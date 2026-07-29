@@ -1,0 +1,1578 @@
+{
+  "_createdAt": "2026-07-13T09:42:58.383362Z",
+  "_draft": false,
+  "_id": "felix-pristine-wave-6-2026-07-13",
+  "_publishedId": "felix-pristine-wave-6-2026-07-13",
+  "_rev": "d2f2d69465178a431263cef7148700f6",
+  "_type": "paper",
+  "_updatedAt": "2026-07-18T01:09:21.247082Z",
+  "blocks": [
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Status: COMPLETE — reviewed A- (2026-07-13). Epic: task-96a908af98698118. Drives: task-felix-ledger-restamp (SEALED done) and task-5a5e2c939a33a621 (async flip, PR #2917, merge-gate lead-owned). This Paper is the living story of Wave 6: Strategize -> Survey -> Digest -> Verify -> Decide -> Review debrief (below)."
+        }
+      ],
+      "id": "block-0",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-1",
+      "level": 2,
+      "text": "The wish",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FINISH the two wave-5 slices that did not land, HONEST-LEDGER first. (1) task-felix-ledger-restamp: restamp the 24+1 done-but-unstamped Felix fix tasks via self-serve /v1/data/mutate on the PUBLISHED doc — every stamp MUST cite a REAL merge commit, NEVER fabricate. Two landmines to RESOLVE not stamp: task-d328fb91ff55b743 (OTP supervision, investigate for a real landing commit — REOPEN if genuinely unfixed) and the double-count task-9e21c3f285b3d7d0 + task-a9adc82f820db065 (both seem to resolve to #2390 — confirm same-vs-distinct). (2) task-5a5e2c939a33a621 async-flip part-2: land the empirically-validated safe subset with suite wall-clock before/after as evidence and no new flake across two seed-varied runs. Each slice its own opus worktree/PR, fail-before proof, CC=/usr/bin/clang mix test green. Branch from ORIGIN/main."
+        }
+      ],
+      "id": "block-2",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-3",
+      "level": 2,
+      "text": "Ground truth at Strategize (what the ledger actually shows)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The framing 'didn't land' is imprecise — the WORK sits done in local branches, but neither slice is MERGED/CLOSED. Both branches exist locally only (never pushed, no PRs)."
+        }
+      ],
+      "id": "block-4",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "RESTAMP (task-felix-ledger-restamp): lifecycle=OPEN yet all 5/5 criteria are stamped met:true with rich evidence claiming '24 tx ids already LIVE' on guerrilla, d328 restamped to fc9665e4/#2403, a9adc82 honestly [true,false,true] duplicate-of #2390. Branch loop-epic/re-stamp-the-24-done-but-unstamped-felix-4 (f6beac23) carries only an audit-anchor record — the real deliverable is server-side ledger mutations, not code. THE IRONY: the task that fixes false-done stamps is itself stamped-but-not-closed. HONEST-LEDGER doctrine demands we VERIFY those 24 published copies and every cited commit before trusting the green, then honestly close it (or fix the gaps)."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "ASYNC-FLIP (task-5a5e2c939a33a621): lifecycle=in_progress, 4/5 met — only the MERGE GATE criterion is met:false. Branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c) flips 55 DataCase files (down from the analytic 230, after a ~10-run flake-hunt reverted 13 files across 4 hazard classes grep missed). Wall-clock measured -36% (340.7s→217.8s at seed333; corroborated seed111 -39%, seed222 -25%), 0-fail across seed111/222/222-repeat on the full 10393-test suite. The work is real and flake-hunted; it simply was never pushed, PR'd, or merged."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-7",
+      "level": 2,
+      "text": "Direction for Wave 6",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The finished experience: (A) the Felix ledger tells the TRUTH — every done task carries a real, ancestor-of-origin/main merge-commit citation; zero fabrication; any genuinely-unfixed task is REOPENED not papered over (surfacing a false-done is a WIN); and the restamp task itself is verified-real then honestly closed. (B) the async subset is MERGED to main with a green seed-varied CC=/usr/bin/clang gate, the wall-clock payoff recorded, no new flake."
+        }
+      ],
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Key leans (tentative — Decide finalizes after two explore rounds): TRUST the empirical 55-file async outcome over the analytic 230 — a smaller proven-safe subset committed is the honest outcome; do NOT re-litigate the set, just rebase on origin/main, re-run the seed-varied gate, push/PR/merge. VERIFY-don't-trust the restamp: re-read all 24 published task copies + confirm every cited SHA is a real ancestor of origin/main; the d328 landmine gets INVESTIGATED against the actual fc9665e4/#2403 diff (charter D18/D22 claim it is genuinely fixed and should be RESTAMPED not reopened — but this wave verifies that claim rather than inheriting it). Both slices branch from ORIGIN/main (local main is diverged +106/−46), build in isolated worktrees, opus builders only (Fable exhausted)."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scope is TIGHT: only these two slices build. The other open Felix children (part-xi, vix, telemetry, bokbasen-pagination, roothtml-skip, interop-sweep, migration-ddl, phantom-media) are OUT of Wave 6's build scope — but several show criteria-met-yet-lifecycle-open, a false-done cluster the honest-ledger ethos should MAP (not fix) for wave coherence."
+        }
+      ],
+      "id": "block-10",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-11",
+      "level": 2,
+      "text": "Survey plan (wide net — 12 Sonnet scouts)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Width is cheap now; Digest distills. Each scout maps terrain so Verify can prove claims with run output. Assignments:"
+        }
+      ],
+      "id": "block-12",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "1. restamp-published-truth — Re-read all 24 restamp target PUBLISHED task copies; do their criteria_progress actually reflect the claimed met-vectors with evidence? List each target's current published state; flag any NOT actually flipped. WHY: the restamp task claims done; honest-ledger must confirm the mutations are real, not stamped-in-intent."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "2. restamp-commit-reality — For every merge commit/PR cited in the restamp evidence (fc9665e4, #2403, #2390, 365550a4/#2381, bdf5db1d, the 24 SHAs), confirm each is a REAL commit AND an ancestor of origin/main (git merge-base --is-ancestor). List any cited SHA that doesn't exist or isn't an ancestor. WHY: NEVER-FABRICATE is the wave's spine; a bad SHA is a fabrication to surface."
+        }
+      ],
+      "id": "block-14",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "3. d328-otp-landmine — Investigate task-d328fb91ff55b743 (OTP supervision): read its criterion + the fc9665e4/#2403 diff; does that commit genuinely fix the named failure mode? WHY: the wish says REOPEN if unfixed; the charter says restamp-not-reopen. This wave decides on evidence, not inheritance."
+        }
+      ],
+      "id": "block-15",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "4. doublecount-2390 — Confirm task-9e21c3f285b3d7d0 and task-a9adc82f820db065 both resolve to PR #2390: same PR, distinct criteria? Is a9adc82's [true,false,true] honest — does its N=2000 wall-time/byte criterion legitimately stay met:false? WHY: a double-count wrongly stamped would double-inflate the ledger."
+        }
+      ],
+      "id": "block-16",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "5. async-branch-state — Locate branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c): exists locally/remotely? open PR? how stale vs origin/main (efc02d63/latest)? what 55 files, diff-pure (only the async line)? WHY: Decide needs to know whether to rebase-and-land or re-derive."
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "6. async-safe-set-derivation — Reconcile the wish's '230 validated-safe files' vs the ledger's '55 DataCase files' outcome. Map the grep universe (277 matches), the keep-serial exclusions, and the 4 hazard classes that killed 13 files. Is 55 the right deliverable or is more safely attainable? WHY: decides whether to trust or expand the set."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "7. async-gate-repro — Nail the exact gate: command, toolchain (.tool-versions OTP27/Elixir1.18.4-otp-27), CC=/usr/bin/clang, seed-varied protocol, and the warm-_build borrow recipe for a worktree (copy _build/test, symlink deps). What baseline wall-clock exists to reproduce before/after? WHY: the builder must reproduce the measurement, not inherit it."
+        }
+      ],
+      "id": "block-19",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "8. restamp-branch-and-liveness — Locate branch loop-epic/re-stamp-...-4 (f6beac23): pushed? PR? Are the 24 mutate tx genuinely LIVE on guerrilla or only local intent? Give the exact re-verify recipe (/v1/data/doc GET of a sample, draft=false, met-vector). WHY: distinguishes 'restamp done, just close the task' from 'restamp never executed'."
+        }
+      ],
+      "id": "block-20",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "9. felix-open-task-landscape — Map ALL open Felix children (part-xi 2/2-open, vix 2/3, telemetry 2/3, bokbasen-pag 3/4, roothtml 0/2, interop 0/2, migration-ddl 0/2, phantom-media 0/3): which are done-in-branch-but-unclosed (false-done cluster) vs truly open? WHY: constrains wave coherence and flags whether any block the two slices — NOT a build-scope expansion."
+        }
+      ],
+      "id": "block-21",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "10. mutate-mechanics — Confirm the self-serve restamp recipe end to end: patch writes drafts.<id>, publish op promotes; Writer.deep_merge REPLACES arrays (GET full acceptance_criteria, flip one entry, PATCH the whole array back); ifRevisionID source (_rev from the doc endpoint); done tasks have no live claim so close/stamp are the wrong tools. Any gotchas from the local-portable-testing lessons. WHY: the builder must not corrupt arrays or clobber unrelated criteria."
+        }
+      ],
+      "id": "block-22",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "11. wave5-paper-and-charter-history — Read the wave-5 Paper (felix-pristine-wave-5-2026-07-13) + charter D13–D22: what did wave 5 ACTUALLY land vs claim, and where is the gap that left these two 'unlanded'? WHY: avoids re-deciding what D14/D18 already settled and inherits their proven facts."
+        }
+      ],
+      "id": "block-23",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "12. migration-ddl-flake-interaction — The async criteria mention DDL ACCESS-EXCLUSIVE lock hazards (access_audit, tenancy_atomicity reverted to serial); task-felix-migration-ddl-audit-deadlock (open) names the same class. Does merging the 55-file subset interact with that open flake? Must any async file stay serial because of it? WHY: protects the merge from reintroducing a known flake."
+        }
+      ],
+      "id": "block-24",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-25",
+      "level": 2,
+      "text": "Constraints (binding this wave)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Opus-only builders (Fable exhausted; decompose too-hard slices into smaller opus slices, NEVER Haiku). Verify fleet: opus for correctness digs, sonnet only for breadth. Branch from ORIGIN/main, not the diverged local checkout; main checkout stays on main; all builds in isolated worktrees; CC=/usr/bin/clang mix test green. NEVER fabricate a commit — a stamp with no real ancestor-of-main SHA does not get flipped; a genuinely-unfixed task gets REOPENED. Digest occasionally hits a StructuredOutput cap — if the wave crashes there, resume it."
+        }
+      ],
+      "id": "block-26",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-27",
+      "level": 2,
+      "text": "Digest — survey synthesis (2026-07-13)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Twelve scouts returned a strikingly convergent picture: both wave-5 slices are BUILT and correct, and neither is LANDED/CLOSED. Wave 6 is a FINISH + VERIFY-BEFORE-CLOSE wave, not a rebuild. Nothing in the surveys contradicts the direction on the substance; the only corrections are numeric wording (see below)."
+        }
+      ],
+      "id": "block-28",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-29",
+      "level": 2,
+      "text": "Established (evidence-backed, cross-confirmed)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "RESTAMP is real, not stamped-in-intent. Two scouts independently re-read all 24 published task copies (draft=false via /v1/data/doc GET) and confirmed every claimed met-vector matches; 22 unique cited SHAs all pass git merge-base --is-ancestor origin/main with commit subjects matching the claimed fix; 8 cited PRs spot-checked MERGED with mergeCommit oid matching the short-SHA. Zero fabrication found. This is a VERIFY-AND-CLOSE case, not re-execute."
+        }
+      ],
+      "id": "block-30",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "d328 (the OTP fabrication-landmine) is GENUINELY FIXED by fc9665e4/#2403 — RESTAMP, not reopen. A diff-level read confirms the commit tiers 4 intermediate supervisors and adds supervision_isolation_test.exs (152 lines; its moduledoc names task-d328fb91ff55b743) reproducing the flat-topology escalation and proving the tiered topology contains it. #2403 MERGED, fc9665e4 ancestor of origin/main, task already [true,true,true]. No reopen warranted on current evidence."
+        }
+      ],
+      "id": "block-31",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The #2390 \"double-count\" is NOT a double-count. task-9e21c3f2 (parent fa0adcb6, issue #2299) and task-a9adc82f (parent 30564ed5, issue #2297) are DISTINCT findings sharing one commit. a9adc82f is honestly [true,false,true]: its middle criterion (N=2000 wall-time / :erlang.external_size byte measurement) stays met:false because #2390 only measures :reductions — the evidence says so. Do NOT flip it to met:true."
+        }
+      ],
+      "id": "block-32",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "ASYNC-FLIP branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c) is local-only, never pushed, no PR. The diff is exactly 55 test files, pure async:false→true (58/58 lines; the two multi-defmodule files verified pure). The 55-set correctly excludes rate_limiter, contract/rate_limit, tickets/attachments, dispatcher/audit_webhooks, and every raw-DDL file (access_audit, tenancy_atomicity, extend_workspace_delete_cascade). 4/5 criteria met; only the MERGE GATE is open. Re-confirmed THIS pass: rebase onto CURRENT origin/main (d5db09e5) is conflict-free — the 4 commits since merge-base 47b8c0ce touch only api/.sobelow-skips and workspace_bundle.ex, zero overlap with the 55 files. Branch is now 4 behind origin/main (was 2 at survey time)."
+        }
+      ],
+      "id": "block-33",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "55 is the HONEST CEILING, not a shortfall. The analytic 230-safe set was EMPIRICALLY UNSAFE (V5: same-seed reruns gave 38 then 27 different failures via grep-invisible on_exit-Repo sandbox violations). The graduated flake-hunt landed 55 with 0-fail across seed 111/222/222-repeat on 10393 tests and -25..-39% wall-clock. Re-expanding repeats the exact failure mode — do not re-litigate the set."
+        }
+      ],
+      "id": "block-34",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-35",
+      "level": 2,
+      "text": "Corrections to the direction",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The brief’s \"~10 runs reverted 13 files across 4 hazard classes\" has NO primary source — no commit or paper states 13. The verified arithmetic is 230 candidates → 55 landed = 175 excluded. Downstream must not carry \"13\" forward."
+        }
+      ],
+      "id": "block-36",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The restamp task’s own lifecycle is self-inconsistent: 5/5 met yet lifecycle_status=\"open\" with claim.worker=null (released), while claim.now says \"stays in_progress for lead to close\". The exact honest-close mechanics (fresh claim + epoch CAS, or a direct lifecycle mutate) are unsettled — a Decide-blocker."
+        }
+      ],
+      "id": "block-37",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The restamp branch f6beac23 is a ZERO-DIFF audit-anchor commit (tree byte-identical to parent 821fcada). The real deliverable is the live server-side ledger mutations, which need no PR. Forcing a no-op PR would be theater; Decide chooses keep-as-trail vs git branch -D."
+        }
+      ],
+      "id": "block-38",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-39",
+      "level": 2,
+      "text": "Coverage map — checked and FOUND",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• 24/24 restamp published copies re-read; met-vectors match (restamp-published-truth + restamp-branch-and-liveness raw /v1/data/doc GET)."
+        }
+      ],
+      "id": "block-40",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• 22 unique cited SHAs are real ancestors of origin/main; 8 cited PRs MERGED with matching mergeCommit (restamp-commit-reality)."
+        }
+      ],
+      "id": "block-41",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• d328 fc9665e4 diff genuinely fixes the named blast-radius failure with a protective test (d328-otp-landmine)."
+        }
+      ],
+      "id": "block-42",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• #2390 distinct-tasks + honest partial-stamp confirmed at diff level (doublecount-2390)."
+        }
+      ],
+      "id": "block-43",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• 55-file async diff purity, keep-serial exclusions, and clean rebase re-confirmed this pass (async-branch-state)."
+        }
+      ],
+      "id": "block-44",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• Self-serve mutate recipe code-confirmed against writer.ex / mutations.ex / lifecycle.ex; arrays REPLACE, publish op required (mutate-mechanics)."
+        }
+      ],
+      "id": "block-45",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• migration-ddl 40P01 flake is pre-existing, tracked (task-felix-migration-ddl-audit-deadlock), non-blocking; 55-set raises frequency but does not create it (migration-ddl-flake-interaction)."
+        }
+      ],
+      "id": "block-46",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-47",
+      "level": 2,
+      "text": "Coverage map — checked and NOT found (absences = decisions in waiting)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• Criterion-TEXT-vs-commit-DIFF fidelity was spot-checked for only ~6 of 24 targets; the other ~18 were verified for SHA/ancestor reality but NOT that the criterion text faithfully describes what the commit does."
+        }
+      ],
+      "id": "block-48",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• The async gate has NOT been RUN post-rebase on CURRENT origin/main — all wall-clock/0-fail proof is from 0b9dcf8c on the OLD base 47b8c0ce. \"Distrust vacuous green\" demands one real run."
+        }
+      ],
+      "id": "block-49",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• restamp close mechanics were never exercised (no probe of closing a met-but-open, unclaimed task)."
+        }
+      ],
+      "id": "block-50",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• No surveyor RAN a suite this wave; every Elixir claim is from logs/commit messages, not a fresh execution."
+        }
+      ],
+      "id": "block-51",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "• The 4 Group-A open PRs (#2897 vix, #2898 telemetry, #2899 bokbasen-pag, #2900 part-xi) are confirmed OPEN/unmerged but their merge is OUT of scope — a Wave 7 backlog decision, not touched here."
+        }
+      ],
+      "id": "block-52",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-53",
+      "level": 2,
+      "text": "What Decide cannot live without",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "(1) an independent RUN-proven full-24 SHA-ancestry sweep so the restamp closes on audit-grade evidence, not inherited trust; (2) proof the 55-file flip still passes CC=/usr/bin/clang mix test GREEN after rebasing onto today’s origin/main at ≥1 seed (ideally 2, incl. seed 222 that once surfaced the migration-ddl flake); (3) the exact honest-close mechanics for the met-but-open restamp task."
+        }
+      ],
+      "id": "block-54",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-55",
+      "level": 2,
+      "text": "Verify plan (in flight — 3 assignments)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V1 (opus, RUN) restamp-integrity-sweep: for ALL 24 target ids, GET /v1/data/doc/production/task/<id>, assert _draft=false and record the met-vector; for EVERY SHA cited in evidence run git merge-base --is-ancestor <sha> origin/main after git fetch. Assert zero non-ancestor SHAs, a9adc82f stays [T,F,T], d328 [T,T,T] on fc9665e4. Then read the commit diff for ≥8 of the previously-unchecked ~18 targets and confirm the criterion text faithfully matches the commit. PROVES: no fabrication survives to close."
+        }
+      ],
+      "id": "block-56",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V2 (opus, worktree, RUN) async-rebase-gate-proof: create a worktree from CURRENT origin/main, apply the 55-file flip from 0b9dcf8c, assert clean + exactly 55 files + pure async flip + none of the keep-serial names present; borrow api/_build/test + symlink deps; CC=/usr/bin/clang mix test at seed 111 AND seed 222; capture wall-clock + pass/fail. PROVES the empirical work survives rebase and the gate is green post-rebase (or honestly surfaces the migration-ddl flake)."
+        }
+      ],
+      "id": "block-57",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V3 (sonnet, RUN) close-mechanics-and-backlog: probe bp capabilities for the task close/publish verbs; inspect task-felix-ledger-restamp claim state; determine the exact call to honestly close a met-but-open, unclaimed task (fresh claim+epoch CAS vs direct lifecycle mutate). Re-confirm task-f0bdb914d63a2e84 still 4/4 untouched and PRs #2897–#2900 still open/unmerged. PROVES the close path before Decide commits to it."
+        }
+      ],
+      "id": "block-58",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-w6d-1",
+      "level": 2,
+      "text": "Decide — verification results (deep round, RUN-proven)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Three verifiers flew; all three came back GREEN with actually-run output. RESTAMP INTEGRITY SWEEP (opus): a single pass swept all 24 restamp targets — every published copy is _draft=false, every met-vector matches the assertions, and every one of the 22 unique cited commit SHAs passes \"git merge-base --is-ancestor <sha> origin/main\" (zero fabrication). Criterion-text-vs-diff fidelity checked on 16 of 24 (exceeding the >=8 required): file names and line counts match the diffs exactly (e.g. supervision_isolation_test.exs \"152 lines\" = diff 152; tenant-scope-check.sh \"+265\" = diff 265; write_hotpath_telemetry_test.exs \"+173\" = diff 173). The 5 regex-flagged \"non-commit\" tokens are sibling TASK-ID cross-references, not fabricated SHAs. Verdict: verify-and-close warranted, no reopen candidate."
+        }
+      ],
+      "id": "block-w6d-2",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "ASYNC REBASE GATE (opus, full suite RUN): the 55-file flip (0b9dcf8c) cherry-picks CLEAN onto current origin/main (55 files, 58 insertions / 58 deletions, all pure async:false->true, no keep-serial file present), compiles GREEN under CC=/usr/bin/clang, and passes at BOTH seeds — seed 111 \"10340 tests, 0 failures, 3 skipped\" and seed 222 \"10340 tests, 0 failures, 3 skipped\" (the 40P01 migration-ddl flake did NOT fire). HONEST PAYOFF CORRECTION: the verifier also RAN a same-seed baseline — flip 220.7s vs baseline 221.4s is FLAT. The recorded -36% was true on the OLD base 47b8c0ce; on today's origin/main the serial sync tail dominates and absorbs the rebalance (sync 192.7s->182.3s, async 28.7s->38.4s). Merge is justified by correctness (2 seeds, 0-fail), not a payoff number — distrust-vacuous-green cuts both ways."
+        }
+      ],
+      "id": "block-w6d-3",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "CLOSE-MECHANICS + BACKLOG (sonnet, RUN): task.close is claim/epoch-CAS-gated by design (worker_id + observed_epoch both required) and there is NO bare \"set lifecycle_status\" verb — so the honest close of task-felix-ledger-restamp is re-claim (fresh epoch) -> bp task close, NEVER a raw /v1/data/mutate on lifecycle_status (that would bypass the exact fence this wave exists to protect). Its epoch-6 claim is expired. Two premise corrections landed: (a) task-f0bdb914d63a2e84 (the wish's \"25th landmine\") is ALREADY closed this wave — lifecycle=done, closed_by=lead-opus, all 4 criteria met citing #2870/821fcada (verified MERGED, ancestor of origin/main); no restamp needed. (b) Group-A PR #2900 is already MERGED; only #2897/#2898/#2899 remain open (Wave-7 backlog)."
+        }
+      ],
+      "id": "block-w6d-4",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-w6d-5",
+      "level": 2,
+      "text": "Decisions (D23–D31, mirror of the charter)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D23 — Wave 6 is FINISH + VERIFY-BEFORE-CLOSE, scoped tight to the two unlanded slices; no fresh scouts. D24 — Restamp = VERIFY-AND-CLOSE via claim->close, NEVER raw mutate; re-run the full-24 ancestry sweep against current origin/main as the close evidence. D25 — d328 OTP landmine is RESTAMP not reopen (fc9665e4/#2403 genuinely tiers the supervision tree; refuted a third time); had it been unfixed the move is REOPEN, never a fabricated commit. D26 — the #2390 pair is NOT a double-count; task-a9adc82f820db065 STAYS [T,F,T] (its N=2000 wall-time/byte criterion is genuinely unmet; #2390 measures only :reductions)."
+        }
+      ],
+      "id": "block-w6d-6",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D27 — Async: LAND the 55-file set as-is; do NOT re-litigate or expand (55 is the empirical honest ceiling; 230 was UNSAFE). origin/main advanced past the verify base and touched 10 of the 55, but ALL 55 flip-target \"use ...DataCase, async: false\" lines survive, so the flip re-applies deterministically off origin/main. D28 — Async payoff recorded HONESTLY as net-neutral on current base, NOT -36%. D29 — the 40P01 migration-ddl deadlock is a KNOWN pre-existing flake (task-felix-migration-ddl-audit-deadlock), self-healing on rerun — a hit during the gate is not a wave-6 regression. D30 — task-f0bdb914d63a2e84 already closed, no action. D31 — both slices branch from ORIGIN/main (local diverged +107/-54), isolated worktrees, CC=/usr/bin/clang, opus-only builders (Fable exhausted); restamp branch f6beac23 is a zero-diff audit anchor (no PR)."
+        }
+      ],
+      "id": "block-w6d-7",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-w6d-8",
+      "level": 2,
+      "text": "Wave 6 plan — 2 opus slices in flight (parallel, disjoint files)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 1 [P1, opus] — Ledger restamp, verify-and-close (task-felix-ledger-restamp; wave_paper=felix-pristine-wave-6-2026-07-13). No repo files (ledger-only). Re-run the full-24 SHA-ancestry sweep against current origin/main, confirm every published copy's met-vector unchanged (a9adc82f stays [T,F,T]), then re-claim (fresh epoch) and bp task close — NEVER raw mutate. GATE: the ancestry sweep prints all-ANCESTOR + \"bp task get task-felix-ledger-restamp\" shows lifecycle=done post-close."
+        }
+      ],
+      "id": "block-w6d-9",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 2 [P1, opus] — Async flip, land the 55-file subset (task-5a5e2c939a33a621; wave_paper=felix-pristine-wave-6-2026-07-13). Files: the 55 api/test/**_test.exs files of commit 0b9dcf8c, RE-DERIVED off origin/main (avoids cherry-pick context conflicts on the 10 upstream-touched files). Two seed-varied CC=/usr/bin/clang mix test runs GREEN (0-fail each; a 40P01 hit is the known flake per D29), push + open PR; builder re-stamps criteria [1][2][3] with honest net-neutral payoff (D28); the LEAD closes criterion [4] (merge gate). GATE: two \"CC=/usr/bin/clang mix test --seed N\" runs, 0 failures each."
+        }
+      ],
+      "id": "block-w6d-10",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Backlog seeded this wave (mapped-not-built): 3 open Group-A felix PRs #2897/#2898/#2899 (merge cleanup); task-felix-roothtml-durable-sobelow-skip, task-felix-interop-resource-bound-sweep, task-felix-phantom-media-atomicity, task-felix-migration-ddl-audit-deadlock (all open); and NEW task-4bc654f703da9d4a (measure the #2390 reopen wall-time / byte-size at N=2000 — a9adc82f's one honest-miss criterion). Status: DECIDED -> BUILDING."
+        }
+      ],
+      "id": "block-w6d-11",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-review-1",
+      "level": 2,
+      "text": "Review — debrief (2026-07-13)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Wave 6 FINISHED exactly the two unlanded wave-5 slices. The reviewer re-verified every load-bearing claim against current origin/main, fixed the ledger back-links, and graded the wave A-. No fabrication anywhere; the honest-ledger ethos held end to end."
+        }
+      ],
+      "id": "block-71",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-review-2",
+      "level": 2,
+      "text": "Slice 1 — Ledger restamp (task-felix-ledger-restamp): SEALED",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Final branch: fb6cdd1d (zero-diff audit anchor, no PR). Lifecycle=done, 5/5 met. Reviewer re-ran the full-24 SHA-ancestry sweep vs current origin/main: 22/22 unique merge commits print ANCESTOR, zero NOT-ANCESTOR, zero fabrication. Sentinels re-read on the PUBLISHED copies (/v1/data/doc, _draft=false): task-a9adc82f820db065 holds [T,F,T] — its N=2000 wall-time/byte criterion stays an HONEST MISS (never flipped), noted as a #2390 duplicate-of task-9e21c3f2; task-d328fb91ff55b743 holds [T,T,T] on fc9665e4/#2403, confirmed the real commit 'fix(otp): tier the top-level supervision tree (#2403)' genuinely tiering the blast-radius failure — RESTAMPED, not reopened (the digest's 'no landing commit' landmine refuted a third time); task-9e21c3f2 holds [T,T,T] on #2390, distinct-shared not a double-count. Exemplary honest-ledger work: both wish-named landmines RESOLVED on evidence, not papered over."
+        }
+      ],
+      "id": "block-73",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-review-3",
+      "level": 2,
+      "text": "Slice 2 — Async flip (task-5a5e2c939a33a621): CORRECT, merge-gated",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Final branch: loop-epic/async-flip-land-the-empirically-validate-1 (PR #2917, open/mergeable, base main). Lifecycle=in_progress; only MERGE GATE criterion[4] stays open for the lead. Diff verified surgically pure — 57 async:false->true lines across 54 files, zero other changes; every removed line async:false, every added line async:true. Keep-serial set intact (rate_limit, attachments, dispatcher/audit_webhook, all raw-DDL files absent). The one broad-grep hit, media_search_scope_test.exs, confirmed hazard-free (no on_exit/put_env/Sandbox.mode/:meck/Bypass/:ets/:telemetry.attach) and safe to flip."
+        }
+      ],
+      "id": "block-75",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Honest scope: 54 not 55 — accounts_test.exs excluded for a genuine flip-attributable TOCTOU flake (2 concurrent sandbox Tasks starved under async pool pressure), filed as backlog task-5f4c0d03c05cd10e. Payoff recorded HONESTLY as NET-NEUTRAL (reviewer measured async 43.6s vs sync 229.8s at seed 111 — the serial keep-serial tail dominates total wall-clock; confirms D28, no fabricated -36%)."
+        }
+      ],
+      "id": "block-76",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "CAVEAT for the lead (stamped as reviewer_note on the task): the reviewer full-suite re-gate ran under load-avg 14-19 with 3 concurrent BEAM suites and surfaced non-deterministic DBConnection pool-timeout failures at both seeds (seed 111: 1; seed 222: 2-6). PROVEN ENVIRONMENTAL, not flip-attributable: an UNFLIPPED file (content_schema_workspace_scope_test.exs, still async:false) failed with the identical 'tcp recv/send: closed ... pool timeout' signature, both failing files pass clean in isolation (32 tests / 0 fail / 0.3s), runtime inflated 2.2x (490s vs the builder's 220s). The diff was NOT reverted — it is correct. Merge MUST gate on the CI Elixir Test being green; because the flip raises peak pool concurrency for a net-neutral payoff, watch for pool-timeout flakes on constrained runners and trim the set if they appear."
+        }
+      ],
+      "id": "block-77",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-review-4",
+      "level": 2,
+      "text": "Grade — A-",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Earned, not given. STRONG: the restamp slice is model honest-ledger execution — a run-proven ancestry sweep, both landmines resolved on real evidence, a genuine miss (a9adc82f) preserved rather than force-stamped, and the close done via claim->close (never a raw lifecycle mutate that would bypass the CAS fence this wave exists to protect). The async diff is provably pure and its scope honestly trimmed to what empirically passes. FALLS SHORT of A: the async slice's payoff is net-neutral (D28), so it buys correctness/consistency but no speed while slightly raising pool-pressure flake surface — a marginal-value merge the lead should weigh — and the reviewer could not reproduce a clean full-suite green locally (environmental, but it means CI is the sole authoritative gate). Nothing is broken; nothing fabricated; the WISH is met."
+        }
+      ],
+      "id": "block-79",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-review-5",
+      "level": 2,
+      "text": "Ledger audit outcome",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Both slice tasks reflect reality: restamp done/5-5, async in_progress/4-5 with merge-gate open (correct — builders never close the lead's merge-gate criterion). Backlog child task-5f4c0d03c05cd10e (harden accounts_test) filed/open/priority-3 under the epic. Reviewer FIXES: added wave_paper=felix-pristine-wave-6-2026-07-13 back-link to BOTH slice tasks (was one-way from the Paper only), and stamped an honest reviewer_note on the async task recording the re-gate finding. No out-of-wave tasks touched; the 24 restamp targets were read-only this wave (verify-and-close), met-vectors unchanged."
+        }
+      ],
+      "id": "block-81",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-review-6",
+      "level": 2,
+      "text": "What the next wave should take",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Immediate: the lead merges PR #2917 once CI Elixir Test is green and closes async criterion[4]; the restamp is already sealed. Then Wave 7 = merge-cleanup of the 3 open Group-A felix PRs (#2897 vix, #2898 telemetry, #2899 bokbasen-pagination) and the open backlog children: task-felix-roothtml-durable-sobelow-skip, task-felix-interop-resource-bound-sweep, task-felix-migration-ddl-audit-deadlock (the 40P01 flake this flip brushes against), task-felix-phantom-media-atomicity (Fable-class), and the new a9adc82f N=2000 measurement. No fresh domain scouts — the 12 audits stay closed."
+        }
+      ],
+      "id": "block-83",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Status: COMPLETE — reviewed A- (2026-07-13). Epic: task-96a908af98698118. Drives: task-felix-ledger-restamp (SEALED done) and task-5a5e2c939a33a621 (async flip, PR #2917, merge-gate lead-owned). This Paper is the living story of Wave 6: Strategize -> Survey -> Digest -> Verify -> Decide -> Review debrief (below)."
+          }
+        ],
+        "id": "block-0",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-1",
+        "level": 2,
+        "text": "The wish",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FINISH the two wave-5 slices that did not land, HONEST-LEDGER first. (1) task-felix-ledger-restamp: restamp the 24+1 done-but-unstamped Felix fix tasks via self-serve /v1/data/mutate on the PUBLISHED doc — every stamp MUST cite a REAL merge commit, NEVER fabricate. Two landmines to RESOLVE not stamp: task-d328fb91ff55b743 (OTP supervision, investigate for a real landing commit — REOPEN if genuinely unfixed) and the double-count task-9e21c3f285b3d7d0 + task-a9adc82f820db065 (both seem to resolve to #2390 — confirm same-vs-distinct). (2) task-5a5e2c939a33a621 async-flip part-2: land the empirically-validated safe subset with suite wall-clock before/after as evidence and no new flake across two seed-varied runs. Each slice its own opus worktree/PR, fail-before proof, CC=/usr/bin/clang mix test green. Branch from ORIGIN/main."
+          }
+        ],
+        "id": "block-2",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-3",
+        "level": 2,
+        "text": "Ground truth at Strategize (what the ledger actually shows)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The framing 'didn't land' is imprecise — the WORK sits done in local branches, but neither slice is MERGED/CLOSED. Both branches exist locally only (never pushed, no PRs)."
+          }
+        ],
+        "id": "block-4",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "RESTAMP (task-felix-ledger-restamp): lifecycle=OPEN yet all 5/5 criteria are stamped met:true with rich evidence claiming '24 tx ids already LIVE' on guerrilla, d328 restamped to fc9665e4/#2403, a9adc82 honestly [true,false,true] duplicate-of #2390. Branch loop-epic/re-stamp-the-24-done-but-unstamped-felix-4 (f6beac23) carries only an audit-anchor record — the real deliverable is server-side ledger mutations, not code. THE IRONY: the task that fixes false-done stamps is itself stamped-but-not-closed. HONEST-LEDGER doctrine demands we VERIFY those 24 published copies and every cited commit before trusting the green, then honestly close it (or fix the gaps)."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "ASYNC-FLIP (task-5a5e2c939a33a621): lifecycle=in_progress, 4/5 met — only the MERGE GATE criterion is met:false. Branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c) flips 55 DataCase files (down from the analytic 230, after a ~10-run flake-hunt reverted 13 files across 4 hazard classes grep missed). Wall-clock measured -36% (340.7s→217.8s at seed333; corroborated seed111 -39%, seed222 -25%), 0-fail across seed111/222/222-repeat on the full 10393-test suite. The work is real and flake-hunted; it simply was never pushed, PR'd, or merged."
+          }
+        ],
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-7",
+        "level": 2,
+        "text": "Direction for Wave 6",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The finished experience: (A) the Felix ledger tells the TRUTH — every done task carries a real, ancestor-of-origin/main merge-commit citation; zero fabrication; any genuinely-unfixed task is REOPENED not papered over (surfacing a false-done is a WIN); and the restamp task itself is verified-real then honestly closed. (B) the async subset is MERGED to main with a green seed-varied CC=/usr/bin/clang gate, the wall-clock payoff recorded, no new flake."
+          }
+        ],
+        "id": "block-8",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Key leans (tentative — Decide finalizes after two explore rounds): TRUST the empirical 55-file async outcome over the analytic 230 — a smaller proven-safe subset committed is the honest outcome; do NOT re-litigate the set, just rebase on origin/main, re-run the seed-varied gate, push/PR/merge. VERIFY-don't-trust the restamp: re-read all 24 published task copies + confirm every cited SHA is a real ancestor of origin/main; the d328 landmine gets INVESTIGATED against the actual fc9665e4/#2403 diff (charter D18/D22 claim it is genuinely fixed and should be RESTAMPED not reopened — but this wave verifies that claim rather than inheriting it). Both slices branch from ORIGIN/main (local main is diverged +106/−46), build in isolated worktrees, opus builders only (Fable exhausted)."
+          }
+        ],
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Scope is TIGHT: only these two slices build. The other open Felix children (part-xi, vix, telemetry, bokbasen-pagination, roothtml-skip, interop-sweep, migration-ddl, phantom-media) are OUT of Wave 6's build scope — but several show criteria-met-yet-lifecycle-open, a false-done cluster the honest-ledger ethos should MAP (not fix) for wave coherence."
+          }
+        ],
+        "id": "block-10",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-11",
+        "level": 2,
+        "text": "Survey plan (wide net — 12 Sonnet scouts)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Width is cheap now; Digest distills. Each scout maps terrain so Verify can prove claims with run output. Assignments:"
+          }
+        ],
+        "id": "block-12",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "1. restamp-published-truth — Re-read all 24 restamp target PUBLISHED task copies; do their criteria_progress actually reflect the claimed met-vectors with evidence? List each target's current published state; flag any NOT actually flipped. WHY: the restamp task claims done; honest-ledger must confirm the mutations are real, not stamped-in-intent."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "2. restamp-commit-reality — For every merge commit/PR cited in the restamp evidence (fc9665e4, #2403, #2390, 365550a4/#2381, bdf5db1d, the 24 SHAs), confirm each is a REAL commit AND an ancestor of origin/main (git merge-base --is-ancestor). List any cited SHA that doesn't exist or isn't an ancestor. WHY: NEVER-FABRICATE is the wave's spine; a bad SHA is a fabrication to surface."
+          }
+        ],
+        "id": "block-14",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "3. d328-otp-landmine — Investigate task-d328fb91ff55b743 (OTP supervision): read its criterion + the fc9665e4/#2403 diff; does that commit genuinely fix the named failure mode? WHY: the wish says REOPEN if unfixed; the charter says restamp-not-reopen. This wave decides on evidence, not inheritance."
+          }
+        ],
+        "id": "block-15",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "4. doublecount-2390 — Confirm task-9e21c3f285b3d7d0 and task-a9adc82f820db065 both resolve to PR #2390: same PR, distinct criteria? Is a9adc82's [true,false,true] honest — does its N=2000 wall-time/byte criterion legitimately stay met:false? WHY: a double-count wrongly stamped would double-inflate the ledger."
+          }
+        ],
+        "id": "block-16",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "5. async-branch-state — Locate branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c): exists locally/remotely? open PR? how stale vs origin/main (efc02d63/latest)? what 55 files, diff-pure (only the async line)? WHY: Decide needs to know whether to rebase-and-land or re-derive."
+          }
+        ],
+        "id": "block-17",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "6. async-safe-set-derivation — Reconcile the wish's '230 validated-safe files' vs the ledger's '55 DataCase files' outcome. Map the grep universe (277 matches), the keep-serial exclusions, and the 4 hazard classes that killed 13 files. Is 55 the right deliverable or is more safely attainable? WHY: decides whether to trust or expand the set."
+          }
+        ],
+        "id": "block-18",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "7. async-gate-repro — Nail the exact gate: command, toolchain (.tool-versions OTP27/Elixir1.18.4-otp-27), CC=/usr/bin/clang, seed-varied protocol, and the warm-_build borrow recipe for a worktree (copy _build/test, symlink deps). What baseline wall-clock exists to reproduce before/after? WHY: the builder must reproduce the measurement, not inherit it."
+          }
+        ],
+        "id": "block-19",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "8. restamp-branch-and-liveness — Locate branch loop-epic/re-stamp-...-4 (f6beac23): pushed? PR? Are the 24 mutate tx genuinely LIVE on guerrilla or only local intent? Give the exact re-verify recipe (/v1/data/doc GET of a sample, draft=false, met-vector). WHY: distinguishes 'restamp done, just close the task' from 'restamp never executed'."
+          }
+        ],
+        "id": "block-20",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "9. felix-open-task-landscape — Map ALL open Felix children (part-xi 2/2-open, vix 2/3, telemetry 2/3, bokbasen-pag 3/4, roothtml 0/2, interop 0/2, migration-ddl 0/2, phantom-media 0/3): which are done-in-branch-but-unclosed (false-done cluster) vs truly open? WHY: constrains wave coherence and flags whether any block the two slices — NOT a build-scope expansion."
+          }
+        ],
+        "id": "block-21",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "10. mutate-mechanics — Confirm the self-serve restamp recipe end to end: patch writes drafts.<id>, publish op promotes; Writer.deep_merge REPLACES arrays (GET full acceptance_criteria, flip one entry, PATCH the whole array back); ifRevisionID source (_rev from the doc endpoint); done tasks have no live claim so close/stamp are the wrong tools. Any gotchas from the local-portable-testing lessons. WHY: the builder must not corrupt arrays or clobber unrelated criteria."
+          }
+        ],
+        "id": "block-22",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "11. wave5-paper-and-charter-history — Read the wave-5 Paper (felix-pristine-wave-5-2026-07-13) + charter D13–D22: what did wave 5 ACTUALLY land vs claim, and where is the gap that left these two 'unlanded'? WHY: avoids re-deciding what D14/D18 already settled and inherits their proven facts."
+          }
+        ],
+        "id": "block-23",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "12. migration-ddl-flake-interaction — The async criteria mention DDL ACCESS-EXCLUSIVE lock hazards (access_audit, tenancy_atomicity reverted to serial); task-felix-migration-ddl-audit-deadlock (open) names the same class. Does merging the 55-file subset interact with that open flake? Must any async file stay serial because of it? WHY: protects the merge from reintroducing a known flake."
+          }
+        ],
+        "id": "block-24",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-25",
+        "level": 2,
+        "text": "Constraints (binding this wave)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Opus-only builders (Fable exhausted; decompose too-hard slices into smaller opus slices, NEVER Haiku). Verify fleet: opus for correctness digs, sonnet only for breadth. Branch from ORIGIN/main, not the diverged local checkout; main checkout stays on main; all builds in isolated worktrees; CC=/usr/bin/clang mix test green. NEVER fabricate a commit — a stamp with no real ancestor-of-main SHA does not get flipped; a genuinely-unfixed task gets REOPENED. Digest occasionally hits a StructuredOutput cap — if the wave crashes there, resume it."
+          }
+        ],
+        "id": "block-26",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-27",
+        "level": 2,
+        "text": "Digest — survey synthesis (2026-07-13)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Twelve scouts returned a strikingly convergent picture: both wave-5 slices are BUILT and correct, and neither is LANDED/CLOSED. Wave 6 is a FINISH + VERIFY-BEFORE-CLOSE wave, not a rebuild. Nothing in the surveys contradicts the direction on the substance; the only corrections are numeric wording (see below)."
+          }
+        ],
+        "id": "block-28",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-29",
+        "level": 2,
+        "text": "Established (evidence-backed, cross-confirmed)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "RESTAMP is real, not stamped-in-intent. Two scouts independently re-read all 24 published task copies (draft=false via /v1/data/doc GET) and confirmed every claimed met-vector matches; 22 unique cited SHAs all pass git merge-base --is-ancestor origin/main with commit subjects matching the claimed fix; 8 cited PRs spot-checked MERGED with mergeCommit oid matching the short-SHA. Zero fabrication found. This is a VERIFY-AND-CLOSE case, not re-execute."
+          }
+        ],
+        "id": "block-30",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "d328 (the OTP fabrication-landmine) is GENUINELY FIXED by fc9665e4/#2403 — RESTAMP, not reopen. A diff-level read confirms the commit tiers 4 intermediate supervisors and adds supervision_isolation_test.exs (152 lines; its moduledoc names task-d328fb91ff55b743) reproducing the flat-topology escalation and proving the tiered topology contains it. #2403 MERGED, fc9665e4 ancestor of origin/main, task already [true,true,true]. No reopen warranted on current evidence."
+          }
+        ],
+        "id": "block-31",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The #2390 \"double-count\" is NOT a double-count. task-9e21c3f2 (parent fa0adcb6, issue #2299) and task-a9adc82f (parent 30564ed5, issue #2297) are DISTINCT findings sharing one commit. a9adc82f is honestly [true,false,true]: its middle criterion (N=2000 wall-time / :erlang.external_size byte measurement) stays met:false because #2390 only measures :reductions — the evidence says so. Do NOT flip it to met:true."
+          }
+        ],
+        "id": "block-32",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "ASYNC-FLIP branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c) is local-only, never pushed, no PR. The diff is exactly 55 test files, pure async:false→true (58/58 lines; the two multi-defmodule files verified pure). The 55-set correctly excludes rate_limiter, contract/rate_limit, tickets/attachments, dispatcher/audit_webhooks, and every raw-DDL file (access_audit, tenancy_atomicity, extend_workspace_delete_cascade). 4/5 criteria met; only the MERGE GATE is open. Re-confirmed THIS pass: rebase onto CURRENT origin/main (d5db09e5) is conflict-free — the 4 commits since merge-base 47b8c0ce touch only api/.sobelow-skips and workspace_bundle.ex, zero overlap with the 55 files. Branch is now 4 behind origin/main (was 2 at survey time)."
+          }
+        ],
+        "id": "block-33",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "55 is the HONEST CEILING, not a shortfall. The analytic 230-safe set was EMPIRICALLY UNSAFE (V5: same-seed reruns gave 38 then 27 different failures via grep-invisible on_exit-Repo sandbox violations). The graduated flake-hunt landed 55 with 0-fail across seed 111/222/222-repeat on 10393 tests and -25..-39% wall-clock. Re-expanding repeats the exact failure mode — do not re-litigate the set."
+          }
+        ],
+        "id": "block-34",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-35",
+        "level": 2,
+        "text": "Corrections to the direction",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The brief’s \"~10 runs reverted 13 files across 4 hazard classes\" has NO primary source — no commit or paper states 13. The verified arithmetic is 230 candidates → 55 landed = 175 excluded. Downstream must not carry \"13\" forward."
+          }
+        ],
+        "id": "block-36",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The restamp task’s own lifecycle is self-inconsistent: 5/5 met yet lifecycle_status=\"open\" with claim.worker=null (released), while claim.now says \"stays in_progress for lead to close\". The exact honest-close mechanics (fresh claim + epoch CAS, or a direct lifecycle mutate) are unsettled — a Decide-blocker."
+          }
+        ],
+        "id": "block-37",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The restamp branch f6beac23 is a ZERO-DIFF audit-anchor commit (tree byte-identical to parent 821fcada). The real deliverable is the live server-side ledger mutations, which need no PR. Forcing a no-op PR would be theater; Decide chooses keep-as-trail vs git branch -D."
+          }
+        ],
+        "id": "block-38",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-39",
+        "level": 2,
+        "text": "Coverage map — checked and FOUND",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• 24/24 restamp published copies re-read; met-vectors match (restamp-published-truth + restamp-branch-and-liveness raw /v1/data/doc GET)."
+          }
+        ],
+        "id": "block-40",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• 22 unique cited SHAs are real ancestors of origin/main; 8 cited PRs MERGED with matching mergeCommit (restamp-commit-reality)."
+          }
+        ],
+        "id": "block-41",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• d328 fc9665e4 diff genuinely fixes the named blast-radius failure with a protective test (d328-otp-landmine)."
+          }
+        ],
+        "id": "block-42",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• #2390 distinct-tasks + honest partial-stamp confirmed at diff level (doublecount-2390)."
+          }
+        ],
+        "id": "block-43",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• 55-file async diff purity, keep-serial exclusions, and clean rebase re-confirmed this pass (async-branch-state)."
+          }
+        ],
+        "id": "block-44",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• Self-serve mutate recipe code-confirmed against writer.ex / mutations.ex / lifecycle.ex; arrays REPLACE, publish op required (mutate-mechanics)."
+          }
+        ],
+        "id": "block-45",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• migration-ddl 40P01 flake is pre-existing, tracked (task-felix-migration-ddl-audit-deadlock), non-blocking; 55-set raises frequency but does not create it (migration-ddl-flake-interaction)."
+          }
+        ],
+        "id": "block-46",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-47",
+        "level": 2,
+        "text": "Coverage map — checked and NOT found (absences = decisions in waiting)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• Criterion-TEXT-vs-commit-DIFF fidelity was spot-checked for only ~6 of 24 targets; the other ~18 were verified for SHA/ancestor reality but NOT that the criterion text faithfully describes what the commit does."
+          }
+        ],
+        "id": "block-48",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• The async gate has NOT been RUN post-rebase on CURRENT origin/main — all wall-clock/0-fail proof is from 0b9dcf8c on the OLD base 47b8c0ce. \"Distrust vacuous green\" demands one real run."
+          }
+        ],
+        "id": "block-49",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• restamp close mechanics were never exercised (no probe of closing a met-but-open, unclaimed task)."
+          }
+        ],
+        "id": "block-50",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• No surveyor RAN a suite this wave; every Elixir claim is from logs/commit messages, not a fresh execution."
+          }
+        ],
+        "id": "block-51",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "• The 4 Group-A open PRs (#2897 vix, #2898 telemetry, #2899 bokbasen-pag, #2900 part-xi) are confirmed OPEN/unmerged but their merge is OUT of scope — a Wave 7 backlog decision, not touched here."
+          }
+        ],
+        "id": "block-52",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-53",
+        "level": 2,
+        "text": "What Decide cannot live without",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "(1) an independent RUN-proven full-24 SHA-ancestry sweep so the restamp closes on audit-grade evidence, not inherited trust; (2) proof the 55-file flip still passes CC=/usr/bin/clang mix test GREEN after rebasing onto today’s origin/main at ≥1 seed (ideally 2, incl. seed 222 that once surfaced the migration-ddl flake); (3) the exact honest-close mechanics for the met-but-open restamp task."
+          }
+        ],
+        "id": "block-54",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-55",
+        "level": 2,
+        "text": "Verify plan (in flight — 3 assignments)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V1 (opus, RUN) restamp-integrity-sweep: for ALL 24 target ids, GET /v1/data/doc/production/task/<id>, assert _draft=false and record the met-vector; for EVERY SHA cited in evidence run git merge-base --is-ancestor <sha> origin/main after git fetch. Assert zero non-ancestor SHAs, a9adc82f stays [T,F,T], d328 [T,T,T] on fc9665e4. Then read the commit diff for ≥8 of the previously-unchecked ~18 targets and confirm the criterion text faithfully matches the commit. PROVES: no fabrication survives to close."
+          }
+        ],
+        "id": "block-56",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V2 (opus, worktree, RUN) async-rebase-gate-proof: create a worktree from CURRENT origin/main, apply the 55-file flip from 0b9dcf8c, assert clean + exactly 55 files + pure async flip + none of the keep-serial names present; borrow api/_build/test + symlink deps; CC=/usr/bin/clang mix test at seed 111 AND seed 222; capture wall-clock + pass/fail. PROVES the empirical work survives rebase and the gate is green post-rebase (or honestly surfaces the migration-ddl flake)."
+          }
+        ],
+        "id": "block-57",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V3 (sonnet, RUN) close-mechanics-and-backlog: probe bp capabilities for the task close/publish verbs; inspect task-felix-ledger-restamp claim state; determine the exact call to honestly close a met-but-open, unclaimed task (fresh claim+epoch CAS vs direct lifecycle mutate). Re-confirm task-f0bdb914d63a2e84 still 4/4 untouched and PRs #2897–#2900 still open/unmerged. PROVES the close path before Decide commits to it."
+          }
+        ],
+        "id": "block-58",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-w6d-1",
+        "level": 2,
+        "text": "Decide — verification results (deep round, RUN-proven)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Three verifiers flew; all three came back GREEN with actually-run output. RESTAMP INTEGRITY SWEEP (opus): a single pass swept all 24 restamp targets — every published copy is _draft=false, every met-vector matches the assertions, and every one of the 22 unique cited commit SHAs passes \"git merge-base --is-ancestor <sha> origin/main\" (zero fabrication). Criterion-text-vs-diff fidelity checked on 16 of 24 (exceeding the >=8 required): file names and line counts match the diffs exactly (e.g. supervision_isolation_test.exs \"152 lines\" = diff 152; tenant-scope-check.sh \"+265\" = diff 265; write_hotpath_telemetry_test.exs \"+173\" = diff 173). The 5 regex-flagged \"non-commit\" tokens are sibling TASK-ID cross-references, not fabricated SHAs. Verdict: verify-and-close warranted, no reopen candidate."
+          }
+        ],
+        "id": "block-w6d-2",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "ASYNC REBASE GATE (opus, full suite RUN): the 55-file flip (0b9dcf8c) cherry-picks CLEAN onto current origin/main (55 files, 58 insertions / 58 deletions, all pure async:false->true, no keep-serial file present), compiles GREEN under CC=/usr/bin/clang, and passes at BOTH seeds — seed 111 \"10340 tests, 0 failures, 3 skipped\" and seed 222 \"10340 tests, 0 failures, 3 skipped\" (the 40P01 migration-ddl flake did NOT fire). HONEST PAYOFF CORRECTION: the verifier also RAN a same-seed baseline — flip 220.7s vs baseline 221.4s is FLAT. The recorded -36% was true on the OLD base 47b8c0ce; on today's origin/main the serial sync tail dominates and absorbs the rebalance (sync 192.7s->182.3s, async 28.7s->38.4s). Merge is justified by correctness (2 seeds, 0-fail), not a payoff number — distrust-vacuous-green cuts both ways."
+          }
+        ],
+        "id": "block-w6d-3",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "CLOSE-MECHANICS + BACKLOG (sonnet, RUN): task.close is claim/epoch-CAS-gated by design (worker_id + observed_epoch both required) and there is NO bare \"set lifecycle_status\" verb — so the honest close of task-felix-ledger-restamp is re-claim (fresh epoch) -> bp task close, NEVER a raw /v1/data/mutate on lifecycle_status (that would bypass the exact fence this wave exists to protect). Its epoch-6 claim is expired. Two premise corrections landed: (a) task-f0bdb914d63a2e84 (the wish's \"25th landmine\") is ALREADY closed this wave — lifecycle=done, closed_by=lead-opus, all 4 criteria met citing #2870/821fcada (verified MERGED, ancestor of origin/main); no restamp needed. (b) Group-A PR #2900 is already MERGED; only #2897/#2898/#2899 remain open (Wave-7 backlog)."
+          }
+        ],
+        "id": "block-w6d-4",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-w6d-5",
+        "level": 2,
+        "text": "Decisions (D23–D31, mirror of the charter)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D23 — Wave 6 is FINISH + VERIFY-BEFORE-CLOSE, scoped tight to the two unlanded slices; no fresh scouts. D24 — Restamp = VERIFY-AND-CLOSE via claim->close, NEVER raw mutate; re-run the full-24 ancestry sweep against current origin/main as the close evidence. D25 — d328 OTP landmine is RESTAMP not reopen (fc9665e4/#2403 genuinely tiers the supervision tree; refuted a third time); had it been unfixed the move is REOPEN, never a fabricated commit. D26 — the #2390 pair is NOT a double-count; task-a9adc82f820db065 STAYS [T,F,T] (its N=2000 wall-time/byte criterion is genuinely unmet; #2390 measures only :reductions)."
+          }
+        ],
+        "id": "block-w6d-6",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D27 — Async: LAND the 55-file set as-is; do NOT re-litigate or expand (55 is the empirical honest ceiling; 230 was UNSAFE). origin/main advanced past the verify base and touched 10 of the 55, but ALL 55 flip-target \"use ...DataCase, async: false\" lines survive, so the flip re-applies deterministically off origin/main. D28 — Async payoff recorded HONESTLY as net-neutral on current base, NOT -36%. D29 — the 40P01 migration-ddl deadlock is a KNOWN pre-existing flake (task-felix-migration-ddl-audit-deadlock), self-healing on rerun — a hit during the gate is not a wave-6 regression. D30 — task-f0bdb914d63a2e84 already closed, no action. D31 — both slices branch from ORIGIN/main (local diverged +107/-54), isolated worktrees, CC=/usr/bin/clang, opus-only builders (Fable exhausted); restamp branch f6beac23 is a zero-diff audit anchor (no PR)."
+          }
+        ],
+        "id": "block-w6d-7",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-w6d-8",
+        "level": 2,
+        "text": "Wave 6 plan — 2 opus slices in flight (parallel, disjoint files)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 1 [P1, opus] — Ledger restamp, verify-and-close (task-felix-ledger-restamp; wave_paper=felix-pristine-wave-6-2026-07-13). No repo files (ledger-only). Re-run the full-24 SHA-ancestry sweep against current origin/main, confirm every published copy's met-vector unchanged (a9adc82f stays [T,F,T]), then re-claim (fresh epoch) and bp task close — NEVER raw mutate. GATE: the ancestry sweep prints all-ANCESTOR + \"bp task get task-felix-ledger-restamp\" shows lifecycle=done post-close."
+          }
+        ],
+        "id": "block-w6d-9",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 2 [P1, opus] — Async flip, land the 55-file subset (task-5a5e2c939a33a621; wave_paper=felix-pristine-wave-6-2026-07-13). Files: the 55 api/test/**_test.exs files of commit 0b9dcf8c, RE-DERIVED off origin/main (avoids cherry-pick context conflicts on the 10 upstream-touched files). Two seed-varied CC=/usr/bin/clang mix test runs GREEN (0-fail each; a 40P01 hit is the known flake per D29), push + open PR; builder re-stamps criteria [1][2][3] with honest net-neutral payoff (D28); the LEAD closes criterion [4] (merge gate). GATE: two \"CC=/usr/bin/clang mix test --seed N\" runs, 0 failures each."
+          }
+        ],
+        "id": "block-w6d-10",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Backlog seeded this wave (mapped-not-built): 3 open Group-A felix PRs #2897/#2898/#2899 (merge cleanup); task-felix-roothtml-durable-sobelow-skip, task-felix-interop-resource-bound-sweep, task-felix-phantom-media-atomicity, task-felix-migration-ddl-audit-deadlock (all open); and NEW task-4bc654f703da9d4a (measure the #2390 reopen wall-time / byte-size at N=2000 — a9adc82f's one honest-miss criterion). Status: DECIDED -> BUILDING."
+          }
+        ],
+        "id": "block-w6d-11",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-review-1",
+        "level": 2,
+        "text": "Review — debrief (2026-07-13)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Wave 6 FINISHED exactly the two unlanded wave-5 slices. The reviewer re-verified every load-bearing claim against current origin/main, fixed the ledger back-links, and graded the wave A-. No fabrication anywhere; the honest-ledger ethos held end to end."
+          }
+        ],
+        "id": "block-71",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-review-2",
+        "level": 2,
+        "text": "Slice 1 — Ledger restamp (task-felix-ledger-restamp): SEALED",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Final branch: fb6cdd1d (zero-diff audit anchor, no PR). Lifecycle=done, 5/5 met. Reviewer re-ran the full-24 SHA-ancestry sweep vs current origin/main: 22/22 unique merge commits print ANCESTOR, zero NOT-ANCESTOR, zero fabrication. Sentinels re-read on the PUBLISHED copies (/v1/data/doc, _draft=false): task-a9adc82f820db065 holds [T,F,T] — its N=2000 wall-time/byte criterion stays an HONEST MISS (never flipped), noted as a #2390 duplicate-of task-9e21c3f2; task-d328fb91ff55b743 holds [T,T,T] on fc9665e4/#2403, confirmed the real commit 'fix(otp): tier the top-level supervision tree (#2403)' genuinely tiering the blast-radius failure — RESTAMPED, not reopened (the digest's 'no landing commit' landmine refuted a third time); task-9e21c3f2 holds [T,T,T] on #2390, distinct-shared not a double-count. Exemplary honest-ledger work: both wish-named landmines RESOLVED on evidence, not papered over."
+          }
+        ],
+        "id": "block-73",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-review-3",
+        "level": 2,
+        "text": "Slice 2 — Async flip (task-5a5e2c939a33a621): CORRECT, merge-gated",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Final branch: loop-epic/async-flip-land-the-empirically-validate-1 (PR #2917, open/mergeable, base main). Lifecycle=in_progress; only MERGE GATE criterion[4] stays open for the lead. Diff verified surgically pure — 57 async:false->true lines across 54 files, zero other changes; every removed line async:false, every added line async:true. Keep-serial set intact (rate_limit, attachments, dispatcher/audit_webhook, all raw-DDL files absent). The one broad-grep hit, media_search_scope_test.exs, confirmed hazard-free (no on_exit/put_env/Sandbox.mode/:meck/Bypass/:ets/:telemetry.attach) and safe to flip."
+          }
+        ],
+        "id": "block-75",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Honest scope: 54 not 55 — accounts_test.exs excluded for a genuine flip-attributable TOCTOU flake (2 concurrent sandbox Tasks starved under async pool pressure), filed as backlog task-5f4c0d03c05cd10e. Payoff recorded HONESTLY as NET-NEUTRAL (reviewer measured async 43.6s vs sync 229.8s at seed 111 — the serial keep-serial tail dominates total wall-clock; confirms D28, no fabricated -36%)."
+          }
+        ],
+        "id": "block-76",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "CAVEAT for the lead (stamped as reviewer_note on the task): the reviewer full-suite re-gate ran under load-avg 14-19 with 3 concurrent BEAM suites and surfaced non-deterministic DBConnection pool-timeout failures at both seeds (seed 111: 1; seed 222: 2-6). PROVEN ENVIRONMENTAL, not flip-attributable: an UNFLIPPED file (content_schema_workspace_scope_test.exs, still async:false) failed with the identical 'tcp recv/send: closed ... pool timeout' signature, both failing files pass clean in isolation (32 tests / 0 fail / 0.3s), runtime inflated 2.2x (490s vs the builder's 220s). The diff was NOT reverted — it is correct. Merge MUST gate on the CI Elixir Test being green; because the flip raises peak pool concurrency for a net-neutral payoff, watch for pool-timeout flakes on constrained runners and trim the set if they appear."
+          }
+        ],
+        "id": "block-77",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-review-4",
+        "level": 2,
+        "text": "Grade — A-",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Earned, not given. STRONG: the restamp slice is model honest-ledger execution — a run-proven ancestry sweep, both landmines resolved on real evidence, a genuine miss (a9adc82f) preserved rather than force-stamped, and the close done via claim->close (never a raw lifecycle mutate that would bypass the CAS fence this wave exists to protect). The async diff is provably pure and its scope honestly trimmed to what empirically passes. FALLS SHORT of A: the async slice's payoff is net-neutral (D28), so it buys correctness/consistency but no speed while slightly raising pool-pressure flake surface — a marginal-value merge the lead should weigh — and the reviewer could not reproduce a clean full-suite green locally (environmental, but it means CI is the sole authoritative gate). Nothing is broken; nothing fabricated; the WISH is met."
+          }
+        ],
+        "id": "block-79",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-review-5",
+        "level": 2,
+        "text": "Ledger audit outcome",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Both slice tasks reflect reality: restamp done/5-5, async in_progress/4-5 with merge-gate open (correct — builders never close the lead's merge-gate criterion). Backlog child task-5f4c0d03c05cd10e (harden accounts_test) filed/open/priority-3 under the epic. Reviewer FIXES: added wave_paper=felix-pristine-wave-6-2026-07-13 back-link to BOTH slice tasks (was one-way from the Paper only), and stamped an honest reviewer_note on the async task recording the re-gate finding. No out-of-wave tasks touched; the 24 restamp targets were read-only this wave (verify-and-close), met-vectors unchanged."
+          }
+        ],
+        "id": "block-81",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-review-6",
+        "level": 2,
+        "text": "What the next wave should take",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Immediate: the lead merges PR #2917 once CI Elixir Test is green and closes async criterion[4]; the restamp is already sealed. Then Wave 7 = merge-cleanup of the 3 open Group-A felix PRs (#2897 vix, #2898 telemetry, #2899 bokbasen-pagination) and the open backlog children: task-felix-roothtml-durable-sobelow-skip, task-felix-interop-resource-bound-sweep, task-felix-migration-ddl-audit-deadlock (the 40P01 flake this flip brushes against), task-felix-phantom-media-atomicity (Fable-class), and the new a9adc82f N=2000 measurement. No fresh domain scouts — the 12 audits stay closed."
+          }
+        ],
+        "id": "block-83",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<p>Status: COMPLETE — reviewed A- (2026-07-13). Epic: task-96a908af98698118. Drives: task-felix-ledger-restamp (SEALED done) and task-5a5e2c939a33a621 (async flip, PR #2917, merge-gate lead-owned). This Paper is the living story of Wave 6: Strategize -&gt; Survey -&gt; Digest -&gt; Verify -&gt; Decide -&gt; Review debrief (below).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The wish</h2><p>FINISH the two wave-5 slices that did not land, HONEST-LEDGER first. (1) task-felix-ledger-restamp: restamp the 24+1 done-but-unstamped Felix fix tasks via self-serve /v1/data/mutate on the PUBLISHED doc — every stamp MUST cite a REAL merge commit, NEVER fabricate. Two landmines to RESOLVE not stamp: task-d328fb91ff55b743 (OTP supervision, investigate for a real landing commit — REOPEN if genuinely unfixed) and the double-count task-9e21c3f285b3d7d0 + task-a9adc82f820db065 (both seem to resolve to #2390 — confirm same-vs-distinct). (2) task-5a5e2c939a33a621 async-flip part-2: land the empirically-validated safe subset with suite wall-clock before/after as evidence and no new flake across two seed-varied runs. Each slice its own opus worktree/PR, fail-before proof, CC=/usr/bin/clang mix test green. Branch from ORIGIN/main.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Ground truth at Strategize (what the ledger actually shows)</h2><p>The framing &#39;didn&#39;t land&#39; is imprecise — the WORK sits done in local branches, but neither slice is MERGED/CLOSED. Both branches exist locally only (never pushed, no PRs).</p><p>RESTAMP (task-felix-ledger-restamp): lifecycle=OPEN yet all 5/5 criteria are stamped met:true with rich evidence claiming &#39;24 tx ids already LIVE&#39; on guerrilla, d328 restamped to fc9665e4/#2403, a9adc82 honestly [true,false,true] duplicate-of #2390. Branch loop-epic/re-stamp-the-24-done-but-unstamped-felix-4 (f6beac23) carries only an audit-anchor record — the real deliverable is server-side ledger mutations, not code. THE IRONY: the task that fixes false-done stamps is itself stamped-but-not-closed. HONEST-LEDGER doctrine demands we VERIFY those 24 published copies and every cited commit before trusting the green, then honestly close it (or fix the gaps).</p><p>ASYNC-FLIP (task-5a5e2c939a33a621): lifecycle=in_progress, 4/5 met — only the MERGE GATE criterion is met:false. Branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c) flips 55 DataCase files (down from the analytic 230, after a ~10-run flake-hunt reverted 13 files across 4 hazard classes grep missed). Wall-clock measured -36% (340.7s→217.8s at seed333; corroborated seed111 -39%, seed222 -25%), 0-fail across seed111/222/222-repeat on the full 10393-test suite. The work is real and flake-hunted; it simply was never pushed, PR&#39;d, or merged.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Direction for Wave 6</h2><p>The finished experience: (A) the Felix ledger tells the TRUTH — every done task carries a real, ancestor-of-origin/main merge-commit citation; zero fabrication; any genuinely-unfixed task is REOPENED not papered over (surfacing a false-done is a WIN); and the restamp task itself is verified-real then honestly closed. (B) the async subset is MERGED to main with a green seed-varied CC=/usr/bin/clang gate, the wall-clock payoff recorded, no new flake.</p><p>Key leans (tentative — Decide finalizes after two explore rounds): TRUST the empirical 55-file async outcome over the analytic 230 — a smaller proven-safe subset committed is the honest outcome; do NOT re-litigate the set, just rebase on origin/main, re-run the seed-varied gate, push/PR/merge. VERIFY-don&#39;t-trust the restamp: re-read all 24 published task copies + confirm every cited SHA is a real ancestor of origin/main; the d328 landmine gets INVESTIGATED against the actual fc9665e4/#2403 diff (charter D18/D22 claim it is genuinely fixed and should be RESTAMPED not reopened — but this wave verifies that claim rather than inheriting it). Both slices branch from ORIGIN/main (local main is diverged +106/−46), build in isolated worktrees, opus builders only (Fable exhausted).</p><p>Scope is TIGHT: only these two slices build. The other open Felix children (part-xi, vix, telemetry, bokbasen-pagination, roothtml-skip, interop-sweep, migration-ddl, phantom-media) are OUT of Wave 6&#39;s build scope — but several show criteria-met-yet-lifecycle-open, a false-done cluster the honest-ledger ethos should MAP (not fix) for wave coherence.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Survey plan (wide net — 12 Sonnet scouts)</h2><p>Width is cheap now; Digest distills. Each scout maps terrain so Verify can prove claims with run output. Assignments:</p><p>1. restamp-published-truth — Re-read all 24 restamp target PUBLISHED task copies; do their criteria_progress actually reflect the claimed met-vectors with evidence? List each target&#39;s current published state; flag any NOT actually flipped. WHY: the restamp task claims done; honest-ledger must confirm the mutations are real, not stamped-in-intent.</p><p>2. restamp-commit-reality — For every merge commit/PR cited in the restamp evidence (fc9665e4, #2403, #2390, 365550a4/#2381, bdf5db1d, the 24 SHAs), confirm each is a REAL commit AND an ancestor of origin/main (git merge-base --is-ancestor). List any cited SHA that doesn&#39;t exist or isn&#39;t an ancestor. WHY: NEVER-FABRICATE is the wave&#39;s spine; a bad SHA is a fabrication to surface.</p><p>3. d328-otp-landmine — Investigate task-d328fb91ff55b743 (OTP supervision): read its criterion + the fc9665e4/#2403 diff; does that commit genuinely fix the named failure mode? WHY: the wish says REOPEN if unfixed; the charter says restamp-not-reopen. This wave decides on evidence, not inheritance.</p><p>4. doublecount-2390 — Confirm task-9e21c3f285b3d7d0 and task-a9adc82f820db065 both resolve to PR #2390: same PR, distinct criteria? Is a9adc82&#39;s [true,false,true] honest — does its N=2000 wall-time/byte criterion legitimately stay met:false? WHY: a double-count wrongly stamped would double-inflate the ledger.</p><p>5. async-branch-state — Locate branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c): exists locally/remotely? open PR? how stale vs origin/main (efc02d63/latest)? what 55 files, diff-pure (only the async line)? WHY: Decide needs to know whether to rebase-and-land or re-derive.</p><p>6. async-safe-set-derivation — Reconcile the wish&#39;s &#39;230 validated-safe files&#39; vs the ledger&#39;s &#39;55 DataCase files&#39; outcome. Map the grep universe (277 matches), the keep-serial exclusions, and the 4 hazard classes that killed 13 files. Is 55 the right deliverable or is more safely attainable? WHY: decides whether to trust or expand the set.</p><p>7. async-gate-repro — Nail the exact gate: command, toolchain (.tool-versions OTP27/Elixir1.18.4-otp-27), CC=/usr/bin/clang, seed-varied protocol, and the warm-_build borrow recipe for a worktree (copy _build/test, symlink deps). What baseline wall-clock exists to reproduce before/after? WHY: the builder must reproduce the measurement, not inherit it.</p><p>8. restamp-branch-and-liveness — Locate branch loop-epic/re-stamp-...-4 (f6beac23): pushed? PR? Are the 24 mutate tx genuinely LIVE on guerrilla or only local intent? Give the exact re-verify recipe (/v1/data/doc GET of a sample, draft=false, met-vector). WHY: distinguishes &#39;restamp done, just close the task&#39; from &#39;restamp never executed&#39;.</p><p>9. felix-open-task-landscape — Map ALL open Felix children (part-xi 2/2-open, vix 2/3, telemetry 2/3, bokbasen-pag 3/4, roothtml 0/2, interop 0/2, migration-ddl 0/2, phantom-media 0/3): which are done-in-branch-but-unclosed (false-done cluster) vs truly open? WHY: constrains wave coherence and flags whether any block the two slices — NOT a build-scope expansion.</p><p>10. mutate-mechanics — Confirm the self-serve restamp recipe end to end: patch writes drafts.&lt;id&gt;, publish op promotes; Writer.deep_merge REPLACES arrays (GET full acceptance_criteria, flip one entry, PATCH the whole array back); ifRevisionID source (_rev from the doc endpoint); done tasks have no live claim so close/stamp are the wrong tools. Any gotchas from the local-portable-testing lessons. WHY: the builder must not corrupt arrays or clobber unrelated criteria.</p><p>11. wave5-paper-and-charter-history — Read the wave-5 Paper (felix-pristine-wave-5-2026-07-13) + charter D13–D22: what did wave 5 ACTUALLY land vs claim, and where is the gap that left these two &#39;unlanded&#39;? WHY: avoids re-deciding what D14/D18 already settled and inherits their proven facts.</p><p>12. migration-ddl-flake-interaction — The async criteria mention DDL ACCESS-EXCLUSIVE lock hazards (access_audit, tenancy_atomicity reverted to serial); task-felix-migration-ddl-audit-deadlock (open) names the same class. Does merging the 55-file subset interact with that open flake? Must any async file stay serial because of it? WHY: protects the merge from reintroducing a known flake.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Constraints (binding this wave)</h2><p>Opus-only builders (Fable exhausted; decompose too-hard slices into smaller opus slices, NEVER Haiku). Verify fleet: opus for correctness digs, sonnet only for breadth. Branch from ORIGIN/main, not the diverged local checkout; main checkout stays on main; all builds in isolated worktrees; CC=/usr/bin/clang mix test green. NEVER fabricate a commit — a stamp with no real ancestor-of-main SHA does not get flipped; a genuinely-unfixed task gets REOPENED. Digest occasionally hits a StructuredOutput cap — if the wave crashes there, resume it.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Digest — survey synthesis (2026-07-13)</h2><p>Twelve scouts returned a strikingly convergent picture: both wave-5 slices are BUILT and correct, and neither is LANDED/CLOSED. Wave 6 is a FINISH + VERIFY-BEFORE-CLOSE wave, not a rebuild. Nothing in the surveys contradicts the direction on the substance; the only corrections are numeric wording (see below).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Established (evidence-backed, cross-confirmed)</h2><p>RESTAMP is real, not stamped-in-intent. Two scouts independently re-read all 24 published task copies (draft=false via /v1/data/doc GET) and confirmed every claimed met-vector matches; 22 unique cited SHAs all pass git merge-base --is-ancestor origin/main with commit subjects matching the claimed fix; 8 cited PRs spot-checked MERGED with mergeCommit oid matching the short-SHA. Zero fabrication found. This is a VERIFY-AND-CLOSE case, not re-execute.</p><p>d328 (the OTP fabrication-landmine) is GENUINELY FIXED by fc9665e4/#2403 — RESTAMP, not reopen. A diff-level read confirms the commit tiers 4 intermediate supervisors and adds supervision_isolation_test.exs (152 lines; its moduledoc names task-d328fb91ff55b743) reproducing the flat-topology escalation and proving the tiered topology contains it. #2403 MERGED, fc9665e4 ancestor of origin/main, task already [true,true,true]. No reopen warranted on current evidence.</p><p>The #2390 &quot;double-count&quot; is NOT a double-count. task-9e21c3f2 (parent fa0adcb6, issue #2299) and task-a9adc82f (parent 30564ed5, issue #2297) are DISTINCT findings sharing one commit. a9adc82f is honestly [true,false,true]: its middle criterion (N=2000 wall-time / :erlang.external_size byte measurement) stays met:false because #2390 only measures :reductions — the evidence says so. Do NOT flip it to met:true.</p><p>ASYNC-FLIP branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c) is local-only, never pushed, no PR. The diff is exactly 55 test files, pure async:false→true (58/58 lines; the two multi-defmodule files verified pure). The 55-set correctly excludes rate_limiter, contract/rate_limit, tickets/attachments, dispatcher/audit_webhooks, and every raw-DDL file (access_audit, tenancy_atomicity, extend_workspace_delete_cascade). 4/5 criteria met; only the MERGE GATE is open. Re-confirmed THIS pass: rebase onto CURRENT origin/main (d5db09e5) is conflict-free — the 4 commits since merge-base 47b8c0ce touch only api/.sobelow-skips and workspace_bundle.ex, zero overlap with the 55 files. Branch is now 4 behind origin/main (was 2 at survey time).</p><p>55 is the HONEST CEILING, not a shortfall. The analytic 230-safe set was EMPIRICALLY UNSAFE (V5: same-seed reruns gave 38 then 27 different failures via grep-invisible on_exit-Repo sandbox violations). The graduated flake-hunt landed 55 with 0-fail across seed 111/222/222-repeat on 10393 tests and -25..-39% wall-clock. Re-expanding repeats the exact failure mode — do not re-litigate the set.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Corrections to the direction</h2><p>The brief’s &quot;~10 runs reverted 13 files across 4 hazard classes&quot; has NO primary source — no commit or paper states 13. The verified arithmetic is 230 candidates → 55 landed = 175 excluded. Downstream must not carry &quot;13&quot; forward.</p><p>The restamp task’s own lifecycle is self-inconsistent: 5/5 met yet lifecycle_status=&quot;open&quot; with claim.worker=null (released), while claim.now says &quot;stays in_progress for lead to close&quot;. The exact honest-close mechanics (fresh claim + epoch CAS, or a direct lifecycle mutate) are unsettled — a Decide-blocker.</p><p>The restamp branch f6beac23 is a ZERO-DIFF audit-anchor commit (tree byte-identical to parent 821fcada). The real deliverable is the live server-side ledger mutations, which need no PR. Forcing a no-op PR would be theater; Decide chooses keep-as-trail vs git branch -D.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Coverage map — checked and FOUND</h2><p>• 24/24 restamp published copies re-read; met-vectors match (restamp-published-truth + restamp-branch-and-liveness raw /v1/data/doc GET).</p><p>• 22 unique cited SHAs are real ancestors of origin/main; 8 cited PRs MERGED with matching mergeCommit (restamp-commit-reality).</p><p>• d328 fc9665e4 diff genuinely fixes the named blast-radius failure with a protective test (d328-otp-landmine).</p><p>• #2390 distinct-tasks + honest partial-stamp confirmed at diff level (doublecount-2390).</p><p>• 55-file async diff purity, keep-serial exclusions, and clean rebase re-confirmed this pass (async-branch-state).</p><p>• Self-serve mutate recipe code-confirmed against writer.ex / mutations.ex / lifecycle.ex; arrays REPLACE, publish op required (mutate-mechanics).</p><p>• migration-ddl 40P01 flake is pre-existing, tracked (task-felix-migration-ddl-audit-deadlock), non-blocking; 55-set raises frequency but does not create it (migration-ddl-flake-interaction).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Coverage map — checked and NOT found (absences = decisions in waiting)</h2><p>• Criterion-TEXT-vs-commit-DIFF fidelity was spot-checked for only ~6 of 24 targets; the other ~18 were verified for SHA/ancestor reality but NOT that the criterion text faithfully describes what the commit does.</p><p>• The async gate has NOT been RUN post-rebase on CURRENT origin/main — all wall-clock/0-fail proof is from 0b9dcf8c on the OLD base 47b8c0ce. &quot;Distrust vacuous green&quot; demands one real run.</p><p>• restamp close mechanics were never exercised (no probe of closing a met-but-open, unclaimed task).</p><p>• No surveyor RAN a suite this wave; every Elixir claim is from logs/commit messages, not a fresh execution.</p><p>• The 4 Group-A open PRs (#2897 vix, #2898 telemetry, #2899 bokbasen-pag, #2900 part-xi) are confirmed OPEN/unmerged but their merge is OUT of scope — a Wave 7 backlog decision, not touched here.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What Decide cannot live without</h2><p>(1) an independent RUN-proven full-24 SHA-ancestry sweep so the restamp closes on audit-grade evidence, not inherited trust; (2) proof the 55-file flip still passes CC=/usr/bin/clang mix test GREEN after rebasing onto today’s origin/main at ≥1 seed (ideally 2, incl. seed 222 that once surfaced the migration-ddl flake); (3) the exact honest-close mechanics for the met-but-open restamp task.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verify plan (in flight — 3 assignments)</h2><p>V1 (opus, RUN) restamp-integrity-sweep: for ALL 24 target ids, GET /v1/data/doc/production/task/&lt;id&gt;, assert _draft=false and record the met-vector; for EVERY SHA cited in evidence run git merge-base --is-ancestor &lt;sha&gt; origin/main after git fetch. Assert zero non-ancestor SHAs, a9adc82f stays [T,F,T], d328 [T,T,T] on fc9665e4. Then read the commit diff for ≥8 of the previously-unchecked ~18 targets and confirm the criterion text faithfully matches the commit. PROVES: no fabrication survives to close.</p><p>V2 (opus, worktree, RUN) async-rebase-gate-proof: create a worktree from CURRENT origin/main, apply the 55-file flip from 0b9dcf8c, assert clean + exactly 55 files + pure async flip + none of the keep-serial names present; borrow api/_build/test + symlink deps; CC=/usr/bin/clang mix test at seed 111 AND seed 222; capture wall-clock + pass/fail. PROVES the empirical work survives rebase and the gate is green post-rebase (or honestly surfaces the migration-ddl flake).</p><p>V3 (sonnet, RUN) close-mechanics-and-backlog: probe bp capabilities for the task close/publish verbs; inspect task-felix-ledger-restamp claim state; determine the exact call to honestly close a met-but-open, unclaimed task (fresh claim+epoch CAS vs direct lifecycle mutate). Re-confirm task-f0bdb914d63a2e84 still 4/4 untouched and PRs #2897–#2900 still open/unmerged. PROVES the close path before Decide commits to it.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Decide — verification results (deep round, RUN-proven)</h2><p>Three verifiers flew; all three came back GREEN with actually-run output. RESTAMP INTEGRITY SWEEP (opus): a single pass swept all 24 restamp targets — every published copy is _draft=false, every met-vector matches the assertions, and every one of the 22 unique cited commit SHAs passes &quot;git merge-base --is-ancestor &lt;sha&gt; origin/main&quot; (zero fabrication). Criterion-text-vs-diff fidelity checked on 16 of 24 (exceeding the &gt;=8 required): file names and line counts match the diffs exactly (e.g. supervision_isolation_test.exs &quot;152 lines&quot; = diff 152; tenant-scope-check.sh &quot;+265&quot; = diff 265; write_hotpath_telemetry_test.exs &quot;+173&quot; = diff 173). The 5 regex-flagged &quot;non-commit&quot; tokens are sibling TASK-ID cross-references, not fabricated SHAs. Verdict: verify-and-close warranted, no reopen candidate.</p><p>ASYNC REBASE GATE (opus, full suite RUN): the 55-file flip (0b9dcf8c) cherry-picks CLEAN onto current origin/main (55 files, 58 insertions / 58 deletions, all pure async:false-&gt;true, no keep-serial file present), compiles GREEN under CC=/usr/bin/clang, and passes at BOTH seeds — seed 111 &quot;10340 tests, 0 failures, 3 skipped&quot; and seed 222 &quot;10340 tests, 0 failures, 3 skipped&quot; (the 40P01 migration-ddl flake did NOT fire). HONEST PAYOFF CORRECTION: the verifier also RAN a same-seed baseline — flip 220.7s vs baseline 221.4s is FLAT. The recorded -36% was true on the OLD base 47b8c0ce; on today&#39;s origin/main the serial sync tail dominates and absorbs the rebalance (sync 192.7s-&gt;182.3s, async 28.7s-&gt;38.4s). Merge is justified by correctness (2 seeds, 0-fail), not a payoff number — distrust-vacuous-green cuts both ways.</p><p>CLOSE-MECHANICS + BACKLOG (sonnet, RUN): task.close is claim/epoch-CAS-gated by design (worker_id + observed_epoch both required) and there is NO bare &quot;set lifecycle_status&quot; verb — so the honest close of task-felix-ledger-restamp is re-claim (fresh epoch) -&gt; bp task close, NEVER a raw /v1/data/mutate on lifecycle_status (that would bypass the exact fence this wave exists to protect). Its epoch-6 claim is expired. Two premise corrections landed: (a) task-f0bdb914d63a2e84 (the wish&#39;s &quot;25th landmine&quot;) is ALREADY closed this wave — lifecycle=done, closed_by=lead-opus, all 4 criteria met citing #2870/821fcada (verified MERGED, ancestor of origin/main); no restamp needed. (b) Group-A PR #2900 is already MERGED; only #2897/#2898/#2899 remain open (Wave-7 backlog).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Decisions (D23–D31, mirror of the charter)</h2><p>D23 — Wave 6 is FINISH + VERIFY-BEFORE-CLOSE, scoped tight to the two unlanded slices; no fresh scouts. D24 — Restamp = VERIFY-AND-CLOSE via claim-&gt;close, NEVER raw mutate; re-run the full-24 ancestry sweep against current origin/main as the close evidence. D25 — d328 OTP landmine is RESTAMP not reopen (fc9665e4/#2403 genuinely tiers the supervision tree; refuted a third time); had it been unfixed the move is REOPEN, never a fabricated commit. D26 — the #2390 pair is NOT a double-count; task-a9adc82f820db065 STAYS [T,F,T] (its N=2000 wall-time/byte criterion is genuinely unmet; #2390 measures only :reductions).</p><p>D27 — Async: LAND the 55-file set as-is; do NOT re-litigate or expand (55 is the empirical honest ceiling; 230 was UNSAFE). origin/main advanced past the verify base and touched 10 of the 55, but ALL 55 flip-target &quot;use ...DataCase, async: false&quot; lines survive, so the flip re-applies deterministically off origin/main. D28 — Async payoff recorded HONESTLY as net-neutral on current base, NOT -36%. D29 — the 40P01 migration-ddl deadlock is a KNOWN pre-existing flake (task-felix-migration-ddl-audit-deadlock), self-healing on rerun — a hit during the gate is not a wave-6 regression. D30 — task-f0bdb914d63a2e84 already closed, no action. D31 — both slices branch from ORIGIN/main (local diverged +107/-54), isolated worktrees, CC=/usr/bin/clang, opus-only builders (Fable exhausted); restamp branch f6beac23 is a zero-diff audit anchor (no PR).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Wave 6 plan — 2 opus slices in flight (parallel, disjoint files)</h2><p>SLICE 1 [P1, opus] — Ledger restamp, verify-and-close (task-felix-ledger-restamp; wave_paper=felix-pristine-wave-6-2026-07-13). No repo files (ledger-only). Re-run the full-24 SHA-ancestry sweep against current origin/main, confirm every published copy&#39;s met-vector unchanged (a9adc82f stays [T,F,T]), then re-claim (fresh epoch) and bp task close — NEVER raw mutate. GATE: the ancestry sweep prints all-ANCESTOR + &quot;bp task get task-felix-ledger-restamp&quot; shows lifecycle=done post-close.</p><p>SLICE 2 [P1, opus] — Async flip, land the 55-file subset (task-5a5e2c939a33a621; wave_paper=felix-pristine-wave-6-2026-07-13). Files: the 55 api/test/**_test.exs files of commit 0b9dcf8c, RE-DERIVED off origin/main (avoids cherry-pick context conflicts on the 10 upstream-touched files). Two seed-varied CC=/usr/bin/clang mix test runs GREEN (0-fail each; a 40P01 hit is the known flake per D29), push + open PR; builder re-stamps criteria [1][2][3] with honest net-neutral payoff (D28); the LEAD closes criterion [4] (merge gate). GATE: two &quot;CC=/usr/bin/clang mix test --seed N&quot; runs, 0 failures each.</p><p>Backlog seeded this wave (mapped-not-built): 3 open Group-A felix PRs #2897/#2898/#2899 (merge cleanup); task-felix-roothtml-durable-sobelow-skip, task-felix-interop-resource-bound-sweep, task-felix-phantom-media-atomicity, task-felix-migration-ddl-audit-deadlock (all open); and NEW task-4bc654f703da9d4a (measure the #2390 reopen wall-time / byte-size at N=2000 — a9adc82f&#39;s one honest-miss criterion). Status: DECIDED -&gt; BUILDING.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Review — debrief (2026-07-13)</h2><p>Wave 6 FINISHED exactly the two unlanded wave-5 slices. The reviewer re-verified every load-bearing claim against current origin/main, fixed the ledger back-links, and graded the wave A-. No fabrication anywhere; the honest-ledger ethos held end to end.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Slice 1 — Ledger restamp (task-felix-ledger-restamp): SEALED</h2><p>Final branch: fb6cdd1d (zero-diff audit anchor, no PR). Lifecycle=done, 5/5 met. Reviewer re-ran the full-24 SHA-ancestry sweep vs current origin/main: 22/22 unique merge commits print ANCESTOR, zero NOT-ANCESTOR, zero fabrication. Sentinels re-read on the PUBLISHED copies (/v1/data/doc, _draft=false): task-a9adc82f820db065 holds [T,F,T] — its N=2000 wall-time/byte criterion stays an HONEST MISS (never flipped), noted as a #2390 duplicate-of task-9e21c3f2; task-d328fb91ff55b743 holds [T,T,T] on fc9665e4/#2403, confirmed the real commit &#39;fix(otp): tier the top-level supervision tree (#2403)&#39; genuinely tiering the blast-radius failure — RESTAMPED, not reopened (the digest&#39;s &#39;no landing commit&#39; landmine refuted a third time); task-9e21c3f2 holds [T,T,T] on #2390, distinct-shared not a double-count. Exemplary honest-ledger work: both wish-named landmines RESOLVED on evidence, not papered over.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Slice 2 — Async flip (task-5a5e2c939a33a621): CORRECT, merge-gated</h2><p>Final branch: loop-epic/async-flip-land-the-empirically-validate-1 (PR #2917, open/mergeable, base main). Lifecycle=in_progress; only MERGE GATE criterion[4] stays open for the lead. Diff verified surgically pure — 57 async:false-&gt;true lines across 54 files, zero other changes; every removed line async:false, every added line async:true. Keep-serial set intact (rate_limit, attachments, dispatcher/audit_webhook, all raw-DDL files absent). The one broad-grep hit, media_search_scope_test.exs, confirmed hazard-free (no on_exit/put_env/Sandbox.mode/:meck/Bypass/:ets/:telemetry.attach) and safe to flip.</p><p>Honest scope: 54 not 55 — accounts_test.exs excluded for a genuine flip-attributable TOCTOU flake (2 concurrent sandbox Tasks starved under async pool pressure), filed as backlog task-5f4c0d03c05cd10e. Payoff recorded HONESTLY as NET-NEUTRAL (reviewer measured async 43.6s vs sync 229.8s at seed 111 — the serial keep-serial tail dominates total wall-clock; confirms D28, no fabricated -36%).</p><p>CAVEAT for the lead (stamped as reviewer_note on the task): the reviewer full-suite re-gate ran under load-avg 14-19 with 3 concurrent BEAM suites and surfaced non-deterministic DBConnection pool-timeout failures at both seeds (seed 111: 1; seed 222: 2-6). PROVEN ENVIRONMENTAL, not flip-attributable: an UNFLIPPED file (content_schema_workspace_scope_test.exs, still async:false) failed with the identical &#39;tcp recv/send: closed ... pool timeout&#39; signature, both failing files pass clean in isolation (32 tests / 0 fail / 0.3s), runtime inflated 2.2x (490s vs the builder&#39;s 220s). The diff was NOT reverted — it is correct. Merge MUST gate on the CI Elixir Test being green; because the flip raises peak pool concurrency for a net-neutral payoff, watch for pool-timeout flakes on constrained runners and trim the set if they appear.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Grade — A-</h2><p>Earned, not given. STRONG: the restamp slice is model honest-ledger execution — a run-proven ancestry sweep, both landmines resolved on real evidence, a genuine miss (a9adc82f) preserved rather than force-stamped, and the close done via claim-&gt;close (never a raw lifecycle mutate that would bypass the CAS fence this wave exists to protect). The async diff is provably pure and its scope honestly trimmed to what empirically passes. FALLS SHORT of A: the async slice&#39;s payoff is net-neutral (D28), so it buys correctness/consistency but no speed while slightly raising pool-pressure flake surface — a marginal-value merge the lead should weigh — and the reviewer could not reproduce a clean full-suite green locally (environmental, but it means CI is the sole authoritative gate). Nothing is broken; nothing fabricated; the WISH is met.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Ledger audit outcome</h2><p>Both slice tasks reflect reality: restamp done/5-5, async in_progress/4-5 with merge-gate open (correct — builders never close the lead&#39;s merge-gate criterion). Backlog child task-5f4c0d03c05cd10e (harden accounts_test) filed/open/priority-3 under the epic. Reviewer FIXES: added wave_paper=felix-pristine-wave-6-2026-07-13 back-link to BOTH slice tasks (was one-way from the Paper only), and stamped an honest reviewer_note on the async task recording the re-gate finding. No out-of-wave tasks touched; the 24 restamp targets were read-only this wave (verify-and-close), met-vectors unchanged.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What the next wave should take</h2><p>Immediate: the lead merges PR #2917 once CI Elixir Test is green and closes async criterion[4]; the restamp is already sealed. Then Wave 7 = merge-cleanup of the 3 open Group-A felix PRs (#2897 vix, #2898 telemetry, #2899 bokbasen-pagination) and the open backlog children: task-felix-roothtml-durable-sobelow-skip, task-felix-interop-resource-bound-sweep, task-felix-migration-ddl-audit-deadlock (the 40P01 flake this flip brushes against), task-felix-phantom-media-atomicity (Fable-class), and the new a9adc82f N=2000 measurement. No fresh domain scouts — the 12 audits stay closed.</p>"
+  },
+  "body_html": "<p>Status: COMPLETE — reviewed A- (2026-07-13). Epic: task-96a908af98698118. Drives: task-felix-ledger-restamp (SEALED done) and task-5a5e2c939a33a621 (async flip, PR #2917, merge-gate lead-owned). This Paper is the living story of Wave 6: Strategize -&gt; Survey -&gt; Digest -&gt; Verify -&gt; Decide -&gt; Review debrief (below).</p><h2>The wish</h2><p>FINISH the two wave-5 slices that did not land, HONEST-LEDGER first. (1) task-felix-ledger-restamp: restamp the 24+1 done-but-unstamped Felix fix tasks via self-serve /v1/data/mutate on the PUBLISHED doc — every stamp MUST cite a REAL merge commit, NEVER fabricate. Two landmines to RESOLVE not stamp: task-d328fb91ff55b743 (OTP supervision, investigate for a real landing commit — REOPEN if genuinely unfixed) and the double-count task-9e21c3f285b3d7d0 + task-a9adc82f820db065 (both seem to resolve to #2390 — confirm same-vs-distinct). (2) task-5a5e2c939a33a621 async-flip part-2: land the empirically-validated safe subset with suite wall-clock before/after as evidence and no new flake across two seed-varied runs. Each slice its own opus worktree/PR, fail-before proof, CC=/usr/bin/clang mix test green. Branch from ORIGIN/main.</p><h2>Ground truth at Strategize (what the ledger actually shows)</h2><p>The framing &#39;didn&#39;t land&#39; is imprecise — the WORK sits done in local branches, but neither slice is MERGED/CLOSED. Both branches exist locally only (never pushed, no PRs).</p><p>RESTAMP (task-felix-ledger-restamp): lifecycle=OPEN yet all 5/5 criteria are stamped met:true with rich evidence claiming &#39;24 tx ids already LIVE&#39; on guerrilla, d328 restamped to fc9665e4/#2403, a9adc82 honestly [true,false,true] duplicate-of #2390. Branch loop-epic/re-stamp-the-24-done-but-unstamped-felix-4 (f6beac23) carries only an audit-anchor record — the real deliverable is server-side ledger mutations, not code. THE IRONY: the task that fixes false-done stamps is itself stamped-but-not-closed. HONEST-LEDGER doctrine demands we VERIFY those 24 published copies and every cited commit before trusting the green, then honestly close it (or fix the gaps).</p><p>ASYNC-FLIP (task-5a5e2c939a33a621): lifecycle=in_progress, 4/5 met — only the MERGE GATE criterion is met:false. Branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c) flips 55 DataCase files (down from the analytic 230, after a ~10-run flake-hunt reverted 13 files across 4 hazard classes grep missed). Wall-clock measured -36% (340.7s→217.8s at seed333; corroborated seed111 -39%, seed222 -25%), 0-fail across seed111/222/222-repeat on the full 10393-test suite. The work is real and flake-hunted; it simply was never pushed, PR&#39;d, or merged.</p><h2>Direction for Wave 6</h2><p>The finished experience: (A) the Felix ledger tells the TRUTH — every done task carries a real, ancestor-of-origin/main merge-commit citation; zero fabrication; any genuinely-unfixed task is REOPENED not papered over (surfacing a false-done is a WIN); and the restamp task itself is verified-real then honestly closed. (B) the async subset is MERGED to main with a green seed-varied CC=/usr/bin/clang gate, the wall-clock payoff recorded, no new flake.</p><p>Key leans (tentative — Decide finalizes after two explore rounds): TRUST the empirical 55-file async outcome over the analytic 230 — a smaller proven-safe subset committed is the honest outcome; do NOT re-litigate the set, just rebase on origin/main, re-run the seed-varied gate, push/PR/merge. VERIFY-don&#39;t-trust the restamp: re-read all 24 published task copies + confirm every cited SHA is a real ancestor of origin/main; the d328 landmine gets INVESTIGATED against the actual fc9665e4/#2403 diff (charter D18/D22 claim it is genuinely fixed and should be RESTAMPED not reopened — but this wave verifies that claim rather than inheriting it). Both slices branch from ORIGIN/main (local main is diverged +106/−46), build in isolated worktrees, opus builders only (Fable exhausted).</p><p>Scope is TIGHT: only these two slices build. The other open Felix children (part-xi, vix, telemetry, bokbasen-pagination, roothtml-skip, interop-sweep, migration-ddl, phantom-media) are OUT of Wave 6&#39;s build scope — but several show criteria-met-yet-lifecycle-open, a false-done cluster the honest-ledger ethos should MAP (not fix) for wave coherence.</p><h2>Survey plan (wide net — 12 Sonnet scouts)</h2><p>Width is cheap now; Digest distills. Each scout maps terrain so Verify can prove claims with run output. Assignments:</p><p>1. restamp-published-truth — Re-read all 24 restamp target PUBLISHED task copies; do their criteria_progress actually reflect the claimed met-vectors with evidence? List each target&#39;s current published state; flag any NOT actually flipped. WHY: the restamp task claims done; honest-ledger must confirm the mutations are real, not stamped-in-intent.</p><p>2. restamp-commit-reality — For every merge commit/PR cited in the restamp evidence (fc9665e4, #2403, #2390, 365550a4/#2381, bdf5db1d, the 24 SHAs), confirm each is a REAL commit AND an ancestor of origin/main (git merge-base --is-ancestor). List any cited SHA that doesn&#39;t exist or isn&#39;t an ancestor. WHY: NEVER-FABRICATE is the wave&#39;s spine; a bad SHA is a fabrication to surface.</p><p>3. d328-otp-landmine — Investigate task-d328fb91ff55b743 (OTP supervision): read its criterion + the fc9665e4/#2403 diff; does that commit genuinely fix the named failure mode? WHY: the wish says REOPEN if unfixed; the charter says restamp-not-reopen. This wave decides on evidence, not inheritance.</p><p>4. doublecount-2390 — Confirm task-9e21c3f285b3d7d0 and task-a9adc82f820db065 both resolve to PR #2390: same PR, distinct criteria? Is a9adc82&#39;s [true,false,true] honest — does its N=2000 wall-time/byte criterion legitimately stay met:false? WHY: a double-count wrongly stamped would double-inflate the ledger.</p><p>5. async-branch-state — Locate branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c): exists locally/remotely? open PR? how stale vs origin/main (efc02d63/latest)? what 55 files, diff-pure (only the async line)? WHY: Decide needs to know whether to rebase-and-land or re-derive.</p><p>6. async-safe-set-derivation — Reconcile the wish&#39;s &#39;230 validated-safe files&#39; vs the ledger&#39;s &#39;55 DataCase files&#39; outcome. Map the grep universe (277 matches), the keep-serial exclusions, and the 4 hazard classes that killed 13 files. Is 55 the right deliverable or is more safely attainable? WHY: decides whether to trust or expand the set.</p><p>7. async-gate-repro — Nail the exact gate: command, toolchain (.tool-versions OTP27/Elixir1.18.4-otp-27), CC=/usr/bin/clang, seed-varied protocol, and the warm-_build borrow recipe for a worktree (copy _build/test, symlink deps). What baseline wall-clock exists to reproduce before/after? WHY: the builder must reproduce the measurement, not inherit it.</p><p>8. restamp-branch-and-liveness — Locate branch loop-epic/re-stamp-...-4 (f6beac23): pushed? PR? Are the 24 mutate tx genuinely LIVE on guerrilla or only local intent? Give the exact re-verify recipe (/v1/data/doc GET of a sample, draft=false, met-vector). WHY: distinguishes &#39;restamp done, just close the task&#39; from &#39;restamp never executed&#39;.</p><p>9. felix-open-task-landscape — Map ALL open Felix children (part-xi 2/2-open, vix 2/3, telemetry 2/3, bokbasen-pag 3/4, roothtml 0/2, interop 0/2, migration-ddl 0/2, phantom-media 0/3): which are done-in-branch-but-unclosed (false-done cluster) vs truly open? WHY: constrains wave coherence and flags whether any block the two slices — NOT a build-scope expansion.</p><p>10. mutate-mechanics — Confirm the self-serve restamp recipe end to end: patch writes drafts.&lt;id&gt;, publish op promotes; Writer.deep_merge REPLACES arrays (GET full acceptance_criteria, flip one entry, PATCH the whole array back); ifRevisionID source (_rev from the doc endpoint); done tasks have no live claim so close/stamp are the wrong tools. Any gotchas from the local-portable-testing lessons. WHY: the builder must not corrupt arrays or clobber unrelated criteria.</p><p>11. wave5-paper-and-charter-history — Read the wave-5 Paper (felix-pristine-wave-5-2026-07-13) + charter D13–D22: what did wave 5 ACTUALLY land vs claim, and where is the gap that left these two &#39;unlanded&#39;? WHY: avoids re-deciding what D14/D18 already settled and inherits their proven facts.</p><p>12. migration-ddl-flake-interaction — The async criteria mention DDL ACCESS-EXCLUSIVE lock hazards (access_audit, tenancy_atomicity reverted to serial); task-felix-migration-ddl-audit-deadlock (open) names the same class. Does merging the 55-file subset interact with that open flake? Must any async file stay serial because of it? WHY: protects the merge from reintroducing a known flake.</p><h2>Constraints (binding this wave)</h2><p>Opus-only builders (Fable exhausted; decompose too-hard slices into smaller opus slices, NEVER Haiku). Verify fleet: opus for correctness digs, sonnet only for breadth. Branch from ORIGIN/main, not the diverged local checkout; main checkout stays on main; all builds in isolated worktrees; CC=/usr/bin/clang mix test green. NEVER fabricate a commit — a stamp with no real ancestor-of-main SHA does not get flipped; a genuinely-unfixed task gets REOPENED. Digest occasionally hits a StructuredOutput cap — if the wave crashes there, resume it.</p><h2>Digest — survey synthesis (2026-07-13)</h2><p>Twelve scouts returned a strikingly convergent picture: both wave-5 slices are BUILT and correct, and neither is LANDED/CLOSED. Wave 6 is a FINISH + VERIFY-BEFORE-CLOSE wave, not a rebuild. Nothing in the surveys contradicts the direction on the substance; the only corrections are numeric wording (see below).</p><h2>Established (evidence-backed, cross-confirmed)</h2><p>RESTAMP is real, not stamped-in-intent. Two scouts independently re-read all 24 published task copies (draft=false via /v1/data/doc GET) and confirmed every claimed met-vector matches; 22 unique cited SHAs all pass git merge-base --is-ancestor origin/main with commit subjects matching the claimed fix; 8 cited PRs spot-checked MERGED with mergeCommit oid matching the short-SHA. Zero fabrication found. This is a VERIFY-AND-CLOSE case, not re-execute.</p><p>d328 (the OTP fabrication-landmine) is GENUINELY FIXED by fc9665e4/#2403 — RESTAMP, not reopen. A diff-level read confirms the commit tiers 4 intermediate supervisors and adds supervision_isolation_test.exs (152 lines; its moduledoc names task-d328fb91ff55b743) reproducing the flat-topology escalation and proving the tiered topology contains it. #2403 MERGED, fc9665e4 ancestor of origin/main, task already [true,true,true]. No reopen warranted on current evidence.</p><p>The #2390 &quot;double-count&quot; is NOT a double-count. task-9e21c3f2 (parent fa0adcb6, issue #2299) and task-a9adc82f (parent 30564ed5, issue #2297) are DISTINCT findings sharing one commit. a9adc82f is honestly [true,false,true]: its middle criterion (N=2000 wall-time / :erlang.external_size byte measurement) stays met:false because #2390 only measures :reductions — the evidence says so. Do NOT flip it to met:true.</p><p>ASYNC-FLIP branch loop-epic/async-false-true-flip-empirically-valida-5 (0b9dcf8c) is local-only, never pushed, no PR. The diff is exactly 55 test files, pure async:false→true (58/58 lines; the two multi-defmodule files verified pure). The 55-set correctly excludes rate_limiter, contract/rate_limit, tickets/attachments, dispatcher/audit_webhooks, and every raw-DDL file (access_audit, tenancy_atomicity, extend_workspace_delete_cascade). 4/5 criteria met; only the MERGE GATE is open. Re-confirmed THIS pass: rebase onto CURRENT origin/main (d5db09e5) is conflict-free — the 4 commits since merge-base 47b8c0ce touch only api/.sobelow-skips and workspace_bundle.ex, zero overlap with the 55 files. Branch is now 4 behind origin/main (was 2 at survey time).</p><p>55 is the HONEST CEILING, not a shortfall. The analytic 230-safe set was EMPIRICALLY UNSAFE (V5: same-seed reruns gave 38 then 27 different failures via grep-invisible on_exit-Repo sandbox violations). The graduated flake-hunt landed 55 with 0-fail across seed 111/222/222-repeat on 10393 tests and -25..-39% wall-clock. Re-expanding repeats the exact failure mode — do not re-litigate the set.</p><h2>Corrections to the direction</h2><p>The brief’s &quot;~10 runs reverted 13 files across 4 hazard classes&quot; has NO primary source — no commit or paper states 13. The verified arithmetic is 230 candidates → 55 landed = 175 excluded. Downstream must not carry &quot;13&quot; forward.</p><p>The restamp task’s own lifecycle is self-inconsistent: 5/5 met yet lifecycle_status=&quot;open&quot; with claim.worker=null (released), while claim.now says &quot;stays in_progress for lead to close&quot;. The exact honest-close mechanics (fresh claim + epoch CAS, or a direct lifecycle mutate) are unsettled — a Decide-blocker.</p><p>The restamp branch f6beac23 is a ZERO-DIFF audit-anchor commit (tree byte-identical to parent 821fcada). The real deliverable is the live server-side ledger mutations, which need no PR. Forcing a no-op PR would be theater; Decide chooses keep-as-trail vs git branch -D.</p><h2>Coverage map — checked and FOUND</h2><p>• 24/24 restamp published copies re-read; met-vectors match (restamp-published-truth + restamp-branch-and-liveness raw /v1/data/doc GET).</p><p>• 22 unique cited SHAs are real ancestors of origin/main; 8 cited PRs MERGED with matching mergeCommit (restamp-commit-reality).</p><p>• d328 fc9665e4 diff genuinely fixes the named blast-radius failure with a protective test (d328-otp-landmine).</p><p>• #2390 distinct-tasks + honest partial-stamp confirmed at diff level (doublecount-2390).</p><p>• 55-file async diff purity, keep-serial exclusions, and clean rebase re-confirmed this pass (async-branch-state).</p><p>• Self-serve mutate recipe code-confirmed against writer.ex / mutations.ex / lifecycle.ex; arrays REPLACE, publish op required (mutate-mechanics).</p><p>• migration-ddl 40P01 flake is pre-existing, tracked (task-felix-migration-ddl-audit-deadlock), non-blocking; 55-set raises frequency but does not create it (migration-ddl-flake-interaction).</p><h2>Coverage map — checked and NOT found (absences = decisions in waiting)</h2><p>• Criterion-TEXT-vs-commit-DIFF fidelity was spot-checked for only ~6 of 24 targets; the other ~18 were verified for SHA/ancestor reality but NOT that the criterion text faithfully describes what the commit does.</p><p>• The async gate has NOT been RUN post-rebase on CURRENT origin/main — all wall-clock/0-fail proof is from 0b9dcf8c on the OLD base 47b8c0ce. &quot;Distrust vacuous green&quot; demands one real run.</p><p>• restamp close mechanics were never exercised (no probe of closing a met-but-open, unclaimed task).</p><p>• No surveyor RAN a suite this wave; every Elixir claim is from logs/commit messages, not a fresh execution.</p><p>• The 4 Group-A open PRs (#2897 vix, #2898 telemetry, #2899 bokbasen-pag, #2900 part-xi) are confirmed OPEN/unmerged but their merge is OUT of scope — a Wave 7 backlog decision, not touched here.</p><h2>What Decide cannot live without</h2><p>(1) an independent RUN-proven full-24 SHA-ancestry sweep so the restamp closes on audit-grade evidence, not inherited trust; (2) proof the 55-file flip still passes CC=/usr/bin/clang mix test GREEN after rebasing onto today’s origin/main at ≥1 seed (ideally 2, incl. seed 222 that once surfaced the migration-ddl flake); (3) the exact honest-close mechanics for the met-but-open restamp task.</p><h2>Verify plan (in flight — 3 assignments)</h2><p>V1 (opus, RUN) restamp-integrity-sweep: for ALL 24 target ids, GET /v1/data/doc/production/task/&lt;id&gt;, assert _draft=false and record the met-vector; for EVERY SHA cited in evidence run git merge-base --is-ancestor &lt;sha&gt; origin/main after git fetch. Assert zero non-ancestor SHAs, a9adc82f stays [T,F,T], d328 [T,T,T] on fc9665e4. Then read the commit diff for ≥8 of the previously-unchecked ~18 targets and confirm the criterion text faithfully matches the commit. PROVES: no fabrication survives to close.</p><p>V2 (opus, worktree, RUN) async-rebase-gate-proof: create a worktree from CURRENT origin/main, apply the 55-file flip from 0b9dcf8c, assert clean + exactly 55 files + pure async flip + none of the keep-serial names present; borrow api/_build/test + symlink deps; CC=/usr/bin/clang mix test at seed 111 AND seed 222; capture wall-clock + pass/fail. PROVES the empirical work survives rebase and the gate is green post-rebase (or honestly surfaces the migration-ddl flake).</p><p>V3 (sonnet, RUN) close-mechanics-and-backlog: probe bp capabilities for the task close/publish verbs; inspect task-felix-ledger-restamp claim state; determine the exact call to honestly close a met-but-open, unclaimed task (fresh claim+epoch CAS vs direct lifecycle mutate). Re-confirm task-f0bdb914d63a2e84 still 4/4 untouched and PRs #2897–#2900 still open/unmerged. PROVES the close path before Decide commits to it.</p><h2>Decide — verification results (deep round, RUN-proven)</h2><p>Three verifiers flew; all three came back GREEN with actually-run output. RESTAMP INTEGRITY SWEEP (opus): a single pass swept all 24 restamp targets — every published copy is _draft=false, every met-vector matches the assertions, and every one of the 22 unique cited commit SHAs passes &quot;git merge-base --is-ancestor &lt;sha&gt; origin/main&quot; (zero fabrication). Criterion-text-vs-diff fidelity checked on 16 of 24 (exceeding the &gt;=8 required): file names and line counts match the diffs exactly (e.g. supervision_isolation_test.exs &quot;152 lines&quot; = diff 152; tenant-scope-check.sh &quot;+265&quot; = diff 265; write_hotpath_telemetry_test.exs &quot;+173&quot; = diff 173). The 5 regex-flagged &quot;non-commit&quot; tokens are sibling TASK-ID cross-references, not fabricated SHAs. Verdict: verify-and-close warranted, no reopen candidate.</p><p>ASYNC REBASE GATE (opus, full suite RUN): the 55-file flip (0b9dcf8c) cherry-picks CLEAN onto current origin/main (55 files, 58 insertions / 58 deletions, all pure async:false-&gt;true, no keep-serial file present), compiles GREEN under CC=/usr/bin/clang, and passes at BOTH seeds — seed 111 &quot;10340 tests, 0 failures, 3 skipped&quot; and seed 222 &quot;10340 tests, 0 failures, 3 skipped&quot; (the 40P01 migration-ddl flake did NOT fire). HONEST PAYOFF CORRECTION: the verifier also RAN a same-seed baseline — flip 220.7s vs baseline 221.4s is FLAT. The recorded -36% was true on the OLD base 47b8c0ce; on today&#39;s origin/main the serial sync tail dominates and absorbs the rebalance (sync 192.7s-&gt;182.3s, async 28.7s-&gt;38.4s). Merge is justified by correctness (2 seeds, 0-fail), not a payoff number — distrust-vacuous-green cuts both ways.</p><p>CLOSE-MECHANICS + BACKLOG (sonnet, RUN): task.close is claim/epoch-CAS-gated by design (worker_id + observed_epoch both required) and there is NO bare &quot;set lifecycle_status&quot; verb — so the honest close of task-felix-ledger-restamp is re-claim (fresh epoch) -&gt; bp task close, NEVER a raw /v1/data/mutate on lifecycle_status (that would bypass the exact fence this wave exists to protect). Its epoch-6 claim is expired. Two premise corrections landed: (a) task-f0bdb914d63a2e84 (the wish&#39;s &quot;25th landmine&quot;) is ALREADY closed this wave — lifecycle=done, closed_by=lead-opus, all 4 criteria met citing #2870/821fcada (verified MERGED, ancestor of origin/main); no restamp needed. (b) Group-A PR #2900 is already MERGED; only #2897/#2898/#2899 remain open (Wave-7 backlog).</p><h2>Decisions (D23–D31, mirror of the charter)</h2><p>D23 — Wave 6 is FINISH + VERIFY-BEFORE-CLOSE, scoped tight to the two unlanded slices; no fresh scouts. D24 — Restamp = VERIFY-AND-CLOSE via claim-&gt;close, NEVER raw mutate; re-run the full-24 ancestry sweep against current origin/main as the close evidence. D25 — d328 OTP landmine is RESTAMP not reopen (fc9665e4/#2403 genuinely tiers the supervision tree; refuted a third time); had it been unfixed the move is REOPEN, never a fabricated commit. D26 — the #2390 pair is NOT a double-count; task-a9adc82f820db065 STAYS [T,F,T] (its N=2000 wall-time/byte criterion is genuinely unmet; #2390 measures only :reductions).</p><p>D27 — Async: LAND the 55-file set as-is; do NOT re-litigate or expand (55 is the empirical honest ceiling; 230 was UNSAFE). origin/main advanced past the verify base and touched 10 of the 55, but ALL 55 flip-target &quot;use ...DataCase, async: false&quot; lines survive, so the flip re-applies deterministically off origin/main. D28 — Async payoff recorded HONESTLY as net-neutral on current base, NOT -36%. D29 — the 40P01 migration-ddl deadlock is a KNOWN pre-existing flake (task-felix-migration-ddl-audit-deadlock), self-healing on rerun — a hit during the gate is not a wave-6 regression. D30 — task-f0bdb914d63a2e84 already closed, no action. D31 — both slices branch from ORIGIN/main (local diverged +107/-54), isolated worktrees, CC=/usr/bin/clang, opus-only builders (Fable exhausted); restamp branch f6beac23 is a zero-diff audit anchor (no PR).</p><h2>Wave 6 plan — 2 opus slices in flight (parallel, disjoint files)</h2><p>SLICE 1 [P1, opus] — Ledger restamp, verify-and-close (task-felix-ledger-restamp; wave_paper=felix-pristine-wave-6-2026-07-13). No repo files (ledger-only). Re-run the full-24 SHA-ancestry sweep against current origin/main, confirm every published copy&#39;s met-vector unchanged (a9adc82f stays [T,F,T]), then re-claim (fresh epoch) and bp task close — NEVER raw mutate. GATE: the ancestry sweep prints all-ANCESTOR + &quot;bp task get task-felix-ledger-restamp&quot; shows lifecycle=done post-close.</p><p>SLICE 2 [P1, opus] — Async flip, land the 55-file subset (task-5a5e2c939a33a621; wave_paper=felix-pristine-wave-6-2026-07-13). Files: the 55 api/test/**_test.exs files of commit 0b9dcf8c, RE-DERIVED off origin/main (avoids cherry-pick context conflicts on the 10 upstream-touched files). Two seed-varied CC=/usr/bin/clang mix test runs GREEN (0-fail each; a 40P01 hit is the known flake per D29), push + open PR; builder re-stamps criteria [1][2][3] with honest net-neutral payoff (D28); the LEAD closes criterion [4] (merge gate). GATE: two &quot;CC=/usr/bin/clang mix test --seed N&quot; runs, 0 failures each.</p><p>Backlog seeded this wave (mapped-not-built): 3 open Group-A felix PRs #2897/#2898/#2899 (merge cleanup); task-felix-roothtml-durable-sobelow-skip, task-felix-interop-resource-bound-sweep, task-felix-phantom-media-atomicity, task-felix-migration-ddl-audit-deadlock (all open); and NEW task-4bc654f703da9d4a (measure the #2390 reopen wall-time / byte-size at N=2000 — a9adc82f&#39;s one honest-miss criterion). Status: DECIDED -&gt; BUILDING.</p><h2>Review — debrief (2026-07-13)</h2><p>Wave 6 FINISHED exactly the two unlanded wave-5 slices. The reviewer re-verified every load-bearing claim against current origin/main, fixed the ledger back-links, and graded the wave A-. No fabrication anywhere; the honest-ledger ethos held end to end.</p><h2>Slice 1 — Ledger restamp (task-felix-ledger-restamp): SEALED</h2><p>Final branch: fb6cdd1d (zero-diff audit anchor, no PR). Lifecycle=done, 5/5 met. Reviewer re-ran the full-24 SHA-ancestry sweep vs current origin/main: 22/22 unique merge commits print ANCESTOR, zero NOT-ANCESTOR, zero fabrication. Sentinels re-read on the PUBLISHED copies (/v1/data/doc, _draft=false): task-a9adc82f820db065 holds [T,F,T] — its N=2000 wall-time/byte criterion stays an HONEST MISS (never flipped), noted as a #2390 duplicate-of task-9e21c3f2; task-d328fb91ff55b743 holds [T,T,T] on fc9665e4/#2403, confirmed the real commit &#39;fix(otp): tier the top-level supervision tree (#2403)&#39; genuinely tiering the blast-radius failure — RESTAMPED, not reopened (the digest&#39;s &#39;no landing commit&#39; landmine refuted a third time); task-9e21c3f2 holds [T,T,T] on #2390, distinct-shared not a double-count. Exemplary honest-ledger work: both wish-named landmines RESOLVED on evidence, not papered over.</p><h2>Slice 2 — Async flip (task-5a5e2c939a33a621): CORRECT, merge-gated</h2><p>Final branch: loop-epic/async-flip-land-the-empirically-validate-1 (PR #2917, open/mergeable, base main). Lifecycle=in_progress; only MERGE GATE criterion[4] stays open for the lead. Diff verified surgically pure — 57 async:false-&gt;true lines across 54 files, zero other changes; every removed line async:false, every added line async:true. Keep-serial set intact (rate_limit, attachments, dispatcher/audit_webhook, all raw-DDL files absent). The one broad-grep hit, media_search_scope_test.exs, confirmed hazard-free (no on_exit/put_env/Sandbox.mode/:meck/Bypass/:ets/:telemetry.attach) and safe to flip.</p><p>Honest scope: 54 not 55 — accounts_test.exs excluded for a genuine flip-attributable TOCTOU flake (2 concurrent sandbox Tasks starved under async pool pressure), filed as backlog task-5f4c0d03c05cd10e. Payoff recorded HONESTLY as NET-NEUTRAL (reviewer measured async 43.6s vs sync 229.8s at seed 111 — the serial keep-serial tail dominates total wall-clock; confirms D28, no fabricated -36%).</p><p>CAVEAT for the lead (stamped as reviewer_note on the task): the reviewer full-suite re-gate ran under load-avg 14-19 with 3 concurrent BEAM suites and surfaced non-deterministic DBConnection pool-timeout failures at both seeds (seed 111: 1; seed 222: 2-6). PROVEN ENVIRONMENTAL, not flip-attributable: an UNFLIPPED file (content_schema_workspace_scope_test.exs, still async:false) failed with the identical &#39;tcp recv/send: closed ... pool timeout&#39; signature, both failing files pass clean in isolation (32 tests / 0 fail / 0.3s), runtime inflated 2.2x (490s vs the builder&#39;s 220s). The diff was NOT reverted — it is correct. Merge MUST gate on the CI Elixir Test being green; because the flip raises peak pool concurrency for a net-neutral payoff, watch for pool-timeout flakes on constrained runners and trim the set if they appear.</p><h2>Grade — A-</h2><p>Earned, not given. STRONG: the restamp slice is model honest-ledger execution — a run-proven ancestry sweep, both landmines resolved on real evidence, a genuine miss (a9adc82f) preserved rather than force-stamped, and the close done via claim-&gt;close (never a raw lifecycle mutate that would bypass the CAS fence this wave exists to protect). The async diff is provably pure and its scope honestly trimmed to what empirically passes. FALLS SHORT of A: the async slice&#39;s payoff is net-neutral (D28), so it buys correctness/consistency but no speed while slightly raising pool-pressure flake surface — a marginal-value merge the lead should weigh — and the reviewer could not reproduce a clean full-suite green locally (environmental, but it means CI is the sole authoritative gate). Nothing is broken; nothing fabricated; the WISH is met.</p><h2>Ledger audit outcome</h2><p>Both slice tasks reflect reality: restamp done/5-5, async in_progress/4-5 with merge-gate open (correct — builders never close the lead&#39;s merge-gate criterion). Backlog child task-5f4c0d03c05cd10e (harden accounts_test) filed/open/priority-3 under the epic. Reviewer FIXES: added wave_paper=felix-pristine-wave-6-2026-07-13 back-link to BOTH slice tasks (was one-way from the Paper only), and stamped an honest reviewer_note on the async task recording the re-gate finding. No out-of-wave tasks touched; the 24 restamp targets were read-only this wave (verify-and-close), met-vectors unchanged.</p><h2>What the next wave should take</h2><p>Immediate: the lead merges PR #2917 once CI Elixir Test is green and closes async criterion[4]; the restamp is already sealed. Then Wave 7 = merge-cleanup of the 3 open Group-A felix PRs (#2897 vix, #2898 telemetry, #2899 bokbasen-pagination) and the open backlog children: task-felix-roothtml-durable-sobelow-skip, task-felix-interop-resource-bound-sweep, task-felix-migration-ddl-audit-deadlock (the 40P01 flake this flip brushes against), task-felix-phantom-media-atomicity (Fable-class), and the new a9adc82f N=2000 measurement. No fresh domain scouts — the 12 audits stay closed.</p>",
+  "body_html_sv": 3,
+  "description": "Felix Pristine Wave 6 living story — FINISH the two unlanded wave-5 slices honest-ledger first: verify-then-close the 24-target restamp (every stamp cites a real ancestor-of-main merge commit) and rebase+land the empirically-validated 55-file async DataCase flip with a seed-varied green gate.",
+  "main_tag": "wave-paper",
+  "preview": {
+    "description": "Felix Pristine Wave 6 living story — FINISH the two unlanded wave-5 slices honest-ledger first:…",
+    "extensions": {
+      "tags": [
+        "wave-paper",
+        "ratchet-honesty",
+        "ledger",
+        "testing",
+        "elixir"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-pristine-wave-6-2026-07-13"
+  },
+  "rev": 1,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "this is the living wave-6 Paper opened at Strategize, closed at Review",
+      "strength": 92,
+      "tag": "wave-paper"
+    },
+    {
+      "rationale": "restamp is audit-integrity work: every stamp cites a real ancestor-of-main commit",
+      "strength": 80,
+      "tag": "ratchet-honesty"
+    },
+    {
+      "rationale": "the 24-target restamp and honest close of a met-but-open task are ledger operations",
+      "strength": 68,
+      "tag": "ledger"
+    },
+    {
+      "rationale": "the async DataCase flip slice plus every slice fail-before protective gate",
+      "strength": 55,
+      "tag": "testing"
+    },
+    {
+      "rationale": "the async flip changes Elixir ExUnit async flags and is proven by mix test",
+      "strength": 40,
+      "tag": "elixir"
+    }
+  ],
+  "title": "The wish"
+}

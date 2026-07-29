@@ -1,0 +1,1791 @@
+{
+  "_createdAt": "2026-07-13T06:09:53.771036Z",
+  "_draft": false,
+  "_id": "felix-pristine-wave-5-2026-07-13",
+  "_publishedId": "felix-pristine-wave-5-2026-07-13",
+  "_rev": "17e66fec7581db236c7fec26406fce7e",
+  "_type": "paper",
+  "_updatedAt": "2026-07-13T09:32:56.317269Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix Pristine W5 — build the filed backlog (async flip · vix ceiling · LV telemetry · Part XI · ledger re-stamp)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Status: VERIFYING (Digest complete). 13 survey reports folded. A verify fleet of 7 is in flight before Decide cuts the plan. This wave does NOT re-audit the 12 closed domains — it SHIPS the filed backlog: each item its own opus slice / worktree / PR with a fail-before protective test and a green CC=/usr/bin/clang mix test. Heartbeat: wave_status = 'wave: verifying'."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "The wish (verbatim intent)",
+      "type": "heading"
+    },
+    {
+      "id": "block-3",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "(1) async-flip part-2 — collect the wall-clock payoff Wave 4 left on the table. Flip ONLY files proven free of global mutable state. ETS rate-limiter tests + Application-env mutators STAY serial. Payoff measured = suite wall-clock before/after."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "(2) task-vix-bomb-explicit-ceiling — defense-in-depth explicit pixel/memory ceiling on the vix/libvips render path (twin of the Magick bound)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "(3) task-felix-liveview-telemetry-consumer — the Prometheus reporter consumes no LiveView mount/handle_event telemetry; wire the distribution metrics."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "(4) task-felix-part-xi-corpus-gap — close the Part XI coverage gap (Interop/Mailers/File-storage/i18n/Assets/GraphQL) with a per-concept verdict table under the improvement-only doctrine."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "(5) task-felix-ledger-restamp — re-stamp ~20 done-but-unstamped fix tasks with real merge-commit evidence (audit-trail rot; root cause task-6e819f39fe3aa9e6). NOT fabrication."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "SKIP task-felix-phantom-media-atomicity — Fable-class after-commit redesign, correctly parked; do NOT cut it into under-specified opus slices."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Direction for this wave",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "This is a SHIP wave, not an audit. The filed tasks already name their failure modes — the job is to build them green with fail-before proofs, in isolated worktrees, on opus (Fable exhausted this wave). The finished experience: the Felix backlog empties honestly — each closed task carries a PR, a merge commit, and a protective test that fails before the fix and passes after. Two of the five are code hardening (vix ceiling, LiveView telemetry), one is a measured performance collection (async flip), one is a bounded audit that produces its own verdict table (Part XI), and one is pure ledger hygiene (re-stamp) that restores trust in 'is X fixed?' answered via bp alone."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Leaning: sequence the async flip as the highest-effort slice (measurement + flake-hunt); treat vix-ceiling and liveview-telemetry as clean parallel opus slices with sharp fail-before tests; treat Part XI as a bounded audit whose only ship-deliverable is the verdict table + any qualifying child tasks (most chapters likely 'not-applicable' or 'already-good' — Barkpark has no Absinthe/GraphQL, and mailers/assets/i18n reach is small); treat ledger-restamp as a careful evidence-gathering pass, never a blind met:true stamp — each stamp must cite the actual merge commit."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-7",
+      "level": 2,
+      "text": "The five slices → task map",
+      "type": "heading"
+    },
+    {
+      "id": "block-8",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "async flip part-2 → task-5a5e2c939a33a621 (in_progress; part-1 keystone landed; criteria 2-5 open). opus."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "vix ceiling → task-vix-bomb-explicit-ceiling (open). opus."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "LiveView telemetry → task-felix-liveview-telemetry-consumer (open). opus."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Part XI corpus gap → task-felix-part-xi-corpus-gap (open, bounded audit). opus."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "ledger re-stamp → task-felix-ledger-restamp (open, bookkeeping). opus."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Adjacent/optional: task-5dbbbe2efc44e48e (BokbasenLive paginate beyond @page_limit) — a Wave-4 follow-up; survey whether it belongs in this wave or stays backlog."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "block-9",
+      "level": 2,
+      "text": "Survey plan (in flight — surveyors flying now)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Cast wide and cheap: map every seam the five slices touch so Digest can hand each opus builder a precise brief. Each assignment below names what to find and why it changes the plan."
+        }
+      ],
+      "id": "block-10",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-11",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "async-safe test inventory: enumerate every test/**/*.exs with `async: false`, and flag which contain Application.put_env / :persistent_term / Registry. / Process.register / raw :ets new|insert|delete_all|delete_all_objects. Output the SAFE-to-flip list vs the MUST-stay-serial list. Why: this IS the flip's scope; a wrong flip flakes the suite."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "rate-limiter keystone reality: confirm conncase.ex no longer does an unconditional :ets.delete_all_objects and that the bucket key is per-test scoped (commit bdf5db1d). Why: criterion 1 claims met:true — verify before flipping the ~160 ConnCase files it unblocks."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "vix render path: map the vix/libvips rendition code (media rendition backend, where Vix.Vips / Operation is called, image decode entry). What resource controls Vix exposes (no ImageMagick -limit; likely a pre-decode dimension/pixel ceiling). Where the Magick twin bound landed (magick.ex) so the vix bound mirrors it. Why: defines the exact seam + test stub shape."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Prometheus/telemetry reporter: find the module defining prometheus_metrics/0 (Telemetry.Metrics distribution/counter definitions) and where Phoenix LiveView telemetry events would attach. List the exact event names Phoenix emits ([:phoenix,:live_view,:mount|:handle_event|:handle_params,:stop] + live_component). Why: names the metrics to add + how the driven-mount test asserts."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Part XI applicability scan: for each of Interop / Mailers / File-storage / i18n / Assets / GraphQL, does api/ even have it? (grep for Absinthe/absinthe, Swoosh/Mailer, gettext, esbuild/tailwind asset pipeline, file storage module, System.cmd/Port/NIF interop). Why: most chapters are likely not-applicable or already-good — bounds the audit sharply."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "ledger re-stamp target list: enumerate the ~20 Felix child/related tasks that are lifecycle=done with criteria met:false or empty evidence; for each, find the merge commit/PR that actually landed the fix (git log / gh). Identify the 3 criteria-less Sobelow tasks and the 2 probe artifacts (task-bd2578a682eb6fce, task-fabbbbf10f60c17c). Why: the stamp must cite real evidence, never fabricate."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "restamp root-cause dependency: inspect task-6e819f39fe3aa9e6 (bp task close --set criteria rubric-shape bug) — is it fixed? does re-stamping require the fix first, or can we patch acceptance_criteria via /v1/data/mutate directly? Why: determines whether ledger-restamp is blocked or self-serve."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Elixir gate recipe in-worktree: confirm the borrow-warm-_build fast path (copy _build/test, symlink deps) works for a fresh Felix worktree, and that CC=/usr/bin/clang mix test runs (test.exs disables codelist seeder; registry self-call fixed a81e9761). Why: every slice needs a green gate; a broken borrow strands all five."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "magick twin precedent: read the shipped Magick timeout+-limit fix (task-38d34db1ead325b5) and its fail-before test to mirror structure for the vix ceiling test. Why: consistency + a proven test shape."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "bokbasen pagination scope: read task-5dbbbe2efc44e48e and bokbasen_live.ex post Wave-4 mount-gate — is @page_limit already capping and pagination the only gap? Why: decide in-wave vs backlog."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "existing async payoff evidence: search bp papers/tasks + git for any prior wall-clock measurement of the suite (baseline seconds). Why: the acceptance evidence needs a before number; find or plan to capture it."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "sobelow/durable-skip regression check: confirm Wave-4's inline # sobelow_skip on studio_chat.ex attachment functions landed and `mix sobelow --skip --exit Low` is green. Why: ensures no re-opened suppression drift bleeds into this wave's gates."
+          }
+        ]
+      ],
+      "ordered": true,
+      "type": "list"
+    },
+    {
+      "id": "block-12",
+      "level": 2,
+      "text": "What is IN FLIGHT right now",
+      "type": "heading"
+    },
+    {
+      "id": "block-13",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Digest complete — 13 surveys folded, corrections logged, 7-assignment verify fleet designed and appended above."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Verify fleet FLYING now: V1-V7. Decide waits on their run-proofs before cutting the wave plan."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Heartbeat stamped on epic task-96a908af98698118: wave_status = 'wave: verifying'."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "dig-00",
+      "level": 2,
+      "text": "Digest — what the survey established",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Thirteen surveys, wide and shallow. The five slices are real, filed, unclaimed, and each names its failure mode. The load-bearing facts the build can stand on:"
+        }
+      ],
+      "id": "dig-01",
+      "type": "paragraph"
+    },
+    {
+      "id": "dig-02",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "ASYNC FLIP (task-5a5e2c939a33a621): the true split is 3-way, not 2-way. 443/788 test files are async:false; 277 pass the literal 5-pattern grep, but 47 of those still carry pattern-INVISIBLE shared state (System.put_env, Sandbox.mode, :meck, Bypass, start_supervised singletons, :telemetry.attach, shared uploads/ dir). The validated SAFE set is 230 files (prior stalled worker's /tmp/flip_final.txt — every one a subset of the independent 277). USE 230, NOT 277 — flipping the raw 277 silently reintroduces 47 flakes. The keystone rate-limiter scope fix (bdf5db1d) IS landed. No wall-clock baseline was ever captured; a fresh live gate run measured ~248s green off LOCAL (stale) main."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "VIX CEILING (task-vix-bomb-explicit-ceiling): seam fully mapped. Vix.render/4 = Image.open→thumbnail→watermark→write, in-process (no shell-out, so no Task.yield deadline needed). libvips has NO per-call -limit; its only knobs are process-global (cache_set_max_mem/1, concurrency_set/1). The per-request bound must be a PRE-thumbnail pixel-dimension guard using Image.width/height (cheap, pre-decode) returning a bounded {:error, :vix_...} tuple — a materially DIFFERENT mechanism than the Magick timeout twin. Magick precedent lives on origin/main (4ce8c471, #2868), NOT on local main."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "LV TELEMETRY (task-felix-liveview-telemetry-consumer): reporter = BarkparkWeb.Telemetry.prometheus_metrics/0, 8 metrics, ZERO LiveView. Exactly 4 event families to wire: live_view mount/handle_params/handle_event + live_component handle_event (NO live_component mount/handle_params event exists). Metadata carries a raw %Socket{} — needs a NEW tag_values fn to extract socket.view/component (no tag_values precedent in the repo). Protective-test template = write_hotpath_telemetry_test.exs's 3-tier declared/attached/fires-and-scrapes pattern."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "PART XI (task-felix-part-xi-corpus-gap): mostly not-applicable/already-good, as predicted. No Absinthe/GraphQL server anywhere (only the github plugin CONSUMES GitHub's GraphQL). Gettext installed but ZERO real call sites (3 hits, all self-referential moduledoc). Swoosh mailer mature + env-gated. Assets = 3 independent JS bundlers, not the stock esbuild/tailwind mix pipeline. Interop is the one live chapter — it already produced the wave-4 Magick fix and the wave-5 vix target. Deliverable is a per-concept verdict TABLE, not new digging."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "LEDGER RE-STAMP (task-felix-ledger-restamp): the count is 24, NOT the ~20/3 the task text claims — 18 done tasks with met:false + 6 with the acceptance_criteria field entirely ABSENT (only half are Sobelow). 22 of 24 resolve to a confirmed merge commit. Root cause task-6e819f39fe3aa9e6 does NOT block: the shape-mismatch defect is real but restamping already-done tasks is self-serve via /v1/data/mutate (no live claim/epoch, so close/stamp are the wrong tools regardless). Set REPLACES arrays wholesale (Writer.deep_merge) — a restamp patch must GET the full acceptance_criteria array, flip one entry, PATCH the whole array back."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "dig-10",
+      "level": 2,
+      "text": "Corrections & contradictions vs the wish",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Where the survey diverges from the wish/direction text — these are what Decide must absorb:"
+        }
+      ],
+      "id": "dig-11",
+      "type": "paragraph"
+    },
+    {
+      "id": "dig-12",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "RESTAMP SCOPE is 24, not ~20/3. The wish's '~20 done-but-unstamped' and 'three criteria-less Sobelow tasks' both undercount. Decide must scope the slice to the full 24-task table (produced by the verify fleet)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NEW residue item: task-f0bdb914d63a2e84 (wave-4 sobelow durable-skip) is CODE-DONE but LEDGER-OPEN — its PR #2870 (821fcada) IS merged to origin/main, but lifecycle_status=open and the merge-gate criterion is met:false/empty. The charter's wave-log 'no ledger fixes required' was written ~15min BEFORE the 3 PRs actually merged, so it is stale. Restamp MUST also close this one (25th target)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "FABRICATION LANDMINE: task-d328fb91ff55b743 (OTP supervision / flat restart budget) is lifecycle=done but NO landing commit was found — it may be genuinely unfixed & mislabeled done. Restamping it with a fabricated commit would violate the never-fabricate mandate. Must be resolved before the builder touches it (verify assignment V2)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "DOUBLE-COUNT RISK: task-9e21c3f285b3d7d0 and task-a9adc82f820db065 both appear to resolve to the same fix (PR #2390). Restamping both against one commit inflates the evidence tally. Resolve same-vs-distinct before restamp (V2)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "OUT-OF-BACKLOG flag (do NOT build unprompted): root.html.heex XSS.Raw is still fingerprint-only (never got the durable inline sobelow_skip that studio_chat.ex got) and its baseline has already drifted TWICE. Worth a small follow-up FILE, not a wave-5 build."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "cov-00",
+      "level": 2,
+      "text": "Coverage map — checked & found / checked & NOT found",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Distilled from the surveyors' coverage arrays. Absences are decisions-in-waiting."
+        }
+      ],
+      "id": "cov-01",
+      "type": "paragraph"
+    },
+    {
+      "id": "cov-10",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "FOUND — the 230-file async SAFE list (/tmp/flip_final.txt) cross-checks 100% inside the independent 277 pattern-clean set."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "FOUND — Magick twin (deadline+limit) + its fail-before test shape, read on origin/main (4ce8c471)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "FOUND — the 4 LiveView telemetry event families + metadata shapes, read from phoenix_live_view deps source (utils.ex/channel.ex/logger.ex), not just docs."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "FOUND — the borrow-warm-_build gate mechanism works end-to-end (live run, 248.2s green, 10204 tests) off local main."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "FOUND — 22/24 restamp targets resolve to a confirmed merge commit; the published-vs-draft mutate semantics + array-replace footgun."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "FOUND — bokbasen wave-4 fix (@page_limit=200 + connected?-gate) live on origin/main; pagination-beyond-cap is the only remaining gap."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "cov-20",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "NOT RUN — mix sobelow --skip --exit Low was never executed against true current main (origin/main). Gate-green is inferred from source, not proven (V4)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NOT RUN — the borrow-gate off ORIGIN/MAIN (which carries the 3 merged fixes). Every survey gate ran off LOCAL main, which is stale (ahead 103 / behind 37). Builders MUST branch from origin/main; the gate must be re-proven there (V4)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NOT CAPTURED — any async before/after wall-clock pair. The whole payoff metric is still open (folded into V4's baseline run)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NOT VERIFIED — task-d328fb91ff55b743 (OTP supervision) fix existence; and whether the two #2390 tasks are one fix or two (V2)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NOT PROVEN — that a /v1/data/mutate restamp actually lands on the PUBLISHED copy the gate reads (V3, a probe write + readback)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NOT REACHED — the actual Part XI corpus SOURCE text (ch 77-82); applicability was inferred from grep alone. No surveyor read the underlying book chapters — acceptable given the not-applicable verdicts, but the verdict table must interpret 'Assets' against Barkpark's real 3-bundler reality."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NOT RE-DERIVED durably — the 230-file list lives only in ephemeral /tmp; it must be re-derived and written somewhere durable (V5)."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "ver-00",
+      "level": 2,
+      "text": "Verify plan — the last look before the plan is cut",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Seven assignments. Opus where being wrong is expensive (fabrication landmines, cross-surface correctness); Sonnet for breadth/enumeration. Each names what it RUNS as proof."
+        }
+      ],
+      "id": "ver-01",
+      "type": "paragraph"
+    },
+    {
+      "id": "ver-02",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "V1 (sonnet) — RESTAMP ENUMERATION: confirm each of the 24 candidates' landing commit on origin/main (git merge-base --is-ancestor), produce the authoritative task→PR→commit→criteria-shape table, and ADD the 25th (task-f0bdb914d63a2e84 → 821fcada). Runs: git log/merge-base + bp task get. Flags any target without a clean commit for V2."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V2 (opus) — FABRICATION LANDMINES: (a) is task-d328fb91ff55b743 (OTP supervision) genuinely fixed or mislabeled-done? read supervisor tree on origin/main + exhaustive git log; (b) are task-9e21c3f285b3d7d0 and task-a9adc82f820db065 the same fix (PR #2390) or distinct? read the #2390 diff vs both criteria. Runs: git log/show. Output decides restamp-vs-reopen for each."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V3 (opus) — MUTATE-PATH PROOF: prove a /v1/data/mutate patch to the bare doc_id lands on the PUBLISHED task the gate reads, with full-array replace semantics preserved. Runs: one real restamp write on a genuinely-merged target + bp task get readback confirming the published ledger reflects it. De-risks the entire restamp mechanism."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V4 (opus, worktree) — GATE OFF ORIGIN/MAIN: worktree off origin/main, borrow warm _build, RUN both `CC=/usr/bin/clang mix sobelow --skip --exit Low` (prove the sobelow gate is green on true current main) and `CC=/usr/bin/clang mix test` (capture the trustworthy async before-baseline + prove the suite is green). The foundation the async slice and the whole wave stand on."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V5 (sonnet, worktree) — ASYNC 230 RE-VALIDATE: re-derive the async:false pattern-clean set against origin/main HEAD, confirm the 230-file intent still holds (no files drifted into shared state), identify the extra keep-serial candidates the gate surveyor flagged (ClaudeChat.Session.terminate / Webhooks.Dispatcher.dispatch_audit_async test files), and WRITE the durable flip list. Runs: the grep pipeline."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V6 (opus, worktree) — VIX BOMB FIXTURE FEASIBILITY: prove a pixel-bomb fixture (inflated IHDR PNG) makes Image.open report huge width/height BEFORE full decode, so the pre-thumbnail guard is viable; pick the numeric ceiling and confirm the bounded-error-tuple mechanism. Runs: a targeted mix run --no-start / test exercising Image.open on the crafted fixture."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V7 (sonnet) — LV TELEMETRY CONTRACT: confirm the TelemetryMetricsPrometheus.Core tag_values signature from deps, pick the cheapest driveable LiveView route for the fires-and-scrapes tier (borrow board_live_test harness), and RUN the existing write_hotpath_telemetry_test.exs to prove the 3-tier template is green as the copy-source."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-27",
+      "level": 2,
+      "text": "Status: DECIDED — building 6 opus slices (2026-07-13)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Decide is complete. The verify fleet landed and, in two places, REFUTED the wish/digest. The plan is cut: 6 opus slices (Fable exhausted — every builder opus), each its own worktree/PR off origin/main with a fail-before protective test and a green CC=/usr/bin/clang mix test. Charter D13–D22 committed at dd46a6f2."
+        }
+      ],
+      "id": "block-28-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-28",
+      "level": 2,
+      "text": "Verify results — proven & refuted",
+      "type": "heading"
+    },
+    {
+      "id": "block-29",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "V1 (restamp enumeration): PROVEN — 24 restamp targets (18 done/met:false + 6 done/criteria-absent), and all 22 named SHAs are ancestors of origin/main (loop printed ANCESTOR for every one). REFUTED two digest landmines: OTP task-d328fb91 DOES have a landing commit (fc9665e4/#2403), and task-f0bdb914d63a2e84 is ALREADY 4/4 met — NOT a 25th restamp target."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V2 (fabrication landmines): BOTH false alarms. d328 genuinely fixed by fc9665e4 (restates the flat ~30-child / 3-in-5s failure verbatim, ships supervision_isolation_test.exs) → RESTAMP not reopen. task-9e21c3f2 and task-a9adc82f both legitimately close to #2390 (a9ads new list_messages/2 DB LIMIT closes its failure mode), but a9ads N=2000 wall-time criterion is NOT evidenced by the commit → partial-stamp, never fabricate."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V3 (mutate path): CONFIRMED + hardened. patch alone writes drafts.<id>; a publish op in the SAME batch is LOAD-BEARING for the gate to see it; full-array replace is real (GET → flip → PATCH whole array); ifRevisionID fence honored (bogus rev → 412 precondition_failed). One real restamp already landed: task-22a5a3fc529 entry[1] met:true with #2381/365550a4."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V4 (sobelow): GREEN on origin/main — mix sobelow --skip --exit Low → SCAN COMPLETE EXIT 0. The async before-baseline was NOT captured (forced finalize) — the async slice must measure fresh."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V5 (async 230-revalidate): the 230 SAFE list is git-drift-free but EMPIRICALLY UNSAFE — flipping all 230 gave 38 then 27 DIFFERENT failures at the SAME seed vs 0 failures / 154.5s serial. New hazard class: on_exit callbacks calling Repo directly (sandbox-ownership violation, invisible to every grep). 227-minus-3-diagnosed still gave 31 failures. Monolithic flip is DEAD → graduated tranches only."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V6 (vix fixture): VIABLE + PROVEN against the real NIF. libvips trusts an inflated header; Image.open reports declared dims LAZILY (50000² PNG opens ~1ms/0.2MB warm); Image.thumbnail is ALSO lazy → the guard must sit between open and thumbnail. 68-byte PNG bomb works; a JPEG bomb needs a full marker skeleton (SOI..EOI)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "V7 (LV telemetry contract): holds. 4 event families (live_view mount|handle_params|handle_event + live_component handle_event); tag_values is 1-arity metadata→map; the 3 live_view metrics extract socket.view, the live_component metric tags off metadata.component (no generic fn reuse — a missing declared tag silently drops the sample). write_hotpath_telemetry_test.exs template + board_live_test.exs harness both green."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-30",
+      "level": 2,
+      "text": "Decisions (mirror charter D13–D22)",
+      "type": "heading"
+    },
+    {
+      "id": "block-31",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "D13 — Wave 5 is SHIP-THE-BACKLOG, not re-audit. 6 opus slices, fail-before tests, green Elixir gate."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D14 — async flip re-scoped to GRADUATED TRANCHES (V5 killed the monolith); keep-serial set expanded with the on_exit-Repo hazard class + codelist_issue_version_test; re-parented to the epic."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D15 — vix ceiling SHIP: pre-decode header guard between Image.open and Image.thumbnail, {:error,:vix_dimensions_exceeded}, 68-byte PNG bomb; mechanism DIFFERS from Magicks CLI -limit."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D16 — LV telemetry SHIP: 4 distribution() metrics, socket.view vs metadata.component asymmetry, board_live harness."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D17 — Part XI SHIP as a bounded verdict-table Paper (distill survey, not new digging); file gap tasks only if a real gap lands."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D18 — Ledger re-stamp SHIP: authoritative 24-target table, mutate patch+publish, NEVER fabricate (d328 restamp-not-reopen; a9ad partial; f0bdb914 not a target; rootcause task-6e819f39 does NOT block)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D19 — Bokbasen pagination SHIP in-wave (6th slice): offset pagination + PubSub re-subscribe guard, preserve #2869 heap bound + connected? gate."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D20 — Phantom-media atomicity STAYS backlog (Fable-class, Fable exhausted)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D21 — New backlog seeded: root.html.heex durable sobelow_skip; remaining System.cmd/Port interop resource-bound sweep."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D22 — Stale digest contradiction items retired (both refuted by V1/V2); D11 opus-only + D12 worktree-gate hold."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-32",
+      "level": 2,
+      "text": "Wave plan — 6 opus slices in flight",
+      "type": "heading"
+    },
+    {
+      "id": "block-33",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "vix ceiling — task-vix-bomb-explicit-ceiling — surface: media/image_backend (vix.ex + vix_test.exs) — opus — gate: CC=/usr/bin/clang mix test test/barkpark/media/image_backend/vix_test.exs"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "LV telemetry — task-felix-liveview-telemetry-consumer — surface: web telemetry (telemetry.ex + new liveview_telemetry_test.exs) — opus — gate: CC=/usr/bin/clang mix test <new test>"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Bokbasen pagination — task-5dbbbe2efc44e48e — surface: onixedit/web (bokbasen_live.ex + test) — opus — gate: CC=/usr/bin/clang mix test test/barkpark/plugins/onixedit/web/bokbasen_live_test.exs"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Part XI verdict table — task-felix-part-xi-corpus-gap — surface: Barkpark Paper (no repo files) — opus — gate: verdict-table Paper published + linked; gaps filed as children"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Ledger re-stamp (24 targets) — task-felix-ledger-restamp — surface: bp ledger via /v1/data/mutate (no repo files) — opus — gate: bp task get sample shows criteria_progress reflecting restamp on the published copy"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "async flip (validated subset + wall-clock) — task-5a5e2c939a33a621 — surface: api/test/ broad (merges LAST, rebases + re-derives) — opus — gate: two seed-varied green CC=/usr/bin/clang mix test runs + before/after wall-clock"
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-35",
+      "level": 2,
+      "text": "Review debrief — SHIPPED (2026-07-13, grade A−)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Reviewer (last hands before merge, own worktree, pinned OTP27/Elixir1.18.4-otp-27, borrowed deps + copied _build/test). Reviewed every green slice adversarially, re-ran gates on the actual final state, fixed the ledger, filed the one discovered risk. Six slices shipped; five are clean-green with the gate re-run by the reviewer; the async flip is mechanically sound but its full-suite gate is not reliably 0-failures on a loaded machine (one self-healing flake per run, in the PRE-EXISTING migration-DDL surface, not the flipped files). No slice code needed a fix — the builders' code was already right; the only correction was a ledger off-by-one on the vix task."
+        }
+      ],
+      "id": "block-36",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-37",
+      "level": 2,
+      "text": "Per-slice verdicts (final branch = the original — reviewer added zero code commits)",
+      "type": "heading"
+    },
+    {
+      "id": "block-38",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "vix ceiling (task-vix-bomb-explicit-ceiling, loop-epic/vix-rendition-pixel-memory-ceiling-dos-d-0) — SOUND. guard_dimensions/1 between Image.open and Image.thumbnail rejects width*height*bands > 256MiB (config-overridable) with {:error,:vix_dimensions_exceeded}; no caller touched. 73-byte PNG bomb fixture proves fail-before. Reviewer re-ran gate: 10 tests, 0 failures. LEDGER FIX applied (see below). LEAD closes the merge-gate criterion on merge."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "LV telemetry (task-felix-liveview-telemetry-consumer, loop-epic/liveview-telemetry-consumer-wire-mount-h-1) — STRONG. 4 distribution() histograms for the real live_view/live_component span families; the socket.view vs metadata.component asymmetry is handled by two distinct fail-closed tag fns. 3-tier test (declared/attached/fires-and-scrapes) + asymmetry unit tier. Reviewer re-ran gate: 6 tests, 0 failures. LEAD closes merge-gate."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "bokbasen pagination (task-5dbbbe2efc44e48e, loop-epic/bokbasenlive-pagination-beyond-the-page--2) — CLEAN. OFFSET pagination preserves the @page_limit heap bound; resubscribe/2 diffs old/new doc_id sets so PubSub subs don't leak per socket across navigation; pager has honest disabled states + aria-label. Reviewer re-ran gate: 14 tests, 0 failures. Minor known UX: exact-multiple-of-200 total advertises one empty next page (recoverable via prev). LEAD closes merge-gate."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Part XI verdict table (task-felix-part-xi-corpus-gap, felix-pristine-part-xi-verdict-table) — HONEST. Bounded distillation, 6 terminal verdicts, ZERO new gaps fabricated; the one real gap (phantom-media atomicity) was already filed+parked. Gate: style=article, _draft False, 10 blocks. Paper-only slice, live on guerrilla; no merge gate."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "ledger re-stamp (task-felix-ledger-restamp, loop-epic/re-stamp-the-24-done-but-unstamped-felix-4) — FAITHFUL. All 24 done-but-unstamped fix tasks restamped on the PUBLISHED copy; a9adc82f keeps its N=2000 wall-time criterion met:false (duplicate-of note) — NO fabrication. d328fb91 restamped (not reopened) — genuinely fixed by fc9665e4/#2403. Gate sample verified."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "async flip (task-5a5e2c939a33a621, loop-epic/async-false-true-flip-empirically-valida-5) — SOUND MECHANISM, NOISY GATE. Pure async:false→true on 55 DataCase files (verified: no logic changes, all 55 are DataCase, every wish-mandated exclusion honored — no rate-limiter/env-mutator/on_exit-Repo/migration/sibling-slice file flipped). Reviewer full-suite runs: seed 111 = 293.5s / 1 flake (self-healed on rerun); seed 222 = 431s / 1 flake = the migration-DDL deadlock (NOT a flipped file). See risk below."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-39",
+      "level": 2,
+      "text": "Ledger audit + fixes",
+      "type": "heading"
+    },
+    {
+      "id": "block-40",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "FIXED — vix task off-by-one: the builder stamped one index too high (mentally 1-indexed, tool is 0-indexed), leaving criterion 0 (the core impl, which IS done + gate-green) OPEN and stamping criterion 2 (the MERGE GATE the lead closes) as MET, with shuffled evidence. Reviewer rewrote the array via /v1/data/mutate → now [met, met, OPEN] with correct evidence; merge gate correctly awaits the lead."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Verified honest: LV telemetry [met,met,OPEN], bokbasen [met,met,met,OPEN], async [met,met,met,met,OPEN] — every merge-gate criterion correctly left open for the lead. Part XI [met,met] (no merge gate). Ledger-restamp [all met] lifecycle open (ledger-only work, already live — leaving it open is honest, not a lie)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Out-of-wave hygiene: the ledger-restamp slice's 24 touched tasks are its in-wave targets; no non-target epic child was spuriously mutated."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "FILED (work discovered, not taken): task-felix-migration-ddl-audit-deadlock (p2, published) — the suite flake below."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-41",
+      "level": 2,
+      "text": "The one risk the LEAD must know before merging the async flip",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The full suite is NOT reliably 0-failures under the raised concurrency. Named failure mode: Barkpark.Repo.Migrations.ExtendWorkspaceDeleteCascadeTest (DataCase async:FALSE — untouched by the flip) runs raw DDL (ALTER TABLE apply_down → AccessExclusiveLock on the webhooks/synonyms tables) and hits a Postgrex 40P01 deadlock against a SPAWNED Barkpark.Webhooks.Dispatcher.audit_targets/1 SELECT (AccessShareLock) leaked from another test via Audit.safe_bridge → dispatch_audit_async (a fire-and-forget Task that escapes the sandbox owner and outlives its test). The flip does NOT touch the migration tests or the audit path, so it breaks nothing deterministically — but 55 more async files raises ambient concurrency and plausibly raises this flake's frequency. Both reviewer flakes self-healed on isolated --failed rerun. RECOMMENDATION: merge the flip (its files are correct and its payoff is real), but treat a migration-test 40P01 in CI as this pre-existing flake — re-run, do not attribute to the flip — and land task-felix-migration-ddl-audit-deadlock to make the audit dispatch owner-aware in test env."
+        }
+      ],
+      "id": "block-42",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-43",
+      "level": 2,
+      "text": "Grade + next wave",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "GRADE: A−. The wave shipped exactly the filed backlog with zero cosmetic churn, every fix grounded in a named failure mode, and exemplary honesty (async re-scoped from the unsafe 230-monolith to an empirically-validated 55-file subset; Part XI opened no fake gaps; the restamp kept an unproven criterion false). Held back from A by two things: the async gate is not cleanly green on a loaded machine (a suite flake the flip may aggravate, now filed), and the vix ledger needed an off-by-one correction. NEXT WAVE: (1) LEAD merges the 4 code branches + closes their merge-gate criteria (vix crit 2, LV crit 2, bokbasen crit 3, async crit 4); async merges LAST/rebased. (2) Land task-felix-migration-ddl-audit-deadlock (owner-aware audit dispatch OR serialized DDL-migration group) to stabilise the suite. (3) task-felix-phantom-media-atomicity stays Fable-parked; task-felix-interop-resource-bound-sweep is the remaining Interop backlog."
+        }
+      ],
+      "id": "block-44",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix Pristine W5 — build the filed backlog (async flip · vix ceiling · LV telemetry · Part XI · ledger re-stamp)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Status: VERIFYING (Digest complete). 13 survey reports folded. A verify fleet of 7 is in flight before Decide cuts the plan. This wave does NOT re-audit the 12 closed domains — it SHIPS the filed backlog: each item its own opus slice / worktree / PR with a fail-before protective test and a green CC=/usr/bin/clang mix test. Heartbeat: wave_status = 'wave: verifying'."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "level": 2,
+        "text": "The wish (verbatim intent)",
+        "type": "heading"
+      },
+      {
+        "id": "block-3",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "(1) async-flip part-2 — collect the wall-clock payoff Wave 4 left on the table. Flip ONLY files proven free of global mutable state. ETS rate-limiter tests + Application-env mutators STAY serial. Payoff measured = suite wall-clock before/after."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(2) task-vix-bomb-explicit-ceiling — defense-in-depth explicit pixel/memory ceiling on the vix/libvips render path (twin of the Magick bound)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(3) task-felix-liveview-telemetry-consumer — the Prometheus reporter consumes no LiveView mount/handle_event telemetry; wire the distribution metrics."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(4) task-felix-part-xi-corpus-gap — close the Part XI coverage gap (Interop/Mailers/File-storage/i18n/Assets/GraphQL) with a per-concept verdict table under the improvement-only doctrine."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "(5) task-felix-ledger-restamp — re-stamp ~20 done-but-unstamped fix tasks with real merge-commit evidence (audit-trail rot; root cause task-6e819f39fe3aa9e6). NOT fabrication."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "SKIP task-felix-phantom-media-atomicity — Fable-class after-commit redesign, correctly parked; do NOT cut it into under-specified opus slices."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "Direction for this wave",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "This is a SHIP wave, not an audit. The filed tasks already name their failure modes — the job is to build them green with fail-before proofs, in isolated worktrees, on opus (Fable exhausted this wave). The finished experience: the Felix backlog empties honestly — each closed task carries a PR, a merge commit, and a protective test that fails before the fix and passes after. Two of the five are code hardening (vix ceiling, LiveView telemetry), one is a measured performance collection (async flip), one is a bounded audit that produces its own verdict table (Part XI), and one is pure ledger hygiene (re-stamp) that restores trust in 'is X fixed?' answered via bp alone."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Leaning: sequence the async flip as the highest-effort slice (measurement + flake-hunt); treat vix-ceiling and liveview-telemetry as clean parallel opus slices with sharp fail-before tests; treat Part XI as a bounded audit whose only ship-deliverable is the verdict table + any qualifying child tasks (most chapters likely 'not-applicable' or 'already-good' — Barkpark has no Absinthe/GraphQL, and mailers/assets/i18n reach is small); treat ledger-restamp as a careful evidence-gathering pass, never a blind met:true stamp — each stamp must cite the actual merge commit."
+          }
+        ],
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-7",
+        "level": 2,
+        "text": "The five slices → task map",
+        "type": "heading"
+      },
+      {
+        "id": "block-8",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "async flip part-2 → task-5a5e2c939a33a621 (in_progress; part-1 keystone landed; criteria 2-5 open). opus."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "vix ceiling → task-vix-bomb-explicit-ceiling (open). opus."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "LiveView telemetry → task-felix-liveview-telemetry-consumer (open). opus."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Part XI corpus gap → task-felix-part-xi-corpus-gap (open, bounded audit). opus."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ledger re-stamp → task-felix-ledger-restamp (open, bookkeeping). opus."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Adjacent/optional: task-5dbbbe2efc44e48e (BokbasenLive paginate beyond @page_limit) — a Wave-4 follow-up; survey whether it belongs in this wave or stays backlog."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "block-9",
+        "level": 2,
+        "text": "Survey plan (in flight — surveyors flying now)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Cast wide and cheap: map every seam the five slices touch so Digest can hand each opus builder a precise brief. Each assignment below names what to find and why it changes the plan."
+          }
+        ],
+        "id": "block-10",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-11",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "async-safe test inventory: enumerate every test/**/*.exs with `async: false`, and flag which contain Application.put_env / :persistent_term / Registry. / Process.register / raw :ets new|insert|delete_all|delete_all_objects. Output the SAFE-to-flip list vs the MUST-stay-serial list. Why: this IS the flip's scope; a wrong flip flakes the suite."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "rate-limiter keystone reality: confirm conncase.ex no longer does an unconditional :ets.delete_all_objects and that the bucket key is per-test scoped (commit bdf5db1d). Why: criterion 1 claims met:true — verify before flipping the ~160 ConnCase files it unblocks."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "vix render path: map the vix/libvips rendition code (media rendition backend, where Vix.Vips / Operation is called, image decode entry). What resource controls Vix exposes (no ImageMagick -limit; likely a pre-decode dimension/pixel ceiling). Where the Magick twin bound landed (magick.ex) so the vix bound mirrors it. Why: defines the exact seam + test stub shape."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Prometheus/telemetry reporter: find the module defining prometheus_metrics/0 (Telemetry.Metrics distribution/counter definitions) and where Phoenix LiveView telemetry events would attach. List the exact event names Phoenix emits ([:phoenix,:live_view,:mount|:handle_event|:handle_params,:stop] + live_component). Why: names the metrics to add + how the driven-mount test asserts."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Part XI applicability scan: for each of Interop / Mailers / File-storage / i18n / Assets / GraphQL, does api/ even have it? (grep for Absinthe/absinthe, Swoosh/Mailer, gettext, esbuild/tailwind asset pipeline, file storage module, System.cmd/Port/NIF interop). Why: most chapters are likely not-applicable or already-good — bounds the audit sharply."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ledger re-stamp target list: enumerate the ~20 Felix child/related tasks that are lifecycle=done with criteria met:false or empty evidence; for each, find the merge commit/PR that actually landed the fix (git log / gh). Identify the 3 criteria-less Sobelow tasks and the 2 probe artifacts (task-bd2578a682eb6fce, task-fabbbbf10f60c17c). Why: the stamp must cite real evidence, never fabricate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "restamp root-cause dependency: inspect task-6e819f39fe3aa9e6 (bp task close --set criteria rubric-shape bug) — is it fixed? does re-stamping require the fix first, or can we patch acceptance_criteria via /v1/data/mutate directly? Why: determines whether ledger-restamp is blocked or self-serve."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Elixir gate recipe in-worktree: confirm the borrow-warm-_build fast path (copy _build/test, symlink deps) works for a fresh Felix worktree, and that CC=/usr/bin/clang mix test runs (test.exs disables codelist seeder; registry self-call fixed a81e9761). Why: every slice needs a green gate; a broken borrow strands all five."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "magick twin precedent: read the shipped Magick timeout+-limit fix (task-38d34db1ead325b5) and its fail-before test to mirror structure for the vix ceiling test. Why: consistency + a proven test shape."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bokbasen pagination scope: read task-5dbbbe2efc44e48e and bokbasen_live.ex post Wave-4 mount-gate — is @page_limit already capping and pagination the only gap? Why: decide in-wave vs backlog."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "existing async payoff evidence: search bp papers/tasks + git for any prior wall-clock measurement of the suite (baseline seconds). Why: the acceptance evidence needs a before number; find or plan to capture it."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "sobelow/durable-skip regression check: confirm Wave-4's inline # sobelow_skip on studio_chat.ex attachment functions landed and `mix sobelow --skip --exit Low` is green. Why: ensures no re-opened suppression drift bleeds into this wave's gates."
+            }
+          ]
+        ],
+        "ordered": true,
+        "type": "list"
+      },
+      {
+        "id": "block-12",
+        "level": 2,
+        "text": "What is IN FLIGHT right now",
+        "type": "heading"
+      },
+      {
+        "id": "block-13",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Digest complete — 13 surveys folded, corrections logged, 7-assignment verify fleet designed and appended above."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Verify fleet FLYING now: V1-V7. Decide waits on their run-proofs before cutting the wave plan."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Heartbeat stamped on epic task-96a908af98698118: wave_status = 'wave: verifying'."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "dig-00",
+        "level": 2,
+        "text": "Digest — what the survey established",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Thirteen surveys, wide and shallow. The five slices are real, filed, unclaimed, and each names its failure mode. The load-bearing facts the build can stand on:"
+          }
+        ],
+        "id": "dig-01",
+        "type": "paragraph"
+      },
+      {
+        "id": "dig-02",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "ASYNC FLIP (task-5a5e2c939a33a621): the true split is 3-way, not 2-way. 443/788 test files are async:false; 277 pass the literal 5-pattern grep, but 47 of those still carry pattern-INVISIBLE shared state (System.put_env, Sandbox.mode, :meck, Bypass, start_supervised singletons, :telemetry.attach, shared uploads/ dir). The validated SAFE set is 230 files (prior stalled worker's /tmp/flip_final.txt — every one a subset of the independent 277). USE 230, NOT 277 — flipping the raw 277 silently reintroduces 47 flakes. The keystone rate-limiter scope fix (bdf5db1d) IS landed. No wall-clock baseline was ever captured; a fresh live gate run measured ~248s green off LOCAL (stale) main."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "VIX CEILING (task-vix-bomb-explicit-ceiling): seam fully mapped. Vix.render/4 = Image.open→thumbnail→watermark→write, in-process (no shell-out, so no Task.yield deadline needed). libvips has NO per-call -limit; its only knobs are process-global (cache_set_max_mem/1, concurrency_set/1). The per-request bound must be a PRE-thumbnail pixel-dimension guard using Image.width/height (cheap, pre-decode) returning a bounded {:error, :vix_...} tuple — a materially DIFFERENT mechanism than the Magick timeout twin. Magick precedent lives on origin/main (4ce8c471, #2868), NOT on local main."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "LV TELEMETRY (task-felix-liveview-telemetry-consumer): reporter = BarkparkWeb.Telemetry.prometheus_metrics/0, 8 metrics, ZERO LiveView. Exactly 4 event families to wire: live_view mount/handle_params/handle_event + live_component handle_event (NO live_component mount/handle_params event exists). Metadata carries a raw %Socket{} — needs a NEW tag_values fn to extract socket.view/component (no tag_values precedent in the repo). Protective-test template = write_hotpath_telemetry_test.exs's 3-tier declared/attached/fires-and-scrapes pattern."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "PART XI (task-felix-part-xi-corpus-gap): mostly not-applicable/already-good, as predicted. No Absinthe/GraphQL server anywhere (only the github plugin CONSUMES GitHub's GraphQL). Gettext installed but ZERO real call sites (3 hits, all self-referential moduledoc). Swoosh mailer mature + env-gated. Assets = 3 independent JS bundlers, not the stock esbuild/tailwind mix pipeline. Interop is the one live chapter — it already produced the wave-4 Magick fix and the wave-5 vix target. Deliverable is a per-concept verdict TABLE, not new digging."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "LEDGER RE-STAMP (task-felix-ledger-restamp): the count is 24, NOT the ~20/3 the task text claims — 18 done tasks with met:false + 6 with the acceptance_criteria field entirely ABSENT (only half are Sobelow). 22 of 24 resolve to a confirmed merge commit. Root cause task-6e819f39fe3aa9e6 does NOT block: the shape-mismatch defect is real but restamping already-done tasks is self-serve via /v1/data/mutate (no live claim/epoch, so close/stamp are the wrong tools regardless). Set REPLACES arrays wholesale (Writer.deep_merge) — a restamp patch must GET the full acceptance_criteria array, flip one entry, PATCH the whole array back."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "dig-10",
+        "level": 2,
+        "text": "Corrections & contradictions vs the wish",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Where the survey diverges from the wish/direction text — these are what Decide must absorb:"
+          }
+        ],
+        "id": "dig-11",
+        "type": "paragraph"
+      },
+      {
+        "id": "dig-12",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "RESTAMP SCOPE is 24, not ~20/3. The wish's '~20 done-but-unstamped' and 'three criteria-less Sobelow tasks' both undercount. Decide must scope the slice to the full 24-task table (produced by the verify fleet)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NEW residue item: task-f0bdb914d63a2e84 (wave-4 sobelow durable-skip) is CODE-DONE but LEDGER-OPEN — its PR #2870 (821fcada) IS merged to origin/main, but lifecycle_status=open and the merge-gate criterion is met:false/empty. The charter's wave-log 'no ledger fixes required' was written ~15min BEFORE the 3 PRs actually merged, so it is stale. Restamp MUST also close this one (25th target)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FABRICATION LANDMINE: task-d328fb91ff55b743 (OTP supervision / flat restart budget) is lifecycle=done but NO landing commit was found — it may be genuinely unfixed & mislabeled done. Restamping it with a fabricated commit would violate the never-fabricate mandate. Must be resolved before the builder touches it (verify assignment V2)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "DOUBLE-COUNT RISK: task-9e21c3f285b3d7d0 and task-a9adc82f820db065 both appear to resolve to the same fix (PR #2390). Restamping both against one commit inflates the evidence tally. Resolve same-vs-distinct before restamp (V2)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "OUT-OF-BACKLOG flag (do NOT build unprompted): root.html.heex XSS.Raw is still fingerprint-only (never got the durable inline sobelow_skip that studio_chat.ex got) and its baseline has already drifted TWICE. Worth a small follow-up FILE, not a wave-5 build."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "cov-00",
+        "level": 2,
+        "text": "Coverage map — checked & found / checked & NOT found",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Distilled from the surveyors' coverage arrays. Absences are decisions-in-waiting."
+          }
+        ],
+        "id": "cov-01",
+        "type": "paragraph"
+      },
+      {
+        "id": "cov-10",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "FOUND — the 230-file async SAFE list (/tmp/flip_final.txt) cross-checks 100% inside the independent 277 pattern-clean set."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FOUND — Magick twin (deadline+limit) + its fail-before test shape, read on origin/main (4ce8c471)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FOUND — the 4 LiveView telemetry event families + metadata shapes, read from phoenix_live_view deps source (utils.ex/channel.ex/logger.ex), not just docs."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FOUND — the borrow-warm-_build gate mechanism works end-to-end (live run, 248.2s green, 10204 tests) off local main."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FOUND — 22/24 restamp targets resolve to a confirmed merge commit; the published-vs-draft mutate semantics + array-replace footgun."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FOUND — bokbasen wave-4 fix (@page_limit=200 + connected?-gate) live on origin/main; pagination-beyond-cap is the only remaining gap."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "cov-20",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "NOT RUN — mix sobelow --skip --exit Low was never executed against true current main (origin/main). Gate-green is inferred from source, not proven (V4)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT RUN — the borrow-gate off ORIGIN/MAIN (which carries the 3 merged fixes). Every survey gate ran off LOCAL main, which is stale (ahead 103 / behind 37). Builders MUST branch from origin/main; the gate must be re-proven there (V4)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT CAPTURED — any async before/after wall-clock pair. The whole payoff metric is still open (folded into V4's baseline run)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT VERIFIED — task-d328fb91ff55b743 (OTP supervision) fix existence; and whether the two #2390 tasks are one fix or two (V2)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT PROVEN — that a /v1/data/mutate restamp actually lands on the PUBLISHED copy the gate reads (V3, a probe write + readback)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT REACHED — the actual Part XI corpus SOURCE text (ch 77-82); applicability was inferred from grep alone. No surveyor read the underlying book chapters — acceptable given the not-applicable verdicts, but the verdict table must interpret 'Assets' against Barkpark's real 3-bundler reality."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT RE-DERIVED durably — the 230-file list lives only in ephemeral /tmp; it must be re-derived and written somewhere durable (V5)."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "ver-00",
+        "level": 2,
+        "text": "Verify plan — the last look before the plan is cut",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Seven assignments. Opus where being wrong is expensive (fabrication landmines, cross-surface correctness); Sonnet for breadth/enumeration. Each names what it RUNS as proof."
+          }
+        ],
+        "id": "ver-01",
+        "type": "paragraph"
+      },
+      {
+        "id": "ver-02",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "V1 (sonnet) — RESTAMP ENUMERATION: confirm each of the 24 candidates' landing commit on origin/main (git merge-base --is-ancestor), produce the authoritative task→PR→commit→criteria-shape table, and ADD the 25th (task-f0bdb914d63a2e84 → 821fcada). Runs: git log/merge-base + bp task get. Flags any target without a clean commit for V2."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V2 (opus) — FABRICATION LANDMINES: (a) is task-d328fb91ff55b743 (OTP supervision) genuinely fixed or mislabeled-done? read supervisor tree on origin/main + exhaustive git log; (b) are task-9e21c3f285b3d7d0 and task-a9adc82f820db065 the same fix (PR #2390) or distinct? read the #2390 diff vs both criteria. Runs: git log/show. Output decides restamp-vs-reopen for each."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V3 (opus) — MUTATE-PATH PROOF: prove a /v1/data/mutate patch to the bare doc_id lands on the PUBLISHED task the gate reads, with full-array replace semantics preserved. Runs: one real restamp write on a genuinely-merged target + bp task get readback confirming the published ledger reflects it. De-risks the entire restamp mechanism."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V4 (opus, worktree) — GATE OFF ORIGIN/MAIN: worktree off origin/main, borrow warm _build, RUN both `CC=/usr/bin/clang mix sobelow --skip --exit Low` (prove the sobelow gate is green on true current main) and `CC=/usr/bin/clang mix test` (capture the trustworthy async before-baseline + prove the suite is green). The foundation the async slice and the whole wave stand on."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V5 (sonnet, worktree) — ASYNC 230 RE-VALIDATE: re-derive the async:false pattern-clean set against origin/main HEAD, confirm the 230-file intent still holds (no files drifted into shared state), identify the extra keep-serial candidates the gate surveyor flagged (ClaudeChat.Session.terminate / Webhooks.Dispatcher.dispatch_audit_async test files), and WRITE the durable flip list. Runs: the grep pipeline."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V6 (opus, worktree) — VIX BOMB FIXTURE FEASIBILITY: prove a pixel-bomb fixture (inflated IHDR PNG) makes Image.open report huge width/height BEFORE full decode, so the pre-thumbnail guard is viable; pick the numeric ceiling and confirm the bounded-error-tuple mechanism. Runs: a targeted mix run --no-start / test exercising Image.open on the crafted fixture."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V7 (sonnet) — LV TELEMETRY CONTRACT: confirm the TelemetryMetricsPrometheus.Core tag_values signature from deps, pick the cheapest driveable LiveView route for the fires-and-scrapes tier (borrow board_live_test harness), and RUN the existing write_hotpath_telemetry_test.exs to prove the 3-tier template is green as the copy-source."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-27",
+        "level": 2,
+        "text": "Status: DECIDED — building 6 opus slices (2026-07-13)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Decide is complete. The verify fleet landed and, in two places, REFUTED the wish/digest. The plan is cut: 6 opus slices (Fable exhausted — every builder opus), each its own worktree/PR off origin/main with a fail-before protective test and a green CC=/usr/bin/clang mix test. Charter D13–D22 committed at dd46a6f2."
+          }
+        ],
+        "id": "block-28-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-28",
+        "level": 2,
+        "text": "Verify results — proven & refuted",
+        "type": "heading"
+      },
+      {
+        "id": "block-29",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "V1 (restamp enumeration): PROVEN — 24 restamp targets (18 done/met:false + 6 done/criteria-absent), and all 22 named SHAs are ancestors of origin/main (loop printed ANCESTOR for every one). REFUTED two digest landmines: OTP task-d328fb91 DOES have a landing commit (fc9665e4/#2403), and task-f0bdb914d63a2e84 is ALREADY 4/4 met — NOT a 25th restamp target."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V2 (fabrication landmines): BOTH false alarms. d328 genuinely fixed by fc9665e4 (restates the flat ~30-child / 3-in-5s failure verbatim, ships supervision_isolation_test.exs) → RESTAMP not reopen. task-9e21c3f2 and task-a9adc82f both legitimately close to #2390 (a9ads new list_messages/2 DB LIMIT closes its failure mode), but a9ads N=2000 wall-time criterion is NOT evidenced by the commit → partial-stamp, never fabricate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V3 (mutate path): CONFIRMED + hardened. patch alone writes drafts.<id>; a publish op in the SAME batch is LOAD-BEARING for the gate to see it; full-array replace is real (GET → flip → PATCH whole array); ifRevisionID fence honored (bogus rev → 412 precondition_failed). One real restamp already landed: task-22a5a3fc529 entry[1] met:true with #2381/365550a4."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V4 (sobelow): GREEN on origin/main — mix sobelow --skip --exit Low → SCAN COMPLETE EXIT 0. The async before-baseline was NOT captured (forced finalize) — the async slice must measure fresh."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V5 (async 230-revalidate): the 230 SAFE list is git-drift-free but EMPIRICALLY UNSAFE — flipping all 230 gave 38 then 27 DIFFERENT failures at the SAME seed vs 0 failures / 154.5s serial. New hazard class: on_exit callbacks calling Repo directly (sandbox-ownership violation, invisible to every grep). 227-minus-3-diagnosed still gave 31 failures. Monolithic flip is DEAD → graduated tranches only."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V6 (vix fixture): VIABLE + PROVEN against the real NIF. libvips trusts an inflated header; Image.open reports declared dims LAZILY (50000² PNG opens ~1ms/0.2MB warm); Image.thumbnail is ALSO lazy → the guard must sit between open and thumbnail. 68-byte PNG bomb works; a JPEG bomb needs a full marker skeleton (SOI..EOI)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "V7 (LV telemetry contract): holds. 4 event families (live_view mount|handle_params|handle_event + live_component handle_event); tag_values is 1-arity metadata→map; the 3 live_view metrics extract socket.view, the live_component metric tags off metadata.component (no generic fn reuse — a missing declared tag silently drops the sample). write_hotpath_telemetry_test.exs template + board_live_test.exs harness both green."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-30",
+        "level": 2,
+        "text": "Decisions (mirror charter D13–D22)",
+        "type": "heading"
+      },
+      {
+        "id": "block-31",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "D13 — Wave 5 is SHIP-THE-BACKLOG, not re-audit. 6 opus slices, fail-before tests, green Elixir gate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D14 — async flip re-scoped to GRADUATED TRANCHES (V5 killed the monolith); keep-serial set expanded with the on_exit-Repo hazard class + codelist_issue_version_test; re-parented to the epic."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D15 — vix ceiling SHIP: pre-decode header guard between Image.open and Image.thumbnail, {:error,:vix_dimensions_exceeded}, 68-byte PNG bomb; mechanism DIFFERS from Magicks CLI -limit."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D16 — LV telemetry SHIP: 4 distribution() metrics, socket.view vs metadata.component asymmetry, board_live harness."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D17 — Part XI SHIP as a bounded verdict-table Paper (distill survey, not new digging); file gap tasks only if a real gap lands."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D18 — Ledger re-stamp SHIP: authoritative 24-target table, mutate patch+publish, NEVER fabricate (d328 restamp-not-reopen; a9ad partial; f0bdb914 not a target; rootcause task-6e819f39 does NOT block)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D19 — Bokbasen pagination SHIP in-wave (6th slice): offset pagination + PubSub re-subscribe guard, preserve #2869 heap bound + connected? gate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D20 — Phantom-media atomicity STAYS backlog (Fable-class, Fable exhausted)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D21 — New backlog seeded: root.html.heex durable sobelow_skip; remaining System.cmd/Port interop resource-bound sweep."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D22 — Stale digest contradiction items retired (both refuted by V1/V2); D11 opus-only + D12 worktree-gate hold."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-32",
+        "level": 2,
+        "text": "Wave plan — 6 opus slices in flight",
+        "type": "heading"
+      },
+      {
+        "id": "block-33",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "vix ceiling — task-vix-bomb-explicit-ceiling — surface: media/image_backend (vix.ex + vix_test.exs) — opus — gate: CC=/usr/bin/clang mix test test/barkpark/media/image_backend/vix_test.exs"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "LV telemetry — task-felix-liveview-telemetry-consumer — surface: web telemetry (telemetry.ex + new liveview_telemetry_test.exs) — opus — gate: CC=/usr/bin/clang mix test <new test>"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Bokbasen pagination — task-5dbbbe2efc44e48e — surface: onixedit/web (bokbasen_live.ex + test) — opus — gate: CC=/usr/bin/clang mix test test/barkpark/plugins/onixedit/web/bokbasen_live_test.exs"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Part XI verdict table — task-felix-part-xi-corpus-gap — surface: Barkpark Paper (no repo files) — opus — gate: verdict-table Paper published + linked; gaps filed as children"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Ledger re-stamp (24 targets) — task-felix-ledger-restamp — surface: bp ledger via /v1/data/mutate (no repo files) — opus — gate: bp task get sample shows criteria_progress reflecting restamp on the published copy"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "async flip (validated subset + wall-clock) — task-5a5e2c939a33a621 — surface: api/test/ broad (merges LAST, rebases + re-derives) — opus — gate: two seed-varied green CC=/usr/bin/clang mix test runs + before/after wall-clock"
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-35",
+        "level": 2,
+        "text": "Review debrief — SHIPPED (2026-07-13, grade A−)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Reviewer (last hands before merge, own worktree, pinned OTP27/Elixir1.18.4-otp-27, borrowed deps + copied _build/test). Reviewed every green slice adversarially, re-ran gates on the actual final state, fixed the ledger, filed the one discovered risk. Six slices shipped; five are clean-green with the gate re-run by the reviewer; the async flip is mechanically sound but its full-suite gate is not reliably 0-failures on a loaded machine (one self-healing flake per run, in the PRE-EXISTING migration-DDL surface, not the flipped files). No slice code needed a fix — the builders' code was already right; the only correction was a ledger off-by-one on the vix task."
+          }
+        ],
+        "id": "block-36",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-37",
+        "level": 2,
+        "text": "Per-slice verdicts (final branch = the original — reviewer added zero code commits)",
+        "type": "heading"
+      },
+      {
+        "id": "block-38",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "vix ceiling (task-vix-bomb-explicit-ceiling, loop-epic/vix-rendition-pixel-memory-ceiling-dos-d-0) — SOUND. guard_dimensions/1 between Image.open and Image.thumbnail rejects width*height*bands > 256MiB (config-overridable) with {:error,:vix_dimensions_exceeded}; no caller touched. 73-byte PNG bomb fixture proves fail-before. Reviewer re-ran gate: 10 tests, 0 failures. LEDGER FIX applied (see below). LEAD closes the merge-gate criterion on merge."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "LV telemetry (task-felix-liveview-telemetry-consumer, loop-epic/liveview-telemetry-consumer-wire-mount-h-1) — STRONG. 4 distribution() histograms for the real live_view/live_component span families; the socket.view vs metadata.component asymmetry is handled by two distinct fail-closed tag fns. 3-tier test (declared/attached/fires-and-scrapes) + asymmetry unit tier. Reviewer re-ran gate: 6 tests, 0 failures. LEAD closes merge-gate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bokbasen pagination (task-5dbbbe2efc44e48e, loop-epic/bokbasenlive-pagination-beyond-the-page--2) — CLEAN. OFFSET pagination preserves the @page_limit heap bound; resubscribe/2 diffs old/new doc_id sets so PubSub subs don't leak per socket across navigation; pager has honest disabled states + aria-label. Reviewer re-ran gate: 14 tests, 0 failures. Minor known UX: exact-multiple-of-200 total advertises one empty next page (recoverable via prev). LEAD closes merge-gate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Part XI verdict table (task-felix-part-xi-corpus-gap, felix-pristine-part-xi-verdict-table) — HONEST. Bounded distillation, 6 terminal verdicts, ZERO new gaps fabricated; the one real gap (phantom-media atomicity) was already filed+parked. Gate: style=article, _draft False, 10 blocks. Paper-only slice, live on guerrilla; no merge gate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ledger re-stamp (task-felix-ledger-restamp, loop-epic/re-stamp-the-24-done-but-unstamped-felix-4) — FAITHFUL. All 24 done-but-unstamped fix tasks restamped on the PUBLISHED copy; a9adc82f keeps its N=2000 wall-time criterion met:false (duplicate-of note) — NO fabrication. d328fb91 restamped (not reopened) — genuinely fixed by fc9665e4/#2403. Gate sample verified."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "async flip (task-5a5e2c939a33a621, loop-epic/async-false-true-flip-empirically-valida-5) — SOUND MECHANISM, NOISY GATE. Pure async:false→true on 55 DataCase files (verified: no logic changes, all 55 are DataCase, every wish-mandated exclusion honored — no rate-limiter/env-mutator/on_exit-Repo/migration/sibling-slice file flipped). Reviewer full-suite runs: seed 111 = 293.5s / 1 flake (self-healed on rerun); seed 222 = 431s / 1 flake = the migration-DDL deadlock (NOT a flipped file). See risk below."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-39",
+        "level": 2,
+        "text": "Ledger audit + fixes",
+        "type": "heading"
+      },
+      {
+        "id": "block-40",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "FIXED — vix task off-by-one: the builder stamped one index too high (mentally 1-indexed, tool is 0-indexed), leaving criterion 0 (the core impl, which IS done + gate-green) OPEN and stamping criterion 2 (the MERGE GATE the lead closes) as MET, with shuffled evidence. Reviewer rewrote the array via /v1/data/mutate → now [met, met, OPEN] with correct evidence; merge gate correctly awaits the lead."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Verified honest: LV telemetry [met,met,OPEN], bokbasen [met,met,met,OPEN], async [met,met,met,met,OPEN] — every merge-gate criterion correctly left open for the lead. Part XI [met,met] (no merge gate). Ledger-restamp [all met] lifecycle open (ledger-only work, already live — leaving it open is honest, not a lie)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Out-of-wave hygiene: the ledger-restamp slice's 24 touched tasks are its in-wave targets; no non-target epic child was spuriously mutated."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "FILED (work discovered, not taken): task-felix-migration-ddl-audit-deadlock (p2, published) — the suite flake below."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-41",
+        "level": 2,
+        "text": "The one risk the LEAD must know before merging the async flip",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The full suite is NOT reliably 0-failures under the raised concurrency. Named failure mode: Barkpark.Repo.Migrations.ExtendWorkspaceDeleteCascadeTest (DataCase async:FALSE — untouched by the flip) runs raw DDL (ALTER TABLE apply_down → AccessExclusiveLock on the webhooks/synonyms tables) and hits a Postgrex 40P01 deadlock against a SPAWNED Barkpark.Webhooks.Dispatcher.audit_targets/1 SELECT (AccessShareLock) leaked from another test via Audit.safe_bridge → dispatch_audit_async (a fire-and-forget Task that escapes the sandbox owner and outlives its test). The flip does NOT touch the migration tests or the audit path, so it breaks nothing deterministically — but 55 more async files raises ambient concurrency and plausibly raises this flake's frequency. Both reviewer flakes self-healed on isolated --failed rerun. RECOMMENDATION: merge the flip (its files are correct and its payoff is real), but treat a migration-test 40P01 in CI as this pre-existing flake — re-run, do not attribute to the flip — and land task-felix-migration-ddl-audit-deadlock to make the audit dispatch owner-aware in test env."
+          }
+        ],
+        "id": "block-42",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-43",
+        "level": 2,
+        "text": "Grade + next wave",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "GRADE: A−. The wave shipped exactly the filed backlog with zero cosmetic churn, every fix grounded in a named failure mode, and exemplary honesty (async re-scoped from the unsafe 230-monolith to an empirically-validated 55-file subset; Part XI opened no fake gaps; the restamp kept an unproven criterion false). Held back from A by two things: the async gate is not cleanly green on a loaded machine (a suite flake the flip may aggravate, now filed), and the vix ledger needed an off-by-one correction. NEXT WAVE: (1) LEAD merges the 4 code branches + closes their merge-gate criteria (vix crit 2, LV crit 2, bokbasen crit 3, async crit 4); async merges LAST/rebased. (2) Land task-felix-migration-ddl-audit-deadlock (owner-aware audit dispatch OR serialized DDL-migration group) to stabilise the suite. (3) task-felix-phantom-media-atomicity stays Fable-parked; task-felix-interop-resource-bound-sweep is the remaining Interop backlog."
+          }
+        ],
+        "id": "block-44",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix Pristine W5 — build the filed backlog (async flip · vix ceiling · LV telemetry · Part XI · ledger re-stamp)</h1><p>Status: VERIFYING (Digest complete). 13 survey reports folded. A verify fleet of 7 is in flight before Decide cuts the plan. This wave does NOT re-audit the 12 closed domains — it SHIPS the filed backlog: each item its own opus slice / worktree / PR with a fail-before protective test and a green CC=/usr/bin/clang mix test. Heartbeat: wave_status = &#39;wave: verifying&#39;.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The wish (verbatim intent)</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>(1) async-flip part-2 — collect the wall-clock payoff Wave 4 left on the table. Flip ONLY files proven free of global mutable state. ETS rate-limiter tests + Application-env mutators STAY serial. Payoff measured = suite wall-clock before/after.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>(2) task-vix-bomb-explicit-ceiling — defense-in-depth explicit pixel/memory ceiling on the vix/libvips render path (twin of the Magick bound).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>(3) task-felix-liveview-telemetry-consumer — the Prometheus reporter consumes no LiveView mount/handle_event telemetry; wire the distribution metrics.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>(4) task-felix-part-xi-corpus-gap — close the Part XI coverage gap (Interop/Mailers/File-storage/i18n/Assets/GraphQL) with a per-concept verdict table under the improvement-only doctrine.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>(5) task-felix-ledger-restamp — re-stamp ~20 done-but-unstamped fix tasks with real merge-commit evidence (audit-trail rot; root cause task-6e819f39fe3aa9e6). NOT fabrication.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>SKIP task-felix-phantom-media-atomicity — Fable-class after-commit redesign, correctly parked; do NOT cut it into under-specified opus slices.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Direction for this wave</h2><p>This is a SHIP wave, not an audit. The filed tasks already name their failure modes — the job is to build them green with fail-before proofs, in isolated worktrees, on opus (Fable exhausted this wave). The finished experience: the Felix backlog empties honestly — each closed task carries a PR, a merge commit, and a protective test that fails before the fix and passes after. Two of the five are code hardening (vix ceiling, LiveView telemetry), one is a measured performance collection (async flip), one is a bounded audit that produces its own verdict table (Part XI), and one is pure ledger hygiene (re-stamp) that restores trust in &#39;is X fixed?&#39; answered via bp alone.</p><p>Leaning: sequence the async flip as the highest-effort slice (measurement + flake-hunt); treat vix-ceiling and liveview-telemetry as clean parallel opus slices with sharp fail-before tests; treat Part XI as a bounded audit whose only ship-deliverable is the verdict table + any qualifying child tasks (most chapters likely &#39;not-applicable&#39; or &#39;already-good&#39; — Barkpark has no Absinthe/GraphQL, and mailers/assets/i18n reach is small); treat ledger-restamp as a careful evidence-gathering pass, never a blind met:true stamp — each stamp must cite the actual merge commit.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The five slices → task map</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>async flip part-2 → task-5a5e2c939a33a621 (in_progress; part-1 keystone landed; criteria 2-5 open). opus.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>vix ceiling → task-vix-bomb-explicit-ceiling (open). opus.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>LiveView telemetry → task-felix-liveview-telemetry-consumer (open). opus.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Part XI corpus gap → task-felix-part-xi-corpus-gap (open, bounded audit). opus.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>ledger re-stamp → task-felix-ledger-restamp (open, bookkeeping). opus.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Adjacent/optional: task-5dbbbe2efc44e48e (BokbasenLive paginate beyond @page_limit) — a Wave-4 follow-up; survey whether it belongs in this wave or stays backlog.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Survey plan (in flight — surveyors flying now)</h2><p>Cast wide and cheap: map every seam the five slices touch so Digest can hand each opus builder a precise brief. Each assignment below names what to find and why it changes the plan.</p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>1. </span><span>async-safe test inventory: enumerate every test/**/*.exs with `async: false`, and flag which contain Application.put_env / :persistent_term / Registry. / Process.register / raw :ets new|insert|delete_all|delete_all_objects. Output the SAFE-to-flip list vs the MUST-stay-serial list. Why: this IS the flip&#39;s scope; a wrong flip flakes the suite.</span></div><div style=\"display:flex;flex-direction:row\"><span>2. </span><span>rate-limiter keystone reality: confirm conncase.ex no longer does an unconditional :ets.delete_all_objects and that the bucket key is per-test scoped (commit bdf5db1d). Why: criterion 1 claims met:true — verify before flipping the ~160 ConnCase files it unblocks.</span></div><div style=\"display:flex;flex-direction:row\"><span>3. </span><span>vix render path: map the vix/libvips rendition code (media rendition backend, where Vix.Vips / Operation is called, image decode entry). What resource controls Vix exposes (no ImageMagick -limit; likely a pre-decode dimension/pixel ceiling). Where the Magick twin bound landed (magick.ex) so the vix bound mirrors it. Why: defines the exact seam + test stub shape.</span></div><div style=\"display:flex;flex-direction:row\"><span>4. </span><span>Prometheus/telemetry reporter: find the module defining prometheus_metrics/0 (Telemetry.Metrics distribution/counter definitions) and where Phoenix LiveView telemetry events would attach. List the exact event names Phoenix emits ([:phoenix,:live_view,:mount|:handle_event|:handle_params,:stop] + live_component). Why: names the metrics to add + how the driven-mount test asserts.</span></div><div style=\"display:flex;flex-direction:row\"><span>5. </span><span>Part XI applicability scan: for each of Interop / Mailers / File-storage / i18n / Assets / GraphQL, does api/ even have it? (grep for Absinthe/absinthe, Swoosh/Mailer, gettext, esbuild/tailwind asset pipeline, file storage module, System.cmd/Port/NIF interop). Why: most chapters are likely not-applicable or already-good — bounds the audit sharply.</span></div><div style=\"display:flex;flex-direction:row\"><span>6. </span><span>ledger re-stamp target list: enumerate the ~20 Felix child/related tasks that are lifecycle=done with criteria met:false or empty evidence; for each, find the merge commit/PR that actually landed the fix (git log / gh). Identify the 3 criteria-less Sobelow tasks and the 2 probe artifacts (task-bd2578a682eb6fce, task-fabbbbf10f60c17c). Why: the stamp must cite real evidence, never fabricate.</span></div><div style=\"display:flex;flex-direction:row\"><span>7. </span><span>restamp root-cause dependency: inspect task-6e819f39fe3aa9e6 (bp task close --set criteria rubric-shape bug) — is it fixed? does re-stamping require the fix first, or can we patch acceptance_criteria via /v1/data/mutate directly? Why: determines whether ledger-restamp is blocked or self-serve.</span></div><div style=\"display:flex;flex-direction:row\"><span>8. </span><span>Elixir gate recipe in-worktree: confirm the borrow-warm-_build fast path (copy _build/test, symlink deps) works for a fresh Felix worktree, and that CC=/usr/bin/clang mix test runs (test.exs disables codelist seeder; registry self-call fixed a81e9761). Why: every slice needs a green gate; a broken borrow strands all five.</span></div><div style=\"display:flex;flex-direction:row\"><span>9. </span><span>magick twin precedent: read the shipped Magick timeout+-limit fix (task-38d34db1ead325b5) and its fail-before test to mirror structure for the vix ceiling test. Why: consistency + a proven test shape.</span></div><div style=\"display:flex;flex-direction:row\"><span>10. </span><span>bokbasen pagination scope: read task-5dbbbe2efc44e48e and bokbasen_live.ex post Wave-4 mount-gate — is @page_limit already capping and pagination the only gap? Why: decide in-wave vs backlog.</span></div><div style=\"display:flex;flex-direction:row\"><span>11. </span><span>existing async payoff evidence: search bp papers/tasks + git for any prior wall-clock measurement of the suite (baseline seconds). Why: the acceptance evidence needs a before number; find or plan to capture it.</span></div><div style=\"display:flex;flex-direction:row\"><span>12. </span><span>sobelow/durable-skip regression check: confirm Wave-4&#39;s inline # sobelow_skip on studio_chat.ex attachment functions landed and `mix sobelow --skip --exit Low` is green. Why: ensures no re-opened suppression drift bleeds into this wave&#39;s gates.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What is IN FLIGHT right now</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Digest complete — 13 surveys folded, corrections logged, 7-assignment verify fleet designed and appended above.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Verify fleet FLYING now: V1-V7. Decide waits on their run-proofs before cutting the wave plan.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Heartbeat stamped on epic task-96a908af98698118: wave_status = &#39;wave: verifying&#39;.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Digest — what the survey established</h2><p>Thirteen surveys, wide and shallow. The five slices are real, filed, unclaimed, and each names its failure mode. The load-bearing facts the build can stand on:</p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>ASYNC FLIP (task-5a5e2c939a33a621): the true split is 3-way, not 2-way. 443/788 test files are async:false; 277 pass the literal 5-pattern grep, but 47 of those still carry pattern-INVISIBLE shared state (System.put_env, Sandbox.mode, :meck, Bypass, start_supervised singletons, :telemetry.attach, shared uploads/ dir). The validated SAFE set is 230 files (prior stalled worker&#39;s /tmp/flip_final.txt — every one a subset of the independent 277). USE 230, NOT 277 — flipping the raw 277 silently reintroduces 47 flakes. The keystone rate-limiter scope fix (bdf5db1d) IS landed. No wall-clock baseline was ever captured; a fresh live gate run measured ~248s green off LOCAL (stale) main.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>VIX CEILING (task-vix-bomb-explicit-ceiling): seam fully mapped. Vix.render/4 = Image.open→thumbnail→watermark→write, in-process (no shell-out, so no Task.yield deadline needed). libvips has NO per-call -limit; its only knobs are process-global (cache_set_max_mem/1, concurrency_set/1). The per-request bound must be a PRE-thumbnail pixel-dimension guard using Image.width/height (cheap, pre-decode) returning a bounded {:error, :vix_...} tuple — a materially DIFFERENT mechanism than the Magick timeout twin. Magick precedent lives on origin/main (4ce8c471, #2868), NOT on local main.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>LV TELEMETRY (task-felix-liveview-telemetry-consumer): reporter = BarkparkWeb.Telemetry.prometheus_metrics/0, 8 metrics, ZERO LiveView. Exactly 4 event families to wire: live_view mount/handle_params/handle_event + live_component handle_event (NO live_component mount/handle_params event exists). Metadata carries a raw %Socket{} — needs a NEW tag_values fn to extract socket.view/component (no tag_values precedent in the repo). Protective-test template = write_hotpath_telemetry_test.exs&#39;s 3-tier declared/attached/fires-and-scrapes pattern.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>PART XI (task-felix-part-xi-corpus-gap): mostly not-applicable/already-good, as predicted. No Absinthe/GraphQL server anywhere (only the github plugin CONSUMES GitHub&#39;s GraphQL). Gettext installed but ZERO real call sites (3 hits, all self-referential moduledoc). Swoosh mailer mature + env-gated. Assets = 3 independent JS bundlers, not the stock esbuild/tailwind mix pipeline. Interop is the one live chapter — it already produced the wave-4 Magick fix and the wave-5 vix target. Deliverable is a per-concept verdict TABLE, not new digging.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>LEDGER RE-STAMP (task-felix-ledger-restamp): the count is 24, NOT the ~20/3 the task text claims — 18 done tasks with met:false + 6 with the acceptance_criteria field entirely ABSENT (only half are Sobelow). 22 of 24 resolve to a confirmed merge commit. Root cause task-6e819f39fe3aa9e6 does NOT block: the shape-mismatch defect is real but restamping already-done tasks is self-serve via /v1/data/mutate (no live claim/epoch, so close/stamp are the wrong tools regardless). Set REPLACES arrays wholesale (Writer.deep_merge) — a restamp patch must GET the full acceptance_criteria array, flip one entry, PATCH the whole array back.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Corrections &amp; contradictions vs the wish</h2><p>Where the survey diverges from the wish/direction text — these are what Decide must absorb:</p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>RESTAMP SCOPE is 24, not ~20/3. The wish&#39;s &#39;~20 done-but-unstamped&#39; and &#39;three criteria-less Sobelow tasks&#39; both undercount. Decide must scope the slice to the full 24-task table (produced by the verify fleet).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NEW residue item: task-f0bdb914d63a2e84 (wave-4 sobelow durable-skip) is CODE-DONE but LEDGER-OPEN — its PR #2870 (821fcada) IS merged to origin/main, but lifecycle_status=open and the merge-gate criterion is met:false/empty. The charter&#39;s wave-log &#39;no ledger fixes required&#39; was written ~15min BEFORE the 3 PRs actually merged, so it is stale. Restamp MUST also close this one (25th target).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>FABRICATION LANDMINE: task-d328fb91ff55b743 (OTP supervision / flat restart budget) is lifecycle=done but NO landing commit was found — it may be genuinely unfixed &amp; mislabeled done. Restamping it with a fabricated commit would violate the never-fabricate mandate. Must be resolved before the builder touches it (verify assignment V2).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>DOUBLE-COUNT RISK: task-9e21c3f285b3d7d0 and task-a9adc82f820db065 both appear to resolve to the same fix (PR #2390). Restamping both against one commit inflates the evidence tally. Resolve same-vs-distinct before restamp (V2).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>OUT-OF-BACKLOG flag (do NOT build unprompted): root.html.heex XSS.Raw is still fingerprint-only (never got the durable inline sobelow_skip that studio_chat.ex got) and its baseline has already drifted TWICE. Worth a small follow-up FILE, not a wave-5 build.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Coverage map — checked &amp; found / checked &amp; NOT found</h2><p>Distilled from the surveyors&#39; coverage arrays. Absences are decisions-in-waiting.</p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>FOUND — the 230-file async SAFE list (/tmp/flip_final.txt) cross-checks 100% inside the independent 277 pattern-clean set.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>FOUND — Magick twin (deadline+limit) + its fail-before test shape, read on origin/main (4ce8c471).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>FOUND — the 4 LiveView telemetry event families + metadata shapes, read from phoenix_live_view deps source (utils.ex/channel.ex/logger.ex), not just docs.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>FOUND — the borrow-warm-_build gate mechanism works end-to-end (live run, 248.2s green, 10204 tests) off local main.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>FOUND — 22/24 restamp targets resolve to a confirmed merge commit; the published-vs-draft mutate semantics + array-replace footgun.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>FOUND — bokbasen wave-4 fix (@page_limit=200 + connected?-gate) live on origin/main; pagination-beyond-cap is the only remaining gap.</span></div></div><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NOT RUN — mix sobelow --skip --exit Low was never executed against true current main (origin/main). Gate-green is inferred from source, not proven (V4).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NOT RUN — the borrow-gate off ORIGIN/MAIN (which carries the 3 merged fixes). Every survey gate ran off LOCAL main, which is stale (ahead 103 / behind 37). Builders MUST branch from origin/main; the gate must be re-proven there (V4).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NOT CAPTURED — any async before/after wall-clock pair. The whole payoff metric is still open (folded into V4&#39;s baseline run).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NOT VERIFIED — task-d328fb91ff55b743 (OTP supervision) fix existence; and whether the two #2390 tasks are one fix or two (V2).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NOT PROVEN — that a /v1/data/mutate restamp actually lands on the PUBLISHED copy the gate reads (V3, a probe write + readback).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NOT REACHED — the actual Part XI corpus SOURCE text (ch 77-82); applicability was inferred from grep alone. No surveyor read the underlying book chapters — acceptable given the not-applicable verdicts, but the verdict table must interpret &#39;Assets&#39; against Barkpark&#39;s real 3-bundler reality.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NOT RE-DERIVED durably — the 230-file list lives only in ephemeral /tmp; it must be re-derived and written somewhere durable (V5).</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verify plan — the last look before the plan is cut</h2><p>Seven assignments. Opus where being wrong is expensive (fabrication landmines, cross-surface correctness); Sonnet for breadth/enumeration. Each names what it RUNS as proof.</p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V1 (sonnet) — RESTAMP ENUMERATION: confirm each of the 24 candidates&#39; landing commit on origin/main (git merge-base --is-ancestor), produce the authoritative task→PR→commit→criteria-shape table, and ADD the 25th (task-f0bdb914d63a2e84 → 821fcada). Runs: git log/merge-base + bp task get. Flags any target without a clean commit for V2.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V2 (opus) — FABRICATION LANDMINES: (a) is task-d328fb91ff55b743 (OTP supervision) genuinely fixed or mislabeled-done? read supervisor tree on origin/main + exhaustive git log; (b) are task-9e21c3f285b3d7d0 and task-a9adc82f820db065 the same fix (PR #2390) or distinct? read the #2390 diff vs both criteria. Runs: git log/show. Output decides restamp-vs-reopen for each.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V3 (opus) — MUTATE-PATH PROOF: prove a /v1/data/mutate patch to the bare doc_id lands on the PUBLISHED task the gate reads, with full-array replace semantics preserved. Runs: one real restamp write on a genuinely-merged target + bp task get readback confirming the published ledger reflects it. De-risks the entire restamp mechanism.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V4 (opus, worktree) — GATE OFF ORIGIN/MAIN: worktree off origin/main, borrow warm _build, RUN both `CC=/usr/bin/clang mix sobelow --skip --exit Low` (prove the sobelow gate is green on true current main) and `CC=/usr/bin/clang mix test` (capture the trustworthy async before-baseline + prove the suite is green). The foundation the async slice and the whole wave stand on.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V5 (sonnet, worktree) — ASYNC 230 RE-VALIDATE: re-derive the async:false pattern-clean set against origin/main HEAD, confirm the 230-file intent still holds (no files drifted into shared state), identify the extra keep-serial candidates the gate surveyor flagged (ClaudeChat.Session.terminate / Webhooks.Dispatcher.dispatch_audit_async test files), and WRITE the durable flip list. Runs: the grep pipeline.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V6 (opus, worktree) — VIX BOMB FIXTURE FEASIBILITY: prove a pixel-bomb fixture (inflated IHDR PNG) makes Image.open report huge width/height BEFORE full decode, so the pre-thumbnail guard is viable; pick the numeric ceiling and confirm the bounded-error-tuple mechanism. Runs: a targeted mix run --no-start / test exercising Image.open on the crafted fixture.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V7 (sonnet) — LV TELEMETRY CONTRACT: confirm the TelemetryMetricsPrometheus.Core tag_values signature from deps, pick the cheapest driveable LiveView route for the fires-and-scrapes tier (borrow board_live_test harness), and RUN the existing write_hotpath_telemetry_test.exs to prove the 3-tier template is green as the copy-source.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Status: DECIDED — building 6 opus slices (2026-07-13)</h2><p>Decide is complete. The verify fleet landed and, in two places, REFUTED the wish/digest. The plan is cut: 6 opus slices (Fable exhausted — every builder opus), each its own worktree/PR off origin/main with a fail-before protective test and a green CC=/usr/bin/clang mix test. Charter D13–D22 committed at dd46a6f2.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verify results — proven &amp; refuted</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V1 (restamp enumeration): PROVEN — 24 restamp targets (18 done/met:false + 6 done/criteria-absent), and all 22 named SHAs are ancestors of origin/main (loop printed ANCESTOR for every one). REFUTED two digest landmines: OTP task-d328fb91 DOES have a landing commit (fc9665e4/#2403), and task-f0bdb914d63a2e84 is ALREADY 4/4 met — NOT a 25th restamp target.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V2 (fabrication landmines): BOTH false alarms. d328 genuinely fixed by fc9665e4 (restates the flat ~30-child / 3-in-5s failure verbatim, ships supervision_isolation_test.exs) → RESTAMP not reopen. task-9e21c3f2 and task-a9adc82f both legitimately close to #2390 (a9ads new list_messages/2 DB LIMIT closes its failure mode), but a9ads N=2000 wall-time criterion is NOT evidenced by the commit → partial-stamp, never fabricate.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V3 (mutate path): CONFIRMED + hardened. patch alone writes drafts.&lt;id&gt;; a publish op in the SAME batch is LOAD-BEARING for the gate to see it; full-array replace is real (GET → flip → PATCH whole array); ifRevisionID fence honored (bogus rev → 412 precondition_failed). One real restamp already landed: task-22a5a3fc529 entry[1] met:true with #2381/365550a4.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V4 (sobelow): GREEN on origin/main — mix sobelow --skip --exit Low → SCAN COMPLETE EXIT 0. The async before-baseline was NOT captured (forced finalize) — the async slice must measure fresh.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V5 (async 230-revalidate): the 230 SAFE list is git-drift-free but EMPIRICALLY UNSAFE — flipping all 230 gave 38 then 27 DIFFERENT failures at the SAME seed vs 0 failures / 154.5s serial. New hazard class: on_exit callbacks calling Repo directly (sandbox-ownership violation, invisible to every grep). 227-minus-3-diagnosed still gave 31 failures. Monolithic flip is DEAD → graduated tranches only.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V6 (vix fixture): VIABLE + PROVEN against the real NIF. libvips trusts an inflated header; Image.open reports declared dims LAZILY (50000² PNG opens ~1ms/0.2MB warm); Image.thumbnail is ALSO lazy → the guard must sit between open and thumbnail. 68-byte PNG bomb works; a JPEG bomb needs a full marker skeleton (SOI..EOI).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>V7 (LV telemetry contract): holds. 4 event families (live_view mount|handle_params|handle_event + live_component handle_event); tag_values is 1-arity metadata→map; the 3 live_view metrics extract socket.view, the live_component metric tags off metadata.component (no generic fn reuse — a missing declared tag silently drops the sample). write_hotpath_telemetry_test.exs template + board_live_test.exs harness both green.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Decisions (mirror charter D13–D22)</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D13 — Wave 5 is SHIP-THE-BACKLOG, not re-audit. 6 opus slices, fail-before tests, green Elixir gate.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D14 — async flip re-scoped to GRADUATED TRANCHES (V5 killed the monolith); keep-serial set expanded with the on_exit-Repo hazard class + codelist_issue_version_test; re-parented to the epic.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D15 — vix ceiling SHIP: pre-decode header guard between Image.open and Image.thumbnail, {:error,:vix_dimensions_exceeded}, 68-byte PNG bomb; mechanism DIFFERS from Magicks CLI -limit.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D16 — LV telemetry SHIP: 4 distribution() metrics, socket.view vs metadata.component asymmetry, board_live harness.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D17 — Part XI SHIP as a bounded verdict-table Paper (distill survey, not new digging); file gap tasks only if a real gap lands.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D18 — Ledger re-stamp SHIP: authoritative 24-target table, mutate patch+publish, NEVER fabricate (d328 restamp-not-reopen; a9ad partial; f0bdb914 not a target; rootcause task-6e819f39 does NOT block).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D19 — Bokbasen pagination SHIP in-wave (6th slice): offset pagination + PubSub re-subscribe guard, preserve #2869 heap bound + connected? gate.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D20 — Phantom-media atomicity STAYS backlog (Fable-class, Fable exhausted).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D21 — New backlog seeded: root.html.heex durable sobelow_skip; remaining System.cmd/Port interop resource-bound sweep.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D22 — Stale digest contradiction items retired (both refuted by V1/V2); D11 opus-only + D12 worktree-gate hold.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Wave plan — 6 opus slices in flight</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>vix ceiling — task-vix-bomb-explicit-ceiling — surface: media/image_backend (vix.ex + vix_test.exs) — opus — gate: CC=/usr/bin/clang mix test test/barkpark/media/image_backend/vix_test.exs</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>LV telemetry — task-felix-liveview-telemetry-consumer — surface: web telemetry (telemetry.ex + new liveview_telemetry_test.exs) — opus — gate: CC=/usr/bin/clang mix test &lt;new test&gt;</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Bokbasen pagination — task-5dbbbe2efc44e48e — surface: onixedit/web (bokbasen_live.ex + test) — opus — gate: CC=/usr/bin/clang mix test test/barkpark/plugins/onixedit/web/bokbasen_live_test.exs</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Part XI verdict table — task-felix-part-xi-corpus-gap — surface: Barkpark Paper (no repo files) — opus — gate: verdict-table Paper published + linked; gaps filed as children</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Ledger re-stamp (24 targets) — task-felix-ledger-restamp — surface: bp ledger via /v1/data/mutate (no repo files) — opus — gate: bp task get sample shows criteria_progress reflecting restamp on the published copy</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>async flip (validated subset + wall-clock) — task-5a5e2c939a33a621 — surface: api/test/ broad (merges LAST, rebases + re-derives) — opus — gate: two seed-varied green CC=/usr/bin/clang mix test runs + before/after wall-clock</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Review debrief — SHIPPED (2026-07-13, grade A−)</h2><p>Reviewer (last hands before merge, own worktree, pinned OTP27/Elixir1.18.4-otp-27, borrowed deps + copied _build/test). Reviewed every green slice adversarially, re-ran gates on the actual final state, fixed the ledger, filed the one discovered risk. Six slices shipped; five are clean-green with the gate re-run by the reviewer; the async flip is mechanically sound but its full-suite gate is not reliably 0-failures on a loaded machine (one self-healing flake per run, in the PRE-EXISTING migration-DDL surface, not the flipped files). No slice code needed a fix — the builders&#39; code was already right; the only correction was a ledger off-by-one on the vix task.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Per-slice verdicts (final branch = the original — reviewer added zero code commits)</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>vix ceiling (task-vix-bomb-explicit-ceiling, loop-epic/vix-rendition-pixel-memory-ceiling-dos-d-0) — SOUND. guard_dimensions/1 between Image.open and Image.thumbnail rejects width*height*bands &gt; 256MiB (config-overridable) with {:error,:vix_dimensions_exceeded}; no caller touched. 73-byte PNG bomb fixture proves fail-before. Reviewer re-ran gate: 10 tests, 0 failures. LEDGER FIX applied (see below). LEAD closes the merge-gate criterion on merge.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>LV telemetry (task-felix-liveview-telemetry-consumer, loop-epic/liveview-telemetry-consumer-wire-mount-h-1) — STRONG. 4 distribution() histograms for the real live_view/live_component span families; the socket.view vs metadata.component asymmetry is handled by two distinct fail-closed tag fns. 3-tier test (declared/attached/fires-and-scrapes) + asymmetry unit tier. Reviewer re-ran gate: 6 tests, 0 failures. LEAD closes merge-gate.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>bokbasen pagination (task-5dbbbe2efc44e48e, loop-epic/bokbasenlive-pagination-beyond-the-page--2) — CLEAN. OFFSET pagination preserves the @page_limit heap bound; resubscribe/2 diffs old/new doc_id sets so PubSub subs don&#39;t leak per socket across navigation; pager has honest disabled states + aria-label. Reviewer re-ran gate: 14 tests, 0 failures. Minor known UX: exact-multiple-of-200 total advertises one empty next page (recoverable via prev). LEAD closes merge-gate.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Part XI verdict table (task-felix-part-xi-corpus-gap, felix-pristine-part-xi-verdict-table) — HONEST. Bounded distillation, 6 terminal verdicts, ZERO new gaps fabricated; the one real gap (phantom-media atomicity) was already filed+parked. Gate: style=article, _draft False, 10 blocks. Paper-only slice, live on guerrilla; no merge gate.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>ledger re-stamp (task-felix-ledger-restamp, loop-epic/re-stamp-the-24-done-but-unstamped-felix-4) — FAITHFUL. All 24 done-but-unstamped fix tasks restamped on the PUBLISHED copy; a9adc82f keeps its N=2000 wall-time criterion met:false (duplicate-of note) — NO fabrication. d328fb91 restamped (not reopened) — genuinely fixed by fc9665e4/#2403. Gate sample verified.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>async flip (task-5a5e2c939a33a621, loop-epic/async-false-true-flip-empirically-valida-5) — SOUND MECHANISM, NOISY GATE. Pure async:false→true on 55 DataCase files (verified: no logic changes, all 55 are DataCase, every wish-mandated exclusion honored — no rate-limiter/env-mutator/on_exit-Repo/migration/sibling-slice file flipped). Reviewer full-suite runs: seed 111 = 293.5s / 1 flake (self-healed on rerun); seed 222 = 431s / 1 flake = the migration-DDL deadlock (NOT a flipped file). See risk below.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Ledger audit + fixes</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>FIXED — vix task off-by-one: the builder stamped one index too high (mentally 1-indexed, tool is 0-indexed), leaving criterion 0 (the core impl, which IS done + gate-green) OPEN and stamping criterion 2 (the MERGE GATE the lead closes) as MET, with shuffled evidence. Reviewer rewrote the array via /v1/data/mutate → now [met, met, OPEN] with correct evidence; merge gate correctly awaits the lead.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Verified honest: LV telemetry [met,met,OPEN], bokbasen [met,met,met,OPEN], async [met,met,met,met,OPEN] — every merge-gate criterion correctly left open for the lead. Part XI [met,met] (no merge gate). Ledger-restamp [all met] lifecycle open (ledger-only work, already live — leaving it open is honest, not a lie).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Out-of-wave hygiene: the ledger-restamp slice&#39;s 24 touched tasks are its in-wave targets; no non-target epic child was spuriously mutated.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>FILED (work discovered, not taken): task-felix-migration-ddl-audit-deadlock (p2, published) — the suite flake below.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The one risk the LEAD must know before merging the async flip</h2><p>The full suite is NOT reliably 0-failures under the raised concurrency. Named failure mode: Barkpark.Repo.Migrations.ExtendWorkspaceDeleteCascadeTest (DataCase async:FALSE — untouched by the flip) runs raw DDL (ALTER TABLE apply_down → AccessExclusiveLock on the webhooks/synonyms tables) and hits a Postgrex 40P01 deadlock against a SPAWNED Barkpark.Webhooks.Dispatcher.audit_targets/1 SELECT (AccessShareLock) leaked from another test via Audit.safe_bridge → dispatch_audit_async (a fire-and-forget Task that escapes the sandbox owner and outlives its test). The flip does NOT touch the migration tests or the audit path, so it breaks nothing deterministically — but 55 more async files raises ambient concurrency and plausibly raises this flake&#39;s frequency. Both reviewer flakes self-healed on isolated --failed rerun. RECOMMENDATION: merge the flip (its files are correct and its payoff is real), but treat a migration-test 40P01 in CI as this pre-existing flake — re-run, do not attribute to the flip — and land task-felix-migration-ddl-audit-deadlock to make the audit dispatch owner-aware in test env.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Grade + next wave</h2><p>GRADE: A−. The wave shipped exactly the filed backlog with zero cosmetic churn, every fix grounded in a named failure mode, and exemplary honesty (async re-scoped from the unsafe 230-monolith to an empirically-validated 55-file subset; Part XI opened no fake gaps; the restamp kept an unproven criterion false). Held back from A by two things: the async gate is not cleanly green on a loaded machine (a suite flake the flip may aggravate, now filed), and the vix ledger needed an off-by-one correction. NEXT WAVE: (1) LEAD merges the 4 code branches + closes their merge-gate criteria (vix crit 2, LV crit 2, bokbasen crit 3, async crit 4); async merges LAST/rebased. (2) Land task-felix-migration-ddl-audit-deadlock (owner-aware audit dispatch OR serialized DDL-migration group) to stabilise the suite. (3) task-felix-phantom-media-atomicity stays Fable-parked; task-felix-interop-resource-bound-sweep is the remaining Interop backlog.</p>"
+  },
+  "description": "Wave 5 of Felix Pristine BUILDS five already-filed backlog tasks as separate opus PRs — the async:false->true flip part-2, the vix/libvips resource ceiling, the LiveView telemetry consumer, the Part XI corpus audit, and the ledger re-stamp — each with a fail-before protective test and a green CC=/usr/bin/clang mix test. Explicitly NOT a re-audit of the 12 closed domains; phantom-media stays parked.",
+  "drives_tasks": [
+    "task-vix-bomb-explicit-ceiling",
+    "task-felix-liveview-telemetry-consumer",
+    "task-5dbbbe2efc44e48e",
+    "task-felix-part-xi-corpus-gap",
+    "task-felix-ledger-restamp",
+    "task-5a5e2c939a33a621",
+    "task-felix-roothtml-durable-sobelow-skip",
+    "task-felix-interop-resource-bound-sweep"
+  ],
+  "main_tag": "wave-strategy",
+  "preview": {
+    "description": "Wave 5 of Felix Pristine BUILDS five already-filed backlog tasks as separate opus PRs — the async:false->true…",
+    "extensions": {
+      "tags": [
+        "wave-strategy",
+        "doctrine",
+        "security",
+        "testing"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-pristine-wave-5-2026-07-13"
+  },
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "The living wave-5 strategy Paper opened at Strategize.",
+      "strength": 95,
+      "tag": "wave-strategy"
+    },
+    {
+      "rationale": "Improvement-only: each slice names a failure mode + measured/scar cost.",
+      "strength": 88,
+      "tag": "doctrine"
+    },
+    {
+      "rationale": "The vix pixel/memory ceiling is a render-path DoS defense-in-depth slice.",
+      "strength": 72,
+      "tag": "security"
+    },
+    {
+      "rationale": "The async flip slice + every slice's fail-before protective test.",
+      "strength": 56,
+      "tag": "testing"
+    }
+  ],
+  "title": "Felix Pristine W5 — build the filed backlog (async flip · vix ceiling · LV telemetry · Part XI · ledger re-stamp)"
+}

@@ -1,0 +1,3382 @@
+{
+  "_createdAt": "2026-07-27T16:00:52.054964Z",
+  "_draft": false,
+  "_id": "finder-three-frameworks",
+  "_publishedId": "finder-three-frameworks",
+  "_rev": "b5ef67f4cec934a49335e5f5baa6114d",
+  "_type": "paper",
+  "_updatedAt": "2026-07-28T16:32:42.978576Z",
+  "blocks": [
+    {
+      "id": "eb1",
+      "text": "BARKPARK · THE FINDER · FRAMEWORK STUDY",
+      "type": "eyebrow"
+    },
+    {
+      "id": "h2",
+      "level": 1,
+      "text": "One finder, three frameworks: what it actually costs to make them feel identical",
+      "type": "heading"
+    },
+    {
+      "id": "by4",
+      "items": [
+        "A field study from the Barkpark search-template epic",
+        "2026-07-27",
+        "Evidence: the three shipped implementations, cited by file"
+      ],
+      "type": "byline"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "We built the same product three times — a persistent search rail, a live corpus graph that lights up as you type, and a document pane rendering canonical blocks — in "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Next.js"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ", "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Astro"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ", and "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Phoenix LiveView"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". The goal was that all three feel exactly the same. Two of them now do. This is the honest ledger of what each framework gave us for free, what each one charged, and the one decision we ratified as impossible and later proved wrong."
+        }
+      ],
+      "id": "in5",
+      "type": "ingress"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Next.js delivers the shell for free and charges at the deploy seam. Astro charges for the shell — we paid, and it now matches — and gives back the best documents on the internet: static HTML, zero client JS, no token. Phoenix is the cheapest and safest by construction, and is "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "not currently this product at all"
+            }
+          ],
+          "type": "em"
+        },
+        {
+          "type": "text",
+          "value": " — it is a different design that shares a renderer."
+        }
+      ],
+      "id": "co6",
+      "title": "The short version",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "h9",
+      "level": 2,
+      "text": "What we were building, precisely",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "One sentence, because every comparison below is meaningless without it: "
+        }
+      ],
+      "id": "p11",
+      "type": "paragraph"
+    },
+    {
+      "id": "li13",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "A persistent left rail"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — per-keystroke search over a dual-engine backend, whose typed query and scroll position must survive opening a document."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "A live corpus graph"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — the landing's right half, which highlights matching nodes "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "as you type"
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": ", weighted by engine rank."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "A document pane"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — the canonical PortableDoc renderer, all block types, identical bytes-shape across all three."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The word that did all the damage is "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "persistent"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". Everything else ports cleanly. That one requirement is where the three frameworks stop being interchangeable."
+        }
+      ],
+      "id": "p15",
+      "type": "paragraph"
+    },
+    {
+      "id": "h18",
+      "level": 2,
+      "text": "The comparison, at a glance",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": ""
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Next.js"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Astro"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Phoenix LiveView"
+          }
+        ]
+      ],
+      "id": "tb20",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "Shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Node SSR process"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Static files"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The BEAM you already run"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Persistent shell"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Free"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Bought"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — see below"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Absent"
+                }
+              ],
+              "type": "strong"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Search transport"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "WS channel → HTTP route"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "WS channel → flat anon route"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "LiveView channel"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Keystroke debounce"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "90ms live / 250ms HTTP"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "90ms / 250ms (same code)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "150ms fixed"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Results per query"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "100"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "12"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Finder→graph bridge"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "React context"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "React context (one island)"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Not wired"
+                }
+              ],
+              "type": "strong"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Documents"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "SSR + ISR 300s"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Static HTML, zero JS"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Separate reader"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "URL state"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Query string"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Query string (shimmed)"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "None"
+                }
+              ],
+              "type": "strong"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Token in browser"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "WS token only"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "WS token only"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "None at all"
+                }
+              ],
+              "type": "strong"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Release size"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "~18 MB traced"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "~16 KB"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "n/a — already deployed"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Density per box"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Low tens"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Thousands"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "n/a"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Rollback"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Warm slot, <1s flip"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Symlink rename"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "n/a"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Bold marks where a framework is decisively better or worse, not merely different."
+            }
+          ],
+          "type": "em"
+        }
+      ],
+      "id": "p22",
+      "type": "paragraph"
+    },
+    {
+      "id": "h25",
+      "level": 2,
+      "text": "The decision we got wrong",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Early in the epic we ratified charter decision "
+        },
+        {
+          "type": "code",
+          "value": "D41"
+        },
+        {
+          "type": "text",
+          "value": ": the split-view shell "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "\"needs Next's persistent nested App-Router layout… impossible on a static host where every navigation is a full page load\""
+            }
+          ],
+          "type": "em"
+        },
+        {
+          "type": "text",
+          "value": ". Replicating it, we wrote, "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "\"= a full SPA client router = violates the thin-adapter doctrine\""
+            }
+          ],
+          "type": "em"
+        },
+        {
+          "type": "text",
+          "value": ". We accepted the loss and documented it in the page itself."
+        }
+      ],
+      "id": "p27",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "That reasoning contained a false step. Reaching the behaviour does not require writing a client router — Astro "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "ships one"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". The actual solution is three of its own primitives:"
+        }
+      ],
+      "id": "p29",
+      "type": "paragraph"
+    },
+    {
+      "id": "li31",
+      "items": [
+        [
+          {
+            "type": "code",
+            "value": "<ClientRouter />"
+          },
+          {
+            "type": "text",
+            "value": " intercepts same-origin link clicks, fetches the target and swaps the DOM. The finder's existing links needed "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "zero"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " changes."
+          }
+        ],
+        [
+          {
+            "type": "code",
+            "value": "transition:persist"
+          },
+          {
+            "type": "text",
+            "value": " on the island, with the same name on both pages — that identity is what makes the router "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "reuse"
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": " the element instead of recreating it."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "A "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "React portal"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " for the graph — the piece the whole design turns on."
+          }
+        ]
+      ],
+      "ordered": true,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The portal is the interesting one. A persisted island cannot vary its own markup per page, yet the graph must exist on the landing and "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "not"
+            }
+          ],
+          "type": "em"
+        },
+        {
+          "type": "text",
+          "value": " on a document. So the graph stays inside the finder's React tree — preserving the context bridge that forced the one-island rule in the first place — while its DOM lands in a page-owned slot the router swaps. The landing renders the slot; a document page does not; the graph follows the page without the island ever unmounting."
+        }
+      ],
+      "id": "p33",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A value set on "
+        },
+        {
+          "type": "code",
+          "value": "window"
+        },
+        {
+          "type": "text",
+          "value": " before a result click was still there afterwards (a reload would have cleared it); the rail was verifiably the "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "same DOM node"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " before and after; the graph vanished on the document and returned on the way back. The lesson worth keeping: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "\"impossible\" was a statement about our first idea, not about the framework."
+            }
+          ],
+          "type": "em"
+        }
+      ],
+      "id": "co35",
+      "title": "Proven, not asserted",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "And it charged a toll we did not see coming."
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " Minutes after this shipped, a screenshot caught a dark session turning "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "white"
+            }
+          ],
+          "type": "em"
+        },
+        {
+          "type": "text",
+          "value": " on navigation. The theme is applied to "
+        },
+        {
+          "type": "code",
+          "value": "<html>"
+        },
+        {
+          "type": "text",
+          "value": " at runtime, so it exists nowhere in the static markup — and the client router replaces the root element's attributes on every swap. Both axes were simply gone, while the operating system still asked for dark."
+        }
+      ],
+      "id": "p37",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The fix is one line of binding, and "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "which event you bind to is the whole answer"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ": "
+        },
+        {
+          "type": "code",
+          "value": "astro:after-swap"
+        },
+        {
+          "type": "text",
+          "value": " fires before the new document is painted, so the theme is restored invisibly. "
+        },
+        {
+          "type": "code",
+          "value": "astro:page-load"
+        },
+        {
+          "type": "text",
+          "value": " fires after paint — same code, and every navigation flashes the wrong theme. This is the tax on client-side navigation in general, not on Astro: the moment a document stops being reloaded, everything you attached to that document needs an owner."
+        }
+      ],
+      "id": "p39",
+      "type": "paragraph"
+    },
+    {
+      "id": "h42",
+      "level": 2,
+      "text": "Next.js — the shape the product was born in",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The rail lives in the "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "layout"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ", not the page, so opening a document swaps only the "
+        },
+        {
+          "type": "code",
+          "value": "children"
+        },
+        {
+          "type": "text",
+          "value": " segment and nothing remounts. Every other edition is measured against a behaviour Next gives away for free."
+        }
+      ],
+      "id": "p44",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A detail worth stealing: "
+        },
+        {
+          "type": "code",
+          "value": "children"
+        },
+        {
+          "type": "text",
+          "value": " is a plain nested route rather than a parallel slot, "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "specifically"
+            }
+          ],
+          "type": "em"
+        },
+        {
+          "type": "text",
+          "value": " so that "
+        },
+        {
+          "type": "code",
+          "value": "notFound()"
+        },
+        {
+          "type": "text",
+          "value": " sets a real HTTP 404 — under a slot the sibling segment still resolves 200 and the 404 becomes cosmetic."
+        }
+      ],
+      "id": "p46",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "What it charges."
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " The scars cluster at the build and deploy seam, not in the UI:"
+        }
+      ],
+      "id": "p48",
+      "type": "paragraph"
+    },
+    {
+      "id": "li50",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "The standalone build "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "silently drops "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "code",
+            "value": "undici"
+          },
+          {
+            "type": "text",
+            "value": " — Next treats it as a server-external and the output tracer skips it, so the release throws at first render. "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Local "
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "code",
+            "value": "next start"
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": " masks it entirely"
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": ", because it resolves from the full node_modules."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "A resident process per site: low tens per box, and a warm standby doubles memory during a deploy."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The base path is baked at "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "build"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " time, so attaching a domain later goes TLS-green and then 404s at the root."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h53",
+      "level": 2,
+      "text": "Astro — everything downstream of the shell, done better",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Documents are real prerendered HTML with "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "zero client JavaScript on the document itself"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " — the best SEO position of the three and the cheapest thing on earth to serve. A release is about "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "16 KB"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " against Next's ~18 MB, thousands fit on a box, and rollback is a symlink rename."
+        }
+      ],
+      "id": "p55",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The zero-token property is "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "architectural, not disciplinary"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ": every content read happens at build, so the deployed site has no credential to leak. (One honest asterisk — the optional live-search upgrade does inline a public-read token, so \"no token ever reaches a visitor\" is true of the baked corpus and overstated as a blanket claim.)"
+        }
+      ],
+      "id": "p57",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "What it charges."
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " The finder is vendored byte-identically from the Next tree, which means every adaptation must live outside it:"
+        }
+      ],
+      "id": "p59",
+      "type": "paragraph"
+    },
+    {
+      "id": "li61",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Two shims — "
+          },
+          {
+            "type": "code",
+            "value": "next/link"
+          },
+          {
+            "type": "text",
+            "value": " and "
+          },
+          {
+            "type": "code",
+            "value": "next/navigation"
+          },
+          {
+            "type": "text",
+            "value": " — reimplemented over "
+          },
+          {
+            "type": "code",
+            "value": "history"
+          },
+          {
+            "type": "text",
+            "value": " and "
+          },
+          {
+            "type": "code",
+            "value": "location"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Base-path and trailing-slash normalisation, because static output writes directories and a missing slash costs a 308."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The one-island rule: React context cannot cross island boundaries, so finder and graph must share a root."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Single-type generation today — untyped routes hit a "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "deploying"
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": " page rather than a 404, which reads as an outage."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "h64",
+      "level": 2,
+      "text": "Phoenix LiveView — the honest outlier",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The "
+        },
+        {
+          "type": "code",
+          "value": "/finder"
+        },
+        {
+          "type": "text",
+          "value": " surface has no rail, no detail pane, no URL state, and "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "no finder→graph bridge at all"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". It is a search panel over a graph where the two never speak. It shares the renderer and the block grammar, not the design."
+        }
+      ],
+      "id": "co66",
+      "title": "This is not the same product",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "What it is genuinely best at."
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " There is no bundle, no build step, no site infrastructure, and no key to leak — search runs server-side under an anonymous caller that can only see public schemas. It ships with every instance, in a fifth of the code."
+        }
+      ],
+      "id": "p68",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "What the study found."
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " Measured against the same brief, the gaps are large and worth naming:"
+        }
+      ],
+      "id": "p70",
+      "type": "paragraph"
+    },
+    {
+      "id": "li72",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "The graph renderer "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "exposes"
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": " the exact bridge API the other two use — and nothing on the server ever calls it. Matches sent per keystroke: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "zero"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Because the host never opts out, the renderer draws its "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "own"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " in-canvas search box: two unrelated search fields, one server-side, one substring-matching, neither aware of the other."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The dual-engine claim does not hold — the tenant gate forces Postgres, and typo-widening is disabled as a side effect. The pipeline reports which engine actually served; the caller discards it."
+          }
+        ],
+        [
+          {
+            "type": "code",
+            "value": "?q="
+          },
+          {
+            "type": "text",
+            "value": " does not exist: a search is not linkable, bookmarkable, or reload-surviving."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The corpus derivation is expensive and uncached — re-run per connected mount."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "None of this is a criticism of LiveView. It is a criticism of an unfinished surface — and notably, the charter contains no ratified decision describing this edition's design at all."
+            }
+          ],
+          "type": "em"
+        }
+      ],
+      "id": "p74",
+      "type": "paragraph"
+    },
+    {
+      "id": "h77",
+      "level": 2,
+      "text": "So which one should you reach for?",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "If your situation is…"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Reach for"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Because"
+          }
+        ]
+      ],
+      "id": "tb79",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "A reading-heavy corpus that must rank, and cheaply"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Astro"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Static documents, no token, thousands per box — and the shell is now attainable"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Content that changes under you, per request"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Next.js"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A real server: ISR, revalidation tags, server-only secrets"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "Search over data you already own, no new infra"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Phoenix"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "No bundle, no build, no key — it ships with the instance"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "You need the split shell above all"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Next.js first"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "You get it for free; every other edition pays for it"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "You are gating on SEO"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Astro"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Prerendered HTML beats both, decisively"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The pattern underneath: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Next buys you request-time behaviour, Astro buys you build-time cheapness and safety, Phoenix buys you having no frontend at all"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ". The shell requirement used to break the tie outright. Now it mostly doesn't — which makes the tie-breaker the boring, correct one: where does your content come from, and how often does it change?"
+        }
+      ],
+      "id": "p81",
+      "type": "paragraph"
+    },
+    {
+      "id": "h84",
+      "level": 2,
+      "text": "What the exercise actually taught us",
+      "type": "heading"
+    },
+    {
+      "id": "li86",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "A framework's \"impossible\" is usually your design's impossible."
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " D41 was wrong for two months because we reasoned from our first attempt instead of from the framework's primitives."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Byte-identical vendoring is a real bill, paid in shims."
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " It bought us zero drift between two editions — enforced by a gate that compares bytes, not hashes — and charged us every Next-specific import."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The expensive bugs were invisible to every green build."
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " A dropped dependency that only local dev masks; a websocket that joins successfully and returns nothing forever; a title printed twice. All caught by looking at the running thing."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Honest degradation beats silent substitution."
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " Two editions report when the engine they asked for is not the one that answered. The third computes it and throws it away."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Client-side navigation makes the document a shared resource."
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " Anything you attach to it at runtime — a theme, a listener, a scroll position — used to be cleaned up by the reload you just removed. Each one now needs an explicit owner and an explicit moment, and the right moment is usually earlier than you think."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "All three should feel the same to a stranger in ten seconds. Two now do — and the third's gap is written down, quantified, and filed rather than quietly tolerated."
+        }
+      ],
+      "id": "co88",
+      "title": "The standard we hold this to",
+      "tone": "info",
+      "type": "callout"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "eb1",
+        "text": "BARKPARK · THE FINDER · FRAMEWORK STUDY",
+        "type": "eyebrow"
+      },
+      {
+        "id": "h2",
+        "level": 1,
+        "text": "One finder, three frameworks: what it actually costs to make them feel identical",
+        "type": "heading"
+      },
+      {
+        "id": "by4",
+        "items": [
+          "A field study from the Barkpark search-template epic",
+          "2026-07-27",
+          "Evidence: the three shipped implementations, cited by file"
+        ],
+        "type": "byline"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "We built the same product three times — a persistent search rail, a live corpus graph that lights up as you type, and a document pane rendering canonical blocks — in "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Next.js"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ", "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Astro"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ", and "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Phoenix LiveView"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". The goal was that all three feel exactly the same. Two of them now do. This is the honest ledger of what each framework gave us for free, what each one charged, and the one decision we ratified as impossible and later proved wrong."
+          }
+        ],
+        "id": "in5",
+        "type": "ingress"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Next.js delivers the shell for free and charges at the deploy seam. Astro charges for the shell — we paid, and it now matches — and gives back the best documents on the internet: static HTML, zero client JS, no token. Phoenix is the cheapest and safest by construction, and is "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "not currently this product at all"
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": " — it is a different design that shares a renderer."
+          }
+        ],
+        "id": "co6",
+        "title": "The short version",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "h9",
+        "level": 2,
+        "text": "What we were building, precisely",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "One sentence, because every comparison below is meaningless without it: "
+          }
+        ],
+        "id": "p11",
+        "type": "paragraph"
+      },
+      {
+        "id": "li13",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "A persistent left rail"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — per-keystroke search over a dual-engine backend, whose typed query and scroll position must survive opening a document."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "A live corpus graph"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — the landing's right half, which highlights matching nodes "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "as you type"
+                }
+              ],
+              "type": "em"
+            },
+            {
+              "type": "text",
+              "value": ", weighted by engine rank."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "A document pane"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " — the canonical PortableDoc renderer, all block types, identical bytes-shape across all three."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The word that did all the damage is "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "persistent"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". Everything else ports cleanly. That one requirement is where the three frameworks stop being interchangeable."
+          }
+        ],
+        "id": "p15",
+        "type": "paragraph"
+      },
+      {
+        "id": "h18",
+        "level": 2,
+        "text": "The comparison, at a glance",
+        "type": "heading"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": ""
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Next.js"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Astro"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Phoenix LiveView"
+            }
+          ]
+        ],
+        "id": "tb20",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Shape"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Node SSR process"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Static files"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "The BEAM you already run"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Persistent shell"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Free"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Bought"
+                  }
+                ],
+                "type": "strong"
+              },
+              {
+                "type": "text",
+                "value": " — see below"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Absent"
+                  }
+                ],
+                "type": "strong"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Search transport"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "WS channel → HTTP route"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "WS channel → flat anon route"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "LiveView channel"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Keystroke debounce"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "90ms live / 250ms HTTP"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "90ms / 250ms (same code)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "150ms fixed"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Results per query"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "100"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "12"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Finder→graph bridge"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "React context"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "React context (one island)"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Not wired"
+                  }
+                ],
+                "type": "strong"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Documents"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "SSR + ISR 300s"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Static HTML, zero JS"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Separate reader"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "URL state"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Query string"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Query string (shimmed)"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "None"
+                  }
+                ],
+                "type": "strong"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Token in browser"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "WS token only"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "WS token only"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "None at all"
+                  }
+                ],
+                "type": "strong"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Release size"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "~18 MB traced"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "~16 KB"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "n/a — already deployed"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Density per box"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Low tens"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "Thousands"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "n/a"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Rollback"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Warm slot, <1s flip"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Symlink rename"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "n/a"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Bold marks where a framework is decisively better or worse, not merely different."
+              }
+            ],
+            "type": "em"
+          }
+        ],
+        "id": "p22",
+        "type": "paragraph"
+      },
+      {
+        "id": "h25",
+        "level": 2,
+        "text": "The decision we got wrong",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Early in the epic we ratified charter decision "
+          },
+          {
+            "type": "code",
+            "value": "D41"
+          },
+          {
+            "type": "text",
+            "value": ": the split-view shell "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "\"needs Next's persistent nested App-Router layout… impossible on a static host where every navigation is a full page load\""
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": ". Replicating it, we wrote, "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "\"= a full SPA client router = violates the thin-adapter doctrine\""
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": ". We accepted the loss and documented it in the page itself."
+          }
+        ],
+        "id": "p27",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "That reasoning contained a false step. Reaching the behaviour does not require writing a client router — Astro "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "ships one"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". The actual solution is three of its own primitives:"
+          }
+        ],
+        "id": "p29",
+        "type": "paragraph"
+      },
+      {
+        "id": "li31",
+        "items": [
+          [
+            {
+              "type": "code",
+              "value": "<ClientRouter />"
+            },
+            {
+              "type": "text",
+              "value": " intercepts same-origin link clicks, fetches the target and swaps the DOM. The finder's existing links needed "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "zero"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " changes."
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "transition:persist"
+            },
+            {
+              "type": "text",
+              "value": " on the island, with the same name on both pages — that identity is what makes the router "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "reuse"
+                }
+              ],
+              "type": "em"
+            },
+            {
+              "type": "text",
+              "value": " the element instead of recreating it."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "React portal"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " for the graph — the piece the whole design turns on."
+            }
+          ]
+        ],
+        "ordered": true,
+        "type": "list"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The portal is the interesting one. A persisted island cannot vary its own markup per page, yet the graph must exist on the landing and "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "not"
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": " on a document. So the graph stays inside the finder's React tree — preserving the context bridge that forced the one-island rule in the first place — while its DOM lands in a page-owned slot the router swaps. The landing renders the slot; a document page does not; the graph follows the page without the island ever unmounting."
+          }
+        ],
+        "id": "p33",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "A value set on "
+          },
+          {
+            "type": "code",
+            "value": "window"
+          },
+          {
+            "type": "text",
+            "value": " before a result click was still there afterwards (a reload would have cleared it); the rail was verifiably the "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "same DOM node"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " before and after; the graph vanished on the document and returned on the way back. The lesson worth keeping: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "\"impossible\" was a statement about our first idea, not about the framework."
+              }
+            ],
+            "type": "em"
+          }
+        ],
+        "id": "co35",
+        "title": "Proven, not asserted",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "And it charged a toll we did not see coming."
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " Minutes after this shipped, a screenshot caught a dark session turning "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "white"
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": " on navigation. The theme is applied to "
+          },
+          {
+            "type": "code",
+            "value": "<html>"
+          },
+          {
+            "type": "text",
+            "value": " at runtime, so it exists nowhere in the static markup — and the client router replaces the root element's attributes on every swap. Both axes were simply gone, while the operating system still asked for dark."
+          }
+        ],
+        "id": "p37",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The fix is one line of binding, and "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "which event you bind to is the whole answer"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ": "
+          },
+          {
+            "type": "code",
+            "value": "astro:after-swap"
+          },
+          {
+            "type": "text",
+            "value": " fires before the new document is painted, so the theme is restored invisibly. "
+          },
+          {
+            "type": "code",
+            "value": "astro:page-load"
+          },
+          {
+            "type": "text",
+            "value": " fires after paint — same code, and every navigation flashes the wrong theme. This is the tax on client-side navigation in general, not on Astro: the moment a document stops being reloaded, everything you attached to that document needs an owner."
+          }
+        ],
+        "id": "p39",
+        "type": "paragraph"
+      },
+      {
+        "id": "h42",
+        "level": 2,
+        "text": "Next.js — the shape the product was born in",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The rail lives in the "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "layout"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ", not the page, so opening a document swaps only the "
+          },
+          {
+            "type": "code",
+            "value": "children"
+          },
+          {
+            "type": "text",
+            "value": " segment and nothing remounts. Every other edition is measured against a behaviour Next gives away for free."
+          }
+        ],
+        "id": "p44",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "A detail worth stealing: "
+          },
+          {
+            "type": "code",
+            "value": "children"
+          },
+          {
+            "type": "text",
+            "value": " is a plain nested route rather than a parallel slot, "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "specifically"
+              }
+            ],
+            "type": "em"
+          },
+          {
+            "type": "text",
+            "value": " so that "
+          },
+          {
+            "type": "code",
+            "value": "notFound()"
+          },
+          {
+            "type": "text",
+            "value": " sets a real HTTP 404 — under a slot the sibling segment still resolves 200 and the 404 becomes cosmetic."
+          }
+        ],
+        "id": "p46",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "What it charges."
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " The scars cluster at the build and deploy seam, not in the UI:"
+          }
+        ],
+        "id": "p48",
+        "type": "paragraph"
+      },
+      {
+        "id": "li50",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "The standalone build "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "silently drops "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "code",
+              "value": "undici"
+            },
+            {
+              "type": "text",
+              "value": " — Next treats it as a server-external and the output tracer skips it, so the release throws at first render. "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Local "
+                }
+              ],
+              "type": "em"
+            },
+            {
+              "type": "code",
+              "value": "next start"
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": " masks it entirely"
+                }
+              ],
+              "type": "em"
+            },
+            {
+              "type": "text",
+              "value": ", because it resolves from the full node_modules."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A resident process per site: low tens per box, and a warm standby doubles memory during a deploy."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The base path is baked at "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "build"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " time, so attaching a domain later goes TLS-green and then 404s at the root."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h53",
+        "level": 2,
+        "text": "Astro — everything downstream of the shell, done better",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Documents are real prerendered HTML with "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "zero client JavaScript on the document itself"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " — the best SEO position of the three and the cheapest thing on earth to serve. A release is about "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "16 KB"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " against Next's ~18 MB, thousands fit on a box, and rollback is a symlink rename."
+          }
+        ],
+        "id": "p55",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The zero-token property is "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "architectural, not disciplinary"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ": every content read happens at build, so the deployed site has no credential to leak. (One honest asterisk — the optional live-search upgrade does inline a public-read token, so \"no token ever reaches a visitor\" is true of the baked corpus and overstated as a blanket claim.)"
+          }
+        ],
+        "id": "p57",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "What it charges."
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " The finder is vendored byte-identically from the Next tree, which means every adaptation must live outside it:"
+          }
+        ],
+        "id": "p59",
+        "type": "paragraph"
+      },
+      {
+        "id": "li61",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Two shims — "
+            },
+            {
+              "type": "code",
+              "value": "next/link"
+            },
+            {
+              "type": "text",
+              "value": " and "
+            },
+            {
+              "type": "code",
+              "value": "next/navigation"
+            },
+            {
+              "type": "text",
+              "value": " — reimplemented over "
+            },
+            {
+              "type": "code",
+              "value": "history"
+            },
+            {
+              "type": "text",
+              "value": " and "
+            },
+            {
+              "type": "code",
+              "value": "location"
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Base-path and trailing-slash normalisation, because static output writes directories and a missing slash costs a 308."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The one-island rule: React context cannot cross island boundaries, so finder and graph must share a root."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Single-type generation today — untyped routes hit a "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "deploying"
+                }
+              ],
+              "type": "em"
+            },
+            {
+              "type": "text",
+              "value": " page rather than a 404, which reads as an outage."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "h64",
+        "level": 2,
+        "text": "Phoenix LiveView — the honest outlier",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The "
+          },
+          {
+            "type": "code",
+            "value": "/finder"
+          },
+          {
+            "type": "text",
+            "value": " surface has no rail, no detail pane, no URL state, and "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "no finder→graph bridge at all"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". It is a search panel over a graph where the two never speak. It shares the renderer and the block grammar, not the design."
+          }
+        ],
+        "id": "co66",
+        "title": "This is not the same product",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "What it is genuinely best at."
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " There is no bundle, no build step, no site infrastructure, and no key to leak — search runs server-side under an anonymous caller that can only see public schemas. It ships with every instance, in a fifth of the code."
+          }
+        ],
+        "id": "p68",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "What the study found."
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " Measured against the same brief, the gaps are large and worth naming:"
+          }
+        ],
+        "id": "p70",
+        "type": "paragraph"
+      },
+      {
+        "id": "li72",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "The graph renderer "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "exposes"
+                }
+              ],
+              "type": "em"
+            },
+            {
+              "type": "text",
+              "value": " the exact bridge API the other two use — and nothing on the server ever calls it. Matches sent per keystroke: "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "zero"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Because the host never opts out, the renderer draws its "
+            },
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "own"
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " in-canvas search box: two unrelated search fields, one server-side, one substring-matching, neither aware of the other."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The dual-engine claim does not hold — the tenant gate forces Postgres, and typo-widening is disabled as a side effect. The pipeline reports which engine actually served; the caller discards it."
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "?q="
+            },
+            {
+              "type": "text",
+              "value": " does not exist: a search is not linkable, bookmarkable, or reload-surviving."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The corpus derivation is expensive and uncached — re-run per connected mount."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "None of this is a criticism of LiveView. It is a criticism of an unfinished surface — and notably, the charter contains no ratified decision describing this edition's design at all."
+              }
+            ],
+            "type": "em"
+          }
+        ],
+        "id": "p74",
+        "type": "paragraph"
+      },
+      {
+        "id": "h77",
+        "level": 2,
+        "text": "So which one should you reach for?",
+        "type": "heading"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "If your situation is…"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Reach for"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Because"
+            }
+          ]
+        ],
+        "id": "tb79",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "A reading-heavy corpus that must rank, and cheaply"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Astro"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Static documents, no token, thousands per box — and the shell is now attainable"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Content that changes under you, per request"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Next.js"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "A real server: ISR, revalidation tags, server-only secrets"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Search over data you already own, no new infra"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Phoenix"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "No bundle, no build, no key — it ships with the instance"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "You need the split shell above all"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Next.js first"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "You get it for free; every other edition pays for it"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "You are gating on SEO"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Astro"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Prerendered HTML beats both, decisively"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The pattern underneath: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Next buys you request-time behaviour, Astro buys you build-time cheapness and safety, Phoenix buys you having no frontend at all"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ". The shell requirement used to break the tie outright. Now it mostly doesn't — which makes the tie-breaker the boring, correct one: where does your content come from, and how often does it change?"
+          }
+        ],
+        "id": "p81",
+        "type": "paragraph"
+      },
+      {
+        "id": "h84",
+        "level": 2,
+        "text": "What the exercise actually taught us",
+        "type": "heading"
+      },
+      {
+        "id": "li86",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "A framework's \"impossible\" is usually your design's impossible."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " D41 was wrong for two months because we reasoned from our first attempt instead of from the framework's primitives."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Byte-identical vendoring is a real bill, paid in shims."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " It bought us zero drift between two editions — enforced by a gate that compares bytes, not hashes — and charged us every Next-specific import."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The expensive bugs were invisible to every green build."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " A dropped dependency that only local dev masks; a websocket that joins successfully and returns nothing forever; a title printed twice. All caught by looking at the running thing."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Honest degradation beats silent substitution."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " Two editions report when the engine they asked for is not the one that answered. The third computes it and throws it away."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Client-side navigation makes the document a shared resource."
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": " Anything you attach to it at runtime — a theme, a listener, a scroll position — used to be cleaned up by the reload you just removed. Each one now needs an explicit owner and an explicit moment, and the right moment is usually earlier than you think."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "All three should feel the same to a stranger in ten seconds. Two now do — and the third's gap is written down, quantified, and filed rather than quietly tolerated."
+          }
+        ],
+        "id": "co88",
+        "title": "The standard we hold this to",
+        "tone": "info",
+        "type": "callout"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">BARKPARK · THE FINDER · FRAMEWORK STUDY</p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">One finder, three frameworks: what it actually costs to make them feel identical</h1><p style=\"border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px\">A field study from the Barkpark search-template epic · 2026-07-27 · Evidence: the three shipped implementations, cited by file</p><p style=\"margin:0 0 10px;line-height:1.55;font-size:18px\">We built the same product three times — a persistent search rail, a live corpus graph that lights up as you type, and a document pane rendering canonical blocks — in <span style=\"font-weight:bold\">Next.js</span>, <span style=\"font-weight:bold\">Astro</span>, and <span style=\"font-weight:bold\">Phoenix LiveView</span>. The goal was that all three feel exactly the same. Two of them now do. This is the honest ledger of what each framework gave us for free, what each one charged, and the one decision we ratified as impossible and later proved wrong.</p><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">The short version</div><span>Next.js delivers the shell for free and charges at the deploy seam. Astro charges for the shell — we paid, and it now matches — and gives back the best documents on the internet: static HTML, zero client JS, no token. Phoenix is the cheapest and safest by construction, and is <span style=\"font-style:italic\">not currently this product at all</span> — it is a different design that shares a renderer.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What we were building, precisely</h2><p>One sentence, because every comparison below is meaningless without it: </p><ul style=\"margin:0 0 24px;padding-left:24px;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.7\"><li style=\"margin:4pt 0 0\"><span><span style=\"font-weight:bold\">A persistent left rail</span> — per-keystroke search over a dual-engine backend, whose typed query and scroll position must survive opening a document.</span></li><li style=\"margin:4pt 0 0\"><span><span style=\"font-weight:bold\">A live corpus graph</span> — the landing&#39;s right half, which highlights matching nodes <span style=\"font-style:italic\">as you type</span>, weighted by engine rank.</span></li><li style=\"margin:4pt 0 0\"><span><span style=\"font-weight:bold\">A document pane</span> — the canonical PortableDoc renderer, all block types, identical bytes-shape across all three.</span></li></ul><p>The word that did all the damage is <span style=\"font-weight:bold\">persistent</span>. Everything else ports cleanly. That one requirement is where the three frameworks stop being interchangeable.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The comparison, at a glance</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span></span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Next.js</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Astro</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Phoenix LiveView</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Shape</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Node SSR process</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Static files</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>The BEAM you already run</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Persistent shell</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Free</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Bought</span><span> — see below</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Absent</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Search transport</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>WS channel → HTTP route</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>WS channel → flat anon route</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>LiveView channel</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Keystroke debounce</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>90ms live / 250ms HTTP</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>90ms / 250ms (same code)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>150ms fixed</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Results per query</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>100</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>12</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Finder→graph bridge</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>React context</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>React context (one island)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Not wired</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Documents</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>SSR + ISR 300s</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Static HTML, zero JS</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Separate reader</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>URL state</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Query string</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Query string (shimmed)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">None</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Token in browser</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>WS token only</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>WS token only</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">None at all</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Release size</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>~18 MB traced</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">~16 KB</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>n/a — already deployed</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Density per box</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Low tens</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">Thousands</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>n/a</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Rollback</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Warm slot, &lt;1s flip</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Symlink rename</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>n/a</span></td></tr></tbody></table><p><span style=\"font-style:italic\">Bold marks where a framework is decisively better or worse, not merely different.</span></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The decision we got wrong</h2><p>Early in the epic we ratified charter decision <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">D41</code>: the split-view shell <span style=\"font-style:italic\">&quot;needs Next&#39;s persistent nested App-Router layout… impossible on a static host where every navigation is a full page load&quot;</span>. Replicating it, we wrote, <span style=\"font-style:italic\">&quot;= a full SPA client router = violates the thin-adapter doctrine&quot;</span>. We accepted the loss and documented it in the page itself.</p><p>That reasoning contained a false step. Reaching the behaviour does not require writing a client router — Astro <span style=\"font-weight:bold\">ships one</span>. The actual solution is three of its own primitives:</p><ol style=\"margin:0 0 24px;padding-left:24px;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.7\"><li style=\"margin:4pt 0 0\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">&lt;ClientRouter /&gt;</code> intercepts same-origin link clicks, fetches the target and swaps the DOM. The finder&#39;s existing links needed <span style=\"font-weight:bold\">zero</span> changes.</span></li><li style=\"margin:4pt 0 0\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">transition:persist</code> on the island, with the same name on both pages — that identity is what makes the router <span style=\"font-style:italic\">reuse</span> the element instead of recreating it.</span></li><li style=\"margin:4pt 0 0\"><span>A <span style=\"font-weight:bold\">React portal</span> for the graph — the piece the whole design turns on.</span></li></ol><p>The portal is the interesting one. A persisted island cannot vary its own markup per page, yet the graph must exist on the landing and <span style=\"font-style:italic\">not</span> on a document. So the graph stays inside the finder&#39;s React tree — preserving the context bridge that forced the one-island rule in the first place — while its DOM lands in a page-owned slot the router swaps. The landing renders the slot; a document page does not; the graph follows the page without the island ever unmounting.</p><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#1e6b52;font-weight:600;margin:0 0 6px\">Proven, not asserted</div><span>A value set on <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">window</code> before a result click was still there afterwards (a reload would have cleared it); the rail was verifiably the <span style=\"font-weight:bold\">same DOM node</span> before and after; the graph vanished on the document and returned on the way back. The lesson worth keeping: <span style=\"font-style:italic\">&quot;impossible&quot; was a statement about our first idea, not about the framework.</span></span></div><p><span style=\"font-weight:bold\">And it charged a toll we did not see coming.</span> Minutes after this shipped, a screenshot caught a dark session turning <span style=\"font-style:italic\">white</span> on navigation. The theme is applied to <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">&lt;html&gt;</code> at runtime, so it exists nowhere in the static markup — and the client router replaces the root element&#39;s attributes on every swap. Both axes were simply gone, while the operating system still asked for dark.</p><p>The fix is one line of binding, and <span style=\"font-weight:bold\">which event you bind to is the whole answer</span>: <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">astro:after-swap</code> fires before the new document is painted, so the theme is restored invisibly. <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">astro:page-load</code> fires after paint — same code, and every navigation flashes the wrong theme. This is the tax on client-side navigation in general, not on Astro: the moment a document stops being reloaded, everything you attached to that document needs an owner.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Next.js — the shape the product was born in</h2><p>The rail lives in the <span style=\"font-weight:bold\">layout</span>, not the page, so opening a document swaps only the <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">children</code> segment and nothing remounts. Every other edition is measured against a behaviour Next gives away for free.</p><p>A detail worth stealing: <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">children</code> is a plain nested route rather than a parallel slot, <span style=\"font-style:italic\">specifically</span> so that <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">notFound()</code> sets a real HTTP 404 — under a slot the sibling segment still resolves 200 and the 404 becomes cosmetic.</p><p><span style=\"font-weight:bold\">What it charges.</span> The scars cluster at the build and deploy seam, not in the UI:</p><ul style=\"margin:0 0 24px;padding-left:24px;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.7\"><li style=\"margin:4pt 0 0\"><span>The standalone build <span style=\"font-weight:bold\">silently drops </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">undici</code> — Next treats it as a server-external and the output tracer skips it, so the release throws at first render. <span style=\"font-style:italic\">Local </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">next start</code><span style=\"font-style:italic\"> masks it entirely</span>, because it resolves from the full node_modules.</span></li><li style=\"margin:4pt 0 0\"><span>A resident process per site: low tens per box, and a warm standby doubles memory during a deploy.</span></li><li style=\"margin:4pt 0 0\"><span>The base path is baked at <span style=\"font-weight:bold\">build</span> time, so attaching a domain later goes TLS-green and then 404s at the root.</span></li></ul><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Astro — everything downstream of the shell, done better</h2><p>Documents are real prerendered HTML with <span style=\"font-weight:bold\">zero client JavaScript on the document itself</span> — the best SEO position of the three and the cheapest thing on earth to serve. A release is about <span style=\"font-weight:bold\">16 KB</span> against Next&#39;s ~18 MB, thousands fit on a box, and rollback is a symlink rename.</p><p>The zero-token property is <span style=\"font-weight:bold\">architectural, not disciplinary</span>: every content read happens at build, so the deployed site has no credential to leak. (One honest asterisk — the optional live-search upgrade does inline a public-read token, so &quot;no token ever reaches a visitor&quot; is true of the baked corpus and overstated as a blanket claim.)</p><p><span style=\"font-weight:bold\">What it charges.</span> The finder is vendored byte-identically from the Next tree, which means every adaptation must live outside it:</p><ul style=\"margin:0 0 24px;padding-left:24px;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.7\"><li style=\"margin:4pt 0 0\"><span>Two shims — <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">next/link</code> and <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">next/navigation</code> — reimplemented over <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">history</code> and <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">location</code>.</span></li><li style=\"margin:4pt 0 0\"><span>Base-path and trailing-slash normalisation, because static output writes directories and a missing slash costs a 308.</span></li><li style=\"margin:4pt 0 0\"><span>The one-island rule: React context cannot cross island boundaries, so finder and graph must share a root.</span></li><li style=\"margin:4pt 0 0\"><span>Single-type generation today — untyped routes hit a <span style=\"font-style:italic\">deploying</span> page rather than a 404, which reads as an outage.</span></li></ul><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Phoenix LiveView — the honest outlier</h2><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#8a6420;font-weight:600;margin:0 0 6px\">This is not the same product</div><span>The <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">/finder</code> surface has no rail, no detail pane, no URL state, and <span style=\"font-weight:bold\">no finder→graph bridge at all</span>. It is a search panel over a graph where the two never speak. It shares the renderer and the block grammar, not the design.</span></div><p><span style=\"font-weight:bold\">What it is genuinely best at.</span> There is no bundle, no build step, no site infrastructure, and no key to leak — search runs server-side under an anonymous caller that can only see public schemas. It ships with every instance, in a fifth of the code.</p><p><span style=\"font-weight:bold\">What the study found.</span> Measured against the same brief, the gaps are large and worth naming:</p><ul style=\"margin:0 0 24px;padding-left:24px;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.7\"><li style=\"margin:4pt 0 0\"><span>The graph renderer <span style=\"font-style:italic\">exposes</span> the exact bridge API the other two use — and nothing on the server ever calls it. Matches sent per keystroke: <span style=\"font-weight:bold\">zero</span>.</span></li><li style=\"margin:4pt 0 0\"><span>Because the host never opts out, the renderer draws its <span style=\"font-weight:bold\">own</span> in-canvas search box: two unrelated search fields, one server-side, one substring-matching, neither aware of the other.</span></li><li style=\"margin:4pt 0 0\"><span>The dual-engine claim does not hold — the tenant gate forces Postgres, and typo-widening is disabled as a side effect. The pipeline reports which engine actually served; the caller discards it.</span></li><li style=\"margin:4pt 0 0\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">?q=</code> does not exist: a search is not linkable, bookmarkable, or reload-surviving.</span></li><li style=\"margin:4pt 0 0\"><span>The corpus derivation is expensive and uncached — re-run per connected mount.</span></li></ul><p><span style=\"font-style:italic\">None of this is a criticism of LiveView. It is a criticism of an unfinished surface — and notably, the charter contains no ratified decision describing this edition&#39;s design at all.</span></p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">So which one should you reach for?</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>If your situation is…</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Reach for</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Because</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>A reading-heavy corpus that must rank, and cheaply</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Astro</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Static documents, no token, thousands per box — and the shell is now attainable</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Content that changes under you, per request</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Next.js</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>A real server: ISR, revalidation tags, server-only secrets</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Search over data you already own, no new infra</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Phoenix</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>No bundle, no build, no key — it ships with the instance</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>You need the split shell above all</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Next.js first</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>You get it for free; every other edition pays for it</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>You are gating on SEO</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Astro</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Prerendered HTML beats both, decisively</span></td></tr></tbody></table><p>The pattern underneath: <span style=\"font-weight:bold\">Next buys you request-time behaviour, Astro buys you build-time cheapness and safety, Phoenix buys you having no frontend at all</span>. The shell requirement used to break the tie outright. Now it mostly doesn&#39;t — which makes the tie-breaker the boring, correct one: where does your content come from, and how often does it change?</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What the exercise actually taught us</h2><ul style=\"margin:0 0 24px;padding-left:24px;font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.7\"><li style=\"margin:4pt 0 0\"><span><span style=\"font-weight:bold\">A framework&#39;s &quot;impossible&quot; is usually your design&#39;s impossible.</span> D41 was wrong for two months because we reasoned from our first attempt instead of from the framework&#39;s primitives.</span></li><li style=\"margin:4pt 0 0\"><span><span style=\"font-weight:bold\">Byte-identical vendoring is a real bill, paid in shims.</span> It bought us zero drift between two editions — enforced by a gate that compares bytes, not hashes — and charged us every Next-specific import.</span></li><li style=\"margin:4pt 0 0\"><span><span style=\"font-weight:bold\">The expensive bugs were invisible to every green build.</span> A dropped dependency that only local dev masks; a websocket that joins successfully and returns nothing forever; a title printed twice. All caught by looking at the running thing.</span></li><li style=\"margin:4pt 0 0\"><span><span style=\"font-weight:bold\">Honest degradation beats silent substitution.</span> Two editions report when the engine they asked for is not the one that answered. The third computes it and throws it away.</span></li><li style=\"margin:4pt 0 0\"><span><span style=\"font-weight:bold\">Client-side navigation makes the document a shared resource.</span> Anything you attach to it at runtime — a theme, a listener, a scroll position — used to be cleaned up by the reload you just removed. Each one now needs an explicit owner and an explicit moment, and the right moment is usually earlier than you think.</span></li></ul><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">The standard we hold this to</div><span>All three should feel the same to a stranger in ten seconds. Two now do — and the third&#39;s gap is written down, quantified, and filed rather than quietly tolerated.</span></div>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\">BARKPARK · THE FINDER · FRAMEWORK STUDY</p><h1>One finder, three frameworks: what it actually costs to make them feel identical</h1><p class=\"bp-role-byline\">A field study from the Barkpark search-template epic · 2026-07-27 · Evidence: the three shipped implementations, cited by file</p><p class=\"bp-role-ingress\">We built the same product three times — a persistent search rail, a live corpus graph that lights up as you type, and a document pane rendering canonical blocks — in <span style=\"font-weight:bold\">Next.js</span>, <span style=\"font-weight:bold\">Astro</span>, and <span style=\"font-weight:bold\">Phoenix LiveView</span>. The goal was that all three feel exactly the same. Two of them now do. This is the honest ledger of what each framework gave us for free, what each one charged, and the one decision we ratified as impossible and later proved wrong.</p><div class=\"bp-callout bp-callout--info\"><strong>The short version</strong> <span>Next.js delivers the shell for free and charges at the deploy seam. Astro charges for the shell — we paid, and it now matches — and gives back the best documents on the internet: static HTML, zero client JS, no token. Phoenix is the cheapest and safest by construction, and is <span style=\"font-style:italic\">not currently this product at all</span> — it is a different design that shares a renderer.</span></div><h2>What we were building, precisely</h2><p>One sentence, because every comparison below is meaningless without it: </p><ul><li><span><span style=\"font-weight:bold\">A persistent left rail</span> — per-keystroke search over a dual-engine backend, whose typed query and scroll position must survive opening a document.</span></li><li><span><span style=\"font-weight:bold\">A live corpus graph</span> — the landing&#39;s right half, which highlights matching nodes <span style=\"font-style:italic\">as you type</span>, weighted by engine rank.</span></li><li><span><span style=\"font-weight:bold\">A document pane</span> — the canonical PortableDoc renderer, all block types, identical bytes-shape across all three.</span></li></ul><p>The word that did all the damage is <span style=\"font-weight:bold\">persistent</span>. Everything else ports cleanly. That one requirement is where the three frameworks stop being interchangeable.</p><h2>The comparison, at a glance</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span></span></th><th class=\"bp-table__th\"><span>Next.js</span></th><th class=\"bp-table__th\"><span>Astro</span></th><th class=\"bp-table__th\"><span>Phoenix LiveView</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>Shape</span></td><td class=\"bp-table__td\"><span>Node SSR process</span></td><td class=\"bp-table__td\"><span>Static files</span></td><td class=\"bp-table__td\"><span>The BEAM you already run</span></td></tr><tr><td class=\"bp-table__td\"><span>Persistent shell</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Free</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Bought</span><span> — see below</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Absent</span></td></tr><tr><td class=\"bp-table__td\"><span>Search transport</span></td><td class=\"bp-table__td\"><span>WS channel → HTTP route</span></td><td class=\"bp-table__td\"><span>WS channel → flat anon route</span></td><td class=\"bp-table__td\"><span>LiveView channel</span></td></tr><tr><td class=\"bp-table__td\"><span>Keystroke debounce</span></td><td class=\"bp-table__td\"><span>90ms live / 250ms HTTP</span></td><td class=\"bp-table__td\"><span>90ms / 250ms (same code)</span></td><td class=\"bp-table__td\"><span>150ms fixed</span></td></tr><tr><td class=\"bp-table__td\"><span>Results per query</span></td><td class=\"bp-table__td\"><span>100</span></td><td class=\"bp-table__td\"><span>100</span></td><td class=\"bp-table__td\"><span>12</span></td></tr><tr><td class=\"bp-table__td\"><span>Finder→graph bridge</span></td><td class=\"bp-table__td\"><span>React context</span></td><td class=\"bp-table__td\"><span>React context (one island)</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Not wired</span></td></tr><tr><td class=\"bp-table__td\"><span>Documents</span></td><td class=\"bp-table__td\"><span>SSR + ISR 300s</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Static HTML, zero JS</span></td><td class=\"bp-table__td\"><span>Separate reader</span></td></tr><tr><td class=\"bp-table__td\"><span>URL state</span></td><td class=\"bp-table__td\"><span>Query string</span></td><td class=\"bp-table__td\"><span>Query string (shimmed)</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">None</span></td></tr><tr><td class=\"bp-table__td\"><span>Token in browser</span></td><td class=\"bp-table__td\"><span>WS token only</span></td><td class=\"bp-table__td\"><span>WS token only</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">None at all</span></td></tr><tr><td class=\"bp-table__td\"><span>Release size</span></td><td class=\"bp-table__td\"><span>~18 MB traced</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">~16 KB</span></td><td class=\"bp-table__td\"><span>n/a — already deployed</span></td></tr><tr><td class=\"bp-table__td\"><span>Density per box</span></td><td class=\"bp-table__td\"><span>Low tens</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">Thousands</span></td><td class=\"bp-table__td\"><span>n/a</span></td></tr><tr><td class=\"bp-table__td\"><span>Rollback</span></td><td class=\"bp-table__td\"><span>Warm slot, &lt;1s flip</span></td><td class=\"bp-table__td\"><span>Symlink rename</span></td><td class=\"bp-table__td\"><span>n/a</span></td></tr></tbody></table><p><span style=\"font-style:italic\">Bold marks where a framework is decisively better or worse, not merely different.</span></p><h2>The decision we got wrong</h2><p>Early in the epic we ratified charter decision <code>D41</code>: the split-view shell <span style=\"font-style:italic\">&quot;needs Next&#39;s persistent nested App-Router layout… impossible on a static host where every navigation is a full page load&quot;</span>. Replicating it, we wrote, <span style=\"font-style:italic\">&quot;= a full SPA client router = violates the thin-adapter doctrine&quot;</span>. We accepted the loss and documented it in the page itself.</p><p>That reasoning contained a false step. Reaching the behaviour does not require writing a client router — Astro <span style=\"font-weight:bold\">ships one</span>. The actual solution is three of its own primitives:</p><ol><li><span><code>&lt;ClientRouter /&gt;</code> intercepts same-origin link clicks, fetches the target and swaps the DOM. The finder&#39;s existing links needed <span style=\"font-weight:bold\">zero</span> changes.</span></li><li><span><code>transition:persist</code> on the island, with the same name on both pages — that identity is what makes the router <span style=\"font-style:italic\">reuse</span> the element instead of recreating it.</span></li><li><span>A <span style=\"font-weight:bold\">React portal</span> for the graph — the piece the whole design turns on.</span></li></ol><p>The portal is the interesting one. A persisted island cannot vary its own markup per page, yet the graph must exist on the landing and <span style=\"font-style:italic\">not</span> on a document. So the graph stays inside the finder&#39;s React tree — preserving the context bridge that forced the one-island rule in the first place — while its DOM lands in a page-owned slot the router swaps. The landing renders the slot; a document page does not; the graph follows the page without the island ever unmounting.</p><div class=\"bp-callout bp-callout--success\"><strong>Proven, not asserted</strong> <span>A value set on <code>window</code> before a result click was still there afterwards (a reload would have cleared it); the rail was verifiably the <span style=\"font-weight:bold\">same DOM node</span> before and after; the graph vanished on the document and returned on the way back. The lesson worth keeping: <span style=\"font-style:italic\">&quot;impossible&quot; was a statement about our first idea, not about the framework.</span></span></div><p><span style=\"font-weight:bold\">And it charged a toll we did not see coming.</span> Minutes after this shipped, a screenshot caught a dark session turning <span style=\"font-style:italic\">white</span> on navigation. The theme is applied to <code>&lt;html&gt;</code> at runtime, so it exists nowhere in the static markup — and the client router replaces the root element&#39;s attributes on every swap. Both axes were simply gone, while the operating system still asked for dark.</p><p>The fix is one line of binding, and <span style=\"font-weight:bold\">which event you bind to is the whole answer</span>: <code>astro:after-swap</code> fires before the new document is painted, so the theme is restored invisibly. <code>astro:page-load</code> fires after paint — same code, and every navigation flashes the wrong theme. This is the tax on client-side navigation in general, not on Astro: the moment a document stops being reloaded, everything you attached to that document needs an owner.</p><h2>Next.js — the shape the product was born in</h2><p>The rail lives in the <span style=\"font-weight:bold\">layout</span>, not the page, so opening a document swaps only the <code>children</code> segment and nothing remounts. Every other edition is measured against a behaviour Next gives away for free.</p><p>A detail worth stealing: <code>children</code> is a plain nested route rather than a parallel slot, <span style=\"font-style:italic\">specifically</span> so that <code>notFound()</code> sets a real HTTP 404 — under a slot the sibling segment still resolves 200 and the 404 becomes cosmetic.</p><p><span style=\"font-weight:bold\">What it charges.</span> The scars cluster at the build and deploy seam, not in the UI:</p><ul><li><span>The standalone build <span style=\"font-weight:bold\">silently drops </span><code>undici</code> — Next treats it as a server-external and the output tracer skips it, so the release throws at first render. <span style=\"font-style:italic\">Local </span><code>next start</code><span style=\"font-style:italic\"> masks it entirely</span>, because it resolves from the full node_modules.</span></li><li><span>A resident process per site: low tens per box, and a warm standby doubles memory during a deploy.</span></li><li><span>The base path is baked at <span style=\"font-weight:bold\">build</span> time, so attaching a domain later goes TLS-green and then 404s at the root.</span></li></ul><h2>Astro — everything downstream of the shell, done better</h2><p>Documents are real prerendered HTML with <span style=\"font-weight:bold\">zero client JavaScript on the document itself</span> — the best SEO position of the three and the cheapest thing on earth to serve. A release is about <span style=\"font-weight:bold\">16 KB</span> against Next&#39;s ~18 MB, thousands fit on a box, and rollback is a symlink rename.</p><p>The zero-token property is <span style=\"font-weight:bold\">architectural, not disciplinary</span>: every content read happens at build, so the deployed site has no credential to leak. (One honest asterisk — the optional live-search upgrade does inline a public-read token, so &quot;no token ever reaches a visitor&quot; is true of the baked corpus and overstated as a blanket claim.)</p><p><span style=\"font-weight:bold\">What it charges.</span> The finder is vendored byte-identically from the Next tree, which means every adaptation must live outside it:</p><ul><li><span>Two shims — <code>next/link</code> and <code>next/navigation</code> — reimplemented over <code>history</code> and <code>location</code>.</span></li><li><span>Base-path and trailing-slash normalisation, because static output writes directories and a missing slash costs a 308.</span></li><li><span>The one-island rule: React context cannot cross island boundaries, so finder and graph must share a root.</span></li><li><span>Single-type generation today — untyped routes hit a <span style=\"font-style:italic\">deploying</span> page rather than a 404, which reads as an outage.</span></li></ul><h2>Phoenix LiveView — the honest outlier</h2><div class=\"bp-callout bp-callout--warning\"><strong>This is not the same product</strong> <span>The <code>/finder</code> surface has no rail, no detail pane, no URL state, and <span style=\"font-weight:bold\">no finder→graph bridge at all</span>. It is a search panel over a graph where the two never speak. It shares the renderer and the block grammar, not the design.</span></div><p><span style=\"font-weight:bold\">What it is genuinely best at.</span> There is no bundle, no build step, no site infrastructure, and no key to leak — search runs server-side under an anonymous caller that can only see public schemas. It ships with every instance, in a fifth of the code.</p><p><span style=\"font-weight:bold\">What the study found.</span> Measured against the same brief, the gaps are large and worth naming:</p><ul><li><span>The graph renderer <span style=\"font-style:italic\">exposes</span> the exact bridge API the other two use — and nothing on the server ever calls it. Matches sent per keystroke: <span style=\"font-weight:bold\">zero</span>.</span></li><li><span>Because the host never opts out, the renderer draws its <span style=\"font-weight:bold\">own</span> in-canvas search box: two unrelated search fields, one server-side, one substring-matching, neither aware of the other.</span></li><li><span>The dual-engine claim does not hold — the tenant gate forces Postgres, and typo-widening is disabled as a side effect. The pipeline reports which engine actually served; the caller discards it.</span></li><li><span><code>?q=</code> does not exist: a search is not linkable, bookmarkable, or reload-surviving.</span></li><li><span>The corpus derivation is expensive and uncached — re-run per connected mount.</span></li></ul><p><span style=\"font-style:italic\">None of this is a criticism of LiveView. It is a criticism of an unfinished surface — and notably, the charter contains no ratified decision describing this edition&#39;s design at all.</span></p><h2>So which one should you reach for?</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>If your situation is…</span></th><th class=\"bp-table__th\"><span>Reach for</span></th><th class=\"bp-table__th\"><span>Because</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><span>A reading-heavy corpus that must rank, and cheaply</span></td><td class=\"bp-table__td\"><span>Astro</span></td><td class=\"bp-table__td\"><span>Static documents, no token, thousands per box — and the shell is now attainable</span></td></tr><tr><td class=\"bp-table__td\"><span>Content that changes under you, per request</span></td><td class=\"bp-table__td\"><span>Next.js</span></td><td class=\"bp-table__td\"><span>A real server: ISR, revalidation tags, server-only secrets</span></td></tr><tr><td class=\"bp-table__td\"><span>Search over data you already own, no new infra</span></td><td class=\"bp-table__td\"><span>Phoenix</span></td><td class=\"bp-table__td\"><span>No bundle, no build, no key — it ships with the instance</span></td></tr><tr><td class=\"bp-table__td\"><span>You need the split shell above all</span></td><td class=\"bp-table__td\"><span>Next.js first</span></td><td class=\"bp-table__td\"><span>You get it for free; every other edition pays for it</span></td></tr><tr><td class=\"bp-table__td\"><span>You are gating on SEO</span></td><td class=\"bp-table__td\"><span>Astro</span></td><td class=\"bp-table__td\"><span>Prerendered HTML beats both, decisively</span></td></tr></tbody></table><p>The pattern underneath: <span style=\"font-weight:bold\">Next buys you request-time behaviour, Astro buys you build-time cheapness and safety, Phoenix buys you having no frontend at all</span>. The shell requirement used to break the tie outright. Now it mostly doesn&#39;t — which makes the tie-breaker the boring, correct one: where does your content come from, and how often does it change?</p><h2>What the exercise actually taught us</h2><ul><li><span><span style=\"font-weight:bold\">A framework&#39;s &quot;impossible&quot; is usually your design&#39;s impossible.</span> D41 was wrong for two months because we reasoned from our first attempt instead of from the framework&#39;s primitives.</span></li><li><span><span style=\"font-weight:bold\">Byte-identical vendoring is a real bill, paid in shims.</span> It bought us zero drift between two editions — enforced by a gate that compares bytes, not hashes — and charged us every Next-specific import.</span></li><li><span><span style=\"font-weight:bold\">The expensive bugs were invisible to every green build.</span> A dropped dependency that only local dev masks; a websocket that joins successfully and returns nothing forever; a title printed twice. All caught by looking at the running thing.</span></li><li><span><span style=\"font-weight:bold\">Honest degradation beats silent substitution.</span> Two editions report when the engine they asked for is not the one that answered. The third computes it and throws it away.</span></li><li><span><span style=\"font-weight:bold\">Client-side navigation makes the document a shared resource.</span> Anything you attach to it at runtime — a theme, a listener, a scroll position — used to be cleaned up by the reload you just removed. Each one now needs an explicit owner and an explicit moment, and the right moment is usually earlier than you think.</span></li></ul><div class=\"bp-callout bp-callout--info\"><strong>The standard we hold this to</strong> <span>All three should feel the same to a stranger in ten seconds. Two now do — and the third&#39;s gap is written down, quantified, and filed rather than quietly tolerated.</span></div>",
+  "body_html_sv": "c18f53335d0cddd150ef2c1749afc3f83072e9160a011cac63d103bd03fdd308",
+  "description": "A field study from the Barkpark search-template epic: the same master-detail finder built in Next.js, Astro and Phoenix LiveView — what each framework gave away free, what each charged, and the ratified decision we proved wrong by making the static edition feel identical.",
+  "main_tag": "search-template",
+  "preview": {
+    "description": "A field study from the Barkpark search-template epic: the same master-detail finder built in Next.js, Astro…",
+    "extensions": {
+      "tags": [
+        "search-template",
+        "render-path",
+        "design"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/finder-three-frameworks"
+  },
+  "rev": 2,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "The epic this study is drawn from — the finder across every framework edition.",
+      "strength": 90,
+      "tag": "search-template"
+    },
+    {
+      "rationale": "Compares how each framework renders canonical PortableDoc documents.",
+      "strength": 55,
+      "tag": "render-path"
+    },
+    {
+      "rationale": "A design-decision study: which framework suits this product shape and why.",
+      "strength": 35,
+      "tag": "design"
+    }
+  ],
+  "title": "One finder, three frameworks: what it actually costs to make them feel identical"
+}

@@ -1,0 +1,162 @@
+{
+  "_createdAt": "2026-07-08T00:17:38.975525Z",
+  "_draft": false,
+  "_id": "fleet-audit",
+  "_publishedId": "fleet-audit",
+  "_rev": "f54f71c26b3566762cca5d0a7ef66f4e",
+  "_type": "paper",
+  "_updatedAt": "2026-07-09T23:40:24.456882Z",
+  "blocks": [
+    {
+      "id": "fl-001",
+      "text": "Barkpark · read-only fleet audit",
+      "type": "eyebrow"
+    },
+    {
+      "id": "fl-002",
+      "level": 1,
+      "text": "Fleet components — the read-only ten",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Sample renders of the fleet blocks that are still server-painted and NOT editable in-canvas. This paper exists so each can be screenshotted for the audit."
+        }
+      ],
+      "id": "fl-003",
+      "type": "paragraph"
+    },
+    {
+      "id": "fl-004",
+      "level": 2,
+      "text": "tasks / task-board",
+      "type": "heading"
+    },
+    {
+      "id": "fl-tb",
+      "query": {
+        "parent_id": "composition-doctrine"
+      },
+      "type": "task-board"
+    },
+    {
+      "id": "fl-006",
+      "level": 2,
+      "text": "task-detail",
+      "type": "heading"
+    },
+    {
+      "id": "fl-td",
+      "query": {
+        "parent_id": "composition-doctrine"
+      },
+      "type": "task-detail"
+    },
+    {
+      "id": "fl-008",
+      "level": 2,
+      "text": "roadmap",
+      "type": "heading"
+    },
+    {
+      "id": "fl-rm",
+      "query": {
+        "parent_id": "composition-doctrine"
+      },
+      "type": "roadmap"
+    },
+    {
+      "id": "fl-010",
+      "level": 2,
+      "text": "status-legend",
+      "type": "heading"
+    },
+    {
+      "id": "fl-sl",
+      "type": "status-legend"
+    },
+    {
+      "id": "fl-012",
+      "level": 2,
+      "text": "asciicast",
+      "type": "heading"
+    },
+    {
+      "id": "fl-ac",
+      "src": "https://asciinema.org/a/1.cast",
+      "type": "asciicast"
+    },
+    {
+      "id": "fl-014",
+      "level": 2,
+      "text": "form / questionnaire",
+      "type": "heading"
+    },
+    {
+      "id": "fl-fm",
+      "items": [
+        {
+          "kind": "text",
+          "label": "Your role?"
+        }
+      ],
+      "kind": "questionnaire",
+      "type": "form"
+    },
+    {
+      "id": "fl-016",
+      "level": 2,
+      "text": "sheet",
+      "type": "heading"
+    },
+    {
+      "id": "fl-sh",
+      "ref": "demo",
+      "snapshot": {
+        "cells": {
+          "A1": "Tier",
+          "A2": "Element",
+          "B1": "Editable",
+          "B2": "fully"
+        }
+      },
+      "type": "sheet"
+    },
+    {
+      "id": "fl-018",
+      "level": 2,
+      "text": "embed",
+      "type": "heading"
+    },
+    {
+      "html": "<em>an external embed placeholder</em>",
+      "id": "fl-em",
+      "type": "embed"
+    },
+    {
+      "id": "fl-020",
+      "level": 2,
+      "text": "image",
+      "type": "heading"
+    },
+    {
+      "alt": "a content image",
+      "id": "fl-img",
+      "src": "",
+      "type": "image"
+    }
+  ],
+  "preview": {
+    "description": "Sample renders of the fleet blocks that are still server-painted and NOT editable in-canvas. This paper…",
+    "extensions": {},
+    "image": null,
+    "title": "Fleet audit — read-only components",
+    "type": "paper",
+    "url": "/papers/fleet-audit"
+  },
+  "slug": "fleet-audit",
+  "style": "article",
+  "title": "Fleet audit — read-only components"
+}

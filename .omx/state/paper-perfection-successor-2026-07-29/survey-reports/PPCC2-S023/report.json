@@ -1,0 +1,488 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S023",
+  "assignment_snapshot_sha256": "0959a10487a15a0b8a99cf80dcc487e1e59ed298016f65531fe048054272f6a7",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 8,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "b1ddb19187ece09e3c8424fa8d87e0bd163d575d23f2d0c1c31a8b1b4058f203"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All ten pinned revisions were read: 721 native top-level blocks plus one 38,142-character legacy HTML paper. Keep 3 and repair 7. Evidence discipline is consistently strong, especially when probes refute premises. The repeated defect is reader authority: five living wave records leave obsolete phase banners at the front, one has a generic title, one is legacy-only, and the 21-block fleet “audit” records specimens without audit verdicts.",
+  "verdict_counts": {
+    "repair": 7,
+    "keep": 3
+  },
+  "checked_unit_ids": [
+    "paper:felix-pristine-wave-23-2026-07-28",
+    "paper:felix-pristine-wave-5-2026-07-13",
+    "paper:felix-pristine-wave-6-2026-07-13",
+    "paper:felix-pristine-wave-7-2026-07-13",
+    "paper:felix-pristine-wave-8-2026-07-13",
+    "paper:felix-pristine-wave-9-2026-07-13",
+    "paper:finder-three-frameworks",
+    "paper:fleet-audit",
+    "paper:fleet-primer-proof",
+    "paper:gates-tell-the-truth-wave-2026-07-20"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 10,
+    "native_top_level_blocks_read": 721,
+    "legacy_html_documents_read": 1,
+    "legacy_html_chars_read": 38142,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:felix-pristine-wave-23-2026-07-28 blocks[119]",
+      "evidence": "A lexical waiver assumption is attacked with deletion and scan-diff proof.",
+      "lesson": "Tooling gates need adversarial semantic fixtures."
+    },
+    {
+      "block_ref": "paper:finder-three-frameworks blocks[17]",
+      "evidence": "Browser state and DOM identity demonstrate shell persistence.",
+      "lesson": "Prove experiential parity in the running product."
+    },
+    {
+      "block_ref": "paper:fleet-primer-proof blocks[6]",
+      "evidence": "The single harmful compressed-law miss is isolated rather than averaged away.",
+      "lesson": "Safety-relevant misses outrank mean scores."
+    },
+    {
+      "block_ref": "paper:felix-pristine-wave-9-2026-07-13 blocks[46]",
+      "evidence": "A live slow-server probe refutes an alleged unbounded timeout.",
+      "lesson": "Let boundary measurements downgrade the backlog."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:felix-pristine-wave-23-2026-07-28 blocks[0]",
+      "evidence": "Opening says OPEN/surveying while the final callout says COMPLETE.",
+      "reader_impact": "Skimmers receive obsolete authority."
+    },
+    {
+      "block_ref": "paper:felix-pristine-wave-8-2026-07-13 blocks[1]",
+      "evidence": "Opening says SURVEYING; later status correction says reviewed with only two of three slices delivered.",
+      "reader_impact": "The paper makes readers reconcile status and completeness themselves."
+    },
+    {
+      "block_ref": "paper:fleet-audit blocks[18]",
+      "evidence": "The embed specimen is explicitly a placeholder and no component has a pass/fail observation.",
+      "reader_impact": "The title promises an audit that the body does not perform."
+    },
+    {
+      "block_ref": "paper:gates-tell-the-truth-wave-2026-07-20 blocks[2]",
+      "evidence": "A 173-block completed wave still opens with SURVEYING.",
+      "reader_impact": "Chronology overwhelms current truth on every constrained reader."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "felix-pristine-wave-5-2026-07-13",
+        "felix-pristine-wave-6-2026-07-13",
+        "felix-pristine-wave-7-2026-07-13",
+        "felix-pristine-wave-8-2026-07-13",
+        "felix-pristine-wave-9-2026-07-13"
+      ],
+      "basis": "Shared Felix living-wave scaffold and recurring backlog/ledger handoffs; each nevertheless owns a distinct wave decision and outcome.",
+      "disposition": "Do not merge. Add a Felix wave index and compress each paper to current summary plus historical appendix."
+    },
+    {
+      "candidate_set": [
+        "felix-pristine-wave-23-2026-07-28",
+        "gates-tell-the-truth-wave-2026-07-20"
+      ],
+      "basis": "Both analyze gates whose visible green/red state does not match enforceable truth, including anti-vacuity and branch-protection limits.",
+      "disposition": "Keep separate authorities; cross-link Wave 23 as a Sobelow-specific application of the founding honest-gates doctrine and deduplicate repeated general explanations."
+    }
+  ],
+  "reader_risks": [
+    "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+    "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+    "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+    "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+    "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:felix-pristine-wave-23-2026-07-28",
+      "document_id": "felix-pristine-wave-23-2026-07-28",
+      "document_rev": "60e63b53bb9bbfd3444ec6bfdf8bd230",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Living Wave 23 record that turns a masked Sobelow failure into a bounded suppression-lifecycle and gate-honesty program.",
+      "opening_and_criteria": "blocks[0]-[23] establish doctrine, live measurements, intended slices, and done conditions, but the first status is obsolete by the final debrief.",
+      "outline_and_hierarchy": "The Strategize→Survey→Verify→Decide→Review chronology is traceable but 203 blocks make the current result hard to find without a front summary.",
+      "human_voice_and_precision": "Exceptionally candid about refuted premises, non-blocking gates, failed assumptions, and fenced work; the security detail needs audience-aware redaction.",
+      "compression_and_restraint": "Repair by replacing the stale opening with a compact COMPLETE summary and folding superseded plans, giant matrices, and repeated gate explanations into appendices.",
+      "evidence_and_truth": "blocks[62], [66], [74], [119], [146], [174], and [202] distinguish measured facts, refutations, review fixes, and honest shortfall.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[119]",
+          "evidence": "A misplaced inline annotation is proven to transfer a waiver to the next definition, and lexical mismatch is tested rather than eyeballed.",
+          "lesson": "Turn tooling syntax assumptions into adversarial before/after proof."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[0]",
+          "evidence": "The first reader-visible status still says OPEN and surveying although blocks[202] closes the wave.",
+          "lesson": "A living paper needs one canonical current-state front door."
+        }
+      ],
+      "duplicate_disposition": "Distinct Wave 23 authority; overlap with the honest-gates paper is conceptual, so cross-link rather than merge.",
+      "reader_risks": [
+        "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+        "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+        "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+        "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+        "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+      ],
+      "rationale": "Repair: outstanding evidence honesty and review depth are obscured by stale front matter and extreme chronology-first length."
+    },
+    {
+      "unit_id": "paper:felix-pristine-wave-5-2026-07-13",
+      "document_id": "felix-pristine-wave-5-2026-07-13",
+      "document_rev": "17e66fec7581db236c7fec26406fce7e",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 5 delivery record for six backlog slices spanning async tests, resource bounds, telemetry, corpus coverage, pagination, and ledger repair.",
+      "opening_and_criteria": "blocks[1]-[8] make the ship-wave contract concrete, but the opening VERIFYING heartbeat conflicts with the SHIPPED debrief at blocks[35]-[44].",
+      "outline_and_hierarchy": "A disciplined phase sequence and per-slice review table support auditability, though corrections accumulate instead of being reconciled into a current summary.",
+      "human_voice_and_precision": "Specific numbers, refutations, and merge-gate ownership read as human judgment rather than success theater.",
+      "compression_and_restraint": "Repair the status/front summary and demote superseded survey inventories; the debrief should be the primary reading path.",
+      "evidence_and_truth": "blocks[16], [19], [29], and [38] preserve changed counts, fabricated-evidence risks, verify results, and rerun gates.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[16]",
+          "evidence": "The paper rejects a naive 277-file async set after finding 47 pattern-invisible shared-state files, retaining a validated 230-file set.",
+          "lesson": "Prefer independently bounded populations over grep-clean claims."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[1]",
+          "evidence": "The lead paragraph says VERIFYING even though the later debrief declares SHIPPED.",
+          "lesson": "Do not make skimmers reconstruct authority from the bottom of a living paper."
+        }
+      ],
+      "duplicate_disposition": "Keep as Wave 5 chronology; it is purpose-distinct from Waves 6–9 despite recurring Felix scaffolding.",
+      "reader_risks": [
+        "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+        "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+        "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+        "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+        "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+      ],
+      "rationale": "Repair: strong delivery evidence, but the obsolete opening status materially misleads readers."
+    },
+    {
+      "unit_id": "paper:felix-pristine-wave-6-2026-07-13",
+      "document_id": "felix-pristine-wave-6-2026-07-13",
+      "document_rev": "d2f2d69465178a431263cef7148700f6",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 6 completion record for honest ledger restamping and the empirically bounded async test flip.",
+      "opening_and_criteria": "blocks[0]-[2] correctly lead with COMPLETE, ownership, anti-fabrication rules, and measurable green criteria.",
+      "outline_and_hierarchy": "The 84-block phase chronology is well labeled and ends with slice, grade, ledger, and handoff sections.",
+      "human_voice_and_precision": "The body is candid and operationally precise, especially about merge-gated ownership and unresolved measurement.",
+      "compression_and_restraint": "Repair metadata and title first: the stored title “The wish” erases the wave identity even though the body is coherent; lightly collapse old phase scaffolding.",
+      "evidence_and_truth": "blocks[0], [59], [72], [74], [80], and [83] separate current outcome, verification, per-slice status, ledger, and handoff.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[0]",
+          "evidence": "The first block gives COMPLETE status, grade, task ownership, and the paper’s role before chronology.",
+          "lesson": "A living record should expose current authority immediately."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The detailed wish is discoverable, but the document metadata title is merely “The wish,” obscuring identity in lists and search.",
+          "lesson": "Metadata must name the artifact, not a generic internal section."
+        }
+      ],
+      "duplicate_disposition": "Keep as the Wave 5 carryover closure record; do not merge with neighboring wave papers.",
+      "reader_risks": [
+        "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+        "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+        "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+        "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+        "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+      ],
+      "rationale": "Repair: editorial structure and truthfulness are strong, but the generic stored title is a serious discovery and reader-orientation defect."
+    },
+    {
+      "unit_id": "paper:felix-pristine-wave-7-2026-07-13",
+      "document_id": "felix-pristine-wave-7-2026-07-13",
+      "document_rev": "03a640a923be2c32c05ded3ab6f063af",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 7 strategy-to-review record closing four named Felix backlog failures with origin/main proofs.",
+      "opening_and_criteria": "body_html[0]-[2] establish the wave and initial state; body_html[103]-[119] close it with per-slice proof, open obligations, grade, and next wave.",
+      "outline_and_hierarchy": "Semantic headings are strong, but the sole representation is a 38,142-character legacy HTML blob rather than canonical blocks.",
+      "human_voice_and_precision": "The record corrects its own premises, protects merge-gated criteria, and names the unrun N≥10 proof.",
+      "compression_and_restraint": "Repair by converting to canonical blocks, replacing slug-like metadata with a descriptive title, and adding a current summary before the chronology.",
+      "evidence_and_truth": "body_html[83]-[101] records verified decisions; body_html[103]-[116] separates shipped work, owed evidence, ledger correction, and grade.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[103]",
+          "evidence": "The review explicitly says COMPLETE, grade A, independent gates, and that no earlier section was invalidated.",
+          "lesson": "Close a living paper with a falsifiable authority statement."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[2]",
+          "evidence": "The early SURVEYING status remains in the only legacy HTML body while the stored metadata title is a slug.",
+          "lesson": "Legacy representation and stale phase state weaken every reader surface."
+        }
+      ],
+      "duplicate_disposition": "Keep as distinct Wave 7 authority; convert rather than merge.",
+      "reader_risks": [
+        "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+        "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+        "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+        "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+        "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+      ],
+      "rationale": "Repair: substantive review is excellent, but legacy-only storage, weak metadata, and stale early state create avoidable cross-reader fragility."
+    },
+    {
+      "unit_id": "paper:felix-pristine-wave-8-2026-07-13",
+      "document_id": "felix-pristine-wave-8-2026-07-13",
+      "document_rev": "fa9e8b5d4039de23d84fb9cd4872a6ab",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "CI-hardening wave record for suite-order flakes, Sobelow reconciliation, and migrator lock behavior.",
+      "opening_and_criteria": "blocks[1]-[13] state SURVEYING and a three-slice wish; block[52] later corrects the status and honestly says only two of three delivered.",
+      "outline_and_hierarchy": "The 59-block chronology is compact relative to sibling waves and the debrief cleanly separates shipped, stalled, ledger, grade, and next actions.",
+      "human_voice_and_precision": "Strong premise-refutation voice: a supposed 40P01 becomes a deterministic checkout timeout and the stalled slice is not laundered as complete.",
+      "compression_and_restraint": "Repair the front status and headline so “wave complete” does not imply 3/3 delivery; preserve the concise debrief and candidate recovery pointer.",
+      "evidence_and_truth": "blocks[34], [52]-[58] show mechanism refutation, 2/3 delivery, exact stalled handoff, recurring ledger bug, and open actions.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[54]",
+          "evidence": "The review independently reproduces the real checkout timeout and explicitly distinguishes it from the filed 40P01 premise.",
+          "lesson": "Let runtime evidence rename the failure mode."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[1]",
+          "evidence": "The first status remains SURVEYING despite a later REVIEWED completion correction.",
+          "lesson": "Front matter must not require a bottom-of-document correction."
+        }
+      ],
+      "duplicate_disposition": "Keep as Wave 8 authority; the stalled Sobelow candidate feeds Wave 9 but does not duplicate Wave 9’s landing record.",
+      "reader_risks": [
+        "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+        "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+        "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+        "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+        "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+      ],
+      "rationale": "Repair: honest and compact debrief, but stale front matter and ambiguous “complete” language weaken the accurate 2/3 outcome."
+    },
+    {
+      "unit_id": "paper:felix-pristine-wave-9-2026-07-13",
+      "document_id": "felix-pristine-wave-9-2026-07-13",
+      "document_rev": "984efe1ad3ad670ed5025eac945a41e2",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Finishing wave that lands Sobelow carryover, repairs ledger auto-stamping, and audits outbound I/O without inventing work.",
+      "opening_and_criteria": "blocks[1]-[9] immediately state REVIEWED, grade, predecessor state, the three fronts, and tentative decision boundary.",
+      "outline_and_hierarchy": "Eighty-one blocks provide a readable Strategize→Digest→Verify→Decide→Review progression with explicit backlog and lead actions.",
+      "human_voice_and_precision": "The paper readily refutes the explicit-timeout premise, distinguishes locally green proof from CI-only proof, and avoids inflating finishing work.",
+      "compression_and_restraint": "Keep; optional trimming can collapse survey assignments, but the current front door and debrief already orient readers.",
+      "evidence_and_truth": "blocks[46], [67], [74], [78], and [80] connect live timeout measurement, review reruns, deferred proofs, grade, and concrete next steps.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[46]",
+          "evidence": "A live 25-second slow-server probe shows Req’s default returns a timeout at about 15.16 seconds, refuting the unbounded-hang premise.",
+          "lesson": "Use an executable boundary probe to downgrade a speculative availability claim."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[74]",
+          "evidence": "Two substantive proofs remain deferred to PR CI or lead-granted full-suite runs.",
+          "lesson": "Readers must not interpret reviewed correctness as all merge evidence already complete."
+        }
+      ],
+      "duplicate_disposition": "Distinct Wave 9 landing record; cross-link the Wave 8 carryover rather than merging chronologies.",
+      "reader_risks": [
+        "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+        "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+        "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+        "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+        "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+      ],
+      "rationale": "Keep: current status, premise correction, scoped proof, and open obligations are all placed clearly."
+    },
+    {
+      "unit_id": "paper:finder-three-frameworks",
+      "document_id": "finder-three-frameworks",
+      "document_rev": "b5ef67f4cec934a49335e5f5baa6114d",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Public-facing framework field study explaining the actual product and operational cost of equivalent finder experiences.",
+      "opening_and_criteria": "blocks[3]-[10] define the product, state the two-of-three result, and provide a compact comparison table before framework detail.",
+      "outline_and_hierarchy": "The 42-block arc moves from exact scope to wrong decision, three framework accounts, choice matrix, and transferable lessons.",
+      "human_voice_and_precision": "Confident without boosterism: Astro’s win, Next.js convenience, and Phoenix’s non-equivalence are all stated plainly.",
+      "compression_and_restraint": "Keep; the density is appropriate and repetition reinforces the single decision rather than padding chronology.",
+      "evidence_and_truth": "blocks[13]-[19] identify the disproven D41 assumption and running-state proof; blocks[31], [37], and [40] preserve limits and decisions.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[17]",
+          "evidence": "Persistent browser state, DOM-node identity, and graph restoration prove the Astro shell persists rather than merely asserting parity.",
+          "lesson": "Make experiential claims observable."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[31]",
+          "evidence": "Phoenix shares a renderer but lacks rail, detail pane, URL state, and finder-to-graph bridge.",
+          "lesson": "The comparison must not be quoted as three equivalent implementations."
+        }
+      ],
+      "duplicate_disposition": "No purpose duplicate in this assignment; keep as standalone public synthesis.",
+      "reader_risks": [
+        "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+        "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+        "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+        "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+        "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+      ],
+      "rationale": "Keep: clear audience, excellent comparison structure, honest non-equivalence, and concrete proof."
+    },
+    {
+      "unit_id": "paper:fleet-audit",
+      "document_id": "fleet-audit",
+      "document_rev": "f54f71c26b3566762cca5d0a7ef66f4e",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Read-only component fixture displaying ten fleet-oriented block types for renderer inspection.",
+      "opening_and_criteria": "blocks[0]-[2] name a fleet audit but provide no methodology, expected rendering criteria, result summary, owner, or freshness statement.",
+      "outline_and_hierarchy": "Ten heading/component pairs are easy to scan, yet the artifact is a fixture inventory rather than an editorial audit.",
+      "human_voice_and_precision": "Labels are literal and restrained, but absent prose leaves readers unable to tell whether components passed or merely rendered.",
+      "compression_and_restraint": "Repair by adding a one-screen purpose, environment/revision, per-component expected-versus-observed verdict, and overall result; replace placeholder embed content.",
+      "evidence_and_truth": "blocks[3]-[20] prove the ten component specimens exist, but no block records observation or acceptance.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[3]",
+          "evidence": "Each component begins under an explicit type heading, making the specimen inventory scannable.",
+          "lesson": "Keep fixture structure deterministic."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[18]",
+          "evidence": "The embed is explicitly “an external embed placeholder” rather than review evidence.",
+          "lesson": "A durable audit cannot treat placeholder content as a result."
+        }
+      ],
+      "duplicate_disposition": "No purpose duplicate; retain as a fixture only after relabeling and adding outcome evidence.",
+      "reader_risks": [
+        "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+        "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+        "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+        "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+        "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+      ],
+      "rationale": "Repair: useful renderer fixture, but it does not yet meet its title’s audit claim."
+    },
+    {
+      "unit_id": "paper:fleet-primer-proof",
+      "document_id": "fleet-primer-proof",
+      "document_rev": "6e29bb5c14cec13c713c5282a92bb001",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Concise experiment report deciding when optical documentation primers are accurate and economically justified.",
+      "opening_and_criteria": "blocks[3]-[6] disclose the contaminated first control, redesigned seven-law test, exact scores, and the single harmful miss.",
+      "outline_and_hierarchy": "Thirteen blocks are exceptionally compressed: method, scoreboard, economics, ruling, and series pointers.",
+      "human_voice_and_precision": "The prose resists product theater by conceding raw docs win accuracy and caching erases most claimed token savings.",
+      "compression_and_restraint": "Keep; add experiment artifact links if available, but do not expand the compact decision surface.",
+      "evidence_and_truth": "blocks[5]-[10] distinguish observed correctness, inferred economics, and a conditional deployment doctrine.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[6]",
+          "evidence": "The report isolates the one dropped PATH FROZEN law and notes the harmful inverted answer instead of hiding it inside an average.",
+          "lesson": "Report the safety-significant miss, not just the mean."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "Token-equivalent economics depend on prompt-caching assumptions and are not a universal cost claim.",
+          "lesson": "Readers should treat the numbers as workload-dependent."
+        }
+      ],
+      "duplicate_disposition": "No purpose duplicate; keep as the decision-grade summary of its experiment series.",
+      "reader_risks": [
+        "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+        "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+        "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+        "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+        "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+      ],
+      "rationale": "Keep: unusually good compression, decontaminated comparison, and honest partial ruling."
+    },
+    {
+      "unit_id": "paper:gates-tell-the-truth-wave-2026-07-20",
+      "document_id": "gates-tell-the-truth-wave-2026-07-20",
+      "document_rev": "228640f4f5085b81d0494eee8afe7dd9",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Founding honest-gates wave that diagnoses lying CI gates, repairs populations rather than samples, and installs anti-vacuity ratchets.",
+      "opening_and_criteria": "blocks[2]-[21] give a memorable thesis and committed-but-tentative direction, but the first status remains SURVEYING after a complete grade-A debrief.",
+      "outline_and_hierarchy": "The 173-block paper is internally navigable yet overlong; multiple full planning layers obscure the final five-slice outcome.",
+      "human_voice_and_precision": "The best voice corrects its own sampling errors, labels refutations, and exposes defects in the very ratchets meant to cure defects.",
+      "compression_and_restraint": "Repair with a current outcome capsule, phase appendix links, and a sharply reduced main path from thesis to five shipped slices and remaining branch-protection gap.",
+      "evidence_and_truth": "blocks[80]-[81], [112], [149], [156]-[164], and [171] preserve corrected priorities, review fixes, integrated gates, and the unprotected-repo limit.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[81]",
+          "evidence": "The paper admits its original four-defect roster sampled a broader live flake population, including a 1,310-failure sandbox cascade.",
+          "lesson": "Apply the paper’s own population-over-sample thesis to its plan."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The first visible status says SURVEYING although block[149] reports all five slices reviewed and green.",
+          "lesson": "Long living papers require canonical current status at the top."
+        }
+      ],
+      "duplicate_disposition": "Keep separate from Felix Wave 23: this is the founding general gate doctrine, while Wave 23 is the later Sobelow-specific application; add reciprocal links.",
+      "reader_risks": [
+        "Studio: surface the final verdict and current authority first; collapse historical phase logs, command receipts, and long matrices behind progressive disclosure.",
+        "TUI80: wrap prose and tables to one decision per screen; preserve status, named failure, proof, and next action without horizontal scrolling.",
+        "email: send the current outcome, material caveat, and owner action only; link the durable Paper for chronology and receipts.",
+        "public: remove internal task ids, branch names, operational topology, security-sensitive paths, and unreleased assertions; retain verified lessons and disclosed limitations.",
+        "CLI/API: preserve exact ids, revisions, verdicts, evidence refs, counts, confidence boundaries, and the difference among built, reviewed, merged, and deployed."
+      ],
+      "rationale": "Repair: high-value doctrine and adversarial evidence are buried beneath stale state and 173 blocks of accumulated chronology."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}

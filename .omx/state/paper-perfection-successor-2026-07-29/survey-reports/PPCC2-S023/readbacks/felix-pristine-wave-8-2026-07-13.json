@@ -1,0 +1,1113 @@
+{
+  "_createdAt": "2026-07-13T15:40:46.693850Z",
+  "_draft": false,
+  "_id": "felix-pristine-wave-8-2026-07-13",
+  "_publishedId": "felix-pristine-wave-8-2026-07-13",
+  "_rev": "fa9e8b5d4039de23d84fb9cd4872a6ab",
+  "_type": "paper",
+  "_updatedAt": "2026-07-13T17:30:05.596352Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix Pristine — Wave 8 (CI-hardening finish)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Status: SURVEYING. This is the wave's living story — each phase appends. Wave 7 landed 3 slices (#2954/#2956 + phantom-media #2955), all MERGED 2026-07-13; this wave does NOT re-handle them."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "The wish",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Kill the flaky / only-growing test infrastructure that has been reddening merge trains. Cut this wave from the OPEN backlog children the wave-7 review filed. Three test-infra slices, each its own opus worktree/PR with a fail-before protective test that REPRODUCES the flake (a flake fix with no reproduction is vacuous-green); gates green (CC=/usr/bin/clang mix test). Finishing over net-new; every change names a concrete failure mode; zero cosmetic churn."
+        }
+      ],
+      "id": "block-3",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Strategic direction",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Finished experience: a rebased PR's Test gate reds ONLY on its own change — never on infrastructure noise. Today three pre-existing hazards poison the merge train: (1) an order-dependent global-atom-table race + a wall-clock rate-limiter-window flake that surface as intermittent 429s; (2) a Sobelow baseline that only GROWS via append-only --mark-skip-all, so a code line-shift drifts it and re-adds dead fossils; (3) a sibling 40P01 migration-DDL deadlock from an un-Sandbox.allow'd Ecto.Migrator connection Task. This is a FINISH-THE-BACKLOG wave: build exactly the three filed children, no fresh audit, no scope creep."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The quality bar (Kinsta/Vercel): a green suite means the code is good — not that the dice landed right. Every slice must convert a probabilistic red into a deterministic one. The reproduction test is the deliverable's spine: seed-pinned, order-forced, or contention-forced so it reds BEFORE the fix and greens AFTER. A fix whose test cannot reproduce the flake is rejected as vacuous-green."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-7",
+      "level": 2,
+      "text": "The three slices (all opus — Fable is exhausted this wave)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 1 — task-felix-suite-order-flakes (P4). content_probe_test.exs:83 asserts :erlang.system_info(:atom_count) == before under async:true — it races the GLOBAL VM atom table against every concurrent test (83136 vs 83135). pulse_public_surface_test.exs:122 asserts exactly 3 of N concurrent burst requests get 200; a wall-clock rate-limiter window occasionally lets 4 through. Fix direction: stop asserting a global atom-count delta under async (serialize the one assertion or make it tolerant to concurrent minting), and assert <=N (or drive the limiter deterministically) for the burst. Reproduction: force concurrency/contention so the flake reds before the fix."
+        }
+      ],
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 2 — task-felix-sobelow-baseline-reconcile (P3, ADVISORY gate — Sobelow is continue-on-error in security.yml, so this is hygiene, never a merge blocker). mix sobelow --mark-skip-all is APPEND-ONLY: it never drops a fingerprint whose finding has moved/disappeared, so api/.sobelow-skips only grows and a line-shift drifts the baseline. origin/main is currently 84 lines (already pruned by #2956 from 193 — the task's '193 lines / 63% dead' figure is STALE, re-measure on a fresh regen). Ship a reconcile-not-append regen step (make/CI target or small script) that REPLACES the baseline with only currently-live fingerprints, and a guard proving a freshly-added un-skipped finding STILL reds mix sobelow --skip --exit Low (no blanket-suppress)."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 3 — task-felix-migrator-task-sandbox-race (P3). Two @tag :flaky migration tests (codelist_issue_version_test.exs, restore_search_null_dataset_dedup_test.exs) are excluded by default for a sandbox-escaping-Task bug: Ecto.Migrator.up/3 spawns its OWN connection Task for the migration body BEFORE Sandbox.allow/3 shares the owner pid, so it races on checkout, intermittent 40P01. DISTINCT from wave-7's D35 audit-dispatch deadlock fix (that toggle covers Dispatcher.fan_out, NOT Migrator internals). Fix (as the tests' own comments prescribe): share the sandbox owner pid with the Migrator's spawned task, then drop :flaky. Acceptance = N>=10 full-suite runs with 0 40P01. NOTE: restore_search's comment says it drives via apply_up/1 / apply_down/1 (NOT Ecto.Migrator) — surveyor must confirm whether that test actually hits the Migrator-spawned-Task path, because the two tests may need different treatment."
+        }
+      ],
+      "id": "block-10",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-11",
+      "level": 2,
+      "text": "Guardrails (from the lead + charter)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Branch from ORIGIN/main — the local checkout is DIVERGED ~112 ahead with omx commits; never build from it. Main checkout stays on main; all builds in isolated worktrees. CC=/usr/bin/clang (cc is a Claude wrapper). mix test is NOT blocked by dev-boot OOM/registry blockers (test.exs disables the codelist seeder). Every builder_model = opus; decompose a too-hard slice into smaller opus slices, NEVER Fable, NEVER Haiku. Publish wall: content.tags = 1-12 single-line {tag, distinct strength 1-100, rationale >=20 chars} with registry-known tags. Charter is the rotating slot bp-cloud-epic-charter.md (holds Felix); Decide commits it AND ensures it reaches origin/main; never pipe cherry-pick to tail in an && chain."
+        }
+      ],
+      "id": "block-12",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-13",
+      "level": 2,
+      "text": "Survey plan (in flight)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Casting a wide net across the three slices: exact flake mechanisms + reproduction levers, the sandbox/DataCase setup seam, Sobelow tooling seam + how other Elixir shops reconcile baselines, prior art in Barkpark papers/tasks (epic tree + wave-5/6/7 charter decisions D14/D29/D35), and adjacent constraints (async:true flip history, ExUnit.OnExitHandler ownership hazard from D14). Each question and its why is enumerated in the survey assignments."
+        }
+      ],
+      "id": "block-14",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Digest appends the survey digest + verify plan here BEFORE verifiers fly. Decide appends decisions + wave plan BEFORE builders fly. Review closes this story as the debrief. Slices driven: task-felix-suite-order-flakes, task-felix-sobelow-baseline-reconcile, task-felix-migrator-task-sandbox-race. Epic: task-96a908af98698118."
+        }
+      ],
+      "id": "block-15",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-16",
+      "level": 2,
+      "text": "Survey digest (12 reports folded — DIGEST phase)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "What is now ESTABLISHED, file:line-anchored. SLICE 1 mechanism is fully pinned with in-repo fix precedent. content_probe_test.exs:9 is async:true; line 81-83 asserts GLOBAL :erlang.system_info(:atom_count) unchanged around a content_get call. content_get is provably atom-safe (content_probe.ex:82-96 — only String.to_existing_atom + rescue), so the delta comes from ANY other concurrent test minting an atom on the shared VM table (e.g. content/validation.ex:109, tasks/validation.ex:147, both String.to_atom). Fix: replace the global-counter check with a key-specific proof — assert_raise ArgumentError on String.to_existing_atom(key) — deterministic under any scheduling, keeps async:true. Flipping to async:false is NOT a reliable fix (ExUnit sync-loop is not temporally isolated from the async pool). pulse_public_surface_test.exs:122 asserts exactly 3-of-4 burst POSTs=200; the limiter is a continuous-refill token bucket (rate_limiter.ex:50-68, System.monotonic_time, no clock seam), test-storm fixture burst=3 refill=10 tok/sec, so ~100ms of real round-trip latency refills a 4th token. Fix: assert <=@burst AND require a 429 present — sibling pulse_abuse_drill_test.exs:60 ALREADY does `assert two_hundreds <= @burst`. Both slice-1 files are OUTSIDE the async-flip's 54-file blast radius (dd0c27ce --stat) and pulse is the charter D4 keep-serial exemplar — zero collision risk."
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 2 root cause + native mechanism confirmed from dep source. --mark-skip-all opens api/.sobelow-skips in :append mode (sobelow.ex:512), never prunes; the fingerprint is phash2([type,source,filename,vuln_line_no]) (finding.ex:53-63) — line-anchored, so any line shift orphans an entry. No native single-flag reconcile exists: the reconcile IS `mix sobelow --clear-skip` (File.rm!, sobelow.ex:463-471) THEN `mix sobelow --mark-skip-all` (regenerate from live findings only). origin/main baseline is 84 lines (the task's 193/63%-dead figure is STALE — #2956 already pruned to 84). At least 3 confirmed dead CI.System fossils from #2954 (validator.ex:72, self_update/runner.ex:114, studio_chat/probe.ex:197 — the live code moved to inline `# sobelow_skip` at :127/:171/:217); the 4th CI.System entry titles.ex:366 is still LIVE. Guard test is cheap: sobelow scans source directly (utils.ex:34-36, no compile), and DOS.StringToAtom forces :low confidence for any non-controller module (string_to_atom.ex:20) — plant a throwaway non-controller `def leak(k), do: String.to_atom(k)` fixture, prove `mix sobelow --skip --exit Low` reds, delete it. The gate is ADVISORY (security.yml continue-on-error) — never blocks merge."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 3 — the task PREMISE is factually contested by a UNANIMOUS survey finding, and this is the wave's crux. The task says BOTH files share the Ecto.Migrator-spawned-Task race and BOTH should drop @tag :flaky. FALSE: only ONE test — codelist_issue_version_test.exs Fixture E (lines 190-244) — actually calls Ecto.Migrator.up/3. Codelist Fixtures A-D and BOTH restore_search tests drive via apply_up/1 directly (in-process, same sandbox connection, no Task spawned); restore_search's own comment (lines 39-41) says it AVOIDS Migrator on purpose. So :flaky on 6 of 7 tests looks defensive/copy-pasted, not evidence of this race. DEEPER CONTEST: the Migrator-race THEORY may be wrong even for Fixture E — DataCase already puts async:false tests in Sandbox SHARED mode (start_owner!(shared: not tags[:async])) which auto-covers any spawned process, and stdlib Task.async propagates $callers (Elixir >=1.8) which DBConnection.Ownership checks (ownership.ex:54-64). There is NO public Migrator option to inject an owner pid (its Task.async is private/unexported), so an allow-based fix may have nothing to act on. And NO 40P01 stack trace exists anywhere in the repo — the flake is comment-asserted only; :flaky is excluded from default mix test (test_helper.exs:47-55). CONFOUND: D35's audit-dispatch 40P01 fix (a DIFFERENT flake) is UNMERGED on origin/main (60966bdc not an ancestor; dispatcher.ex has no audit_dispatch_async) — a second 40P01 source is STILL LIVE, so slice-3 evidence MUST attribute any hit by stack (Migrator DDL vs Dispatcher.fan_out SELECT), exactly D29's warning."
+        }
+      ],
+      "id": "block-19",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Harness reality (governs slice-3 acceptance). Command: `cd api && CC=/usr/bin/clang mix test`. CI Test step ~5.5min warm; isolated local ~220-248s; under load 14-19 runtime inflated 2.2x with spurious pool-timeouts. This box is CURRENTLY load 53-77 with ~20 worktrees — a naive N>=10 full-suite loop locally is impractical (>1hr) and manufactures noise. Precedent (the already-closed D35 task) treated N>=10 full-suite as CI/lead merge-gated, with the deterministic protective test as PRIMARY proof. The borrow-warm-_build recipe (copy api/_build/test + symlink deps) works. For slice-3 the honest reproduction is a targeted/forced contention repro against Fixture E, not a natural full-suite loop."
+        }
+      ],
+      "id": "block-20",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "CONTRADICTIONS / tensions for DECIDE. (1) Slice-3 premise vs surveys: the fix shape depends ENTIRELY on whether the flake reproduces — Decide MUST re-scope slice-3 acceptance criteria into two distinct claims: (A) Fixture E — repro-or-prove-already-covered, fix only if a real Migrator-owner 40P01 fires; (B) the 6 non-Migrator tests — detag ONLY with N>=10 --include flaky evidence, and if any genuinely flakes for a distinct cause, split it to a NEW backlog task rather than fold it into a vacuous close. (2) atom_count fix: keep async:true + assert_raise rewrite (favored — more precise, sidesteps the async-isolation question) vs serialize. (3) sobelow true dead-count unknown beyond the 3 confirmed CI.System fossils until a fresh regen runs."
+        }
+      ],
+      "id": "block-21",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-22",
+      "level": 3,
+      "text": "Coverage map — checked & FOUND",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 1: content_probe_test.exs, content_probe.ex, content/validation.ex:109, tasks/validation.ex:147, pulse_public_surface_test.exs, rate_limiter.ex, pulse_controller.ex, config/test.exs (test-storm + abuse-rate fixtures), pulse_abuse_drill_test.exs:60 (<=@burst precedent), rate_limit.ex scope hatch, conn_case.ex, test_helper.exs, async-flip commit dd0c27ce --stat. SLICE 2: .sobelow-skips (origin/main 84 lines), sobelow.ex (clear/mark impl), finding.ex (line-anchored hash), utils.ex (source scan), string_to_atom.ex (forced :low), security.yml (advisory), merge-gates.md, mix.exs (no alias), Makefile (no target), #2954 commit 841fc284 + inline-skip sites, titles.ex:366 still live. SLICE 3: codelist_issue_version_test.exs (Fixture E vs A-D), restore_search test + both migration modules, data_case.ex (setup_sandbox + drain), ecto_sql migrator.ex + sandbox.ex, db_connection ownership.ex ($callers), charter D14/D29/D35/D38, D35 commit 60966bdc UNMERGED, test_helper.exs flaky exclude."
+        }
+      ],
+      "id": "block-23",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-24",
+      "level": 3,
+      "text": "Coverage map — checked & NOT FOUND (absences = decisions-in-waiting)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "(1) NO surveyor could run bp full-text prior-art search — every survey hit `bp search: unknown command`. The Barkpark papers/tasks knowledge base was NOT searched for prior art on any slice (the charter + task bodies stood in). Corner unreached: any prior paper specifically on these three flakes. (2) NOBODY RAN ANYTHING — all 12 surveys were read-only. Zero empirical confirmation that any flake reproduces, that the reconcile runs on this toolchain, or that the guard fixture reds. This is precisely why the verify fleet below is RUN-heavy — distrust vacuous green. (3) NO 40P01 stack trace exists in the repo — the migrator flake is comment-asserted only. (4) The other ~80 non-CI.System sobelow lines (Traversal.FileModule ~50, XSS 4, Config 9, SQL 7, DOS 6, RCE 1) were NOT individually checked for deadness — real dead count unknown until a fresh regen. (5) restore_search's actual flake behavior (does it EVER fail, or is the tag purely defensive?) was never executed. (6) The ExUnit sync-loop-vs-async-pool temporal-concurrency claim (load-bearing for 'async:false won't fix atom_count') is asserted from general OTP knowledge, not verified against this repo's Elixir/OTP."
+        }
+      ],
+      "id": "block-25",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-26",
+      "level": 2,
+      "text": "Verify plan — 4 opus assignments IN FLIGHT (all RUN, distrust vacuous green)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V1 [opus, worktree, RUN] — SLICE-3 CRUX: does the migrator 40P01 actually reproduce? In an isolated worktree off origin/main (the 5 target files are byte-identical to origin/main — verify via git diff first), loop codelist Fixture E + restore_search --include flaky (20 seeds) and under concurrent load; capture any 40P01 / DBConnection.OwnershipError and its EXACT stack (Migrator DDL vs distinct cause). Test the shared-mode hypothesis: with DataCase shared mode active, does Fixture E ever fail? If NO repro -> slice-3 reframes to 'prove-already-covered + detag with N>=10 evidence'; if YES -> capture whether owner-pid sharing is the fix or a distinct cause. PROVES the fix shape Decide must pick."
+        }
+      ],
+      "id": "block-27",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V2 [opus, worktree, RUN] — SLICE-2: run the reconcile + guard end-to-end. In a worktree off origin/main: `mix sobelow --clear-skip && mix sobelow --mark-skip-all`, diff regenerated .sobelow-skips vs origin/main's 84 lines — report the REAL live count, confirm the 3 CI.System fossils drop and titles.ex:366 survives, and how many other dead entries prune. Then plant a throwaway non-controller String.to_atom(k) fixture under lib/, run `mix sobelow --skip --exit Low`, confirm NONZERO exit (fresh finding reds), delete fixture + restore baseline. PROVES both the reconcile mechanism and the guard on this exact toolchain."
+        }
+      ],
+      "id": "block-28",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V3 [opus, worktree, RUN] — SLICE-1: prove both fail-before reproductions are constructible. atom_count: force the current line-83 assertion to red (spawn a Task minting a fresh atom in the window, or run alongside an atom-minting async module) and confirm the assert_raise-on-to_existing_atom(key) rewrite is green under the same forcing. pulse: inject Process.sleep(~120ms) between the 4 burst POSTs so a 4th token refills, confirm the current `==3` reds and `<=@burst`+429-present holds. RUN both targeted mix test invocations. PROVES neither slice-1 fix is vacuous-green."
+        }
+      ],
+      "id": "block-29",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V4 [opus, RUN(light)] — SLICE-3 confound + task-ledger re-scope for Decide. Confirm D35's audit_dispatch_async is absent from origin/main (`git show origin/main:api/lib/barkpark/webhooks/dispatcher.ex | grep -c audit_dispatch_async` -> 0), so a second live 40P01 source exists. Confirm the exact @tag:flaky inventory across both slice-3 files and that only Fixture E calls Ecto.Migrator. Draft the re-scoped slice-3 acceptance-criteria wording (crit A Fixture E repro-or-cover; crit B the 6 tests detag-with-evidence, split-if-distinct). Confirm task-felix-migration-ddl-audit-deadlock (D35) is still open so Decide notes the coexisting-unlanded-fix risk. PROVES the ledger reality Decide re-scopes from."
+        }
+      ],
+      "id": "block-30",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Drives tasks: task-felix-suite-order-flakes (S1), task-felix-sobelow-baseline-reconcile (S2), task-felix-migrator-task-sandbox-race (S3). Epic: task-96a908af98698118."
+        }
+      ],
+      "id": "block-31",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Status: DECIDED (building). Decide folded the 4 verify reports + 12 surveys into decisions D39-D44 and cut 3 opus slices. The verify round OVERTURNED two premises baked into the wish — recorded below."
+        }
+      ],
+      "id": "block-32",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-33",
+      "level": 2,
+      "text": "Verification results (proofs > facts > prose)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V1 — SLICE-3 CRUX (migrator 40P01), RUN, 20 seeds. REFUTED the premise twice over. (a) NO 40P01 reproduces: 0/20 seeds, and a repo-wide grep for 40P01|deadlock_detected is EMPTY — the label is comment-only, so 'N>=10 runs 0 40P01' is trivially already met. (b) What reproduces is DETERMINISTIC, not flaky: Fixture E (the ONLY Ecto.Migrator caller, codelist_issue_version_test.exs:207/222) fails 20/20 with a DBConnection.ConnectionError checkout timeout, stack rooted at 'ecto_sql migrator.ex:354 run_maybe_in_transaction <- Task.Supervised.invoke_mfa'. Root cause: the parent holds the migration advisory lock (a transaction) on the single SHARED sandbox conn (data_case.ex:82 shared: not async), so the Migrator's Task.async|>Task.await child queues behind it -> ~970ms checkout timeout. NOT an ownership gap (shared mode already shares the conn; $callers already propagates), so the task's Sandbox.allow fix CANNOT work. PROVEN fix: `migration_lock: false` on the up/down calls -> '5 tests, 0 failures' on seeds 1/7/13 (was 100% failing). The other 6 :flaky tests drive apply_up/1 (no Task/Migrator) and never fail — detag them. All 5 slice-3 files byte-identical to origin/main."
+        }
+      ],
+      "id": "block-34",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V2 — SLICE-2 (sobelow reconcile), RAN end-to-end on Elixir 1.19.5/OTP28 + sobelow 0.14.1. Mechanism WORKS: `mix sobelow --clear-skip` (exit 0, rm baseline) THEN `mix sobelow --mark-skip-all` (exit 0, regenerate) = the live set. But the briefing numbers do NOT hold — the real story is TOOLCHAIN DRIFT: a fresh dev-box regen emits 108 findings, not the 84-line committed baseline; the committed 84-baseline even REDS `mix sobelow --skip --exit Low` on dev (media.ex:408 live vs baselined :400). CI is 1.18.1/OTP27. So the reconcile MUST run on the CI toolchain or it re-mis-baselines. The '193 lines / 63% dead' + '~80 dead entries' hypotheses are REFUTED — the baseline is ~93% live, only 6 dead fossils (3 CI.System line-shifted by #2954 + 3 Traversal). GUARD PROVEN: planting `def leak(k), do: String.to_atom(k)` -> `mix sobelow --skip --exit Low` exit 1 (DOS.StringToAtom :low); removing it -> exit 0. Gate is ADVISORY (continue-on-error)."
+        }
+      ],
+      "id": "block-35",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V3 — SLICE-1 (fail-before repros), RUN. content_probe: FULLY constructible — forcing a concurrent atom mint reds line-83 (left 36102 right 36097); the assert_raise-on-to_existing_atom rewrite greens (13 tests 0 failures) under the same forcing, async:true kept. pulse: the repro AS SPECIFIED (Process.sleep 120ms + <=@burst on test-storm) is NOT constructible — test-storm is 10 tok/sec, 120ms over-refills to 1.2 tokens so all 4 POSTs return 200 [200,200,200,200], reding BOTH ==3 AND <=@burst and removing the 429. CORRECT fix: drive the burst on the slow-refill abuse-rate channel (0.1 tok/sec, config/test.exs:116-120) asserting two_hundreds<=@burst + 429 in statuses, mirroring the latency-immune pulse_abuse_drill_test.exs:55-62."
+        }
+      ],
+      "id": "block-36",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V4 — SLICE-3 CONFOUND, RUN(light). D35's audit-dispatch 40P01 fix is UNMERGED on origin/main — proven three ways: grep audit_dispatch_async=0 (before+after fetch), audit_dispatch_test.exs does not exist on origin/main, task-felix-migration-ddl-audit-deadlock lifecycle=open (crit2 N>=10 + crit3 merge both unmet). The audit fan_out (dispatcher.ex:98-108) still does an unawaited Task.Supervisor.start_child; its documented victim extend_workspace_delete_cascade_test.exs shares slice-3's migrations test dir. So a live 40P01 CAN fire during slice-3's gate and be mis-charged to the migrator — attribution by stack trace is mandatory. Only 1 of 7 :flaky tests calls Ecto.Migrator (Fixture E); the other 6 drive apply_up/1 and are tagged by association."
+        }
+      ],
+      "id": "block-37",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Coverage / not-founds: bp full-text prior-art search was unreachable from every verifier ('unknown command search') — the CI-toolchain caveat for slice 2 may already live in a prior sobelow task/PR #2956 discussion; the builder should bp-search before committing an approach. No verifier ran the FULL suite N>=10 (slice-3's default-suite acceptance is the builder's/lead's gate)."
+        }
+      ],
+      "id": "block-38",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-39",
+      "level": 2,
+      "text": "Decisions (D39-D44 — mirror the charter)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D39 — Wave 8 = FINISH-THE-CI-HARDENING-BACKLOG: exactly the 3 OPEN D38-seeded children, all opus (Fable exhausted), each its own worktree/PR branched from ORIGIN/main with a fail-before reproduction (a flake fix with no reproduction is vacuous-green and rejected). No re-audit, no net-new."
+        }
+      ],
+      "id": "block-40",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D40 — Slice 1 ships BOTH proven fixes: content_probe = key-scoped assert_raise (drop the global atom_count read, keep async:true); pulse = RETARGET the burst-cap test onto the slow-refill abuse-rate channel with <=@burst + 429 (the wish's sleep-force-on-test-storm is a RED test per V3). Slice 1 is the ACTUAL merge-train reddener (un-tagged, runs in the default gate) -> priority raised to P3."
+        }
+      ],
+      "id": "block-41",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D41 — Slice 2: reconcile = clear-skip THEN mark-skip-all, but it MUST run on the CI toolchain (1.18.1/OTP27) and upload the reconciled baseline as an artifact for human review — NOT a dev-box make target that commits a locally-regenerated baseline (toolchain drift re-mis-baselines). The '193/63% dead' figure is stale (origin/main = 84 lines, ~93% live). Gate is ADVISORY — improves hygiene, never blocks a merge; do NOT flip it to blocking (that is backlog)."
+        }
+      ],
+      "id": "block-42",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D42 — Slice 3 PREMISE REFUTED, task rewritten: there is NO 40P01 (comment-only); Fixture E fails DETERMINISTICALLY with a lock-contention checkout timeout; the Sandbox.allow fix cannot work (no ownership gap in shared mode). Proven fix = migration_lock:false on Fixture E; the other 6 apply_up/1 tests never fail -> detag. Every observed 40P01 stack-attributed (a dispatch_audit_async/fan_out hit is D35's, unmerged — not counted). These :flaky tests are excluded by default so they are NOT the merge-train symptom."
+        }
+      ],
+      "id": "block-43",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D43 — Slice-3 acceptance criteria rewritten to the corrected diagnosis: [0] Fixture E migration_lock:false with the captured deterministic ConnectionError as fail-before; [1] detag the 6 apply_up tests on N>=10 --include-flaky evidence, stack-attributed, file a new backlog child if any still flakes for a distinct cause; [2] merge gate (lead)."
+        }
+      ],
+      "id": "block-44",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D44 — Guardrails (unchanged from D37): all opus, branch from ORIGIN/main, main checkout stays on main, isolated worktrees, CC=/usr/bin/clang, borrow-warm _build. The 3 slices are file-disjoint -> dispatch in parallel. Backlog seeded: task-felix-pulse-ratelimit-scope-isolation (Pulse bypasses the per-test bucket scope), task-felix-sobelow-gate-blocking-eval (flip the advisory gate to blocking once the CI reconcile lands)."
+        }
+      ],
+      "id": "block-45",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-46",
+      "level": 2,
+      "text": "Wave plan — 3 opus slices IN FLIGHT (file-disjoint, parallel)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 1 [P3, opus] task-felix-suite-order-flakes — surface: Elixir test suite. Files: api/test/barkpark/plugins/content_probe_test.exs, api/test/barkpark_web/pulse_public_surface_test.exs. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark/plugins/content_probe_test.exs test/barkpark_web/pulse_public_surface_test.exs."
+        }
+      ],
+      "id": "block-47",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 2 [P4, opus] task-felix-sobelow-baseline-reconcile — surface: CI / sobelow tooling. Files: api/scripts/ (new reconcile + guard scripts), .github/workflows/security.yml. Does NOT commit a dev-regenerated api/.sobelow-skips. Local gate (dev toolchain): the guard reds a planted finding — cd api && CC=/usr/bin/clang mix sobelow --skip --exit Low exits 1 with the fixture, 0 without; the CI-toolchain reconcile runs as a security.yml job step uploading the artifact."
+        }
+      ],
+      "id": "block-48",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 3 [P4, opus] task-felix-migrator-task-sandbox-race — surface: Elixir migration test suite. Files: api/test/barkpark/repo/migrations/codelist_issue_version_test.exs, api/test/barkpark/repo/migrations/restore_search_null_dataset_dedup_test.exs. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark/repo/migrations/codelist_issue_version_test.exs test/barkpark/repo/migrations/restore_search_null_dataset_dedup_test.exs --include flaky."
+        }
+      ],
+      "id": "block-49",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Drives tasks: task-felix-suite-order-flakes (S1), task-felix-sobelow-baseline-reconcile (S2), task-felix-migrator-task-sandbox-race (S3), all children of task-96a908af98698118. Backlog children seeded this wave: task-felix-pulse-ratelimit-scope-isolation, task-felix-sobelow-gate-blocking-eval. Confound to clear separately: D35 task-felix-migration-ddl-audit-deadlock must merge (its 40P01 source is still live on origin/main)."
+        }
+      ],
+      "id": "block-50",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-51",
+      "level": 2,
+      "text": "Review debrief (REVIEWED 2026-07-13) — wave complete, grade A−",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Status correction (supersedes the SURVEYING banner above): Wave 8 is REVIEWED and complete. 2 of the 3 slices were delivered green, adversarially reviewed, and had their gates re-run GREEN on the reviewer's final state; the 3rd (sobelow reconcile) STALLED — not delivered as a green branch — but left a recoverable committed candidate. Overall grade A−. Reviewer made ZERO code changes (both delivered slices were correct as built); the only fixes were to the task ledger."
+        }
+      ],
+      "id": "block-52",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 1 — task-felix-suite-order-flakes — FINAL BRANCH loop-epic/deflake-suite-order-flakes-content-probe-0 (SHIPPED, correct). content_probe: the whole-VM :erlang.system_info(:atom_count)==before read (a false flake under async:true) was replaced with a KEY-SCOPED assert_raise ArgumentError on String.to_existing_atom(key) after content_get(...)==nil — structurally immune to any co-scheduled atom mint, and load-bearing (it fails iff content_get mints the key's atom). pulse burst-cap: retargeted off the fast-refill test-storm channel (10 tok/sec) onto the slow-refill abuse-rate channel (0.1 tok/sec) via new burst_conn/burst_post helpers, asserted as latency-immune BOUNDS (1 <= two_hundreds <= @burst AND 429 in statuses AND limited.status==429), mirroring pulse_abuse_drill_test.exs — NOT the wish's sleep-force-on-test-storm (V3-proven RED). Reviewer re-ran the gate: 26 tests/0 failures; seeds 1/42/999 all clean; confirmed IP {198,51,100,42} is unique to this test (per-IP bucket, both files async:false — no cross-file bleed). Merge-gated criterion[2] stays OPEN for the lead."
+        }
+      ],
+      "id": "block-53",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 3 — task-felix-migrator-task-sandbox-race — FINAL BRANCH loop-epic/migrator-ddl-deflake-migration-lock-fals-2 (SHIPPED, correct, premise-refuted build honored). Fixture E (the ONLY Ecto.Migrator caller) gets migration_lock:false on its up AND down calls; the 6 apply_up-driven tests were detagged from :flaky into the default suite. Reviewer INDEPENDENTLY re-ran the fail-before: WITHOUT migration_lock:false Fixture E fails DETERMINISTICALLY with (DBConnection.ConnectionError) checkout timeout after 981ms, stack rooted at ecto_sql migrator.ex:354 run_maybe_in_transaction <- Task.Supervised — a lock-contention timeout, NOT a 40P01 (confirming V1's refutation of the task premise); WITH the fix it passes seeds 1/7/42/100/555. Default suite (no --include flaky) = 6 tests/0 failures with E excluded (1 excluded); --include flaky = 7/0. Merge-gated criterion[2] OPEN for the lead. IMPORTANT: the D35 audit-dispatch 40P01 SOURCE (task-felix-migration-ddl-audit-deadlock) is still UNMERGED on origin/main — the lead must merge it separately to clear the live 40P01; slice 3 does not depend on it (slice-3 touches only DDL test files, never the audit path)."
+        }
+      ],
+      "id": "block-54",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SLICE 2 — task-felix-sobelow-baseline-reconcile — STALLED (not delivered as a green branch). A concurrent worker (worker-1) held then lapsed the claim, so this wave's dispatched builder correctly REFUSED to stomp the live claim / duplicate near-complete work on an identical file set — it made zero edits. The task honestly reads lifecycle=open with no active claim. HANDOFF: worker-1 committed a FULL candidate at SHA b48fb6c1 (\"fix(ci): reconcile Sobelow baseline in pinned toolchain\") touching the exact slice file set — .github/workflows/security.yml, api/scripts/sobelow-baseline-reconcile.sh, api/scripts/sobelow-fresh-finding-guard.sh, docs/ops/merge-gates.md. It was dangling on no named branch (GC-vulnerable); the reviewer preserved it as local branch wave8-carryover/sobelow-reconcile-candidate (based on 607aea46 — one CLI-only commit behind origin/main tip, rebases clean) and recorded the recovery pointer on the task's reviewer_note. NEXT WAVE: recover + review that candidate (it is NOT reviewer-verified) rather than dispatch a duplicate builder."
+        }
+      ],
+      "id": "block-55",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "LEDGER AUDIT: both delivered slices carried the IDENTICAL off-by-one stamp bug seen in wave 7 — builders passed a 1-based --criterion into the 0-based acceptance_criteria array, so evidence was shifted +1 and the lead-owned MERGE GATE criterion was falsely met=true while the first real proof read met=false/empty. Reviewer re-patched both to the honest vector via bp doc patch + publish (S1: content_probe met+evidence / pulse met+evidence / MERGE open; S3: Fixture-E-fail-before met+evidence / detag-6 met+evidence / MERGE open), each with a reviewer re-verification note appended. Both green tasks lifecycle=in_progress (correct — merge-gated). The sobelow task is honestly open with the candidate pointer. Backlog children task-felix-pulse-ratelimit-scope-isolation and task-felix-sobelow-gate-blocking-eval confirmed PUBLISHED. No out-of-wave tasks were touched."
+        }
+      ],
+      "id": "block-56",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "GRADE: A−. What earns it: two slices are exemplary CI-hardening — each names a concrete failure mode, each ships a fail-before reproduction the reviewer independently re-ran RED-without / GREEN-with (slice 3's is a genuine deterministic 981ms checkout-timeout repro; slice 1's atom_count fix is structurally immune and its pulse fix latency-immune), zero cosmetic churn, and both correctly HONORED the wave's premise-refutations over the wish's literal (wrong) prescriptions — distrust-vacuous-green satisfied on both. What holds it below A: the third slice (sobelow reconcile — the \"only-growing baseline\" half of the wish) did NOT land this wave (a recoverable candidate exists, but it is unverified), so completeness against the full 3-part wish is 2/3; and both delivered slices shipped the recurring off-by-one ledger bug that the reviewer had to hand-fix — a process defect re-appearing wave over wave."
+        }
+      ],
+      "id": "block-57",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "NEXT WAVE / lead actions: (a) merge the two green PRs (Elixir-gated) and close their MERGE criteria; (b) merge task-felix-migration-ddl-audit-deadlock (D35) to clear the live 40P01 source before relying on any full-suite --include-flaky run; (c) recover wave8-carryover/sobelow-reconcile-candidate, review it (currently unverified), and land the reconcile-not-append regen + fresh-finding guard; (d) fix the recurring builder off-by-one --criterion stamp at the tooling level so reviewers stop hand-patching every wave."
+        }
+      ],
+      "id": "block-58",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix Pristine — Wave 8 (CI-hardening finish)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Status: SURVEYING. This is the wave's living story — each phase appends. Wave 7 landed 3 slices (#2954/#2956 + phantom-media #2955), all MERGED 2026-07-13; this wave does NOT re-handle them."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "level": 2,
+        "text": "The wish",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Kill the flaky / only-growing test infrastructure that has been reddening merge trains. Cut this wave from the OPEN backlog children the wave-7 review filed. Three test-infra slices, each its own opus worktree/PR with a fail-before protective test that REPRODUCES the flake (a flake fix with no reproduction is vacuous-green); gates green (CC=/usr/bin/clang mix test). Finishing over net-new; every change names a concrete failure mode; zero cosmetic churn."
+          }
+        ],
+        "id": "block-3",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "Strategic direction",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Finished experience: a rebased PR's Test gate reds ONLY on its own change — never on infrastructure noise. Today three pre-existing hazards poison the merge train: (1) an order-dependent global-atom-table race + a wall-clock rate-limiter-window flake that surface as intermittent 429s; (2) a Sobelow baseline that only GROWS via append-only --mark-skip-all, so a code line-shift drifts it and re-adds dead fossils; (3) a sibling 40P01 migration-DDL deadlock from an un-Sandbox.allow'd Ecto.Migrator connection Task. This is a FINISH-THE-BACKLOG wave: build exactly the three filed children, no fresh audit, no scope creep."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The quality bar (Kinsta/Vercel): a green suite means the code is good — not that the dice landed right. Every slice must convert a probabilistic red into a deterministic one. The reproduction test is the deliverable's spine: seed-pinned, order-forced, or contention-forced so it reds BEFORE the fix and greens AFTER. A fix whose test cannot reproduce the flake is rejected as vacuous-green."
+          }
+        ],
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-7",
+        "level": 2,
+        "text": "The three slices (all opus — Fable is exhausted this wave)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 1 — task-felix-suite-order-flakes (P4). content_probe_test.exs:83 asserts :erlang.system_info(:atom_count) == before under async:true — it races the GLOBAL VM atom table against every concurrent test (83136 vs 83135). pulse_public_surface_test.exs:122 asserts exactly 3 of N concurrent burst requests get 200; a wall-clock rate-limiter window occasionally lets 4 through. Fix direction: stop asserting a global atom-count delta under async (serialize the one assertion or make it tolerant to concurrent minting), and assert <=N (or drive the limiter deterministically) for the burst. Reproduction: force concurrency/contention so the flake reds before the fix."
+          }
+        ],
+        "id": "block-8",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 2 — task-felix-sobelow-baseline-reconcile (P3, ADVISORY gate — Sobelow is continue-on-error in security.yml, so this is hygiene, never a merge blocker). mix sobelow --mark-skip-all is APPEND-ONLY: it never drops a fingerprint whose finding has moved/disappeared, so api/.sobelow-skips only grows and a line-shift drifts the baseline. origin/main is currently 84 lines (already pruned by #2956 from 193 — the task's '193 lines / 63% dead' figure is STALE, re-measure on a fresh regen). Ship a reconcile-not-append regen step (make/CI target or small script) that REPLACES the baseline with only currently-live fingerprints, and a guard proving a freshly-added un-skipped finding STILL reds mix sobelow --skip --exit Low (no blanket-suppress)."
+          }
+        ],
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 3 — task-felix-migrator-task-sandbox-race (P3). Two @tag :flaky migration tests (codelist_issue_version_test.exs, restore_search_null_dataset_dedup_test.exs) are excluded by default for a sandbox-escaping-Task bug: Ecto.Migrator.up/3 spawns its OWN connection Task for the migration body BEFORE Sandbox.allow/3 shares the owner pid, so it races on checkout, intermittent 40P01. DISTINCT from wave-7's D35 audit-dispatch deadlock fix (that toggle covers Dispatcher.fan_out, NOT Migrator internals). Fix (as the tests' own comments prescribe): share the sandbox owner pid with the Migrator's spawned task, then drop :flaky. Acceptance = N>=10 full-suite runs with 0 40P01. NOTE: restore_search's comment says it drives via apply_up/1 / apply_down/1 (NOT Ecto.Migrator) — surveyor must confirm whether that test actually hits the Migrator-spawned-Task path, because the two tests may need different treatment."
+          }
+        ],
+        "id": "block-10",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-11",
+        "level": 2,
+        "text": "Guardrails (from the lead + charter)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Branch from ORIGIN/main — the local checkout is DIVERGED ~112 ahead with omx commits; never build from it. Main checkout stays on main; all builds in isolated worktrees. CC=/usr/bin/clang (cc is a Claude wrapper). mix test is NOT blocked by dev-boot OOM/registry blockers (test.exs disables the codelist seeder). Every builder_model = opus; decompose a too-hard slice into smaller opus slices, NEVER Fable, NEVER Haiku. Publish wall: content.tags = 1-12 single-line {tag, distinct strength 1-100, rationale >=20 chars} with registry-known tags. Charter is the rotating slot bp-cloud-epic-charter.md (holds Felix); Decide commits it AND ensures it reaches origin/main; never pipe cherry-pick to tail in an && chain."
+          }
+        ],
+        "id": "block-12",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-13",
+        "level": 2,
+        "text": "Survey plan (in flight)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Casting a wide net across the three slices: exact flake mechanisms + reproduction levers, the sandbox/DataCase setup seam, Sobelow tooling seam + how other Elixir shops reconcile baselines, prior art in Barkpark papers/tasks (epic tree + wave-5/6/7 charter decisions D14/D29/D35), and adjacent constraints (async:true flip history, ExUnit.OnExitHandler ownership hazard from D14). Each question and its why is enumerated in the survey assignments."
+          }
+        ],
+        "id": "block-14",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Digest appends the survey digest + verify plan here BEFORE verifiers fly. Decide appends decisions + wave plan BEFORE builders fly. Review closes this story as the debrief. Slices driven: task-felix-suite-order-flakes, task-felix-sobelow-baseline-reconcile, task-felix-migrator-task-sandbox-race. Epic: task-96a908af98698118."
+          }
+        ],
+        "id": "block-15",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-16",
+        "level": 2,
+        "text": "Survey digest (12 reports folded — DIGEST phase)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "What is now ESTABLISHED, file:line-anchored. SLICE 1 mechanism is fully pinned with in-repo fix precedent. content_probe_test.exs:9 is async:true; line 81-83 asserts GLOBAL :erlang.system_info(:atom_count) unchanged around a content_get call. content_get is provably atom-safe (content_probe.ex:82-96 — only String.to_existing_atom + rescue), so the delta comes from ANY other concurrent test minting an atom on the shared VM table (e.g. content/validation.ex:109, tasks/validation.ex:147, both String.to_atom). Fix: replace the global-counter check with a key-specific proof — assert_raise ArgumentError on String.to_existing_atom(key) — deterministic under any scheduling, keeps async:true. Flipping to async:false is NOT a reliable fix (ExUnit sync-loop is not temporally isolated from the async pool). pulse_public_surface_test.exs:122 asserts exactly 3-of-4 burst POSTs=200; the limiter is a continuous-refill token bucket (rate_limiter.ex:50-68, System.monotonic_time, no clock seam), test-storm fixture burst=3 refill=10 tok/sec, so ~100ms of real round-trip latency refills a 4th token. Fix: assert <=@burst AND require a 429 present — sibling pulse_abuse_drill_test.exs:60 ALREADY does `assert two_hundreds <= @burst`. Both slice-1 files are OUTSIDE the async-flip's 54-file blast radius (dd0c27ce --stat) and pulse is the charter D4 keep-serial exemplar — zero collision risk."
+          }
+        ],
+        "id": "block-17",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 2 root cause + native mechanism confirmed from dep source. --mark-skip-all opens api/.sobelow-skips in :append mode (sobelow.ex:512), never prunes; the fingerprint is phash2([type,source,filename,vuln_line_no]) (finding.ex:53-63) — line-anchored, so any line shift orphans an entry. No native single-flag reconcile exists: the reconcile IS `mix sobelow --clear-skip` (File.rm!, sobelow.ex:463-471) THEN `mix sobelow --mark-skip-all` (regenerate from live findings only). origin/main baseline is 84 lines (the task's 193/63%-dead figure is STALE — #2956 already pruned to 84). At least 3 confirmed dead CI.System fossils from #2954 (validator.ex:72, self_update/runner.ex:114, studio_chat/probe.ex:197 — the live code moved to inline `# sobelow_skip` at :127/:171/:217); the 4th CI.System entry titles.ex:366 is still LIVE. Guard test is cheap: sobelow scans source directly (utils.ex:34-36, no compile), and DOS.StringToAtom forces :low confidence for any non-controller module (string_to_atom.ex:20) — plant a throwaway non-controller `def leak(k), do: String.to_atom(k)` fixture, prove `mix sobelow --skip --exit Low` reds, delete it. The gate is ADVISORY (security.yml continue-on-error) — never blocks merge."
+          }
+        ],
+        "id": "block-18",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 3 — the task PREMISE is factually contested by a UNANIMOUS survey finding, and this is the wave's crux. The task says BOTH files share the Ecto.Migrator-spawned-Task race and BOTH should drop @tag :flaky. FALSE: only ONE test — codelist_issue_version_test.exs Fixture E (lines 190-244) — actually calls Ecto.Migrator.up/3. Codelist Fixtures A-D and BOTH restore_search tests drive via apply_up/1 directly (in-process, same sandbox connection, no Task spawned); restore_search's own comment (lines 39-41) says it AVOIDS Migrator on purpose. So :flaky on 6 of 7 tests looks defensive/copy-pasted, not evidence of this race. DEEPER CONTEST: the Migrator-race THEORY may be wrong even for Fixture E — DataCase already puts async:false tests in Sandbox SHARED mode (start_owner!(shared: not tags[:async])) which auto-covers any spawned process, and stdlib Task.async propagates $callers (Elixir >=1.8) which DBConnection.Ownership checks (ownership.ex:54-64). There is NO public Migrator option to inject an owner pid (its Task.async is private/unexported), so an allow-based fix may have nothing to act on. And NO 40P01 stack trace exists anywhere in the repo — the flake is comment-asserted only; :flaky is excluded from default mix test (test_helper.exs:47-55). CONFOUND: D35's audit-dispatch 40P01 fix (a DIFFERENT flake) is UNMERGED on origin/main (60966bdc not an ancestor; dispatcher.ex has no audit_dispatch_async) — a second 40P01 source is STILL LIVE, so slice-3 evidence MUST attribute any hit by stack (Migrator DDL vs Dispatcher.fan_out SELECT), exactly D29's warning."
+          }
+        ],
+        "id": "block-19",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Harness reality (governs slice-3 acceptance). Command: `cd api && CC=/usr/bin/clang mix test`. CI Test step ~5.5min warm; isolated local ~220-248s; under load 14-19 runtime inflated 2.2x with spurious pool-timeouts. This box is CURRENTLY load 53-77 with ~20 worktrees — a naive N>=10 full-suite loop locally is impractical (>1hr) and manufactures noise. Precedent (the already-closed D35 task) treated N>=10 full-suite as CI/lead merge-gated, with the deterministic protective test as PRIMARY proof. The borrow-warm-_build recipe (copy api/_build/test + symlink deps) works. For slice-3 the honest reproduction is a targeted/forced contention repro against Fixture E, not a natural full-suite loop."
+          }
+        ],
+        "id": "block-20",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "CONTRADICTIONS / tensions for DECIDE. (1) Slice-3 premise vs surveys: the fix shape depends ENTIRELY on whether the flake reproduces — Decide MUST re-scope slice-3 acceptance criteria into two distinct claims: (A) Fixture E — repro-or-prove-already-covered, fix only if a real Migrator-owner 40P01 fires; (B) the 6 non-Migrator tests — detag ONLY with N>=10 --include flaky evidence, and if any genuinely flakes for a distinct cause, split it to a NEW backlog task rather than fold it into a vacuous close. (2) atom_count fix: keep async:true + assert_raise rewrite (favored — more precise, sidesteps the async-isolation question) vs serialize. (3) sobelow true dead-count unknown beyond the 3 confirmed CI.System fossils until a fresh regen runs."
+          }
+        ],
+        "id": "block-21",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-22",
+        "level": 3,
+        "text": "Coverage map — checked & FOUND",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 1: content_probe_test.exs, content_probe.ex, content/validation.ex:109, tasks/validation.ex:147, pulse_public_surface_test.exs, rate_limiter.ex, pulse_controller.ex, config/test.exs (test-storm + abuse-rate fixtures), pulse_abuse_drill_test.exs:60 (<=@burst precedent), rate_limit.ex scope hatch, conn_case.ex, test_helper.exs, async-flip commit dd0c27ce --stat. SLICE 2: .sobelow-skips (origin/main 84 lines), sobelow.ex (clear/mark impl), finding.ex (line-anchored hash), utils.ex (source scan), string_to_atom.ex (forced :low), security.yml (advisory), merge-gates.md, mix.exs (no alias), Makefile (no target), #2954 commit 841fc284 + inline-skip sites, titles.ex:366 still live. SLICE 3: codelist_issue_version_test.exs (Fixture E vs A-D), restore_search test + both migration modules, data_case.ex (setup_sandbox + drain), ecto_sql migrator.ex + sandbox.ex, db_connection ownership.ex ($callers), charter D14/D29/D35/D38, D35 commit 60966bdc UNMERGED, test_helper.exs flaky exclude."
+          }
+        ],
+        "id": "block-23",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-24",
+        "level": 3,
+        "text": "Coverage map — checked & NOT FOUND (absences = decisions-in-waiting)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "(1) NO surveyor could run bp full-text prior-art search — every survey hit `bp search: unknown command`. The Barkpark papers/tasks knowledge base was NOT searched for prior art on any slice (the charter + task bodies stood in). Corner unreached: any prior paper specifically on these three flakes. (2) NOBODY RAN ANYTHING — all 12 surveys were read-only. Zero empirical confirmation that any flake reproduces, that the reconcile runs on this toolchain, or that the guard fixture reds. This is precisely why the verify fleet below is RUN-heavy — distrust vacuous green. (3) NO 40P01 stack trace exists in the repo — the migrator flake is comment-asserted only. (4) The other ~80 non-CI.System sobelow lines (Traversal.FileModule ~50, XSS 4, Config 9, SQL 7, DOS 6, RCE 1) were NOT individually checked for deadness — real dead count unknown until a fresh regen. (5) restore_search's actual flake behavior (does it EVER fail, or is the tag purely defensive?) was never executed. (6) The ExUnit sync-loop-vs-async-pool temporal-concurrency claim (load-bearing for 'async:false won't fix atom_count') is asserted from general OTP knowledge, not verified against this repo's Elixir/OTP."
+          }
+        ],
+        "id": "block-25",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-26",
+        "level": 2,
+        "text": "Verify plan — 4 opus assignments IN FLIGHT (all RUN, distrust vacuous green)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V1 [opus, worktree, RUN] — SLICE-3 CRUX: does the migrator 40P01 actually reproduce? In an isolated worktree off origin/main (the 5 target files are byte-identical to origin/main — verify via git diff first), loop codelist Fixture E + restore_search --include flaky (20 seeds) and under concurrent load; capture any 40P01 / DBConnection.OwnershipError and its EXACT stack (Migrator DDL vs distinct cause). Test the shared-mode hypothesis: with DataCase shared mode active, does Fixture E ever fail? If NO repro -> slice-3 reframes to 'prove-already-covered + detag with N>=10 evidence'; if YES -> capture whether owner-pid sharing is the fix or a distinct cause. PROVES the fix shape Decide must pick."
+          }
+        ],
+        "id": "block-27",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V2 [opus, worktree, RUN] — SLICE-2: run the reconcile + guard end-to-end. In a worktree off origin/main: `mix sobelow --clear-skip && mix sobelow --mark-skip-all`, diff regenerated .sobelow-skips vs origin/main's 84 lines — report the REAL live count, confirm the 3 CI.System fossils drop and titles.ex:366 survives, and how many other dead entries prune. Then plant a throwaway non-controller String.to_atom(k) fixture under lib/, run `mix sobelow --skip --exit Low`, confirm NONZERO exit (fresh finding reds), delete fixture + restore baseline. PROVES both the reconcile mechanism and the guard on this exact toolchain."
+          }
+        ],
+        "id": "block-28",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V3 [opus, worktree, RUN] — SLICE-1: prove both fail-before reproductions are constructible. atom_count: force the current line-83 assertion to red (spawn a Task minting a fresh atom in the window, or run alongside an atom-minting async module) and confirm the assert_raise-on-to_existing_atom(key) rewrite is green under the same forcing. pulse: inject Process.sleep(~120ms) between the 4 burst POSTs so a 4th token refills, confirm the current `==3` reds and `<=@burst`+429-present holds. RUN both targeted mix test invocations. PROVES neither slice-1 fix is vacuous-green."
+          }
+        ],
+        "id": "block-29",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V4 [opus, RUN(light)] — SLICE-3 confound + task-ledger re-scope for Decide. Confirm D35's audit_dispatch_async is absent from origin/main (`git show origin/main:api/lib/barkpark/webhooks/dispatcher.ex | grep -c audit_dispatch_async` -> 0), so a second live 40P01 source exists. Confirm the exact @tag:flaky inventory across both slice-3 files and that only Fixture E calls Ecto.Migrator. Draft the re-scoped slice-3 acceptance-criteria wording (crit A Fixture E repro-or-cover; crit B the 6 tests detag-with-evidence, split-if-distinct). Confirm task-felix-migration-ddl-audit-deadlock (D35) is still open so Decide notes the coexisting-unlanded-fix risk. PROVES the ledger reality Decide re-scopes from."
+          }
+        ],
+        "id": "block-30",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Drives tasks: task-felix-suite-order-flakes (S1), task-felix-sobelow-baseline-reconcile (S2), task-felix-migrator-task-sandbox-race (S3). Epic: task-96a908af98698118."
+          }
+        ],
+        "id": "block-31",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Status: DECIDED (building). Decide folded the 4 verify reports + 12 surveys into decisions D39-D44 and cut 3 opus slices. The verify round OVERTURNED two premises baked into the wish — recorded below."
+          }
+        ],
+        "id": "block-32",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-33",
+        "level": 2,
+        "text": "Verification results (proofs > facts > prose)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V1 — SLICE-3 CRUX (migrator 40P01), RUN, 20 seeds. REFUTED the premise twice over. (a) NO 40P01 reproduces: 0/20 seeds, and a repo-wide grep for 40P01|deadlock_detected is EMPTY — the label is comment-only, so 'N>=10 runs 0 40P01' is trivially already met. (b) What reproduces is DETERMINISTIC, not flaky: Fixture E (the ONLY Ecto.Migrator caller, codelist_issue_version_test.exs:207/222) fails 20/20 with a DBConnection.ConnectionError checkout timeout, stack rooted at 'ecto_sql migrator.ex:354 run_maybe_in_transaction <- Task.Supervised.invoke_mfa'. Root cause: the parent holds the migration advisory lock (a transaction) on the single SHARED sandbox conn (data_case.ex:82 shared: not async), so the Migrator's Task.async|>Task.await child queues behind it -> ~970ms checkout timeout. NOT an ownership gap (shared mode already shares the conn; $callers already propagates), so the task's Sandbox.allow fix CANNOT work. PROVEN fix: `migration_lock: false` on the up/down calls -> '5 tests, 0 failures' on seeds 1/7/13 (was 100% failing). The other 6 :flaky tests drive apply_up/1 (no Task/Migrator) and never fail — detag them. All 5 slice-3 files byte-identical to origin/main."
+          }
+        ],
+        "id": "block-34",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V2 — SLICE-2 (sobelow reconcile), RAN end-to-end on Elixir 1.19.5/OTP28 + sobelow 0.14.1. Mechanism WORKS: `mix sobelow --clear-skip` (exit 0, rm baseline) THEN `mix sobelow --mark-skip-all` (exit 0, regenerate) = the live set. But the briefing numbers do NOT hold — the real story is TOOLCHAIN DRIFT: a fresh dev-box regen emits 108 findings, not the 84-line committed baseline; the committed 84-baseline even REDS `mix sobelow --skip --exit Low` on dev (media.ex:408 live vs baselined :400). CI is 1.18.1/OTP27. So the reconcile MUST run on the CI toolchain or it re-mis-baselines. The '193 lines / 63% dead' + '~80 dead entries' hypotheses are REFUTED — the baseline is ~93% live, only 6 dead fossils (3 CI.System line-shifted by #2954 + 3 Traversal). GUARD PROVEN: planting `def leak(k), do: String.to_atom(k)` -> `mix sobelow --skip --exit Low` exit 1 (DOS.StringToAtom :low); removing it -> exit 0. Gate is ADVISORY (continue-on-error)."
+          }
+        ],
+        "id": "block-35",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V3 — SLICE-1 (fail-before repros), RUN. content_probe: FULLY constructible — forcing a concurrent atom mint reds line-83 (left 36102 right 36097); the assert_raise-on-to_existing_atom rewrite greens (13 tests 0 failures) under the same forcing, async:true kept. pulse: the repro AS SPECIFIED (Process.sleep 120ms + <=@burst on test-storm) is NOT constructible — test-storm is 10 tok/sec, 120ms over-refills to 1.2 tokens so all 4 POSTs return 200 [200,200,200,200], reding BOTH ==3 AND <=@burst and removing the 429. CORRECT fix: drive the burst on the slow-refill abuse-rate channel (0.1 tok/sec, config/test.exs:116-120) asserting two_hundreds<=@burst + 429 in statuses, mirroring the latency-immune pulse_abuse_drill_test.exs:55-62."
+          }
+        ],
+        "id": "block-36",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V4 — SLICE-3 CONFOUND, RUN(light). D35's audit-dispatch 40P01 fix is UNMERGED on origin/main — proven three ways: grep audit_dispatch_async=0 (before+after fetch), audit_dispatch_test.exs does not exist on origin/main, task-felix-migration-ddl-audit-deadlock lifecycle=open (crit2 N>=10 + crit3 merge both unmet). The audit fan_out (dispatcher.ex:98-108) still does an unawaited Task.Supervisor.start_child; its documented victim extend_workspace_delete_cascade_test.exs shares slice-3's migrations test dir. So a live 40P01 CAN fire during slice-3's gate and be mis-charged to the migrator — attribution by stack trace is mandatory. Only 1 of 7 :flaky tests calls Ecto.Migrator (Fixture E); the other 6 drive apply_up/1 and are tagged by association."
+          }
+        ],
+        "id": "block-37",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Coverage / not-founds: bp full-text prior-art search was unreachable from every verifier ('unknown command search') — the CI-toolchain caveat for slice 2 may already live in a prior sobelow task/PR #2956 discussion; the builder should bp-search before committing an approach. No verifier ran the FULL suite N>=10 (slice-3's default-suite acceptance is the builder's/lead's gate)."
+          }
+        ],
+        "id": "block-38",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-39",
+        "level": 2,
+        "text": "Decisions (D39-D44 — mirror the charter)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D39 — Wave 8 = FINISH-THE-CI-HARDENING-BACKLOG: exactly the 3 OPEN D38-seeded children, all opus (Fable exhausted), each its own worktree/PR branched from ORIGIN/main with a fail-before reproduction (a flake fix with no reproduction is vacuous-green and rejected). No re-audit, no net-new."
+          }
+        ],
+        "id": "block-40",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D40 — Slice 1 ships BOTH proven fixes: content_probe = key-scoped assert_raise (drop the global atom_count read, keep async:true); pulse = RETARGET the burst-cap test onto the slow-refill abuse-rate channel with <=@burst + 429 (the wish's sleep-force-on-test-storm is a RED test per V3). Slice 1 is the ACTUAL merge-train reddener (un-tagged, runs in the default gate) -> priority raised to P3."
+          }
+        ],
+        "id": "block-41",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D41 — Slice 2: reconcile = clear-skip THEN mark-skip-all, but it MUST run on the CI toolchain (1.18.1/OTP27) and upload the reconciled baseline as an artifact for human review — NOT a dev-box make target that commits a locally-regenerated baseline (toolchain drift re-mis-baselines). The '193/63% dead' figure is stale (origin/main = 84 lines, ~93% live). Gate is ADVISORY — improves hygiene, never blocks a merge; do NOT flip it to blocking (that is backlog)."
+          }
+        ],
+        "id": "block-42",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D42 — Slice 3 PREMISE REFUTED, task rewritten: there is NO 40P01 (comment-only); Fixture E fails DETERMINISTICALLY with a lock-contention checkout timeout; the Sandbox.allow fix cannot work (no ownership gap in shared mode). Proven fix = migration_lock:false on Fixture E; the other 6 apply_up/1 tests never fail -> detag. Every observed 40P01 stack-attributed (a dispatch_audit_async/fan_out hit is D35's, unmerged — not counted). These :flaky tests are excluded by default so they are NOT the merge-train symptom."
+          }
+        ],
+        "id": "block-43",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D43 — Slice-3 acceptance criteria rewritten to the corrected diagnosis: [0] Fixture E migration_lock:false with the captured deterministic ConnectionError as fail-before; [1] detag the 6 apply_up tests on N>=10 --include-flaky evidence, stack-attributed, file a new backlog child if any still flakes for a distinct cause; [2] merge gate (lead)."
+          }
+        ],
+        "id": "block-44",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D44 — Guardrails (unchanged from D37): all opus, branch from ORIGIN/main, main checkout stays on main, isolated worktrees, CC=/usr/bin/clang, borrow-warm _build. The 3 slices are file-disjoint -> dispatch in parallel. Backlog seeded: task-felix-pulse-ratelimit-scope-isolation (Pulse bypasses the per-test bucket scope), task-felix-sobelow-gate-blocking-eval (flip the advisory gate to blocking once the CI reconcile lands)."
+          }
+        ],
+        "id": "block-45",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-46",
+        "level": 2,
+        "text": "Wave plan — 3 opus slices IN FLIGHT (file-disjoint, parallel)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 1 [P3, opus] task-felix-suite-order-flakes — surface: Elixir test suite. Files: api/test/barkpark/plugins/content_probe_test.exs, api/test/barkpark_web/pulse_public_surface_test.exs. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark/plugins/content_probe_test.exs test/barkpark_web/pulse_public_surface_test.exs."
+          }
+        ],
+        "id": "block-47",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 2 [P4, opus] task-felix-sobelow-baseline-reconcile — surface: CI / sobelow tooling. Files: api/scripts/ (new reconcile + guard scripts), .github/workflows/security.yml. Does NOT commit a dev-regenerated api/.sobelow-skips. Local gate (dev toolchain): the guard reds a planted finding — cd api && CC=/usr/bin/clang mix sobelow --skip --exit Low exits 1 with the fixture, 0 without; the CI-toolchain reconcile runs as a security.yml job step uploading the artifact."
+          }
+        ],
+        "id": "block-48",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 3 [P4, opus] task-felix-migrator-task-sandbox-race — surface: Elixir migration test suite. Files: api/test/barkpark/repo/migrations/codelist_issue_version_test.exs, api/test/barkpark/repo/migrations/restore_search_null_dataset_dedup_test.exs. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark/repo/migrations/codelist_issue_version_test.exs test/barkpark/repo/migrations/restore_search_null_dataset_dedup_test.exs --include flaky."
+          }
+        ],
+        "id": "block-49",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Drives tasks: task-felix-suite-order-flakes (S1), task-felix-sobelow-baseline-reconcile (S2), task-felix-migrator-task-sandbox-race (S3), all children of task-96a908af98698118. Backlog children seeded this wave: task-felix-pulse-ratelimit-scope-isolation, task-felix-sobelow-gate-blocking-eval. Confound to clear separately: D35 task-felix-migration-ddl-audit-deadlock must merge (its 40P01 source is still live on origin/main)."
+          }
+        ],
+        "id": "block-50",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-51",
+        "level": 2,
+        "text": "Review debrief (REVIEWED 2026-07-13) — wave complete, grade A−",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Status correction (supersedes the SURVEYING banner above): Wave 8 is REVIEWED and complete. 2 of the 3 slices were delivered green, adversarially reviewed, and had their gates re-run GREEN on the reviewer's final state; the 3rd (sobelow reconcile) STALLED — not delivered as a green branch — but left a recoverable committed candidate. Overall grade A−. Reviewer made ZERO code changes (both delivered slices were correct as built); the only fixes were to the task ledger."
+          }
+        ],
+        "id": "block-52",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 1 — task-felix-suite-order-flakes — FINAL BRANCH loop-epic/deflake-suite-order-flakes-content-probe-0 (SHIPPED, correct). content_probe: the whole-VM :erlang.system_info(:atom_count)==before read (a false flake under async:true) was replaced with a KEY-SCOPED assert_raise ArgumentError on String.to_existing_atom(key) after content_get(...)==nil — structurally immune to any co-scheduled atom mint, and load-bearing (it fails iff content_get mints the key's atom). pulse burst-cap: retargeted off the fast-refill test-storm channel (10 tok/sec) onto the slow-refill abuse-rate channel (0.1 tok/sec) via new burst_conn/burst_post helpers, asserted as latency-immune BOUNDS (1 <= two_hundreds <= @burst AND 429 in statuses AND limited.status==429), mirroring pulse_abuse_drill_test.exs — NOT the wish's sleep-force-on-test-storm (V3-proven RED). Reviewer re-ran the gate: 26 tests/0 failures; seeds 1/42/999 all clean; confirmed IP {198,51,100,42} is unique to this test (per-IP bucket, both files async:false — no cross-file bleed). Merge-gated criterion[2] stays OPEN for the lead."
+          }
+        ],
+        "id": "block-53",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 3 — task-felix-migrator-task-sandbox-race — FINAL BRANCH loop-epic/migrator-ddl-deflake-migration-lock-fals-2 (SHIPPED, correct, premise-refuted build honored). Fixture E (the ONLY Ecto.Migrator caller) gets migration_lock:false on its up AND down calls; the 6 apply_up-driven tests were detagged from :flaky into the default suite. Reviewer INDEPENDENTLY re-ran the fail-before: WITHOUT migration_lock:false Fixture E fails DETERMINISTICALLY with (DBConnection.ConnectionError) checkout timeout after 981ms, stack rooted at ecto_sql migrator.ex:354 run_maybe_in_transaction <- Task.Supervised — a lock-contention timeout, NOT a 40P01 (confirming V1's refutation of the task premise); WITH the fix it passes seeds 1/7/42/100/555. Default suite (no --include flaky) = 6 tests/0 failures with E excluded (1 excluded); --include flaky = 7/0. Merge-gated criterion[2] OPEN for the lead. IMPORTANT: the D35 audit-dispatch 40P01 SOURCE (task-felix-migration-ddl-audit-deadlock) is still UNMERGED on origin/main — the lead must merge it separately to clear the live 40P01; slice 3 does not depend on it (slice-3 touches only DDL test files, never the audit path)."
+          }
+        ],
+        "id": "block-54",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SLICE 2 — task-felix-sobelow-baseline-reconcile — STALLED (not delivered as a green branch). A concurrent worker (worker-1) held then lapsed the claim, so this wave's dispatched builder correctly REFUSED to stomp the live claim / duplicate near-complete work on an identical file set — it made zero edits. The task honestly reads lifecycle=open with no active claim. HANDOFF: worker-1 committed a FULL candidate at SHA b48fb6c1 (\"fix(ci): reconcile Sobelow baseline in pinned toolchain\") touching the exact slice file set — .github/workflows/security.yml, api/scripts/sobelow-baseline-reconcile.sh, api/scripts/sobelow-fresh-finding-guard.sh, docs/ops/merge-gates.md. It was dangling on no named branch (GC-vulnerable); the reviewer preserved it as local branch wave8-carryover/sobelow-reconcile-candidate (based on 607aea46 — one CLI-only commit behind origin/main tip, rebases clean) and recorded the recovery pointer on the task's reviewer_note. NEXT WAVE: recover + review that candidate (it is NOT reviewer-verified) rather than dispatch a duplicate builder."
+          }
+        ],
+        "id": "block-55",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "LEDGER AUDIT: both delivered slices carried the IDENTICAL off-by-one stamp bug seen in wave 7 — builders passed a 1-based --criterion into the 0-based acceptance_criteria array, so evidence was shifted +1 and the lead-owned MERGE GATE criterion was falsely met=true while the first real proof read met=false/empty. Reviewer re-patched both to the honest vector via bp doc patch + publish (S1: content_probe met+evidence / pulse met+evidence / MERGE open; S3: Fixture-E-fail-before met+evidence / detag-6 met+evidence / MERGE open), each with a reviewer re-verification note appended. Both green tasks lifecycle=in_progress (correct — merge-gated). The sobelow task is honestly open with the candidate pointer. Backlog children task-felix-pulse-ratelimit-scope-isolation and task-felix-sobelow-gate-blocking-eval confirmed PUBLISHED. No out-of-wave tasks were touched."
+          }
+        ],
+        "id": "block-56",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "GRADE: A−. What earns it: two slices are exemplary CI-hardening — each names a concrete failure mode, each ships a fail-before reproduction the reviewer independently re-ran RED-without / GREEN-with (slice 3's is a genuine deterministic 981ms checkout-timeout repro; slice 1's atom_count fix is structurally immune and its pulse fix latency-immune), zero cosmetic churn, and both correctly HONORED the wave's premise-refutations over the wish's literal (wrong) prescriptions — distrust-vacuous-green satisfied on both. What holds it below A: the third slice (sobelow reconcile — the \"only-growing baseline\" half of the wish) did NOT land this wave (a recoverable candidate exists, but it is unverified), so completeness against the full 3-part wish is 2/3; and both delivered slices shipped the recurring off-by-one ledger bug that the reviewer had to hand-fix — a process defect re-appearing wave over wave."
+          }
+        ],
+        "id": "block-57",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "NEXT WAVE / lead actions: (a) merge the two green PRs (Elixir-gated) and close their MERGE criteria; (b) merge task-felix-migration-ddl-audit-deadlock (D35) to clear the live 40P01 source before relying on any full-suite --include-flaky run; (c) recover wave8-carryover/sobelow-reconcile-candidate, review it (currently unverified), and land the reconcile-not-append regen + fresh-finding guard; (d) fix the recurring builder off-by-one --criterion stamp at the tooling level so reviewers stop hand-patching every wave."
+          }
+        ],
+        "id": "block-58",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix Pristine — Wave 8 (CI-hardening finish)</h1><p>Status: SURVEYING. This is the wave&#39;s living story — each phase appends. Wave 7 landed 3 slices (#2954/#2956 + phantom-media #2955), all MERGED 2026-07-13; this wave does NOT re-handle them.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The wish</h2><p>Kill the flaky / only-growing test infrastructure that has been reddening merge trains. Cut this wave from the OPEN backlog children the wave-7 review filed. Three test-infra slices, each its own opus worktree/PR with a fail-before protective test that REPRODUCES the flake (a flake fix with no reproduction is vacuous-green); gates green (CC=/usr/bin/clang mix test). Finishing over net-new; every change names a concrete failure mode; zero cosmetic churn.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Strategic direction</h2><p>Finished experience: a rebased PR&#39;s Test gate reds ONLY on its own change — never on infrastructure noise. Today three pre-existing hazards poison the merge train: (1) an order-dependent global-atom-table race + a wall-clock rate-limiter-window flake that surface as intermittent 429s; (2) a Sobelow baseline that only GROWS via append-only --mark-skip-all, so a code line-shift drifts it and re-adds dead fossils; (3) a sibling 40P01 migration-DDL deadlock from an un-Sandbox.allow&#39;d Ecto.Migrator connection Task. This is a FINISH-THE-BACKLOG wave: build exactly the three filed children, no fresh audit, no scope creep.</p><p>The quality bar (Kinsta/Vercel): a green suite means the code is good — not that the dice landed right. Every slice must convert a probabilistic red into a deterministic one. The reproduction test is the deliverable&#39;s spine: seed-pinned, order-forced, or contention-forced so it reds BEFORE the fix and greens AFTER. A fix whose test cannot reproduce the flake is rejected as vacuous-green.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The three slices (all opus — Fable is exhausted this wave)</h2><p>SLICE 1 — task-felix-suite-order-flakes (P4). content_probe_test.exs:83 asserts :erlang.system_info(:atom_count) == before under async:true — it races the GLOBAL VM atom table against every concurrent test (83136 vs 83135). pulse_public_surface_test.exs:122 asserts exactly 3 of N concurrent burst requests get 200; a wall-clock rate-limiter window occasionally lets 4 through. Fix direction: stop asserting a global atom-count delta under async (serialize the one assertion or make it tolerant to concurrent minting), and assert &lt;=N (or drive the limiter deterministically) for the burst. Reproduction: force concurrency/contention so the flake reds before the fix.</p><p>SLICE 2 — task-felix-sobelow-baseline-reconcile (P3, ADVISORY gate — Sobelow is continue-on-error in security.yml, so this is hygiene, never a merge blocker). mix sobelow --mark-skip-all is APPEND-ONLY: it never drops a fingerprint whose finding has moved/disappeared, so api/.sobelow-skips only grows and a line-shift drifts the baseline. origin/main is currently 84 lines (already pruned by #2956 from 193 — the task&#39;s &#39;193 lines / 63% dead&#39; figure is STALE, re-measure on a fresh regen). Ship a reconcile-not-append regen step (make/CI target or small script) that REPLACES the baseline with only currently-live fingerprints, and a guard proving a freshly-added un-skipped finding STILL reds mix sobelow --skip --exit Low (no blanket-suppress).</p><p>SLICE 3 — task-felix-migrator-task-sandbox-race (P3). Two @tag :flaky migration tests (codelist_issue_version_test.exs, restore_search_null_dataset_dedup_test.exs) are excluded by default for a sandbox-escaping-Task bug: Ecto.Migrator.up/3 spawns its OWN connection Task for the migration body BEFORE Sandbox.allow/3 shares the owner pid, so it races on checkout, intermittent 40P01. DISTINCT from wave-7&#39;s D35 audit-dispatch deadlock fix (that toggle covers Dispatcher.fan_out, NOT Migrator internals). Fix (as the tests&#39; own comments prescribe): share the sandbox owner pid with the Migrator&#39;s spawned task, then drop :flaky. Acceptance = N&gt;=10 full-suite runs with 0 40P01. NOTE: restore_search&#39;s comment says it drives via apply_up/1 / apply_down/1 (NOT Ecto.Migrator) — surveyor must confirm whether that test actually hits the Migrator-spawned-Task path, because the two tests may need different treatment.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Guardrails (from the lead + charter)</h2><p>Branch from ORIGIN/main — the local checkout is DIVERGED ~112 ahead with omx commits; never build from it. Main checkout stays on main; all builds in isolated worktrees. CC=/usr/bin/clang (cc is a Claude wrapper). mix test is NOT blocked by dev-boot OOM/registry blockers (test.exs disables the codelist seeder). Every builder_model = opus; decompose a too-hard slice into smaller opus slices, NEVER Fable, NEVER Haiku. Publish wall: content.tags = 1-12 single-line {tag, distinct strength 1-100, rationale &gt;=20 chars} with registry-known tags. Charter is the rotating slot bp-cloud-epic-charter.md (holds Felix); Decide commits it AND ensures it reaches origin/main; never pipe cherry-pick to tail in an &amp;&amp; chain.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Survey plan (in flight)</h2><p>Casting a wide net across the three slices: exact flake mechanisms + reproduction levers, the sandbox/DataCase setup seam, Sobelow tooling seam + how other Elixir shops reconcile baselines, prior art in Barkpark papers/tasks (epic tree + wave-5/6/7 charter decisions D14/D29/D35), and adjacent constraints (async:true flip history, ExUnit.OnExitHandler ownership hazard from D14). Each question and its why is enumerated in the survey assignments.</p><p>Digest appends the survey digest + verify plan here BEFORE verifiers fly. Decide appends decisions + wave plan BEFORE builders fly. Review closes this story as the debrief. Slices driven: task-felix-suite-order-flakes, task-felix-sobelow-baseline-reconcile, task-felix-migrator-task-sandbox-race. Epic: task-96a908af98698118.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Survey digest (12 reports folded — DIGEST phase)</h2><p>What is now ESTABLISHED, file:line-anchored. SLICE 1 mechanism is fully pinned with in-repo fix precedent. content_probe_test.exs:9 is async:true; line 81-83 asserts GLOBAL :erlang.system_info(:atom_count) unchanged around a content_get call. content_get is provably atom-safe (content_probe.ex:82-96 — only String.to_existing_atom + rescue), so the delta comes from ANY other concurrent test minting an atom on the shared VM table (e.g. content/validation.ex:109, tasks/validation.ex:147, both String.to_atom). Fix: replace the global-counter check with a key-specific proof — assert_raise ArgumentError on String.to_existing_atom(key) — deterministic under any scheduling, keeps async:true. Flipping to async:false is NOT a reliable fix (ExUnit sync-loop is not temporally isolated from the async pool). pulse_public_surface_test.exs:122 asserts exactly 3-of-4 burst POSTs=200; the limiter is a continuous-refill token bucket (rate_limiter.ex:50-68, System.monotonic_time, no clock seam), test-storm fixture burst=3 refill=10 tok/sec, so ~100ms of real round-trip latency refills a 4th token. Fix: assert &lt;=@burst AND require a 429 present — sibling pulse_abuse_drill_test.exs:60 ALREADY does `assert two_hundreds &lt;= @burst`. Both slice-1 files are OUTSIDE the async-flip&#39;s 54-file blast radius (dd0c27ce --stat) and pulse is the charter D4 keep-serial exemplar — zero collision risk.</p><p>SLICE 2 root cause + native mechanism confirmed from dep source. --mark-skip-all opens api/.sobelow-skips in :append mode (sobelow.ex:512), never prunes; the fingerprint is phash2([type,source,filename,vuln_line_no]) (finding.ex:53-63) — line-anchored, so any line shift orphans an entry. No native single-flag reconcile exists: the reconcile IS `mix sobelow --clear-skip` (File.rm!, sobelow.ex:463-471) THEN `mix sobelow --mark-skip-all` (regenerate from live findings only). origin/main baseline is 84 lines (the task&#39;s 193/63%-dead figure is STALE — #2956 already pruned to 84). At least 3 confirmed dead CI.System fossils from #2954 (validator.ex:72, self_update/runner.ex:114, studio_chat/probe.ex:197 — the live code moved to inline `# sobelow_skip` at :127/:171/:217); the 4th CI.System entry titles.ex:366 is still LIVE. Guard test is cheap: sobelow scans source directly (utils.ex:34-36, no compile), and DOS.StringToAtom forces :low confidence for any non-controller module (string_to_atom.ex:20) — plant a throwaway non-controller `def leak(k), do: String.to_atom(k)` fixture, prove `mix sobelow --skip --exit Low` reds, delete it. The gate is ADVISORY (security.yml continue-on-error) — never blocks merge.</p><p>SLICE 3 — the task PREMISE is factually contested by a UNANIMOUS survey finding, and this is the wave&#39;s crux. The task says BOTH files share the Ecto.Migrator-spawned-Task race and BOTH should drop @tag :flaky. FALSE: only ONE test — codelist_issue_version_test.exs Fixture E (lines 190-244) — actually calls Ecto.Migrator.up/3. Codelist Fixtures A-D and BOTH restore_search tests drive via apply_up/1 directly (in-process, same sandbox connection, no Task spawned); restore_search&#39;s own comment (lines 39-41) says it AVOIDS Migrator on purpose. So :flaky on 6 of 7 tests looks defensive/copy-pasted, not evidence of this race. DEEPER CONTEST: the Migrator-race THEORY may be wrong even for Fixture E — DataCase already puts async:false tests in Sandbox SHARED mode (start_owner!(shared: not tags[:async])) which auto-covers any spawned process, and stdlib Task.async propagates $callers (Elixir &gt;=1.8) which DBConnection.Ownership checks (ownership.ex:54-64). There is NO public Migrator option to inject an owner pid (its Task.async is private/unexported), so an allow-based fix may have nothing to act on. And NO 40P01 stack trace exists anywhere in the repo — the flake is comment-asserted only; :flaky is excluded from default mix test (test_helper.exs:47-55). CONFOUND: D35&#39;s audit-dispatch 40P01 fix (a DIFFERENT flake) is UNMERGED on origin/main (60966bdc not an ancestor; dispatcher.ex has no audit_dispatch_async) — a second 40P01 source is STILL LIVE, so slice-3 evidence MUST attribute any hit by stack (Migrator DDL vs Dispatcher.fan_out SELECT), exactly D29&#39;s warning.</p><p>Harness reality (governs slice-3 acceptance). Command: `cd api &amp;&amp; CC=/usr/bin/clang mix test`. CI Test step ~5.5min warm; isolated local ~220-248s; under load 14-19 runtime inflated 2.2x with spurious pool-timeouts. This box is CURRENTLY load 53-77 with ~20 worktrees — a naive N&gt;=10 full-suite loop locally is impractical (&gt;1hr) and manufactures noise. Precedent (the already-closed D35 task) treated N&gt;=10 full-suite as CI/lead merge-gated, with the deterministic protective test as PRIMARY proof. The borrow-warm-_build recipe (copy api/_build/test + symlink deps) works. For slice-3 the honest reproduction is a targeted/forced contention repro against Fixture E, not a natural full-suite loop.</p><p>CONTRADICTIONS / tensions for DECIDE. (1) Slice-3 premise vs surveys: the fix shape depends ENTIRELY on whether the flake reproduces — Decide MUST re-scope slice-3 acceptance criteria into two distinct claims: (A) Fixture E — repro-or-prove-already-covered, fix only if a real Migrator-owner 40P01 fires; (B) the 6 non-Migrator tests — detag ONLY with N&gt;=10 --include flaky evidence, and if any genuinely flakes for a distinct cause, split it to a NEW backlog task rather than fold it into a vacuous close. (2) atom_count fix: keep async:true + assert_raise rewrite (favored — more precise, sidesteps the async-isolation question) vs serialize. (3) sobelow true dead-count unknown beyond the 3 confirmed CI.System fossils until a fresh regen runs.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Coverage map — checked &amp; FOUND</h3><p>SLICE 1: content_probe_test.exs, content_probe.ex, content/validation.ex:109, tasks/validation.ex:147, pulse_public_surface_test.exs, rate_limiter.ex, pulse_controller.ex, config/test.exs (test-storm + abuse-rate fixtures), pulse_abuse_drill_test.exs:60 (&lt;=@burst precedent), rate_limit.ex scope hatch, conn_case.ex, test_helper.exs, async-flip commit dd0c27ce --stat. SLICE 2: .sobelow-skips (origin/main 84 lines), sobelow.ex (clear/mark impl), finding.ex (line-anchored hash), utils.ex (source scan), string_to_atom.ex (forced :low), security.yml (advisory), merge-gates.md, mix.exs (no alias), Makefile (no target), #2954 commit 841fc284 + inline-skip sites, titles.ex:366 still live. SLICE 3: codelist_issue_version_test.exs (Fixture E vs A-D), restore_search test + both migration modules, data_case.ex (setup_sandbox + drain), ecto_sql migrator.ex + sandbox.ex, db_connection ownership.ex ($callers), charter D14/D29/D35/D38, D35 commit 60966bdc UNMERGED, test_helper.exs flaky exclude.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Coverage map — checked &amp; NOT FOUND (absences = decisions-in-waiting)</h3><p>(1) NO surveyor could run bp full-text prior-art search — every survey hit `bp search: unknown command`. The Barkpark papers/tasks knowledge base was NOT searched for prior art on any slice (the charter + task bodies stood in). Corner unreached: any prior paper specifically on these three flakes. (2) NOBODY RAN ANYTHING — all 12 surveys were read-only. Zero empirical confirmation that any flake reproduces, that the reconcile runs on this toolchain, or that the guard fixture reds. This is precisely why the verify fleet below is RUN-heavy — distrust vacuous green. (3) NO 40P01 stack trace exists in the repo — the migrator flake is comment-asserted only. (4) The other ~80 non-CI.System sobelow lines (Traversal.FileModule ~50, XSS 4, Config 9, SQL 7, DOS 6, RCE 1) were NOT individually checked for deadness — real dead count unknown until a fresh regen. (5) restore_search&#39;s actual flake behavior (does it EVER fail, or is the tag purely defensive?) was never executed. (6) The ExUnit sync-loop-vs-async-pool temporal-concurrency claim (load-bearing for &#39;async:false won&#39;t fix atom_count&#39;) is asserted from general OTP knowledge, not verified against this repo&#39;s Elixir/OTP.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verify plan — 4 opus assignments IN FLIGHT (all RUN, distrust vacuous green)</h2><p>V1 [opus, worktree, RUN] — SLICE-3 CRUX: does the migrator 40P01 actually reproduce? In an isolated worktree off origin/main (the 5 target files are byte-identical to origin/main — verify via git diff first), loop codelist Fixture E + restore_search --include flaky (20 seeds) and under concurrent load; capture any 40P01 / DBConnection.OwnershipError and its EXACT stack (Migrator DDL vs distinct cause). Test the shared-mode hypothesis: with DataCase shared mode active, does Fixture E ever fail? If NO repro -&gt; slice-3 reframes to &#39;prove-already-covered + detag with N&gt;=10 evidence&#39;; if YES -&gt; capture whether owner-pid sharing is the fix or a distinct cause. PROVES the fix shape Decide must pick.</p><p>V2 [opus, worktree, RUN] — SLICE-2: run the reconcile + guard end-to-end. In a worktree off origin/main: `mix sobelow --clear-skip &amp;&amp; mix sobelow --mark-skip-all`, diff regenerated .sobelow-skips vs origin/main&#39;s 84 lines — report the REAL live count, confirm the 3 CI.System fossils drop and titles.ex:366 survives, and how many other dead entries prune. Then plant a throwaway non-controller String.to_atom(k) fixture under lib/, run `mix sobelow --skip --exit Low`, confirm NONZERO exit (fresh finding reds), delete fixture + restore baseline. PROVES both the reconcile mechanism and the guard on this exact toolchain.</p><p>V3 [opus, worktree, RUN] — SLICE-1: prove both fail-before reproductions are constructible. atom_count: force the current line-83 assertion to red (spawn a Task minting a fresh atom in the window, or run alongside an atom-minting async module) and confirm the assert_raise-on-to_existing_atom(key) rewrite is green under the same forcing. pulse: inject Process.sleep(~120ms) between the 4 burst POSTs so a 4th token refills, confirm the current `==3` reds and `&lt;=@burst`+429-present holds. RUN both targeted mix test invocations. PROVES neither slice-1 fix is vacuous-green.</p><p>V4 [opus, RUN(light)] — SLICE-3 confound + task-ledger re-scope for Decide. Confirm D35&#39;s audit_dispatch_async is absent from origin/main (`git show origin/main:api/lib/barkpark/webhooks/dispatcher.ex | grep -c audit_dispatch_async` -&gt; 0), so a second live 40P01 source exists. Confirm the exact @tag:flaky inventory across both slice-3 files and that only Fixture E calls Ecto.Migrator. Draft the re-scoped slice-3 acceptance-criteria wording (crit A Fixture E repro-or-cover; crit B the 6 tests detag-with-evidence, split-if-distinct). Confirm task-felix-migration-ddl-audit-deadlock (D35) is still open so Decide notes the coexisting-unlanded-fix risk. PROVES the ledger reality Decide re-scopes from.</p><p>Drives tasks: task-felix-suite-order-flakes (S1), task-felix-sobelow-baseline-reconcile (S2), task-felix-migrator-task-sandbox-race (S3). Epic: task-96a908af98698118.</p><p>Status: DECIDED (building). Decide folded the 4 verify reports + 12 surveys into decisions D39-D44 and cut 3 opus slices. The verify round OVERTURNED two premises baked into the wish — recorded below.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verification results (proofs &gt; facts &gt; prose)</h2><p>V1 — SLICE-3 CRUX (migrator 40P01), RUN, 20 seeds. REFUTED the premise twice over. (a) NO 40P01 reproduces: 0/20 seeds, and a repo-wide grep for 40P01|deadlock_detected is EMPTY — the label is comment-only, so &#39;N&gt;=10 runs 0 40P01&#39; is trivially already met. (b) What reproduces is DETERMINISTIC, not flaky: Fixture E (the ONLY Ecto.Migrator caller, codelist_issue_version_test.exs:207/222) fails 20/20 with a DBConnection.ConnectionError checkout timeout, stack rooted at &#39;ecto_sql migrator.ex:354 run_maybe_in_transaction &lt;- Task.Supervised.invoke_mfa&#39;. Root cause: the parent holds the migration advisory lock (a transaction) on the single SHARED sandbox conn (data_case.ex:82 shared: not async), so the Migrator&#39;s Task.async|&gt;Task.await child queues behind it -&gt; ~970ms checkout timeout. NOT an ownership gap (shared mode already shares the conn; $callers already propagates), so the task&#39;s Sandbox.allow fix CANNOT work. PROVEN fix: `migration_lock: false` on the up/down calls -&gt; &#39;5 tests, 0 failures&#39; on seeds 1/7/13 (was 100% failing). The other 6 :flaky tests drive apply_up/1 (no Task/Migrator) and never fail — detag them. All 5 slice-3 files byte-identical to origin/main.</p><p>V2 — SLICE-2 (sobelow reconcile), RAN end-to-end on Elixir 1.19.5/OTP28 + sobelow 0.14.1. Mechanism WORKS: `mix sobelow --clear-skip` (exit 0, rm baseline) THEN `mix sobelow --mark-skip-all` (exit 0, regenerate) = the live set. But the briefing numbers do NOT hold — the real story is TOOLCHAIN DRIFT: a fresh dev-box regen emits 108 findings, not the 84-line committed baseline; the committed 84-baseline even REDS `mix sobelow --skip --exit Low` on dev (media.ex:408 live vs baselined :400). CI is 1.18.1/OTP27. So the reconcile MUST run on the CI toolchain or it re-mis-baselines. The &#39;193 lines / 63% dead&#39; + &#39;~80 dead entries&#39; hypotheses are REFUTED — the baseline is ~93% live, only 6 dead fossils (3 CI.System line-shifted by #2954 + 3 Traversal). GUARD PROVEN: planting `def leak(k), do: String.to_atom(k)` -&gt; `mix sobelow --skip --exit Low` exit 1 (DOS.StringToAtom :low); removing it -&gt; exit 0. Gate is ADVISORY (continue-on-error).</p><p>V3 — SLICE-1 (fail-before repros), RUN. content_probe: FULLY constructible — forcing a concurrent atom mint reds line-83 (left 36102 right 36097); the assert_raise-on-to_existing_atom rewrite greens (13 tests 0 failures) under the same forcing, async:true kept. pulse: the repro AS SPECIFIED (Process.sleep 120ms + &lt;=@burst on test-storm) is NOT constructible — test-storm is 10 tok/sec, 120ms over-refills to 1.2 tokens so all 4 POSTs return 200 [200,200,200,200], reding BOTH ==3 AND &lt;=@burst and removing the 429. CORRECT fix: drive the burst on the slow-refill abuse-rate channel (0.1 tok/sec, config/test.exs:116-120) asserting two_hundreds&lt;=@burst + 429 in statuses, mirroring the latency-immune pulse_abuse_drill_test.exs:55-62.</p><p>V4 — SLICE-3 CONFOUND, RUN(light). D35&#39;s audit-dispatch 40P01 fix is UNMERGED on origin/main — proven three ways: grep audit_dispatch_async=0 (before+after fetch), audit_dispatch_test.exs does not exist on origin/main, task-felix-migration-ddl-audit-deadlock lifecycle=open (crit2 N&gt;=10 + crit3 merge both unmet). The audit fan_out (dispatcher.ex:98-108) still does an unawaited Task.Supervisor.start_child; its documented victim extend_workspace_delete_cascade_test.exs shares slice-3&#39;s migrations test dir. So a live 40P01 CAN fire during slice-3&#39;s gate and be mis-charged to the migrator — attribution by stack trace is mandatory. Only 1 of 7 :flaky tests calls Ecto.Migrator (Fixture E); the other 6 drive apply_up/1 and are tagged by association.</p><p>Coverage / not-founds: bp full-text prior-art search was unreachable from every verifier (&#39;unknown command search&#39;) — the CI-toolchain caveat for slice 2 may already live in a prior sobelow task/PR #2956 discussion; the builder should bp-search before committing an approach. No verifier ran the FULL suite N&gt;=10 (slice-3&#39;s default-suite acceptance is the builder&#39;s/lead&#39;s gate).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Decisions (D39-D44 — mirror the charter)</h2><p>D39 — Wave 8 = FINISH-THE-CI-HARDENING-BACKLOG: exactly the 3 OPEN D38-seeded children, all opus (Fable exhausted), each its own worktree/PR branched from ORIGIN/main with a fail-before reproduction (a flake fix with no reproduction is vacuous-green and rejected). No re-audit, no net-new.</p><p>D40 — Slice 1 ships BOTH proven fixes: content_probe = key-scoped assert_raise (drop the global atom_count read, keep async:true); pulse = RETARGET the burst-cap test onto the slow-refill abuse-rate channel with &lt;=@burst + 429 (the wish&#39;s sleep-force-on-test-storm is a RED test per V3). Slice 1 is the ACTUAL merge-train reddener (un-tagged, runs in the default gate) -&gt; priority raised to P3.</p><p>D41 — Slice 2: reconcile = clear-skip THEN mark-skip-all, but it MUST run on the CI toolchain (1.18.1/OTP27) and upload the reconciled baseline as an artifact for human review — NOT a dev-box make target that commits a locally-regenerated baseline (toolchain drift re-mis-baselines). The &#39;193/63% dead&#39; figure is stale (origin/main = 84 lines, ~93% live). Gate is ADVISORY — improves hygiene, never blocks a merge; do NOT flip it to blocking (that is backlog).</p><p>D42 — Slice 3 PREMISE REFUTED, task rewritten: there is NO 40P01 (comment-only); Fixture E fails DETERMINISTICALLY with a lock-contention checkout timeout; the Sandbox.allow fix cannot work (no ownership gap in shared mode). Proven fix = migration_lock:false on Fixture E; the other 6 apply_up/1 tests never fail -&gt; detag. Every observed 40P01 stack-attributed (a dispatch_audit_async/fan_out hit is D35&#39;s, unmerged — not counted). These :flaky tests are excluded by default so they are NOT the merge-train symptom.</p><p>D43 — Slice-3 acceptance criteria rewritten to the corrected diagnosis: [0] Fixture E migration_lock:false with the captured deterministic ConnectionError as fail-before; [1] detag the 6 apply_up tests on N&gt;=10 --include-flaky evidence, stack-attributed, file a new backlog child if any still flakes for a distinct cause; [2] merge gate (lead).</p><p>D44 — Guardrails (unchanged from D37): all opus, branch from ORIGIN/main, main checkout stays on main, isolated worktrees, CC=/usr/bin/clang, borrow-warm _build. The 3 slices are file-disjoint -&gt; dispatch in parallel. Backlog seeded: task-felix-pulse-ratelimit-scope-isolation (Pulse bypasses the per-test bucket scope), task-felix-sobelow-gate-blocking-eval (flip the advisory gate to blocking once the CI reconcile lands).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Wave plan — 3 opus slices IN FLIGHT (file-disjoint, parallel)</h2><p>SLICE 1 [P3, opus] task-felix-suite-order-flakes — surface: Elixir test suite. Files: api/test/barkpark/plugins/content_probe_test.exs, api/test/barkpark_web/pulse_public_surface_test.exs. Gate: cd api &amp;&amp; CC=/usr/bin/clang mix test test/barkpark/plugins/content_probe_test.exs test/barkpark_web/pulse_public_surface_test.exs.</p><p>SLICE 2 [P4, opus] task-felix-sobelow-baseline-reconcile — surface: CI / sobelow tooling. Files: api/scripts/ (new reconcile + guard scripts), .github/workflows/security.yml. Does NOT commit a dev-regenerated api/.sobelow-skips. Local gate (dev toolchain): the guard reds a planted finding — cd api &amp;&amp; CC=/usr/bin/clang mix sobelow --skip --exit Low exits 1 with the fixture, 0 without; the CI-toolchain reconcile runs as a security.yml job step uploading the artifact.</p><p>SLICE 3 [P4, opus] task-felix-migrator-task-sandbox-race — surface: Elixir migration test suite. Files: api/test/barkpark/repo/migrations/codelist_issue_version_test.exs, api/test/barkpark/repo/migrations/restore_search_null_dataset_dedup_test.exs. Gate: cd api &amp;&amp; CC=/usr/bin/clang mix test test/barkpark/repo/migrations/codelist_issue_version_test.exs test/barkpark/repo/migrations/restore_search_null_dataset_dedup_test.exs --include flaky.</p><p>Drives tasks: task-felix-suite-order-flakes (S1), task-felix-sobelow-baseline-reconcile (S2), task-felix-migrator-task-sandbox-race (S3), all children of task-96a908af98698118. Backlog children seeded this wave: task-felix-pulse-ratelimit-scope-isolation, task-felix-sobelow-gate-blocking-eval. Confound to clear separately: D35 task-felix-migration-ddl-audit-deadlock must merge (its 40P01 source is still live on origin/main).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Review debrief (REVIEWED 2026-07-13) — wave complete, grade A−</h2><p>Status correction (supersedes the SURVEYING banner above): Wave 8 is REVIEWED and complete. 2 of the 3 slices were delivered green, adversarially reviewed, and had their gates re-run GREEN on the reviewer&#39;s final state; the 3rd (sobelow reconcile) STALLED — not delivered as a green branch — but left a recoverable committed candidate. Overall grade A−. Reviewer made ZERO code changes (both delivered slices were correct as built); the only fixes were to the task ledger.</p><p>SLICE 1 — task-felix-suite-order-flakes — FINAL BRANCH loop-epic/deflake-suite-order-flakes-content-probe-0 (SHIPPED, correct). content_probe: the whole-VM :erlang.system_info(:atom_count)==before read (a false flake under async:true) was replaced with a KEY-SCOPED assert_raise ArgumentError on String.to_existing_atom(key) after content_get(...)==nil — structurally immune to any co-scheduled atom mint, and load-bearing (it fails iff content_get mints the key&#39;s atom). pulse burst-cap: retargeted off the fast-refill test-storm channel (10 tok/sec) onto the slow-refill abuse-rate channel (0.1 tok/sec) via new burst_conn/burst_post helpers, asserted as latency-immune BOUNDS (1 &lt;= two_hundreds &lt;= @burst AND 429 in statuses AND limited.status==429), mirroring pulse_abuse_drill_test.exs — NOT the wish&#39;s sleep-force-on-test-storm (V3-proven RED). Reviewer re-ran the gate: 26 tests/0 failures; seeds 1/42/999 all clean; confirmed IP {198,51,100,42} is unique to this test (per-IP bucket, both files async:false — no cross-file bleed). Merge-gated criterion[2] stays OPEN for the lead.</p><p>SLICE 3 — task-felix-migrator-task-sandbox-race — FINAL BRANCH loop-epic/migrator-ddl-deflake-migration-lock-fals-2 (SHIPPED, correct, premise-refuted build honored). Fixture E (the ONLY Ecto.Migrator caller) gets migration_lock:false on its up AND down calls; the 6 apply_up-driven tests were detagged from :flaky into the default suite. Reviewer INDEPENDENTLY re-ran the fail-before: WITHOUT migration_lock:false Fixture E fails DETERMINISTICALLY with (DBConnection.ConnectionError) checkout timeout after 981ms, stack rooted at ecto_sql migrator.ex:354 run_maybe_in_transaction &lt;- Task.Supervised — a lock-contention timeout, NOT a 40P01 (confirming V1&#39;s refutation of the task premise); WITH the fix it passes seeds 1/7/42/100/555. Default suite (no --include flaky) = 6 tests/0 failures with E excluded (1 excluded); --include flaky = 7/0. Merge-gated criterion[2] OPEN for the lead. IMPORTANT: the D35 audit-dispatch 40P01 SOURCE (task-felix-migration-ddl-audit-deadlock) is still UNMERGED on origin/main — the lead must merge it separately to clear the live 40P01; slice 3 does not depend on it (slice-3 touches only DDL test files, never the audit path).</p><p>SLICE 2 — task-felix-sobelow-baseline-reconcile — STALLED (not delivered as a green branch). A concurrent worker (worker-1) held then lapsed the claim, so this wave&#39;s dispatched builder correctly REFUSED to stomp the live claim / duplicate near-complete work on an identical file set — it made zero edits. The task honestly reads lifecycle=open with no active claim. HANDOFF: worker-1 committed a FULL candidate at SHA b48fb6c1 (&quot;fix(ci): reconcile Sobelow baseline in pinned toolchain&quot;) touching the exact slice file set — .github/workflows/security.yml, api/scripts/sobelow-baseline-reconcile.sh, api/scripts/sobelow-fresh-finding-guard.sh, docs/ops/merge-gates.md. It was dangling on no named branch (GC-vulnerable); the reviewer preserved it as local branch wave8-carryover/sobelow-reconcile-candidate (based on 607aea46 — one CLI-only commit behind origin/main tip, rebases clean) and recorded the recovery pointer on the task&#39;s reviewer_note. NEXT WAVE: recover + review that candidate (it is NOT reviewer-verified) rather than dispatch a duplicate builder.</p><p>LEDGER AUDIT: both delivered slices carried the IDENTICAL off-by-one stamp bug seen in wave 7 — builders passed a 1-based --criterion into the 0-based acceptance_criteria array, so evidence was shifted +1 and the lead-owned MERGE GATE criterion was falsely met=true while the first real proof read met=false/empty. Reviewer re-patched both to the honest vector via bp doc patch + publish (S1: content_probe met+evidence / pulse met+evidence / MERGE open; S3: Fixture-E-fail-before met+evidence / detag-6 met+evidence / MERGE open), each with a reviewer re-verification note appended. Both green tasks lifecycle=in_progress (correct — merge-gated). The sobelow task is honestly open with the candidate pointer. Backlog children task-felix-pulse-ratelimit-scope-isolation and task-felix-sobelow-gate-blocking-eval confirmed PUBLISHED. No out-of-wave tasks were touched.</p><p>GRADE: A−. What earns it: two slices are exemplary CI-hardening — each names a concrete failure mode, each ships a fail-before reproduction the reviewer independently re-ran RED-without / GREEN-with (slice 3&#39;s is a genuine deterministic 981ms checkout-timeout repro; slice 1&#39;s atom_count fix is structurally immune and its pulse fix latency-immune), zero cosmetic churn, and both correctly HONORED the wave&#39;s premise-refutations over the wish&#39;s literal (wrong) prescriptions — distrust-vacuous-green satisfied on both. What holds it below A: the third slice (sobelow reconcile — the &quot;only-growing baseline&quot; half of the wish) did NOT land this wave (a recoverable candidate exists, but it is unverified), so completeness against the full 3-part wish is 2/3; and both delivered slices shipped the recurring off-by-one ledger bug that the reviewer had to hand-fix — a process defect re-appearing wave over wave.</p><p>NEXT WAVE / lead actions: (a) merge the two green PRs (Elixir-gated) and close their MERGE criteria; (b) merge task-felix-migration-ddl-audit-deadlock (D35) to clear the live 40P01 source before relying on any full-suite --include-flaky run; (c) recover wave8-carryover/sobelow-reconcile-candidate, review it (currently unverified), and land the reconcile-not-append regen + fresh-finding guard; (d) fix the recurring builder off-by-one --criterion stamp at the tooling level so reviewers stop hand-patching every wave.</p>"
+  },
+  "description": "Wave 8 strategy: finish the three CI-hardening backlog slices (suite-order flakes, sobelow reconcile, migrator sandbox race) with fail-before reproduction tests.",
+  "main_tag": "testing",
+  "preview": {
+    "description": "Wave 8 strategy: finish the three CI-hardening backlog slices (suite-order flakes, sobelow reconcile,…",
+    "extensions": {
+      "tags": [
+        "testing",
+        "elixir"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-pristine-wave-8-2026-07-13"
+  },
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "CI-hardening flake elimination wave strategy",
+      "strength": 80,
+      "tag": "testing"
+    },
+    {
+      "rationale": "Elixir/ExUnit sandbox + Sobelow gate mechanics",
+      "strength": 40,
+      "tag": "elixir"
+    }
+  ],
+  "title": "Felix Pristine — Wave 8 (CI-hardening finish) — 2026-07-13"
+}

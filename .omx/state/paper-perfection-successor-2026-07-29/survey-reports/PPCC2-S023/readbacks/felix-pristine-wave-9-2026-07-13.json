@@ -1,0 +1,1473 @@
+{
+  "_createdAt": "2026-07-13T17:55:47.682821Z",
+  "_draft": false,
+  "_id": "felix-pristine-wave-9-2026-07-13",
+  "_publishedId": "felix-pristine-wave-9-2026-07-13",
+  "_rev": "984efe1ad3ad670ed5025eac945a41e2",
+  "_type": "paper",
+  "_updatedAt": "2026-07-13T19:05:39.266944Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix Pristine Wave 9 — sobelow reconcile landing, ledger auto-stamp tooling, fresh outbound-IO audit",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Status: REVIEWED — wave complete, grade A-. Living story: Strategize→Digest→Decide→Build→Review. Epic: task-96a908af98698118. Fable EXHAUSTED — every builder opus. Review debrief appended below (2026-07-13)."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "Where the epic stands (reconciled)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Waves 1-7 emptied Felix's named-failure code backlog (Magick/vix bounds, bokbasen mount+pagination, LV telemetry, interop resource-bound sweep, phantom-media after-commit deferral, sobelow durable skip, async flip, ledger restamp - all merged). Wave 8 DECIDED three CI-hardening slices; two LANDED (#3015 suite-order deflake, #3016 migrator-ddl Fixture-E migration_lock:false). The third - the sobelow reconcile-not-append regen - was BUILT but could not merge in wave 8; it survives as branch wave8-carryover/sobelow-reconcile-candidate (commit b48fb6c1, off 607aea46, an ancestor of origin/main). Wave 9 finishes that carryover, fixes the recurring ledger tooling scar, and runs ONE fresh audit over an uncovered subsystem."
+        }
+      ],
+      "id": "block-3",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "The wish",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Close the CI-hardening backlog AND run one fresh Phoenix-mastery audit pass. THREE fronts, all opus."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "(1) LAND the sobelow reconcile branch (b48fb6c1): reconcile-not-append baseline regen + fresh-finding guard, run on the CI toolchain (1.18.1/OTP27), never a dev-box commit. REVIEW the branch for correctness, harden if needed, prepare to merge. Do NOT re-claim task-felix-sobelow-baseline-reconcile (held by a LIVE cross-session claim, worker-1-team424-author) - land the already-built BRANCH. Sobelow is ADVISORY (continue-on-error) - hygiene, never a merge-blocker."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "(2) FIX THE RECURRING LEDGER TOOLING BUG at the tool level: every wave, builders leave the final LEAD-CLOSED-on-merge criterion met=false and a reviewer/steward hand-patches it. Make bp task close (and/or the task-close API handler) auto-stamp the final merge-gated criterion met=true with close evidence, so future waves stop needing hand-fixing. Self-contained api/ (+ bp CLI if the verb needs it), fail-before test."
+        }
+      ],
+      "id": "block-7",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "(3) ONE fresh Felix audit over a single UNCOVERED api/ subsystem - improvement-only, every finding names a concrete failure mode / measured cost / scar-class risk (zero tidiness), each CONFIRMED finding backed by a protective test. File qualifying issues as child bp tasks and build the crispest 1-2. Also mergeable if it fits: task-felix-migration-ddl-audit-deadlock (D35) - its audit-dispatch 40P01 sync toggle is still UNMERGED on origin/main; land it (merge/verify, stack-attribute any 40P01)."
+        }
+      ],
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-9",
+      "level": 2,
+      "text": "Direction (tentative - Decide finalizes after two explore rounds)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Finish over net-new. Three disjoint, parallelizable opus worktrees, each with a fail-before proof, gated CC=/usr/bin/clang mix test, branched from ORIGIN/main (local checkout diverged with unrelated omx commits - never build from it)."
+        }
+      ],
+      "id": "block-10",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FRONT 1 - sobelow carryover, land it. First read of b48fb6c1 is encouraging: the reconcile script does clear-skip THEN mark-skip-all, guards the CI toolchain (1.18.1/OTP27) and refuses on a dev box, backs up + restores .sobelow-skips byte-for-byte (never commits), and uploads the regenerated baseline+diff as a human-review artifact; the fresh-finding guard plants a non-controller String.to_atom and asserts exit 1 + a DOS.StringToAtom hit - exactly the D41 shape. What a verifier must EXERCISE: does clear-skip then mark-skip-all yield a live baseline on the pinned toolchain? does the trap/restore leave the tracked file byte-identical on every exit path (including mid-script failure)? does the planted guard still red under --skip --exit Low against the CURRENT origin/main baseline? does security.yml run only the pinned toolchain, or will a second matrix row trip the version guard exit 2? Harden only if a gap is proven. Closing the task is a foreign-claim mechanics puzzle - the lander lands the BRANCH; the lead closes the ledger without stomping the live claim."
+        }
+      ],
+      "id": "block-11",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FRONT 2 - kill the ledger off-by-one at the tool, not by hand. Seam: api/lib/barkpark/tasks/close.ex (+ criteria.ex, the /v1 close route, internal/cli close verb). Wave-7 review log names the scar: builders pass a 1-based --criterion index into a 0-based tool, so the MERGE criterion reads falsely met=true and the first real criterion falsely unmet - and separately the final LEAD-CLOSED-on-merge criterion sits met=false until a human patches it. The fix must make close auto-stamp the final merge-gated criterion met=true, writing close evidence (worker + epoch + merge commit/PR). Crux for survey: how is the final merge-gated criterion IDENTIFIED (last entry? a marker string like LEAD-CLOSED / merged? a flag on the criterion)? The fix must be CONSERVATIVE - only stamp a criterion unambiguously the merge gate, never fabricate met=true on a non-gate criterion. Prefer an explicit close-time flag over a fragile heuristic if identification is ambiguous. Fail-before: a close today leaves the final criterion met=false; after the fix it is met=true with evidence. Watch OpenAPI: if the close route request/response shape changes, docs/openapi.json needs a CI-artifact regen (local regen OOMs)."
+        }
+      ],
+      "id": "block-12",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FRONT 3 - one fresh audit over genuinely-uncovered ground. The 12 domains were framework-structural; Part XI got a verdict-table Paper (Interop live, Mailers/i18n/Assets/GraphQL mostly n-a/already-good). The ripest uncovered scar-class is the OUTBOUND I/O boundary that is NOT System.cmd/Port (the interop sweep already bounded those): outbound HTTP - webhook dispatch, CDN purge/invalidate, self-update fetches, any Finch/Req/HTTPoison/:httpc call - where a missing timeout, retry storm, or connection-pool exhaustion is a real availability scar. Lean the fresh audit there tentatively, but let surveyors confirm whether outbound-HTTP, mailer/Swoosh, caching/ETS TTL sweepers, or JSON/serialization is the freshest ripe target with a NAMED failure mode. Build the crispest 1-2 confirmed findings with protective tests; file the rest as child bp tasks (publish-wall: 1-12 single-line tags, registry slugs like elixir/testing/search)."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FRONT 3b (opportunistic) - land task-felix-migration-ddl-audit-deadlock (D35) if it fits: the audit-dispatch sync-in-test toggle (config :barkpark, :audit_dispatch_async default true; false in test.exs; dispatch_audit_async runs fan-out synchronously in-caller when off, scoped to the AUDIT path only - do NOT touch the shared fan_out/2 webhook dispatch). Survey must confirm whether it is built on a branch/PR or still unbuilt, and whether it is needed before any --include-flaky full-suite sweep can be trusted. Every 40P01 seen during its gate must be stack-attributed."
+        }
+      ],
+      "id": "block-14",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-15",
+      "level": 2,
+      "text": "Survey plan (cast wide - Digest distills)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "15 broad Sonnet surveyor assignments across the three fronts - sobelow-branch correctness, ledger close-handler seam + off-by-one, uncovered-subsystem audit surface, D35 landing state, wave-8 landed slices, publish-wall tag registry, OpenAPI impact. Each question names suspected files/claims and why the answer changes the plan; the full set is carried on this Paper's driving tasks and the Strategize output."
+        }
+      ],
+      "id": "block-16",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-17",
+      "level": 2,
+      "text": "In flight now",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SURVEYING - 15 surveyors dispatched. Next: Digest folds their reports into this Paper and designs the verify fleet BEFORE verifiers fly."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-19",
+      "level": 2,
+      "text": "Digest — survey folded (2026-07-13)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "15 surveyors reported. Wide-but-shallow; file:line evidence trusted over prose. Net: two of the three fronts are LAND/REVIEW jobs whose branches are proven-good, one front needs a live-run to pick its target, and TWO load-bearing premises in the wish are now contradicted by evidence."
+        }
+      ],
+      "id": "block-20",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-21",
+      "level": 3,
+      "text": "What is established",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FRONT 1 (sobelow carryover) is a clean LAND, no code hardening needed. Verified from Sobelow's own dep source: clear-skip halts BEFORE any scan, so the ignore-set is empty when mark-skip-all's scan runs, and it writes EVERY live finding — a true reconcile, not an append onto stale history. Trap/restore leaves .sobelow-skips byte-identical on every exit path including a mid-script mix failure (trap armed before either mix call, cmp-verified before the one trap-disarm). security.yml's sobelow job is a SINGLE matrix row (otp 27.0 / elixir 1.18.1) that exactly matches the reconcile script's exit-2 version guard; both new steps carry if:always() and continue-on-error stays advisory. The branch rebases clean by construction — zero commits between base 607aea46 and origin/main touch any of the 4 changed files. The fresh-finding guard was ACTUALLY RUN locally (off-pin toolchain): the planted String.to_atom probe reds with DOS.StringToAtom exit 1 and the probe is cleaned up."
+        }
+      ],
+      "id": "block-22",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FRONT 2 root cause: the wish CONFLATES two distinct failure modes. Mode A (the real recurring off-by-one) — builders pass a 1-based --criterion into the 0-based STAMP tool; it corrupts an arbitrary criterion and in observed incidents made the merge-gate criterion falsely TRUE (opposite polarity to the wish text). It is a usage bug, hit across three epics; internal.ex merge_criteria already has an optional criterion-TEXT guard that would REJECT a wrong index, but it is not exposed via any CLI flag. Mode B (the wish's actual target) — the final LEAD-CLOSED merge-gate criterion left met=false is INTENTIONAL DESIGN (bp-epic-cycle.workflow.js:62: builders do NOT close merge-gated criteria; the LEAD closes on merge). The pain is pure TOIL: the lead hand-stamps it after merge."
+        }
+      ],
+      "id": "block-23",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FRONT 2 seam + guardrail: auto-stamping inside the builder's own bp task close fires BEFORE merge and would recreate Mode-A's premature-true bug — the fix MUST be a lead/merge-time seam. The seam is close.ex apply_close_update alongside merge_criteria/2; worker_id, observed_epoch, ts_iso and the landed{prs,files,capability_slugs} map are all already in scope at close time. No is_merge_gate field exists anywhere in the schema — identification today is pure convention (LAST array entry + literal 'MERGE GATE' substring, 8/8 sampled). Use an EXPLICIT flag, never a text heuristic: criterion TEXT is work-digest-defining, so matching on it risks tripping the claim fence. OpenAPI: zero drift if implemented server-side or as a flags: entry; only an args: addition drifts docs/openapi.json (CI-blocking; local regen OOMs)."
+        }
+      ],
+      "id": "block-24",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FRONT 3 target: outbound-HTTP is the freshest ground (System.cmd/Port already swept; mailer, webhook dispatcher, ETS caches and JSON/atom paths all independently confirmed already-hardened). Two candidate findings. (a) sso/oidc/http.ex + sso/social/http.ex are the ONLY two outbound-HTTP modules in api/lib with NO explicit receive_timeout/retry, sitting on the user-facing login path — but whether this is a real unbounded-hang or a style nit hinges on Req 0.5.17's DEFAULT receive_timeout when unset (undetermined this pass). (b) media/delivery/cdn.ex invalidate_http is synchronous, single-attempt, un-backgrounded, inline in BOTH the media-upload path and the inbound transcoder-callback controller — the crispest self-contained buildable finding (a slow CDN blocks the upload response). Shared Finch default pool (only Sync.Finch is dedicated) is real but architecturally larger — file as a child task, do not build this wave."
+        }
+      ],
+      "id": "block-25",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FRONT 3b (D35, opportunistic): task-felix-migration-ddl-audit-deadlock is BUILT but UNMERGED with no PR. The fix lives on local branch loop-epic/migration-ddl-deadlock-sync-in-test-audi-2 (commit 60966bdc, 4 files: config.exs, test.exs, dispatcher.ex, audit_dispatch_test.exs). Its base is an ancestor of origin/main but 39 commits behind (including PR #2917's async:false→true DataCase flip). It must be rebased/cherry-picked as the 4-file hunks — a naive merge would revert unrelated origin/main work. Criteria 2/4; the N>=10 full-suite flake-gone confirmation was never completed. Wave-8 slices #3015 and #3016 are confirmed MERGED and closed 3/3 — do NOT re-handle."
+        }
+      ],
+      "id": "block-26",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-27",
+      "level": 3,
+      "text": "Contradictions the Decide phase must not inherit blindly",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "1) Front-1 claim state: the wish/direction asserts task-felix-sobelow-baseline-reconcile is held by a LIVE cross-session claim (worker-1-team424-author). TWO independent surveyors found the claim is RELEASED (claim.worker=null, released_at/released_by set, lifecycle_status=open, and the task appears in bp task ready). Operational instruction is unchanged either way (land the BRANCH, do not rebuild the task), but the closer must CLAIM-to-close (epoch 5→6) since nobody holds it, and must claim BY EXPLICIT ID — a blind bp task next could race another wave-9 process. Do not repeat 'LIVE claim' verbatim without a fresh check."
+        }
+      ],
+      "id": "block-28",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "2) Front-2 polarity: the wish describes the bug as 'final criterion left met=false', but the recurring real incident is the OPPOSITE — the off-by-one made the merge-gate criterion falsely met=TRUE while a real criterion was left unmet. Mode B (left-false) is by-design toil, not a bug. Decide should scope Front 2 as: (i) a lead/merge-time explicit-flag auto-stamp for Mode B, and consider (ii) exposing internal.ex's existing criterion-text guard to kill Mode A at the source — flag both to the builder rather than 'auto-stamp on close'."
+        }
+      ],
+      "id": "block-29",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-30",
+      "level": 3,
+      "text": "Coverage map — checked & FOUND (settled)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Sobelow branch: dep-source semantics of clear-skip/mark-skip-all, trap/restore control flow, single-matrix-row vs version-guard match, if:always() wiring, structural rebase-clean guarantee, live guard run. Ledger: close.ex/internal.ex/criteria.ex full write path, merge_criteria index-targeting, work_digest deliberately excluding met/evidence, CLI close is 100% manifest-driven (zero bespoke Go), OpenAPI close-route generation mechanics (permissive Document schema; only args: drift). Audit map: 12 Felix domains + Part XI verdict scope enumerated from the epic children; webhooks dispatcher / mailer(Swoosh, retries:1, gen_smtp 5s default) / ETS caches (rate_limiter, surface_configs, replay_ring) / JSON-atom paths all confirmed already-good; full 12-site outbound-HTTP inventory with per-site timeout config; CDN sync-block call chain traced end to end. D35: branch existence, 4-file diff, 39-behind ancestry, no open PR, released claim. Infra: Wave-8 #3015/#3016 merge state + task closure, CI green base (cfd9e6d4 Test green; Format advisory red; sobelow advisory), borrow-warm _build/test recipe live (same-day), 54-tag publish-wall registry captured."
+        }
+      ],
+      "id": "block-31",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-32",
+      "level": 3,
+      "text": "Coverage map — checked & NOT FOUND (absences = decisions in waiting)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "No live CI-toolchain (1.18.1/OTP27) execution of the reconcile script's clear-skip→mark-skip-all — local is 1.19.5/OTP28 and the script self-refuses; source trace is strong but unproven on-pin (Front-1 residual). No is_merge_gate structured field anywhere in schema/validation — identification is pure prose. Req/Finch EXACT default receive_timeout when unset — undetermined; Front-3 SSO severity hinges on it. Whether bp task stamp authorizes against an already-CLOSED (done) task — untested; if it does, Front 2 shrinks to a lead post-merge stamp with no close.ex change. No rebase DRY-RUN of the D35 branch onto the current origin/main tip — only diff --stat. N>=10 D35 flake-gone confirmation — never completed. bp search verb absent on this CLI build across ALL surveyors — freshness worth a note."
+        }
+      ],
+      "id": "block-33",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-34",
+      "level": 3,
+      "text": "Coverage map — corners NO surveyor reached",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The full ~34 Felix child-task set for the merge-gate-convention invariant (only 8 sampled). The domain-10 (auth/security/tenancy) findings Paper — whether its SSO coverage already touched outbound-call resilience vs authz-only (no paper access this pass). Deep trace of ETS-cache prune-timer survival across a supervisor-restart storm (moduledoc read only). Whether the fresh-finding guard's planted probe .ex module pollutes the BEAM code path of the SAME security.yml job's later steps (cleanup looked fine, interaction untraced)."
+        }
+      ],
+      "id": "block-35",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-36",
+      "level": 2,
+      "text": "Verify plan — 6 assignments in flight (5 opus, 1 sonnet)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V1 (opus, RUN): Req 0.5.17 default receive_timeout — does an omitted receive_timeout leave sso/oidc + sso/social calls truly unbounded, or does Req/Finch bound it? Inspect deps/req + deps/finch defaults AND run a Req.get with no timeout against a deliberately-slow local server, measuring whether it hangs past ~20s. Settles whether Front 3 anchors on SSO or on CDN."
+        }
+      ],
+      "id": "block-37",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V2 (opus, RUN, worktree): CDN sync-block — a targeted mix test with a slow stub CDN adapter proving the media-upload (and transcoder-callback) request path blocks on Cdn.invalidate_http wall-clock; grep all 4 call sites confirming no caller branches on its return value. Establishes the fail-before for the crispest Front-3 build."
+        }
+      ],
+      "id": "block-38",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V3 (opus, RUN): Front-2 crux — does bp task stamp / the /v1 stamp route authorize+apply against a task whose lifecycle_status is already 'done' (claim retained at close)? Read stamp.ex + the stamp controller for a lifecycle guard, run the tasks unit tests, and if safe exercise a throwaway create→close→stamp against the live server. Also RUN internal.ex's merge_criteria path to confirm the criterion-TEXT guard rejects a mismatched index. Decides whether Front 2 is a lead post-merge stamp (small) or a close.ex change."
+        }
+      ],
+      "id": "block-39",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V4 (opus, RUN, worktree): D35 landability — cherry-pick 60966bdc onto CURRENT origin/main in a worktree, confirm it applies without conflict on the 4 files, then CC=/usr/bin/clang mix test test/barkpark/webhooks/audit_dispatch_test.exs green AND fail-before (revert the sync toggle → test reds). Confirms PR #2917's async flip didn't change the fix's semantics."
+        }
+      ],
+      "id": "block-40",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V5 (sonnet): Ledger truth + convention scan — re-fetch task-felix-sobelow-baseline-reconcile and task-felix-migration-ddl-audit-deadlock claim state NOW (worker null? lifecycle? ready?) to settle the live-vs-released contradiction; then scan ALL ~34 Felix child tasks confirming the merge-gate criterion is invariably the LAST entry AND carries the 'MERGE GATE' substring, quantifying any exception (Front-2 identification safety)."
+        }
+      ],
+      "id": "block-41",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "V6 (opus, RUN): Front-1 on-pin proof — open a DRAFT PR from origin/wave8-carryover/sobelow-reconcile-candidate and observe security.yml's sobelow job on the real 1.18.1/OTP27 CI toolchain: reconcile step yields a live baseline+diff artifact, the guard step reds the planted probe (exit 1), no version-guard exit-2, continue-on-error shields the whole job. The one proof no surveyor could do locally; the draft PR is reversible and doubles as the human-review artifact."
+        }
+      ],
+      "id": "block-42",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-43",
+      "level": 2,
+      "text": "In flight now",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "VERIFYING — 6 verifiers dispatched. Next: Digest's successor Decide folds their run-proofs, cuts the per-slice build plan (all builders opus; Fable exhausted), commits the charter, and files any child backlog behind the publish wall."
+        }
+      ],
+      "id": "block-44",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-46",
+      "level": 2,
+      "text": "Decide — verification results (six RUN verifiers, proofs over prose)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "req-default-timeout: PREMISE REFUTED. Req 0.5.17 / Finch 0.21.0 supply a bounded 15_000ms receive_timeout default; a live probe (Req.get, no receive_timeout, against a 25s slow raw-TCP server) returned {:error, %Req.TransportError{reason: :timeout}} at 15164 ms — bounded, not a hang. SSO omitting the option drops from an availability scar to a low-severity consistency nit (backlog). Coverage: every OTHER outbound Req module sets receive_timeout explicitly (self_update 10s, webhooks 10s, github/indx/bokbasen 30s, titles 15s); no app-level default override exists."
+        }
+      ],
+      "id": "block-47",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "cdn-sync-block-failbefore: CONFIRMED. Cdn.publish blocks the caller for the full CDN round-trip inline in both upload sites (media/processing.ex:38 and media_processing_controller.ex:25, before json(conn,...)). Proof: slow-CDN Bypass -> Cdn.publish wall-clock 916/1103ms vs 0-7ms noop control. Async-safety doubly confirmed: all 3 call sites discard the return; the invalidate chain unconditionally returns :ok. Delete-path media.ex:398 is D36's concern — not this slice."
+        }
+      ],
+      "id": "block-48",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "stamp-on-closed-task: DECISIVE. bp task stamp / the /v1 stamp route does NOT authorize against a done task — check_in_progress returns {:error, {:not_in_progress, \"done\"}} -> 409; the ledger is sealed by close. A post-merge external stamp is architecturally impossible; the only working seam is close.ex apply_close_update. Also proved: internal.ex merge_criteria's criteria-text guard aborts a mismatched write with :criteria_mismatch (the Mode-A CAS, backlogged for exposure)."
+        }
+      ],
+      "id": "block-49",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "d35-cherrypick-green: CONFIRMED. git cherry-pick 60966bdc onto origin/main exits 0 (4 files, config.exs 3-way auto-merged), the protective test is GREEN (5 tests, 0 failures), and the fail-before is real — flipping :audit_dispatch_async true makes dispatch_audit_async return {:ok, #PID} (unawaited spawn) -> 3 failures. PR #2917 concern dispelled: the 40-commit gap touched neither dispatcher.ex nor data_case.ex; the audit test pins async:false."
+        }
+      ],
+      "id": "block-50",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "ledger-claim-truth-and-convention: both wish contradictions CONFIRMED. task-felix-sobelow-baseline-reconcile is RELEASED (worker=null, epoch 5, released_by worker-1-team424-author, in bp task ready) — NOT the LIVE claim the wish asserted. And the 'last acceptance_criteria entry contains MERGE GATE' convention holds on only 14/34 Felix children — an unreliable detection heuristic, so Front 2 must use an explicit marker. Charter Wave-7 log independently confirms the Mode-A off-by-one polarity (merge criterion falsely met=TRUE)."
+        }
+      ],
+      "id": "block-51",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "sobelow-onpin-ci-proof: reconcile + fresh-finding guard PROVEN correct on the real pin (run 29274393147, OTP 27 / Elixir 1.18.1) — clear-skip -> mark-skip-all regenerated a live 112-line baseline, the guard flagged the planted probe and restored it, no version-guard trip, continue-on-error shielded the job. BUT one proven gap: the reconciled .sobelow-skips (a dotfile) is DROPPED from the artifact by upload-artifact@v4 include-hidden-files:false — it ships only metadata+diff. The digest's 'clean land, no code' read is REFUTED; land WITH the include-hidden-files hardening."
+        }
+      ],
+      "id": "block-52",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-53",
+      "level": 2,
+      "text": "Decide — decisions (D45–D50, mirror the charter)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D45: Wave 9 = FINISH + ONE-FRESH-AUDIT, 4 opus slices, file-disjoint, all builders opus (Fable exhausted). W8 #3015/#3016 stay done."
+        }
+      ],
+      "id": "block-54",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D46: Front 1 (sobelow) LANDS branch b48fb6c1 WITH the include-hidden-files hardening — the on-pin proof refuted the clean-land read. Claim is RELEASED not live; claim by explicit ID epoch 5->6; do NOT rebuild. Sobelow stays advisory."
+        }
+      ],
+      "id": "block-55",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D47: Front 2 fixes Mode B ONLY, at close.ex apply_close_update, via an explicit merge_gate:true criterion marker (stamp on a done task is sealed; the text convention is unreliable at 14/34). Auto-stamp gated on terminal status + non-empty landed map -> never recreates Mode A. Zero OpenAPI drift. Mode-A hardening -> backlog."
+        }
+      ],
+      "id": "block-56",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D48: Front 3 ships the CDN sync-block fix (SSO headline refuted). Async-ize the publish-path purge on the two upload sites only; delete-path is D36. Backlog: SSO explicit-timeout, dedicated auth/plugin Finch pool."
+        }
+      ],
+      "id": "block-57",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D49: Front 3b lands D35 by cherry-picking 60966bdc (not merging the 40-behind branch). Re-claim epoch 16->17; criterion 2 (N>=10) may stay a --miss note; merge gate lead-closed."
+        }
+      ],
+      "id": "block-58",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "D50: Guardrails unchanged — branch from ORIGIN/main (tip 3cbbe26b), main checkout stays on main, isolated worktrees, CC=/usr/bin/clang, borrow-warm _build. Charter committed before fan-out (d654715b)."
+        }
+      ],
+      "id": "block-59",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-60",
+      "level": 2,
+      "text": "Decide — wave plan (4 opus slices, in flight)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Slice 1 [P1, small] — task-felix-sobelow-baseline-reconcile — surface: CI/security.yml + api/scripts + docs. LAND wave8-carryover/sobelow-reconcile-candidate (b48fb6c1) + add include-hidden-files:true (or a non-dotfile artifact name) so the reconciled baseline actually ships. Builder: opus. Gate: cd api && CC=/usr/bin/clang mix sobelow --skip --exit Low (advisory) + confirm the upload step names the baseline."
+        }
+      ],
+      "id": "block-61",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Slice 2 [P1, medium] — task-felix-close-merge-gate-autostamp — surface: api/lib/barkpark/tasks (close.ex, internal.ex) + close_test.exs. Explicit merge_gate marker auto-stamped at close when terminal+landed. Builder: opus. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark/tasks/close_test.exs."
+        }
+      ],
+      "id": "block-62",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Slice 3 [P1, medium] — task-felix-cdn-sync-block-async — surface: api/lib/barkpark/media (processing.ex, delivery/cdn.ex) + v1/media_processing_controller.ex + new cdn_sync_block_test.exs. Async-ize the CDN purge on the two upload sites. Builder: opus. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark/media/cdn_sync_block_test.exs."
+        }
+      ],
+      "id": "block-63",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Slice 4 [P2, small] — task-felix-migration-ddl-audit-deadlock — surface: api/config + webhooks/dispatcher.ex + audit_dispatch_test.exs. Cherry-pick 60966bdc onto origin/main. Builder: opus. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark/webhooks/audit_dispatch_test.exs."
+        }
+      ],
+      "id": "block-64",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-65",
+      "level": 2,
+      "text": "Backlog seeded this wave (published children of the epic)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "task-felix-sso-explicit-timeout (P3): set an explicit <=15s receive_timeout on sso/oidc/http.ex + sso/social/http.ex for consistency/faster login-path failure (not a hang — bounded default proven). task-felix-outbound-pool-isolation (P3): dedicated Finch pool for auth/plugin outbound so logins don't queue behind a webhook/CDN delivery storm on the shared default pool. task-felix-stamp-index-guard (P2): kill Mode A at source — require/expose the internal.ex criteria-text guard (or add 0-based --criterion validation) so a wrong-index stamp is rejected with :criteria_mismatch instead of silently corrupting a neighbor criterion."
+        }
+      ],
+      "id": "block-66",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-66-1",
+      "level": 2,
+      "text": "Review — wave debrief (2026-07-13)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Reviewer (one Fable, last hands before merge) reviewed all four green slices adversarially against origin/main (45a02ecf) and re-ran every slice gate on the final state. Verdict: all four correct as built — ZERO code fixes needed, zero reviewer commits. Final branches are the originals. Grade: A-."
+        }
+      ],
+      "id": "block-67",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-68",
+      "level": 3,
+      "text": "What shipped (per slice)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "(1) sobelow reconcile — LAND carryover — task-felix-sobelow-baseline-reconcile — final branch loop-epic/sobelow-reconcile-land-carryover-branch--0. Cherry-picked b48fb6c1 (worker-1's complete candidate) clean onto origin/main: 4 files (security.yml +3 if:always() steps, sobelow-baseline-reconcile.sh, sobelow-fresh-finding-guard.sh, merge-gates.md) + the one proven hardening include-hidden-files:true on the artifact-upload step (the reconciled dotfile baseline was silently dropped by upload-artifact@v4's hidden-file default). Reviewer confirmed: reconcile script is CI-only + toolchain-pinned (1.18.1/OTP27) with mktemp backup + trap restore + byte-identical restore assert; guard plants a String.to_atom probe and asserts exit-1 + DOS.StringToAtom + probe filename then removes it; both scripts bash -n clean; security.yml YAML valid; branch touches ZERO .ex and ZERO .sobelow-skips (sobelow input byte-identical to origin/main). The local advisory red (exit 1, 12 findings) is pre-existing cross-toolchain fingerprint drift, NOT a regression — sobelow stays ADVISORY (continue-on-error), never a merge-blocker. Gate: advisory, substantive on-pin CI."
+        }
+      ],
+      "id": "block-69",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "(2) ledger close auto-stamp — task-felix-close-merge-gate-autostamp — final branch loop-epic/ledger-close-auto-stamp-the-merge-gate-c-1. Pure server-side: close.ex apply_close_update calls autostamp_merge_gate/6 right before merge_criteria. Synthesizes a met=true update ONLY when new_status==done AND a non-empty landed map rides the close AND the criterion carries an explicit merge_gate:true marker AND it is still met!=true AND the caller did not already target that index. Rides the SAME merge_criteria rev-CAS write. Identification is the explicit marker only — no text/last-entry/index heuristic (verify-proven unreliable at 14/34). Zero OpenAPI drift, no CLI change. Reviewer re-ran gate: 33 tests, 0 failures; 7 new cases cover happy-path, no-landed negative, no-marker negative, caller-wins, idempotent already-met, cancelled non-done. The task DOGFOODS the feature (its own criterion[4] carries merge_gate:true). Gate: green."
+        }
+      ],
+      "id": "block-70",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "(3) CDN publish-path async-ize — task-felix-cdn-sync-block-async — final branch loop-epic/async-ize-the-synchronous-cdn-purge-on-t-2. Single-seam fix inside Cdn.publish/2: the edge purge now fires on the supervised Barkpark.TaskSupervisor via purge_edge_cache_async/1, mirroring Media.Delivery.Events.dispatch's fire-and-forget pattern. Because BOTH publish-path callers (Processing.process/1 and the transcoder ready branch) funnel through Cdn.publish, one seam fixes both. :ok contract preserved; delete-path Cdn.invalidate untouched (D36 owns it). Reviewer confirmed Barkpark.TaskSupervisor is registered in the supervision tree. Gate re-run: cdn_sync_block_test 1/0 (wall-clock <500ms + purge-still-fires assert), cdn_test 4/0 no regression. Gate: green."
+        }
+      ],
+      "id": "block-71",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "(4) D35 audit-dispatch land — task-felix-migration-ddl-audit-deadlock — final branch loop-epic/land-d35-audit-dispatch-sync-in-test-tog-3. Cherry-picked 60966bdc conflict-free onto origin/main (4 files: config.exs +9, test.exs +11, dispatcher.ex +30, audit_dispatch_test.exs +187). Wires config :barkpark, :audit_dispatch_async (default true; false in test) so dispatch_audit_async runs the audit fan-out INLINE when the flag is false — owner-scoped, joins the sandbox, dies with the test — instead of the unawaited Task.Supervisor.start_child that leaked an audit SELECT and deadlocked concurrent raw-DDL tests (40P01). Scoped to the AUDIT path only; shared fan_out/2 untouched. Gate re-run: 5 tests, 0 failures. Gate: green."
+        }
+      ],
+      "id": "block-72",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-73",
+      "level": 3,
+      "text": "What stalled / merge-gated obligations",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Nothing stalled — all four slices are built, correct, and gate-green. Open obligations the LEAD closes on merge: every slice's merge_gate criterion (PR merged to origin/main) stays honestly met=false. ADDITIONALLY, task-felix-migration-ddl-audit-deadlock criterion[2] (N>=10 full-suite --include flaky, 0 Postgrex 40P01) is honestly met=false with a --miss note — the full-suite grant was unavailable in the isolated build worktree; the lead runs + stamps it before merging D35. Sobelow's substantive reconcile/guard steps only execute on the PR's on-pin 1.18.1/OTP27 CI run (they self-guard off-pin), so criterion[0]/[2] were stamped on reviewed correctness + the two guard proofs, not a live on-pin run — the PR's CI is the final arbiter."
+        }
+      ],
+      "id": "block-74",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-75",
+      "level": 3,
+      "text": "Ledger audit outcome",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "All four slice tasks are HONEST: lifecycle=in_progress (correct — merge-gated criteria stay open for the lead), each claimed by its epic-builder with evidence stamped as-worked, each linked to wave_paper felix-pristine-wave-9-2026-07-13 and parent task-96a908af98698118. Criteria met-vectors: sobelow [T,T,T,F(mg)], close-autostamp [T,T,T,T,F(mg)], cdn-async [T,T,T,T,F(mg)], migration-ddl [T,T,F(N>=10 honest-miss),F(mg)]. No ledger lies or omissions found — ZERO ledger fixes required. The sobelow task's live claim is now held by its own epic-builder (epoch 10), not the released worker-1-team424-author the wish warned about; the builder reviewed/landed the BRANCH without rebuilding the reconcile, as instructed."
+        }
+      ],
+      "id": "block-76",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-77",
+      "level": 3,
+      "text": "Grade + commentary",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "A-. This is a tight, honest, finishing wave. All four slices are correct, minimal, and gate-green with genuine fail-before proofs; nothing is bloated or show-off. The close.ex auto-stamp is the standout — it kills a recurring per-wave ledger toil AT THE TOOL with a conservative, explicit-marker design (no fragile heuristic), zero OpenAPI drift, and comprehensive negative-case tests, and the task dogfoods its own marker. The CDN and D35 fixes are surgical single-seam / clean-cherry-pick landings. Why A- not A: the wave is finishing-work over net-new (by design), and two substantive proofs are deferred to the PR's CI rather than run here — the sobelow reconcile/guard only execute on the on-pin CI toolchain (locally self-guarded), and the D35 N>=10 full-suite flake sweep is an honest --miss pending the lead's grant. Both are correctly and honestly deferred, not hidden — but they mean the wave's full value is only realized once CI + the lead close the gates."
+        }
+      ],
+      "id": "block-78",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-79",
+      "level": 3,
+      "text": "What the next wave should take",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Lead: merge the four PRs (Elixir-gated); on the D35 PR, run + stamp criterion[2]'s N>=10 --include-flaky sweep before merging; watch the sobelow PR's on-pin CI to confirm the reconcile artifact ships the baseline (include-hidden-files) and the fresh-finding guard reds. Then the next wave clears the freshly-seeded outbound-IO backlog: task-felix-sso-explicit-timeout (explicit <=15s receive_timeout on the OIDC/Social login path), task-felix-outbound-pool-isolation (dedicated auth/plugin Finch pool off the shared webhook/CDN pool), and task-felix-stamp-index-guard (kill Mode-A wrong-index stamps at source with :criteria_mismatch). Also still open: task-felix-sobelow-gate-blocking-eval (flip sobelow to blocking once the CI reconcile lands). Felix's named-failure code backlog is otherwise empty — the remaining work is consistency/hygiene nits and ledger-tooling hardening."
+        }
+      ],
+      "id": "block-80",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix Pristine Wave 9 — sobelow reconcile landing, ledger auto-stamp tooling, fresh outbound-IO audit",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Status: REVIEWED — wave complete, grade A-. Living story: Strategize→Digest→Decide→Build→Review. Epic: task-96a908af98698118. Fable EXHAUSTED — every builder opus. Review debrief appended below (2026-07-13)."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "level": 2,
+        "text": "Where the epic stands (reconciled)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Waves 1-7 emptied Felix's named-failure code backlog (Magick/vix bounds, bokbasen mount+pagination, LV telemetry, interop resource-bound sweep, phantom-media after-commit deferral, sobelow durable skip, async flip, ledger restamp - all merged). Wave 8 DECIDED three CI-hardening slices; two LANDED (#3015 suite-order deflake, #3016 migrator-ddl Fixture-E migration_lock:false). The third - the sobelow reconcile-not-append regen - was BUILT but could not merge in wave 8; it survives as branch wave8-carryover/sobelow-reconcile-candidate (commit b48fb6c1, off 607aea46, an ancestor of origin/main). Wave 9 finishes that carryover, fixes the recurring ledger tooling scar, and runs ONE fresh audit over an uncovered subsystem."
+          }
+        ],
+        "id": "block-3",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "The wish",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Close the CI-hardening backlog AND run one fresh Phoenix-mastery audit pass. THREE fronts, all opus."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "(1) LAND the sobelow reconcile branch (b48fb6c1): reconcile-not-append baseline regen + fresh-finding guard, run on the CI toolchain (1.18.1/OTP27), never a dev-box commit. REVIEW the branch for correctness, harden if needed, prepare to merge. Do NOT re-claim task-felix-sobelow-baseline-reconcile (held by a LIVE cross-session claim, worker-1-team424-author) - land the already-built BRANCH. Sobelow is ADVISORY (continue-on-error) - hygiene, never a merge-blocker."
+          }
+        ],
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "(2) FIX THE RECURRING LEDGER TOOLING BUG at the tool level: every wave, builders leave the final LEAD-CLOSED-on-merge criterion met=false and a reviewer/steward hand-patches it. Make bp task close (and/or the task-close API handler) auto-stamp the final merge-gated criterion met=true with close evidence, so future waves stop needing hand-fixing. Self-contained api/ (+ bp CLI if the verb needs it), fail-before test."
+          }
+        ],
+        "id": "block-7",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "(3) ONE fresh Felix audit over a single UNCOVERED api/ subsystem - improvement-only, every finding names a concrete failure mode / measured cost / scar-class risk (zero tidiness), each CONFIRMED finding backed by a protective test. File qualifying issues as child bp tasks and build the crispest 1-2. Also mergeable if it fits: task-felix-migration-ddl-audit-deadlock (D35) - its audit-dispatch 40P01 sync toggle is still UNMERGED on origin/main; land it (merge/verify, stack-attribute any 40P01)."
+          }
+        ],
+        "id": "block-8",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-9",
+        "level": 2,
+        "text": "Direction (tentative - Decide finalizes after two explore rounds)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Finish over net-new. Three disjoint, parallelizable opus worktrees, each with a fail-before proof, gated CC=/usr/bin/clang mix test, branched from ORIGIN/main (local checkout diverged with unrelated omx commits - never build from it)."
+          }
+        ],
+        "id": "block-10",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FRONT 1 - sobelow carryover, land it. First read of b48fb6c1 is encouraging: the reconcile script does clear-skip THEN mark-skip-all, guards the CI toolchain (1.18.1/OTP27) and refuses on a dev box, backs up + restores .sobelow-skips byte-for-byte (never commits), and uploads the regenerated baseline+diff as a human-review artifact; the fresh-finding guard plants a non-controller String.to_atom and asserts exit 1 + a DOS.StringToAtom hit - exactly the D41 shape. What a verifier must EXERCISE: does clear-skip then mark-skip-all yield a live baseline on the pinned toolchain? does the trap/restore leave the tracked file byte-identical on every exit path (including mid-script failure)? does the planted guard still red under --skip --exit Low against the CURRENT origin/main baseline? does security.yml run only the pinned toolchain, or will a second matrix row trip the version guard exit 2? Harden only if a gap is proven. Closing the task is a foreign-claim mechanics puzzle - the lander lands the BRANCH; the lead closes the ledger without stomping the live claim."
+          }
+        ],
+        "id": "block-11",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FRONT 2 - kill the ledger off-by-one at the tool, not by hand. Seam: api/lib/barkpark/tasks/close.ex (+ criteria.ex, the /v1 close route, internal/cli close verb). Wave-7 review log names the scar: builders pass a 1-based --criterion index into a 0-based tool, so the MERGE criterion reads falsely met=true and the first real criterion falsely unmet - and separately the final LEAD-CLOSED-on-merge criterion sits met=false until a human patches it. The fix must make close auto-stamp the final merge-gated criterion met=true, writing close evidence (worker + epoch + merge commit/PR). Crux for survey: how is the final merge-gated criterion IDENTIFIED (last entry? a marker string like LEAD-CLOSED / merged? a flag on the criterion)? The fix must be CONSERVATIVE - only stamp a criterion unambiguously the merge gate, never fabricate met=true on a non-gate criterion. Prefer an explicit close-time flag over a fragile heuristic if identification is ambiguous. Fail-before: a close today leaves the final criterion met=false; after the fix it is met=true with evidence. Watch OpenAPI: if the close route request/response shape changes, docs/openapi.json needs a CI-artifact regen (local regen OOMs)."
+          }
+        ],
+        "id": "block-12",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FRONT 3 - one fresh audit over genuinely-uncovered ground. The 12 domains were framework-structural; Part XI got a verdict-table Paper (Interop live, Mailers/i18n/Assets/GraphQL mostly n-a/already-good). The ripest uncovered scar-class is the OUTBOUND I/O boundary that is NOT System.cmd/Port (the interop sweep already bounded those): outbound HTTP - webhook dispatch, CDN purge/invalidate, self-update fetches, any Finch/Req/HTTPoison/:httpc call - where a missing timeout, retry storm, or connection-pool exhaustion is a real availability scar. Lean the fresh audit there tentatively, but let surveyors confirm whether outbound-HTTP, mailer/Swoosh, caching/ETS TTL sweepers, or JSON/serialization is the freshest ripe target with a NAMED failure mode. Build the crispest 1-2 confirmed findings with protective tests; file the rest as child bp tasks (publish-wall: 1-12 single-line tags, registry slugs like elixir/testing/search)."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FRONT 3b (opportunistic) - land task-felix-migration-ddl-audit-deadlock (D35) if it fits: the audit-dispatch sync-in-test toggle (config :barkpark, :audit_dispatch_async default true; false in test.exs; dispatch_audit_async runs fan-out synchronously in-caller when off, scoped to the AUDIT path only - do NOT touch the shared fan_out/2 webhook dispatch). Survey must confirm whether it is built on a branch/PR or still unbuilt, and whether it is needed before any --include-flaky full-suite sweep can be trusted. Every 40P01 seen during its gate must be stack-attributed."
+          }
+        ],
+        "id": "block-14",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-15",
+        "level": 2,
+        "text": "Survey plan (cast wide - Digest distills)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "15 broad Sonnet surveyor assignments across the three fronts - sobelow-branch correctness, ledger close-handler seam + off-by-one, uncovered-subsystem audit surface, D35 landing state, wave-8 landed slices, publish-wall tag registry, OpenAPI impact. Each question names suspected files/claims and why the answer changes the plan; the full set is carried on this Paper's driving tasks and the Strategize output."
+          }
+        ],
+        "id": "block-16",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-17",
+        "level": 2,
+        "text": "In flight now",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SURVEYING - 15 surveyors dispatched. Next: Digest folds their reports into this Paper and designs the verify fleet BEFORE verifiers fly."
+          }
+        ],
+        "id": "block-18",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-19",
+        "level": 2,
+        "text": "Digest — survey folded (2026-07-13)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "15 surveyors reported. Wide-but-shallow; file:line evidence trusted over prose. Net: two of the three fronts are LAND/REVIEW jobs whose branches are proven-good, one front needs a live-run to pick its target, and TWO load-bearing premises in the wish are now contradicted by evidence."
+          }
+        ],
+        "id": "block-20",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-21",
+        "level": 3,
+        "text": "What is established",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FRONT 1 (sobelow carryover) is a clean LAND, no code hardening needed. Verified from Sobelow's own dep source: clear-skip halts BEFORE any scan, so the ignore-set is empty when mark-skip-all's scan runs, and it writes EVERY live finding — a true reconcile, not an append onto stale history. Trap/restore leaves .sobelow-skips byte-identical on every exit path including a mid-script mix failure (trap armed before either mix call, cmp-verified before the one trap-disarm). security.yml's sobelow job is a SINGLE matrix row (otp 27.0 / elixir 1.18.1) that exactly matches the reconcile script's exit-2 version guard; both new steps carry if:always() and continue-on-error stays advisory. The branch rebases clean by construction — zero commits between base 607aea46 and origin/main touch any of the 4 changed files. The fresh-finding guard was ACTUALLY RUN locally (off-pin toolchain): the planted String.to_atom probe reds with DOS.StringToAtom exit 1 and the probe is cleaned up."
+          }
+        ],
+        "id": "block-22",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FRONT 2 root cause: the wish CONFLATES two distinct failure modes. Mode A (the real recurring off-by-one) — builders pass a 1-based --criterion into the 0-based STAMP tool; it corrupts an arbitrary criterion and in observed incidents made the merge-gate criterion falsely TRUE (opposite polarity to the wish text). It is a usage bug, hit across three epics; internal.ex merge_criteria already has an optional criterion-TEXT guard that would REJECT a wrong index, but it is not exposed via any CLI flag. Mode B (the wish's actual target) — the final LEAD-CLOSED merge-gate criterion left met=false is INTENTIONAL DESIGN (bp-epic-cycle.workflow.js:62: builders do NOT close merge-gated criteria; the LEAD closes on merge). The pain is pure TOIL: the lead hand-stamps it after merge."
+          }
+        ],
+        "id": "block-23",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FRONT 2 seam + guardrail: auto-stamping inside the builder's own bp task close fires BEFORE merge and would recreate Mode-A's premature-true bug — the fix MUST be a lead/merge-time seam. The seam is close.ex apply_close_update alongside merge_criteria/2; worker_id, observed_epoch, ts_iso and the landed{prs,files,capability_slugs} map are all already in scope at close time. No is_merge_gate field exists anywhere in the schema — identification today is pure convention (LAST array entry + literal 'MERGE GATE' substring, 8/8 sampled). Use an EXPLICIT flag, never a text heuristic: criterion TEXT is work-digest-defining, so matching on it risks tripping the claim fence. OpenAPI: zero drift if implemented server-side or as a flags: entry; only an args: addition drifts docs/openapi.json (CI-blocking; local regen OOMs)."
+          }
+        ],
+        "id": "block-24",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FRONT 3 target: outbound-HTTP is the freshest ground (System.cmd/Port already swept; mailer, webhook dispatcher, ETS caches and JSON/atom paths all independently confirmed already-hardened). Two candidate findings. (a) sso/oidc/http.ex + sso/social/http.ex are the ONLY two outbound-HTTP modules in api/lib with NO explicit receive_timeout/retry, sitting on the user-facing login path — but whether this is a real unbounded-hang or a style nit hinges on Req 0.5.17's DEFAULT receive_timeout when unset (undetermined this pass). (b) media/delivery/cdn.ex invalidate_http is synchronous, single-attempt, un-backgrounded, inline in BOTH the media-upload path and the inbound transcoder-callback controller — the crispest self-contained buildable finding (a slow CDN blocks the upload response). Shared Finch default pool (only Sync.Finch is dedicated) is real but architecturally larger — file as a child task, do not build this wave."
+          }
+        ],
+        "id": "block-25",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FRONT 3b (D35, opportunistic): task-felix-migration-ddl-audit-deadlock is BUILT but UNMERGED with no PR. The fix lives on local branch loop-epic/migration-ddl-deadlock-sync-in-test-audi-2 (commit 60966bdc, 4 files: config.exs, test.exs, dispatcher.ex, audit_dispatch_test.exs). Its base is an ancestor of origin/main but 39 commits behind (including PR #2917's async:false→true DataCase flip). It must be rebased/cherry-picked as the 4-file hunks — a naive merge would revert unrelated origin/main work. Criteria 2/4; the N>=10 full-suite flake-gone confirmation was never completed. Wave-8 slices #3015 and #3016 are confirmed MERGED and closed 3/3 — do NOT re-handle."
+          }
+        ],
+        "id": "block-26",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-27",
+        "level": 3,
+        "text": "Contradictions the Decide phase must not inherit blindly",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "1) Front-1 claim state: the wish/direction asserts task-felix-sobelow-baseline-reconcile is held by a LIVE cross-session claim (worker-1-team424-author). TWO independent surveyors found the claim is RELEASED (claim.worker=null, released_at/released_by set, lifecycle_status=open, and the task appears in bp task ready). Operational instruction is unchanged either way (land the BRANCH, do not rebuild the task), but the closer must CLAIM-to-close (epoch 5→6) since nobody holds it, and must claim BY EXPLICIT ID — a blind bp task next could race another wave-9 process. Do not repeat 'LIVE claim' verbatim without a fresh check."
+          }
+        ],
+        "id": "block-28",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "2) Front-2 polarity: the wish describes the bug as 'final criterion left met=false', but the recurring real incident is the OPPOSITE — the off-by-one made the merge-gate criterion falsely met=TRUE while a real criterion was left unmet. Mode B (left-false) is by-design toil, not a bug. Decide should scope Front 2 as: (i) a lead/merge-time explicit-flag auto-stamp for Mode B, and consider (ii) exposing internal.ex's existing criterion-text guard to kill Mode A at the source — flag both to the builder rather than 'auto-stamp on close'."
+          }
+        ],
+        "id": "block-29",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-30",
+        "level": 3,
+        "text": "Coverage map — checked & FOUND (settled)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Sobelow branch: dep-source semantics of clear-skip/mark-skip-all, trap/restore control flow, single-matrix-row vs version-guard match, if:always() wiring, structural rebase-clean guarantee, live guard run. Ledger: close.ex/internal.ex/criteria.ex full write path, merge_criteria index-targeting, work_digest deliberately excluding met/evidence, CLI close is 100% manifest-driven (zero bespoke Go), OpenAPI close-route generation mechanics (permissive Document schema; only args: drift). Audit map: 12 Felix domains + Part XI verdict scope enumerated from the epic children; webhooks dispatcher / mailer(Swoosh, retries:1, gen_smtp 5s default) / ETS caches (rate_limiter, surface_configs, replay_ring) / JSON-atom paths all confirmed already-good; full 12-site outbound-HTTP inventory with per-site timeout config; CDN sync-block call chain traced end to end. D35: branch existence, 4-file diff, 39-behind ancestry, no open PR, released claim. Infra: Wave-8 #3015/#3016 merge state + task closure, CI green base (cfd9e6d4 Test green; Format advisory red; sobelow advisory), borrow-warm _build/test recipe live (same-day), 54-tag publish-wall registry captured."
+          }
+        ],
+        "id": "block-31",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-32",
+        "level": 3,
+        "text": "Coverage map — checked & NOT FOUND (absences = decisions in waiting)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "No live CI-toolchain (1.18.1/OTP27) execution of the reconcile script's clear-skip→mark-skip-all — local is 1.19.5/OTP28 and the script self-refuses; source trace is strong but unproven on-pin (Front-1 residual). No is_merge_gate structured field anywhere in schema/validation — identification is pure prose. Req/Finch EXACT default receive_timeout when unset — undetermined; Front-3 SSO severity hinges on it. Whether bp task stamp authorizes against an already-CLOSED (done) task — untested; if it does, Front 2 shrinks to a lead post-merge stamp with no close.ex change. No rebase DRY-RUN of the D35 branch onto the current origin/main tip — only diff --stat. N>=10 D35 flake-gone confirmation — never completed. bp search verb absent on this CLI build across ALL surveyors — freshness worth a note."
+          }
+        ],
+        "id": "block-33",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-34",
+        "level": 3,
+        "text": "Coverage map — corners NO surveyor reached",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The full ~34 Felix child-task set for the merge-gate-convention invariant (only 8 sampled). The domain-10 (auth/security/tenancy) findings Paper — whether its SSO coverage already touched outbound-call resilience vs authz-only (no paper access this pass). Deep trace of ETS-cache prune-timer survival across a supervisor-restart storm (moduledoc read only). Whether the fresh-finding guard's planted probe .ex module pollutes the BEAM code path of the SAME security.yml job's later steps (cleanup looked fine, interaction untraced)."
+          }
+        ],
+        "id": "block-35",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-36",
+        "level": 2,
+        "text": "Verify plan — 6 assignments in flight (5 opus, 1 sonnet)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V1 (opus, RUN): Req 0.5.17 default receive_timeout — does an omitted receive_timeout leave sso/oidc + sso/social calls truly unbounded, or does Req/Finch bound it? Inspect deps/req + deps/finch defaults AND run a Req.get with no timeout against a deliberately-slow local server, measuring whether it hangs past ~20s. Settles whether Front 3 anchors on SSO or on CDN."
+          }
+        ],
+        "id": "block-37",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V2 (opus, RUN, worktree): CDN sync-block — a targeted mix test with a slow stub CDN adapter proving the media-upload (and transcoder-callback) request path blocks on Cdn.invalidate_http wall-clock; grep all 4 call sites confirming no caller branches on its return value. Establishes the fail-before for the crispest Front-3 build."
+          }
+        ],
+        "id": "block-38",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V3 (opus, RUN): Front-2 crux — does bp task stamp / the /v1 stamp route authorize+apply against a task whose lifecycle_status is already 'done' (claim retained at close)? Read stamp.ex + the stamp controller for a lifecycle guard, run the tasks unit tests, and if safe exercise a throwaway create→close→stamp against the live server. Also RUN internal.ex's merge_criteria path to confirm the criterion-TEXT guard rejects a mismatched index. Decides whether Front 2 is a lead post-merge stamp (small) or a close.ex change."
+          }
+        ],
+        "id": "block-39",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V4 (opus, RUN, worktree): D35 landability — cherry-pick 60966bdc onto CURRENT origin/main in a worktree, confirm it applies without conflict on the 4 files, then CC=/usr/bin/clang mix test test/barkpark/webhooks/audit_dispatch_test.exs green AND fail-before (revert the sync toggle → test reds). Confirms PR #2917's async flip didn't change the fix's semantics."
+          }
+        ],
+        "id": "block-40",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V5 (sonnet): Ledger truth + convention scan — re-fetch task-felix-sobelow-baseline-reconcile and task-felix-migration-ddl-audit-deadlock claim state NOW (worker null? lifecycle? ready?) to settle the live-vs-released contradiction; then scan ALL ~34 Felix child tasks confirming the merge-gate criterion is invariably the LAST entry AND carries the 'MERGE GATE' substring, quantifying any exception (Front-2 identification safety)."
+          }
+        ],
+        "id": "block-41",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "V6 (opus, RUN): Front-1 on-pin proof — open a DRAFT PR from origin/wave8-carryover/sobelow-reconcile-candidate and observe security.yml's sobelow job on the real 1.18.1/OTP27 CI toolchain: reconcile step yields a live baseline+diff artifact, the guard step reds the planted probe (exit 1), no version-guard exit-2, continue-on-error shields the whole job. The one proof no surveyor could do locally; the draft PR is reversible and doubles as the human-review artifact."
+          }
+        ],
+        "id": "block-42",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-43",
+        "level": 2,
+        "text": "In flight now",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "VERIFYING — 6 verifiers dispatched. Next: Digest's successor Decide folds their run-proofs, cuts the per-slice build plan (all builders opus; Fable exhausted), commits the charter, and files any child backlog behind the publish wall."
+          }
+        ],
+        "id": "block-44",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-46",
+        "level": 2,
+        "text": "Decide — verification results (six RUN verifiers, proofs over prose)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "req-default-timeout: PREMISE REFUTED. Req 0.5.17 / Finch 0.21.0 supply a bounded 15_000ms receive_timeout default; a live probe (Req.get, no receive_timeout, against a 25s slow raw-TCP server) returned {:error, %Req.TransportError{reason: :timeout}} at 15164 ms — bounded, not a hang. SSO omitting the option drops from an availability scar to a low-severity consistency nit (backlog). Coverage: every OTHER outbound Req module sets receive_timeout explicitly (self_update 10s, webhooks 10s, github/indx/bokbasen 30s, titles 15s); no app-level default override exists."
+          }
+        ],
+        "id": "block-47",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "cdn-sync-block-failbefore: CONFIRMED. Cdn.publish blocks the caller for the full CDN round-trip inline in both upload sites (media/processing.ex:38 and media_processing_controller.ex:25, before json(conn,...)). Proof: slow-CDN Bypass -> Cdn.publish wall-clock 916/1103ms vs 0-7ms noop control. Async-safety doubly confirmed: all 3 call sites discard the return; the invalidate chain unconditionally returns :ok. Delete-path media.ex:398 is D36's concern — not this slice."
+          }
+        ],
+        "id": "block-48",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "stamp-on-closed-task: DECISIVE. bp task stamp / the /v1 stamp route does NOT authorize against a done task — check_in_progress returns {:error, {:not_in_progress, \"done\"}} -> 409; the ledger is sealed by close. A post-merge external stamp is architecturally impossible; the only working seam is close.ex apply_close_update. Also proved: internal.ex merge_criteria's criteria-text guard aborts a mismatched write with :criteria_mismatch (the Mode-A CAS, backlogged for exposure)."
+          }
+        ],
+        "id": "block-49",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "d35-cherrypick-green: CONFIRMED. git cherry-pick 60966bdc onto origin/main exits 0 (4 files, config.exs 3-way auto-merged), the protective test is GREEN (5 tests, 0 failures), and the fail-before is real — flipping :audit_dispatch_async true makes dispatch_audit_async return {:ok, #PID} (unawaited spawn) -> 3 failures. PR #2917 concern dispelled: the 40-commit gap touched neither dispatcher.ex nor data_case.ex; the audit test pins async:false."
+          }
+        ],
+        "id": "block-50",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "ledger-claim-truth-and-convention: both wish contradictions CONFIRMED. task-felix-sobelow-baseline-reconcile is RELEASED (worker=null, epoch 5, released_by worker-1-team424-author, in bp task ready) — NOT the LIVE claim the wish asserted. And the 'last acceptance_criteria entry contains MERGE GATE' convention holds on only 14/34 Felix children — an unreliable detection heuristic, so Front 2 must use an explicit marker. Charter Wave-7 log independently confirms the Mode-A off-by-one polarity (merge criterion falsely met=TRUE)."
+          }
+        ],
+        "id": "block-51",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "sobelow-onpin-ci-proof: reconcile + fresh-finding guard PROVEN correct on the real pin (run 29274393147, OTP 27 / Elixir 1.18.1) — clear-skip -> mark-skip-all regenerated a live 112-line baseline, the guard flagged the planted probe and restored it, no version-guard trip, continue-on-error shielded the job. BUT one proven gap: the reconciled .sobelow-skips (a dotfile) is DROPPED from the artifact by upload-artifact@v4 include-hidden-files:false — it ships only metadata+diff. The digest's 'clean land, no code' read is REFUTED; land WITH the include-hidden-files hardening."
+          }
+        ],
+        "id": "block-52",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-53",
+        "level": 2,
+        "text": "Decide — decisions (D45–D50, mirror the charter)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D45: Wave 9 = FINISH + ONE-FRESH-AUDIT, 4 opus slices, file-disjoint, all builders opus (Fable exhausted). W8 #3015/#3016 stay done."
+          }
+        ],
+        "id": "block-54",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D46: Front 1 (sobelow) LANDS branch b48fb6c1 WITH the include-hidden-files hardening — the on-pin proof refuted the clean-land read. Claim is RELEASED not live; claim by explicit ID epoch 5->6; do NOT rebuild. Sobelow stays advisory."
+          }
+        ],
+        "id": "block-55",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D47: Front 2 fixes Mode B ONLY, at close.ex apply_close_update, via an explicit merge_gate:true criterion marker (stamp on a done task is sealed; the text convention is unreliable at 14/34). Auto-stamp gated on terminal status + non-empty landed map -> never recreates Mode A. Zero OpenAPI drift. Mode-A hardening -> backlog."
+          }
+        ],
+        "id": "block-56",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D48: Front 3 ships the CDN sync-block fix (SSO headline refuted). Async-ize the publish-path purge on the two upload sites only; delete-path is D36. Backlog: SSO explicit-timeout, dedicated auth/plugin Finch pool."
+          }
+        ],
+        "id": "block-57",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D49: Front 3b lands D35 by cherry-picking 60966bdc (not merging the 40-behind branch). Re-claim epoch 16->17; criterion 2 (N>=10) may stay a --miss note; merge gate lead-closed."
+          }
+        ],
+        "id": "block-58",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "D50: Guardrails unchanged — branch from ORIGIN/main (tip 3cbbe26b), main checkout stays on main, isolated worktrees, CC=/usr/bin/clang, borrow-warm _build. Charter committed before fan-out (d654715b)."
+          }
+        ],
+        "id": "block-59",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-60",
+        "level": 2,
+        "text": "Decide — wave plan (4 opus slices, in flight)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Slice 1 [P1, small] — task-felix-sobelow-baseline-reconcile — surface: CI/security.yml + api/scripts + docs. LAND wave8-carryover/sobelow-reconcile-candidate (b48fb6c1) + add include-hidden-files:true (or a non-dotfile artifact name) so the reconciled baseline actually ships. Builder: opus. Gate: cd api && CC=/usr/bin/clang mix sobelow --skip --exit Low (advisory) + confirm the upload step names the baseline."
+          }
+        ],
+        "id": "block-61",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Slice 2 [P1, medium] — task-felix-close-merge-gate-autostamp — surface: api/lib/barkpark/tasks (close.ex, internal.ex) + close_test.exs. Explicit merge_gate marker auto-stamped at close when terminal+landed. Builder: opus. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark/tasks/close_test.exs."
+          }
+        ],
+        "id": "block-62",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Slice 3 [P1, medium] — task-felix-cdn-sync-block-async — surface: api/lib/barkpark/media (processing.ex, delivery/cdn.ex) + v1/media_processing_controller.ex + new cdn_sync_block_test.exs. Async-ize the CDN purge on the two upload sites. Builder: opus. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark/media/cdn_sync_block_test.exs."
+          }
+        ],
+        "id": "block-63",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Slice 4 [P2, small] — task-felix-migration-ddl-audit-deadlock — surface: api/config + webhooks/dispatcher.ex + audit_dispatch_test.exs. Cherry-pick 60966bdc onto origin/main. Builder: opus. Gate: cd api && CC=/usr/bin/clang mix test test/barkpark/webhooks/audit_dispatch_test.exs."
+          }
+        ],
+        "id": "block-64",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-65",
+        "level": 2,
+        "text": "Backlog seeded this wave (published children of the epic)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "task-felix-sso-explicit-timeout (P3): set an explicit <=15s receive_timeout on sso/oidc/http.ex + sso/social/http.ex for consistency/faster login-path failure (not a hang — bounded default proven). task-felix-outbound-pool-isolation (P3): dedicated Finch pool for auth/plugin outbound so logins don't queue behind a webhook/CDN delivery storm on the shared default pool. task-felix-stamp-index-guard (P2): kill Mode A at source — require/expose the internal.ex criteria-text guard (or add 0-based --criterion validation) so a wrong-index stamp is rejected with :criteria_mismatch instead of silently corrupting a neighbor criterion."
+          }
+        ],
+        "id": "block-66",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-66-1",
+        "level": 2,
+        "text": "Review — wave debrief (2026-07-13)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Reviewer (one Fable, last hands before merge) reviewed all four green slices adversarially against origin/main (45a02ecf) and re-ran every slice gate on the final state. Verdict: all four correct as built — ZERO code fixes needed, zero reviewer commits. Final branches are the originals. Grade: A-."
+          }
+        ],
+        "id": "block-67",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-68",
+        "level": 3,
+        "text": "What shipped (per slice)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "(1) sobelow reconcile — LAND carryover — task-felix-sobelow-baseline-reconcile — final branch loop-epic/sobelow-reconcile-land-carryover-branch--0. Cherry-picked b48fb6c1 (worker-1's complete candidate) clean onto origin/main: 4 files (security.yml +3 if:always() steps, sobelow-baseline-reconcile.sh, sobelow-fresh-finding-guard.sh, merge-gates.md) + the one proven hardening include-hidden-files:true on the artifact-upload step (the reconciled dotfile baseline was silently dropped by upload-artifact@v4's hidden-file default). Reviewer confirmed: reconcile script is CI-only + toolchain-pinned (1.18.1/OTP27) with mktemp backup + trap restore + byte-identical restore assert; guard plants a String.to_atom probe and asserts exit-1 + DOS.StringToAtom + probe filename then removes it; both scripts bash -n clean; security.yml YAML valid; branch touches ZERO .ex and ZERO .sobelow-skips (sobelow input byte-identical to origin/main). The local advisory red (exit 1, 12 findings) is pre-existing cross-toolchain fingerprint drift, NOT a regression — sobelow stays ADVISORY (continue-on-error), never a merge-blocker. Gate: advisory, substantive on-pin CI."
+          }
+        ],
+        "id": "block-69",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "(2) ledger close auto-stamp — task-felix-close-merge-gate-autostamp — final branch loop-epic/ledger-close-auto-stamp-the-merge-gate-c-1. Pure server-side: close.ex apply_close_update calls autostamp_merge_gate/6 right before merge_criteria. Synthesizes a met=true update ONLY when new_status==done AND a non-empty landed map rides the close AND the criterion carries an explicit merge_gate:true marker AND it is still met!=true AND the caller did not already target that index. Rides the SAME merge_criteria rev-CAS write. Identification is the explicit marker only — no text/last-entry/index heuristic (verify-proven unreliable at 14/34). Zero OpenAPI drift, no CLI change. Reviewer re-ran gate: 33 tests, 0 failures; 7 new cases cover happy-path, no-landed negative, no-marker negative, caller-wins, idempotent already-met, cancelled non-done. The task DOGFOODS the feature (its own criterion[4] carries merge_gate:true). Gate: green."
+          }
+        ],
+        "id": "block-70",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "(3) CDN publish-path async-ize — task-felix-cdn-sync-block-async — final branch loop-epic/async-ize-the-synchronous-cdn-purge-on-t-2. Single-seam fix inside Cdn.publish/2: the edge purge now fires on the supervised Barkpark.TaskSupervisor via purge_edge_cache_async/1, mirroring Media.Delivery.Events.dispatch's fire-and-forget pattern. Because BOTH publish-path callers (Processing.process/1 and the transcoder ready branch) funnel through Cdn.publish, one seam fixes both. :ok contract preserved; delete-path Cdn.invalidate untouched (D36 owns it). Reviewer confirmed Barkpark.TaskSupervisor is registered in the supervision tree. Gate re-run: cdn_sync_block_test 1/0 (wall-clock <500ms + purge-still-fires assert), cdn_test 4/0 no regression. Gate: green."
+          }
+        ],
+        "id": "block-71",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "(4) D35 audit-dispatch land — task-felix-migration-ddl-audit-deadlock — final branch loop-epic/land-d35-audit-dispatch-sync-in-test-tog-3. Cherry-picked 60966bdc conflict-free onto origin/main (4 files: config.exs +9, test.exs +11, dispatcher.ex +30, audit_dispatch_test.exs +187). Wires config :barkpark, :audit_dispatch_async (default true; false in test) so dispatch_audit_async runs the audit fan-out INLINE when the flag is false — owner-scoped, joins the sandbox, dies with the test — instead of the unawaited Task.Supervisor.start_child that leaked an audit SELECT and deadlocked concurrent raw-DDL tests (40P01). Scoped to the AUDIT path only; shared fan_out/2 untouched. Gate re-run: 5 tests, 0 failures. Gate: green."
+          }
+        ],
+        "id": "block-72",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-73",
+        "level": 3,
+        "text": "What stalled / merge-gated obligations",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Nothing stalled — all four slices are built, correct, and gate-green. Open obligations the LEAD closes on merge: every slice's merge_gate criterion (PR merged to origin/main) stays honestly met=false. ADDITIONALLY, task-felix-migration-ddl-audit-deadlock criterion[2] (N>=10 full-suite --include flaky, 0 Postgrex 40P01) is honestly met=false with a --miss note — the full-suite grant was unavailable in the isolated build worktree; the lead runs + stamps it before merging D35. Sobelow's substantive reconcile/guard steps only execute on the PR's on-pin 1.18.1/OTP27 CI run (they self-guard off-pin), so criterion[0]/[2] were stamped on reviewed correctness + the two guard proofs, not a live on-pin run — the PR's CI is the final arbiter."
+          }
+        ],
+        "id": "block-74",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-75",
+        "level": 3,
+        "text": "Ledger audit outcome",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "All four slice tasks are HONEST: lifecycle=in_progress (correct — merge-gated criteria stay open for the lead), each claimed by its epic-builder with evidence stamped as-worked, each linked to wave_paper felix-pristine-wave-9-2026-07-13 and parent task-96a908af98698118. Criteria met-vectors: sobelow [T,T,T,F(mg)], close-autostamp [T,T,T,T,F(mg)], cdn-async [T,T,T,T,F(mg)], migration-ddl [T,T,F(N>=10 honest-miss),F(mg)]. No ledger lies or omissions found — ZERO ledger fixes required. The sobelow task's live claim is now held by its own epic-builder (epoch 10), not the released worker-1-team424-author the wish warned about; the builder reviewed/landed the BRANCH without rebuilding the reconcile, as instructed."
+          }
+        ],
+        "id": "block-76",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-77",
+        "level": 3,
+        "text": "Grade + commentary",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "A-. This is a tight, honest, finishing wave. All four slices are correct, minimal, and gate-green with genuine fail-before proofs; nothing is bloated or show-off. The close.ex auto-stamp is the standout — it kills a recurring per-wave ledger toil AT THE TOOL with a conservative, explicit-marker design (no fragile heuristic), zero OpenAPI drift, and comprehensive negative-case tests, and the task dogfoods its own marker. The CDN and D35 fixes are surgical single-seam / clean-cherry-pick landings. Why A- not A: the wave is finishing-work over net-new (by design), and two substantive proofs are deferred to the PR's CI rather than run here — the sobelow reconcile/guard only execute on the on-pin CI toolchain (locally self-guarded), and the D35 N>=10 full-suite flake sweep is an honest --miss pending the lead's grant. Both are correctly and honestly deferred, not hidden — but they mean the wave's full value is only realized once CI + the lead close the gates."
+          }
+        ],
+        "id": "block-78",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-79",
+        "level": 3,
+        "text": "What the next wave should take",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Lead: merge the four PRs (Elixir-gated); on the D35 PR, run + stamp criterion[2]'s N>=10 --include-flaky sweep before merging; watch the sobelow PR's on-pin CI to confirm the reconcile artifact ships the baseline (include-hidden-files) and the fresh-finding guard reds. Then the next wave clears the freshly-seeded outbound-IO backlog: task-felix-sso-explicit-timeout (explicit <=15s receive_timeout on the OIDC/Social login path), task-felix-outbound-pool-isolation (dedicated auth/plugin Finch pool off the shared webhook/CDN pool), and task-felix-stamp-index-guard (kill Mode-A wrong-index stamps at source with :criteria_mismatch). Also still open: task-felix-sobelow-gate-blocking-eval (flip sobelow to blocking once the CI reconcile lands). Felix's named-failure code backlog is otherwise empty — the remaining work is consistency/hygiene nits and ledger-tooling hardening."
+          }
+        ],
+        "id": "block-80",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix Pristine Wave 9 — sobelow reconcile landing, ledger auto-stamp tooling, fresh outbound-IO audit</h1><p>Status: REVIEWED — wave complete, grade A-. Living story: Strategize→Digest→Decide→Build→Review. Epic: task-96a908af98698118. Fable EXHAUSTED — every builder opus. Review debrief appended below (2026-07-13).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Where the epic stands (reconciled)</h2><p>Waves 1-7 emptied Felix&#39;s named-failure code backlog (Magick/vix bounds, bokbasen mount+pagination, LV telemetry, interop resource-bound sweep, phantom-media after-commit deferral, sobelow durable skip, async flip, ledger restamp - all merged). Wave 8 DECIDED three CI-hardening slices; two LANDED (#3015 suite-order deflake, #3016 migrator-ddl Fixture-E migration_lock:false). The third - the sobelow reconcile-not-append regen - was BUILT but could not merge in wave 8; it survives as branch wave8-carryover/sobelow-reconcile-candidate (commit b48fb6c1, off 607aea46, an ancestor of origin/main). Wave 9 finishes that carryover, fixes the recurring ledger tooling scar, and runs ONE fresh audit over an uncovered subsystem.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The wish</h2><p>Close the CI-hardening backlog AND run one fresh Phoenix-mastery audit pass. THREE fronts, all opus.</p><p>(1) LAND the sobelow reconcile branch (b48fb6c1): reconcile-not-append baseline regen + fresh-finding guard, run on the CI toolchain (1.18.1/OTP27), never a dev-box commit. REVIEW the branch for correctness, harden if needed, prepare to merge. Do NOT re-claim task-felix-sobelow-baseline-reconcile (held by a LIVE cross-session claim, worker-1-team424-author) - land the already-built BRANCH. Sobelow is ADVISORY (continue-on-error) - hygiene, never a merge-blocker.</p><p>(2) FIX THE RECURRING LEDGER TOOLING BUG at the tool level: every wave, builders leave the final LEAD-CLOSED-on-merge criterion met=false and a reviewer/steward hand-patches it. Make bp task close (and/or the task-close API handler) auto-stamp the final merge-gated criterion met=true with close evidence, so future waves stop needing hand-fixing. Self-contained api/ (+ bp CLI if the verb needs it), fail-before test.</p><p>(3) ONE fresh Felix audit over a single UNCOVERED api/ subsystem - improvement-only, every finding names a concrete failure mode / measured cost / scar-class risk (zero tidiness), each CONFIRMED finding backed by a protective test. File qualifying issues as child bp tasks and build the crispest 1-2. Also mergeable if it fits: task-felix-migration-ddl-audit-deadlock (D35) - its audit-dispatch 40P01 sync toggle is still UNMERGED on origin/main; land it (merge/verify, stack-attribute any 40P01).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Direction (tentative - Decide finalizes after two explore rounds)</h2><p>Finish over net-new. Three disjoint, parallelizable opus worktrees, each with a fail-before proof, gated CC=/usr/bin/clang mix test, branched from ORIGIN/main (local checkout diverged with unrelated omx commits - never build from it).</p><p>FRONT 1 - sobelow carryover, land it. First read of b48fb6c1 is encouraging: the reconcile script does clear-skip THEN mark-skip-all, guards the CI toolchain (1.18.1/OTP27) and refuses on a dev box, backs up + restores .sobelow-skips byte-for-byte (never commits), and uploads the regenerated baseline+diff as a human-review artifact; the fresh-finding guard plants a non-controller String.to_atom and asserts exit 1 + a DOS.StringToAtom hit - exactly the D41 shape. What a verifier must EXERCISE: does clear-skip then mark-skip-all yield a live baseline on the pinned toolchain? does the trap/restore leave the tracked file byte-identical on every exit path (including mid-script failure)? does the planted guard still red under --skip --exit Low against the CURRENT origin/main baseline? does security.yml run only the pinned toolchain, or will a second matrix row trip the version guard exit 2? Harden only if a gap is proven. Closing the task is a foreign-claim mechanics puzzle - the lander lands the BRANCH; the lead closes the ledger without stomping the live claim.</p><p>FRONT 2 - kill the ledger off-by-one at the tool, not by hand. Seam: api/lib/barkpark/tasks/close.ex (+ criteria.ex, the /v1 close route, internal/cli close verb). Wave-7 review log names the scar: builders pass a 1-based --criterion index into a 0-based tool, so the MERGE criterion reads falsely met=true and the first real criterion falsely unmet - and separately the final LEAD-CLOSED-on-merge criterion sits met=false until a human patches it. The fix must make close auto-stamp the final merge-gated criterion met=true, writing close evidence (worker + epoch + merge commit/PR). Crux for survey: how is the final merge-gated criterion IDENTIFIED (last entry? a marker string like LEAD-CLOSED / merged? a flag on the criterion)? The fix must be CONSERVATIVE - only stamp a criterion unambiguously the merge gate, never fabricate met=true on a non-gate criterion. Prefer an explicit close-time flag over a fragile heuristic if identification is ambiguous. Fail-before: a close today leaves the final criterion met=false; after the fix it is met=true with evidence. Watch OpenAPI: if the close route request/response shape changes, docs/openapi.json needs a CI-artifact regen (local regen OOMs).</p><p>FRONT 3 - one fresh audit over genuinely-uncovered ground. The 12 domains were framework-structural; Part XI got a verdict-table Paper (Interop live, Mailers/i18n/Assets/GraphQL mostly n-a/already-good). The ripest uncovered scar-class is the OUTBOUND I/O boundary that is NOT System.cmd/Port (the interop sweep already bounded those): outbound HTTP - webhook dispatch, CDN purge/invalidate, self-update fetches, any Finch/Req/HTTPoison/:httpc call - where a missing timeout, retry storm, or connection-pool exhaustion is a real availability scar. Lean the fresh audit there tentatively, but let surveyors confirm whether outbound-HTTP, mailer/Swoosh, caching/ETS TTL sweepers, or JSON/serialization is the freshest ripe target with a NAMED failure mode. Build the crispest 1-2 confirmed findings with protective tests; file the rest as child bp tasks (publish-wall: 1-12 single-line tags, registry slugs like elixir/testing/search).</p><p>FRONT 3b (opportunistic) - land task-felix-migration-ddl-audit-deadlock (D35) if it fits: the audit-dispatch sync-in-test toggle (config :barkpark, :audit_dispatch_async default true; false in test.exs; dispatch_audit_async runs fan-out synchronously in-caller when off, scoped to the AUDIT path only - do NOT touch the shared fan_out/2 webhook dispatch). Survey must confirm whether it is built on a branch/PR or still unbuilt, and whether it is needed before any --include-flaky full-suite sweep can be trusted. Every 40P01 seen during its gate must be stack-attributed.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Survey plan (cast wide - Digest distills)</h2><p>15 broad Sonnet surveyor assignments across the three fronts - sobelow-branch correctness, ledger close-handler seam + off-by-one, uncovered-subsystem audit surface, D35 landing state, wave-8 landed slices, publish-wall tag registry, OpenAPI impact. Each question names suspected files/claims and why the answer changes the plan; the full set is carried on this Paper&#39;s driving tasks and the Strategize output.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">In flight now</h2><p>SURVEYING - 15 surveyors dispatched. Next: Digest folds their reports into this Paper and designs the verify fleet BEFORE verifiers fly.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Digest — survey folded (2026-07-13)</h2><p>15 surveyors reported. Wide-but-shallow; file:line evidence trusted over prose. Net: two of the three fronts are LAND/REVIEW jobs whose branches are proven-good, one front needs a live-run to pick its target, and TWO load-bearing premises in the wish are now contradicted by evidence.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">What is established</h3><p>FRONT 1 (sobelow carryover) is a clean LAND, no code hardening needed. Verified from Sobelow&#39;s own dep source: clear-skip halts BEFORE any scan, so the ignore-set is empty when mark-skip-all&#39;s scan runs, and it writes EVERY live finding — a true reconcile, not an append onto stale history. Trap/restore leaves .sobelow-skips byte-identical on every exit path including a mid-script mix failure (trap armed before either mix call, cmp-verified before the one trap-disarm). security.yml&#39;s sobelow job is a SINGLE matrix row (otp 27.0 / elixir 1.18.1) that exactly matches the reconcile script&#39;s exit-2 version guard; both new steps carry if:always() and continue-on-error stays advisory. The branch rebases clean by construction — zero commits between base 607aea46 and origin/main touch any of the 4 changed files. The fresh-finding guard was ACTUALLY RUN locally (off-pin toolchain): the planted String.to_atom probe reds with DOS.StringToAtom exit 1 and the probe is cleaned up.</p><p>FRONT 2 root cause: the wish CONFLATES two distinct failure modes. Mode A (the real recurring off-by-one) — builders pass a 1-based --criterion into the 0-based STAMP tool; it corrupts an arbitrary criterion and in observed incidents made the merge-gate criterion falsely TRUE (opposite polarity to the wish text). It is a usage bug, hit across three epics; internal.ex merge_criteria already has an optional criterion-TEXT guard that would REJECT a wrong index, but it is not exposed via any CLI flag. Mode B (the wish&#39;s actual target) — the final LEAD-CLOSED merge-gate criterion left met=false is INTENTIONAL DESIGN (bp-epic-cycle.workflow.js:62: builders do NOT close merge-gated criteria; the LEAD closes on merge). The pain is pure TOIL: the lead hand-stamps it after merge.</p><p>FRONT 2 seam + guardrail: auto-stamping inside the builder&#39;s own bp task close fires BEFORE merge and would recreate Mode-A&#39;s premature-true bug — the fix MUST be a lead/merge-time seam. The seam is close.ex apply_close_update alongside merge_criteria/2; worker_id, observed_epoch, ts_iso and the landed{prs,files,capability_slugs} map are all already in scope at close time. No is_merge_gate field exists anywhere in the schema — identification today is pure convention (LAST array entry + literal &#39;MERGE GATE&#39; substring, 8/8 sampled). Use an EXPLICIT flag, never a text heuristic: criterion TEXT is work-digest-defining, so matching on it risks tripping the claim fence. OpenAPI: zero drift if implemented server-side or as a flags: entry; only an args: addition drifts docs/openapi.json (CI-blocking; local regen OOMs).</p><p>FRONT 3 target: outbound-HTTP is the freshest ground (System.cmd/Port already swept; mailer, webhook dispatcher, ETS caches and JSON/atom paths all independently confirmed already-hardened). Two candidate findings. (a) sso/oidc/http.ex + sso/social/http.ex are the ONLY two outbound-HTTP modules in api/lib with NO explicit receive_timeout/retry, sitting on the user-facing login path — but whether this is a real unbounded-hang or a style nit hinges on Req 0.5.17&#39;s DEFAULT receive_timeout when unset (undetermined this pass). (b) media/delivery/cdn.ex invalidate_http is synchronous, single-attempt, un-backgrounded, inline in BOTH the media-upload path and the inbound transcoder-callback controller — the crispest self-contained buildable finding (a slow CDN blocks the upload response). Shared Finch default pool (only Sync.Finch is dedicated) is real but architecturally larger — file as a child task, do not build this wave.</p><p>FRONT 3b (D35, opportunistic): task-felix-migration-ddl-audit-deadlock is BUILT but UNMERGED with no PR. The fix lives on local branch loop-epic/migration-ddl-deadlock-sync-in-test-audi-2 (commit 60966bdc, 4 files: config.exs, test.exs, dispatcher.ex, audit_dispatch_test.exs). Its base is an ancestor of origin/main but 39 commits behind (including PR #2917&#39;s async:false→true DataCase flip). It must be rebased/cherry-picked as the 4-file hunks — a naive merge would revert unrelated origin/main work. Criteria 2/4; the N&gt;=10 full-suite flake-gone confirmation was never completed. Wave-8 slices #3015 and #3016 are confirmed MERGED and closed 3/3 — do NOT re-handle.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Contradictions the Decide phase must not inherit blindly</h3><p>1) Front-1 claim state: the wish/direction asserts task-felix-sobelow-baseline-reconcile is held by a LIVE cross-session claim (worker-1-team424-author). TWO independent surveyors found the claim is RELEASED (claim.worker=null, released_at/released_by set, lifecycle_status=open, and the task appears in bp task ready). Operational instruction is unchanged either way (land the BRANCH, do not rebuild the task), but the closer must CLAIM-to-close (epoch 5→6) since nobody holds it, and must claim BY EXPLICIT ID — a blind bp task next could race another wave-9 process. Do not repeat &#39;LIVE claim&#39; verbatim without a fresh check.</p><p>2) Front-2 polarity: the wish describes the bug as &#39;final criterion left met=false&#39;, but the recurring real incident is the OPPOSITE — the off-by-one made the merge-gate criterion falsely met=TRUE while a real criterion was left unmet. Mode B (left-false) is by-design toil, not a bug. Decide should scope Front 2 as: (i) a lead/merge-time explicit-flag auto-stamp for Mode B, and consider (ii) exposing internal.ex&#39;s existing criterion-text guard to kill Mode A at the source — flag both to the builder rather than &#39;auto-stamp on close&#39;.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Coverage map — checked &amp; FOUND (settled)</h3><p>Sobelow branch: dep-source semantics of clear-skip/mark-skip-all, trap/restore control flow, single-matrix-row vs version-guard match, if:always() wiring, structural rebase-clean guarantee, live guard run. Ledger: close.ex/internal.ex/criteria.ex full write path, merge_criteria index-targeting, work_digest deliberately excluding met/evidence, CLI close is 100% manifest-driven (zero bespoke Go), OpenAPI close-route generation mechanics (permissive Document schema; only args: drift). Audit map: 12 Felix domains + Part XI verdict scope enumerated from the epic children; webhooks dispatcher / mailer(Swoosh, retries:1, gen_smtp 5s default) / ETS caches (rate_limiter, surface_configs, replay_ring) / JSON-atom paths all confirmed already-good; full 12-site outbound-HTTP inventory with per-site timeout config; CDN sync-block call chain traced end to end. D35: branch existence, 4-file diff, 39-behind ancestry, no open PR, released claim. Infra: Wave-8 #3015/#3016 merge state + task closure, CI green base (cfd9e6d4 Test green; Format advisory red; sobelow advisory), borrow-warm _build/test recipe live (same-day), 54-tag publish-wall registry captured.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Coverage map — checked &amp; NOT FOUND (absences = decisions in waiting)</h3><p>No live CI-toolchain (1.18.1/OTP27) execution of the reconcile script&#39;s clear-skip→mark-skip-all — local is 1.19.5/OTP28 and the script self-refuses; source trace is strong but unproven on-pin (Front-1 residual). No is_merge_gate structured field anywhere in schema/validation — identification is pure prose. Req/Finch EXACT default receive_timeout when unset — undetermined; Front-3 SSO severity hinges on it. Whether bp task stamp authorizes against an already-CLOSED (done) task — untested; if it does, Front 2 shrinks to a lead post-merge stamp with no close.ex change. No rebase DRY-RUN of the D35 branch onto the current origin/main tip — only diff --stat. N&gt;=10 D35 flake-gone confirmation — never completed. bp search verb absent on this CLI build across ALL surveyors — freshness worth a note.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Coverage map — corners NO surveyor reached</h3><p>The full ~34 Felix child-task set for the merge-gate-convention invariant (only 8 sampled). The domain-10 (auth/security/tenancy) findings Paper — whether its SSO coverage already touched outbound-call resilience vs authz-only (no paper access this pass). Deep trace of ETS-cache prune-timer survival across a supervisor-restart storm (moduledoc read only). Whether the fresh-finding guard&#39;s planted probe .ex module pollutes the BEAM code path of the SAME security.yml job&#39;s later steps (cleanup looked fine, interaction untraced).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verify plan — 6 assignments in flight (5 opus, 1 sonnet)</h2><p>V1 (opus, RUN): Req 0.5.17 default receive_timeout — does an omitted receive_timeout leave sso/oidc + sso/social calls truly unbounded, or does Req/Finch bound it? Inspect deps/req + deps/finch defaults AND run a Req.get with no timeout against a deliberately-slow local server, measuring whether it hangs past ~20s. Settles whether Front 3 anchors on SSO or on CDN.</p><p>V2 (opus, RUN, worktree): CDN sync-block — a targeted mix test with a slow stub CDN adapter proving the media-upload (and transcoder-callback) request path blocks on Cdn.invalidate_http wall-clock; grep all 4 call sites confirming no caller branches on its return value. Establishes the fail-before for the crispest Front-3 build.</p><p>V3 (opus, RUN): Front-2 crux — does bp task stamp / the /v1 stamp route authorize+apply against a task whose lifecycle_status is already &#39;done&#39; (claim retained at close)? Read stamp.ex + the stamp controller for a lifecycle guard, run the tasks unit tests, and if safe exercise a throwaway create→close→stamp against the live server. Also RUN internal.ex&#39;s merge_criteria path to confirm the criterion-TEXT guard rejects a mismatched index. Decides whether Front 2 is a lead post-merge stamp (small) or a close.ex change.</p><p>V4 (opus, RUN, worktree): D35 landability — cherry-pick 60966bdc onto CURRENT origin/main in a worktree, confirm it applies without conflict on the 4 files, then CC=/usr/bin/clang mix test test/barkpark/webhooks/audit_dispatch_test.exs green AND fail-before (revert the sync toggle → test reds). Confirms PR #2917&#39;s async flip didn&#39;t change the fix&#39;s semantics.</p><p>V5 (sonnet): Ledger truth + convention scan — re-fetch task-felix-sobelow-baseline-reconcile and task-felix-migration-ddl-audit-deadlock claim state NOW (worker null? lifecycle? ready?) to settle the live-vs-released contradiction; then scan ALL ~34 Felix child tasks confirming the merge-gate criterion is invariably the LAST entry AND carries the &#39;MERGE GATE&#39; substring, quantifying any exception (Front-2 identification safety).</p><p>V6 (opus, RUN): Front-1 on-pin proof — open a DRAFT PR from origin/wave8-carryover/sobelow-reconcile-candidate and observe security.yml&#39;s sobelow job on the real 1.18.1/OTP27 CI toolchain: reconcile step yields a live baseline+diff artifact, the guard step reds the planted probe (exit 1), no version-guard exit-2, continue-on-error shields the whole job. The one proof no surveyor could do locally; the draft PR is reversible and doubles as the human-review artifact.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">In flight now</h2><p>VERIFYING — 6 verifiers dispatched. Next: Digest&#39;s successor Decide folds their run-proofs, cuts the per-slice build plan (all builders opus; Fable exhausted), commits the charter, and files any child backlog behind the publish wall.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Decide — verification results (six RUN verifiers, proofs over prose)</h2><p>req-default-timeout: PREMISE REFUTED. Req 0.5.17 / Finch 0.21.0 supply a bounded 15_000ms receive_timeout default; a live probe (Req.get, no receive_timeout, against a 25s slow raw-TCP server) returned {:error, %Req.TransportError{reason: :timeout}} at 15164 ms — bounded, not a hang. SSO omitting the option drops from an availability scar to a low-severity consistency nit (backlog). Coverage: every OTHER outbound Req module sets receive_timeout explicitly (self_update 10s, webhooks 10s, github/indx/bokbasen 30s, titles 15s); no app-level default override exists.</p><p>cdn-sync-block-failbefore: CONFIRMED. Cdn.publish blocks the caller for the full CDN round-trip inline in both upload sites (media/processing.ex:38 and media_processing_controller.ex:25, before json(conn,...)). Proof: slow-CDN Bypass -&gt; Cdn.publish wall-clock 916/1103ms vs 0-7ms noop control. Async-safety doubly confirmed: all 3 call sites discard the return; the invalidate chain unconditionally returns :ok. Delete-path media.ex:398 is D36&#39;s concern — not this slice.</p><p>stamp-on-closed-task: DECISIVE. bp task stamp / the /v1 stamp route does NOT authorize against a done task — check_in_progress returns {:error, {:not_in_progress, &quot;done&quot;}} -&gt; 409; the ledger is sealed by close. A post-merge external stamp is architecturally impossible; the only working seam is close.ex apply_close_update. Also proved: internal.ex merge_criteria&#39;s criteria-text guard aborts a mismatched write with :criteria_mismatch (the Mode-A CAS, backlogged for exposure).</p><p>d35-cherrypick-green: CONFIRMED. git cherry-pick 60966bdc onto origin/main exits 0 (4 files, config.exs 3-way auto-merged), the protective test is GREEN (5 tests, 0 failures), and the fail-before is real — flipping :audit_dispatch_async true makes dispatch_audit_async return {:ok, #PID} (unawaited spawn) -&gt; 3 failures. PR #2917 concern dispelled: the 40-commit gap touched neither dispatcher.ex nor data_case.ex; the audit test pins async:false.</p><p>ledger-claim-truth-and-convention: both wish contradictions CONFIRMED. task-felix-sobelow-baseline-reconcile is RELEASED (worker=null, epoch 5, released_by worker-1-team424-author, in bp task ready) — NOT the LIVE claim the wish asserted. And the &#39;last acceptance_criteria entry contains MERGE GATE&#39; convention holds on only 14/34 Felix children — an unreliable detection heuristic, so Front 2 must use an explicit marker. Charter Wave-7 log independently confirms the Mode-A off-by-one polarity (merge criterion falsely met=TRUE).</p><p>sobelow-onpin-ci-proof: reconcile + fresh-finding guard PROVEN correct on the real pin (run 29274393147, OTP 27 / Elixir 1.18.1) — clear-skip -&gt; mark-skip-all regenerated a live 112-line baseline, the guard flagged the planted probe and restored it, no version-guard trip, continue-on-error shielded the job. BUT one proven gap: the reconciled .sobelow-skips (a dotfile) is DROPPED from the artifact by upload-artifact@v4 include-hidden-files:false — it ships only metadata+diff. The digest&#39;s &#39;clean land, no code&#39; read is REFUTED; land WITH the include-hidden-files hardening.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Decide — decisions (D45–D50, mirror the charter)</h2><p>D45: Wave 9 = FINISH + ONE-FRESH-AUDIT, 4 opus slices, file-disjoint, all builders opus (Fable exhausted). W8 #3015/#3016 stay done.</p><p>D46: Front 1 (sobelow) LANDS branch b48fb6c1 WITH the include-hidden-files hardening — the on-pin proof refuted the clean-land read. Claim is RELEASED not live; claim by explicit ID epoch 5-&gt;6; do NOT rebuild. Sobelow stays advisory.</p><p>D47: Front 2 fixes Mode B ONLY, at close.ex apply_close_update, via an explicit merge_gate:true criterion marker (stamp on a done task is sealed; the text convention is unreliable at 14/34). Auto-stamp gated on terminal status + non-empty landed map -&gt; never recreates Mode A. Zero OpenAPI drift. Mode-A hardening -&gt; backlog.</p><p>D48: Front 3 ships the CDN sync-block fix (SSO headline refuted). Async-ize the publish-path purge on the two upload sites only; delete-path is D36. Backlog: SSO explicit-timeout, dedicated auth/plugin Finch pool.</p><p>D49: Front 3b lands D35 by cherry-picking 60966bdc (not merging the 40-behind branch). Re-claim epoch 16-&gt;17; criterion 2 (N&gt;=10) may stay a --miss note; merge gate lead-closed.</p><p>D50: Guardrails unchanged — branch from ORIGIN/main (tip 3cbbe26b), main checkout stays on main, isolated worktrees, CC=/usr/bin/clang, borrow-warm _build. Charter committed before fan-out (d654715b).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Decide — wave plan (4 opus slices, in flight)</h2><p>Slice 1 [P1, small] — task-felix-sobelow-baseline-reconcile — surface: CI/security.yml + api/scripts + docs. LAND wave8-carryover/sobelow-reconcile-candidate (b48fb6c1) + add include-hidden-files:true (or a non-dotfile artifact name) so the reconciled baseline actually ships. Builder: opus. Gate: cd api &amp;&amp; CC=/usr/bin/clang mix sobelow --skip --exit Low (advisory) + confirm the upload step names the baseline.</p><p>Slice 2 [P1, medium] — task-felix-close-merge-gate-autostamp — surface: api/lib/barkpark/tasks (close.ex, internal.ex) + close_test.exs. Explicit merge_gate marker auto-stamped at close when terminal+landed. Builder: opus. Gate: cd api &amp;&amp; CC=/usr/bin/clang mix test test/barkpark/tasks/close_test.exs.</p><p>Slice 3 [P1, medium] — task-felix-cdn-sync-block-async — surface: api/lib/barkpark/media (processing.ex, delivery/cdn.ex) + v1/media_processing_controller.ex + new cdn_sync_block_test.exs. Async-ize the CDN purge on the two upload sites. Builder: opus. Gate: cd api &amp;&amp; CC=/usr/bin/clang mix test test/barkpark/media/cdn_sync_block_test.exs.</p><p>Slice 4 [P2, small] — task-felix-migration-ddl-audit-deadlock — surface: api/config + webhooks/dispatcher.ex + audit_dispatch_test.exs. Cherry-pick 60966bdc onto origin/main. Builder: opus. Gate: cd api &amp;&amp; CC=/usr/bin/clang mix test test/barkpark/webhooks/audit_dispatch_test.exs.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Backlog seeded this wave (published children of the epic)</h2><p>task-felix-sso-explicit-timeout (P3): set an explicit &lt;=15s receive_timeout on sso/oidc/http.ex + sso/social/http.ex for consistency/faster login-path failure (not a hang — bounded default proven). task-felix-outbound-pool-isolation (P3): dedicated Finch pool for auth/plugin outbound so logins don&#39;t queue behind a webhook/CDN delivery storm on the shared default pool. task-felix-stamp-index-guard (P2): kill Mode A at source — require/expose the internal.ex criteria-text guard (or add 0-based --criterion validation) so a wrong-index stamp is rejected with :criteria_mismatch instead of silently corrupting a neighbor criterion.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Review — wave debrief (2026-07-13)</h2><p>Reviewer (one Fable, last hands before merge) reviewed all four green slices adversarially against origin/main (45a02ecf) and re-ran every slice gate on the final state. Verdict: all four correct as built — ZERO code fixes needed, zero reviewer commits. Final branches are the originals. Grade: A-.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">What shipped (per slice)</h3><p>(1) sobelow reconcile — LAND carryover — task-felix-sobelow-baseline-reconcile — final branch loop-epic/sobelow-reconcile-land-carryover-branch--0. Cherry-picked b48fb6c1 (worker-1&#39;s complete candidate) clean onto origin/main: 4 files (security.yml +3 if:always() steps, sobelow-baseline-reconcile.sh, sobelow-fresh-finding-guard.sh, merge-gates.md) + the one proven hardening include-hidden-files:true on the artifact-upload step (the reconciled dotfile baseline was silently dropped by upload-artifact@v4&#39;s hidden-file default). Reviewer confirmed: reconcile script is CI-only + toolchain-pinned (1.18.1/OTP27) with mktemp backup + trap restore + byte-identical restore assert; guard plants a String.to_atom probe and asserts exit-1 + DOS.StringToAtom + probe filename then removes it; both scripts bash -n clean; security.yml YAML valid; branch touches ZERO .ex and ZERO .sobelow-skips (sobelow input byte-identical to origin/main). The local advisory red (exit 1, 12 findings) is pre-existing cross-toolchain fingerprint drift, NOT a regression — sobelow stays ADVISORY (continue-on-error), never a merge-blocker. Gate: advisory, substantive on-pin CI.</p><p>(2) ledger close auto-stamp — task-felix-close-merge-gate-autostamp — final branch loop-epic/ledger-close-auto-stamp-the-merge-gate-c-1. Pure server-side: close.ex apply_close_update calls autostamp_merge_gate/6 right before merge_criteria. Synthesizes a met=true update ONLY when new_status==done AND a non-empty landed map rides the close AND the criterion carries an explicit merge_gate:true marker AND it is still met!=true AND the caller did not already target that index. Rides the SAME merge_criteria rev-CAS write. Identification is the explicit marker only — no text/last-entry/index heuristic (verify-proven unreliable at 14/34). Zero OpenAPI drift, no CLI change. Reviewer re-ran gate: 33 tests, 0 failures; 7 new cases cover happy-path, no-landed negative, no-marker negative, caller-wins, idempotent already-met, cancelled non-done. The task DOGFOODS the feature (its own criterion[4] carries merge_gate:true). Gate: green.</p><p>(3) CDN publish-path async-ize — task-felix-cdn-sync-block-async — final branch loop-epic/async-ize-the-synchronous-cdn-purge-on-t-2. Single-seam fix inside Cdn.publish/2: the edge purge now fires on the supervised Barkpark.TaskSupervisor via purge_edge_cache_async/1, mirroring Media.Delivery.Events.dispatch&#39;s fire-and-forget pattern. Because BOTH publish-path callers (Processing.process/1 and the transcoder ready branch) funnel through Cdn.publish, one seam fixes both. :ok contract preserved; delete-path Cdn.invalidate untouched (D36 owns it). Reviewer confirmed Barkpark.TaskSupervisor is registered in the supervision tree. Gate re-run: cdn_sync_block_test 1/0 (wall-clock &lt;500ms + purge-still-fires assert), cdn_test 4/0 no regression. Gate: green.</p><p>(4) D35 audit-dispatch land — task-felix-migration-ddl-audit-deadlock — final branch loop-epic/land-d35-audit-dispatch-sync-in-test-tog-3. Cherry-picked 60966bdc conflict-free onto origin/main (4 files: config.exs +9, test.exs +11, dispatcher.ex +30, audit_dispatch_test.exs +187). Wires config :barkpark, :audit_dispatch_async (default true; false in test) so dispatch_audit_async runs the audit fan-out INLINE when the flag is false — owner-scoped, joins the sandbox, dies with the test — instead of the unawaited Task.Supervisor.start_child that leaked an audit SELECT and deadlocked concurrent raw-DDL tests (40P01). Scoped to the AUDIT path only; shared fan_out/2 untouched. Gate re-run: 5 tests, 0 failures. Gate: green.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">What stalled / merge-gated obligations</h3><p>Nothing stalled — all four slices are built, correct, and gate-green. Open obligations the LEAD closes on merge: every slice&#39;s merge_gate criterion (PR merged to origin/main) stays honestly met=false. ADDITIONALLY, task-felix-migration-ddl-audit-deadlock criterion[2] (N&gt;=10 full-suite --include flaky, 0 Postgrex 40P01) is honestly met=false with a --miss note — the full-suite grant was unavailable in the isolated build worktree; the lead runs + stamps it before merging D35. Sobelow&#39;s substantive reconcile/guard steps only execute on the PR&#39;s on-pin 1.18.1/OTP27 CI run (they self-guard off-pin), so criterion[0]/[2] were stamped on reviewed correctness + the two guard proofs, not a live on-pin run — the PR&#39;s CI is the final arbiter.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Ledger audit outcome</h3><p>All four slice tasks are HONEST: lifecycle=in_progress (correct — merge-gated criteria stay open for the lead), each claimed by its epic-builder with evidence stamped as-worked, each linked to wave_paper felix-pristine-wave-9-2026-07-13 and parent task-96a908af98698118. Criteria met-vectors: sobelow [T,T,T,F(mg)], close-autostamp [T,T,T,T,F(mg)], cdn-async [T,T,T,T,F(mg)], migration-ddl [T,T,F(N&gt;=10 honest-miss),F(mg)]. No ledger lies or omissions found — ZERO ledger fixes required. The sobelow task&#39;s live claim is now held by its own epic-builder (epoch 10), not the released worker-1-team424-author the wish warned about; the builder reviewed/landed the BRANCH without rebuilding the reconcile, as instructed.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Grade + commentary</h3><p>A-. This is a tight, honest, finishing wave. All four slices are correct, minimal, and gate-green with genuine fail-before proofs; nothing is bloated or show-off. The close.ex auto-stamp is the standout — it kills a recurring per-wave ledger toil AT THE TOOL with a conservative, explicit-marker design (no fragile heuristic), zero OpenAPI drift, and comprehensive negative-case tests, and the task dogfoods its own marker. The CDN and D35 fixes are surgical single-seam / clean-cherry-pick landings. Why A- not A: the wave is finishing-work over net-new (by design), and two substantive proofs are deferred to the PR&#39;s CI rather than run here — the sobelow reconcile/guard only execute on the on-pin CI toolchain (locally self-guarded), and the D35 N&gt;=10 full-suite flake sweep is an honest --miss pending the lead&#39;s grant. Both are correctly and honestly deferred, not hidden — but they mean the wave&#39;s full value is only realized once CI + the lead close the gates.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">What the next wave should take</h3><p>Lead: merge the four PRs (Elixir-gated); on the D35 PR, run + stamp criterion[2]&#39;s N&gt;=10 --include-flaky sweep before merging; watch the sobelow PR&#39;s on-pin CI to confirm the reconcile artifact ships the baseline (include-hidden-files) and the fresh-finding guard reds. Then the next wave clears the freshly-seeded outbound-IO backlog: task-felix-sso-explicit-timeout (explicit &lt;=15s receive_timeout on the OIDC/Social login path), task-felix-outbound-pool-isolation (dedicated auth/plugin Finch pool off the shared webhook/CDN pool), and task-felix-stamp-index-guard (kill Mode-A wrong-index stamps at source with :criteria_mismatch). Also still open: task-felix-sobelow-gate-blocking-eval (flip sobelow to blocking once the CI reconcile lands). Felix&#39;s named-failure code backlog is otherwise empty — the remaining work is consistency/hygiene nits and ledger-tooling hardening.</p>"
+  },
+  "description": "Wave 9: land the sobelow reconcile carryover branch, fix the recurring ledger close off-by-one at the tool level, and run one fresh Phoenix audit over an uncovered outbound-IO subsystem.",
+  "main_tag": "elixir",
+  "preview": {
+    "description": "Wave 9: land the sobelow reconcile carryover branch, fix the recurring ledger close off-by-one at the tool…",
+    "extensions": {
+      "tags": [
+        "elixir",
+        "testing"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-pristine-wave-9-2026-07-13"
+  },
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "Phoenix outbound-IO audit + audit-dispatch deadlock landing + ledger close-handler tooling fix",
+      "strength": 70,
+      "tag": "elixir"
+    },
+    {
+      "rationale": "sobelow reconcile fresh-finding guard carryover + fail-before protective tests",
+      "strength": 35,
+      "tag": "testing"
+    }
+  ],
+  "title": "Felix Pristine Wave 9 — sobelow reconcile landing, ledger auto-stamp tooling, fresh outbound-IO audit"
+}

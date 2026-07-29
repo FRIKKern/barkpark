@@ -1,0 +1,730 @@
+{
+  "_createdAt": "2026-07-16T10:20:45.191599Z",
+  "_draft": false,
+  "_id": "fleet-primer-proof",
+  "_publishedId": "fleet-primer-proof",
+  "_rev": "6e29bb5c14cec13c713c5282a92bb001",
+  "_type": "paper",
+  "_updatedAt": "2026-07-16T10:20:45.191599Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "text": "Spec-1 fleet primer · two rounds · decontaminated proof",
+      "type": "eyebrow"
+    },
+    {
+      "id": "block-1",
+      "level": 1,
+      "text": "The fleet primer, proven and priced: real information, one lost law, and what caching does to the math",
+      "type": "heading"
+    },
+    {
+      "id": "block-2",
+      "items": [
+        "86 agents · 2 rounds",
+        "round-1 control contaminated → redesigned",
+        "PRIMED 6/7 vs control 4/7",
+        "the caching caveat stated honestly"
+      ],
+      "type": "byline"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Spec-1's claim: a "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "4,064-token optical primer"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " of the full 18-file doc tier ("
+        },
+        {
+          "type": "code",
+          "value": "bp context pack"
+        },
+        {
+          "type": "text",
+          "value": ", 5.35× vs 21.7k raw) makes a worker as law-correct as reading the raw docs, and both beat an unprimed control. Round 1's control was contaminated — the harness injects CLAUDE.md into every subagent, so 'no-docs' workers aced router-law scenarios (9.8!). Round 2 was redesigned: seven laws verified to live ONLY in cards/contracts, control forbidden from docs. All workers Opus 4.8, judged against card-verified keys."
+        }
+      ],
+      "id": "block-3",
+      "title": "What was tested",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Round-2 scoreboard (decontaminated)",
+      "type": "heading"
+    },
+    {
+      "header": [
+        "Arm",
+        "Mean",
+        "Law-correct",
+        "What it proves"
+      ],
+      "id": "block-5",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "SELFREAD (raw docs)"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "9.8"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "7/7"
+                }
+              ],
+              "type": "strong"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the accuracy ceiling"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "PRIMED (optical)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "8.6"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "6/7"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "near-parity — the whole gap is ONE cell"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "HARNESS-DEFAULT"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "5.8"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "4/7"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "the primer carries real doc-only information"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "block-6",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The control gap is real and diagnostic. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "The no-docs arm failed exactly the doc-fiat laws: safe workspace delete (honest refusal), PATH FROZEN (inverted), and the plugin law — where it confidently answered the EXACT forbidden pattern (route around the host). Where it scored high, the source was code, world knowledge, or ambient memory — never the docs it lacked."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "The optical channel dropped one of seven laws. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "The terse one-line fiat 'docs/cli/** is PATH FROZEN' (cli.md:11) did not survive into the primed worker's answer — it reasoned from the generic doc contract to a harmful inverted verdict. Everything else transmitted at full fidelity, including exact code anchors (bcp47_to_iso6392b/1, @default_retry_delays_ms, assertStripComplete). Excluding that cell: 9.7 vs 9.8, and PRIMED beat SELFREAD once (the raw-text arm misread Elixir arity notation as an attempt count)."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Round-1 side finding: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "workers already carry the router CLAUDE.md ambiently — a primer's incremental value is the 16 cards/contracts beyond it."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "block-7",
+      "level": 2,
+      "text": "The economics, stated honestly",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Raw math: ~11–16k input tokens saved per worker, ~110–480k per 10–30-worker wave. "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "But prompt caching largely erases this"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ": identical prepended context re-reads at ~0.1× after the first worker, so cached-raw vs cached-primer differ by ~1.3k token-equivalents per worker — and raw docs is the accuracy winner. What keeps the primer alive: (a) self-read as workers actually do it (each independently grepping) is NOT cross-worker cacheable and costs tool-turns and latency; (b) the primer occupies 4k vs 17.5k of each worker's finite window; (c) at corpus scale the calculus flips — the 238-paper KB is 849k as text (uncacheable headroom-wise) vs 131k packed."
+        }
+      ],
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-9",
+      "level": 2,
+      "text": "Ruling and the resulting doctrine",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The primer provably transmits doc-only law (control gap), at near-parity fidelity — but it dropped one terse fiat rule out of seven, producing a harmful inverted answer. Doctrine: "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "for the standard fleet wave, prepend the RAW tier and let caching pay for it — accuracy wins and the cost argument is moot. Deploy the optical primer where the window, not the bill, is the constraint"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": " (huge corpora, long-running workers needing headroom), and pair it with a "
+        },
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "laws-index sidecar"
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": ": the tier's one-line fiat rules extracted as text riding alongside the pages — exactly the mechanism that already protects exact strings, extended to terse laws."
+        }
+      ],
+      "id": "block-10",
+      "title": "PARTIAL — transmission is real but not lossless",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "id": "block-11",
+      "type": "divider"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Series: "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "code",
+          "value": "optical-duels-results"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "type": "code",
+          "value": "whole-corpus-oracle-verdict"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "type": "code",
+          "value": "optical-compression-research-report"
+        },
+        {
+          "type": "text",
+          "value": " · tool "
+        },
+        {
+          "type": "code",
+          "value": "bp context pack"
+        },
+        {
+          "type": "text",
+          "value": "."
+        }
+      ],
+      "id": "block-12",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "text": "Spec-1 fleet primer · two rounds · decontaminated proof",
+        "type": "eyebrow"
+      },
+      {
+        "id": "block-1",
+        "level": 1,
+        "text": "The fleet primer, proven and priced: real information, one lost law, and what caching does to the math",
+        "type": "heading"
+      },
+      {
+        "id": "block-2",
+        "items": [
+          "86 agents · 2 rounds",
+          "round-1 control contaminated → redesigned",
+          "PRIMED 6/7 vs control 4/7",
+          "the caching caveat stated honestly"
+        ],
+        "type": "byline"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Spec-1's claim: a "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "4,064-token optical primer"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " of the full 18-file doc tier ("
+          },
+          {
+            "type": "code",
+            "value": "bp context pack"
+          },
+          {
+            "type": "text",
+            "value": ", 5.35× vs 21.7k raw) makes a worker as law-correct as reading the raw docs, and both beat an unprimed control. Round 1's control was contaminated — the harness injects CLAUDE.md into every subagent, so 'no-docs' workers aced router-law scenarios (9.8!). Round 2 was redesigned: seven laws verified to live ONLY in cards/contracts, control forbidden from docs. All workers Opus 4.8, judged against card-verified keys."
+          }
+        ],
+        "id": "block-3",
+        "title": "What was tested",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "Round-2 scoreboard (decontaminated)",
+        "type": "heading"
+      },
+      {
+        "header": [
+          "Arm",
+          "Mean",
+          "Law-correct",
+          "What it proves"
+        ],
+        "id": "block-5",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "SELFREAD (raw docs)"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "9.8"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "children": [
+                  {
+                    "type": "text",
+                    "value": "7/7"
+                  }
+                ],
+                "type": "strong"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "the accuracy ceiling"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "PRIMED (optical)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "8.6"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "6/7"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "near-parity — the whole gap is ONE cell"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "HARNESS-DEFAULT"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "5.8"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "4/7"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "the primer carries real doc-only information"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "block-6",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The control gap is real and diagnostic. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "The no-docs arm failed exactly the doc-fiat laws: safe workspace delete (honest refusal), PATH FROZEN (inverted), and the plugin law — where it confidently answered the EXACT forbidden pattern (route around the host). Where it scored high, the source was code, world knowledge, or ambient memory — never the docs it lacked."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "The optical channel dropped one of seven laws. "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "The terse one-line fiat 'docs/cli/** is PATH FROZEN' (cli.md:11) did not survive into the primed worker's answer — it reasoned from the generic doc contract to a harmful inverted verdict. Everything else transmitted at full fidelity, including exact code anchors (bcp47_to_iso6392b/1, @default_retry_delays_ms, assertStripComplete). Excluding that cell: 9.7 vs 9.8, and PRIMED beat SELFREAD once (the raw-text arm misread Elixir arity notation as an attempt count)."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "Round-1 side finding: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "workers already carry the router CLAUDE.md ambiently — a primer's incremental value is the 16 cards/contracts beyond it."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "block-7",
+        "level": 2,
+        "text": "The economics, stated honestly",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Raw math: ~11–16k input tokens saved per worker, ~110–480k per 10–30-worker wave. "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "But prompt caching largely erases this"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ": identical prepended context re-reads at ~0.1× after the first worker, so cached-raw vs cached-primer differ by ~1.3k token-equivalents per worker — and raw docs is the accuracy winner. What keeps the primer alive: (a) self-read as workers actually do it (each independently grepping) is NOT cross-worker cacheable and costs tool-turns and latency; (b) the primer occupies 4k vs 17.5k of each worker's finite window; (c) at corpus scale the calculus flips — the 238-paper KB is 849k as text (uncacheable headroom-wise) vs 131k packed."
+          }
+        ],
+        "id": "block-8",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-9",
+        "level": 2,
+        "text": "Ruling and the resulting doctrine",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The primer provably transmits doc-only law (control gap), at near-parity fidelity — but it dropped one terse fiat rule out of seven, producing a harmful inverted answer. Doctrine: "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "for the standard fleet wave, prepend the RAW tier and let caching pay for it — accuracy wins and the cost argument is moot. Deploy the optical primer where the window, not the bill, is the constraint"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": " (huge corpora, long-running workers needing headroom), and pair it with a "
+          },
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "laws-index sidecar"
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": ": the tier's one-line fiat rules extracted as text riding alongside the pages — exactly the mechanism that already protects exact strings, extended to terse laws."
+          }
+        ],
+        "id": "block-10",
+        "title": "PARTIAL — transmission is real but not lossless",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "id": "block-11",
+        "type": "divider"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Series: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "code",
+            "value": "optical-duels-results"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "type": "code",
+            "value": "whole-corpus-oracle-verdict"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "type": "code",
+            "value": "optical-compression-research-report"
+          },
+          {
+            "type": "text",
+            "value": " · tool "
+          },
+          {
+            "type": "code",
+            "value": "bp context pack"
+          },
+          {
+            "type": "text",
+            "value": "."
+          }
+        ],
+        "id": "block-12",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">Spec-1 fleet primer · two rounds · decontaminated proof</p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">The fleet primer, proven and priced: real information, one lost law, and what caching does to the math</h1><p style=\"border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px\">86 agents · 2 rounds · round-1 control contaminated → redesigned · PRIMED 6/7 vs control 4/7 · the caching caveat stated honestly</p><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#2d5e8f;font-weight:600;margin:0 0 6px\">What was tested</div><span>Spec-1&#39;s claim: a <span style=\"font-weight:bold\">4,064-token optical primer</span> of the full 18-file doc tier (<code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bp context pack</code>, 5.35× vs 21.7k raw) makes a worker as law-correct as reading the raw docs, and both beat an unprimed control. Round 1&#39;s control was contaminated — the harness injects CLAUDE.md into every subagent, so &#39;no-docs&#39; workers aced router-law scenarios (9.8!). Round 2 was redesigned: seven laws verified to live ONLY in cards/contracts, control forbidden from docs. All workers Opus 4.8, judged against card-verified keys.</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Round-2 scoreboard (decontaminated)</h2><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Arm</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Mean</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Law-correct</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>What it proves</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">SELFREAD (raw docs)</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">9.8</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span style=\"font-weight:bold\">7/7</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>the accuracy ceiling</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">PRIMED (optical)</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>8.6</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>6/7</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>near-parity — the whole gap is ONE cell</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">HARNESS-DEFAULT</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>5.8</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>4/7</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>the primer carries real doc-only information</span></td></tr></tbody></table><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">The control gap is real and diagnostic. </span>The no-docs arm failed exactly the doc-fiat laws: safe workspace delete (honest refusal), PATH FROZEN (inverted), and the plugin law — where it confidently answered the EXACT forbidden pattern (route around the host). Where it scored high, the source was code, world knowledge, or ambient memory — never the docs it lacked.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">The optical channel dropped one of seven laws. </span>The terse one-line fiat &#39;docs/cli/** is PATH FROZEN&#39; (cli.md:11) did not survive into the primed worker&#39;s answer — it reasoned from the generic doc contract to a harmful inverted verdict. Everything else transmitted at full fidelity, including exact code anchors (bcp47_to_iso6392b/1, @default_retry_delays_ms, assertStripComplete). Excluding that cell: 9.7 vs 9.8, and PRIMED beat SELFREAD once (the raw-text arm misread Elixir arity notation as an attempt count).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">Round-1 side finding: </span>workers already carry the router CLAUDE.md ambiently — a primer&#39;s incremental value is the 16 cards/contracts beyond it.</span></div></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">The economics, stated honestly</h2><p>Raw math: ~11–16k input tokens saved per worker, ~110–480k per 10–30-worker wave. <span style=\"font-weight:bold\">But prompt caching largely erases this</span>: identical prepended context re-reads at ~0.1× after the first worker, so cached-raw vs cached-primer differ by ~1.3k token-equivalents per worker — and raw docs is the accuracy winner. What keeps the primer alive: (a) self-read as workers actually do it (each independently grepping) is NOT cross-worker cacheable and costs tool-turns and latency; (b) the primer occupies 4k vs 17.5k of each worker&#39;s finite window; (c) at corpus scale the calculus flips — the 238-paper KB is 849k as text (uncacheable headroom-wise) vs 131k packed.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Ruling and the resulting doctrine</h2><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><div style=\"color:#8a6420;font-weight:600;margin:0 0 6px\">PARTIAL — transmission is real but not lossless</div><span>The primer provably transmits doc-only law (control gap), at near-parity fidelity — but it dropped one terse fiat rule out of seven, producing a harmful inverted answer. Doctrine: <span style=\"font-weight:bold\">for the standard fleet wave, prepend the RAW tier and let caching pay for it — accuracy wins and the cost argument is moot. Deploy the optical primer where the window, not the bill, is the constraint</span> (huge corpora, long-running workers needing headroom), and pair it with a <span style=\"font-weight:bold\">laws-index sidecar</span>: the tier&#39;s one-line fiat rules extracted as text riding alongside the pages — exactly the mechanism that already protects exact strings, extended to terse laws.</span></div><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><p><span style=\"font-weight:bold\">Series: </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">optical-duels-results</code> · <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">whole-corpus-oracle-verdict</code> · <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">optical-compression-research-report</code> · tool <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bp context pack</code>.</p>"
+  },
+  "body_html": "<p class=\"bp-role-eyebrow\">Spec-1 fleet primer · two rounds · decontaminated proof</p><h1>The fleet primer, proven and priced: real information, one lost law, and what caching does to the math</h1><p class=\"bp-role-byline\">86 agents · 2 rounds · round-1 control contaminated → redesigned · PRIMED 6/7 vs control 4/7 · the caching caveat stated honestly</p><div class=\"bp-callout bp-callout--info\"><strong>What was tested</strong> <span>Spec-1&#39;s claim: a <span style=\"font-weight:bold\">4,064-token optical primer</span> of the full 18-file doc tier (<code>bp context pack</code>, 5.35× vs 21.7k raw) makes a worker as law-correct as reading the raw docs, and both beat an unprimed control. Round 1&#39;s control was contaminated — the harness injects CLAUDE.md into every subagent, so &#39;no-docs&#39; workers aced router-law scenarios (9.8!). Round 2 was redesigned: seven laws verified to live ONLY in cards/contracts, control forbidden from docs. All workers Opus 4.8, judged against card-verified keys.</span></div><h2>Round-2 scoreboard (decontaminated)</h2><table role=\"presentation\" class=\"bp-table\"><thead><tr><th class=\"bp-table__th\"><span>Arm</span></th><th class=\"bp-table__th\"><span>Mean</span></th><th class=\"bp-table__th\"><span>Law-correct</span></th><th class=\"bp-table__th\"><span>What it proves</span></th></tr></thead><tbody><tr><td class=\"bp-table__td\"><code>SELFREAD (raw docs)</code></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">9.8</span></td><td class=\"bp-table__td\"><span style=\"font-weight:bold\">7/7</span></td><td class=\"bp-table__td\"><span>the accuracy ceiling</span></td></tr><tr><td class=\"bp-table__td\"><code>PRIMED (optical)</code></td><td class=\"bp-table__td\"><span>8.6</span></td><td class=\"bp-table__td\"><span>6/7</span></td><td class=\"bp-table__td\"><span>near-parity — the whole gap is ONE cell</span></td></tr><tr><td class=\"bp-table__td\"><code>HARNESS-DEFAULT</code></td><td class=\"bp-table__td\"><span>5.8</span></td><td class=\"bp-table__td\"><span>4/7</span></td><td class=\"bp-table__td\"><span>the primer carries real doc-only information</span></td></tr></tbody></table><ul><li><span><span style=\"font-weight:bold\">The control gap is real and diagnostic. </span>The no-docs arm failed exactly the doc-fiat laws: safe workspace delete (honest refusal), PATH FROZEN (inverted), and the plugin law — where it confidently answered the EXACT forbidden pattern (route around the host). Where it scored high, the source was code, world knowledge, or ambient memory — never the docs it lacked.</span></li><li><span><span style=\"font-weight:bold\">The optical channel dropped one of seven laws. </span>The terse one-line fiat &#39;docs/cli/** is PATH FROZEN&#39; (cli.md:11) did not survive into the primed worker&#39;s answer — it reasoned from the generic doc contract to a harmful inverted verdict. Everything else transmitted at full fidelity, including exact code anchors (bcp47_to_iso6392b/1, @default_retry_delays_ms, assertStripComplete). Excluding that cell: 9.7 vs 9.8, and PRIMED beat SELFREAD once (the raw-text arm misread Elixir arity notation as an attempt count).</span></li><li><span><span style=\"font-weight:bold\">Round-1 side finding: </span>workers already carry the router CLAUDE.md ambiently — a primer&#39;s incremental value is the 16 cards/contracts beyond it.</span></li></ul><h2>The economics, stated honestly</h2><p>Raw math: ~11–16k input tokens saved per worker, ~110–480k per 10–30-worker wave. <span style=\"font-weight:bold\">But prompt caching largely erases this</span>: identical prepended context re-reads at ~0.1× after the first worker, so cached-raw vs cached-primer differ by ~1.3k token-equivalents per worker — and raw docs is the accuracy winner. What keeps the primer alive: (a) self-read as workers actually do it (each independently grepping) is NOT cross-worker cacheable and costs tool-turns and latency; (b) the primer occupies 4k vs 17.5k of each worker&#39;s finite window; (c) at corpus scale the calculus flips — the 238-paper KB is 849k as text (uncacheable headroom-wise) vs 131k packed.</p><h2>Ruling and the resulting doctrine</h2><div class=\"bp-callout bp-callout--warning\"><strong>PARTIAL — transmission is real but not lossless</strong> <span>The primer provably transmits doc-only law (control gap), at near-parity fidelity — but it dropped one terse fiat rule out of seven, producing a harmful inverted answer. Doctrine: <span style=\"font-weight:bold\">for the standard fleet wave, prepend the RAW tier and let caching pay for it — accuracy wins and the cost argument is moot. Deploy the optical primer where the window, not the bill, is the constraint</span> (huge corpora, long-running workers needing headroom), and pair it with a <span style=\"font-weight:bold\">laws-index sidecar</span>: the tier&#39;s one-line fiat rules extracted as text riding alongside the pages — exactly the mechanism that already protects exact strings, extended to terse laws.</span></div><div style=\"position:relative;text-align:center;margin:2.4rem 0;border-top:1px solid var(--paper-rule, #dde7e2)\"><span style=\"position:relative;top:-0.7rem;display:inline-block;padding:0 0.8rem;background:var(--paper-bg-deep, #eaf1ee);color:var(--paper-ink-soft, #55635e);font-size:1.1rem\">§</span></div><p><span style=\"font-weight:bold\">Series: </span><code>optical-duels-results</code> · <code>whole-corpus-oracle-verdict</code> · <code>optical-compression-research-report</code> · tool <code>bp context pack</code>.</p>",
+  "body_html_sv": 3,
+  "description": "Two-round Spec-1 trial of the 4,064-token optical doc-tier primer (bp context pack, 5.35x) on Opus 4.8 workers. Round 1's no-docs control was contaminated by the harness-injected CLAUDE.md (scored 9.8) and was redesigned; round 2 tested seven laws living only in cards/contracts: PRIMED 8.6/6-of-7 vs SELFREAD 9.8/7-of-7 vs no-docs 5.8/4-of-7. The primer provably transmits doc-only law but dropped one terse fiat rule (docs/cli PATH FROZEN) into a harmful inverted answer. Economics stated honestly: prompt caching mostly erases the token savings for repeated identical context — the primer's durable value is window headroom; doctrine is raw-cached tier for standard waves, optical primer plus a laws-index sidecar where the window is the constraint.",
+  "main_tag": "optical-compression",
+  "preview": {
+    "description": "Two-round Spec-1 trial of the 4,064-token optical doc-tier primer (bp context pack, 5.35x) on Opus 4.8…",
+    "extensions": {
+      "tags": [
+        "optical-compression",
+        "research-note",
+        "fidelity-risk",
+        "context-management"
+      ]
+    },
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/fleet-primer-proof"
+  },
+  "rev": 1,
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "Spec-1 fleet-primer trial of the shipped tool",
+      "strength": 85,
+      "tag": "optical-compression"
+    },
+    {
+      "rationale": "contamination found and fixed; honest caching economics",
+      "strength": 80,
+      "tag": "research-note"
+    },
+    {
+      "rationale": "one-in-seven terse-law loss, harmful inversion",
+      "strength": 60,
+      "tag": "fidelity-risk"
+    },
+    {
+      "rationale": "when to prime raw-cached vs optical",
+      "strength": 55,
+      "tag": "context-management"
+    }
+  ],
+  "title": "The fleet primer, proven and priced: real information, one lost law, and what caching does to the math"
+}
