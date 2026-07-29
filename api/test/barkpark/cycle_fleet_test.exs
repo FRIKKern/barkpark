@@ -2793,6 +2793,41 @@ defmodule Barkpark.CycleFleetTest do
                )
     end
 
+    test "numeric experiment round keys reconcile and unlock the seal", %{scope: scope} do
+      assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 15))
+
+      for {round_key, round} <-
+            Enum.with_index(~w(baseline diverge attack converge pilot), 1),
+          candidate <- 1..3 do
+        id = "numeric-key-#{round}-#{candidate}"
+
+        assert {:ok, assignment} =
+                 CycleFleet.create_assignment(
+                   assignment_attrs(scope, id, "experiment", "legendary-experimenter", [])
+                 )
+
+        assert {:ok, _result} =
+                 complete_result(assignment, "terminal-#{id}", "completed", %{
+                   round: round,
+                   round_key: round_key,
+                   candidate: candidate
+                 })
+      end
+
+      assert {:ok, summary} = CycleFleet.reconcile(scope)
+
+      assert summary.experiment.round_counts == %{
+               "baseline" => 3,
+               "diverge" => 3,
+               "attack" => 3,
+               "converge" => 3,
+               "pilot" => 3
+             }
+
+      assert summary.experiment.missing_rounds == []
+      assert {:ok, _plan} = CycleFleet.seal_build_plan(scope, build_plan_attrs(5))
+    end
+
     test "numeric experiment rounds fall back to matching canonical round names", %{scope: scope} do
       assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 15))
 
@@ -2831,6 +2866,37 @@ defmodule Barkpark.CycleFleetTest do
       assert summary.experiment.round_counts["baseline"] == 3
       assert summary.experiment.round_counts["diverge"] == 3
       assert summary.experiment.missing_rounds == ~w(attack converge pilot)
+    end
+
+    test "numeric experiment round keys reject mismatched canonical names", %{scope: scope} do
+      assert {:ok, _wave} = CycleFleet.open_wave(legendary_wave_attrs(scope, 15))
+
+      for {round_key, round} <-
+            Enum.with_index(~w(baseline diverge attack converge pilot), 1),
+          candidate <- 1..3 do
+        id = "mismatched-key-#{round}-#{candidate}"
+        submitted_key = if round == 1, do: "diverge", else: round_key
+
+        assert {:ok, assignment} =
+                 CycleFleet.create_assignment(
+                   assignment_attrs(scope, id, "experiment", "legendary-experimenter", [])
+                 )
+
+        assert {:ok, _result} =
+                 complete_result(assignment, "terminal-#{id}", "completed", %{
+                   round: round,
+                   round_key: submitted_key,
+                   candidate: candidate
+                 })
+      end
+
+      assert {:ok, summary} = CycleFleet.reconcile(scope)
+      assert summary.experiment.round_counts["baseline"] == 0
+      assert summary.experiment.round_counts["diverge"] == 3
+      assert summary.experiment.missing_rounds == ["baseline"]
+
+      assert {:error, :experiment_assignments_incomplete} =
+               CycleFleet.seal_build_plan(scope, build_plan_attrs(5))
     end
 
     test "Legendary becomes exact only after every planned phase is complete", %{scope: scope} do
