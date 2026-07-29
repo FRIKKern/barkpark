@@ -2094,3 +2094,44 @@ fences itself strictly OFF `api/lib/barkpark_web/live/studio` (its D82) and Site
 entirely (its D83) — so the overlap the lead warned about is smaller than feared. **One unadjudicated soft
 edge:** Felix's fence reads `api/test` unqualified. Wave 17 claims `api/test/barkpark_web/{live/studio,components}/**`
 by atomic bp claim; it is written down here rather than assumed.
+
+## Wave log — wave 17 (append at Review)
+
+### Wave 2026-07-29 — Wave 17 (THE HUMAN PATH), Review. Grade **A-**.
+
+**The wish.** The owner sat down with the product and it did not work: *"when creating a paper and
+selecting it, we see nothing… we need to be able to add things physically as well."* Rule one was
+REPRODUCE IT AS A HUMAN FIRST, and this wave is the first in the epic that did — in the verify phase,
+in a real authenticated browser on the deployed instance, before any diagnosis. The frames show the
+Papers desk gaining an `Untitled` draft row after a click on `+` while the content pane still reads
+*"Select a document to edit"*, twice (immediately and after 20s, so not a race); the control frames
+show an EXISTING published paper opening into a full canvas with `+ Add block` and `Auto-saved`. The
+machinery was present; only the never-published path was blank.
+
+**Round 1 landed — three slices, all reviewed, all pushed with PRs.**
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| `spd-w17-create-seam` | `…create-seam-a-new-paper-opens-in-0-r` | #7566 | THE owner's bug. `pane_builder.ex`'s blocks branch (and the reserved `["open", type, id]` segment) resolved published-only, so every never-published paper resolved to nothing; `seed_new_doc_content/1` now seeds an empty blocks LIST, which is what trips the paper template. Guard re-run by the reviewer against unmodified `origin/main`: **3 tests, 3 failures**, all on `refute html =~ "Select a document to edit"`. |
+| `spd-w17-desk-operable` | `…make-the-desk-operable-every-structure-a-1-r` | #7567 | The defect was a written-down convention in `pane_item/1`'s docstring; that sentence is deleted. Rows are real buttons with composed accessible names, `aria-current`, and focus rings; the icon-only `+` gains a name. |
+| `spd-w17-session-icon` | `…fix-the-session-schema-s-unrenderable-ic-2-r` | #7568 | Grew, in review, from one file into the class: `form_response.json` and scaffy `command.json` carried unmapped emoji too, and a new JSON-parsing scan over every `priv/plugins/*/schemas/*.json` found two MORE dead names (`shield`, `link`). Also delivers `spd-w17-sibling-schema-icons`. |
+
+**Reviewer fixes in place** (each mutation-proven, each in the class ExUnit structurally could not see):
+a brand-new paper was greeting its author with its own Slug field painted red — the inspector seeded
+from the raw `drafts.` id and failed its own format check (`sidebar_assigns/1` now normalises through
+`published_id`); the `div → button` conversion silently dropped the rows from body's `line-height: 1.6`
+to the UA button's `normal` (`line-height: inherit` restored); and one new assertion was an
+anywhere-match with an `or`, the same shape as the stale assertion the slice deletes.
+
+**Held at round 2 BY DESIGN** (the sequenced-rounds law, not a stall): `spd-w17-never-blank` and
+`spd-w17-browser-journey` after #7566, `spd-w17-pending-honest` after #7567. Dispatch in that order.
+
+**What this wave did NOT do, and it matters.** Nobody has looked at the FIXED screen in a browser.
+The reproduction is L1; the fix is proven offline. Anchor criteria 1–4 (`task-f559f7c508527010`) stay
+open with honest `--miss` notes, and the browser-journey slice is what closes them. The format leg of
+every gate exits 1 on this host on 88 untouched files — Elixir 1.19.5 installed against a pinned
+1.18.4 — verified differentially, not waved through.
+
+**D232.** A schema's icon is a shipped product string, not source, and `priv/` was a fourth hole in a
+tripwire whose own moduledoc named three. Three schemas were wrong at once. The scan is the fix; the
+two edits were the symptom.
