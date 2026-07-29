@@ -762,7 +762,12 @@ export function ListingsMap({
             type="button"
             aria-label="Close"
             onClick={() => setSelected(null)}
-            className="absolute right-2 top-2 text-muted-text hover:text-zinc-700"
+            // The hover tone needs its dark counterpart: without it, hovering
+            // this close control in dark mode darkens it toward the panel it
+            // sits on. Every other de-emphasised control in the starter
+            // (detail-chrome's close, the Options toggle, clear-filters)
+            // already carries the pair.
+            className="absolute right-2 top-2 text-muted-text transition-colors hover:text-zinc-700 dark:hover:text-zinc-200"
           >
             ✕
           </button>
