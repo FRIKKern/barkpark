@@ -1,0 +1,504 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S011",
+  "assignment_snapshot_sha256": "0961ab8caf296ad5038e2a3820ab36c041d9923c6eb9f8e2ad8b8ee10ae323c8",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 4,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "1cc8aa76463e8e1fc753830690ceaeebc542fb39e41730249da9082d2f780193"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All ten pinned revisions were read: 964 native top-level blocks plus the complete 53,846-character legacy HTML node-slot Paper. Keep 4, repair 4, supersede 2. Round 12 is the sole current GUI seal authority; the strongest transferable pattern is real-sibling and mutation proof, while the recurring failure is stale front status and enormous process chronology burying terminal truth.",
+  "verdict_counts": {
+    "repair": 4,
+    "keep": 4,
+    "superseded": 2
+  },
+  "checked_unit_ids": [
+    "paper:cloud-gui-remake-wave-2026-07-20-seal-r5",
+    "paper:cloud-gui-remake-wave-2026-07-21-r12",
+    "paper:cloud-gui-remake-wave-2026-07-21-seal",
+    "paper:cloud-site-spawner-cf-wave-2026-07-14",
+    "paper:cloud-site-spawner-node-wave-2026-07-15",
+    "paper:cloud-site-spawner-wave-2026-07-14",
+    "paper:cloud-site-spawner-wave-3-2026-07-14",
+    "paper:cloud-site-spawner-wave-4-2026-07-14",
+    "paper:cloud-site-spawner-wave-5-2026-07-14",
+    "paper:cmux-bridge"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 10,
+    "native_top_level_blocks_read": 964,
+    "legacy_html_documents_read": 1,
+    "legacy_html_chars_read": 53846,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:cloud-gui-remake-wave-2026-07-21-r12 blocks[156]",
+      "evidence": "The reviewer mutation-tests the real terminal guard and gets 44 findings before restoring green.",
+      "lesson": "Prove a terminal instrument can fail for the intended reason."
+    },
+    {
+      "block_ref": "paper:cloud-site-spawner-wave-3-2026-07-14 blocks[169]",
+      "evidence": "Five isolated greens conceal real sibling-contract failures.",
+      "lesson": "Run at least one cross-slice test against the real peer."
+    },
+    {
+      "block_ref": "paper:cloud-site-spawner-node-wave-2026-07-15 body_html[128]",
+      "evidence": "The legacy narrative ties marker-by-value HEALTH and marker-anchored switching to specific false-green and corruption risks.",
+      "lesson": "Explain the causal safety mechanism, not only the gate result."
+    },
+    {
+      "block_ref": "paper:cmux-bridge blocks[13]",
+      "evidence": "Acceptance-gated close chooses false resume over false close.",
+      "lesson": "Bias failure toward recoverable unfinished work."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:cloud-gui-remake-wave-2026-07-21-seal blocks[118]",
+      "evidence": "It asserts there is no round 12, but round 12 exists and is terminal authority.",
+      "reader_impact": "The wrong “last” paper can be selected as current truth."
+    },
+    {
+      "block_ref": "paper:cloud-site-spawner-wave-3-2026-07-14 blocks[171]",
+      "evidence": "Offline syntax evidence falsely stamped a live-create criterion met.",
+      "reader_impact": "The ledger could overstate production proof."
+    },
+    {
+      "block_ref": "paper:cloud-site-spawner-node-wave-2026-07-15 body_html[122]",
+      "evidence": "Missing CLI-facing slot/port/health telemetry prevents the live harness from going green.",
+      "reader_impact": "A built label can hide a blocking proof dependency."
+    },
+    {
+      "block_ref": "paper:cloud-site-spawner-wave-5-2026-07-14 blocks[1]",
+      "evidence": "The front door remains SURVEYING after the A- debrief.",
+      "reader_impact": "Status-only readers miss terminal scope and owner actions."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "cloud-gui-remake-wave-2026-07-20-seal-r5",
+        "cloud-gui-remake-wave-2026-07-21-seal",
+        "cloud-gui-remake-wave-2026-07-21-r12"
+      ],
+      "basis": "Same purpose and authority chain: repeated terminal seal attempts. Round 12 explicitly consumes the prior runbook, performs the moves, records SEAL, and ends the epic.",
+      "disposition": "Round 12 is current authority; archive r5 and seal as provenance with forward links and superseded badges."
+    },
+    {
+      "candidate_set": [
+        "cloud-site-spawner-wave-3-2026-07-14",
+        "cloud-site-spawner-wave-4-2026-07-14",
+        "cloud-site-spawner-wave-5-2026-07-14"
+      ],
+      "basis": "Shared static-spawner chronology but distinct purpose: orchestration spine, source provisioning/live manual deploy, then publish-triggered auto-update.",
+      "disposition": "Keep separate; add a compact capability/proof timeline that distinguishes offline-built, merged, manual-live, and auto-live states."
+    },
+    {
+      "candidate_set": [
+        "cloud-site-spawner-wave-2026-07-14",
+        "cloud-site-spawner-cf-wave-2026-07-14"
+      ],
+      "basis": "Both concern Cloudflare, but Wave 2 owns provider custody/strategy while Wave 6 owns end-to-end binding, DNS/TLS/status wiring, and merged-suite reconciliation.",
+      "disposition": "Cross-link D13-D21 provenance forward into Wave 6; do not merge the strategy source with implementation evidence."
+    },
+    {
+      "candidate_set": [
+        "cloud-site-spawner-wave-4-2026-07-14",
+        "cloud-site-spawner-node-wave-2026-07-15"
+      ],
+      "basis": "Both reuse the six-stage engine and live-proof doctrine, but static symlink artifacts and node process slots have different HEALTH, SWITCH, RETIRE, density, and isolation concerns.",
+      "disposition": "Retain separate runtime-target authorities; share only a common state-machine doctrine link."
+    }
+  ],
+  "reader_risks": [
+    "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+    "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+    "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+    "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+    "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:cloud-gui-remake-wave-2026-07-20-seal-r5",
+      "document_id": "cloud-gui-remake-wave-2026-07-20-seal-r5",
+      "document_rev": "42bead7634a527952bd94d2604f48afd",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Round-9 Cloud GUI seal attempt: register defect provenance, disposition live ledger rows, run the frozen predicate, and disclose rather than cosmetically rename the ending.",
+      "opening_and_criteria": "blocks[0]-[4] name round 9 and the seal wish, but blocks[2] still says SURVEYING. The actual terminal state appears only at blocks[73]-[90]: round 1 complete, predicate still NO SEAL, clause (a) remaining.",
+      "outline_and_hierarchy": "92 blocks progress through ground truth, rival directions, survey, verify, Decide, two-round plan, and debrief. The logic is strong, but a terminal reader must traverse the full process diary.",
+      "human_voice_and_precision": "Candid and corrective: it publicly reverses an unsound squash-merge ancestry inference and names an instrument bug that burned claim epochs. Task ids and seal lore assume expert context.",
+      "compression_and_restraint": "About 25k rendered HTML characters and 92 native blocks. Preserve the exceptional audit receipts, but route current readers to round 12 rather than compressing this into another current status surface.",
+      "evidence_and_truth": "blocks[57]-[62] separate live predicate proof from refuted claims; blocks[74], [78], and [83] disclose unfinished sealing, exact ledger results, and the false rate-limit proxy.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[83]",
+          "evidence": "The driver grepped payload text for “429” and “rate_limited,” creating false throttles and burning 12 claim epochs; every affected outcome was still read back.",
+          "lesson": "Disclose instrument failure with scope, control, and outcome impact instead of hiding it behind a green."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The front door remains “STATUS: SURVEYING” although a complete round-one debrief later records NO SEAL.",
+          "reader_impact": "A skimming reader mistakes an intermediate phase for terminal truth and may treat this as current authority."
+        }
+      ],
+      "duplicate_disposition": "Same terminal-seal purpose as cloud-gui-remake-wave-2026-07-21-seal and round 12. Round 12 performs the moves, records SEAL, and explicitly ends the epic; retain this only as round-9 provenance.",
+      "reader_risks": [
+        "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+        "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+        "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+        "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+      ],
+      "rationale": "Superseded: preserve its forensic corrections and process lessons, but make round 12 the sole current outcome authority and label this historical round 9."
+    },
+    {
+      "unit_id": "paper:cloud-gui-remake-wave-2026-07-21-r12",
+      "document_id": "cloud-gui-remake-wave-2026-07-21-r12",
+      "document_rev": "e1b11ac0a424cd8f2d005495f325452c",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Canonical terminal Cloud GUI seal execution: close one row, move 59 rows, run the frozen predicate, append the terminal artifact, and hand 68 open children to the successor.",
+      "opening_and_criteria": "blocks[1]-[12] clearly promise the last attempt and define success as a terminal artifact, not necessarily a green. The actual terminal outcome is at blocks[149]-[177]: SEAL, roster deltas, caveats, ledger audit, and successor handoff.",
+      "outline_and_hierarchy": "178 blocks preserve Strategize, 19-lane Digest, contradictions, Decide, execution, review, mutation proof, limitations, and handoff. This is the authority but not a fast read.",
+      "human_voice_and_precision": "Exceptional self-critique: it states the crown is dark, the done-set unaudited, and the predicate a shape check. Precision is high, though the density of round lore and row ids raises entry cost.",
+      "compression_and_restraint": "About 56k rendered HTML characters and 178 native blocks. Add a compact terminal card linking to the full artifact, roster delta, mutation proof, and successor risks.",
+      "evidence_and_truth": "blocks[151]-[156] independently re-read rosters, preserve stdout, prove instrument freeze, and mutation-test clause (b); blocks[160]-[164] limit what SEAL means.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[156]",
+          "evidence": "The reviewer deliberately broke the relevant CSS rule and the real guard failed with 44 findings, then restored and re-ran green.",
+          "lesson": "Mutation-test a terminal green so the reader knows the instrument can fail for the intended reason."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[173]",
+          "evidence": "The builder’s terminal artifact headline conflated 58 successor-bound moves with 59 rows leaving the epic, and the reviewer had to repair it.",
+          "reader_impact": "The most quotable terminal number was initially wrong, so the compact current summary must be generated from the corrected roster table."
+        }
+      ],
+      "duplicate_disposition": "Current authority for the same purpose as the two earlier seal papers. Cross-link those as historical attempts; do not merge their contradictory interim statuses into this terminal artifact.",
+      "reader_risks": [
+        "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+        "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+        "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+        "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+      ],
+      "rationale": "Repair: keep as canonical authority, but prepend a short corrected terminal summary and move the 178-block derivation behind navigable archival sections."
+    },
+    {
+      "unit_id": "paper:cloud-gui-remake-wave-2026-07-21-seal",
+      "document_id": "cloud-gui-remake-wave-2026-07-21-seal",
+      "document_rev": "88fb9824758512ef28a8b91201d17eab",
+      "verdict": "superseded",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Round-11 preparation for the Cloud GUI terminal act: reconcile the 60-row census, refresh the successor charter, then sequence the moves and predicate run.",
+      "opening_and_criteria": "blocks[1]-[12] call this the eighth and last seal attempt and even say there is no round 11/12; blocks[93]-[118] later show only the charter-refresh slice shipped and terminal execution remained deferred.",
+      "outline_and_hierarchy": "119 blocks cover full strategy, survey, verification, decisions, a two-round plan, and review. Its terminal section is a preflight handoff rather than the epic ending.",
+      "human_voice_and_precision": "Honest about arithmetic defects and about building nothing. However, repeated “last” language is objectively stale once round 12 exists and succeeds.",
+      "compression_and_restraint": "About 50k rendered HTML characters and 119 native blocks. Preserve it as the preflight authority for the successor charter, but prevent it from competing with the completed round-12 artifact.",
+      "evidence_and_truth": "blocks[100]-[102] catch and repair the 60 censused / 58 arriving / 68 post-move arithmetic before execution.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[100]",
+          "evidence": "Review identifies that the successor charter’s single deliverable was off by one and corrects the live published description to 60/58/68.",
+          "lesson": "Treat review of handoff arithmetic as a load-bearing gate, not copy editing."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[118]",
+          "evidence": "The handoff says “There is no round 12,” yet the pinned round-12 Paper exists and records the completed SEAL.",
+          "reader_impact": "A literal reader can select the wrong terminal authority and stop before the real outcome."
+        }
+      ],
+      "duplicate_disposition": "Direct predecessor and same seal purpose as cloud-gui-remake-wave-2026-07-21-r12. Round 12 consumes this runbook, corrects further arithmetic, performs the act, and closes the epic.",
+      "reader_risks": [
+        "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+        "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+        "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+        "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+      ],
+      "rationale": "Superseded: archive as round-11 preflight and link forward to round 12; do not present its no-round-12 assertion as current truth."
+    },
+    {
+      "unit_id": "paper:cloud-site-spawner-cf-wave-2026-07-14",
+      "document_id": "cloud-site-spawner-cf-wave-2026-07-14",
+      "document_rev": "d5cc1d7de4742d9cc9048487073c7320",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Cloud Site Spawner Wave 6 implementation record for an optional Cloudflare-in-front capability while preserving standalone operation.",
+      "opening_and_criteria": "blocks[0]-[3] provide a current CLOSED status, A- grade, six shipped slices, and an explicit human-gated live cutover. The criteria are framed as DNS/TLS/CDN plus graceful degradation.",
+      "outline_and_hierarchy": "91 blocks reconcile overwritten charter decisions, survey and verify the architectural fork, record D51-D60, then give a compact six-slice debrief and next-wave order.",
+      "human_voice_and_precision": "Precise and unusually honest about the rotating-charter overwrite, inert runtime channel, and human gate. Vendor and security vocabulary is dense but appropriate to the technical audience.",
+      "compression_and_restraint": "The opening status card prevents the living-wave history from lying. Keep the full audit; a public or email projection should suppress credential/header and live-topology detail.",
+      "evidence_and_truth": "blocks[75]-[88] distinguish isolated gates from merged-suite proof and record three cross-slice defects before claiming the provable scope met.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[84]",
+          "evidence": "Review catches a duplicate registry function, a silently dropped audit action, and merged-suite test breakage that isolated slice gates missed.",
+          "lesson": "Make merged integration proof a separate obligation even when every slice is green alone."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[90]",
+          "evidence": "The handoff says the CP-to-box serving_mode channel is still absent, so proxied TLS rendering remains inert until follow-up work lands.",
+          "reader_impact": "Readers must not infer a live Full-Strict cutover from a design-truth wave whose critical production channel is deferred."
+        }
+      ],
+      "duplicate_disposition": "Distinct implementation wave in the site-spawner sequence. It reuses earlier Cloudflare strategy but owns the end-to-end wiring and merged-suite reconciliation; cross-link, do not merge.",
+      "reader_risks": [
+        "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+        "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+        "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+        "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+      ],
+      "rationale": "Keep: strong front status, explicit scope boundary, merged integration evidence, and precise deferred live cutover make this a trustworthy historical authority."
+    },
+    {
+      "unit_id": "paper:cloud-site-spawner-node-wave-2026-07-15",
+      "document_id": "cloud-site-spawner-node-wave-2026-07-15",
+      "document_rev": "d728d96b87e4f111f2d77633e6ca9ddc",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 7 design/build/review record for a systemd node-slot SSR runtime target, Next.js flagship, blue-green process switching, and rollback.",
+      "opening_and_criteria": "body_html[1] still says DECIDED and building six slices. The complete review appears at body_html[106]-[131], where all six slices are built but the guerrilla live capstone and deployment telemetry remain open.",
+      "outline_and_hierarchy": "A full 53,846-character legacy HTML narrative with 132 semantic elements, not an empty or description-only Paper. It spans architectural forks, D61-D72, six slices, cross-slice fixes, risks, and next wave.",
+      "human_voice_and_precision": "The prose is frank about Docker prior art, live-proof false reds, and tenant-code risk. The legacy representation plus acronym density makes navigation and reliable extraction harder than the native-block papers.",
+      "compression_and_restraint": "Preserve the full record, migrate it to native blocks, and prepend terminal truth. The current zero-native-block shape must never be interpreted as zero content.",
+      "evidence_and_truth": "body_html[109]-[119] records concrete shipped slices and closes three cross-slice contract gaps; body_html[128]-[129] separates genuine strengths from the unrun capstone.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "body_html[128]",
+          "evidence": "The debrief explains why marker-by-value HEALTH, boot-in-place, a closed runtime enum, and a marker-anchored Caddy flip make false greens and global-sed corruption harder.",
+          "lesson": "Explain why safeguards prove the desired mechanism, not only that their tests passed."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "body_html[122]",
+          "evidence": "The live harness requires slot, port, and health_exit_code, but no W7 slice exposes them in CLI-facing JSON, so the literal capstone cannot go green yet.",
+          "reader_impact": "A “built” label without this dependency would overstate live readiness; front status must surface the missing telemetry."
+        }
+      ],
+      "duplicate_disposition": "Distinct SSR runtime-target wave. It extends the static/auto-update sequence but is not a duplicate; link its reuse points to W4/W5 while retaining its process-lifecycle decisions.",
+      "reader_risks": [
+        "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+        "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+        "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+        "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+      ],
+      "rationale": "Repair: migrate the full legacy HTML to native blocks, correct the stale DECIDED front status, and elevate the missing telemetry/live-proof dependency before the build diary."
+    },
+    {
+      "unit_id": "paper:cloud-site-spawner-wave-2026-07-14",
+      "document_id": "cloud-site-spawner-wave-2026-07-14",
+      "document_rev": "e8072e11eb545a37b679132d751f2066",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 2 strategy and reviewed foundation for Cloudflare capability providers, credential custody, adapter behavior, and provider-plugin degradation law.",
+      "opening_and_criteria": "blocks[0]-[9] clearly identify a strategy wave and standalone-core north star. blocks[89]-[101] close the wave A-, state that only two additive scaffolds shipped, and name the later build family.",
+      "outline_and_hierarchy": "102 blocks move from ambitious Cloudflare strategy through evidence and D13-D21 to a deliberately narrow two-slice review. The scope contraction is explained rather than hidden.",
+      "human_voice_and_precision": "Good product voice and legal/cost restraint; it distinguishes provider capability from standalone correctness. Some early “VERIFYING” language is historical, but the debrief is unambiguous.",
+      "compression_and_restraint": "Long for a two-slice foundation, yet the decision provenance is useful. A projection should lead with the closed-scope debrief and keep the broad vendor rationale as background.",
+      "evidence_and_truth": "blocks[90]-[99] state exactly what shipped, why end-to-end work did not, and why the ledger remains in_progress rather than falsely done.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[92]",
+          "evidence": "The adapter is configured-gated, transport-reusing, and fail-closed; the fake is deterministic and the reviewer closes the missing malformed-JSON coverage.",
+          "lesson": "A provider plugin should be safe when absent before it is impressive when configured."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[97]",
+          "evidence": "The A- review admits that nothing runs end-to-end, nothing is merged, and the standalone-degrade invariant is deferred.",
+          "reader_impact": "Readers must carry the narrow foundation scope forward and not mistake capability scaffolding for Cloudflare-in-front availability."
+        }
+      ],
+      "duplicate_disposition": "Strategy predecessor to the later CF Wave 6 implementation, but its D13-D21 custody and provider-plugin decisions are distinct source authority. Link forward rather than collapse.",
+      "reader_risks": [
+        "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+        "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+        "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+        "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+      ],
+      "rationale": "Keep: the paper accurately scopes a plan-heavy foundation and its debrief prevents the ambitious wish from being mistaken for delivered end-to-end behavior."
+    },
+    {
+      "unit_id": "paper:cloud-site-spawner-wave-3-2026-07-14",
+      "document_id": "cloud-site-spawner-wave-3-2026-07-14",
+      "document_rev": "92f39731f755353243b050c86ed25ac7",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 3 orchestration record wiring the control-plane-to-box deploy spine, CLI honesty, engine protocol, TLS mode, and an intended live spawn/rollback proof.",
+      "opening_and_criteria": "blocks[1]-[9] still present SURVEYING and the intended live finish. blocks[153]-[176] close at B+ and explicitly say the wish is not met because the live guerrilla proof never ran.",
+      "outline_and_hierarchy": "177 blocks form a comprehensive but very long living-wave chronology. The decisive review—seam failures, human gate, missing levers, false ledger stamp—arrives only in the final 24 blocks.",
+      "human_voice_and_precision": "The strongest voice in the set on false-green discipline: it names mutually consistent fakes and corrects a false-done stamp. Heavy task and implementation detail obscures the product outcome.",
+      "compression_and_restraint": "Compress into a terminal outcome card plus six-slice table, then retain the full receipts. Current readers should see “spine built; live proof unrun” before 18 survey assignments.",
+      "evidence_and_truth": "blocks[154]-[171] prove that every review defect lived at a slice seam and that one live criterion had been falsely stamped from offline syntax evidence.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[169]",
+          "evidence": "Both sides of several interfaces passed against their own fakes while the real sibling contract failed; the paper derives a rule requiring at least one real-sibling test.",
+          "lesson": "Test cross-slice contracts against the real peer, not two mutually consistent simulations."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[171]",
+          "evidence": "A live-create criterion was marked met using evidence that only proved the script’s offline syntax gate; review had to reverse the false-done.",
+          "reader_impact": "Criterion-index and evidence mismatch can turn an unrun production proof into a green ledger lie."
+        }
+      ],
+      "duplicate_disposition": "Distinct orchestration wave. W4 directly takes its live-proof gap and supplies source provisioning, so link W3 as “spine and failure lessons,” not current deploy-capability authority.",
+      "reader_risks": [
+        "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+        "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+        "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+        "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+      ],
+      "rationale": "Repair: prepend the B+ terminal truth, isolate the false-green seam lessons, and demote the long survey/dispatch chronology to archival evidence."
+    },
+    {
+      "unit_id": "paper:cloud-site-spawner-wave-4-2026-07-14",
+      "document_id": "cloud-site-spawner-wave-4-2026-07-14",
+      "document_rev": "fed93c20af0a9405e5cab5b7d0309f88",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 4 source-provisioning record completing the static site input path, force rebuild, CLI streaming, slot-env persistence, and a rigorous live-proof harness.",
+      "opening_and_criteria": "blocks[0]-[3] state the one-verb live-URL goal; blocks[1] also carries a dated correction that the wave closed with five green slices and A-.",
+      "outline_and_hierarchy": "80 blocks are comparatively restrained: reconcile W3, survey/verify, D33-D41, five slices, debrief, ledger, and explicit lead handoff.",
+      "human_voice_and_precision": "Clear, practical, and honest about the difference between offline proof readiness and a real guerrilla run. The correction in the front status keeps chronology truthful.",
+      "compression_and_restraint": "The shortest full site-spawner wave here and well scoped. Keep exact harness evidence; summarize the long per-slice details for email/TUI readers.",
+      "evidence_and_truth": "blocks[73]-[78] give per-slice receipts, a non-vacuous 24-red self-check, the unrun live finish, and honest unmet merge/live criteria.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[76]",
+          "evidence": "The live-proof harness asserts five marker values, uses force to mint a second build, and drives 24 named red cases offline before the lead run.",
+          "lesson": "Build an executable live gate that is proven capable of rejecting each typed failure."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[77]",
+          "evidence": "The A- verdict says the literal live six-stage walk and sub-second rollback were not run in-session and remain lead-gated.",
+          "reader_impact": "A green implementation wave must not be presented as live-proven until the external capstone runs."
+        }
+      ],
+      "duplicate_disposition": "Direct successor to W3’s missing source/live-proof gap and predecessor to W5 auto-update. Each has a distinct trigger/runtime purpose; keep a chronological index rather than merge.",
+      "reader_risks": [
+        "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+        "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+        "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+        "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+      ],
+      "rationale": "Keep: front correction, tight scope, non-vacuous harness, and explicit unrun live criterion make the record honest and usable."
+    },
+    {
+      "unit_id": "paper:cloud-site-spawner-wave-5-2026-07-14",
+      "document_id": "cloud-site-spawner-wave-5-2026-07-14",
+      "document_rev": "4bd18af484a8da2d3ab5304224cdef60",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave 5 publish-to-live auto-update record: signed content-publish notification, per-site binding, correct debounce/coalescing, trigger provenance, and live-proof harness.",
+      "opening_and_criteria": "blocks[1]-[6] frame the last original deploy gap and record W4 live proof. The first line remains SURVEYING, but blocks[82]-[95] give a complete A- debrief and precise merge-gated live walk.",
+      "outline_and_hierarchy": "96 blocks progress through cross-host architecture, survey, D42-D50, three slices, and review. The debrief is compact enough to function as the primary outcome section.",
+      "human_voice_and_precision": "Technically precise and particularly good about HMAC scheme parity, absence provenance, and the mid-build publish race. Acronyms and internal route detail require expert context.",
+      "compression_and_restraint": "Keep the full record, but Studio should surface the debrief status above the stale living-wave opener. Public/email projections need only behavior, proof boundary, and residual backfill.",
+      "evidence_and_truth": "blocks[85]-[91] independently verify signing parity, the Oban states-minus-executing invariant, non-vacuous auto-trigger proof, and the one missing live walk.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[85]",
+          "evidence": "The mid-build test forces job A to executing, then proves a new publish creates exactly one trailing rebuild while a burst of ten collapses to one scheduled job.",
+          "lesson": "Test both burst coalescing and the mid-flight update so debounce cannot silently serve stale content."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[1]",
+          "evidence": "The front door still says SURVEYING even though the paper later closes at A- with all three slices reviewed.",
+          "reader_impact": "Status-only readers can miss the completed build and its remaining live-proof obligation."
+        }
+      ],
+      "duplicate_disposition": "Distinct automatic-trigger layer atop W4’s manually proven deploy machine. Reuses the state machine but owns event transport, coalescing, and provenance; cross-link, do not merge.",
+      "reader_risks": [
+        "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+        "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+        "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+        "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+      ],
+      "rationale": "Keep: despite a stale opener, the debrief is complete, scoped, evidence-rich, and honest about the unrun live capstone; surface that terminal section in readers."
+    },
+    {
+      "unit_id": "paper:cmux-bridge",
+      "document_id": "cmux-bridge",
+      "document_rev": "ed88c777b97622f9fc9459d29271d452",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Design-only contract for mapping a cmux pane to a Barkpark worker lease, acceptance-gated hook closure, frontier-based pane dispatch, and print-first installation.",
+      "opening_and_criteria": "blocks[0]-[2] state the falsifiable fail-safe claim and explicitly say the phase is design-only/read-only. Criteria are distributed across the hook table and cardinal rules rather than summarized as an acceptance list.",
+      "outline_and_hierarchy": "29 concise blocks: wish, cmux identity, worker derivation, hook contract, fail-safes, dispatch, install, limits, task tree. The hierarchy is excellent, but the document title metadata is merely “1. The wish.”",
+      "human_voice_and_precision": "Clear human voice and good asymmetry: false resume is cheap; false close strands work. It carefully distinguishes designed flags and reserved merge behavior from implemented facts.",
+      "compression_and_restraint": "Compact and restrained. Repair only the metadata/title, verification status, and acceptance summary; do not expand the design.",
+      "evidence_and_truth": "blocks[12]-[16] make ownership, renewal, close fencing, no-op behavior, bounded network, and stdout discipline concrete and falsifiable.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[13]",
+          "evidence": "Stop closes only when at least one acceptance criterion exists and every criterion is met; otherwise it lets the lease expire for resume.",
+          "lesson": "Choose the failure direction that preserves unfinished work: false resume is cheaper than false close."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[26]",
+          "evidence": "The exact cmux new-surface flags come from feasibility research and remain to be confirmed against --help.",
+          "reader_impact": "A design reader could mistake proposed command spelling for an implemented, verified CLI contract."
+        }
+      ],
+      "duplicate_disposition": "Distinct design source for the cmux bridge and dispatch-frontier integration; no same-purpose current authority appears in this assignment. Keep linked to implementation tasks, not merged with wave logs.",
+      "reader_risks": [
+        "Studio: lead with a dated terminal-status and authority card; collapse long living-wave history behind named evidence sections.",
+        "TUI80: summarize wide tables, task rosters, and multi-kilobyte phase receipts before the exact raw detail.",
+        "email: extract outcome, residual risk, and next owner action; link the durable Paper instead of inlining the diary.",
+        "public: remove live host, credential, security-topology, branch, task, and operator-gate details or label them historical and access-sensitive.",
+        "CLI/API: preserve exact ids, pinned revisions, exit codes, counts, and the distinction among planned, tested, merged, and live-proven states."
+      ],
+      "rationale": "Repair: give the document a real title, add a compact acceptance/test matrix, and mark every command surface as proposed versus verified while preserving the strong fail-safe design."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}

@@ -1,0 +1,98 @@
+{
+  "schema_version": "paper-perfection-successor-readback-index/v1",
+  "assignment_id": "PPCC2-S011",
+  "reads": [
+    {
+      "document_id": "cloud-gui-remake-wave-2026-07-20-seal-r5",
+      "document_rev": "42bead7634a527952bd94d2604f48afd",
+      "readback_sha256": "2d3fe6e7f711c78d18169617d184240d7d74fc4f8066f2d69faa0b3c1e58f32e",
+      "block_count": 92,
+      "body_html_chars": 25704,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:50:18Z"
+    },
+    {
+      "document_id": "cloud-gui-remake-wave-2026-07-21-r12",
+      "document_rev": "e1b11ac0a424cd8f2d005495f325452c",
+      "readback_sha256": "a89bb77df832cdb5c7f2eabc9fecc313aedf178eff31b7f7eb2cfc6ad635ae65",
+      "block_count": 178,
+      "body_html_chars": 55876,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:50:18Z"
+    },
+    {
+      "document_id": "cloud-gui-remake-wave-2026-07-21-seal",
+      "document_rev": "88fb9824758512ef28a8b91201d17eab",
+      "readback_sha256": "45f3054d1fca0bb0c941f4b213360099745d15f5259af1f92a4b84b79203a2b4",
+      "block_count": 119,
+      "body_html_chars": 50257,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:50:18Z"
+    },
+    {
+      "document_id": "cloud-site-spawner-cf-wave-2026-07-14",
+      "document_rev": "d5cc1d7de4742d9cc9048487073c7320",
+      "readback_sha256": "e584db234da6f1eb6122191947dbbc3e517ea446b67092c04f6a869e326271ad",
+      "block_count": 91,
+      "body_html_chars": 0,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:50:18Z"
+    },
+    {
+      "document_id": "cloud-site-spawner-node-wave-2026-07-15",
+      "document_rev": "d728d96b87e4f111f2d77633e6ca9ddc",
+      "readback_sha256": "453f05d61ed0488759db3eb25c884d68a1b3a7326299b910e68662e1e378b0f6",
+      "block_count": 0,
+      "body_html_chars": 53846,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:50:18Z"
+    },
+    {
+      "document_id": "cloud-site-spawner-wave-2026-07-14",
+      "document_rev": "e8072e11eb545a37b679132d751f2066",
+      "readback_sha256": "d5f4998dc99eb2d61779dd53842b3008d5da9733dd25265f7903688b898008ea",
+      "block_count": 102,
+      "body_html_chars": 0,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:50:18Z"
+    },
+    {
+      "document_id": "cloud-site-spawner-wave-3-2026-07-14",
+      "document_rev": "92f39731f755353243b050c86ed25ac7",
+      "readback_sha256": "f1adcf3c2029aa5f4796acb7c9ee6b3a5b339829b411f2623cd27a0e7786dbd7",
+      "block_count": 177,
+      "body_html_chars": 0,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:50:18Z"
+    },
+    {
+      "document_id": "cloud-site-spawner-wave-4-2026-07-14",
+      "document_rev": "fed93c20af0a9405e5cab5b7d0309f88",
+      "readback_sha256": "c7dee0de2da9e0ad69a7bef4ab503ddf51fbd3e49ef92246d88dece31f759ac3",
+      "block_count": 80,
+      "body_html_chars": 0,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:50:18Z"
+    },
+    {
+      "document_id": "cloud-site-spawner-wave-5-2026-07-14",
+      "document_rev": "4bd18af484a8da2d3ab5304224cdef60",
+      "readback_sha256": "0bb81bf8a6d0e6205b9eaa0394232ea5cf32567836c952c1bb2676bc40a9edf0",
+      "block_count": 96,
+      "body_html_chars": 0,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:50:18Z"
+    },
+    {
+      "document_id": "cmux-bridge",
+      "document_rev": "ed88c777b97622f9fc9459d29271d452",
+      "readback_sha256": "348ef8bd577106dc383dee54aab58256daba645f76e83987a0b1317ab92258a4",
+      "block_count": 29,
+      "body_html_chars": 12208,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T06:50:18Z"
+    }
+  ],
+  "all_pinned_revisions_read": true,
+  "count": 10
+}
