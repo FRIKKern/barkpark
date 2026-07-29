@@ -6274,6 +6274,15 @@ defmodule BarkparkCloud.Web.Router do
   post "/v1/sites/:id/artifact" do
     with_team_site(conn, {:ability, "write"}, fn conn, site ->
       case read_artifact_body(conn, max_artifact_bytes()) do
+        # An EMPTY body is a caller error, not a server one: `bytes` is required,
+        # so the insert would fail its changeset and a bare `{:ok, _} =` match
+        # would turn "you posted nothing" into a 500 with no detail.
+        {:ok, conn, ""} ->
+          json(conn, 422, %{
+            error: "empty_artifact",
+            detail: "the request body was empty — POST the tar.gz as application/octet-stream"
+          })
+
         {:ok, conn, bytes} ->
           sha = sha256_hex(bytes)
           {:ok, artifact} = Sites.Deploy.store_site_artifact(site, bytes, sha)
@@ -11708,6 +11717,13 @@ defmodule BarkparkCloud.Web.Router do
 
   defp receive_deployment_artifact(conn, site, deployment) do
     case read_artifact_body(conn, max_artifact_bytes()) do
+      {:ok, conn, ""} ->
+        json(conn, 422, %{
+          error: "empty_artifact",
+          detail:
+            "the request body was empty — POST the tar.gz of dist/ as application/octet-stream"
+        })
+
       {:ok, conn, bytes} ->
         settle_deployment_artifact(conn, site, deployment, bytes, sha256_hex(bytes))
 

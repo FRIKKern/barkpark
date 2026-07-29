@@ -626,6 +626,18 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert artifacts_for_site(site.id) == []
     end
 
+    test "an EMPTY body → 422, not a 500" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, site} = Registry.create_site(bp, %{name: "Empty", slug: "empty"})
+      token = login_token(user)
+
+      conn = call_binary(:post, "/v1/sites/#{site.id}/artifact", "", token)
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "empty_artifact"
+      assert artifacts_for_site(site.id) == []
+    end
+
     ## THE AUTH-AXIS FLIP (charter D97).
     ##
     ## This route used to run on `with_team_site/2`'s `:session` default, which
@@ -1952,6 +1964,22 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       assert conn.status == 413
       assert json_body(conn)["error"] == "artifact_too_large"
       assert Sites.Deploy.artifact_for(dep["id"]) == nil
+    end
+
+    test "an EMPTY body → 422 empty_artifact, and the driver is NOT started" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+      dep = mint_prebuilt(site, token)
+
+      conn =
+        call_binary(:post, "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact", "", token)
+
+      assert conn.status == 422
+      assert json_body(conn)["error"] == "empty_artifact"
+      assert Sites.Deploy.artifact_for(dep["id"]) == nil
+      assert started_snapshot(dep["id"]) == nil
     end
 
     test "another team's site → 404, and a foreign deployment id → 404" do
