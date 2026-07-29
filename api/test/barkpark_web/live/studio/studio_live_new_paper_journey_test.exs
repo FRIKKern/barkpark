@@ -87,6 +87,17 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
 
     assert :sys.get_state(view.pid).socket.assigns.paper_block_mode,
            "expected paper_block_mode — the paper opened in the field-form/empty branch instead"
+
+    # …and it does not open by accusing the human of a value it wrote itself.
+    # The editor now resolves the DRAFT row, so the sidebar's slug field is
+    # seeded from `drafts.paper-…` unless it normalises — and that string
+    # fails the slug format check, so a brand-new document greeted its author
+    # with a red "Only lowercase letters, numbers, and hyphens" on the one
+    # field it had never touched.
+    refute html =~ ~s(value="drafts.),
+           "the sidebar slug field must show the published id, never the drafts. storage prefix"
+
+    refute html =~ "Only lowercase letters, numbers, and hyphens"
   end
 
   describe "arm 1 — a human clicks + in the Papers pane" do

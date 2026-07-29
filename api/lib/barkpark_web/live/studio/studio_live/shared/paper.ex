@@ -716,7 +716,19 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   # would BE the flash D12 refused (measured: first paint t=20.1ms,
   # phx-connected t=419.5ms). The cascade closes it at first paint instead.
   defp sidebar_assigns(paper) do
-    slug = (paper && Map.get(paper, :doc_id)) || ""
+    # NORMALISED through `published_id/1`, and that is not cosmetic. Since the
+    # blocks branch resolves draft-first (spd-w17), a never-published paper
+    # arrives here as `drafts.paper-…` — and `drafts.` is a STORAGE prefix, not
+    # part of any slug. Unnormalised, the very first thing a human sees after
+    # creating a document is its own Slug field painted red with "Only
+    # lowercase letters, numbers, and hyphens": the product accusing the user
+    # of a value the product itself wrote. The slug of a document is its
+    # published id in both states.
+    slug =
+      case paper && Map.get(paper, :doc_id) do
+        id when is_binary(id) -> Content.published_id(id)
+        _ -> ""
+      end
 
     [
       sidebar_open: true,
