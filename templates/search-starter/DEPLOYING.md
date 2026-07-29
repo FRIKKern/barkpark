@@ -9,7 +9,8 @@ folder-wide golden path (workspace / schema / token mechanics) lives in
 ## TL;DR — the one command
 
 ```sh
-bp cloud site create --template search-starter --barkpark <id> --kind node
+bp cloud site create --name my-search --dataset default/default/production \
+  --instance <your-box> --kind node --framework nextjs --template search-starter
 bp cloud site deploy <slug>          # streams PLAN→BUILD→STAGE→HEALTH→SWITCH→RETIRE, prints the URL
 ```
 
@@ -18,12 +19,10 @@ long-lived Node SSR process (not static HTML). `deploy` health-gates the build
 before flipping the Caddy upstream. If `HEALTH` fails, nothing switches and
 visitors keep seeing the previous build.
 
-> **Template selection is landing across this epic.** The deploy engine already
-> materializes the `search-starter` tree (the `template` axis shipped in Wave 1),
-> but the `--template` / `--barkpark` flags on `bp cloud site create` (and the
-> dashboard picker) are the epic's next surface (Wave 2). Today's create binds by
-> instance: `bp cloud site create --name <name> --dataset <ws/proj/ds>
-> --instance <id> --kind node --framework nextjs`.
+> `--template` is live today — it is in `bp cloud site create`'s own usage, and
+> the dashboard picker offers **Search Starter** too. `--name`, `--dataset` and
+> `--instance` are all required. There is no `--barkpark` flag; that spelling was
+> printed here until it was checked against the CLI.
 
 ## Prerequisites (all live today)
 
@@ -35,7 +34,9 @@ bp login --device      # device flow; --device-start / --device-poll for headles
 ```
 
 `install-cli.sh` installs `bp` 1.15.0 (fix #2797). You need a Barkpark instance
-id (`bp cloud barkpark ls`) and admin on it to seed the corpus.
+id (`bp cloud status` lists your fleet) and admin on it to seed the corpus.
+This line used to print a "barkpark ls" subcommand that `runCloud` has never
+dispatched.
 
 ## Seed the corpus (why the graph is a constellation)
 

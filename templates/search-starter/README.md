@@ -38,18 +38,18 @@ curl -fsSL https://raw.githubusercontent.com/FRIKKern/barkpark/main/scripts/inst
 bp login --device
 
 # 3. spawn the site from this template, bound to your Barkpark instance
-bp cloud site create --template search-starter --barkpark <id> --kind node
+#    (`bp cloud status` lists your instances and their ids)
+bp cloud site create --name my-search --dataset default/default/production \
+  --instance <your-box> --kind node --framework nextjs --template search-starter
 
 # 4. deploy it — streams the six stages, prints the live URL
 bp cloud site deploy <slug>
 ```
 
-> **Template selection is landing across this epic.** The deploy engine already
-> materializes `search-starter` (the `template` axis ships in Wave 1); the
-> `--template` flag on `bp cloud site create` and the dashboard picker are the
-> epic's next surface (Wave 2). Until then, bind the site with `--instance <id>`
-> (`bp cloud site create --name <name> --dataset <ws/proj/ds> --instance <id>
-> --kind node --framework nextjs`) and select the template on deploy.
+> `--template` is live today — it is in `bp cloud site create`'s own usage. The
+> site is bound by `--instance`, and `--name` / `--dataset` / `--instance` are
+> all required. There is no `--barkpark` flag; that spelling was printed here
+> until it was checked against the CLI.
 
 `create` registers the site (node runtime target) against your instance;
 `deploy` enqueues the build and **streams the six visible stages live**:
