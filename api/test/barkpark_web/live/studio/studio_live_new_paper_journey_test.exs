@@ -53,6 +53,33 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
   end
 
   setup do
+    # PIN THE CANVAS FLAG ON, and this is not ceremony — it is why this file
+    # passed alone and RED in CI's full suite. `BARKPARK_PAPER_CANVAS` is read
+    # from the PROCESS-GLOBAL environment at render time, and four sibling
+    # suites deliberately set it to "0" to pin the legacy opt-out path
+    # (`paper_editor_test_helpers.ex`, `studio_live_paper_canvas_test.exs`,
+    # `paper_canvas_test.exs`, `studio_live_paper_test.exs`). Inheriting a "0"
+    # here does NOT re-break the owner's bug — the empty state stays gone — but
+    # a block paper then opens into the read-only View pane plus the View⇄Edit
+    # toggle, so `studio-paper-block-editor` legitimately does not render until
+    # someone clicks Edit. Exactly three assertions failed in CI and it was
+    # this, reproduced locally with `BARKPARK_PAPER_CANVAS=0`: 3 tests, 3
+    # failures on that one line.
+    #
+    # The canvas IS the mainline default (D7/D9) — `nil` reads as ON — so this
+    # pins the default rather than inventing a mode, mirroring the same
+    # prev/put/on_exit idiom the OFF suites use. `async: false` makes the
+    # process-global write safe.
+    prev = System.get_env("BARKPARK_PAPER_CANVAS")
+    System.put_env("BARKPARK_PAPER_CANVAS", "1")
+
+    on_exit(fn ->
+      case prev do
+        nil -> System.delete_env("BARKPARK_PAPER_CANVAS")
+        v -> System.put_env("BARKPARK_PAPER_CANVAS", v)
+      end
+    end)
+
     seed_paper_schema!()
     :ok
   end
