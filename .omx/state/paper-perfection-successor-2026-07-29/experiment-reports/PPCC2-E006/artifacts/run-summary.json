@@ -1,0 +1,1254 @@
+{
+  "actual_command_outputs": [
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 2.563856,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 145266,
+          "stdout_sha256": "e311c32701ede0e1489287f46dffc2a0c580fcba8992bb5a96fed817f7e1f58c"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper choosing-your-site-framework -o json",
+      "elapsed_seconds": 2.564071,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 145266,
+      "stdout_sha256": "e311c32701ede0e1489287f46dffc2a0c580fcba8992bb5a96fed817f7e1f58c"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 5.247573,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 179733,
+          "stdout_sha256": "fcd8cc97861353c5aa182da88b8942ddec7e925ca7d76924181b965d4b89bdc2"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper component-reference -o json",
+      "elapsed_seconds": 5.247652,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 179733,
+      "stdout_sha256": "fcd8cc97861353c5aa182da88b8942ddec7e925ca7d76924181b965d4b89bdc2"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 3.478035,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 66196,
+          "stdout_sha256": "cbbf21e428dfac22c6e8b42857601f8aa83547188ef50b3822ced47e4eb61c80"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper wave-deck -o json",
+      "elapsed_seconds": 3.478079,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 66196,
+      "stdout_sha256": "cbbf21e428dfac22c6e8b42857601f8aa83547188ef50b3822ced47e4eb61c80"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 3.892992,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 433740,
+          "stdout_sha256": "1fd02673d4143b59b59c5675daa823630b1483953355f147432c25137b5ba4b6"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper cloud-console-hardening-wave-2026-07-21 -o json",
+      "elapsed_seconds": 3.893213,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 433740,
+      "stdout_sha256": "1fd02673d4143b59b59c5675daa823630b1483953355f147432c25137b5ba4b6"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 2.782051,
+          "exit_code": 8,
+          "stderr": "",
+          "stdout_bytes": 214,
+          "stdout_sha256": "2ceeb3e88360c922e22135379bb32e8e2787019578ed82ad36c9641c25bdef36"
+        },
+        {
+          "attempt": 2,
+          "elapsed_seconds": 1.259414,
+          "exit_code": 1,
+          "stderr": "bp: acquire manifest from https://guerrilla.barkpark.cloud/v1/capabilities: fetch manifest: unexpected status 500 — {\"error\":{\"code\":\"internal_error\",\"message\":\"unknown error\",\"hint\":\"Retry shortly; if it persists, report the request_id to the API operator.\",\"request_id\":\"GMa5GOEiYMo5QwMABidR\"}} (hint: set BARKPARK_MANIFEST=<file> or pass --manifest <file> to run before /v1/capabilities is deployed)\n",
+          "stdout_bytes": 0,
+          "stdout_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+        },
+        {
+          "attempt": 3,
+          "elapsed_seconds": 3.926957,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 504634,
+          "stdout_sha256": "5dc7842807f77a36178fcd95e52e265f3842d28b9259cf7b03fab30a7e9e8b2b"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper cloud-console-hardening-wave-3-2026-07-21 -o json",
+      "elapsed_seconds": 9.478907,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 504634,
+      "stdout_sha256": "5dc7842807f77a36178fcd95e52e265f3842d28b9259cf7b03fab30a7e9e8b2b"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 1.710179,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 454016,
+          "stdout_sha256": "e6e73b295ec33295ea78721429184dc99ca0986d610ecba04e0dca82082d3a6d"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper spd-inspector-successor-wave-2026-07-20 -o json",
+      "elapsed_seconds": 1.710362,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 454016,
+      "stdout_sha256": "e6e73b295ec33295ea78721429184dc99ca0986d610ecba04e0dca82082d3a6d"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 1.64713,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 529232,
+          "stdout_sha256": "be62090e3fbf1cc51ab799f467b4a115d6452155ce6ddd0b8226c0c6f1dca63d"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper block-wishlist-100 -o json",
+      "elapsed_seconds": 1.647376,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 529232,
+      "stdout_sha256": "be62090e3fbf1cc51ab799f467b4a115d6452155ce6ddd0b8226c0c6f1dca63d"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 1.912113,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 380652,
+          "stdout_sha256": "f9c72a63bb1ac558b1cde99588d24240d9d42798a367d8e541aec4187735ee25"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper honest-gates-wave-4-2026-07-28 -o json",
+      "elapsed_seconds": 1.91228,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 380652,
+      "stdout_sha256": "f9c72a63bb1ac558b1cde99588d24240d9d42798a367d8e541aec4187735ee25"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 1.317554,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 127430,
+          "stdout_sha256": "cf1087f55728087766f1613739e392923ccc37209fab9a2d4c47f1e45ede19a9"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper task-tui-wave-2026-07-23b -o json",
+      "elapsed_seconds": 1.317638,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 127430,
+      "stdout_sha256": "cf1087f55728087766f1613739e392923ccc37209fab9a2d4c47f1e45ede19a9"
+    }
+  ],
+  "artifact_root": "artifacts",
+  "assignment_id": "PPCC2-E006",
+  "assignment_map_sha256": "4c97689b79478ff39c7e45a8bb75d1f6037a061597958b16fad25d1f4d5d860a",
+  "candidate_schema_version": "ppcc2-reader-adaptive-candidate/v1",
+  "fixture_count": 9,
+  "fixture_results": [
+    {
+      "accessibility": {
+        "all_regions_aria_labeled": true,
+        "deterministic_reading_order": true,
+        "email_logical_h1_count": 1,
+        "pass": true,
+        "studio_logical_h1_count": 1
+      },
+      "block_count": 88,
+      "cli_api_round_trip": {
+        "canonical_sha256": "1e1ef026964f1c464d95defbf9b95e372c4f41cf972a898d0ba77144d81693bd",
+        "decode_encode_byte_stable": true,
+        "pass": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "document_id": "choosing-your-site-framework",
+      "document_rev": "5e12190e742c0888ad78babdc5c6b93c",
+      "email_safety": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true,
+        "unresolved_runtime_structure": false
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "blocks_sha256": "8dda53e1baa15737c2dc9214c70e7540b74f8e09de4ebb677fbb4d1fa65409d0",
+        "generic_adapter_dropped_nodes": 0,
+        "generic_adapter_placeholder_nodes": 0,
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 8,
+        "null_nodes": 0,
+        "pass": true,
+        "top_level_blocks": 88,
+        "typed_nodes": 587
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "1e1ef026964f1c464d95defbf9b95e372c4f41cf972a898d0ba77144d81693bd",
+            "1e1ef026964f1c464d95defbf9b95e372c4f41cf972a898d0ba77144d81693bd"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "4335dd9db008bfcb1527faf57e0120ffb6379df40c8dbafdbb8b9b4f9bac53dc",
+            "4335dd9db008bfcb1527faf57e0120ffb6379df40c8dbafdbb8b9b4f9bac53dc"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "9dcd773c8760ca0feaeb80e8c61a548bdbe33b0e86aa9a0e8b8d1f53acf1f11d",
+            "9dcd773c8760ca0feaeb80e8c61a548bdbe33b0e86aa9a0e8b8d1f53acf1f11d"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "63250a8cc2aa85fc9be218745b7c6e027fe2d525df6221beabeb0ef1d7ee004f",
+            "63250a8cc2aa85fc9be218745b7c6e027fe2d525df6221beabeb0ef1d7ee004f"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "7c6fa3b18ed2985f25ade124b33adf691576401f22e7eaff3c8f325ebb869646",
+            "7c6fa3b18ed2985f25ade124b33adf691576401f22e7eaff3c8f325ebb869646"
+          ]
+        }
+      },
+      "semantic_node_count": 88,
+      "semantic_segment_count": 370,
+      "studio_structural_completeness": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:choosing-your-site-framework"
+    },
+    {
+      "accessibility": {
+        "all_regions_aria_labeled": true,
+        "deterministic_reading_order": true,
+        "email_logical_h1_count": 1,
+        "pass": true,
+        "studio_logical_h1_count": 1
+      },
+      "block_count": 159,
+      "cli_api_round_trip": {
+        "canonical_sha256": "e304f63db6542bfba5dcabcb7d72bb9777c1a11dd0bba5abd92d1ee6e88ab2f4",
+        "decode_encode_byte_stable": true,
+        "pass": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "document_id": "component-reference",
+      "document_rev": "11673b5ff7fe2978fe3c0643f5495eee",
+      "email_safety": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true,
+        "unresolved_runtime_structure": false
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "blocks_sha256": "82114a7db4e28634873a1fe559bd3332f8ff954112bfa8e3773721124712bd59",
+        "generic_adapter_dropped_nodes": 0,
+        "generic_adapter_placeholder_nodes": 0,
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 9,
+        "null_nodes": 0,
+        "pass": true,
+        "top_level_blocks": 159,
+        "typed_nodes": 945
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "e304f63db6542bfba5dcabcb7d72bb9777c1a11dd0bba5abd92d1ee6e88ab2f4",
+            "e304f63db6542bfba5dcabcb7d72bb9777c1a11dd0bba5abd92d1ee6e88ab2f4"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "aceabb0874749de0e274569945de1f907e84727747df4252ca531c18b93b622e",
+            "aceabb0874749de0e274569945de1f907e84727747df4252ca531c18b93b622e"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "2fb1afe0b511e1c1ed5d97c3797c2932270108b3cc8f926f6cbfc4e74a5e0cec",
+            "2fb1afe0b511e1c1ed5d97c3797c2932270108b3cc8f926f6cbfc4e74a5e0cec"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "0db16c1cc3bc5bcfd5582dc153aa831185057537d620e32554aa8f9234b7397f",
+            "0db16c1cc3bc5bcfd5582dc153aa831185057537d620e32554aa8f9234b7397f"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "0dcef6e3cd746513d8d778052fe245a045817ab17fc89ba9d5711a2dfa614265",
+            "0dcef6e3cd746513d8d778052fe245a045817ab17fc89ba9d5711a2dfa614265"
+          ]
+        }
+      },
+      "semantic_node_count": 159,
+      "semantic_segment_count": 577,
+      "studio_structural_completeness": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:component-reference"
+    },
+    {
+      "accessibility": {
+        "all_regions_aria_labeled": true,
+        "deterministic_reading_order": true,
+        "email_logical_h1_count": 1,
+        "pass": true,
+        "studio_logical_h1_count": 1
+      },
+      "block_count": 98,
+      "cli_api_round_trip": {
+        "canonical_sha256": "aa73182b1562aa812ec6db79ca84369fb6a8d56f256f5aa65d1abc2d57106b35",
+        "decode_encode_byte_stable": true,
+        "pass": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "document_id": "wave-deck",
+      "document_rev": "e86c9ab685223febc97b25cc2c0e3b6e",
+      "email_safety": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true,
+        "unresolved_runtime_structure": false
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "blocks_sha256": "461cfce1cf37c6e757bda3ebb9079a3af93fe78d2d6007ce916f425355d5f51b",
+        "generic_adapter_dropped_nodes": 0,
+        "generic_adapter_placeholder_nodes": 0,
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 7,
+        "null_nodes": 0,
+        "pass": true,
+        "top_level_blocks": 98,
+        "typed_nodes": 347
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "aa73182b1562aa812ec6db79ca84369fb6a8d56f256f5aa65d1abc2d57106b35",
+            "aa73182b1562aa812ec6db79ca84369fb6a8d56f256f5aa65d1abc2d57106b35"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "f62aedc5ff1192234e0e8ea4437576c1093e68656f781261a6abeb350ef05343",
+            "f62aedc5ff1192234e0e8ea4437576c1093e68656f781261a6abeb350ef05343"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "fde7192e823d81274e1e8246ef1a43c7c0e614d992b377a987c571a81893e2ba",
+            "fde7192e823d81274e1e8246ef1a43c7c0e614d992b377a987c571a81893e2ba"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "8cb5f26539ea781a706538940e42d52dd53be4df20dd0f8378d99e12ca572a40",
+            "8cb5f26539ea781a706538940e42d52dd53be4df20dd0f8378d99e12ca572a40"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "3f1114f06e9e38e62027c6ca33de232ed7fd6c88eb4e363b02d94bc54aa9ee9c",
+            "3f1114f06e9e38e62027c6ca33de232ed7fd6c88eb4e363b02d94bc54aa9ee9c"
+          ]
+        }
+      },
+      "semantic_node_count": 98,
+      "semantic_segment_count": 308,
+      "studio_structural_completeness": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:wave-deck"
+    },
+    {
+      "accessibility": {
+        "all_regions_aria_labeled": true,
+        "deterministic_reading_order": true,
+        "email_logical_h1_count": 1,
+        "pass": true,
+        "studio_logical_h1_count": 1
+      },
+      "block_count": 147,
+      "cli_api_round_trip": {
+        "canonical_sha256": "c80f262c1d4a186be104539bc7e3559c79b4abedd9ae8a89f3b54a7a0b839cd3",
+        "decode_encode_byte_stable": true,
+        "pass": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "document_id": "cloud-console-hardening-wave-2026-07-21",
+      "document_rev": "16a3141be0bb985742e2b016254bba82",
+      "email_safety": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true,
+        "unresolved_runtime_structure": false
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "blocks_sha256": "08e03b1fbb7ed97a9023242ab1a320a1649bdf2e76fac5a9c1cee2a506b23923",
+        "generic_adapter_dropped_nodes": 0,
+        "generic_adapter_placeholder_nodes": 0,
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 4,
+        "null_nodes": 0,
+        "pass": true,
+        "top_level_blocks": 147,
+        "typed_nodes": 294
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "c80f262c1d4a186be104539bc7e3559c79b4abedd9ae8a89f3b54a7a0b839cd3",
+            "c80f262c1d4a186be104539bc7e3559c79b4abedd9ae8a89f3b54a7a0b839cd3"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "053635f72c1dc53b1c4875822c6b181b54276d57be047d9e3f52edb0708dc0ff",
+            "053635f72c1dc53b1c4875822c6b181b54276d57be047d9e3f52edb0708dc0ff"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "636c95b0c4f83ae0edb8aac7be17d5a73552870be3ff04a022a9aa76fdbbbbdd",
+            "636c95b0c4f83ae0edb8aac7be17d5a73552870be3ff04a022a9aa76fdbbbbdd"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "fba2d5f19b78165e39b761c758bc199561ca1b2727879814e8215f83fcc3ea86",
+            "fba2d5f19b78165e39b761c758bc199561ca1b2727879814e8215f83fcc3ea86"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "beb49a7fdaa8f930f3e0cc17681efedfc29dca5fa0cdcba7dc5b27dcae2a2cd6",
+            "beb49a7fdaa8f930f3e0cc17681efedfc29dca5fa0cdcba7dc5b27dcae2a2cd6"
+          ]
+        }
+      },
+      "semantic_node_count": 147,
+      "semantic_segment_count": 294,
+      "studio_structural_completeness": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:cloud-console-hardening-wave-2026-07-21"
+    },
+    {
+      "accessibility": {
+        "all_regions_aria_labeled": true,
+        "deterministic_reading_order": true,
+        "email_logical_h1_count": 1,
+        "pass": true,
+        "studio_logical_h1_count": 1
+      },
+      "block_count": 186,
+      "cli_api_round_trip": {
+        "canonical_sha256": "64c375f4217d1d79f350a8921622ebbd4e9803ab73a27c9abb12b61ef8979327",
+        "decode_encode_byte_stable": true,
+        "pass": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "document_id": "cloud-console-hardening-wave-3-2026-07-21",
+      "document_rev": "bc89039eb1bcc908b5be80ce33148094",
+      "email_safety": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true,
+        "unresolved_runtime_structure": false
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "blocks_sha256": "ca4ac752935aafc9b693bce391b97d664d2e11e8a71331ae3cc4025ded17792e",
+        "generic_adapter_dropped_nodes": 0,
+        "generic_adapter_placeholder_nodes": 0,
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 6,
+        "null_nodes": 0,
+        "pass": true,
+        "top_level_blocks": 186,
+        "typed_nodes": 404
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "64c375f4217d1d79f350a8921622ebbd4e9803ab73a27c9abb12b61ef8979327",
+            "64c375f4217d1d79f350a8921622ebbd4e9803ab73a27c9abb12b61ef8979327"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "321d5cff3005b38a284559eaf486e68e6292b361a620dfebab7b92e92322f398",
+            "321d5cff3005b38a284559eaf486e68e6292b361a620dfebab7b92e92322f398"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "df38cacb4bf20685ae96602805f654b6a6d6ca85baee67a15b24fb38529e805a",
+            "df38cacb4bf20685ae96602805f654b6a6d6ca85baee67a15b24fb38529e805a"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "9257609edf170fa3fe172c2f9dac41424a04ed48e39f8ef7cd4e71c11c581de7",
+            "9257609edf170fa3fe172c2f9dac41424a04ed48e39f8ef7cd4e71c11c581de7"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "7ef6df815e2663fa4b42c41ced7ac71b9b9103e894fcc83a4fd1585988f6d0e1",
+            "7ef6df815e2663fa4b42c41ced7ac71b9b9103e894fcc83a4fd1585988f6d0e1"
+          ]
+        }
+      },
+      "semantic_node_count": 186,
+      "semantic_segment_count": 443,
+      "studio_structural_completeness": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:cloud-console-hardening-wave-3-2026-07-21"
+    },
+    {
+      "accessibility": {
+        "all_regions_aria_labeled": true,
+        "deterministic_reading_order": true,
+        "email_logical_h1_count": 1,
+        "pass": true,
+        "studio_logical_h1_count": 1
+      },
+      "block_count": 212,
+      "cli_api_round_trip": {
+        "canonical_sha256": "69da12e377bc1150166faec91ea00250b07869933c0dd5c7b1f65b2187530c28",
+        "decode_encode_byte_stable": true,
+        "pass": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "document_id": "spd-inspector-successor-wave-2026-07-20",
+      "document_rev": "44ce6ce860011494d225c553c018b436",
+      "email_safety": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true,
+        "unresolved_runtime_structure": false
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "blocks_sha256": "17c9cdb6b9c787ae8e8acbe7fb5c5558a9acae1edba9e2ab566eba978e4c7f89",
+        "generic_adapter_dropped_nodes": 0,
+        "generic_adapter_placeholder_nodes": 0,
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 4,
+        "null_nodes": 0,
+        "pass": true,
+        "top_level_blocks": 212,
+        "typed_nodes": 424
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "69da12e377bc1150166faec91ea00250b07869933c0dd5c7b1f65b2187530c28",
+            "69da12e377bc1150166faec91ea00250b07869933c0dd5c7b1f65b2187530c28"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "82bb0bd4f522a2cb72ef753aec16389ecca7f93074135559b4b61458f33a2949",
+            "82bb0bd4f522a2cb72ef753aec16389ecca7f93074135559b4b61458f33a2949"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "849f3889aa94e6518a52afaed3363189aceb73585c74b7ecaab460699e6f5e27",
+            "849f3889aa94e6518a52afaed3363189aceb73585c74b7ecaab460699e6f5e27"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "f71c448d6486190ece5ec1c60238f6e66685c2cbad18e5bef7188ccf656af8af",
+            "f71c448d6486190ece5ec1c60238f6e66685c2cbad18e5bef7188ccf656af8af"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "cced5e32906a973a1795b8f1f60cfaff3154e7561740ebb75039e070fddc528e",
+            "cced5e32906a973a1795b8f1f60cfaff3154e7561740ebb75039e070fddc528e"
+          ]
+        }
+      },
+      "semantic_node_count": 212,
+      "semantic_segment_count": 212,
+      "studio_structural_completeness": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:spd-inspector-successor-wave-2026-07-20"
+    },
+    {
+      "accessibility": {
+        "all_regions_aria_labeled": true,
+        "deterministic_reading_order": true,
+        "email_logical_h1_count": 1,
+        "pass": true,
+        "studio_logical_h1_count": 1
+      },
+      "block_count": 440,
+      "cli_api_round_trip": {
+        "canonical_sha256": "f24df6b0a2b9f2c08a9d255d504e0df5949a3a2e18d9ff8cff832e91c4d99c23",
+        "decode_encode_byte_stable": true,
+        "pass": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "document_id": "block-wishlist-100",
+      "document_rev": "4a848abc89f77860416de0871d5d5bf4",
+      "email_safety": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true,
+        "unresolved_runtime_structure": false
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "blocks_sha256": "47bbeec4a5d3a4346993a98eede99526626be6bd248f08718b7ffce25f2320dc",
+        "generic_adapter_dropped_nodes": 0,
+        "generic_adapter_placeholder_nodes": 0,
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 9,
+        "null_nodes": 0,
+        "pass": true,
+        "top_level_blocks": 440,
+        "typed_nodes": 708
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "f24df6b0a2b9f2c08a9d255d504e0df5949a3a2e18d9ff8cff832e91c4d99c23",
+            "f24df6b0a2b9f2c08a9d255d504e0df5949a3a2e18d9ff8cff832e91c4d99c23"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "bd35e23471be6429daacd99a62d2f7d44c521ff724bf7343d5358d57c12815ed",
+            "bd35e23471be6429daacd99a62d2f7d44c521ff724bf7343d5358d57c12815ed"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "d5517a79dfd83062f6d763152e8947c1bba504fa1dc048cc605547b760db57fb",
+            "d5517a79dfd83062f6d763152e8947c1bba504fa1dc048cc605547b760db57fb"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "586b2a2b417d811ac7246c3190a1353b812424b6ba7df3df2a2d5479f6d4a256",
+            "586b2a2b417d811ac7246c3190a1353b812424b6ba7df3df2a2d5479f6d4a256"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "7d64e3d5be3e09fd7f2bc2a2fc5b26d4032dcaa69ffd2a4743cbdc88d2a64a7b",
+            "7d64e3d5be3e09fd7f2bc2a2fc5b26d4032dcaa69ffd2a4743cbdc88d2a64a7b"
+          ]
+        }
+      },
+      "semantic_node_count": 440,
+      "semantic_segment_count": 519,
+      "studio_structural_completeness": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:block-wishlist-100"
+    },
+    {
+      "accessibility": {
+        "all_regions_aria_labeled": true,
+        "deterministic_reading_order": true,
+        "email_logical_h1_count": 1,
+        "pass": true,
+        "studio_logical_h1_count": 1
+      },
+      "block_count": 264,
+      "cli_api_round_trip": {
+        "canonical_sha256": "268cefb8d3ac40722f6efc6c9234fe56f1140a57ed81a8a090689b5d52a14fb0",
+        "decode_encode_byte_stable": true,
+        "pass": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "document_id": "honest-gates-wave-4-2026-07-28",
+      "document_rev": "ab8b4653f1fa81becbf29ee3f658f8c6",
+      "email_safety": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true,
+        "unresolved_runtime_structure": false
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "blocks_sha256": "b28c24438bb802de5ea4f6893c5dbd5eb2128be86be55b7c31caa523ea5c541f",
+        "generic_adapter_dropped_nodes": 0,
+        "generic_adapter_placeholder_nodes": 0,
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 8,
+        "null_nodes": 0,
+        "pass": true,
+        "top_level_blocks": 264,
+        "typed_nodes": 1008
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "268cefb8d3ac40722f6efc6c9234fe56f1140a57ed81a8a090689b5d52a14fb0",
+            "268cefb8d3ac40722f6efc6c9234fe56f1140a57ed81a8a090689b5d52a14fb0"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "8c85df731ac955ae95a71fc357b879e2b59204a9d9d2d35ffcbbb06412917527",
+            "8c85df731ac955ae95a71fc357b879e2b59204a9d9d2d35ffcbbb06412917527"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "90c7c02750936cf68980ad9c6f871085d2f48a0d329166d63996ca05a21b5b03",
+            "90c7c02750936cf68980ad9c6f871085d2f48a0d329166d63996ca05a21b5b03"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "d328852db2aae0e74f57653f89ac1bc8642088695107b5e199d2d672a935e6fb",
+            "d328852db2aae0e74f57653f89ac1bc8642088695107b5e199d2d672a935e6fb"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "0d29d722d921bd85fcb503625e5b496e992ec57315fbbb232470b0128862ec63",
+            "0d29d722d921bd85fcb503625e5b496e992ec57315fbbb232470b0128862ec63"
+          ]
+        }
+      },
+      "semantic_node_count": 264,
+      "semantic_segment_count": 889,
+      "studio_structural_completeness": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:honest-gates-wave-4-2026-07-28"
+    },
+    {
+      "accessibility": {
+        "all_regions_aria_labeled": true,
+        "deterministic_reading_order": true,
+        "email_logical_h1_count": 1,
+        "pass": true,
+        "studio_logical_h1_count": 1
+      },
+      "block_count": 35,
+      "cli_api_round_trip": {
+        "canonical_sha256": "9cec84da9f7148ee271f45a28d3055afddd208ccba85aa72a2b39e80ff16c84b",
+        "decode_encode_byte_stable": true,
+        "pass": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "document_id": "task-tui-wave-2026-07-23b",
+      "document_rev": "3999a067808963303810884654e80ab5",
+      "email_safety": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true,
+        "unresolved_runtime_structure": false
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "blocks_sha256": "98bb6e07f0ee8a8ca82a128988402cdad77633d9ed567bbacffc02e75675f6ae",
+        "generic_adapter_dropped_nodes": 0,
+        "generic_adapter_placeholder_nodes": 0,
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 4,
+        "null_nodes": 0,
+        "pass": true,
+        "top_level_blocks": 35,
+        "typed_nodes": 63
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "9cec84da9f7148ee271f45a28d3055afddd208ccba85aa72a2b39e80ff16c84b",
+            "9cec84da9f7148ee271f45a28d3055afddd208ccba85aa72a2b39e80ff16c84b"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "8e2d7f23378972bb35a4455dd816d899f41a1fa58ea4e2749eb4283336031071",
+            "8e2d7f23378972bb35a4455dd816d899f41a1fa58ea4e2749eb4283336031071"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "682a0a4f4990c5c99027a293c070f57da01c3523e403f2569643bd5273cbf06f",
+            "682a0a4f4990c5c99027a293c070f57da01c3523e403f2569643bd5273cbf06f"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "f43db60051da293bf9f88d8ded9b3ad76677c060a355760488848a083055d8d3",
+            "f43db60051da293bf9f88d8ded9b3ad76677c060a355760488848a083055d8d3"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "998f826291edecc14f03a1adc2d092bb6a36e2cf57d1bb109ab8afdbe3baf32e",
+            "998f826291edecc14f03a1adc2d092bb6a36e2cf57d1bb109ab8afdbe3baf32e"
+          ]
+        }
+      },
+      "semantic_node_count": 35,
+      "semantic_segment_count": 39,
+      "studio_structural_completeness": {
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:task-tui-wave-2026-07-23b"
+    }
+  ],
+  "metrics": {
+    "accessibility": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "batch_capacity": {
+      "largest_disjoint_batch_completing_all_hard_gates_without_repair_spillover": 9,
+      "provisional_only": true,
+      "reason": "Round 2 candidate evidence cannot seal Round 5 build capacity.",
+      "surface_projections_per_unit": 5,
+      "units_attempted": 9,
+      "wall_seconds": 34.099789
+    },
+    "candidate_gate_pass_rate": {
+      "attempted": 63,
+      "passed": 63,
+      "value": 1.0
+    },
+    "cli_api_round_trip": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "content_preservation": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "email_safety": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "observed_failure_rate": {
+      "hard_failures": 0,
+      "hard_gate_checks": 63,
+      "rate": 0.0
+    },
+    "pilot_gate_pass_rate": {
+      "applicable": false,
+      "reason": "PPCC2-E006 is Round 2 diverge; Round 5 pilot was not started.",
+      "value": null
+    },
+    "portable_doc_schema_validity": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "rollback": {
+      "pass": true,
+      "production_mutations": 0,
+      "rule": "discard the PPCC2-E006 assignment directory"
+    },
+    "studio_structural_completeness": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "tui_width": {
+      "attempted": 9,
+      "overflow_lines_total": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80
+    }
+  },
+  "required_surfaces": [
+    "studio",
+    "tui80",
+    "tui40",
+    "email",
+    "cli_api"
+  ],
+  "schema_version": "ppcc2-e006-run-summary/v1",
+  "status": "PASS"
+}

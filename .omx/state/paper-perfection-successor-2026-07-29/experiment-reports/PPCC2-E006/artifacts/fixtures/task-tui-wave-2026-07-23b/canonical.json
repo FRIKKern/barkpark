@@ -1,0 +1,706 @@
+{
+  "authored": {
+    "block_count": 35,
+    "blocks_sha256": "98bb6e07f0ee8a8ca82a128988402cdad77633d9ed567bbacffc02e75675f6ae",
+    "portable_doc": {
+      "blocks": [
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "THROUGHPUT wave on the proven recipe: Fable architect + Fable grade, freshness-gated lean Sonnet survey, uncertainty-gated verify (smoke-cleared slices go straight to build; builder self-supplies mutation proof; reviewer re-derives AND runs the full package suite + gofmt + goldens), Opus builders. Go TUI fence only (internal/taskboard + internal/pdrender + task-tui tooling); merges on the Go gate, parallel to the draining Elixir queue. Scoreboard: tokens-per-MERGED-slice appended to scoreboard t4 under research epic task-09f4775e7ccc2cca (E7 487k / E6 573k / E4 800k). Honest count; an honest 1-2 slice wave beats a padded 5."
+            }
+          ],
+          "id": "arm-declaration",
+          "title": "Recipe: winning E6+E7, wave 18",
+          "tone": "info",
+          "type": "callout"
+        },
+        {
+          "id": "wish",
+          "level": 2,
+          "text": "The wish",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "THIS CYCLE: TASK-TUI — the NAVIGATION SHELL wave the charter names as next (with the subtraction pass + reading renderers the charter sequences for THIS wave). Apply the WINNING RECIPE (Fable-arch × Fable-grade × freshness-gated lean survey × uncertainty-gated verify — E6+E7, ~487k/slice grade A). Go TUI, merges on its own Go gate. FIRST premise-smoke on origin/main: git-show the charter's named nav-shell/subtraction/reading-renderer sites + confirm genuinely unbuilt (premise stale ~6x this session — VERIFY each before spending a builder; refute honestly + pivot if already built). Prefer OFFLINE goldens/unit proofs; DEFER anything needing a live tmux terminal drive. gofmt is a blocking shrink-only ceiling (#5741) — run it. Honest count; improvement-only."
+            }
+          ],
+          "id": "wish-copy",
+          "type": "paragraph"
+        },
+        {
+          "id": "premise",
+          "level": 2,
+          "text": "Premise smoke — the wish premise is REFUTED, honestly",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "git-shown on origin/main 2026-07-23: program.go carries the full D11/D29 navigation stack (stack []Frame, push/pop, handleFrame, breadcrumb); the D14 subtraction shipped in wave 5; detail_render.go + paper.go + mdlite.go (the reading renderers) exist with goldens; waves 9-16 then re-added the detailed direction, phase bands, activity focus, pane inversion, and THE MOUSE. Wave 17 (cut+built+reviewed earlier TODAY, Arm E/E6) merged its 3 slices: #5837 rail-stop hover (wide, D99), #5838 chip delegate (D100), #5839 help copy (D101). The wish text dates from the wave-5-era charter state (D19). Pivot per the wish's own instruction: build the charter's REAL named-next residue."
+            }
+          ],
+          "id": "premise-verdict",
+          "title": "Nav shell / subtraction / reading renderers: ALL ALREADY BUILT",
+          "tone": "warning",
+          "type": "callout"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Smoke ledger (all RUN, not assumed): (1) origin/main internal/taskboard/program.go — nav stack present (L104-108, L212). (2) Charter tail: the Wave-17 REVIEWED entry rides open PR #5840 (charter-tail conflict risk for this wave's log append — merge #5840 first). (3) W17 dispatch item 1 (merge #5837/#5838/#5839): DONE on origin/main (365583fa5, a80ac7443, e9e081f0a) but the 3 tasks' merge criteria are STILL OPEN in the ledger — hygiene owed. (4) ttw17-bl-d43-elixir-walkex: BUILT by felix W19 (D114 ruling, f50c5f405, crits 0+1 met, merge pending on the Elixir gate) — off-fence AND off-plate. (5) ttw17-bl-live-tmux-drive: open, deferred by the wish (cannot be proven offline; do not fake). (6) compose.go:148 narrow windowFrame call passes hoverStop=-1 hardcoded — the D99 narrow residue is REAL and unbuilt. (7) inline.go taskStatusGlyph guard covers only {open,in_progress,blocked,done,cancelled}; pdrender's gated vocabulary (gridblocks.go roleForStatus/glyphForRole) already covers ready/closed/considering/researching — widening is REAL and unbuilt. (8) handleWideMouse comment: 'wide exposes no footer-verb click targets' — the W16 honest gap is still open. (9) task-tui-goal exists and carries the epic's children — heartbeat lands there. (10) gofmt ceiling #5741 merged — blocking, shrink-only."
+            }
+          ],
+          "id": "premise-checks",
+          "type": "paragraph"
+        },
+        {
+          "id": "direction",
+          "level": 2,
+          "text": "Direction — finish the mouse story and the status language, offline-proven",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Wave 18 is a FINISH wave, not a feature wave: two honest, chartered, package-disjoint Go slices that close the last offline-provable residues of the mouse era and the status-vocabulary unification. SLICE 1 (internal/taskboard): narrow-mode reading-frame rail-stop hover — the named residue of D99. mouseMotion learns to resolve reading-frame stops through the SAME ComposeHitMap the click path already uses (hitmap.go already tags rail stops as LineSpineRow), feeding setHoverStop with the existing change-only debounce; compose.go:148 passes m.ui.HoverStop instead of the hardcoded -1 so windowFrame's existing hover paint (shipped in #5837) lights up in narrow mode too. One hover language per screen, wide and narrow. Candidate rider (survey decides): wide-mode footer-verb click targets, the last W16 honest gap — same files, same slice, never a parallel builder. SLICE 2 (internal/pdrender): the in-body chip delegate widens from 5 statuses to the FULL manifest vocabulary — ready ○(full), closed ✓(teal), considering ◌, researching ◎ join the delegate; ▸ stays strictly for unknown statuses. This is cross-language PARITY, not divergence: the Elixir twin (felix W19, built, merge-pending) already case-matches ALL StatusVocab.statuses(). Extend the D100 delegate-parity tripwire so the set can never silently shrink. Every fix mutation-proven; hover-paint tests force color via withChrome (the vacuous-green trap D99 named); goldens byte-frozen at rest; gates = CC=/usr/bin/clang go build ./... && go vet && go test over the touched packages, PLUS full-suite + gofmt -l ceiling at review. Deferred honestly as named backlog: the LIVE tmux feels-native drive (ttw17-bl-live-tmux-drive) and the Elixir walk.ex merge (felix W19's, Elixir gate). Ledger hygiene rides the wave: merge PR #5840 before the W18 log append; close W17's three merge criteria."
+            }
+          ],
+          "id": "direction-body",
+          "type": "paragraph"
+        },
+        {
+          "id": "debate",
+          "level": 2,
+          "text": "Direction debate",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "RIVAL A (winner) — mouse-finish + one-status-language (2 offline slices, above). RIVAL B — make the LIVE tmux drive the wave: genuinely the epic's biggest open truth-gap (every mouse behavior is proven only by constructed tea.MouseMsg; the 'feels native' bar is unjudged). Lost by fiat AND by design: the wish explicitly defers live-terminal work, and a throughput wave scored on tokens-per-MERGED-slice cannot merge a judgment session. Absorbed: stays first in named backlog, never faked. RIVAL C — promote a RESERVED server slice (/v1/tasks/board one-call, per-task events endpoint, driven_tasks projector): all Elixir, explicitly off-fence while the Elixir queue drains; D21 already ruled that coupling a Go wave to an Elixir deploy is the failure mode this epic avoids. RIVAL D — zero-slice hygiene wave (close criteria, merge #5840, call the epic done): honest but under-delivers — two chartered, unbuilt, offline-provable residues exist and each is exactly the size the recipe merges cheaply. SHARPEST ATTACK on the winner: 'polish on a lifecycle-done epic — is the wave worth its overhead?' Absorbed three ways: (1) both slices are the charter's OWN next-wave dispatch items 4-5, not invented work; (2) the recipe's economics are proven precisely on small slices (~487k/slice at grade A); (3) slice 2 closes a real cross-surface contract — once felix W19 merges, Go's in-body chip is the ONLY surface not speaking the full manifest; that is correctness, not polish. SECOND ATTACK: compose.go collision if narrow-hover and wide-footer-verbs ran as parallel slices — absorbed by fusing them into ONE slice owned by one builder; the wave is 2 slices across 2 disjoint packages, zero shared files."
+            }
+          ],
+          "id": "debate-body",
+          "type": "paragraph"
+        },
+        {
+          "id": "survey-plan",
+          "level": 2,
+          "text": "Survey plan (freshness-gated lean — 12 Sonnet scouts)",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "(1) narrow-hover-seam — map the exact narrow reading-frame mouse path: hit-map rail-stop tagging, hover clear sites, everything compose.go:148 + mouseMotion need. (2) hoverstop-paint-tests — inventory windowFrame hover-paint tests, the withChrome forced-profile pattern, goldens at risk (should be none at rest). (3) chip-delegate-widening — exact current guard set, what roleForStatus covers, whether a manifest-derived status list exists Go-side for the guard, which tests assert ▸ for the 4 joining statuses. (4) elixir-twin-parity — read felix W19's f50c5f405: confirm walk.ex delegates the full manifest; what the deliberate ⠿-vs-⠋ per-surface delta means for Go's widening. (5) wide-footer-verbs — does wide compose render footer verbs at all; feasibility/worth of X-span targets; recommend rider-in-slice-1 vs honest-out. (6) lane-collisions — open PRs + active branches touching internal/taskboard, internal/pdrender, internal/cli/tasks_board_cmd.go; #5840 charter-tail conflict; tlv-* tokens_gen.go regen risk. (7) ledger-hygiene — full task-tui-goal subtree state; W17 merge criteria to close; lapsed claims; what Decide must fix. (8) gofmt-ceiling — #5741 mechanics, current gofmt -l on the fence dirs, exact gate line for builders. (9) mouse-test-harness — how mouse tests construct tea.MouseMsg, which parity tripwires must stay green, which extend for narrow hover. (10) scoreboard-t4 — locate the research scoreboard + exact row format (tokens-per-MERGED-slice, Repair load column). (11) charter-residue-recheck — re-derive the full open-residue list from the charter tail + the W17 review PR: anything unbuilt beyond the named five. (12) narrow-cursor-paint — confirm windowFrame's cursor/hover paint seam is reachable in narrow FrameTask/FramePaper, and what the W17 'overflow-marker skip + alias-copy' fix means for reuse."
+            }
+          ],
+          "id": "survey-list",
+          "type": "paragraph"
+        },
+        {
+          "id": "in-flight",
+          "level": 2,
+          "text": "In flight",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Digest complete: survey digest + coverage map + verify plan appended above. 5 verifiers in flight (2 worktree probes, 1 Opus parity probe, 2 shared-checkout checks). Next: Decide appends decisions + slice roster (expected: slice 1 narrow hover WITHOUT the wide-footer rider, slice 2 chip widening, plus hygiene = merge #5840, close 4 stale merge-criteria tasks, file wide-footer + live-tmux backlog). Heartbeat on task-tui-goal wave_status."
+            }
+          ],
+          "id": "in-flight-body",
+          "title": "Wave status: VERIFYING",
+          "tone": "note",
+          "type": "callout"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Survey digest (Digest, 2026-07-23)"
+            }
+          ],
+          "id": "digest-h",
+          "level": 2,
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "(1) The Elixir twin is NOT merge-pending: PR #5915 (walk.ex task_glyph -> StatusVocab delegate, felix W19 D114) MERGED to origin/main at 06:03 UTC as ca5fac3a2 — git merge-base-proven. Slice 2 is present-tense parity: Go's in-body chip is the ONLY surface not speaking the full manifest RIGHT NOW. Its ledger task ttw17-bl-d43-elixir-walkex is stale (merge criterion unstamped, claim lapsed) — hygiene close this wave. (2) 'Hover-paint tests force color via withChrome' is a MISNOMER: withChrome only swaps the Chrome branding fixture; the real color force is lipgloss.SetColorProfile(termenv.TrueColor) + t.Cleanup restore (compose_test.go:963-967, mouse_test.go:316-318). A builder taking the direction literally writes a vacuous-green paint test. (3) The scoreboard cost curve '800k/573k/487k' is part-phantom: 573k appears NOWHERE in the corpus (reconstructible only from the superseded lead-copied E6 total); E4/E6 rows are now meter-corrected to 62.32M/38.87M all-axis while E7's 1.95M is NOT yet re-based — Review must not cite the triple as settled."
+            }
+          ],
+          "id": "digest-corrections",
+          "title": "Three stale premises caught by survey (E1 class)",
+          "tone": "warning",
+          "type": "callout"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "ESTABLISHED (file:line-anchored, all on origin/main be5eaa649). SLICE 1 (narrow hover, internal/taskboard) is real, unbuilt, and SMALLER than budgeted: ComposeHitMap/frameHitTargets already tag narrow reading-frame rail stops as LineSpineRow with CursorIndex in exactly windowFrame's hoverStop index space (hitmap.go:137-150,205-227; click-proven by TestHitMapClickReadingRail) — NO hit-map extension needed. The whole fix is (a) mouseMotion (program.go:670, today Board-frame-only by explicit comment) gains a reading-frame branch resolving via the SAME ComposeHitMap into setHoverStop (program.go:438, reused as-is), mirroring wideMouseMotion's unconditional dual-set pattern (compose.go:524-545) so crossing frame types clears the other tint; (b) compose.go:148 swaps hardcoded -1 for m.ui.HoverStop, mirroring wide's line 191. HoverStop is already cleared unconditionally on keypress (program.go:466) and M-toggle (program.go:849) — narrow clear-on-key already works. Goldens: all 4 narrow goldens pin HoverStop=-1 by fixture default and the wide golden never calls windowFrame — the swap is argued byte-neutral at rest (verify assignment 1 PROVES it by probe edit). windowFrame's overflow-marker skip + alias-copy guard (compose.go:361-376) is inherited and correct. SLICE 2 (chip widening, internal/pdrender) is a 4-case switch widening: taskStatusGlyph (inline.go:237-244) guards 5 of 9 manifest statuses; roleForStatus/roleGlyph (gridblocks.go:421-442,341-350) ALREADY map ready->○, closed->✓(done role), considering->◌, researching->◎ — no new mapping logic. The guard must STAY an explicit allowlist (roleForStatus's default folds unknown->open, which would swallow the ▸ sentinel — inline.go's own doc comment says so); a JSON-parsed 'manifest-derived' guard would cross the go-list-deps boundary pdrender is barred from and is OUT of scope. The D100 tripwire test (taskchip_test.go:182-194) loops only the original 5 statuses and MUST widen in lockstep (verify assignment 2 mutation-proves this). Spinner parity: Elixir deliberately emits still-frame ⠿ (D114); Go keeps its own in_progress frame — parity is asserted on the 8 STATIC glyphs only. WIDE FOOTER-VERB RIDER: survey recommends HONEST-OUT — it is a second feature (new footer-row geometry vs variable bottomChrome, restructuring handleWideMouse's unconditional pendingClose clear at compose.go:496 vs narrow's verb-first ordering, a third hover branch, new tests), the absence is test-locked (TestFooterVerbAtDegradesHonestly errors if wide EXPOSES a verb target) and charter-logged as a deliberate wave-16 honest gap. Recommendation to Decide: drop the rider, file backlog task ttw-bl-wide-footer-verb-clicks. LANE: zero of 9 open PRs touch internal/taskboard/** or internal/pdrender/**; PR #5840 is doc-only pure tail-append (merge FIRST, before the W18 charter append); gofmt fences are clean (0 dirty in both dirs, roster empty = zero tolerance, 691 files scanned); docs-anchors-check cannot fire (no target file is card-anchored). LEDGER: 4 tasks are close-eligible (only-unmet criterion = merge, and every PR is git-proven on origin/main): ttw17-rail-stop-hover (#5837), ttw17-d43-chip-delegate (#5838), ttm-followup-help-copy (#5839 — parent is task-tui-mouse, NOT task-tui-goal; fetch by id), ttw17-bl-d43-elixir-walkex (#5915 — parent is the felix epic). All claims lapsed (worker=null); closing needs re-claim for a fresh epoch. ttw17-bl-live-tmux-drive stays open/unclaimed backlog, honestly deferred."
+            }
+          ],
+          "id": "digest-established",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "COVERAGE MAP — checked and FOUND: hitmap.go/frameHitTargets narrow stop tagging; mouseMotion board-only gate; compose.go:148 -1 + line-191 wide twin; windowFrame paint guards; setHoverStop debounce + both clear sites; withChrome vs SetColorProfile split; all 5 compose goldens' HoverStop defaults; taskStatusGlyph 5-case switch; roleForStatus/roleGlyph full-vocab machinery; design/status-manifest.json 9 statuses/8 roles, byte-identical across #5915; walk.ex generic map-pattern delegate + ⠿ still-frame ruling; D91/D95/D96/D99/D100/D101 charter entries; W17 PRs #5837/#5838/#5839 merged; #5915 merged; #5840 open pure-append; gofmt ceiling mechanics (advisory job vs blocking own-job, empty roster, selftest); scoreboard t4 header/17 rows/append conventions + 'not metered' precedent; all 5 ledger tasks' claim states. Checked and NOT FOUND (absences = decisions-in-waiting): NO narrow reading-frame hover test exists anywhere (zero FrameTask/LineSpineRow hits in motion/mouse/mouse_fusion tests); NO hover-variant golden exists in the golden suite; NO test drives cursor==hoverStop or a hovered-stop-scrolled-out-of-window (pre-existing debt, wide included — mouseWheel never clears HoverStop); NO Go-side reader of status-manifest.json (hand-mirror is deliberate, byte-checked by scripts/status-manifest-check.sh); '573k' absent from the entire corpus; NO open PR in the fence; NO extra TODO/residue markers beyond the two known comments. CORNERS NO SURVEYOR REACHED: W17 wave paper + felix-pristine-w19 paper not read in full (code-level facts stood on their own); tlv-crown-builder's task never resolved (all found tlv work is Elixir-side, off-fence); go.mod's pinned Go version not read (gofmt version-skew edge); whether status-manifest-check.sh Part 3/4 covers taskStatusGlyph specifically (verify assignment 4); whether a minimal FrameTask fixture yields >=2 rail stops for a two-stop hover test, and whether ComposeHitMap's window top math is one-producer-identical to windowFrame's (verify assignment 3 — the one genuinely flip-prone unknown)."
+            }
+          ],
+          "id": "digest-coverage",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Verify plan (last exploration round — in flight now)"
+            }
+          ],
+          "id": "verify-h",
+          "level": 2,
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Five assignments, uncertainty-gated: 1) golden-at-rest-probe (Sonnet, worktree): RUN the full Go baseline gate on origin/main (CC=/usr/bin/clang go build ./... + go vet + go test taskboard+pdrender + gofmt -l both fences), then apply the one-token compose.go:148 probe edit (-1 -> m.ui.HoverStop), re-run go test, PROVE git status --short internal/taskboard/testdata/ is empty — turning the survey's static byte-neutrality argument into run-proof. 2) chip-tripwire-mutation (Sonnet, worktree): widen taskStatusGlyph to 9 statuses WITHOUT touching the test -> suite must stay GREEN (proving the D100 tripwire is vacuous for the 4 joiners and must widen in lockstep); widen the test list -> green; revert the switch only -> test must RED (proving the widened tripwire can fail). 3) narrow-fixture-and-top-parity (OPUS, worktree): throwaway probe test proving a minimal narrow FrameTask/FramePaper fixture yields >=2 LineSpineRow stops at distinct Y via ComposeHitMap, AND that the hit map's window-top math agrees row-for-row with windowFrame's under scroll (D42 one-producer parity) — the subtlest way slice 1 could silently paint the wrong row. 4) manifest-check-and-spinner (Sonnet, shared checkout): RUN scripts/status-manifest-check.sh; report whether Part 3/4 byte-checks taskStatusGlyph (does slice 2 need a script update?) and pin Go's exact in_progress chip glyph for the PR's parity note. 5) ledger-hygiene-freshness (Sonnet, shared checkout): immediately-pre-Decide re-check — 4 close-eligible tasks still worker=null with recorded epochs, #5840 still open + still clean against the CURRENT charter tail, and no newly-opened PR entered the fence."
+            }
+          ],
+          "id": "verify-list",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Verification results (Decide, 2026-07-23) — 4/4 assignments green, zero premises survived unproven"
+            }
+          ],
+          "id": "verify-results-h",
+          "level": 2,
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "All four verify assignments returned run-proof, not prose. Nothing refuted the two slices; three stale premises in the DIRECTION were confirmed corrected (see digest corrections). Both slices proceed exactly as digested, plus one hardening ruled in (D105c)."
+            }
+          ],
+          "id": "verify-results-verdict",
+          "type": "callout"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "1) golden-at-rest-probe: origin/main be5eaa649 is Go-gate green on both fences (build/vet/test/gofmt all clean); the compose.go:148 probe edit (-1 -> m.ui.HoverStop) compiled, all 40+ taskboard tests passed, and 'git status --short internal/taskboard/testdata/' printed NOTHING — the swap is run-proven golden-byte-neutral at rest (neutral-NOW, because no narrow fixture sets HoverStop; not neutral-by-construction). Probe reverted clean. 2) chip-tripwire-mutation: three-state mutation proved the D100 tripwire is vacuous today for the 4 joining statuses (widened switch + untouched test = GREEN) and that the widened tripwire CAN fail — reverting only the switch reds with: taskchip_test.go:187: taskStatusGlyph(\"ready\") = \"\\u25b8\", must delegate to glyphForRole(roleForStatus) = \"\\u25cb\". TestTaskChipUnknownStatusGetsNeutralGlyph green in all three states. 3) narrow-fixture-and-top-parity: a windowed narrow fixture (parent+15 children, 44x14, scroll=3) yields 9 LineSpineRow entries at distinct rows; EVERY hit row maps to the exact windowFrame repaint row (hitmapY-2), text ansi-identical, cursor==hover keeps the bar glyph with only color collapsing. FOUND: the narrow reading-frame top is computed by TWO textually-separate copies (frameHitTargets inline vs readingWindowTop) that agree only algebraically — hardening ruled into slice 1 (D105c). Also re-confirmed: the real color force is lipgloss.SetColorProfile(termenv.TrueColor); withChrome alone writes a vacuous-green paint test. 4) manifest-check-and-spinner: scripts/status-manifest-check.sh gates ONLY gridblocks.go's roleGlyph/roleForStatus/roleLabel/roleMeaning (grep for taskStatusGlyph = zero hits) — slice 2 needs NO script edit; Go's in_progress glyph is a STATIC map value (steady Braille frame), a documented manifest exception, deliberately divergent from Elixir's still-frame (felix D114). FOUND latent: go.mod pins 1.25.0 vs local go1.26.2 vs CI ~1.25.x — real, currently inert (gofmt clean, ceiling 0/684), filed as backlog. 5) ledger-hygiene-freshness: NO DRIFT — 4 tasks worker=null merge-criterion-only with PRs #5837/#5838/#5839/#5915 git-proven merged; #5840 OPEN MERGEABLE pure tail-append; ZERO open PRs touch either fence package; ttw17-bl-live-tmux-drive still open/unclaimed. Not-founds worth keeping: no test exercises a non-negative HoverStop in narrow mode (why the swap is byte-neutral); '573k' appears nowhere in the corpus (the scoreboard triple is part-phantom); no open PR or concurrent session touches internal/taskboard or internal/pdrender."
+            }
+          ],
+          "id": "verify-results-detail",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Decisions (charter D104-D108, mirrored)"
+            }
+          ],
+          "id": "decisions-h",
+          "level": 2,
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "D104: Wave 18 = two package-disjoint Go slices — ttw18-narrow-rail-hover (internal/taskboard, medium) + ttw18-chip-full-manifest (internal/pdrender, small); wide-footer verb rider HONEST-OUT (second feature, test-locked absence, deliberate W16 gap) -> backlog ttw18-bl-wide-footer-verb-clicks. D105: slice 1 = mouseMotion reading-frame branch -> setHoverStop; compose.go:148 -1 -> m.ui.HoverStop; PLUS the one-producer hardening (frameHitTargets calls readingWindowTop, inline copy deleted, scrolled parity test that fails on drift); paint tests force SetColorProfile(TrueColor), cursor==hoverStop asserted. D106: slice 2 = widen taskStatusGlyph 5->9 as an explicit allowlist (NEVER passthrough — roleForStatus default would swallow the unknown sentinel); D100 tripwire widened in lockstep with the mutation-proven red quoted; no script edit; parity note on the 8 static glyphs only (spinner divergence is deliberate, felix D114). D107: three stale direction premises corrected — #5915 already merged (slice 2 is present-tense parity); withChrome misnomer; 800k/573k/487k curve part-phantom (Review appends the t4 row with a METER read or the honest 'not metered' placeholder, never the phantom triple). D108: hygiene executed at Decide — #5840 merged FIRST (1cd865e82), then the W18 charter append pushed (5608bef5a); 4 merge-criterion tasks re-claimed and CLOSED on git-proven merges; backlog filed (ttw18-bl-wide-footer-verb-clicks prio 3, ttw18-bl-go-toolchain-skew prio 4); ttw17-bl-live-tmux-drive stays first-in-line backlog, never faked."
+            }
+          ],
+          "id": "decisions-body",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "Wave plan — 2 slices, both round 1, builders=opus, gates dry-run green at Decide"
+            }
+          ],
+          "id": "wave-plan-h",
+          "level": 2,
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "SLICE 1 ttw18-narrow-rail-hover (internal/taskboard, medium, opus, round 1): narrow-mode reading-frame rail-stop hover through the one shared hit-map producer — mouseMotion branch + compose.go:148 swap + readingWindowTop unification + 4 test families (motion set/clear, truecolor paint, cursor==hover, scrolled parity). Gate: CC=/usr/bin/clang go build ./... && go vet ./internal/taskboard/... && go test ./internal/taskboard/... && gofmt -l internal/taskboard (empty). SLICE 2 ttw18-chip-full-manifest (internal/pdrender, small, opus, round 1): taskStatusGlyph widens 5->9 with the D100 tripwire in lockstep, strict two-file edit (inline.go + taskchip_test.go). Gate: CC=/usr/bin/clang go build ./... && go vet ./internal/pdrender/... && go test ./internal/pdrender/... && gofmt -l internal/pdrender (empty) + bash scripts/status-manifest-check.sh exit 0. Fences are disjoint packages with zero shared files; zero open PRs touch either. No high-flip-risk judgments this wave (no reachability/security/tenancy calls) — routine-slice review suffices; reviewer re-runs the FULL suite + gofmt, not slice-scoped. Review closes the story: merge on the Go gate, close merge criteria, append the scoreboard t4 row under task-09f4775e7ccc2cca (METER-honest per D107)."
+            }
+          ],
+          "id": "wave-plan-body",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "IN FLIGHT NOW: 2 builders (opus) on ttw18-narrow-rail-hover + ttw18-chip-full-manifest. Ledger already clean: W17's four merge-criterion tasks CLOSED, #5840 merged, charter W18 section (D104-D108) pushed to origin/main as 5608bef5a."
+            }
+          ],
+          "id": "in-flight-decide",
+          "type": "callout"
+        },
+        {
+          "id": "debrief",
+          "level": 2,
+          "text": "Debrief (Review, 2026-07-23) — both slices green, zero fixes, pushed, PRs open",
+          "type": "heading"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "WAVE COMPLETE, grade A. Both slices review-verified adversarially: the reviewer independently re-ran three of the builders' mutation proofs and both full gates on the exact pushed heads, then pushed both branches and opened the PRs. Zero code fixes were needed — second consecutive wave at zero — so the final branches ARE the builder branches (no -r variants). One dated correction: the 'Verify plan' section above names five assignments; four were dispatched and returned (the golden-at-rest probe absorbed the gofmt sweep) — the 4/4 result block is the truth."
+            }
+          ],
+          "id": "debrief-verdict",
+          "type": "callout"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "SLICE 1 ttw18-narrow-rail-hover -> PR #6002 (loop-epic/narrow-mode-reading-frame-rail-stops-gai-0, head 79e85492a). D99 closed + D105 exactly as chartered: mouseMotion's reading-frame branch resolves ComposeHitMap()[y].CursorIndex into setHoverStop (D95 change-only debounce reused unmodified, wide's unconditional dual-set mirrored so crossing surfaces clears the other tint); compose.go:148 wired to m.ui.HoverStop; and the D42/D105c one-producer hardening — frameHitTargets now CALLS readingWindowTop, inline top-math copy deleted. Five tests including the truecolor-forced paint trio and the windowed Scroll=8 hit-map/paint parity tripwire. Reviewer re-ran mutations: compose.go:148 back to -1 reds all three paint tests; +1 top-math drift reds the parity test with the exact predicted 'hit-map row 3 != painted row 4' message. Gate green on the pushed head; goldens byte-frozen at rest. Verdict: excellent — minimal diff, structural drift-proofing, honest deferrals."
+            }
+          ],
+          "id": "debrief-s1",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "SLICE 2 ttw18-chip-full-manifest -> PR #6003 (loop-epic/in-body-task-chips-speak-the-full-9-stat-1, head 43ccb292a). D43 closed Go-side + D106: taskStatusGlyph's guarded allowlist widened 5->9 in strict two-file lockstep with its tripwire test; the never-a-passthrough sentinel rationale preserved verbatim; status-manifest-check.sh untouched and all-PASS. Reviewer re-ran the mutation: switch narrowed to 5 reds with exactly taskStatusGlyph(\"ready\") = \"\\u25b8\", must delegate to glyphForRole(roleForStatus) = \"\\u25cb\". With #5915 already merged (D107 premise fix), both in-body chip forks now delegate — the one-status-language goal is complete pending merge. Verdict: exactly-as-chartered, 2-line diff, genuinely-can-fail tripwire."
+            }
+          ],
+          "id": "debrief-s2",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "LEDGER AUDIT: both tasks honestly in_progress, every non-merge criterion evidence-stamped mid-claim, merge criterion left open for the LEAD (who closes it on merging #6002/#6003). No lies, no omissions, no foreign-task touches. One reviewer addition filed + published: ttw18-bl-narrow-reading-width-skew (P3) — the builder-flagged pre-existing fork where narrow stop/scroll math measures at readingWidth() (full m.width) while composeAt/hit-map paint at boardGeometry width (minus 3-4 gutter cols); latent until a title wraps differently at the two widths; the same drift class D105c just killed for the window top. Wave log appended to the charter via PR #6004 (based on origin/main, conflict-free tail)."
+            }
+          ],
+          "id": "debrief-ledger",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "GRADE A (honest commentary): what is genuinely strong — the premise-refute-then-pivot held end to end (the wish's nav-shell premise was stale exactly as the user warned, and zero builder tokens were spent on built work); both slices are minimal, chartered, mutation-proven, and the D105c hardening turns a convention into a structure; the tripwires were proven ABLE TO FAIL, not just green. What keeps it from A+: the wave is small (two finish slices, one of them 2 lines) and the wish's real crown — the LIVE tmux feels-native judgment — remains honestly deferred rather than advanced; the pre-existing width-skew was flagged and filed but not fixed, so one known drift vector still stands. An honest 2-slice wave beating a padded 5 is exactly what the wish asked for, and that is what this is."
+            }
+          ],
+          "id": "debrief-grade",
+          "type": "paragraph"
+        },
+        {
+          "content": [
+            {
+              "type": "text",
+              "value": "NEXT WAVE (dispatch order): (1) LEAD merges #6002 + #6003 (package-disjoint, Go gate only, any order) + #6004 (wave log), closes each task's merge criterion. (2) ttw17-bl-live-tmux-drive — now the LAST mouse item standing; needs a live terminal, do not fake. (3) ttw18-bl-narrow-reading-width-skew — one width producer for narrow reading frames. (4) ttw18-bl-wide-footer-verb-clicks (P3). (5) ttw18-bl-go-toolchain-skew (P4, latent). Scoreboard row for the research epic (task-09f4775e7ccc2cca, D107(3)) appended by Review with the honest not-metered placeholder unless a METER.md tier-3 read lands."
+            }
+          ],
+          "id": "debrief-next",
+          "type": "paragraph"
+        }
+      ],
+      "version": 1
+    },
+    "typed_tree_stats": {
+      "invalid_typed_nodes": 0,
+      "max_json_depth": 4,
+      "null_nodes": 0,
+      "typed_nodes": 63
+    }
+  },
+  "document": {
+    "id": "task-tui-wave-2026-07-23b",
+    "revision": "3999a067808963303810884654e80ab5",
+    "title": "Narrow-hover + full-manifest chip vocabulary — task-TUI wave 18 finish pass"
+  },
+  "reader_contract": {
+    "canonical_source": "authored.portable_doc",
+    "cli_api": {
+      "format": "canonical JSON",
+      "round_trip": "byte-stable canonical encoding"
+    },
+    "email": {
+      "format": "script-free semantic HTML",
+      "logical_h1": 1
+    },
+    "node_order": "semantic_nodes.source_index ascending",
+    "single_h1_source": "document.title",
+    "studio": {
+      "format": "semantic HTML5",
+      "logical_h1": 1
+    },
+    "tui40": {
+      "format": "plain text",
+      "max_display_width": 40
+    },
+    "tui80": {
+      "format": "plain text",
+      "max_display_width": 80
+    }
+  },
+  "schema_version": "ppcc2-reader-adaptive-candidate/v1",
+  "semantic_nodes": [
+    {
+      "block_id": "arm-declaration",
+      "block_type": "callout",
+      "segments": [
+        "Recipe: winning E6+E7, wave 18",
+        "THROUGHPUT wave on the proven recipe: Fable architect + Fable grade, freshness-gated lean Sonnet survey, uncertainty-gated verify (smoke-cleared slices go straight to build; builder self-supplies mutation proof; reviewer re-derives AND runs the full package suite + gofmt + goldens), Opus builders. Go TUI fence only (internal/taskboard + internal/pdrender + task-tui tooling); merges on the Go gate, parallel to the draining Elixir queue. Scoreboard: tokens-per-MERGED-slice appended to scoreboard t4 under research epic task-09f4775e7ccc2cca (E7 487k / E6 573k / E4 800k). Honest count; an honest 1-2 slice wave beats a padded 5."
+      ],
+      "segments_sha256": "17f780ed5b71049bcc8765854975be35069972811d757302983d7b3aa8e28b5b",
+      "source_index": 0
+    },
+    {
+      "block_id": "wish",
+      "block_type": "heading",
+      "segments": [
+        "The wish"
+      ],
+      "segments_sha256": "754750872725e7f18d0a5ff06b791ed8d223e6cad0f4e74c5bffd0cd29fbe936",
+      "source_index": 1
+    },
+    {
+      "block_id": "wish-copy",
+      "block_type": "paragraph",
+      "segments": [
+        "THIS CYCLE: TASK-TUI — the NAVIGATION SHELL wave the charter names as next (with the subtraction pass + reading renderers the charter sequences for THIS wave). Apply the WINNING RECIPE (Fable-arch × Fable-grade × freshness-gated lean survey × uncertainty-gated verify — E6+E7, ~487k/slice grade A). Go TUI, merges on its own Go gate. FIRST premise-smoke on origin/main: git-show the charter's named nav-shell/subtraction/reading-renderer sites + confirm genuinely unbuilt (premise stale ~6x this session — VERIFY each before spending a builder; refute honestly + pivot if already built). Prefer OFFLINE goldens/unit proofs; DEFER anything needing a live tmux terminal drive. gofmt is a blocking shrink-only ceiling (#5741) — run it. Honest count; improvement-only."
+      ],
+      "segments_sha256": "3feac90cb238442c465ffc9991b932df08ae2c6fc3577ca96e81d40065fff155",
+      "source_index": 2
+    },
+    {
+      "block_id": "premise",
+      "block_type": "heading",
+      "segments": [
+        "Premise smoke — the wish premise is REFUTED, honestly"
+      ],
+      "segments_sha256": "320c73b218cb340ab22325e0d9f17d7f179853fdb38aae06d744667c2f57e73e",
+      "source_index": 3
+    },
+    {
+      "block_id": "premise-verdict",
+      "block_type": "callout",
+      "segments": [
+        "Nav shell / subtraction / reading renderers: ALL ALREADY BUILT",
+        "git-shown on origin/main 2026-07-23: program.go carries the full D11/D29 navigation stack (stack []Frame, push/pop, handleFrame, breadcrumb); the D14 subtraction shipped in wave 5; detail_render.go + paper.go + mdlite.go (the reading renderers) exist with goldens; waves 9-16 then re-added the detailed direction, phase bands, activity focus, pane inversion, and THE MOUSE. Wave 17 (cut+built+reviewed earlier TODAY, Arm E/E6) merged its 3 slices: #5837 rail-stop hover (wide, D99), #5838 chip delegate (D100), #5839 help copy (D101). The wish text dates from the wave-5-era charter state (D19). Pivot per the wish's own instruction: build the charter's REAL named-next residue."
+      ],
+      "segments_sha256": "5347ee3d1ac1216dd3f66111b22dcee27450c3f2aafcc34792a9298f9218cecf",
+      "source_index": 4
+    },
+    {
+      "block_id": "premise-checks",
+      "block_type": "paragraph",
+      "segments": [
+        "Smoke ledger (all RUN, not assumed): (1) origin/main internal/taskboard/program.go — nav stack present (L104-108, L212). (2) Charter tail: the Wave-17 REVIEWED entry rides open PR #5840 (charter-tail conflict risk for this wave's log append — merge #5840 first). (3) W17 dispatch item 1 (merge #5837/#5838/#5839): DONE on origin/main (365583fa5, a80ac7443, e9e081f0a) but the 3 tasks' merge criteria are STILL OPEN in the ledger — hygiene owed. (4) ttw17-bl-d43-elixir-walkex: BUILT by felix W19 (D114 ruling, f50c5f405, crits 0+1 met, merge pending on the Elixir gate) — off-fence AND off-plate. (5) ttw17-bl-live-tmux-drive: open, deferred by the wish (cannot be proven offline; do not fake). (6) compose.go:148 narrow windowFrame call passes hoverStop=-1 hardcoded — the D99 narrow residue is REAL and unbuilt. (7) inline.go taskStatusGlyph guard covers only {open,in_progress,blocked,done,cancelled}; pdrender's gated vocabulary (gridblocks.go roleForStatus/glyphForRole) already covers ready/closed/considering/researching — widening is REAL and unbuilt. (8) handleWideMouse comment: 'wide exposes no footer-verb click targets' — the W16 honest gap is still open. (9) task-tui-goal exists and carries the epic's children — heartbeat lands there. (10) gofmt ceiling #5741 merged — blocking, shrink-only."
+      ],
+      "segments_sha256": "948fd681cf2d3ac789578d211cb8d7b2dbbda29c0568141832bd50898d00ccc0",
+      "source_index": 5
+    },
+    {
+      "block_id": "direction",
+      "block_type": "heading",
+      "segments": [
+        "Direction — finish the mouse story and the status language, offline-proven"
+      ],
+      "segments_sha256": "0645f843d24a3c26c93c5c5447ab5fed0777a7adb1628e99118191b6d760f518",
+      "source_index": 6
+    },
+    {
+      "block_id": "direction-body",
+      "block_type": "paragraph",
+      "segments": [
+        "Wave 18 is a FINISH wave, not a feature wave: two honest, chartered, package-disjoint Go slices that close the last offline-provable residues of the mouse era and the status-vocabulary unification. SLICE 1 (internal/taskboard): narrow-mode reading-frame rail-stop hover — the named residue of D99. mouseMotion learns to resolve reading-frame stops through the SAME ComposeHitMap the click path already uses (hitmap.go already tags rail stops as LineSpineRow), feeding setHoverStop with the existing change-only debounce; compose.go:148 passes m.ui.HoverStop instead of the hardcoded -1 so windowFrame's existing hover paint (shipped in #5837) lights up in narrow mode too. One hover language per screen, wide and narrow. Candidate rider (survey decides): wide-mode footer-verb click targets, the last W16 honest gap — same files, same slice, never a parallel builder. SLICE 2 (internal/pdrender): the in-body chip delegate widens from 5 statuses to the FULL manifest vocabulary — ready ○(full), closed ✓(teal), considering ◌, researching ◎ join the delegate; ▸ stays strictly for unknown statuses. This is cross-language PARITY, not divergence: the Elixir twin (felix W19, built, merge-pending) already case-matches ALL StatusVocab.statuses(). Extend the D100 delegate-parity tripwire so the set can never silently shrink. Every fix mutation-proven; hover-paint tests force color via withChrome (the vacuous-green trap D99 named); goldens byte-frozen at rest; gates = CC=/usr/bin/clang go build ./... && go vet && go test over the touched packages, PLUS full-suite + gofmt -l ceiling at review. Deferred honestly as named backlog: the LIVE tmux feels-native drive (ttw17-bl-live-tmux-drive) and the Elixir walk.ex merge (felix W19's, Elixir gate). Ledger hygiene rides the wave: merge PR #5840 before the W18 log append; close W17's three merge criteria."
+      ],
+      "segments_sha256": "d3861d3fd7b6cdee1da067a8aebd1c6bf38f5b50f56f12e5c5ad9be9497b77f8",
+      "source_index": 7
+    },
+    {
+      "block_id": "debate",
+      "block_type": "heading",
+      "segments": [
+        "Direction debate"
+      ],
+      "segments_sha256": "1242434f1a97bd65b2d1e68ecd623a91b7ebb81c6b5500008c017ddd53bc2238",
+      "source_index": 8
+    },
+    {
+      "block_id": "debate-body",
+      "block_type": "paragraph",
+      "segments": [
+        "RIVAL A (winner) — mouse-finish + one-status-language (2 offline slices, above). RIVAL B — make the LIVE tmux drive the wave: genuinely the epic's biggest open truth-gap (every mouse behavior is proven only by constructed tea.MouseMsg; the 'feels native' bar is unjudged). Lost by fiat AND by design: the wish explicitly defers live-terminal work, and a throughput wave scored on tokens-per-MERGED-slice cannot merge a judgment session. Absorbed: stays first in named backlog, never faked. RIVAL C — promote a RESERVED server slice (/v1/tasks/board one-call, per-task events endpoint, driven_tasks projector): all Elixir, explicitly off-fence while the Elixir queue drains; D21 already ruled that coupling a Go wave to an Elixir deploy is the failure mode this epic avoids. RIVAL D — zero-slice hygiene wave (close criteria, merge #5840, call the epic done): honest but under-delivers — two chartered, unbuilt, offline-provable residues exist and each is exactly the size the recipe merges cheaply. SHARPEST ATTACK on the winner: 'polish on a lifecycle-done epic — is the wave worth its overhead?' Absorbed three ways: (1) both slices are the charter's OWN next-wave dispatch items 4-5, not invented work; (2) the recipe's economics are proven precisely on small slices (~487k/slice at grade A); (3) slice 2 closes a real cross-surface contract — once felix W19 merges, Go's in-body chip is the ONLY surface not speaking the full manifest; that is correctness, not polish. SECOND ATTACK: compose.go collision if narrow-hover and wide-footer-verbs ran as parallel slices — absorbed by fusing them into ONE slice owned by one builder; the wave is 2 slices across 2 disjoint packages, zero shared files."
+      ],
+      "segments_sha256": "b2bfc0e7dd7ae05450351b862a3ea440f712c284385298732b9f2e370b721bf0",
+      "source_index": 9
+    },
+    {
+      "block_id": "survey-plan",
+      "block_type": "heading",
+      "segments": [
+        "Survey plan (freshness-gated lean — 12 Sonnet scouts)"
+      ],
+      "segments_sha256": "efffb5810b54b03e77123dc401ba689bd8fdef574a616aa0c3c09f77e26214f4",
+      "source_index": 10
+    },
+    {
+      "block_id": "survey-list",
+      "block_type": "paragraph",
+      "segments": [
+        "(1) narrow-hover-seam — map the exact narrow reading-frame mouse path: hit-map rail-stop tagging, hover clear sites, everything compose.go:148 + mouseMotion need. (2) hoverstop-paint-tests — inventory windowFrame hover-paint tests, the withChrome forced-profile pattern, goldens at risk (should be none at rest). (3) chip-delegate-widening — exact current guard set, what roleForStatus covers, whether a manifest-derived status list exists Go-side for the guard, which tests assert ▸ for the 4 joining statuses. (4) elixir-twin-parity — read felix W19's f50c5f405: confirm walk.ex delegates the full manifest; what the deliberate ⠿-vs-⠋ per-surface delta means for Go's widening. (5) wide-footer-verbs — does wide compose render footer verbs at all; feasibility/worth of X-span targets; recommend rider-in-slice-1 vs honest-out. (6) lane-collisions — open PRs + active branches touching internal/taskboard, internal/pdrender, internal/cli/tasks_board_cmd.go; #5840 charter-tail conflict; tlv-* tokens_gen.go regen risk. (7) ledger-hygiene — full task-tui-goal subtree state; W17 merge criteria to close; lapsed claims; what Decide must fix. (8) gofmt-ceiling — #5741 mechanics, current gofmt -l on the fence dirs, exact gate line for builders. (9) mouse-test-harness — how mouse tests construct tea.MouseMsg, which parity tripwires must stay green, which extend for narrow hover. (10) scoreboard-t4 — locate the research scoreboard + exact row format (tokens-per-MERGED-slice, Repair load column). (11) charter-residue-recheck — re-derive the full open-residue list from the charter tail + the W17 review PR: anything unbuilt beyond the named five. (12) narrow-cursor-paint — confirm windowFrame's cursor/hover paint seam is reachable in narrow FrameTask/FramePaper, and what the W17 'overflow-marker skip + alias-copy' fix means for reuse."
+      ],
+      "segments_sha256": "e033e3975d1f7c1da27c91f5b21dd454d41cfdd43c94cfeaac8264a7dc7364f2",
+      "source_index": 11
+    },
+    {
+      "block_id": "in-flight",
+      "block_type": "heading",
+      "segments": [
+        "In flight"
+      ],
+      "segments_sha256": "05636b4c457670934014bff022a4f7f1558e265cbebc01862ca72057509b9bd6",
+      "source_index": 12
+    },
+    {
+      "block_id": "in-flight-body",
+      "block_type": "callout",
+      "segments": [
+        "Wave status: VERIFYING",
+        "Digest complete: survey digest + coverage map + verify plan appended above. 5 verifiers in flight (2 worktree probes, 1 Opus parity probe, 2 shared-checkout checks). Next: Decide appends decisions + slice roster (expected: slice 1 narrow hover WITHOUT the wide-footer rider, slice 2 chip widening, plus hygiene = merge #5840, close 4 stale merge-criteria tasks, file wide-footer + live-tmux backlog). Heartbeat on task-tui-goal wave_status."
+      ],
+      "segments_sha256": "63e8ae8f63b519786ac6d5a7bc9b75653bd1a485b91fb24a0ff2685078e0a173",
+      "source_index": 13
+    },
+    {
+      "block_id": "digest-h",
+      "block_type": "heading",
+      "segments": [
+        "Survey digest (Digest, 2026-07-23)"
+      ],
+      "segments_sha256": "01a0309be08a31f47120ef7c6fd8cfd288b254cbbd460354bb08cd79a014e30c",
+      "source_index": 14
+    },
+    {
+      "block_id": "digest-corrections",
+      "block_type": "callout",
+      "segments": [
+        "Three stale premises caught by survey (E1 class)",
+        "(1) The Elixir twin is NOT merge-pending: PR #5915 (walk.ex task_glyph -> StatusVocab delegate, felix W19 D114) MERGED to origin/main at 06:03 UTC as ca5fac3a2 — git merge-base-proven. Slice 2 is present-tense parity: Go's in-body chip is the ONLY surface not speaking the full manifest RIGHT NOW. Its ledger task ttw17-bl-d43-elixir-walkex is stale (merge criterion unstamped, claim lapsed) — hygiene close this wave. (2) 'Hover-paint tests force color via withChrome' is a MISNOMER: withChrome only swaps the Chrome branding fixture; the real color force is lipgloss.SetColorProfile(termenv.TrueColor) + t.Cleanup restore (compose_test.go:963-967, mouse_test.go:316-318). A builder taking the direction literally writes a vacuous-green paint test. (3) The scoreboard cost curve '800k/573k/487k' is part-phantom: 573k appears NOWHERE in the corpus (reconstructible only from the superseded lead-copied E6 total); E4/E6 rows are now meter-corrected to 62.32M/38.87M all-axis while E7's 1.95M is NOT yet re-based — Review must not cite the triple as settled."
+      ],
+      "segments_sha256": "31c857b7ffc081d1e7aae705d2e15706200937c7b532c800087ee0a85e0ea838",
+      "source_index": 15
+    },
+    {
+      "block_id": "digest-established",
+      "block_type": "paragraph",
+      "segments": [
+        "ESTABLISHED (file:line-anchored, all on origin/main be5eaa649). SLICE 1 (narrow hover, internal/taskboard) is real, unbuilt, and SMALLER than budgeted: ComposeHitMap/frameHitTargets already tag narrow reading-frame rail stops as LineSpineRow with CursorIndex in exactly windowFrame's hoverStop index space (hitmap.go:137-150,205-227; click-proven by TestHitMapClickReadingRail) — NO hit-map extension needed. The whole fix is (a) mouseMotion (program.go:670, today Board-frame-only by explicit comment) gains a reading-frame branch resolving via the SAME ComposeHitMap into setHoverStop (program.go:438, reused as-is), mirroring wideMouseMotion's unconditional dual-set pattern (compose.go:524-545) so crossing frame types clears the other tint; (b) compose.go:148 swaps hardcoded -1 for m.ui.HoverStop, mirroring wide's line 191. HoverStop is already cleared unconditionally on keypress (program.go:466) and M-toggle (program.go:849) — narrow clear-on-key already works. Goldens: all 4 narrow goldens pin HoverStop=-1 by fixture default and the wide golden never calls windowFrame — the swap is argued byte-neutral at rest (verify assignment 1 PROVES it by probe edit). windowFrame's overflow-marker skip + alias-copy guard (compose.go:361-376) is inherited and correct. SLICE 2 (chip widening, internal/pdrender) is a 4-case switch widening: taskStatusGlyph (inline.go:237-244) guards 5 of 9 manifest statuses; roleForStatus/roleGlyph (gridblocks.go:421-442,341-350) ALREADY map ready->○, closed->✓(done role), considering->◌, researching->◎ — no new mapping logic. The guard must STAY an explicit allowlist (roleForStatus's default folds unknown->open, which would swallow the ▸ sentinel — inline.go's own doc comment says so); a JSON-parsed 'manifest-derived' guard would cross the go-list-deps boundary pdrender is barred from and is OUT of scope. The D100 tripwire test (taskchip_test.go:182-194) loops only the original 5 statuses and MUST widen in lockstep (verify assignment 2 mutation-proves this). Spinner parity: Elixir deliberately emits still-frame ⠿ (D114); Go keeps its own in_progress frame — parity is asserted on the 8 STATIC glyphs only. WIDE FOOTER-VERB RIDER: survey recommends HONEST-OUT — it is a second feature (new footer-row geometry vs variable bottomChrome, restructuring handleWideMouse's unconditional pendingClose clear at compose.go:496 vs narrow's verb-first ordering, a third hover branch, new tests), the absence is test-locked (TestFooterVerbAtDegradesHonestly errors if wide EXPOSES a verb target) and charter-logged as a deliberate wave-16 honest gap. Recommendation to Decide: drop the rider, file backlog task ttw-bl-wide-footer-verb-clicks. LANE: zero of 9 open PRs touch internal/taskboard/** or internal/pdrender/**; PR #5840 is doc-only pure tail-append (merge FIRST, before the W18 charter append); gofmt fences are clean (0 dirty in both dirs, roster empty = zero tolerance, 691 files scanned); docs-anchors-check cannot fire (no target file is card-anchored). LEDGER: 4 tasks are close-eligible (only-unmet criterion = merge, and every PR is git-proven on origin/main): ttw17-rail-stop-hover (#5837), ttw17-d43-chip-delegate (#5838), ttm-followup-help-copy (#5839 — parent is task-tui-mouse, NOT task-tui-goal; fetch by id), ttw17-bl-d43-elixir-walkex (#5915 — parent is the felix epic). All claims lapsed (worker=null); closing needs re-claim for a fresh epoch. ttw17-bl-live-tmux-drive stays open/unclaimed backlog, honestly deferred."
+      ],
+      "segments_sha256": "c75c0e7f9c3b5f39b247bca0a33d7b9808b24f2fbf7a5c0dcbd565bccc5a261e",
+      "source_index": 16
+    },
+    {
+      "block_id": "digest-coverage",
+      "block_type": "paragraph",
+      "segments": [
+        "COVERAGE MAP — checked and FOUND: hitmap.go/frameHitTargets narrow stop tagging; mouseMotion board-only gate; compose.go:148 -1 + line-191 wide twin; windowFrame paint guards; setHoverStop debounce + both clear sites; withChrome vs SetColorProfile split; all 5 compose goldens' HoverStop defaults; taskStatusGlyph 5-case switch; roleForStatus/roleGlyph full-vocab machinery; design/status-manifest.json 9 statuses/8 roles, byte-identical across #5915; walk.ex generic map-pattern delegate + ⠿ still-frame ruling; D91/D95/D96/D99/D100/D101 charter entries; W17 PRs #5837/#5838/#5839 merged; #5915 merged; #5840 open pure-append; gofmt ceiling mechanics (advisory job vs blocking own-job, empty roster, selftest); scoreboard t4 header/17 rows/append conventions + 'not metered' precedent; all 5 ledger tasks' claim states. Checked and NOT FOUND (absences = decisions-in-waiting): NO narrow reading-frame hover test exists anywhere (zero FrameTask/LineSpineRow hits in motion/mouse/mouse_fusion tests); NO hover-variant golden exists in the golden suite; NO test drives cursor==hoverStop or a hovered-stop-scrolled-out-of-window (pre-existing debt, wide included — mouseWheel never clears HoverStop); NO Go-side reader of status-manifest.json (hand-mirror is deliberate, byte-checked by scripts/status-manifest-check.sh); '573k' absent from the entire corpus; NO open PR in the fence; NO extra TODO/residue markers beyond the two known comments. CORNERS NO SURVEYOR REACHED: W17 wave paper + felix-pristine-w19 paper not read in full (code-level facts stood on their own); tlv-crown-builder's task never resolved (all found tlv work is Elixir-side, off-fence); go.mod's pinned Go version not read (gofmt version-skew edge); whether status-manifest-check.sh Part 3/4 covers taskStatusGlyph specifically (verify assignment 4); whether a minimal FrameTask fixture yields >=2 rail stops for a two-stop hover test, and whether ComposeHitMap's window top math is one-producer-identical to windowFrame's (verify assignment 3 — the one genuinely flip-prone unknown)."
+      ],
+      "segments_sha256": "1364b412d5dd9b46af25101f53166898a888480dd8233cee7835cc726829849b",
+      "source_index": 17
+    },
+    {
+      "block_id": "verify-h",
+      "block_type": "heading",
+      "segments": [
+        "Verify plan (last exploration round — in flight now)"
+      ],
+      "segments_sha256": "1daa4fd3831e09159828191f4fa0f2e3d0e6f041ea542027fe26e627bb56cb23",
+      "source_index": 18
+    },
+    {
+      "block_id": "verify-list",
+      "block_type": "paragraph",
+      "segments": [
+        "Five assignments, uncertainty-gated: 1) golden-at-rest-probe (Sonnet, worktree): RUN the full Go baseline gate on origin/main (CC=/usr/bin/clang go build ./... + go vet + go test taskboard+pdrender + gofmt -l both fences), then apply the one-token compose.go:148 probe edit (-1 -> m.ui.HoverStop), re-run go test, PROVE git status --short internal/taskboard/testdata/ is empty — turning the survey's static byte-neutrality argument into run-proof. 2) chip-tripwire-mutation (Sonnet, worktree): widen taskStatusGlyph to 9 statuses WITHOUT touching the test -> suite must stay GREEN (proving the D100 tripwire is vacuous for the 4 joiners and must widen in lockstep); widen the test list -> green; revert the switch only -> test must RED (proving the widened tripwire can fail). 3) narrow-fixture-and-top-parity (OPUS, worktree): throwaway probe test proving a minimal narrow FrameTask/FramePaper fixture yields >=2 LineSpineRow stops at distinct Y via ComposeHitMap, AND that the hit map's window-top math agrees row-for-row with windowFrame's under scroll (D42 one-producer parity) — the subtlest way slice 1 could silently paint the wrong row. 4) manifest-check-and-spinner (Sonnet, shared checkout): RUN scripts/status-manifest-check.sh; report whether Part 3/4 byte-checks taskStatusGlyph (does slice 2 need a script update?) and pin Go's exact in_progress chip glyph for the PR's parity note. 5) ledger-hygiene-freshness (Sonnet, shared checkout): immediately-pre-Decide re-check — 4 close-eligible tasks still worker=null with recorded epochs, #5840 still open + still clean against the CURRENT charter tail, and no newly-opened PR entered the fence."
+      ],
+      "segments_sha256": "42595e4b72289e20758d8324506e4f03bca2fea721f2e921b35a0a450c5b411a",
+      "source_index": 19
+    },
+    {
+      "block_id": "verify-results-h",
+      "block_type": "heading",
+      "segments": [
+        "Verification results (Decide, 2026-07-23) — 4/4 assignments green, zero premises survived unproven"
+      ],
+      "segments_sha256": "7403c9b0e27975df2e1fcb1113a6516539089b9951552b79e172fef277eeae97",
+      "source_index": 20
+    },
+    {
+      "block_id": "verify-results-verdict",
+      "block_type": "callout",
+      "segments": [
+        "All four verify assignments returned run-proof, not prose. Nothing refuted the two slices; three stale premises in the DIRECTION were confirmed corrected (see digest corrections). Both slices proceed exactly as digested, plus one hardening ruled in (D105c)."
+      ],
+      "segments_sha256": "3d222e3be535e538042e514c6d7816361803b41951371e417070458299b11b57",
+      "source_index": 21
+    },
+    {
+      "block_id": "verify-results-detail",
+      "block_type": "paragraph",
+      "segments": [
+        "1) golden-at-rest-probe: origin/main be5eaa649 is Go-gate green on both fences (build/vet/test/gofmt all clean); the compose.go:148 probe edit (-1 -> m.ui.HoverStop) compiled, all 40+ taskboard tests passed, and 'git status --short internal/taskboard/testdata/' printed NOTHING — the swap is run-proven golden-byte-neutral at rest (neutral-NOW, because no narrow fixture sets HoverStop; not neutral-by-construction). Probe reverted clean. 2) chip-tripwire-mutation: three-state mutation proved the D100 tripwire is vacuous today for the 4 joining statuses (widened switch + untouched test = GREEN) and that the widened tripwire CAN fail — reverting only the switch reds with: taskchip_test.go:187: taskStatusGlyph(\"ready\") = \"\\u25b8\", must delegate to glyphForRole(roleForStatus) = \"\\u25cb\". TestTaskChipUnknownStatusGetsNeutralGlyph green in all three states. 3) narrow-fixture-and-top-parity: a windowed narrow fixture (parent+15 children, 44x14, scroll=3) yields 9 LineSpineRow entries at distinct rows; EVERY hit row maps to the exact windowFrame repaint row (hitmapY-2), text ansi-identical, cursor==hover keeps the bar glyph with only color collapsing. FOUND: the narrow reading-frame top is computed by TWO textually-separate copies (frameHitTargets inline vs readingWindowTop) that agree only algebraically — hardening ruled into slice 1 (D105c). Also re-confirmed: the real color force is lipgloss.SetColorProfile(termenv.TrueColor); withChrome alone writes a vacuous-green paint test. 4) manifest-check-and-spinner: scripts/status-manifest-check.sh gates ONLY gridblocks.go's roleGlyph/roleForStatus/roleLabel/roleMeaning (grep for taskStatusGlyph = zero hits) — slice 2 needs NO script edit; Go's in_progress glyph is a STATIC map value (steady Braille frame), a documented manifest exception, deliberately divergent from Elixir's still-frame (felix D114). FOUND latent: go.mod pins 1.25.0 vs local go1.26.2 vs CI ~1.25.x — real, currently inert (gofmt clean, ceiling 0/684), filed as backlog. 5) ledger-hygiene-freshness: NO DRIFT — 4 tasks worker=null merge-criterion-only with PRs #5837/#5838/#5839/#5915 git-proven merged; #5840 OPEN MERGEABLE pure tail-append; ZERO open PRs touch either fence package; ttw17-bl-live-tmux-drive still open/unclaimed. Not-founds worth keeping: no test exercises a non-negative HoverStop in narrow mode (why the swap is byte-neutral); '573k' appears nowhere in the corpus (the scoreboard triple is part-phantom); no open PR or concurrent session touches internal/taskboard or internal/pdrender."
+      ],
+      "segments_sha256": "a3c479e35cb9d7c2287d8f72e34f6b696e707d4118178f2a465cc07e2d4763b9",
+      "source_index": 22
+    },
+    {
+      "block_id": "decisions-h",
+      "block_type": "heading",
+      "segments": [
+        "Decisions (charter D104-D108, mirrored)"
+      ],
+      "segments_sha256": "e5a8398bb9e64d37ad07fb337a530d8b98ee1dfa0fca9afbf928fcbde7d23e3a",
+      "source_index": 23
+    },
+    {
+      "block_id": "decisions-body",
+      "block_type": "paragraph",
+      "segments": [
+        "D104: Wave 18 = two package-disjoint Go slices — ttw18-narrow-rail-hover (internal/taskboard, medium) + ttw18-chip-full-manifest (internal/pdrender, small); wide-footer verb rider HONEST-OUT (second feature, test-locked absence, deliberate W16 gap) -> backlog ttw18-bl-wide-footer-verb-clicks. D105: slice 1 = mouseMotion reading-frame branch -> setHoverStop; compose.go:148 -1 -> m.ui.HoverStop; PLUS the one-producer hardening (frameHitTargets calls readingWindowTop, inline copy deleted, scrolled parity test that fails on drift); paint tests force SetColorProfile(TrueColor), cursor==hoverStop asserted. D106: slice 2 = widen taskStatusGlyph 5->9 as an explicit allowlist (NEVER passthrough — roleForStatus default would swallow the unknown sentinel); D100 tripwire widened in lockstep with the mutation-proven red quoted; no script edit; parity note on the 8 static glyphs only (spinner divergence is deliberate, felix D114). D107: three stale direction premises corrected — #5915 already merged (slice 2 is present-tense parity); withChrome misnomer; 800k/573k/487k curve part-phantom (Review appends the t4 row with a METER read or the honest 'not metered' placeholder, never the phantom triple). D108: hygiene executed at Decide — #5840 merged FIRST (1cd865e82), then the W18 charter append pushed (5608bef5a); 4 merge-criterion tasks re-claimed and CLOSED on git-proven merges; backlog filed (ttw18-bl-wide-footer-verb-clicks prio 3, ttw18-bl-go-toolchain-skew prio 4); ttw17-bl-live-tmux-drive stays first-in-line backlog, never faked."
+      ],
+      "segments_sha256": "526ead6d7cfd01b69af4c8b3ba62e7a965ee60ab6e67bbaee8f017c70b19bf4f",
+      "source_index": 24
+    },
+    {
+      "block_id": "wave-plan-h",
+      "block_type": "heading",
+      "segments": [
+        "Wave plan — 2 slices, both round 1, builders=opus, gates dry-run green at Decide"
+      ],
+      "segments_sha256": "55fe919a10c71e2fad959ae65ebdb633ce0ada7db93e27d4273c738c02b2990d",
+      "source_index": 25
+    },
+    {
+      "block_id": "wave-plan-body",
+      "block_type": "paragraph",
+      "segments": [
+        "SLICE 1 ttw18-narrow-rail-hover (internal/taskboard, medium, opus, round 1): narrow-mode reading-frame rail-stop hover through the one shared hit-map producer — mouseMotion branch + compose.go:148 swap + readingWindowTop unification + 4 test families (motion set/clear, truecolor paint, cursor==hover, scrolled parity). Gate: CC=/usr/bin/clang go build ./... && go vet ./internal/taskboard/... && go test ./internal/taskboard/... && gofmt -l internal/taskboard (empty). SLICE 2 ttw18-chip-full-manifest (internal/pdrender, small, opus, round 1): taskStatusGlyph widens 5->9 with the D100 tripwire in lockstep, strict two-file edit (inline.go + taskchip_test.go). Gate: CC=/usr/bin/clang go build ./... && go vet ./internal/pdrender/... && go test ./internal/pdrender/... && gofmt -l internal/pdrender (empty) + bash scripts/status-manifest-check.sh exit 0. Fences are disjoint packages with zero shared files; zero open PRs touch either. No high-flip-risk judgments this wave (no reachability/security/tenancy calls) — routine-slice review suffices; reviewer re-runs the FULL suite + gofmt, not slice-scoped. Review closes the story: merge on the Go gate, close merge criteria, append the scoreboard t4 row under task-09f4775e7ccc2cca (METER-honest per D107)."
+      ],
+      "segments_sha256": "d5f163708a2849c0b2520ed47f98a5570f9eeb2a1c4ab4197fc03304efa32d4b",
+      "source_index": 26
+    },
+    {
+      "block_id": "in-flight-decide",
+      "block_type": "callout",
+      "segments": [
+        "IN FLIGHT NOW: 2 builders (opus) on ttw18-narrow-rail-hover + ttw18-chip-full-manifest. Ledger already clean: W17's four merge-criterion tasks CLOSED, #5840 merged, charter W18 section (D104-D108) pushed to origin/main as 5608bef5a."
+      ],
+      "segments_sha256": "03875aeac5514a9bfade8eb44d0ccdaa4ccecbc74c1596dfa376812e7306f966",
+      "source_index": 27
+    },
+    {
+      "block_id": "debrief",
+      "block_type": "heading",
+      "segments": [
+        "Debrief (Review, 2026-07-23) — both slices green, zero fixes, pushed, PRs open"
+      ],
+      "segments_sha256": "b62c3261b5131c918d40481497e658845a25f9259bab32e94803f70d923250e2",
+      "source_index": 28
+    },
+    {
+      "block_id": "debrief-verdict",
+      "block_type": "callout",
+      "segments": [
+        "WAVE COMPLETE, grade A. Both slices review-verified adversarially: the reviewer independently re-ran three of the builders' mutation proofs and both full gates on the exact pushed heads, then pushed both branches and opened the PRs. Zero code fixes were needed — second consecutive wave at zero — so the final branches ARE the builder branches (no -r variants). One dated correction: the 'Verify plan' section above names five assignments; four were dispatched and returned (the golden-at-rest probe absorbed the gofmt sweep) — the 4/4 result block is the truth."
+      ],
+      "segments_sha256": "8c14d70e9e82e832648ebce942079168d9efc53a78f4c0172f02235ec34eb23b",
+      "source_index": 29
+    },
+    {
+      "block_id": "debrief-s1",
+      "block_type": "paragraph",
+      "segments": [
+        "SLICE 1 ttw18-narrow-rail-hover -> PR #6002 (loop-epic/narrow-mode-reading-frame-rail-stops-gai-0, head 79e85492a). D99 closed + D105 exactly as chartered: mouseMotion's reading-frame branch resolves ComposeHitMap()[y].CursorIndex into setHoverStop (D95 change-only debounce reused unmodified, wide's unconditional dual-set mirrored so crossing surfaces clears the other tint); compose.go:148 wired to m.ui.HoverStop; and the D42/D105c one-producer hardening — frameHitTargets now CALLS readingWindowTop, inline top-math copy deleted. Five tests including the truecolor-forced paint trio and the windowed Scroll=8 hit-map/paint parity tripwire. Reviewer re-ran mutations: compose.go:148 back to -1 reds all three paint tests; +1 top-math drift reds the parity test with the exact predicted 'hit-map row 3 != painted row 4' message. Gate green on the pushed head; goldens byte-frozen at rest. Verdict: excellent — minimal diff, structural drift-proofing, honest deferrals."
+      ],
+      "segments_sha256": "22d25aad75b583b7c3998e4eb022c893ffae0039a7f2c39b54e52007f41a6d1c",
+      "source_index": 30
+    },
+    {
+      "block_id": "debrief-s2",
+      "block_type": "paragraph",
+      "segments": [
+        "SLICE 2 ttw18-chip-full-manifest -> PR #6003 (loop-epic/in-body-task-chips-speak-the-full-9-stat-1, head 43ccb292a). D43 closed Go-side + D106: taskStatusGlyph's guarded allowlist widened 5->9 in strict two-file lockstep with its tripwire test; the never-a-passthrough sentinel rationale preserved verbatim; status-manifest-check.sh untouched and all-PASS. Reviewer re-ran the mutation: switch narrowed to 5 reds with exactly taskStatusGlyph(\"ready\") = \"\\u25b8\", must delegate to glyphForRole(roleForStatus) = \"\\u25cb\". With #5915 already merged (D107 premise fix), both in-body chip forks now delegate — the one-status-language goal is complete pending merge. Verdict: exactly-as-chartered, 2-line diff, genuinely-can-fail tripwire."
+      ],
+      "segments_sha256": "2bd70d4699da9787a407fa6dcbf6c58768c1578da1a03710b703e406a780b0e2",
+      "source_index": 31
+    },
+    {
+      "block_id": "debrief-ledger",
+      "block_type": "paragraph",
+      "segments": [
+        "LEDGER AUDIT: both tasks honestly in_progress, every non-merge criterion evidence-stamped mid-claim, merge criterion left open for the LEAD (who closes it on merging #6002/#6003). No lies, no omissions, no foreign-task touches. One reviewer addition filed + published: ttw18-bl-narrow-reading-width-skew (P3) — the builder-flagged pre-existing fork where narrow stop/scroll math measures at readingWidth() (full m.width) while composeAt/hit-map paint at boardGeometry width (minus 3-4 gutter cols); latent until a title wraps differently at the two widths; the same drift class D105c just killed for the window top. Wave log appended to the charter via PR #6004 (based on origin/main, conflict-free tail)."
+      ],
+      "segments_sha256": "e459e40c563a961b7762845983a8a9b8e0db27459356a3f98f56b0bf611109c3",
+      "source_index": 32
+    },
+    {
+      "block_id": "debrief-grade",
+      "block_type": "paragraph",
+      "segments": [
+        "GRADE A (honest commentary): what is genuinely strong — the premise-refute-then-pivot held end to end (the wish's nav-shell premise was stale exactly as the user warned, and zero builder tokens were spent on built work); both slices are minimal, chartered, mutation-proven, and the D105c hardening turns a convention into a structure; the tripwires were proven ABLE TO FAIL, not just green. What keeps it from A+: the wave is small (two finish slices, one of them 2 lines) and the wish's real crown — the LIVE tmux feels-native judgment — remains honestly deferred rather than advanced; the pre-existing width-skew was flagged and filed but not fixed, so one known drift vector still stands. An honest 2-slice wave beating a padded 5 is exactly what the wish asked for, and that is what this is."
+      ],
+      "segments_sha256": "9972da2ee84c3e4f92e031f2ae1309fdfc74d20cbf89827f9304a3c4fab6d496",
+      "source_index": 33
+    },
+    {
+      "block_id": "debrief-next",
+      "block_type": "paragraph",
+      "segments": [
+        "NEXT WAVE (dispatch order): (1) LEAD merges #6002 + #6003 (package-disjoint, Go gate only, any order) + #6004 (wave log), closes each task's merge criterion. (2) ttw17-bl-live-tmux-drive — now the LAST mouse item standing; needs a live terminal, do not fake. (3) ttw18-bl-narrow-reading-width-skew — one width producer for narrow reading frames. (4) ttw18-bl-wide-footer-verb-clicks (P3). (5) ttw18-bl-go-toolchain-skew (P4, latent). Scoreboard row for the research epic (task-09f4775e7ccc2cca, D107(3)) appended by Review with the honest not-metered placeholder unless a METER.md tier-3 read lands."
+      ],
+      "segments_sha256": "d32ee46c68162e1fd964dae439ca31515603572968a3054407028dd5442f18d1",
+      "source_index": 34
+    }
+  ],
+  "semantic_segments_sha256": "4d614fd4338dd2bd92f1c2bc444a2796a8b44915370fdb5b1820241cd466d310",
+  "unit_id": "paper:task-tui-wave-2026-07-23b"
+}

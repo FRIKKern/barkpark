@@ -1,0 +1,1904 @@
+Wave 4: install the teeth, and make the merge verb an artifact
+==============================================================
+[1 · heading]
+Wave 4: install the teeth, and make the merge verb an artifact
+
+[3 · paragraph]
+Living wave Paper for WAVE 4 of the Honest Gates epic (root task
+auth-totp-tests-are-time-boundary-flaky, priority 0). Charter:
+.claude/workflows/bp-honest-gates-charter.md on origin/main @ f38c01920 — 246
+lines, D1-D49. Predecessor Papers: gates-tell-the-truth-wave-2026-07-20 (wave
+1), honest-gates-wave-2026-07-27 (wave 2), honest-gates-wave-2026-07-28 (wave
+3). Every later phase appends HERE — Digest adds the survey digest and the
+verify plan before the verifiers fly; Decide adds the decisions and the slice
+roster before the builders fly; Review closes it as the debrief.
+
+[4 · paragraph]
+STATUS: Strategize complete — the wave is SURVEYING. The direction below is
+committed in shape and tentative in its details; two exploration rounds (survey,
+then verify) precede Decide.
+
+[7 · heading]
+The wish
+
+[9 · paragraph]
+Run wave 4 and close hgw2-s7-enable-branch-protection. Three consecutive waves
+have deferred it, each with a better reason than the last, and every one of
+those reasons is now paid off. The plain sentence that has survived every wave
+must not survive this one: nothing in this repo is required-by-name, and every
+ratchet waves 1-3 built is ADVISORY.
+
+[10 · paragraph]
+DONE MEANS: branches/main/protection returns 200 with enforce_admins.enabled
+true and the required contexts pinned; a throwaway PR with a RED required check
+has gh pr merge --admin REFUSED and the refusal quoted; the same PR merges once
+green; the fleet has a documented, working merge verb that is not --admin; and a
+break-glass exists that is one attributable command down, one back, and
+impossible to leave open silently.
+
+[11 · paragraph]
+Also in scope: close hgw2-s5-ci-verdict-reader honestly (PR #6414 is green and
+the lead will merge it), and DECIDE the claim-lease false red rather than
+documenting it again.
+
+[14 · heading]
+Ground truth, re-derived at Strategize (2026-07-28, origin/main @ f38c01920)
+
+[16 · paragraph]
+Every row below was measured in this phase against live GitHub or the live
+ledger. Nothing here is inherited on trust.
+
+[17 · table]
+Protection state
+branches/main/protection = 404 Branch not protected; rulesets = []
+D13 still stands verbatim. The wave's whole reason.
+Repo merge flags
+allow_auto_merge false, allow_squash_merge true, delete_branch_on_merge false,
+user-owned public repo
+Auto-merge is a repo-setting change, not a per-PR one. User-owned kills merge
+queue AND may kill the audit log the break-glass wants.
+PROCESS RULE 2 citation
+bp-loop-ledger.md line 43 reads verbatim: 'This repo does NOT allow gh
+auto-merge — poll checks + gh pr merge --squash --admin'
+The cited authority EXISTS and COVERS what it is cited for. Premise smoke: PASS.
+Committed spec
+.github/required-checks.json on main: enforced false, two checks pinned to
+app_id 15368 — 'Elixir gate' and 'PR references an active task', with 10
+reasoned exclusions
+The apply tooling and the spec exist. This wave regenerates and flips, it does
+not rebuild.
+Fleet freeze, re-derived
+15 open PRs. 4 render 'Elixir gate' (#6631 #6551 #6498 #6414). 11 render ZERO.
+All 15 render 'PR references an active task'.
+The unfreeze is 11 PRs, not 12, and the two names have RADICALLY different
+freeze costs.
+Skip-shim throughput, live
+PR #6414: 'Elixir gate' concluded success in 2 SECONDS; four Elixir jobs
+'skipping'
+Requiring Elixir gate is ~13m39s only on api-touching PRs. On everything else it
+is seconds. This materially weakens the auto-merge necessity argument.
+Main's own health
+'Elixir gate' = success on the last three main shas whose runs actually
+completed (b43f5d7f, c8897f81, ad3b6d56). Format advisory = failure on all
+three.
+The required name is main-green today. Format stays out (D10).
+Main's queue collapse
+11 of the last 12 main pushes have NO 'Elixir gate' conclusion at all — elixir
+runs at 11:40-11:42Z are 'cancelled' by queue collapse (D28 SUPERSEDED shape)
+Criterion 10's 'main-green' must be read on shas whose run COMPLETED, or it
+reads a false red. Protection is unaffected: it evaluates PR heads.
+Sobelow
+security.yml runs green on main pushes (27352d8c, c0d27a0d) after the Felix
+inline-annotation migration
+Irrelevant to protection either way — security.yml is paths-filtered and
+structurally disqualified. Any plan treating Sobelow greenness as a precondition
+is wrong.
+Legacy Vercel poison
+commits/f38c01920/status = failure; 'Vercel – demo' and 'Vercel – barkpark' (EN
+DASH) failure on every sha
+The spec correctly uses checks with app_id, never contexts. A required set
+containing either is an instant deadlock.
+The lapse grace is ALREADY exceeded, live
+hgw2-s5-ci-verdict-reader: lifecycle open, claim.previous_worker lead-w3-land,
+claim.expired_at 2026-07-28T05:08:01Z — about 6h37m ago against a 21600s (6h)
+grace
+The task gate would RED #6414 on its next fire. Requiring it today knowingly
+installs a false red. This is the lease decision, and it is not hypothetical.
+The reap DOES stamp
+hgw2-s5's claim carries previous_worker + expired_at + worker:null; hgw2-s2
+carries released_at (the D23 ordering clause's real shape)
+D23's predicate is REACHABLE. The hole is the grace WIDTH, not the mechanism.
+Preconditions
+hgw3-s7-charter-via-pr open 0/7; hgw2-s4-format-ceiling-reland open 0/12;
+hg-bl-enable-auto-merge-under-protection open 0/4 (a CHILD of s7); both D49
+hotfix backlog items open
+hgw3-s7 is a hard precondition (D39). The format ceiling is NOT — see the
+direction.
+Claim
+Measured
+What it changes
+
+[20 · heading]
+The direction: protection ships, and the merge protocol ships as an ARTIFACT,
+not a sentence
+
+[22 · paragraph]
+Wave 3 framed the blocker as 'protection needs a merge-protocol replacement.'
+That framing is right and incomplete. The replacement it proposed — rewrite
+PROCESS RULE 2 — is a SENTENCE, and this epic's own charter law says a slice is
+not done without part three: the population and the ratchet. A sentence has
+neither. D48 is the proof already in the record: the same merge folklore occurs
+253 times across 68 files and its highest-leverage copy lives OUTSIDE the repo
+where no builder and no CI guard can reach it. A prose merge protocol is exactly
+the kind of predicate this epic exists to abolish — one that cannot be executed,
+cannot be tested, and cannot be proven able to fail.
+
+[23 · paragraph]
+So the centrepiece of this wave is not the PUT. The PUT is four minutes of work
+with tooling that already exists and is mutation-proven. The centrepiece is that
+THE FLEET'S MERGE VERB BECOMES A SINGLE EXECUTABLE ARTIFACT, and every prose
+site collapses into a pointer at it.
+
+[25 · paragraph]
+What the finished experience looks like. An agent finishes a slice, pushes, and
+runs one command — the sanctioned merge verb. It runs the deadlock detector
+FIRST (set difference of the committed spec against the check runs actually
+rendered on the head, exit 3 as a third state), so a PR that can never merge is
+refused in seconds with the missing context NAMED — something GitHub itself will
+never tell you at N=2, where the refusal reads '2 of 2 required status checks
+are expected.' and names nothing. If the PR is merely not-yet-green, the verb
+waits within a bounded budget and merges the moment it goes green; if the wait
+exceeds the budget it hands off to GitHub's own auto-merge and says so. If a
+required check is genuinely red, it refuses and quotes the refusal. If the
+ledger is down, it says the ledger is down and names the exit. The agent never
+types --admin, never types --auto, and never has to know which of GitHub's six
+refusal shapes it is looking at. Every one of those shapes maps to one row of an
+enumerated exit table, and every row has one command.
+
+[26 · paragraph]
+And the break-glass is not a curl. A curl cannot be attributed on a user-owned
+repo and cannot be prevented from being left open. The break-glass becomes a
+script that CANNOT OPEN WITHOUT WRITING A RECORD: it refuses without a reason
+and a task id, writes the record to the ledger first, then DELETEs
+enforce_admins — and while it is open, the required-checks verify guard reds in
+CI, so the repo itself screams until it is closed. One attributable command
+down, one back, impossible to leave open silently — the wish's words, satisfied
+mechanically rather than by discipline.
+
+[28 · paragraph]
+The choices I lean toward, tentatively:
+
+[29 · list]
+BOTH names on day one, as the committed spec already pins: 'Elixir gate' + 'PR
+references an active task'. D43's refusal of a ratchet-free required set stands,
+and Elixir gate is where every ratchet waves 1-3 built actually rides.
+hgw3-s7-charter-via-pr is a HARD precondition and ships in round 1. D39 is L1:
+protection rejects a direct push with GH006, and 12.7% of main arrives that way
+from the epic-cycle's own Decide phase. Without it, every concurrent wave hangs
+at Decide the day the flip lands.
+hgw2-s4-format-ceiling-reland is NOT a precondition and must not gate the flip.
+It adds a blocking job to the aggregator's needs, which changes Elixir gate's
+COMPOSITION, not the required NAME. It carries its own hazard in the other
+direction (a stale roster reds the required context repo-wide), so it lands
+BEFORE the flip with a fresh roster or it is explicitly deferred with the hazard
+named — never squeezed in after.
+The lease gets DECIDED, not documented, and it is a hard sibling of the flip
+rather than a nice-to-have. The 6h grace is already exceeded on a live PR's own
+task. Requiring the task gate on top of a predicate we have measured to be
+currently false is installing a known false red — the epic's disease inside the
+epic's own flip.
+allow_auto_merge: lean YES, but as a MECHANISM the artifact invokes behind a
+mandatory pre-flight, never as a protocol agents type. The wave decides it on
+evidence (the api-PR ratio, real merge dwell) and adopts
+hg-bl-enable-auto-merge-under-protection rather than re-filing it (D14).
+The fleet unfreeze is executed and evidenced, not asserted — with one
+measurement first that could collapse its cost by an order of magnitude (survey
+key unfreeze-cost).
+bullet
+
+[31 · paragraph]
+What to prioritise if the wave has to choose. The flip beats everything, and the
+flip is cheap. The merge verb beats the format ceiling. The lease decision beats
+the format ceiling. The format ceiling is the thing to drop.
+
+[34 · heading]
+The direction debate: four rivals, argued
+
+[36 · paragraph]
+RIVAL 1 — FLIP AND FOLLOW. Install protection with the two names; the
+merge-protocol replacement is 'delete one flag' (D40 measured that a plain gh pr
+merge --squash merges under enforce_admins:true the moment the required context
+goes green); rewrite PROCESS RULE 2; decide auto-merge NO. Smallest possible
+change, lowest blast radius, ships in one round.
+
+[37 · paragraph]
+Why it loses. It is the wave-3 plan with the deferral removed, and it repeats a
+mistake the charter already documented. A prose-only merge verb has no
+population step and no ratchet, and D48 measured what happens to prose in this
+fleet: 253 occurrences, 68 files, and the one that reaches every session
+automatically lives in a different repository. Worse, it leaves each agent to
+interpret GitHub's refusal themselves — and D38 measured that at N=2 the refusal
+names NOTHING, and that a deadlock and a red are only distinguishable by a set
+difference nobody is doing. An agent that cannot tell a deadlock from a red,
+holding a token with admin rights, will open the glass. That is D13 a fifth time
+by a different door.
+
+[39 · paragraph]
+RIVAL 2 — THE MERGE VERB BECOMES AN ARTIFACT (the winner). Same flip; the
+deliverable is one executable merge verb plus one executable break-glass, both
+harnessed and mutation-proven, and every prose site — bp-loop-ledger.md:43,
+.claude/agents/felix.md:44, connectors/README.md:189, docs/ops/merge-gates.md,
+and the out-of-repo memory file as a lead action — repointed at them.
+
+[40 · paragraph]
+Why it wins. It is the only rival that satisfies the epic's own acceptance law.
+CAUSE: protection installed with enforce_admins true. POPULATION: every merge
+path in the fleet repointed, not the one sentence that happened to be cited.
+RATCHET: the verb's own harness, the break-glass that cannot open silently, the
+verify guard that reds while it is open, and a tripwire that reds if --admin
+reappears as a sanctioned verb. It also converts the auto-merge question from a
+fleet-wide behavioural change into an implementation detail behind a pre-flight
+— which is precisely how to absorb the sharpest objection against it.
+
+[42 · paragraph]
+RIVAL 3 — STAGE THE TEETH: protect with ONE name today, add the second once the
+fleet is unfrozen. Genuinely attractive: it kills the plain sentence within the
+hour and makes a fifth deferral structurally impossible, because protection
+would already be installed when the unfreeze work begins. The obvious staging is
+'task gate first' — it renders on 15 of 15 open PRs, so the freeze cost is ZERO,
+it re-fires without a push (D43), and its p50/p90 are 16s/57s.
+
+[43 · paragraph]
+Why it loses, and why its INVERSE survives as a fallback. Task-gate-first is the
+worst possible single name: it is the ONE required context whose verdict depends
+on guerrilla, a host measured at 2.8-10.3s under concurrent waves that 500s
+outright on large payloads, and whose lapse predicate is measurably false RIGHT
+NOW on hgw2-s5. Requiring it alone means one ledger outage deadlocks the entire
+repository with no other check to reason from, and D49's only documented exit —
+the hotfix! label — needs a push to engage and records nothing. The INVERSE
+staging (Elixir gate only on day one, task gate second) is strictly safer: it
+depends on GitHub alone. It survives as the wave's fallback if the unfreeze or
+the lease decision proves more expensive than measured — but it is not the plan,
+because both names are already pinned in a spec that was generated,
+selection-tested across 8 heads of different path shapes, and reviewed.
+
+[45 · paragraph]
+RIVAL 4 — FIX THE LEASE AND THE HOTFIX BREAK-GLASS FIRST, FLIP NEXT WAVE.
+Honest-sounding: do not require a gate you have measured to be currently lying.
+Rejected as deferral #5 wearing a lab coat. The lease fix is a predicate change
+in one script with an existing 62-fixture harness; it is a SIBLING of the flip,
+not a prerequisite round. Sequencing it as a prerequisite is exactly the move
+that produced three better-reasoned deferrals.
+
+[47 · heading]
+The sharpest attack on the winner, and how the wave absorbs it
+
+[48 · paragraph]
+THE ATTACK. 'The merge verb as an artifact' introduces a new mandatory tool to a
+fleet of roughly 250 agent-runs a day that reads prose and acts on habit. D26 is
+the charter's own warning: a harness nobody runs is not a ratchet. If agents
+keep typing gh pr merge --squash --admin from muscle memory, the artifact
+changes nothing — except that now the habitual command FAILS LOUDLY, and the
+agent's most natural recovery, holding a token with repo admin, is to open the
+glass. The wave would then have built a beautifully-harnessed verb nobody uses
+and a break-glass everybody does. That is D13 a fifth time, installed by the
+wave that was supposed to end it.
+
+[49 · paragraph]
+HOW THE WAVE ABSORBS IT. Four ways, and they are acceptance criteria, not
+intentions.
+
+[50 · list]
+GRACEFUL DEGRADATION. The verb is a THIN wrapper. If an agent ignores it
+entirely and runs a plain gh pr merge --squash, that still works and still
+respects protection — D40 measured it. The artifact adds pre-flight and waiting;
+it does not add a required dependency. Only --admin breaks, and only when it
+should.
+THE POPULATION LANDS IN THE SAME SESSION AS THE FLIP. Not the same wave — the
+same session. The three live agent-facing prose sites plus merge-gates.md ship
+in the flip's own PR, and the out-of-repo memory file is a named LEAD ACTION
+executed alongside, because no builder worktree can reach it (D48).
+THE GLASS IS DELIBERATELY HIGHER-FRICTION THAN THE CORRECT PATH. Merging
+correctly is one command with no arguments. Opening the glass demands a reason
+and a task id, writes a record before it acts, and makes CI red until it is
+closed. The friction gradient must point at the correct path, and that is
+testable.
+ADOPTION IS MEASURED, NOT ASSUMED. 'The same PR merges once green' generalises:
+the wave does not close until real fleet merges have gone through the new verb
+and the audit of what actually happened is in the debrief. If the fleet routes
+around the verb, that is a finding this wave must report, not one the next wave
+discovers.
+bullet
+
+[51 · paragraph]
+A second, quieter attack worth naming: requiring 'PR references an active task'
+makes LEDGER HYGIENE a merge blocker on a host that degrades. The wave's answer
+is that this is a real cost accepted with eyes open, bounded by the lease
+decision and by an enumerated outage exit — and that the fallback staging
+(Elixir gate only) exists precisely for the case where survey shows guerrilla's
+availability cannot support it.
+
+[54 · heading]
+The survey plan — 17 assignments
+
+[56 · paragraph]
+Width now buys precise depth later. Each assignment names what would change in
+the plan if the answer surprises us. Several are direct attacks on load-bearing
+assumptions of the winning direction.
+
+[57 · table]
+unfreeze-cost
+Does a PUSH — even an empty commit — make a pre-shim PR head render 'Elixir
+gate'? GitHub runs pull_request workflows from the MERGE ref, so main's
+elixir.yml may already apply. Probe it on a real open PR.
+D43 priced the unfreeze at 5 cheap rebases plus 6 conflict-heavy ones. If an
+empty commit suffices, the unfreeze collapses from hours to minutes and stops
+being a scheduling constraint at all.
+pr-path-mix
+Over the last 7 days of merged PRs: what fraction touch the api path sets
+(paying about 13m39s) vs skip in seconds? Real dwell distribution from open to
+merge.
+This is the entire evidential basis of the auto-merge decision. #6414's Elixir
+gate concluded in 2s; if that is the norm, the throughput cliff is a minority
+case and auto-merge is optional ergonomics.
+automerge-safety
+Attack --auto directly: does GitHub re-evaluate required checks at merge time;
+what happens with stacked branches merging out of order; what does
+allow_auto_merge:true expose repo-wide; can it be scoped per-PR; what is the
+observable difference from poll-then-merge.
+The wish's sharpest objection. If --auto genuinely widens what lands unattended,
+the artifact must not use it and the wave says so with evidence.
+merge-verb-population
+Enumerate EVERY place in the repo, in .claude/**, in workflows, and in
+agent-facing prose that performs or prescribes a PR merge. Which are live
+agent-facing vs historical churn (D48 says 3 of 253).
+This is the population step. An unenumerated population is the epic's own
+disease.
+breakglass-attributability
+On a USER-owned repo, what record does GitHub keep of a protection change? Is
+there any audit log, events feed, or webhook? Test a real DELETE/POST cycle on a
+throwaway base and look for the trace.
+Criterion 8 says attributability is 'checked in the org audit log rather than
+assumed'. If a user-owned repo has no org audit log, that criterion is
+UNSATISFIABLE as written and the break-glass MUST write its own record.
+verify-guard-liveness
+Run scripts/required-checks-verify.sh in all four modes today, plus --selftest.
+Does it RED when enforce_admins is off live while the spec says true? Does
+required-checks-drift.yml actually run, and on what?
+Criterion 8's 'the verify guard reds while it is open' is the mechanism that
+makes the glass impossible to leave open silently. If it does not red, the
+break-glass design changes.
+lease-honest-predicate
+Measure the real population of task-gate reds today and classify them. How often
+does a lapse exceed 6h under real review dwell? Does a re-claim erase
+previous_worker (charter says claim.ex:297-304 rebuilds the map)? What predicate
+is BOTH honest and falsifiable — wider grace, PR-linked exemption,
+push-renews-lease, or something else?
+hgw2-s5's claim lapsed about 6h37m ago against a 6h grace, live. The wave must
+DECIDE this, and a decision needs the distribution, not one data point.
+open-pr-triage
+For all 15 open PRs: age, path shape, mergeability, which required names render,
+and a rebase-or-close recommendation with a reason. Which are wave-log docs PRs
+that could merge in seconds today?
+The unfreeze is criterion 1 and must be evidenced per-PR. Several look like
+stale wave-log docs PRs that a 30-second skip would land immediately.
+direct-push-population
+Map every path by which this fleet writes DIRECTLY to main: epic-cycle Decide,
+grip ledger rows, charters, wave logs, memory files, any workflow. What exactly
+does hgw3-s7-charter-via-pr need to change, and is its 7-criterion brief
+complete against that map?
+D39 is the single largest go/no-go. If the direct-push population is wider than
+the epic-cycle's Decide phase, hgw3-s7 as filed is incomplete and the flip
+breaks something nobody enumerated.
+format-ceiling-state
+Re-derive 0bf3b4551 against TODAY's main: conflict count, the drifted population
+under the pinned 1.18.1, roster freshness. And specifically: what happens to the
+REQUIRED context if the ceiling job lands with a stale roster AFTER protection?
+D45 already refuted D33's conflict count once. This decides whether the ceiling
+ships this wave, and quantifies the hazard of deferring it past the flip.
+spec-regeneration
+Run scripts/required-checks-generate.sh against current PR heads of different
+path shapes. Do the same two names survive the five rejections plus the
+selection stage? Any NEW poisoned or candidate names since
+(sobelow-inline-overlap, required-checks-drift, the uninterpolated matrix names
+visible on #6414)?
+Criterion 4 demands regeneration in the flip's own PR. If a new name qualifies
+or one stops qualifying, the day-one set changes.
+main-green-reading
+Main's queue collapse leaves most main shas with no Elixir gate conclusion (11
+of 12 measured). Establish the honest 'main-green' reading for criterion 10, and
+confirm queue collapse cannot affect protection's evaluation of PR heads.
+Criterion 10 is discharged 'in its honest split form'. A naive reading of main's
+last sha would report a false red and stall the flip for no reason.
+ledger-availability
+Probe guerrilla against the task gate specifically: 500s, timeouts, and the
+200-with-null-result shape D49 flagged unreproduced. Does the merged
+retry-then-fail path behave honestly under each? What is today's real
+availability?
+Requiring the task gate makes guerrilla a merge dependency. This decides whether
+both names ship day one or the Elixir-gate-only fallback staging is taken.
+hotfix-breakglass
+State of hg-bl-hotfix-breakglass-records-nothing and
+hg-bl-pr-task-gate-hotfix-label-norefire. Is BARKPARK_TASK_TOKEN provisionable
+by this fleet? What is the minimum honest hotfix path that engages without a
+push and records what it did?
+D49 calls both hard prerequisites of s7. If BARKPARK_TASK_TOKEN cannot be
+provisioned, the hotfix lane needs a different design or the required set must
+not include the task gate.
+prior-art
+Search bp papers and tasks (not just this epic) for prior decisions on branch
+protection, merge protocol, auto-merge, required checks, and merge wrappers
+across ALL epics. Anything already decided that this wave would re-derive?
+D14: adopt, never re-file. Re-deriving filed work is the documentation dimension
+of the sample-scope disease.
+aggregator-composition
+What jobs feed 'Elixir gate' today, what the allow-set accepts, and what happens
+to the required context if a new blocking job lands wired into needs but not
+into decide (the D36 shape) — or wired correctly but with a red roster.
+Under protection, one bad job wiring reds the required name on EVERY PR
+repo-wide. The blast radius of an aggregator mistake changes the day the flip
+lands.
+concurrency-fence
+Confirm nothing else in flight touches .github/**, scripts/*gate*, or
+.claude/workflows/**. Check open PRs, live worktrees, and the concurrent Cloud
+Console wave (fence cloud/**, gr-*/cch-*).
+A concurrent edit to elixir.yml or the gate scripts during the flip is the one
+collision that could deadlock the repo for everyone.
+Key
+Question
+Why it changes the plan
+
+[59 · callout]
+This Paper is the wave's living record. Digest appends the survey digest and the
+verify plan BEFORE the verifiers fly. Decide appends the decisions and the slice
+roster BEFORE the builders fly. Review closes it as the debrief. Tasks driven:
+hgw2-s7-enable-branch-protection (P0), hgw3-s7-charter-via-pr,
+hgw2-s4-format-ceiling-reland (P2), hgw2-s5-ci-verdict-reader,
+hg-bl-enable-auto-merge-under-protection,
+hg-bl-hotfix-breakglass-records-nothing,
+hg-bl-pr-task-gate-hotfix-label-norefire.
+
+[62 · heading]
+Survey digest — 17 reports, zero coverage deficit
+
+[64 · paragraph]
+The plain sentence still stands, re-derived this phase against origin/main @
+f38c01920:
+strong
+branches/main/protection
+code
+returns 404,
+rulesets
+code
+returns [],
+allow_auto_merge
+code
+is false. All nine code sites the wave builds on exist on origin/main. D13, D17,
+D39, D40, D43, D48 and D49 were git-shown and read for coverage, not merely
+cited.
+
+[66 · paragraph]
+The survey did not confirm the plan. It corrected it in five places, and two of
+those corrections change what ships.
+strong
+
+[68 · heading]
+1. The flip has a day-one deadlock, and it is bigger than the direction assumed
+
+[70 · paragraph]
+Three independent surveyors re-derived the same split: 4 of 15 open PR heads
+render
+Elixir gate
+code
+; 11 render it zero times; 15/15 render the task gate. The cause is now
+precisely dated — the
+Elixir gate
+code
+aggregator did not exist before 2c7f864eb (#6411) at 2026-07-28 00:44:48 +0200.
+Of 45 recently-merged api-touching PRs, only 12 render the aggregator, and all
+12 merged at or after 00:35Z.
+
+[71 · paragraph]
+A required context that never renders is a DEADLOCK, not a red. GitHub reports
+it as expected-and-waiting with no way to satisfy it, and at N=2 the refusal
+names nothing (D38). If the flip lands before the 11 are rebased or closed, they
+become unmergeable by any means short of removing protection — D13 a fifth time,
+by the exact door this wave fears.
+
+[73 · paragraph]
+THE OPEN HINGE.
+strong
+D43's verbatim text on origin/main states the reason as head-file semantics: "a
+pull_request
+code
+run executes the workflow file on the HEAD and no pre-shim head contains the
+job." The unfreeze-cost surveyor challenges that reason using the repo's own
+measured statement at
+elixir.yml:93-105
+code
+— GitHub checks a
+pull_request
+code
+job out on
+refs/pull/N/merge
+code
+, "a commit that already contains main's advance." If the run executes on the
+merge ref, the workflow definition read is the MERGED one, and an empty commit
+on a mergeable frozen PR would render the aggregator in seconds.
+Nobody ran the probe.
+strong
+It is 30 seconds of work and it decides whether the unfreeze is a scheduling
+constraint or a footnote.
+
+[75 · paragraph]
+Either way the unfreeze splits by MERGEABILITY, not by shim-age. 4 of the 11 are
+MERGEABLE (#6055, #6053, #6028, #5754); 7 are CONFLICTING (#6086, #6057, #5951,
+#5922, #5918, #5901, #2907) and no push can produce a computable merge ref for
+them. Protection adds no new blocker to the conflicting tier — they cannot merge
+under any setting — but it will read as "protection broke 7 PRs" unless named in
+advance. Independent triage recommends 3 merges today, 4 real rebases, and 8
+closes.
+
+[78 · heading]
+2. The auto-merge objection is factually inverted — but the throughput argument
+for it also fails
+
+[80 · paragraph]
+The wish's sharpest objection was that
+--auto
+code
+widens what lands unattended. Measured, it does not. Ten PRs merged into main in
+72 seconds today, all sharing
+baseRefOid b43f5d7f
+code
+, onto a main that had moved. PR #6617 merged 40 minutes after its checks
+completed, unattended, with Sobelow at conclusion FAILURE. That is TODAY'S
+baseline under
+--admin
+code
+. Stale-base unattended landing is a property of strict:false plus concurrency,
+not of
+--auto
+code
+— and
+--auto
+code
+cannot merge over a red REQUIRED context, where
+--admin
+code
+can and did. The repo has exactly ONE collaborator, so the actor set that could
+queue an auto-merge is identical to the set that can already merge. The
+repo-wide exposure delta is nil.
+
+[82 · paragraph]
+But the survivability argument for
+--auto
+code
+also collapses. 71.9% of 462 PRs merged in 7 days skip the Elixir suite
+entirely; today it is 80.6%. The aggregator itself always concludes in 2-5
+seconds. The blocking wall clock is 31 seconds when the suite skips and a median
+13.1m when it runs — against a median PR dwell of 21.9 minutes that is already
+longer than the gate. Wave 3's "~16m36s per PR" conflated the job with the suite
+and overstated how many PRs pay it.
+
+[84 · paragraph]
+Both findings point the same way, and it is the direction's tentative choice:
+adopt
+strong
+allow_auto_merge
+code
+as a MECHANISM the artifact invokes on the over-budget branch, never as a
+protocol agents type.
+strong
+Two mitigations are mandatory, not optional: the pre-flight deadlock detector
+must run FIRST (on a never-reporting context
+--admin
+code
+refuses loudly while
+--auto
+code
+queues silently forever), and
+expectedHeadOid
+code
+must always be pinned — a write-holder's own follow-up push does NOT cancel a
+queued merge, so without the pin a merge can outlive its agent and land a commit
+the agent never saw.
+
+[87 · heading]
+3. Two acceptance criteria are unsatisfiable as written, and both must be
+rewritten in this wave's PR
+
+[89 · paragraph]
+Criterion 8's audit-log check cannot exist.
+strong
+A surveyor ran the full PUT / DELETE enforce_admins / POST cycle on a throwaway
+branch and then hunted every trace surface.
+/repos/.../events
+code
+,
+/users/FRIKKern/events
+code
+and
+/repos/.../activity
+code
+recorded NOTHING for the protection writes. All three audit-log endpoints 404 —
+the repo owner is a User, so no org audit log can exist. Zero webhooks are
+installed. The protection object itself carries no actor and no timestamp: you
+cannot even read WHEN protection last changed. Writing "assumed attributable via
+GitHub" would be the exact false-predicate class this epic abolishes.
+
+[90 · paragraph]
+The one positive: repository RULESETS are self-attributing on a user repo —
+/rulesets/{id}/history
+code
+returned actor id plus millisecond timestamps for both a create and an edit.
+Caveat measured: deleting the ruleset destroys its history, so a guard must
+assert the ruleset EXISTS with the expected enforcement, never that history
+looks clean. This is a real option but a mechanism change late in the wave; the
+mutation-proven
+required-checks-*.sh
+code
+target classic protection.
+
+[92 · paragraph]
+"The verify guard reds in CI while the glass is open" is FALSE as the repo
+stands.
+strong
+The SCRIPT is healthy — all four modes exit 0 today, the 12-clause selftest is
+mutation-proven, and with the spec at enforced=true against a live
+enforce_admins:false it exits 1 naming the drift. But the CI job carrying it is
+triply defanged:
+continue-on-error: true
+code
+at JOB level (
+required-checks-drift.yml:51
+code
+), paths-filtered on BOTH triggers so it never runs on an api-only PR, and
+carrying no
+schedule:
+code
+and no
+workflow_dispatch
+code
+. A glass opened at 14:00 can go unobserved for days. All six historical runs
+report success; no run has ever demonstrated a failing report reaching a human.
+The break-glass scream must be BUILT this wave, not assumed.
+strong
+
+[94 · paragraph]
+And the naive fix is a trap the workflow's own header warns about: dropping
+continue-on-error
+code
+from the whole job re-imports API-blip fragility at the moment protection goes
+live. Split the enforce_admins clause into its own blocking surface; do not flip
+the flag.
+
+[97 · heading]
+4. The lease is a NUMBER problem wearing a mechanism costume — and it is already
+red
+
+[99 · paragraph]
+D23 lapsed-claim acceptance already SHIPPED (#6413, be8ea92c0).
+LAPSE_GRACE_SECONDS=21600
+code
+is live at
+pr-task-gate.sh:120
+code
+with a four-way discrimination that still fails a released claim, a
+never-claimed task and an unreadable expiry. So the question is not "accept
+lapsed claims" — that is done. It is: raise the number, renew the lease, or
+change the predicate.
+
+[101 · paragraph]
+The premise that review dwell is the cause is measured WRONG.
+strong
+Of 44 task-gate reds in 48h: 14 are wave-3's own synthetic probe branches, 18
+ran a PRE-GRACE script (the grace landed 00:44 and those heads predate it), 5
+are real post-grace lapse reds, 4 never claimed, 1 no claim, 2
+ledger-unreachable. Of the 5 real lapse reds the ages are 6h22m, 11h31m, 1d12h,
+4d18h and 13d18h — and FOUR of five are charter/wave-log PRs pointing at a
+long-lived EPIC or GOAL task that nobody will ever re-claim, because workers
+claim slices, not goals. A grace wide enough to cover them is fourteen days,
+i.e. no grace at all. Raising the number rescues 1 of 5.
+
+[103 · paragraph]
+It is red RIGHT NOW.
+strong
+Running the real gate against the real ledger this phase:
+FAIL: task 'hgw2-s5-ci-verdict-reader' is 'open': the claim by 'lead-w3-land'
+lapsed 25024s ago, beyond the 21600s grace.
+code
+That is 6h57m against a 6h grace — past it, not approaching it. Requiring
+PR references an active task
+code
+today installs a knowingly-false red on #6414, the one PR the wave means to
+land, and on 8 of 15 open PRs including #6631 and #6498 which are otherwise
+clean.
+
+[105 · paragraph]
+Two mechanical facts narrow the fix. A re-claim REPLACES the whole claim map (
+claim.ex:297-304
+code
+builds a fresh literal,
+:316
+code
+Map.puts it), destroying previous_worker — but
+renew
+code
+MERGES (
+claim.ex:378-381
+code
+). And a TTL reap deliberately PRESERVES
+content.assignee
+code
+(
+ttl_sweeper.ex:393
+code
+) — a durable ownership field that survives reaps indefinitely, which the gate
+never reads. A CI-side renew is refuted by the gate's own comment at
+pr-task-gate.sh:295-300
+code
+: it would bump the epoch and fence the holder out of their own close.
+
+[108 · heading]
+5. The merge-verb population is far smaller than D48's number, and it has ONE
+caller
+
+[110 · paragraph]
+The 253-occurrences / 68-files figure is the
+Elixir Test
+code
+stale-NAME census, not the merge-verb population — two surveyors independently
+failed to reproduce it as a merge-verb count. Re-derived:
+git grep -c 'gh pr merge'
+code
+is 20 hits across 16 files, of which nine are frozen .omx experiment fixtures
+and four are wave-3 ledger evidence that must NOT be rewritten. The genuinely
+live agent-facing in-repo population is FOUR sites, and only one of them ORDERS
+a merge.
+
+[112 · paragraph]
+No script, Makefile target or workflow in this repo performs a merge, and
+strong
+bp-epic-cycle.workflow.js:851
+code
+says "Do NOT merge — the lead merges."
+strong
+Reinforced at :141, :167 and :794, and verbatim in
+wild-bulk-cycle.workflow.js:100. So the artifact lands in an empty namespace
+with no migration — and its real caller class is the LEAD, not the fleet. That
+is good for the flip (one caller, one doc home) and bad for reach: the lead's
+instructions come almost entirely from a git repo rooted at
+/Users/pelle
+code
+that no worktree and no CI guard can reach.
+
+[114 · paragraph]
+The out-of-repo population is SEVEN files, not one. The charter's lead-action
+note names only
+always-merge-prs.md
+code
+and undercounts by six:
+pr-task-gate-lease-lapse.md:11
+code
+(prescribes claim-then-
+--admin
+code
+as THE lease remedy — the exact verb protection kills),
+repo-concurrent-worktrees-bp-volatile.md:17
+code
+,
+enterprise-ready-auth-epic.md:78
+code
+,
+doc-maintenance-system.md:22
+code
+,
+instance-lifecycle-admin.md:20
+code
+, and — escaping every
+gh pr merge
+code
+grep because it contains no merge command —
+dont-merge-before-elixir-test.md
+code
+, which is auto-loaded into every session and whose core claim ("no branch
+protection here means the gate is self-discipline, not enforced") INVERTS on the
+flip.
+
+[117 · heading]
+6. Five smaller corrections that change slice scope
+
+[119 · list]
+THE STALE-SHA REGENERATION HAZARD, newly found and silent. Stage 1 of the
+generator takes a strict INTERSECTION across sampled shas. Mixing one pre-#6411
+head silently downgrades the required set to ONE name — proven by running it:
+--sha cff46a98 --sha 4f80c433 emits only the task gate, with no warning and no
+non-zero exit. Only 3 of 15 open PR heads postdate #6411, so the obvious
+sampling pool would quietly halve the teeth. The flip PR must pin
+post-2026-07-28 00:44 heads AND assert Elixir gate is in the output before the
+PUT.
+THE AGGREGATOR'S GATE-ARGUMENT HOLE. D36's needs_without_decide guard keys ONLY
+on decide()'s second positional argument; the THIRD (the gate value) is asserted
+nowhere. A job gated on compile=='true' but decided with gate NEVER passes every
+fact and every cardinality, then reds Elixir gate on every docs-only PR forever.
+The mirror silently greens. This survives the entire guard and is the mistake
+the next new job is most likely to make.
+hgw3-s7 IS NECESSARY AND NOT SUFFICIENT. Its file scope is exactly the two
+epic-cycle files. But CLAUDE.md:87-96 mandates a session-ending direct push and
+says verbatim 'If push fails, resolve and retry until it succeeds' — under
+protection that instructs agents to fight GH006 in an infinite loop. The same
+rule lives again in ~/.claude/CLAUDE.md, outside the repo. The direct-push rate
+is also re-derived HIGHER than D39's 12.7%: 13.7% over 7 days, 18.2% in 24h,
+across THREE distinct actors, and 10 of 62 touch code.
+THE hotfix! LABEL DOES NOT EXIST. gh label list --limit 200 returns no hotfix
+label. D49's 'named exit today' is not merely push-gated and silent — it is
+inapplicable. And the auto-file would file an invisible DRAFT even with a token.
+The recommended replacement needs no provisioning at all: record into GitHub
+with the built-in GITHUB_TOKEN (three workflows in this repo already do exactly
+that), and FAIL LOUD rather than warn-and-pass.
+BARKPARK_TASK_TOKEN SHOULD NOT BE PROVISIONED. The fleet CAN set the secret (gh
+auth is FRIKKern with repo+workflow and repo ADMIN). But bp exposes no
+token-mint verb, so the only credential available is the fleet's own
+auth_tier:admin guerrilla token — in a PUBLIC repo's Actions secrets. 'As narrow
+as the API allows' is unachievable. Delete the auto-file path instead.
+
+[122 · heading]
+7. What the survey SETTLED, so no builder re-derives it
+
+[124 · list]
+Guerrilla is not the risk. 1550 unauthenticated reads across six load levels:
+zero timeouts, zero 200-with-null, worst latency 1.56s against a 20s cap. Rate
+limiting starts between -P 10 and -P 25 from ONE IP; the gate makes one GET per
+PR event from IP-diverse runners. No retry to tune, no caching layer, no
+fallback host.
+The gate is honest in five of six degraded shapes: connection-refused, 503, 429
+and a 200 with garbage all exit 2 UNCHECKED after bounded retry. Never a silent
+green. The SIXTH — 200 with a well-formed null result — takes the `missing`
+branch and DEFINITIVELY accuses a correct PR. And that branch is reachable ONLY
+via 200-with-null, because a nonexistent id AND a real-id/wrong-type read both
+return 404 handled elsewhere. So rerouting it to UNCHECKED loses no true
+detection whatsoever.
+No security.yml check can ever be required — confirmed independently from the
+spec's own exclusion list, which names both security.yml contexts as S4
+PATHS-FILTERED. Sobelow's greenness is NOT a precondition for protection.
+doc-gates.yml and go-tests.yml are likewise structurally disqualified.
+The main-green reading has an honest rule. Queue collapse on main is DOCUMENTED,
+INTENDED behaviour (cancel-in-progress is explicitly false on main; the comment
+says 'Queued main runs collapse to one'), and it is main-ref-scoped: PR-ref
+elixir runs are 0 cancelled / 15 success / 1 real failure. Read the newest main
+push whose elixir run reached a terminal non-cancelled conclusion. Today that is
+27352d8c1 and it is GREEN — while the naive tip read of f38c01920 returns no
+such check run and would be mis-narrated as a false red.
+The concurrency fence is clear on the critical path. NO open PR touches
+elixir.yml, pr-task-gate.yml, required-checks.json or
+scripts/required-checks-*.sh. No hg-* task carries a foreign claim. The
+security.yml edit is already merged. ONE real collision: PR #6086 rewrites
+bp-epic-cycle.workflow.js (+200/-17) — the same file, and the same line-726
+region, that hgw3-s7 must rewrite.
+The format ceiling should be DROPPED, and deferring it costs nothing. Neither
+.format-drift-ceiling nor scripts/format-drift-ceiling.sh exists on main, so the
+required name's composition is untouched and there is no decay clock. Three
+conflicts remain (D45 confirmed, D33's 'two' still wrong), the roster is 536
+commits and 82 new files stale, and its un-wired shape is NOT the safe one — a
+green unwired ceiling is a prime candidate for silent auto-promotion into the
+required set on the next regeneration.
+The break-glass is ~70% built. required-checks-apply.sh already implements both
+forms and refuses without --confirm; required-checks-verify.sh already asserts
+enforce_admins.enabled == true. The deadlock detector ALSO already exists on
+main as required-checks-verify.sh --deadlock, with exit 3 as a third state,
+built for D38. The artifact must CALL these, never reimplement them (D14).
+
+[127 · heading]
+Coverage map — what was checked, and what was checked and NOT found
+
+[129 · paragraph]
+Absences below are decisions-in-waiting, not gaps in diligence. Every dispatched
+surveyor reported; the coverage deficit was none.
+
+[131 · table]
+branches/main/protection, rulesets, allow_auto_merge
+NOT FOUND (404, [], false)
+Re-derived by four independent surveyors. The plain sentence survives into this
+wave.
+gh label list --limit 200 for a hotfix label
+NOT FOUND
+The documented break-glass is inapplicable, not merely silent.
+gh secret list / gh variable list for BARKPARK_TASK_TOKEN
+NOT FOUND
+And it should stay that way — no narrow token can be minted.
+orgs/FRIKKern/audit-log, user/audit-log, repos/.../events for a protection write
+NOT FOUND (404 / no entry)
+Criterion 8 is unsatisfiable as written. Rewrite it in the flip's own PR.
+repos/.../hooks
+NOT FOUND ([])
+The branch_protection_rule webhook exists in GitHub but nothing here receives
+it.
+A merge script in scripts/ or a gh pr merge in any workflow .js
+NOT FOUND
+The artifact lands in an empty namespace. No migration, no name collision.
+A main-green stage in required-checks-generate.sh or -verify.sh
+NOT FOUND
+D42 asks for one; criterion 10 is discharged by hand today. Six lines closes it.
+An auto_merge decision anywhere in docs/ops/merge-gates.md
+NOT FOUND
+s7 criterion 1's target section must be CREATED, not edited.
+.format-drift-ceiling and scripts/format-drift-ceiling.sh on origin/main
+NOT FOUND
+The ceiling has never landed. Deferring it changes nothing.
+A counterexample: a head lacking the shim that still rendered Elixir gate
+NOT FOUND in 16 sampled shas
+The corpus cannot separate head-file from merge-ref semantics. Only a probe can.
+Required-check spec drift (advisory) in required-checks.json exclusions
+NOT FOUND
+drift.yml:14 claims it is named there. It is not — a live prose-vs-artifact gap.
+decide()'s third positional argument in the D36 guard
+NOT FOUND (unasserted)
+A false-RED generator survives every existing guard.
+check-run output.summary on the task gate
+NOT FOUND (empty on 6 PRs)
+An artifact classifying refusals by reading summaries reads blank and
+misclassifies.
+Elixir gate on any of the last 5 main heads
+NOT FOUND
+S5 red-on-main is structurally vacuous for the one name that matters most.
+Checked
+Result
+What it means
+
+[133 · paragraph]
+Corners no surveyor reached, and the wave should know it:
+strong
+(1) the QueryController :show body — whether a 200-with-null is emittable
+server-side at all is unresolved, and it decides reroute-vs-delete for the
+gate's `missing` branch; (2) the two release workflows (cli-release.yml,
+release-artifact.yml) were grepped for push verbs but not read line by line; (3)
+working-tree dirtiness across the 1,545 worktrees was not checked — only which
+ones diff a fenced path; (4) scripts/local-update.sh and
+scripts/pds-window-sentinel.sh matched the push recipe but were never opened;
+(5) whether any of the 6 deployment environments holds a secret was inherited,
+not re-enumerated; (6) three cloud-shaped check names seen only on a stale head
+were never traced to their workflow's on: block.
+
+[136 · heading]
+Verify plan — the last look before the plan is cut
+
+[138 · paragraph]
+Ten assignments. Eight Opus, two Fable — Fable only where the answer is a
+judgment whose cost of being wrong is a false red on a REQUIRED gate. Every
+assignment names what it will RUN; reading is not proof.
+
+[140 · table]
+1
+unfreeze-probe
+opus
+Pushes an empty commit to a real MERGEABLE frozen PR (#5754) and reads gh pr
+checks. Settles head-file vs merge-ref semantics — the single hinge under D43.
+Also probes a CONFLICTING PR for the fail-closed dispatcher's RED.
+2
+breakglass-scream
+fable
+Mutates required-checks-verify to red and reads the resulting CHECK-RUN
+conclusion under continue-on-error. Decides what firing surface the break-glass
+scream needs, given the job is advisory + paths-filtered + unscheduled.
+3
+gate-arg-hole
+opus
+Mutation-proves the D36 hole in a worktree: wires a job with the WRONG third
+decide() argument and confirms elixir-path-escape-check.sh --selftest still
+passes 101/101.
+4
+lease-predicate
+fable
+Samples live guerrilla for assignee-vs-previous_worker agreement and re-derives
+the 5 lapse reds. Decides P1 (assignee-backed) vs grace-widening vs
+epic-delegation — a wrong call installs a false red on a required gate.
+5
+spec-freshness
+opus
+Runs required-checks-generate.sh against three post-#6411 heads, diffs against
+the committed spec, re-reads the main-green rule at the tip, and re-scans all
+open PRs for fenced-path edits. This is the immediately-pre-PUT check.
+6
+deadlock-detector-live
+opus
+Runs required-checks-verify.sh --deadlock against a REAL frozen head (one of the
+11 rendering zero Elixir gate) and confirms exit 3 with the missing context
+NAMED. The artifact's pre-flight depends on it and nobody has aimed it at a
+frozen head.
+7
+automerge-wiring
+opus
+Flips allow_auto_merge, and proves on a throwaway PR whether gh pr merge --auto
+--match-head-commit actually forwards expectedHeadOid to the ENABLE mutation.
+The core mitigation depends on the answer.
+8
+refusal-exit-table
+opus
+Enumerates GitHub's refusal shapes against a throwaway PROTECTED branch and
+proves the task gate's output.summary is empty — establishing what the artifact
+can and cannot classify on.
+9
+directpush-scope
+opus
+Re-derives the direct-push population, opens the two unread push-recipe scripts,
+and settles the PR #6086 collision with hgw3-s7 by diffing both against the same
+file region.
+10
+ledger-null-origin
+opus
+Reads QueryController :show and runs a targeted unit test to establish whether a
+200-with-null is emittable at all — deciding whether the gate's `missing` branch
+is rerouted or deleted.
+#
+Key
+Model
+What it PROVES by running
+
+[142 · callout]
+The wave stands at: survey complete and digested, ten verifiers in flight.
+Nothing is built yet. The flip has not happened; branches/main/protection still
+returns 404 as of this writing.
+
+[145 · heading]
+What verification proved, and the two premises it destroyed
+
+[147 · paragraph]
+Nine verifiers ran against live GitHub, a live ledger, and the real files. Zero
+coverage deficit. Two of the direction's own load-bearing beliefs were refuted
+by running them, and both refutations changed what ships. Every number below
+names the tree and the load it was taken under.
+
+[149 · heading]
+REFUTED: auto-merge's mandatory safety mitigation is a placebo
+
+[150 · paragraph]
+The direction called
+expectedHeadOid
+code
+pinning a non-optional mitigation.
+GitHub accepts it and ignores it.
+strong
+Proven end to end on a throwaway protected base:
+GH_DEBUG=api
+code
+captured the literal ENABLE mutation carrying the pin, HTTP 200. The
+write-holding actor then pushed
+5738a149
+code
+; auto-merge
+survived
+strong
+with
+enabledAt
+code
+unchanged and zero
+auto_merge_disabled
+code
+timeline events; the PR merged 3 seconds after the NEW head went green, and
+squash commit
+fbaeb5ed
+code
+contains
+both
+strong
+files. Worse, the pin is unreadable afterwards: it is an input-only field, and
+AutoMergeRequest
+code
+exposes exactly seven fields that do not include it. No artifact can ever verify
+its own pin.
+
+[151 · paragraph]
+The throughput case collapsed independently:
+71.9% of 462 PRs skip the Elixir suite
+strong
+, the aggregator always concludes in 2-5s, blocking wall clock is
+31 seconds
+strong
+when skipping against a median PR dwell of 21.9m, and Elixir-running PRs dwell
+24.5m against skippers' 20.4m - a four-minute difference, not the sixteen wave 3
+assumed (it conflated the job with the suite). And on an
+unprotected
+strong
+base
+--auto
+code
+does not queue - it merges
+immediately, exit 0, silently
+strong
+: probe PR #6649 landed on main before its checks completed.
+
+[152 · paragraph]
+Decision reversed: allow_auto_merge stays FALSE.
+strong
+
+[154 · heading]
+REFUTED: D43's stated reason for the freeze - the remedy got harder, then the
+cost got smaller
+
+[155 · paragraph]
+D43 says a pre-shim head cannot render
+Elixir gate
+code
+because a pull_request run executes the workflow file on the HEAD. An empty
+commit pushed to #5754 rendered it in
+35 seconds
+strong
+- GitHub selects the workflow file from the
+merge ref
+strong
+. But it rendered RED, and no push can green it: the dispatcher pins
+ref: head.sha
+code
+and runs
+scripts/elixir-path-escape-check.sh
+code
+, a script the shim commit itself introduced, so a pre-shim head tree gives
+exit 127
+code
+and the aggregator fail-closes. A perfect 16/16 biconditional holds across every
+open PR: PRE-shim implies NO-SCRIPT implies gate ABSENT-or-RED.
+The cure is a rebase, never a push.
+strong
+
+[156 · paragraph]
+But the cost is far smaller than D43 priced. Re-derived per head: only
+THREE
+strong
+open PRs are simultaneously MERGEABLE and rendering zero gate (#6055, #6053,
+#6028). The other seven absent-gate PRs are already CONFLICTING - and a
+conflicting PR is
+dark, not slow
+strong
+: #6057's pushed head produced
+zero
+strong
+Actions runs over 11.5 minutes (total_count 0, merge_commit_sha null). They are
+unmergeable today under no protection at all, so counting them as strand cost
+double-counts an existing wall.
+
+[157 · paragraph]
+The unfreeze is not a precondition. It is three rebases and a lead triage
+action.
+strong
+
+[159 · heading]
+The lease: three obvious candidates, all refuted by count
+
+[160 · table]
+current 6h grace
+20
+reds correct work; already red on 8 of 15 open PRs
+P1 assignee-backed
+108
+TAUTOLOGICAL - a gate that cannot red (D8)
+P3 goal delegation
+0
+rescues nothing, and is time-varying
+P2 renew-on-push
+n/a
+fences the holder out of their own close
+P4 live-when-opened
+strong
+11 of 13 open PRs
+strong
+SHIPS - refuses exactly the two abandoned epics
+strong
+Candidate
+strong
+Passes, of 109 open lapsed tasks
+strong
+Verdict
+strong
+
+[161 · paragraph]
+P1's agreement is not empirical, it is
+tautological
+strong
+:
+do_claim
+code
+writes
+assignee
+code
+and
+claim.worker
+code
+from the same
+worker_id
+code
+, and the reap deliberately preserves the assignee - 275 agree,
+zero disagree
+strong
+, across all 3,363 ledger tasks. P4 measures against the PR's own
+created_at
+code
+, which cannot decay with review dwell. Its cost is stated, not smuggled: it
+certifies
+opened under a live claim
+strong
+, not still being worked.
+
+[163 · heading]
+The break-glass: one criterion unsatisfiable, one property 0% built
+
+[164 · list]
+Criterion 8 cannot be satisfied.
+strong
+The owner is a User, so orgs/, users/ and repos/.../audit-log all 404; /activity
+carries only branch/push/merge; there are zero webhooks; and the protection
+object carries
+no actor and no timestamp at all
+strong
+. A full PUT/DELETE/POST cycle ran on a throwaway branch and left no trace
+anywhere.
+The scream does not exist.
+strong
+The verify SCRIPT is healthy - a simulated glass-open exits 1 naming the
+enforce_admins drift. The WORKFLOW is not: job-level
+continue-on-error
+code
+, paths-filtered on both triggers, no schedule and no workflow_dispatch. Only
+3 of the last 60 merged PRs
+strong
+touch .github/**, so it is silent on ~95% of merges.
+Recording is 0% built, not 70%.
+strong
+--disable
+code
+removes ALL protection; the narrow form is two raw gh api lines inside a
+comment, with no reason, no task id and no record.
+The hotfix! label does not exist.
+strong
+gh label list --limit 200
+code
+finds no hotfix label - D49's named exit is inapplicable, not merely silent.
+bullet
+
+[166 · heading]
+The refusal grammar: the exit code is a constant, and D38 is missing the most
+common shape
+
+[167 · paragraph]
+Ten rows captured verbatim on a freshly protected throwaway base.
+Every refusal exits 1
+strong
+- deadlock, red, cancelled, pending, plural, and gh's own client-side block. So
+the artifact must regex stderr; there is no numeric shortcut.
+
+[168 · table]
+N=1 never reports
+Required status check "X" is expected.
+DEADLOCK - no merge command fixes it
+N=1 red
+... is failing.
+re-run FIRST (D57 laundering), then read the diff
+N=1 cancelled
+... is cancelled.
+gh run rerun <id>
+N=1 pending
+strong
+... is in progress.
+strong
+WAIT - absent from D38, most common state
+strong
+N=2 mixed
+2 of 2 ...: 1 expected and 1 failing.
+names nothing; fall through to set-difference
+no flags, blocked
+... base branch policy prohibits the merge.
+client-side; never reached the API
+GREEN, plain --squash
+strong
+(no output), exit 0, MERGED
+strong
+graceful degradation PROVEN
+strong
+State
+strong
+Refusal string
+strong
+The one resolving command
+strong
+
+[169 · paragraph]
+A trap worth naming:
+strong
+the plural categories
+do not sum
+strong
+-
+2 of 2 ... have not succeeded: 1 expected.
+code
+silently absorbs the pending one, so a parser computing total-minus-named == 0
+mis-handles the single most common state.
+
+[171 · heading]
+Smaller findings that changed slice scope
+
+[172 · list]
+The detector is blind to cancellation.
+strong
+--deadlock
+code
+returns EXIT 3 naming the missing context on frozen heads - but it matches on
+the name column only, discarding the conclusion it already computes. On head
+5ea4cb4f, whose required task gate concluded cancelled, it returns
+EXIT 0, shape-identical to green
+strong
+.
+The generator has a silent downgrade and no floor.
+strong
+Three post-shim heads regenerate byte-identically to the committed two names.
+Mixing ONE pre-shim head emits
+a single name, exit 0, empty stderr
+strong
+. Eleven flags exist and none is a cardinality guard.
+hgw3-s7's own gate cannot fail.
+strong
+node --check
+code
+exits 0 on the workflow file with a deliberate syntax error appended - a file
+with both a top-level export and a top-level return defeats it. The gate written
+into plan.md exits 1 on
+unmodified main
+strong
+. Both broken, in opposite directions.
+CLAUDE.md orders an infinite fight.
+strong
+"If push fails, resolve and retry until it succeeds." Under protection that is a
+GH006 loop - and the file has
+eight bytes
+strong
+of budget headroom, so the rewrite must replace, never append.
+The gate's missing branch only ever lies.
+strong
+It is reachable solely via a 200-with-null; both genuine cases return 404 and
+are owned by a different branch. Deleting it is worse than rerouting - the
+emitter falls through to the lifecycle catch-all and prints a
+second
+strong
+, worse false accusation.
+D48's 253/68 is the wrong census.
+strong
+That is the stale-NAME count for 'Elixir Test'. The merge-verb population is
+four live in-repo sites - and
+seven
+strong
+out-of-repo files, not one.
+The D36 mirror hole is real but is not a flip blocker.
+strong
+Giving the unfiltered ratchet a compile-output gate passes
+101/101
+strong
+while the aggregator greens on a docs-only PR. It is a false-GREEN, so it
+degrades safety not availability, and it needs another elixir.yml edit to go
+live.
+Main is GREEN,
+strong
+read by the honest three-state rule: newest main push with a terminal
+non-cancelled conclusion is 69a9d591d, Elixir gate success at 12:49:03Z. A naive
+tip read manufactures a false red, because queued main runs collapse by design.
+bullet
+
+[174 · heading]
+Coverage, including the not-founds
+
+[175 · list]
+No audit-log endpoint of any kind exists on this repo - three paths probed, all
+404. This is a
+negative that rewrites an acceptance criterion
+strong
+.
+No branch_protection_rule usage anywhere in .github/; zero webhooks; the events
+feed carries no such type. Unprovable before the flip, and an edge trigger
+regardless.
+No script, Makefile target or workflow in this repo merges a PR - the artifact
+lands in an empty namespace with one caller class, the lead.
+Neither local-update.sh nor pds-window-sentinel.sh contains any git push - no
+unattended pusher exists.
+No prior-art task owns the lease-predicate decision, the firing-surface
+question, or the third-argument hole - all three are fresh.
+Honest gap:
+strong
+the merge-main cure is one push short of L1. The exit-127 cause was proven
+removable, but #5754 turned out byte-identical to main so its dispatcher then
+failed on an empty diff. Treat 'rebase cures it' as strongly implied, not
+measured.
+Honest gap:
+strong
+repo settings were being mutated concurrently by a sibling agent -
+allow_auto_merge read false, then true, then false again in one phase. Any
+single settings read this afternoon is L3, so the flip re-derives everything
+immediately before the PUT.
+bullet
+
+[178 · heading]
+Decisions
+
+[180 · paragraph]
+Charter D50 through D73, written to .claude/workflows/bp-honest-gates-charter.md
+and published to origin/main as 117e6fe91. Each with its one line of why; the
+charter is the epic's memory, this is the wave's story.
+
+[182 · list]
+Protection ships, round 2, after exactly three slices.
+strong
+Not timidity: the wave's own DONE bar demands a merge verb that is not --admin
+and a glass that cannot be left open, and requiring a gate measured to be lying
+today reds 8 of 15 PRs.
+The merge verb becomes an executable artifact.
+strong
+A prose merge protocol has no population and no ratchet - it is the exact
+predicate class this epic exists to abolish.
+allow_auto_merge stays FALSE.
+strong
+Its mandatory mitigation is a proven placebo, its throughput case is refuted,
+and on an unprotected base it merges instantly and silently.
+The lease becomes P4.
+strong
+The only candidate that discriminates: it cannot decay with review dwell, and it
+cannot become permanently true.
+The break-glass writes its record BEFORE the DELETE.
+strong
+A crash between them must leave a false-positive record, never a silent open -
+because GitHub itself records nothing at all.
+The scream is a separate, level-triggered workflow.
+strong
+An edge trigger fires once and is silent forever; and un-advisory-ing the
+existing drift job would make an API-reading check eligible for the required set
+on flip day.
+The format ceiling is DROPPED.
+strong
+It never landed on main, so deferring costs nothing - and the un-wired shape is
+the dangerous one, because the generator would promote a green un-subsumed check
+into the required set with nobody deciding.
+The D36 mirror hole goes to backlog.
+strong
+A false-GREEN degrades safety, not availability, and it is unreachable without
+another aggregator edit.
+BARKPARK_TASK_TOKEN is refused.
+strong
+The only mintable credential is the fleet's admin token, in a public repo's
+secrets - and the auto-file would write an invisible draft anyway.
+Criterion 8 is rewritten, not waived.
+strong
+Attributability moves to a record the glass cannot skip, because the audit log
+it named does not exist.
+bullet
+
+[185 · heading]
+The wave plan - 7 slices, 2 rounds
+
+[187 · paragraph]
+Round 1 is five file-disjoint slices. Round 2 is the flip plus the hotfix lane,
+dispatched by the lead once their dependencies MERGE.
+
+[189 · table]
+S1
+hgw4-s1-task-gate-honest-predicate
+1
+fable
+bash scripts/pr-task-gate.test.sh
+S2
+hgw4-s2-merge-verb-artifact
+1
+fable
+bash scripts/bp-merge.test.sh
+S3
+hgw4-s3-breakglass-recorded-and-screaming
+1
+fable
+bash scripts/breakglass.test.sh
+S4
+hgw4-s4-claude-md-push-under-protection
+1
+opus
+bash scripts/check-doc-budgets.sh
+S5
+hgw3-s7-charter-via-pr
+1
+opus
+bash scripts/workflow-module-smoke.sh
+S6
+strong
+hgw2-s7-enable-branch-protection
+strong
+2, after S1+S2+S3
+strong
+fable
+bash scripts/required-checks-verify.sh --ci
+S7
+hg-bl-hotfix-breakglass-records-nothing
+2, after S1
+opus
+bash scripts/pr-task-gate.test.sh
+#
+strong
+Task
+strong
+Round
+strong
+Model
+strong
+Gate
+strong
+
+[191 · paragraph]
+HIGH-FLIP-RISK, independent second re-derivation owed before merge:
+strong
+S1 (is P4 the honest predicate, or does it merely move the lie?) and S6 (is the
+regenerated required set genuinely two names, or a silently downgraded one?).
+
+[192 · paragraph]
+Fable is unavailable this session
+strong
+- every fable-marked slice dispatches on Opus. The marking records the honest
+difficulty judgment, not an expectation.
+
+[194 · paragraph]
+Lead actions this wave cannot do from a worktree:
+strong
+the seven out-of-repo memory files
+(hgw4-bl-memory-merge-population-seven-files), the open-PR triage
+(hgw4-bl-open-pr-triage-under-protection), merging #6414 and closing
+hgw2-s5-ci-verdict-reader on its claim epoch, and deleting the
+probe-automerge-clean residue repo.
+
+[196 · callout]
+The plain sentence this wave must end:
+nothing in this repo is required-by-name, and every ratchet waves 1-3 built is
+advisory.
+strong
+It is still true as these slices dispatch. S6 is what makes it false - and S1,
+S2 and S3 are what make S6 honest rather than a fifth deferral wearing a
+different hat.
+
+[199 · heading]
+Corrections to earlier sections of this Paper (2026-07-28, Review)
+
+[201 · paragraph]
+This Paper is the wave's living story, so where a later phase invalidated an
+earlier claim the earlier claim is corrected here with a date rather than
+silently rewritten. Three sections above were overtaken by their own wave.
+
+[203 · list]
+THE DIRECTION SECTION SAID THE MERGE VERB WOULD HAND OFF TO AUTO-MERGE. It
+reads: 'if the wait exceeds the budget it hands off to GitHub's own auto-merge
+and says so.' That was REVERSED by D53 and by the wish's own sharpest objection.
+What shipped refuses to hand off: over budget it prints the PR URL and the
+re-run command and exits 2, and allow_auto_merge stays FALSE. The reason is
+measured, not aesthetic — gh forwards expectedHeadOid to the enable mutation and
+GitHub accepts-and-ignores it, so the pin is a placebo and the flag is
+unreadable afterwards. Write-only safety is not safety, and widening what can
+land unattended inside a wave whose purpose is narrowing it was the wrong trade.
+THE DIRECTION SECTION SAID THE BREAK-GLASS WRITES ITS RECORD TO THE LEDGER. It
+reads: 'writes the record to the ledger first, then DELETEs enforce_admins.'
+REVERSED by D49: the sink is the committed docs/ops/break-glass-log.md. A
+recorder that needs a healthy remote is a recorder that is absent exactly when
+it matters — and bp task create returned 500s and timeouts again during this
+very wave, twice, to a builder and then to the reviewer. The ordering claim
+(record first, DELETE second) survives verbatim; only the sink changed.
+THE DIRECTION SECTION SAID THE VERIFY GUARD WOULD BE THE SCREAM. It reads:
+'while it is open, the required-checks verify guard reds in CI.' REVERSED by
+D61: that guard reads three endpoints and is paths-filtered, so making it hard
+would have made an API-reading check eligible for the required set on flip day.
+The scream shipped as a separate, narrow, one-endpoint watch on its own
+schedule, and required-checks-drift.yml was deliberately left carrying its
+continue-on-error.
+
+[206 · heading]
+DEBRIEF — round 1 shipped, grade B+
+
+[208 · paragraph]
+Written 2026-07-28 by the wave reviewer, the last hands before merge. Five
+slices were built, reviewed adversarially, fixed in place, gate-re-run, pushed,
+and opened as PRs #6684-#6688, with the charter wave-log riding #6689. Round 1
+of two is complete.
+
+[210 · paragraph]
+THE PLAIN SENTENCE SURVIVES A FOURTH TIME, and honesty requires it be the first
+line of the debrief and not a footnote: gh api
+repos/FRIKKern/barkpark/branches/main/protection still returns 404, rulesets
+still returns [], and every ratchet waves 1-4 built is still ADVISORY. hgw2-s7
+is round 2 by the sequenced-rounds law — gated on three of these five merging —
+so its absence from this run is the law working rather than a fifth deferral.
+But the wish asked for teeth, and this wave delivers the mouth, the jaw and the
+dentist's appointment. What is genuinely different from the three prior
+deferrals is that the reasons are now ARTIFACTS ON BRANCHES rather than
+ARGUMENTS IN A CHARTER.
+
+[212 · table]
+Slice
+Final branch / PR
+Verdict
+S1 task-gate honest predicate
+…the-task-gate-stops-lying-twice-the-leas-0-r · #6684
+D58 + D59. LAPSE_GRACE_SECONDS deleted outright; the open branch tests
+claim.expired_at >= pull_request.created_at, PR_OPENED_AT plumbed from the
+payload, absent-or-unparseable is a REFUSAL not a fall-open. The -300s
+future-clock floor and the released_at >= expired_at ordering clause survive and
+are re-proven load-bearing under P4. missing reroutes to UNCHECKED. 62 -> 73
+fixtures, six mutation proofs, three re-run independently by the reviewer.
+S2 merge-verb artifact
+…the-fleet-s-merge-verb-becomes-one-execu-1-r · #6685
+D53-D57. bp-merge.sh: deadlock pre-flight by CALLING the detector, bounded
+attended wait, plain gh pr merge --squash. Neither --admin nor --auto on any
+executable line, grepped as a ratchet. Seven-state refusal table keyed on the
+STRING, plural before singular, is-in-progress present, UNRECOGNISED refuses
+loudly. And D56: the detector returned EXIT 0 on a required context concluding
+cancelled, shape-identical to green on a frozen head, proven live on 5ea4cb4f.
+S3 break-glass + scream
+…a-break-glass-that-cannot-open-without-w-2-r · #6686
+D49 + D60 + D61. The record is written AND acknowledged off disk BEFORE the
+DELETE, proven at the API call by snapshotting the log inside the gh stub rather
+than reading source. --close inverts the order on purpose so a crash
+over-reports. Sink is a committed file. A separate level-triggered watch, no
+continue-on-error anywhere, one endpoint, two authorities. Reviewer fixed a
+shipping-blocker. 54 -> 55.
+S4 CLAUDE.md under protection
+…claude-md-stops-ordering-an-infinite-fig-3-r · #6687
+D67. Two single-line hunks inside eight bytes of headroom: step 4 branches on
+ref, and 'retry until it succeeds' becomes 'a push protection refusal (GH006) is
+CORRECT, not a retry cue'. Ownership sentences survive verbatim; Golden Rules
+untouched.
+S5 (hgw3-s7) charter via PR
+…the-epic-cycle-decide-phase-stops-direct-4-r · #6688
+D66. Both prior gates for *.workflow.js re-derived broken in OPPOSITE
+directions; workflow-module-smoke.sh replaces them, mutation-proven on four
+files. Decide publishes the charter as a docs-only PR from its own worktree, and
+charter_pr is a REQUIRED schema field so 'the phase reports the PR' cannot
+degrade into 'the phase claims success'. Reviewer closed the regression it
+introduced.
+
+[215 · heading]
+What the reviewer fixed in place — seven defects
+
+[217 · paragraph]
+One of them would have shipped a scream that never runs. Two are the epic's own
+disease inside the slices built to cure it.
+
+[219 · list]
+S3's watch workflow was UNPARSEABLE. It declared administration: read under
+permissions:. That scope is not one GITHUB_TOKEN accepts, so GitHub rejects the
+whole file and the workflow NEVER RUNS — a scream that is silent by
+construction, inside the slice built to abolish silence. bash -n and all 54
+script assertions stayed green straight through it, because a script harness
+cannot catch a YAML defect: D26's own lesson, recurring one wave later. Removed,
+with the consequence written down rather than papered over — branch-protection
+reads need repo-admin scope that no permissions: key can grant, so the live
+authority is UNARMED until a BREAKGLASS_TOKEN secret exists and the
+committed-log authority carries the check. New harness row 6.8b validates every
+scope against GitHub's accepted set; mutation-proven by re-adding the scope.
+S2's RE-RUN set refused heads GitHub would merge. skipped was in the
+cancelled-class set as the builder's own stated widest guess. GitHub counts a
+required check concluding skipped as SATISFYING protection, so the merge verb
+would have refused a mergeable head. A lie in the opposite direction is still a
+lie, and in a wrapper whose whole promise is that it never lies about the merge
+it is the worst possible place for one. Removed; probe 16/16 pins it from both
+sides.
+S5's own change silently staled the charter for every builder. Publishing by PR
+means the charter is not on origin/main while the wave flies, and the Build and
+Review prompts still said 'Read the epic charter at <path> first' from a
+worktree branched off origin/main — returning the PREVIOUS wave's charter,
+plausibly and without a symptom. Both prompts now interpolate the open PR, say
+the local copy is stale, and point at this Paper; the Review prompt additionally
+routes the wave-log append onto the charter PR's branch, because appending to a
+stale local main would drop the charter changes on the floor.
+S1's doc twin was left contradicting the code it documents.
+docs/ops/merge-gates.md section 7 still described the 6h grace and a tunable
+deleted from every file in the tree. Rewritten to the D58 rule, the refusal, the
+floor, the stated narrowing cost, and D59.
+S3's residual list claimed three gaps and had five. The unpushed-record window
+and the unarmed live authority are now stated in numbers. An incomplete residual
+list is itself a residual.
+S4's replacement clause was ungrammatical ('a push protection refuses (GH006) is
+CORRECT') in a sentence an agent reads while blocked. Byte-neutral repair inside
+four bytes of headroom.
+Three --help handlers printed hard-coded line ranges that any comment edit above
+would silently truncate. All three now print by shape and stop at the first
+non-comment line.
+
+[222 · heading]
+The wish's two open questions, both DECIDED rather than documented
+
+[224 · paragraph]
+AUTO-MERGE: NO, and the objection the wish raised against it is upheld. The wish
+asked that auto-merge be decided with evidence and warned that it widens what
+can land without a human inside a wave whose purpose is narrowing it. The wave
+agreed and found the other path. allow_auto_merge stays FALSE; the throughput
+problem it was meant to solve is answered by a BOUNDED ATTENDED WAIT instead —
+bp-merge.sh polls within a budget, prints every cycle, merges the moment the
+head goes green, and over budget refuses and hands the PR back to its author.
+The residual is named rather than hidden: the loop re-attempts the merge each
+poll, so a builder who runs it and walks away has a wait-length window in which
+a merge happens unwatched. That is strictly narrower than auto-merge — bounded,
+one PR, no queue, and it dies rather than persists — but it is not zero, and the
+wave says so.
+
+[226 · paragraph]
+THE CLAIM-LEASE FALSE RED: DECIDED as P4, not documented again. The lease
+predicate is now 'the claim was live when this PR was opened', and
+LAPSE_GRACE_SECONDS is gone — there is no tunable left to argue about. The
+reviewer re-derived the flip-risk judgment independently rather than re-reading
+the builder: P4 is strictly MORE permissive than the 6h grace for long-lived PRs
+and strictly LESS permissive for a PR opened after its claim had already lapsed.
+The trade is defensible — the old predicate's verdict decayed with the wall
+clock, so the same unchanged PR flipped green to red by sitting, which is a gate
+lying about a PR rather than about a task, and a fixed stated narrowing beats a
+time-varying one. But it is a permanently-open hole: once this check is
+required, the cheapest way to satisfy it forever is to open the PR the moment
+you claim. It is in the code comment, in the runbook, and here.
+
+[229 · heading]
+Ledger audit
+
+[231 · paragraph]
+Clean on every slice, and honest about the one thing it could not do. All five
+slice tasks are claimed, in_progress (never done), published, parented under the
+epic, carrying this Paper, and stamped criterion-by-criterion AS THE WORK
+HAPPENED rather than batched at the end — S1 7/8, S2 10/11, S3 9/10, S4 6/7, S5
+6/7 — with every merge-gated criterion left OPEN for the lead and every unmet
+criterion carrying an honest --miss note. The three deferred round-2 tasks are
+open, unclaimed and untouched. No task outside this wave was modified.
+
+[233 · paragraph]
+hgw2-s5-ci-verdict-reader was CLOSED HONESTLY RATHER THAN CLOSED. The wish asked
+for it, and the honest state is not 'done'. Criteria 6 and 7 were both
+merge-gated halves the builder could only half-prove; the reviewer proved both
+from PR #6414's LIVE state — the check run 'release-scan.sh CI-verdict
+derivation' executed with conclusion SUCCESS (so the paths filter matched and
+the harness really ran), the PR touches no file under tooling/grip/, and the
+screen.mjs:555 finding is in the PR body at line 32, verbatim. That is 8 of 9
+met. The ninth is 'PR merged to main', the lead's to close, and the task stays
+in_progress because the work is not merged — writing done here would be exactly
+the false-done shape this epic exists to kill. #6414 is green on BOTH required
+contexts, the only open PR that is, and is therefore the natural 'merges once
+green' specimen for the flip proof.
+
+[235 · paragraph]
+THE D49 CREATE REGRESSION HAS NOT CLEARED, and wave 3's wave-log note saying it
+had is wrong. bp task create, bp doc create task and raw /v1/data/mutate creates
+alternated between 'unknown error', HTTP 500 and client timeouts across FOURTEEN
+reviewer attempts spanning about six minutes, while reads, patches, publishes,
+claims, stamps and pulses stayed healthy throughout — the same asymmetry two
+builders reported hours earlier. One task landed early in the window
+(hgw4-bl-merge-verb-names-the-run-id, filed and published for the S2 builder
+whose six attempts had failed); one did not. This is not a nuisance: 'PR
+references an active task' is about to become required against this same host,
+so an outage that blocks task CREATION becomes an outage that blocks a fleet
+from opening PRs.
+
+[237 · paragraph]
+THE ITEM THAT ALMOST DID NOT MAKE IT ONTO THE BOARD — it is filed now, and the
+fight to file it is itself the finding. hgw4-bl-disable-bypasses-recording-glass
+is PUBLISHED, priority 1, parented under the epic, five acceptance criteria. It
+took roughly TWENTY create attempts across two windows, and the call that
+finally worked reported nothing: a later retry answered 'document already
+exists', which is how the reviewer learned the draft had landed. THE TRAP WORTH
+RECORDING FOR EVERY FUTURE PHASE: a bp create that REPORTS FAILURE may
+nevertheless have landed as a draft, so read the draft back (bp doc get task
+drafts.<id> --perspective raw) before re-filing, or you will conclude work is
+unfiled when it is merely unpublished. The body:
+scripts/required-checks-apply.sh --disable removes ALL branch protection after
+nothing but --confirm and records nothing, so the recording invariant is a
+MECHANISM for the narrow glass and only a CONVENTION for the total hammer;
+breakglass.sh --close only POSTs enforce_admins and cannot repair a --disable.
+Scoped honestly, because the builder overstated it: this is UNRECORDED, not
+SILENT — breakglass-watch.sh reads UNPROTECTED and reds with 'BREAK-GLASS OPEN
+(total)' when the committed spec says enforced=true, so the wish's 'impossible
+to leave open silently' is actually satisfied; what is missing is attribution.
+The fix is four steps, on the task. Fold it into hgw2-s7, which already touches
+that script.
+
+[239 · paragraph]
+A LIVE GAP THE FLIP MUST ANSWER, found by this wave's own charter PR. #6689
+carries the wave-log entry and its 'PR references an active task' check is RED —
+correctly, by the gate's own rule. The only task it could honestly name is the
+epic parent auth-totp-tests-are-time-boundary-flaky, which is an open, unclaimed
+Goal. Under protection this PR could not merge, and both ways out are wrong:
+claiming a long-lived Goal misrepresents its lifecycle, and naming a sibling
+slice task is a lie. This is not hypothetical and it is not one PR's problem —
+hgw3-s7 (#6688) routes EVERY future epic-cycle charter through exactly this
+shape, so the day the task gate is required, every wave's own charter PR
+deadlocks. Round 2 must decide it: either the epic-cycle files a per-wave
+wave-log task, or the gate learns that a Goal-typed parent backs its own charter
+PR. The five slice PRs (#6684-#6688) are all green on both required contexts, so
+this is specific to the charter shape.
+
+[242 · heading]
+Cross-slice integration
+
+[244 · paragraph]
+All five -r branches merge onto current origin/main with ZERO conflicts, and
+every wave-4 gate is green in that one integrated tree: pr-task-gate 73/0,
+bp-merge 28/0, required-checks selftest 16/16, break-glass 55/0, doc budgets
+PASS, docs-anchors PASS, and module-scope smoke OK on all four workflow files.
+The slices are genuinely file-disjoint, which is why the frontier dispatched
+them in parallel and why they cohere: S2 and S3 both consume
+required-checks-verify.sh but only S2 edits it, and S3's gate runs S2's selftest
+against origin/main's copy, so the two agree in both directions.
+
+[246 · paragraph]
+The one coherence gap worth naming is not a conflict but an absence: nothing in
+the repo POINTS at scripts/bp-merge.sh yet. bp-loop-ledger.md PROCESS RULE 2
+still says gh pr merge --squash --admin, and merge-gates.md, felix.md and
+connectors/README.md still carry the same folklore. That repointing is hgw2-s7's
+own criterion 16 and lands with the flip by design — but until it does, the
+fleet has a merge verb nobody has been told about.
+
+[249 · heading]
+Grade: B+
+
+[251 · paragraph]
+What earns it. Every slice did the hard version. S1 could have widened the grace
+to 24h and moved on; instead it DELETED the tunable and replaced a time-varying
+predicate with a fixed one, then wrote the cost of that narrowing into the code
+rather than into a changelog nobody reads. S2 could have been a bash alias;
+instead it is a seven-state refusal table keyed on the string because the exit
+code was measured to carry no information, with a pure classifier seam that lets
+the whole table be harnessed over captured fixtures with no token — and along
+the way it found that the deadlock detector was returning green on a permanently
+frozen head. S3 proved its ordering claim AT THE API CALL by snapshotting the
+log inside a gh stub, rather than asserting it from source, which is the
+difference between a proof and a description. S5 refused to reinstate either of
+the two broken gates it inherited and built a third. And four of five builders
+named holes in their own work in writing, unprompted, including the two the
+reviewer then had to close.
+
+[253 · paragraph]
+What holds it below an A. The wish's headline — INSTALL THE TEETH — did not
+happen, and while the sequencing is correct and defensible, a wave graded
+against this wish cannot call that a rounding error: protection is still 404 and
+the fourth consecutive wave ends with every ratchet advisory. Beyond that, two
+defects that reached the reviewer should not have. The invalid permissions scope
+shipped a workflow that GitHub would have refused to parse — a scream that never
+runs, in the slice whose entire subject is silence, and it is the SECOND wave in
+a row where a YAML defect walked past a green script harness. And the skipped
+conclusion shipped as an explicitly-labelled guess in a merge verb, where a
+wrong guess means refusing a mergeable head. Both were found by reading, not by
+any gate. There is also almost no live exercise anywhere in this wave:
+bp-merge's merge_loop and preflight have never touched a real protected PR,
+breakglass.sh has never run against the real repo, and the watch workflow has
+never executed — every proof here is hermetic, which is honest but is not the
+same as working.
+
+[255 · paragraph]
+One thing that is NOT held against the wave: the branches are pushed and the PRs
+are open. Six consecutive waves ended with reviewed, gate-passing work sitting
+on local-only branches in a shared checkout that other cycles reset. #6684
+through #6689 exist.
+
+[258 · heading]
+What the next wave takes
+
+[260 · paragraph]
+ROUND 2, in dispatch order, the moment its dependencies merge.
+hgw2-s7-enable-branch-protection after S1 + S2 + S3 (#6684, #6685, #6686) — this
+is THE FLIP and everything it was waiting for is now on a branch. Two
+instructions the reviewer would add to its brief. First: run the throwaway-PR
+proof THROUGH scripts/bp-merge.sh rather than around it, because S7's proof is
+the only opportunity in sight to exercise the merge verb's live paths, and a
+wrapper whose merge_loop has never run under enforce_admins is a wrapper the
+fleet will discover is broken at the worst moment. Second: fold in
+hg-bl-disable-bypasses-recording-glass, whose body is above, since S7 already
+touches the apply script. Then hg-bl-hotfix-breakglass-records-nothing after S1
+(#6684), which edits the same workflow file.
+
+[262 · paragraph]
+LEAD ACTIONS this wave could not do from a worktree: merge #6414 and close
+hgw2-s5-ci-verdict-reader's ninth criterion on its claim epoch (8 of 9 are
+stamped and waiting); dispatch the genuinely independent second review of S1's
+P4 predicate, which this workflow structurally cannot spawn; provision the
+BREAKGLASS_TOKEN secret, without which the scream's live authority is unarmed;
+file hg-bl-disable-bypasses-recording-glass if the ledger recovers before S7
+runs; and update the out-of-repo ~/.claude/CLAUDE.md:31 push mandate, which
+still carries the pre-GH006 framing.
+
+[264 · blockquote]
+Wave 4 did not install the teeth. It built every tool the dentist refused to
+work without, proved each one able to fail, and put them on branches with the
+PRs open — including the one that would have gone in as a scream GitHub could
+not even parse. The plain sentence is still true: nothing in this repo is
+required-by-name. It is now false by three merges, and every one of them is a
+link you can click.

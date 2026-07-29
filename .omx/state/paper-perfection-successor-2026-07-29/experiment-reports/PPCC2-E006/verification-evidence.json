@@ -1,0 +1,96 @@
+{
+  "checks": [
+    {
+      "command": "python3 -m compileall -q candidate.py test_candidate.py validate_report.py",
+      "elapsed_seconds": 0.045851,
+      "exit_code": 0,
+      "name": "typecheck_dynamic_python",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "command": "python3 -m tabnanny candidate.py test_candidate.py validate_report.py",
+      "elapsed_seconds": 0.046142,
+      "exit_code": 0,
+      "name": "linter_python",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "command": "python3 -m unittest -v test_candidate.py",
+      "elapsed_seconds": 0.845318,
+      "exit_code": 0,
+      "name": "unit_tests",
+      "status": "PASS",
+      "stderr_tail": "test_canonical_cli_api_round_trip_is_byte_stable (test_candidate.CandidateUnitTest) ... ok\ntest_canonical_source_is_exact_and_all_projections_pass (test_candidate.CandidateUnitTest) ... ok\ntest_hard_wrap_respects_unicode_display_width (test_candidate.CandidateUnitTest) ... ok\ntest_missing_or_invalid_block_type_is_rejected (test_candidate.CandidateUnitTest) ... ok\ntest_typed_tree_is_counted_without_truncation (test_candidate.CandidateUnitTest) ... ok\ntest_verify_output_replays_generated_metrics_when_present (test_candidate.CandidateUnitTest) ... ok\n\n----------------------------------------------------------------------\nRan 6 tests in 0.789s\n\nOK\n",
+      "stdout_tail": ""
+    },
+    {
+      "command": "python3 candidate.py run --assignment-map /Volumes/SATECHI/github/barkpark/.omx/state/paper-perfection-successor-2026-07-29/experiment-assignments.json --output artifacts",
+      "elapsed_seconds": 34.153011,
+      "exit_code": 0,
+      "name": "end_to_end_candidate",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": "{\"assignment_id\": \"PPCC2-E006\", \"candidate_gate_pass_rate\": {\"attempted\": 63, \"passed\": 63, \"value\": 1.0}, \"fixture_count\": 9, \"observed_failure_rate\": {\"hard_failures\": 0, \"hard_gate_checks\": 63, \"rate\": 0.0}, \"status\": \"PASS\"}\n"
+    },
+    {
+      "command": "python3 candidate.py verify --output artifacts",
+      "elapsed_seconds": 0.769651,
+      "exit_code": 0,
+      "name": "artifact_replay",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": "{\"all_hard_gates_pass\": true, \"fixture_count\": 9, \"required_metric_count\": 11, \"status\": \"PASS\"}\n"
+    },
+    {
+      "command": "bash -lc set -e\nROOT=$(git rev-parse --show-toplevel)\nDIR=\"$ROOT/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E006\"\ncd \"$DIR\"\ntmp=$(mktemp -d \"${TMPDIR:-/tmp}/ppcc2-e006-tools.XXXXXX\")\ntrap 'trash \"$tmp\" >/dev/null 2>&1 || true' EXIT\ngo build -o \"$tmp/widthcheck\" \"$ROOT/internal/pdrender/cmd/widthcheck\"\ngo build -o \"$tmp/htmlcheck\" \"$ROOT/internal/pdrender/cmd/htmlcheck\"\nfor fixture in artifacts/fixtures/*; do\n  w80=$($tmp/widthcheck \"$fixture/tui80.txt\" 80)\n  w40=$($tmp/widthcheck \"$fixture/tui40.txt\" 40)\n  gui=$($tmp/htmlcheck gui \"$fixture/studio.html\")\n  email=$($tmp/htmlcheck email \"$fixture/email.html\")\n  jq -e -n --argjson w80 \"$w80\" --argjson w40 \"$w40\" --argjson gui \"$gui\" --argjson email \"$email\" '$w80.overflow_lines==0 and $w40.overflow_lines==0 and $gui.body_found and $gui.meaningful and $email.body_found and $email.meaningful and $email.links_valid' >/dev/null\ndone\necho 'external widthcheck/htmlcheck: PASS (9 fixtures x 4 checks)'\n",
+      "elapsed_seconds": 2.243349,
+      "exit_code": 0,
+      "name": "external_surface_checks",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": "external widthcheck/htmlcheck: PASS (9 fixtures x 4 checks)\n"
+    },
+    {
+      "command": "go test ./internal/pdrender/...",
+      "elapsed_seconds": 2.407438,
+      "exit_code": 0,
+      "name": "go_pdrender_tests",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": "ok  \tgithub.com/FRIKKern/barkpark/internal/pdrender\t0.915s\n?   \tgithub.com/FRIKKern/barkpark/internal/pdrender/cmd/demo\t[no test files]\n?   \tgithub.com/FRIKKern/barkpark/internal/pdrender/cmd/dump\t[no test files]\nok  \tgithub.com/FRIKKern/barkpark/internal/pdrender/cmd/htmlcheck\t0.333s\n?   \tgithub.com/FRIKKern/barkpark/internal/pdrender/cmd/widthcheck\t[no test files]\n"
+    },
+    {
+      "command": "go vet ./internal/pdrender/...",
+      "elapsed_seconds": 0.266489,
+      "exit_code": 0,
+      "name": "go_pdrender_vet",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": ""
+    },
+    {
+      "command": "bash scripts/audit-paper-readers-test.sh",
+      "elapsed_seconds": 10.294001,
+      "exit_code": 0,
+      "name": "reader_audit_regression",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": "paper reader audit fixture: PASS\n"
+    },
+    {
+      "command": "python3 -m json.tool artifacts/run-summary.json",
+      "elapsed_seconds": 0.046582,
+      "exit_code": 0,
+      "name": "run_summary_json_lint",
+      "status": "PASS",
+      "stderr_tail": "",
+      "stdout_tail": "     ]\n                },\n                \"studio\": {\n                    \"pass\": true,\n                    \"repeat_sha256\": [\n                        \"682a0a4f4990c5c99027a293c070f57da01c3523e403f2569643bd5273cbf06f\",\n                        \"682a0a4f4990c5c99027a293c070f57da01c3523e403f2569643bd5273cbf06f\"\n                    ]\n                },\n                \"tui40\": {\n                    \"pass\": true,\n                    \"repeat_sha256\": [\n                        \"f43db60051da293bf9f88d8ded9b3ad76677c060a355760488848a083055d8d3\",\n                        \"f43db60051da293bf9f88d8ded9b3ad76677c060a355760488848a083055d8d3\"\n                    ]\n                },\n                \"tui80\": {\n                    \"pass\": true,\n                    \"repeat_sha256\": [\n                        \"998f826291edecc14f03a1adc2d092bb6a36e2cf57d1bb109ab8afdbe3baf32e\",\n                        \"998f826291edecc14f03a1adc2d092bb6a36e2cf57d1bb109ab8afdbe3baf32e\"\n                    ]\n                }\n            },\n            \"semantic_node_count\": 35,\n            \"semantic_segment_count\": 39,\n            \"studio_structural_completeness\": {\n                \"logical_h1_count\": 1,\n                \"missing_authored_strings\": [],\n                \"pass\": true\n            },\n            \"tui_width\": {\n                \"pass\": true,\n                \"tui40_max_display_width\": 40,\n                \"tui40_overflow_lines\": 0,\n                \"tui80_max_display_width\": 80,\n                \"tui80_overflow_lines\": 0\n            },\n            \"unit_id\": \"paper:task-tui-wave-2026-07-23b\"\n        }\n    ],\n    \"metrics\": {\n        \"accessibility\": {\n            \"attempted\": 9,\n            \"pass\": true,\n            \"pass_rate\": 1.0,\n            \"passed\": 9\n        },\n        \"batch_capacity\": {\n            \"largest_disjoint_batch_completing_all_hard_gates_without_repair_spillover\": 9,\n            \"provisional_only\": true,\n            \"reason\": \"Round 2 candidate evidence cannot seal Round 5 build capacity.\",\n            \"surface_projections_per_unit\": 5,\n            \"units_attempted\": 9,\n            \"wall_seconds\": 34.099789\n        },\n        \"candidate_gate_pass_rate\": {\n            \"attempted\": 63,\n            \"passed\": 63,\n            \"value\": 1.0\n        },\n        \"cli_api_round_trip\": {\n            \"attempted\": 9,\n            \"pass\": true,\n            \"pass_rate\": 1.0,\n            \"passed\": 9\n        },\n        \"content_preservation\": {\n            \"attempted\": 9,\n            \"pass\": true,\n            \"pass_rate\": 1.0,\n            \"passed\": 9\n        },\n        \"email_safety\": {\n            \"attempted\": 9,\n            \"pass\": true,\n            \"pass_rate\": 1.0,\n            \"passed\": 9\n        },\n        \"observed_failure_rate\": {\n            \"hard_failures\": 0,\n            \"hard_gate_checks\": 63,\n            \"rate\": 0.0\n        },\n        \"pilot_gate_pass_rate\": {\n            \"applicable\": false,\n            \"reason\": \"PPCC2-E006 is Round 2 diverge; Round 5 pilot was not started.\",\n            \"value\": null\n        },\n        \"portable_doc_schema_validity\": {\n            \"attempted\": 9,\n            \"pass\": true,\n            \"pass_rate\": 1.0,\n            \"passed\": 9\n        },\n        \"rollback\": {\n            \"pass\": true,\n            \"production_mutations\": 0,\n            \"rule\": \"discard the PPCC2-E006 assignment directory\"\n        },\n        \"studio_structural_completeness\": {\n            \"attempted\": 9,\n            \"pass\": true,\n            \"pass_rate\": 1.0,\n            \"passed\": 9\n        },\n        \"tui_width\": {\n            \"attempted\": 9,\n            \"overflow_lines_total\": 0,\n            \"pass\": true,\n            \"pass_rate\": 1.0,\n            \"passed\": 9,\n            \"tui40_max_display_width\": 40,\n            \"tui80_max_display_width\": 80\n        }\n    },\n    \"required_surfaces\": [\n        \"studio\",\n        \"tui80\",\n        \"tui40\",\n        \"email\",\n        \"cli_api\"\n    ],\n    \"schema_version\": \"ppcc2-e006-run-summary/v1\",\n    \"status\": \"PASS\"\n}\n"
+    }
+  ],
+  "schema_version": "ppcc2-e006-verification/v1",
+  "status": "PASS"
+}

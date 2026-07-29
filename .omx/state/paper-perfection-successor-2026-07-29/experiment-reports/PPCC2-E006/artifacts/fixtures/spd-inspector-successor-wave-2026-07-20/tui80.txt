@@ -1,0 +1,1837 @@
+The inspector stops borrowing the reader's column — the desk pays for it in
+priority order
+================================================================================
+[1 · heading]
+The inspector stops borrowing the reader's column — the desk pays for it in
+priority order
+
+[2 · paragraph]
+Living wave Paper for the FIRST wave of
+`spd-b39-user-opened-inspector-shape-successor`, which stands as its OWN ROOT
+work. Its parent epic `studio-space-priority-desk` CLOSED at wave-9 Review on
+D136 with a refused seal — NO SEAL argued separately on three ledgers (D136
+i/ii/iii) — and D142 moved this successor to root rather than keeping a dead
+epic open as a container. Charter:
+`.claude/workflows/bp-studio-space-priority-charter.md`, D1-D147.
+
+[3 · paragraph]
+READING DISCIPLINE, inherited and load-bearing. Every code fact in this Paper
+was read via `git show origin/main:<path>`. The primary checkout is 100 commits
+BEHIND origin/main and 13 commits AHEAD of it (it carries the wave-9 amendment
+D136-D147, which origin does not) — so neither tree alone is the truth, and a
+grep of the working copy returns CONFIDENT EMPTY results that manufactured two
+overturns in the parent epic. Code from origin/main; charter ledger from the
+local file; every desk number from the committed artifact
+`scripts/measurements/spd-visible-table-2026-07-20.json` at origin/main, served
+SHA `65541e2d43e7ea116c6d49e0ac0b1e0109c93a8f`, slot blue, provenance bracket
+matched, 54 rows, non-vacuity guard applied in 21 of 21 applicable rows,
+`unsettled_rows` 0.
+
+[4 · paragraph]
+STATUS: Strategize complete — the wave is SURVEYING. Digest appends the survey
+digest and the verify plan BEFORE the verifiers fly; Decide appends the
+decisions and the wave plan BEFORE the builders fly; Review closes this Paper as
+the debrief. Per the model constraint, every slice dispatches with
+`builder_model: opus`. No phase of this wave runs on Fable.
+
+[5 · heading]
+The wish
+
+[6 · paragraph]
+Decide the shape of the user-summoned inspector, ship it, and MEASURE it with
+the committed instrument against the DEPLOYED build. The question is explicitly
+NOT 'dock or overlay' — D126 killed that framing with arithmetic. The real
+question, pre-registered by D127 and handed over undecided: is a user-summoned
+inspector a MODE in which the reading bar is deliberately suspended AND SAID to
+be — or is the reading bar law, meaning the panel may never take the screen and
+must become something else entirely?
+
+[7 · paragraph]
+D127 is explicit about ORDER, not about the answer: the successor MAY rule the
+mode exempt, but only after stating the rule BEFORE it looks at its own table.
+This Paper states that rule below, in the Direction section, written against a
+table that already exists and is already public — so the pre-registration is
+about the SUCCESSOR's table, the one the shape this wave ships will produce.
+
+[8 · heading]
+What we inherit, measured rather than argued
+
+[9 · paragraph]
+The committed 54-row table is the ground. 9 viewport widths x 3 forced faces x 2
+inspector states. D107 fixed 'desktop rows' BEFORE any table was consulted:
+1440, 1280, 1024, 900, 800, 764, 700. Viewport 640 is an excluded named
+shortfall; viewport 500 / phone was never ch-gated (its criterion is
+navigability plus no horizontal scroll).
+
+[10 · paragraph]
+THE DEFAULT STATE IS A LARGE, REAL WIN. `spd-b29` shipped the D91 hybrid: below
+the `wide` bucket the cascade paints the never-asked-for inspector as a 41px
+in-flow strip, and the scrim is suppressed there (0 of 27 default rows render
+it). Default-state visible reading width, resolved Iowan face, probe 10.0000
+px/ch at 18px: 1440 640px / 1280 596px / 1024 599px / 900 640px / 800 635px /
+764 631px / 700 567px. Eighteen of the twenty-one desktop default cells MEET
+>=55ch. Three refuse, ALL forced Georgia (11.0469 px/ch at 18px): 1280 at
+53.95ch, 1024 at 54.22ch, 700 at 51.33ch — `overflow_px: 0` in all three,
+genuinely narrow columns rather than scroll-masked ones. D141 restated their
+ownership BY MECHANISM: the 720px surface cap plus Georgia's advance, owned by
+`spd-b42-georgia-default-shortfall-inflow-width`, NOT by a floor bind and NOT by
+`spd-b28` (which is `done` and whose own close reason disclaims them).
+
+[11 · paragraph]
+THE USER-OPENED STATE IS THE DEFECT, AND IT IS TOTAL BELOW `wide`. Quoted from
+`visible_meets_55ch`, never `content_meets_55ch` (D139 — the two fields disagree
+by FIFTEEN on the 21 desktop user-opened cells, and quoting the layout field
+would let a ruling claim 20-of-21 MEET in the very state it is refusing). The
+honest ledger is 5 MEET, 16 FAIL. All five MEETs sit in the `wide` bucket where
+the inspector DOCKS: `position: static`, `overlap_over_content_box_px: 0`, scrim
+absent, one-click delta 0.000px. Sub-wide, at 1024 / 900 / 800 / 764 / 700 x
+three faces, it is 15 of 15 FAIL without exception. The sixteen failures
+decompose and must be quoted decomposed: THIRTEEN are overlay-caused (MEET in
+default, FAIL on one click) and THREE are inherited from the default shortfall
+and fail in both states.
+
+[12 · paragraph]
+THE SHARPEST CELL. At a 1024px viewport on the resolved Iowan face, one click
+takes the reader from 599.000px = 59.90ch to 378.958px = 37.90ch. 220.042px =
+22.00ch gone, with the inspector at `position: absolute`, `width: 300px`,
+overlapping the content box by 260px. D109 names what makes this a DEFECT rather
+than a disliked number: at that same click the LAYOUT metric RISES (`content_px`
+599 -> 640, because the 41px strip leaves flow and hands its width back to the
+panel) while the reader LOSES 219px. The layout number and the human move in
+opposite directions on the single interaction this work is about.
+
+[13 · paragraph]
+AND IT IS A HALF-STATE, NOT A MODE. The scrim covers the ENTIRE content box at
+55% black (`scrim_covers_content_fully: true`, `scrim_alpha: 0.55`,
+`dimmed_content_px` equal to the row's whole `visible_content_px` in each of the
+21 rows where it renders). The text is dimmed, not hidden. And the reader cannot
+leave: `spd-b12-inspector-overlay-dismiss` is open at 0/4 — no Escape, no
+tap-to-dismiss, no `aria-modal`, no focus management — and the scrim is a
+`::after` PSEUDO-ELEMENT carrying `pointer-events: none` by deliberate design (a
+click-catching scrim would swallow edits), so it structurally cannot carry a
+dismiss handler. Neither a clean mode nor a viable dock. That indeterminacy is
+D127's real subject.
+
+[14 · paragraph]
+THE CEILING, AS THE CHARTER LEFT IT. D126: `ceiling = min(panel_px, surface cap
+720) - gutter - 55 x probe px/ch`. At 1024 that is 90.0px on the resolved Iowan
+face, 32.4px forced Georgia, 135.5px Source Serif 4 — and it is FLAT from 800
+through 1440, because the 720px surface cap binds at every width at or above
+1024. A metadata panel does not fit in 90px. The corrected in-flow comparable is
+340px = 34.00ch; the 420px / ~42ch figure is STRUCK by D126 and may not be
+quoted.
+
+[15 · heading]
+The finding that reopens the option set
+
+[16 · paragraph]
+D126's arithmetic, and the criterion-2 evidence string on `spd-b39` that repeats
+it, hold `panel_px` FIXED at its measured 720 at viewport 1024. But 720 is not a
+constraint — it is a CHOICE the desk is currently making. The committed artifact
+records the pane rail per row: at 1024 it is `visible_pane_widths_px: [44,
+260]`. The desk is spending 260px on a document-list column while it overlays
+the inspector on the prose. 1024 = 44 + 260 + 720.
+
+[17 · paragraph]
+The parent epic's own Vision sentence declares the priority order that was never
+run at this transition, verbatim: 'all squeeze flows outward by explicit
+priority (list pane compresses first, then rails to 44px strips, then the
+Document inspector overlays instead of docking)'. At 1024 the list pane has
+never been asked to compress. The inspector goes straight to the overlay — step
+three of a ladder whose first step was skipped.
+
+[18 · paragraph]
+The machinery to run it ALREADY SHIPS.
+`BarkparkWeb.Studio.PaneBuilder.display_state/4` returns `:full | :strip |
+:hidden` per pane. In the `narrow` bucket with an editor open, every pane is
+`:hidden` except the LAST, which is a 44px `:strip` — which is exactly why the
+artifact reads `[44]` at 900 and below and `[44, 260]` at 1024, where the
+`standard` branch instead returns `:strip` iff `collapse?/3` else `:full`. The
+rule that frees the pixels is written, tested and deployed; it is simply not
+reachable from the `standard` bucket, and nothing in the codebase lets the
+inspector's own state influence it.
+
+[19 · paragraph]
+RUN THE LADDER AT 1024, on measured inputs. If opening the inspector applies the
+shipped `narrow` rule, the rail goes [44, 260] -> [44] and the panel goes 720 ->
+980. Dock the 300px inspector in flow: surface = min(680, 720) = 680; the gutter
+READ at 1024 in the committed artifact is 80px total; content = 600px. Per face,
+each divided by its OWN probe advance at 18px, no cross-face division: 600 /
+10.0000 = 60.00ch resolved Iowan; 600 / 11.0469 = 54.31ch forced Georgia; 600 /
+9.1719 = 65.42ch forced Source Serif 4.
+
+[20 · paragraph]
+Read that against what ships today at the same cell: 37.90 / 34.30 / 41.32ch.
+The reader who opens the inspector at 1024 would end up with MORE reading width
+than they had before opening it (default is 599px = 59.90ch), with the inspector
+DOCKED, `overlap_over_content_box_px: 0`, and the scrim never rendering. Forced
+Georgia lands at 54.31ch — which is the INHERITED default shortfall (54.22ch at
+that same width) essentially unchanged, owned by
+`spd-b42-georgia-default-shortfall-inflow-width`, and NOT overlay-caused.
+Charging it to the inspector would double-count the default shortfall, which
+D139 forbids by name.
+
+[21 · paragraph]
+This arithmetic is a HYPOTHESIS, stated so it can fail. It rests on four
+assumptions this wave must break or confirm before it builds: that the
+`standard` bucket's second pane can be driven to `:hidden` by an inspector-state
+input at all; that the panel actually claims the freed width rather than
+something else absorbing it; that the 80px gutter reading at 1024 survives the
+panel change; and that a 300px in-flow inspector inside a 980px panel does not
+trip horizontal overflow on `.editor-body.bp-paper-body`. Each is a survey and
+verify assignment below.
+
+[22 · heading]
+The direction
+
+[23 · paragraph]
+THE INSPECTOR STOPS BORROWING THE READER'S COLUMN, AND THE DESK PAYS FOR IT IN
+PRIORITY ORDER. The answer to D127's binary is neither horn alone: the reading
+bar is LAW at every width where the desk can still pay for the inspector out of
+lower-priority space, and it is SUSPENDED-AND-SAID only where a run proves there
+was nothing left to sell. A three-tier ladder, each tier chosen by arithmetic
+rather than by taste.
+
+[24 · paragraph]
+TIER 1 — `wide` (1280, 1440). UNCHANGED, and this is a hard constraint rather
+than an omission. The inspector docks, costs 0.000px on the click,
+`visible_content_px == content_px`, and five of the six MEETs in the entire
+user-opened table live here. Any slice this wave dispatches must prove wide
+moved zero pixels, by the runtime rule-deletion diff D102 used, not by
+assertion.
+
+[25 · paragraph]
+TIER 2 — `standard` (1024). THE LIST YIELDS AND THE INSPECTOR DOCKS. On the
+click that opens the inspector, the desk applies the pane rule it already ships
+one bucket down; the 260px document-list column folds to nothing (its 44px strip
+stays on screen and clickable, the same distinction `spd-b29` proved is the
+difference between a collapsed strip and an un-openable panel), the panel takes
+the width, and the inspector sits BESIDE the prose instead of on top of it. No
+overlay. No scrim. No mode. The >=55ch bar HOLDS here and is measured, not
+exempted. This is the wave's headline, and it converts the single sharpest cell
+in the whole ledger from 37.90ch to a predicted 60.00ch.
+
+[26 · paragraph]
+TIER 3 — `narrow` and `phone` (900 and below). THE PANEL STOPS BEING A PANEL.
+Here the arithmetic is genuinely closed and the charter is right: D113 measured
+that `.editor-panel`'s left edge is 44px at EVERY sub-wide width — the rail has
+already yielded everything, there is nothing left to sell — and docking is not
+merely insufficient but WORSE than the overlay at 800 (a 300px dock inside a
+756px panel leaves 376px of content against the overlay's measured 396.9px). So
+the inspector becomes a SUMMONED DESTINATION: it takes the whole panel, the
+reading column is LEFT rather than dimmed, and the breadcrumb drill that ALREADY
+SHIPS at `phone` (the artifact records `crumbs.host_present: true`, `visible:
+true`, `count: 3` at viewport 500, with `pane_columns: 0`) carries the reader
+back. This is Sanity's shape, MD3's standard-sheet tier, and the parent epic's
+own vision sentence for phone, extended upward to every width where docking is
+dead.
+
+[27 · paragraph]
+THE UNIFYING RULE, and the aesthetic core: NOWHERE does the desk end up with a
+reader's prose at 55% black under a panel. The dimming is ABOLISHED, not tuned.
+A mode either shows the document or it does not, and the shipped design's
+refusal to choose is the defect D127 is really asking about. Pay for the dock
+where the desk can afford it; leave the document where it cannot.
+
+[28 · heading]
+The pre-registered rule (D127), stated before the successor's table is consulted
+
+[29 · paragraph]
+This is written now, in a published Paper, before this wave's shape exists and
+therefore before its table exists. It will be landed as a numbered decision in
+the charter FILE in the same wave that cites it (D135), because a Paper's claim
+to have committed something is a claim like any other and this work verifies
+claims.
+
+[30 · paragraph]
+RULE, part 1 — WHERE THE BAR APPLIES. In the user-opened state the >=55ch bar
+APPLIES at every width where a reading column is on screen: `wide` and
+`standard`. It is measured there by `visible_meets_55ch` (D139), per face, each
+figure naming its face, its font-size and its probe-derived px/ch, with
+cross-face division BANNED (D83). A failure there is a failure; no exemption is
+available at those widths and none will be sought.
+
+[31 · paragraph]
+RULE, part 2 — WHERE IT DOES NOT APPLY, AND WHAT REPLACES IT. At `narrow` and
+`phone`, in the user-opened state ONLY, the bar does not apply, because no
+reading column is on screen to measure. This is NOT the metric being made
+unmeasurable: the harm this work measured was OCCLUSION of a column the reader
+was still trying to read, and removing the column removes the reading, not
+merely the measurement. The exemption is EARNED by three replacement criteria,
+all of which must pass or the exemption is void and Tier 3 reverts to a defect:
+
+[32 · paragraph]
+(a) ROUND-TRIP FIDELITY. default -> user-opened -> dismissed returns the reading
+column BIT-IDENTICAL to its pre-open value, at every width and every forced
+face, measured by the instrument in one run rather than compared across runs. A
+destination the reader cannot get back from is worse than an overlay.
+
+[33 · paragraph]
+(b) THE EXIT IS CHEAP AND PLURAL. Escape, an explicit close control, and a tap
+outside all dismiss; focus is trapped while summoned and restored to the
+invoking control on dismiss; `aria-modal` and `aria-expanded` tell the truth in
+every state. This is `spd-b12-inspector-overlay-dismiss`'s four criteria, and it
+is the SPINE of any mode claim — a mode you cannot leave is a trap, and the
+current one cannot be left. Note the structural constraint the survey must
+resolve: today's scrim is a `::after` pseudo-element with `pointer-events:
+none`, so it cannot carry a dismiss handler and a real element or a window-level
+key handler is required.
+
+[34 · paragraph]
+(c) THE MODE DECLARES ITSELF. No reading text is left half-legible under a scrim
+in any state at any width — `scrim_covers_content_fully` must be false, or the
+scrim absent, in every row of the successor's table. If the shipped shape still
+dims prose anywhere, the exemption does not apply and the cell counts as a
+failure.
+
+[35 · paragraph]
+RULE, part 3 — WHAT MAY NOT MOVE. Viewport 640 stays a named, owned shortfall
+(D100 as superseded by D106: 50.7ch resolved Iowan, 45.9ch forced Georgia — the
+'~0.2ch / ~5.4ch' figures may never be quoted, they were the user-opened state
+read as the default one). Viewport 500 / phone stays never-ch-gated. D107's
+seven desktop widths are FIXED and may not be renegotiated by any slice that
+consults the table.
+
+[36 · heading]
+The direction debate — the rivals, and why the winner won
+
+[37 · paragraph]
+RIVAL 1 — MODE BY DECREE. Change no geometry. Rule the user-opened state an
+exempt mode, write the rule into the charter before looking, fix only the
+dismissal grammar, ship. It is the cheapest candidate, it is explicitly
+sanctioned by D127, and it would close this work in one small wave. REFUSED. It
+accepts the half-state as permanent: the scrim still dims the entire content box
+at 55% black and the reader still watches 22.00ch of prose go grey on a single
+click at 1024. A mode-exemption that leaves the document visible-but-illegible
+under the panel is not a mode — it is exactly the INDETERMINACY the wish names
+as the defect, and declaring it legal does not resolve it. Worse, it forecloses
+Tier 2 permanently: it writes an exemption over the one width the desk could
+actually have paid for, and a later wave inheriting that exemption would have no
+reason to re-check the arithmetic.
+
+[38 · paragraph]
+RIVAL 2 — THE NARROW SHEET. Shrink the inspector below 300px until an in-flow
+dock fits at 1024. REFUSED on D126's own terms AND on content. The ceiling with
+the panel frozen is 90px resolved Iowan and 32.4px forced Georgia; nothing that
+answers to 'metadata panel' fits. And the panel is ALREADY too narrow for its
+contents at 300px — the overlay block in `root.html.heex` ships `.bp-doc-field {
+flex-wrap: wrap; }` inside it, an authored admission that the label/value rows
+collide, and the Relations section holds outbound references plus three groups
+of inbound backlinks that grow without bound. Narrowing an already-cramped panel
+to buy fractions of a ch, per face, is the threshold-gerrymandering D83 and D103
+forbid by name.
+
+[39 · paragraph]
+RIVAL 3 — DRILL EVERYWHERE. Make the inspector a summoned destination at every
+non-`wide` width, 1024 included. This is the strongest rival and it very nearly
+won: one rule instead of two, one shape to build and test, no new dimension on
+`display_state`, no collision with the epic's 40-cell literal pin, and it
+satisfies the pre-registered rule cleanly. It lost on a single point: at 1024 it
+GIVES AWAY a MEET the desk can afford. Throwing the reader out of their document
+to check a slug, at a width where the arithmetic says the panel and the prose
+fit side by side with 60.00ch to spare, is precisely the desk failing to reason
+about the space it has — the charge this whole epic was filed on. Rival 3 is
+retained as the NAMED FALLBACK, not discarded (see the absorption below).
+
+[40 · paragraph]
+WHY THE LADDER WON. It is the only candidate derived from the parent epic's OWN
+declared priority order rather than from a preference. It converts the sharpest
+measured cell in the ledger into a predicted pass by arithmetic on measured
+inputs rather than by changing a rule or moving a threshold. And it makes the
+pre-registered exemption HONEST in a way no rival can: the bar is suspended only
+at widths where a run can demonstrate the desk had nothing left to sell — which
+D113 already demonstrated for 900 and below, and which the charter never even
+asked at 1024.
+
+[41 · heading]
+The sharpest attack on the winner
+
+[42 · paragraph]
+THE ATTACK. Tier 2 is bought by giving `display_state` a new input, and
+`display_state/4`'s 40-cell exhaustive table of hardcoded literals is, by D94's
+own words, 'the epic's one genuinely non-vacuous wide lock' — the only assertion
+in the repo that catches a regression of `collapse?/3`, proven by fault
+injection when its neighbouring 'bit-identical' test stayed green and was later
+retired by conversion. And D94's re-authored criterion 2 names 'the
+wide/STANDARD `display_state/4` table is unchanged, pinned by literal constants'
+as clause (a). Viewport 1024 is `standard`. So this wave's headline collides
+head-on with the lock the epic wrote to protect itself, at exactly the width it
+protects.
+
+[43 · paragraph]
+THE SECOND EDGE OF THE SAME ATTACK. The Tier 2 win is bought by making a
+user-visible document list DISAPPEAR on a metadata click. If that reads as the
+desk losing the reader's place, then a 22ch gain has been purchased with a
+navigation regression that no ch figure in any table will ever show — and this
+work has been overturned before by exactly that shape of blindness (D96: the
+secondary pane was dead for five waves behind green tests, because every
+covering test drove the socket and none drove the DOM).
+
+[44 · paragraph]
+HOW THE WAVE ABSORBS IT. (1) The new dimension lands as a NEW ARITY — an
+inspector-aware `display_state/5` delegating to an UNTOUCHED `/4` — so the
+40-cell literal table stays byte-identical and D94(a) is satisfied by
+construction rather than by argument, and the new dimension earns its OWN
+exhaustive literal table, extending the lock instead of widening it. Any shape
+that requires editing a pinned literal is refused at Decide. (2) The
+disappearing-list risk becomes a first-class acceptance criterion rather than a
+hope: round-trip fidelity must restore the PANES and the reading column, the
+44px strip must stay on screen and clickable in the yielded state, and the proof
+must drive a real browser rather than a socket. (3) Both edges are survey
+assignments below, and if the survey shows `display_state` cannot take a fifth
+input without disturbing the pin, the wave falls back to Rival 3 at 1024 — the
+two shapes share the dismissal grammar, the destination surface, the metric rule
+and all of the instrument work, so the fallback costs this wave ONE SLICE, never
+its direction. A direction whose fallback is a rival it already argued is a
+direction that can survive being wrong.
+
+[45 · heading]
+Standing law this wave inherits, each bought with a real failure
+
+[46 · paragraph]
+MEASUREMENT. Every ch figure names its face, its font-size and its probe-derived
+px/ch; cross-face division is BANNED (D83). `viewport 640` and `content 640`
+never appear bare. The user-opened verdict is quoted from `visible_meets_55ch`,
+never `content_meets_55ch` (D139). The 13/3 overlay-caused vs inherited
+decomposition is quoted decomposed. D124 and D125 are always quoted TOGETHER, as
+are D119 and D133. The struck figures — 420px, ~42ch, '~0.2ch / ~5.4ch', '9 of 9
+default cells MEET' — may not be quoted.
+
+[47 · paragraph]
+THE INSTRUMENT. It has NO gate authority by design: it needs deployed guerrilla,
+an admin token and an authenticated Chromium run, and a flaky gate everyone
+learns to ignore is worse than an honest script. Observed full-sweep runtimes
+are 29.8s / 30.9s / 32.8s / 59.7s — the '~10 minutes' comment was off by ~20x
+and was a live false-blocker (D115). A run that writes ZERO BYTES is an
+INSTRUMENT FAILURE reported as such, never a desk fact (D130, D138). Determinism
+is ~80%, not 100%: the honest sentence is '4 of 5 completed runs reproduce the
+committed table at tolerance zero; the fifth diverged in one row outside the
+ruling set and the instrument caught it itself' — never '0 of 54' (D138).
+Bracket every sweep with a pre- AND post-run provenance read over ssh and
+discard on mismatch. Prove the non-vacuity guard applies in >0 rows before
+quoting any cell — `applies: 0` is vacuous, not a pass (D122). Register the
+prediction BEFORE the run so it can fail (D138).
+
+[48 · paragraph]
+SURFACES AND GATES. Stay in `barkpark_web`. `cloud/` belongs to the GUI-remake
+epic; `api/tenancy`, `internal/cli` and `scripts/` beyond this work's own
+instrument belong to PDS. `root.html.heex` is SINGLE-OWNER PER ROUND (D16) — two
+slices touching it never dispatch in the same round, and pre-provisioning CSS
+against an element no slice yet renders is refused (D67). Both colour gates plus
+`paper-editor-mirror-check` guard any `root.html.heex` touch, and the Part E
+ratchet fails on SHRINK too. A branch predating a token change reds
+`design/check.mjs` with a stale generated app.css layer — rebase, then `node
+design/emit.mjs --write`, and verify `node design/check.mjs` exits 0 locally
+before pushing. Hand-written CSS must NEVER sit inside the BEGIN GENERATED
+block: `emit --write` deletes it silently while the design gate goes GREEN on
+the deletion. `.ex`/`.exs`/`.heex` branches WAIT for the Elixir Test gate.
+
+[49 · paragraph]
+LEDGER. `lifecycle_status: blocked` FAILS OPEN and is DESTRUCTIVE fail-open —
+claiming a blocked task flips it to `in_progress` and releasing lands on `open`
+— so it is never a fence (D98). File ownership is enforced by the round/`after`
+graph and `files:` labels. Every reference is by FULL SLUG (D116, D133): `bp
+task get spd-b28` 404s, and worse, `bp task get spd-b35` RESOLVES SILENTLY to
+the wrong task. New slugs carry NO counter and NO shared wave prefix — a wave
+prefix is a counter wearing a different hat, and D119 reproduced under
+observation FOUR times, most recently inside the wave that transcribed it
+(D144). Line numbers are banned from briefs; navigate by marker.
+
+[50 · heading]
+The survey plan
+
+[51 · paragraph]
+Seventeen broad assignments, one Sonnet surveyor each. Width is deliberately
+cheap here — the Digest phase distills and the Verify phase proves. Every
+load-bearing assumption in the direction above appears below as a question that
+can come back NO. Surveyors read code via `git show origin/main:<path>` and must
+report empty results as 'not found on origin/main at <sha>' rather than as
+absence.
+
+[52 · heading]
+display-state-seam
+
+[53 · paragraph]
+QUESTION. Map api/lib/barkpark_web/studio/pane_builder.ex on origin/main:
+display_state/4, collapse?/3, and every test that pins them (the 40-cell
+exhaustive table D94 calls the epic's one non-vacuous wide lock,
+wide_geometry_lock_test.exs, measure_parity_test.exs,
+editor_panel_containment_test.exs). Report: exactly which literals are pinned,
+whether an inspector-aware display_state/5 delegating to an untouched /4 is
+possible, what would have to change at every call site, and whether any existing
+test asserts on the FUNCTION's arity or on a module-level export list. Read via
+git show origin/main:<path>; navigate by marker, not line number.
+
+[54 · paragraph]
+WHY IT CHANGES THE PLAN. Tier 2 — the wave's headline — is bought by a new input
+to this seam, and D94(a) pins the wide/standard table. If a fifth input cannot
+land without editing a pinned literal, the wave falls back to Rival 3 (drill
+everywhere) at 1024 and loses its best cell.
+
+[55 · heading]
+inspector-signal-path
+
+[56 · paragraph]
+QUESTION. Trace how sidebar_open and sidebar_user_opened flow on origin/main:
+shared/paper.ex (sidebar_assigns), handlers/paper.ex (sidebar_toggle_panel),
+studio_live.ex, studio_live/components.ex, and wherever pane_builder is CALLED
+to compute panes. Is the inspector's open/user-opened state available at the
+point panes are built, or is it computed in a different pass? What re-renders
+when the toggle fires — the whole desk, or only the <aside>?
+
+[57 · paragraph]
+WHY IT CHANGES THE PLAN. Tier 2 requires the inspector's state to influence the
+pane ladder. If the two live in passes that never meet, the cost of the
+direction changes from small to structural and Decide needs to know before it
+dispatches.
+
+[58 · heading]
+rail-and-panel-arithmetic
+
+[59 · paragraph]
+QUESTION. Using ONLY fields in the committed artifact
+scripts/measurements/spd-visible-table-2026-07-20.json at origin/main,
+reconstruct per width: panes.visible_pane_widths_px, panel_px,
+surface_border_box_px, surface_max_width_px, gutter (report both padding values,
+never a bare number), content_px, and confirm panel + rails == viewport at
+1440/1280/1024/900/800/764/700. Then state what panel_px WOULD be at 1024 if the
+rail became [44], and flag any row where the identity does not close.
+
+[60 · paragraph]
+WHY IT CHANGES THE PLAN. The whole Tier 2 prediction (panel 720 -> 980, content
+600px) rests on this identity holding. If rails + panel does not equal the
+viewport, some box is being absorbed elsewhere and the 60.00ch figure is wrong.
+
+[61 · heading]
+dismissal-grammar
+
+[62 · paragraph]
+QUESTION. Read spd-b12-inspector-overlay-dismiss (full slug) and report its four
+criteria verbatim. Then survey origin/main barkpark_web for existing precedent:
+phx-window-keydown / Escape handling, focus trap or focus restore helpers,
+aria-modal usage, JS hooks, and any modal that already dismisses correctly (note
+the secondary picker's fix — backdrop dropped phx-click, phx-click-away became
+the dismiss). Confirm the scrim is a ::after pseudo-element with pointer-events:
+none and state what element could carry a dismiss handler instead.
+
+[63 · paragraph]
+WHY IT CHANGES THE PLAN. The mode claim in the pre-registered rule is void
+without a cheap, plural exit. A pseudo-element cannot carry phx-click, so the
+dismissal shape is a real design decision the wave must make, not a detail.
+
+[64 · heading]
+drill-machinery
+
+[65 · paragraph]
+QUESTION. How does the phone drill work on origin/main? The artifact records
+crumbs.host_present true, visible true, count 3 and pane_columns 0 at viewport
+500. Find the breadcrumb component and its host, how 'back' navigates, what
+state it reads, and whether it can carry a destination that is NOT a pane (the
+inspector). Report display_state/4's phone and narrow branches and what renders
+when every pane is :hidden.
+
+[66 · paragraph]
+WHY IT CHANGES THE PLAN. Tier 3 makes the inspector a summoned destination
+reached by the drill. If the crumb machinery is pane-only, Tier 3 needs new
+navigation rather than an extension of a shipped pattern, which changes its
+size.
+
+[67 · heading]
+instrument-contract
+
+[68 · paragraph]
+QUESTION. Read scripts/studio-desk-measure.mjs on origin/main. Report: how it
+selects and forces the two inspector_states, how it clicks the toggle and
+asserts the [data-user-opened] marker, how content_px and visible_content_px are
+derived, how occlusion is attributed by DIFF (pointer-events natural vs forced)
+and how the non-vacuity guard works. Then answer: what happens if
+.bp-paper-surface is ABSENT (the Tier 3 destination state) — does it crash,
+warn, or silently record 0? Where would a third state and a round-trip (open
+then dismiss) measurement slot in?
+
+[69 · paragraph]
+WHY IT CHANGES THE PLAN. The wave must measure a shape the instrument was not
+written for. A Tier 3 state with no reading column could silently record 0 and
+be read as catastrophic occlusion, or crash the sweep. This is the single most
+likely way the wave produces a non-measurement and reads it as a desk fact.
+
+[70 · heading]
+root-heex-ownership
+
+[71 · paragraph]
+QUESTION. Census every rule in api/lib/barkpark_web/layouts/root.html.heex on
+origin/main touching .bp-doc-sidebar, .editor-with-preview, .editor-panel,
+.bp-paper-surface and the @container panel (max-width: 860px) block — including
+the b29 painted-closed rule and the scrim guard. Report which would have to
+change for each tier, and what the BEGIN GENERATED block boundaries are. Confirm
+what the two colour gates and paper-editor-mirror-check actually assert.
+
+[72 · paragraph]
+WHY IT CHANGES THE PLAN. D16 makes this file single-owner per round. If two
+tiers both need it, the wave sequences rounds rather than discovering the
+collision at build time — which is what forced the parent epic to invert a
+chartered round order once already.
+
+[73 · heading]
+georgia-shortfall
+
+[74 · paragraph]
+QUESTION. Read spd-b42-georgia-default-shortfall-inflow-width (full slug) —
+criteria, body, current progress. Then establish from origin/main where the
+720px surface cap and the 80px gutter at 1024 are declared, what else consumes
+them, and whether either is reachable inside barkpark_web without crossing the
+surface fence. Report the arithmetic for what trim would carry forced Georgia
+over 55ch at 1280 and 1024 in the DEFAULT state.
+
+[75 · paragraph]
+WHY IT CHANGES THE PLAN. Three cells fail in BOTH states and are inherited, not
+overlay-caused. The wave must decide explicitly whether it takes spd-b42 as a
+co-traveller or names it out — and a wave that ships the shape while the reader
+on a Georgia-resolving platform still fails has not made the reader whole.
+
+[76 · heading]
+b39-subtree-census
+
+[77 · paragraph]
+QUESTION. Enumerate all 24 children of
+spd-b39-user-opened-inspector-shape-successor with full slugs, lifecycle_status
+and criteria progress. Bucket each: (a) live prerequisite of this wave's shape,
+(b) instrument work, (c) measurement/coverage backlog, (d) obsoleted by the
+parent epic's closure. Flag every short-number collision family and state your
+counting convention and timestamp, and note that the census must RECURSE.
+
+[78 · paragraph]
+WHY IT CHANGES THE PLAN. The wave must know what it already owns before it files
+anything new. D144 proved a top-level census structurally undercounts, and that
+bp task get on a bare short slug can resolve SILENTLY to the wrong task.
+
+[79 · heading]
+prior-papers
+
+[80 · paragraph]
+QUESTION. Read the wave-7, wave-8 and wave-9 Papers of the parent epic
+(studio-space-priority-desk-seal-2026-07-20 and its siblings — find them via bp
+search query). Extract anything bearing on the SHAPE question that the charter
+did not transcribe: the ceiling section, the struck 420px/~42ch figure and its
+context, any shape candidates raised and dropped, and any user-facing reasoning
+about what the inspector is FOR.
+
+[81 · paragraph]
+WHY IT CHANGES THE PLAN. The charter is a decision ledger, not a design record.
+D137 already had to recover D117-D119 from a Paper because the charter never
+carried them — the same gap may hide a shape argument this wave would otherwise
+re-derive or repeat.
+
+[82 · heading]
+comparables-recheck
+
+[83 · paragraph]
+QUESTION. Re-establish the sourced comparables as D101 and D129 left them:
+Notion (page-details panel defaults to last state, first-party distraction
+rationale), Sanity Studio (panes collapse into a tab bar, user drills), MD3
+(two-tier standard/modal, 600-1199dp, standard sheets SHRINK rather than
+overlay; the third-pane endorsement is gated to 1600dp+). Contentful is STRUCK
+as unsourced. Look additionally for sourced convention on inspector-panel
+dismissal — Escape, focus trap, aria-modal. Report ONLY what you can cite; mark
+everything else unconfirmed.
+
+[84 · paragraph]
+WHY IT CHANGES THE PLAN. The direction claims Tier 3 is Sanity's shape and MD3's
+standard-sheet tier. If that is not sourceable the claim gets downgraded to
+directional — and 'the Kinsta bar' is a craft standard here, never a layout
+citation.
+
+[85 · heading]
+surface-disjointness
+
+[86 · paragraph]
+QUESTION. D96 found the paper view and the classic editor shell were DISJOINT:
+@editor_view == :paper dispatches to studio_paper_view which had no doc_actions,
+while the classic branch had the entry point but no .bp-paper-surface. Check
+origin/main now: does the paper view carry doc_actions, does the inspector
+render identically on both surfaces, and which surface does the instrument
+actually measure? Read spd-b34-paper-editor-no-doc-actions (full slug) for its
+current state.
+
+[87 · paragraph]
+WHY IT CHANGES THE PLAN. A shape built on one surface and measured on the other
+is how this work was overturned before. Any tier that changes navigation must
+know how many surfaces it has to change.
+
+[88 · heading]
+wide-untouched-proof
+
+[89 · paragraph]
+QUESTION. How would a slice PROVE that 1280 and 1440 moved zero pixels? Document
+the runtime rule-deletion diff technique D102 used (delete the rules from every
+stylesheet at runtime and diff every field). Report which tests today pin
+wide-bucket geometry, what the 14-entry geometry census covers, and how
+last_line/1 handles multi-line comma-separated selector lists and at-rule
+headers.
+
+[90 · paragraph]
+WHY IT CHANGES THE PLAN. Tier 1 is a hard constraint, and five of the six
+user-opened MEETs live there. The census parser has already had a hole that let
+a 260px->180px regression through green, so the proof technique matters as much
+as the intent.
+
+[91 · heading]
+gates-and-traps
+
+[92 · paragraph]
+QUESTION. Enumerate what a root.html.heex + pane_builder.ex + components.ex
+change trips in CI on origin/main: the Elixir Test gate, studio-literal-check,
+the Part E ratchet (which fails on SHRINK too), design/emit.mjs and
+design/check.mjs, paper-editor-mirror-check, both colour gates, doc-gates.yml's
+25 steps, docs-anchors-check and check-doc-budgets. Report the
+stale-generated-app.css trap for a branch predating a token change, and confirm
+docs/cards/plugins.md sits at its budget cap.
+
+[93 · paragraph]
+WHY IT CHANGES THE PLAN. Builders lose whole rounds to gates nobody warned them
+about. The charter records a card at exactly its byte cap and a design gate that
+goes GREEN on silently deleting hand-written CSS from inside the generated
+block.
+
+[94 · heading]
+scrim-and-motion
+
+[95 · paragraph]
+QUESTION. Report the scrim's full contract on origin/main (the ::after rule, its
+alpha, its guard, D111's report-never-subtract law) and the epic's motion laws:
+the motion-cage, prefers-reduced-motion handling, and what
+spd-b36-cross-browser-surface-measure-coverage (full slug) says is unmeasured.
+Then state what a sliding or transitioning destination surface would owe under
+those laws.
+
+[96 · paragraph]
+WHY IT CHANGES THE PLAN. The pre-registered rule ABOLISHES dimming rather than
+tuning it, and Tier 3 introduces a transition between a document and a
+destination. Both touch laws already bought with failures.
+
+[97 · heading]
+deploy-and-measure-loop
+
+[98 · paragraph]
+QUESTION. Document the exact loop for getting a barkpark_web change onto
+deployed guerrilla and measuring it: what triggers the deploy, how to ssh-query
+the served SHA and the active slot pre and post, what auth the instrument needs,
+and the observed sweep runtimes (29.8s / 30.9s / 32.8s / 59.7s per D115 — the
+'~10 minutes' comment is a live false-blocker). Report the zero-byte failure
+mode and the named fail-closed abort that permits a bounded retry.
+
+[99 · paragraph]
+WHY IT CHANGES THE PLAN. The deliverable is a measured deployed run with the
+prediction registered first. A wave that mis-times the deploy or misreads a
+zero-byte run as a desk fact repeats the exact disease this ledger was built to
+stop.
+
+[100 · heading]
+ledger-write-contract
+
+[101 · paragraph]
+QUESTION. Report the bp task write contract as it stands: how to file a task
+with acceptance_criteria ({criterion, met, evidence}), how claim/stamp/close
+works including the epoch CAS, why lifecycle_status blocked is destructive
+fail-open, and the D134 backfill rule (patch + publish only for DONE tasks,
+barred for open ones). Confirm how to file slices with NO counter and NO shared
+wave prefix per D119/D144.
+
+[102 · paragraph]
+WHY IT CHANGES THE PLAN. Every slice this wave files must be well-formed and
+collision-free at ALLOCATION time — D119 has reproduced under observation four
+times, including inside the wave that ruled on it.
+
+[103 · heading]
+Closing the loop
+
+[104 · paragraph]
+This Paper is the wave's living story. Digest appends the survey digest and the
+verify plan before the verifiers fly. Decide appends the decisions, the
+pre-registered rule as a numbered charter D-entry, and the slice roster (every
+slice `builder_model: opus`) before the builders fly. Review closes it as the
+debrief. The Paper's id is stamped on
+`spd-b39-user-opened-inspector-shape-successor` as flat `wave_paper`, and every
+slice this wave files names this Paper and is named by it.
+
+[105 · heading]
+DIGEST — the survey digest and the verify plan
+
+[106 · paragraph]
+STATUS: Strategize and Survey complete. 17 surveyors reported. The wave is
+VERIFYING — 11 targeted assignments are in flight, listed in full below. Decide
+appends the decisions and the slice roster after they land. Nothing in this
+section is a decision; it is what the survey established, where it CONTRADICTS
+the direction, and what the last exploration round is being sent to prove by
+running things rather than reading them.
+
+[107 · heading]
+What the survey established
+
+[108 · paragraph]
+THE SHARPEST ATTACK ON THE DIRECTION IS DEFUSED, BY CONSTRUCTION. The winning
+shape (Tier 2: at viewport 1024 the list pane yields and the inspector docks in
+flow) was argued to collide head-on with the epic's one genuinely non-vacuous
+wide lock — display_state/4's 40-cell exhaustive table of hardcoded literals,
+and D94(a)'s clause that the wide/standard table is unchanged, pinned by literal
+constants. The display-state-seam survey settles the mechanics: collapse?/3 and
+display_state/4 are pure functions dispatched by Elixir arity and pattern; an
+inspector-aware display_state/5 never touches the /4 clauses, so the /4 table is
+not edited at all. No test anywhere in api/test/barkpark_web/studio or the
+live/studio directory asserts on arity, __info__, function_exported? or an
+export list. There is exactly ONE production call site in the whole tree —
+components.ex's studio_live_shell/1 pane-row loop — so the blast radius of a
+fifth argument is one line, using the Map.get(assigns, …, default) idiom already
+present there. The docs/cards/studio.md anchor is a substring match and is
+unaffected by a new arity. D94(a) is satisfied by construction rather than by
+argument.
+
+[109 · paragraph]
+THE FIFTH INPUT ALREADY EXISTS AS SERVER STATE, AND IS NOT WIRED.
+sidebar_user_opened (charter D91) seeds false in Shared.Paper.sidebar_assigns/1
+and is raised only by Handlers.Paper.sidebar_toggle_panel/1 — which is a PURE
+ASSIGN FLIP. It does not call Shared.rebuild_panes/1, does not touch panes, does
+not touch width_bucket. Today it is threaded only to the inspector aside as
+data-user-opened. Consequence, and this is the mechanical statement of the
+direction's claim that step one of the ladder was skipped: on a sidebar toggle,
+display_state/4's inputs are unchanged, so its output for every pane cell is
+byte-identical, LiveView sends no patch to the pane row, and the rail does not
+move. The overlay and scrim below wide are implemented ENTIRELY in CSS via an
+@container panel query reacting to [data-width-bucket] and [data-user-opened].
+Tier 2 therefore costs real plumbing in three places — an event that triggers a
+pane-visibility recompute, a fifth input on the ladder, and a reconciliation so
+the CSS overlay grammar and the Elixir ladder make ONE decision instead of two
+independent ones. Bounded and localised to pane_builder.ex, handlers/paper.ex,
+components.ex and root.html.heex, all inside the barkpark_web fence — but not a
+one-line change.
+
+[110 · paragraph]
+THE ARITHMETIC SPLITS CLEANLY INTO A PROVEN HALF AND AN UNPROVEN HALF. The
+identity rails + panel_px == viewport_px holds in ALL 54 rows of the committed
+table, zero exceptions, at every width, state and face; surface_max_width_px is
+720 in all 54; content_px equals surface_border_box_px minus gutter total in all
+54. So the first step of the Tier-2 chain — rail [44, 260] to [44], panel 720 to
+980 at viewport 1024 — follows from a measured identity and needs no new
+assumption. The SECOND half does not. No row in the committed table has the
+inspector in a docked, in-flow, non-absolute position at ANY width;
+inspector.position is absolute in every sub-wide row. The chain surface 980
+minus 300 = 680, then min(680, 720) = 680, then content 600, then 60.00ch
+resolved Iowan at 10.0000 px/ch assumes the docked panel is subtracted from
+panel_px exactly the way the list rail currently is. That subtraction model is
+architecturally reasonable and is NOT a measured fact. It is the wave's headline
+prediction and must be registered BEFORE any run, per the standing law.
+
+[111 · paragraph]
+THERE ARE THREE BOX-ACCOUNTING MECHANISMS, NOT TWO, AND A BUILDER CAN CONFLATE
+THEM. (i) Today's user-opened overlay: position absolute, overlap 260px over the
+content box, scrim covering the content box fully at alpha 0.55. (ii) The b29
+default state below wide: an in-flow strip whose width is INTRINSIC (the head's
+8px/12px padding plus the collapse icon), not a literal — at 1024 it shows
+surface_border_box_px 679 against panel_px 720, a 41px cost. (iii) The proposed
+Tier-2 dock, which exists nowhere yet. Any slice brief that treats (ii) and
+(iii) as the same kind of number will underestimate its own diff: (ii) is
+padding-and-icon rework, (iii) is new geometry.
+
+[112 · paragraph]
+TIER 1 IS FREE, AND SO IS THE b29 RULE. The overlay and scrim block is scoped
+inside @container panel (max-width: 860px); the b29/D91 painted-closed rule and
+its scrim guard are both scoped to html not-wide AND to
+:not([data-user-opened]). Net: neither b29 rule fires for the user-opened case
+this wave is about, so a user-opened shape must land as a NEW selector rather
+than a modification of them — and the wide bucket is already excluded from every
+rule in the family. Tier 1 should need zero CSS edits, which is a testable
+claim, not a hope.
+
+[113 · paragraph]
+D16 IS A REAL COLLISION THIS WAVE, NOT A HYPOTHETICAL. All five
+inspector-relevant selector families live in ONE contiguous span of
+root.html.heex at origin/main — the Responsive desk (spd-s1) section. Tier 2's
+rail-collapse CSS and Tier 3's destination-plus-scrim-suppression CSS both want
+the same sub-span. Two tiers cannot dispatch in the same round. spd-b12's
+dismissal work lives in components.ex and does NOT compete for that ownership,
+but is coupled to whatever the scrim rule becomes.
+
+[114 · paragraph]
+THE DISMISSAL SPINE HAS A REAL DESIGN FORK AND ONE CRITERION WITH ZERO
+PRECEDENT. The scrim is confirmed to be a bare ::after pseudo-element with
+pointer-events: none, and the stylesheet's own comment names spd-b12 as the
+owner of tap-to-dismiss in the .ex half — it structurally cannot carry a
+handler. spd-b12's criterion 1 cites two modals in components.ex
+(close-unpublish-guard, valueref-writeback-close) whose shape is a SEPARATE
+backdrop div carrying its own phx-click. But the repo's most recent and most
+relevant precedent is the secondary-picker fix (a8fb69cf7, D96): the backdrop
+DROPPED phx-click and dismissal moved to phx-click-away on the dialog card
+itself, because an inline onclick stopPropagation had killed every phx-click
+inside the card. D96 now forbids re-adding either. The inspector has no backdrop
+div at all. So criterion 1's literal precedent and the repo's hardened precedent
+point at different shapes — a fork Decide must rule, not a builder. Separately,
+criterion 3 (focus into the panel on open, return to the toggle on close,
+covered content inert or aria-hidden) has ZERO reusable precedent: no focus
+trap, no focus restore, no inert-marking helper exists anywhere in
+api/lib/barkpark_web or api/assets, and none of the roughly twenty inline hooks
+does it. That is new engineering. And criterion 4 needs an Elixir-visible 'am I
+in the overlay tier' signal, which today exists ONLY as a CSS container query
+with no server or JS mirror.
+
+[115 · paragraph]
+THE INSTRUMENT FAILS LOUD, NOT SILENT — AND THAT IS ITS OWN PROBLEM. If
+.bp-paper-surface is absent, two independent layers die(): sweepRow's
+REQUIRED_SELECTORS loop before any measurement, and PAGE_MEASURE's own fatal
+branch. It is never a silent zero. But the whole sweep is one try/finally with
+no per-row recovery, so a single die() discards the entire matrix including rows
+already collected. A Tier-3 destination state that legitimately has no reading
+column would, added naively, kill Tier 1 and Tier 2's rows in the same run. The
+third state needs four things that do not exist: a third navigation block, a
+state-conditional REQUIRED_SELECTORS (a real per-state required list, not a skip
+— the file's own doctrine forbids reporting a number derived from an element
+that is not there), a reading_column_present false / null-not-zero convention so
+nobody misreads 0 as catastrophic occlusion, and a fourth round-trip pass.
+Round-trip has nothing to call: no dismiss path is exercised anywhere in the
+instrument today, and spd-b12 is 0 of 4. The wish's own priority order already
+sequences the instrument AFTER the UI it measures; the survey confirms that
+ordering is forced, not preferred.
+
+[116 · paragraph]
+THE DEPLOY-AND-MEASURE LOOP IS FULLY MAPPED AND CHEAPER THAN FEARED. Changes
+under api/ on main auto-trigger deploy.yml; instance-deploy.sh clean-builds the
+idle slot, health-gates /api/schemas, flips the Caddy upstream. The instrument
+ssh-queries git rev-parse HEAD and the slot units once before the browser
+launches and once after the sweep closes, and a SHA or slot move between the two
+reads discards the whole matrix. Observed sweep runtimes are 29.8s, 30.9s, 32.8s
+and 59.7s — the '~10 minute run' is already corrected in the committed script
+and cited to D115; the risk is only that someone quotes the old number from
+memory. The zero-byte failure was an asymmetric realpath comparison in the
+entrypoint guard and is fixed. The [data-user-opened] real-click marker fails
+roughly 1 in 3 and dies BEFORE writeRunArtifact, so nothing is written and
+retrying is safe. One trap worth stating loudly: guerrilla is 157.180.90.121,
+not the 89.167.28.206 in the repo CLAUDE.md prod micro-block — a builder
+following the router literally will ssh to the wrong host and read an irrelevant
+SHA.
+
+[117 · paragraph]
+THE GATE ROSTER IS KNOWN AND ONE CARD IS AT ITS CAP. A root.html.heex plus .ex
+PR trips the ONE doc-gates job (25 named steps, confirmed by count) plus the
+Elixir workflow (mix-test and mix-prod-compile blocking, format advisory).
+root.html.heex is itself a design/emit.mjs ARTIFACT, but its single BEGIN/END
+GENERATED tokens marker pair sits far above the inspector region, so no tier
+risks the silent-deletion trap in this section. Part E is a ratchet that fails
+on SHRINK as well as growth, and the two colour gates have inverse blind spots:
+a raw rgba() scrim spelling passes studio-literal-check and fails Part E, while
+a var() with a hex fallback does the reverse. Both must be named in any brief.
+docs/cards/plugins.md sits at exactly 2400 bytes of its 2400-byte cap.
+
+[118 · paragraph]
+THE LEDGER LAW FOR THIS WAVE'S SLICES. D119, reproduced a fourth time inside the
+very wave that ruled on it, and extended by D144: wave prefixes are counters
+too. Every slice this wave files gets a fully descriptive standalone slug or a
+server-minted id — no spd-bNN, no shared wave prefix. lifecycle_status blocked
+is a DESTRUCTIVE fail-open (claiming it succeeds and one-way flips it to
+in_progress) and may never carry a collision-prevention plan; use blocks edges
+plus files: plus round sequencing. Close-time criteria updates are INDEX-shaped
+and differ from the create-time criterion-keyed shape — reusing one blob for
+both is a known write failure. bp task create DOES exist as a live verb; two
+local memory files claiming otherwise are stale.
+
+[119 · heading]
+Where the survey CONTRADICTS the direction (all of it must be reconciled before
+Decide)
+
+[120 · paragraph]
+1. THE MD3 CITATION IS OVERSTATED, AND TWO INDEPENDENT SURVEYORS CAUGHT IT. The
+wish states MD3 puts 1024-1440px in a dockable-over-modal tier. D129 already
+corrected D101 on exactly this: the accurate citation is a two-tier
+standard/modal taxonomy at 600-1199dp in which standard sheets SHRINK rather
+than overlay, and MD3 only endorses a third pane or dock at 1600dp and above —
+ABOVE every width this wave tests. Viewport 1024 falls inside 600-1199dp and the
+shrink-not-overlay principle genuinely supports Tier 2; the three-pane docked
+configuration at 1024-1440 is NOT MD3-endorsed. Repeating the wish phrasing in a
+charter D-entry would re-commit the exact over-claim D129 had to strike, in the
+wave that inherits D129.
+
+[121 · paragraph]
+2. SANITY IS WIDTH-UNCONFIRMED AND ITS MECHANISM IS RICHER THAN "DRILL". D129
+retains the behaviour but marks the triggering widths unconfirmed. The sourced
+mechanism is panes collapsing into a TAB BAR plus drill. Calling Tier 3
+"Sanity's shape" must stay hedged as directional support, and if Tier 3 ships a
+bare full-screen destination with no tab-bar element, that divergence from the
+sourced comparable should be deliberate and stated, not silent.
+
+[122 · paragraph]
+3. TIER 3's "THE BREADCRUMB DRILL THAT ALREADY SHIPS CARRIES THE READER BACK" IS
+ASPIRATIONAL, NOT SHIPPED. desk_crumbs renders only at the phone bucket, and
+every clickable crumb is a PANE INDEX firing expand-pane with phx-value-idx; the
+handler truncates nav_path and push_patches a URL built from pane segments
+alone. The editor's own crumb is unconditionally static text with aria-current,
+never a button — a dead end, not a link. The editor closes as a SIDE EFFECT of
+the pane path shrinking, because handle_params re-derives editor_doc from the
+URL. At phone with an editor open, display_state returns :hidden for EVERY pane
+— no 44px strip survives, and crumbs are the only navigation surface left. There
+is no crumb kind for a non-pane destination. Making the inspector a summoned
+destination reachable by this drill needs either a new event and crumb kind or
+an extension of nav_path's model to make the editor an addressable node. The
+component's own doc comment guarantees "zero new server events" — a guarantee
+scoped to pane navigation only. Tier 3 is therefore larger than "extend a
+shipped pattern," and the direction's size framing for it must be corrected
+before slices are cut.
+
+[123 · paragraph]
+4. D102's RUNTIME RULE-DELETION DIFF IS NOT COMMITTED TOOLING. The direction
+requires any slice to prove wide moved zero pixels "by D102's runtime
+rule-deletion diff." A repo-wide search for deleteRule( returns zero hits;
+studio-desk-measure.mjs has no CSS-mutation capability, only the D97 provenance
+bracket. D102 was an ad hoc session whose RESULT was recorded in charter prose
+and whose TOOL did not survive. Wide-untouched must therefore be proven by the
+committed wide_geometry_lock_test.exs plus a bracketed deployed measurement
+diff, or a slice must budget for writing the deletion-diff probe. This is
+unbudgeted scope in the direction as written.
+
+[124 · paragraph]
+5. THE GEOMETRY CENSUS IS 15 ENTRIES, NOT 14. Commit df30ad4b2 (spd-w5) added
+the reading column's own container-name/container-type declaration as a
+fifteenth entry, and that entry deliberately DOES apply at 1280 and 1440 — it
+declares no box geometry, only which box a query resolves against, so it does
+not violate the wide-moves-zero-pixels property. Any brief quoting 14 will send
+a builder to "fix" a discrepancy that is not one.
+
+[125 · paragraph]
+6. spd-b39's OWN PROSE IS STALE ABOUT spd-b12. The root task's INHERITED
+CHILDREN section says spd-b12-inspector-overlay-dismiss is DELIBERATELY NOT
+RE-PARENTED and stays general backlog. The live ledger shows parent_id equal to
+spd-b39, updated at 10:10:50Z, by an in-progress sweep whose job is exactly that
+reclassification. Live parent_id is the truth; the prose is not. This matters
+because it puts the dismissal spine genuinely inside this wave's fence, matching
+the wish.
+
+[126 · paragraph]
+7. spd-b42 AND THE TIER-2 LADDER AIM TWO DIFFERENT LEVERS AT THE SAME CELL.
+spd-b42-georgia-default-shortfall-inflow-width (open, 0 of 4, correctly parented
+to spd-b39) already carries pre-computed arithmetic for 1024 via a NARROW lever
+— trimming the b29 strip's intrinsic width by roughly 9px to get under the
+32.42px ceiling — plus a 1280 lever (dock 300px down to 288.4px or less) and a
+700 case that is arithmetically foreclosed. If the Tier-2 ladder ships, it moots
+spd-b42's 1024 criterion by overshooting it, leaving the 1280 trim and the 700
+owned shortfall as the unclaimed remainder. If Decide does not rule this
+explicitly, the ledger carries two live claims about one number, and D139's
+no-double-counting rule is breached from the inside.
+
+[127 · paragraph]
+8. THE PART E BASELINE OF 165 IS A STALE SNAPSHOT. It moved wave to wave across
+D43, D53, D66 and D146. Any brief quoting it without a live run is quoting
+history.
+
+[128 · heading]
+Coverage map — what was checked and FOUND
+
+[129 · paragraph]
+Read at origin/main via git show, and confirmed: pane_builder.ex (collapse?/3,
+display_state/4's five literal clauses, build/3's desk/scope/scope_prefix-only
+opts); components.ex (the single display_state call site,
+paper_metadata_sidebar's one call site, desk_crumbs, the two existing
+role=dialog modals); handlers/paper.ex (sidebar_toggle_panel as a pure flip);
+handlers/scope.ex (expand_pane's nav_path truncation); shared.ex (rebuild_panes
+as PaneBuilder.build's only caller); shared/paper.ex (sidebar_assigns seeding);
+paths.ex (studio_path_for builds from nav_path alone); root.html.heex's whole
+responsive-desk section including the @container panel 860px overlay and scrim
+block, the b29/D91 painted-closed rule and its scrim guard, the phone-only rail
+logic, the shared .bp-paper-surface 720px cap and 80px gutter, the single
+BEGIN/END GENERATED tokens marker pair, and the studio-literal-check skip
+region; pane_builder_test.exs (40-cell table, deep-stack table, three narrow
+tests, zero arity assertions); wide_geometry_lock_test.exs in full (four literal
+pins, the geometry census, the at-rule census, last_line/1 and its two
+negative-control tests); measure_parity_test.exs;
+editor_panel_containment_test.exs (the motion cage's six-property ban list,
+transition NOT banned); studio_live_secondary_pane_dom_test.exs (the
+DOM-attribute test pattern to copy); studio-desk-measure.mjs in full (the two
+hardcoded states, openInspectorByRealClick's 3-click cap, the five-scanline
+ancestry hit-test, the forced-pointer-events scrim diff, the non-vacuity guard,
+REQUIRED_SELECTORS, the provenance bracket, the realpath entrypoint fix); the
+committed 54-row artifact programmatically, all identities verified; deploy.yml,
+deploy/README.md, instance-deploy.sh; doc-gates.yml (25 steps counted);
+elixir.yml; design/emit.mjs and design/check.mjs Parts A and E;
+design/exemptions.json; scripts/studio-literal-check.sh,
+paper-editor-mirror-check.sh, check-doc-budgets.sh; the charter D1-D147 at
+origin/main; the wave-6, wave-7 and wave-9 Papers in full; and the live ledger
+(spd-b39's 24 children and its one grandchild, all 25 open, none cancelled).
+
+[130 · heading]
+Coverage map — what was checked and NOT FOUND (absences are decisions in
+waiting)
+
+[131 · paragraph]
+NOT FOUND, and each absence is load-bearing. (a) No focus-trap, focus-restore or
+inert-marking helper anywhere in api/lib/barkpark_web or api/assets — spd-b12's
+criterion 3 has no precedent to adapt. (b) No HTML inert attribute and no
+aria-hidden on a covered content region anywhere in the repo; every aria-hidden
+hit is a decorative icon. (c) Zero occurrences of deleteRule( repo-wide — D102's
+technique is not preserved as tooling. (d) No state enum, no conditional
+REQUIRED_SELECTORS, no dismiss action and no round-trip pass in the instrument —
+the third state is engineering, not a flag. (e) No row anywhere in the committed
+table with a docked, in-flow inspector at any width — the Tier-2 second-half
+chain is unmeasured. (f) No crumb kind, event or nav_path node that can address
+the inspector as a destination. (g) No Elixir or JS mirror of the CSS
+overlay/dock boundary — criterion 4 has no server-side signal to gate on. (h) No
+sidebar-aware parameter anywhere in pane_builder.ex. (i) No external
+accessibility citation anywhere in the repo — no WAI-ARIA APG, no W3C dialog
+pattern; the dismissal grammar rests entirely on two internal modal precedents,
+defensible engineering but NOT a sourced convention in the sense D101/D129 use
+the word. (j) No standalone Barkpark Paper for wave 8 could be located under any
+slug tried; its D117-D135 content exists only transcribed into the charter and
+recapped in the wave-9 ruling Paper. (k) Vercel, Linear, Contentful and Kinsta
+remain unsourced after two independent verification passes; Contentful is struck
+outright. (l) No .bp-canvas-* rule anywhere near the inspector region, so
+paper-editor-mirror-check is a no-op for this work unless a slice strays.
+
+[132 · paragraph]
+CORNERS NO SURVEYOR REACHED, stated plainly so Decide does not mistake silence
+for safety. (i) width_bucket_seam_test.exs and studio_live_width_bucket_test.exs
+were located but never opened — nobody confirmed whether either also pins
+wide-bucket geometry, which would contradict measure_parity_test.exs's claim
+that only wide_geometry_lock_test.exs does. (ii)
+studio_live_phone_drill_test.exs was referenced only in comments. (iii) Nobody
+read pane_builder_test.exs's 40-cell table with their own eyes and separately
+confirmed it still covers wide rows — it was cited from another file's
+moduledoc. (iv) Nobody ran scripts/tenant-scope-check.sh against pane_builder.ex
+or components.ex, so a fail-open read in either is neither confirmed nor ruled
+out. (v) Nobody re-measured docs/cards/studio.md's byte headroom (last known
+2393 of 2400, wave-stale). (vi) Nobody re-read the live Part E baseline. (vii)
+Nobody verified whether the sidebar_user_opened assign reaches
+studio_live_shell/1 for non-paper editor types (sheet, graph, media) or only
+when a paper is open — the fifth input's availability at the render point is
+unconfirmed. (viii) Nobody checked whether calling rebuild_panes/1 from a
+sidebar toggle is side-effect-safe; it also recomputes editor_doc, editor_schema
+and editor_blocks. (ix) The earlier wave Papers (land, advance, prove, browser)
+were never opened. (x) No surveyor ran ANY gate, test or script — the entire
+survey is reading. That is precisely what this verify round exists to correct.
+
+[133 · heading]
+Verify plan — 11 assignments in flight, every load-bearing claim proven by
+RUNNING something
+
+[134 · paragraph]
+Model choice follows the cost of being wrong. Opus where a wrong answer changes
+the shape or silently ships a regression; Sonnet for mapping and breadth
+follow-ups. All eleven are dispatched now; Decide does not begin until they
+land.
+
+[135 · paragraph]
+V1 — display-state-five-is-additive (opus, worktree). Does an inspector-aware
+display_state/5 actually leave the 40-cell literal table and the deep-stack
+table byte-identical and green? PROOF: add a throwaway /5 head plus its own
+exhaustive literal table in a worktree, then RUN the studio and live/studio test
+directories under CC=clang mix test. Distrust vacuous green: also delete one /5
+clause and confirm the new table FAILS, so the extended lock is proven able to
+fail.
+
+[136 · paragraph]
+V2 — fifth-input-reaches-the-render-point (opus, worktree). Does the
+sidebar_user_opened assign reach studio_live_shell/1 unconditionally, including
+sheet, graph and media editor types, or only when a paper is open? And can a
+sidebar toggle drive a pane recompute without a full rebuild_panes/1, which also
+recomputes editor_doc, editor_schema and editor_blocks? PROOF: a targeted
+LiveView test that opens each editor type and asserts the assign at the shell,
+plus a test that toggles the sidebar and asserts the pane row actually
+re-renders. If the assign is absent for any editor type, the /5 wiring has a
+hole and Decide must know before cutting the slice.
+
+[137 · paragraph]
+V3 — tier-two-prediction-probe (opus). The direction's headline — panel 980,
+surface 680, content 600, 60.00ch resolved Iowan and 54.31ch forced Georgia at
+viewport 1024 — is unmeasured. PROOF: build a standalone static harness
+reproducing the measured box model (rail 44, docked panel 300, 720 cap, 80px
+gutter) and drive it headless, measuring per face with each face divided by its
+OWN probe advance, no cross-face division. Report the registered prediction and
+whether the harness confirms or refutes the 300px subtraction model. A
+refutation changes the wave's headline and is worth Opus.
+
+[138 · paragraph]
+V4 — wide-lock-literals-and-census (sonnet). Is the census 15 entries, and does
+anything in wide_geometry_lock_test.exs assert a literal 300 or 860 beyond the
+name-based census — which would block spd-b42's 1280 dock trim? PROOF: RUN the
+wide geometry lock test, grep the file for numeric assertions, then perturb the
+300px flex-basis in a scratch copy and confirm whether the suite reds or stays
+green.
+
+[139 · paragraph]
+V5 — colour-gates-live-baseline-and-mutation (sonnet, worktree). What is the
+CURRENT Part E baseline for root.html.heex, and can both colour gates actually
+fail? PROOF: RUN node design/check.mjs and bash scripts/studio-literal-check.sh
+clean, record the real baseline number and exit codes; then seed a raw rgba()
+scrim literal and re-run BOTH, confirming the documented inverse blind spot
+(literal-check passes, Part E reds); then delete an existing literal and confirm
+Part E reds on SHRINK. A gate that cannot be made to fail proves nothing.
+
+[140 · paragraph]
+V6 — dismissal-fork-and-overlay-signal (opus, worktree). Which shape does
+spd-b12 take — criterion 1's literal precedent (a new real backdrop div with its
+own phx-click) or D96's hardened phx-click-away on the aside — and does
+click-away self-fire when the user interacts with the chevron or fields INSIDE
+the aside? And what server-visible signal can gate criterion 4 to the overlay
+tier when that boundary is CSS-only today? PROOF: build both shapes in a
+worktree and RUN a DOM-attribute test in the style of
+studio_live_secondary_pane_dom_test.exs against each, driving the DOM rather
+than the socket — D96 exists because five waves of green socket tests hid a dead
+pane.
+
+[141 · paragraph]
+V7 — crumb-cannot-carry-a-destination (sonnet). Confirm the drill is
+pane-index-only and enumerate the MINIMAL new machinery Tier 3 needs. PROOF: RUN
+the phone drill LiveView test and report exactly what it pins; then state, with
+markers not line numbers, the smallest change that makes the inspector
+addressable — a new crumb kind and event, or a nav_path node — and which files
+each touches.
+
+[142 · paragraph]
+V8 — instrument-fails-loud-and-third-state-cost (opus). Confirm by execution,
+not reading, that the instrument aborts rather than recording zero, and that the
+zero-byte defect is genuinely fixed. PROOF: RUN node --check on the script;
+invoke it through a symlinked path and confirm a non-zero exit with non-empty
+stderr; invoke it with an absent config or unsatisfiable required selector and
+confirm it dies naming the failure and writes NOTHING to the out path. Then cost
+the third state: name every edit needed for a state-conditional required list
+and a reading_column_present convention.
+
+[143 · paragraph]
+V9 — comparables-citation-repair (sonnet). Produce the EXACT wording this wave
+may use for MD3 and Sanity, reconciled against D129, so the charter D-entry does
+not re-commit D101's struck over-claim. Reading suffices; no run. The
+deliverable is the sentence, not a summary of the problem.
+
+[144 · paragraph]
+V10 — wide-untouched-proof-method (opus). D102's rule-deletion diff does not
+exist as tooling. PROOF: write and RUN a minimal deletion-diff probe against the
+static harness at 1280 and 1440 — delete the candidate rules at runtime, diff
+every field, report identical or not — and cost it as a slice. Then state which
+combination (the committed ExUnit lock plus a bracketed deployed diff, or a new
+probe) the wave should require, and be explicit that the ExUnit lock alone
+proves the sheet did not change, never that the render is pixel-identical.
+
+[145 · paragraph]
+V11 — ledger-truth-and-slug-law (sonnet). Re-pull, live and timestamped:
+spd-b12's parent, spd-b42 and its child, whether spd-w9-child-sweep-executed has
+closed (if it is still in progress the reparent could still move), the status of
+every cross-boundary short-number collision member inherited from a 10:10:56Z
+snapshot rather than re-derived, and whether the bare-doc_id task titled
+'spd-b36' is owned by anyone. PROOF: bp task get on each by full slug, with the
+pull timestamp stated. File anything unowned as a published child task now.
+
+[146 · paragraph]
+What Decide cannot proceed without: V1 and V2 together (the shape is buildable,
+or the wave falls back to Rival 3 at 1024, which costs one slice and not the
+direction), V3 (the headline is a prediction or a refutation), V6 (the dismissal
+fork is a design ruling, not a builder choice), and V9 plus the seven other
+contradictions above, each of which must be reconciled in the charter D-entries
+this wave lands BEFORE any run, per D135.
+
+[147 · heading]
+Decide — verification results, decisions, and the wave plan
+
+[148 · paragraph]
+Nine verification assignments flew. Every one of them RAN something; the entire
+round is proof rather than reading, which is what the survey round explicitly
+failed to do. Three of the direction's load-bearing sentences were REFUTED by
+measurement, and following the evidence rather than the plan is the most
+valuable thing that happened here. What follows is what was proven, what was
+refuted, what nobody reached, and the seven slices that carry it.
+
+[149 · heading]
+What was PROVEN
+
+[150 · heading]
+display_state/5 is additive by arity — settled by execution, not argument
+
+[151 · paragraph]
+The direction's own sharpest self-identified attack was that a fifth input
+collides with D94's 40-cell literal table at exactly the bucket it protects. It
+does not. Baseline `1725 tests, 0 failures (9 excluded)`; with a `/5` head
+added, `1729 tests, 0 failures`; `git diff --stat` reads `1 file changed, 19
+insertions(+)` with ZERO deletions; and the md5 of `pane_builder_test.exs` is
+`d1e3b5c13b7b729e4c9e83de6d0aa085` BEFORE AND AFTER — byte-identical, not merely
+passing. Deleting the one Tier-2 clause reds exactly 2 tests, both in the new
+probe file, with a readable diff: `bucket=standard num_panes=2 has_editor=true —
+got [:strip, :full], want [:hidden, :strip]`. Restoring returns all four lock
+suites to `56 tests, 0 failures`. The verifier also OPENED
+`pane_builder_test.exs` directly, which no surveyor had: ten wide cells as
+literal lists with `assert map_size(table) == 40`, and the deep-stack table is
+the NEXT test in the SAME file with its own `map_size == 6` guard — so one
+hash-identity proof covers both.
+
+[152 · paragraph]
+The caveat is load-bearing and became a named deliverable rather than an
+implication: the probe proves `/5` is free when ADDED, not when the CALL SITE
+SWITCHES to it. After the swap the 40-cell table still passes but stops
+describing what the desk renders at `standard` — D94(a) satisfied literally
+while its purpose hollows out. The bridge is the 'inspector CLOSED is /4
+verbatim' equivalence test, now criterion 1 of the ladder slice.
+
+[153 · heading]
+The Tier-2 prediction CONFIRMS, 3 of 3 faces, on a harness that first reproduced
+9 of 9 committed ground-truth rows
+
+[154 · paragraph]
+Registered before the run, then measured. At viewport 1024 with rail [44] and a
+docked 300px inspector: panel 980 (predicted 980), surface_border_box 680 (680),
+gutter READ 80 (80), content 600 (600). Per face, each divided by its OWN probe
+advance at 18px: 60.00ch resolved Iowan Old Style at 10.0000 px/ch, 54.31ch
+forced Georgia at 11.0469, 65.42ch forced Source Serif 4 at 9.1719 — all three
+matching the registered figures. The run reports `sidebar position=static,
+docked_in_flow=true, occlusion=0, visible_content=600, scrim_content=none,
+scrim_renders=false`, and `## PREDICTION P1: CONFIRMED (3/3 faces match the
+registered figures)`.
+
+[155 · paragraph]
+The subtraction model is no longer an assumption. The harness reproduced three
+independently-shaped committed configurations to the pixel first — 1440 default
+(1136/720/640), 1024 default including the b29 41px in-flow strip DERIVED rather
+than pinned (720/679/599), and 1024 user-opened as today's absolute overlay
+(720/720/640, occlusion 260) — and printed `## NON-VACUITY GATE: ground-truth
+rows reproduced 9/9 PASS` before quoting any prediction cell. Its first run
+FAILED that gate at 6/9 because the Source Serif 4 face fell through to generic
+serif, and the gate caught it. `rails + panel_px == viewport_px` holds 18 of 18
+distinct (width, state) rows with zero exceptions.
+
+[156 · heading]
+Tier 2 needs ZERO lines of CSS — confirmed independently, twice
+
+[157 · paragraph]
+The overlay and its scrim live entirely inside `@container panel (max-width:
+860px)`. At panel 980 that block simply stops matching:
+`.bp-doc-sidebar.is-open`'s default `flex: 0 0 300px` returns and the scrim
+`::after` structurally cannot render. Measured, not argued, by both the Tier-2
+harness and the wide-untouched verifier, whose ladder run printed `panel=980
+main=680 surface_bb=680 gutter=80 content=600` with `inspector position=static
+width=300 overlap=0 scrim_content=none`. This is what dissolves the D16
+collision the digest predicted between Tier 2 and Tier 3 — the ladder is pure
+Elixir, so the destination surface owns root.html.heex alone in the same round.
+
+[158 · heading]
+The fifth input does not have a hole — it has a crash
+
+[159 · paragraph]
+`sidebar_user_opened` is seeded only by `sidebar_assigns/1`, reached only from
+`setup_paper_view`. Measured 7/7 green: the key is ABSENT on a fresh mount for
+sheet, graph, field form and desk root, PRESENT only for paper — and its
+lifetime is paper-VISIT-scoped, not mount-scoped, so opening a paper then
+patching to a sheet KEEPS it, which makes the hole invisible to any test that
+opens a paper first. Wiring the fifth input as `@sidebar_user_opened` in the
+pane comprehension produced `** (KeyError) key :sidebar_user_opened not found`
+through `Phoenix.LiveView.Diff.process_keyed/5`, with 5 of 7 views crashing. The
+read-site `Map.get(..., false)` alternative runs and silently defaults every
+non-paper desk to false. Seed it in `mount.ex`. Separately proven: a pure toggle
+DOES re-render the pane comprehension without `rebuild_panes/1` — at `standard`,
+one click moves the row's fifth input false→true while panes, editor_doc,
+editor_schema, editor_blocks and editor_form stay term-identical.
+
+[160 · heading]
+The wide-geometry lock is BLIND to the inspector, proven by mutation
+
+[161 · paragraph]
+`pane_family?/1` matches only `pane-layout`, `pane-column` and `editor-panel`;
+`.bp-doc-sidebar.is-open` contains none of them. The REAL lock test passes `16
+tests, 0 failures` on a sheet whose only change is the dock basis 300px → 200px
+— and that same lock-green edit moves viewport 1280's wide reading content from
+596px to 640px. A slice can move 44px of wide reading column and stay green.
+Also confirmed: D102's runtime rule-deletion diff is not committed tooling
+(`deleteRule(` returns zero repo-wide) and the harness it ran on was never
+committed either, so D102's wide-unmoved proof is unreproducible. The verifier
+then WROTE the missing tool: with a tight deletion set it reports 6 rules
+deleted and IDENTICAL at 1280 and 1440, reproducing the deployed artifact
+exactly (1280 → 976/676/596; 1440 → 1136/720/640). Its px are faithful at wide
+and its ch is POISONOUS — it resolves 8.8125 px/ch and reproduces the charter's
+own disproven 67.6ch, because the paper face is EEx-interpolated and cannot be
+statically lifted.
+
+[162 · heading]
+Both colour gates were made to fail, today, in the inspector's own scrim region
+
+[163 · paragraph]
+Seeding `rgba(0, 0, 0, 0.55)` leaves `studio-literal-check` PASS (367 files, 0
+hits — its regex scans `hsl(<digit>` and `#hex` only) while `design/check.mjs`
+reds with `Part E FAIL: root.html.heex GREW 165 → 166 (+1)`. Changing `--st-ok:
+#0d9488` to `teal` reds with `SHRANK 165 → 164 (-1)` and an instruction to lower
+the baseline in the same diff. Both reverted; both gates back to exit 0. The
+premise that 165 is a stale snapshot is REFUTED — it is current and exact, and a
+brief that 'updates' it introduces a false mismatch.
+
+[164 · heading]
+What was REFUTED — the three reversals that changed the plan
+
+[165 · heading]
+1. The ≥55ch bar does NOT hold at standard for forced Georgia
+
+[166 · paragraph]
+The direction said the bar 'HOLDS and is measured rather than exempted' at Tier
+2. Measured: 54.31ch, a MISS. Two levers were then measured on the same gated
+harness — a 292px dock yields Georgia 55.04ch MEET (292.42 is the exact
+arithmetic ceiling), and a 260px dock yields surface 720, content 640, Georgia
+57.93ch MEET, a cell identical to the 1440 docked cell, which would also erase a
+non-monotonicity nobody had named: today the 1024 DEFAULT column is 599px while
+the 900 default column is 640px, so the desk reads WORSE at 1024 than at 900.
+
+[167 · paragraph]
+Both refused (D149). 292 is trimming to one face's arithmetic ceiling — the
+gerrymandering D83 and D103 forbid by name. `.bp-doc-sidebar.is-open { flex: 0 0
+300px }` is GLOBAL, so 260px moves viewport 1280 from surface 676 to 716: 40px
+of wide-tier movement against a hard zero-pixel constraint. And the 1024 Georgia
+shortfall is INHERITED — the default cell is 54.22ch and the ladder adds 0.09ch
+— so charging it to the inspector double-counts, which D139 forbids in those
+words. The 260px measurement is recorded and handed to `spd-b42`'s fence, filed
+as `inspector-dock-260px-and-the-1024-900-non-monotonicity`. D127 Part 1 is
+amended per-face BEFORE the run (D150) rather than discovered false after it.
+
+[168 · heading]
+2. A successful fix makes the non-vacuity guard VACUOUS — and nobody was asked
+to look for this
+
+[169 · paragraph]
+All 21 of the committed table's `guard_applies` rows are user-opened sub-wide
+rows at 1024/900/800/764/700/640/500 — every single one is a row this wave's fix
+abolishes, because the guard only applies where the scrim renders. Dock at 1024,
+abolish dimming below, and `applies_in_rows → 0`, at which point
+`summariseNonVacuity` stamps `vacuous: true` with the note 'This is NOT a pass —
+every dimming figure in this run is unverified by it.' The standing law 'prove
+the guard applies in >0 rows before quoting any cell' becomes UNSATISFIABLE: the
+wave would measure a working desk and be forbidden from reading its own table.
+D153 restates the law as a conditional and — because 'the selector drifted' and
+'the desk is fixed' produce an identical zero — makes a POSITIVE CONTROL
+mandatory in the same run.
+
+[170 · heading]
+3. phx-click-away MISFIRES at the docked tier, and the dismissal fork was
+mis-stated
+
+[171 · paragraph]
+The fork was posed as 'a new backdrop div' versus 'D96's hardened
+phx-click-away'. Correcting it dissolves it: both `components.ex` precedents
+render the click-carrying overlay as a SIBLING of the dialog, never a wrapper —
+`.image-picker-overlay aside` matches 0 elements — and D96's failure mode
+required a WRAPPER plus an inline `stopPropagation()`. D96's actual law is
+narrower: never put a dismiss handler on an ANCESTOR of the dialog. Both shapes
+obey it. `phx-click-away` then loses on browser-driven behaviour:
+`dispatchClickAway` scans the whole document gated only on visibility and
+viewport, never on CSS state, and at the DOCKED tier clicking the prose fired
+`C:dismiss`. A docked inspector would dismiss itself the moment the reader
+clicks into the document. It also fires on mousedown-outside/release-inside. It
+does correctly NOT self-fire from the inspector's 7 internal `phx-click`
+bindings — that part of the worry is refuted. Sharper still: today's `::after`
+scrim with `pointer-events: none` means the hit test returns the PROSE and the
+prose's own `phx-click` fires through — the dimmed text is fully live and
+editable while it looks suspended. That is D127's indeterminacy at the event
+level.
+
+[172 · heading]
+Corrections to inherited figures
+
+[173 · paragraph]
+MD3 was OVERSTATED and two independent surveyors caught it: D129 already
+corrected D101 to a two-tier standard/modal split at 600-1199dp where the
+standard tier SHRINKS rather than overlays, with the only third-pane endorsement
+gated to 1600dp+ — above every width measured. The three-pane dock at 1024-1440
+is consistent with MD3's principle and is NOT MD3-endorsed. Sanity is cited for
+mechanism (panes collapse into a TAB BAR plus drill) and never for a breakpoint,
+because its widths are unconfirmed. Contentful is struck, Linear inconclusive.
+The dismissal grammar has NO external APG sourcing anywhere in barkpark_web's
+Studio surface — it rests on internal precedent, and focus trap / restore /
+`inert` have ZERO repo precedent. '0 of 9 user-opened desktop cells meet the
+bar' is FALSE by the artifact's own `visible_meets_55ch`: 5 of 9 MEET across
+1440/1280/1024, all five in the wide bucket; the true 0-of-3 is 1024 alone. The
+geometry census is 15 entries, not 14. And 'the primary checkout runs 200+
+commits behind' is not true now — measured 0-to-1 commits behind across the
+round.
+
+[174 · heading]
+Tier 3's breadcrumb drill does not exist as claimed
+
+[175 · paragraph]
+`desk_crumbs/1` builds its trail from `@panes` and `@editor_doc` only, is never
+passed `sidebar_user_opened` at its one call site, fires `expand-pane` with a
+pane INDEX handled by `Enum.take(nav_path, idx)` + push_patch, and its trailing
+document crumb is unconditionally a static `span` — a dead end, not a link. The
+editor closes only as a SIDE EFFECT of the pane path shrinking, and at
+phone+editor `display_state` returns `:hidden` for EVERY pane. Extending the
+crumb is minimal (a new segment, the document crumb made clickable via
+`sidebar-toggle-panel`, which is already in `@safe_events`); extending
+`nav_path` with a synthetic inspector node is refused because `resolve/4`
+pattern-matches real content heads. The inspector renders `:if={@paper_doc}`, so
+the whole destination is PAPER-ONLY — stated rather than discovered, and filed.
+
+[176 · heading]
+The instrument's third-state defect is the SILENT DROP
+
+[177 · paragraph]
+Feeding a synthetic third-state row into a real 54-row run and executing the
+printer: 55 rows go in, `destination` appears ZERO times in the output, and no
+error is raised anywhere — three summary loops hardcode the two states. Teaching
+them the third state then throws `TypeError: Cannot read properties of null
+(reading 'toFixed')`, but THAT is already contained by the existing try/catch
+whose comment literally anticipates 'one null where a number was expected'. The
+drop is the dangerous one. The null convention is half-implemented: the printer
+renders `?` for null ch NUMBERS but `FAIL` for null VERDICTS — asserting FAIL
+where no reading column exists is exactly what D127 Part 2 forbids. Confirmed
+separately: a mid-sweep die writes 0 bytes and discards every collected row;
+`REQUIRED_SELECTORS` is a flat const checked for every state; and no dismiss,
+Escape or round-trip path exists anywhere in 2192 lines.
+
+[178 · paragraph]
+One assignment's stated expectation was INVERTED and the inversion is itself the
+proof: the brief predicted a symlinked invocation would die, labelling a written
+artifact 'bad'. Post-D130 it is supposed to RUN, and it did — exit 0, 700,919
+bytes, 54/54 rows, bracket MATCHED, reproducing the committed table cell for
+cell across all 27 user-opened rows at sha `65541e2d…`, slot blue. A verifier
+who had 'confirmed' the expected failure would have been confirming a broken
+instrument.
+
+[179 · heading]
+Coverage, including the not-founds
+
+[180 · paragraph]
+Reached and read directly for the first time: `pane_builder_test.exs`'s 40-cell
+and deep-stack literal tables, `width_bucket_seam_test.exs` (in full — pure
+assign-level, zero display_state coupling), `wide_geometry_lock_test.exs` (in
+full, 792 lines), `studio_live_phone_drill_test.exs`, `modal_a11y_test.exs`,
+`studio_live_caps_gate_test.exs`, `caps.ex`, `mount.ex`, `shared/paper.ex`,
+`handlers/scope.ex`, and LiveView 1.1.28's `dispatchClickAway` source.
+
+[181 · paragraph]
+NOT FOUND / NOT REACHED, recorded rather than papered over: `deleteRule(` exists
+nowhere in the tree and neither does the harness D102 measured on. No test
+anywhere in `api/test/` asserts on PaneBuilder's arity, `__info__` or
+`function_exported?`. No focus-trap / `inert` / `restoreFocus` implementation
+exists in `api/lib` — every grep hit is the English word. No WAI-ARIA APG
+citation exists in the Studio surface. `bp search` does not exist in this CLI
+build, so prior-art sweeps fell back to the charter and the ledger.
+`studio_live_width_bucket_test.exs` was grepped rather than read in full, so
+'does a rendered-desk test catch a /4→/5 call-site swap at standard?' stays
+OPEN. `scripts/studio-desk-compare.mjs` and
+`scripts/measurements/spd-visible-table-verify-2026-07-20.json` were never
+opened — both filed. The media explorer could not be reached end-to-end in a
+bare test scope. And the deployed half of the headline — that a docked 300px is
+actually subtracted from panel_px the way the rail is — remains a PREDICTION on
+a static harness until round 3 runs it against the deployed build.
+
+[182 · heading]
+Decisions — D148 to D160, landed in the charter before any builder flies
+
+[183 · paragraph]
+Per D135 these are written and COMMITTED to
+`.claude/workflows/bp-studio-space-priority-charter.md` in the same wave that
+cites them. Briefs may quote them; they may neither create nor renumber one. The
+charter is the epic's memory and this Paper mirrors it — it does not fork it.
+
+[184 · paragraph]
+D148 — The Tier-2 ladder ships and costs zero lines of CSS, because the 860px
+container query self-disarms at panel 980. D149 — The dock stays 300px: 292 is
+gerrymandering, 260 moves wide by 40px, and the Georgia cell is inherited, so
+charging it here double-counts. D150 — D127 Part 1 is amended per-face BEFORE
+the run; the ladder's claim is that overlay-caused harm is abolished, not that
+all three faces MEET. D151 — `display_state/5` is additive by arity, and the
+`/4` equivalence test is what keeps D94(a) from hollowing out. D152 — The fifth
+input is seeded in `mount.ex`; defaulting at the read site is the same hole
+wearing a green test. D153 — A successful fix makes the guard vacuous, so its
+law becomes conditional and acquires a mandatory positive control. D154 —
+Dismissal is the sibling-scrim shape, and the tier gate may not key on
+`width_bucket`. D155 — Tier 3 is a summoned destination with a new crumb kind;
+`nav_path` is not extended; the paper-only scope is said out loud. D156 — 'Wide
+moved zero pixels' is three proofs, each named for what it actually proves, and
+the lock is blind today. D157 — The instrument's third-state defect is the
+silent drop, and D121's literal 54 is retired as a number while its doctrine
+survives. D158 — The comparables are re-quoted from D129 and three inherited
+figures are corrected. D159 — The Part E baseline of 165 is current, and both
+colour gates were re-proven by mutation. D160 — The round split is file-truth,
+and D16 is satisfied by arithmetic rather than by scheduling.
+
+[185 · heading]
+The wave plan — seven slices, three rounds, every builder on opus
+
+[186 · paragraph]
+ROUND 1 (dependency-free, building now).
+`inspector-ladder-standard-dock-in-flow` — the Tier-2 ladder: inspector-aware
+`display_state/5`, the `mount.ex` seed, the single call-site swap, the `/4`
+equivalence test and a new exhaustive literal table for the inspector-open
+dimension. Surface: `pane_builder.ex`, `mount.ex`, `components.ex` and their
+tests. Gate: `cd api && CC=clang mix test test/barkpark_web/studio/
+test/barkpark_web/live/studio/`, against a 1725/0 baseline. —
+`inspector-narrow-destination-surface` — the Tier-3 summoned destination,
+dimming abolished, owning `root.html.heex` alone. Gate: `node design/check.mjs
+&& bash scripts/studio-literal-check.sh && bash
+scripts/paper-editor-mirror-check.sh` plus the studio suites. —
+`wide-rule-deletion-diff-committed` — the missing D102 tooling, px-only and
+hard-throwing on ch. Gate: `node --check scripts/studio-wide-deletion-diff.mjs
+&& node scripts/__studio-wide-deletion-diff.test.mjs`. —
+`desk-measure-learns-third-state-and-round-trip` — the silent drop dies,
+`REQUIRED_SELECTORS` goes per-state, null verdicts render `?`, the literal 54 is
+computed, and round-trip plus the positive control are built. Gate: `node
+--check scripts/studio-desk-measure.mjs && node scripts/studio-desk-measure.mjs
+--help`.
+
+[187 · paragraph]
+ROUND 2 (dispatched by the lead after their dependencies merge).
+`wide-geometry-lock-sees-the-inspector` — AFTER
+`inspector-narrow-destination-surface` merges, so the census enumerates the
+final rule set; its acceptance is the mutation proof that a 300px→200px dock
+change now REDS. Gate: `cd api && CC=clang mix test test/barkpark_web/studio/`.
+— `inspector-dismissal-and-return-grammar` — AFTER the ladder and the
+destination merge, because it shares `components.ex` with the ladder's call-site
+swap and gates on the destination state: sibling scrim, tier gate that is not
+`width_bucket`, the a11y quintet with Escape DRIVEN, focus trap and restore,
+`sidebar-dismiss` added to `@safe_events`, the new crumb kind, and a round trip
+that restores PANES and not only prose. Gate: the studio suites plus `bash
+scripts/studio-literal-check.sh`.
+
+[188 · paragraph]
+ROUND 3. `inspector-shape-bracketed-deployed-run` — AFTER everything merges and
+deploys. The only artefact permitted to speak about the deployed render:
+prediction registered first (D150 verbatim), ssh-queried sha and slot bracketed
+pre and post, positive control mandatory, Tier-1 rows byte-identical, artifact
+committed under `scripts/measurements/`.
+
+[189 · paragraph]
+Backlog filed this wave, all published under `spd-b39`:
+`inspector-dock-260px-and-the-1024-900-non-monotonicity` (the measured 260px
+lever, handed to spd-b42's fence so two claims never describe one number),
+`inspector-destination-for-sheet-graph-media` (the paper-only scope gap),
+`spd-b39-prose-contradicts-live-parent-of-spd-b12` (the task's own prose
+contradicts the live ledger, plus spd-w9's lapsed claim and spd-b40's stale
+census), `spd-b42-brief-cites-a-14-entry-census`, and
+`desk-measure-compare-may-share-the-two-state-axis` (an unopened sibling tool
+that may carry the same silent drop).
+
+[190 · paragraph]
+The unifying rule, and the reason this wave is not a preference: nowhere does
+the desk end up with prose at 55% black under a panel. Dimming is abolished, not
+tuned. A mode either shows the document or it does not, and the shipped design's
+refusal to choose IS the indeterminacy D127 asked about. The desk pays for the
+dock where it can afford it, and leaves the document where it cannot.
+
+[191 · heading]
+DEBRIEF — wave 10 Review, 2026-07-20. Grade A−.
+
+[192 · paragraph]
+STATUS: the wave is COMPLETE. Four slices built, all four green on their own
+gates, all four reviewed adversarially with mutation passes rather than accepted
+on green. One real bug found and fixed in place; one filed backlog premise
+disproven by measurement and corrected on the ledger; one wave-level defect —
+the charter citations — repaired at Review for the second wave running. Rounds 2
+and 3 remain, by the sequenced-rounds law and not by failure.
+
+[193 · heading]
+CORRECTION TO THIS PAPER — the Decisions section made a claim that was false
+when written
+
+[194 · paragraph]
+Dated correction, 2026-07-20, wave-10 Review. The Decisions section above states
+verbatim that D148–D160 are "written and COMMITTED to
+`.claude/workflows/bp-studio-space-priority-charter.md` in the same wave that
+cites them". THAT WAS NOT TRUE. At Review the charter ended at D147; `git diff
+--name-only origin/main..<branch>` on all four built branches returned zero
+charter paths; and three of the four slices had shipped code comments citing
+D148, D149, D151, D152, D155 and a `D156b` that is not a decision at all. This
+is precisely the failure D135 was authored to prevent, reproducing inside the
+wave whose own Paper quotes D135 while committing it — the third recorded
+occurrence (wave 8, wave 9 repair, wave 10). It is left standing above rather
+than silently rewritten, because the record of the claim IS the finding. Review
+transcribed D148–D160 into the charter from this Paper (the authoritative record
+of what Decide ruled) and landed them on the ladder slice's branch so the
+charter merges WITH the wave per D68. The `D156b` citation was corrected in code
+to D156. Filed as `charter-citation-resolves-guard`: the cure D135 wrote is
+prose, and prose does not fail a build.
+
+[195 · heading]
+What shipped, per slice
+
+[196 · paragraph]
+SLICE 1 — `inspector-ladder-standard-dock-in-flow`, final branch
+`loop-epic/the-tier-2-ladder-at-viewport-1024-the-p-0-r`. VERDICT: ship.
+`display_state/5` as a pure additive ARITY with a `/4` equivalence bridge (4
+buckets × 1..8 panes × both editor states) that keeps D94(a)'s 40-cell table
+load-bearing after the call-site swap, plus a new exhaustive open-dimension
+table with a `map_size` guard. `pane_builder_test.exs` verified byte-identical
+at md5 `d1e3b5c13b7b729e4c9e83de6d0aa085`, before and after `mix format`. The
+D152 wiring hole closed in `mount.ex`. Zero CSS, exactly as D148 predicted. Gate
+green on the final state: 1741 tests, 0 failures — 1725 baseline + 16 new, so
+nothing pre-existing was lost or silently skipped. Review mutation: deleting the
+Tier-2 clause reds 4 of 16 new tests while `pane_builder_test.exs` stays unmoved
+— the lock genuinely bites. Review ADDED the charter amendment commit to this
+branch; no code was changed.
+
+[197 · paragraph]
+SLICE 2 — `inspector-narrow-destination-surface`, final branch
+`loop-epic/at-narrow-and-phone-the-user-opened-insp-1` (UNCHANGED — Review found
+nothing to fix). VERDICT: ship, with a merge-order caveat the lead must weigh.
+One NEW bucket-keyed selector list, `root.html.heex` +75/−0 insertions-only, the
+b29/D91 rules byte-untouched. The scrim lock EVALUATES THE CASCADE rather than
+asserting a rule exists — the D39/D40 vacuity — with an in-process mutation
+control. All four CSS gates green on the final state, Part E ratchet 165/165 Δ0
+(D159), 1736 tests 0 failures. Review verified the positioning mechanism is the
+one already proven in production (the shipped overlay uses identical `position:
+absolute` + `inset` + `z-index: 5` against `.editor-panel`), and verified the
+exit control is a real `<button>` with `aria-expanded` at the top of the
+now-fully-visible panel — so the destination is escapable, not a trap.
+
+[198 · paragraph]
+SLICE 3 — `wide-rule-deletion-diff-committed`, final branch
+`loop-epic/commit-the-runtime-rule-deletion-diff-as-2-r`. VERDICT: ship. D102's
+"wide is unmoved, proven by deleting the rules at runtime" stops resting on an
+evaporated harness — `deleteRule(` existed nowhere in the tree. Fidelity
+reproduced at tolerance ZERO (1280 → 976/676/596; 1440 → 1136/720/640), default
+deletion set IDENTICAL across 18 fields at both widths, 6 deleted / 0 missed.
+Review confirmed the ch ban is STRUCTURAL by execution rather than by reading:
+clean px passes while a ch-shaped KEY, a ch-shaped VALUE and a NESTED ch figure
+all hard-throw. Gate re-run green after Review's fix: node --check + 21/21
+self-tests. Review FIXED the two `D156b` citations to D156.
+
+[199 · paragraph]
+SLICE 4 — `desk-measure-learns-third-state-and-round-trip`, final branch
+`loop-epic/the-instrument-learns-a-third-inspector--3-r`. VERDICT: ship, and it
+carries the wave's one real bug, now fixed. The SILENT DROP dies first and is
+proven dead by execution against the pre-fix printer from git HEAD (18 rows in,
+`destination` printed ZERO times, no error raised). Review verified the
+arithmetic by calling the exports directly: `expectedRowCount()` = 75,
+`expectedRowCount(["default","user-opened"])` = 54, undeclared states APPENDED
+not dropped, and the `SILENT STATE DROP` tripwire throws on a missing state
+while staying silent on the real set. D121's literal 54 is gone from code and
+`--help` (grep count 0).
+
+[200 · heading]
+The one real bug Review found and fixed
+
+[201 · paragraph]
+`runRoundTrip` called `openInspectorByRealClick`, which `die()`s on an
+unreachable toggle — and `runRoundTrip` runs MID-SWEEP, before the provenance
+bracket closes and therefore before anything reaches disk. One missing toggle at
+one width discarded EVERY row already collected and left a ZERO-BYTE run, which
+D138 rules an INSTRUMENT FAILURE and never a desk fact. That is the exact
+all-or-nothing abort this slice was filed to END, reintroduced by the pass it
+added — D130's pattern of a fix reintroducing its own disease, one slice later.
+The builder named the asymmetry in his own review and asked a reviewer to push
+on it; Review did. `openInspectorByRealClick` gains `fatal` (default true, so
+the matrix sweep and `user_opened_proof` keep D97 semantics — an unreached
+user-opened row is not a desk fact) and the round trip passes `fatal: false`,
+returning a named skip symmetric with `dismissInspectorByRealClick`, which
+already skipped rather than threw.
+
+[202 · heading]
+A filed backlog item whose premise Review disproved
+
+[203 · paragraph]
+`summoned-destination-position-coupling-untested` was filed by slice 2's builder
+against himself, claiming the lock "pins the four properties INDEPENDENTLY, so
+it would stay green on three of four" if `position: absolute` were dropped.
+Review settled it by mutation rather than by reading: stripping `position:
+absolute` from the narrow/phone rule REDS the suite, 11 tests / 1 failure,
+failing by name — "the summoned-destination rule no longer declares `position` —
+its geometry is gone". So the silent-revert hazard cannot occur silently, and
+the task's criterion 1 is already satisfied by the shipped test. The task was
+corrected on the ledger (dated reviewer note, priority dropped to 4) rather than
+left to send a future builder chasing a non-issue. What genuinely survives is
+only the narrower implication-form hardening. This is worth naming as a
+POSITIVE: the builder's instinct to file against himself was right even though
+this particular fear was not — the epic wants that instinct, and the correction
+costs one measurement.
+
+[204 · heading]
+Ledger audit
+
+[205 · paragraph]
+HONEST — no lies to fix on the wave's own four tasks. All four left `lifecycle:
+in_progress`, stamped every non-merge criterion with substantial evidence as
+they worked (361–1820 bytes per criterion, concrete and run-derived), and
+correctly left the merge-gated criterion `met: false` with EMPTY evidence for
+the lead to close on merge. All four parent to
+`spd-b39-user-opened-inspector-shape-successor`. Three discovered-but-not-taken
+items were filed AND published during the run
+(`spd-b47-ladder-backstrip-expand-collision`,
+`summoned-destination-position-coupling-untested`,
+`desk-measure-printer-proof-harness`). The three deferred slices
+(`wide-geometry-lock-sees-the-inspector`,
+`inspector-dismissal-and-return-grammar`,
+`inspector-shape-bracketed-deployed-run`) sit `open` and UNCLAIMED, exactly as
+the sequenced-rounds law requires — their absence from this wave is design, not
+failure. Review's own ledger writes: the position-coupling correction above, and
+one new published child, `charter-citation-resolves-guard`.
+
+[206 · heading]
+What the lead must know before merging
+
+[207 · paragraph]
+(1) MERGE ORDER IS NOT FREE. Slice 2 makes the exit MORE load-bearing than
+before: the panel now covers the content pane completely, so the only way out is
+the single `.bp-doc-sidebar__collapse` button — verified present and a real
+`<button>` with `aria-expanded`, so it is not a dead end — with no Escape, no
+focus trap, no focus return and no `aria-modal`.
+`inspector-dismissal-and-return-grammar` owns exactly that and is ROUND 2.
+Shipping Tier 3 before it is an honest, bounded regression in escapability, and
+the lead should decide deliberately rather than discover it. (2) `spd-b47` IS
+INHERITED, NOT NEW: the ladder's surviving 44px back-strip reuses the
+`narrow`-with-editor rule VERBATIM, so its `expand-pane` behaviour at `standard`
+is identical to what already ships at `narrow` today. Worth settling; the ladder
+did not create it. (3) NOTHING IN THIS WAVE HAS RUN IN A BROWSER against the
+deployed build. Every ch figure is transcribed from the committed 54-row table,
+never re-derived and never cross-face divided. The round trip, the destination
+state, the positive control and `PAGE_MEASURE_CHROME` are code that has never
+printed. (4) MERGE-GATED CRITERIA THE LEAD CLOSES: slice 1 index 6, slice 2
+index 5, slice 3 index 6, slice 4 index 7 — one "PR merged" criterion each, all
+four correctly left unstamped.
+
+[208 · heading]
+Grade — A−
+
+[209 · paragraph]
+WHAT EARNS IT. The wave answered D127's handed-over question in geometry that
+exists in the tree, not in prose: a ladder keyed to how much room there actually
+is, with each tier's refusal reasoned rather than asserted. The half-suspended
+read D127 ruled a DEFECT — prose at 55% black while the layout metric rises and
+the human loses 219px — does not survive at any width in any state after this
+wave. Three of four slices were mutation-proven by their own builders BEFORE
+Review, and every one of those proofs reproduced when Review re-ran it. The
+additive-arity design is genuinely elegant: it buys a fifth input without
+costing the existing 40-cell lock a single byte, and the equivalence bridge is
+what keeps that from being a technicality. The builders were unusually honest —
+two filed tasks against their own work, one refused a brief instruction that was
+factually wrong (the "invert four absent-assign tests" instruction, where the
+tests did not exist) and stamped the deviation rather than quietly dropping it,
+and slice 4's builder named the exact bug Review then fixed. D102's
+evaporated-harness provenance is closed with committed, re-runnable tooling
+whose ch-refusal guard fired on its own author's run-record key.
+
+[210 · paragraph]
+WHAT HOLDS IT BACK, and it is not the deferred rounds. The charter defect is a
+wave-level failure, not a slice-level one: the Paper asserted a write it had not
+made, three slices shipped citations into a tree where they resolved to nothing,
+and Review had to repair the same class of defect for the second consecutive
+wave. The epic has now spent three waves learning one lesson. Second, slice 4 —
+the largest diff in the wave at 1126 insertions — has a gate of `node --check`
+plus `--help`, which is close to no gate at all, and its builder said plainly
+that nothing in it has run in a browser; the one bug Review found lived exactly
+in that unexercised region, which is evidence the gate is too thin rather than
+reassurance that review caught it. Third, the DELIVERABLE the wish names —
+measure the shipped shape against the DEPLOYED build with the prediction
+registered first — is genuinely not done this wave; that is legitimately round
+3's and correctly sequenced, but it means the wave ships a shape whose central
+claims are still source-facts. Not an A, because a wave that repairs its own
+citation discipline at Review has not yet internalised it; comfortably above B+,
+because everything it actually built is correct, well-locked, honestly reported,
+and moves the wish forward.
+
+[211 · heading]
+What the next wave takes
+
+[212 · paragraph]
+MERGE ROUND 1 FIRST — all four slices are file-disjoint
+(`pane_builder.ex`/`components.ex`/`mount.ex`; `root.html.heex`; two new
+`scripts/` files; `studio-desk-measure.mjs`) and the charter amendment rides
+slice 1. Then dispatch by dependency, not by convenience.
+`wide-geometry-lock-sees-the-inspector` the MOMENT slice 2 merges — its census
+must enumerate the FINAL rule set, and today the lock passes 16 of 16 on a sheet
+mutated 300px → 200px while that same edit moves 1280 wide content 596px →
+640px. `inspector-dismissal-and-return-grammar` once slices 1 AND 2 merge — it
+is the escapability debt this wave took on deliberately, and D154 fixes its
+shape (sibling scrim, `phx-click-away` REFUSED, the tier gate computed from
+`display_state/5`'s own inputs and never from `width_bucket`, since after the
+ladder 1024 is standard AND docked). Then, after all five merge and DEPLOY,
+`inspector-shape-bracketed-deployed-run` — the only artefact permitted to speak
+about the deployed render. Register D150's per-face prediction BEFORE the run so
+it can fail; forced Georgia's 54.31ch MISS at 1024 is EXPECTED and inherited
+(`spd-b42`), not overlay-caused. D153's positive control is MANDATORY, because a
+successful fix makes the non-vacuity guard vacuous and a drifted selector
+produces the identical zero. A zero-byte run is an INSTRUMENT FAILURE, never a
+desk fact.

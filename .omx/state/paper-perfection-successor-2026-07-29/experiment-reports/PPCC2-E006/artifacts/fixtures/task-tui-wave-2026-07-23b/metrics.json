@@ -1,0 +1,108 @@
+{
+  "accessibility": {
+    "all_regions_aria_labeled": true,
+    "deterministic_reading_order": true,
+    "email_logical_h1_count": 1,
+    "pass": true,
+    "studio_logical_h1_count": 1
+  },
+  "block_count": 35,
+  "cli_api_round_trip": {
+    "canonical_sha256": "9cec84da9f7148ee271f45a28d3055afddd208ccba85aa72a2b39e80ff16c84b",
+    "decode_encode_byte_stable": true,
+    "pass": true
+  },
+  "content_preservation": {
+    "authored_blocks_exactly_embedded": true,
+    "invented_decisive_facts": 0,
+    "missing_authored_strings": {
+      "email": [],
+      "studio": [],
+      "tui40": [],
+      "tui80": []
+    },
+    "pass": true
+  },
+  "document_id": "task-tui-wave-2026-07-23b",
+  "document_rev": "3999a067808963303810884654e80ab5",
+  "email_safety": {
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "script_free": true,
+    "unresolved_runtime_structure": false
+  },
+  "hard_gate_pass": true,
+  "hard_gates": {
+    "accessibility": true,
+    "cli_api_round_trip": true,
+    "content_preservation": true,
+    "email_safety": true,
+    "portable_doc_schema_validity": true,
+    "studio_structural_completeness": true,
+    "tui_width": true
+  },
+  "portable_doc_schema_validity": {
+    "blocks_sha256": "98bb6e07f0ee8a8ca82a128988402cdad77633d9ed567bbacffc02e75675f6ae",
+    "generic_adapter_dropped_nodes": 0,
+    "generic_adapter_placeholder_nodes": 0,
+    "invalid_typed_nodes": 0,
+    "max_json_depth": 4,
+    "null_nodes": 0,
+    "pass": true,
+    "top_level_blocks": 35,
+    "typed_nodes": 63
+  },
+  "projection_determinism": {
+    "cli_api": {
+      "pass": true,
+      "repeat_sha256": [
+        "9cec84da9f7148ee271f45a28d3055afddd208ccba85aa72a2b39e80ff16c84b",
+        "9cec84da9f7148ee271f45a28d3055afddd208ccba85aa72a2b39e80ff16c84b"
+      ]
+    },
+    "email": {
+      "pass": true,
+      "repeat_sha256": [
+        "8e2d7f23378972bb35a4455dd816d899f41a1fa58ea4e2749eb4283336031071",
+        "8e2d7f23378972bb35a4455dd816d899f41a1fa58ea4e2749eb4283336031071"
+      ]
+    },
+    "studio": {
+      "pass": true,
+      "repeat_sha256": [
+        "682a0a4f4990c5c99027a293c070f57da01c3523e403f2569643bd5273cbf06f",
+        "682a0a4f4990c5c99027a293c070f57da01c3523e403f2569643bd5273cbf06f"
+      ]
+    },
+    "tui40": {
+      "pass": true,
+      "repeat_sha256": [
+        "f43db60051da293bf9f88d8ded9b3ad76677c060a355760488848a083055d8d3",
+        "f43db60051da293bf9f88d8ded9b3ad76677c060a355760488848a083055d8d3"
+      ]
+    },
+    "tui80": {
+      "pass": true,
+      "repeat_sha256": [
+        "998f826291edecc14f03a1adc2d092bb6a36e2cf57d1bb109ab8afdbe3baf32e",
+        "998f826291edecc14f03a1adc2d092bb6a36e2cf57d1bb109ab8afdbe3baf32e"
+      ]
+    }
+  },
+  "semantic_node_count": 35,
+  "semantic_segment_count": 39,
+  "studio_structural_completeness": {
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true
+  },
+  "tui_width": {
+    "pass": true,
+    "tui40_max_display_width": 40,
+    "tui40_overflow_lines": 0,
+    "tui80_max_display_width": 80,
+    "tui80_overflow_lines": 0
+  },
+  "unit_id": "paper:task-tui-wave-2026-07-23b"
+}

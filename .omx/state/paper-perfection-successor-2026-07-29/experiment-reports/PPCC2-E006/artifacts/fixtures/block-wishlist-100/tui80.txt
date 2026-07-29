@@ -1,0 +1,2144 @@
+Block Wishlist 100 — one hundred new PortableDoc blocks
+=======================================================
+[1 · eyebrow]
+PD BLOCK WISHLIST · WAVE 1 · 2026-07-17
+
+[2 · ingress]
+One hundred NEW block candidates for PortableDoc — deduped against the 62
+canonical types (plus the TUI dashboard and this wave's blockquote), graded
+honestly per surface, priced by cost tier, and wired to real demand evidence.
+The companion Review paper ranks them by usefulness; this paper is the raw
+material, and it is written IN the product it describes.
+
+[3 · callout]
+Method
+Baseline: tiers.ex's 62 canonical types (25 element + 35 widget + 2 section,
+test-enforced) + TUI-only dashboard + blockquote (born this wave) — charter D1.
+Struck by the binding dedup verdicts (D9): linear gauge (stat max-bar + 1-row
+gauge-list cover it), toned callout (5 tones shipped), and generic "mermaid
+support" (the browser is a full pass-through). The chat-approval / chat-question
+/ chat-plan rows once wished for are ALREADY first-class blocks — demand
+satisfied before this list was written.
+
+[4 · section]
+How to read a candidate
+Each entry: anchor + kebab type name, one-line pitch with its demand evidence,
+an Attrs-contract data-shape sketch (the ratified pbp-tui-creative-slate style),
+then one grade line: family · tier · cost · View · Edit (E0-E4) · TUI · React ·
+Email. Grades are per surface and never inferred from each other (D2 — the
+React/Edit missing-sets overlap on only 4 of 14 items).
+Honesty rules
+Data-viz Edit defaults to E3 — a JSON textarea is not WYSIWYG (D3). Email badges
+split REAL renders from degrades (D4). Cost tiers are calibrated on shipped
+datapoints (D6/D7): STATIC ~9-14 files; I1 dual hydration cost asciicast 30-40
+files; I2 adds a route + security surface; in-canvas editability is a separate
+~514-line STUDIO-EDIT surcharge. Blocks needing non-task data carry a resolver
+flag; plugin-domain blocks carry a seam flag (D10).
+
+[5 · table]
+E0
+opaque carry — the canvas holds the block, no affordance
+E1
+read-only reference atom
+E2
+server-painted, no island
+E3
+server-paint + JSON/query island (data-viz default, D3)
+E4
+true in-canvas (a=control atom, b=WYSIWYG body, c=no-data leaf)
+Edit grade
+Meaning
+
+[6 · table]
+STATIC
+scaffy-startable, ~9-14 files/block when it reuses a rendering vocabulary
+I0
+zero-JS interactive (native <details>/CSS — collapsible-callout precedent)
+I1
+hydrated-stateless: dual implementations (client.ts + Phoenix hook) +
+real-browser test; asciicast cost 30-40 files
+I2
+backend-write: I1 + new API route + resolver + security surface
+STUDIO-EDIT
+in-canvas editability surcharge, ~514 lines / 8 files per block — separate from
+birth
+Cost tier
+Calibration (D6/D7)
+
+[7 · heading]
+The demand springs
+
+[8 · columns]
+Demand is measured, not vibed. The ledger census over 294 guerrilla papers shows
+what authors reach for when blocks exist (right). Beyond the ledger: the SAME
+dep-free Canvas2D map is duplicated in web/components/listings-map.tsx and
+apps/hundesteder/components/places-map.tsx (the geo family's origin story); the
+Projects Board shipped a bespoke Gantt (the timeline family's); and ~25
+confirmed competitor gaps span Notion (synced block, ToC, breadcrumb, equation,
+template button, gallery), Coda (action buttons), Craft (card-link, toggle
+list), Observable (chart cell, data table, reactive inputs), GitBook (try-it
+console, expandable, tabs), Typst (vector diagram, tree, scientific plot,
+chemfig) and Slite (freshness badge).
+paragraph
+4969
+heading
+3232
+list
+759
+callout
+676
+table
+207
+code
+156
+terminal
+100
+diagram
+37
+chart
+25
+stats
+23
+heatmap / gauge-list / roadmap
+8 each
+Block
+Uses
+
+[9 · heading]
+The ledger, live
+
+[10 · paragraph]
+These three data-viz blocks carry a query, not a snapshot — the task resolver
+runs them fresh on every page load against the real ledger (COUNT aggregates
+only, per D10; sum/avg stay k-anon-gated). What you see below is this
+workspace's task system, now.
+
+[11 · stat]
+tasks in this workspace (live count)
+count
+week
+inserted_at
+tasks
+
+[12 · chart]
+Tasks created per week, by lifecycle status — live COUNT aggregate.
+0
+count
+status
+week
+inserted_at
+tasks
+
+[13 · heatmap]
+count
+status
+priority
+tasks
+
+[14 · heading]
+The wishlist at a glance
+
+[15 · stat-grid]
+candidates
+100
+families
+10
+STATIC-cost
+73
+100
+I0 zero-JS
+6
+I1 hydrated
+13
+I2 backend-write
+8
+resolver-flagged
+13
+plugin-seam-flagged
+5
+
+[16 · diagram]
+Ten families (charter D8) — family x code-tier matrix; nearly every candidate
+lands :widget.
+flowchart TD W["Block Wishlist 100"] W --> F0["data-viz and charts (17)"] W -->
+F1["diagrams and technical (11)"] W --> F2["live-data and task-ops (11)"] W -->
+F3["editorial and structure (12)"] W --> F4["interactive and disclosure (10)"] W
+--> F5["media (8)"] W --> F6["geo and map (5)"] W --> F7["dev and code (10)"] W
+--> F8["fields and schema (8)"] W --> F9["navigation and meta (8)"]
+
+[17 · pullquote]
+A wishlist is only honest if every wish carries its price tag and its proof of
+demand.
+
+[19 · heading]
+data-viz & charts (17)
+
+[20 · paragraph]
+The largest family, because the wish named graphs first. chart (line), stat,
+stats, stat-grid, heatmap and gauge-list exist; everything here is a missing
+FORM, not a missing datum — plus two Observable-inspired query-native blocks at
+the end.
+
+[21 · heading]
+B001 radial-dial
+
+[22 · paragraph]
+The D9 replacement for the struck linear gauge: a radial % dial for the
+single-number 'how far along' read (criteria met, budget burned). stat's max-bar
+and a 1-row gauge-list already own the linear form — the dial is the shape that
+doesn't exist yet.
+
+[23 · code]
+{ "type": "radial-dial", "value": 71, "max": 118, // sweep = value/max, clamped
+"label": "criteria met", "bands"?: [{"to": 0.5, "tone": "danger"}, {"to": 0.9,
+"tone": "warning"}] }
+
+[24 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[25 · heading]
+B002 sparkline
+
+[26 · paragraph]
+A standalone trend strip. stat embeds a spark today, but you cannot place the
+strip alone beside prose or inside a table cell — the ledger's 23 stats uses
+show the appetite; this unlocks the bare form.
+
+[27 · code]
+{ "type": "sparkline", "points": [3, 5, 8, 9, 11, 13, 14], "label"?:
+"renderers/week", "band"?: {"min": 0, "max": 20} // pin the y-span like chart
+axes }
+
+[28 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[29 · heading]
+B003 bar-chart
+
+[30 · paragraph]
+Horizontal bars for categorical counts — the D9-mandated form. chart draws line
+series only; gauge-list's horizontal-bar vocabulary is the TUI prior art, but
+there is no labeled categorical bar block on any surface.
+
+[31 · code]
+{ "type": "bar-chart", "bars": [{"label": "paragraph", "value": 4969}, {"label":
+"heading", "value": 3232}], "max"?: 5000, // else data max "values"?: true //
+print the number after each bar }
+
+[32 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[33 · heading]
+B004 pie-chart
+
+[34 · paragraph]
+Pie/donut share-of-whole — absent on every surface (D9 confirms). The mermaid
+pie kind proves terminal feasibility; this is the data-native block (attrs, not
+diagram source).
+
+[35 · code]
+{ "type": "pie-chart", "slices": [{"label": "element", "value": 25}, {"label":
+"widget", "value": 35}, {"label": "section", "value": 2}], "donut"?: true,
+"values"?: true }
+
+[36 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[37 · heading]
+B005 scatter-plot
+
+[38 · paragraph]
+An x/y point cloud (correlation, cost-vs-size). Absent everywhere (D9);
+Observable's chart cell shows the demand for point-level plots in docs. Braille
+dots are the natural TUI medium.
+
+[39 · code]
+{ "type": "scatter-plot", "series": [{"label": "PRs", "points": [{"x": 1, "y":
+3, "label"?: "w1"}]}], "axes"?: {"min": 0, "max": 100, "xLabel": "files",
+"yLabel": "lines"} }
+
+[40 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[41 · heading]
+B006 area-chart
+
+[42 · paragraph]
+Stacked area for composition-over-time (task states by week, storage by kind).
+chart's line series are the substrate; stacking is a genuinely different read
+(parts of a whole moving).
+
+[43 · code]
+{ "type": "area-chart", "series": [{"label": "open", "points": [4, 6, 5]},
+{"label": "done", "points": [1, 3, 8]}], "stack"?: true, "axes"?: {"xLabels":
+["w1", "", "w3"]} }
+
+[44 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[45 · heading]
+B007 histogram
+
+[46 · paragraph]
+Distribution of a numeric list with binning (PR sizes, latency). No block bins
+today — authors pre-chew data into chart points by hand.
+
+[47 · code]
+{ "type": "histogram", "values": [12, 18, 22, 22, 30, 41, 55], "bins"?: 8,
+"range"?: {"min": 0, "max": 60} }
+
+[48 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[49 · heading]
+B008 box-plot
+
+[50 · paragraph]
+Five-number distribution summary per label — the honest way to compare spreads
+(benchmark runs, review latencies) without hiding outliers in an average.
+
+[51 · code]
+{ "type": "box-plot", "series": [{"label": "cold", "values": [110, 140, 150,
+180, 240]}, {"label": "warm", "values": [40, 55, 60, 70, 95]}] }
+
+[52 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[53 · heading]
+B009 waterfall-chart
+
+[54 · paragraph]
+Additive deltas walking to a total (budget, token spend, latency budget). A
+staple of cost stories; nothing on any surface draws signed running bars.
+
+[55 · code]
+{ "type": "waterfall-chart", "steps": [{"label": "base", "delta": 120},
+{"label": "cache", "delta": -40}, {"label": "retry", "delta": 15}],
+"totalLabel"?: "net" }
+
+[56 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[57 · heading]
+B010 funnel-chart
+
+[58 · paragraph]
+Stage drop-off (signup funnel, task pipeline survival). The Cloud console and
+onboarding docs hand-describe funnels in prose today.
+
+[59 · code]
+{ "type": "funnel-chart", "stages": [{"label": "visit", "value": 900}, {"label":
+"signup", "value": 210}, {"label": "deploy", "value": 80}] }
+
+[60 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[61 · heading]
+B011 radar-chart
+
+[62 · paragraph]
+Multi-axis profile comparison — score cards like the Cody 14-dimension grade or
+a per-surface feasibility profile read at a glance.
+
+[63 · code]
+{ "type": "radar-chart", "axes": ["demand", "frequency", "unlock", "reach"],
+"series": [{"label": "tabs", "values": [5, 4, 4, 3]}] }
+
+[64 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[65 · heading]
+B012 treemap
+
+[66 · paragraph]
+Hierarchical share as nested rectangles (disk usage, the 4969-paragraph ledger
+census itself). Share-of-whole with hierarchy has no home block.
+
+[67 · code]
+{ "type": "treemap", "nodes": [{"label": "prose", "value": 8960, "children"?:
+[{"label": "paragraph", "value": 4969}]}] }
+
+[68 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[69 · heading]
+B013 sankey
+
+[70 · paragraph]
+Flows between stages (traffic sources -> pages, task states -> outcomes). High
+wow-per-byte for architecture and funnel docs; honest cost: layout is the hard
+part.
+
+[71 · code]
+{ "type": "sankey", "links": [{"from": "open", "to": "claimed", "value": 40},
+{"from": "claimed", "to": "done", "value": 33}] }
+
+[72 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[73 · heading]
+B014 calendar-heatmap
+
+[74 · paragraph]
+Date-keyed contribution grid (GitHub-style). heatmap is row x col labels, not
+date-aware — authors cannot show 'activity by day over a year' without
+hand-slicing weeks.
+
+[75 · code]
+{ "type": "calendar-heatmap", "entries": [{"date": "2026-07-01", "value": 4},
+{"date": "2026-07-02", "value": 9}], "months"?: 12, "ramp"?: "shade" }
+
+[76 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[77 · heading]
+B015 scientific-plot
+
+[78 · paragraph]
+Function/log-scale plot with grid and pinned axes — the Typst gap. Sampled
+points in, honest axes out; unlocks engineering notes that today ship
+screenshots.
+
+[79 · code]
+{ "type": "scientific-plot", "series": [{"label": "O(n log n)", "points": [{"x":
+1, "y": 0}, {"x": 10, "y": 33}]}], "xScale"?: "log", "yScale"?: "linear",
+"grid"?: true }
+
+[80 · paragraph]
+data-viz & charts · :widget · cost: STATIC (scaffy-startable, ~9-14 files; D6) ·
+View: new Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: none
+
+[81 · heading]
+B016 chart-cell
+
+[82 · paragraph]
+Observable's pull: a chart with field pickers bound to a live query — pick
+source, x, y, mark; the block re-shapes itself. The reactive-doc gateway drug.
+
+[83 · code]
+{ "type": "chart-cell", "query": {"source": "tasks", "groupBy": "status", "agg":
+{"op": "count"}}, "mark": "bar" | "line" | "dot", "pickers"?: true // render the
+field controls }
+
+[84 · paragraph]
+data-viz & charts · :widget · cost: I1 — hydrated pickers over the resolver path
+(D6) · View: new Render.DataViz emitter — token palette, honest empty box ·
+Edit: E3 — server-paint + JSON island, not WYSIWYG (D3 default for data-viz) ·
+TUI: new pdrender renderer (braille / eighth-block vocabulary) · React: port of
+the View emitter (@barkpark/react registry +1) · Email: degrade badge: text
+summary (chart precedent, D4) · Flags: blocked on new aggregate/resolver
+plumbing (only the task-scoped count resolver exists; D10)
+
+[85 · heading]
+B017 data-grid
+
+[86 · paragraph]
+Observable's data table with inline wrangling: a query-driven grid with client
+sort/filter. table is static hand-typed cells; the ledger's 207 tables show how
+often people want tabular reads.
+
+[87 · code]
+{ "type": "data-grid", "query": {"source": "tasks", "filter": {"status":
+"open"}}, "columns": [{"field": "title"}, {"field": "priority", "sort"?:
+"asc"}], "pageSize"?: 25 }
+
+[88 · paragraph]
+data-viz & charts · :widget · cost: I1 — hydrated sort/filter (D6) · View: new
+Render.DataViz emitter — token palette, honest empty box · Edit: E3 —
+server-paint + JSON island, not WYSIWYG (D3 default for data-viz) · TUI: new
+pdrender renderer (braille / eighth-block vocabulary) · React: port of the View
+emitter (@barkpark/react registry +1) · Email: degrade badge: text summary
+(chart precedent, D4) · Flags: blocked on new aggregate/resolver plumbing (only
+the task-scoped count resolver exists; D10)
+
+[89 · heading]
+diagrams & technical (11)
+
+[90 · paragraph]
+The browser already renders every mermaid kind; the terminal renders only what
+has a hand-built renderer. Seven per-kind TUI renderers (D9's answer to 'mermaid
+support'), then the notation blocks Typst and Notion prove people need.
+
+[91 · heading]
+B018 diagram-gantt-tui
+
+[92 · paragraph]
+Per-kind TUI mermaid renderer (D9): schedule bars over a date axis — the kind
+the Projects Board Gantt proves people want in docs too. The browser already
+renders every mermaid kind via pass-through; the terminal renders only the kinds
+with hand-built renderers (6 waves shipped so far) — this closes the `gantt`
+gap.
+
+[93 · code]
+{ "type": "diagram", // EXISTING block — new pdrender kind "source": "gantt\n
+..." // mermaid `gantt` source, labels double-quoted }
+
+[94 · paragraph]
+diagrams & technical · :element (existing `diagram` — a new TUI kind renderer,
+NOT a new type) · cost: STATIC (Go-only; terminal-mermaid wave precedent) ·
+View: already full — browser is a mermaid.js pass-through (D9) · Edit: E0 —
+unchanged (source editing as today) · TUI: THE deliverable: native box-drawing
+renderer for this kind · React: n/a — mermaid client already covers it · Email:
+degrade badge: raw source (as today, D4) · Flags: none
+
+[95 · heading]
+B019 diagram-er-tui
+
+[96 · paragraph]
+Per-kind TUI mermaid renderer (D9): entity-relation boxes + crow's-feet — schema
+docs read in the terminal. The browser already renders every mermaid kind via
+pass-through; the terminal renders only the kinds with hand-built renderers (6
+waves shipped so far) — this closes the `er` gap.
+
+[97 · code]
+{ "type": "diagram", // EXISTING block — new pdrender kind "source": "er\n ..."
+// mermaid `er` source, labels double-quoted }
+
+[98 · paragraph]
+diagrams & technical · :element (existing `diagram` — a new TUI kind renderer,
+NOT a new type) · cost: STATIC (Go-only; terminal-mermaid wave precedent) ·
+View: already full — browser is a mermaid.js pass-through (D9) · Edit: E0 —
+unchanged (source editing as today) · TUI: THE deliverable: native box-drawing
+renderer for this kind · React: n/a — mermaid client already covers it · Email:
+degrade badge: raw source (as today, D4) · Flags: none
+
+[99 · heading]
+B020 diagram-class-tui
+
+[100 · paragraph]
+Per-kind TUI mermaid renderer (D9): class boxes with members + relations —
+architecture notes for the Go/Elixir internals. The browser already renders
+every mermaid kind via pass-through; the terminal renders only the kinds with
+hand-built renderers (6 waves shipped so far) — this closes the `class` gap.
+
+[101 · code]
+{ "type": "diagram", // EXISTING block — new pdrender kind "source": "class\n
+..." // mermaid `class` source, labels double-quoted }
+
+[102 · paragraph]
+diagrams & technical · :element (existing `diagram` — a new TUI kind renderer,
+NOT a new type) · cost: STATIC (Go-only; terminal-mermaid wave precedent) ·
+View: already full — browser is a mermaid.js pass-through (D9) · Edit: E0 —
+unchanged (source editing as today) · TUI: THE deliverable: native box-drawing
+renderer for this kind · React: n/a — mermaid client already covers it · Email:
+degrade badge: raw source (as today, D4) · Flags: none
+
+[103 · heading]
+B021 diagram-pie-tui
+
+[104 · paragraph]
+Per-kind TUI mermaid renderer (D9): share-of-whole in eighth-block arcs — the
+diagram twin of the pie-chart block. The browser already renders every mermaid
+kind via pass-through; the terminal renders only the kinds with hand-built
+renderers (6 waves shipped so far) — this closes the `pie` gap.
+
+[105 · code]
+{ "type": "diagram", // EXISTING block — new pdrender kind "source": "pie\n ..."
+// mermaid `pie` source, labels double-quoted }
+
+[106 · paragraph]
+diagrams & technical · :element (existing `diagram` — a new TUI kind renderer,
+NOT a new type) · cost: STATIC (Go-only; terminal-mermaid wave precedent) ·
+View: already full — browser is a mermaid.js pass-through (D9) · Edit: E0 —
+unchanged (source editing as today) · TUI: THE deliverable: native box-drawing
+renderer for this kind · React: n/a — mermaid client already covers it · Email:
+degrade badge: raw source (as today, D4) · Flags: none
+
+[107 · heading]
+B022 diagram-gitgraph-tui
+
+[108 · paragraph]
+Per-kind TUI mermaid renderer (D9): branch/merge topology — release and worktree
+runbooks. The browser already renders every mermaid kind via pass-through; the
+terminal renders only the kinds with hand-built renderers (6 waves shipped so
+far) — this closes the `gitgraph` gap.
+
+[109 · code]
+{ "type": "diagram", // EXISTING block — new pdrender kind "source": "gitgraph\n
+..." // mermaid `gitgraph` source, labels double-quoted }
+
+[110 · paragraph]
+diagrams & technical · :element (existing `diagram` — a new TUI kind renderer,
+NOT a new type) · cost: STATIC (Go-only; terminal-mermaid wave precedent) ·
+View: already full — browser is a mermaid.js pass-through (D9) · Edit: E0 —
+unchanged (source editing as today) · TUI: THE deliverable: native box-drawing
+renderer for this kind · React: n/a — mermaid client already covers it · Email:
+degrade badge: raw source (as today, D4) · Flags: none
+
+[111 · heading]
+B023 diagram-state-tui
+
+[112 · paragraph]
+Per-kind TUI mermaid renderer (D9): state machines with transitions — lifecycle
+docs (task claim/close, deploy slots). The browser already renders every mermaid
+kind via pass-through; the terminal renders only the kinds with hand-built
+renderers (6 waves shipped so far) — this closes the `state` gap.
+
+[113 · code]
+{ "type": "diagram", // EXISTING block — new pdrender kind "source": "state\n
+..." // mermaid `state` source, labels double-quoted }
+
+[114 · paragraph]
+diagrams & technical · :element (existing `diagram` — a new TUI kind renderer,
+NOT a new type) · cost: STATIC (Go-only; terminal-mermaid wave precedent) ·
+View: already full — browser is a mermaid.js pass-through (D9) · Edit: E0 —
+unchanged (source editing as today) · TUI: THE deliverable: native box-drawing
+renderer for this kind · React: n/a — mermaid client already covers it · Email:
+degrade badge: raw source (as today, D4) · Flags: none
+
+[115 · heading]
+B024 diagram-journey-tui
+
+[116 · paragraph]
+Per-kind TUI mermaid renderer (D9): user-journey lanes with scores — UX and
+onboarding papers. The browser already renders every mermaid kind via
+pass-through; the terminal renders only the kinds with hand-built renderers (6
+waves shipped so far) — this closes the `journey` gap.
+
+[117 · code]
+{ "type": "diagram", // EXISTING block — new pdrender kind "source": "journey\n
+..." // mermaid `journey` source, labels double-quoted }
+
+[118 · paragraph]
+diagrams & technical · :element (existing `diagram` — a new TUI kind renderer,
+NOT a new type) · cost: STATIC (Go-only; terminal-mermaid wave precedent) ·
+View: already full — browser is a mermaid.js pass-through (D9) · Edit: E0 —
+unchanged (source editing as today) · TUI: THE deliverable: native box-drawing
+renderer for this kind · React: n/a — mermaid client already covers it · Email:
+degrade badge: raw source (as today, D4) · Flags: none
+
+[119 · heading]
+B025 equation
+
+[120 · paragraph]
+Math/equation block — a confirmed Notion AND Typst gap. TeX source in, MathML
+out (native in every modern browser — zero client JS); the terminal prints
+aligned unicode or honest raw TeX.
+
+[121 · code]
+{ "type": "equation", "tex": "E = mc^2", "display"?: true // block vs inline
+sizing }
+
+[122 · paragraph]
+diagrams & technical · :element · cost: STATIC (TeX -> MathML on the server; no
+client lib) · View: server-side TeX -> MathML (native browser math; zero JS) ·
+Edit: E2 — source textarea; live MathML preview = E3 island later · TUI: unicode
+approximation, raw TeX fallback · React: port of the same TeX -> MathML
+transform · Email: degrade badge: raw TeX source · Flags: none
+
+[123 · heading]
+B026 vector-diagram
+
+[124 · paragraph]
+Typst's gap: a declarative primitive canvas — boxes, arrows, labels at
+coordinates — for the diagrams mermaid's opinionated layouts refuse to draw
+(annotated architecture, memory layouts).
+
+[125 · code]
+{ "type": "vector-diagram", "shapes": [{"kind": "box", "at": [0, 0], "size":
+[12, 3], "label": "API"}, {"kind": "arrow", "from": [12, 1], "to": [20, 1],
+"label": "SSE"}], "grid"?: [40, 12] }
+
+[126 · paragraph]
+diagrams & technical · :widget · cost: STATIC (SVG emitter + box-drawing port) ·
+View: server-painted SVG · Edit: E3 — JSON island · TUI: box-drawing port (the
+layout-engine solver already speaks rectangles) · React: SVG port · Email:
+degrade badge: label list · Flags: none
+
+[127 · heading]
+B027 tree-diagram
+
+[128 · paragraph]
+Typst's gap: a tree from nested data (org charts, decision trees, taxonomy).
+filetree draws paths only; mermaid flowcharts can fake it but never read well in
+the terminal.
+
+[129 · code]
+{ "type": "tree-diagram", "root": {"label": "Document", "children": [ {"label":
+"Section", "children": [{"label": "Widget"}, {"label": "Element"}]}]} }
+
+[130 · paragraph]
+diagrams & technical · :widget · cost: STATIC (SVG + the filetree box-drawing
+vocabulary) · View: server-painted SVG/CSS tree · Edit: E3 — JSON island · TUI:
+box-drawing port (filetree precedent) · React: port · Email: degrade badge:
+indented list (REAL enough to read) · Flags: none
+
+[131 · heading]
+B028 chemfig
+
+[132 · paragraph]
+Chemical structure rendering (Typst gap). Honest: the narrowest candidate in the
+family — include for completeness of the Typst survey, expect a low usefulness
+rank.
+
+[133 · code]
+{ "type": "chemfig", "source": "C(-[:90]H)(-[:210]H)=O" // chemfig/SMILES-style
+source }
+
+[134 · paragraph]
+diagrams & technical · :element · cost: STATIC but specialist (dedicated
+layouter) · View: server-painted SVG · Edit: E2 — source textarea · TUI: raw
+source (honest) · React: port · Email: degrade badge: raw source · Flags: none
+
+[135 · heading]
+live-data & task-ops (11)
+
+[136 · paragraph]
+Everything-is-a-task makes the ledger the liveliest data source in the product.
+Two candidates ride the existing count resolver nearly for free; the rest state
+exactly which plumbing they wait on (D10).
+
+[137 · heading]
+B029 timeline-gantt
+
+[138 · paragraph]
+A native gantt over a task query — the Projects Board shipped a bespoke Gantt,
+proving both demand and renderer; this moves the read into any paper (plans,
+wave charters).
+
+[139 · code]
+{ "type": "timeline-gantt", "query": {"source": "tasks", "filter": {"parent_id":
+"pd-block-wishlist-epic"}}, "on"?: ["inserted_at", "closed_at"], // bar span
+fields "lanes"?: "assignee" }
+
+[140 · paragraph]
+live-data & task-ops · :widget · cost: STATIC (rides the existing task resolver;
+D10 count-only) · View: server-paint via the TaskResolver agg/rows path, fresh
+per page load · Edit: E3 — query JSON island; live preview channel already
+exists · TUI: pdrender port over the same resolved attrs · React: port of the
+View emitter · Email: degrade badge: text rollup · Flags: blocked on new
+aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) —
+task rows carry no date span today
+
+[141 · heading]
+B030 burndown-chart
+
+[142 · paragraph]
+Open-count over time with an ideal line — the sprint read. The agg path already
+supports count + over(closed_at) buckets, so this is nearly free: shape the two
+series, draw with the existing chart vocabulary.
+
+[143 · code]
+{ "type": "burndown-chart", "query": {"source": "tasks", "filter": {"parent_id":
+"epic-x"}, "over": {"bucket": "day", "on": "closed_at", "last": 14}}, "ideal"?:
+true }
+
+[144 · paragraph]
+live-data & task-ops · :widget · cost: STATIC (rides the existing task resolver;
+D10 count-only) · View: server-paint via the TaskResolver agg/rows path, fresh
+per page load · Edit: E3 — query JSON island; live preview channel already
+exists · TUI: pdrender port over the same resolved attrs · React: port of the
+View emitter · Email: degrade badge: text rollup · Flags: none
+
+[145 · heading]
+B031 task-calendar
+
+[146 · paragraph]
+Month grid of tasks by date (due/closed) — the planning read boards do not give.
+Pairs with calendar-heatmap but shows the tasks, not just intensity.
+
+[147 · code]
+{ "type": "task-calendar", "query": {"source": "tasks", "filter": {"labels":
+["wave-1"]}}, "on"?: "closed_at", "month"?: "2026-07" }
+
+[148 · paragraph]
+live-data & task-ops · :widget · cost: STATIC (rides the existing task resolver;
+D10 count-only) · View: server-paint via the TaskResolver agg/rows path, fresh
+per page load · Edit: E3 — query JSON island; live preview channel already
+exists · TUI: pdrender port over the same resolved attrs · React: port of the
+View emitter · Email: degrade badge: text rollup · Flags: blocked on new
+aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) —
+needs date fields in the row shape
+
+[149 · heading]
+B032 activity-feed
+
+[150 · paragraph]
+Recent ledger events (claims, stamps, closes) as a feed — the 'is this epic
+alive?' read the memory doctrine keeps asking for. Everything-is-a-task makes
+the event stream the heartbeat.
+
+[151 · code]
+{ "type": "activity-feed", "query": {"source": "task-events", "filter":
+{"parent_id": "epic-x"}, "last": 20}, "kinds"?: ["claim", "stamp", "close"] }
+
+[152 · paragraph]
+live-data & task-ops · :widget · cost: STATIC (rides the existing task resolver;
+D10 count-only) · View: server-paint via the TaskResolver agg/rows path, fresh
+per page load · Edit: E3 — query JSON island; live preview channel already
+exists · TUI: pdrender port over the same resolved attrs · React: port of the
+View emitter · Email: degrade badge: text rollup · Flags: blocked on new
+aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) —
+no task-event source is exposed to blocks
+
+[153 · heading]
+B033 claim-monitor
+
+[154 · paragraph]
+Live board of current claims: worker, lease age, pulse now-line per task. The
+ledger-liveness contract (pulse the now-line) has no reader surface today — this
+is it.
+
+[155 · code]
+{ "type": "claim-monitor", "query": {"source": "tasks", "filter": {"status":
+"in_progress"}}, "show"?: ["worker", "now", "epoch", "age"] }
+
+[156 · paragraph]
+live-data & task-ops · :widget · cost: STATIC (rides the existing task resolver;
+D10 count-only) · View: server-paint via the TaskResolver agg/rows path, fresh
+per page load · Edit: E3 — query JSON island; live preview channel already
+exists · TUI: pdrender port over the same resolved attrs · React: port of the
+View emitter · Email: degrade badge: text rollup · Flags: blocked on new
+aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) —
+claim/now-line fields are not in the resolver row shape
+
+[157 · heading]
+B034 criteria-progress
+
+[158 · paragraph]
+Acceptance-criteria met/total rolled up across a query (per task and aggregate).
+Resolver rows ALREADY carry criteria — this is a pure shaping + render job, the
+cheapest live candidate here.
+
+[159 · code]
+{ "type": "criteria-progress", "query": {"source": "tasks", "filter":
+{"parent_id": "epic-x"}}, "detail"?: "rows" | "total" }
+
+[160 · paragraph]
+live-data & task-ops · :widget · cost: STATIC (rides the existing task resolver;
+D10 count-only) · View: server-paint via the TaskResolver agg/rows path, fresh
+per page load · Edit: E3 — query JSON island; live preview channel already
+exists · TUI: pdrender port over the same resolved attrs · React: port of the
+View emitter · Email: degrade badge: text rollup · Flags: none
+
+[161 · heading]
+B035 epic-heartbeat
+
+[162 · paragraph]
+One banner for an epic: its wave_status heartbeat line + child progress counts.
+The charter contract writes wave_status on every phase; no block renders it.
+
+[163 · code]
+{ "type": "epic-heartbeat", "task": "pd-block-wishlist-epic", // the epic task
+slug "show"?: ["wave_status", "children", "updated"] }
+
+[164 · paragraph]
+live-data & task-ops · :widget · cost: STATIC (rides the existing task resolver;
+D10 count-only) · View: server-paint via the TaskResolver agg/rows path, fresh
+per page load · Edit: E3 — query JSON island; live preview channel already
+exists · TUI: pdrender port over the same resolved attrs · React: port of the
+View emitter · Email: degrade badge: text rollup · Flags: blocked on new
+aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) —
+wave_status passthrough missing from the row shape
+
+[165 · heading]
+B036 countdown
+
+[166 · paragraph]
+Deadline countdown to a datetime (launch, gate close). Client ticks; server
+paints the absolute date so the degrade is honest everywhere.
+
+[167 · code]
+{ "type": "countdown", "to": "2026-08-01T12:00:00Z", "label"?: "beta freeze",
+"done"?: "Shipped." }
+
+[168 · paragraph]
+live-data & task-ops · :widget · cost: I1 — dual hydration (client.ts + Phoenix
+hook) + real-browser test (asciicast cost 30-40 files, D6) · View: server-paints
+shell; framework-free DOM-scan hydration (D7 pattern) · Edit: E3 — server-paint
++ island · TUI: static/degraded port · React: port sharing the hydration core ·
+Email: degrade badge: absolute date (REAL text) · Flags: none
+
+[169 · heading]
+B037 deploy-status
+
+[170 · paragraph]
+Live deploy slot card (blue/green, current rev, health) for an instance —
+runbooks that show the truth they describe. Plugin-domain data
+(cloud/instances).
+
+[171 · code]
+{ "type": "deploy-status", "instance": "guerrilla", "show"?: ["slot", "rev",
+"health", "last_deploy"] }
+
+[172 · paragraph]
+live-data & task-ops · :widget · cost: STATIC (rides the existing task resolver;
+D10 count-only) · View: server-paint via the TaskResolver agg/rows path, fresh
+per page load · Edit: E3 — query JSON island; live preview channel already
+exists · TUI: pdrender port over the same resolved attrs · React: port of the
+View emitter · Email: degrade badge: text rollup · Flags: needs
+block-registration seam (plugins cannot register block types today; D10 backlog)
+
+[173 · heading]
+B038 sheet-chart
+
+[174 · paragraph]
+Chart over a Sheets range — the spreadsheet plugin owns tabular data people
+already maintain; letting a paper chart a range closes the loop without
+copy-paste.
+
+[175 · code]
+{ "type": "sheet-chart", "sheet": "q3-budget", "range": "A1:C12", "mark"?:
+"line" | "bar" }
+
+[176 · paragraph]
+live-data & task-ops · :widget · cost: STATIC (rides the existing task resolver;
+D10 count-only) · View: server-paint via the TaskResolver agg/rows path, fresh
+per page load · Edit: E3 — query JSON island; live preview channel already
+exists · TUI: pdrender port over the same resolved attrs · React: port of the
+View emitter · Email: degrade badge: text rollup · Flags: needs
+block-registration seam (plugins cannot register block types today; D10 backlog)
+
+[177 · heading]
+B039 paper-stats
+
+[178 · paragraph]
+Live corpus stats (papers count, block-type census like the 294-paper table in
+this paper) — the census that grounded THIS wishlist was hand-run SQL; a block
+makes it reproducible.
+
+[179 · code]
+{ "type": "paper-stats", "query": {"source": "papers", "groupBy": "block_type"},
+"top"?: 12 }
+
+[180 · paragraph]
+live-data & task-ops · :widget · cost: STATIC (rides the existing task resolver;
+D10 count-only) · View: server-paint via the TaskResolver agg/rows path, fresh
+per page load · Edit: E3 — query JSON island; live preview channel already
+exists · TUI: pdrender port over the same resolved attrs · React: port of the
+View emitter · Email: degrade badge: text rollup · Flags: blocked on new
+aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) —
+content-source aggregate; the resolver is task-only by design
+
+[181 · heading]
+editorial & structure (12)
+
+[182 · paragraph]
+Long-form structure: the apparatus of serious documents — footnotes, procedures,
+changelogs, verdicts. Cheap (STATIC), email-REAL, and heavily demanded by the
+corpus's own writing patterns.
+
+[183 · heading]
+B040 footnote
+
+[184 · paragraph]
+Numbered footnotes with backlinks — the reference apparatus long-form papers
+fake with parenthetical asides today. Inline marker + notes list, wired both
+ways.
+
+[185 · code]
+{ "type": "footnote", "notes": [{"id": "fn1", "content": [ ...inline spans...
+]}] } // inline side: {"type": "footnote-ref", "ref": "fn1"} span
+
+[186 · paragraph]
+editorial & structure · :widget · cost: STATIC (compose.ex emitter + ports) ·
+View: compose.ex emitter, article typography · Edit: E2 — server-painted, no
+island; E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port ·
+React: port of the View emitter · Email: REAL render (static HTML, D4) · Flags:
+none
+
+[187 · heading]
+B041 sidenote
+
+[188 · paragraph]
+Margin note (Tufte-style): commentary beside the text column on wide screens,
+inline aside on narrow/email/TUI. The honest-degrade story is the whole design.
+
+[189 · code]
+{ "type": "sidenote", "content": [ ...inline spans... ], "align"?: "right" }
+
+[190 · paragraph]
+editorial & structure · :widget · cost: STATIC (compose.ex emitter + ports) ·
+View: compose.ex emitter, article typography · Edit: E2 — server-painted, no
+island; E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port ·
+React: port of the View emitter · Email: REAL render (static HTML, D4) · Flags:
+none
+
+[191 · heading]
+B042 glossary-term
+
+[192 · paragraph]
+Inline term with an expandable definition (native <details>/<abbr>). Barkpark's
+own papers are jargon-dense — E-grades, I-tiers, seams — and every reader meets
+them cold.
+
+[193 · code]
+{ "type": "glossary-term", "term": "E3", "definition": "server-paint + JSON
+island", "inline"?: true }
+
+[194 · paragraph]
+editorial & structure · :widget · cost: I0 — zero-JS (native <details>/CSS;
+collapsible-callout precedent walk.ex:1415-1434, D7) · View: compose.ex emitter
+· Edit: E2 — server-painted, no island · TUI: expanded-by-default port · React:
+port of the View emitter · Email: REAL render (expanded state) · Flags: none
+
+[195 · heading]
+B043 steps
+
+[196 · paragraph]
+Numbered procedure with substeps and per-step blocks — the docs staple
+(GitBook/ReadMe both ship it). Runbooks here hand-number headings and lose the
+semantics.
+
+[197 · code]
+{ "type": "steps", "steps": [{"title": "Claim the task", "blocks": [ ...child
+blocks... ]}, {"title": "Stamp evidence", "blocks": [...]}] }
+
+[198 · paragraph]
+editorial & structure · :widget · cost: STATIC (compose.ex emitter + ports) ·
+View: compose.ex emitter, article typography · Edit: E2 — server-painted, no
+island; E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port ·
+React: port of the View emitter · Email: REAL render (static HTML, D4) · Flags:
+none
+
+[199 · heading]
+B044 faq
+
+[200 · paragraph]
+Question/answer pairs as native details accordions. Support docs and launch
+pages want this shape; the tickets plugin gives it a real consumer.
+
+[201 · code]
+{ "type": "faq", "items": [{"q": "Is my data portable?", "a": [ ...blocks... ],
+"open"?: false}] }
+
+[202 · paragraph]
+editorial & structure · :widget · cost: I0 — zero-JS (native <details>/CSS;
+collapsible-callout precedent walk.ex:1415-1434, D7) · View: compose.ex emitter
+· Edit: E2 — server-painted, no island · TUI: expanded-by-default port · React:
+port of the View emitter · Email: REAL render (expanded state) · Flags: none
+
+[203 · heading]
+B045 definition-list
+
+[204 · paragraph]
+Semantic term/definition pairs (dl/dt/dd). table is overkill for glossaries and
+option references — 207 ledger tables include many two-column definition tables
+that want this.
+
+[205 · code]
+{ "type": "definition-list", "items": [{"term": "widget", "definition": [
+...inline spans... ]}] }
+
+[206 · paragraph]
+editorial & structure · :widget · cost: STATIC (compose.ex emitter + ports) ·
+View: compose.ex emitter, article typography · Edit: E2 — server-painted, no
+island; E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port ·
+React: port of the View emitter · Email: REAL render (static HTML, D4) · Flags:
+none
+
+[207 · heading]
+B046 chronology
+
+[208 · paragraph]
+Editorial timeline of dated events (project history, incident postmortems) —
+vertical line + entries. Distinct from timeline-gantt: hand-authored narrative,
+not live task spans.
+
+[209 · code]
+{ "type": "chronology", "events": [{"date": "2026-07-17", "title": "Charter
+ratified", "content"?: [ ...spans... ]}] }
+
+[210 · paragraph]
+editorial & structure · :widget · cost: STATIC (compose.ex emitter + ports) ·
+View: compose.ex emitter, article typography · Edit: E2 — server-painted, no
+island; E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port ·
+React: port of the View emitter · Email: REAL render (static HTML, D4) · Flags:
+none
+
+[211 · heading]
+B047 changelog
+
+[212 · paragraph]
+Release-note entries with version, date, and change-kind badges
+(added/fixed/breaking). Every SDK release note here is hand-formatted headings +
+lists.
+
+[213 · code]
+{ "type": "changelog", "entries": [{"version": "1.4.0", "date": "2026-07-10",
+"changes": [{"kind": "added", "text": "..."}]}] }
+
+[214 · paragraph]
+editorial & structure · :widget · cost: STATIC (compose.ex emitter + ports) ·
+View: compose.ex emitter, article typography · Edit: E2 — server-painted, no
+island; E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port ·
+React: port of the View emitter · Email: REAL render (static HTML, D4) · Flags:
+none
+
+[215 · heading]
+B048 citation-list
+
+[216 · paragraph]
+Bibliography with inline cite markers — the academic apparatus (Typst pull).
+Research papers in the corpus (perfect-plan verdicts) cite by bare URL today.
+
+[217 · code]
+{ "type": "citation-list", "refs": [{"id": "c1", "title": "...", "url"?: "...",
+"authors"?: [...], "year"?: 2026}] }
+
+[218 · paragraph]
+editorial & structure · :widget · cost: STATIC (compose.ex emitter + ports) ·
+View: compose.ex emitter, article typography · Edit: E2 — server-painted, no
+island; E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port ·
+React: port of the View emitter · Email: REAL render (static HTML, D4) · Flags:
+none
+
+[219 · heading]
+B049 pros-cons
+
+[220 · paragraph]
+Two-column verdict block (pros / cons / verdict line) — review and decision docs
+hand-roll this with columns + callouts; one purposeful widget reads better on
+every surface.
+
+[221 · code]
+{ "type": "pros-cons", "pros": [ ...inline spans per item... ], "cons": [...],
+"verdict"?: [ ...inline spans... ] }
+
+[222 · paragraph]
+editorial & structure · :widget · cost: STATIC (compose.ex emitter + ports) ·
+View: compose.ex emitter, article typography · Edit: E2 — server-painted, no
+island; E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port ·
+React: port of the View emitter · Email: REAL render (static HTML, D4) · Flags:
+none
+
+[223 · heading]
+B050 hero
+
+[224 · paragraph]
+Cover hero: background image + title/kicker overlay + action. The content-first
+doctrine gives papers title+featured-image; launch and template pages need the
+composed front door. Slots-native: element ARRAYS, never flat strings (the
+silent-empty trap).
+
+[225 · code]
+{ "type": "hero", "slots": {"media": [{"type": "image", "src": "..."}], "title":
+[{"type": "heading", "level": 1, "text": "..."}], "action"?: [{"type": "action",
+"label": "Start", "href": "..."}]} }
+
+[226 · paragraph]
+editorial & structure · :widget · cost: STATIC (compose.ex emitter + ports) ·
+View: compose.ex emitter, article typography · Edit: E2 — server-painted, no
+island; E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port ·
+React: port of the View emitter · Email: REAL render (static HTML, D4) · Flags:
+none
+
+[227 · heading]
+B051 page-break
+
+[228 · paragraph]
+Print/PDF pagination hint — an element like divider that browsers honor in print
+CSS. The paper-to-PDF path has no pagination control at all.
+
+[229 · code]
+{ "type": "page-break" }
+
+[230 · paragraph]
+editorial & structure · :element · cost: STATIC (one CSS rule + no-op ports) ·
+View: compose.ex emitter, article typography · Edit: E2 — a labeled marker line
+in the canvas · TUI: no-op (honest) · React: one-line port · Email: no-op ·
+Flags: none
+
+[231 · heading]
+interactive & disclosure (10)
+
+[232 · paragraph]
+Disclosure and interaction, priced by I-tier (D7). The I0 entries reuse
+callout's shipping <details> pattern; the I2 entries are honest about buying a
+route + security surface.
+
+[233 · heading]
+B052 tabs
+
+[234 · paragraph]
+Tabbed panels of child blocks — prior art is ALREADY in the repo:
+internal/pdrender/dashboard.go dashboardTabs renders {label, blocks} tab sets in
+the terminal. GitBook ships it; multi-audience docs (per-OS installs) need it.
+
+[235 · code]
+{ "type": "tabs", "tabs": [{"label": "macOS", "blocks": [ ...child blocks... ]},
+{"label": "Linux", "blocks": [...]}], "active"?: 0 }
+
+[236 · paragraph]
+interactive & disclosure · :section (owns child layout, like columns) · cost: I1
+— dual hydration (client.ts + Phoenix hook) + real-browser test (asciicast cost
+30-40 files, D6) · View: server-paints shell; framework-free DOM-scan hydration
+(D7 pattern) · Edit: E3 — server-paint + island · TUI: already proven — the
+dashboard.go {label,blocks} renderer generalizes · React: port sharing the
+hydration core · Email: degrade badge: stacked sections with tab-name headings ·
+Flags: none
+
+[237 · heading]
+B053 expandable
+
+[238 · paragraph]
+A generic collapsible container — D9 repriced: callout already ships native
+<details> (walk.ex:1415-1434); this is the same pattern minus the callout
+chrome. GitBook's 'expandable' by name.
+
+[239 · code]
+{ "type": "expandable", "summary": "Show the full trace", "blocks": [ ...child
+blocks... ], "open"?: false }
+
+[240 · paragraph]
+interactive & disclosure · :widget · cost: I0 — zero-JS (native <details>/CSS;
+collapsible-callout precedent walk.ex:1415-1434, D7) · View: compose.ex emitter
+· Edit: E2 — server-painted, no island · TUI: expanded-by-default port · React:
+port of the View emitter · Email: REAL render (expanded state) · Flags: none
+
+[241 · heading]
+B054 toggle-list
+
+[242 · paragraph]
+Craft's toggle list: list items that expand into block bodies — per-item
+<details>. The outline-first writing pattern Notion/Craft users expect on day
+one.
+
+[243 · code]
+{ "type": "toggle-list", "items": [{"summary": [ ...inline spans... ], "blocks":
+[ ...child blocks... ]}] }
+
+[244 · paragraph]
+interactive & disclosure · :widget · cost: I0 — zero-JS (native <details>/CSS;
+collapsible-callout precedent walk.ex:1415-1434, D7) · View: compose.ex emitter
+· Edit: E2 — server-painted, no island · TUI: expanded-by-default port · React:
+port of the View emitter · Email: REAL render (expanded state) · Flags: none
+
+[245 · heading]
+B055 carousel
+
+[246 · paragraph]
+Slide sequence of child blocks with dots/arrows — product tours and screenshot
+walkthroughs. Email/TUI degrade to a stacked sequence, which stays honest.
+
+[247 · code]
+{ "type": "carousel", "slides": [{"blocks": [ ...child blocks... ], "caption"?:
+"..."}], "loop"?: false }
+
+[248 · paragraph]
+interactive & disclosure · :section (owns child layout) · cost: I1 — dual
+hydration (client.ts + Phoenix hook) + real-browser test (asciicast cost 30-40
+files, D6) · View: server-paints shell; framework-free DOM-scan hydration (D7
+pattern) · Edit: E3 — server-paint + island · TUI: static/degraded port · React:
+port sharing the hydration core · Email: degrade badge: static fallback · Flags:
+none
+
+[249 · heading]
+B056 action-button
+
+[250 · paragraph]
+Coda's pull: a button that fires a declared mutation (close a task, trigger a
+webhook) with confirmation + result state. The first write-path block — its
+security surface IS the cost (D6 I2).
+
+[251 · code]
+{ "type": "action-button", "label": "Close task", "action": {"kind":
+"task.close", "task": "slug"} | {"kind": "webhook", "url": "..."}, "confirm"?:
+"Really close?" }
+
+[252 · paragraph]
+interactive & disclosure · :widget · cost: I2 — I1 + API route + resolver +
+security surface (D6) · View: server-paints shell; hydrated client calls a new
+write route · Edit: E3 — server-paint + island · TUI: read-only port · React:
+port sharing the hydration core · Email: degrade badge: link out · Flags: none
+
+[253 · heading]
+B057 template-button
+
+[254 · paragraph]
+Notion's template button: inserts a predefined block template into the doc
+(meeting notes row, decision record). Studio-edit-only by nature — readers never
+see it do anything.
+
+[255 · code]
+{ "type": "template-button", "label": "+ Decision record", "template": [
+...blocks to insert... ] }
+
+[256 · paragraph]
+interactive & disclosure · :widget · cost: I2 + STUDIO-EDIT (the whole feature
+lives in the canvas) · View: server-paints shell; hydrated client calls a new
+write route · Edit: E3 — server-paint + island · TUI: hidden (edit-only block) ·
+React: port sharing the hydration core · Email: hidden (edit-only block) ·
+Flags: none
+
+[257 · heading]
+B058 reactive-input
+
+[258 · paragraph]
+Observable's core move: a slider/select whose value feeds sibling query/chart
+blocks — documents that answer what-ifs. The biggest unlock in this family and
+honestly the most expensive (client dataflow graph).
+
+[259 · code]
+{ "type": "reactive-input", "name": "weeks", "kind": "range", "min": 1, "max":
+12, "value": 8 } // sibling blocks reference {"$input": "weeks"} in query params
+
+[260 · paragraph]
+interactive & disclosure · :widget · cost: I2 — I1 + API route + resolver +
+security surface (D6) · View: server-paints shell; hydrated client calls a new
+write route · Edit: E3 — server-paint + island · TUI: read-only port · React:
+port sharing the hydration core · Email: degrade badge: link out · Flags: none
+
+[261 · heading]
+B059 poll
+
+[262 · paragraph]
+Reader vote + live tally (team decisions, talk feedback). Backend-write with
+dedup per principal; tally renders as the existing bar vocabulary.
+
+[263 · code]
+{ "type": "poll", "question": "Which S-tier block first?", "options": ["tabs",
+"map", "toc"], "multi"?: false }
+
+[264 · paragraph]
+interactive & disclosure · :widget · cost: I2 — I1 + API route + resolver +
+security surface (D6) · View: server-paints shell; hydrated client calls a new
+write route · Edit: E3 — server-paint + island · TUI: read-only port · React:
+port sharing the hydration core · Email: degrade badge: link out · Flags: none
+
+[265 · heading]
+B060 checklist
+
+[266 · paragraph]
+Persisted checkboxes (doc-state write) — onboarding and runbook progress that
+survives reload. Distinct from list's static checked marks: state belongs to the
+reader+doc pair.
+
+[267 · code]
+{ "type": "checklist", "items": [[ ...inline spans... ], ...], "scope"?:
+"reader" | "doc" }
+
+[268 · paragraph]
+interactive & disclosure · :widget · cost: I2 — I1 + API route + resolver +
+security surface (D6) · View: server-paints shell; hydrated client calls a new
+write route · Edit: E3 — server-paint + island · TUI: read-only port · React:
+port sharing the hydration core · Email: degrade badge: link out · Flags: none
+
+[269 · heading]
+B061 quiz-embed
+
+[270 · paragraph]
+Embed a Hyperquiz question or deck inline — the quiz engine is LIVE as
+Plugins.Quiz on this very instance; papers cannot host it because plugins cannot
+register block types.
+
+[271 · code]
+{ "type": "quiz-embed", "quiz": "quiz-slug", "mode"?: "single" | "deck" }
+
+[272 · paragraph]
+interactive & disclosure · :widget · cost: I2 — I1 + API route + resolver +
+security surface (D6) · View: server-paints shell; hydrated client calls a new
+write route · Edit: E3 — server-paint + island · TUI: read-only port · React:
+port sharing the hydration core · Email: degrade badge: link out · Flags: needs
+block-registration seam (plugins cannot register block types today; D10 backlog)
+
+[273 · heading]
+media (8)
+
+[274 · paragraph]
+Media beyond image/figure/asciicast: the census shows zero video in 294 papers
+because no block exists. All degrade honestly (poster, link, transcript).
+
+[275 · heading]
+B062 video
+
+[276 · paragraph]
+Plain <video> file block (poster, captions, controls). The census shows ZERO
+video in 294 papers — because no block exists, not because nobody wants product
+demos in docs.
+
+[277 · code]
+{ "type": "video", "src": "https://.../demo.mp4", "poster"?: "...", "captions"?:
+[{"lang": "en", "src": "..."}], "loop"?: false }
+
+[278 · paragraph]
+media · :element · cost: STATIC (native browser elements) · View: native element
+render · Edit: E2 — server-painted; E4a picker control = STUDIO-EDIT surcharge ·
+TUI: labeled box + path line (media precedent) · React: port of the View emitter
+· Email: degrade badge: poster / link · Flags: none
+
+[279 · heading]
+B063 audio
+
+[280 · paragraph]
+Plain <audio> block with an optional transcript body — voice notes, podcast
+clips, pronunciation. Transcript doubles as the TUI/email degrade.
+
+[281 · code]
+{ "type": "audio", "src": "https://.../clip.mp3", "transcript"?: [ ...blocks...
+] }
+
+[282 · paragraph]
+media · :element · cost: STATIC (native browser elements) · View: native element
+render · Edit: E2 — server-painted; E4a picker control = STUDIO-EDIT surcharge ·
+TUI: labeled box + path line (media precedent) · React: port of the View emitter
+· Email: degrade badge: poster / link · Flags: none
+
+[283 · heading]
+B064 gallery
+
+[284 · paragraph]
+Notion's gallery: an image grid with captions and a lightbox. figure is one
+image; screenshot-heavy release notes stack figures vertically today. Grid is
+I0; the lightbox is the I1 part.
+
+[285 · code]
+{ "type": "gallery", "images": [{"src": "...", "caption"?: "...", "alt":
+"..."}], "columns"?: 3, "lightbox"?: true }
+
+[286 · paragraph]
+media · :widget · cost: I0 grid; I1 with lightbox (D7 split) · View: native
+element render · Edit: E2 — server-painted; E4a picker control = STUDIO-EDIT
+surcharge · TUI: labeled box + path line (media precedent) · React: port of the
+View emitter · Email: degrade badge: poster / link · Flags: none
+
+[287 · heading]
+B065 image-compare
+
+[288 · paragraph]
+Before/after slider over two images — design reviews and the view-edit-parity
+audits ship side-by-side screenshots that beg for this.
+
+[289 · code]
+{ "type": "image-compare", "before": {"src": "...", "label"?: "before"},
+"after": {"src": "...", "label"?: "after"}, "start"?: 0.5 }
+
+[290 · paragraph]
+media · :widget · cost: I1 — dual hydration (client.ts + Phoenix hook) +
+real-browser test (asciicast cost 30-40 files, D6) · View: server-paints shell;
+framework-free DOM-scan hydration (D7 pattern) · Edit: E3 — server-paint +
+island · TUI: static/degraded port · React: port sharing the hydration core ·
+Email: degrade badge: both images stacked (REAL) · Flags: none
+
+[291 · heading]
+B066 pdf-embed
+
+[292 · paragraph]
+Inline PDF viewer (object/iframe with a download fallback card). Contracts,
+invoices, and specs live as PDFs; today they leave the paper.
+
+[293 · code]
+{ "type": "pdf-embed", "src": "https://.../contract.pdf", "height"?: 640,
+"title": "Q3 agreement" }
+
+[294 · paragraph]
+media · :element · cost: STATIC (native browser elements) · View: native element
+render · Edit: E2 — server-painted; E4a picker control = STUDIO-EDIT surcharge ·
+TUI: labeled box + path line (media precedent) · React: port of the View emitter
+· Email: degrade badge: poster / link · Flags: none
+
+[295 · heading]
+B067 file-attachment
+
+[296 · paragraph]
+Download card: filename, size, type icon, checksum. The media plugin stores
+files; papers have no way to hand one to the reader.
+
+[297 · code]
+{ "type": "file-attachment", "src": "...", "name": "dataset.csv", "size"?:
+48123, "sha256"?: "..." }
+
+[298 · paragraph]
+media · :element · cost: STATIC (native browser elements) · View: native element
+render · Edit: E2 — server-painted; E4a picker control = STUDIO-EDIT surcharge ·
+TUI: labeled box + path line (media precedent) · React: port of the View emitter
+· Email: REAL render (a link is a link) · Flags: none
+
+[299 · heading]
+B068 svg-inline
+
+[300 · paragraph]
+Sanitized inline SVG — diagrams exported from design tools render crisp and
+theme-tintable. The sanitizer IS the feature; without it this block is an XSS
+hole (honest security cost).
+
+[301 · code]
+{ "type": "svg-inline", "svg": "<svg ...>...</svg>", // server-sanitized
+allowlist "caption"?: "..." }
+
+[302 · paragraph]
+media · :element · cost: STATIC + sanitizer (security-reviewed allowlist) ·
+View: native element render · Edit: E2 — server-painted; E4a picker control =
+STUDIO-EDIT surcharge · TUI: labeled box + path line (media precedent) · React:
+port of the View emitter · Email: degrade badge: poster / link · Flags: none
+
+[303 · heading]
+B069 icon
+
+[304 · paragraph]
+Inline icon element from the shipped Lucide set (Studio already bundles it) —
+status glyphs and nav affordances without image round-trips.
+
+[305 · code]
+{ "type": "icon", "name": "check-circle", "size"?: 20, "label"?: "done" }
+
+[306 · paragraph]
+media · :element · cost: STATIC (native browser elements) · View: native element
+render · Edit: E2 — server-painted; E4a picker control = STUDIO-EDIT surcharge ·
+TUI: unicode glyph · React: port of the View emitter · Email: degrade badge:
+unicode fallback · Flags: none
+
+[307 · heading]
+geo & map (5)
+
+[308 · paragraph]
+Born from a real dedup: the same Canvas2D map shipped twice in this repo. One
+shared core, five compositions.
+
+[309 · heading]
+B070 map
+
+[310 · paragraph]
+Marker map — the strongest dedup-by-demand case in the wishlist: the SAME
+dep-free Canvas2D map is duplicated in web/components/listings-map.tsx AND
+apps/hundesteder/components/places-map.tsx. One block retires two forks.
+
+[311 · code]
+{ "type": "map", "center": [59.91, 10.75], "zoom": 12, "markers": [{"at":
+[59.91, 10.75], "label": "Oslo", "href"?: "..."}] }
+
+[312 · paragraph]
+geo & map · :widget · cost: I1 — canvas hydration (dep-free Canvas2D precedent
+already duplicated in web/ + hundesteder) · View: server-paints frame; client
+draws Canvas2D · Edit: E3 — server-paint + JSON island · TUI: coordinate scatter
+/ labeled box · React: port of the SHARED Canvas2D core (the dedup win) · Email:
+degrade badge: address / coordinate list · Flags: none
+
+[313 · heading]
+B071 map-route
+
+[314 · paragraph]
+Polyline route with waypoints (trail guides, delivery runs, race courses) — the
+hundesteder domain (dog places) is literally routes and places.
+
+[315 · code]
+{ "type": "map-route", "path": [[59.91, 10.75], [59.93, 10.71]], "waypoints"?:
+[{"at": [59.92, 10.73], "label": "rest"}] }
+
+[316 · paragraph]
+geo & map · :widget · cost: I1 — canvas hydration (dep-free Canvas2D precedent
+already duplicated in web/ + hundesteder) · View: server-paints frame; client
+draws Canvas2D · Edit: E3 — server-paint + JSON island · TUI: coordinate scatter
+/ labeled box · React: port of the SHARED Canvas2D core (the dedup win) · Email:
+degrade badge: address / coordinate list · Flags: none
+
+[317 · heading]
+B072 choropleth
+
+[318 · paragraph]
+Region-shaded map from inline GeoJSON + values (sales by region, coverage by
+country). Honest cost: geometry payloads are big; the block must own
+simplification discipline.
+
+[319 · code]
+{ "type": "choropleth", "regions": {"type": "FeatureCollection", ...}, "values":
+{"NO-03": 42, "NO-50": 17}, "ramp"?: "shade" }
+
+[320 · paragraph]
+geo & map · :widget · cost: I1 — canvas hydration (dep-free Canvas2D precedent
+already duplicated in web/ + hundesteder) · View: server-paints frame; client
+draws Canvas2D · Edit: E3 — server-paint + JSON island · TUI: coordinate scatter
+/ labeled box · React: port of the SHARED Canvas2D core (the dedup win) · Email:
+degrade badge: address / coordinate list · Flags: none
+
+[321 · heading]
+B073 location-card
+
+[322 · paragraph]
+Single place card: mini-map + address + hours + link — the hundesteder
+place-page pattern as a reusable block for contact pages and event papers.
+
+[323 · code]
+{ "type": "location-card", "at": [59.91, 10.75], "name": "HQ", "address": "...",
+"hours"?: [...], "href"?: "..." }
+
+[324 · paragraph]
+geo & map · :widget · cost: I1 — canvas hydration (dep-free Canvas2D precedent
+already duplicated in web/ + hundesteder) · View: server-paints frame; client
+draws Canvas2D · Edit: E3 — server-paint + JSON island · TUI: coordinate scatter
+/ labeled box · React: port of the SHARED Canvas2D core (the dedup win) · Email:
+degrade badge: address text (REAL enough) · Flags: none
+
+[325 · heading]
+B074 geojson-map
+
+[326 · paragraph]
+Arbitrary GeoJSON feature render — the power-user escape hatch when
+markers/routes/regions compose (survey plots, territory maps).
+
+[327 · code]
+{ "type": "geojson-map", "features": {"type": "FeatureCollection", ...}, "fit"?:
+"bounds" }
+
+[328 · paragraph]
+geo & map · :widget · cost: I1 — canvas hydration (dep-free Canvas2D precedent
+already duplicated in web/ + hundesteder) · View: server-paints frame; client
+draws Canvas2D · Edit: E3 — server-paint + JSON island · TUI: coordinate scatter
+/ labeled box · React: port of the SHARED Canvas2D core (the dedup win) · Email:
+degrade badge: address / coordinate list · Flags: none
+
+[329 · heading]
+dev & code (10)
+
+[330 · paragraph]
+Developer-doc staples: endpoint cards, code tabs, install snippets — plus two
+github-plugin cards that wait on the block-registration seam.
+
+[331 · heading]
+B075 api-endpoint
+
+[332 · paragraph]
+Endpoint doc card: method chip + path + params + response table — the docs
+staple. docs/api-v1.md hand-formats dozens of these; the block makes them
+consistent and greppable.
+
+[333 · code]
+{ "type": "api-endpoint", "method": "POST", "path": "/v1/data/mutate", "params":
+[{"name": "dataset", "in": "path", "type": "string", "required": true}],
+"responses"?: [{"status": 200, "note": "..."}] }
+
+[334 · paragraph]
+dev & code · :widget · cost: STATIC (compose.ex emitter + ports) · View:
+compose.ex emitter, article typography · Edit: E2 — server-painted, no island;
+E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port · React: port
+of the View emitter · Email: REAL render (static HTML, D4) · Flags: none
+
+[335 · heading]
+B076 openapi-console
+
+[336 · paragraph]
+GitBook's try-it console driven by an OpenAPI operation — live request builder +
+real response. The repo already maintains docs/openapi.json; this block makes it
+executable.
+
+[337 · code]
+{ "type": "openapi-console", "spec": "/docs/openapi.json", "operationId":
+"mutateData", "auth"?: "token-prompt" }
+
+[338 · paragraph]
+dev & code · :widget · cost: I2 — I1 + API route + resolver + security surface
+(D6) · View: server-paints shell; hydrated client calls a new write route ·
+Edit: E3 — server-paint + island · TUI: read-only port · React: port sharing the
+hydration core · Email: degrade badge: link out · Flags: none
+
+[339 · heading]
+B077 code-tabs
+
+[340 · paragraph]
+One snippet per language with a synced switcher (choose npm once, every
+code-tabs block follows). SDK docs across Go/JS/HTTP need it on nearly every
+page.
+
+[341 · code]
+{ "type": "code-tabs", "tabs": [{"label": "JS", "language": "js", "value":
+"..."}, {"label": "Go", "language": "go", "value": "..."}], "syncKey"?: "lang" }
+
+[342 · paragraph]
+dev & code · :widget · cost: I1 — dual hydration (client.ts + Phoenix hook) +
+real-browser test (asciicast cost 30-40 files, D6) · View: server-paints shell;
+framework-free DOM-scan hydration (D7 pattern) · Edit: E3 — server-paint +
+island · TUI: static/degraded port · React: port sharing the hydration core ·
+Email: degrade badge: static fallback · Flags: none
+
+[343 · heading]
+B078 json-viewer
+
+[344 · paragraph]
+Collapsible JSON tree (native details per node) — API payload docs beyond code's
+flat text. The capabilities manifest and task docs in this repo are exactly this
+shape.
+
+[345 · code]
+{ "type": "json-viewer", "value": { ...literal JSON... }, "open"?: 2 // expand
+depth }
+
+[346 · paragraph]
+dev & code · :widget · cost: I0 — zero-JS (native <details>/CSS;
+collapsible-callout precedent walk.ex:1415-1434, D7) · View: compose.ex emitter
+· Edit: E2 — server-painted, no island · TUI: expanded-by-default port · React:
+port of the View emitter · Email: REAL render (expanded state) · Flags: none
+
+[347 · heading]
+B079 csv-table
+
+[348 · paragraph]
+Paste CSV/TSV, render a table — removes the hand-conversion between spreadsheets
+and the 207 ledger tables. Element-simple, sheet-plugin-free.
+
+[349 · code]
+{ "type": "csv-table", "csv": "name,count\nparagraph,4969", "header"?: true,
+"align"?: ["l", "r"] }
+
+[350 · paragraph]
+dev & code · :element · cost: STATIC (compose.ex emitter + ports) · View:
+compose.ex emitter, article typography · Edit: E2 — server-painted, no island;
+E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port · React: port
+of the View emitter · Email: REAL render (static HTML, D4) · Flags: none
+
+[351 · heading]
+B080 commit-card
+
+[352 · paragraph]
+Git commit card (sha, message, stats, author) resolved via the github plugin
+(source EXACTLY "github") — postmortems and release notes cite commits as bare
+hashes today.
+
+[353 · code]
+{ "type": "commit-card", "repo": "FRIKKern/barkpark", "sha": "42e2caffe" }
+
+[354 · paragraph]
+dev & code · :widget · cost: STATIC (compose.ex emitter + ports) · View:
+compose.ex emitter, article typography · Edit: E2 — server-painted, no island;
+E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port · React: port
+of the View emitter · Email: REAL render (static HTML, D4) · Flags: needs
+block-registration seam (plugins cannot register block types today; D10 backlog)
+
+[355 · heading]
+B081 pr-status
+
+[356 · paragraph]
+Live PR card: state, checks, review status — wave papers narrate PRs by number
+and go stale the moment a gate flips. The github plugin owns the data.
+
+[357 · code]
+{ "type": "pr-status", "repo": "FRIKKern/barkpark", "pr": 4008, "show"?:
+["checks", "reviews", "mergeable"] }
+
+[358 · paragraph]
+dev & code · :widget · cost: STATIC (compose.ex emitter + ports) · View:
+compose.ex emitter, article typography · Edit: E2 — server-painted, no island;
+E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port · React: port
+of the View emitter · Email: REAL render (static HTML, D4) · Flags: needs
+block-registration seam (plugins cannot register block types today; D10 backlog)
+
+[359 · heading]
+B082 kbd
+
+[360 · paragraph]
+Keyboard-shortcut caps (kbd chips with plus separators) — TUI docs and the
+keybindings guide describe chords in prose; every docs platform renders them as
+caps.
+
+[361 · code]
+{ "type": "kbd", "keys": ["cmd", "shift", "p"], "label"?: "command palette" }
+
+[362 · paragraph]
+dev & code · :element · cost: STATIC (compose.ex emitter + ports) · View:
+compose.ex emitter, article typography · Edit: E2 — server-painted, no island;
+E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port · React: port
+of the View emitter · Email: REAL render (static HTML, D4) · Flags: none
+
+[363 · heading]
+B083 badge-row
+
+[364 · paragraph]
+Status badge row (build passing, version, license) — READMEs get shields.io;
+papers get nothing. Static chips with tone + optional link, no external image
+dependency.
+
+[365 · code]
+{ "type": "badge-row", "badges": [{"label": "gate", "value": "green", "tone":
+"success", "href"?: "..."}] }
+
+[366 · paragraph]
+dev & code · :element · cost: STATIC (compose.ex emitter + ports) · View:
+compose.ex emitter, article typography · Edit: E2 — server-painted, no island;
+E4b in-canvas = STUDIO-EDIT surcharge (D6) · TUI: box-drawing port · React: port
+of the View emitter · Email: REAL render (static HTML, D4) · Flags: none
+
+[367 · heading]
+B084 package-install
+
+[368 · paragraph]
+Install snippet with a package-manager switcher (npm/pnpm/yarn/go get) — the
+first block of every SDK quickstart, synced with code-tabs' syncKey.
+
+[369 · code]
+{ "type": "package-install", "package": "@barkpark/react", "managers"?: ["npm",
+"pnpm", "yarn"] }
+
+[370 · paragraph]
+dev & code · :widget · cost: I1 — dual hydration (client.ts + Phoenix hook) +
+real-browser test (asciicast cost 30-40 files, D6) · View: server-paints shell;
+framework-free DOM-scan hydration (D7 pattern) · Edit: E3 — server-paint +
+island · TUI: static/degraded port · React: port sharing the hydration core ·
+Email: degrade badge: static fallback · Flags: none
+
+[371 · heading]
+fields & schema (8)
+
+[372 · paragraph]
+Schema atoms: field-number is the loudest single gap in the family (no numeric
+field exists). Field atoms are E4a by nature — their canvas control IS the
+block.
+
+[373 · heading]
+B085 field-number
+
+[374 · paragraph]
+The MISSING numeric field atom —
+string/slug/text/boolean/select/datetime/color/image/reference all exist; number
+does not. Every schema with a price, count, or weight hits this wall first.
+
+[375 · code]
+{ "type": "field-number", "name": "price", "label"?: "Price", "min"?: 0, "max"?:
+10000, "step"?: 0.01, "unit"?: "NOK" }
+
+[376 · paragraph]
+fields & schema · :element · cost: STATIC + STUDIO-EDIT (a field atom's canvas
+control IS the block) · View: read-only value render · Edit: E4a — control atom
+(the point of the block) · TUI: read-only line · React: form-control port ·
+Email: degrade badge: value as text · Flags: none
+
+[377 · heading]
+B086 field-url
+
+[378 · paragraph]
+URL field atom with validation and a link-preview affordance (pairs with the
+link-preview block and the shipped OG manifest).
+
+[379 · code]
+{ "type": "field-url", "name": "website", "label"?: "Website", "allow"?:
+["https"] }
+
+[380 · paragraph]
+fields & schema · :element · cost: STATIC + STUDIO-EDIT (a field atom's canvas
+control IS the block) · View: read-only value render · Edit: E4a — control atom
+(the point of the block) · TUI: read-only line · React: form-control port ·
+Email: degrade badge: value as text · Flags: none
+
+[381 · heading]
+B087 field-file
+
+[382 · paragraph]
+File/attachment field storing through the media plugin — schemas model downloads
+(spec PDFs, firmware) with a string URL hack today.
+
+[383 · code]
+{ "type": "field-file", "name": "manual", "accept"?: [".pdf", ".zip"],
+"maxSize"?: 10485760 }
+
+[384 · paragraph]
+fields & schema · :element · cost: STATIC + STUDIO-EDIT (a field atom's canvas
+control IS the block) · View: read-only value render · Edit: E4a — control atom
+(the point of the block) · TUI: read-only line · React: form-control port ·
+Email: degrade badge: value as text · Flags: none
+
+[385 · heading]
+B088 field-geopoint
+
+[386 · paragraph]
+Lat/lng picker atom — the schema-side twin of the map family; hundesteder's
+places store coordinates as two floats with no picker.
+
+[387 · code]
+{ "type": "field-geopoint", "name": "location", "label"?: "Location",
+"default"?: [59.91, 10.75] }
+
+[388 · paragraph]
+fields & schema · :element · cost: STATIC + STUDIO-EDIT (a field atom's canvas
+control IS the block) · View: read-only value render · Edit: E4a — control atom
+(the point of the block) · TUI: read-only line · React: form-control port ·
+Email: degrade badge: value as text · Flags: none
+
+[389 · heading]
+B089 field-json
+
+[390 · paragraph]
+Raw JSON field atom with syntax validation — escape hatch for structured config
+values (webhook payload templates, feature flags).
+
+[391 · code]
+{ "type": "field-json", "name": "config", "schema"?: { ...JSON-schema subset...
+} }
+
+[392 · paragraph]
+fields & schema · :element · cost: STATIC + STUDIO-EDIT (a field atom's canvas
+control IS the block) · View: read-only value render · Edit: E4a — control atom
+(the point of the block) · TUI: read-only line · React: form-control port ·
+Email: degrade badge: value as text · Flags: none
+
+[393 · heading]
+B090 field-rating
+
+[394 · paragraph]
+Bounded rating atom (stars / 1-N scale) — reviews, quiz scoring, the Cody-style
+graded dimensions as schema data.
+
+[395 · code]
+{ "type": "field-rating", "name": "score", "max": 5, "style"?: "stars" |
+"number" }
+
+[396 · paragraph]
+fields & schema · :element · cost: STATIC + STUDIO-EDIT (a field atom's canvas
+control IS the block) · View: read-only value render · Edit: E4a — control atom
+(the point of the block) · TUI: read-only line · React: form-control port ·
+Email: degrade badge: value as text · Flags: none
+
+[397 · heading]
+B091 field-tags
+
+[398 · paragraph]
+Weighted-tag editor atom — Barkpark's OWN tag contract ({tag, strength,
+rationale}, distinct strengths) has no field control; every paper publish wall
+depends on hand-typed JSON.
+
+[399 · code]
+{ "type": "field-tags", "name": "tags", "registry": "tag", // registered tag
+docs "distinctStrengths": true }
+
+[400 · paragraph]
+fields & schema · :element · cost: STATIC + STUDIO-EDIT (a field atom's canvas
+control IS the block) · View: read-only value render · Edit: E4a — control atom
+(the point of the block) · TUI: read-only line · React: form-control port ·
+Email: degrade badge: value as text · Flags: none
+
+[401 · heading]
+B092 schema-card
+
+[402 · paragraph]
+Live render of a schema type's field table (name, type, required, description) —
+SDK and API docs re-type schemas by hand and drift from the source of truth.
+
+[403 · code]
+{ "type": "schema-card", "schema": "post", "dataset"?: "production", "show"?:
+["types", "required"] }
+
+[404 · paragraph]
+fields & schema · :widget · cost: STATIC (server has the schema) · View:
+server-painted table · Edit: E3 — reference + options island · TUI: table port ·
+React: port · Email: REAL render (static table) · Flags: blocked on new
+aggregate/resolver plumbing (only the task-scoped count resolver exists; D10) —
+needs a schema-source resolver for blocks
+
+[405 · heading]
+navigation & meta (8)
+
+[406 · paragraph]
+Blocks that make the corpus navigable: ToC, backlinks (the server capability
+already exists), link previews via the shipped OG manifest, and Slite's
+freshness badge as gate culture for prose.
+
+[407 · heading]
+B093 toc
+
+[408 · paragraph]
+Heading-derived table of contents with anchor links — a confirmed Notion gap, a
+GitBook standard, and painfully absent from THIS 500-block paper. Server walks
+the blocks; zero client JS.
+
+[409 · code]
+{ "type": "toc", "depth"?: 2, "numbered"?: false, "sticky"?: true // viewport
+affordance, View-only }
+
+[410 · paragraph]
+navigation & meta · :widget · cost: STATIC (compose.ex emitter) · View:
+compose.ex emitter · Edit: E2 — server-painted, no island · TUI: box-drawing
+port · React: port of the View emitter · Email: REAL render (static links, D4) ·
+Flags: none
+
+[411 · heading]
+B094 breadcrumb
+
+[412 · paragraph]
+Ancestor trail (workspace / project / collection / paper) — the Notion gap;
+readers landing deep from search have no sense of place.
+
+[413 · code]
+{ "type": "breadcrumb", "show"?: ["project", "collection"] }
+
+[414 · paragraph]
+navigation & meta · :widget · cost: STATIC (compose.ex emitter) · View:
+compose.ex emitter · Edit: E2 — server-painted, no island · TUI: box-drawing
+port · React: port of the View emitter · Email: REAL render (static links, D4) ·
+Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count
+resolver exists; D10) — needs the doc-graph ancestors exposed to blocks
+
+[415 · heading]
+B095 backlinks
+
+[416 · paragraph]
+Papers that reference THIS paper — the server capability already exists
+(reverse_referencers); no block surfaces it. The knowledge-graph payoff for
+free.
+
+[417 · code]
+{ "type": "backlinks", "limit"?: 10, "kinds"?: ["paper", "task"] }
+
+[418 · paragraph]
+navigation & meta · :widget · cost: STATIC (compose.ex emitter) · View:
+compose.ex emitter · Edit: E2 — server-painted, no island · TUI: box-drawing
+port · React: port of the View emitter · Email: REAL render (static links, D4) ·
+Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count
+resolver exists; D10) — block-level plumbing to reverse_referencers
+
+[419 · heading]
+B096 related-papers
+
+[420 · paragraph]
+Related papers by shared weighted tags — the registered-tag system (strengths,
+rationale) is a similarity signal nothing reads yet.
+
+[421 · code]
+{ "type": "related-papers", "by"?: "tags", "limit"?: 5 }
+
+[422 · paragraph]
+navigation & meta · :widget · cost: STATIC (compose.ex emitter) · View:
+compose.ex emitter · Edit: E2 — server-painted, no island · TUI: box-drawing
+port · React: port of the View emitter · Email: REAL render (static links, D4) ·
+Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count
+resolver exists; D10) — needs a content-query resolver
+
+[423 · heading]
+B097 synced-block
+
+[424 · paragraph]
+Notion's synced block: one fragment mirrored live across papers, edited
+anywhere. embed (![[note]]) covers whole-note transclusion; this is
+block-granular with write-back — honest: the consistency semantics are the hard
+80%.
+
+[425 · code]
+{ "type": "synced-block", "source": {"paper": "policies", "blockId": "sec-3"},
+"editable"?: false }
+
+[426 · paragraph]
+navigation & meta · :widget · cost: I2 — I1 + API route + resolver + security
+surface (D6) · View: server-paints shell; hydrated client calls a new write
+route · Edit: E3 — server-paint + island · TUI: read-only port · React: port
+sharing the hydration core · Email: degrade badge: link out · Flags: none
+
+[427 · heading]
+B098 link-preview
+
+[428 · paragraph]
+Craft's card-link: a rich URL preview card — and the repo ALREADY ships the
+machinery: the OG preview manifest (preview-contract, no-oEmbed law). Fetch at
+save, render static, never iframe.
+
+[429 · code]
+{ "type": "link-preview", "href": "https://...", "fetched"?: {"title": "...",
+"description": "...", "image": "..."} // snapshot at save }
+
+[430 · paragraph]
+navigation & meta · :widget · cost: STATIC + save-time fetch (OG manifest
+precedent) · View: compose.ex emitter · Edit: E2 — server-painted, no island ·
+TUI: box-drawing port · React: port of the View emitter · Email: REAL render
+(static links, D4) · Flags: none
+
+[431 · heading]
+B099 paper-list
+
+[432 · paragraph]
+Query-driven list of papers (by tag/type/recency) — index pages and team
+homepages hand-curate link lists that go stale weekly.
+
+[433 · code]
+{ "type": "paper-list", "filter": {"tags": ["portabledoc"]}, "sort"?:
+"-updatedAt", "limit"?: 10, "show"?: ["description", "date"] }
+
+[434 · paragraph]
+navigation & meta · :widget · cost: STATIC (compose.ex emitter) · View:
+compose.ex emitter · Edit: E2 — server-painted, no island · TUI: box-drawing
+port · React: port of the View emitter · Email: REAL render (static links, D4) ·
+Flags: blocked on new aggregate/resolver plumbing (only the task-scoped count
+resolver exists; D10) — needs a content-query resolver
+
+[435 · heading]
+B100 freshness-badge
+
+[436 · paragraph]
+Slite's verification badge: verified-by + last-verified + stale-after-N-days —
+docs rot silently; this block makes staleness a visible, gateable state (the
+distrust-vacuous-green culture, applied to prose).
+
+[437 · code]
+{ "type": "freshness-badge", "verifiedBy": "pelle", "verifiedAt": "2026-07-17",
+"staleAfterDays"?: 90 }
+
+[438 · paragraph]
+navigation & meta · :widget · cost: STATIC (compose.ex emitter) · View:
+compose.ex emitter · Edit: E2 — server-painted, no island · TUI: box-drawing
+port · React: port of the View emitter · Email: REAL render (static links, D4) ·
+Flags: none
+
+[440 · callout]
+What happens next
+The Review paper (round 2 of this wave) scores all 100 on the D5 rubric — demand
+35%, frequency 25%, unlock 25%, reach 15%, cost as tiebreak only — and ranks
+them S/A/B/C. Every S-tier candidate gets filed as a bp task; the S tier IS the
+backlog for wave 2.

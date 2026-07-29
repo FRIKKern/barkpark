@@ -1,0 +1,612 @@
+The Wave Deck — the epic cycle as an interactive, slide-by-slide experience
+===========================================================================
+[1 · eyebrow]
+Epic cycle · design handoff spec
+
+[2 · heading]
+The Wave Deck — the epic cycle as an interactive, slide-by-slide experience
+
+[3 · byline]
+One wave, one deck
+5 decision gates
+Live fleet, live ledger
+
+[4 · ingress]
+The 7-phase epic cycle already externalizes everything it knows into Barkpark —
+a living wave Paper, a published task ledger, a
+wave_status
+heartbeat. The Wave Deck renders that state as slides a human can ride: watch
+the fleet fly in realtime, see exactly what was checked and what wasn't, and
+DECIDE at five gates whether to research more, build, or land. This paper is the
+information spec: slide by slide, what each screen must inform, what is live,
+where the data already lives, and what is genuinely open for design.
+
+[5 · callout]
+What this paper is (and isn't)
+This is the
+what-to-inform
+spec for Claude design — content, data sources, decision moments, live elements.
+It deliberately says nothing about visual style, layout, or component
+aesthetics. Every slide below states its job in one line; if a slide can't, it
+shouldn't exist.
+
+[7 · heading]
+Slide 0 — The Loop (orientation map)
+
+[8 · paragraph]
+Job:
+one glance answers “where is the wave, and how many minds are on it right now?”
+The current phase is lit; every gate shows whether it's upcoming, open (waiting
+on the user), or passed.
+
+[9 · diagram]
+The cycle with its five user gates. Every ↺ edge is a deliberate, cheap loop —
+research costs Sonnet minutes, not Opus hours.
+flowchart TD S1["1 · Strategize\n1 Fable · ~5 min"] --> S2["2 · Survey\n5–20
+Sonnet · ~5 min"] S2 --> S3["3 · Digest\n1 Fable · ~10 min"] S3 --> G1{"GATE
+1\nenough ground?"} G1 -- "research more ↺" --> S2 G1 -- "verify →" --> S4["4 ·
+Verify\n1–15 Sonnet/Opus"] G1 -- "skip ahead ⏩" --> S5 S4 --> G2{"GATE
+2\nproven enough?"} G2 -- "verify more ↺" --> S4 G2 -- "proceed →" --> S5["5 ·
+Decide\n1 Fable · open-ended"] S5 --> G3{"GATE 3\napprove the plan?"} G3 --
+"redirect ↺" --> S3 G3 -- "build →" --> S6["6 · Build\n1–8 Fable/Opus"] S6 -->
+S7["7 · Review\n1 Fable · open-ended"] S7 --> G4{"GATE 4\nland it?"} G4 -- "fix
+round ↺" --> S6 G4 -- "land →" --> D["Debrief\nPaper closed · grade"] D -->
+G5{"GATE 5\nnext wave?"} G5 -- "fire ↺" --> S1
+
+[10 · stats]
+thinking phases (1 Fable each)
+4
+survey fleet
+5–20
+verify fleet
+≤15
+build fleet
+≤8
+user gates
+5
+
+[11 · paragraph]
+Must inform:
+current phase · live agent count (flying / done / stalled) · elapsed time per
+phase vs its budget (~5 min, ~5 min, ~10 min, open) · which gate comes next and
+what will be decided there.
+
+[12 · paragraph]
+Data:
+phase + fleet counts from the workflow run (phase groups, agent labels);
+position also mirrored in the epic task's
+wave_status
+heartbeat (“wave: surveying — …”), so the deck can render from bp alone even
+after the run ends.
+
+[14 · heading]
+Slide 1 — The Wave Card (cover)
+
+[15 · paragraph]
+Job:
+the wave at a glance — for someone who just walked in.
+
+[16 · list]
+The wish, verbatim.
+It is the focus of every phase; the deck leads with it, always visible
+(persistent header or recurring element).
+Epic + wave identity:
+epic task id, wave Paper id, charter path, date.
+Live status line:
+the
+wave_status
+heartbeat, rendered as state — surveying / verifying / building 6 slices /
+complete, grade B+.
+Outcome when closed:
+grade with its one-line commentary hook — never a bare number (Cody mandate).
+
+[17 · paragraph]
+Data:
+bp task get <epic>
+→
+wave_status
+,
+wave_paper
+; the Paper's title block.
+
+[19 · heading]
+Slide 2 — Direction (Strategize)
+
+[20 · paragraph]
+Job:
+show the bet before the evidence — what the strategist thinks the finished
+experience is, and what it wants scouted.
+
+[21 · list]
+Direction statement
+— the bold hypothesis, marked clearly as tentative (“Decide finalizes after two
+explore rounds”).
+The survey plan
+— every question with its
+why
+(“how the answer changes the plan”). This is the first place the user can
+intervene: a wrong question at minute 5 is the cheapest bug in the whole cycle.
+Soft gate
+— “fly the survey (N Sonnets)” is the default with a short countdown; the user
+can add/strike questions or annotate the direction before launch. Auto mode
+skips the pause entirely.
+
+[22 · paragraph]
+Data:
+wave Paper §Strategize (direction + survey plan land there before the fleet
+flies).
+
+[24 · heading]
+Slide 3 — Fleet in Flight (Survey, live)
+
+[25 · paragraph]
+Job:
+the realtime spectacle with substance — you SEE 5–20 minds working, and each one
+is inspectable. This is where the deck rides the existing Studio chat surface:
+the wave is a chat session; the fleet is the agents rail; clicking an agent is
+the drill-down.
+
+[26 · paragraph]
+Per-agent card (the unit of this slide):
+
+[27 · list]
+assignment key + the question, one line (
+survey:auth-seams
+)
+model tier badge (Sonnet/Opus/Fable) — the user asked to SEE the amount and kind
+of agents; make the fleet composition legible at a glance
+state: queued · flying · reporting · done · died (agents can die on API errors —
+show it honestly, with what was lost)
+live activity: elapsed time, files touched so far, last action line (streamed
+from the agent transcript — the chat feature already streams this)
+on done: found/not-found/partial counts from its coverage[] — the card flips
+from activity to result
+
+[28 · callout]
+Realtime contract
+Liveness comes from two independent feeds and the deck must survive either going
+quiet: (1) the chat/workflow stream — agent spawn, phase change, tool activity,
+tokens; (2) the bp ledger — heartbeat, task stamps, Paper sections, which
+persist. Stream dies → deck degrades to polling bp and says so. Never render a
+frozen “live” view as if it were current.
+
+[29 · paragraph]
+Data:
+workflow phase groups + agent labels (spawn/complete events); Studio chat
+SESSIONS surface (agents rail, per-agent drill-down transcripts); tokens/elapsed
+from the run.
+
+[31 · heading]
+Slide 4 — The Coverage Map (Survey results)
+
+[32 · paragraph]
+Job:
+make the EDGES of knowledge visible — this slide is the honest heart of the deck
+and the evidence base for Gate 1. Not “what did we learn” but “what did we
+check, what did we find, what did we check and NOT find, and where did nobody
+look”.
+
+[33 · list]
+Checked & found
+— path, what it was checked for, the one-line takeaway.
+Checked & NOT found
+— rendered as loudly as found. “No existing rate limiter in api/” is a
+decision-in-waiting, not a footnote.
+Partial
+— ran out of timebox; candidates for the verify round.
+Unreached corners
+— named by the Digest; unlisted = unchecked is the rule, so the map must admit
+its own blank space.
+Open questions
+— every surveyor's parked unknowns, deduped.
+
+[34 · paragraph]
+Aggregations that matter:
+N files checked across M surveyors · found/not-found/partial ratio · which repo
+areas got zero coverage. A heatmap over repo areas is a natural fit; the raw
+per-file table must stay one tap away — trust comes from the ability to drill to
+the specific file and claim.
+
+[35 · paragraph]
+Data:
+surveyors' structured
+coverage[]
+({path, checked_for, found|not_found|partial, note}), folded into wave Paper
+§Survey digest by the Digest phase.
+
+[37 · heading]
+Slide 5 — Synthesis & GATE 1: enough ground?
+
+[38 · paragraph]
+Job:
+the Digest Fable's synthesis, contradictions named, and the proposed verify
+fleet — then the wave STOPS and asks. This is the user's “research more?” moment
+and the reason the deck exists.
+
+[39 · paragraph]
+Must inform before the user can decide:
+
+[40 · list]
+what is now established (with the coverage map one slide back)
+where survey reports contradict each other or the direction — verbatim, both
+sides
+what remains unknown that Decide cannot live without — the justification for
+every verify assignment
+the proposed verify fleet: per assignment its question, model (Sonnet vs Opus —
+and
+why the expensive one, when chosen
+), and what will be RUN as proof vs merely read
+cost of each option: another survey round ≈ N Sonnet-minutes; the verify round ≈
+this fleet; skipping ahead ≈ deciding on unproven claims (name which)
+
+[41 · cards]
+Research more ↺
+Add or edit survey questions (user can type their own); another cheap Sonnet
+round flies; the Paper and coverage map grow — never fork.
+Verify →
+Approve the fleet as designed (default). User may strike or add assignments and
+flip a Sonnet↔Opus choice before launch.
+Skip ahead ⏩
+“I already know enough.” Deck names the claims that will go unproven; the choice
+is logged into the Paper with a dated note.
+
+[42 · paragraph]
+Data:
+wave Paper §Survey digest + §Verify plan (written BEFORE the fleet flies — the
+Paper always states what is in flight); gate choice appends a dated decision
+note to the Paper.
+
+[44 · heading]
+Slide 6 — Proof Runs (Verify, live)
+
+[45 · paragraph]
+Job:
+same fleet view as Slide 3, but the cards are proof-oriented: which command is
+running, live output tail, pass/fail as it lands. Mixed fleet — the Sonnet/Opus
+badges now carry meaning the user chose at Gate 1.
+
+[46 · terminal]
+$ verify:search-seal — RUNNING
+CC=/usr/bin/clang mix test test/barkpark/access/grant_search_deny_test.exs
+...
+1 test, 1 failure ← RED: the leak is REAL (repro proves the hole)
+A proof card mid-run — the decisive output line is the payload, not the
+pass/fail icon alone.
+
+[47 · paragraph]
+Data:
+agent transcripts (chat drill-down) for live tails; structured
+proofs[]
+({claim, command, output_excerpt, passed}) on completion.
+
+[49 · heading]
+Slide 7 — The Proof Table & GATE 2: proven enough?
+
+[50 · paragraph]
+Job:
+every load-bearing claim with its verdict and the actual output that earned it.
+Refuted premises get top billing — a premise that died here just saved a build
+slice.
+
+[51 · list]
+proof rows: claim → command → decisive output excerpt → PROVEN / REFUTED — the
+excerpt is mandatory (distrust vacuous green: a pass only counts if the right
+thing produced it)
+claims that arrived unproven (assignment had no runnable proof) — flagged, not
+hidden
+verifier coverage delta — what the deep round checked that the survey hadn't
+
+[52 · cards]
+Verify more ↺
+Target the still-unproven claims; user can demand a specific proof (“run the
+deny repro against X”).
+Proceed to Decide →
+Default when every load-bearing claim is proven or consciously accepted as
+unproven (logged).
+
+[53 · paragraph]
+Data:
+wave Paper §Verification results (Decide writes it) + workflow return
+proofs
+count; per-claim rows from verifiers' structured output.
+
+[55 · heading]
+Slide 8 — The Plan & GATE 3: approve the wave
+
+[56 · paragraph]
+Job:
+the biggest decision on the deck: exactly what will be built, by which class of
+mind, proven by what. Nothing here is hypothetical — every slice IS a published
+bp task the user can open.
+
+[57 · list]
+Decisions
+— each with its one-line why; where verification overturned the original
+direction, show the reversal explicitly (before → after).
+Slice cards = task cards:
+title · bp task id (live link) · surface · builder model badge (Opus =
+well-specified; Fable = subtle/high-blast-radius — the badge carries the
+architect's reasoning on hover/tap) · the exact gate command · acceptance
+criteria with their merge-gated ones marked.
+Backlog seeded
+— discovered-but-deferred tasks filed now; the ledger shows the future, render
+it.
+Fleet preview
+— N builders about to fly, model mix, expected file-overlap = zero (slices are
+worktree-isolated by design).
+
+[58 · cards]
+Build →
+Fire the builders (default). The Paper already carries the plan; the heartbeat
+flips to “building N slices”.
+Trim / retarget
+Strike slices (their tasks stay filed, unclaimed, honest in the backlog) or
+demote/promote a builder model; then fire.
+Redirect ↺
+The plan is wrong at the root — send it back to Digest with a note. Expensive
+and rare; the note becomes lead_notes for the re-run.
+
+[59 · paragraph]
+Data:
+wave Paper §Decisions + §Wave plan; slice tasks live via
+task-board
+query on
+parent_id=<epic>
+— this block type already exists in PortableDoc and renders the published
+ledger.
+
+[61 · heading]
+Slide 9 — The Build Board (live)
+
+[62 · paragraph]
+Job:
+the long phase, made watchable. The ledger's stamp-as-you-go contract means the
+board moves the moment reality does — criteria flip with evidence attached,
+stalls surface with the builder's own note, nothing waits for the end of the
+run.
+
+[63 · list]
+per-slice: claim state (claimed by whom, when) → criteria flipping live, each
+with its evidence snippet → gate status (running/red/green) → branch + commit
+when done
+stall = first-class state: the builder stamps why (“gate red on X,
+investigating”) — the card shows it the moment it's stamped, not at post-mortem
+fleet strip: same per-agent cards as Slide 3 (builders now, model badges
+meaningful), drill-down into any builder's transcript mid-build
+
+[64 · paragraph]
+Data:
+published task ledger (criteria[], claim, lifecycle) — poll or realtime via the
+existing webhook/LiveView channel; agent stream for transcripts. The deck needs
+NO new write path: builders already stamp everything.
+
+[66 · heading]
+Slide 10 — The Verdict & GATE 4: land it?
+
+[67 · paragraph]
+Job:
+the reviewer's honest account, slice by slice, then the wave's grade — and the
+user's call on landing.
+
+[68 · list]
+per slice: what the reviewer FIXED in place (or “none”) · final branch (-r if
+touched) · gate re-run result · the honest verdict incl. what the lead must know
+before merging
+cross-slice coherence findings; ledger audit outcome (were the builders' live
+stamps truthful?)
+The grade with its commentary
+— the commentary EARNS the grade; render them as one unit, never a bare letter
+(Cody mandate)
+what stalled and why, with its honest task state
+
+[69 · cards]
+Land →
+Merge the final branches; the lead closes merge-gated criteria on merge — the
+deck lists exactly which ones per slice.
+Fix round ↺
+Named issues go back to build — as bp tasks, so the loop stays in the ledger.
+Park
+Branches stay, tasks stay in_progress with honest notes; the debrief records the
+parking reason.
+
+[70 · paragraph]
+Data:
+workflow return (reviewed[], grade, commentary, ledger_fixes) + wave Paper
+§Debrief.
+
+[72 · heading]
+Slide 11 — The Debrief & GATE 5: next wave?
+
+[73 · paragraph]
+Job:
+close the story, open the next. The wave Paper is now complete — direction →
+coverage → proofs → decisions → outcome — and this slide is its executive
+rendering plus the loop-back.
+
+[74 · list]
+what shipped vs what the wish asked (holistic, not a checklist)
+the next_wave handoff — what the reviewer says the next wave should take,
+pre-filled as the next wave's draft direction
+backlog state: open children on the epic, by priority — the future the Decide
+phase seeded
+gate: fire the next wave (loops to Slide 2 with the handoff as input) or close
+the epic
+
+[75 · pullquote]
+Someone opening the Paper mid-wave must see exactly where the wave stands — the
+deck is that sentence, made navigable.
+
+[77 · heading]
+The fleet, everywhere: riding the chat surface
+
+[78 · paragraph]
+The user's explicit ask:
+see the amount of agents, visualize details realtime, using our chat features.
+The Studio Claude chat (SESSIONS epic — terminal soul, composer cockpit, agents
+rail, per-agent drill-down) is the substrate; the deck is a projection over a
+wave-scoped session. Concretely:
+
+[79 · notes]
+Scoped to the wave: one entry per agent, model badge, phase group, live state.
+The deck's Slides 3/6/9 are this rail, arranged.
+RAIL
+The agents rail IS the fleet view.
+The drill-down already streams tool calls and output — proof tails and build
+activity come free.
+DRILL
+Every agent card opens its transcript.
+Buttons for the default choices; free text for notes/redirects — a gate answer
+is just a message the lead consumes before firing the next phase.
+COMPOSER
+Gates are answered in the composer.
+Per phase: flying/done/died. Per wave: total spawned, by model tier. The numbers
+are the pulse of the whole experience.
+COUNT
+Agent counts are always visible.
+
+[81 · heading]
+The data contract — every slide, sourced
+
+[82 · paragraph]
+Nothing below requires a new backend write path. The cycle's liveness contract
+(heartbeat + stamp-as-you-go + Fable-owned Paper) was designed so any surface
+can render the wave from bp data plus the chat stream.
+
+[83 · table]
+0 Loop / 1 Wave Card
+wave_status heartbeat, wave_paper link
+epic task (flat fields), stamped by every Fable phase
+2 Direction
+direction + survey plan
+wave Paper §Strategize
+3/6/9 Fleet live
+agent spawn/state/labels, transcripts, tokens
+workflow run + chat session (agents rail, drill-down)
+4 Coverage Map
+coverage[] {path, checked_for, result, note}
+surveyor structured output → Paper §Survey digest
+5 Gate 1
+synthesis, contradictions, verify plan w/ models
+wave Paper (written BEFORE the fleet flies)
+7 Proof Table
+proofs[] {claim, command, output_excerpt, passed}
+verifier structured output → Paper §Verification results
+8 Plan / Gate 3
+decisions, slice tasks, backlog, builder models
+wave Paper §Wave plan + published tasks (task-board query)
+9 Build Board
+claim, criteria[] w/ evidence, lifecycle, stall notes
+published task ledger (stamp-as-you-go), webhook/LiveView
+10 Verdict
+reviewed[], grade+commentary, ledger audit
+workflow return + Paper §Debrief
+11 Debrief
+next_wave handoff, backlog by priority
+Paper §Debrief + epic task children
+All gates
+the choice + who made it + note
+dated decision note appended to the Paper (new, tiny)
+Slide
+Primary data
+Lives where (today)
+
+[84 · callout]
+The one honest engineering note
+Today the 7 phases run as ONE background workflow. Real gates need the run to
+pause on user input. The clean cut: the workflow already externalizes ALL state
+into Paper + tasks at every Fable boundary — exactly where the gates sit. So
+gates = run the cycle as phase segments the lead fires one at a time (the deck's
+gate answer is the lead's cue), or a workflow-level pause primitive if one lands
+later. No phase needs to change what it writes.
+
+[86 · heading]
+Interaction doctrine
+
+[87 · notes]
+Every gate has a default and (in auto) zero-wait pass-through. The deck adds
+decision power without taxing the user who trusts the loop.
+D1
+Gates are optional; auto mode is today's behavior.
+“Research more” costs Sonnet-minutes. The deck shows the cost of each option AT
+the gate, so choosing more research feels safe, not indulgent.
+D2
+Research loops are cheap by design.
+Every extra round appends to the same wave Paper. The deck is a lens on the
+Paper — rewind any wave by scrolling it.
+D3
+Loops grow one Paper; they never fork.
+Choice, author, note, timestamp — appended to the Paper. The wave's story
+includes the human's decisions, not just the agents'.
+D4
+Every gate answer is recorded.
+Every gate is judged against it. Persistent, verbatim, untruncated.
+D5
+The wish never leaves the screen.
+
+[89 · heading]
+Principles the design must carry
+
+[90 · notes]
+Absence of prior art, a refuted premise, an unreached corner — these change
+plans. Never render them smaller than positives.
+P1
+Not-found is as loud as found.
+The Paper states the plan before each fleet flies; the deck must too. A mid-wave
+visitor orients in one glance.
+P2
+Always show what is in flight.
+“14 agents” is a number; 14 cards with model badges, states, and assignments is
+a fleet. Aggregate AND enumerate.
+P3
+Counts with faces.
+Grade travels with commentary; pass travels with the output that produced it;
+count travels with the list behind it.
+P4
+Never a bare number.
+Agents die, gates go red, streams drop, builders stall. Each is a designed
+state, not an edge case — loading/empty/error at the Kinsta/Vercel bar.
+P5
+Honest states everywhere.
+Every aggregate opens to its evidence: coverage cell → file+claim, proof row →
+full output, slice card → bp task, agent card → transcript.
+P6
+Drill-down is the trust mechanism.
+Deck states mirror task design language (open/claimed/in_progress/done, criteria
+met/unmet) — no parallel status taxonomy.
+P7
+One vocabulary with the ledger.
+
+[92 · heading]
+Open questions for Claude design
+
+[93 · list]
+Deck vs scroll: are slides discrete steps (carousel with the loop map as
+navigator) or sections of one scrollable live document? The Paper is a scroll;
+the gates argue for steps.
+Where do gate timeouts land — how long does a soft gate wait in attended mode
+before auto-defaulting, and how is that countdown shown?
+Fleet view at 20 agents: cards, rows, or a swarm visualization with
+detail-on-hover? (80-col TUI parity exists as a constraint worth respecting —
+the deck should have a terminal projection someday.)
+How does the deck coexist with the raw chat transcript — tabs, split, or the
+deck AS the chat's rich rendering of a wave-scoped session?
+Multi-wave epics: does the deck show one wave or the epic's wave history (Paper
+per wave, charter as the spine)?
+Notification surface for gates in unattended mode — push, email, Studio inbox
+(tickets exists), or all three?
+
+[95 · heading]
+Live reference material
+
+[96 · paragraph]
+A real wave is flying under the new cycle right now — its Paper is the best
+reference for what phases actually write:
+
+[97 · action]
+Open the live wave Paper (airdrop-grants close-out)
+primary
+
+[98 · paragraph]
+The cycle itself:
+.claude/workflows/bp-epic-cycle.workflow.js
+— every schema named in the data contract is defined there.

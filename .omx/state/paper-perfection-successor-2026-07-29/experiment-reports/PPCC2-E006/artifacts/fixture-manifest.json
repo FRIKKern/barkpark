@@ -1,0 +1,74 @@
+[
+  {
+    "blocks_sha256": "8dda53e1baa15737c2dc9214c70e7540b74f8e09de4ebb677fbb4d1fa65409d0",
+    "document_id": "choosing-your-site-framework",
+    "document_rev": "5e12190e742c0888ad78babdc5c6b93c",
+    "fixture_class": "known_good_control",
+    "hard_gate_pass": true,
+    "unit_id": "paper:choosing-your-site-framework"
+  },
+  {
+    "blocks_sha256": "82114a7db4e28634873a1fe559bd3332f8ff954112bfa8e3773721124712bd59",
+    "document_id": "component-reference",
+    "document_rev": "11673b5ff7fe2978fe3c0643f5495eee",
+    "fixture_class": "rich_block_control",
+    "hard_gate_pass": true,
+    "unit_id": "paper:component-reference"
+  },
+  {
+    "blocks_sha256": "461cfce1cf37c6e757bda3ebb9079a3af93fe78d2d6007ce916f425355d5f51b",
+    "document_id": "wave-deck",
+    "document_rev": "e86c9ab685223febc97b25cc2c0e3b6e",
+    "fixture_class": "interactive_edge_control",
+    "hard_gate_pass": true,
+    "unit_id": "paper:wave-deck"
+  },
+  {
+    "blocks_sha256": "08e03b1fbb7ed97a9023242ab1a320a1649bdf2e76fac5a9c1cee2a506b23923",
+    "document_id": "cloud-console-hardening-wave-2026-07-21",
+    "document_rev": "16a3141be0bb985742e2b016254bba82",
+    "fixture_class": "known_bad_long_repeated_multi_h1",
+    "hard_gate_pass": true,
+    "unit_id": "paper:cloud-console-hardening-wave-2026-07-21"
+  },
+  {
+    "blocks_sha256": "ca4ac752935aafc9b693bce391b97d664d2e11e8a71331ae3cc4025ded17792e",
+    "document_id": "cloud-console-hardening-wave-3-2026-07-21",
+    "document_rev": "bc89039eb1bcc908b5be80ce33148094",
+    "fixture_class": "known_bad_very_long_buried_criteria",
+    "hard_gate_pass": true,
+    "unit_id": "paper:cloud-console-hardening-wave-3-2026-07-21"
+  },
+  {
+    "blocks_sha256": "17c9cdb6b9c787ae8e8acbe7fb5c5558a9acae1edba9e2ab566eba978e4c7f89",
+    "document_id": "spd-inspector-successor-wave-2026-07-20",
+    "document_rev": "44ce6ce860011494d225c553c018b436",
+    "fixture_class": "known_bad_missing_h1_long",
+    "hard_gate_pass": true,
+    "unit_id": "paper:spd-inspector-successor-wave-2026-07-20"
+  },
+  {
+    "blocks_sha256": "47bbeec4a5d3a4346993a98eede99526626be6bd248f08718b7ffce25f2320dc",
+    "document_id": "block-wishlist-100",
+    "document_rev": "4a848abc89f77860416de0871d5d5bf4",
+    "fixture_class": "adversarial_many_blocks_and_types",
+    "hard_gate_pass": true,
+    "unit_id": "paper:block-wishlist-100"
+  },
+  {
+    "blocks_sha256": "b28c24438bb802de5ea4f6893c5dbd5eb2128be86be55b7c31caa523ea5c541f",
+    "document_id": "honest-gates-wave-4-2026-07-28",
+    "document_rev": "ab8b4653f1fa81becbf29ee3f658f8c6",
+    "fixture_class": "adversarial_spacers_and_long_content",
+    "hard_gate_pass": true,
+    "unit_id": "paper:honest-gates-wave-4-2026-07-28"
+  },
+  {
+    "blocks_sha256": "98bb6e07f0ee8a8ca82a128988402cdad77633d9ed567bbacffc02e75675f6ae",
+    "document_id": "task-tui-wave-2026-07-23b",
+    "document_rev": "3999a067808963303810884654e80ab5",
+    "fixture_class": "adversarial_narrow_reader_long_paragraphs",
+    "hard_gate_pass": true,
+    "unit_id": "paper:task-tui-wave-2026-07-23b"
+  }
+]
