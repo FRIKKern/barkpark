@@ -1,0 +1,1310 @@
+{
+  "actual_command_outputs": [
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 0.61823,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 145266,
+          "stdout_sha256": "e311c32701ede0e1489287f46dffc2a0c580fcba8992bb5a96fed817f7e1f58c"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper choosing-your-site-framework -o json",
+      "elapsed_seconds": 0.618364,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 145266,
+      "stdout_sha256": "e311c32701ede0e1489287f46dffc2a0c580fcba8992bb5a96fed817f7e1f58c"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 0.647114,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 179733,
+          "stdout_sha256": "fcd8cc97861353c5aa182da88b8942ddec7e925ca7d76924181b965d4b89bdc2"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper component-reference -o json",
+      "elapsed_seconds": 0.647228,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 179733,
+      "stdout_sha256": "fcd8cc97861353c5aa182da88b8942ddec7e925ca7d76924181b965d4b89bdc2"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 0.487389,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 66196,
+          "stdout_sha256": "cbbf21e428dfac22c6e8b42857601f8aa83547188ef50b3822ced47e4eb61c80"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper wave-deck -o json",
+      "elapsed_seconds": 0.487446,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 66196,
+      "stdout_sha256": "cbbf21e428dfac22c6e8b42857601f8aa83547188ef50b3822ced47e4eb61c80"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 0.964435,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 433740,
+          "stdout_sha256": "1fd02673d4143b59b59c5675daa823630b1483953355f147432c25137b5ba4b6"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper cloud-console-hardening-wave-2026-07-21 -o json",
+      "elapsed_seconds": 0.964647,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 433740,
+      "stdout_sha256": "1fd02673d4143b59b59c5675daa823630b1483953355f147432c25137b5ba4b6"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 1.011547,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 504634,
+          "stdout_sha256": "5dc7842807f77a36178fcd95e52e265f3842d28b9259cf7b03fab30a7e9e8b2b"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper cloud-console-hardening-wave-3-2026-07-21 -o json",
+      "elapsed_seconds": 1.011761,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 504634,
+      "stdout_sha256": "5dc7842807f77a36178fcd95e52e265f3842d28b9259cf7b03fab30a7e9e8b2b"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 1.084334,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 454016,
+          "stdout_sha256": "e6e73b295ec33295ea78721429184dc99ca0986d610ecba04e0dca82082d3a6d"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper spd-inspector-successor-wave-2026-07-20 -o json",
+      "elapsed_seconds": 1.084643,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 454016,
+      "stdout_sha256": "e6e73b295ec33295ea78721429184dc99ca0986d610ecba04e0dca82082d3a6d"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 0.870832,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 529232,
+          "stdout_sha256": "be62090e3fbf1cc51ab799f467b4a115d6452155ce6ddd0b8226c0c6f1dca63d"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper block-wishlist-100 -o json",
+      "elapsed_seconds": 0.87105,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 529232,
+      "stdout_sha256": "be62090e3fbf1cc51ab799f467b4a115d6452155ce6ddd0b8226c0c6f1dca63d"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 0.88947,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 380652,
+          "stdout_sha256": "f9c72a63bb1ac558b1cde99588d24240d9d42798a367d8e541aec4187735ee25"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper honest-gates-wave-4-2026-07-28 -o json",
+      "elapsed_seconds": 0.889637,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 380652,
+      "stdout_sha256": "f9c72a63bb1ac558b1cde99588d24240d9d42798a367d8e541aec4187735ee25"
+    },
+    {
+      "attempts": [
+        {
+          "attempt": 1,
+          "elapsed_seconds": 0.667812,
+          "exit_code": 0,
+          "stderr": "",
+          "stdout_bytes": 127430,
+          "stdout_sha256": "cf1087f55728087766f1613739e392923ccc37209fab9a2d4c47f1e45ede19a9"
+        }
+      ],
+      "command": "bp -s guerrilla -w default -p default -d production doc get paper task-tui-wave-2026-07-23b -o json",
+      "elapsed_seconds": 0.667909,
+      "exit_code": 0,
+      "method": "GET via bp document reader",
+      "stderr": "",
+      "stdout_bytes": 127430,
+      "stdout_sha256": "cf1087f55728087766f1613739e392923ccc37209fab9a2d4c47f1e45ede19a9"
+    }
+  ],
+  "artifact_root": "artifacts",
+  "assignment_id": "PPCC2-E011",
+  "assignment_map_sha256": "4c97689b79478ff39c7e45a8bb75d1f6037a061597958b16fad25d1f4d5d860a",
+  "candidate_schema_version": "ppcc2-accessibility-convergence/v1",
+  "fixture_count": 9,
+  "fixture_results": [
+    {
+      "accessibility": {
+        "cross_reader_equivalence_sha256": "f4da3bd9b2edb8d32c7b6449b0055a0d1bf9e2997fd145e8b21d54141d7986a6",
+        "deterministic_reading_order": true,
+        "email_heading_count": 16,
+        "email_main_labelled": true,
+        "images_missing_alt": 0,
+        "pass": true,
+        "safe_link_count": 0,
+        "source_heading_count": 16,
+        "source_image_count": 0,
+        "studio_heading_count": 16,
+        "studio_main_labelled": true
+      },
+      "block_count": 88,
+      "cli_api_round_trip": {
+        "canonical_sha256": "13b0e55184ead19a064b0643f7ef8f37c501dd419001a715cff99e41730409fd",
+        "decode_encode_byte_stable": true,
+        "pass": true,
+        "strict_rfc_json": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "degradation_count": 0,
+      "degradations": [],
+      "document_id": "choosing-your-site-framework",
+      "document_rev": "5e12190e742c0888ad78babdc5c6b93c",
+      "email_safety": {
+        "authored_heading_count": 16,
+        "linear_no_details": true,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 8,
+        "null_nodes": 0,
+        "pass": true,
+        "typed_nodes": 587
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "13b0e55184ead19a064b0643f7ef8f37c501dd419001a715cff99e41730409fd",
+            "13b0e55184ead19a064b0643f7ef8f37c501dd419001a715cff99e41730409fd"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "0a14cf9ec93d871f56485a7163a2cdf34fb176f9738484abdbc0cb90debc333e",
+            "0a14cf9ec93d871f56485a7163a2cdf34fb176f9738484abdbc0cb90debc333e"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "8fcc5d8c5741427f55bbf463daee7bf8b6ecd20bf2a737b075ab3b7e96adeab2",
+            "8fcc5d8c5741427f55bbf463daee7bf8b6ecd20bf2a737b075ab3b7e96adeab2"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "28491d052c15a7a0c1ceef8f0554ed969c9f21754f49f07e081c33fc3c384c63",
+            "28491d052c15a7a0c1ceef8f0554ed969c9f21754f49f07e081c33fc3c384c63"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "831668afd07d7492982fa979465f9bb24db94a3c359e6b8ff779d5334c547880",
+            "831668afd07d7492982fa979465f9bb24db94a3c359e6b8ff779d5334c547880"
+          ]
+        }
+      },
+      "render_node_count": 168,
+      "studio_structural_completeness": {
+        "authored_heading_count": 16,
+        "image_count": 0,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "safe_link_count": 0
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:choosing-your-site-framework"
+    },
+    {
+      "accessibility": {
+        "cross_reader_equivalence_sha256": "e285521ad09f1d42d11b76f9b79662d8ba4ebd51adaa48a8fdd8c5f93a5d13d8",
+        "deterministic_reading_order": true,
+        "email_heading_count": 31,
+        "email_main_labelled": true,
+        "images_missing_alt": 0,
+        "pass": true,
+        "safe_link_count": 0,
+        "source_heading_count": 31,
+        "source_image_count": 16,
+        "studio_heading_count": 31,
+        "studio_main_labelled": true
+      },
+      "block_count": 159,
+      "cli_api_round_trip": {
+        "canonical_sha256": "c21f7aeea0015f3021f76c65c0f212e0100c30e851e8006f6b68003b26af8e66",
+        "decode_encode_byte_stable": true,
+        "pass": true,
+        "strict_rfc_json": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "degradation_count": 0,
+      "degradations": [],
+      "document_id": "component-reference",
+      "document_rev": "11673b5ff7fe2978fe3c0643f5495eee",
+      "email_safety": {
+        "authored_heading_count": 31,
+        "linear_no_details": true,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 9,
+        "null_nodes": 0,
+        "pass": true,
+        "typed_nodes": 945
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "c21f7aeea0015f3021f76c65c0f212e0100c30e851e8006f6b68003b26af8e66",
+            "c21f7aeea0015f3021f76c65c0f212e0100c30e851e8006f6b68003b26af8e66"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "c488b7b5c79dfc0a9db80a3700aef8e00a6b3874d79b293c9530b49d9716493f",
+            "c488b7b5c79dfc0a9db80a3700aef8e00a6b3874d79b293c9530b49d9716493f"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "7708ff158193cdeabc08111bb5308775b5539451aa9822819359146a74a37e4c",
+            "7708ff158193cdeabc08111bb5308775b5539451aa9822819359146a74a37e4c"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "439439feb89fefe51e1499c725281e51cc1cf4d7f6291d10653916891ce5f947",
+            "439439feb89fefe51e1499c725281e51cc1cf4d7f6291d10653916891ce5f947"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "d2095e2ad9b6737d1344859f48fcf5a13c7f4f65437221914ff7c0e4a1f4bf41",
+            "d2095e2ad9b6737d1344859f48fcf5a13c7f4f65437221914ff7c0e4a1f4bf41"
+          ]
+        }
+      },
+      "render_node_count": 379,
+      "studio_structural_completeness": {
+        "authored_heading_count": 31,
+        "image_count": 16,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "safe_link_count": 0
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:component-reference"
+    },
+    {
+      "accessibility": {
+        "cross_reader_equivalence_sha256": "ad42cd45a2d428b6abfd5d54b4eb05aa56a9454fcff4ad25a4bd6cc0537e10e6",
+        "deterministic_reading_order": true,
+        "email_heading_count": 19,
+        "email_main_labelled": true,
+        "images_missing_alt": 0,
+        "pass": true,
+        "safe_link_count": 1,
+        "source_heading_count": 19,
+        "source_image_count": 0,
+        "studio_heading_count": 19,
+        "studio_main_labelled": true
+      },
+      "block_count": 98,
+      "cli_api_round_trip": {
+        "canonical_sha256": "6e94738bd4b4863c219079118fece469b97d179e5783fa3196b74f72fb48a250",
+        "decode_encode_byte_stable": true,
+        "pass": true,
+        "strict_rfc_json": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "degradation_count": 0,
+      "degradations": [],
+      "document_id": "wave-deck",
+      "document_rev": "e86c9ab685223febc97b25cc2c0e3b6e",
+      "email_safety": {
+        "authored_heading_count": 19,
+        "linear_no_details": true,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 7,
+        "null_nodes": 0,
+        "pass": true,
+        "typed_nodes": 347
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "6e94738bd4b4863c219079118fece469b97d179e5783fa3196b74f72fb48a250",
+            "6e94738bd4b4863c219079118fece469b97d179e5783fa3196b74f72fb48a250"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "62ecf1279d0907c27dc6a0cf31b33d7cc6206bfb91ae18919ac8578c87322f60",
+            "62ecf1279d0907c27dc6a0cf31b33d7cc6206bfb91ae18919ac8578c87322f60"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "ce0425de5785daa21ee6064310ddd90b664cde663ba16623ab973f14aaca6705",
+            "ce0425de5785daa21ee6064310ddd90b664cde663ba16623ab973f14aaca6705"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "04cd15a2c7581313dd16bc94534aeba22c4000c5da3d0717cc846190c5d03698",
+            "04cd15a2c7581313dd16bc94534aeba22c4000c5da3d0717cc846190c5d03698"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "5ad1bac315cefda2a1e1b26383e46ccf880f5cee3677c3d682e14cf4fe04a47d",
+            "5ad1bac315cefda2a1e1b26383e46ccf880f5cee3677c3d682e14cf4fe04a47d"
+          ]
+        }
+      },
+      "render_node_count": 145,
+      "studio_structural_completeness": {
+        "authored_heading_count": 19,
+        "image_count": 0,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "safe_link_count": 1
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:wave-deck"
+    },
+    {
+      "accessibility": {
+        "cross_reader_equivalence_sha256": "be0eaaff0a13f7bcf1379ce5bad4fc9cdfd4fb3a8dde1bc3e07f11d3e8e493d3",
+        "deterministic_reading_order": true,
+        "email_heading_count": 32,
+        "email_main_labelled": true,
+        "images_missing_alt": 0,
+        "pass": true,
+        "safe_link_count": 0,
+        "source_heading_count": 32,
+        "source_image_count": 0,
+        "studio_heading_count": 32,
+        "studio_main_labelled": true
+      },
+      "block_count": 147,
+      "cli_api_round_trip": {
+        "canonical_sha256": "e67bf14b57cafc1060d68fa01983363954ae65a15155c2e9cb67d2aeb66f9975",
+        "decode_encode_byte_stable": true,
+        "pass": true,
+        "strict_rfc_json": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "degradation_count": 0,
+      "degradations": [],
+      "document_id": "cloud-console-hardening-wave-2026-07-21",
+      "document_rev": "16a3141be0bb985742e2b016254bba82",
+      "email_safety": {
+        "authored_heading_count": 32,
+        "linear_no_details": true,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 4,
+        "null_nodes": 0,
+        "pass": true,
+        "typed_nodes": 294
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "e67bf14b57cafc1060d68fa01983363954ae65a15155c2e9cb67d2aeb66f9975",
+            "e67bf14b57cafc1060d68fa01983363954ae65a15155c2e9cb67d2aeb66f9975"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "c046423b8763586581ccac63877d6c93a3f17b4e77d2b72e6576da53145636ec",
+            "c046423b8763586581ccac63877d6c93a3f17b4e77d2b72e6576da53145636ec"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "bd0fc63e230a1d28c9fd073f538cfbbe4c5861bf610cf572f43d735ba3ed335a",
+            "bd0fc63e230a1d28c9fd073f538cfbbe4c5861bf610cf572f43d735ba3ed335a"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "0b87e6428453ec07388da3ffeea1e0aca3fe23542cbd7f6ba7bf78f2a582f1ea",
+            "0b87e6428453ec07388da3ffeea1e0aca3fe23542cbd7f6ba7bf78f2a582f1ea"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "d7739315f3d5758a3177e32273fc4b787098299ef95d4006159da2d6fb48279c",
+            "d7739315f3d5758a3177e32273fc4b787098299ef95d4006159da2d6fb48279c"
+          ]
+        }
+      },
+      "render_node_count": 179,
+      "studio_structural_completeness": {
+        "authored_heading_count": 32,
+        "image_count": 0,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "safe_link_count": 0
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:cloud-console-hardening-wave-2026-07-21"
+    },
+    {
+      "accessibility": {
+        "cross_reader_equivalence_sha256": "7f8c705e737a93974a4aade797de1baf265cc1be239eb0d95130df288c6d9f9d",
+        "deterministic_reading_order": true,
+        "email_heading_count": 56,
+        "email_main_labelled": true,
+        "images_missing_alt": 0,
+        "pass": true,
+        "safe_link_count": 0,
+        "source_heading_count": 56,
+        "source_image_count": 0,
+        "studio_heading_count": 56,
+        "studio_main_labelled": true
+      },
+      "block_count": 186,
+      "cli_api_round_trip": {
+        "canonical_sha256": "e46f5a6ab446ce4c2ca841264d742d26c2df1a3368f090974b5a6e483034f322",
+        "decode_encode_byte_stable": true,
+        "pass": true,
+        "strict_rfc_json": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "degradation_count": 0,
+      "degradations": [],
+      "document_id": "cloud-console-hardening-wave-3-2026-07-21",
+      "document_rev": "bc89039eb1bcc908b5be80ce33148094",
+      "email_safety": {
+        "authored_heading_count": 56,
+        "linear_no_details": true,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 6,
+        "null_nodes": 0,
+        "pass": true,
+        "typed_nodes": 404
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "e46f5a6ab446ce4c2ca841264d742d26c2df1a3368f090974b5a6e483034f322",
+            "e46f5a6ab446ce4c2ca841264d742d26c2df1a3368f090974b5a6e483034f322"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "9c18d6f658f5e838449faca8e959fe520bee40ef0448d0d73a875e2d7b098fdc",
+            "9c18d6f658f5e838449faca8e959fe520bee40ef0448d0d73a875e2d7b098fdc"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "81c8fc582a0fb3c7678e1e254e2047ba773a656419ea2323281db415c8b95a68",
+            "81c8fc582a0fb3c7678e1e254e2047ba773a656419ea2323281db415c8b95a68"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "2f6e1c6b0257754189437886f560f268d3cbc99dd7935dac93d1caac704bd18d",
+            "2f6e1c6b0257754189437886f560f268d3cbc99dd7935dac93d1caac704bd18d"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "de5129be7991d8eadef247045ab3fb781a8c483a47198acf4fc1c65e76fb6e33",
+            "de5129be7991d8eadef247045ab3fb781a8c483a47198acf4fc1c65e76fb6e33"
+          ]
+        }
+      },
+      "render_node_count": 266,
+      "studio_structural_completeness": {
+        "authored_heading_count": 56,
+        "image_count": 0,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "safe_link_count": 0
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:cloud-console-hardening-wave-3-2026-07-21"
+    },
+    {
+      "accessibility": {
+        "cross_reader_equivalence_sha256": "267b500d40ad983b6f7e3a6ccd3d5aacbe804f762e61a1fa645a0d5d4fbb1f9b",
+        "deterministic_reading_order": true,
+        "email_heading_count": 61,
+        "email_main_labelled": true,
+        "images_missing_alt": 0,
+        "pass": true,
+        "safe_link_count": 0,
+        "source_heading_count": 61,
+        "source_image_count": 0,
+        "studio_heading_count": 61,
+        "studio_main_labelled": true
+      },
+      "block_count": 212,
+      "cli_api_round_trip": {
+        "canonical_sha256": "b4c966cd832e417e7fdf8efda50c0cbee5feba7d87dda47539ac7ac551d02148",
+        "decode_encode_byte_stable": true,
+        "pass": true,
+        "strict_rfc_json": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "degradation_count": 0,
+      "degradations": [],
+      "document_id": "spd-inspector-successor-wave-2026-07-20",
+      "document_rev": "44ce6ce860011494d225c553c018b436",
+      "email_safety": {
+        "authored_heading_count": 61,
+        "linear_no_details": true,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 4,
+        "null_nodes": 0,
+        "pass": true,
+        "typed_nodes": 424
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "b4c966cd832e417e7fdf8efda50c0cbee5feba7d87dda47539ac7ac551d02148",
+            "b4c966cd832e417e7fdf8efda50c0cbee5feba7d87dda47539ac7ac551d02148"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "ea5fed594eb9ae760528f5224db965e7b0d03f87d72857091a071a16928d1b30",
+            "ea5fed594eb9ae760528f5224db965e7b0d03f87d72857091a071a16928d1b30"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "4098893e46a1ff287720a1a491bdbd7758feba036c8b240e140d116fd66e8836",
+            "4098893e46a1ff287720a1a491bdbd7758feba036c8b240e140d116fd66e8836"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "494f74bcd611afc780b804bfbcc8dcebb28885ec5af38187457372e9c59971c9",
+            "494f74bcd611afc780b804bfbcc8dcebb28885ec5af38187457372e9c59971c9"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "867b59fb549aa56ba3e86b0f68add286b832641fa8d7dc27c5492c1b17bb3fc0",
+            "867b59fb549aa56ba3e86b0f68add286b832641fa8d7dc27c5492c1b17bb3fc0"
+          ]
+        }
+      },
+      "render_node_count": 212,
+      "studio_structural_completeness": {
+        "authored_heading_count": 61,
+        "image_count": 0,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "safe_link_count": 0
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:spd-inspector-successor-wave-2026-07-20"
+    },
+    {
+      "accessibility": {
+        "cross_reader_equivalence_sha256": "e31ca6072414f4d6f08e580cc4c2ef30fcaa4db69f460e3f377f53000d976a1f",
+        "deterministic_reading_order": true,
+        "email_heading_count": 113,
+        "email_main_labelled": true,
+        "images_missing_alt": 0,
+        "pass": true,
+        "safe_link_count": 0,
+        "source_heading_count": 113,
+        "source_image_count": 0,
+        "studio_heading_count": 113,
+        "studio_main_labelled": true
+      },
+      "block_count": 440,
+      "cli_api_round_trip": {
+        "canonical_sha256": "64d0f0d8e36a9e4d0dcfcb105a987695725e08873c9710653059c4563bf67084",
+        "decode_encode_byte_stable": true,
+        "pass": true,
+        "strict_rfc_json": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "degradation_count": 0,
+      "degradations": [],
+      "document_id": "block-wishlist-100",
+      "document_rev": "4a848abc89f77860416de0871d5d5bf4",
+      "email_safety": {
+        "authored_heading_count": 113,
+        "linear_no_details": true,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 9,
+        "null_nodes": 0,
+        "pass": true,
+        "typed_nodes": 708
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "64d0f0d8e36a9e4d0dcfcb105a987695725e08873c9710653059c4563bf67084",
+            "64d0f0d8e36a9e4d0dcfcb105a987695725e08873c9710653059c4563bf67084"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "82597508d20114d8e1e789a94d710993a38a1e3afa2776545dea9604e15fcf33",
+            "82597508d20114d8e1e789a94d710993a38a1e3afa2776545dea9604e15fcf33"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "f0413a967429f221b05381fe7f2f7f54da1c9ca55c7f421392cfe856346d337f",
+            "f0413a967429f221b05381fe7f2f7f54da1c9ca55c7f421392cfe856346d337f"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "f43c473f80a3256f22c446a364c6bdaad02d0359e69ba8b0bb706f7768ebd272",
+            "f43c473f80a3256f22c446a364c6bdaad02d0359e69ba8b0bb706f7768ebd272"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "15488e9653737a9fd800098159b39f747858386b81a73fe0c7cfed050c0a737b",
+            "15488e9653737a9fd800098159b39f747858386b81a73fe0c7cfed050c0a737b"
+          ]
+        }
+      },
+      "render_node_count": 541,
+      "studio_structural_completeness": {
+        "authored_heading_count": 113,
+        "image_count": 0,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "safe_link_count": 0
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:block-wishlist-100"
+    },
+    {
+      "accessibility": {
+        "cross_reader_equivalence_sha256": "f87a474d98f771f5e1fb72250b8258f55e72055bba8c13bffc3423dd73b84e0e",
+        "deterministic_reading_order": true,
+        "email_heading_count": 35,
+        "email_main_labelled": true,
+        "images_missing_alt": 0,
+        "pass": true,
+        "safe_link_count": 0,
+        "source_heading_count": 35,
+        "source_image_count": 0,
+        "studio_heading_count": 35,
+        "studio_main_labelled": true
+      },
+      "block_count": 264,
+      "cli_api_round_trip": {
+        "canonical_sha256": "0f8f676a55c5385baca2dff24f716efa9d07a5dd5990e16313d5a10a80cd46ea",
+        "decode_encode_byte_stable": true,
+        "pass": true,
+        "strict_rfc_json": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "degradation_count": 0,
+      "degradations": [],
+      "document_id": "honest-gates-wave-4-2026-07-28",
+      "document_rev": "ab8b4653f1fa81becbf29ee3f658f8c6",
+      "email_safety": {
+        "authored_heading_count": 35,
+        "linear_no_details": true,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 8,
+        "null_nodes": 0,
+        "pass": true,
+        "typed_nodes": 1008
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "0f8f676a55c5385baca2dff24f716efa9d07a5dd5990e16313d5a10a80cd46ea",
+            "0f8f676a55c5385baca2dff24f716efa9d07a5dd5990e16313d5a10a80cd46ea"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "f5782ceb9226dc13eb9a23f9855d633e54ee681ad72eaaba56a351ee1cfb1531",
+            "f5782ceb9226dc13eb9a23f9855d633e54ee681ad72eaaba56a351ee1cfb1531"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "43d0bb47ab61c570cfa9427740873e0b60c84f4de1f78b91cd380f38f5e529a6",
+            "43d0bb47ab61c570cfa9427740873e0b60c84f4de1f78b91cd380f38f5e529a6"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "d248fc51adc59a13513843f8ea1fba3a1988b5ad95110c34cae2f9cad5021e49",
+            "d248fc51adc59a13513843f8ea1fba3a1988b5ad95110c34cae2f9cad5021e49"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "ecdc763bfd4ad4802eac3ea358169969829d6dc92a9d28df38539375af2315c5",
+            "ecdc763bfd4ad4802eac3ea358169969829d6dc92a9d28df38539375af2315c5"
+          ]
+        }
+      },
+      "render_node_count": 185,
+      "studio_structural_completeness": {
+        "authored_heading_count": 35,
+        "image_count": 0,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "safe_link_count": 0
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:honest-gates-wave-4-2026-07-28"
+    },
+    {
+      "accessibility": {
+        "cross_reader_equivalence_sha256": "172e4df2577137aeac780e8f61fda8edda276b8c3735ed7dd90568717b9a7aa7",
+        "deterministic_reading_order": true,
+        "email_heading_count": 12,
+        "email_main_labelled": true,
+        "images_missing_alt": 0,
+        "pass": true,
+        "safe_link_count": 0,
+        "source_heading_count": 12,
+        "source_image_count": 0,
+        "studio_heading_count": 12,
+        "studio_main_labelled": true
+      },
+      "block_count": 35,
+      "cli_api_round_trip": {
+        "canonical_sha256": "34167c058c50d976091f0ac259386308c5fd813e006f8f05c92547cf038ab771",
+        "decode_encode_byte_stable": true,
+        "pass": true,
+        "strict_rfc_json": true
+      },
+      "content_preservation": {
+        "authored_blocks_exactly_embedded": true,
+        "invented_decisive_facts": 0,
+        "missing_authored_strings": {
+          "email": [],
+          "studio": [],
+          "tui40": [],
+          "tui80": []
+        },
+        "pass": true
+      },
+      "degradation_count": 0,
+      "degradations": [],
+      "document_id": "task-tui-wave-2026-07-23b",
+      "document_rev": "3999a067808963303810884654e80ab5",
+      "email_safety": {
+        "authored_heading_count": 12,
+        "linear_no_details": true,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "script_free": true
+      },
+      "hard_gate_pass": true,
+      "hard_gates": {
+        "accessibility": true,
+        "cli_api_round_trip": true,
+        "content_preservation": true,
+        "email_safety": true,
+        "portable_doc_schema_validity": true,
+        "studio_structural_completeness": true,
+        "tui_width": true
+      },
+      "portable_doc_schema_validity": {
+        "invalid_typed_nodes": 0,
+        "max_json_depth": 4,
+        "null_nodes": 0,
+        "pass": true,
+        "typed_nodes": 63
+      },
+      "projection_determinism": {
+        "cli_api": {
+          "pass": true,
+          "repeat_sha256": [
+            "34167c058c50d976091f0ac259386308c5fd813e006f8f05c92547cf038ab771",
+            "34167c058c50d976091f0ac259386308c5fd813e006f8f05c92547cf038ab771"
+          ]
+        },
+        "email": {
+          "pass": true,
+          "repeat_sha256": [
+            "c9ead4abb87f78613f92849fa52ee2e5345deef22476ef8ccb5c4c455fe580b2",
+            "c9ead4abb87f78613f92849fa52ee2e5345deef22476ef8ccb5c4c455fe580b2"
+          ]
+        },
+        "studio": {
+          "pass": true,
+          "repeat_sha256": [
+            "6348ef02023be83d1a5ab7ceae48b79ff489936c5648eb91da65a565300bf2e3",
+            "6348ef02023be83d1a5ab7ceae48b79ff489936c5648eb91da65a565300bf2e3"
+          ]
+        },
+        "tui40": {
+          "pass": true,
+          "repeat_sha256": [
+            "93714dd757990a54c63d074d3227c2b8b331355b6923a7e271b6db13b03c60aa",
+            "93714dd757990a54c63d074d3227c2b8b331355b6923a7e271b6db13b03c60aa"
+          ]
+        },
+        "tui80": {
+          "pass": true,
+          "repeat_sha256": [
+            "d520831437a8536e3352d0f54897313b66699457a9f67366f68b51a2e4bd1fa2",
+            "d520831437a8536e3352d0f54897313b66699457a9f67366f68b51a2e4bd1fa2"
+          ]
+        }
+      },
+      "render_node_count": 35,
+      "studio_structural_completeness": {
+        "authored_heading_count": 12,
+        "image_count": 0,
+        "logical_h1_count": 1,
+        "missing_authored_strings": [],
+        "pass": true,
+        "safe_link_count": 0
+      },
+      "tui_width": {
+        "pass": true,
+        "tui40_max_display_width": 40,
+        "tui40_overflow_lines": 0,
+        "tui80_max_display_width": 80,
+        "tui80_overflow_lines": 0
+      },
+      "unit_id": "paper:task-tui-wave-2026-07-23b"
+    }
+  ],
+  "metrics": {
+    "accessibility": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "batch_capacity": {
+      "largest_disjoint_batch_completing_all_hard_gates_without_repair_spillover": 9,
+      "provisional_only": true,
+      "reason": "Round 4 convergence cannot seal Round 5 builder capacity.",
+      "surface_projections_per_unit": 5,
+      "units_attempted": 9,
+      "wall_seconds": 11.109838
+    },
+    "candidate_gate_pass_rate": {
+      "attempted": 63,
+      "passed": 63,
+      "value": 1.0
+    },
+    "cli_api_round_trip": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "content_preservation": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "email_safety": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "observed_failure_rate": {
+      "hard_failures": 0,
+      "hard_gate_checks": 63,
+      "rate": 0.0
+    },
+    "pilot_gate_pass_rate": {
+      "applicable": false,
+      "reason": "PPCC2-E011 is Round 4 convergence; Round 5 pilot was not started.",
+      "value": null
+    },
+    "portable_doc_schema_validity": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "rollback": {
+      "pass": true,
+      "production_mutations": 0,
+      "rule": "discard only the isolated PPCC2-E011 assignment directory"
+    },
+    "studio_structural_completeness": {
+      "attempted": 9,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9
+    },
+    "tui_width": {
+      "attempted": 9,
+      "overflow_lines_total": 0,
+      "pass": true,
+      "pass_rate": 1.0,
+      "passed": 9,
+      "tui40_max_display_width": 40,
+      "tui80_max_display_width": 80
+    }
+  },
+  "required_surfaces": [
+    "studio",
+    "tui80",
+    "tui40",
+    "email",
+    "cli_api"
+  ],
+  "schema_version": "ppcc2-e011-run-summary/v1",
+  "status": "PASS"
+}

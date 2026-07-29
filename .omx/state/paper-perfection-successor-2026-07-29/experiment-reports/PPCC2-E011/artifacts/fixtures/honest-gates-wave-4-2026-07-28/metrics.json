@@ -1,0 +1,116 @@
+{
+  "accessibility": {
+    "cross_reader_equivalence_sha256": "f87a474d98f771f5e1fb72250b8258f55e72055bba8c13bffc3423dd73b84e0e",
+    "deterministic_reading_order": true,
+    "email_heading_count": 35,
+    "email_main_labelled": true,
+    "images_missing_alt": 0,
+    "pass": true,
+    "safe_link_count": 0,
+    "source_heading_count": 35,
+    "source_image_count": 0,
+    "studio_heading_count": 35,
+    "studio_main_labelled": true
+  },
+  "block_count": 264,
+  "cli_api_round_trip": {
+    "canonical_sha256": "0f8f676a55c5385baca2dff24f716efa9d07a5dd5990e16313d5a10a80cd46ea",
+    "decode_encode_byte_stable": true,
+    "pass": true,
+    "strict_rfc_json": true
+  },
+  "content_preservation": {
+    "authored_blocks_exactly_embedded": true,
+    "invented_decisive_facts": 0,
+    "missing_authored_strings": {
+      "email": [],
+      "studio": [],
+      "tui40": [],
+      "tui80": []
+    },
+    "pass": true
+  },
+  "degradation_count": 0,
+  "degradations": [],
+  "document_id": "honest-gates-wave-4-2026-07-28",
+  "document_rev": "ab8b4653f1fa81becbf29ee3f658f8c6",
+  "email_safety": {
+    "authored_heading_count": 35,
+    "linear_no_details": true,
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "script_free": true
+  },
+  "hard_gate_pass": true,
+  "hard_gates": {
+    "accessibility": true,
+    "cli_api_round_trip": true,
+    "content_preservation": true,
+    "email_safety": true,
+    "portable_doc_schema_validity": true,
+    "studio_structural_completeness": true,
+    "tui_width": true
+  },
+  "portable_doc_schema_validity": {
+    "invalid_typed_nodes": 0,
+    "max_json_depth": 8,
+    "null_nodes": 0,
+    "pass": true,
+    "typed_nodes": 1008
+  },
+  "projection_determinism": {
+    "cli_api": {
+      "pass": true,
+      "repeat_sha256": [
+        "0f8f676a55c5385baca2dff24f716efa9d07a5dd5990e16313d5a10a80cd46ea",
+        "0f8f676a55c5385baca2dff24f716efa9d07a5dd5990e16313d5a10a80cd46ea"
+      ]
+    },
+    "email": {
+      "pass": true,
+      "repeat_sha256": [
+        "f5782ceb9226dc13eb9a23f9855d633e54ee681ad72eaaba56a351ee1cfb1531",
+        "f5782ceb9226dc13eb9a23f9855d633e54ee681ad72eaaba56a351ee1cfb1531"
+      ]
+    },
+    "studio": {
+      "pass": true,
+      "repeat_sha256": [
+        "43d0bb47ab61c570cfa9427740873e0b60c84f4de1f78b91cd380f38f5e529a6",
+        "43d0bb47ab61c570cfa9427740873e0b60c84f4de1f78b91cd380f38f5e529a6"
+      ]
+    },
+    "tui40": {
+      "pass": true,
+      "repeat_sha256": [
+        "d248fc51adc59a13513843f8ea1fba3a1988b5ad95110c34cae2f9cad5021e49",
+        "d248fc51adc59a13513843f8ea1fba3a1988b5ad95110c34cae2f9cad5021e49"
+      ]
+    },
+    "tui80": {
+      "pass": true,
+      "repeat_sha256": [
+        "ecdc763bfd4ad4802eac3ea358169969829d6dc92a9d28df38539375af2315c5",
+        "ecdc763bfd4ad4802eac3ea358169969829d6dc92a9d28df38539375af2315c5"
+      ]
+    }
+  },
+  "render_node_count": 185,
+  "studio_structural_completeness": {
+    "authored_heading_count": 35,
+    "image_count": 0,
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "safe_link_count": 0
+  },
+  "tui_width": {
+    "pass": true,
+    "tui40_max_display_width": 40,
+    "tui40_overflow_lines": 0,
+    "tui80_max_display_width": 80,
+    "tui80_overflow_lines": 0
+  },
+  "unit_id": "paper:honest-gates-wave-4-2026-07-28"
+}

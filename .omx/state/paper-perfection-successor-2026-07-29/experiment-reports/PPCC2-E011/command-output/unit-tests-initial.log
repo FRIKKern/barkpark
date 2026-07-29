@@ -1,0 +1,28 @@
+test_duplicate_top_level_identifier_is_quarantined (test_candidate.AccessibilityConvergenceTest) ... ok
+test_generated_output_replays_when_present (test_candidate.AccessibilityConvergenceTest) ... skipped 'generated corpus artifacts not present yet'
+test_malformed_nested_null_is_machine_readable_quarantine (test_candidate.AccessibilityConvergenceTest) ... ok
+test_missing_alt_and_unsafe_href_degrade_deterministically (test_candidate.AccessibilityConvergenceTest) ... FAIL
+test_real_heading_link_image_and_cross_reader_gates (test_candidate.AccessibilityConvergenceTest) ... FAIL
+test_strict_json_rejects_duplicate_keys_and_non_finite_numbers (test_candidate.AccessibilityConvergenceTest) ... ok
+test_unicode_hard_wrap_never_exceeds_width (test_candidate.AccessibilityConvergenceTest) ... ok
+
+======================================================================
+FAIL: test_missing_alt_and_unsafe_href_degrade_deterministically (test_candidate.AccessibilityConvergenceTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Volumes/SATECHI/github/barkpark/.omx/team/ppcc2-r4-converge-typ-263c172a/worktrees/worker-2/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E011/test_candidate.py", line 90, in test_missing_alt_and_unsafe_href_degrade_deterministically
+    self.assertTrue(self.render(first)["hard_gate_pass"])
+AssertionError: False is not true
+
+======================================================================
+FAIL: test_real_heading_link_image_and_cross_reader_gates (test_candidate.AccessibilityConvergenceTest)
+----------------------------------------------------------------------
+Traceback (most recent call last):
+  File "/Volumes/SATECHI/github/barkpark/.omx/team/ppcc2-r4-converge-typ-263c172a/worktrees/worker-2/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E011/test_candidate.py", line 65, in test_real_heading_link_image_and_cross_reader_gates
+    self.assertTrue(result["hard_gate_pass"], result)
+AssertionError: False is not true : {'unit_id': 'paper:synthetic', 'document_id': 'synthetic', 'document_rev': 'rev-1', 'block_count': 4, 'render_node_count': 4, 'hard_gate_pass': False, 'hard_gates': {'portable_doc_schema_validity': True, 'studio_structural_completeness': False, 'tui_width': True, 'email_safety': False, 'cli_api_round_trip': True, 'accessibility': True, 'content_preservation': False}, 'portable_doc_schema_validity': {'pass': True, 'typed_nodes': 5, 'invalid_typed_nodes': 0, 'null_nodes': 0, 'max_json_depth': 4}, 'studio_structural_completeness': {'pass': False, 'logical_h1_count': 1, 'authored_heading_count': 1, 'image_count': 1, 'safe_link_count': 1, 'missing_authored_strings': ['Informativeimage']}, 'tui_width': {'pass': True, 'tui80_max_display_width': 49, 'tui80_overflow_lines': 0, 'tui40_max_display_width': 39, 'tui40_overflow_lines': 0}, 'email_safety': {'pass': False, 'linear_no_details': True, 'script_free': True, 'logical_h1_count': 1, 'authored_heading_count': 1, 'missing_authored_strings': ['Informativeimage']}, 'cli_api_round_trip': {'pass': True, 'canonical_sha256': '5a07d0498204f901740fb6a4a7ad363414310077704946806fa7fa19c18e1826', 'strict_rfc_json': True, 'decode_encode_byte_stable': True}, 'accessibility': {'pass': True, 'deterministic_reading_order': True, 'source_heading_count': 1, 'studio_heading_count': 1, 'email_heading_count': 1, 'source_image_count': 1, 'images_missing_alt': 0, 'safe_link_count': 1, 'studio_main_labelled': True, 'email_main_labelled': True, 'cross_reader_equivalence_sha256': 'b38f6d52455622703dfdecbd2a55556949694c17d956f28dd5dc9b2f3c4cd347'}, 'content_preservation': {'pass': False, 'authored_blocks_exactly_embedded': True, 'missing_authored_strings': {'studio': ['Informativeimage'], 'tui80': [], 'tui40': [], 'email': ['Informativeimage']}, 'invented_decisive_facts': 0}, 'degradation_count': 0, 'degradations': []}
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.007s
+
+FAILED (failures=2, skipped=1)

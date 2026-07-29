@@ -1,0 +1,116 @@
+{
+  "accessibility": {
+    "cross_reader_equivalence_sha256": "e31ca6072414f4d6f08e580cc4c2ef30fcaa4db69f460e3f377f53000d976a1f",
+    "deterministic_reading_order": true,
+    "email_heading_count": 113,
+    "email_main_labelled": true,
+    "images_missing_alt": 0,
+    "pass": true,
+    "safe_link_count": 0,
+    "source_heading_count": 113,
+    "source_image_count": 0,
+    "studio_heading_count": 113,
+    "studio_main_labelled": true
+  },
+  "block_count": 440,
+  "cli_api_round_trip": {
+    "canonical_sha256": "64d0f0d8e36a9e4d0dcfcb105a987695725e08873c9710653059c4563bf67084",
+    "decode_encode_byte_stable": true,
+    "pass": true,
+    "strict_rfc_json": true
+  },
+  "content_preservation": {
+    "authored_blocks_exactly_embedded": true,
+    "invented_decisive_facts": 0,
+    "missing_authored_strings": {
+      "email": [],
+      "studio": [],
+      "tui40": [],
+      "tui80": []
+    },
+    "pass": true
+  },
+  "degradation_count": 0,
+  "degradations": [],
+  "document_id": "block-wishlist-100",
+  "document_rev": "4a848abc89f77860416de0871d5d5bf4",
+  "email_safety": {
+    "authored_heading_count": 113,
+    "linear_no_details": true,
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "script_free": true
+  },
+  "hard_gate_pass": true,
+  "hard_gates": {
+    "accessibility": true,
+    "cli_api_round_trip": true,
+    "content_preservation": true,
+    "email_safety": true,
+    "portable_doc_schema_validity": true,
+    "studio_structural_completeness": true,
+    "tui_width": true
+  },
+  "portable_doc_schema_validity": {
+    "invalid_typed_nodes": 0,
+    "max_json_depth": 9,
+    "null_nodes": 0,
+    "pass": true,
+    "typed_nodes": 708
+  },
+  "projection_determinism": {
+    "cli_api": {
+      "pass": true,
+      "repeat_sha256": [
+        "64d0f0d8e36a9e4d0dcfcb105a987695725e08873c9710653059c4563bf67084",
+        "64d0f0d8e36a9e4d0dcfcb105a987695725e08873c9710653059c4563bf67084"
+      ]
+    },
+    "email": {
+      "pass": true,
+      "repeat_sha256": [
+        "82597508d20114d8e1e789a94d710993a38a1e3afa2776545dea9604e15fcf33",
+        "82597508d20114d8e1e789a94d710993a38a1e3afa2776545dea9604e15fcf33"
+      ]
+    },
+    "studio": {
+      "pass": true,
+      "repeat_sha256": [
+        "f0413a967429f221b05381fe7f2f7f54da1c9ca55c7f421392cfe856346d337f",
+        "f0413a967429f221b05381fe7f2f7f54da1c9ca55c7f421392cfe856346d337f"
+      ]
+    },
+    "tui40": {
+      "pass": true,
+      "repeat_sha256": [
+        "f43c473f80a3256f22c446a364c6bdaad02d0359e69ba8b0bb706f7768ebd272",
+        "f43c473f80a3256f22c446a364c6bdaad02d0359e69ba8b0bb706f7768ebd272"
+      ]
+    },
+    "tui80": {
+      "pass": true,
+      "repeat_sha256": [
+        "15488e9653737a9fd800098159b39f747858386b81a73fe0c7cfed050c0a737b",
+        "15488e9653737a9fd800098159b39f747858386b81a73fe0c7cfed050c0a737b"
+      ]
+    }
+  },
+  "render_node_count": 541,
+  "studio_structural_completeness": {
+    "authored_heading_count": 113,
+    "image_count": 0,
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "safe_link_count": 0
+  },
+  "tui_width": {
+    "pass": true,
+    "tui40_max_display_width": 40,
+    "tui40_overflow_lines": 0,
+    "tui80_max_display_width": 80,
+    "tui80_overflow_lines": 0
+  },
+  "unit_id": "paper:block-wishlist-100"
+}

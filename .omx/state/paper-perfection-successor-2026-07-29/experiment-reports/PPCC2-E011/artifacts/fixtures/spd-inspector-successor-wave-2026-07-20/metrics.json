@@ -1,0 +1,116 @@
+{
+  "accessibility": {
+    "cross_reader_equivalence_sha256": "267b500d40ad983b6f7e3a6ccd3d5aacbe804f762e61a1fa645a0d5d4fbb1f9b",
+    "deterministic_reading_order": true,
+    "email_heading_count": 61,
+    "email_main_labelled": true,
+    "images_missing_alt": 0,
+    "pass": true,
+    "safe_link_count": 0,
+    "source_heading_count": 61,
+    "source_image_count": 0,
+    "studio_heading_count": 61,
+    "studio_main_labelled": true
+  },
+  "block_count": 212,
+  "cli_api_round_trip": {
+    "canonical_sha256": "b4c966cd832e417e7fdf8efda50c0cbee5feba7d87dda47539ac7ac551d02148",
+    "decode_encode_byte_stable": true,
+    "pass": true,
+    "strict_rfc_json": true
+  },
+  "content_preservation": {
+    "authored_blocks_exactly_embedded": true,
+    "invented_decisive_facts": 0,
+    "missing_authored_strings": {
+      "email": [],
+      "studio": [],
+      "tui40": [],
+      "tui80": []
+    },
+    "pass": true
+  },
+  "degradation_count": 0,
+  "degradations": [],
+  "document_id": "spd-inspector-successor-wave-2026-07-20",
+  "document_rev": "44ce6ce860011494d225c553c018b436",
+  "email_safety": {
+    "authored_heading_count": 61,
+    "linear_no_details": true,
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "script_free": true
+  },
+  "hard_gate_pass": true,
+  "hard_gates": {
+    "accessibility": true,
+    "cli_api_round_trip": true,
+    "content_preservation": true,
+    "email_safety": true,
+    "portable_doc_schema_validity": true,
+    "studio_structural_completeness": true,
+    "tui_width": true
+  },
+  "portable_doc_schema_validity": {
+    "invalid_typed_nodes": 0,
+    "max_json_depth": 4,
+    "null_nodes": 0,
+    "pass": true,
+    "typed_nodes": 424
+  },
+  "projection_determinism": {
+    "cli_api": {
+      "pass": true,
+      "repeat_sha256": [
+        "b4c966cd832e417e7fdf8efda50c0cbee5feba7d87dda47539ac7ac551d02148",
+        "b4c966cd832e417e7fdf8efda50c0cbee5feba7d87dda47539ac7ac551d02148"
+      ]
+    },
+    "email": {
+      "pass": true,
+      "repeat_sha256": [
+        "ea5fed594eb9ae760528f5224db965e7b0d03f87d72857091a071a16928d1b30",
+        "ea5fed594eb9ae760528f5224db965e7b0d03f87d72857091a071a16928d1b30"
+      ]
+    },
+    "studio": {
+      "pass": true,
+      "repeat_sha256": [
+        "4098893e46a1ff287720a1a491bdbd7758feba036c8b240e140d116fd66e8836",
+        "4098893e46a1ff287720a1a491bdbd7758feba036c8b240e140d116fd66e8836"
+      ]
+    },
+    "tui40": {
+      "pass": true,
+      "repeat_sha256": [
+        "494f74bcd611afc780b804bfbcc8dcebb28885ec5af38187457372e9c59971c9",
+        "494f74bcd611afc780b804bfbcc8dcebb28885ec5af38187457372e9c59971c9"
+      ]
+    },
+    "tui80": {
+      "pass": true,
+      "repeat_sha256": [
+        "867b59fb549aa56ba3e86b0f68add286b832641fa8d7dc27c5492c1b17bb3fc0",
+        "867b59fb549aa56ba3e86b0f68add286b832641fa8d7dc27c5492c1b17bb3fc0"
+      ]
+    }
+  },
+  "render_node_count": 212,
+  "studio_structural_completeness": {
+    "authored_heading_count": 61,
+    "image_count": 0,
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "safe_link_count": 0
+  },
+  "tui_width": {
+    "pass": true,
+    "tui40_max_display_width": 40,
+    "tui40_overflow_lines": 0,
+    "tui80_max_display_width": 80,
+    "tui80_overflow_lines": 0
+  },
+  "unit_id": "paper:spd-inspector-successor-wave-2026-07-20"
+}

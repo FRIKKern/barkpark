@@ -1,0 +1,116 @@
+{
+  "accessibility": {
+    "cross_reader_equivalence_sha256": "172e4df2577137aeac780e8f61fda8edda276b8c3735ed7dd90568717b9a7aa7",
+    "deterministic_reading_order": true,
+    "email_heading_count": 12,
+    "email_main_labelled": true,
+    "images_missing_alt": 0,
+    "pass": true,
+    "safe_link_count": 0,
+    "source_heading_count": 12,
+    "source_image_count": 0,
+    "studio_heading_count": 12,
+    "studio_main_labelled": true
+  },
+  "block_count": 35,
+  "cli_api_round_trip": {
+    "canonical_sha256": "34167c058c50d976091f0ac259386308c5fd813e006f8f05c92547cf038ab771",
+    "decode_encode_byte_stable": true,
+    "pass": true,
+    "strict_rfc_json": true
+  },
+  "content_preservation": {
+    "authored_blocks_exactly_embedded": true,
+    "invented_decisive_facts": 0,
+    "missing_authored_strings": {
+      "email": [],
+      "studio": [],
+      "tui40": [],
+      "tui80": []
+    },
+    "pass": true
+  },
+  "degradation_count": 0,
+  "degradations": [],
+  "document_id": "task-tui-wave-2026-07-23b",
+  "document_rev": "3999a067808963303810884654e80ab5",
+  "email_safety": {
+    "authored_heading_count": 12,
+    "linear_no_details": true,
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "script_free": true
+  },
+  "hard_gate_pass": true,
+  "hard_gates": {
+    "accessibility": true,
+    "cli_api_round_trip": true,
+    "content_preservation": true,
+    "email_safety": true,
+    "portable_doc_schema_validity": true,
+    "studio_structural_completeness": true,
+    "tui_width": true
+  },
+  "portable_doc_schema_validity": {
+    "invalid_typed_nodes": 0,
+    "max_json_depth": 4,
+    "null_nodes": 0,
+    "pass": true,
+    "typed_nodes": 63
+  },
+  "projection_determinism": {
+    "cli_api": {
+      "pass": true,
+      "repeat_sha256": [
+        "34167c058c50d976091f0ac259386308c5fd813e006f8f05c92547cf038ab771",
+        "34167c058c50d976091f0ac259386308c5fd813e006f8f05c92547cf038ab771"
+      ]
+    },
+    "email": {
+      "pass": true,
+      "repeat_sha256": [
+        "c9ead4abb87f78613f92849fa52ee2e5345deef22476ef8ccb5c4c455fe580b2",
+        "c9ead4abb87f78613f92849fa52ee2e5345deef22476ef8ccb5c4c455fe580b2"
+      ]
+    },
+    "studio": {
+      "pass": true,
+      "repeat_sha256": [
+        "6348ef02023be83d1a5ab7ceae48b79ff489936c5648eb91da65a565300bf2e3",
+        "6348ef02023be83d1a5ab7ceae48b79ff489936c5648eb91da65a565300bf2e3"
+      ]
+    },
+    "tui40": {
+      "pass": true,
+      "repeat_sha256": [
+        "93714dd757990a54c63d074d3227c2b8b331355b6923a7e271b6db13b03c60aa",
+        "93714dd757990a54c63d074d3227c2b8b331355b6923a7e271b6db13b03c60aa"
+      ]
+    },
+    "tui80": {
+      "pass": true,
+      "repeat_sha256": [
+        "d520831437a8536e3352d0f54897313b66699457a9f67366f68b51a2e4bd1fa2",
+        "d520831437a8536e3352d0f54897313b66699457a9f67366f68b51a2e4bd1fa2"
+      ]
+    }
+  },
+  "render_node_count": 35,
+  "studio_structural_completeness": {
+    "authored_heading_count": 12,
+    "image_count": 0,
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "safe_link_count": 0
+  },
+  "tui_width": {
+    "pass": true,
+    "tui40_max_display_width": 40,
+    "tui40_overflow_lines": 0,
+    "tui80_max_display_width": 80,
+    "tui80_overflow_lines": 0
+  },
+  "unit_id": "paper:task-tui-wave-2026-07-23b"
+}

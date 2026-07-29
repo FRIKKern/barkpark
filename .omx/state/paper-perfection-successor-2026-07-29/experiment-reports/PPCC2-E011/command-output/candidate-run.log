@@ -1,0 +1,17 @@
+Traceback (most recent call last):
+  File "/Volumes/SATECHI/github/barkpark/.omx/team/ppcc2-r4-converge-typ-263c172a/worktrees/worker-2/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E011/candidate.py", line 751, in <module>
+    raise SystemExit(main())
+  File "/Volumes/SATECHI/github/barkpark/.omx/team/ppcc2-r4-converge-typ-263c172a/worktrees/worker-2/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E011/candidate.py", line 732, in main
+    result = run_experiment(args.assignment_map, args.output)
+  File "/Volumes/SATECHI/github/barkpark/.omx/team/ppcc2-r4-converge-typ-263c172a/worktrees/worker-2/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E011/candidate.py", line 675, in run_experiment
+    summary = base.run_experiment(assignment_path, output)
+  File "/Volumes/SATECHI/github/barkpark/.omx/team/ppcc2-r4-converge-typ-263c172a/worktrees/worker-2/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E011/base_candidate.py", line 773, in run_experiment
+    metrics = aggregate_metrics(fixture_results, elapsed)
+  File "/Volumes/SATECHI/github/barkpark/.omx/team/ppcc2-r4-converge-typ-263c172a/worktrees/worker-2/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E011/candidate.py", line 635, in aggregate_metrics
+    metrics = base.aggregate_metrics(results, elapsed)
+  File "/Volumes/SATECHI/github/barkpark/.omx/team/ppcc2-r4-converge-typ-263c172a/worktrees/worker-2/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E011/candidate.py", line 635, in aggregate_metrics
+    metrics = base.aggregate_metrics(results, elapsed)
+  File "/Volumes/SATECHI/github/barkpark/.omx/team/ppcc2-r4-converge-typ-263c172a/worktrees/worker-2/.omx/state/paper-perfection-successor-2026-07-29/experiment-reports/PPCC2-E011/candidate.py", line 635, in aggregate_metrics
+    metrics = base.aggregate_metrics(results, elapsed)
+  [Previous line repeated 993 more times]
+RecursionError: maximum recursion depth exceeded

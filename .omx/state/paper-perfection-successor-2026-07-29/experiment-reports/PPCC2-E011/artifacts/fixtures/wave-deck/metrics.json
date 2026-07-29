@@ -1,0 +1,116 @@
+{
+  "accessibility": {
+    "cross_reader_equivalence_sha256": "ad42cd45a2d428b6abfd5d54b4eb05aa56a9454fcff4ad25a4bd6cc0537e10e6",
+    "deterministic_reading_order": true,
+    "email_heading_count": 19,
+    "email_main_labelled": true,
+    "images_missing_alt": 0,
+    "pass": true,
+    "safe_link_count": 1,
+    "source_heading_count": 19,
+    "source_image_count": 0,
+    "studio_heading_count": 19,
+    "studio_main_labelled": true
+  },
+  "block_count": 98,
+  "cli_api_round_trip": {
+    "canonical_sha256": "6e94738bd4b4863c219079118fece469b97d179e5783fa3196b74f72fb48a250",
+    "decode_encode_byte_stable": true,
+    "pass": true,
+    "strict_rfc_json": true
+  },
+  "content_preservation": {
+    "authored_blocks_exactly_embedded": true,
+    "invented_decisive_facts": 0,
+    "missing_authored_strings": {
+      "email": [],
+      "studio": [],
+      "tui40": [],
+      "tui80": []
+    },
+    "pass": true
+  },
+  "degradation_count": 0,
+  "degradations": [],
+  "document_id": "wave-deck",
+  "document_rev": "e86c9ab685223febc97b25cc2c0e3b6e",
+  "email_safety": {
+    "authored_heading_count": 19,
+    "linear_no_details": true,
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "script_free": true
+  },
+  "hard_gate_pass": true,
+  "hard_gates": {
+    "accessibility": true,
+    "cli_api_round_trip": true,
+    "content_preservation": true,
+    "email_safety": true,
+    "portable_doc_schema_validity": true,
+    "studio_structural_completeness": true,
+    "tui_width": true
+  },
+  "portable_doc_schema_validity": {
+    "invalid_typed_nodes": 0,
+    "max_json_depth": 7,
+    "null_nodes": 0,
+    "pass": true,
+    "typed_nodes": 347
+  },
+  "projection_determinism": {
+    "cli_api": {
+      "pass": true,
+      "repeat_sha256": [
+        "6e94738bd4b4863c219079118fece469b97d179e5783fa3196b74f72fb48a250",
+        "6e94738bd4b4863c219079118fece469b97d179e5783fa3196b74f72fb48a250"
+      ]
+    },
+    "email": {
+      "pass": true,
+      "repeat_sha256": [
+        "62ecf1279d0907c27dc6a0cf31b33d7cc6206bfb91ae18919ac8578c87322f60",
+        "62ecf1279d0907c27dc6a0cf31b33d7cc6206bfb91ae18919ac8578c87322f60"
+      ]
+    },
+    "studio": {
+      "pass": true,
+      "repeat_sha256": [
+        "ce0425de5785daa21ee6064310ddd90b664cde663ba16623ab973f14aaca6705",
+        "ce0425de5785daa21ee6064310ddd90b664cde663ba16623ab973f14aaca6705"
+      ]
+    },
+    "tui40": {
+      "pass": true,
+      "repeat_sha256": [
+        "04cd15a2c7581313dd16bc94534aeba22c4000c5da3d0717cc846190c5d03698",
+        "04cd15a2c7581313dd16bc94534aeba22c4000c5da3d0717cc846190c5d03698"
+      ]
+    },
+    "tui80": {
+      "pass": true,
+      "repeat_sha256": [
+        "5ad1bac315cefda2a1e1b26383e46ccf880f5cee3677c3d682e14cf4fe04a47d",
+        "5ad1bac315cefda2a1e1b26383e46ccf880f5cee3677c3d682e14cf4fe04a47d"
+      ]
+    }
+  },
+  "render_node_count": 145,
+  "studio_structural_completeness": {
+    "authored_heading_count": 19,
+    "image_count": 0,
+    "logical_h1_count": 1,
+    "missing_authored_strings": [],
+    "pass": true,
+    "safe_link_count": 1
+  },
+  "tui_width": {
+    "pass": true,
+    "tui40_max_display_width": 40,
+    "tui40_overflow_lines": 0,
+    "tui80_max_display_width": 80,
+    "tui80_overflow_lines": 0
+  },
+  "unit_id": "paper:wave-deck"
+}

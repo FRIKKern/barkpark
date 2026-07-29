@@ -1,0 +1,12 @@
+test_duplicate_top_level_identifier_is_quarantined (test_candidate.AccessibilityConvergenceTest) ... ok
+test_generated_output_replays_when_present (test_candidate.AccessibilityConvergenceTest) ... skipped 'generated corpus artifacts not present yet'
+test_malformed_nested_null_is_machine_readable_quarantine (test_candidate.AccessibilityConvergenceTest) ... ok
+test_missing_alt_and_unsafe_href_degrade_deterministically (test_candidate.AccessibilityConvergenceTest) ... ok
+test_real_heading_link_image_and_cross_reader_gates (test_candidate.AccessibilityConvergenceTest) ... ok
+test_strict_json_rejects_duplicate_keys_and_non_finite_numbers (test_candidate.AccessibilityConvergenceTest) ... ok
+test_unicode_hard_wrap_never_exceeds_width (test_candidate.AccessibilityConvergenceTest) ... ok
+
+----------------------------------------------------------------------
+Ran 7 tests in 0.005s
+
+OK (skipped=1)
