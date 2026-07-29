@@ -1,0 +1,509 @@
+{
+  "_createdAt": "2026-07-10T18:15:58.587456Z",
+  "_draft": false,
+  "_id": "felix-findings-otp-supervision",
+  "_publishedId": "felix-findings-otp-supervision",
+  "_rev": "25cc385cde42f03103533f064e9f2ffa",
+  "_type": "paper",
+  "_updatedAt": "2026-07-10T18:15:58.587456Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix Audit d01 — OTP & Supervision Tree Design",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Domain audit against the Phoenix Mastery Corpus, Part I (BEAM/OTP/ETS substrate) and Part IX (OTP application design). Read-only. Method: read the full supervision tree, sweep all 23 GenServers + 8 ETS tables, trace the three hottest paths (read/query, mutate, sheets ops), and load-reason each singleton. Verdicts: adopt / already-good / rejected-with-reason. Improvement doctrine: a finding qualifies ONLY via named failure mode, measured cost, scar-class risk, or provably-cheaper future change. Tree-tidiness rejected."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "Verdict table",
+      "type": "heading"
+    },
+    {
+      "id": "block-3",
+      "language": "text",
+      "type": "code",
+      "value": "DOMAIN d01 — OTP & SUPERVISION TREE — VERDICTS\nCorpus: Part I ch1-5, Part IX ch64-69\n\nCONCEPT                                          VERDICT              EVIDENCE\nFlat top-level supervision tree (~30 children)   ADOPT (filed p2)     application.ex:185 default 3/5 intensity\n  shares one restart budget                        task-d328fb91ff55b743\nStartup ordering (Auth->Recovery->Oban; host->    already-good        application.ex:67-181 list position + comments\n  services before Endpoint)\nRateLimiter (token bucket)                        already-good        rate_limiter.ex ETS public, write_conc, bounded prune\nRequestStats (req/s + p95)                        already-good        request_stats.ex ETS write path, rare GenServer read\nSheets.Session fleet hibernation                  already-good        session.ex:402 hibernate_after wired\nSheets.Session mailbox blowup under load          already-good        Registry-sharded, sync-call backpressure, 1000-op cap\nPulse.Metrics (live cost telemetry)               already-good        metrics.ex :counters + :persistent_term, no hot mailbox\nPlugins.Registry hot-path lookups                 already-good        registry.ex:114 persistent_term snapshot fast-path\nValidation.Registry / Content.Validation.Rules    rejected-w-reason   evaluator.run has ZERO non-test callers (dormant)\n  singleton GenServer.call on 'hot' path\nGithub/Bokbasen/Indx Auth: HTTP in handle_call    rejected-w-reason   ~1h cache, off-by-default, de-dup is intended\nETS unbounded growth (all 8 tables)               already-good        clear-on-full pattern #790/#792; codelists=plugin-keyed\nPartitionSupervisor opportunity (RateLimiter/     rejected-w-reason   no measured bottleneck; write_concurrency suffices\n  RequestStats/Registry)                                              (Chapter 5: no premature ETS/sharding)\nIndx.Recovery / Auth crash-loop hardening         already-good        recovery.ex try/rescue; auth.ex lazy init"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Finding 1 (ADOPT, p2) — Flat top-level supervision tree shares one restart budget",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Filed: task-d328fb91ff55b743 (parent task-9e2fc23e66db1de5, priority 2, labels felix/phoenix-audit-finding)."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Barkpark.Application starts ~30 children under ONE flat supervisor with NO restart-intensity override, so OTP's default 3-restarts-in-5s applies to the ENTIRE tree at once. Plugin-contributed workers fold in FLAT next to Repo, Oban, PubSub and Endpoint. There are no intermediate supervisors (grep confirms only Telemetry has its own; the Sheets/StudioChat DynamicSupervisors hold restart:temporary children that don't count against the top budget)."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-7",
+      "language": "elixir",
+      "type": "code",
+      "value": "opts = [strategy: :one_for_one, name: Barkpark.Supervisor]  # application.ex:185 — no max_restarts/max_seconds\nchildren = [RateLimiter, Telemetry, RequestStats, Repo, Vault, Plugins.Registry, ...]\n           ++ plugin_children   # Pulse.Metrics, Quiz.Bridge, Github.Auth+DrainWorker, OnixEdit — FLAT\n           ++ [SchemaBootstrap, Indx.Auth, Indx.Monitor, Indx.Recovery, {Oban,...},\n               PubSub, Sheets registries+supervisors, StudioChat registries+supervisors,\n               Presence, TaskSupervisors, ...SelfUpdate.Runner, Endpoint]"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "NAMED FAILURE MODE — concrete inputs to wrong outcome: any ONE top-level child that crash-loops (raises in init/handle_continue 3x within 5s — e.g. a future or third-party plugin worker validating external config at boot, or several DB-touching workers each crashing ONCE inside the same 5s window during a Postgres blip) breaches Barkpark.Supervisor's SHARED 3/5s intensity. The top supervisor then terminates ALL siblings — Repo, Oban and Endpoint included — so a contained subsystem fault escalates to a TOTAL application outage (every request 502s) instead of degrading."
+        }
+      ],
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The sharp irony: the code already invests in graceful degradation at the QUERY layer — engine=indx is designed to 'silently fall back to Postgres' when Indx is unreachable (application.ex:112-119). But a crash-LOOPING Indx or plugin process would take the whole box down at the SUPERVISION layer before that fallback ever runs. Chapter 64 doctrine: 'Layering isolates blast radius'; 'Flat supervision trees' is the named anti-pattern."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "HONEST SCOPING: today's children are individually hardened (Indx.Recovery wraps its pass in try/rescue; the Auth caches are lazy), so the fault is LATENT, not currently reachable. This qualifies under doctrine #4 (provably-cheaper future change): grouping the volatile plugin/subsystem tiers under intermediate supervisors with their own restart intensity contains any subtree crash-loop structurally, so adding a fallible worker no longer risks a whole-app shutdown and authors stop re-implementing crash isolation per worker."
+        }
+      ],
+      "id": "block-10",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "PROTECTIVE MEASUREMENT (delegated to the fix task): build a replica supervisor with the same flat shape + default intensity containing a deliberately crash-looping child; assert the WHOLE supervisor terminates (escalation reproduced). After the fix the same crash-looper tears down only its own subtree while Repo/Endpoint-equivalent siblings stay up. Fix must preserve boot ORDER (Auth->Recovery->Oban, host services before Endpoint) and the default-off/fresh-install invariants."
+        }
+      ],
+      "id": "block-11",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-12",
+      "level": 2,
+      "text": "Rejected-with-reason (first-class verdicts)",
+      "type": "heading"
+    },
+    {
+      "id": "block-13",
+      "level": 3,
+      "text": "Validation singletons — GenServer.call on a 'hot' path",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Content.Validation.Rules.for_schema/1 and Validation.Registry.find/1 look like a per-mutate singleton serialization point. But Evaluator.run/3 — the only caller of for_schema/1 — has ZERO non-test callers in lib/ (cross-field validation is not yet wired into any mutate/export path; WI2 not landed). Validation.Registry.find/1 already reads ETS directly (no GenServer round-trip), and Rules explicitly documents the map-over-ETS tradeoff. No live hot path exists, so converting to persistent_term now would be premature optimization of unexercised code (Chapter 5 anti-pattern). Reject; revisit when WI2 wires the evaluator in."
+        }
+      ],
+      "id": "block-14",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-15",
+      "level": 3,
+      "text": "Auth token caches block HTTP inside handle_call",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Github.Auth, Bokbasen.Auth and Indx.Auth all run a synchronous ~30s Req token exchange inside handle_call(:token). The blocking window head-of-line-blocks other :token/:invalidate callers. Rejected: the serialization IS the intended in-flight de-dup (documented), the token is cached ~1h so a fetch is rare, and all three plugins are off-by-default. No measured cost; the async-reply refactor adds complexity for a pathological-only (upstream-hang) benefit."
+        }
+      ],
+      "id": "block-16",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-17",
+      "level": 3,
+      "text": "PartitionSupervisor / sharding opportunities",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "RateLimiter, RequestStats and Plugins.Registry were checked for a sharding win. RateLimiter uses one public ETS table with write_concurrency (distinct keys don't contend; same-key contention is inherent to a per-client bucket). RequestStats inserts unique {time,uniq} keys with write_concurrency. Plugins.Registry serves hot lookups from a persistent_term snapshot. Sheets.Session and Quiz.Room are ALREADY Registry-sharded per entity. No measured bottleneck anywhere — Chapter 5/65 'measure before over-engineering' says reject."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-19",
+      "level": 2,
+      "text": "Already-good (verified, no change)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "RateLimiter — ETS public token bucket, read/write_concurrency, opportunistic bounded prune at 10k entries (Chapter 68 compliant: rate limiting in ETS, not a GenServer)."
+        }
+      ],
+      "id": "block-20",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "RequestStats — ETS write path from the telemetry handler (never serializes through the mailbox), rare GenServer read, timer-pruned to ~one window; honest null p95 on empty window."
+        }
+      ],
+      "id": "block-21",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Sheets.Session fleet — lazy per-sheet GenServer, Registry-keyed under a DynamicSupervisor, restart:temporary (reloads from persisted row), hibernate_after wired (session.ex:402), idle-stop, 30s shutdown to persist the tail. Mailbox is the serializer but sync apply_ops calls backpressure callers and a 1000-op-per-call cap bounds a single batch. The brief's hibernation ask is already satisfied."
+        }
+      ],
+      "id": "block-22",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Pulse.Metrics — exemplary: hot-path bumps via lock-free :counters fetched through :persistent_term (no-op with the plugin off), a 2s self-tick sampler, snapshot reads from :persistent_term so a busy dashboard cannot back-pressure the sampler."
+        }
+      ],
+      "id": "block-23",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Plugins.Registry — hot lookups (all/0, collect_*) read a :persistent_term snapshot; the GenServer.call is a cold fallback only. Correct Chapter 5 use of persistent_term for a read-mostly, rarely-written registry."
+        }
+      ],
+      "id": "block-24",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "ETS growth — all 8 tables bounded: RateLimiter, RequestStats, Indx.Monitor, search SurfaceConfigs and the DEK cache use the clear-on-full pattern (#790/#792); codelists' alias cache is keyed by plugin name (fixed small cardinality). No unbounded-growth vein."
+        }
+      ],
+      "id": "block-25",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "DrainWorker — level-triggered self-tick poll loop with a reentrancy guard, capped backoff, and a memoized active-gate; never receives hot-path messages, so no mailbox blowup. Indx.Recovery/Auth are crash-loop-hardened (try/rescue pass; lazy init). self_update.Checker fetches asynchronously (spawns, replies via handle_info) rather than blocking."
+        }
+      ],
+      "id": "block-26",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Startup ordering — the flat list encodes real dependencies by position with explaining comments (Repo/Vault/Registry before plugin workers; SchemaBootstrap synchronously before Oban so no job dequeues against an unregistered schema; Auth->Recovery->Oban; host services before Endpoint). This is a deliberately-ordered flat tree, not a naive one — the ONLY topology gap is blast-radius layering (Finding 1)."
+        }
+      ],
+      "id": "block-27",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix Audit d01 — OTP & Supervision Tree Design",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Domain audit against the Phoenix Mastery Corpus, Part I (BEAM/OTP/ETS substrate) and Part IX (OTP application design). Read-only. Method: read the full supervision tree, sweep all 23 GenServers + 8 ETS tables, trace the three hottest paths (read/query, mutate, sheets ops), and load-reason each singleton. Verdicts: adopt / already-good / rejected-with-reason. Improvement doctrine: a finding qualifies ONLY via named failure mode, measured cost, scar-class risk, or provably-cheaper future change. Tree-tidiness rejected."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "level": 2,
+        "text": "Verdict table",
+        "type": "heading"
+      },
+      {
+        "id": "block-3",
+        "language": "text",
+        "type": "code",
+        "value": "DOMAIN d01 — OTP & SUPERVISION TREE — VERDICTS\nCorpus: Part I ch1-5, Part IX ch64-69\n\nCONCEPT                                          VERDICT              EVIDENCE\nFlat top-level supervision tree (~30 children)   ADOPT (filed p2)     application.ex:185 default 3/5 intensity\n  shares one restart budget                        task-d328fb91ff55b743\nStartup ordering (Auth->Recovery->Oban; host->    already-good        application.ex:67-181 list position + comments\n  services before Endpoint)\nRateLimiter (token bucket)                        already-good        rate_limiter.ex ETS public, write_conc, bounded prune\nRequestStats (req/s + p95)                        already-good        request_stats.ex ETS write path, rare GenServer read\nSheets.Session fleet hibernation                  already-good        session.ex:402 hibernate_after wired\nSheets.Session mailbox blowup under load          already-good        Registry-sharded, sync-call backpressure, 1000-op cap\nPulse.Metrics (live cost telemetry)               already-good        metrics.ex :counters + :persistent_term, no hot mailbox\nPlugins.Registry hot-path lookups                 already-good        registry.ex:114 persistent_term snapshot fast-path\nValidation.Registry / Content.Validation.Rules    rejected-w-reason   evaluator.run has ZERO non-test callers (dormant)\n  singleton GenServer.call on 'hot' path\nGithub/Bokbasen/Indx Auth: HTTP in handle_call    rejected-w-reason   ~1h cache, off-by-default, de-dup is intended\nETS unbounded growth (all 8 tables)               already-good        clear-on-full pattern #790/#792; codelists=plugin-keyed\nPartitionSupervisor opportunity (RateLimiter/     rejected-w-reason   no measured bottleneck; write_concurrency suffices\n  RequestStats/Registry)                                              (Chapter 5: no premature ETS/sharding)\nIndx.Recovery / Auth crash-loop hardening         already-good        recovery.ex try/rescue; auth.ex lazy init"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "Finding 1 (ADOPT, p2) — Flat top-level supervision tree shares one restart budget",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Filed: task-d328fb91ff55b743 (parent task-9e2fc23e66db1de5, priority 2, labels felix/phoenix-audit-finding)."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Barkpark.Application starts ~30 children under ONE flat supervisor with NO restart-intensity override, so OTP's default 3-restarts-in-5s applies to the ENTIRE tree at once. Plugin-contributed workers fold in FLAT next to Repo, Oban, PubSub and Endpoint. There are no intermediate supervisors (grep confirms only Telemetry has its own; the Sheets/StudioChat DynamicSupervisors hold restart:temporary children that don't count against the top budget)."
+          }
+        ],
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-7",
+        "language": "elixir",
+        "type": "code",
+        "value": "opts = [strategy: :one_for_one, name: Barkpark.Supervisor]  # application.ex:185 — no max_restarts/max_seconds\nchildren = [RateLimiter, Telemetry, RequestStats, Repo, Vault, Plugins.Registry, ...]\n           ++ plugin_children   # Pulse.Metrics, Quiz.Bridge, Github.Auth+DrainWorker, OnixEdit — FLAT\n           ++ [SchemaBootstrap, Indx.Auth, Indx.Monitor, Indx.Recovery, {Oban,...},\n               PubSub, Sheets registries+supervisors, StudioChat registries+supervisors,\n               Presence, TaskSupervisors, ...SelfUpdate.Runner, Endpoint]"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "NAMED FAILURE MODE — concrete inputs to wrong outcome: any ONE top-level child that crash-loops (raises in init/handle_continue 3x within 5s — e.g. a future or third-party plugin worker validating external config at boot, or several DB-touching workers each crashing ONCE inside the same 5s window during a Postgres blip) breaches Barkpark.Supervisor's SHARED 3/5s intensity. The top supervisor then terminates ALL siblings — Repo, Oban and Endpoint included — so a contained subsystem fault escalates to a TOTAL application outage (every request 502s) instead of degrading."
+          }
+        ],
+        "id": "block-8",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The sharp irony: the code already invests in graceful degradation at the QUERY layer — engine=indx is designed to 'silently fall back to Postgres' when Indx is unreachable (application.ex:112-119). But a crash-LOOPING Indx or plugin process would take the whole box down at the SUPERVISION layer before that fallback ever runs. Chapter 64 doctrine: 'Layering isolates blast radius'; 'Flat supervision trees' is the named anti-pattern."
+          }
+        ],
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "HONEST SCOPING: today's children are individually hardened (Indx.Recovery wraps its pass in try/rescue; the Auth caches are lazy), so the fault is LATENT, not currently reachable. This qualifies under doctrine #4 (provably-cheaper future change): grouping the volatile plugin/subsystem tiers under intermediate supervisors with their own restart intensity contains any subtree crash-loop structurally, so adding a fallible worker no longer risks a whole-app shutdown and authors stop re-implementing crash isolation per worker."
+          }
+        ],
+        "id": "block-10",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "PROTECTIVE MEASUREMENT (delegated to the fix task): build a replica supervisor with the same flat shape + default intensity containing a deliberately crash-looping child; assert the WHOLE supervisor terminates (escalation reproduced). After the fix the same crash-looper tears down only its own subtree while Repo/Endpoint-equivalent siblings stay up. Fix must preserve boot ORDER (Auth->Recovery->Oban, host services before Endpoint) and the default-off/fresh-install invariants."
+          }
+        ],
+        "id": "block-11",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-12",
+        "level": 2,
+        "text": "Rejected-with-reason (first-class verdicts)",
+        "type": "heading"
+      },
+      {
+        "id": "block-13",
+        "level": 3,
+        "text": "Validation singletons — GenServer.call on a 'hot' path",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Content.Validation.Rules.for_schema/1 and Validation.Registry.find/1 look like a per-mutate singleton serialization point. But Evaluator.run/3 — the only caller of for_schema/1 — has ZERO non-test callers in lib/ (cross-field validation is not yet wired into any mutate/export path; WI2 not landed). Validation.Registry.find/1 already reads ETS directly (no GenServer round-trip), and Rules explicitly documents the map-over-ETS tradeoff. No live hot path exists, so converting to persistent_term now would be premature optimization of unexercised code (Chapter 5 anti-pattern). Reject; revisit when WI2 wires the evaluator in."
+          }
+        ],
+        "id": "block-14",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-15",
+        "level": 3,
+        "text": "Auth token caches block HTTP inside handle_call",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Github.Auth, Bokbasen.Auth and Indx.Auth all run a synchronous ~30s Req token exchange inside handle_call(:token). The blocking window head-of-line-blocks other :token/:invalidate callers. Rejected: the serialization IS the intended in-flight de-dup (documented), the token is cached ~1h so a fetch is rare, and all three plugins are off-by-default. No measured cost; the async-reply refactor adds complexity for a pathological-only (upstream-hang) benefit."
+          }
+        ],
+        "id": "block-16",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-17",
+        "level": 3,
+        "text": "PartitionSupervisor / sharding opportunities",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "RateLimiter, RequestStats and Plugins.Registry were checked for a sharding win. RateLimiter uses one public ETS table with write_concurrency (distinct keys don't contend; same-key contention is inherent to a per-client bucket). RequestStats inserts unique {time,uniq} keys with write_concurrency. Plugins.Registry serves hot lookups from a persistent_term snapshot. Sheets.Session and Quiz.Room are ALREADY Registry-sharded per entity. No measured bottleneck anywhere — Chapter 5/65 'measure before over-engineering' says reject."
+          }
+        ],
+        "id": "block-18",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-19",
+        "level": 2,
+        "text": "Already-good (verified, no change)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "RateLimiter — ETS public token bucket, read/write_concurrency, opportunistic bounded prune at 10k entries (Chapter 68 compliant: rate limiting in ETS, not a GenServer)."
+          }
+        ],
+        "id": "block-20",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "RequestStats — ETS write path from the telemetry handler (never serializes through the mailbox), rare GenServer read, timer-pruned to ~one window; honest null p95 on empty window."
+          }
+        ],
+        "id": "block-21",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Sheets.Session fleet — lazy per-sheet GenServer, Registry-keyed under a DynamicSupervisor, restart:temporary (reloads from persisted row), hibernate_after wired (session.ex:402), idle-stop, 30s shutdown to persist the tail. Mailbox is the serializer but sync apply_ops calls backpressure callers and a 1000-op-per-call cap bounds a single batch. The brief's hibernation ask is already satisfied."
+          }
+        ],
+        "id": "block-22",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Pulse.Metrics — exemplary: hot-path bumps via lock-free :counters fetched through :persistent_term (no-op with the plugin off), a 2s self-tick sampler, snapshot reads from :persistent_term so a busy dashboard cannot back-pressure the sampler."
+          }
+        ],
+        "id": "block-23",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Plugins.Registry — hot lookups (all/0, collect_*) read a :persistent_term snapshot; the GenServer.call is a cold fallback only. Correct Chapter 5 use of persistent_term for a read-mostly, rarely-written registry."
+          }
+        ],
+        "id": "block-24",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "ETS growth — all 8 tables bounded: RateLimiter, RequestStats, Indx.Monitor, search SurfaceConfigs and the DEK cache use the clear-on-full pattern (#790/#792); codelists' alias cache is keyed by plugin name (fixed small cardinality). No unbounded-growth vein."
+          }
+        ],
+        "id": "block-25",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "DrainWorker — level-triggered self-tick poll loop with a reentrancy guard, capped backoff, and a memoized active-gate; never receives hot-path messages, so no mailbox blowup. Indx.Recovery/Auth are crash-loop-hardened (try/rescue pass; lazy init). self_update.Checker fetches asynchronously (spawns, replies via handle_info) rather than blocking."
+          }
+        ],
+        "id": "block-26",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Startup ordering — the flat list encodes real dependencies by position with explaining comments (Repo/Vault/Registry before plugin workers; SchemaBootstrap synchronously before Oban so no job dequeues against an unregistered schema; Auth->Recovery->Oban; host services before Endpoint). This is a deliberately-ordered flat tree, not a naive one — the ONLY topology gap is blast-radius layering (Finding 1)."
+          }
+        ],
+        "id": "block-27",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix Audit d01 — OTP &amp; Supervision Tree Design</h1><p>Domain audit against the Phoenix Mastery Corpus, Part I (BEAM/OTP/ETS substrate) and Part IX (OTP application design). Read-only. Method: read the full supervision tree, sweep all 23 GenServers + 8 ETS tables, trace the three hottest paths (read/query, mutate, sheets ops), and load-reason each singleton. Verdicts: adopt / already-good / rejected-with-reason. Improvement doctrine: a finding qualifies ONLY via named failure mode, measured cost, scar-class risk, or provably-cheaper future change. Tree-tidiness rejected.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verdict table</h2><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">DOMAIN d01 — OTP &amp; SUPERVISION TREE — VERDICTS</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Corpus: Part I ch1-5, Part IX ch64-69</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">CONCEPT                                          VERDICT              EVIDENCE</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Flat top-level supervision tree (~30 children)   ADOPT (filed p2)     application.ex:185 default 3/5 intensity</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  shares one restart budget                        task-d328fb91ff55b743</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Startup ordering (Auth-&gt;Recovery-&gt;Oban; host-&gt;    already-good        application.ex:67-181 list position + comments</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  services before Endpoint)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">RateLimiter (token bucket)                        already-good        rate_limiter.ex ETS public, write_conc, bounded prune</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">RequestStats (req/s + p95)                        already-good        request_stats.ex ETS write path, rare GenServer read</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Sheets.Session fleet hibernation                  already-good        session.ex:402 hibernate_after wired</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Sheets.Session mailbox blowup under load          already-good        Registry-sharded, sync-call backpressure, 1000-op cap</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Pulse.Metrics (live cost telemetry)               already-good        metrics.ex :counters + :persistent_term, no hot mailbox</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Plugins.Registry hot-path lookups                 already-good        registry.ex:114 persistent_term snapshot fast-path</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Validation.Registry / Content.Validation.Rules    rejected-w-reason   evaluator.run has ZERO non-test callers (dormant)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  singleton GenServer.call on &#39;hot&#39; path</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Github/Bokbasen/Indx Auth: HTTP in handle_call    rejected-w-reason   ~1h cache, off-by-default, de-dup is intended</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">ETS unbounded growth (all 8 tables)               already-good        clear-on-full pattern #790/#792; codelists=plugin-keyed</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">PartitionSupervisor opportunity (RateLimiter/     rejected-w-reason   no measured bottleneck; write_concurrency suffices</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  RequestStats/Registry)                                              (Chapter 5: no premature ETS/sharding)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Indx.Recovery / Auth crash-loop hardening         already-good        recovery.ex try/rescue; auth.ex lazy init</code></span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding 1 (ADOPT, p2) — Flat top-level supervision tree shares one restart budget</h2><p>Filed: task-d328fb91ff55b743 (parent task-9e2fc23e66db1de5, priority 2, labels felix/phoenix-audit-finding).</p><p>Barkpark.Application starts ~30 children under ONE flat supervisor with NO restart-intensity override, so OTP&#39;s default 3-restarts-in-5s applies to the ENTIRE tree at once. Plugin-contributed workers fold in FLAT next to Repo, Oban, PubSub and Endpoint. There are no intermediate supervisors (grep confirms only Telemetry has its own; the Sheets/StudioChat DynamicSupervisors hold restart:temporary children that don&#39;t count against the top budget).</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">opts = [strategy: :one_for_one, name: Barkpark.Supervisor]  # application.ex:185 — no max_restarts/max_seconds</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">children = [RateLimiter, Telemetry, RequestStats, Repo, Vault, Plugins.Registry, ...]</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">           ++ plugin_children   # Pulse.Metrics, Quiz.Bridge, Github.Auth+DrainWorker, OnixEdit — FLAT</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">           ++ [SchemaBootstrap, Indx.Auth, Indx.Monitor, Indx.Recovery, {Oban,...},</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">               PubSub, Sheets registries+supervisors, StudioChat registries+supervisors,</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">               Presence, TaskSupervisors, ...SelfUpdate.Runner, Endpoint]</code></span></div><p>NAMED FAILURE MODE — concrete inputs to wrong outcome: any ONE top-level child that crash-loops (raises in init/handle_continue 3x within 5s — e.g. a future or third-party plugin worker validating external config at boot, or several DB-touching workers each crashing ONCE inside the same 5s window during a Postgres blip) breaches Barkpark.Supervisor&#39;s SHARED 3/5s intensity. The top supervisor then terminates ALL siblings — Repo, Oban and Endpoint included — so a contained subsystem fault escalates to a TOTAL application outage (every request 502s) instead of degrading.</p><p>The sharp irony: the code already invests in graceful degradation at the QUERY layer — engine=indx is designed to &#39;silently fall back to Postgres&#39; when Indx is unreachable (application.ex:112-119). But a crash-LOOPING Indx or plugin process would take the whole box down at the SUPERVISION layer before that fallback ever runs. Chapter 64 doctrine: &#39;Layering isolates blast radius&#39;; &#39;Flat supervision trees&#39; is the named anti-pattern.</p><p>HONEST SCOPING: today&#39;s children are individually hardened (Indx.Recovery wraps its pass in try/rescue; the Auth caches are lazy), so the fault is LATENT, not currently reachable. This qualifies under doctrine #4 (provably-cheaper future change): grouping the volatile plugin/subsystem tiers under intermediate supervisors with their own restart intensity contains any subtree crash-loop structurally, so adding a fallible worker no longer risks a whole-app shutdown and authors stop re-implementing crash isolation per worker.</p><p>PROTECTIVE MEASUREMENT (delegated to the fix task): build a replica supervisor with the same flat shape + default intensity containing a deliberately crash-looping child; assert the WHOLE supervisor terminates (escalation reproduced). After the fix the same crash-looper tears down only its own subtree while Repo/Endpoint-equivalent siblings stay up. Fix must preserve boot ORDER (Auth-&gt;Recovery-&gt;Oban, host services before Endpoint) and the default-off/fresh-install invariants.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Rejected-with-reason (first-class verdicts)</h2><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Validation singletons — GenServer.call on a &#39;hot&#39; path</h3><p>Content.Validation.Rules.for_schema/1 and Validation.Registry.find/1 look like a per-mutate singleton serialization point. But Evaluator.run/3 — the only caller of for_schema/1 — has ZERO non-test callers in lib/ (cross-field validation is not yet wired into any mutate/export path; WI2 not landed). Validation.Registry.find/1 already reads ETS directly (no GenServer round-trip), and Rules explicitly documents the map-over-ETS tradeoff. No live hot path exists, so converting to persistent_term now would be premature optimization of unexercised code (Chapter 5 anti-pattern). Reject; revisit when WI2 wires the evaluator in.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Auth token caches block HTTP inside handle_call</h3><p>Github.Auth, Bokbasen.Auth and Indx.Auth all run a synchronous ~30s Req token exchange inside handle_call(:token). The blocking window head-of-line-blocks other :token/:invalidate callers. Rejected: the serialization IS the intended in-flight de-dup (documented), the token is cached ~1h so a fetch is rare, and all three plugins are off-by-default. No measured cost; the async-reply refactor adds complexity for a pathological-only (upstream-hang) benefit.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">PartitionSupervisor / sharding opportunities</h3><p>RateLimiter, RequestStats and Plugins.Registry were checked for a sharding win. RateLimiter uses one public ETS table with write_concurrency (distinct keys don&#39;t contend; same-key contention is inherent to a per-client bucket). RequestStats inserts unique {time,uniq} keys with write_concurrency. Plugins.Registry serves hot lookups from a persistent_term snapshot. Sheets.Session and Quiz.Room are ALREADY Registry-sharded per entity. No measured bottleneck anywhere — Chapter 5/65 &#39;measure before over-engineering&#39; says reject.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Already-good (verified, no change)</h2><p>RateLimiter — ETS public token bucket, read/write_concurrency, opportunistic bounded prune at 10k entries (Chapter 68 compliant: rate limiting in ETS, not a GenServer).</p><p>RequestStats — ETS write path from the telemetry handler (never serializes through the mailbox), rare GenServer read, timer-pruned to ~one window; honest null p95 on empty window.</p><p>Sheets.Session fleet — lazy per-sheet GenServer, Registry-keyed under a DynamicSupervisor, restart:temporary (reloads from persisted row), hibernate_after wired (session.ex:402), idle-stop, 30s shutdown to persist the tail. Mailbox is the serializer but sync apply_ops calls backpressure callers and a 1000-op-per-call cap bounds a single batch. The brief&#39;s hibernation ask is already satisfied.</p><p>Pulse.Metrics — exemplary: hot-path bumps via lock-free :counters fetched through :persistent_term (no-op with the plugin off), a 2s self-tick sampler, snapshot reads from :persistent_term so a busy dashboard cannot back-pressure the sampler.</p><p>Plugins.Registry — hot lookups (all/0, collect_*) read a :persistent_term snapshot; the GenServer.call is a cold fallback only. Correct Chapter 5 use of persistent_term for a read-mostly, rarely-written registry.</p><p>ETS growth — all 8 tables bounded: RateLimiter, RequestStats, Indx.Monitor, search SurfaceConfigs and the DEK cache use the clear-on-full pattern (#790/#792); codelists&#39; alias cache is keyed by plugin name (fixed small cardinality). No unbounded-growth vein.</p><p>DrainWorker — level-triggered self-tick poll loop with a reentrancy guard, capped backoff, and a memoized active-gate; never receives hot-path messages, so no mailbox blowup. Indx.Recovery/Auth are crash-loop-hardened (try/rescue pass; lazy init). self_update.Checker fetches asynchronously (spawns, replies via handle_info) rather than blocking.</p><p>Startup ordering — the flat list encodes real dependencies by position with explaining comments (Repo/Vault/Registry before plugin workers; SchemaBootstrap synchronously before Oban so no job dequeues against an unregistered schema; Auth-&gt;Recovery-&gt;Oban; host services before Endpoint). This is a deliberately-ordered flat tree, not a naive one — the ONLY topology gap is blast-radius layering (Finding 1).</p>"
+  },
+  "body_html": "<h1>Felix Audit d01 — OTP &amp; Supervision Tree Design</h1><p>Domain audit against the Phoenix Mastery Corpus, Part I (BEAM/OTP/ETS substrate) and Part IX (OTP application design). Read-only. Method: read the full supervision tree, sweep all 23 GenServers + 8 ETS tables, trace the three hottest paths (read/query, mutate, sheets ops), and load-reason each singleton. Verdicts: adopt / already-good / rejected-with-reason. Improvement doctrine: a finding qualifies ONLY via named failure mode, measured cost, scar-class risk, or provably-cheaper future change. Tree-tidiness rejected.</p><h2>Verdict table</h2><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">DOMAIN d01 — OTP &amp; SUPERVISION TREE — VERDICTS\nCorpus: Part I ch1-5, Part IX ch64-69\n\nCONCEPT                                          VERDICT              EVIDENCE\nFlat top-level supervision tree (~30 children)   ADOPT (filed p2)     application.ex:185 default 3/5 intensity\n  shares one restart budget                        task-d328fb91ff55b743\nStartup ordering (Auth-&gt;Recovery-&gt;Oban; host-&gt;    already-good        application.ex:67-181 list position + comments\n  services before Endpoint)\nRateLimiter (token bucket)                        already-good        rate_limiter.ex ETS public, write_conc, bounded prune\nRequestStats (req/s + p95)                        already-good        request_stats.ex ETS write path, rare GenServer read\nSheets.Session fleet hibernation                  already-good        session.ex:402 hibernate_after wired\nSheets.Session mailbox blowup under load          already-good        Registry-sharded, sync-call backpressure, 1000-op cap\nPulse.Metrics (live cost telemetry)               already-good        metrics.ex :counters + :persistent_term, no hot mailbox\nPlugins.Registry hot-path lookups                 already-good        registry.ex:114 persistent_term snapshot fast-path\nValidation.Registry / Content.Validation.Rules    rejected-w-reason   evaluator.run has ZERO non-test callers (dormant)\n  singleton GenServer.call on &#39;hot&#39; path\nGithub/Bokbasen/Indx Auth: HTTP in handle_call    rejected-w-reason   ~1h cache, off-by-default, de-dup is intended\nETS unbounded growth (all 8 tables)               already-good        clear-on-full pattern #790/#792; codelists=plugin-keyed\nPartitionSupervisor opportunity (RateLimiter/     rejected-w-reason   no measured bottleneck; write_concurrency suffices\n  RequestStats/Registry)                                              (Chapter 5: no premature ETS/sharding)\nIndx.Recovery / Auth crash-loop hardening         already-good        recovery.ex try/rescue; auth.ex lazy init</pre><h2>Finding 1 (ADOPT, p2) — Flat top-level supervision tree shares one restart budget</h2><p>Filed: task-d328fb91ff55b743 (parent task-9e2fc23e66db1de5, priority 2, labels felix/phoenix-audit-finding).</p><p>Barkpark.Application starts ~30 children under ONE flat supervisor with NO restart-intensity override, so OTP&#39;s default 3-restarts-in-5s applies to the ENTIRE tree at once. Plugin-contributed workers fold in FLAT next to Repo, Oban, PubSub and Endpoint. There are no intermediate supervisors (grep confirms only Telemetry has its own; the Sheets/StudioChat DynamicSupervisors hold restart:temporary children that don&#39;t count against the top budget).</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">opts = [strategy: :one_for_one, name: Barkpark.Supervisor]  # application.ex:185 — no max_restarts/max_seconds\nchildren = [RateLimiter, Telemetry, RequestStats, Repo, Vault, Plugins.Registry, ...]\n           ++ plugin_children   # Pulse.Metrics, Quiz.Bridge, Github.Auth+DrainWorker, OnixEdit — FLAT\n           ++ [SchemaBootstrap, Indx.Auth, Indx.Monitor, Indx.Recovery, {Oban,...},\n               PubSub, Sheets registries+supervisors, StudioChat registries+supervisors,\n               Presence, TaskSupervisors, ...SelfUpdate.Runner, Endpoint]</pre><p>NAMED FAILURE MODE — concrete inputs to wrong outcome: any ONE top-level child that crash-loops (raises in init/handle_continue 3x within 5s — e.g. a future or third-party plugin worker validating external config at boot, or several DB-touching workers each crashing ONCE inside the same 5s window during a Postgres blip) breaches Barkpark.Supervisor&#39;s SHARED 3/5s intensity. The top supervisor then terminates ALL siblings — Repo, Oban and Endpoint included — so a contained subsystem fault escalates to a TOTAL application outage (every request 502s) instead of degrading.</p><p>The sharp irony: the code already invests in graceful degradation at the QUERY layer — engine=indx is designed to &#39;silently fall back to Postgres&#39; when Indx is unreachable (application.ex:112-119). But a crash-LOOPING Indx or plugin process would take the whole box down at the SUPERVISION layer before that fallback ever runs. Chapter 64 doctrine: &#39;Layering isolates blast radius&#39;; &#39;Flat supervision trees&#39; is the named anti-pattern.</p><p>HONEST SCOPING: today&#39;s children are individually hardened (Indx.Recovery wraps its pass in try/rescue; the Auth caches are lazy), so the fault is LATENT, not currently reachable. This qualifies under doctrine #4 (provably-cheaper future change): grouping the volatile plugin/subsystem tiers under intermediate supervisors with their own restart intensity contains any subtree crash-loop structurally, so adding a fallible worker no longer risks a whole-app shutdown and authors stop re-implementing crash isolation per worker.</p><p>PROTECTIVE MEASUREMENT (delegated to the fix task): build a replica supervisor with the same flat shape + default intensity containing a deliberately crash-looping child; assert the WHOLE supervisor terminates (escalation reproduced). After the fix the same crash-looper tears down only its own subtree while Repo/Endpoint-equivalent siblings stay up. Fix must preserve boot ORDER (Auth-&gt;Recovery-&gt;Oban, host services before Endpoint) and the default-off/fresh-install invariants.</p><h2>Rejected-with-reason (first-class verdicts)</h2><h3>Validation singletons — GenServer.call on a &#39;hot&#39; path</h3><p>Content.Validation.Rules.for_schema/1 and Validation.Registry.find/1 look like a per-mutate singleton serialization point. But Evaluator.run/3 — the only caller of for_schema/1 — has ZERO non-test callers in lib/ (cross-field validation is not yet wired into any mutate/export path; WI2 not landed). Validation.Registry.find/1 already reads ETS directly (no GenServer round-trip), and Rules explicitly documents the map-over-ETS tradeoff. No live hot path exists, so converting to persistent_term now would be premature optimization of unexercised code (Chapter 5 anti-pattern). Reject; revisit when WI2 wires the evaluator in.</p><h3>Auth token caches block HTTP inside handle_call</h3><p>Github.Auth, Bokbasen.Auth and Indx.Auth all run a synchronous ~30s Req token exchange inside handle_call(:token). The blocking window head-of-line-blocks other :token/:invalidate callers. Rejected: the serialization IS the intended in-flight de-dup (documented), the token is cached ~1h so a fetch is rare, and all three plugins are off-by-default. No measured cost; the async-reply refactor adds complexity for a pathological-only (upstream-hang) benefit.</p><h3>PartitionSupervisor / sharding opportunities</h3><p>RateLimiter, RequestStats and Plugins.Registry were checked for a sharding win. RateLimiter uses one public ETS table with write_concurrency (distinct keys don&#39;t contend; same-key contention is inherent to a per-client bucket). RequestStats inserts unique {time,uniq} keys with write_concurrency. Plugins.Registry serves hot lookups from a persistent_term snapshot. Sheets.Session and Quiz.Room are ALREADY Registry-sharded per entity. No measured bottleneck anywhere — Chapter 5/65 &#39;measure before over-engineering&#39; says reject.</p><h2>Already-good (verified, no change)</h2><p>RateLimiter — ETS public token bucket, read/write_concurrency, opportunistic bounded prune at 10k entries (Chapter 68 compliant: rate limiting in ETS, not a GenServer).</p><p>RequestStats — ETS write path from the telemetry handler (never serializes through the mailbox), rare GenServer read, timer-pruned to ~one window; honest null p95 on empty window.</p><p>Sheets.Session fleet — lazy per-sheet GenServer, Registry-keyed under a DynamicSupervisor, restart:temporary (reloads from persisted row), hibernate_after wired (session.ex:402), idle-stop, 30s shutdown to persist the tail. Mailbox is the serializer but sync apply_ops calls backpressure callers and a 1000-op-per-call cap bounds a single batch. The brief&#39;s hibernation ask is already satisfied.</p><p>Pulse.Metrics — exemplary: hot-path bumps via lock-free :counters fetched through :persistent_term (no-op with the plugin off), a 2s self-tick sampler, snapshot reads from :persistent_term so a busy dashboard cannot back-pressure the sampler.</p><p>Plugins.Registry — hot lookups (all/0, collect_*) read a :persistent_term snapshot; the GenServer.call is a cold fallback only. Correct Chapter 5 use of persistent_term for a read-mostly, rarely-written registry.</p><p>ETS growth — all 8 tables bounded: RateLimiter, RequestStats, Indx.Monitor, search SurfaceConfigs and the DEK cache use the clear-on-full pattern (#790/#792); codelists&#39; alias cache is keyed by plugin name (fixed small cardinality). No unbounded-growth vein.</p><p>DrainWorker — level-triggered self-tick poll loop with a reentrancy guard, capped backoff, and a memoized active-gate; never receives hot-path messages, so no mailbox blowup. Indx.Recovery/Auth are crash-loop-hardened (try/rescue pass; lazy init). self_update.Checker fetches asynchronously (spawns, replies via handle_info) rather than blocking.</p><p>Startup ordering — the flat list encodes real dependencies by position with explaining comments (Repo/Vault/Registry before plugin workers; SchemaBootstrap synchronously before Oban so no job dequeues against an unregistered schema; Auth-&gt;Recovery-&gt;Oban; host services before Endpoint). This is a deliberately-ordered flat tree, not a naive one — the ONLY topology gap is blast-radius layering (Finding 1).</p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": "Domain audit against the Phoenix Mastery Corpus, Part I (BEAM/OTP/ETS substrate) and Part IX (OTP application…",
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-findings-otp-supervision"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Felix Audit d01 — OTP & Supervision Tree Design"
+}

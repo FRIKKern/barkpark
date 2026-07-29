@@ -1,0 +1,498 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S020",
+  "assignment_snapshot_sha256": "68ceff1384a47ee7429e9c79fc479c48b26120c4c38fd47d0cf42ca9eeff0f41",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 7,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "e5b439417f3731710cc268a87ad929d0d169f82c00d88974e0ba7ad14acea751"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All ten pinned revisions were read across 250 native top-level blocks. Keep 9 and repair 1. The Felix audit papers are unusually strong: each names inputs to wrong outcomes, files protective tests, reports already-good and rejected cases, and tags static-versus-measured confidence. The one clear editorial repair is the living Expressive Agent Loops wave, whose SURVEYING front door contradicts its later COMPLETE A- debrief.",
+  "verdict_counts": {
+    "repair": 1,
+    "keep": 9
+  },
+  "checked_unit_ids": [
+    "paper:expressive-agent-loops-wave-2026-07-11",
+    "paper:felix-findings-boundaries-plugins",
+    "paper:felix-findings-liveview-collections",
+    "paper:felix-findings-liveview-tracking",
+    "paper:felix-findings-otp-supervision",
+    "paper:felix-findings-plug-router",
+    "paper:felix-findings-queries-indexes",
+    "paper:felix-findings-realtime",
+    "paper:felix-findings-schemas-changesets",
+    "paper:felix-findings-security-tenancy"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 10,
+    "native_top_level_blocks_read": 250,
+    "legacy_html_documents_read": 0,
+    "legacy_html_chars_read": 0,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:felix-findings-plug-router blocks[5]",
+      "evidence": "The audit first proves the historical scar closed, then finds the live contract class elsewhere.",
+      "lesson": "Retire stale defects before filing new work."
+    },
+    {
+      "block_ref": "paper:felix-findings-queries-indexes blocks[10]",
+      "evidence": "Static growth risk stays medium confidence until an EXPLAIN/benchmark proves it.",
+      "lesson": "Label evidence modality."
+    },
+    {
+      "block_ref": "paper:felix-findings-security-tenancy blocks[14]",
+      "evidence": "Tenant risk is called latent while still earning a cheap scar-class guard.",
+      "lesson": "Separate reachability from prevention value."
+    },
+    {
+      "block_ref": "paper:expressive-agent-loops-wave-2026-07-11 blocks[50]",
+      "evidence": "The debrief moves a promised live proof post-merge instead of pretending it ran.",
+      "lesson": "Correct phase promises openly."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:expressive-agent-loops-wave-2026-07-11 blocks[4]",
+      "evidence": "Front status remains SURVEYING despite later COMPLETE debrief.",
+      "reader_impact": "Skimmers get the wrong authority state."
+    },
+    {
+      "block_ref": "paper:felix-findings-liveview-collections blocks[7]",
+      "evidence": "Unbounded transcript finding duplicates d07 tracking work.",
+      "reader_impact": "Two task ids can split ownership for the same defect."
+    },
+    {
+      "block_ref": "paper:felix-findings-realtime blocks[6]",
+      "evidence": "Slow SSE reader can accumulate an unbounded process mailbox.",
+      "reader_impact": "A single reader threatens availability."
+    },
+    {
+      "block_ref": "paper:felix-findings-security-tenancy blocks[5]",
+      "evidence": "Stored HTML can render raw on reader surfaces.",
+      "reader_impact": "Internal detail is security-sensitive and unsafe for unredacted public projection."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "felix-findings-liveview-collections",
+        "felix-findings-liveview-tracking"
+      ],
+      "basis": "Different audit domains but the same unbounded @messages/group_agent_rows defect was independently filed under two task ids.",
+      "disposition": "Keep both domain audits; merge or explicitly link the duplicate finding/task ownership and share one protective benchmark."
+    },
+    {
+      "candidate_set": [
+        "felix-findings-boundaries-plugins",
+        "felix-findings-plug-router",
+        "felix-findings-queries-indexes",
+        "felix-findings-realtime",
+        "felix-findings-schemas-changesets",
+        "felix-findings-security-tenancy",
+        "felix-findings-otp-supervision"
+      ],
+      "basis": "Coherent Felix audit series with repeated verdict/method shape but distinct runtime boundaries and source authority.",
+      "disposition": "Do not merge; create a series index showing domain, findings, priority, task, confidence, and fix status."
+    },
+    {
+      "candidate_set": [
+        "expressive-agent-loops-wave-2026-07-11",
+        "felix-findings-realtime"
+      ],
+      "basis": "Both touch events/realtime substrate, but the wave owns task-loop features and integration while Felix d09 owns later SSE/PubSub/webhook audit risks.",
+      "disposition": "Cross-link the events-feed outcome to the realtime audit; retain separate temporal and purpose authority."
+    }
+  ],
+  "reader_risks": [
+    "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+    "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+    "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+    "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+    "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:expressive-agent-loops-wave-2026-07-11",
+      "document_id": "expressive-agent-loops-wave-2026-07-11",
+      "document_rev": "fdb8655adfa9d64d7a893cdb94dabd3f",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Wave record for live criterion locks, task pulses, durable events, TUI locks, and self-dogfooding agent loops.",
+      "opening_and_criteria": "blocks[0]-[4] still lead with STATUS: SURVEYING. blocks[43]-[55] later close five reviewed slices at A- and explicitly defer live post-merge dogfood proof.",
+      "outline_and_hierarchy": "56 blocks preserve Strategize, Digest, Decide, and Review. The living chronology is valuable but lets an obsolete opening state compete with the terminal debrief.",
+      "human_voice_and_precision": "Exceptionally candid about verification contradictions, stacked branches, reaped leases, and a proof promised one phase too early. Internal task and branch density is high.",
+      "compression_and_restraint": "Prepend the COMPLETE/A- outcome, merge order, and open live-proof obligation; retain the full phase diary below.",
+      "evidence_and_truth": "blocks[46]-[50] give gate-specific shipped receipts and correct the integration-proof promise before claiming the wave complete.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[46]",
+          "evidence": "Review records exact branch order, real gate counts, and a manifest regression found only after stacking.",
+          "lesson": "Verify stacked integration, not only slice-local gates."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[4]",
+          "evidence": "The front says SURVEYING and nothing built although the same Paper later records COMPLETE and five green slices.",
+          "lesson": "Status-only readers see the wrong phase and miss the live-proof caveat."
+        }
+      ],
+      "duplicate_disposition": "Distinct wave outcome; cross-link Felix audits only where they later inspect related runtime seams.",
+      "reader_risks": [
+        "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+        "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+        "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+        "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+      ],
+      "rationale": "Repair: honest A- evidence, but stale front status and 56-block chronology obscure terminal truth."
+    },
+    {
+      "unit_id": "paper:felix-findings-boundaries-plugins",
+      "document_id": "felix-findings-boundaries-plugins",
+      "document_rev": "30f680c030bb098a9a47b768d7e81eab",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Read-only audit of core/plugin boundaries and the fresh-install invariant.",
+      "opening_and_criteria": "blocks[0]-[2] name domain, invariant, verdicts, and filed tasks before detailed evidence.",
+      "outline_and_hierarchy": "23 blocks give two findings, already-good cases, exceptions, and confidence notes in a compact audit shape.",
+      "human_voice_and_precision": "Nuanced: it rejects the literal zero-naming rule, acknowledges sanctioned UI/static coupling, and scopes compile-edge priority.",
+      "compression_and_restraint": "Keep; add metadata description for discoverability, but the native opening already carries the purpose.",
+      "evidence_and_truth": "blocks[7]-[15] distinguish necessary host-owned coupling from an unguarded removable-plugin path and the sole compile-time edge.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "The audit explains why host-owned UI necessarily names plugin modules and replaces an impossible absolute rule with an enforceable boundary.",
+          "lesson": "Repair the contract before broadening its guard."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "The OnixEdit-only guard can stay green when a new unconditional reach into another removable plugin lands.",
+          "lesson": "A vacuous guard falsely certifies fresh-install safety."
+        }
+      ],
+      "duplicate_disposition": "Part of the Felix domain-audit series; keep separate by domain and provide a series index.",
+      "reader_risks": [
+        "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+        "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+        "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+        "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+      ],
+      "rationale": "Keep: concise, evidenced, and careful about sanctioned exceptions versus actionable gaps."
+    },
+    {
+      "unit_id": "paper:felix-findings-liveview-collections",
+      "document_id": "felix-findings-liveview-collections",
+      "document_rev": "370a4be8b3809a4686dc2749fc26e69a",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Audit of LiveView collections, async work, forms, uploads, and bounded per-socket state.",
+      "opening_and_criteria": "blocks[0]-[3] disclose static-only limits, doctrine, and one filed finding.",
+      "outline_and_hierarchy": "20 blocks focus on the unbounded transcript, then verify async/uploads/streams and reject low-value rewrites.",
+      "human_voice_and_precision": "Pragmatic voice rejects streams and to_form fashion when their shapes do not fit. Absolute cost is explicitly estimated, not measured.",
+      "compression_and_restraint": "Keep; reconcile the duplicate transcript task with the tracking audit and add a short description metadata field.",
+      "evidence_and_truth": "blocks[6]-[9] trace unbounded hydration, O(n) rendering, O(n²) grouping, and a bounded cap/async measurement plan.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[9]",
+          "evidence": "The fix menu explicitly rejects forcing streams onto grouped rows and prefers cap, async hydration, or memoization.",
+          "lesson": "Choose primitives that match the data shape, not the audit checklist."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "Every session row is loaded and regrouped synchronously, with list appends and repeated full walks.",
+          "lesson": "Long sessions multiply memory and reopen latency per socket."
+        }
+      ],
+      "duplicate_disposition": "Overlaps felix-findings-liveview-tracking on the exact transcript failure. Keep domain papers separate, but merge the duplicate finding/task ownership and cross-link evidence.",
+      "reader_risks": [
+        "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+        "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+        "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+        "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+      ],
+      "rationale": "Keep: bounded audit with a specific fix menu; coordination, not editorial merger, resolves the duplicate finding."
+    },
+    {
+      "unit_id": "paper:felix-findings-liveview-tracking",
+      "document_id": "felix-findings-liveview-tracking",
+      "document_rev": "1385d509b48acc174b1f5f07fa814d83",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Audit of LiveView lifecycle, change tracking, component choices, and Studio per-socket costs.",
+      "opening_and_criteria": "blocks[0]-[3] state corpus, static-confidence limits, and two findings.",
+      "outline_and_hierarchy": "22 blocks pair unbounded transcript and discarded disconnected-mount work with strong already-good contrasts.",
+      "human_voice_and_precision": "Precise confidence tagging prevents static estimates from masquerading as live measurements.",
+      "compression_and_restraint": "Keep; reconcile the duplicate transcript task with d08 and add metadata description.",
+      "evidence_and_truth": "blocks[11]-[13] explain why auth pages should not duplicate DB projections while public pages correctly need disconnected content.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[13]",
+          "evidence": "Public readers are explicitly exempted from the connected?-guard recommendation because crawlers need dead-render content.",
+          "lesson": "Apply lifecycle optimization by audience, not globally."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "Full transcript regrouping is O(n) per turn, child append is O(k²), and the socket retains all rows.",
+          "lesson": "The same issue was separately filed in d08, risking duplicate remediation."
+        }
+      ],
+      "duplicate_disposition": "Direct overlap with d08 on chat transcript; tracking additionally owns disconnected mounts. Cross-link and unify the duplicate task, do not merge the papers.",
+      "reader_risks": [
+        "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+        "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+        "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+        "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+      ],
+      "rationale": "Keep: clear dual findings, already-good counterexamples, and honest confidence boundaries."
+    },
+    {
+      "unit_id": "paper:felix-findings-otp-supervision",
+      "document_id": "felix-findings-otp-supervision",
+      "document_rev": "25cc385cde42f03103533f064e9f2ffa",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Audit of supervision topology, GenServers, ETS, restart budgets, and hot-path design.",
+      "opening_and_criteria": "blocks[0]-[3] state read scope, doctrine, and one P2 finding.",
+      "outline_and_hierarchy": "28 blocks fully derive the shared restart-budget risk and then reject speculative singleton/sharding refactors with evidence.",
+      "human_voice_and_precision": "Excellent OTP voice: latent risk is called latent, graceful query degradation is contrasted with structural blast radius, and boot ordering is preserved.",
+      "compression_and_restraint": "Keep; add a metadata description and compact filed-task summary for non-OTP readers.",
+      "evidence_and_truth": "blocks[8]-[11] give concrete crash-loop inputs, total-outage outcome, honest present reachability, and a protective supervisor experiment.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[9]",
+          "evidence": "The audit contrasts graceful Indx query fallback with a flat supervisor that can terminate the whole application first.",
+          "lesson": "Resilience must exist at supervision boundaries, not only call sites."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "Three crashes across any flat top-level children in five seconds can terminate Repo, Oban, PubSub, and Endpoint together.",
+          "lesson": "A contained subsystem fault can escalate to total outage."
+        }
+      ],
+      "duplicate_disposition": "Distinct Felix OTP domain paper; series-index only.",
+      "reader_risks": [
+        "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+        "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+        "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+        "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+      ],
+      "rationale": "Keep: named failure, protective measurement, and rejected-with-reason sections make the recommendation disciplined."
+    },
+    {
+      "unit_id": "paper:felix-findings-plug-router",
+      "document_id": "felix-findings-plug-router",
+      "document_rev": "b86f0792c45f0a3a64119268c3942ede",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Audit of endpoint, router, controllers, plugs, error envelopes, origin checks, and pipeline composition.",
+      "opening_and_criteria": "blocks[0]-[3] lead with method, two findings, and task ids.",
+      "outline_and_hierarchy": "22 blocks close the historical duplicate-emitter scar, expose vocabulary/request-id gaps, and verify halting/origin/pipeline behavior.",
+      "human_voice_and_precision": "The audit does not preserve a stale scar narrative: it proves the old defect closed and locates the live class elsewhere.",
+      "compression_and_restraint": "Keep; add metadata description and a redacted public projection because internal error-route enumeration is sensitive.",
+      "evidence_and_truth": "blocks[5]-[13] separate the fixed legacy scar from undeclared served codes and plug envelopes missing request ids.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[5]",
+          "evidence": "The audit verifies the documented query/legacy duplicate-emitter scar is already closed before looking for its surviving class.",
+          "lesson": "Retire fixed lore instead of filing it again."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "Roughly 22 wire error codes bypass the canonical vocabulary and are absent from generated contracts.",
+          "lesson": "Typed clients can fail on variants the OpenAPI enum says cannot exist."
+        }
+      ],
+      "duplicate_disposition": "Distinct HTTP-contract audit in the Felix series.",
+      "reader_risks": [
+        "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+        "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+        "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+        "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+      ],
+      "rationale": "Keep: strong scar verification, exact contract failure, and protective subset/request-id tests."
+    },
+    {
+      "unit_id": "paper:felix-findings-queries-indexes",
+      "document_id": "felix-findings-queries-indexes",
+      "document_rev": "6543af99fb01cce1071aaf10ad18c083",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Audit of query shapes, JSONB, FTS, N+1 discipline, pagination, and index coverage at measured corpus scale.",
+      "opening_and_criteria": "blocks[0]-[3] state production scale and one medium-confidence finding.",
+      "outline_and_hierarchy": "17 blocks are highly compressed: one hot-path issue, already-good inventory, rejected rechecks, and method honesty.",
+      "human_voice_and_precision": "Restrained performance voice refuses speculative indexes and marks EXPLAIN absence clearly.",
+      "compression_and_restraint": "Keep; add a metadata description and re-audit trigger based on partition growth.",
+      "evidence_and_truth": "blocks[6]-[10] derive why wrapping indexed doc_id causes super-linear ready polling and require EXPLAIN at N≥5000 before closure.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "A sibling twin-collapse query keeps the indexed column bare, providing an in-repo index-friendly contrast.",
+          "lesson": "Use a proven sibling query shape to repair an expression-index miss."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[10]",
+          "evidence": "No EXPLAIN or wall-clock proof ran; current 784-row latency is probably small and confidence stays medium.",
+          "lesson": "Static growth reasoning must not be quoted as measured present latency."
+        }
+      ],
+      "duplicate_disposition": "Distinct data-access audit; series-index only.",
+      "reader_risks": [
+        "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+        "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+        "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+        "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+      ],
+      "rationale": "Keep: scale-aware, non-speculative, and explicit about the measurement still owed."
+    },
+    {
+      "unit_id": "paper:felix-findings-realtime",
+      "document_id": "felix-findings-realtime",
+      "document_rev": "d7289245be0e8c2d81dedb3f1fd4a9f9",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Audit of PubSub, channels, presence, webhooks, SSE backpressure, and realtime tenancy/auth.",
+      "opening_and_criteria": "blocks[0]-[4] state method, house-good reference, bottom line, and two SSE findings.",
+      "outline_and_hierarchy": "20 blocks focus on unbounded SSE mailbox and redundant admin re-fetches before proving surrounding realtime components sound.",
+      "human_voice_and_precision": "Failure-mode precision is excellent; rejected global-topic/dedup smells are reasoned rather than inflated.",
+      "compression_and_restraint": "Keep; public projection should omit exploit-operational detail while retaining remediation and risk class.",
+      "evidence_and_truth": "blocks[6]-[13] trace a stalled reader to mailbox growth and N×M redundant DB reads, with testable fixes.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[15]",
+          "evidence": "Webhook signing, retry, dedup, SSRF protection, and durable state are verified together as an already-good subsystem.",
+          "lesson": "Audit complete safety chains, not isolated primitives."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[6]",
+          "evidence": "A stalled SSE chunk blocks the process while PubSub continues delivering full-document messages into an unbounded mailbox.",
+          "lesson": "One slow client can create node-wide memory pressure."
+        }
+      ],
+      "duplicate_disposition": "Distinct Felix realtime domain paper.",
+      "reader_risks": [
+        "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+        "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+        "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+        "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+      ],
+      "rationale": "Keep: compact, defensive, and grounded in precise message-flow failure modes."
+    },
+    {
+      "unit_id": "paper:felix-findings-schemas-changesets",
+      "document_id": "felix-findings-schemas-changesets",
+      "document_rev": "3d5bab334823479b4a24f2c62c9104bf",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Audit of schemas, binary-id boundaries, changeset allowlists, constraint parity, and fail-closed crypto/redaction.",
+      "opening_and_criteria": "blocks[0]-[3] give method and verdict summary before two concrete findings.",
+      "outline_and_hierarchy": "18 blocks pair two input-to-500 paths with broad already-good coverage and one intentionally unfiled watch item.",
+      "human_voice_and_precision": "Strong discipline: 155 safe sites and intentional raw-map design are recorded, preventing a single defect from becoming a blanket indictment.",
+      "compression_and_restraint": "Keep; add metadata description and retain exact protective tests.",
+      "evidence_and_truth": "blocks[13]-[16] classify the safe binary-id paths, prove explicit cast allowlists, and match more than 30 constraints by name.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[13]",
+          "evidence": "The audit explains three distinct guards that make roughly 155 other binary-id sites safe.",
+          "lesson": "Bound a scar class by tracing safe paths, not just counting similar syntax."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[5]",
+          "evidence": "A raw non-UUID credential id reaches a binary_id Repo.get_by and raises a 500 instead of the intended 404.",
+          "lesson": "Authentication-adjacent malformed input becomes an avoidable server error."
+        }
+      ],
+      "duplicate_disposition": "Distinct Ecto-domain audit in Felix series.",
+      "reader_risks": [
+        "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+        "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+        "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+        "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+      ],
+      "rationale": "Keep: concrete inputs, protective tests, and comprehensive safe-site classification support the findings."
+    },
+    {
+      "unit_id": "paper:felix-findings-security-tenancy",
+      "document_id": "felix-findings-security-tenancy",
+      "document_rev": "1ae3afd165ff8c67407f561c31a6b473",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Defensive audit of XSS, security CI, auth/token discipline, and tenant fail-closure.",
+      "opening_and_criteria": "blocks[0]-[3] state defensive scope, no exploit recipes, three findings, priorities, and task ids.",
+      "outline_and_hierarchy": "24 blocks cover stored XSS, missing gates, latent tenant convention, already-good token/CSRF/atom paths, and confidence/open verification.",
+      "human_voice_and_precision": "Security prose is specific enough to remediate while explicitly avoiding step-by-step exploitation and distinguishing latent defense-in-depth from reachable P1.",
+      "compression_and_restraint": "Keep internally; publish only a redacted summary and link task disposition when fixes land.",
+      "evidence_and_truth": "blocks[5]-[14] connect unsanitized raw HTML and absent CSP to reader exposure, then carefully scope tenant isolation as latent but scar-class.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[14]",
+          "evidence": "The tenancy issue is explicitly assessed latent because live callers thread scope, while a prior scar justifies a static guard for future call sites.",
+          "lesson": "Separate current reachability from cheap structural prevention."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[5]",
+          "evidence": "HTML-only body_html is persisted verbatim and rendered raw on public/scoped/share readers.",
+          "lesson": "Stored executable markup crosses a write boundary into reader sessions unless sanitization or CSP intervenes."
+        }
+      ],
+      "duplicate_disposition": "Complements other Felix boundary audits but owns crown-jewel security conclusions; keep separate.",
+      "reader_risks": [
+        "Studio: lead with verdict, priority, filed task, confidence, and current disposition; collapse file/line receipts behind each finding.",
+        "TUI80: wrap code paths and verdict matrices into one finding per screen; keep named failure mode and protective test visible.",
+        "email: send finding, impact, confidence, and owner task only; link the full already-good/rejected audit.",
+        "public: remove internal routes, tenant topology, task ids, exploit-enabling detail, and live operational assumptions; retain defensive conclusions and remediation state.",
+        "CLI/API: preserve exact task/document ids, priorities, confidence, input-to-wrong-outcome chains, and the distinction among static evidence, live measurement, filed, fixed, merged, and deployed."
+      ],
+      "rationale": "Keep: prioritized defensive findings, already-good controls, delegated tests, and two explicit verify-items create honest security authority."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false
+  }
+}

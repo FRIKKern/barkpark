@@ -1,0 +1,397 @@
+{
+  "_createdAt": "2026-07-10T18:18:28.227731Z",
+  "_draft": false,
+  "_id": "felix-findings-liveview-tracking",
+  "_publishedId": "felix-findings-liveview-tracking",
+  "_rev": "1385d509b48acc174b1f5f07fa814d83",
+  "_type": "paper",
+  "_updatedAt": "2026-07-10T18:18:28.227731Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix Findings — d07: LiveView Lifecycle & Change-Tracking (Studio core)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Read-only audit of the 20 LiveView + 4 LiveComponent modules in api/lib against corpus ch 35-38, 46 (Lifecycle, HEEx diffing, LiveComponent, streams, per-socket memory). Local Phoenix does not boot (codelist OOM), so wire-diff/query-count costs are STATIC estimates — marked MEDIUM where not run live. Two qualifying findings; the rest already-good or rejected-with-reason."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "Verdict table",
+      "type": "heading"
+    },
+    {
+      "id": "block-3",
+      "language": "text",
+      "type": "code",
+      "value": "DOMAIN d07 — LiveView lifecycle, change-tracking, Studio core (20 LV + 4 LC)\n\nCONCEPT                                    VERDICT               CONF\n-----------------------------------------  --------------------  ------\nconnected?/mount discipline (public pages) already-good          HIGH\n  bulldocs / sheets_reader / quiz_play — dead-render load is\n  CORRECT (crawlers/unfurlers need OG head+body, no JS)\nconnected?/mount discipline (auth pages)   ADOPT  -> F2          MEDIUM\n  board / inbox / settings / org_admin / staleness run full DB\n  projections on the DISCARDED disconnected mount (2x queries)\nchange-tracking: <% x = @a %> in HEEx       already-good          HIGH\n  ~30 sites; HEEx tracks assigns inside <% %> — style, not a breaker\nchange-tracking: streaming isolation        already-good          HIGH\n  chat per-delta touches only @streaming; transcript comprehension\n  is NOT re-diffed per token (stable_html memoized) — well designed\nchange-tracking: gantt_data(card) in :for   already-good          HIGH\n  board_live:2887 — guarded behind expanded?; bounded to open card\ntranscript growth + grouping recompute      ADOPT  -> F1          HIGH(algo)\n  chat @messages unbounded; group_agent_rows O(n) in template each\n  render, O(k^2) child append — long agent session = O(n^2)+O(n) mem\nLiveComponent vs function-component         already-good          HIGH\n  sheet_grid/paper_field_block/tree_codelist handle events;\n  graph_view scopes derivation via update/2 — all justified stateful\nper-socket memory: Studio desk              already-good          MEDIUM\n  paper_blocks STREAMED (mount.ex:270); media/refs/revisions load\n  on demand; panes bounded by desk size — no unbounded desk assign\nper-socket memory: chat transcript          ADOPT  -> F1          HIGH\nmodule-size extract seams                    rejected-w-reason     HIGH\n  chat_live 5055 / sheet_grid 3489 / board 3343 are fat, but NO\n  named upcoming change is made cheaper by a split — tidiness only\n\nFILED: F1 task-9e21c3f285b3d7d0 (p2)  ·  F2 task-d8970b41d745e066 (p2)\nNo priority-1 correctness finding — both qualifiers are efficiency."
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "F1 — chat_live transcript: unbounded @messages + O(n)/O(k^2) group_agent_rows recomputed every render",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Filed: task-9e21c3f285b3d7d0 (priority 2). Confidence HIGH on the algorithmic costs (code-evident); MEDIUM on absolute wire bytes (not captured live)."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Named failure mode: a long Studio agent session (the sessions epic runs multi-hundred-turn conversations, each turn appending user/assistant/tool rows) accumulates the entire transcript in @messages with NO cap. Every write is socket.assigns.messages ++ [message] (chat_live.ex:1186,1387,3465,3717); grep found zero Enum.take/slice/limit on messages."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-7",
+      "language": "elixir",
+      "type": "code",
+      "value": "# chat_live.ex ~2184 — grouping recomputed INLINE in the template, not memoized:\n<%= for item <- group_agent_rows(@messages) do %>   # O(n) over full history, each render\n\n# group_agent_rows/1 children reduce — O(k^2) for a k-child agent brood:\nMap.update(acc, pid, [m], &(&1 ++ [m]))              # list append is O(k)"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Three compounding costs: (1) group_agent_rows rebuilds spawn-map + children reduce + flat_map over the FULL transcript on every render that touches @messages = O(n)/turn = O(n^2)/session; (2) the &1 ++ [m] child append is O(k^2) per agent brood; (3) per-socket heap holds the whole transcript for the socket lifetime and the transcript comprehension re-diffs all rows on each append (wire O(n)/turn). Fix menu: memoize grouped rows in an assign updated incrementally on append; window/paginate the transcript; replace ++ with prepend+reverse-once. Protective measurement (delegated to the fix task): a group_agent_rows micro-bench at N=2000 vs N=200 asserting non-superlinear, plus a bounded-retention test."
+        }
+      ],
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-9",
+      "level": 2,
+      "text": "F2 — Authenticated Studio LiveViews run full DB projections on the discarded disconnected mount",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Filed: task-d8970b41d745e066 (priority 2). Confidence MEDIUM — double-invocation + unguarded loads are static-evident; absolute ms/query savings not measured live."
+        }
+      ],
+      "id": "block-10",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "For an auth-gated LiveView the disconnected mount render is discarded the instant the WS connects and mount runs again. These surfaces run the expensive projection UNGUARDED, so it executes on both mounts — the disconnected copy is pure waste (no crawler consumes an auth page)."
+        }
+      ],
+      "id": "block-11",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-12",
+      "language": "elixir",
+      "type": "code",
+      "value": "# board_live.ex — Board.snapshot OUTSIDE the connected? guard (heaviest: ~3 queries):\ndef mount(_p,_s,socket) do\n  if connected?(socket) do                 # :197 — guards ONLY subscribe + timer\n    Phoenix.PubSub.subscribe(...); Process.send_after(self(), :refresh, ...)\n  end\n  socket |> assign(:board, Board.snapshot(dataset: @dataset)) ...   # :203 — runs on BOTH mounts\n\n# Sibling unguarded loads:\n#   inbox_live.ex:91        load_inbox (fetch_tickets + presenter)\n#   settings_live.ex:69     assign_page -> assign_plugin_rows\n#   org_admin_live.ex:32    list_organizations + per-org org_status + Audit.recent(20)\n#   staleness_live.ex:52    load_books + per-book detect_stale"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Already-good contrast (do NOT touch): bulldocs_live.ex:76 + sheets_reader + quiz_play load on the dead render DELIBERATELY and correctly — they are PUBLIC pages whose crawlers/unfurlers run no JS and need the OG head + body from the disconnected render (documented at bulldocs_live.ex:76-90). Honest tradeoff: guarding removes first-paint content on the disconnected render (skeleton until WS connects). Protective measurement (delegated): an Ecto SQL.Sandbox query-count test asserting connected?==false issues zero board-projection queries."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-14",
+      "level": 2,
+      "text": "Already-good (verified, no change)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Streaming isolation: chat per-text-delta touches only @streaming (chat_live.ex:945); the transcript comprehension is not re-diffed per token, and @streaming.stable_html memoizes the stable prefix — textbook design."
+        }
+      ],
+      "id": "block-15",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "gantt_data(card): board_live.ex:2887 recompute is guarded behind expanded?(@expanded, card) — bounded to the open card, not all cards."
+        }
+      ],
+      "id": "block-16",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "<% x = @a %> in HEEx (~30 sites, editor.ex / components.ex / sheet_grid.ex etc.): modern HEEx tracks assigns referenced inside <% %> blocks — a style smell, not a change-tracking breaker. Rejected as tidiness."
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "LiveComponent choices: sheet_grid (80 handle_event), paper_field_block (3), tree_codelist_field (4) are genuinely stateful; graph_view has no handle_event but uses update/2 to scope derivation per assign change — converting to a function component would recompute on every parent render. All justified."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Per-socket desk memory: the paper block list is STREAMED (mount.ex:270 stream(:paper_blocks)); media_files/ref_candidates/revisions/graph_data initialize empty and load on demand; panes are bounded by desk size. No unbounded collection sits in the desk socket."
+        }
+      ],
+      "id": "block-19",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-20",
+      "level": 2,
+      "text": "Rejected with reason",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Module-size extract seams: chat_live (5055 lines), sheet_grid (3489), board_live (3343) are fat, and studio_live is already decomposed into a studio_live/ subtree (mount/blocks/paper_canvas/handlers/shared). But the brief admits a split ONLY where a NAMED upcoming change is made cheaper — none was identified. Splitting for line-count alone is the tree-tidiness the charter rejects."
+        }
+      ],
+      "id": "block-21",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix Findings — d07: LiveView Lifecycle & Change-Tracking (Studio core)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Read-only audit of the 20 LiveView + 4 LiveComponent modules in api/lib against corpus ch 35-38, 46 (Lifecycle, HEEx diffing, LiveComponent, streams, per-socket memory). Local Phoenix does not boot (codelist OOM), so wire-diff/query-count costs are STATIC estimates — marked MEDIUM where not run live. Two qualifying findings; the rest already-good or rejected-with-reason."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "level": 2,
+        "text": "Verdict table",
+        "type": "heading"
+      },
+      {
+        "id": "block-3",
+        "language": "text",
+        "type": "code",
+        "value": "DOMAIN d07 — LiveView lifecycle, change-tracking, Studio core (20 LV + 4 LC)\n\nCONCEPT                                    VERDICT               CONF\n-----------------------------------------  --------------------  ------\nconnected?/mount discipline (public pages) already-good          HIGH\n  bulldocs / sheets_reader / quiz_play — dead-render load is\n  CORRECT (crawlers/unfurlers need OG head+body, no JS)\nconnected?/mount discipline (auth pages)   ADOPT  -> F2          MEDIUM\n  board / inbox / settings / org_admin / staleness run full DB\n  projections on the DISCARDED disconnected mount (2x queries)\nchange-tracking: <% x = @a %> in HEEx       already-good          HIGH\n  ~30 sites; HEEx tracks assigns inside <% %> — style, not a breaker\nchange-tracking: streaming isolation        already-good          HIGH\n  chat per-delta touches only @streaming; transcript comprehension\n  is NOT re-diffed per token (stable_html memoized) — well designed\nchange-tracking: gantt_data(card) in :for   already-good          HIGH\n  board_live:2887 — guarded behind expanded?; bounded to open card\ntranscript growth + grouping recompute      ADOPT  -> F1          HIGH(algo)\n  chat @messages unbounded; group_agent_rows O(n) in template each\n  render, O(k^2) child append — long agent session = O(n^2)+O(n) mem\nLiveComponent vs function-component         already-good          HIGH\n  sheet_grid/paper_field_block/tree_codelist handle events;\n  graph_view scopes derivation via update/2 — all justified stateful\nper-socket memory: Studio desk              already-good          MEDIUM\n  paper_blocks STREAMED (mount.ex:270); media/refs/revisions load\n  on demand; panes bounded by desk size — no unbounded desk assign\nper-socket memory: chat transcript          ADOPT  -> F1          HIGH\nmodule-size extract seams                    rejected-w-reason     HIGH\n  chat_live 5055 / sheet_grid 3489 / board 3343 are fat, but NO\n  named upcoming change is made cheaper by a split — tidiness only\n\nFILED: F1 task-9e21c3f285b3d7d0 (p2)  ·  F2 task-d8970b41d745e066 (p2)\nNo priority-1 correctness finding — both qualifiers are efficiency."
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "F1 — chat_live transcript: unbounded @messages + O(n)/O(k^2) group_agent_rows recomputed every render",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Filed: task-9e21c3f285b3d7d0 (priority 2). Confidence HIGH on the algorithmic costs (code-evident); MEDIUM on absolute wire bytes (not captured live)."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Named failure mode: a long Studio agent session (the sessions epic runs multi-hundred-turn conversations, each turn appending user/assistant/tool rows) accumulates the entire transcript in @messages with NO cap. Every write is socket.assigns.messages ++ [message] (chat_live.ex:1186,1387,3465,3717); grep found zero Enum.take/slice/limit on messages."
+          }
+        ],
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-7",
+        "language": "elixir",
+        "type": "code",
+        "value": "# chat_live.ex ~2184 — grouping recomputed INLINE in the template, not memoized:\n<%= for item <- group_agent_rows(@messages) do %>   # O(n) over full history, each render\n\n# group_agent_rows/1 children reduce — O(k^2) for a k-child agent brood:\nMap.update(acc, pid, [m], &(&1 ++ [m]))              # list append is O(k)"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Three compounding costs: (1) group_agent_rows rebuilds spawn-map + children reduce + flat_map over the FULL transcript on every render that touches @messages = O(n)/turn = O(n^2)/session; (2) the &1 ++ [m] child append is O(k^2) per agent brood; (3) per-socket heap holds the whole transcript for the socket lifetime and the transcript comprehension re-diffs all rows on each append (wire O(n)/turn). Fix menu: memoize grouped rows in an assign updated incrementally on append; window/paginate the transcript; replace ++ with prepend+reverse-once. Protective measurement (delegated to the fix task): a group_agent_rows micro-bench at N=2000 vs N=200 asserting non-superlinear, plus a bounded-retention test."
+          }
+        ],
+        "id": "block-8",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-9",
+        "level": 2,
+        "text": "F2 — Authenticated Studio LiveViews run full DB projections on the discarded disconnected mount",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Filed: task-d8970b41d745e066 (priority 2). Confidence MEDIUM — double-invocation + unguarded loads are static-evident; absolute ms/query savings not measured live."
+          }
+        ],
+        "id": "block-10",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "For an auth-gated LiveView the disconnected mount render is discarded the instant the WS connects and mount runs again. These surfaces run the expensive projection UNGUARDED, so it executes on both mounts — the disconnected copy is pure waste (no crawler consumes an auth page)."
+          }
+        ],
+        "id": "block-11",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-12",
+        "language": "elixir",
+        "type": "code",
+        "value": "# board_live.ex — Board.snapshot OUTSIDE the connected? guard (heaviest: ~3 queries):\ndef mount(_p,_s,socket) do\n  if connected?(socket) do                 # :197 — guards ONLY subscribe + timer\n    Phoenix.PubSub.subscribe(...); Process.send_after(self(), :refresh, ...)\n  end\n  socket |> assign(:board, Board.snapshot(dataset: @dataset)) ...   # :203 — runs on BOTH mounts\n\n# Sibling unguarded loads:\n#   inbox_live.ex:91        load_inbox (fetch_tickets + presenter)\n#   settings_live.ex:69     assign_page -> assign_plugin_rows\n#   org_admin_live.ex:32    list_organizations + per-org org_status + Audit.recent(20)\n#   staleness_live.ex:52    load_books + per-book detect_stale"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Already-good contrast (do NOT touch): bulldocs_live.ex:76 + sheets_reader + quiz_play load on the dead render DELIBERATELY and correctly — they are PUBLIC pages whose crawlers/unfurlers run no JS and need the OG head + body from the disconnected render (documented at bulldocs_live.ex:76-90). Honest tradeoff: guarding removes first-paint content on the disconnected render (skeleton until WS connects). Protective measurement (delegated): an Ecto SQL.Sandbox query-count test asserting connected?==false issues zero board-projection queries."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-14",
+        "level": 2,
+        "text": "Already-good (verified, no change)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Streaming isolation: chat per-text-delta touches only @streaming (chat_live.ex:945); the transcript comprehension is not re-diffed per token, and @streaming.stable_html memoizes the stable prefix — textbook design."
+          }
+        ],
+        "id": "block-15",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "gantt_data(card): board_live.ex:2887 recompute is guarded behind expanded?(@expanded, card) — bounded to the open card, not all cards."
+          }
+        ],
+        "id": "block-16",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "<% x = @a %> in HEEx (~30 sites, editor.ex / components.ex / sheet_grid.ex etc.): modern HEEx tracks assigns referenced inside <% %> blocks — a style smell, not a change-tracking breaker. Rejected as tidiness."
+          }
+        ],
+        "id": "block-17",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "LiveComponent choices: sheet_grid (80 handle_event), paper_field_block (3), tree_codelist_field (4) are genuinely stateful; graph_view has no handle_event but uses update/2 to scope derivation per assign change — converting to a function component would recompute on every parent render. All justified."
+          }
+        ],
+        "id": "block-18",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Per-socket desk memory: the paper block list is STREAMED (mount.ex:270 stream(:paper_blocks)); media_files/ref_candidates/revisions/graph_data initialize empty and load on demand; panes are bounded by desk size. No unbounded collection sits in the desk socket."
+          }
+        ],
+        "id": "block-19",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-20",
+        "level": 2,
+        "text": "Rejected with reason",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Module-size extract seams: chat_live (5055 lines), sheet_grid (3489), board_live (3343) are fat, and studio_live is already decomposed into a studio_live/ subtree (mount/blocks/paper_canvas/handlers/shared). But the brief admits a split ONLY where a NAMED upcoming change is made cheaper — none was identified. Splitting for line-count alone is the tree-tidiness the charter rejects."
+          }
+        ],
+        "id": "block-21",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix Findings — d07: LiveView Lifecycle &amp; Change-Tracking (Studio core)</h1><p>Read-only audit of the 20 LiveView + 4 LiveComponent modules in api/lib against corpus ch 35-38, 46 (Lifecycle, HEEx diffing, LiveComponent, streams, per-socket memory). Local Phoenix does not boot (codelist OOM), so wire-diff/query-count costs are STATIC estimates — marked MEDIUM where not run live. Two qualifying findings; the rest already-good or rejected-with-reason.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verdict table</h2><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">DOMAIN d07 — LiveView lifecycle, change-tracking, Studio core (20 LV + 4 LC)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">CONCEPT                                    VERDICT               CONF</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">-----------------------------------------  --------------------  ------</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">connected?/mount discipline (public pages) already-good          HIGH</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  bulldocs / sheets_reader / quiz_play — dead-render load is</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  CORRECT (crawlers/unfurlers need OG head+body, no JS)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">connected?/mount discipline (auth pages)   ADOPT  -&gt; F2          MEDIUM</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  board / inbox / settings / org_admin / staleness run full DB</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  projections on the DISCARDED disconnected mount (2x queries)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">change-tracking: &lt;% x = @a %&gt; in HEEx       already-good          HIGH</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  ~30 sites; HEEx tracks assigns inside &lt;% %&gt; — style, not a breaker</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">change-tracking: streaming isolation        already-good          HIGH</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  chat per-delta touches only @streaming; transcript comprehension</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  is NOT re-diffed per token (stable_html memoized) — well designed</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">change-tracking: gantt_data(card) in :for   already-good          HIGH</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  board_live:2887 — guarded behind expanded?; bounded to open card</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">transcript growth + grouping recompute      ADOPT  -&gt; F1          HIGH(algo)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  chat @messages unbounded; group_agent_rows O(n) in template each</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  render, O(k^2) child append — long agent session = O(n^2)+O(n) mem</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">LiveComponent vs function-component         already-good          HIGH</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  sheet_grid/paper_field_block/tree_codelist handle events;</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  graph_view scopes derivation via update/2 — all justified stateful</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">per-socket memory: Studio desk              already-good          MEDIUM</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  paper_blocks STREAMED (mount.ex:270); media/refs/revisions load</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  on demand; panes bounded by desk size — no unbounded desk assign</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">per-socket memory: chat transcript          ADOPT  -&gt; F1          HIGH</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">module-size extract seams                    rejected-w-reason     HIGH</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  chat_live 5055 / sheet_grid 3489 / board 3343 are fat, but NO</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  named upcoming change is made cheaper by a split — tidiness only</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">FILED: F1 task-9e21c3f285b3d7d0 (p2)  ·  F2 task-d8970b41d745e066 (p2)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">No priority-1 correctness finding — both qualifiers are efficiency.</code></span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">F1 — chat_live transcript: unbounded @messages + O(n)/O(k^2) group_agent_rows recomputed every render</h2><p>Filed: task-9e21c3f285b3d7d0 (priority 2). Confidence HIGH on the algorithmic costs (code-evident); MEDIUM on absolute wire bytes (not captured live).</p><p>Named failure mode: a long Studio agent session (the sessions epic runs multi-hundred-turn conversations, each turn appending user/assistant/tool rows) accumulates the entire transcript in @messages with NO cap. Every write is socket.assigns.messages ++ [message] (chat_live.ex:1186,1387,3465,3717); grep found zero Enum.take/slice/limit on messages.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># chat_live.ex ~2184 — grouping recomputed INLINE in the template, not memoized:</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">&lt;%= for item &lt;- group_agent_rows(@messages) do %&gt;   # O(n) over full history, each render</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># group_agent_rows/1 children reduce — O(k^2) for a k-child agent brood:</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Map.update(acc, pid, [m], &amp;(&amp;1 ++ [m]))              # list append is O(k)</code></span></div><p>Three compounding costs: (1) group_agent_rows rebuilds spawn-map + children reduce + flat_map over the FULL transcript on every render that touches @messages = O(n)/turn = O(n^2)/session; (2) the &amp;1 ++ [m] child append is O(k^2) per agent brood; (3) per-socket heap holds the whole transcript for the socket lifetime and the transcript comprehension re-diffs all rows on each append (wire O(n)/turn). Fix menu: memoize grouped rows in an assign updated incrementally on append; window/paginate the transcript; replace ++ with prepend+reverse-once. Protective measurement (delegated to the fix task): a group_agent_rows micro-bench at N=2000 vs N=200 asserting non-superlinear, plus a bounded-retention test.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">F2 — Authenticated Studio LiveViews run full DB projections on the discarded disconnected mount</h2><p>Filed: task-d8970b41d745e066 (priority 2). Confidence MEDIUM — double-invocation + unguarded loads are static-evident; absolute ms/query savings not measured live.</p><p>For an auth-gated LiveView the disconnected mount render is discarded the instant the WS connects and mount runs again. These surfaces run the expensive projection UNGUARDED, so it executes on both mounts — the disconnected copy is pure waste (no crawler consumes an auth page).</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># board_live.ex — Board.snapshot OUTSIDE the connected? guard (heaviest: ~3 queries):</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">def mount(_p,_s,socket) do</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  if connected?(socket) do                 # :197 — guards ONLY subscribe + timer</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">    Phoenix.PubSub.subscribe(...); Process.send_after(self(), :refresh, ...)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  end</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  socket |&gt; assign(:board, Board.snapshot(dataset: @dataset)) ...   # :203 — runs on BOTH mounts</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># Sibling unguarded loads:</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">#   inbox_live.ex:91        load_inbox (fetch_tickets + presenter)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">#   settings_live.ex:69     assign_page -&gt; assign_plugin_rows</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">#   org_admin_live.ex:32    list_organizations + per-org org_status + Audit.recent(20)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">#   staleness_live.ex:52    load_books + per-book detect_stale</code></span></div><p>Already-good contrast (do NOT touch): bulldocs_live.ex:76 + sheets_reader + quiz_play load on the dead render DELIBERATELY and correctly — they are PUBLIC pages whose crawlers/unfurlers run no JS and need the OG head + body from the disconnected render (documented at bulldocs_live.ex:76-90). Honest tradeoff: guarding removes first-paint content on the disconnected render (skeleton until WS connects). Protective measurement (delegated): an Ecto SQL.Sandbox query-count test asserting connected?==false issues zero board-projection queries.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Already-good (verified, no change)</h2><p>Streaming isolation: chat per-text-delta touches only @streaming (chat_live.ex:945); the transcript comprehension is not re-diffed per token, and @streaming.stable_html memoizes the stable prefix — textbook design.</p><p>gantt_data(card): board_live.ex:2887 recompute is guarded behind expanded?(@expanded, card) — bounded to the open card, not all cards.</p><p>&lt;% x = @a %&gt; in HEEx (~30 sites, editor.ex / components.ex / sheet_grid.ex etc.): modern HEEx tracks assigns referenced inside &lt;% %&gt; blocks — a style smell, not a change-tracking breaker. Rejected as tidiness.</p><p>LiveComponent choices: sheet_grid (80 handle_event), paper_field_block (3), tree_codelist_field (4) are genuinely stateful; graph_view has no handle_event but uses update/2 to scope derivation per assign change — converting to a function component would recompute on every parent render. All justified.</p><p>Per-socket desk memory: the paper block list is STREAMED (mount.ex:270 stream(:paper_blocks)); media_files/ref_candidates/revisions/graph_data initialize empty and load on demand; panes are bounded by desk size. No unbounded collection sits in the desk socket.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Rejected with reason</h2><p>Module-size extract seams: chat_live (5055 lines), sheet_grid (3489), board_live (3343) are fat, and studio_live is already decomposed into a studio_live/ subtree (mount/blocks/paper_canvas/handlers/shared). But the brief admits a split ONLY where a NAMED upcoming change is made cheaper — none was identified. Splitting for line-count alone is the tree-tidiness the charter rejects.</p>"
+  },
+  "body_html": "<h1>Felix Findings — d07: LiveView Lifecycle &amp; Change-Tracking (Studio core)</h1><p>Read-only audit of the 20 LiveView + 4 LiveComponent modules in api/lib against corpus ch 35-38, 46 (Lifecycle, HEEx diffing, LiveComponent, streams, per-socket memory). Local Phoenix does not boot (codelist OOM), so wire-diff/query-count costs are STATIC estimates — marked MEDIUM where not run live. Two qualifying findings; the rest already-good or rejected-with-reason.</p><h2>Verdict table</h2><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">DOMAIN d07 — LiveView lifecycle, change-tracking, Studio core (20 LV + 4 LC)\n\nCONCEPT                                    VERDICT               CONF\n-----------------------------------------  --------------------  ------\nconnected?/mount discipline (public pages) already-good          HIGH\n  bulldocs / sheets_reader / quiz_play — dead-render load is\n  CORRECT (crawlers/unfurlers need OG head+body, no JS)\nconnected?/mount discipline (auth pages)   ADOPT  -&gt; F2          MEDIUM\n  board / inbox / settings / org_admin / staleness run full DB\n  projections on the DISCARDED disconnected mount (2x queries)\nchange-tracking: &lt;% x = @a %&gt; in HEEx       already-good          HIGH\n  ~30 sites; HEEx tracks assigns inside &lt;% %&gt; — style, not a breaker\nchange-tracking: streaming isolation        already-good          HIGH\n  chat per-delta touches only @streaming; transcript comprehension\n  is NOT re-diffed per token (stable_html memoized) — well designed\nchange-tracking: gantt_data(card) in :for   already-good          HIGH\n  board_live:2887 — guarded behind expanded?; bounded to open card\ntranscript growth + grouping recompute      ADOPT  -&gt; F1          HIGH(algo)\n  chat @messages unbounded; group_agent_rows O(n) in template each\n  render, O(k^2) child append — long agent session = O(n^2)+O(n) mem\nLiveComponent vs function-component         already-good          HIGH\n  sheet_grid/paper_field_block/tree_codelist handle events;\n  graph_view scopes derivation via update/2 — all justified stateful\nper-socket memory: Studio desk              already-good          MEDIUM\n  paper_blocks STREAMED (mount.ex:270); media/refs/revisions load\n  on demand; panes bounded by desk size — no unbounded desk assign\nper-socket memory: chat transcript          ADOPT  -&gt; F1          HIGH\nmodule-size extract seams                    rejected-w-reason     HIGH\n  chat_live 5055 / sheet_grid 3489 / board 3343 are fat, but NO\n  named upcoming change is made cheaper by a split — tidiness only\n\nFILED: F1 task-9e21c3f285b3d7d0 (p2)  ·  F2 task-d8970b41d745e066 (p2)\nNo priority-1 correctness finding — both qualifiers are efficiency.</pre><h2>F1 — chat_live transcript: unbounded @messages + O(n)/O(k^2) group_agent_rows recomputed every render</h2><p>Filed: task-9e21c3f285b3d7d0 (priority 2). Confidence HIGH on the algorithmic costs (code-evident); MEDIUM on absolute wire bytes (not captured live).</p><p>Named failure mode: a long Studio agent session (the sessions epic runs multi-hundred-turn conversations, each turn appending user/assistant/tool rows) accumulates the entire transcript in @messages with NO cap. Every write is socket.assigns.messages ++ [message] (chat_live.ex:1186,1387,3465,3717); grep found zero Enum.take/slice/limit on messages.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\"># chat_live.ex ~2184 — grouping recomputed INLINE in the template, not memoized:\n&lt;%= for item &lt;- group_agent_rows(@messages) do %&gt;   # O(n) over full history, each render\n\n# group_agent_rows/1 children reduce — O(k^2) for a k-child agent brood:\nMap.update(acc, pid, [m], &amp;(&amp;1 ++ [m]))              # list append is O(k)</pre><p>Three compounding costs: (1) group_agent_rows rebuilds spawn-map + children reduce + flat_map over the FULL transcript on every render that touches @messages = O(n)/turn = O(n^2)/session; (2) the &amp;1 ++ [m] child append is O(k^2) per agent brood; (3) per-socket heap holds the whole transcript for the socket lifetime and the transcript comprehension re-diffs all rows on each append (wire O(n)/turn). Fix menu: memoize grouped rows in an assign updated incrementally on append; window/paginate the transcript; replace ++ with prepend+reverse-once. Protective measurement (delegated to the fix task): a group_agent_rows micro-bench at N=2000 vs N=200 asserting non-superlinear, plus a bounded-retention test.</p><h2>F2 — Authenticated Studio LiveViews run full DB projections on the discarded disconnected mount</h2><p>Filed: task-d8970b41d745e066 (priority 2). Confidence MEDIUM — double-invocation + unguarded loads are static-evident; absolute ms/query savings not measured live.</p><p>For an auth-gated LiveView the disconnected mount render is discarded the instant the WS connects and mount runs again. These surfaces run the expensive projection UNGUARDED, so it executes on both mounts — the disconnected copy is pure waste (no crawler consumes an auth page).</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\"># board_live.ex — Board.snapshot OUTSIDE the connected? guard (heaviest: ~3 queries):\ndef mount(_p,_s,socket) do\n  if connected?(socket) do                 # :197 — guards ONLY subscribe + timer\n    Phoenix.PubSub.subscribe(...); Process.send_after(self(), :refresh, ...)\n  end\n  socket |&gt; assign(:board, Board.snapshot(dataset: @dataset)) ...   # :203 — runs on BOTH mounts\n\n# Sibling unguarded loads:\n#   inbox_live.ex:91        load_inbox (fetch_tickets + presenter)\n#   settings_live.ex:69     assign_page -&gt; assign_plugin_rows\n#   org_admin_live.ex:32    list_organizations + per-org org_status + Audit.recent(20)\n#   staleness_live.ex:52    load_books + per-book detect_stale</pre><p>Already-good contrast (do NOT touch): bulldocs_live.ex:76 + sheets_reader + quiz_play load on the dead render DELIBERATELY and correctly — they are PUBLIC pages whose crawlers/unfurlers run no JS and need the OG head + body from the disconnected render (documented at bulldocs_live.ex:76-90). Honest tradeoff: guarding removes first-paint content on the disconnected render (skeleton until WS connects). Protective measurement (delegated): an Ecto SQL.Sandbox query-count test asserting connected?==false issues zero board-projection queries.</p><h2>Already-good (verified, no change)</h2><p>Streaming isolation: chat per-text-delta touches only @streaming (chat_live.ex:945); the transcript comprehension is not re-diffed per token, and @streaming.stable_html memoizes the stable prefix — textbook design.</p><p>gantt_data(card): board_live.ex:2887 recompute is guarded behind expanded?(@expanded, card) — bounded to the open card, not all cards.</p><p>&lt;% x = @a %&gt; in HEEx (~30 sites, editor.ex / components.ex / sheet_grid.ex etc.): modern HEEx tracks assigns referenced inside &lt;% %&gt; blocks — a style smell, not a change-tracking breaker. Rejected as tidiness.</p><p>LiveComponent choices: sheet_grid (80 handle_event), paper_field_block (3), tree_codelist_field (4) are genuinely stateful; graph_view has no handle_event but uses update/2 to scope derivation per assign change — converting to a function component would recompute on every parent render. All justified.</p><p>Per-socket desk memory: the paper block list is STREAMED (mount.ex:270 stream(:paper_blocks)); media_files/ref_candidates/revisions/graph_data initialize empty and load on demand; panes are bounded by desk size. No unbounded collection sits in the desk socket.</p><h2>Rejected with reason</h2><p>Module-size extract seams: chat_live (5055 lines), sheet_grid (3489), board_live (3343) are fat, and studio_live is already decomposed into a studio_live/ subtree (mount/blocks/paper_canvas/handlers/shared). But the brief admits a split ONLY where a NAMED upcoming change is made cheaper — none was identified. Splitting for line-count alone is the tree-tidiness the charter rejects.</p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": "Read-only audit of the 20 LiveView + 4 LiveComponent modules in api/lib against corpus ch 35-38, 46…",
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-findings-liveview-tracking"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Felix Findings — d07: LiveView Lifecycle & Change-Tracking (Studio core)"
+}

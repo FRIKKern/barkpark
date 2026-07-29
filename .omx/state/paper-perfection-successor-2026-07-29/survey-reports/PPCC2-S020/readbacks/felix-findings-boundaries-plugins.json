@@ -1,0 +1,425 @@
+{
+  "_createdAt": "2026-07-10T18:17:49.582903Z",
+  "_draft": false,
+  "_id": "felix-findings-boundaries-plugins",
+  "_publishedId": "felix-findings-boundaries-plugins",
+  "_rev": "30f680c030bb098a9a47b768d7e81eab",
+  "_type": "paper",
+  "_updatedAt": "2026-07-10T18:17:49.582903Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix Audit d03 — Context Boundaries & Plugin Architecture Purity",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Read-only audit of the core-vs-plugin seam in the Barkpark api/ tree, judged against the fresh-install invariant declared in lib/barkpark/plugin.ex and the intended core/plugin split documented in api/CLAUDE.md (Bulldocs + Sheets)."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "language": "text",
+      "type": "code",
+      "value": "DOMAIN d03 — CONTEXT BOUNDARIES & PLUGIN ARCHITECTURE PURITY\nAuditor: felix-d03  |  Date: 2026-07-10  |  Corpus: ch21 (contexts), Part XII ch83-88\n\nCONCEPT                                         VERDICT              EVIDENCE\n--------------------------------------------------------------------------------------------\ncontent.ex god-context growth                   already-good        691 LOC facade; fan-in low\nBarkpark.Plugin behaviour contract completeness already-good        1245 LOC, 34 typedoc callbacks\nRegistry / Enablement with plugins OFF          already-good        kill-switch + core graph test\nCore reaches INTO plugin modules (invariant)    FINDING x2          F1 guard gap, F2 compile edge\n  - literal 'zero naming' reading               rejected-with-reason inherent host-owns-UI coupling\n--------------------------------------------------------------------------------------------\nFILED: F1 task-2bfe34a98d53be8a (p2) · F2 task-b88cd354c8ccaca3 (p2)"
+    },
+    {
+      "id": "block-3",
+      "level": 2,
+      "text": "Finding F1 — the fresh-install invariant is guarded against ONE plugin (OnixEdit)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Contract (plugin.ex:61-68): 'host code under lib/barkpark + lib/barkpark_web (excluding lib/barkpark/plugins/) must not name any plugin module.' Its regression bar, plugin_free_boot_test.exs tier 5, greps host code for exactly one namespace: Barkpark.Plugins.OnixEdit."
+        }
+      ],
+      "id": "block-4",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Measured reality (felix-d03, 2026-07-10): host code names 7 business plugins across 35 files / 64 code sites."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-6",
+      "language": "text",
+      "type": "code",
+      "value": "$ grep -rnE 'Barkpark.Plugins.(Media|Sheets|Github|Bulldocs|Tickets|Indx|Tasks)\\.[A-Z]' \\\n      lib/barkpark lib/barkpark_web --include=*.ex | grep -v lib/barkpark/plugins/\n -> 64 sites, 35 files\nNamed plugins: Media.Assets, Sheets.{Core,Engine,CondFormat,Fmt,Structure,Session},\n               Github.Link, Bulldocs.Events, Tickets.Keys, Indx.{Auth,Monitor,Recovery},\n               Tasks.hydrate_edges"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Nuance that makes the LITERAL rule un-holdable: the host owns ALL Studio UI (plugins may not ship UI, per the same contract), so SheetGrid and the Bulldocs reader NECESSARILY name Sheets/Bulldocs modules; Indx.* and Sheets.Session* are declared core-static in application.ex. That coupling is sanctioned. The problem is nothing distinguishes it from an accidental regression."
+        }
+      ],
+      "id": "block-7",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "NAMED FAILURE MODE (scar-class: guard-that-doesn't-guard / vacuous green): a future PR adding an unconditional core->removable-plugin reach — e.g. core querying Github.Link on a path that runs with Github disabled — ships GREEN. The OnixEdit-only grep never sees it, and the monorepo keeps the module compiled so there is no UndefinedFunctionError to catch it at runtime."
+        }
+      ],
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FIX (filed task-2bfe34a98d53be8a): (a) replace the absolute wording with the enforceable rule — host must not name a REMOVABLE plugin on a code path that runs when it is disabled — plus a documented always-present/UI-owned allowlist; (b) broaden the tier-5 grep to every removable-plugin namespace minus that allowlist. The broadened grep FAILS today, enumerating the true 35-file coupling surface (the protective test)."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-10",
+      "level": 2,
+      "text": "Finding F2 — core PortableDoc render has a compile-time edge into the Sheets plugin",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "walk.ex:69 (core render machinery, must render with all plugins off per api/CLAUDE.md) declares a compile-time module attribute that calls into the Sheets plugin:"
+        }
+      ],
+      "id": "block-11",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-12",
+      "language": "elixir",
+      "type": "code",
+      "value": "# lib/barkpark/portable_doc/render/walk.ex\n61  # Mirrors the canonical `Barkpark.Plugins.Sheets.merge_area_cap/0` value; a\n62  # local attr keeps portable_doc decoupled from the plugin namespace.\n63  @merge_area_cap 10_000\n...\n69  @error_values Barkpark.Plugins.Sheets.Engine.error_values()   # <- compile-time reach"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "SELF-INCONSISTENCY: six lines above, @merge_area_cap is DELIBERATELY a local mirror explicitly 'to keep portable_doc decoupled from the plugin namespace.' The module states its own decoupling doctrine for one constant, then violates it for the next. The coupled value is 7 static tokens: ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!). The same reach is duplicated at sheet_grid/cells.ex:16. These are the ONLY two host-code compile-time reaches into any plugin."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "COST (criterion 4 — provably-cheaper future change): PortableDoc.Render cannot compile without lib/barkpark/plugins/sheets present; it is the sole compile-time core->plugin edge, so making Sheets build-optional requires cutting exactly this. HONEST COUNTER-ARGUMENT: single-sourcing keeps the paper embed's error vocabulary in lockstep with the engine — a legitimate DRY case, which is why this is priority 2, not 1."
+        }
+      ],
+      "id": "block-14",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FIX (filed task-b88cd354c8ccaca3): mirror the 7 tokens locally like @merge_area_cap already does, OR move the canonical error vocabulary to a core module both sides reference (inverting the edge to core<-plugin). Protective measurement: an xref assertion that PortableDoc.Render has zero compile edges into plugins/ — fails today at walk.ex:69."
+        }
+      ],
+      "id": "block-15",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-16",
+      "level": 2,
+      "text": "Already-good (rejected-with-reason — no qualifying failure mode)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "content.ex god-context: 691 LOC. It is a thin facade delegating to a decomposed content/ subtree (writer, lifecycle, graph, sheets, papers/, broadcast, write_scope, document). Not a god context; already split. No finding."
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Barkpark.Plugin behaviour contract: 1245 LOC, 34 fully-typedoc'd optional callbacks (manifest, register_schemas/routes/workers, resolve_* chain, extract_edges, lifecycle_hooks, content_renderer, cli_commands, default_enabled?, structure_placement, owned_schema_types). Comprehensive MUST/MUST-NOT surfaces, fresh-install invariant, route buckets, idempotent registration. Exemplary. No finding."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Registry / Enablement with plugins off: Enablement.effective/1 resolves to declaration defaults on nil/failure (keeps Repo reads off the registry registration path); the registry short-circuits the disk walk under :plugins []; supervision uses pure collect_workers/1; the content graph was RELOCATED to core so /v1/graph survives the kill switch, proven by a live end-to-end test in plugin_free_boot_test.exs. Well-engineered. No finding."
+        }
+      ],
+      "id": "block-19",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Supervision reaches into Barkpark.Plugins.Indx.* and Sheets.Session*: documented core-static ('Indx is NOT a registered plugin ... MUST be declared statically'; Sheets session runtime 'CORE, plugin-independent'). Reasoned exceptions, folded into F1's allowlist rather than filed separately."
+        }
+      ],
+      "id": "block-20",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-21",
+      "level": 2,
+      "text": "Confidence notes",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "F1 CONFIRMED by direct measurement (grep counts reproducible). F2 CONFIRMED by file inspection; its priority is deliberately 2 because the DRY counter-argument is real. No priority-1 correctness crash was found: every runtime host->plugin reach is guarded by data-existence or is a documented no-op for non-matching docs, and the monorepo keeps all plugin modules compiled, so 'plugin off' never produces an UndefinedFunctionError today. Protective tests are delegated to the two fix tasks (each acceptance criterion names a grep/xref assertion that fails before the fix)."
+        }
+      ],
+      "id": "block-22",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix Audit d03 — Context Boundaries & Plugin Architecture Purity",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Read-only audit of the core-vs-plugin seam in the Barkpark api/ tree, judged against the fresh-install invariant declared in lib/barkpark/plugin.ex and the intended core/plugin split documented in api/CLAUDE.md (Bulldocs + Sheets)."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "language": "text",
+        "type": "code",
+        "value": "DOMAIN d03 — CONTEXT BOUNDARIES & PLUGIN ARCHITECTURE PURITY\nAuditor: felix-d03  |  Date: 2026-07-10  |  Corpus: ch21 (contexts), Part XII ch83-88\n\nCONCEPT                                         VERDICT              EVIDENCE\n--------------------------------------------------------------------------------------------\ncontent.ex god-context growth                   already-good        691 LOC facade; fan-in low\nBarkpark.Plugin behaviour contract completeness already-good        1245 LOC, 34 typedoc callbacks\nRegistry / Enablement with plugins OFF          already-good        kill-switch + core graph test\nCore reaches INTO plugin modules (invariant)    FINDING x2          F1 guard gap, F2 compile edge\n  - literal 'zero naming' reading               rejected-with-reason inherent host-owns-UI coupling\n--------------------------------------------------------------------------------------------\nFILED: F1 task-2bfe34a98d53be8a (p2) · F2 task-b88cd354c8ccaca3 (p2)"
+      },
+      {
+        "id": "block-3",
+        "level": 2,
+        "text": "Finding F1 — the fresh-install invariant is guarded against ONE plugin (OnixEdit)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Contract (plugin.ex:61-68): 'host code under lib/barkpark + lib/barkpark_web (excluding lib/barkpark/plugins/) must not name any plugin module.' Its regression bar, plugin_free_boot_test.exs tier 5, greps host code for exactly one namespace: Barkpark.Plugins.OnixEdit."
+          }
+        ],
+        "id": "block-4",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Measured reality (felix-d03, 2026-07-10): host code names 7 business plugins across 35 files / 64 code sites."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-6",
+        "language": "text",
+        "type": "code",
+        "value": "$ grep -rnE 'Barkpark.Plugins.(Media|Sheets|Github|Bulldocs|Tickets|Indx|Tasks)\\.[A-Z]' \\\n      lib/barkpark lib/barkpark_web --include=*.ex | grep -v lib/barkpark/plugins/\n -> 64 sites, 35 files\nNamed plugins: Media.Assets, Sheets.{Core,Engine,CondFormat,Fmt,Structure,Session},\n               Github.Link, Bulldocs.Events, Tickets.Keys, Indx.{Auth,Monitor,Recovery},\n               Tasks.hydrate_edges"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Nuance that makes the LITERAL rule un-holdable: the host owns ALL Studio UI (plugins may not ship UI, per the same contract), so SheetGrid and the Bulldocs reader NECESSARILY name Sheets/Bulldocs modules; Indx.* and Sheets.Session* are declared core-static in application.ex. That coupling is sanctioned. The problem is nothing distinguishes it from an accidental regression."
+          }
+        ],
+        "id": "block-7",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "NAMED FAILURE MODE (scar-class: guard-that-doesn't-guard / vacuous green): a future PR adding an unconditional core->removable-plugin reach — e.g. core querying Github.Link on a path that runs with Github disabled — ships GREEN. The OnixEdit-only grep never sees it, and the monorepo keeps the module compiled so there is no UndefinedFunctionError to catch it at runtime."
+          }
+        ],
+        "id": "block-8",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FIX (filed task-2bfe34a98d53be8a): (a) replace the absolute wording with the enforceable rule — host must not name a REMOVABLE plugin on a code path that runs when it is disabled — plus a documented always-present/UI-owned allowlist; (b) broaden the tier-5 grep to every removable-plugin namespace minus that allowlist. The broadened grep FAILS today, enumerating the true 35-file coupling surface (the protective test)."
+          }
+        ],
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-10",
+        "level": 2,
+        "text": "Finding F2 — core PortableDoc render has a compile-time edge into the Sheets plugin",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "walk.ex:69 (core render machinery, must render with all plugins off per api/CLAUDE.md) declares a compile-time module attribute that calls into the Sheets plugin:"
+          }
+        ],
+        "id": "block-11",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-12",
+        "language": "elixir",
+        "type": "code",
+        "value": "# lib/barkpark/portable_doc/render/walk.ex\n61  # Mirrors the canonical `Barkpark.Plugins.Sheets.merge_area_cap/0` value; a\n62  # local attr keeps portable_doc decoupled from the plugin namespace.\n63  @merge_area_cap 10_000\n...\n69  @error_values Barkpark.Plugins.Sheets.Engine.error_values()   # <- compile-time reach"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "SELF-INCONSISTENCY: six lines above, @merge_area_cap is DELIBERATELY a local mirror explicitly 'to keep portable_doc decoupled from the plugin namespace.' The module states its own decoupling doctrine for one constant, then violates it for the next. The coupled value is 7 static tokens: ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!). The same reach is duplicated at sheet_grid/cells.ex:16. These are the ONLY two host-code compile-time reaches into any plugin."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "COST (criterion 4 — provably-cheaper future change): PortableDoc.Render cannot compile without lib/barkpark/plugins/sheets present; it is the sole compile-time core->plugin edge, so making Sheets build-optional requires cutting exactly this. HONEST COUNTER-ARGUMENT: single-sourcing keeps the paper embed's error vocabulary in lockstep with the engine — a legitimate DRY case, which is why this is priority 2, not 1."
+          }
+        ],
+        "id": "block-14",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FIX (filed task-b88cd354c8ccaca3): mirror the 7 tokens locally like @merge_area_cap already does, OR move the canonical error vocabulary to a core module both sides reference (inverting the edge to core<-plugin). Protective measurement: an xref assertion that PortableDoc.Render has zero compile edges into plugins/ — fails today at walk.ex:69."
+          }
+        ],
+        "id": "block-15",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-16",
+        "level": 2,
+        "text": "Already-good (rejected-with-reason — no qualifying failure mode)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "content.ex god-context: 691 LOC. It is a thin facade delegating to a decomposed content/ subtree (writer, lifecycle, graph, sheets, papers/, broadcast, write_scope, document). Not a god context; already split. No finding."
+          }
+        ],
+        "id": "block-17",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Barkpark.Plugin behaviour contract: 1245 LOC, 34 fully-typedoc'd optional callbacks (manifest, register_schemas/routes/workers, resolve_* chain, extract_edges, lifecycle_hooks, content_renderer, cli_commands, default_enabled?, structure_placement, owned_schema_types). Comprehensive MUST/MUST-NOT surfaces, fresh-install invariant, route buckets, idempotent registration. Exemplary. No finding."
+          }
+        ],
+        "id": "block-18",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Registry / Enablement with plugins off: Enablement.effective/1 resolves to declaration defaults on nil/failure (keeps Repo reads off the registry registration path); the registry short-circuits the disk walk under :plugins []; supervision uses pure collect_workers/1; the content graph was RELOCATED to core so /v1/graph survives the kill switch, proven by a live end-to-end test in plugin_free_boot_test.exs. Well-engineered. No finding."
+          }
+        ],
+        "id": "block-19",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Supervision reaches into Barkpark.Plugins.Indx.* and Sheets.Session*: documented core-static ('Indx is NOT a registered plugin ... MUST be declared statically'; Sheets session runtime 'CORE, plugin-independent'). Reasoned exceptions, folded into F1's allowlist rather than filed separately."
+          }
+        ],
+        "id": "block-20",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-21",
+        "level": 2,
+        "text": "Confidence notes",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "F1 CONFIRMED by direct measurement (grep counts reproducible). F2 CONFIRMED by file inspection; its priority is deliberately 2 because the DRY counter-argument is real. No priority-1 correctness crash was found: every runtime host->plugin reach is guarded by data-existence or is a documented no-op for non-matching docs, and the monorepo keeps all plugin modules compiled, so 'plugin off' never produces an UndefinedFunctionError today. Protective tests are delegated to the two fix tasks (each acceptance criterion names a grep/xref assertion that fails before the fix)."
+          }
+        ],
+        "id": "block-22",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix Audit d03 — Context Boundaries &amp; Plugin Architecture Purity</h1><p>Read-only audit of the core-vs-plugin seam in the Barkpark api/ tree, judged against the fresh-install invariant declared in lib/barkpark/plugin.ex and the intended core/plugin split documented in api/CLAUDE.md (Bulldocs + Sheets).</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">DOMAIN d03 — CONTEXT BOUNDARIES &amp; PLUGIN ARCHITECTURE PURITY</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Auditor: felix-d03  |  Date: 2026-07-10  |  Corpus: ch21 (contexts), Part XII ch83-88</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">CONCEPT                                         VERDICT              EVIDENCE</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">--------------------------------------------------------------------------------------------</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">content.ex god-context growth                   already-good        691 LOC facade; fan-in low</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Barkpark.Plugin behaviour contract completeness already-good        1245 LOC, 34 typedoc callbacks</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Registry / Enablement with plugins OFF          already-good        kill-switch + core graph test</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Core reaches INTO plugin modules (invariant)    FINDING x2          F1 guard gap, F2 compile edge</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  - literal &#39;zero naming&#39; reading               rejected-with-reason inherent host-owns-UI coupling</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">--------------------------------------------------------------------------------------------</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">FILED: F1 task-2bfe34a98d53be8a (p2) · F2 task-b88cd354c8ccaca3 (p2)</code></span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding F1 — the fresh-install invariant is guarded against ONE plugin (OnixEdit)</h2><p>Contract (plugin.ex:61-68): &#39;host code under lib/barkpark + lib/barkpark_web (excluding lib/barkpark/plugins/) must not name any plugin module.&#39; Its regression bar, plugin_free_boot_test.exs tier 5, greps host code for exactly one namespace: Barkpark.Plugins.OnixEdit.</p><p>Measured reality (felix-d03, 2026-07-10): host code names 7 business plugins across 35 files / 64 code sites.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">$ grep -rnE &#39;Barkpark.Plugins.(Media|Sheets|Github|Bulldocs|Tickets|Indx|Tasks)\\.[A-Z]&#39; \\</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">      lib/barkpark lib/barkpark_web --include=*.ex | grep -v lib/barkpark/plugins/</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"> -&gt; 64 sites, 35 files</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Named plugins: Media.Assets, Sheets.{Core,Engine,CondFormat,Fmt,Structure,Session},</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">               Github.Link, Bulldocs.Events, Tickets.Keys, Indx.{Auth,Monitor,Recovery},</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">               Tasks.hydrate_edges</code></span></div><p>Nuance that makes the LITERAL rule un-holdable: the host owns ALL Studio UI (plugins may not ship UI, per the same contract), so SheetGrid and the Bulldocs reader NECESSARILY name Sheets/Bulldocs modules; Indx.* and Sheets.Session* are declared core-static in application.ex. That coupling is sanctioned. The problem is nothing distinguishes it from an accidental regression.</p><p>NAMED FAILURE MODE (scar-class: guard-that-doesn&#39;t-guard / vacuous green): a future PR adding an unconditional core-&gt;removable-plugin reach — e.g. core querying Github.Link on a path that runs with Github disabled — ships GREEN. The OnixEdit-only grep never sees it, and the monorepo keeps the module compiled so there is no UndefinedFunctionError to catch it at runtime.</p><p>FIX (filed task-2bfe34a98d53be8a): (a) replace the absolute wording with the enforceable rule — host must not name a REMOVABLE plugin on a code path that runs when it is disabled — plus a documented always-present/UI-owned allowlist; (b) broaden the tier-5 grep to every removable-plugin namespace minus that allowlist. The broadened grep FAILS today, enumerating the true 35-file coupling surface (the protective test).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding F2 — core PortableDoc render has a compile-time edge into the Sheets plugin</h2><p>walk.ex:69 (core render machinery, must render with all plugins off per api/CLAUDE.md) declares a compile-time module attribute that calls into the Sheets plugin:</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># lib/barkpark/portable_doc/render/walk.ex</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">61  # Mirrors the canonical `Barkpark.Plugins.Sheets.merge_area_cap/0` value; a</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">62  # local attr keeps portable_doc decoupled from the plugin namespace.</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">63  @merge_area_cap 10_000</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">...</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">69  @error_values Barkpark.Plugins.Sheets.Engine.error_values()   # &lt;- compile-time reach</code></span></div><p>SELF-INCONSISTENCY: six lines above, @merge_area_cap is DELIBERATELY a local mirror explicitly &#39;to keep portable_doc decoupled from the plugin namespace.&#39; The module states its own decoupling doctrine for one constant, then violates it for the next. The coupled value is 7 static tokens: ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!). The same reach is duplicated at sheet_grid/cells.ex:16. These are the ONLY two host-code compile-time reaches into any plugin.</p><p>COST (criterion 4 — provably-cheaper future change): PortableDoc.Render cannot compile without lib/barkpark/plugins/sheets present; it is the sole compile-time core-&gt;plugin edge, so making Sheets build-optional requires cutting exactly this. HONEST COUNTER-ARGUMENT: single-sourcing keeps the paper embed&#39;s error vocabulary in lockstep with the engine — a legitimate DRY case, which is why this is priority 2, not 1.</p><p>FIX (filed task-b88cd354c8ccaca3): mirror the 7 tokens locally like @merge_area_cap already does, OR move the canonical error vocabulary to a core module both sides reference (inverting the edge to core&lt;-plugin). Protective measurement: an xref assertion that PortableDoc.Render has zero compile edges into plugins/ — fails today at walk.ex:69.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Already-good (rejected-with-reason — no qualifying failure mode)</h2><p>content.ex god-context: 691 LOC. It is a thin facade delegating to a decomposed content/ subtree (writer, lifecycle, graph, sheets, papers/, broadcast, write_scope, document). Not a god context; already split. No finding.</p><p>Barkpark.Plugin behaviour contract: 1245 LOC, 34 fully-typedoc&#39;d optional callbacks (manifest, register_schemas/routes/workers, resolve_* chain, extract_edges, lifecycle_hooks, content_renderer, cli_commands, default_enabled?, structure_placement, owned_schema_types). Comprehensive MUST/MUST-NOT surfaces, fresh-install invariant, route buckets, idempotent registration. Exemplary. No finding.</p><p>Registry / Enablement with plugins off: Enablement.effective/1 resolves to declaration defaults on nil/failure (keeps Repo reads off the registry registration path); the registry short-circuits the disk walk under :plugins []; supervision uses pure collect_workers/1; the content graph was RELOCATED to core so /v1/graph survives the kill switch, proven by a live end-to-end test in plugin_free_boot_test.exs. Well-engineered. No finding.</p><p>Supervision reaches into Barkpark.Plugins.Indx.* and Sheets.Session*: documented core-static (&#39;Indx is NOT a registered plugin ... MUST be declared statically&#39;; Sheets session runtime &#39;CORE, plugin-independent&#39;). Reasoned exceptions, folded into F1&#39;s allowlist rather than filed separately.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Confidence notes</h2><p>F1 CONFIRMED by direct measurement (grep counts reproducible). F2 CONFIRMED by file inspection; its priority is deliberately 2 because the DRY counter-argument is real. No priority-1 correctness crash was found: every runtime host-&gt;plugin reach is guarded by data-existence or is a documented no-op for non-matching docs, and the monorepo keeps all plugin modules compiled, so &#39;plugin off&#39; never produces an UndefinedFunctionError today. Protective tests are delegated to the two fix tasks (each acceptance criterion names a grep/xref assertion that fails before the fix).</p>"
+  },
+  "body_html": "<h1>Felix Audit d03 — Context Boundaries &amp; Plugin Architecture Purity</h1><p>Read-only audit of the core-vs-plugin seam in the Barkpark api/ tree, judged against the fresh-install invariant declared in lib/barkpark/plugin.ex and the intended core/plugin split documented in api/CLAUDE.md (Bulldocs + Sheets).</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">DOMAIN d03 — CONTEXT BOUNDARIES &amp; PLUGIN ARCHITECTURE PURITY\nAuditor: felix-d03  |  Date: 2026-07-10  |  Corpus: ch21 (contexts), Part XII ch83-88\n\nCONCEPT                                         VERDICT              EVIDENCE\n--------------------------------------------------------------------------------------------\ncontent.ex god-context growth                   already-good        691 LOC facade; fan-in low\nBarkpark.Plugin behaviour contract completeness already-good        1245 LOC, 34 typedoc callbacks\nRegistry / Enablement with plugins OFF          already-good        kill-switch + core graph test\nCore reaches INTO plugin modules (invariant)    FINDING x2          F1 guard gap, F2 compile edge\n  - literal &#39;zero naming&#39; reading               rejected-with-reason inherent host-owns-UI coupling\n--------------------------------------------------------------------------------------------\nFILED: F1 task-2bfe34a98d53be8a (p2) · F2 task-b88cd354c8ccaca3 (p2)</pre><h2>Finding F1 — the fresh-install invariant is guarded against ONE plugin (OnixEdit)</h2><p>Contract (plugin.ex:61-68): &#39;host code under lib/barkpark + lib/barkpark_web (excluding lib/barkpark/plugins/) must not name any plugin module.&#39; Its regression bar, plugin_free_boot_test.exs tier 5, greps host code for exactly one namespace: Barkpark.Plugins.OnixEdit.</p><p>Measured reality (felix-d03, 2026-07-10): host code names 7 business plugins across 35 files / 64 code sites.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">$ grep -rnE &#39;Barkpark.Plugins.(Media|Sheets|Github|Bulldocs|Tickets|Indx|Tasks)\\.[A-Z]&#39; \\\n      lib/barkpark lib/barkpark_web --include=*.ex | grep -v lib/barkpark/plugins/\n -&gt; 64 sites, 35 files\nNamed plugins: Media.Assets, Sheets.{Core,Engine,CondFormat,Fmt,Structure,Session},\n               Github.Link, Bulldocs.Events, Tickets.Keys, Indx.{Auth,Monitor,Recovery},\n               Tasks.hydrate_edges</pre><p>Nuance that makes the LITERAL rule un-holdable: the host owns ALL Studio UI (plugins may not ship UI, per the same contract), so SheetGrid and the Bulldocs reader NECESSARILY name Sheets/Bulldocs modules; Indx.* and Sheets.Session* are declared core-static in application.ex. That coupling is sanctioned. The problem is nothing distinguishes it from an accidental regression.</p><p>NAMED FAILURE MODE (scar-class: guard-that-doesn&#39;t-guard / vacuous green): a future PR adding an unconditional core-&gt;removable-plugin reach — e.g. core querying Github.Link on a path that runs with Github disabled — ships GREEN. The OnixEdit-only grep never sees it, and the monorepo keeps the module compiled so there is no UndefinedFunctionError to catch it at runtime.</p><p>FIX (filed task-2bfe34a98d53be8a): (a) replace the absolute wording with the enforceable rule — host must not name a REMOVABLE plugin on a code path that runs when it is disabled — plus a documented always-present/UI-owned allowlist; (b) broaden the tier-5 grep to every removable-plugin namespace minus that allowlist. The broadened grep FAILS today, enumerating the true 35-file coupling surface (the protective test).</p><h2>Finding F2 — core PortableDoc render has a compile-time edge into the Sheets plugin</h2><p>walk.ex:69 (core render machinery, must render with all plugins off per api/CLAUDE.md) declares a compile-time module attribute that calls into the Sheets plugin:</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\"># lib/barkpark/portable_doc/render/walk.ex\n61  # Mirrors the canonical `Barkpark.Plugins.Sheets.merge_area_cap/0` value; a\n62  # local attr keeps portable_doc decoupled from the plugin namespace.\n63  @merge_area_cap 10_000\n...\n69  @error_values Barkpark.Plugins.Sheets.Engine.error_values()   # &lt;- compile-time reach</pre><p>SELF-INCONSISTENCY: six lines above, @merge_area_cap is DELIBERATELY a local mirror explicitly &#39;to keep portable_doc decoupled from the plugin namespace.&#39; The module states its own decoupling doctrine for one constant, then violates it for the next. The coupled value is 7 static tokens: ~w(#CYCLE! #REF! #VALUE! #DIV/0! #N/A #NUM! #SPILL!). The same reach is duplicated at sheet_grid/cells.ex:16. These are the ONLY two host-code compile-time reaches into any plugin.</p><p>COST (criterion 4 — provably-cheaper future change): PortableDoc.Render cannot compile without lib/barkpark/plugins/sheets present; it is the sole compile-time core-&gt;plugin edge, so making Sheets build-optional requires cutting exactly this. HONEST COUNTER-ARGUMENT: single-sourcing keeps the paper embed&#39;s error vocabulary in lockstep with the engine — a legitimate DRY case, which is why this is priority 2, not 1.</p><p>FIX (filed task-b88cd354c8ccaca3): mirror the 7 tokens locally like @merge_area_cap already does, OR move the canonical error vocabulary to a core module both sides reference (inverting the edge to core&lt;-plugin). Protective measurement: an xref assertion that PortableDoc.Render has zero compile edges into plugins/ — fails today at walk.ex:69.</p><h2>Already-good (rejected-with-reason — no qualifying failure mode)</h2><p>content.ex god-context: 691 LOC. It is a thin facade delegating to a decomposed content/ subtree (writer, lifecycle, graph, sheets, papers/, broadcast, write_scope, document). Not a god context; already split. No finding.</p><p>Barkpark.Plugin behaviour contract: 1245 LOC, 34 fully-typedoc&#39;d optional callbacks (manifest, register_schemas/routes/workers, resolve_* chain, extract_edges, lifecycle_hooks, content_renderer, cli_commands, default_enabled?, structure_placement, owned_schema_types). Comprehensive MUST/MUST-NOT surfaces, fresh-install invariant, route buckets, idempotent registration. Exemplary. No finding.</p><p>Registry / Enablement with plugins off: Enablement.effective/1 resolves to declaration defaults on nil/failure (keeps Repo reads off the registry registration path); the registry short-circuits the disk walk under :plugins []; supervision uses pure collect_workers/1; the content graph was RELOCATED to core so /v1/graph survives the kill switch, proven by a live end-to-end test in plugin_free_boot_test.exs. Well-engineered. No finding.</p><p>Supervision reaches into Barkpark.Plugins.Indx.* and Sheets.Session*: documented core-static (&#39;Indx is NOT a registered plugin ... MUST be declared statically&#39;; Sheets session runtime &#39;CORE, plugin-independent&#39;). Reasoned exceptions, folded into F1&#39;s allowlist rather than filed separately.</p><h2>Confidence notes</h2><p>F1 CONFIRMED by direct measurement (grep counts reproducible). F2 CONFIRMED by file inspection; its priority is deliberately 2 because the DRY counter-argument is real. No priority-1 correctness crash was found: every runtime host-&gt;plugin reach is guarded by data-existence or is a documented no-op for non-matching docs, and the monorepo keeps all plugin modules compiled, so &#39;plugin off&#39; never produces an UndefinedFunctionError today. Protective tests are delegated to the two fix tasks (each acceptance criterion names a grep/xref assertion that fails before the fix).</p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": "Read-only audit of the core-vs-plugin seam in the Barkpark api/ tree, judged against the fresh-install…",
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-findings-boundaries-plugins"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Felix Audit d03 — Context Boundaries & Plugin Architecture Purity"
+}

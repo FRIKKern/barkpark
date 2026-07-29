@@ -1,0 +1,325 @@
+{
+  "_createdAt": "2026-07-10T18:19:50.201220Z",
+  "_draft": false,
+  "_id": "felix-findings-schemas-changesets",
+  "_publishedId": "felix-findings-schemas-changesets",
+  "_rev": "3d5bab334823479b4a24f2c62c9104bf",
+  "_type": "paper",
+  "_updatedAt": "2026-07-10T18:19:50.201220Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix d04 — Ecto Schemas & Changeset Discipline: Findings",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Audit of the Barkpark api/ Ecto layer (59 schema modules, 156 Repo.get/get_by/one call sites, 131 migrations) against corpus ch. 25-26. Method: three parallel call-chain traces of the binary_id CastError scar CLASS, one full migration<->changeset constraint-parity cross-check, plus direct read of the cast allowlists and the two fail-closed crypto/redaction modules. Every finding is independently re-verified against source. Doctrine: a finding qualifies ONLY via a named failure mode with concrete inputs -> wrong outcome; tidiness rejected."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "Verdict summary",
+      "type": "heading"
+    },
+    {
+      "id": "block-3",
+      "language": "text",
+      "type": "code",
+      "value": "CONCEPT                                          VERDICT            EVIDENCE\nbinary_id CastError scar (raw id -> Repo.get)    1 FINDING + clean   webauthn.ex:145 unguarded; ~156 other sites safe\ncast/4 allowlists vs mass assignment             ALREADY-GOOD       explicit field lists; server-managed fields non-castable\nvalidations (UX) vs DB constraints (truth)       1 FINDING + clean   surface_config unmapped unique index; 30+ schemas mapped\nembedded schemas for JSONB content               REJECTED-W-REASON  deliberate raw-map (headless CMS), validated by schema-v2\nredaction.ex fail-closed                         ALREADY-GOOD       allowlist log-scrubber, callers destructure first\nencrypted_map.ex / encrypted_binary.ex           ALREADY-GOOD       Cloak AES-GCM, raises on decrypt failure = fail-closed"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Finding 1 (priority 1) — webauthn delete_credential: non-UUID :id -> CastError 500",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "NAMED FAILURE MODE: DELETE /v1/auth/webauthn/credentials/:id (router.ex:1227, pipe_through [:user_auth,:require_user]) passes the raw :id path param unmodified through webauthn_controller.ex:188-189 into Barkpark.Accounts.Webauthn.delete_credential/2, which calls Repo.get_by(WebauthnCredential, id: id, user_id: uid). WebauthnCredential PK is :binary_id. Any authenticated user hitting DELETE .../credentials/garbage (non-UUID :id) makes Ecto cast 'garbage' to :binary_id inside get_by -> Ecto.CastError -> HTTP 500, instead of the intended 404 not_found. The user_id: uid scoping does NOT save it — the cast on id: fires regardless. This is the exact binary_id CastError scar class; the canonical guard Barkpark.Repo.uuid_or_nil/1 is not on this path."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-6",
+      "language": "elixir",
+      "type": "code",
+      "value": "# lib/barkpark/accounts/webauthn.ex:144-145\ndef delete_credential(%User{id: uid}, id) do\n  case Repo.get_by(WebauthnCredential, id: id, user_id: uid) do   # <- id is raw path param, PK is :binary_id\n    nil -> {:error, :not_found}\n# FIX: with id when (uuid = Repo.uuid_or_nil(id)) != nil ... else nil -> {:error, :not_found}"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Filed: task-b5af6673bfb773ea. Protective test (fails before fix): authenticated DELETE with a non-UUID :id returns 404, not 500."
+        }
+      ],
+      "id": "block-7",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-8",
+      "level": 2,
+      "text": "Finding 2 (priority 2) — search_surface_config: unmapped unique index -> ConstraintError 500 on concurrent first PUT",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "NAMED FAILURE MODE (validations-vs-constraints, FAILURE-B): migration 20260527100000:17-18 creates UNIQUE index search_surface_config_surface_scope_idx on (surface, scope). But SurfaceConfig.changeset/2 (surface_config.ex:36) casts only the 4 config fields and maps NO unique_constraint, and surface_configs.ex:136-140 does Repo.get_by then, on nil, Repo.insert() with NO on_conflict. External entry: search_controller.ex:270 and v1/media_controller.ex:156. Trigger: for a (surface,scope) with no row yet (a new dataset's first search-config PUT), two concurrent PUTs both see get_by=nil, both insert, the second violates the unique index -> Ecto.ConstraintError uncaught -> HTTP 500 instead of a clean update/idempotent upsert. Admin-gated and race-only (pre-seeded documents/media production rows unaffected), but the index exists and the changeset ignores it — the exact 'constraints are truth' gap."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-10",
+      "language": "elixir",
+      "type": "code",
+      "value": "# lib/barkpark/search/surface_configs.ex:136-140\ncase Repo.get_by(SurfaceConfig, surface: surface, scope: scope) do\n  nil ->\n    %SurfaceConfig{surface: surface, scope: scope}\n    |> SurfaceConfig.changeset(merged)\n    |> Repo.insert()          # <- no on_conflict; changeset maps no unique_constraint\n# FIX: mirror plugin_settings/secrets — Repo.insert_or_update(on_conflict: {:replace_all_except, ...}, conflict_target: [:surface,:scope])"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Filed: task-1a4e660c18bb3046. Protective test (fails before fix): two inserts for the same new (surface,scope) — the second returns {:error, changeset} or is idempotent, not an uncaught ConstraintError."
+        }
+      ],
+      "id": "block-11",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-12",
+      "level": 2,
+      "text": "Already-good (verified, no change) — the doctrine is largely held",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "binary_id scar, the other ~155 sites: SAFE via one of three guards — (a) canonical Repo.uuid_or_nil/1 at the context boundary (tenancy.ex 149/320/600, access.ex 127/404, auth.ex 214, status.ex 133, sharing/links.ex 97, bulldocs/events.ex 66/110, search/synonyms.ex 67, tickets/keys.ex, studio_chat.ex 62); (b) the doc_id->Document text-column indirection — the entire task-mutation surface (fence/mutations/release/close/move + content/writer/lifecycle) resolves the external doc_id string via find_task_by_doc_id (a query on the TEXT doc_id column) and passes only the fetched row's real UUID .id downward, so a garbage id returns 404 at the controller and never reaches a :binary_id query; (c) not a binary_id key (github conflict + webhook MutationEvent are integer keys validated by Integer.parse; onixedit staleness + task board query the :string doc_id field), or the id is DB-sourced (Oban job args, loaded rows)."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "cast/4 allowlists: every changeset uses an explicit field allowlist — zero __schema__(:fields)/Map.keys mass-assignment. Privilege/server-managed fields are deliberately excluded: User.failed_login_count/locked_until ('NEVER castable'), Webhook auto-disable + secret-rotation fields, and Membership.role is validated by inclusion against valid_roles with the role passed explicitly by callers. Access.Grant fails closed on its capability vocabulary (read/write/admin only)."
+        }
+      ],
+      "id": "block-14",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Constraint parity: 30+ external-write schemas carry the DB constraint AND a matching changeset mapping, with every explicit name: verified byte-aligned to its migration index name (no vacuous mappings). users.email correctly pairs unsafe_validate_unique (UX) with unique_constraint + a real UNIQUE(email) (truth). No FAILURE-A (vacuous constraint) anywhere. plugin_settings/secrets have unmapped PK uniqueness but resolve the race in-DB via Repo.insert_or_update(on_conflict:), so they are SAFE — this is the pattern surface_config should copy. webhooks FKs are unmapped but tenant scope is server-resolved (client scope keys stripped), not external-reachable today."
+        }
+      ],
+      "id": "block-15",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Fail-closed modules: redaction.ex is an allowlist secret-log scrubber used ONLY by plugin Inspect impls that destructure specific fields first, so the struct-passthrough branch never receives a secret-bearing struct — appropriate, not leaky (and it is distinct from Envelope field-visibility redaction). encrypted_map.ex / encrypted_binary.ex are Cloak AES-GCM types that raise on decrypt failure = fail-closed. Embedded-schema-for-JSONB is deliberately rejected: Document.content is a raw map by design (one content model, many surfaces), validated by the schema-v2 validation layer, not Ecto embeds."
+        }
+      ],
+      "id": "block-16",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Watch-item (NOT filed — no live failure mode, would be speculative): Accounts.get_user/1 (accounts.ex:40) does an unguarded Repo.get(User, id). All current callers feed DB-sourced or already-cast UUIDs, so it is SAFE today; it becomes a 500 the instant any controller wires a raw :user_id/:id path param straight into it. One-line uuid_or_nil guard would pre-empt that, but per the improvement doctrine there is no named failure mode today, so it stays a note."
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix d04 — Ecto Schemas & Changeset Discipline: Findings",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Audit of the Barkpark api/ Ecto layer (59 schema modules, 156 Repo.get/get_by/one call sites, 131 migrations) against corpus ch. 25-26. Method: three parallel call-chain traces of the binary_id CastError scar CLASS, one full migration<->changeset constraint-parity cross-check, plus direct read of the cast allowlists and the two fail-closed crypto/redaction modules. Every finding is independently re-verified against source. Doctrine: a finding qualifies ONLY via a named failure mode with concrete inputs -> wrong outcome; tidiness rejected."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "level": 2,
+        "text": "Verdict summary",
+        "type": "heading"
+      },
+      {
+        "id": "block-3",
+        "language": "text",
+        "type": "code",
+        "value": "CONCEPT                                          VERDICT            EVIDENCE\nbinary_id CastError scar (raw id -> Repo.get)    1 FINDING + clean   webauthn.ex:145 unguarded; ~156 other sites safe\ncast/4 allowlists vs mass assignment             ALREADY-GOOD       explicit field lists; server-managed fields non-castable\nvalidations (UX) vs DB constraints (truth)       1 FINDING + clean   surface_config unmapped unique index; 30+ schemas mapped\nembedded schemas for JSONB content               REJECTED-W-REASON  deliberate raw-map (headless CMS), validated by schema-v2\nredaction.ex fail-closed                         ALREADY-GOOD       allowlist log-scrubber, callers destructure first\nencrypted_map.ex / encrypted_binary.ex           ALREADY-GOOD       Cloak AES-GCM, raises on decrypt failure = fail-closed"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "Finding 1 (priority 1) — webauthn delete_credential: non-UUID :id -> CastError 500",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "NAMED FAILURE MODE: DELETE /v1/auth/webauthn/credentials/:id (router.ex:1227, pipe_through [:user_auth,:require_user]) passes the raw :id path param unmodified through webauthn_controller.ex:188-189 into Barkpark.Accounts.Webauthn.delete_credential/2, which calls Repo.get_by(WebauthnCredential, id: id, user_id: uid). WebauthnCredential PK is :binary_id. Any authenticated user hitting DELETE .../credentials/garbage (non-UUID :id) makes Ecto cast 'garbage' to :binary_id inside get_by -> Ecto.CastError -> HTTP 500, instead of the intended 404 not_found. The user_id: uid scoping does NOT save it — the cast on id: fires regardless. This is the exact binary_id CastError scar class; the canonical guard Barkpark.Repo.uuid_or_nil/1 is not on this path."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-6",
+        "language": "elixir",
+        "type": "code",
+        "value": "# lib/barkpark/accounts/webauthn.ex:144-145\ndef delete_credential(%User{id: uid}, id) do\n  case Repo.get_by(WebauthnCredential, id: id, user_id: uid) do   # <- id is raw path param, PK is :binary_id\n    nil -> {:error, :not_found}\n# FIX: with id when (uuid = Repo.uuid_or_nil(id)) != nil ... else nil -> {:error, :not_found}"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Filed: task-b5af6673bfb773ea. Protective test (fails before fix): authenticated DELETE with a non-UUID :id returns 404, not 500."
+          }
+        ],
+        "id": "block-7",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-8",
+        "level": 2,
+        "text": "Finding 2 (priority 2) — search_surface_config: unmapped unique index -> ConstraintError 500 on concurrent first PUT",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "NAMED FAILURE MODE (validations-vs-constraints, FAILURE-B): migration 20260527100000:17-18 creates UNIQUE index search_surface_config_surface_scope_idx on (surface, scope). But SurfaceConfig.changeset/2 (surface_config.ex:36) casts only the 4 config fields and maps NO unique_constraint, and surface_configs.ex:136-140 does Repo.get_by then, on nil, Repo.insert() with NO on_conflict. External entry: search_controller.ex:270 and v1/media_controller.ex:156. Trigger: for a (surface,scope) with no row yet (a new dataset's first search-config PUT), two concurrent PUTs both see get_by=nil, both insert, the second violates the unique index -> Ecto.ConstraintError uncaught -> HTTP 500 instead of a clean update/idempotent upsert. Admin-gated and race-only (pre-seeded documents/media production rows unaffected), but the index exists and the changeset ignores it — the exact 'constraints are truth' gap."
+          }
+        ],
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-10",
+        "language": "elixir",
+        "type": "code",
+        "value": "# lib/barkpark/search/surface_configs.ex:136-140\ncase Repo.get_by(SurfaceConfig, surface: surface, scope: scope) do\n  nil ->\n    %SurfaceConfig{surface: surface, scope: scope}\n    |> SurfaceConfig.changeset(merged)\n    |> Repo.insert()          # <- no on_conflict; changeset maps no unique_constraint\n# FIX: mirror plugin_settings/secrets — Repo.insert_or_update(on_conflict: {:replace_all_except, ...}, conflict_target: [:surface,:scope])"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Filed: task-1a4e660c18bb3046. Protective test (fails before fix): two inserts for the same new (surface,scope) — the second returns {:error, changeset} or is idempotent, not an uncaught ConstraintError."
+          }
+        ],
+        "id": "block-11",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-12",
+        "level": 2,
+        "text": "Already-good (verified, no change) — the doctrine is largely held",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "binary_id scar, the other ~155 sites: SAFE via one of three guards — (a) canonical Repo.uuid_or_nil/1 at the context boundary (tenancy.ex 149/320/600, access.ex 127/404, auth.ex 214, status.ex 133, sharing/links.ex 97, bulldocs/events.ex 66/110, search/synonyms.ex 67, tickets/keys.ex, studio_chat.ex 62); (b) the doc_id->Document text-column indirection — the entire task-mutation surface (fence/mutations/release/close/move + content/writer/lifecycle) resolves the external doc_id string via find_task_by_doc_id (a query on the TEXT doc_id column) and passes only the fetched row's real UUID .id downward, so a garbage id returns 404 at the controller and never reaches a :binary_id query; (c) not a binary_id key (github conflict + webhook MutationEvent are integer keys validated by Integer.parse; onixedit staleness + task board query the :string doc_id field), or the id is DB-sourced (Oban job args, loaded rows)."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "cast/4 allowlists: every changeset uses an explicit field allowlist — zero __schema__(:fields)/Map.keys mass-assignment. Privilege/server-managed fields are deliberately excluded: User.failed_login_count/locked_until ('NEVER castable'), Webhook auto-disable + secret-rotation fields, and Membership.role is validated by inclusion against valid_roles with the role passed explicitly by callers. Access.Grant fails closed on its capability vocabulary (read/write/admin only)."
+          }
+        ],
+        "id": "block-14",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Constraint parity: 30+ external-write schemas carry the DB constraint AND a matching changeset mapping, with every explicit name: verified byte-aligned to its migration index name (no vacuous mappings). users.email correctly pairs unsafe_validate_unique (UX) with unique_constraint + a real UNIQUE(email) (truth). No FAILURE-A (vacuous constraint) anywhere. plugin_settings/secrets have unmapped PK uniqueness but resolve the race in-DB via Repo.insert_or_update(on_conflict:), so they are SAFE — this is the pattern surface_config should copy. webhooks FKs are unmapped but tenant scope is server-resolved (client scope keys stripped), not external-reachable today."
+          }
+        ],
+        "id": "block-15",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Fail-closed modules: redaction.ex is an allowlist secret-log scrubber used ONLY by plugin Inspect impls that destructure specific fields first, so the struct-passthrough branch never receives a secret-bearing struct — appropriate, not leaky (and it is distinct from Envelope field-visibility redaction). encrypted_map.ex / encrypted_binary.ex are Cloak AES-GCM types that raise on decrypt failure = fail-closed. Embedded-schema-for-JSONB is deliberately rejected: Document.content is a raw map by design (one content model, many surfaces), validated by the schema-v2 validation layer, not Ecto embeds."
+          }
+        ],
+        "id": "block-16",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Watch-item (NOT filed — no live failure mode, would be speculative): Accounts.get_user/1 (accounts.ex:40) does an unguarded Repo.get(User, id). All current callers feed DB-sourced or already-cast UUIDs, so it is SAFE today; it becomes a 500 the instant any controller wires a raw :user_id/:id path param straight into it. One-line uuid_or_nil guard would pre-empt that, but per the improvement doctrine there is no named failure mode today, so it stays a note."
+          }
+        ],
+        "id": "block-17",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix d04 — Ecto Schemas &amp; Changeset Discipline: Findings</h1><p>Audit of the Barkpark api/ Ecto layer (59 schema modules, 156 Repo.get/get_by/one call sites, 131 migrations) against corpus ch. 25-26. Method: three parallel call-chain traces of the binary_id CastError scar CLASS, one full migration&lt;-&gt;changeset constraint-parity cross-check, plus direct read of the cast allowlists and the two fail-closed crypto/redaction modules. Every finding is independently re-verified against source. Doctrine: a finding qualifies ONLY via a named failure mode with concrete inputs -&gt; wrong outcome; tidiness rejected.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verdict summary</h2><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">CONCEPT                                          VERDICT            EVIDENCE</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">binary_id CastError scar (raw id -&gt; Repo.get)    1 FINDING + clean   webauthn.ex:145 unguarded; ~156 other sites safe</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">cast/4 allowlists vs mass assignment             ALREADY-GOOD       explicit field lists; server-managed fields non-castable</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">validations (UX) vs DB constraints (truth)       1 FINDING + clean   surface_config unmapped unique index; 30+ schemas mapped</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">embedded schemas for JSONB content               REJECTED-W-REASON  deliberate raw-map (headless CMS), validated by schema-v2</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">redaction.ex fail-closed                         ALREADY-GOOD       allowlist log-scrubber, callers destructure first</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">encrypted_map.ex / encrypted_binary.ex           ALREADY-GOOD       Cloak AES-GCM, raises on decrypt failure = fail-closed</code></span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding 1 (priority 1) — webauthn delete_credential: non-UUID :id -&gt; CastError 500</h2><p>NAMED FAILURE MODE: DELETE /v1/auth/webauthn/credentials/:id (router.ex:1227, pipe_through [:user_auth,:require_user]) passes the raw :id path param unmodified through webauthn_controller.ex:188-189 into Barkpark.Accounts.Webauthn.delete_credential/2, which calls Repo.get_by(WebauthnCredential, id: id, user_id: uid). WebauthnCredential PK is :binary_id. Any authenticated user hitting DELETE .../credentials/garbage (non-UUID :id) makes Ecto cast &#39;garbage&#39; to :binary_id inside get_by -&gt; Ecto.CastError -&gt; HTTP 500, instead of the intended 404 not_found. The user_id: uid scoping does NOT save it — the cast on id: fires regardless. This is the exact binary_id CastError scar class; the canonical guard Barkpark.Repo.uuid_or_nil/1 is not on this path.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># lib/barkpark/accounts/webauthn.ex:144-145</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">def delete_credential(%User{id: uid}, id) do</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  case Repo.get_by(WebauthnCredential, id: id, user_id: uid) do   # &lt;- id is raw path param, PK is :binary_id</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">    nil -&gt; {:error, :not_found}</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># FIX: with id when (uuid = Repo.uuid_or_nil(id)) != nil ... else nil -&gt; {:error, :not_found}</code></span></div><p>Filed: task-b5af6673bfb773ea. Protective test (fails before fix): authenticated DELETE with a non-UUID :id returns 404, not 500.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding 2 (priority 2) — search_surface_config: unmapped unique index -&gt; ConstraintError 500 on concurrent first PUT</h2><p>NAMED FAILURE MODE (validations-vs-constraints, FAILURE-B): migration 20260527100000:17-18 creates UNIQUE index search_surface_config_surface_scope_idx on (surface, scope). But SurfaceConfig.changeset/2 (surface_config.ex:36) casts only the 4 config fields and maps NO unique_constraint, and surface_configs.ex:136-140 does Repo.get_by then, on nil, Repo.insert() with NO on_conflict. External entry: search_controller.ex:270 and v1/media_controller.ex:156. Trigger: for a (surface,scope) with no row yet (a new dataset&#39;s first search-config PUT), two concurrent PUTs both see get_by=nil, both insert, the second violates the unique index -&gt; Ecto.ConstraintError uncaught -&gt; HTTP 500 instead of a clean update/idempotent upsert. Admin-gated and race-only (pre-seeded documents/media production rows unaffected), but the index exists and the changeset ignores it — the exact &#39;constraints are truth&#39; gap.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># lib/barkpark/search/surface_configs.ex:136-140</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">case Repo.get_by(SurfaceConfig, surface: surface, scope: scope) do</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  nil -&gt;</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">    %SurfaceConfig{surface: surface, scope: scope}</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">    |&gt; SurfaceConfig.changeset(merged)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">    |&gt; Repo.insert()          # &lt;- no on_conflict; changeset maps no unique_constraint</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># FIX: mirror plugin_settings/secrets — Repo.insert_or_update(on_conflict: {:replace_all_except, ...}, conflict_target: [:surface,:scope])</code></span></div><p>Filed: task-1a4e660c18bb3046. Protective test (fails before fix): two inserts for the same new (surface,scope) — the second returns {:error, changeset} or is idempotent, not an uncaught ConstraintError.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Already-good (verified, no change) — the doctrine is largely held</h2><p>binary_id scar, the other ~155 sites: SAFE via one of three guards — (a) canonical Repo.uuid_or_nil/1 at the context boundary (tenancy.ex 149/320/600, access.ex 127/404, auth.ex 214, status.ex 133, sharing/links.ex 97, bulldocs/events.ex 66/110, search/synonyms.ex 67, tickets/keys.ex, studio_chat.ex 62); (b) the doc_id-&gt;Document text-column indirection — the entire task-mutation surface (fence/mutations/release/close/move + content/writer/lifecycle) resolves the external doc_id string via find_task_by_doc_id (a query on the TEXT doc_id column) and passes only the fetched row&#39;s real UUID .id downward, so a garbage id returns 404 at the controller and never reaches a :binary_id query; (c) not a binary_id key (github conflict + webhook MutationEvent are integer keys validated by Integer.parse; onixedit staleness + task board query the :string doc_id field), or the id is DB-sourced (Oban job args, loaded rows).</p><p>cast/4 allowlists: every changeset uses an explicit field allowlist — zero __schema__(:fields)/Map.keys mass-assignment. Privilege/server-managed fields are deliberately excluded: User.failed_login_count/locked_until (&#39;NEVER castable&#39;), Webhook auto-disable + secret-rotation fields, and Membership.role is validated by inclusion against valid_roles with the role passed explicitly by callers. Access.Grant fails closed on its capability vocabulary (read/write/admin only).</p><p>Constraint parity: 30+ external-write schemas carry the DB constraint AND a matching changeset mapping, with every explicit name: verified byte-aligned to its migration index name (no vacuous mappings). users.email correctly pairs unsafe_validate_unique (UX) with unique_constraint + a real UNIQUE(email) (truth). No FAILURE-A (vacuous constraint) anywhere. plugin_settings/secrets have unmapped PK uniqueness but resolve the race in-DB via Repo.insert_or_update(on_conflict:), so they are SAFE — this is the pattern surface_config should copy. webhooks FKs are unmapped but tenant scope is server-resolved (client scope keys stripped), not external-reachable today.</p><p>Fail-closed modules: redaction.ex is an allowlist secret-log scrubber used ONLY by plugin Inspect impls that destructure specific fields first, so the struct-passthrough branch never receives a secret-bearing struct — appropriate, not leaky (and it is distinct from Envelope field-visibility redaction). encrypted_map.ex / encrypted_binary.ex are Cloak AES-GCM types that raise on decrypt failure = fail-closed. Embedded-schema-for-JSONB is deliberately rejected: Document.content is a raw map by design (one content model, many surfaces), validated by the schema-v2 validation layer, not Ecto embeds.</p><p>Watch-item (NOT filed — no live failure mode, would be speculative): Accounts.get_user/1 (accounts.ex:40) does an unguarded Repo.get(User, id). All current callers feed DB-sourced or already-cast UUIDs, so it is SAFE today; it becomes a 500 the instant any controller wires a raw :user_id/:id path param straight into it. One-line uuid_or_nil guard would pre-empt that, but per the improvement doctrine there is no named failure mode today, so it stays a note.</p>"
+  },
+  "body_html": "<h1>Felix d04 — Ecto Schemas &amp; Changeset Discipline: Findings</h1><p>Audit of the Barkpark api/ Ecto layer (59 schema modules, 156 Repo.get/get_by/one call sites, 131 migrations) against corpus ch. 25-26. Method: three parallel call-chain traces of the binary_id CastError scar CLASS, one full migration&lt;-&gt;changeset constraint-parity cross-check, plus direct read of the cast allowlists and the two fail-closed crypto/redaction modules. Every finding is independently re-verified against source. Doctrine: a finding qualifies ONLY via a named failure mode with concrete inputs -&gt; wrong outcome; tidiness rejected.</p><h2>Verdict summary</h2><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">CONCEPT                                          VERDICT            EVIDENCE\nbinary_id CastError scar (raw id -&gt; Repo.get)    1 FINDING + clean   webauthn.ex:145 unguarded; ~156 other sites safe\ncast/4 allowlists vs mass assignment             ALREADY-GOOD       explicit field lists; server-managed fields non-castable\nvalidations (UX) vs DB constraints (truth)       1 FINDING + clean   surface_config unmapped unique index; 30+ schemas mapped\nembedded schemas for JSONB content               REJECTED-W-REASON  deliberate raw-map (headless CMS), validated by schema-v2\nredaction.ex fail-closed                         ALREADY-GOOD       allowlist log-scrubber, callers destructure first\nencrypted_map.ex / encrypted_binary.ex           ALREADY-GOOD       Cloak AES-GCM, raises on decrypt failure = fail-closed</pre><h2>Finding 1 (priority 1) — webauthn delete_credential: non-UUID :id -&gt; CastError 500</h2><p>NAMED FAILURE MODE: DELETE /v1/auth/webauthn/credentials/:id (router.ex:1227, pipe_through [:user_auth,:require_user]) passes the raw :id path param unmodified through webauthn_controller.ex:188-189 into Barkpark.Accounts.Webauthn.delete_credential/2, which calls Repo.get_by(WebauthnCredential, id: id, user_id: uid). WebauthnCredential PK is :binary_id. Any authenticated user hitting DELETE .../credentials/garbage (non-UUID :id) makes Ecto cast &#39;garbage&#39; to :binary_id inside get_by -&gt; Ecto.CastError -&gt; HTTP 500, instead of the intended 404 not_found. The user_id: uid scoping does NOT save it — the cast on id: fires regardless. This is the exact binary_id CastError scar class; the canonical guard Barkpark.Repo.uuid_or_nil/1 is not on this path.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\"># lib/barkpark/accounts/webauthn.ex:144-145\ndef delete_credential(%User{id: uid}, id) do\n  case Repo.get_by(WebauthnCredential, id: id, user_id: uid) do   # &lt;- id is raw path param, PK is :binary_id\n    nil -&gt; {:error, :not_found}\n# FIX: with id when (uuid = Repo.uuid_or_nil(id)) != nil ... else nil -&gt; {:error, :not_found}</pre><p>Filed: task-b5af6673bfb773ea. Protective test (fails before fix): authenticated DELETE with a non-UUID :id returns 404, not 500.</p><h2>Finding 2 (priority 2) — search_surface_config: unmapped unique index -&gt; ConstraintError 500 on concurrent first PUT</h2><p>NAMED FAILURE MODE (validations-vs-constraints, FAILURE-B): migration 20260527100000:17-18 creates UNIQUE index search_surface_config_surface_scope_idx on (surface, scope). But SurfaceConfig.changeset/2 (surface_config.ex:36) casts only the 4 config fields and maps NO unique_constraint, and surface_configs.ex:136-140 does Repo.get_by then, on nil, Repo.insert() with NO on_conflict. External entry: search_controller.ex:270 and v1/media_controller.ex:156. Trigger: for a (surface,scope) with no row yet (a new dataset&#39;s first search-config PUT), two concurrent PUTs both see get_by=nil, both insert, the second violates the unique index -&gt; Ecto.ConstraintError uncaught -&gt; HTTP 500 instead of a clean update/idempotent upsert. Admin-gated and race-only (pre-seeded documents/media production rows unaffected), but the index exists and the changeset ignores it — the exact &#39;constraints are truth&#39; gap.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\"># lib/barkpark/search/surface_configs.ex:136-140\ncase Repo.get_by(SurfaceConfig, surface: surface, scope: scope) do\n  nil -&gt;\n    %SurfaceConfig{surface: surface, scope: scope}\n    |&gt; SurfaceConfig.changeset(merged)\n    |&gt; Repo.insert()          # &lt;- no on_conflict; changeset maps no unique_constraint\n# FIX: mirror plugin_settings/secrets — Repo.insert_or_update(on_conflict: {:replace_all_except, ...}, conflict_target: [:surface,:scope])</pre><p>Filed: task-1a4e660c18bb3046. Protective test (fails before fix): two inserts for the same new (surface,scope) — the second returns {:error, changeset} or is idempotent, not an uncaught ConstraintError.</p><h2>Already-good (verified, no change) — the doctrine is largely held</h2><p>binary_id scar, the other ~155 sites: SAFE via one of three guards — (a) canonical Repo.uuid_or_nil/1 at the context boundary (tenancy.ex 149/320/600, access.ex 127/404, auth.ex 214, status.ex 133, sharing/links.ex 97, bulldocs/events.ex 66/110, search/synonyms.ex 67, tickets/keys.ex, studio_chat.ex 62); (b) the doc_id-&gt;Document text-column indirection — the entire task-mutation surface (fence/mutations/release/close/move + content/writer/lifecycle) resolves the external doc_id string via find_task_by_doc_id (a query on the TEXT doc_id column) and passes only the fetched row&#39;s real UUID .id downward, so a garbage id returns 404 at the controller and never reaches a :binary_id query; (c) not a binary_id key (github conflict + webhook MutationEvent are integer keys validated by Integer.parse; onixedit staleness + task board query the :string doc_id field), or the id is DB-sourced (Oban job args, loaded rows).</p><p>cast/4 allowlists: every changeset uses an explicit field allowlist — zero __schema__(:fields)/Map.keys mass-assignment. Privilege/server-managed fields are deliberately excluded: User.failed_login_count/locked_until (&#39;NEVER castable&#39;), Webhook auto-disable + secret-rotation fields, and Membership.role is validated by inclusion against valid_roles with the role passed explicitly by callers. Access.Grant fails closed on its capability vocabulary (read/write/admin only).</p><p>Constraint parity: 30+ external-write schemas carry the DB constraint AND a matching changeset mapping, with every explicit name: verified byte-aligned to its migration index name (no vacuous mappings). users.email correctly pairs unsafe_validate_unique (UX) with unique_constraint + a real UNIQUE(email) (truth). No FAILURE-A (vacuous constraint) anywhere. plugin_settings/secrets have unmapped PK uniqueness but resolve the race in-DB via Repo.insert_or_update(on_conflict:), so they are SAFE — this is the pattern surface_config should copy. webhooks FKs are unmapped but tenant scope is server-resolved (client scope keys stripped), not external-reachable today.</p><p>Fail-closed modules: redaction.ex is an allowlist secret-log scrubber used ONLY by plugin Inspect impls that destructure specific fields first, so the struct-passthrough branch never receives a secret-bearing struct — appropriate, not leaky (and it is distinct from Envelope field-visibility redaction). encrypted_map.ex / encrypted_binary.ex are Cloak AES-GCM types that raise on decrypt failure = fail-closed. Embedded-schema-for-JSONB is deliberately rejected: Document.content is a raw map by design (one content model, many surfaces), validated by the schema-v2 validation layer, not Ecto embeds.</p><p>Watch-item (NOT filed — no live failure mode, would be speculative): Accounts.get_user/1 (accounts.ex:40) does an unguarded Repo.get(User, id). All current callers feed DB-sourced or already-cast UUIDs, so it is SAFE today; it becomes a 500 the instant any controller wires a raw :user_id/:id path param straight into it. One-line uuid_or_nil guard would pre-empt that, but per the improvement doctrine there is no named failure mode today, so it stays a note.</p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": "Audit of the Barkpark api/ Ecto layer (59 schema modules, 156 Repo.get/get_by/one call sites, 131 migrations)…",
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-findings-schemas-changesets"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Felix d04 — Ecto Schemas & Changeset Discipline: Findings"
+}

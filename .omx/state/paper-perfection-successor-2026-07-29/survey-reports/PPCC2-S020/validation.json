@@ -1,0 +1,276 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report-validation/v1",
+  "assignment_id": "PPCC2-S020",
+  "valid": true,
+  "checks": [
+    {
+      "name": "bound-snapshot-sha",
+      "status": "PASS",
+      "evidence": "68ceff1384a47ee7429e9c79fc479c48b26120c4c38fd47d0cf42ca9eeff0f41"
+    },
+    {
+      "name": "source-snapshot-sha",
+      "status": "PASS",
+      "evidence": "e5b439417f3731710cc268a87ad929d0d169f82c00d88974e0ba7ad14acea751"
+    },
+    {
+      "name": "bound-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S020",
+        "status": "cyclefleet_bound",
+        "unit_count": 10
+      }
+    },
+    {
+      "name": "immutable-wave-binding",
+      "status": "PASS",
+      "evidence": {
+        "status": "cyclefleet_bound",
+        "wave_id": "paper-perfection-successor-wave-2026-07-29",
+        "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+        "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+        "source_snapshot_sha256": "e5b439417f3731710cc268a87ad929d0d169f82c00d88974e0ba7ad14acea751"
+      }
+    },
+    {
+      "name": "report-identity",
+      "status": "PASS",
+      "evidence": {
+        "assignment_id": "PPCC2-S020",
+        "worker": "worker-2"
+      }
+    },
+    {
+      "name": "ordered-checked-unit-ids",
+      "status": "PASS",
+      "evidence": [
+        "paper:expressive-agent-loops-wave-2026-07-11",
+        "paper:felix-findings-boundaries-plugins",
+        "paper:felix-findings-liveview-collections",
+        "paper:felix-findings-liveview-tracking",
+        "paper:felix-findings-otp-supervision",
+        "paper:felix-findings-plug-router",
+        "paper:felix-findings-queries-indexes",
+        "paper:felix-findings-realtime",
+        "paper:felix-findings-schemas-changesets",
+        "paper:felix-findings-security-tenancy"
+      ]
+    },
+    {
+      "name": "one-verdict-per-unit",
+      "status": "PASS",
+      "evidence": 10
+    },
+    {
+      "name": "verdict-metadata-pinned",
+      "status": "PASS",
+      "evidence": "all document ids and immutable revisions match"
+    },
+    {
+      "name": "allowed-verdicts-and-counts",
+      "status": "PASS",
+      "evidence": {
+        "repair": 1,
+        "keep": 9
+      }
+    },
+    {
+      "name": "editorial-dimensions-complete",
+      "status": "PASS",
+      "evidence": [
+        "compression_and_restraint",
+        "duplicate_disposition",
+        "evidence_and_truth",
+        "human_voice_and_precision",
+        "opening_and_criteria",
+        "outline_and_hierarchy",
+        "purpose_and_larger_goal",
+        "rationale"
+      ]
+    },
+    {
+      "name": "specific-existing-evidence-refs",
+      "status": "PASS",
+      "evidence": [
+        {
+          "document_id": "expressive-agent-loops-wave-2026-07-11",
+          "ref": "blocks[46]",
+          "exists": true
+        },
+        {
+          "document_id": "expressive-agent-loops-wave-2026-07-11",
+          "ref": "blocks[4]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-boundaries-plugins",
+          "ref": "blocks[7]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-boundaries-plugins",
+          "ref": "blocks[8]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-liveview-collections",
+          "ref": "blocks[9]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-liveview-collections",
+          "ref": "blocks[7]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-liveview-tracking",
+          "ref": "blocks[13]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-liveview-tracking",
+          "ref": "blocks[8]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-otp-supervision",
+          "ref": "blocks[9]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-otp-supervision",
+          "ref": "blocks[8]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-plug-router",
+          "ref": "blocks[5]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-plug-router",
+          "ref": "blocks[7]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-queries-indexes",
+          "ref": "blocks[8]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-queries-indexes",
+          "ref": "blocks[10]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-realtime",
+          "ref": "blocks[15]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-realtime",
+          "ref": "blocks[6]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-schemas-changesets",
+          "ref": "blocks[13]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-schemas-changesets",
+          "ref": "blocks[5]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-security-tenancy",
+          "ref": "blocks[14]",
+          "exists": true
+        },
+        {
+          "document_id": "felix-findings-security-tenancy",
+          "ref": "blocks[5]",
+          "exists": true
+        }
+      ]
+    },
+    {
+      "name": "five-reader-risks",
+      "status": "PASS",
+      "evidence": [
+        "CLI/API",
+        "Studio",
+        "TUI80",
+        "email",
+        "public"
+      ]
+    },
+    {
+      "name": "read-only-mutation-attestation",
+      "status": "PASS",
+      "evidence": {
+        "production_papers_mutated": false,
+        "cyclefleet_mutated": false,
+        "bp_cycle_assign_called": false,
+        "bp_cycle_result_called": false
+      }
+    },
+    {
+      "name": "unvisited-scope-empty",
+      "status": "PASS",
+      "evidence": []
+    },
+    {
+      "name": "readbacks-exact-and-hashed",
+      "status": "PASS",
+      "evidence": "all 10 raw ids/revisions and SHA-256 receipts match"
+    },
+    {
+      "name": "native-and-legacy-representation",
+      "status": "PASS",
+      "evidence": {
+        "native_block_total": 250
+      }
+    },
+    {
+      "name": "purpose-based-duplicate-analysis",
+      "status": "PASS",
+      "evidence": [
+        {
+          "candidate_set": [
+            "felix-findings-liveview-collections",
+            "felix-findings-liveview-tracking"
+          ],
+          "basis": "Different audit domains but the same unbounded @messages/group_agent_rows defect was independently filed under two task ids.",
+          "disposition": "Keep both domain audits; merge or explicitly link the duplicate finding/task ownership and share one protective benchmark."
+        },
+        {
+          "candidate_set": [
+            "felix-findings-boundaries-plugins",
+            "felix-findings-plug-router",
+            "felix-findings-queries-indexes",
+            "felix-findings-realtime",
+            "felix-findings-schemas-changesets",
+            "felix-findings-security-tenancy",
+            "felix-findings-otp-supervision"
+          ],
+          "basis": "Coherent Felix audit series with repeated verdict/method shape but distinct runtime boundaries and source authority.",
+          "disposition": "Do not merge; create a series index showing domain, findings, priority, task, confidence, and fix status."
+        },
+        {
+          "candidate_set": [
+            "expressive-agent-loops-wave-2026-07-11",
+            "felix-findings-realtime"
+          ],
+          "basis": "Both touch events/realtime substrate, but the wave owns task-loop features and integration while Felix d09 owns later SSE/PubSub/webhook audit risks.",
+          "disposition": "Cross-link the events-feed outcome to the realtime audit; retain separate temporal and purpose authority."
+        }
+      ]
+    }
+  ],
+  "summary": {
+    "pass": 17,
+    "fail": 0
+  }
+}

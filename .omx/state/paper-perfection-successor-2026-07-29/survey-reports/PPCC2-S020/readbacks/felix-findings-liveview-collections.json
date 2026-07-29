@@ -1,0 +1,373 @@
+{
+  "_createdAt": "2026-07-10T18:17:16.741395Z",
+  "_draft": false,
+  "_id": "felix-findings-liveview-collections",
+  "_publishedId": "felix-findings-liveview-collections",
+  "_rev": "370a4be8b3809a4686dc2749fc26e69a",
+  "_type": "paper",
+  "_updatedAt": "2026-07-10T18:17:16.741395Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix d08 — LiveView collections, forms, async (audit findings)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Domain audit d08 of the Felix pristine initiative. Corpus chapters 39-40 (streams), 42 (async), 44 (forms/uploads). Environment: local Phoenix does not boot — all runtime costs are static-analysis estimates (MEDIUM confidence); protective tests/measurements are delegated to the fix task. Doctrine: a finding qualifies only via named failure mode, measured cost, scar-class risk, or provably-cheaper future change. Tree-tidiness rejected; already-good and rejected-with-reason are first-class."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "Verdict table",
+      "type": "heading"
+    },
+    {
+      "id": "block-3",
+      "language": "text",
+      "type": "code",
+      "value": "CONCEPT (corpus ch 39-40,42,44)            VERDICT              EVIDENCE\n------------------------------------------  -------------------  ------------------------------------\nUnbounded chat transcript assign            ADOPT (filed p2)     studio_chat.ex:128 + chat_live.ex:3520\napi_tester Task.async lifecycle             ALREADY-GOOD         api_tester_live.ex:333-378\nchat plan-publish Task.Supervisor           ALREADY-GOOD         chat_live.ex:3861\nLiveView native uploads (limits)            ALREADY-GOOD         chat_live.ex:182 / mount.ex:271\nbulldocs / paper_blocks streaming           ALREADY-GOOD         bulldocs_live.ex:642 / mount.ex:270\nchat sessions sidebar list                  ALREADY-GOOD (cap)   studio_chat.ex:101 @sidebar_cap\nStudio doc-type list pane (streams cand.)   REJECTED (bounded)   content.ex:61 limit 100/max 1000\nForms: to_form vs raw map                   REJECTED-W-REASON    content/forms.ex:34 doc_to_form :: map()\nAI call off-process (assign_async cand.)    ALREADY-GOOD         external GenServer + PubSub stream\nMedia upload default size cap               REJECTED-W-REASON    media.ex:132 config-gated, token-gated"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Finding 1 (ADOPT, priority 2) — unbounded per-socket chat transcript",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Filed: task-a9adc82f820db065 (parent task-30564ed509eb2997)."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "NAMED FAILURE MODE: the Studio Claude chat loads a session's ENTIRE message history into a per-socket list assign with no cap, and re-renders every row through the paper engine synchronously on the LiveView process at session open."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-7",
+      "language": "text",
+      "type": "code",
+      "value": "studio_chat.ex:128   list_messages/1 = Repo.all with NO limit\nchat_live.ex:3520    replay_messages/2 maps that uncapped list through\n                     replay_message/2 -> paper-engine markdown render (D7),\n                     O(n) synchronous CPU at open, blocks the reopen\nchat_live.ex:1186,   @messages grows via '++ [message]' every turn\n  1387,3465,3717\nchat_live.ex:2184    render calls group_agent_rows(@messages), which walks\n                     all messages 3x (spawns map, children reduce, flat_map)\n                     on EVERY @messages change -> O(n) per turn, O(n^2)/session"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "COST: a long agent chat (Claude Code sessions routinely emit thousands of tool/assistant/user rows) holds O(n) BEAM memory per connected tab for the session lifetime — tool-result rows carry large code/text payloads, conservatively 1-5KB/row, so 1k rows is roughly 1-5MB per socket, multiplied by tabs and concurrent sessions. Plus O(n) paper-engine render blocking reopen, plus O(n) group_agent_rows recompute per turn. Many concurrent long sessions raise an OOM/availability risk."
+        }
+      ],
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FIX MENU (builder's call): (1) cap list_messages to last N with a lazy 'load older' page; and/or (2) assign_async the transcript hydration so the shell renders first — the tree has ZERO assign_async today, this is the signal; and/or (3) memoize group_agent_rows. Streams is an AWKWARD fit because group_agent_rows GROUPS consecutive rows into agent blocks (streams render one DOM node per item) — do NOT force a streams rewrite; cap+async is the cheaper win. The fix task owns the protective test (query test asserting a LIMIT) and the before/after measurement (reopen wall-time and :erlang.external_size on @messages at N=2000)."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-10",
+      "level": 2,
+      "text": "Already-good (verified, no task)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "api_tester_live Task.async (api_tester_live.ex:333-378): exemplary hand-rolled async — Process.demonitor(ref, [:flush]) on BOTH the result message and the :DOWN, plus a stray-ref fallthrough clause. Correctly handles crash/cancel; converting to assign_async/async_result would be fashion, not improvement. Rejected conversion."
+        }
+      ],
+      "id": "block-11",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "chat_live plan-publish (chat_live.ex:3861): Task.Supervisor.start_child under Barkpark.TaskSupervisor — supervised, $callers-scoped (sandbox-safe under test), never touches the socket (talks to the session PubSub topic), and wraps publish in try/rescue/catch so a crash degrades to an honest 'couldn't publish' broadcast instead of silence. Already-good."
+        }
+      ],
+      "id": "block-12",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "LiveView native uploads: chat :attachments (chat_live.ex:182) accept-list + max_entries 4 + max_file_size 3MB (sized to the Anthropic per-image cap after base64 inflation); studio :image (mount.ex:271) accept-list + max_entries 1 + max_file_size 10MB. Both carry accept/entries/size limits. The studio accept-list includes .svg, but the serve path (media_controller.ex:129) collapses dangerous MIMEs to application/octet-stream with nosniff + content-disposition:attachment, defusing stored-XSS. Already-good."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Streaming collections already on streams: bulldocs_live blocks (bulldocs_live.ex:642) and studio paper_blocks (mount.ex:270). Sessions sidebar list is capped at @sidebar_cap (studio_chat.ex:101). Already-good."
+        }
+      ],
+      "id": "block-14",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "AI turn execution is owned by an external GenServer subprocess (ClaudeChat.Session) streaming results over PubSub — no blocking Claude call in handle_event. Proper OTP off-process design; assign_async not needed there. Already-good."
+        }
+      ],
+      "id": "block-15",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-16",
+      "level": 2,
+      "text": "Rejected-with-reason",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Studio document-type list pane as a streams candidate: Content.list_documents defaults limit 100 / max 1000 (content.ex:61) and the pane re-fetches wholesale on rebuild — bounded, not unbounded-per-socket. Streams would only trim re-render churn on a <=100-row list, below the measurable-win bar. Rejected."
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Forms to_form vs raw changeset: doc_to_form/2 returns a plain map() by design (content/forms.ex:34) because the Studio editor is schema-driven with dynamic fields — there is no fixed Ecto changeset/field-set to source a %Phoenix.HTML.Form{} from, so to_form buys nothing. Edits autosave via phx-change with phx-debounce (150ms slug / 500ms paper blocks), bounding the unsaved-edit window. Reconnect recovery of in-progress contenteditable keystrokes within the <=500ms debounce window is a real but low-severity, hard-to-test-statically gap; not filed. Rejected-with-reason."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Media upload default size cap: Media.upload's allowlist + size cap are config-gated OFF by default (media.ex:132) to honor the fresh-install zero-rejection invariant; the /media/upload route is write-token-gated (:media_mutate pipeline) and the 100MB Plug.Parsers length (endpoint.ex:124) is the effective ceiling. Worst case is a trusted-writer disk-fill DoS — a deliberate decision, not a defect. Rejected-with-reason."
+        }
+      ],
+      "id": "block-19",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix d08 — LiveView collections, forms, async (audit findings)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Domain audit d08 of the Felix pristine initiative. Corpus chapters 39-40 (streams), 42 (async), 44 (forms/uploads). Environment: local Phoenix does not boot — all runtime costs are static-analysis estimates (MEDIUM confidence); protective tests/measurements are delegated to the fix task. Doctrine: a finding qualifies only via named failure mode, measured cost, scar-class risk, or provably-cheaper future change. Tree-tidiness rejected; already-good and rejected-with-reason are first-class."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "level": 2,
+        "text": "Verdict table",
+        "type": "heading"
+      },
+      {
+        "id": "block-3",
+        "language": "text",
+        "type": "code",
+        "value": "CONCEPT (corpus ch 39-40,42,44)            VERDICT              EVIDENCE\n------------------------------------------  -------------------  ------------------------------------\nUnbounded chat transcript assign            ADOPT (filed p2)     studio_chat.ex:128 + chat_live.ex:3520\napi_tester Task.async lifecycle             ALREADY-GOOD         api_tester_live.ex:333-378\nchat plan-publish Task.Supervisor           ALREADY-GOOD         chat_live.ex:3861\nLiveView native uploads (limits)            ALREADY-GOOD         chat_live.ex:182 / mount.ex:271\nbulldocs / paper_blocks streaming           ALREADY-GOOD         bulldocs_live.ex:642 / mount.ex:270\nchat sessions sidebar list                  ALREADY-GOOD (cap)   studio_chat.ex:101 @sidebar_cap\nStudio doc-type list pane (streams cand.)   REJECTED (bounded)   content.ex:61 limit 100/max 1000\nForms: to_form vs raw map                   REJECTED-W-REASON    content/forms.ex:34 doc_to_form :: map()\nAI call off-process (assign_async cand.)    ALREADY-GOOD         external GenServer + PubSub stream\nMedia upload default size cap               REJECTED-W-REASON    media.ex:132 config-gated, token-gated"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "Finding 1 (ADOPT, priority 2) — unbounded per-socket chat transcript",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Filed: task-a9adc82f820db065 (parent task-30564ed509eb2997)."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "NAMED FAILURE MODE: the Studio Claude chat loads a session's ENTIRE message history into a per-socket list assign with no cap, and re-renders every row through the paper engine synchronously on the LiveView process at session open."
+          }
+        ],
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-7",
+        "language": "text",
+        "type": "code",
+        "value": "studio_chat.ex:128   list_messages/1 = Repo.all with NO limit\nchat_live.ex:3520    replay_messages/2 maps that uncapped list through\n                     replay_message/2 -> paper-engine markdown render (D7),\n                     O(n) synchronous CPU at open, blocks the reopen\nchat_live.ex:1186,   @messages grows via '++ [message]' every turn\n  1387,3465,3717\nchat_live.ex:2184    render calls group_agent_rows(@messages), which walks\n                     all messages 3x (spawns map, children reduce, flat_map)\n                     on EVERY @messages change -> O(n) per turn, O(n^2)/session"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "COST: a long agent chat (Claude Code sessions routinely emit thousands of tool/assistant/user rows) holds O(n) BEAM memory per connected tab for the session lifetime — tool-result rows carry large code/text payloads, conservatively 1-5KB/row, so 1k rows is roughly 1-5MB per socket, multiplied by tabs and concurrent sessions. Plus O(n) paper-engine render blocking reopen, plus O(n) group_agent_rows recompute per turn. Many concurrent long sessions raise an OOM/availability risk."
+          }
+        ],
+        "id": "block-8",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FIX MENU (builder's call): (1) cap list_messages to last N with a lazy 'load older' page; and/or (2) assign_async the transcript hydration so the shell renders first — the tree has ZERO assign_async today, this is the signal; and/or (3) memoize group_agent_rows. Streams is an AWKWARD fit because group_agent_rows GROUPS consecutive rows into agent blocks (streams render one DOM node per item) — do NOT force a streams rewrite; cap+async is the cheaper win. The fix task owns the protective test (query test asserting a LIMIT) and the before/after measurement (reopen wall-time and :erlang.external_size on @messages at N=2000)."
+          }
+        ],
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-10",
+        "level": 2,
+        "text": "Already-good (verified, no task)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "api_tester_live Task.async (api_tester_live.ex:333-378): exemplary hand-rolled async — Process.demonitor(ref, [:flush]) on BOTH the result message and the :DOWN, plus a stray-ref fallthrough clause. Correctly handles crash/cancel; converting to assign_async/async_result would be fashion, not improvement. Rejected conversion."
+          }
+        ],
+        "id": "block-11",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "chat_live plan-publish (chat_live.ex:3861): Task.Supervisor.start_child under Barkpark.TaskSupervisor — supervised, $callers-scoped (sandbox-safe under test), never touches the socket (talks to the session PubSub topic), and wraps publish in try/rescue/catch so a crash degrades to an honest 'couldn't publish' broadcast instead of silence. Already-good."
+          }
+        ],
+        "id": "block-12",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "LiveView native uploads: chat :attachments (chat_live.ex:182) accept-list + max_entries 4 + max_file_size 3MB (sized to the Anthropic per-image cap after base64 inflation); studio :image (mount.ex:271) accept-list + max_entries 1 + max_file_size 10MB. Both carry accept/entries/size limits. The studio accept-list includes .svg, but the serve path (media_controller.ex:129) collapses dangerous MIMEs to application/octet-stream with nosniff + content-disposition:attachment, defusing stored-XSS. Already-good."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Streaming collections already on streams: bulldocs_live blocks (bulldocs_live.ex:642) and studio paper_blocks (mount.ex:270). Sessions sidebar list is capped at @sidebar_cap (studio_chat.ex:101). Already-good."
+          }
+        ],
+        "id": "block-14",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "AI turn execution is owned by an external GenServer subprocess (ClaudeChat.Session) streaming results over PubSub — no blocking Claude call in handle_event. Proper OTP off-process design; assign_async not needed there. Already-good."
+          }
+        ],
+        "id": "block-15",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-16",
+        "level": 2,
+        "text": "Rejected-with-reason",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Studio document-type list pane as a streams candidate: Content.list_documents defaults limit 100 / max 1000 (content.ex:61) and the pane re-fetches wholesale on rebuild — bounded, not unbounded-per-socket. Streams would only trim re-render churn on a <=100-row list, below the measurable-win bar. Rejected."
+          }
+        ],
+        "id": "block-17",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Forms to_form vs raw changeset: doc_to_form/2 returns a plain map() by design (content/forms.ex:34) because the Studio editor is schema-driven with dynamic fields — there is no fixed Ecto changeset/field-set to source a %Phoenix.HTML.Form{} from, so to_form buys nothing. Edits autosave via phx-change with phx-debounce (150ms slug / 500ms paper blocks), bounding the unsaved-edit window. Reconnect recovery of in-progress contenteditable keystrokes within the <=500ms debounce window is a real but low-severity, hard-to-test-statically gap; not filed. Rejected-with-reason."
+          }
+        ],
+        "id": "block-18",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Media upload default size cap: Media.upload's allowlist + size cap are config-gated OFF by default (media.ex:132) to honor the fresh-install zero-rejection invariant; the /media/upload route is write-token-gated (:media_mutate pipeline) and the 100MB Plug.Parsers length (endpoint.ex:124) is the effective ceiling. Worst case is a trusted-writer disk-fill DoS — a deliberate decision, not a defect. Rejected-with-reason."
+          }
+        ],
+        "id": "block-19",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix d08 — LiveView collections, forms, async (audit findings)</h1><p>Domain audit d08 of the Felix pristine initiative. Corpus chapters 39-40 (streams), 42 (async), 44 (forms/uploads). Environment: local Phoenix does not boot — all runtime costs are static-analysis estimates (MEDIUM confidence); protective tests/measurements are delegated to the fix task. Doctrine: a finding qualifies only via named failure mode, measured cost, scar-class risk, or provably-cheaper future change. Tree-tidiness rejected; already-good and rejected-with-reason are first-class.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verdict table</h2><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">CONCEPT (corpus ch 39-40,42,44)            VERDICT              EVIDENCE</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">------------------------------------------  -------------------  ------------------------------------</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Unbounded chat transcript assign            ADOPT (filed p2)     studio_chat.ex:128 + chat_live.ex:3520</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">api_tester Task.async lifecycle             ALREADY-GOOD         api_tester_live.ex:333-378</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">chat plan-publish Task.Supervisor           ALREADY-GOOD         chat_live.ex:3861</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">LiveView native uploads (limits)            ALREADY-GOOD         chat_live.ex:182 / mount.ex:271</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bulldocs / paper_blocks streaming           ALREADY-GOOD         bulldocs_live.ex:642 / mount.ex:270</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">chat sessions sidebar list                  ALREADY-GOOD (cap)   studio_chat.ex:101 @sidebar_cap</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Studio doc-type list pane (streams cand.)   REJECTED (bounded)   content.ex:61 limit 100/max 1000</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Forms: to_form vs raw map                   REJECTED-W-REASON    content/forms.ex:34 doc_to_form :: map()</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">AI call off-process (assign_async cand.)    ALREADY-GOOD         external GenServer + PubSub stream</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Media upload default size cap               REJECTED-W-REASON    media.ex:132 config-gated, token-gated</code></span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding 1 (ADOPT, priority 2) — unbounded per-socket chat transcript</h2><p>Filed: task-a9adc82f820db065 (parent task-30564ed509eb2997).</p><p>NAMED FAILURE MODE: the Studio Claude chat loads a session&#39;s ENTIRE message history into a per-socket list assign with no cap, and re-renders every row through the paper engine synchronously on the LiveView process at session open.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">studio_chat.ex:128   list_messages/1 = Repo.all with NO limit</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">chat_live.ex:3520    replay_messages/2 maps that uncapped list through</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">                     replay_message/2 -&gt; paper-engine markdown render (D7),</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">                     O(n) synchronous CPU at open, blocks the reopen</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">chat_live.ex:1186,   @messages grows via &#39;++ [message]&#39; every turn</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  1387,3465,3717</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">chat_live.ex:2184    render calls group_agent_rows(@messages), which walks</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">                     all messages 3x (spawns map, children reduce, flat_map)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">                     on EVERY @messages change -&gt; O(n) per turn, O(n^2)/session</code></span></div><p>COST: a long agent chat (Claude Code sessions routinely emit thousands of tool/assistant/user rows) holds O(n) BEAM memory per connected tab for the session lifetime — tool-result rows carry large code/text payloads, conservatively 1-5KB/row, so 1k rows is roughly 1-5MB per socket, multiplied by tabs and concurrent sessions. Plus O(n) paper-engine render blocking reopen, plus O(n) group_agent_rows recompute per turn. Many concurrent long sessions raise an OOM/availability risk.</p><p>FIX MENU (builder&#39;s call): (1) cap list_messages to last N with a lazy &#39;load older&#39; page; and/or (2) assign_async the transcript hydration so the shell renders first — the tree has ZERO assign_async today, this is the signal; and/or (3) memoize group_agent_rows. Streams is an AWKWARD fit because group_agent_rows GROUPS consecutive rows into agent blocks (streams render one DOM node per item) — do NOT force a streams rewrite; cap+async is the cheaper win. The fix task owns the protective test (query test asserting a LIMIT) and the before/after measurement (reopen wall-time and :erlang.external_size on @messages at N=2000).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Already-good (verified, no task)</h2><p>api_tester_live Task.async (api_tester_live.ex:333-378): exemplary hand-rolled async — Process.demonitor(ref, [:flush]) on BOTH the result message and the :DOWN, plus a stray-ref fallthrough clause. Correctly handles crash/cancel; converting to assign_async/async_result would be fashion, not improvement. Rejected conversion.</p><p>chat_live plan-publish (chat_live.ex:3861): Task.Supervisor.start_child under Barkpark.TaskSupervisor — supervised, $callers-scoped (sandbox-safe under test), never touches the socket (talks to the session PubSub topic), and wraps publish in try/rescue/catch so a crash degrades to an honest &#39;couldn&#39;t publish&#39; broadcast instead of silence. Already-good.</p><p>LiveView native uploads: chat :attachments (chat_live.ex:182) accept-list + max_entries 4 + max_file_size 3MB (sized to the Anthropic per-image cap after base64 inflation); studio :image (mount.ex:271) accept-list + max_entries 1 + max_file_size 10MB. Both carry accept/entries/size limits. The studio accept-list includes .svg, but the serve path (media_controller.ex:129) collapses dangerous MIMEs to application/octet-stream with nosniff + content-disposition:attachment, defusing stored-XSS. Already-good.</p><p>Streaming collections already on streams: bulldocs_live blocks (bulldocs_live.ex:642) and studio paper_blocks (mount.ex:270). Sessions sidebar list is capped at @sidebar_cap (studio_chat.ex:101). Already-good.</p><p>AI turn execution is owned by an external GenServer subprocess (ClaudeChat.Session) streaming results over PubSub — no blocking Claude call in handle_event. Proper OTP off-process design; assign_async not needed there. Already-good.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Rejected-with-reason</h2><p>Studio document-type list pane as a streams candidate: Content.list_documents defaults limit 100 / max 1000 (content.ex:61) and the pane re-fetches wholesale on rebuild — bounded, not unbounded-per-socket. Streams would only trim re-render churn on a &lt;=100-row list, below the measurable-win bar. Rejected.</p><p>Forms to_form vs raw changeset: doc_to_form/2 returns a plain map() by design (content/forms.ex:34) because the Studio editor is schema-driven with dynamic fields — there is no fixed Ecto changeset/field-set to source a %Phoenix.HTML.Form{} from, so to_form buys nothing. Edits autosave via phx-change with phx-debounce (150ms slug / 500ms paper blocks), bounding the unsaved-edit window. Reconnect recovery of in-progress contenteditable keystrokes within the &lt;=500ms debounce window is a real but low-severity, hard-to-test-statically gap; not filed. Rejected-with-reason.</p><p>Media upload default size cap: Media.upload&#39;s allowlist + size cap are config-gated OFF by default (media.ex:132) to honor the fresh-install zero-rejection invariant; the /media/upload route is write-token-gated (:media_mutate pipeline) and the 100MB Plug.Parsers length (endpoint.ex:124) is the effective ceiling. Worst case is a trusted-writer disk-fill DoS — a deliberate decision, not a defect. Rejected-with-reason.</p>"
+  },
+  "body_html": "<h1>Felix d08 — LiveView collections, forms, async (audit findings)</h1><p>Domain audit d08 of the Felix pristine initiative. Corpus chapters 39-40 (streams), 42 (async), 44 (forms/uploads). Environment: local Phoenix does not boot — all runtime costs are static-analysis estimates (MEDIUM confidence); protective tests/measurements are delegated to the fix task. Doctrine: a finding qualifies only via named failure mode, measured cost, scar-class risk, or provably-cheaper future change. Tree-tidiness rejected; already-good and rejected-with-reason are first-class.</p><h2>Verdict table</h2><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">CONCEPT (corpus ch 39-40,42,44)            VERDICT              EVIDENCE\n------------------------------------------  -------------------  ------------------------------------\nUnbounded chat transcript assign            ADOPT (filed p2)     studio_chat.ex:128 + chat_live.ex:3520\napi_tester Task.async lifecycle             ALREADY-GOOD         api_tester_live.ex:333-378\nchat plan-publish Task.Supervisor           ALREADY-GOOD         chat_live.ex:3861\nLiveView native uploads (limits)            ALREADY-GOOD         chat_live.ex:182 / mount.ex:271\nbulldocs / paper_blocks streaming           ALREADY-GOOD         bulldocs_live.ex:642 / mount.ex:270\nchat sessions sidebar list                  ALREADY-GOOD (cap)   studio_chat.ex:101 @sidebar_cap\nStudio doc-type list pane (streams cand.)   REJECTED (bounded)   content.ex:61 limit 100/max 1000\nForms: to_form vs raw map                   REJECTED-W-REASON    content/forms.ex:34 doc_to_form :: map()\nAI call off-process (assign_async cand.)    ALREADY-GOOD         external GenServer + PubSub stream\nMedia upload default size cap               REJECTED-W-REASON    media.ex:132 config-gated, token-gated</pre><h2>Finding 1 (ADOPT, priority 2) — unbounded per-socket chat transcript</h2><p>Filed: task-a9adc82f820db065 (parent task-30564ed509eb2997).</p><p>NAMED FAILURE MODE: the Studio Claude chat loads a session&#39;s ENTIRE message history into a per-socket list assign with no cap, and re-renders every row through the paper engine synchronously on the LiveView process at session open.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">studio_chat.ex:128   list_messages/1 = Repo.all with NO limit\nchat_live.ex:3520    replay_messages/2 maps that uncapped list through\n                     replay_message/2 -&gt; paper-engine markdown render (D7),\n                     O(n) synchronous CPU at open, blocks the reopen\nchat_live.ex:1186,   @messages grows via &#39;++ [message]&#39; every turn\n  1387,3465,3717\nchat_live.ex:2184    render calls group_agent_rows(@messages), which walks\n                     all messages 3x (spawns map, children reduce, flat_map)\n                     on EVERY @messages change -&gt; O(n) per turn, O(n^2)/session</pre><p>COST: a long agent chat (Claude Code sessions routinely emit thousands of tool/assistant/user rows) holds O(n) BEAM memory per connected tab for the session lifetime — tool-result rows carry large code/text payloads, conservatively 1-5KB/row, so 1k rows is roughly 1-5MB per socket, multiplied by tabs and concurrent sessions. Plus O(n) paper-engine render blocking reopen, plus O(n) group_agent_rows recompute per turn. Many concurrent long sessions raise an OOM/availability risk.</p><p>FIX MENU (builder&#39;s call): (1) cap list_messages to last N with a lazy &#39;load older&#39; page; and/or (2) assign_async the transcript hydration so the shell renders first — the tree has ZERO assign_async today, this is the signal; and/or (3) memoize group_agent_rows. Streams is an AWKWARD fit because group_agent_rows GROUPS consecutive rows into agent blocks (streams render one DOM node per item) — do NOT force a streams rewrite; cap+async is the cheaper win. The fix task owns the protective test (query test asserting a LIMIT) and the before/after measurement (reopen wall-time and :erlang.external_size on @messages at N=2000).</p><h2>Already-good (verified, no task)</h2><p>api_tester_live Task.async (api_tester_live.ex:333-378): exemplary hand-rolled async — Process.demonitor(ref, [:flush]) on BOTH the result message and the :DOWN, plus a stray-ref fallthrough clause. Correctly handles crash/cancel; converting to assign_async/async_result would be fashion, not improvement. Rejected conversion.</p><p>chat_live plan-publish (chat_live.ex:3861): Task.Supervisor.start_child under Barkpark.TaskSupervisor — supervised, $callers-scoped (sandbox-safe under test), never touches the socket (talks to the session PubSub topic), and wraps publish in try/rescue/catch so a crash degrades to an honest &#39;couldn&#39;t publish&#39; broadcast instead of silence. Already-good.</p><p>LiveView native uploads: chat :attachments (chat_live.ex:182) accept-list + max_entries 4 + max_file_size 3MB (sized to the Anthropic per-image cap after base64 inflation); studio :image (mount.ex:271) accept-list + max_entries 1 + max_file_size 10MB. Both carry accept/entries/size limits. The studio accept-list includes .svg, but the serve path (media_controller.ex:129) collapses dangerous MIMEs to application/octet-stream with nosniff + content-disposition:attachment, defusing stored-XSS. Already-good.</p><p>Streaming collections already on streams: bulldocs_live blocks (bulldocs_live.ex:642) and studio paper_blocks (mount.ex:270). Sessions sidebar list is capped at @sidebar_cap (studio_chat.ex:101). Already-good.</p><p>AI turn execution is owned by an external GenServer subprocess (ClaudeChat.Session) streaming results over PubSub — no blocking Claude call in handle_event. Proper OTP off-process design; assign_async not needed there. Already-good.</p><h2>Rejected-with-reason</h2><p>Studio document-type list pane as a streams candidate: Content.list_documents defaults limit 100 / max 1000 (content.ex:61) and the pane re-fetches wholesale on rebuild — bounded, not unbounded-per-socket. Streams would only trim re-render churn on a &lt;=100-row list, below the measurable-win bar. Rejected.</p><p>Forms to_form vs raw changeset: doc_to_form/2 returns a plain map() by design (content/forms.ex:34) because the Studio editor is schema-driven with dynamic fields — there is no fixed Ecto changeset/field-set to source a %Phoenix.HTML.Form{} from, so to_form buys nothing. Edits autosave via phx-change with phx-debounce (150ms slug / 500ms paper blocks), bounding the unsaved-edit window. Reconnect recovery of in-progress contenteditable keystrokes within the &lt;=500ms debounce window is a real but low-severity, hard-to-test-statically gap; not filed. Rejected-with-reason.</p><p>Media upload default size cap: Media.upload&#39;s allowlist + size cap are config-gated OFF by default (media.ex:132) to honor the fresh-install zero-rejection invariant; the /media/upload route is write-token-gated (:media_mutate pipeline) and the 100MB Plug.Parsers length (endpoint.ex:124) is the effective ceiling. Worst case is a trusted-writer disk-fill DoS — a deliberate decision, not a defect. Rejected-with-reason.</p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": "Domain audit d08 of the Felix pristine initiative. Corpus chapters 39-40 (streams), 42 (async), 44…",
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-findings-liveview-collections"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Felix d08 — LiveView collections, forms, async (audit findings)"
+}

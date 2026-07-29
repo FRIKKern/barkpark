@@ -1,0 +1,305 @@
+{
+  "_createdAt": "2026-07-10T18:19:38.178415Z",
+  "_draft": false,
+  "_id": "felix-findings-queries-indexes",
+  "_publishedId": "felix-findings-queries-indexes",
+  "_rev": "6543af99fb01cce1071aaf10ad18c083",
+  "_type": "paper",
+  "_updatedAt": "2026-07-10T18:19:38.178415Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix d06 — Query Patterns, JSONB, FTS, N+1 & Index Coverage",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Read-only static audit of the Barkpark api/ read surface against the 131-migration index inventory, sized against guerrilla production. Verdict: index/FTS/N+1 coverage is mature and correctly matched to actual query shapes at current and near-term scale. One qualifying finding on the hottest polled path; everything else already-good or rejected-with-reason (scale)."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "Verdict table",
+      "type": "heading"
+    },
+    {
+      "id": "block-3",
+      "language": "text",
+      "type": "code",
+      "value": "DOMAIN AUDIT d06 — query patterns / JSONB / FTS / N+1 / indexes\nguerrilla production scale at audit: documents table < ~1000 rows (task=784, paper=87, all other types=0)\n\nCONCEPT                                          VERDICT                 BASIS\n------------------------------------------------ ----------------------- ------------------------------------------\nFTS tsvector <-> query config match              already-good            generated col + query both 'english' (+'simple' slug); GIN present\nsearch_vector GIN index                          already-good            documents_search_vector_idx GIN(search_vector), final def 20260614220000\ntitle ILIKE '%v%' (typeahead) + similarity()     already-good            documents_title_trgm_idx GIN(title gin_trgm_ops) serves both\ncontent @> X containment (sheet embeds)          already-good            documents_content_path_idx GIN(content jsonb_path_ops), 20260702130000\nN+1 discipline (3 preload sites / 673 files)     already-good            genuine JSONB-doc economy; resolvers batched; no per-iteration Repo.get\npagination stability                             already-good            asc:d.id total-order tiebreaker on every LIMIT/OFFSET path\noffset/limit DoS caps                            already-good            offset<=100_000, limit<=200/1000, ranking pool<=500\ntask_edges blocker-join coverage                 already-good            (from_id,kind)/(to_id,kind) btrees serve unmet_blocker_counts + blocks gate\nscoped-list composite + null-partial index       already-good            (ws,proj,type,dataset_id) + partial (type,dataset) WHERE dataset_id IS NULL\nlower(title)=lower(x) wikilink resolve           rejected-with-reason    no functional index; but recheck within 87-row paper partition, human-paced\ncontent->'labels'/'tags'/'aliases' @> scalar     rejected-with-reason    bare-col GIN can't serve col->'k' @> form; recheck within type partition, human-paced\ncontent->>'kind'/'lifecycle_status' task filters rejected-with-reason    un-indexed JSONB; recheck within 784-row task partition, sub-ms today\n4 facet GROUP BY queries per search              rejected-with-reason    6 round-trips/search but on <100 rows, human-paced; GROUPING SETS = tidiness now\nfetch_doc_with_draft = 2 point lookups           rejected-with-reason    2 indexed point reads; halving to 1 saves nothing material\nready_query content.dependencies gate            ADOPT (FILED)           regexp_replace wraps indexed doc_id -> seq scan; hottest path; scar-class growth\n"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Finding 1 (ADOPT / FILED task-2c74954d53781113, priority 2, MEDIUM confidence)",
+      "type": "heading"
+    },
+    {
+      "id": "block-5",
+      "level": 3,
+      "text": "ready_query dependency-gate seq-scans the task partition",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "ready_query/1 (api/lib/barkpark/tasks/queue.ex:82-109) backs every bp task ready / bp task next poll and the row-locked atomic claim. Its content.dependencies readiness gate is a correlated NOT-EXISTS whose inner documents t resolution matches deps with regexp_replace(t.doc_id,'^drafts\\.','') = regexp_replace(dep.id,...). Wrapping the INDEXED doc_id column in regexp_replace makes documents_doc_id_type_dataset_id_index unusable, so the inner lookup narrows only via (type,dataset) to the task partition and then SEQ-SCANs it, recomputing the regexp per row. Run once per open/blocked candidate x once per dep, cost is ~O(candidates x deps x task_rows) on the most frequently polled query in the system. The task ledger grows monotonically (never deleted; 784 rows today, synced issue ids already ~2274), so it degrades super-linearly with project age."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Scar class: Same shape as the content-GIN fix (migration 20260702130000): an un-indexed JSONB/expression predicate on a high-FREQUENCY path over a growing table. Here it carries the exact frequency multiplier that fix cited (every agent polls ready) that the human-paced label/tag/alias containment filters do NOT — which is why those stay rejected-with-reason and this one is filed."
+        }
+      ],
+      "id": "block-7",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Contrast (why it is specifically axis-2): The twin-collapse axis (queue.ex:117-137) does the SAME drafts-strip but stays index-friendly: o.doc_id == regexp_replace(parent_as(:doc).doc_id, ...) puts the raw indexed column on the LEFT and the computed value on the RIGHT, so o's (doc_id,...) index serves it. Only the dependency-gate inner query wraps the indexed column on the left, defeating the index."
+        }
+      ],
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Proposed fix: Provably cheaper, no new migration: resolve deps through the raw doc_id unique index by matching BOTH spellings (the both-spellings trick already used in Content.Query.resolve_docs_by_ids/3): t.doc_id IN (dep.id, 'drafts.'||stripped, stripped) so t.doc_id stays bare and the btree serves the lookup; keep the lifecycle_status='done' recheck. Alternative: a functional index on regexp_replace(doc_id,'^drafts\\.','')."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Confidence: MEDIUM. Query shape confirmed by static read; wall-clock NOT measured — no local Postgres (local API boot broken: codelist OOM) and guerrilla exposes no EXPLAIN over HTTP. At 784 rows absolute latency is likely still small; the finding is the growth shape on the hottest path. The fix task carries the protective EXPLAIN/benchmark acceptance criteria (seq scan before -> index scan after, at N>=5000 seeded tasks)."
+        }
+      ],
+      "id": "block-10",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-11",
+      "level": 2,
+      "text": "Already-good (adopt-verified, no action)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FTS: the generated search_vector (title A / author B / category B / slug C 'simple' / body D, all 'english' except slug) matches the retriever's plainto_tsquery('english') and phraseto_tsquery('english'); documents_search_vector_idx GIN backs it. Title typeahead: search_documents_by_title's leading-wildcard ilike(title,'%v%') AND the retriever's similarity(title,term) are both served by documents_title_trgm_idx (GIN title gin_trgm_ops) — a leading wildcard that would otherwise force a seq scan is fully indexed. Containment: sheet_embed_targets' bare content @> embed is served by documents_content_path_idx (jsonb_path_ops), the migration that fixed the 2s-flush seq-scan. N+1: exactly 3 Repo.preload sites (codelist values->translations, studio_chat session->messages) — genuine normalized relations, not the JSONB doc body; wikilink/valueref/search-hit hydration is explicitly BATCHED (resolve_docs_by_titles_or_aliases, resolve_docs_by_ids, get_documents_by_ids) with 'N+1 is forbidden' comments; a Repo-inside-Enum.map sweep found only single-query aggregates, no per-row loops. Pagination: every LIMIT/OFFSET path appends asc:d.id for a total order so pages never skip/duplicate on ties. Blocker joins: task_edges (from_id,kind)/(to_id,kind) btrees serve both the ready blocks-gate and unmet_blocker_counts."
+        }
+      ],
+      "id": "block-12",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-13",
+      "level": 2,
+      "text": "Rejected-with-reason (logged, not filed)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "All rejected items reduce to ONE structural truth: un-indexed secondary predicates (lower(title), col->'key' @> scalar, content->>field equality) execute as RECHECKS within a type-partition that the (type,dataset) / (ws,proj,type,dataset_id) btree already narrows to — NOT whole-table seq scans. At guerrilla's real partitions (paper=87, task=784) each recheck is sub-millisecond, and every path is human-paced (render, typeahead, board view), lacking the loop-frequency multiplier that made the content-GIN case a scar. The team indexes reactively when a path actually hurts (the content GIN is the proof), and the Felix doctrine rejects speculative 'add an index' with no measured cost. These are logged so a FUTURE re-audit at a materially larger corpus can revisit — the trigger is partition growth, not code shape."
+        }
+      ],
+      "id": "block-14",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-15",
+      "level": 2,
+      "text": "Method & honesty note",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Primary tool was static analysis: extracted real WHERE/ORDER/JSONB-path shapes from Content.Query, Search.DocumentsRetriever, Tasks.Query, Tasks.Queue, then diffed against every documents/tasks/search index across the 131 migrations. Partition sizes came from the live guerrilla HTTP count API (?count=true). EXPLAIN was NOT run — no local Postgres (local API boot broken: codelist OOM) and guerrilla exposes no EXPLAIN surface — so every performance verdict that depends on plan choice is marked MEDIUM confidence and the one filed finding's acceptance criteria require the EXPLAIN/benchmark to be produced by the fix, not asserted here."
+        }
+      ],
+      "id": "block-16",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix d06 — Query Patterns, JSONB, FTS, N+1 & Index Coverage",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Read-only static audit of the Barkpark api/ read surface against the 131-migration index inventory, sized against guerrilla production. Verdict: index/FTS/N+1 coverage is mature and correctly matched to actual query shapes at current and near-term scale. One qualifying finding on the hottest polled path; everything else already-good or rejected-with-reason (scale)."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "level": 2,
+        "text": "Verdict table",
+        "type": "heading"
+      },
+      {
+        "id": "block-3",
+        "language": "text",
+        "type": "code",
+        "value": "DOMAIN AUDIT d06 — query patterns / JSONB / FTS / N+1 / indexes\nguerrilla production scale at audit: documents table < ~1000 rows (task=784, paper=87, all other types=0)\n\nCONCEPT                                          VERDICT                 BASIS\n------------------------------------------------ ----------------------- ------------------------------------------\nFTS tsvector <-> query config match              already-good            generated col + query both 'english' (+'simple' slug); GIN present\nsearch_vector GIN index                          already-good            documents_search_vector_idx GIN(search_vector), final def 20260614220000\ntitle ILIKE '%v%' (typeahead) + similarity()     already-good            documents_title_trgm_idx GIN(title gin_trgm_ops) serves both\ncontent @> X containment (sheet embeds)          already-good            documents_content_path_idx GIN(content jsonb_path_ops), 20260702130000\nN+1 discipline (3 preload sites / 673 files)     already-good            genuine JSONB-doc economy; resolvers batched; no per-iteration Repo.get\npagination stability                             already-good            asc:d.id total-order tiebreaker on every LIMIT/OFFSET path\noffset/limit DoS caps                            already-good            offset<=100_000, limit<=200/1000, ranking pool<=500\ntask_edges blocker-join coverage                 already-good            (from_id,kind)/(to_id,kind) btrees serve unmet_blocker_counts + blocks gate\nscoped-list composite + null-partial index       already-good            (ws,proj,type,dataset_id) + partial (type,dataset) WHERE dataset_id IS NULL\nlower(title)=lower(x) wikilink resolve           rejected-with-reason    no functional index; but recheck within 87-row paper partition, human-paced\ncontent->'labels'/'tags'/'aliases' @> scalar     rejected-with-reason    bare-col GIN can't serve col->'k' @> form; recheck within type partition, human-paced\ncontent->>'kind'/'lifecycle_status' task filters rejected-with-reason    un-indexed JSONB; recheck within 784-row task partition, sub-ms today\n4 facet GROUP BY queries per search              rejected-with-reason    6 round-trips/search but on <100 rows, human-paced; GROUPING SETS = tidiness now\nfetch_doc_with_draft = 2 point lookups           rejected-with-reason    2 indexed point reads; halving to 1 saves nothing material\nready_query content.dependencies gate            ADOPT (FILED)           regexp_replace wraps indexed doc_id -> seq scan; hottest path; scar-class growth\n"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "Finding 1 (ADOPT / FILED task-2c74954d53781113, priority 2, MEDIUM confidence)",
+        "type": "heading"
+      },
+      {
+        "id": "block-5",
+        "level": 3,
+        "text": "ready_query dependency-gate seq-scans the task partition",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "ready_query/1 (api/lib/barkpark/tasks/queue.ex:82-109) backs every bp task ready / bp task next poll and the row-locked atomic claim. Its content.dependencies readiness gate is a correlated NOT-EXISTS whose inner documents t resolution matches deps with regexp_replace(t.doc_id,'^drafts\\.','') = regexp_replace(dep.id,...). Wrapping the INDEXED doc_id column in regexp_replace makes documents_doc_id_type_dataset_id_index unusable, so the inner lookup narrows only via (type,dataset) to the task partition and then SEQ-SCANs it, recomputing the regexp per row. Run once per open/blocked candidate x once per dep, cost is ~O(candidates x deps x task_rows) on the most frequently polled query in the system. The task ledger grows monotonically (never deleted; 784 rows today, synced issue ids already ~2274), so it degrades super-linearly with project age."
+          }
+        ],
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Scar class: Same shape as the content-GIN fix (migration 20260702130000): an un-indexed JSONB/expression predicate on a high-FREQUENCY path over a growing table. Here it carries the exact frequency multiplier that fix cited (every agent polls ready) that the human-paced label/tag/alias containment filters do NOT — which is why those stay rejected-with-reason and this one is filed."
+          }
+        ],
+        "id": "block-7",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Contrast (why it is specifically axis-2): The twin-collapse axis (queue.ex:117-137) does the SAME drafts-strip but stays index-friendly: o.doc_id == regexp_replace(parent_as(:doc).doc_id, ...) puts the raw indexed column on the LEFT and the computed value on the RIGHT, so o's (doc_id,...) index serves it. Only the dependency-gate inner query wraps the indexed column on the left, defeating the index."
+          }
+        ],
+        "id": "block-8",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Proposed fix: Provably cheaper, no new migration: resolve deps through the raw doc_id unique index by matching BOTH spellings (the both-spellings trick already used in Content.Query.resolve_docs_by_ids/3): t.doc_id IN (dep.id, 'drafts.'||stripped, stripped) so t.doc_id stays bare and the btree serves the lookup; keep the lifecycle_status='done' recheck. Alternative: a functional index on regexp_replace(doc_id,'^drafts\\.','')."
+          }
+        ],
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Confidence: MEDIUM. Query shape confirmed by static read; wall-clock NOT measured — no local Postgres (local API boot broken: codelist OOM) and guerrilla exposes no EXPLAIN over HTTP. At 784 rows absolute latency is likely still small; the finding is the growth shape on the hottest path. The fix task carries the protective EXPLAIN/benchmark acceptance criteria (seq scan before -> index scan after, at N>=5000 seeded tasks)."
+          }
+        ],
+        "id": "block-10",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-11",
+        "level": 2,
+        "text": "Already-good (adopt-verified, no action)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "FTS: the generated search_vector (title A / author B / category B / slug C 'simple' / body D, all 'english' except slug) matches the retriever's plainto_tsquery('english') and phraseto_tsquery('english'); documents_search_vector_idx GIN backs it. Title typeahead: search_documents_by_title's leading-wildcard ilike(title,'%v%') AND the retriever's similarity(title,term) are both served by documents_title_trgm_idx (GIN title gin_trgm_ops) — a leading wildcard that would otherwise force a seq scan is fully indexed. Containment: sheet_embed_targets' bare content @> embed is served by documents_content_path_idx (jsonb_path_ops), the migration that fixed the 2s-flush seq-scan. N+1: exactly 3 Repo.preload sites (codelist values->translations, studio_chat session->messages) — genuine normalized relations, not the JSONB doc body; wikilink/valueref/search-hit hydration is explicitly BATCHED (resolve_docs_by_titles_or_aliases, resolve_docs_by_ids, get_documents_by_ids) with 'N+1 is forbidden' comments; a Repo-inside-Enum.map sweep found only single-query aggregates, no per-row loops. Pagination: every LIMIT/OFFSET path appends asc:d.id for a total order so pages never skip/duplicate on ties. Blocker joins: task_edges (from_id,kind)/(to_id,kind) btrees serve both the ready blocks-gate and unmet_blocker_counts."
+          }
+        ],
+        "id": "block-12",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-13",
+        "level": 2,
+        "text": "Rejected-with-reason (logged, not filed)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "All rejected items reduce to ONE structural truth: un-indexed secondary predicates (lower(title), col->'key' @> scalar, content->>field equality) execute as RECHECKS within a type-partition that the (type,dataset) / (ws,proj,type,dataset_id) btree already narrows to — NOT whole-table seq scans. At guerrilla's real partitions (paper=87, task=784) each recheck is sub-millisecond, and every path is human-paced (render, typeahead, board view), lacking the loop-frequency multiplier that made the content-GIN case a scar. The team indexes reactively when a path actually hurts (the content GIN is the proof), and the Felix doctrine rejects speculative 'add an index' with no measured cost. These are logged so a FUTURE re-audit at a materially larger corpus can revisit — the trigger is partition growth, not code shape."
+          }
+        ],
+        "id": "block-14",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-15",
+        "level": 2,
+        "text": "Method & honesty note",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Primary tool was static analysis: extracted real WHERE/ORDER/JSONB-path shapes from Content.Query, Search.DocumentsRetriever, Tasks.Query, Tasks.Queue, then diffed against every documents/tasks/search index across the 131 migrations. Partition sizes came from the live guerrilla HTTP count API (?count=true). EXPLAIN was NOT run — no local Postgres (local API boot broken: codelist OOM) and guerrilla exposes no EXPLAIN surface — so every performance verdict that depends on plan choice is marked MEDIUM confidence and the one filed finding's acceptance criteria require the EXPLAIN/benchmark to be produced by the fix, not asserted here."
+          }
+        ],
+        "id": "block-16",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix d06 — Query Patterns, JSONB, FTS, N+1 &amp; Index Coverage</h1><p>Read-only static audit of the Barkpark api/ read surface against the 131-migration index inventory, sized against guerrilla production. Verdict: index/FTS/N+1 coverage is mature and correctly matched to actual query shapes at current and near-term scale. One qualifying finding on the hottest polled path; everything else already-good or rejected-with-reason (scale).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verdict table</h2><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">DOMAIN AUDIT d06 — query patterns / JSONB / FTS / N+1 / indexes</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">guerrilla production scale at audit: documents table &lt; ~1000 rows (task=784, paper=87, all other types=0)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">CONCEPT                                          VERDICT                 BASIS</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">------------------------------------------------ ----------------------- ------------------------------------------</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">FTS tsvector &lt;-&gt; query config match              already-good            generated col + query both &#39;english&#39; (+&#39;simple&#39; slug); GIN present</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">search_vector GIN index                          already-good            documents_search_vector_idx GIN(search_vector), final def 20260614220000</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">title ILIKE &#39;%v%&#39; (typeahead) + similarity()     already-good            documents_title_trgm_idx GIN(title gin_trgm_ops) serves both</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">content @&gt; X containment (sheet embeds)          already-good            documents_content_path_idx GIN(content jsonb_path_ops), 20260702130000</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">N+1 discipline (3 preload sites / 673 files)     already-good            genuine JSONB-doc economy; resolvers batched; no per-iteration Repo.get</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">pagination stability                             already-good            asc:d.id total-order tiebreaker on every LIMIT/OFFSET path</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">offset/limit DoS caps                            already-good            offset&lt;=100_000, limit&lt;=200/1000, ranking pool&lt;=500</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task_edges blocker-join coverage                 already-good            (from_id,kind)/(to_id,kind) btrees serve unmet_blocker_counts + blocks gate</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">scoped-list composite + null-partial index       already-good            (ws,proj,type,dataset_id) + partial (type,dataset) WHERE dataset_id IS NULL</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">lower(title)=lower(x) wikilink resolve           rejected-with-reason    no functional index; but recheck within 87-row paper partition, human-paced</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">content-&gt;&#39;labels&#39;/&#39;tags&#39;/&#39;aliases&#39; @&gt; scalar     rejected-with-reason    bare-col GIN can&#39;t serve col-&gt;&#39;k&#39; @&gt; form; recheck within type partition, human-paced</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">content-&gt;&gt;&#39;kind&#39;/&#39;lifecycle_status&#39; task filters rejected-with-reason    un-indexed JSONB; recheck within 784-row task partition, sub-ms today</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">4 facet GROUP BY queries per search              rejected-with-reason    6 round-trips/search but on &lt;100 rows, human-paced; GROUPING SETS = tidiness now</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">fetch_doc_with_draft = 2 point lookups           rejected-with-reason    2 indexed point reads; halving to 1 saves nothing material</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">ready_query content.dependencies gate            ADOPT (FILED)           regexp_replace wraps indexed doc_id -&gt; seq scan; hottest path; scar-class growth</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding 1 (ADOPT / FILED task-2c74954d53781113, priority 2, MEDIUM confidence)</h2><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">ready_query dependency-gate seq-scans the task partition</h3><p>ready_query/1 (api/lib/barkpark/tasks/queue.ex:82-109) backs every bp task ready / bp task next poll and the row-locked atomic claim. Its content.dependencies readiness gate is a correlated NOT-EXISTS whose inner documents t resolution matches deps with regexp_replace(t.doc_id,&#39;^drafts\\.&#39;,&#39;&#39;) = regexp_replace(dep.id,...). Wrapping the INDEXED doc_id column in regexp_replace makes documents_doc_id_type_dataset_id_index unusable, so the inner lookup narrows only via (type,dataset) to the task partition and then SEQ-SCANs it, recomputing the regexp per row. Run once per open/blocked candidate x once per dep, cost is ~O(candidates x deps x task_rows) on the most frequently polled query in the system. The task ledger grows monotonically (never deleted; 784 rows today, synced issue ids already ~2274), so it degrades super-linearly with project age.</p><p>Scar class: Same shape as the content-GIN fix (migration 20260702130000): an un-indexed JSONB/expression predicate on a high-FREQUENCY path over a growing table. Here it carries the exact frequency multiplier that fix cited (every agent polls ready) that the human-paced label/tag/alias containment filters do NOT — which is why those stay rejected-with-reason and this one is filed.</p><p>Contrast (why it is specifically axis-2): The twin-collapse axis (queue.ex:117-137) does the SAME drafts-strip but stays index-friendly: o.doc_id == regexp_replace(parent_as(:doc).doc_id, ...) puts the raw indexed column on the LEFT and the computed value on the RIGHT, so o&#39;s (doc_id,...) index serves it. Only the dependency-gate inner query wraps the indexed column on the left, defeating the index.</p><p>Proposed fix: Provably cheaper, no new migration: resolve deps through the raw doc_id unique index by matching BOTH spellings (the both-spellings trick already used in Content.Query.resolve_docs_by_ids/3): t.doc_id IN (dep.id, &#39;drafts.&#39;||stripped, stripped) so t.doc_id stays bare and the btree serves the lookup; keep the lifecycle_status=&#39;done&#39; recheck. Alternative: a functional index on regexp_replace(doc_id,&#39;^drafts\\.&#39;,&#39;&#39;).</p><p>Confidence: MEDIUM. Query shape confirmed by static read; wall-clock NOT measured — no local Postgres (local API boot broken: codelist OOM) and guerrilla exposes no EXPLAIN over HTTP. At 784 rows absolute latency is likely still small; the finding is the growth shape on the hottest path. The fix task carries the protective EXPLAIN/benchmark acceptance criteria (seq scan before -&gt; index scan after, at N&gt;=5000 seeded tasks).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Already-good (adopt-verified, no action)</h2><p>FTS: the generated search_vector (title A / author B / category B / slug C &#39;simple&#39; / body D, all &#39;english&#39; except slug) matches the retriever&#39;s plainto_tsquery(&#39;english&#39;) and phraseto_tsquery(&#39;english&#39;); documents_search_vector_idx GIN backs it. Title typeahead: search_documents_by_title&#39;s leading-wildcard ilike(title,&#39;%v%&#39;) AND the retriever&#39;s similarity(title,term) are both served by documents_title_trgm_idx (GIN title gin_trgm_ops) — a leading wildcard that would otherwise force a seq scan is fully indexed. Containment: sheet_embed_targets&#39; bare content @&gt; embed is served by documents_content_path_idx (jsonb_path_ops), the migration that fixed the 2s-flush seq-scan. N+1: exactly 3 Repo.preload sites (codelist values-&gt;translations, studio_chat session-&gt;messages) — genuine normalized relations, not the JSONB doc body; wikilink/valueref/search-hit hydration is explicitly BATCHED (resolve_docs_by_titles_or_aliases, resolve_docs_by_ids, get_documents_by_ids) with &#39;N+1 is forbidden&#39; comments; a Repo-inside-Enum.map sweep found only single-query aggregates, no per-row loops. Pagination: every LIMIT/OFFSET path appends asc:d.id for a total order so pages never skip/duplicate on ties. Blocker joins: task_edges (from_id,kind)/(to_id,kind) btrees serve both the ready blocks-gate and unmet_blocker_counts.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Rejected-with-reason (logged, not filed)</h2><p>All rejected items reduce to ONE structural truth: un-indexed secondary predicates (lower(title), col-&gt;&#39;key&#39; @&gt; scalar, content-&gt;&gt;field equality) execute as RECHECKS within a type-partition that the (type,dataset) / (ws,proj,type,dataset_id) btree already narrows to — NOT whole-table seq scans. At guerrilla&#39;s real partitions (paper=87, task=784) each recheck is sub-millisecond, and every path is human-paced (render, typeahead, board view), lacking the loop-frequency multiplier that made the content-GIN case a scar. The team indexes reactively when a path actually hurts (the content GIN is the proof), and the Felix doctrine rejects speculative &#39;add an index&#39; with no measured cost. These are logged so a FUTURE re-audit at a materially larger corpus can revisit — the trigger is partition growth, not code shape.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Method &amp; honesty note</h2><p>Primary tool was static analysis: extracted real WHERE/ORDER/JSONB-path shapes from Content.Query, Search.DocumentsRetriever, Tasks.Query, Tasks.Queue, then diffed against every documents/tasks/search index across the 131 migrations. Partition sizes came from the live guerrilla HTTP count API (?count=true). EXPLAIN was NOT run — no local Postgres (local API boot broken: codelist OOM) and guerrilla exposes no EXPLAIN surface — so every performance verdict that depends on plan choice is marked MEDIUM confidence and the one filed finding&#39;s acceptance criteria require the EXPLAIN/benchmark to be produced by the fix, not asserted here.</p>"
+  },
+  "body_html": "<h1>Felix d06 — Query Patterns, JSONB, FTS, N+1 &amp; Index Coverage</h1><p>Read-only static audit of the Barkpark api/ read surface against the 131-migration index inventory, sized against guerrilla production. Verdict: index/FTS/N+1 coverage is mature and correctly matched to actual query shapes at current and near-term scale. One qualifying finding on the hottest polled path; everything else already-good or rejected-with-reason (scale).</p><h2>Verdict table</h2><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">DOMAIN AUDIT d06 — query patterns / JSONB / FTS / N+1 / indexes\nguerrilla production scale at audit: documents table &lt; ~1000 rows (task=784, paper=87, all other types=0)\n\nCONCEPT                                          VERDICT                 BASIS\n------------------------------------------------ ----------------------- ------------------------------------------\nFTS tsvector &lt;-&gt; query config match              already-good            generated col + query both &#39;english&#39; (+&#39;simple&#39; slug); GIN present\nsearch_vector GIN index                          already-good            documents_search_vector_idx GIN(search_vector), final def 20260614220000\ntitle ILIKE &#39;%v%&#39; (typeahead) + similarity()     already-good            documents_title_trgm_idx GIN(title gin_trgm_ops) serves both\ncontent @&gt; X containment (sheet embeds)          already-good            documents_content_path_idx GIN(content jsonb_path_ops), 20260702130000\nN+1 discipline (3 preload sites / 673 files)     already-good            genuine JSONB-doc economy; resolvers batched; no per-iteration Repo.get\npagination stability                             already-good            asc:d.id total-order tiebreaker on every LIMIT/OFFSET path\noffset/limit DoS caps                            already-good            offset&lt;=100_000, limit&lt;=200/1000, ranking pool&lt;=500\ntask_edges blocker-join coverage                 already-good            (from_id,kind)/(to_id,kind) btrees serve unmet_blocker_counts + blocks gate\nscoped-list composite + null-partial index       already-good            (ws,proj,type,dataset_id) + partial (type,dataset) WHERE dataset_id IS NULL\nlower(title)=lower(x) wikilink resolve           rejected-with-reason    no functional index; but recheck within 87-row paper partition, human-paced\ncontent-&gt;&#39;labels&#39;/&#39;tags&#39;/&#39;aliases&#39; @&gt; scalar     rejected-with-reason    bare-col GIN can&#39;t serve col-&gt;&#39;k&#39; @&gt; form; recheck within type partition, human-paced\ncontent-&gt;&gt;&#39;kind&#39;/&#39;lifecycle_status&#39; task filters rejected-with-reason    un-indexed JSONB; recheck within 784-row task partition, sub-ms today\n4 facet GROUP BY queries per search              rejected-with-reason    6 round-trips/search but on &lt;100 rows, human-paced; GROUPING SETS = tidiness now\nfetch_doc_with_draft = 2 point lookups           rejected-with-reason    2 indexed point reads; halving to 1 saves nothing material\nready_query content.dependencies gate            ADOPT (FILED)           regexp_replace wraps indexed doc_id -&gt; seq scan; hottest path; scar-class growth\n</pre><h2>Finding 1 (ADOPT / FILED task-2c74954d53781113, priority 2, MEDIUM confidence)</h2><h3>ready_query dependency-gate seq-scans the task partition</h3><p>ready_query/1 (api/lib/barkpark/tasks/queue.ex:82-109) backs every bp task ready / bp task next poll and the row-locked atomic claim. Its content.dependencies readiness gate is a correlated NOT-EXISTS whose inner documents t resolution matches deps with regexp_replace(t.doc_id,&#39;^drafts\\.&#39;,&#39;&#39;) = regexp_replace(dep.id,...). Wrapping the INDEXED doc_id column in regexp_replace makes documents_doc_id_type_dataset_id_index unusable, so the inner lookup narrows only via (type,dataset) to the task partition and then SEQ-SCANs it, recomputing the regexp per row. Run once per open/blocked candidate x once per dep, cost is ~O(candidates x deps x task_rows) on the most frequently polled query in the system. The task ledger grows monotonically (never deleted; 784 rows today, synced issue ids already ~2274), so it degrades super-linearly with project age.</p><p>Scar class: Same shape as the content-GIN fix (migration 20260702130000): an un-indexed JSONB/expression predicate on a high-FREQUENCY path over a growing table. Here it carries the exact frequency multiplier that fix cited (every agent polls ready) that the human-paced label/tag/alias containment filters do NOT — which is why those stay rejected-with-reason and this one is filed.</p><p>Contrast (why it is specifically axis-2): The twin-collapse axis (queue.ex:117-137) does the SAME drafts-strip but stays index-friendly: o.doc_id == regexp_replace(parent_as(:doc).doc_id, ...) puts the raw indexed column on the LEFT and the computed value on the RIGHT, so o&#39;s (doc_id,...) index serves it. Only the dependency-gate inner query wraps the indexed column on the left, defeating the index.</p><p>Proposed fix: Provably cheaper, no new migration: resolve deps through the raw doc_id unique index by matching BOTH spellings (the both-spellings trick already used in Content.Query.resolve_docs_by_ids/3): t.doc_id IN (dep.id, &#39;drafts.&#39;||stripped, stripped) so t.doc_id stays bare and the btree serves the lookup; keep the lifecycle_status=&#39;done&#39; recheck. Alternative: a functional index on regexp_replace(doc_id,&#39;^drafts\\.&#39;,&#39;&#39;).</p><p>Confidence: MEDIUM. Query shape confirmed by static read; wall-clock NOT measured — no local Postgres (local API boot broken: codelist OOM) and guerrilla exposes no EXPLAIN over HTTP. At 784 rows absolute latency is likely still small; the finding is the growth shape on the hottest path. The fix task carries the protective EXPLAIN/benchmark acceptance criteria (seq scan before -&gt; index scan after, at N&gt;=5000 seeded tasks).</p><h2>Already-good (adopt-verified, no action)</h2><p>FTS: the generated search_vector (title A / author B / category B / slug C &#39;simple&#39; / body D, all &#39;english&#39; except slug) matches the retriever&#39;s plainto_tsquery(&#39;english&#39;) and phraseto_tsquery(&#39;english&#39;); documents_search_vector_idx GIN backs it. Title typeahead: search_documents_by_title&#39;s leading-wildcard ilike(title,&#39;%v%&#39;) AND the retriever&#39;s similarity(title,term) are both served by documents_title_trgm_idx (GIN title gin_trgm_ops) — a leading wildcard that would otherwise force a seq scan is fully indexed. Containment: sheet_embed_targets&#39; bare content @&gt; embed is served by documents_content_path_idx (jsonb_path_ops), the migration that fixed the 2s-flush seq-scan. N+1: exactly 3 Repo.preload sites (codelist values-&gt;translations, studio_chat session-&gt;messages) — genuine normalized relations, not the JSONB doc body; wikilink/valueref/search-hit hydration is explicitly BATCHED (resolve_docs_by_titles_or_aliases, resolve_docs_by_ids, get_documents_by_ids) with &#39;N+1 is forbidden&#39; comments; a Repo-inside-Enum.map sweep found only single-query aggregates, no per-row loops. Pagination: every LIMIT/OFFSET path appends asc:d.id for a total order so pages never skip/duplicate on ties. Blocker joins: task_edges (from_id,kind)/(to_id,kind) btrees serve both the ready blocks-gate and unmet_blocker_counts.</p><h2>Rejected-with-reason (logged, not filed)</h2><p>All rejected items reduce to ONE structural truth: un-indexed secondary predicates (lower(title), col-&gt;&#39;key&#39; @&gt; scalar, content-&gt;&gt;field equality) execute as RECHECKS within a type-partition that the (type,dataset) / (ws,proj,type,dataset_id) btree already narrows to — NOT whole-table seq scans. At guerrilla&#39;s real partitions (paper=87, task=784) each recheck is sub-millisecond, and every path is human-paced (render, typeahead, board view), lacking the loop-frequency multiplier that made the content-GIN case a scar. The team indexes reactively when a path actually hurts (the content GIN is the proof), and the Felix doctrine rejects speculative &#39;add an index&#39; with no measured cost. These are logged so a FUTURE re-audit at a materially larger corpus can revisit — the trigger is partition growth, not code shape.</p><h2>Method &amp; honesty note</h2><p>Primary tool was static analysis: extracted real WHERE/ORDER/JSONB-path shapes from Content.Query, Search.DocumentsRetriever, Tasks.Query, Tasks.Queue, then diffed against every documents/tasks/search index across the 131 migrations. Partition sizes came from the live guerrilla HTTP count API (?count=true). EXPLAIN was NOT run — no local Postgres (local API boot broken: codelist OOM) and guerrilla exposes no EXPLAIN surface — so every performance verdict that depends on plan choice is marked MEDIUM confidence and the one filed finding&#39;s acceptance criteria require the EXPLAIN/benchmark to be produced by the fix, not asserted here.</p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": "Read-only static audit of the Barkpark api/ read surface against the 131-migration index inventory, sized…",
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-findings-queries-indexes"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Felix d06 — Query Patterns, JSONB, FTS, N+1 & Index Coverage"
+}

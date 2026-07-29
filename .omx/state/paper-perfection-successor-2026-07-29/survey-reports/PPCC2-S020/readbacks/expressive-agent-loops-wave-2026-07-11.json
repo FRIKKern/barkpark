@@ -1,0 +1,3703 @@
+{
+  "_createdAt": "2026-07-10T23:35:33.225832Z",
+  "_draft": false,
+  "_id": "expressive-agent-loops-wave-2026-07-11",
+  "_publishedId": "expressive-agent-loops-wave-2026-07-11",
+  "_rev": "fdb8655adfa9d64d7a893cdb94dabd3f",
+  "_type": "paper",
+  "_updatedAt": "2026-07-11T01:05:54.163381Z",
+  "blocks": [
+    {
+      "id": "eal-000",
+      "text": "Barkpark · expressive-agent-loops · wave 1 · living wave paper",
+      "type": "eyebrow"
+    },
+    {
+      "id": "eal-001",
+      "level": 1,
+      "text": "Wave 1 — criteria become live locks",
+      "type": "heading"
+    },
+    {
+      "id": "eal-002",
+      "items": [
+        "Epic task-d7b7ce69e14d9124",
+        "Charter .claude/workflows/expressive-agent-loops-charter.md",
+        "Opened at Strategize 2026-07-11"
+      ],
+      "type": "byline"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The wish: agent loops narrate themselves live — criteria stamped mid-claim with honest misses, a now-line pulse on every board, one event stream feeding every surface, proven by a real run, not a demo. This Paper is the wave's living story: Strategize opened it, Digest appends the survey digest + verify plan, Decide appends decisions + the build plan, Review closes it as the debrief."
+        }
+      ],
+      "id": "eal-003",
+      "type": "ingress"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "STATUS: SURVEYING. "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "14 Sonnet surveyors are mapping the seams. Nothing has been built yet in this wave: all four wave-1 children are open and unclaimed (verified against the ledger 2026-07-11)."
+        }
+      ],
+      "id": "eal-004",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "eal-010",
+      "level": 2,
+      "text": "Where the epic actually stands",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The charter (ratified 2026-07-10) filed four perfected children under task-d7b7ce69e14d9124. Ledger check at wave open: all four are lifecycle open, zero criteria met, no claims. So wave 1 is a pure build wave — nothing to reconcile, everything to ship. Do NOT refile the children; claim them."
+        }
+      ],
+      "id": "eal-011",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Slice"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Task"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Surface"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "State at open"
+          }
+        ]
+      ],
+      "id": "eal-012",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "bp task stamp"
+            },
+            {
+              "type": "text",
+              "value": " — criterion-level mid-claim evidence + --miss"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "task-79d71bc80427f0e4"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "api/ + internal/cli"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "open, unclaimed"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "bp task pulse"
+            },
+            {
+              "type": "text",
+              "value": " — now-line + lease renewal, one atomic write"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "task-9e59a7bd4fb241a2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "api/ + internal/cli"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "open, unclaimed"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "task events feed — "
+            },
+            {
+              "type": "code",
+              "value": "/v1/tasks/events?since="
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "task-1780b182cf404dc7"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "api/ + internal/cli"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "open, unclaimed"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "TUI locks strip — criteria ladder on the board"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "task-70eb8244dd1e702a"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "internal/taskboard"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "open, unclaimed"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "eal-020",
+      "level": 2,
+      "text": "Direction for this wave",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Finish, don't start: ship all four slices in dependency order (stamp → pulse ∥ events → locks strip) and seal the wave with the epic's own criterion 2 — a REAL epic-cycle builder that stamps its criteria mid-claim while a human-watchable bp tasks board shows the locks flipping and the now-line breathing. The wave proves itself: per law D4, the later slices in THIS wave are built by workers who stamp and pulse using the verbs the earlier slices just merged."
+        }
+      ],
+      "id": "eal-021",
+      "type": "paragraph"
+    },
+    {
+      "id": "eal-022",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "One substrate (D1): the events feed is a projection of the task ledger's own write path, not a second store. Every stamp/pulse/claim/close funnels through one emitter; the HTTP cursor stream (?since=) replays from durable order, PubSub only accelerates push. If a slice wants its own table of truth, it is a fork — redesign."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Stamp is progress, close is the seal (D3): stamp --met writes evidence into the criterion in place; --miss records the honest attempt WITHOUT flipping the lock. Close still validates the full set. Stamp/pulse must authenticate as the claim holder (worker + epoch CAS) — a lapsed claim cannot stamp."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Pulse extends the existing rail-awareness lease renewal rather than inventing a parallel heartbeat: one atomic write = now-line text + lease renewal. Two writes racing is a bug by design review."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Vocabulary pinned (D2): the locks strip renders 1:1 from design/tokens.json lifecycle — ○ dim → ○ bright → braille spinner blue → ✓ teal, ! amber blocked. taskboard already owns anim.go (braille) and activityband.go; reuse, don't re-invent. Goldens update in the same PR as the renderer."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Quality bar: §0 of the task design-language spec is the acceptance test — it must feel alive; you always feel progress. A board that only repaints on manual refresh fails the wave even if every API test is green."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Tentative choices above are direction, not decree — two exploration rounds (survey + verify) run before Decide finalizes. Known open questions: does a durable ordered event trail already exist to project from (document revisions / work-digest / rail_rev), or does the feed need a minimal append-only tasks-events table? Where exactly does the lease-renewal write live, and can the now-line ride the same UPDATE?"
+        }
+      ],
+      "id": "eal-023",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "id": "eal-030",
+      "level": 2,
+      "text": "Survey plan — 14 scouts in flight",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Cheap width now buys precise depth later. Each scout answers one question and reports coverage (file, checked-for, found/not-found)."
+        }
+      ],
+      "id": "eal-031",
+      "type": "paragraph"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Scout"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Question"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Why it changes the plan"
+          }
+        ]
+      ],
+      "id": "eal-032",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "tasks-plugin-map"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Map the Tasks plugin in api/: claim/close/lease code paths, epoch CAS, criteria validation at close"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Stamp and pulse must plug into these exact functions"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "lease-renewal-prior-art"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "What did rail-awareness ship for lease renewal — endpoint, write shape, fencing?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Pulse should extend it, not duplicate it"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "task-write-contract"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "How task mutations flow (flat fields, /v1/data/mutate patch semantics), where a criterion-level write fits"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Stamp's write must be atomic and merge-safe"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "events-substrate"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Existing realtime seams: PubSub topics, projects-board realtime, webhook contract, rail_rev ETag"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Decides what /v1/tasks/events projects from"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "event-log-storage"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Is there a durable ordered trail (revisions/work-digest) a ?since= cursor can replay?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D1 hinges on this: projection vs new table"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "cli-verb-map"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "How a new bp task verb registers end-to-end (capabilities manifest → CLI)"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "stamp/pulse/events all need this path"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "taskboard-render"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "taskboard internals: board.go, activityband, anim, cache, goldens, refresh loop"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Locks strip lands here; find the seam and the repaint cadence"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "tokens-lifecycle"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "tokens.json lifecycle vocab and how glyphs/colors reach Go + Studio today"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D2 compliance is mechanical if the pipeline exists"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "child-task-briefs"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Full briefs + acceptance criteria of the four children, plus /papers/wave-deck-zen-handoff"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Builders inherit these verbatim; surface contradictions now"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "claim-epoch-cas"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Claim lifecycle gotchas: epoch, fenced_off, re-claim, lapsed leases"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Stamp/pulse authorization semantics"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "surface-census"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Every surface that renders tasks (TUI board, Studio projects, web embed) and how each refreshes"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The now-line must show everywhere the feed lands"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "epic-cycle-hook"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Where the bp-epic-cycle builder prompt lives and how to make builders stamp/pulse"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The wave's integration proof rides this"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "test-harness"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "How tasks-plugin Elixir tests and Go taskboard golden tests run; integration-worktree gate"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Builders need the gate recipe up front"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "prior-attempts"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp search + git log for prior stamp/pulse/events work, branches, papers"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Avoid rebuilding or colliding with exhaust"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "id": "eal-040",
+      "level": 2,
+      "text": "What Done looks like",
+      "type": "heading"
+    },
+    {
+      "id": "eal-041",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "All four children merged, each with its own criteria evidence-closed via the very stamp verb this wave ships."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "A real agent loop (an epic-cycle builder in this wave) stamps criteria live during its claim; the bp tasks board shows the ✓✓⠹○ 2/4 ladder and the now-line pulse without manual refresh."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "One event stream (/v1/tasks/events?since=) demonstrably feeds the TUI board; no surface grew its own store."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Epic parent criteria 1+2 stamped with run proofs; this Paper closed as the debrief."
+          }
+        ]
+      ],
+      "ordered": true,
+      "type": "list"
+    },
+    {
+      "id": "eal-042",
+      "type": "divider"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Log: 2026-07-11 Strategize — paper opened, direction set, 14 surveyors dispatched. Next entry: Digest."
+            }
+          ],
+          "type": "em"
+        }
+      ],
+      "id": "eal-043",
+      "type": "paragraph"
+    },
+    {
+      "id": "eal-099",
+      "type": "divider"
+    },
+    {
+      "id": "eal-100",
+      "level": 2,
+      "text": "Digest — survey folded, verify fleet in flight (2026-07-11)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "STATUS: VERIFYING. "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "14 survey reports digested. 7 verifiers dispatched (3 Opus, 4 Sonnet) — the LAST exploration round before Decide cuts the plan."
+        }
+      ],
+      "id": "eal-101",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "eal-102",
+      "level": 3,
+      "text": "What the survey established",
+      "type": "heading"
+    },
+    {
+      "id": "eal-103",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Events substrate SETTLED (D1): mutation_events is a durable append-only bigserial-ordered table every task op already writes in-transaction through one funnel (Tasks.Internal.insert_mutation_event! → Content.Broadcast.save_event). EventLog.replay_since/4 is a production keyset ?since= cursor (SSE resume at /v1/data/listen); Prime.recent_events already runs the task-filtered query shape; sync_push_cursors + github cursor already treat mutation_events.id as an external cursor. /v1/tasks/events?since= = thin projection. NO new store."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Stamp is genuinely new: acceptance-criteria writes exist ONLY inside Close (merge_criteria/apply_criteria_update, private — advisory lock, in-lock re-read, index-targeted List.replace_at, rev CAS). Stamp = extract that write path into a shared module + graft Close.check_fencing/2 (epoch CAS). Mutations.relabel_by_id is the closest shape template but carries NO fencing — copying it verbatim ships the bug."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Pulse = extend Claim.do_renew/3 — the shipped lease renewal is already ONE atomic Repo.update_all (epoch+1, ts_iso refresh, work_digest deliberately preserved) riding the same-worker targeted-claim branch (renewal?/2). Pulse adds the now-line to that SAME write; a second UPDATE reintroduces the racing-writes problem the charter bans."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "CLI is free: a new verb = manifest map in plugins/tasks.ex cli_commands/0 + route tuple in register_routes/1 + controller action. Go dispatch is 100% manifest-driven (tree.Lookup → runCommand) — zero Go per verb. MCP exposure is a SEPARATE hand-maintained step in mcp_tasks.go. There is no alias layer: the manifest verb string IS the only spelling."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Vocabulary pinned & gated: design/tokens.json lifecycle block (braille-blue spinner, ✓ teal deliberately ≠ status-ok green, ! amber, ○ bright=ready / ○ dim=open) flows via emit.mjs into taskboard tokens_gen.go, Studio TokensGen, and CSS — with design/check.mjs 4-way parity and api/test board_theme_parity_test.exs as live tripwires. Locks-strip reuses spinnerGlyph/GenLifecycle; goldens regen via `go test ./internal/taskboard/... -update`, same PR."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Board liveness does NOT depend on the events feed: the TUI board already self-refreshes (SSE dirty-bit → 750ms debounced full refetch + 30s backstop; events NEVER carry truth), and Studio /admin/projects subscribes to the same broadcast. The feed's value is the durable replayable narration trail for surfaces without that plumbing — plus the ?since= cursor for agents."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Epic-cycle hook is surgical: one canonical file (.claude/workflows/bp-epic-cycle.workflow.js); TASKS_BLOCK line 59 currently teaches close-time-only criteria writes while the Build prompt says STAMP AS YOU GO — the exact gap stamp closes. Touch points: TASKS_BLOCK, LIVENESS_BLOCK, Build phase step 3. Edit lands ONLY after the verbs merge."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "eal-104",
+      "level": 3,
+      "text": "Corrections & contradictions — Decide must resolve",
+      "type": "heading"
+    },
+    {
+      "id": "eal-105",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "The strategic direction named files that don't exist: activityband.go was NEVER an implementation file (NOW/NEXT band retired, Amendment 7/commit 92a618f8); braille lives in spinner.go, glyph render in components.go, the criteria model in types.go. Builders get corrected pointers."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Scheduling tension: charter declares pulse ∥ events, but events criterion 1 demands ordered events for pulse/stamp — either sequence pulse before events, or rewrite the criterion to claim/close/move (+stamp/pulse as they land)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Pulse's brief has NO event-emission criterion — built to spec it never writes a task.pulse row, making events criterion 1 unsatisfiable. Decide must pin the event-kind vocabulary (stamp's brief names task.criterion; pulse's kind is unnamed anywhere) and amend pulse's criteria."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Stamp's criteria never operationalize D3: no test that --met without --evidence is rejected. Add it in Decide."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "task-566d782d09bd0eea (standalone 'bp task renew', gh #1388) overlaps pulse's renewal half AND its criteria contradict shipped code (says epoch kept; do_renew bumps epoch). Fold into pulse or park explicitly."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Direct survey contradiction: one report says ALL task writes share advisory-lock key task:<doc_id>; another says close locks the internal uuid while claim locks the doc_id string. If truly divergent the mutex is defeated — verifier assigned; stamp/pulse must take the ruled-correct key."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Auth depth: filed briefs say epoch-only CAS (close's precedent), but epoch is world-readable on every task get — only Release.check_holder/2 (tested, HTTP-unwired) binds worker identity. Decide picks epoch-only vs holder+epoch, and whether check_holder gets extracted into Tasks.Internal."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Naming: Barkpark.Pulse (Shared Storm) and read-only Barkpark.Tasks.Criteria already exist — new modules scope as Barkpark.Tasks.Pulse / a distinct criteria-write module (e.g. Tasks.Stamp or CriteriaWrite)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "The board cannot express the ladder yet: CriterionItem{Criterion, Met bool} has no attempted/missed state and evidence decodes into a detail-only side structure — stamp's wire shape (--miss attempts[]) must be designed WITH the board render in mind; the stamp→locks dependency order is correct, not just convenient."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "eal-106",
+      "level": 3,
+      "text": "Coverage map — found, NOT found, unreached",
+      "type": "heading"
+    },
+    {
+      "id": "eal-107",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "NOT FOUND anywhere (proves greenfield): stamp/pulse/events verbs, routes, modules, branches, or WIP — repo-wide greps, git log --all, git branch -a all clean; bp task --help lists only claim/close/get/ls/move/next/prime/ready."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NOT FOUND: any SSE/EventSource client in internal/cli or js/packages/core; any realtime board in the Next.js web/ demo (task-board-columns.ts is pure bucketing). 'Every board' realistically = TUI + Studio /admin/projects + papers-reader live embeds; web embed, CLI table, and MCP task_prime are structurally one-shot — descope or file follow-up work, don't pretend."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "NOT FOUND: HTTP route or CLI verb for Tasks.release/3 despite full unit tests — an adjacent silent gap, not wave scope."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Unreached corners: WorkDigest.field_digests full field set (LOAD-BEARING — verifier assigned); move.ex reparent write body read only partially; glyph_budget_test.go internals; mutation_events index fit for a type-filtered ASC scan; semrole/pdrender tokens_gen files (possible stray lifecycle mirror, low risk)."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Tooling note: surveyors disagreed on whether `bp search` exists — `bp search query \"…\"` works on a fresh CLI build, bare `bp search` errors on stale ones; a bp-CLI freshness check belongs in builder prompts."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "eal-108",
+      "level": 3,
+      "text": "Verify fleet — in flight NOW",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Verifier"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Model"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Question"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Proof (RUN, not read)"
+          }
+        ]
+      ],
+      "id": "eal-109",
+      "rows": [
+        [
+          [
+            {
+              "type": "code",
+              "value": "stamp-digest-collision"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Does the claim-time work digest cover acceptance_criteria — would a mid-claim stamp write 409 the eventual close (doc_changed_since_claim)?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "worktree probe test: claim → criteria write → close; baseline mix test tasks_claim + close"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "advisory-lock-key-parity"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Do claim/close/fence/mutations/release hash the SAME advisory-lock key (doc_id string vs internal uuid)?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "call-site trace; ruling names the key stamp/pulse must take"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "pulse-renewal-and-holder"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "do_renew preconditions for a mid-claim pulse; move.ex fence fold = one UPDATE?; epoch-only vs check_holder recommendation"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix test release/fence/close suites"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "criteria-schema-attempts"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "sonnet"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Would attempts[] on a criterion entry survive task schema/validation? Exact close criteria wire shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mix test tasks_test + validation probe"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "events-cursor-proof"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "sonnet"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "mutation_events index fit for task-filtered ASC cursor; /tasks/events route-ordering vs :doc_id catchall; live prime shape"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "event-log/listen tests + migration grep + curl guerrilla /v1/tasks/prime"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "taskboard-gate-baseline"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "sonnet"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Go taskboard suite/goldens/glyph budget + Elixir board_theme_parity green at HEAD; is there a budget slot for the ladder?"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "go build/vet/test taskboard + mix test board_theme_parity"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "code",
+              "value": "cli-generic-dispatch-proof"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "sonnet"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Manifest-declared verb needs zero Go; does the CLI's manifest cache refresh so a NEW server verb appears without rebuild? MCP = manual step"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "go build + go test internal/cli + live bp task get against guerrilla"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Decide cannot fly without: the work-digest answer (it shapes stamp's write path and whether close's digest check needs a stamp-aware exclusion), the lock-key ruling (which mutex stamp/pulse take), the schema verdict on attempts[], and the pinned event-kind vocabulary (task.criterion precedent; task.pulse unnamed). Everything else above is scoping hygiene Decide can rule on directly."
+        }
+      ],
+      "id": "eal-110",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Log: 2026-07-11 Digest — 14 survey reports folded, 7 verifiers dispatched (3 Opus / 4 Sonnet). Next entry: Decide."
+            }
+          ],
+          "type": "em"
+        }
+      ],
+      "id": "eal-111",
+      "tone": "neutral",
+      "type": "callout"
+    },
+    {
+      "id": "eal-201",
+      "type": "divider"
+    },
+    {
+      "id": "eal-202",
+      "level": 2,
+      "text": "Decide — verification ruled, five slices cut (2026-07-11)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "STATUS: BUILDING. "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "Charter decisions D5–D13 committed (a93ba868). Five slice tasks published + perfected, six backlog children filed, one stale task cancelled. Builders fly in integration order: stamp → pulse → events, with locks strip and dogfood wiring in parallel."
+        }
+      ],
+      "id": "eal-203",
+      "tone": "info",
+      "type": "callout"
+    },
+    {
+      "id": "eal-204",
+      "level": 3,
+      "text": "Verification results — what the deep round proved",
+      "type": "heading"
+    },
+    {
+      "id": "eal-205",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "stamp-digest-collision CONFIRMED (run proof): "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "mid-claim criteria stamp → default-path close returns {:error, {:doc_changed_since_claim, …, [\"acceptance_criteria\"]}} — the wave's core loop was broken by construction. WorkDigest hashes the FULL criteria entries (work_digest.ex:20,32,85-92). Ruling: D5 narrows the digest to criterion text, inside the stamp slice. No work_digest_test.exs exists — no golden churn."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "advisory-lock-key-parity GENUINELY DIVERGENT: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "claim/ttl_sweeper/compactor lock task:<doc_id> (string); close/release/move/fence/mutations lock task:<uuid>. Cross-family mutex defeated; safe today only via FOR UPDATE row lock + rev-CAS. The 'SAME key close uses' comments are false across families. Ruling: D6 — stamp joins the close family, pulse the renewal family; convergence = backlog."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "pulse-renewal-and-holder (37/37 green): "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "do_renew is the right one-atomic-write template but rides claim_by_id, whose fall-through silently RE-CLAIMS with a fresh digest when the lease lapsed — a pulse must refuse (not_holder), so it gets its own write path. Both epoch AND worker are world-readable (show returns full claim); holder check = coordination guard, token = the only security boundary. Ruling: D7."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "criteria-schema-attempts (live probes): "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "an attempts[] key survives BOTH validation layers untouched — no migration. But Params.parse_criteria silently DROPS unknown keys and both parse+merge default met→true when absent ({'index':0} → met:true) — the exact footgun a naive --miss would inherit. No array bound exists anywhere; the 5-entry cap is app code. Ruling: D8."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "events-cursor-proof (EXPLAIN ANALYZE): "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "tail cursor = 0.39ms on the bare PK; cold since=0 replay seq-scans (17ms @63k rows, forced index 156ms) — index is backlog, not launch. Prime.recent_events has NO id field and sorts by inserted_at — replay-unsafe, do not reuse; write a fresh replay_since-shaped query. Route must mount above /tasks/:doc_id (prime precedent, live 404-shadow otherwise). Pulse's filed brief had ZERO event-emission criterion — fixed at Decide. Ruling: D10, and pulse ∥ events re-sequenced to pulse → events."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "taskboard-gate-baseline GREEN + hazard: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "go build/vet/test + all goldens pass; -update regen is byte-identical to HEAD; board_theme_parity 4/4 green when isolated. Shared api/_build/test is ACTIVELY CONTAMINATED by a concurrent worktree (media_upload_dir mismatch, red 3/3 in the main checkout) — Elixir gates run in the builder's own isolated worktree build, a shared-checkout red is contamination first. Board row today renders only a bare N/M fraction; the ladder is a NEW token; charter's activityband.go never existed. Ruling: D11 + doctrine line added."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "cli-generic-dispatch-proof LIVE: "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "fresh binary from this checkout ran task get against guerrilla through the fully generic manifest dispatcher; capabilities ETag is content-addressed (proved a real 304 round-trip) — new verbs appear on the next bp invocation, zero Go, zero cache-bust. task.stamp/task.pulse exist NOWHERE yet (repo + live manifest greps empty) — genuinely greenfield. taskboard's pulseMsg is an unrelated SSE keepalive — docstring disambiguation ordered in D9."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "eal-206",
+      "level": 3,
+      "text": "Decisions (charter D5–D13 is canonical — one line each)",
+      "type": "heading"
+    },
+    {
+      "id": "eal-207",
+      "items": [
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D5 · "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "WorkDigest narrows to the brief: criteria hash by criterion text only; met/evidence/attempts never trip the close fence; ships inside stamp — because the proven 409 otherwise breaks stamp-then-close."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D6 · "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "Stamp locks task:<uuid> (serializes with close, the seal); pulse locks task:<doc_id> (serializes with the TTL reap); rev-CAS stays the cross-family contract — because the lock split is real and rev-CAS is what actually guards."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D7 · "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "Both verbs holder-gated (check_holder → Tasks.Internal); stamp epoch-fences like close, pulse never epoch-fences and refuses a lost lease — because evidence binds to a live lease while a keepalive must survive fences."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D8 · "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "Wire vocabulary pinned: task.criterion + task.pulse mutation kinds, one emitter funnel; --met requires evidence; --miss = bounded attempts[] {note,ts,worker} ×5, met pinned explicitly — because the met→true parse default is a proven lock-flipping footgun."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D9 · "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "claim.now {text,ts,criterion?} written in the SAME update_all as the lease renewal; module Barkpark.Tasks.Pulse — because two writes race and bare Barkpark.Pulse is Shared Storm's."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D10 · "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "Events feed = new keyset projection over mutation_events with id AS the cursor, mounted above :doc_id; no migration now — because Prime's shape is replay-unsafe and the tail is already 0.39ms."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D11 · "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "Board ladder with ZERO new glyphs (✓ teal / ! amber miss / spinner only on the pulse-named criterion / ○), all from GenLifecycle — because it keeps the glyph allowlist, theme parity, and the Go-only merge lane intact."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D12 · "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "'Every board' = TUI + Studio + papers-reader embeds this wave; web embed/CLI/MCP filed as backlog — because one-shot surfaces can't breathe and honesty beats silent claims."
+          }
+        ],
+        [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "D13 · "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "task-566d782d09bd0eea cancelled as superseded (criteria contradict shipped do_renew); cmux half re-filed — because two renewal code paths is exactly the fork D1 bans."
+          }
+        ]
+      ],
+      "type": "list"
+    },
+    {
+      "id": "eal-208",
+      "level": 3,
+      "text": "The wave plan — five slices, integration-ordered",
+      "type": "heading"
+    },
+    {
+      "head": [
+        [
+          {
+            "type": "text",
+            "value": "Slice"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Task"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Model"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Order"
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Gate"
+          }
+        ]
+      ],
+      "id": "eal-209",
+      "rows": [
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task stamp + D5 digest narrowing + check_holder extraction"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "task-79d71bc80427f0e4"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fable"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "1"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "mix test stamp/work_digest/close/claim (isolated worktree)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "bp task pulse — claim.now + lease renewal, one atomic write"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "task-9e59a7bd4fb241a2"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fable"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "2"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "mix test pulse/release/ttl_sweeper/claim (isolated worktree)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "task events feed — /v1/tasks/events?since= projection"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "task-1780b182cf404dc7"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "3"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "mix test events/listen_controller (isolated worktree)"
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "TUI locks strip — criteria ladder + now-line ticker"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "task-70eb8244dd1e702a"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "fable"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "∥"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "go build ./... && go vet && go test ./internal/taskboard/..."
+            }
+          ]
+        ],
+        [
+          [
+            {
+              "type": "text",
+              "value": "epic-cycle dogfood wiring — prompts stamp/pulse"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "task-eal-w1-dogfood-wiring"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "opus"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "∥"
+            }
+          ],
+          [
+            {
+              "type": "code",
+              "value": "node --check .claude/workflows/bp-epic-cycle.workflow.js"
+            }
+          ]
+        ]
+      ],
+      "type": "table"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Stamp/pulse/events share api/lib/barkpark/plugins/tasks.ex + tasks_controller.ex — their files: labels intentionally collide so the frontier serializes them; locks strip (internal/taskboard/) and dogfood wiring (one workflow file) are file-disjoint and fly in parallel against the D8/D9 pinned wire shapes. Backlog filed as published epic children: "
+        },
+        {
+          "type": "code",
+          "value": "task-eal-bl-lock-key-convergence"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "type": "code",
+          "value": "task-eal-bl-events-cold-index"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "type": "code",
+          "value": "task-eal-bl-web-embed-realtime"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "type": "code",
+          "value": "task-eal-bl-mcp-stamp-pulse"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "type": "code",
+          "value": "task-eal-bl-release-http"
+        },
+        {
+          "type": "text",
+          "value": " · "
+        },
+        {
+          "type": "code",
+          "value": "task-eal-bl-cmux-auto-pulse"
+        },
+        {
+          "type": "text",
+          "value": ". The wave's integration proof stays the epic's criterion 2: a REAL epic-cycle run stamping and pulsing on a live board, closed at Review."
+        }
+      ],
+      "id": "eal-210",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "Log: 2026-07-11 Decide — 7 verification reports ruled, D5–D13 committed to the charter (a93ba868), 5 slice tasks perfected + 6 backlog filed + 1 cancelled. Next entry: Review (the debrief)."
+            }
+          ],
+          "type": "em"
+        }
+      ],
+      "id": "eal-211",
+      "tone": "neutral",
+      "type": "callout"
+    },
+    {
+      "id": "eal-300",
+      "level": 2,
+      "text": "Review — debrief: five slices green, wave closed (2026-07-11)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "children": [
+            {
+              "type": "text",
+              "value": "STATUS: COMPLETE. "
+            }
+          ],
+          "type": "strong"
+        },
+        {
+          "type": "text",
+          "value": "All five slices built, adversarially reviewed, fixed in place, and re-gated green. The Elixir branches are STACKED in merge order (stamp → pulse → events); TUI and dogfood ride their own lanes. Grade: A−."
+        }
+      ],
+      "id": "eal-301",
+      "tone": "success",
+      "type": "callout"
+    },
+    {
+      "id": "eal-302",
+      "level": 3,
+      "text": "What shipped (final branches — the lead merges these)",
+      "type": "heading"
+    },
+    {
+      "id": "eal-303",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "bp task stamp (task-79d71bc80427f0e4) → loop-epic/bp-task-stamp-criterion-level-live-evide-0-r. D5 digest narrowing + close-family lock + evidence-or-nothing, exactly per charter. Reviewer added 4 ConnCase tests pinning the real CLI wire shape (string args in body, flags as query params). Gate 81/0 + controller 66/0."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "bp task pulse (task-9e59a7bd4fb241a2) → loop-epic/bp-task-pulse-now-line-lease-renewal-in--1-r (STACKED on stamp-r). One atomic write, own path, refuses lost leases — proven against a real TtlSweeper reap. Reviewer caught a REAL red the builder's gate missed: the branch added a 9th manifest verb while cli_commands_manifest_test still pinned ==8; resolved in the stack, test now pins 10 verbs + the epoch-free task.pulse shape."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "task events feed (task-1780b182cf404dc7) → loop-epic/task-events-feed-v1-tasks-events-since-k-2-r (STACKED on pulse-r). Keyset replay, id-as-cursor, deliberately NOT Prime reuse; route precedence pinned by route_info tests. Manifest pins 11 verbs. Gate 29/0."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "TUI locks strip (task-70eb8244dd1e702a) → loop-epic/tui-locks-strip-criteria-ladder-now-line-3-r. Ladder ✓⠹!○ + fraction with narrow-fallback shedding, now-line ticker with honest TTL decay (stale never spins), momentum criteria tally. Goldens verified to actually SHOW all three. Reviewer fix: gofmt only."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "dogfood wiring (task-eal-w1-dogfood-wiring) → loop-epic/epic-cycle-dogfood-wiring-builder-prompt-4-r. Prompt signatures match the built verbs exactly; no fixes. This branch also carries the charter cherry-pick + the wave log (the charter commit a93ba868 lived only on unpushed local main)."
+          }
+        ]
+      ],
+      "ordered": true,
+      "type": "list"
+    },
+    {
+      "id": "eal-304",
+      "level": 3,
+      "text": "Ledger audit",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "All five builders claimed, stamped honest per-criterion evidence, and left merge-gated criteria open — no fabrication found. The TTL sweeper has since reaped the idle leases (lifecycle back to open, worker null), which is substrate honesty, not builder dishonesty; the reviewer stamped a review_note on each task naming the final branch so nobody re-claims built work. Six backlog children + one discovered task (task-46d05e6c3369941e, detail-frame attempts/pulse) are filed and published."
+        }
+      ],
+      "id": "eal-305",
+      "type": "paragraph"
+    },
+    {
+      "id": "eal-306",
+      "level": 3,
+      "text": "Correction — the integration proof moves to post-merge (dated 2026-07-11)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Decide expected “integration proof = real epic-cycle run at Review.” That could not happen THIS wave: stamp/pulse are not merged or deployed, so no real run can stamp live yet (bp task stamp → unknown command against the live server). Epic criterion 2 and the TUI live ○→✓ flip stay OPEN, owed to the first post-merge epic-cycle run. The dogfood order (D4) makes this the designed outcome, not a miss — but the earlier wording promised it a phase early."
+        }
+      ],
+      "id": "eal-307",
+      "tone": "warning",
+      "type": "callout"
+    },
+    {
+      "id": "eal-308",
+      "level": 3,
+      "text": "What the lead must know before merging",
+      "type": "heading"
+    },
+    {
+      "id": "eal-309",
+      "items": [
+        [
+          {
+            "type": "text",
+            "value": "Merge order is forced: stamp-r → pulse-r → events-r (stacked, fast-forward in sequence), TUI-r and dogfood-r any time. .ex changes WAIT for Elixir Test + Prod compile CI gates."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "D5 cutover: leases claimed before stamp merges carry old-style digests — their first default-path close 409s doc_changed_since_claim once; recover with re-read + observed_rev."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "Lead closes each task's merge-gated criterion on merge, then runs one real epic-cycle wave to close epic criterion 2 and record the TUI live-flip proof."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "TUI pulse decay uses the board's 5-minute UI leaseTTL (same constant as the claim glyph), not the server's 2700s reap TTL — consistent on-screen liveness vocabulary, deliberate."
+          }
+        ],
+        [
+          {
+            "type": "text",
+            "value": "make cli-build after the Elixir merges so the local bp picks up stamp/pulse/events (content-addressed capabilities ETag makes the verbs appear on next fetch)."
+          }
+        ]
+      ],
+      "ordered": false,
+      "type": "list"
+    },
+    {
+      "id": "eal-310",
+      "level": 3,
+      "text": "Next wave",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Take: (1) the real-run proof immediately after merge+deploy — one epic-cycle wave whose builders stamp and pulse live, closing epic criterion 2; (2) first consumer of GET /v1/tasks/events (chat/statusline per the Wave-2 plan, gated:true); (3) backlog by appetite: lock-key convergence, (dataset,type,id) index, MCP task_stamp/task_pulse, release-at-HTTP, cmux auto-pulse, web embed realtime."
+        }
+      ],
+      "id": "eal-311",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Log: 2026-07-11 Review — five slices reviewed and fixed in place, branches stacked, ledger audited (review_note stamped on all five tasks), charter wave log appended, grade A−. Paper closed as the wave debrief."
+        }
+      ],
+      "id": "eal-312",
+      "tone": "neutral",
+      "type": "callout"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "eal-000",
+        "text": "Barkpark · expressive-agent-loops · wave 1 · living wave paper",
+        "type": "eyebrow"
+      },
+      {
+        "id": "eal-001",
+        "level": 1,
+        "text": "Wave 1 — criteria become live locks",
+        "type": "heading"
+      },
+      {
+        "id": "eal-002",
+        "items": [
+          "Epic task-d7b7ce69e14d9124",
+          "Charter .claude/workflows/expressive-agent-loops-charter.md",
+          "Opened at Strategize 2026-07-11"
+        ],
+        "type": "byline"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The wish: agent loops narrate themselves live — criteria stamped mid-claim with honest misses, a now-line pulse on every board, one event stream feeding every surface, proven by a real run, not a demo. This Paper is the wave's living story: Strategize opened it, Digest appends the survey digest + verify plan, Decide appends decisions + the build plan, Review closes it as the debrief."
+          }
+        ],
+        "id": "eal-003",
+        "type": "ingress"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "STATUS: SURVEYING. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "14 Sonnet surveyors are mapping the seams. Nothing has been built yet in this wave: all four wave-1 children are open and unclaimed (verified against the ledger 2026-07-11)."
+          }
+        ],
+        "id": "eal-004",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "eal-010",
+        "level": 2,
+        "text": "Where the epic actually stands",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The charter (ratified 2026-07-10) filed four perfected children under task-d7b7ce69e14d9124. Ledger check at wave open: all four are lifecycle open, zero criteria met, no claims. So wave 1 is a pure build wave — nothing to reconcile, everything to ship. Do NOT refile the children; claim them."
+          }
+        ],
+        "id": "eal-011",
+        "type": "paragraph"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "Slice"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Task"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Surface"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "State at open"
+            }
+          ]
+        ],
+        "id": "eal-012",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "bp task stamp"
+              },
+              {
+                "type": "text",
+                "value": " — criterion-level mid-claim evidence + --miss"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "task-79d71bc80427f0e4"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "api/ + internal/cli"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "open, unclaimed"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "bp task pulse"
+              },
+              {
+                "type": "text",
+                "value": " — now-line + lease renewal, one atomic write"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "task-9e59a7bd4fb241a2"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "api/ + internal/cli"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "open, unclaimed"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "task events feed — "
+              },
+              {
+                "type": "code",
+                "value": "/v1/tasks/events?since="
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "task-1780b182cf404dc7"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "api/ + internal/cli"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "open, unclaimed"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "TUI locks strip — criteria ladder on the board"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "task-70eb8244dd1e702a"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "internal/taskboard"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "open, unclaimed"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "eal-020",
+        "level": 2,
+        "text": "Direction for this wave",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Finish, don't start: ship all four slices in dependency order (stamp → pulse ∥ events → locks strip) and seal the wave with the epic's own criterion 2 — a REAL epic-cycle builder that stamps its criteria mid-claim while a human-watchable bp tasks board shows the locks flipping and the now-line breathing. The wave proves itself: per law D4, the later slices in THIS wave are built by workers who stamp and pulse using the verbs the earlier slices just merged."
+          }
+        ],
+        "id": "eal-021",
+        "type": "paragraph"
+      },
+      {
+        "id": "eal-022",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "One substrate (D1): the events feed is a projection of the task ledger's own write path, not a second store. Every stamp/pulse/claim/close funnels through one emitter; the HTTP cursor stream (?since=) replays from durable order, PubSub only accelerates push. If a slice wants its own table of truth, it is a fork — redesign."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Stamp is progress, close is the seal (D3): stamp --met writes evidence into the criterion in place; --miss records the honest attempt WITHOUT flipping the lock. Close still validates the full set. Stamp/pulse must authenticate as the claim holder (worker + epoch CAS) — a lapsed claim cannot stamp."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Pulse extends the existing rail-awareness lease renewal rather than inventing a parallel heartbeat: one atomic write = now-line text + lease renewal. Two writes racing is a bug by design review."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Vocabulary pinned (D2): the locks strip renders 1:1 from design/tokens.json lifecycle — ○ dim → ○ bright → braille spinner blue → ✓ teal, ! amber blocked. taskboard already owns anim.go (braille) and activityband.go; reuse, don't re-invent. Goldens update in the same PR as the renderer."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Quality bar: §0 of the task design-language spec is the acceptance test — it must feel alive; you always feel progress. A board that only repaints on manual refresh fails the wave even if every API test is green."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Tentative choices above are direction, not decree — two exploration rounds (survey + verify) run before Decide finalizes. Known open questions: does a durable ordered event trail already exist to project from (document revisions / work-digest / rail_rev), or does the feed need a minimal append-only tasks-events table? Where exactly does the lease-renewal write live, and can the now-line ride the same UPDATE?"
+          }
+        ],
+        "id": "eal-023",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "id": "eal-030",
+        "level": 2,
+        "text": "Survey plan — 14 scouts in flight",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Cheap width now buys precise depth later. Each scout answers one question and reports coverage (file, checked-for, found/not-found)."
+          }
+        ],
+        "id": "eal-031",
+        "type": "paragraph"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "Scout"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Question"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Why it changes the plan"
+            }
+          ]
+        ],
+        "id": "eal-032",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "tasks-plugin-map"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Map the Tasks plugin in api/: claim/close/lease code paths, epoch CAS, criteria validation at close"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Stamp and pulse must plug into these exact functions"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "lease-renewal-prior-art"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "What did rail-awareness ship for lease renewal — endpoint, write shape, fencing?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Pulse should extend it, not duplicate it"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "task-write-contract"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "How task mutations flow (flat fields, /v1/data/mutate patch semantics), where a criterion-level write fits"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Stamp's write must be atomic and merge-safe"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "events-substrate"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Existing realtime seams: PubSub topics, projects-board realtime, webhook contract, rail_rev ETag"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Decides what /v1/tasks/events projects from"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "event-log-storage"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Is there a durable ordered trail (revisions/work-digest) a ?since= cursor can replay?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "D1 hinges on this: projection vs new table"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "cli-verb-map"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "How a new bp task verb registers end-to-end (capabilities manifest → CLI)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "stamp/pulse/events all need this path"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "taskboard-render"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "taskboard internals: board.go, activityband, anim, cache, goldens, refresh loop"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Locks strip lands here; find the seam and the repaint cadence"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "tokens-lifecycle"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "tokens.json lifecycle vocab and how glyphs/colors reach Go + Studio today"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "D2 compliance is mechanical if the pipeline exists"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "child-task-briefs"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Full briefs + acceptance criteria of the four children, plus /papers/wave-deck-zen-handoff"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Builders inherit these verbatim; surface contradictions now"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "claim-epoch-cas"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Claim lifecycle gotchas: epoch, fenced_off, re-claim, lapsed leases"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Stamp/pulse authorization semantics"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "surface-census"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Every surface that renders tasks (TUI board, Studio projects, web embed) and how each refreshes"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "The now-line must show everywhere the feed lands"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "epic-cycle-hook"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Where the bp-epic-cycle builder prompt lives and how to make builders stamp/pulse"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "The wave's integration proof rides this"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "test-harness"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "How tasks-plugin Elixir tests and Go taskboard golden tests run; integration-worktree gate"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Builders need the gate recipe up front"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "prior-attempts"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "bp search + git log for prior stamp/pulse/events work, branches, papers"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Avoid rebuilding or colliding with exhaust"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "id": "eal-040",
+        "level": 2,
+        "text": "What Done looks like",
+        "type": "heading"
+      },
+      {
+        "id": "eal-041",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "All four children merged, each with its own criteria evidence-closed via the very stamp verb this wave ships."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "A real agent loop (an epic-cycle builder in this wave) stamps criteria live during its claim; the bp tasks board shows the ✓✓⠹○ 2/4 ladder and the now-line pulse without manual refresh."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "One event stream (/v1/tasks/events?since=) demonstrably feeds the TUI board; no surface grew its own store."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Epic parent criteria 1+2 stamped with run proofs; this Paper closed as the debrief."
+            }
+          ]
+        ],
+        "ordered": true,
+        "type": "list"
+      },
+      {
+        "id": "eal-042",
+        "type": "divider"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Log: 2026-07-11 Strategize — paper opened, direction set, 14 surveyors dispatched. Next entry: Digest."
+              }
+            ],
+            "type": "em"
+          }
+        ],
+        "id": "eal-043",
+        "type": "paragraph"
+      },
+      {
+        "id": "eal-099",
+        "type": "divider"
+      },
+      {
+        "id": "eal-100",
+        "level": 2,
+        "text": "Digest — survey folded, verify fleet in flight (2026-07-11)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "STATUS: VERIFYING. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "14 survey reports digested. 7 verifiers dispatched (3 Opus, 4 Sonnet) — the LAST exploration round before Decide cuts the plan."
+          }
+        ],
+        "id": "eal-101",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "eal-102",
+        "level": 3,
+        "text": "What the survey established",
+        "type": "heading"
+      },
+      {
+        "id": "eal-103",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Events substrate SETTLED (D1): mutation_events is a durable append-only bigserial-ordered table every task op already writes in-transaction through one funnel (Tasks.Internal.insert_mutation_event! → Content.Broadcast.save_event). EventLog.replay_since/4 is a production keyset ?since= cursor (SSE resume at /v1/data/listen); Prime.recent_events already runs the task-filtered query shape; sync_push_cursors + github cursor already treat mutation_events.id as an external cursor. /v1/tasks/events?since= = thin projection. NO new store."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Stamp is genuinely new: acceptance-criteria writes exist ONLY inside Close (merge_criteria/apply_criteria_update, private — advisory lock, in-lock re-read, index-targeted List.replace_at, rev CAS). Stamp = extract that write path into a shared module + graft Close.check_fencing/2 (epoch CAS). Mutations.relabel_by_id is the closest shape template but carries NO fencing — copying it verbatim ships the bug."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Pulse = extend Claim.do_renew/3 — the shipped lease renewal is already ONE atomic Repo.update_all (epoch+1, ts_iso refresh, work_digest deliberately preserved) riding the same-worker targeted-claim branch (renewal?/2). Pulse adds the now-line to that SAME write; a second UPDATE reintroduces the racing-writes problem the charter bans."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "CLI is free: a new verb = manifest map in plugins/tasks.ex cli_commands/0 + route tuple in register_routes/1 + controller action. Go dispatch is 100% manifest-driven (tree.Lookup → runCommand) — zero Go per verb. MCP exposure is a SEPARATE hand-maintained step in mcp_tasks.go. There is no alias layer: the manifest verb string IS the only spelling."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Vocabulary pinned & gated: design/tokens.json lifecycle block (braille-blue spinner, ✓ teal deliberately ≠ status-ok green, ! amber, ○ bright=ready / ○ dim=open) flows via emit.mjs into taskboard tokens_gen.go, Studio TokensGen, and CSS — with design/check.mjs 4-way parity and api/test board_theme_parity_test.exs as live tripwires. Locks-strip reuses spinnerGlyph/GenLifecycle; goldens regen via `go test ./internal/taskboard/... -update`, same PR."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Board liveness does NOT depend on the events feed: the TUI board already self-refreshes (SSE dirty-bit → 750ms debounced full refetch + 30s backstop; events NEVER carry truth), and Studio /admin/projects subscribes to the same broadcast. The feed's value is the durable replayable narration trail for surfaces without that plumbing — plus the ?since= cursor for agents."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Epic-cycle hook is surgical: one canonical file (.claude/workflows/bp-epic-cycle.workflow.js); TASKS_BLOCK line 59 currently teaches close-time-only criteria writes while the Build prompt says STAMP AS YOU GO — the exact gap stamp closes. Touch points: TASKS_BLOCK, LIVENESS_BLOCK, Build phase step 3. Edit lands ONLY after the verbs merge."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "eal-104",
+        "level": 3,
+        "text": "Corrections & contradictions — Decide must resolve",
+        "type": "heading"
+      },
+      {
+        "id": "eal-105",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "The strategic direction named files that don't exist: activityband.go was NEVER an implementation file (NOW/NEXT band retired, Amendment 7/commit 92a618f8); braille lives in spinner.go, glyph render in components.go, the criteria model in types.go. Builders get corrected pointers."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Scheduling tension: charter declares pulse ∥ events, but events criterion 1 demands ordered events for pulse/stamp — either sequence pulse before events, or rewrite the criterion to claim/close/move (+stamp/pulse as they land)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Pulse's brief has NO event-emission criterion — built to spec it never writes a task.pulse row, making events criterion 1 unsatisfiable. Decide must pin the event-kind vocabulary (stamp's brief names task.criterion; pulse's kind is unnamed anywhere) and amend pulse's criteria."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Stamp's criteria never operationalize D3: no test that --met without --evidence is rejected. Add it in Decide."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "task-566d782d09bd0eea (standalone 'bp task renew', gh #1388) overlaps pulse's renewal half AND its criteria contradict shipped code (says epoch kept; do_renew bumps epoch). Fold into pulse or park explicitly."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Direct survey contradiction: one report says ALL task writes share advisory-lock key task:<doc_id>; another says close locks the internal uuid while claim locks the doc_id string. If truly divergent the mutex is defeated — verifier assigned; stamp/pulse must take the ruled-correct key."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Auth depth: filed briefs say epoch-only CAS (close's precedent), but epoch is world-readable on every task get — only Release.check_holder/2 (tested, HTTP-unwired) binds worker identity. Decide picks epoch-only vs holder+epoch, and whether check_holder gets extracted into Tasks.Internal."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Naming: Barkpark.Pulse (Shared Storm) and read-only Barkpark.Tasks.Criteria already exist — new modules scope as Barkpark.Tasks.Pulse / a distinct criteria-write module (e.g. Tasks.Stamp or CriteriaWrite)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "The board cannot express the ladder yet: CriterionItem{Criterion, Met bool} has no attempted/missed state and evidence decodes into a detail-only side structure — stamp's wire shape (--miss attempts[]) must be designed WITH the board render in mind; the stamp→locks dependency order is correct, not just convenient."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "eal-106",
+        "level": 3,
+        "text": "Coverage map — found, NOT found, unreached",
+        "type": "heading"
+      },
+      {
+        "id": "eal-107",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND anywhere (proves greenfield): stamp/pulse/events verbs, routes, modules, branches, or WIP — repo-wide greps, git log --all, git branch -a all clean; bp task --help lists only claim/close/get/ls/move/next/prime/ready."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND: any SSE/EventSource client in internal/cli or js/packages/core; any realtime board in the Next.js web/ demo (task-board-columns.ts is pure bucketing). 'Every board' realistically = TUI + Studio /admin/projects + papers-reader live embeds; web embed, CLI table, and MCP task_prime are structurally one-shot — descope or file follow-up work, don't pretend."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "NOT FOUND: HTTP route or CLI verb for Tasks.release/3 despite full unit tests — an adjacent silent gap, not wave scope."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Unreached corners: WorkDigest.field_digests full field set (LOAD-BEARING — verifier assigned); move.ex reparent write body read only partially; glyph_budget_test.go internals; mutation_events index fit for a type-filtered ASC scan; semrole/pdrender tokens_gen files (possible stray lifecycle mirror, low risk)."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Tooling note: surveyors disagreed on whether `bp search` exists — `bp search query \"…\"` works on a fresh CLI build, bare `bp search` errors on stale ones; a bp-CLI freshness check belongs in builder prompts."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "eal-108",
+        "level": 3,
+        "text": "Verify fleet — in flight NOW",
+        "type": "heading"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "Verifier"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Model"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Question"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Proof (RUN, not read)"
+            }
+          ]
+        ],
+        "id": "eal-109",
+        "rows": [
+          [
+            [
+              {
+                "type": "code",
+                "value": "stamp-digest-collision"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "opus"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Does the claim-time work digest cover acceptance_criteria — would a mid-claim stamp write 409 the eventual close (doc_changed_since_claim)?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "worktree probe test: claim → criteria write → close; baseline mix test tasks_claim + close"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "advisory-lock-key-parity"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "opus"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Do claim/close/fence/mutations/release hash the SAME advisory-lock key (doc_id string vs internal uuid)?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "call-site trace; ruling names the key stamp/pulse must take"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "pulse-renewal-and-holder"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "opus"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "do_renew preconditions for a mid-claim pulse; move.ex fence fold = one UPDATE?; epoch-only vs check_holder recommendation"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "mix test release/fence/close suites"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "criteria-schema-attempts"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "sonnet"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Would attempts[] on a criterion entry survive task schema/validation? Exact close criteria wire shape"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "mix test tasks_test + validation probe"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "events-cursor-proof"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "sonnet"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "mutation_events index fit for task-filtered ASC cursor; /tasks/events route-ordering vs :doc_id catchall; live prime shape"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "event-log/listen tests + migration grep + curl guerrilla /v1/tasks/prime"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "taskboard-gate-baseline"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "sonnet"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Go taskboard suite/goldens/glyph budget + Elixir board_theme_parity green at HEAD; is there a budget slot for the ladder?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "go build/vet/test taskboard + mix test board_theme_parity"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "code",
+                "value": "cli-generic-dispatch-proof"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "sonnet"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Manifest-declared verb needs zero Go; does the CLI's manifest cache refresh so a NEW server verb appears without rebuild? MCP = manual step"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "go build + go test internal/cli + live bp task get against guerrilla"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Decide cannot fly without: the work-digest answer (it shapes stamp's write path and whether close's digest check needs a stamp-aware exclusion), the lock-key ruling (which mutex stamp/pulse take), the schema verdict on attempts[], and the pinned event-kind vocabulary (task.criterion precedent; task.pulse unnamed). Everything else above is scoping hygiene Decide can rule on directly."
+          }
+        ],
+        "id": "eal-110",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Log: 2026-07-11 Digest — 14 survey reports folded, 7 verifiers dispatched (3 Opus / 4 Sonnet). Next entry: Decide."
+              }
+            ],
+            "type": "em"
+          }
+        ],
+        "id": "eal-111",
+        "tone": "neutral",
+        "type": "callout"
+      },
+      {
+        "id": "eal-201",
+        "type": "divider"
+      },
+      {
+        "id": "eal-202",
+        "level": 2,
+        "text": "Decide — verification ruled, five slices cut (2026-07-11)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "STATUS: BUILDING. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "Charter decisions D5–D13 committed (a93ba868). Five slice tasks published + perfected, six backlog children filed, one stale task cancelled. Builders fly in integration order: stamp → pulse → events, with locks strip and dogfood wiring in parallel."
+          }
+        ],
+        "id": "eal-203",
+        "tone": "info",
+        "type": "callout"
+      },
+      {
+        "id": "eal-204",
+        "level": 3,
+        "text": "Verification results — what the deep round proved",
+        "type": "heading"
+      },
+      {
+        "id": "eal-205",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "stamp-digest-collision CONFIRMED (run proof): "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "mid-claim criteria stamp → default-path close returns {:error, {:doc_changed_since_claim, …, [\"acceptance_criteria\"]}} — the wave's core loop was broken by construction. WorkDigest hashes the FULL criteria entries (work_digest.ex:20,32,85-92). Ruling: D5 narrows the digest to criterion text, inside the stamp slice. No work_digest_test.exs exists — no golden churn."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "advisory-lock-key-parity GENUINELY DIVERGENT: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "claim/ttl_sweeper/compactor lock task:<doc_id> (string); close/release/move/fence/mutations lock task:<uuid>. Cross-family mutex defeated; safe today only via FOR UPDATE row lock + rev-CAS. The 'SAME key close uses' comments are false across families. Ruling: D6 — stamp joins the close family, pulse the renewal family; convergence = backlog."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "pulse-renewal-and-holder (37/37 green): "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "do_renew is the right one-atomic-write template but rides claim_by_id, whose fall-through silently RE-CLAIMS with a fresh digest when the lease lapsed — a pulse must refuse (not_holder), so it gets its own write path. Both epoch AND worker are world-readable (show returns full claim); holder check = coordination guard, token = the only security boundary. Ruling: D7."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "criteria-schema-attempts (live probes): "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "an attempts[] key survives BOTH validation layers untouched — no migration. But Params.parse_criteria silently DROPS unknown keys and both parse+merge default met→true when absent ({'index':0} → met:true) — the exact footgun a naive --miss would inherit. No array bound exists anywhere; the 5-entry cap is app code. Ruling: D8."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "events-cursor-proof (EXPLAIN ANALYZE): "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "tail cursor = 0.39ms on the bare PK; cold since=0 replay seq-scans (17ms @63k rows, forced index 156ms) — index is backlog, not launch. Prime.recent_events has NO id field and sorts by inserted_at — replay-unsafe, do not reuse; write a fresh replay_since-shaped query. Route must mount above /tasks/:doc_id (prime precedent, live 404-shadow otherwise). Pulse's filed brief had ZERO event-emission criterion — fixed at Decide. Ruling: D10, and pulse ∥ events re-sequenced to pulse → events."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "taskboard-gate-baseline GREEN + hazard: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "go build/vet/test + all goldens pass; -update regen is byte-identical to HEAD; board_theme_parity 4/4 green when isolated. Shared api/_build/test is ACTIVELY CONTAMINATED by a concurrent worktree (media_upload_dir mismatch, red 3/3 in the main checkout) — Elixir gates run in the builder's own isolated worktree build, a shared-checkout red is contamination first. Board row today renders only a bare N/M fraction; the ladder is a NEW token; charter's activityband.go never existed. Ruling: D11 + doctrine line added."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "cli-generic-dispatch-proof LIVE: "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "fresh binary from this checkout ran task get against guerrilla through the fully generic manifest dispatcher; capabilities ETag is content-addressed (proved a real 304 round-trip) — new verbs appear on the next bp invocation, zero Go, zero cache-bust. task.stamp/task.pulse exist NOWHERE yet (repo + live manifest greps empty) — genuinely greenfield. taskboard's pulseMsg is an unrelated SSE keepalive — docstring disambiguation ordered in D9."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "eal-206",
+        "level": 3,
+        "text": "Decisions (charter D5–D13 is canonical — one line each)",
+        "type": "heading"
+      },
+      {
+        "id": "eal-207",
+        "items": [
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "D5 · "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "WorkDigest narrows to the brief: criteria hash by criterion text only; met/evidence/attempts never trip the close fence; ships inside stamp — because the proven 409 otherwise breaks stamp-then-close."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "D6 · "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "Stamp locks task:<uuid> (serializes with close, the seal); pulse locks task:<doc_id> (serializes with the TTL reap); rev-CAS stays the cross-family contract — because the lock split is real and rev-CAS is what actually guards."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "D7 · "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "Both verbs holder-gated (check_holder → Tasks.Internal); stamp epoch-fences like close, pulse never epoch-fences and refuses a lost lease — because evidence binds to a live lease while a keepalive must survive fences."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "D8 · "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "Wire vocabulary pinned: task.criterion + task.pulse mutation kinds, one emitter funnel; --met requires evidence; --miss = bounded attempts[] {note,ts,worker} ×5, met pinned explicitly — because the met→true parse default is a proven lock-flipping footgun."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "D9 · "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "claim.now {text,ts,criterion?} written in the SAME update_all as the lease renewal; module Barkpark.Tasks.Pulse — because two writes race and bare Barkpark.Pulse is Shared Storm's."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "D10 · "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "Events feed = new keyset projection over mutation_events with id AS the cursor, mounted above :doc_id; no migration now — because Prime's shape is replay-unsafe and the tail is already 0.39ms."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "D11 · "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "Board ladder with ZERO new glyphs (✓ teal / ! amber miss / spinner only on the pulse-named criterion / ○), all from GenLifecycle — because it keeps the glyph allowlist, theme parity, and the Go-only merge lane intact."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "D12 · "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "'Every board' = TUI + Studio + papers-reader embeds this wave; web embed/CLI/MCP filed as backlog — because one-shot surfaces can't breathe and honesty beats silent claims."
+            }
+          ],
+          [
+            {
+              "children": [
+                {
+                  "type": "text",
+                  "value": "D13 · "
+                }
+              ],
+              "type": "strong"
+            },
+            {
+              "type": "text",
+              "value": "task-566d782d09bd0eea cancelled as superseded (criteria contradict shipped do_renew); cmux half re-filed — because two renewal code paths is exactly the fork D1 bans."
+            }
+          ]
+        ],
+        "type": "list"
+      },
+      {
+        "id": "eal-208",
+        "level": 3,
+        "text": "The wave plan — five slices, integration-ordered",
+        "type": "heading"
+      },
+      {
+        "head": [
+          [
+            {
+              "type": "text",
+              "value": "Slice"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Task"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Model"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Order"
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Gate"
+            }
+          ]
+        ],
+        "id": "eal-209",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "bp task stamp + D5 digest narrowing + check_holder extraction"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "task-79d71bc80427f0e4"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "fable"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "1"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "mix test stamp/work_digest/close/claim (isolated worktree)"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "bp task pulse — claim.now + lease renewal, one atomic write"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "task-9e59a7bd4fb241a2"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "fable"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "2"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "mix test pulse/release/ttl_sweeper/claim (isolated worktree)"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "task events feed — /v1/tasks/events?since= projection"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "task-1780b182cf404dc7"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "opus"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "3"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "mix test events/listen_controller (isolated worktree)"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "TUI locks strip — criteria ladder + now-line ticker"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "task-70eb8244dd1e702a"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "fable"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "∥"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "go build ./... && go vet && go test ./internal/taskboard/..."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "epic-cycle dogfood wiring — prompts stamp/pulse"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "task-eal-w1-dogfood-wiring"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "opus"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "∥"
+              }
+            ],
+            [
+              {
+                "type": "code",
+                "value": "node --check .claude/workflows/bp-epic-cycle.workflow.js"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Stamp/pulse/events share api/lib/barkpark/plugins/tasks.ex + tasks_controller.ex — their files: labels intentionally collide so the frontier serializes them; locks strip (internal/taskboard/) and dogfood wiring (one workflow file) are file-disjoint and fly in parallel against the D8/D9 pinned wire shapes. Backlog filed as published epic children: "
+          },
+          {
+            "type": "code",
+            "value": "task-eal-bl-lock-key-convergence"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "type": "code",
+            "value": "task-eal-bl-events-cold-index"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "type": "code",
+            "value": "task-eal-bl-web-embed-realtime"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "type": "code",
+            "value": "task-eal-bl-mcp-stamp-pulse"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "type": "code",
+            "value": "task-eal-bl-release-http"
+          },
+          {
+            "type": "text",
+            "value": " · "
+          },
+          {
+            "type": "code",
+            "value": "task-eal-bl-cmux-auto-pulse"
+          },
+          {
+            "type": "text",
+            "value": ". The wave's integration proof stays the epic's criterion 2: a REAL epic-cycle run stamping and pulsing on a live board, closed at Review."
+          }
+        ],
+        "id": "eal-210",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "Log: 2026-07-11 Decide — 7 verification reports ruled, D5–D13 committed to the charter (a93ba868), 5 slice tasks perfected + 6 backlog filed + 1 cancelled. Next entry: Review (the debrief)."
+              }
+            ],
+            "type": "em"
+          }
+        ],
+        "id": "eal-211",
+        "tone": "neutral",
+        "type": "callout"
+      },
+      {
+        "id": "eal-300",
+        "level": 2,
+        "text": "Review — debrief: five slices green, wave closed (2026-07-11)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "children": [
+              {
+                "type": "text",
+                "value": "STATUS: COMPLETE. "
+              }
+            ],
+            "type": "strong"
+          },
+          {
+            "type": "text",
+            "value": "All five slices built, adversarially reviewed, fixed in place, and re-gated green. The Elixir branches are STACKED in merge order (stamp → pulse → events); TUI and dogfood ride their own lanes. Grade: A−."
+          }
+        ],
+        "id": "eal-301",
+        "tone": "success",
+        "type": "callout"
+      },
+      {
+        "id": "eal-302",
+        "level": 3,
+        "text": "What shipped (final branches — the lead merges these)",
+        "type": "heading"
+      },
+      {
+        "id": "eal-303",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "bp task stamp (task-79d71bc80427f0e4) → loop-epic/bp-task-stamp-criterion-level-live-evide-0-r. D5 digest narrowing + close-family lock + evidence-or-nothing, exactly per charter. Reviewer added 4 ConnCase tests pinning the real CLI wire shape (string args in body, flags as query params). Gate 81/0 + controller 66/0."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "bp task pulse (task-9e59a7bd4fb241a2) → loop-epic/bp-task-pulse-now-line-lease-renewal-in--1-r (STACKED on stamp-r). One atomic write, own path, refuses lost leases — proven against a real TtlSweeper reap. Reviewer caught a REAL red the builder's gate missed: the branch added a 9th manifest verb while cli_commands_manifest_test still pinned ==8; resolved in the stack, test now pins 10 verbs + the epoch-free task.pulse shape."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "task events feed (task-1780b182cf404dc7) → loop-epic/task-events-feed-v1-tasks-events-since-k-2-r (STACKED on pulse-r). Keyset replay, id-as-cursor, deliberately NOT Prime reuse; route precedence pinned by route_info tests. Manifest pins 11 verbs. Gate 29/0."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "TUI locks strip (task-70eb8244dd1e702a) → loop-epic/tui-locks-strip-criteria-ladder-now-line-3-r. Ladder ✓⠹!○ + fraction with narrow-fallback shedding, now-line ticker with honest TTL decay (stale never spins), momentum criteria tally. Goldens verified to actually SHOW all three. Reviewer fix: gofmt only."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "dogfood wiring (task-eal-w1-dogfood-wiring) → loop-epic/epic-cycle-dogfood-wiring-builder-prompt-4-r. Prompt signatures match the built verbs exactly; no fixes. This branch also carries the charter cherry-pick + the wave log (the charter commit a93ba868 lived only on unpushed local main)."
+            }
+          ]
+        ],
+        "ordered": true,
+        "type": "list"
+      },
+      {
+        "id": "eal-304",
+        "level": 3,
+        "text": "Ledger audit",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "All five builders claimed, stamped honest per-criterion evidence, and left merge-gated criteria open — no fabrication found. The TTL sweeper has since reaped the idle leases (lifecycle back to open, worker null), which is substrate honesty, not builder dishonesty; the reviewer stamped a review_note on each task naming the final branch so nobody re-claims built work. Six backlog children + one discovered task (task-46d05e6c3369941e, detail-frame attempts/pulse) are filed and published."
+          }
+        ],
+        "id": "eal-305",
+        "type": "paragraph"
+      },
+      {
+        "id": "eal-306",
+        "level": 3,
+        "text": "Correction — the integration proof moves to post-merge (dated 2026-07-11)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Decide expected “integration proof = real epic-cycle run at Review.” That could not happen THIS wave: stamp/pulse are not merged or deployed, so no real run can stamp live yet (bp task stamp → unknown command against the live server). Epic criterion 2 and the TUI live ○→✓ flip stay OPEN, owed to the first post-merge epic-cycle run. The dogfood order (D4) makes this the designed outcome, not a miss — but the earlier wording promised it a phase early."
+          }
+        ],
+        "id": "eal-307",
+        "tone": "warning",
+        "type": "callout"
+      },
+      {
+        "id": "eal-308",
+        "level": 3,
+        "text": "What the lead must know before merging",
+        "type": "heading"
+      },
+      {
+        "id": "eal-309",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "Merge order is forced: stamp-r → pulse-r → events-r (stacked, fast-forward in sequence), TUI-r and dogfood-r any time. .ex changes WAIT for Elixir Test + Prod compile CI gates."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "D5 cutover: leases claimed before stamp merges carry old-style digests — their first default-path close 409s doc_changed_since_claim once; recover with re-read + observed_rev."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "Lead closes each task's merge-gated criterion on merge, then runs one real epic-cycle wave to close epic criterion 2 and record the TUI live-flip proof."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "TUI pulse decay uses the board's 5-minute UI leaseTTL (same constant as the claim glyph), not the server's 2700s reap TTL — consistent on-screen liveness vocabulary, deliberate."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "make cli-build after the Elixir merges so the local bp picks up stamp/pulse/events (content-addressed capabilities ETag makes the verbs appear on next fetch)."
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      {
+        "id": "eal-310",
+        "level": 3,
+        "text": "Next wave",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Take: (1) the real-run proof immediately after merge+deploy — one epic-cycle wave whose builders stamp and pulse live, closing epic criterion 2; (2) first consumer of GET /v1/tasks/events (chat/statusline per the Wave-2 plan, gated:true); (3) backlog by appetite: lock-key convergence, (dataset,type,id) index, MCP task_stamp/task_pulse, release-at-HTTP, cmux auto-pulse, web embed realtime."
+          }
+        ],
+        "id": "eal-311",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Log: 2026-07-11 Review — five slices reviewed and fixed in place, branches stacked, ledger audited (review_note stamped on all five tasks), charter wave log appended, grade A−. Paper closed as the wave debrief."
+          }
+        ],
+        "id": "eal-312",
+        "tone": "neutral",
+        "type": "callout"
+      }
+    ],
+    "html": "<p style=\"margin:0 0 6px;font-weight:600;color:#55635e;text-transform:uppercase;letter-spacing:0.14em;font-size:12px\">Barkpark · expressive-agent-loops · wave 1 · living wave paper</p><h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Wave 1 — criteria become live locks</h1><p style=\"border-bottom:1px solid #dde7e2;padding-bottom:10px;margin:0 0 20px;color:#55635e;font-size:13px\">Epic task-d7b7ce69e14d9124 · Charter .claude/workflows/expressive-agent-loops-charter.md · Opened at Strategize 2026-07-11</p><p style=\"margin:0 0 10px;line-height:1.55;font-size:18px\">The wish: agent loops narrate themselves live — criteria stamped mid-claim with honest misses, a now-line pulse on every board, one event stream feeding every surface, proven by a real run, not a demo. This Paper is the wave&#39;s living story: Strategize opened it, Digest appends the survey digest + verify plan, Decide appends decisions + the build plan, Review closes it as the debrief.</p><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span><span style=\"font-weight:bold\">STATUS: SURVEYING. </span>14 Sonnet surveyors are mapping the seams. Nothing has been built yet in this wave: all four wave-1 children are open and unclaimed (verified against the ledger 2026-07-11).</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Where the epic actually stands</h2><p>The charter (ratified 2026-07-10) filed four perfected children under task-d7b7ce69e14d9124. Ledger check at wave open: all four are lifecycle open, zero criteria met, no claims. So wave 1 is a pure build wave — nothing to reconcile, everything to ship. Do NOT refile the children; claim them.</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Slice</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Task</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Surface</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>State at open</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bp task stamp</code><span> — criterion-level mid-claim evidence + --miss</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-79d71bc80427f0e4</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>api/ + internal/cli</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>open, unclaimed</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">bp task pulse</code><span> — now-line + lease renewal, one atomic write</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-9e59a7bd4fb241a2</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>api/ + internal/cli</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>open, unclaimed</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>task events feed — </span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">/v1/tasks/events?since=</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-1780b182cf404dc7</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>api/ + internal/cli</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>open, unclaimed</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>TUI locks strip — criteria ladder on the board</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-70eb8244dd1e702a</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">internal/taskboard</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>open, unclaimed</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Direction for this wave</h2><p>Finish, don&#39;t start: ship all four slices in dependency order (stamp → pulse ∥ events → locks strip) and seal the wave with the epic&#39;s own criterion 2 — a REAL epic-cycle builder that stamps its criteria mid-claim while a human-watchable bp tasks board shows the locks flipping and the now-line breathing. The wave proves itself: per law D4, the later slices in THIS wave are built by workers who stamp and pulse using the verbs the earlier slices just merged.</p><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>One substrate (D1): the events feed is a projection of the task ledger&#39;s own write path, not a second store. Every stamp/pulse/claim/close funnels through one emitter; the HTTP cursor stream (?since=) replays from durable order, PubSub only accelerates push. If a slice wants its own table of truth, it is a fork — redesign.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Stamp is progress, close is the seal (D3): stamp --met writes evidence into the criterion in place; --miss records the honest attempt WITHOUT flipping the lock. Close still validates the full set. Stamp/pulse must authenticate as the claim holder (worker + epoch CAS) — a lapsed claim cannot stamp.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Pulse extends the existing rail-awareness lease renewal rather than inventing a parallel heartbeat: one atomic write = now-line text + lease renewal. Two writes racing is a bug by design review.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Vocabulary pinned (D2): the locks strip renders 1:1 from design/tokens.json lifecycle — ○ dim → ○ bright → braille spinner blue → ✓ teal, ! amber blocked. taskboard already owns anim.go (braille) and activityband.go; reuse, don&#39;t re-invent. Goldens update in the same PR as the renderer.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Quality bar: §0 of the task design-language spec is the acceptance test — it must feel alive; you always feel progress. A board that only repaints on manual refresh fails the wave even if every API test is green.</span></div></div><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span>Tentative choices above are direction, not decree — two exploration rounds (survey + verify) run before Decide finalizes. Known open questions: does a durable ordered event trail already exist to project from (document revisions / work-digest / rail_rev), or does the feed need a minimal append-only tasks-events table? Where exactly does the lease-renewal write live, and can the now-line ride the same UPDATE?</span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Survey plan — 14 scouts in flight</h2><p>Cheap width now buys precise depth later. Each scout answers one question and reports coverage (file, checked-for, found/not-found).</p><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Scout</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Question</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Why it changes the plan</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">tasks-plugin-map</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Map the Tasks plugin in api/: claim/close/lease code paths, epoch CAS, criteria validation at close</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Stamp and pulse must plug into these exact functions</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">lease-renewal-prior-art</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>What did rail-awareness ship for lease renewal — endpoint, write shape, fencing?</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Pulse should extend it, not duplicate it</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-write-contract</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>How task mutations flow (flat fields, /v1/data/mutate patch semantics), where a criterion-level write fits</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Stamp&#39;s write must be atomic and merge-safe</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">events-substrate</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Existing realtime seams: PubSub topics, projects-board realtime, webhook contract, rail_rev ETag</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Decides what /v1/tasks/events projects from</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">event-log-storage</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Is there a durable ordered trail (revisions/work-digest) a ?since= cursor can replay?</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>D1 hinges on this: projection vs new table</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">cli-verb-map</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>How a new bp task verb registers end-to-end (capabilities manifest → CLI)</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>stamp/pulse/events all need this path</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">taskboard-render</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>taskboard internals: board.go, activityband, anim, cache, goldens, refresh loop</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Locks strip lands here; find the seam and the repaint cadence</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">tokens-lifecycle</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>tokens.json lifecycle vocab and how glyphs/colors reach Go + Studio today</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>D2 compliance is mechanical if the pipeline exists</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">child-task-briefs</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Full briefs + acceptance criteria of the four children, plus /papers/wave-deck-zen-handoff</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Builders inherit these verbatim; surface contradictions now</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">claim-epoch-cas</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Claim lifecycle gotchas: epoch, fenced_off, re-claim, lapsed leases</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Stamp/pulse authorization semantics</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">surface-census</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Every surface that renders tasks (TUI board, Studio projects, web embed) and how each refreshes</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>The now-line must show everywhere the feed lands</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">epic-cycle-hook</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Where the bp-epic-cycle builder prompt lives and how to make builders stamp/pulse</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>The wave&#39;s integration proof rides this</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">test-harness</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>How tasks-plugin Elixir tests and Go taskboard golden tests run; integration-worktree gate</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Builders need the gate recipe up front</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">prior-attempts</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>bp search + git log for prior stamp/pulse/events work, branches, papers</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Avoid rebuilding or colliding with exhaust</span></td></tr></tbody></table><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">What Done looks like</h2><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>1. </span><span>All four children merged, each with its own criteria evidence-closed via the very stamp verb this wave ships.</span></div><div style=\"display:flex;flex-direction:row\"><span>2. </span><span>A real agent loop (an epic-cycle builder in this wave) stamps criteria live during its claim; the bp tasks board shows the ✓✓⠹○ 2/4 ladder and the now-line pulse without manual refresh.</span></div><div style=\"display:flex;flex-direction:row\"><span>3. </span><span>One event stream (/v1/tasks/events?since=) demonstrably feeds the TUI board; no surface grew its own store.</span></div><div style=\"display:flex;flex-direction:row\"><span>4. </span><span>Epic parent criteria 1+2 stamped with run proofs; this Paper closed as the debrief.</span></div></div><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><p><span style=\"font-style:italic\">Log: 2026-07-11 Strategize — paper opened, direction set, 14 surveyors dispatched. Next entry: Digest.</span></p><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Digest — survey folded, verify fleet in flight (2026-07-11)</h2><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span><span style=\"font-weight:bold\">STATUS: VERIFYING. </span>14 survey reports digested. 7 verifiers dispatched (3 Opus, 4 Sonnet) — the LAST exploration round before Decide cuts the plan.</span></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">What the survey established</h3><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Events substrate SETTLED (D1): mutation_events is a durable append-only bigserial-ordered table every task op already writes in-transaction through one funnel (Tasks.Internal.insert_mutation_event! → Content.Broadcast.save_event). EventLog.replay_since/4 is a production keyset ?since= cursor (SSE resume at /v1/data/listen); Prime.recent_events already runs the task-filtered query shape; sync_push_cursors + github cursor already treat mutation_events.id as an external cursor. /v1/tasks/events?since= = thin projection. NO new store.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Stamp is genuinely new: acceptance-criteria writes exist ONLY inside Close (merge_criteria/apply_criteria_update, private — advisory lock, in-lock re-read, index-targeted List.replace_at, rev CAS). Stamp = extract that write path into a shared module + graft Close.check_fencing/2 (epoch CAS). Mutations.relabel_by_id is the closest shape template but carries NO fencing — copying it verbatim ships the bug.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Pulse = extend Claim.do_renew/3 — the shipped lease renewal is already ONE atomic Repo.update_all (epoch+1, ts_iso refresh, work_digest deliberately preserved) riding the same-worker targeted-claim branch (renewal?/2). Pulse adds the now-line to that SAME write; a second UPDATE reintroduces the racing-writes problem the charter bans.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>CLI is free: a new verb = manifest map in plugins/tasks.ex cli_commands/0 + route tuple in register_routes/1 + controller action. Go dispatch is 100% manifest-driven (tree.Lookup → runCommand) — zero Go per verb. MCP exposure is a SEPARATE hand-maintained step in mcp_tasks.go. There is no alias layer: the manifest verb string IS the only spelling.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Vocabulary pinned &amp; gated: design/tokens.json lifecycle block (braille-blue spinner, ✓ teal deliberately ≠ status-ok green, ! amber, ○ bright=ready / ○ dim=open) flows via emit.mjs into taskboard tokens_gen.go, Studio TokensGen, and CSS — with design/check.mjs 4-way parity and api/test board_theme_parity_test.exs as live tripwires. Locks-strip reuses spinnerGlyph/GenLifecycle; goldens regen via `go test ./internal/taskboard/... -update`, same PR.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Board liveness does NOT depend on the events feed: the TUI board already self-refreshes (SSE dirty-bit → 750ms debounced full refetch + 30s backstop; events NEVER carry truth), and Studio /admin/projects subscribes to the same broadcast. The feed&#39;s value is the durable replayable narration trail for surfaces without that plumbing — plus the ?since= cursor for agents.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Epic-cycle hook is surgical: one canonical file (.claude/workflows/bp-epic-cycle.workflow.js); TASKS_BLOCK line 59 currently teaches close-time-only criteria writes while the Build prompt says STAMP AS YOU GO — the exact gap stamp closes. Touch points: TASKS_BLOCK, LIVENESS_BLOCK, Build phase step 3. Edit lands ONLY after the verbs merge.</span></div></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Corrections &amp; contradictions — Decide must resolve</h3><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>The strategic direction named files that don&#39;t exist: activityband.go was NEVER an implementation file (NOW/NEXT band retired, Amendment 7/commit 92a618f8); braille lives in spinner.go, glyph render in components.go, the criteria model in types.go. Builders get corrected pointers.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Scheduling tension: charter declares pulse ∥ events, but events criterion 1 demands ordered events for pulse/stamp — either sequence pulse before events, or rewrite the criterion to claim/close/move (+stamp/pulse as they land).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Pulse&#39;s brief has NO event-emission criterion — built to spec it never writes a task.pulse row, making events criterion 1 unsatisfiable. Decide must pin the event-kind vocabulary (stamp&#39;s brief names task.criterion; pulse&#39;s kind is unnamed anywhere) and amend pulse&#39;s criteria.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Stamp&#39;s criteria never operationalize D3: no test that --met without --evidence is rejected. Add it in Decide.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>task-566d782d09bd0eea (standalone &#39;bp task renew&#39;, gh #1388) overlaps pulse&#39;s renewal half AND its criteria contradict shipped code (says epoch kept; do_renew bumps epoch). Fold into pulse or park explicitly.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Direct survey contradiction: one report says ALL task writes share advisory-lock key task:&lt;doc_id&gt;; another says close locks the internal uuid while claim locks the doc_id string. If truly divergent the mutex is defeated — verifier assigned; stamp/pulse must take the ruled-correct key.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Auth depth: filed briefs say epoch-only CAS (close&#39;s precedent), but epoch is world-readable on every task get — only Release.check_holder/2 (tested, HTTP-unwired) binds worker identity. Decide picks epoch-only vs holder+epoch, and whether check_holder gets extracted into Tasks.Internal.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Naming: Barkpark.Pulse (Shared Storm) and read-only Barkpark.Tasks.Criteria already exist — new modules scope as Barkpark.Tasks.Pulse / a distinct criteria-write module (e.g. Tasks.Stamp or CriteriaWrite).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>The board cannot express the ladder yet: CriterionItem{Criterion, Met bool} has no attempted/missed state and evidence decodes into a detail-only side structure — stamp&#39;s wire shape (--miss attempts[]) must be designed WITH the board render in mind; the stamp→locks dependency order is correct, not just convenient.</span></div></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Coverage map — found, NOT found, unreached</h3><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NOT FOUND anywhere (proves greenfield): stamp/pulse/events verbs, routes, modules, branches, or WIP — repo-wide greps, git log --all, git branch -a all clean; bp task --help lists only claim/close/get/ls/move/next/prime/ready.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NOT FOUND: any SSE/EventSource client in internal/cli or js/packages/core; any realtime board in the Next.js web/ demo (task-board-columns.ts is pure bucketing). &#39;Every board&#39; realistically = TUI + Studio /admin/projects + papers-reader live embeds; web embed, CLI table, and MCP task_prime are structurally one-shot — descope or file follow-up work, don&#39;t pretend.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>NOT FOUND: HTTP route or CLI verb for Tasks.release/3 despite full unit tests — an adjacent silent gap, not wave scope.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Unreached corners: WorkDigest.field_digests full field set (LOAD-BEARING — verifier assigned); move.ex reparent write body read only partially; glyph_budget_test.go internals; mutation_events index fit for a type-filtered ASC scan; semrole/pdrender tokens_gen files (possible stray lifecycle mirror, low risk).</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Tooling note: surveyors disagreed on whether `bp search` exists — `bp search query &quot;…&quot;` works on a fresh CLI build, bare `bp search` errors on stale ones; a bp-CLI freshness check belongs in builder prompts.</span></div></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Verify fleet — in flight NOW</h3><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Verifier</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Model</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Question</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Proof (RUN, not read)</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">stamp-digest-collision</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>opus</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Does the claim-time work digest cover acceptance_criteria — would a mid-claim stamp write 409 the eventual close (doc_changed_since_claim)?</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>worktree probe test: claim → criteria write → close; baseline mix test tasks_claim + close</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">advisory-lock-key-parity</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>opus</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Do claim/close/fence/mutations/release hash the SAME advisory-lock key (doc_id string vs internal uuid)?</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>call-site trace; ruling names the key stamp/pulse must take</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">pulse-renewal-and-holder</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>opus</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>do_renew preconditions for a mid-claim pulse; move.ex fence fold = one UPDATE?; epoch-only vs check_holder recommendation</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>mix test release/fence/close suites</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">criteria-schema-attempts</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>sonnet</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Would attempts[] on a criterion entry survive task schema/validation? Exact close criteria wire shape</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>mix test tasks_test + validation probe</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">events-cursor-proof</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>sonnet</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>mutation_events index fit for task-filtered ASC cursor; /tasks/events route-ordering vs :doc_id catchall; live prime shape</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>event-log/listen tests + migration grep + curl guerrilla /v1/tasks/prime</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">taskboard-gate-baseline</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>sonnet</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Go taskboard suite/goldens/glyph budget + Elixir board_theme_parity green at HEAD; is there a budget slot for the ladder?</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>go build/vet/test taskboard + mix test board_theme_parity</span></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">cli-generic-dispatch-proof</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>sonnet</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>Manifest-declared verb needs zero Go; does the CLI&#39;s manifest cache refresh so a NEW server verb appears without rebuild? MCP = manual step</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>go build + go test internal/cli + live bp task get against guerrilla</span></td></tr></tbody></table><p>Decide cannot fly without: the work-digest answer (it shapes stamp&#39;s write path and whether close&#39;s digest check needs a stamp-aware exclusion), the lock-key ruling (which mutex stamp/pulse take), the schema verdict on attempts[], and the pinned event-kind vocabulary (task.criterion precedent; task.pulse unnamed). Everything else above is scoping hygiene Decide can rule on directly.</p><div style=\"border-left:3px solid #4a544f;background:#edf0ee;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span><span style=\"font-style:italic\">Log: 2026-07-11 Digest — 14 survey reports folded, 7 verifiers dispatched (3 Opus / 4 Sonnet). Next entry: Decide.</span></span></div><hr style=\"border:none;border-top:1px solid #dde7e2;margin:30px 0 26px\"><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Decide — verification ruled, five slices cut (2026-07-11)</h2><div style=\"border-left:3px solid #2d5e8f;background:#e9eff7;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span><span style=\"font-weight:bold\">STATUS: BUILDING. </span>Charter decisions D5–D13 committed (a93ba868). Five slice tasks published + perfected, six backlog children filed, one stale task cancelled. Builders fly in integration order: stamp → pulse → events, with locks strip and dogfood wiring in parallel.</span></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Verification results — what the deep round proved</h3><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">stamp-digest-collision CONFIRMED (run proof): </span>mid-claim criteria stamp → default-path close returns {:error, {:doc_changed_since_claim, …, [&quot;acceptance_criteria&quot;]}} — the wave&#39;s core loop was broken by construction. WorkDigest hashes the FULL criteria entries (work_digest.ex:20,32,85-92). Ruling: D5 narrows the digest to criterion text, inside the stamp slice. No work_digest_test.exs exists — no golden churn.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">advisory-lock-key-parity GENUINELY DIVERGENT: </span>claim/ttl_sweeper/compactor lock task:&lt;doc_id&gt; (string); close/release/move/fence/mutations lock task:&lt;uuid&gt;. Cross-family mutex defeated; safe today only via FOR UPDATE row lock + rev-CAS. The &#39;SAME key close uses&#39; comments are false across families. Ruling: D6 — stamp joins the close family, pulse the renewal family; convergence = backlog.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">pulse-renewal-and-holder (37/37 green): </span>do_renew is the right one-atomic-write template but rides claim_by_id, whose fall-through silently RE-CLAIMS with a fresh digest when the lease lapsed — a pulse must refuse (not_holder), so it gets its own write path. Both epoch AND worker are world-readable (show returns full claim); holder check = coordination guard, token = the only security boundary. Ruling: D7.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">criteria-schema-attempts (live probes): </span>an attempts[] key survives BOTH validation layers untouched — no migration. But Params.parse_criteria silently DROPS unknown keys and both parse+merge default met→true when absent ({&#39;index&#39;:0} → met:true) — the exact footgun a naive --miss would inherit. No array bound exists anywhere; the 5-entry cap is app code. Ruling: D8.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">events-cursor-proof (EXPLAIN ANALYZE): </span>tail cursor = 0.39ms on the bare PK; cold since=0 replay seq-scans (17ms @63k rows, forced index 156ms) — index is backlog, not launch. Prime.recent_events has NO id field and sorts by inserted_at — replay-unsafe, do not reuse; write a fresh replay_since-shaped query. Route must mount above /tasks/:doc_id (prime precedent, live 404-shadow otherwise). Pulse&#39;s filed brief had ZERO event-emission criterion — fixed at Decide. Ruling: D10, and pulse ∥ events re-sequenced to pulse → events.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">taskboard-gate-baseline GREEN + hazard: </span>go build/vet/test + all goldens pass; -update regen is byte-identical to HEAD; board_theme_parity 4/4 green when isolated. Shared api/_build/test is ACTIVELY CONTAMINATED by a concurrent worktree (media_upload_dir mismatch, red 3/3 in the main checkout) — Elixir gates run in the builder&#39;s own isolated worktree build, a shared-checkout red is contamination first. Board row today renders only a bare N/M fraction; the ladder is a NEW token; charter&#39;s activityband.go never existed. Ruling: D11 + doctrine line added.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">cli-generic-dispatch-proof LIVE: </span>fresh binary from this checkout ran task get against guerrilla through the fully generic manifest dispatcher; capabilities ETag is content-addressed (proved a real 304 round-trip) — new verbs appear on the next bp invocation, zero Go, zero cache-bust. task.stamp/task.pulse exist NOWHERE yet (repo + live manifest greps empty) — genuinely greenfield. taskboard&#39;s pulseMsg is an unrelated SSE keepalive — docstring disambiguation ordered in D9.</span></div></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Decisions (charter D5–D13 is canonical — one line each)</h3><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">D5 · </span>WorkDigest narrows to the brief: criteria hash by criterion text only; met/evidence/attempts never trip the close fence; ships inside stamp — because the proven 409 otherwise breaks stamp-then-close.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">D6 · </span>Stamp locks task:&lt;uuid&gt; (serializes with close, the seal); pulse locks task:&lt;doc_id&gt; (serializes with the TTL reap); rev-CAS stays the cross-family contract — because the lock split is real and rev-CAS is what actually guards.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">D7 · </span>Both verbs holder-gated (check_holder → Tasks.Internal); stamp epoch-fences like close, pulse never epoch-fences and refuses a lost lease — because evidence binds to a live lease while a keepalive must survive fences.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">D8 · </span>Wire vocabulary pinned: task.criterion + task.pulse mutation kinds, one emitter funnel; --met requires evidence; --miss = bounded attempts[] {note,ts,worker} ×5, met pinned explicitly — because the met→true parse default is a proven lock-flipping footgun.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">D9 · </span>claim.now {text,ts,criterion?} written in the SAME update_all as the lease renewal; module Barkpark.Tasks.Pulse — because two writes race and bare Barkpark.Pulse is Shared Storm&#39;s.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">D10 · </span>Events feed = new keyset projection over mutation_events with id AS the cursor, mounted above :doc_id; no migration now — because Prime&#39;s shape is replay-unsafe and the tail is already 0.39ms.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">D11 · </span>Board ladder with ZERO new glyphs (✓ teal / ! amber miss / spinner only on the pulse-named criterion / ○), all from GenLifecycle — because it keeps the glyph allowlist, theme parity, and the Go-only merge lane intact.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">D12 · </span>&#39;Every board&#39; = TUI + Studio + papers-reader embeds this wave; web embed/CLI/MCP filed as backlog — because one-shot surfaces can&#39;t breathe and honesty beats silent claims.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span><span style=\"font-weight:bold\">D13 · </span>task-566d782d09bd0eea cancelled as superseded (criteria contradict shipped do_renew); cmux half re-filed — because two renewal code paths is exactly the fork D1 bans.</span></div></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">The wave plan — five slices, integration-ordered</h3><table role=\"presentation\" style=\"border-collapse:collapse;width:100%;margin:18px 0\"><thead><tr><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Slice</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Task</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Model</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Order</span></th><th align=\"left\" style=\"border-bottom:2px solid #15211d;padding:8px 12px;vertical-align:bottom;font-size:13px;letter-spacing:0.02em;color:#55635e;text-transform:uppercase;font-weight:600\"><span>Gate</span></th></tr></thead><tbody><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>bp task stamp + D5 digest narrowing + check_holder extraction</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-79d71bc80427f0e4</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>fable</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>1</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">mix test stamp/work_digest/close/claim (isolated worktree)</code></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>bp task pulse — claim.now + lease renewal, one atomic write</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-9e59a7bd4fb241a2</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>fable</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>2</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">mix test pulse/release/ttl_sweeper/claim (isolated worktree)</code></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>task events feed — /v1/tasks/events?since= projection</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-1780b182cf404dc7</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>opus</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>3</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">mix test events/listen_controller (isolated worktree)</code></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>TUI locks strip — criteria ladder + now-line ticker</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-70eb8244dd1e702a</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>fable</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>∥</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">go build ./... &amp;&amp; go vet &amp;&amp; go test ./internal/taskboard/...</code></td></tr><tr><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>epic-cycle dogfood wiring — prompts stamp/pulse</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-eal-w1-dogfood-wiring</code></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>opus</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><span>∥</span></td><td style=\"border-bottom:1px solid #dde7e2;padding:10px 12px;vertical-align:top\"><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">node --check .claude/workflows/bp-epic-cycle.workflow.js</code></td></tr></tbody></table><p>Stamp/pulse/events share api/lib/barkpark/plugins/tasks.ex + tasks_controller.ex — their files: labels intentionally collide so the frontier serializes them; locks strip (internal/taskboard/) and dogfood wiring (one workflow file) are file-disjoint and fly in parallel against the D8/D9 pinned wire shapes. Backlog filed as published epic children: <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-eal-bl-lock-key-convergence</code> · <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-eal-bl-events-cold-index</code> · <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-eal-bl-web-embed-realtime</code> · <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-eal-bl-mcp-stamp-pulse</code> · <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-eal-bl-release-http</code> · <code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">task-eal-bl-cmux-auto-pulse</code>. The wave&#39;s integration proof stays the epic&#39;s criterion 2: a REAL epic-cycle run stamping and pulsing on a live board, closed at Review.</p><div style=\"border-left:3px solid #4a544f;background:#edf0ee;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span><span style=\"font-style:italic\">Log: 2026-07-11 Decide — 7 verification reports ruled, D5–D13 committed to the charter (a93ba868), 5 slice tasks perfected + 6 backlog filed + 1 cancelled. Next entry: Review (the debrief).</span></span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Review — debrief: five slices green, wave closed (2026-07-11)</h2><div style=\"border-left:3px solid #1e6b52;background:#e7f2ec;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span><span style=\"font-weight:bold\">STATUS: COMPLETE. </span>All five slices built, adversarially reviewed, fixed in place, and re-gated green. The Elixir branches are STACKED in merge order (stamp → pulse → events); TUI and dogfood ride their own lanes. Grade: A−.</span></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">What shipped (final branches — the lead merges these)</h3><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>1. </span><span>bp task stamp (task-79d71bc80427f0e4) → loop-epic/bp-task-stamp-criterion-level-live-evide-0-r. D5 digest narrowing + close-family lock + evidence-or-nothing, exactly per charter. Reviewer added 4 ConnCase tests pinning the real CLI wire shape (string args in body, flags as query params). Gate 81/0 + controller 66/0.</span></div><div style=\"display:flex;flex-direction:row\"><span>2. </span><span>bp task pulse (task-9e59a7bd4fb241a2) → loop-epic/bp-task-pulse-now-line-lease-renewal-in--1-r (STACKED on stamp-r). One atomic write, own path, refuses lost leases — proven against a real TtlSweeper reap. Reviewer caught a REAL red the builder&#39;s gate missed: the branch added a 9th manifest verb while cli_commands_manifest_test still pinned ==8; resolved in the stack, test now pins 10 verbs + the epoch-free task.pulse shape.</span></div><div style=\"display:flex;flex-direction:row\"><span>3. </span><span>task events feed (task-1780b182cf404dc7) → loop-epic/task-events-feed-v1-tasks-events-since-k-2-r (STACKED on pulse-r). Keyset replay, id-as-cursor, deliberately NOT Prime reuse; route precedence pinned by route_info tests. Manifest pins 11 verbs. Gate 29/0.</span></div><div style=\"display:flex;flex-direction:row\"><span>4. </span><span>TUI locks strip (task-70eb8244dd1e702a) → loop-epic/tui-locks-strip-criteria-ladder-now-line-3-r. Ladder ✓⠹!○ + fraction with narrow-fallback shedding, now-line ticker with honest TTL decay (stale never spins), momentum criteria tally. Goldens verified to actually SHOW all three. Reviewer fix: gofmt only.</span></div><div style=\"display:flex;flex-direction:row\"><span>5. </span><span>dogfood wiring (task-eal-w1-dogfood-wiring) → loop-epic/epic-cycle-dogfood-wiring-builder-prompt-4-r. Prompt signatures match the built verbs exactly; no fixes. This branch also carries the charter cherry-pick + the wave log (the charter commit a93ba868 lived only on unpushed local main).</span></div></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Ledger audit</h3><p>All five builders claimed, stamped honest per-criterion evidence, and left merge-gated criteria open — no fabrication found. The TTL sweeper has since reaped the idle leases (lifecycle back to open, worker null), which is substrate honesty, not builder dishonesty; the reviewer stamped a review_note on each task naming the final branch so nobody re-claims built work. Six backlog children + one discovered task (task-46d05e6c3369941e, detail-frame attempts/pulse) are filed and published.</p><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Correction — the integration proof moves to post-merge (dated 2026-07-11)</h3><div style=\"border-left:3px solid #8a6420;background:#f7f0df;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span>Decide expected “integration proof = real epic-cycle run at Review.” That could not happen THIS wave: stamp/pulse are not merged or deployed, so no real run can stamp live yet (bp task stamp → unknown command against the live server). Epic criterion 2 and the TUI live ○→✓ flip stay OPEN, owed to the first post-merge epic-cycle run. The dogfood order (D4) makes this the designed outcome, not a miss — but the earlier wording promised it a phase early.</span></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">What the lead must know before merging</h3><div style=\"display:flex;flex-direction:column\"><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Merge order is forced: stamp-r → pulse-r → events-r (stacked, fast-forward in sequence), TUI-r and dogfood-r any time. .ex changes WAIT for Elixir Test + Prod compile CI gates.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>D5 cutover: leases claimed before stamp merges carry old-style digests — their first default-path close 409s doc_changed_since_claim once; recover with re-read + observed_rev.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>Lead closes each task&#39;s merge-gated criterion on merge, then runs one real epic-cycle wave to close epic criterion 2 and record the TUI live-flip proof.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>TUI pulse decay uses the board&#39;s 5-minute UI leaseTTL (same constant as the claim glyph), not the server&#39;s 2700s reap TTL — consistent on-screen liveness vocabulary, deliberate.</span></div><div style=\"display:flex;flex-direction:row\"><span>• </span><span>make cli-build after the Elixir merges so the local bp picks up stamp/pulse/events (content-addressed capabilities ETag makes the verbs appear on next fetch).</span></div></div><h3 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.3;margin:24px 0 8px;font-weight:600;font-size:20px\">Next wave</h3><p>Take: (1) the real-run proof immediately after merge+deploy — one epic-cycle wave whose builders stamp and pulse live, closing epic criterion 2; (2) first consumer of GET /v1/tasks/events (chat/statusline per the Wave-2 plan, gated:true); (3) backlog by appetite: lock-key convergence, (dataset,type,id) index, MCP task_stamp/task_pulse, release-at-HTTP, cmux auto-pulse, web embed realtime.</p><div style=\"border-left:3px solid #4a544f;background:#edf0ee;padding:14px 18px;border-radius:0 8px 8px 0;color:#15211d;margin:20px 0\"><span>Log: 2026-07-11 Review — five slices reviewed and fixed in place, branches stacked, ledger audited (review_note stamped on all five tasks), charter wave log appended, grade A−. Paper closed as the wave debrief.</span></div>"
+  },
+  "preview": {
+    "description": "The wish: agent loops narrate themselves live — criteria stamped mid-claim with honest misses, a now-line…",
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/expressive-agent-loops-wave-2026-07-11"
+  },
+  "slug": "expressive-agent-loops-wave-2026-07-11",
+  "style": "article",
+  "title": "Expressive Agent Loops — Wave 1 (2026-07-11)"
+}

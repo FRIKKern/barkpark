@@ -1,0 +1,389 @@
+{
+  "_createdAt": "2026-07-10T18:17:51.331172Z",
+  "_draft": false,
+  "_id": "felix-findings-plug-router",
+  "_publishedId": "felix-findings-plug-router",
+  "_rev": "b86f0792c45f0a3a64119268c3942ede",
+  "_type": "paper",
+  "_updatedAt": "2026-07-10T18:17:51.331172Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix d02 - Plug pipeline, Endpoint, Router, controllers",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Read-only audit of the HTTP foundation (Corpus Parts II+III). Anchors: endpoint.ex, router.ex (1929 lines, 33 pipelines), 61 controllers, plugs/, error_envelope.ex, Content.Errors. Method: bp-search-first, read anchors fully, per-concept verdict with file:line evidence. Two qualifying findings filed; the rest are already-good or rejected-with-reason. Domain task: task-e65bb6be90a5551f."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "Verdict table",
+      "type": "heading"
+    },
+    {
+      "id": "block-3",
+      "language": "text",
+      "type": "code",
+      "value": "CONCEPT                                          VERDICT              EVIDENCE / TASK\n-----------------------------------------------  -------------------  ------------------------------\nDup error emitters: query + legacy controller    ALREADY-GOOD         both declare action_fallback ->\n                                                                      FallbackController -> Content.Errors\nServed error vocabulary == emitted codes?        ADOPT (P1)           task-cac1b0367c6031e1\nSingle emitter + request_id at plug layer        ADOPT (P2)           task-603d813e2d2b0b02\naction_fallback coverage                         ALREADY-GOOD         fallthrough controllers serve\n                                                                      html/redirects or route via Content.Errors\nAuth-plug halting discipline                     ALREADY-GOOD         every inline-emit plug halt()s\nEndpoint check_origin / per-socket overrides     ALREADY-GOOD         Past-Mistake-#11 guarded in comments+code\nRouter pipeline composition (33 pipelines)       ALREADY-GOOD         tenancy/scope matrix, no dead dupes\nParser / body length cap (100 MB, all parsers)   REJECTED-W-REASON    413 path exists; per-parser split\n                                                                      speculative w/o measured RAM pressure\nVerified routes ~p adoption                       REJECTED-W-REASON    1929-line router, weak failure mode;\n                                                                      broken routes caught by tests"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Headline: the query+legacy scar is already closed",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "The documented scar - error emitters duplicated across query_controller and legacy_controller - no longer exists in its original form. Both controllers declare action_fallback BarkparkWeb.FallbackController (query_controller.ex:11, legacy_controller.ex:12), which routes every {:error, _} tuple through Content.Errors.to_envelope/2 - the single owner of the error vocabulary. legacy_controller's old bare %{error: \"halted\", reason: reason} (no code/request_id) is gone (see the comment at legacy_controller.ex:83-86). Verdict: ALREADY-GOOD. But the CLASS the scar warned about persists elsewhere - see Findings 1 and 2."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-6",
+      "level": 2,
+      "text": "Finding 1 (ADOPT, P1): served error vocabulary drift - task-cac1b0367c6031e1",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Named failure mode: ~22 error codes reach the wire via inline emitters that bypass Content.Errors, so they are absent from known_codes/0, the served OpenAPI Error.code enum, and api-v1.md. A strongly-typed SDK generated from the spec (capability-manifest doctrine, corpus ch 84) deserializes error.code into the enum; a response carrying code=mfa_required or code=invalid_grant is an undeclared variant - the SDK throws on it or silently drops it, and the client cannot branch on a challenge it was never told exists. This is the contract-shape-sweep scar in its live form."
+        }
+      ],
+      "id": "block-7",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-8",
+      "language": "text",
+      "type": "code",
+      "value": "known_codes/0 (errors.ex:65 = @hints keys, errors.ex:9-53) is the SOLE source for:\n  - the OpenAPI Error.code enum   openapi.ex:374  Errors.known_codes() |> Enum.sort()\n  - docs/api-v1.md Error codes\nParity test openapi_test.exs:220 pins  served-enum == known_codes.\n\nBut 22 codes are emitted INLINE, bypassing Content.Errors, ABSENT from known_codes/0:\n  adopt_failed already_running constraint feature_not_configured inbound_failed\n  intake_failed invalid_event invalid_grant invalid_incident invalid_op invalid_paper\n  invalid_proposal malformed_op malformed_proposal mfa_enrolment_required mfa_required\n  missing_source not_intake runner_start_failed share_expired source_not_found unprocessable\n\nSites incl. bulldocs_ingest_controller.ex, status_controller.ex:62, ticket_keys_controller.ex:185,\ngithub_adopt_controller.ex:76, self_update_controller.ex:29, access_controller.ex:188."
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Protective test (fails today): assert every error code literal emitted by controllers on public /v1 routes is a member of Content.Errors.known_codes/0 (or on an explicit off-spec exclusion list for SCIM/OIDC/SAML). openapi_test.exs:220 only checks enum==known_codes; it does NOT check emitted-codes subset-of known_codes, so the drift is unguarded. Fix (separate PR): register the real public codes in @hints, or route those controllers through Content.Errors; add the subset guard so the class cannot reopen."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-10",
+      "level": 2,
+      "text": "Finding 2 (ADOPT, P2): no single emitter - plug envelopes omit request_id - task-603d813e2d2b0b02",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Named failure mode: the canonical envelope is documented as %{error: %{code, message, hint, request_id}} and built by Content.Errors, but the auth/pre-router plug layer (which has no action_fallback) hand-builds envelopes that OMIT request_id, then halt(). An anonymous caller hitting a 401/403 from an auth plug (e.g. a bad ingest token) gets a body with no request_id, so an operator cannot grep server logs to correlate the rejection - while the internal_error hint literally tells callers to 'report the request_id to the API operator' (errors.ex:44). Plug.RequestId already runs at endpoint.ex:74, so the id exists and is simply dropped. Secondarily, the envelope-build logic is forked into 4 private helpers - the exact sweep-the-tree scar."
+        }
+      ],
+      "id": "block-11",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-12",
+      "language": "text",
+      "type": "code",
+      "value": "Canonical envelope (error_json.ex:18):  %{error: %{code, message, hint, request_id}}\nOwner Content.Errors.to_envelope/2 stamps hint + request_id (errors.ex:67-72, :329).\nPlug.RequestId runs at endpoint.ex:74 (before router) -> request_id EXISTS in Logger metadata.\n\nAuth/pre-router plugs (no action_fallback) hand-build envelopes WITHOUT request_id, then halt():\n  require_user_session.ex:90    require_ingest_token.ex:65    optional_user_session.ex:75\n  require_media_processing_callback_token.ex:28    require_principal_user.ex:28\n\nEnvelope-build logic is ALSO forked into 4 private copies (a contract change must edit all):\n  search_controller.ex:342 error_json/3        v1/media_controller.ex:446 error_json/3\n  tickets_attachments_controller.ex:317 enveloped/3 + :339 maybe_put_request_id/1\n  endpoint.ex:153 parse_error_json/3"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Protective test (fails today): drive an auth-plug rejection and assert body.error.request_id is a non-empty string. Fix (separate PR, decoupled from the guard to avoid the guard+fix co-merge red): one shared BarkparkWeb.ErrorResponse.send(conn, reason) usable from both plugs and controllers, routing through Content.Errors.to_envelope/2; adopt it at the plug sites and retire the 4 private helpers. This is the 'collapse behind one emitter' the brief asked for, applied to the layer where the duplication actually remains."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-14",
+      "level": 2,
+      "text": "Already-good (first-class results, no task)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "action_fallback coverage: the 51 controllers without action_fallback either serve HTML / redirects (error_html, *_redirect, *_html) or deliberately own their JSON error path via a private helper that routes through Content.Errors (search, media, tickets_attachments). No controller drops an {:error, _} tuple on the floor."
+        }
+      ],
+      "id": "block-15",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Auth-plug halting discipline: every plug that emits an inline error envelope also calls halt() immediately after (require_user_session.ex:91, require_ingest_token.ex:66, optional_user_session.ex:76, github_webhook_signature.ex:58, require_principal_user.ex:30). No pipeline continues past a rejection."
+        }
+      ],
+      "id": "block-16",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Endpoint socket / check_origin: all four socket mounts (/live, /socket, /v1/plugins/pulse/socket, /quiz) deliberately inherit the endpoint-level check_origin allowlist with NO per-socket override, with inline comments citing Past-Mistake-#11 - the exact drift that made Studio click-dead. secure_session flips the cookie Secure flag at runtime without force_ssl (Golden Rule #5). Textbook-correct."
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Router pipeline composition: 33 pipelines look large but are a tenancy/scope matrix (scoped_*, shared_*, require_*, ingest, github_webhook, media_mutate...). No dead or byte-identical duplicates surfaced; each variant carries a distinct plug set. Not a qualifying finding."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-19",
+      "level": 2,
+      "text": "Rejected-with-reason",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Body length cap: parse_body sets length: 100_000_000 for ALL parsers (json, urlencoded, multipart) at endpoint.ex:124. A per-parser split (cap JSON low, keep multipart high) is a plausible memory-amplification hardening, but there is already a RequestTooLargeError -> typed 413 path (endpoint.ex:141), and no measured RAM-pressure number backs a lower JSON cap. Rejected as speculative under the improvement doctrine - reopen with a measurement."
+        }
+      ],
+      "id": "block-20",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Verified routes (~p): the router uses plain-string paths (0 uses of ~p). Adopting verified routes across a 1929-line router is large churn with a weak failure mode (a broken route is a 404 caught by request tests). Modern-idiom rewrite with no named failure - rejected."
+        }
+      ],
+      "id": "block-21",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix d02 - Plug pipeline, Endpoint, Router, controllers",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Read-only audit of the HTTP foundation (Corpus Parts II+III). Anchors: endpoint.ex, router.ex (1929 lines, 33 pipelines), 61 controllers, plugs/, error_envelope.ex, Content.Errors. Method: bp-search-first, read anchors fully, per-concept verdict with file:line evidence. Two qualifying findings filed; the rest are already-good or rejected-with-reason. Domain task: task-e65bb6be90a5551f."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-2",
+        "level": 2,
+        "text": "Verdict table",
+        "type": "heading"
+      },
+      {
+        "id": "block-3",
+        "language": "text",
+        "type": "code",
+        "value": "CONCEPT                                          VERDICT              EVIDENCE / TASK\n-----------------------------------------------  -------------------  ------------------------------\nDup error emitters: query + legacy controller    ALREADY-GOOD         both declare action_fallback ->\n                                                                      FallbackController -> Content.Errors\nServed error vocabulary == emitted codes?        ADOPT (P1)           task-cac1b0367c6031e1\nSingle emitter + request_id at plug layer        ADOPT (P2)           task-603d813e2d2b0b02\naction_fallback coverage                         ALREADY-GOOD         fallthrough controllers serve\n                                                                      html/redirects or route via Content.Errors\nAuth-plug halting discipline                     ALREADY-GOOD         every inline-emit plug halt()s\nEndpoint check_origin / per-socket overrides     ALREADY-GOOD         Past-Mistake-#11 guarded in comments+code\nRouter pipeline composition (33 pipelines)       ALREADY-GOOD         tenancy/scope matrix, no dead dupes\nParser / body length cap (100 MB, all parsers)   REJECTED-W-REASON    413 path exists; per-parser split\n                                                                      speculative w/o measured RAM pressure\nVerified routes ~p adoption                       REJECTED-W-REASON    1929-line router, weak failure mode;\n                                                                      broken routes caught by tests"
+      },
+      {
+        "id": "block-4",
+        "level": 2,
+        "text": "Headline: the query+legacy scar is already closed",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "The documented scar - error emitters duplicated across query_controller and legacy_controller - no longer exists in its original form. Both controllers declare action_fallback BarkparkWeb.FallbackController (query_controller.ex:11, legacy_controller.ex:12), which routes every {:error, _} tuple through Content.Errors.to_envelope/2 - the single owner of the error vocabulary. legacy_controller's old bare %{error: \"halted\", reason: reason} (no code/request_id) is gone (see the comment at legacy_controller.ex:83-86). Verdict: ALREADY-GOOD. But the CLASS the scar warned about persists elsewhere - see Findings 1 and 2."
+          }
+        ],
+        "id": "block-5",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-6",
+        "level": 2,
+        "text": "Finding 1 (ADOPT, P1): served error vocabulary drift - task-cac1b0367c6031e1",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Named failure mode: ~22 error codes reach the wire via inline emitters that bypass Content.Errors, so they are absent from known_codes/0, the served OpenAPI Error.code enum, and api-v1.md. A strongly-typed SDK generated from the spec (capability-manifest doctrine, corpus ch 84) deserializes error.code into the enum; a response carrying code=mfa_required or code=invalid_grant is an undeclared variant - the SDK throws on it or silently drops it, and the client cannot branch on a challenge it was never told exists. This is the contract-shape-sweep scar in its live form."
+          }
+        ],
+        "id": "block-7",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-8",
+        "language": "text",
+        "type": "code",
+        "value": "known_codes/0 (errors.ex:65 = @hints keys, errors.ex:9-53) is the SOLE source for:\n  - the OpenAPI Error.code enum   openapi.ex:374  Errors.known_codes() |> Enum.sort()\n  - docs/api-v1.md Error codes\nParity test openapi_test.exs:220 pins  served-enum == known_codes.\n\nBut 22 codes are emitted INLINE, bypassing Content.Errors, ABSENT from known_codes/0:\n  adopt_failed already_running constraint feature_not_configured inbound_failed\n  intake_failed invalid_event invalid_grant invalid_incident invalid_op invalid_paper\n  invalid_proposal malformed_op malformed_proposal mfa_enrolment_required mfa_required\n  missing_source not_intake runner_start_failed share_expired source_not_found unprocessable\n\nSites incl. bulldocs_ingest_controller.ex, status_controller.ex:62, ticket_keys_controller.ex:185,\ngithub_adopt_controller.ex:76, self_update_controller.ex:29, access_controller.ex:188."
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Protective test (fails today): assert every error code literal emitted by controllers on public /v1 routes is a member of Content.Errors.known_codes/0 (or on an explicit off-spec exclusion list for SCIM/OIDC/SAML). openapi_test.exs:220 only checks enum==known_codes; it does NOT check emitted-codes subset-of known_codes, so the drift is unguarded. Fix (separate PR): register the real public codes in @hints, or route those controllers through Content.Errors; add the subset guard so the class cannot reopen."
+          }
+        ],
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-10",
+        "level": 2,
+        "text": "Finding 2 (ADOPT, P2): no single emitter - plug envelopes omit request_id - task-603d813e2d2b0b02",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Named failure mode: the canonical envelope is documented as %{error: %{code, message, hint, request_id}} and built by Content.Errors, but the auth/pre-router plug layer (which has no action_fallback) hand-builds envelopes that OMIT request_id, then halt(). An anonymous caller hitting a 401/403 from an auth plug (e.g. a bad ingest token) gets a body with no request_id, so an operator cannot grep server logs to correlate the rejection - while the internal_error hint literally tells callers to 'report the request_id to the API operator' (errors.ex:44). Plug.RequestId already runs at endpoint.ex:74, so the id exists and is simply dropped. Secondarily, the envelope-build logic is forked into 4 private helpers - the exact sweep-the-tree scar."
+          }
+        ],
+        "id": "block-11",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-12",
+        "language": "text",
+        "type": "code",
+        "value": "Canonical envelope (error_json.ex:18):  %{error: %{code, message, hint, request_id}}\nOwner Content.Errors.to_envelope/2 stamps hint + request_id (errors.ex:67-72, :329).\nPlug.RequestId runs at endpoint.ex:74 (before router) -> request_id EXISTS in Logger metadata.\n\nAuth/pre-router plugs (no action_fallback) hand-build envelopes WITHOUT request_id, then halt():\n  require_user_session.ex:90    require_ingest_token.ex:65    optional_user_session.ex:75\n  require_media_processing_callback_token.ex:28    require_principal_user.ex:28\n\nEnvelope-build logic is ALSO forked into 4 private copies (a contract change must edit all):\n  search_controller.ex:342 error_json/3        v1/media_controller.ex:446 error_json/3\n  tickets_attachments_controller.ex:317 enveloped/3 + :339 maybe_put_request_id/1\n  endpoint.ex:153 parse_error_json/3"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Protective test (fails today): drive an auth-plug rejection and assert body.error.request_id is a non-empty string. Fix (separate PR, decoupled from the guard to avoid the guard+fix co-merge red): one shared BarkparkWeb.ErrorResponse.send(conn, reason) usable from both plugs and controllers, routing through Content.Errors.to_envelope/2; adopt it at the plug sites and retire the 4 private helpers. This is the 'collapse behind one emitter' the brief asked for, applied to the layer where the duplication actually remains."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-14",
+        "level": 2,
+        "text": "Already-good (first-class results, no task)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "action_fallback coverage: the 51 controllers without action_fallback either serve HTML / redirects (error_html, *_redirect, *_html) or deliberately own their JSON error path via a private helper that routes through Content.Errors (search, media, tickets_attachments). No controller drops an {:error, _} tuple on the floor."
+          }
+        ],
+        "id": "block-15",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Auth-plug halting discipline: every plug that emits an inline error envelope also calls halt() immediately after (require_user_session.ex:91, require_ingest_token.ex:66, optional_user_session.ex:76, github_webhook_signature.ex:58, require_principal_user.ex:30). No pipeline continues past a rejection."
+          }
+        ],
+        "id": "block-16",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Endpoint socket / check_origin: all four socket mounts (/live, /socket, /v1/plugins/pulse/socket, /quiz) deliberately inherit the endpoint-level check_origin allowlist with NO per-socket override, with inline comments citing Past-Mistake-#11 - the exact drift that made Studio click-dead. secure_session flips the cookie Secure flag at runtime without force_ssl (Golden Rule #5). Textbook-correct."
+          }
+        ],
+        "id": "block-17",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Router pipeline composition: 33 pipelines look large but are a tenancy/scope matrix (scoped_*, shared_*, require_*, ingest, github_webhook, media_mutate...). No dead or byte-identical duplicates surfaced; each variant carries a distinct plug set. Not a qualifying finding."
+          }
+        ],
+        "id": "block-18",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-19",
+        "level": 2,
+        "text": "Rejected-with-reason",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Body length cap: parse_body sets length: 100_000_000 for ALL parsers (json, urlencoded, multipart) at endpoint.ex:124. A per-parser split (cap JSON low, keep multipart high) is a plausible memory-amplification hardening, but there is already a RequestTooLargeError -> typed 413 path (endpoint.ex:141), and no measured RAM-pressure number backs a lower JSON cap. Rejected as speculative under the improvement doctrine - reopen with a measurement."
+          }
+        ],
+        "id": "block-20",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Verified routes (~p): the router uses plain-string paths (0 uses of ~p). Adopting verified routes across a 1929-line router is large churn with a weak failure mode (a broken route is a 404 caught by request tests). Modern-idiom rewrite with no named failure - rejected."
+          }
+        ],
+        "id": "block-21",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix d02 - Plug pipeline, Endpoint, Router, controllers</h1><p>Read-only audit of the HTTP foundation (Corpus Parts II+III). Anchors: endpoint.ex, router.ex (1929 lines, 33 pipelines), 61 controllers, plugs/, error_envelope.ex, Content.Errors. Method: bp-search-first, read anchors fully, per-concept verdict with file:line evidence. Two qualifying findings filed; the rest are already-good or rejected-with-reason. Domain task: task-e65bb6be90a5551f.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verdict table</h2><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">CONCEPT                                          VERDICT              EVIDENCE / TASK</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">-----------------------------------------------  -------------------  ------------------------------</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Dup error emitters: query + legacy controller    ALREADY-GOOD         both declare action_fallback -&gt;</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">                                                                      FallbackController -&gt; Content.Errors</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Served error vocabulary == emitted codes?        ADOPT (P1)           task-cac1b0367c6031e1</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Single emitter + request_id at plug layer        ADOPT (P2)           task-603d813e2d2b0b02</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">action_fallback coverage                         ALREADY-GOOD         fallthrough controllers serve</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">                                                                      html/redirects or route via Content.Errors</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Auth-plug halting discipline                     ALREADY-GOOD         every inline-emit plug halt()s</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Endpoint check_origin / per-socket overrides     ALREADY-GOOD         Past-Mistake-#11 guarded in comments+code</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Router pipeline composition (33 pipelines)       ALREADY-GOOD         tenancy/scope matrix, no dead dupes</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Parser / body length cap (100 MB, all parsers)   REJECTED-W-REASON    413 path exists; per-parser split</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">                                                                      speculative w/o measured RAM pressure</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Verified routes ~p adoption                       REJECTED-W-REASON    1929-line router, weak failure mode;</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">                                                                      broken routes caught by tests</code></span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Headline: the query+legacy scar is already closed</h2><p>The documented scar - error emitters duplicated across query_controller and legacy_controller - no longer exists in its original form. Both controllers declare action_fallback BarkparkWeb.FallbackController (query_controller.ex:11, legacy_controller.ex:12), which routes every {:error, _} tuple through Content.Errors.to_envelope/2 - the single owner of the error vocabulary. legacy_controller&#39;s old bare %{error: &quot;halted&quot;, reason: reason} (no code/request_id) is gone (see the comment at legacy_controller.ex:83-86). Verdict: ALREADY-GOOD. But the CLASS the scar warned about persists elsewhere - see Findings 1 and 2.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding 1 (ADOPT, P1): served error vocabulary drift - task-cac1b0367c6031e1</h2><p>Named failure mode: ~22 error codes reach the wire via inline emitters that bypass Content.Errors, so they are absent from known_codes/0, the served OpenAPI Error.code enum, and api-v1.md. A strongly-typed SDK generated from the spec (capability-manifest doctrine, corpus ch 84) deserializes error.code into the enum; a response carrying code=mfa_required or code=invalid_grant is an undeclared variant - the SDK throws on it or silently drops it, and the client cannot branch on a challenge it was never told exists. This is the contract-shape-sweep scar in its live form.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">known_codes/0 (errors.ex:65 = @hints keys, errors.ex:9-53) is the SOLE source for:</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  - the OpenAPI Error.code enum   openapi.ex:374  Errors.known_codes() |&gt; Enum.sort()</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  - docs/api-v1.md Error codes</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Parity test openapi_test.exs:220 pins  served-enum == known_codes.</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">But 22 codes are emitted INLINE, bypassing Content.Errors, ABSENT from known_codes/0:</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  adopt_failed already_running constraint feature_not_configured inbound_failed</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  intake_failed invalid_event invalid_grant invalid_incident invalid_op invalid_paper</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  invalid_proposal malformed_op malformed_proposal mfa_enrolment_required mfa_required</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  missing_source not_intake runner_start_failed share_expired source_not_found unprocessable</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Sites incl. bulldocs_ingest_controller.ex, status_controller.ex:62, ticket_keys_controller.ex:185,</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">github_adopt_controller.ex:76, self_update_controller.ex:29, access_controller.ex:188.</code></span></div><p>Protective test (fails today): assert every error code literal emitted by controllers on public /v1 routes is a member of Content.Errors.known_codes/0 (or on an explicit off-spec exclusion list for SCIM/OIDC/SAML). openapi_test.exs:220 only checks enum==known_codes; it does NOT check emitted-codes subset-of known_codes, so the drift is unguarded. Fix (separate PR): register the real public codes in @hints, or route those controllers through Content.Errors; add the subset guard so the class cannot reopen.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding 2 (ADOPT, P2): no single emitter - plug envelopes omit request_id - task-603d813e2d2b0b02</h2><p>Named failure mode: the canonical envelope is documented as %{error: %{code, message, hint, request_id}} and built by Content.Errors, but the auth/pre-router plug layer (which has no action_fallback) hand-builds envelopes that OMIT request_id, then halt(). An anonymous caller hitting a 401/403 from an auth plug (e.g. a bad ingest token) gets a body with no request_id, so an operator cannot grep server logs to correlate the rejection - while the internal_error hint literally tells callers to &#39;report the request_id to the API operator&#39; (errors.ex:44). Plug.RequestId already runs at endpoint.ex:74, so the id exists and is simply dropped. Secondarily, the envelope-build logic is forked into 4 private helpers - the exact sweep-the-tree scar.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Canonical envelope (error_json.ex:18):  %{error: %{code, message, hint, request_id}}</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Owner Content.Errors.to_envelope/2 stamps hint + request_id (errors.ex:67-72, :329).</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Plug.RequestId runs at endpoint.ex:74 (before router) -&gt; request_id EXISTS in Logger metadata.</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Auth/pre-router plugs (no action_fallback) hand-build envelopes WITHOUT request_id, then halt():</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  require_user_session.ex:90    require_ingest_token.ex:65    optional_user_session.ex:75</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  require_media_processing_callback_token.ex:28    require_principal_user.ex:28</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Envelope-build logic is ALSO forked into 4 private copies (a contract change must edit all):</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  search_controller.ex:342 error_json/3        v1/media_controller.ex:446 error_json/3</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  tickets_attachments_controller.ex:317 enveloped/3 + :339 maybe_put_request_id/1</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  endpoint.ex:153 parse_error_json/3</code></span></div><p>Protective test (fails today): drive an auth-plug rejection and assert body.error.request_id is a non-empty string. Fix (separate PR, decoupled from the guard to avoid the guard+fix co-merge red): one shared BarkparkWeb.ErrorResponse.send(conn, reason) usable from both plugs and controllers, routing through Content.Errors.to_envelope/2; adopt it at the plug sites and retire the 4 private helpers. This is the &#39;collapse behind one emitter&#39; the brief asked for, applied to the layer where the duplication actually remains.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Already-good (first-class results, no task)</h2><p>action_fallback coverage: the 51 controllers without action_fallback either serve HTML / redirects (error_html, *_redirect, *_html) or deliberately own their JSON error path via a private helper that routes through Content.Errors (search, media, tickets_attachments). No controller drops an {:error, _} tuple on the floor.</p><p>Auth-plug halting discipline: every plug that emits an inline error envelope also calls halt() immediately after (require_user_session.ex:91, require_ingest_token.ex:66, optional_user_session.ex:76, github_webhook_signature.ex:58, require_principal_user.ex:30). No pipeline continues past a rejection.</p><p>Endpoint socket / check_origin: all four socket mounts (/live, /socket, /v1/plugins/pulse/socket, /quiz) deliberately inherit the endpoint-level check_origin allowlist with NO per-socket override, with inline comments citing Past-Mistake-#11 - the exact drift that made Studio click-dead. secure_session flips the cookie Secure flag at runtime without force_ssl (Golden Rule #5). Textbook-correct.</p><p>Router pipeline composition: 33 pipelines look large but are a tenancy/scope matrix (scoped_*, shared_*, require_*, ingest, github_webhook, media_mutate...). No dead or byte-identical duplicates surfaced; each variant carries a distinct plug set. Not a qualifying finding.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Rejected-with-reason</h2><p>Body length cap: parse_body sets length: 100_000_000 for ALL parsers (json, urlencoded, multipart) at endpoint.ex:124. A per-parser split (cap JSON low, keep multipart high) is a plausible memory-amplification hardening, but there is already a RequestTooLargeError -&gt; typed 413 path (endpoint.ex:141), and no measured RAM-pressure number backs a lower JSON cap. Rejected as speculative under the improvement doctrine - reopen with a measurement.</p><p>Verified routes (~p): the router uses plain-string paths (0 uses of ~p). Adopting verified routes across a 1929-line router is large churn with a weak failure mode (a broken route is a 404 caught by request tests). Modern-idiom rewrite with no named failure - rejected.</p>"
+  },
+  "body_html": "<h1>Felix d02 - Plug pipeline, Endpoint, Router, controllers</h1><p>Read-only audit of the HTTP foundation (Corpus Parts II+III). Anchors: endpoint.ex, router.ex (1929 lines, 33 pipelines), 61 controllers, plugs/, error_envelope.ex, Content.Errors. Method: bp-search-first, read anchors fully, per-concept verdict with file:line evidence. Two qualifying findings filed; the rest are already-good or rejected-with-reason. Domain task: task-e65bb6be90a5551f.</p><h2>Verdict table</h2><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">CONCEPT                                          VERDICT              EVIDENCE / TASK\n-----------------------------------------------  -------------------  ------------------------------\nDup error emitters: query + legacy controller    ALREADY-GOOD         both declare action_fallback -&gt;\n                                                                      FallbackController -&gt; Content.Errors\nServed error vocabulary == emitted codes?        ADOPT (P1)           task-cac1b0367c6031e1\nSingle emitter + request_id at plug layer        ADOPT (P2)           task-603d813e2d2b0b02\naction_fallback coverage                         ALREADY-GOOD         fallthrough controllers serve\n                                                                      html/redirects or route via Content.Errors\nAuth-plug halting discipline                     ALREADY-GOOD         every inline-emit plug halt()s\nEndpoint check_origin / per-socket overrides     ALREADY-GOOD         Past-Mistake-#11 guarded in comments+code\nRouter pipeline composition (33 pipelines)       ALREADY-GOOD         tenancy/scope matrix, no dead dupes\nParser / body length cap (100 MB, all parsers)   REJECTED-W-REASON    413 path exists; per-parser split\n                                                                      speculative w/o measured RAM pressure\nVerified routes ~p adoption                       REJECTED-W-REASON    1929-line router, weak failure mode;\n                                                                      broken routes caught by tests</pre><h2>Headline: the query+legacy scar is already closed</h2><p>The documented scar - error emitters duplicated across query_controller and legacy_controller - no longer exists in its original form. Both controllers declare action_fallback BarkparkWeb.FallbackController (query_controller.ex:11, legacy_controller.ex:12), which routes every {:error, _} tuple through Content.Errors.to_envelope/2 - the single owner of the error vocabulary. legacy_controller&#39;s old bare %{error: &quot;halted&quot;, reason: reason} (no code/request_id) is gone (see the comment at legacy_controller.ex:83-86). Verdict: ALREADY-GOOD. But the CLASS the scar warned about persists elsewhere - see Findings 1 and 2.</p><h2>Finding 1 (ADOPT, P1): served error vocabulary drift - task-cac1b0367c6031e1</h2><p>Named failure mode: ~22 error codes reach the wire via inline emitters that bypass Content.Errors, so they are absent from known_codes/0, the served OpenAPI Error.code enum, and api-v1.md. A strongly-typed SDK generated from the spec (capability-manifest doctrine, corpus ch 84) deserializes error.code into the enum; a response carrying code=mfa_required or code=invalid_grant is an undeclared variant - the SDK throws on it or silently drops it, and the client cannot branch on a challenge it was never told exists. This is the contract-shape-sweep scar in its live form.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">known_codes/0 (errors.ex:65 = @hints keys, errors.ex:9-53) is the SOLE source for:\n  - the OpenAPI Error.code enum   openapi.ex:374  Errors.known_codes() |&gt; Enum.sort()\n  - docs/api-v1.md Error codes\nParity test openapi_test.exs:220 pins  served-enum == known_codes.\n\nBut 22 codes are emitted INLINE, bypassing Content.Errors, ABSENT from known_codes/0:\n  adopt_failed already_running constraint feature_not_configured inbound_failed\n  intake_failed invalid_event invalid_grant invalid_incident invalid_op invalid_paper\n  invalid_proposal malformed_op malformed_proposal mfa_enrolment_required mfa_required\n  missing_source not_intake runner_start_failed share_expired source_not_found unprocessable\n\nSites incl. bulldocs_ingest_controller.ex, status_controller.ex:62, ticket_keys_controller.ex:185,\ngithub_adopt_controller.ex:76, self_update_controller.ex:29, access_controller.ex:188.</pre><p>Protective test (fails today): assert every error code literal emitted by controllers on public /v1 routes is a member of Content.Errors.known_codes/0 (or on an explicit off-spec exclusion list for SCIM/OIDC/SAML). openapi_test.exs:220 only checks enum==known_codes; it does NOT check emitted-codes subset-of known_codes, so the drift is unguarded. Fix (separate PR): register the real public codes in @hints, or route those controllers through Content.Errors; add the subset guard so the class cannot reopen.</p><h2>Finding 2 (ADOPT, P2): no single emitter - plug envelopes omit request_id - task-603d813e2d2b0b02</h2><p>Named failure mode: the canonical envelope is documented as %{error: %{code, message, hint, request_id}} and built by Content.Errors, but the auth/pre-router plug layer (which has no action_fallback) hand-builds envelopes that OMIT request_id, then halt(). An anonymous caller hitting a 401/403 from an auth plug (e.g. a bad ingest token) gets a body with no request_id, so an operator cannot grep server logs to correlate the rejection - while the internal_error hint literally tells callers to &#39;report the request_id to the API operator&#39; (errors.ex:44). Plug.RequestId already runs at endpoint.ex:74, so the id exists and is simply dropped. Secondarily, the envelope-build logic is forked into 4 private helpers - the exact sweep-the-tree scar.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">Canonical envelope (error_json.ex:18):  %{error: %{code, message, hint, request_id}}\nOwner Content.Errors.to_envelope/2 stamps hint + request_id (errors.ex:67-72, :329).\nPlug.RequestId runs at endpoint.ex:74 (before router) -&gt; request_id EXISTS in Logger metadata.\n\nAuth/pre-router plugs (no action_fallback) hand-build envelopes WITHOUT request_id, then halt():\n  require_user_session.ex:90    require_ingest_token.ex:65    optional_user_session.ex:75\n  require_media_processing_callback_token.ex:28    require_principal_user.ex:28\n\nEnvelope-build logic is ALSO forked into 4 private copies (a contract change must edit all):\n  search_controller.ex:342 error_json/3        v1/media_controller.ex:446 error_json/3\n  tickets_attachments_controller.ex:317 enveloped/3 + :339 maybe_put_request_id/1\n  endpoint.ex:153 parse_error_json/3</pre><p>Protective test (fails today): drive an auth-plug rejection and assert body.error.request_id is a non-empty string. Fix (separate PR, decoupled from the guard to avoid the guard+fix co-merge red): one shared BarkparkWeb.ErrorResponse.send(conn, reason) usable from both plugs and controllers, routing through Content.Errors.to_envelope/2; adopt it at the plug sites and retire the 4 private helpers. This is the &#39;collapse behind one emitter&#39; the brief asked for, applied to the layer where the duplication actually remains.</p><h2>Already-good (first-class results, no task)</h2><p>action_fallback coverage: the 51 controllers without action_fallback either serve HTML / redirects (error_html, *_redirect, *_html) or deliberately own their JSON error path via a private helper that routes through Content.Errors (search, media, tickets_attachments). No controller drops an {:error, _} tuple on the floor.</p><p>Auth-plug halting discipline: every plug that emits an inline error envelope also calls halt() immediately after (require_user_session.ex:91, require_ingest_token.ex:66, optional_user_session.ex:76, github_webhook_signature.ex:58, require_principal_user.ex:30). No pipeline continues past a rejection.</p><p>Endpoint socket / check_origin: all four socket mounts (/live, /socket, /v1/plugins/pulse/socket, /quiz) deliberately inherit the endpoint-level check_origin allowlist with NO per-socket override, with inline comments citing Past-Mistake-#11 - the exact drift that made Studio click-dead. secure_session flips the cookie Secure flag at runtime without force_ssl (Golden Rule #5). Textbook-correct.</p><p>Router pipeline composition: 33 pipelines look large but are a tenancy/scope matrix (scoped_*, shared_*, require_*, ingest, github_webhook, media_mutate...). No dead or byte-identical duplicates surfaced; each variant carries a distinct plug set. Not a qualifying finding.</p><h2>Rejected-with-reason</h2><p>Body length cap: parse_body sets length: 100_000_000 for ALL parsers (json, urlencoded, multipart) at endpoint.ex:124. A per-parser split (cap JSON low, keep multipart high) is a plausible memory-amplification hardening, but there is already a RequestTooLargeError -&gt; typed 413 path (endpoint.ex:141), and no measured RAM-pressure number backs a lower JSON cap. Rejected as speculative under the improvement doctrine - reopen with a measurement.</p><p>Verified routes (~p): the router uses plain-string paths (0 uses of ~p). Adopting verified routes across a 1929-line router is large churn with a weak failure mode (a broken route is a 404 caught by request tests). Modern-idiom rewrite with no named failure - rejected.</p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": "Read-only audit of the HTTP foundation (Corpus Parts II+III). Anchors: endpoint.ex, router.ex (1929 lines, 33…",
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-findings-plug-router"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Felix d02 - Plug pipeline, Endpoint, Router, controllers"
+}

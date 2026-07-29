@@ -1,0 +1,373 @@
+{
+  "_createdAt": "2026-07-10T18:19:55.995475Z",
+  "_draft": false,
+  "_id": "felix-findings-realtime",
+  "_publishedId": "felix-findings-realtime",
+  "_rev": "d7289245be0e8c2d81dedb3f1fd4a9f9",
+  "_type": "paper",
+  "_updatedAt": "2026-07-10T18:19:55.995475Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix Audit d09 — Realtime: PubSub, channels, presence, webhooks, SSE",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Read-only audit against Phoenix Mastery Corpus Part VI (ch 50-53) and ch 85, using the sheets op path (2s/25-op debounced persist, {:sheets_op} deltas) as the house-good reference for every bursty producer. Method: enumerated all Phoenix.PubSub broadcast/subscribe call sites, classified topic granularity, checked subscriber-side collapse/throttle, read webhooks/ in full, and traced socket auth token discipline + SSE backpressure. Parent task task-57c1fafec69f1bd2."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Bottom line: the webhook subsystem, channel/socket auth, per-doc/per-workspace topic scoping, and inbound throttles are all already-good — genuinely hardened, not merely tidy. Two qualifying gaps, both on the SSE (ListenController) leg."
+        }
+      ],
+      "id": "block-2",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-3",
+      "level": 2,
+      "text": "Verdict table",
+      "type": "heading"
+    },
+    {
+      "id": "block-4",
+      "language": "text",
+      "type": "code",
+      "value": "CONCEPT                                        VERDICT        EVIDENCE\n---------------------------------------------  -------------  ---------------------------------------\nWebhook signing (HMAC-SHA256 + blank-secret)   already-good   dispatcher.ex:155-194\nWebhook retry / jittered backoff / scheduled   already-good   dispatcher.ex:562-634 + retry_worker.ex\nWebhook dedup / SSRF guard / dead-letter       already-good   dispatcher.ex:285-296, delivery.ex, ReqAdapter\nWebhook ordering                               already-good*  at-least-once + monotonic event_id (Stripe model)\nSocket auth: bearer read-token (UserSocket)    already-good   user_socket.ex:20-27\nSocket auth: Phoenix.Token max_age (Quiz)      already-good   quiz_socket.ex:16,40  (max_age 86_400)\nPreview token: exp + revocation + replay-jti   already-good   preview_token.ex:39-158\nChannel inbound throttle / backpressure        already-good   pulse 80ms; quiz 33/50/250ms\nPubSub topic granularity (per-doc/per-ws)      already-good   broadcast.ex doc_topic/paper_topic (ws-scoped)\nSubscriber collapse (chat activity, board)     already-good   recorder.ex:806-820; board_live.ex seen-set\nSheets op deltas (HOUSE-GOOD reference)        already-good   2s/25-op debounced persist\nPresence tracking (pulse/quiz per-sid)         already-good   pulse_channel.ex / quiz_channel.ex\nSSE mailbox backpressure (slow reader)         FILED P1       task-febe33ce84d39bb4\nSSE per-event get_document re-fetch (admin)    FILED P2       task-4469f80374b0bd24\n\n* ordering: no per-endpoint sequencing by design; consumers reorder via the\n  monotonic x-barkpark-event-id header (matches the Stripe doctrine ch85 cites)."
+    },
+    {
+      "id": "block-5",
+      "level": 2,
+      "text": "Finding 1 (P1) — SSE listen_loop: unbounded mailbox under a slow/stalled reader",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "NAMED FAILURE MODE. BarkparkWeb.ListenController.listen_loop/5 (listen_controller.ex:129-164) has no subscriber-side backpressure. The HTTP adapter is Bandit (config/config.exs:18); Plug.Conn.chunk/2 blocks the connection process on a stalled TCP reader (full send buffer / zero window). While blocked in chunk, Phoenix.PubSub.broadcast keeps send/2-ing {:document_changed, msg} into that SAME process's mailbox — each msg carries a full rendered document. On a high-mutation dataset (e.g. a bulk import at ~100 events/s) a single stalled SSE client grows the connection-process mailbox without bound: heap growth -> node memory exhaustion."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "There is no message_queue_len check, no max_heap_size / off-heap guard, and no drop/collapse/close policy anywhere in lib/ (grep: 0 hits). The `after 30_000 -> keepalive` receive timeout never fires under sustained load because messages keep arriving, so the loop never yields to inspect its backlog. This is a scar-class unbounded-BEAM-mailbox footgun. Contrast the house-good sheets path which bounds the PRODUCER (debounce); the SSE consumer bounds nothing."
+        }
+      ],
+      "id": "block-7",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-8",
+      "language": "elixir",
+      "type": "code",
+      "value": "# fix direction (delegated to the filed task)\n# guard the backlog around chunk; above a threshold either\n#   * drain + collapse to a single 'resync' event -> client re-pulls via Last-Event-ID, or\n#   * close the stream -> client reconnects and replays\ncase Process.info(self(), :message_queue_len) do\n  {:message_queue_len, n} when n > @backlog_max -> collapse_or_close(conn)\n  _ -> chunk(conn, event)\nend"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Filed: task-febe33ce84d39bb4 (priority 1). Acceptance criteria carry a protective test that floods N messages at a blocked chunk sink and asserts message_queue_len stays bounded — fails today (grows to N)."
+        }
+      ],
+      "id": "block-9",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-10",
+      "level": 2,
+      "text": "Finding 2 (P2) — SSE live leg re-fetches get_document per event even for admin callers",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "MEASURED COST. redacted_result/4 (listen_controller.ex:196-208) calls Content.get_document (plus fetch_schema) for EVERY forwarded event, for EVERY subscriber, to re-seal field visibility. Correct and necessary for a redacting caller. But the controller's own comment (line 24) states an admin caller => Envelope.render/3 is a no-op => byte-identical stream, and the live broadcast msg already carries document: Envelope.render(doc, nil, :internal) — the unredacted render, current as of the just-committed mutation (broadcast.ex:133). So for an admin/unredacting caller the per-event get_document round-trip is pure overhead; its result is byte-identical to the :internal render already in hand."
+        }
+      ],
+      "id": "block-11",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Cost: N subscribers x M mutations/s => N*M redundant DB fetches during mutation bursts. Fix (field-visibility invariant preserved, fail-closed): when caller_context is admin/unredacting, forward msg.document directly; keep the re-fetch path for every redacting / owner-scoped caller. forward_event?/2 already drops cross-workspace events before the fetch, so only same-workspace admin events pay this."
+        }
+      ],
+      "id": "block-12",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Filed: task-4469f80374b0bd24 (priority 2). Acceptance criteria carry a measurement counting get_document calls per M live events for an admin subscriber (M today -> 0 after)."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-14",
+      "level": 2,
+      "text": "Already-good (evaluated, no change warranted)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Webhooks (dispatcher.ex, delivery.ex, retry_worker.ex, stuck_delivery_sweeper.ex): HMAC-SHA256 signing over `timestamp.body` with an HONEST absent-header for blank secrets (never a forgeable empty-key HMAC); jittered equal-jitter backoff [1s,5s,30s] with a ceiling; retries SCHEDULED via a one-shot Oban RetryWorker fenced on updated_at (never Process.sleep in a bounded pool slot — the documented head-of-line-blocking fix); UNIQUE(endpoint_id,event_id) dedup; Retry-After honoured (clamped); SSRF guard with redirect:false; per-attempt durable state machine + crash-sweep recovery. Ordering is at-least-once with consumer-side reordering via the monotonic x-barkpark-event-id header — the Stripe model ch85 references. Nothing to add."
+        }
+      ],
+      "id": "block-15",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Socket/channel auth: UserSocket fails the connect closed on an unverifiable bearer read-token; SearchChannel re-authorizes the token against the resolved workspace on JOIN (the P0 leak guard) before any handle_in. QuizSocket uses Phoenix.Token with max_age 86_400 and server-authoritative player ids; a forged/expired token yields a fresh id. PreviewToken enforces exp + revocation + one-time jti. Token-expiry discipline is present everywhere it matters."
+        }
+      ],
+      "id": "block-16",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Inbound backpressure: PulseChannel throttles cursor frames to >=80ms (silent drop); QuizChannel throttles cursor 33ms / hover 50ms / submit 250ms per socket. Writes stay on the rate-limited HTTP POST; the sockets are subscribe-only in practice."
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Topic granularity: broadcast.ex is the single owner of topic shapes; doc_topic/4 and paper_topic/3 workspace-scope every per-doc topic (barkpark-n56v / -rwva) so two tenants' colliding ids never collapse onto one topic. The bare documents:<dataset> topic fans out to all tenants only on the nil-workspace back-compat path; a resolved workspace subscribes to documents:ws:<id>:<dataset>. Subscriber-side collapse is real where it counts: chat activity broadcasts change-only (a hundred stream deltas collapse to one 'writing…'), and BoardLive dedups via a seen-set and applies in-memory (no per-event DB query). Pulse vitals broadcast on a bounded timer via Endpoint.broadcast fastlane."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Rejected-with-reason (noted, not filed): (a) studio_chat:activity is a single GLOBAL topic every Studio tab subscribes to — a minor cross-workspace wakeup + info smell — but it is change-only collapsed (low rate) and an admin/host-is-admin surface, so it does not clear the storm bar. (b) dispatch_async/5 back-compat path skips dedup and can double-deliver, but it is a documented legacy seam and every live caller threads event_id through dispatch_async/7."
+        }
+      ],
+      "id": "block-19",
+      "type": "paragraph"
+    }
+  ],
+  "body": {
+    "blocks": [
+      {
+        "id": "block-0",
+        "level": 1,
+        "text": "Felix Audit d09 — Realtime: PubSub, channels, presence, webhooks, SSE",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Read-only audit against Phoenix Mastery Corpus Part VI (ch 50-53) and ch 85, using the sheets op path (2s/25-op debounced persist, {:sheets_op} deltas) as the house-good reference for every bursty producer. Method: enumerated all Phoenix.PubSub broadcast/subscribe call sites, classified topic granularity, checked subscriber-side collapse/throttle, read webhooks/ in full, and traced socket auth token discipline + SSE backpressure. Parent task task-57c1fafec69f1bd2."
+          }
+        ],
+        "id": "block-1",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Bottom line: the webhook subsystem, channel/socket auth, per-doc/per-workspace topic scoping, and inbound throttles are all already-good — genuinely hardened, not merely tidy. Two qualifying gaps, both on the SSE (ListenController) leg."
+          }
+        ],
+        "id": "block-2",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-3",
+        "level": 2,
+        "text": "Verdict table",
+        "type": "heading"
+      },
+      {
+        "id": "block-4",
+        "language": "text",
+        "type": "code",
+        "value": "CONCEPT                                        VERDICT        EVIDENCE\n---------------------------------------------  -------------  ---------------------------------------\nWebhook signing (HMAC-SHA256 + blank-secret)   already-good   dispatcher.ex:155-194\nWebhook retry / jittered backoff / scheduled   already-good   dispatcher.ex:562-634 + retry_worker.ex\nWebhook dedup / SSRF guard / dead-letter       already-good   dispatcher.ex:285-296, delivery.ex, ReqAdapter\nWebhook ordering                               already-good*  at-least-once + monotonic event_id (Stripe model)\nSocket auth: bearer read-token (UserSocket)    already-good   user_socket.ex:20-27\nSocket auth: Phoenix.Token max_age (Quiz)      already-good   quiz_socket.ex:16,40  (max_age 86_400)\nPreview token: exp + revocation + replay-jti   already-good   preview_token.ex:39-158\nChannel inbound throttle / backpressure        already-good   pulse 80ms; quiz 33/50/250ms\nPubSub topic granularity (per-doc/per-ws)      already-good   broadcast.ex doc_topic/paper_topic (ws-scoped)\nSubscriber collapse (chat activity, board)     already-good   recorder.ex:806-820; board_live.ex seen-set\nSheets op deltas (HOUSE-GOOD reference)        already-good   2s/25-op debounced persist\nPresence tracking (pulse/quiz per-sid)         already-good   pulse_channel.ex / quiz_channel.ex\nSSE mailbox backpressure (slow reader)         FILED P1       task-febe33ce84d39bb4\nSSE per-event get_document re-fetch (admin)    FILED P2       task-4469f80374b0bd24\n\n* ordering: no per-endpoint sequencing by design; consumers reorder via the\n  monotonic x-barkpark-event-id header (matches the Stripe doctrine ch85 cites)."
+      },
+      {
+        "id": "block-5",
+        "level": 2,
+        "text": "Finding 1 (P1) — SSE listen_loop: unbounded mailbox under a slow/stalled reader",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "NAMED FAILURE MODE. BarkparkWeb.ListenController.listen_loop/5 (listen_controller.ex:129-164) has no subscriber-side backpressure. The HTTP adapter is Bandit (config/config.exs:18); Plug.Conn.chunk/2 blocks the connection process on a stalled TCP reader (full send buffer / zero window). While blocked in chunk, Phoenix.PubSub.broadcast keeps send/2-ing {:document_changed, msg} into that SAME process's mailbox — each msg carries a full rendered document. On a high-mutation dataset (e.g. a bulk import at ~100 events/s) a single stalled SSE client grows the connection-process mailbox without bound: heap growth -> node memory exhaustion."
+          }
+        ],
+        "id": "block-6",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "There is no message_queue_len check, no max_heap_size / off-heap guard, and no drop/collapse/close policy anywhere in lib/ (grep: 0 hits). The `after 30_000 -> keepalive` receive timeout never fires under sustained load because messages keep arriving, so the loop never yields to inspect its backlog. This is a scar-class unbounded-BEAM-mailbox footgun. Contrast the house-good sheets path which bounds the PRODUCER (debounce); the SSE consumer bounds nothing."
+          }
+        ],
+        "id": "block-7",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-8",
+        "language": "elixir",
+        "type": "code",
+        "value": "# fix direction (delegated to the filed task)\n# guard the backlog around chunk; above a threshold either\n#   * drain + collapse to a single 'resync' event -> client re-pulls via Last-Event-ID, or\n#   * close the stream -> client reconnects and replays\ncase Process.info(self(), :message_queue_len) do\n  {:message_queue_len, n} when n > @backlog_max -> collapse_or_close(conn)\n  _ -> chunk(conn, event)\nend"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Filed: task-febe33ce84d39bb4 (priority 1). Acceptance criteria carry a protective test that floods N messages at a blocked chunk sink and asserts message_queue_len stays bounded — fails today (grows to N)."
+          }
+        ],
+        "id": "block-9",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-10",
+        "level": 2,
+        "text": "Finding 2 (P2) — SSE live leg re-fetches get_document per event even for admin callers",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "MEASURED COST. redacted_result/4 (listen_controller.ex:196-208) calls Content.get_document (plus fetch_schema) for EVERY forwarded event, for EVERY subscriber, to re-seal field visibility. Correct and necessary for a redacting caller. But the controller's own comment (line 24) states an admin caller => Envelope.render/3 is a no-op => byte-identical stream, and the live broadcast msg already carries document: Envelope.render(doc, nil, :internal) — the unredacted render, current as of the just-committed mutation (broadcast.ex:133). So for an admin/unredacting caller the per-event get_document round-trip is pure overhead; its result is byte-identical to the :internal render already in hand."
+          }
+        ],
+        "id": "block-11",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Cost: N subscribers x M mutations/s => N*M redundant DB fetches during mutation bursts. Fix (field-visibility invariant preserved, fail-closed): when caller_context is admin/unredacting, forward msg.document directly; keep the re-fetch path for every redacting / owner-scoped caller. forward_event?/2 already drops cross-workspace events before the fetch, so only same-workspace admin events pay this."
+          }
+        ],
+        "id": "block-12",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Filed: task-4469f80374b0bd24 (priority 2). Acceptance criteria carry a measurement counting get_document calls per M live events for an admin subscriber (M today -> 0 after)."
+          }
+        ],
+        "id": "block-13",
+        "type": "paragraph"
+      },
+      {
+        "id": "block-14",
+        "level": 2,
+        "text": "Already-good (evaluated, no change warranted)",
+        "type": "heading"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Webhooks (dispatcher.ex, delivery.ex, retry_worker.ex, stuck_delivery_sweeper.ex): HMAC-SHA256 signing over `timestamp.body` with an HONEST absent-header for blank secrets (never a forgeable empty-key HMAC); jittered equal-jitter backoff [1s,5s,30s] with a ceiling; retries SCHEDULED via a one-shot Oban RetryWorker fenced on updated_at (never Process.sleep in a bounded pool slot — the documented head-of-line-blocking fix); UNIQUE(endpoint_id,event_id) dedup; Retry-After honoured (clamped); SSRF guard with redirect:false; per-attempt durable state machine + crash-sweep recovery. Ordering is at-least-once with consumer-side reordering via the monotonic x-barkpark-event-id header — the Stripe model ch85 references. Nothing to add."
+          }
+        ],
+        "id": "block-15",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Socket/channel auth: UserSocket fails the connect closed on an unverifiable bearer read-token; SearchChannel re-authorizes the token against the resolved workspace on JOIN (the P0 leak guard) before any handle_in. QuizSocket uses Phoenix.Token with max_age 86_400 and server-authoritative player ids; a forged/expired token yields a fresh id. PreviewToken enforces exp + revocation + one-time jti. Token-expiry discipline is present everywhere it matters."
+          }
+        ],
+        "id": "block-16",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Inbound backpressure: PulseChannel throttles cursor frames to >=80ms (silent drop); QuizChannel throttles cursor 33ms / hover 50ms / submit 250ms per socket. Writes stay on the rate-limited HTTP POST; the sockets are subscribe-only in practice."
+          }
+        ],
+        "id": "block-17",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Topic granularity: broadcast.ex is the single owner of topic shapes; doc_topic/4 and paper_topic/3 workspace-scope every per-doc topic (barkpark-n56v / -rwva) so two tenants' colliding ids never collapse onto one topic. The bare documents:<dataset> topic fans out to all tenants only on the nil-workspace back-compat path; a resolved workspace subscribes to documents:ws:<id>:<dataset>. Subscriber-side collapse is real where it counts: chat activity broadcasts change-only (a hundred stream deltas collapse to one 'writing…'), and BoardLive dedups via a seen-set and applies in-memory (no per-event DB query). Pulse vitals broadcast on a bounded timer via Endpoint.broadcast fastlane."
+          }
+        ],
+        "id": "block-18",
+        "type": "paragraph"
+      },
+      {
+        "content": [
+          {
+            "type": "text",
+            "value": "Rejected-with-reason (noted, not filed): (a) studio_chat:activity is a single GLOBAL topic every Studio tab subscribes to — a minor cross-workspace wakeup + info smell — but it is change-only collapsed (low rate) and an admin/host-is-admin surface, so it does not clear the storm bar. (b) dispatch_async/5 back-compat path skips dedup and can double-deliver, but it is a documented legacy seam and every live caller threads event_id through dispatch_async/7."
+          }
+        ],
+        "id": "block-19",
+        "type": "paragraph"
+      }
+    ],
+    "html": "<h1 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;letter-spacing:-0.02em;line-height:1.15;margin:0 0 12px;font-weight:600;font-size:32px\">Felix Audit d09 — Realtime: PubSub, channels, presence, webhooks, SSE</h1><p>Read-only audit against Phoenix Mastery Corpus Part VI (ch 50-53) and ch 85, using the sheets op path (2s/25-op debounced persist, {:sheets_op} deltas) as the house-good reference for every bursty producer. Method: enumerated all Phoenix.PubSub broadcast/subscribe call sites, classified topic granularity, checked subscriber-side collapse/throttle, read webhooks/ in full, and traced socket auth token discipline + SSE backpressure. Parent task task-57c1fafec69f1bd2.</p><p>Bottom line: the webhook subsystem, channel/socket auth, per-doc/per-workspace topic scoping, and inbound throttles are all already-good — genuinely hardened, not merely tidy. Two qualifying gaps, both on the SSE (ListenController) leg.</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Verdict table</h2><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">CONCEPT                                        VERDICT        EVIDENCE</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">---------------------------------------------  -------------  ---------------------------------------</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Webhook signing (HMAC-SHA256 + blank-secret)   already-good   dispatcher.ex:155-194</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Webhook retry / jittered backoff / scheduled   already-good   dispatcher.ex:562-634 + retry_worker.ex</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Webhook dedup / SSRF guard / dead-letter       already-good   dispatcher.ex:285-296, delivery.ex, ReqAdapter</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Webhook ordering                               already-good*  at-least-once + monotonic event_id (Stripe model)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Socket auth: bearer read-token (UserSocket)    already-good   user_socket.ex:20-27</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Socket auth: Phoenix.Token max_age (Quiz)      already-good   quiz_socket.ex:16,40  (max_age 86_400)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Preview token: exp + revocation + replay-jti   already-good   preview_token.ex:39-158</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Channel inbound throttle / backpressure        already-good   pulse 80ms; quiz 33/50/250ms</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">PubSub topic granularity (per-doc/per-ws)      already-good   broadcast.ex doc_topic/paper_topic (ws-scoped)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Subscriber collapse (chat activity, board)     already-good   recorder.ex:806-820; board_live.ex seen-set</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Sheets op deltas (HOUSE-GOOD reference)        already-good   2s/25-op debounced persist</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">Presence tracking (pulse/quiz per-sid)         already-good   pulse_channel.ex / quiz_channel.ex</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">SSE mailbox backpressure (slow reader)         FILED P1       task-febe33ce84d39bb4</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">SSE per-event get_document re-fetch (admin)    FILED P2       task-4469f80374b0bd24</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"></code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">* ordering: no per-endpoint sequencing by design; consumers reorder via the</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  monotonic x-barkpark-event-id header (matches the Stripe doctrine ch85 cites).</code></span></div><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding 1 (P1) — SSE listen_loop: unbounded mailbox under a slow/stalled reader</h2><p>NAMED FAILURE MODE. BarkparkWeb.ListenController.listen_loop/5 (listen_controller.ex:129-164) has no subscriber-side backpressure. The HTTP adapter is Bandit (config/config.exs:18); Plug.Conn.chunk/2 blocks the connection process on a stalled TCP reader (full send buffer / zero window). While blocked in chunk, Phoenix.PubSub.broadcast keeps send/2-ing {:document_changed, msg} into that SAME process&#39;s mailbox — each msg carries a full rendered document. On a high-mutation dataset (e.g. a bulk import at ~100 events/s) a single stalled SSE client grows the connection-process mailbox without bound: heap growth -&gt; node memory exhaustion.</p><p>There is no message_queue_len check, no max_heap_size / off-heap guard, and no drop/collapse/close policy anywhere in lib/ (grep: 0 hits). The `after 30_000 -&gt; keepalive` receive timeout never fires under sustained load because messages keep arriving, so the loop never yields to inspect its backlog. This is a scar-class unbounded-BEAM-mailbox footgun. Contrast the house-good sheets path which bounds the PRODUCER (debounce); the SSE consumer bounds nothing.</p><div style=\"display:flex;flex-direction:column\"><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># fix direction (delegated to the filed task)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\"># guard the backlog around chunk; above a threshold either</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">#   * drain + collapse to a single &#39;resync&#39; event -&gt; client re-pulls via Last-Event-ID, or</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">#   * close the stream -&gt; client reconnects and replays</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">case Process.info(self(), :message_queue_len) do</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  {:message_queue_len, n} when n &gt; @backlog_max -&gt; collapse_or_close(conn)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">  _ -&gt; chunk(conn, event)</code></span><span><code style=\"background:#eaf1ee;padding:1px 5px;border-radius:4px;font-family:ui-monospace,Menlo,monospace;font-size:0.88em\">end</code></span></div><p>Filed: task-febe33ce84d39bb4 (priority 1). Acceptance criteria carry a protective test that floods N messages at a blocked chunk sink and asserts message_queue_len stays bounded — fails today (grows to N).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Finding 2 (P2) — SSE live leg re-fetches get_document per event even for admin callers</h2><p>MEASURED COST. redacted_result/4 (listen_controller.ex:196-208) calls Content.get_document (plus fetch_schema) for EVERY forwarded event, for EVERY subscriber, to re-seal field visibility. Correct and necessary for a redacting caller. But the controller&#39;s own comment (line 24) states an admin caller =&gt; Envelope.render/3 is a no-op =&gt; byte-identical stream, and the live broadcast msg already carries document: Envelope.render(doc, nil, :internal) — the unredacted render, current as of the just-committed mutation (broadcast.ex:133). So for an admin/unredacting caller the per-event get_document round-trip is pure overhead; its result is byte-identical to the :internal render already in hand.</p><p>Cost: N subscribers x M mutations/s =&gt; N*M redundant DB fetches during mutation bursts. Fix (field-visibility invariant preserved, fail-closed): when caller_context is admin/unredacting, forward msg.document directly; keep the re-fetch path for every redacting / owner-scoped caller. forward_event?/2 already drops cross-workspace events before the fetch, so only same-workspace admin events pay this.</p><p>Filed: task-4469f80374b0bd24 (priority 2). Acceptance criteria carry a measurement counting get_document calls per M live events for an admin subscriber (M today -&gt; 0 after).</p><h2 style=\"font-family:'Iowan Old Style','Palatino Linotype',Palatino,Georgia,serif;color:#15211d;line-height:1.25;margin:30px 0 10px;font-weight:600;font-size:24px\">Already-good (evaluated, no change warranted)</h2><p>Webhooks (dispatcher.ex, delivery.ex, retry_worker.ex, stuck_delivery_sweeper.ex): HMAC-SHA256 signing over `timestamp.body` with an HONEST absent-header for blank secrets (never a forgeable empty-key HMAC); jittered equal-jitter backoff [1s,5s,30s] with a ceiling; retries SCHEDULED via a one-shot Oban RetryWorker fenced on updated_at (never Process.sleep in a bounded pool slot — the documented head-of-line-blocking fix); UNIQUE(endpoint_id,event_id) dedup; Retry-After honoured (clamped); SSRF guard with redirect:false; per-attempt durable state machine + crash-sweep recovery. Ordering is at-least-once with consumer-side reordering via the monotonic x-barkpark-event-id header — the Stripe model ch85 references. Nothing to add.</p><p>Socket/channel auth: UserSocket fails the connect closed on an unverifiable bearer read-token; SearchChannel re-authorizes the token against the resolved workspace on JOIN (the P0 leak guard) before any handle_in. QuizSocket uses Phoenix.Token with max_age 86_400 and server-authoritative player ids; a forged/expired token yields a fresh id. PreviewToken enforces exp + revocation + one-time jti. Token-expiry discipline is present everywhere it matters.</p><p>Inbound backpressure: PulseChannel throttles cursor frames to &gt;=80ms (silent drop); QuizChannel throttles cursor 33ms / hover 50ms / submit 250ms per socket. Writes stay on the rate-limited HTTP POST; the sockets are subscribe-only in practice.</p><p>Topic granularity: broadcast.ex is the single owner of topic shapes; doc_topic/4 and paper_topic/3 workspace-scope every per-doc topic (barkpark-n56v / -rwva) so two tenants&#39; colliding ids never collapse onto one topic. The bare documents:&lt;dataset&gt; topic fans out to all tenants only on the nil-workspace back-compat path; a resolved workspace subscribes to documents:ws:&lt;id&gt;:&lt;dataset&gt;. Subscriber-side collapse is real where it counts: chat activity broadcasts change-only (a hundred stream deltas collapse to one &#39;writing…&#39;), and BoardLive dedups via a seen-set and applies in-memory (no per-event DB query). Pulse vitals broadcast on a bounded timer via Endpoint.broadcast fastlane.</p><p>Rejected-with-reason (noted, not filed): (a) studio_chat:activity is a single GLOBAL topic every Studio tab subscribes to — a minor cross-workspace wakeup + info smell — but it is change-only collapsed (low rate) and an admin/host-is-admin surface, so it does not clear the storm bar. (b) dispatch_async/5 back-compat path skips dedup and can double-deliver, but it is a documented legacy seam and every live caller threads event_id through dispatch_async/7.</p>"
+  },
+  "body_html": "<h1>Felix Audit d09 — Realtime: PubSub, channels, presence, webhooks, SSE</h1><p>Read-only audit against Phoenix Mastery Corpus Part VI (ch 50-53) and ch 85, using the sheets op path (2s/25-op debounced persist, {:sheets_op} deltas) as the house-good reference for every bursty producer. Method: enumerated all Phoenix.PubSub broadcast/subscribe call sites, classified topic granularity, checked subscriber-side collapse/throttle, read webhooks/ in full, and traced socket auth token discipline + SSE backpressure. Parent task task-57c1fafec69f1bd2.</p><p>Bottom line: the webhook subsystem, channel/socket auth, per-doc/per-workspace topic scoping, and inbound throttles are all already-good — genuinely hardened, not merely tidy. Two qualifying gaps, both on the SSE (ListenController) leg.</p><h2>Verdict table</h2><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\">CONCEPT                                        VERDICT        EVIDENCE\n---------------------------------------------  -------------  ---------------------------------------\nWebhook signing (HMAC-SHA256 + blank-secret)   already-good   dispatcher.ex:155-194\nWebhook retry / jittered backoff / scheduled   already-good   dispatcher.ex:562-634 + retry_worker.ex\nWebhook dedup / SSRF guard / dead-letter       already-good   dispatcher.ex:285-296, delivery.ex, ReqAdapter\nWebhook ordering                               already-good*  at-least-once + monotonic event_id (Stripe model)\nSocket auth: bearer read-token (UserSocket)    already-good   user_socket.ex:20-27\nSocket auth: Phoenix.Token max_age (Quiz)      already-good   quiz_socket.ex:16,40  (max_age 86_400)\nPreview token: exp + revocation + replay-jti   already-good   preview_token.ex:39-158\nChannel inbound throttle / backpressure        already-good   pulse 80ms; quiz 33/50/250ms\nPubSub topic granularity (per-doc/per-ws)      already-good   broadcast.ex doc_topic/paper_topic (ws-scoped)\nSubscriber collapse (chat activity, board)     already-good   recorder.ex:806-820; board_live.ex seen-set\nSheets op deltas (HOUSE-GOOD reference)        already-good   2s/25-op debounced persist\nPresence tracking (pulse/quiz per-sid)         already-good   pulse_channel.ex / quiz_channel.ex\nSSE mailbox backpressure (slow reader)         FILED P1       task-febe33ce84d39bb4\nSSE per-event get_document re-fetch (admin)    FILED P2       task-4469f80374b0bd24\n\n* ordering: no per-endpoint sequencing by design; consumers reorder via the\n  monotonic x-barkpark-event-id header (matches the Stripe doctrine ch85 cites).</pre><h2>Finding 1 (P1) — SSE listen_loop: unbounded mailbox under a slow/stalled reader</h2><p>NAMED FAILURE MODE. BarkparkWeb.ListenController.listen_loop/5 (listen_controller.ex:129-164) has no subscriber-side backpressure. The HTTP adapter is Bandit (config/config.exs:18); Plug.Conn.chunk/2 blocks the connection process on a stalled TCP reader (full send buffer / zero window). While blocked in chunk, Phoenix.PubSub.broadcast keeps send/2-ing {:document_changed, msg} into that SAME process&#39;s mailbox — each msg carries a full rendered document. On a high-mutation dataset (e.g. a bulk import at ~100 events/s) a single stalled SSE client grows the connection-process mailbox without bound: heap growth -&gt; node memory exhaustion.</p><p>There is no message_queue_len check, no max_heap_size / off-heap guard, and no drop/collapse/close policy anywhere in lib/ (grep: 0 hits). The `after 30_000 -&gt; keepalive` receive timeout never fires under sustained load because messages keep arriving, so the loop never yields to inspect its backlog. This is a scar-class unbounded-BEAM-mailbox footgun. Contrast the house-good sheets path which bounds the PRODUCER (debounce); the SSE consumer bounds nothing.</p><pre style=\"background:var(--paper-bg-deep, #eaf1ee);border:0;border-radius:var(--bp-codeblock-radius, 0);border-left:var(--bp-codeblock-accent-w, 3px) solid var(--paper-reading-accent, #a23925);color:var(--paper-ink, #15211d);padding:var(--bp-codeblock-pad, 0.9rem 1.1rem);margin:var(--bp-codeblock-margin, 1.2rem 0);font-family:var(--paper-font-mono, ui-monospace,Menlo,monospace);font-size:var(--bp-codeblock-size, 0.9rem);line-height:var(--bp-codeblock-lh, 1.5);overflow-x:auto;white-space:pre\"># fix direction (delegated to the filed task)\n# guard the backlog around chunk; above a threshold either\n#   * drain + collapse to a single &#39;resync&#39; event -&gt; client re-pulls via Last-Event-ID, or\n#   * close the stream -&gt; client reconnects and replays\ncase Process.info(self(), :message_queue_len) do\n  {:message_queue_len, n} when n &gt; @backlog_max -&gt; collapse_or_close(conn)\n  _ -&gt; chunk(conn, event)\nend</pre><p>Filed: task-febe33ce84d39bb4 (priority 1). Acceptance criteria carry a protective test that floods N messages at a blocked chunk sink and asserts message_queue_len stays bounded — fails today (grows to N).</p><h2>Finding 2 (P2) — SSE live leg re-fetches get_document per event even for admin callers</h2><p>MEASURED COST. redacted_result/4 (listen_controller.ex:196-208) calls Content.get_document (plus fetch_schema) for EVERY forwarded event, for EVERY subscriber, to re-seal field visibility. Correct and necessary for a redacting caller. But the controller&#39;s own comment (line 24) states an admin caller =&gt; Envelope.render/3 is a no-op =&gt; byte-identical stream, and the live broadcast msg already carries document: Envelope.render(doc, nil, :internal) — the unredacted render, current as of the just-committed mutation (broadcast.ex:133). So for an admin/unredacting caller the per-event get_document round-trip is pure overhead; its result is byte-identical to the :internal render already in hand.</p><p>Cost: N subscribers x M mutations/s =&gt; N*M redundant DB fetches during mutation bursts. Fix (field-visibility invariant preserved, fail-closed): when caller_context is admin/unredacting, forward msg.document directly; keep the re-fetch path for every redacting / owner-scoped caller. forward_event?/2 already drops cross-workspace events before the fetch, so only same-workspace admin events pay this.</p><p>Filed: task-4469f80374b0bd24 (priority 2). Acceptance criteria carry a measurement counting get_document calls per M live events for an admin subscriber (M today -&gt; 0 after).</p><h2>Already-good (evaluated, no change warranted)</h2><p>Webhooks (dispatcher.ex, delivery.ex, retry_worker.ex, stuck_delivery_sweeper.ex): HMAC-SHA256 signing over `timestamp.body` with an HONEST absent-header for blank secrets (never a forgeable empty-key HMAC); jittered equal-jitter backoff [1s,5s,30s] with a ceiling; retries SCHEDULED via a one-shot Oban RetryWorker fenced on updated_at (never Process.sleep in a bounded pool slot — the documented head-of-line-blocking fix); UNIQUE(endpoint_id,event_id) dedup; Retry-After honoured (clamped); SSRF guard with redirect:false; per-attempt durable state machine + crash-sweep recovery. Ordering is at-least-once with consumer-side reordering via the monotonic x-barkpark-event-id header — the Stripe model ch85 references. Nothing to add.</p><p>Socket/channel auth: UserSocket fails the connect closed on an unverifiable bearer read-token; SearchChannel re-authorizes the token against the resolved workspace on JOIN (the P0 leak guard) before any handle_in. QuizSocket uses Phoenix.Token with max_age 86_400 and server-authoritative player ids; a forged/expired token yields a fresh id. PreviewToken enforces exp + revocation + one-time jti. Token-expiry discipline is present everywhere it matters.</p><p>Inbound backpressure: PulseChannel throttles cursor frames to &gt;=80ms (silent drop); QuizChannel throttles cursor 33ms / hover 50ms / submit 250ms per socket. Writes stay on the rate-limited HTTP POST; the sockets are subscribe-only in practice.</p><p>Topic granularity: broadcast.ex is the single owner of topic shapes; doc_topic/4 and paper_topic/3 workspace-scope every per-doc topic (barkpark-n56v / -rwva) so two tenants&#39; colliding ids never collapse onto one topic. The bare documents:&lt;dataset&gt; topic fans out to all tenants only on the nil-workspace back-compat path; a resolved workspace subscribes to documents:ws:&lt;id&gt;:&lt;dataset&gt;. Subscriber-side collapse is real where it counts: chat activity broadcasts change-only (a hundred stream deltas collapse to one &#39;writing…&#39;), and BoardLive dedups via a seen-set and applies in-memory (no per-event DB query). Pulse vitals broadcast on a bounded timer via Endpoint.broadcast fastlane.</p><p>Rejected-with-reason (noted, not filed): (a) studio_chat:activity is a single GLOBAL topic every Studio tab subscribes to — a minor cross-workspace wakeup + info smell — but it is change-only collapsed (low rate) and an admin/host-is-admin surface, so it does not clear the storm bar. (b) dispatch_async/5 back-compat path skips dedup and can double-deliver, but it is a documented legacy seam and every live caller threads event_id through dispatch_async/7.</p>",
+  "body_html_sv": 3,
+  "preview": {
+    "description": "Read-only audit against Phoenix Mastery Corpus Part VI (ch 50-53) and ch 85, using the sheets op path…",
+    "extensions": {},
+    "image": null,
+    "title": null,
+    "type": "paper",
+    "url": "/papers/felix-findings-realtime"
+  },
+  "rev": 1,
+  "style": "article",
+  "title": "Felix Audit d09 — Realtime: PubSub, channels, presence, webhooks, SSE"
+}

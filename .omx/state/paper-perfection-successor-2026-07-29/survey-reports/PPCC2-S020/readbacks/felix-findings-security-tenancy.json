@@ -1,0 +1,236 @@
+{
+  "_createdAt": "2026-07-10T18:26:51.289380Z",
+  "_draft": false,
+  "_id": "felix-findings-security-tenancy",
+  "_publishedId": "felix-findings-security-tenancy",
+  "_rev": "1ae3afd165ff8c67407f561c31a6b473",
+  "_type": "paper",
+  "_updatedAt": "2026-07-12T11:33:14.681957Z",
+  "blocks": [
+    {
+      "id": "block-0",
+      "level": 1,
+      "text": "Felix D10 — Security, Auth & Tenancy Fail-Closed Sweep",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Read-only defensive audit of api/ against Phoenix Mastery Corpus Part VII (ch 54-58). Improvement doctrine: a finding qualifies only via named failure mode, measured cost, scar-class risk, or provably-cheaper future change. Three qualifying findings filed; the rest of the domain is already-good or rejected-with-reason. Failure modes are stated precisely without step-by-step exploit recipes (private-repo defensive context)."
+        }
+      ],
+      "id": "block-1",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-2",
+      "level": 2,
+      "text": "Verdict table",
+      "type": "heading"
+    },
+    {
+      "id": "block-3",
+      "language": "text",
+      "type": "code",
+      "value": "DOMAIN D10 — auth / security / tenancy fail-closed sweep        VERDICT\n--------------------------------------------------------------  --------------------\n(a) Field-visibility read paths (Envelope chokepoint)           ALREADY-GOOD (sealed)\n(b) Tenancy by construction (query-level scoping)               MOSTLY-GOOD + 1 gap  [P2]\n(c) raw/2 in HEEx (stored XSS)                                  FINDING              [P1]\n(d) String.to_atom on external input (atom exhaustion)          ALREADY-GOOD\n(e) Token expiry/rotation, dev-token fallback gate              ALREADY-GOOD\n(f) CSRF + Sobelow/hex.audit CI gates                           CSRF good; CI gap    [P2]\n\nFILED TASKS\n  task-16059794a2df0a51  P1  Stored XSS via unsanitized paper body_html + no CSP\n  task-a41fc4590b2c2eb1  P2  No Sobelow + no mix hex.audit gate in CI\n  task-c8044239088107f9  P2  Tenant isolation convention-enforced, not query-enforced"
+    },
+    {
+      "id": "block-4",
+      "level": 2,
+      "text": "Finding 1 [P1] — Stored XSS: unsanitized paper body_html emitted raw with no CSP",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Task: task-16059794a2df0a51. NAMED FAILURE MODE: a paper written with an HTML-only body_html (no blocks list) is persisted VERBATIM — block_ops.ex:181 (is_binary(attrs[\"body_html\"]) -> attrs[\"body_html\"]); no sanitizer exists under content/papers. The stored value is emitted through raw() to the anonymous public reader /papers/:slug (bulldocs_live.ex:597 -> :1003), the scoped reader (scoped_paper_html/show.html.heex:6) and the /s/:token share reader."
+        }
+      ],
+      "id": "block-5",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "No backstop: the browser pipelines run put_secure_browser_headers with NO CSP map (router.ex:8-14); grep for content-security-policy / script-src across lib/ and config/ returns zero hits, so no script-src is set. Injected script/event-handler HTML therefore executes in every reader's browser (session/token theft, defacement)."
+        }
+      ],
+      "id": "block-6",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Write trust boundary: the Bulldocs ingest API (POST /v1/plugins/bulldocs/papers, POST /v1/paperflow/papers; bulldocs_ingest_controller.ex:129-142) on the :ingest shared-secret pipeline. Wider reachability to VERIFY: the before_publish gate reject_hollow_paper_publish (bulldocs.ex:117) checks hollowness only, not script — a body_html-with-script paper is non-hollow and passes, so an ordinary write-token via POST /v1/data/mutate may be able to publish one; if confirmed the blast radius widens from ingest-secret holders to any write-token holder."
+        }
+      ],
+      "id": "block-7",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FIX: sanitize body_html at ingest through an allowlist HTML scrubber, and/or set a script-blocking Content-Security-Policy (script-src 'self'/nonce) on the papers reader pipeline — the CSP hardens every other raw() sink at once and does not break legitimate producer markup. Protective test (delegated to the fix task): ingest a paper whose body_html carries a <script> tag and an onerror= attribute, GET /papers/:slug, assert the response neither contains the executable script nor lacks a script-src CSP header — fails before the fix."
+        }
+      ],
+      "id": "block-8",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-9",
+      "level": 2,
+      "text": "Finding 2 [P2] — No Sobelow static-analysis gate and no dependency-CVE gate in CI",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Task: task-a41fc4590b2c2eb1. NAMED FAILURE MODE / scar-class: elixir.yml runs format(advisory) + mix-test + prod-compile + validation-perf; api/mix.exs carries no :sobelow and no :mix_audit (nor credo/dialyxir). A new raw/2-on-untrusted-input, unsafe atom conversion, missing-CSRF pipeline, or hardcoded secret ships green — the exact class Sobelow catches (this audit found Finding 1's raw() sink by hand; Sobelow's XSS.Raw check surfaces the pattern automatically). And a dependency CVE (mix.lock pins jose, esaml, x509, cloak_ecto, bandit, req, argon2 — all security-relevant) is never detected without mix hex.audit / mix_audit."
+        }
+      ],
+      "id": "block-10",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "FIX (the CI wiring IS the fix): add {:sobelow, only: [:dev,:test], runtime: false} and {:mix_audit, only: [:dev,:test], runtime: false}; CI steps run `mix sobelow --exit` (with a reviewed skip file) and `mix deps.audit`. Protective proof: a planted raw() on a params-derived value reds the Sobelow job; a pinned-vulnerable fixture reds the audit job."
+        }
+      ],
+      "id": "block-11",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-12",
+      "level": 2,
+      "text": "Finding 3 [P2] — Tenant isolation convention-enforced, not query-enforced (latent, scar-class)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Task: task-c8044239088107f9. NAMED FAILURE MODE / scar-class (same shape as the FIXED barkpark-w9dg public-paper cross-workspace leak): the document + graph read spine defaults to Scope.scope_to_workspace_or_global/3, which FAILS OPEN (scope.ex:155-156 — nil workspace_id returns the query untouched = all tenants). Content.Query.get_document/4 and Graph.scope_query/2 use the fail-open primitive; the fail-closed scope_to_workspace/3 (where:false on nil) exists but is not the default there. Separately, the public Barkpark.Tasks delegates close/move/release/relabel fetch by PK with no tenant clause (Repo.get(Document, uuid) — close.ex:84, move.ex:77, release.ex:53, mutations.ex:39/111, fence.ex:102), so tenant safety lives at the call site, not the query."
+        }
+      ],
+      "id": "block-13",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Assessed LATENT / defense-in-depth, not a currently-reachable leak: every live caller threads scope, and the known w9dg scar is test-locked (public_paper_scope_test.exs, content_pubsub_workspace_leak_test.exs, studio_live_desk_scope_leak_test.exs). But it is precisely the class w9dg already proved can ship — a new scoped read site reaching for _or_global, or a new caller passing a raw UUID to Tasks.close, crosses tenants with a green board. FIX (does not re-litigate the ratified _global opt-in): a static guard-gate (docs-anchors-check.sh shape) flagging any NEW _or_global / by-PK Repo.get(Document,...) tenant read without an explicit reviewed # global-read: justification — catches the next w9dg for free. Flat-posture example: onixedit/web/staleness_live.ex:220-228 reads by dataset string with no workspace_id."
+        }
+      ],
+      "id": "block-14",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-15",
+      "level": 2,
+      "text": "Already-good / rejected-with-reason (evidence)",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Field-visibility read paths (a): Content.Envelope.render/3 is the single fail-closed chokepoint (envelope.ex:49). A nil caller is the most-restrictive anonymous principal (nil -> %CallerContext{}, envelope.ex:132), never a bypass; :internal is the explicit full-content sentinel unreachable from any request path. Every read surface threads a request-derived caller_context and is sealed: REST query/preview (query_controller.ex:61/140 + field_readable? filter-oracle at :311), legacy dump (:167), SSE listen (listen_controller.ex:199/205, re-redacted per subscriber), history (:118/:55), search incl. multi-type render_many_by_type (search_controller.ex:65/134, federated :96, channel :167, highlights gated), exports (export.ex:56), reference expansion (expand.ex:162/172), media asset (asset_response.ex:110, anonymous fallback), share link (:107), mutation echo (mutations.ex:61)."
+        }
+      ],
+      "id": "block-16",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Webhook :internal payload (broadcast.ex:69/133/301) — REJECTED-WITH-REASON: webhook registration is admin-gated (:require_admin / :scoped_admin on both /v1/webhooks and the scoped mirror). Since is_admin bypasses all Envelope redaction anyway, an admin-registered endpoint receiving full content is consistent with the trust boundary, not an escalation; encrypted fields ride as ciphertext; payload is HMAC-signed; render_webhook/1 never re-exposes the signing secret."
+        }
+      ],
+      "id": "block-17",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Tokens (e): Auth.verify_token enforces revocation + expiry in the WHERE clause (auth.ex:44-47), fail-closed and indistinguishable from a missing token, with the kind==\"api\" ticket boundary. Login tickets are single-use + 60s TTL; share-edit tokens have a default TTL + 1-year hard cap. PreviewToken uses HS256 with secure_compare, requires an integer exp (fails closed on missing), JTI replay protection, revocation, and binds the dataset claim before consuming the JTI (plugs/preview_token.ex:44). Phoenix.Token.verify calls both pass max_age (webauthn challenge, quiz socket). Dev-token fallback is doubly gated: dev_browser_token is set only in dev.exs, and dev_browser_token_fallback/0 additionally guards on Mix.env()==:dev (live_auth.ex:97-101); prod boots via mix phx.server (MIX_ENV=prod) so Mix.env() resolves correctly to :prod -> nil."
+        }
+      ],
+      "id": "block-18",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Atom exhaustion (d): every String.to_atom hit is on a compile-time constant or module attribute (github/health.ex @queue_states, github.ex @required_creds, content/validation.ex keys are literals \"name\"/\"validation\"); external-input paths use String.to_existing_atom guarded by an ArgumentError rescue (field_visibility.ex safe_atom, validation.ex to_atom_safe). No wire-input atom creation."
+        }
+      ],
+      "id": "block-19",
+      "type": "paragraph"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "CSRF (f): every browser dead-render / LiveView pipeline carries :protect_from_forgery (:browser, :scoped_browser, :shared_studio_browser, :shared_paper_browser); LiveView carries _csrf_token on socket connect (root.html.heex meta + LiveSocket params). JSON session-cookie write surfaces (media, user-auth self-service, access-claim) are guarded by the x-requested-with custom-header check (RequireBearerOrSessionToken / RequireUserSession / OptionalUserSession — bearer branch exempt as APIs carry no cookie). Pure bearer/HMAC API writes are correctly CSRF-exempt. The one browser-reachable POST on a session pipeline without CSRF token or the header is the SAML ACS/SLO callback (:sso_browser) — an intentional signature-gated external-IdP exemption; noted as a verify-item (confirm SamlController enforces signature + InResponseTo/RelayState nonce), not a filed finding."
+        }
+      ],
+      "id": "block-20",
+      "type": "paragraph"
+    },
+    {
+      "id": "block-21",
+      "level": 2,
+      "text": "Confidence notes",
+      "type": "heading"
+    },
+    {
+      "content": [
+        {
+          "type": "text",
+          "value": "Crown-jewel (a) and finding (c) verified at source by direct read (block_ops.ex:181, CSP absence, render chokepoint). Read-path enumeration, tenancy scoping, and raw/CSRF sweeps used parallel read-only agents; every cited file:line was spot-checked against the tree. Protective tests for all three findings are DELEGATED to the fix tasks (this was a read-only audit — no code changed). Two verify-items left open for the owner: (1) whether a body_html-only paper is publishable via /v1/data/mutate (widens Finding 1 blast radius), (2) SAML ACS/SLO signature+nonce enforcement."
+        }
+      ],
+      "id": "block-22",
+      "type": "paragraph"
+    },
+    {
+      "href": "https://guerrilla.barkpark.cloud/papers/workspace-bundle-keystone",
+      "id": "wbk-backlink-felix-findin",
+      "label": "Complementary proof: Workspace Bundle keystone — the same tenant boundary enumerated completely; count(export)==count(WHERE workspace_id) doubles as the Finding 3 isolation audit",
+      "type": "action"
+    }
+  ],
+  "description": "Felix D10 security/auth/tenancy fail-closed sweep: stored-XSS in raw body_html, missing Sobelow/CVE gates, and the scar-class finding that tenant isolation is convention-enforced, not query-enforced.",
+  "main_tag": "security",
+  "style": "article",
+  "tags": [
+    {
+      "rationale": "A fail-closed security sweep: stored XSS, CSP absence, static-analysis and CVE gate gaps.",
+      "strength": 92,
+      "tag": "security"
+    },
+    {
+      "rationale": "Finding 3 is the tenant-isolation scar class — convention-enforced scoping, not query-enforced.",
+      "strength": 78,
+      "tag": "tenancy"
+    },
+    {
+      "rationale": "Names the missing CI gates (Sobelow, dependency-CVE) and the protective tests the sweep demands.",
+      "strength": 55,
+      "tag": "testing"
+    }
+  ],
+  "title": "Felix D10 — Security, Auth & Tenancy Fail-Closed Sweep"
+}

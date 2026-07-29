@@ -1,0 +1,98 @@
+{
+  "schema_version": "paper-perfection-successor-readback-index/v1",
+  "assignment_id": "PPCC2-S020",
+  "reads": [
+    {
+      "document_id": "expressive-agent-loops-wave-2026-07-11",
+      "document_rev": "fdb8655adfa9d64d7a893cdb94dabd3f",
+      "readback_sha256": "6692531d6b63ad7f8667a6f8ed8a470ff7665fac60ab81966dd9bea7428bba4d",
+      "block_count": 56,
+      "body_html_chars": 0,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T07:09:52Z"
+    },
+    {
+      "document_id": "felix-findings-boundaries-plugins",
+      "document_rev": "30f680c030bb098a9a47b768d7e81eab",
+      "readback_sha256": "661bcecbfdd9cf194de04a1e7e855d3249757981440c398c6403aca654086238",
+      "block_count": 23,
+      "body_html_chars": 8840,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T07:09:53Z"
+    },
+    {
+      "document_id": "felix-findings-liveview-collections",
+      "document_rev": "370a4be8b3809a4686dc2749fc26e69a",
+      "readback_sha256": "ebe42f553bf1f8be71f18221f6e4620309c971d66685abc7f24ea3dc047d8eac",
+      "block_count": 20,
+      "body_html_chars": 7968,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T07:09:53Z"
+    },
+    {
+      "document_id": "felix-findings-liveview-tracking",
+      "document_rev": "1385d509b48acc174b1f5f07fa814d83",
+      "readback_sha256": "9932fdb0ea1c50d49388702836cffa4828f8d05426ab68a7f2e55aed90c7b672",
+      "block_count": 22,
+      "body_html_chars": 9245,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T07:09:54Z"
+    },
+    {
+      "document_id": "felix-findings-otp-supervision",
+      "document_rev": "25cc385cde42f03103533f064e9f2ffa",
+      "readback_sha256": "86b3262240988067d50b08a217639dd91c8936d413127f7e81925de278e2f9be",
+      "block_count": 28,
+      "body_html_chars": 11098,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T07:09:55Z"
+    },
+    {
+      "document_id": "felix-findings-plug-router",
+      "document_rev": "b86f0792c45f0a3a64119268c3942ede",
+      "readback_sha256": "c51825a6697988e74295d249ace4a997fe24ceba3440289e7cd6687f48d09011",
+      "block_count": 22,
+      "body_html_chars": 10674,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T07:09:55Z"
+    },
+    {
+      "document_id": "felix-findings-queries-indexes",
+      "document_rev": "6543af99fb01cce1071aaf10ad18c083",
+      "readback_sha256": "322cfb5c88f1fc1db2aaf7ad0c6bdebca49c3ff7b7f6f9dad96be9e30dd52665",
+      "block_count": 17,
+      "body_html_chars": 9392,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T07:09:56Z"
+    },
+    {
+      "document_id": "felix-findings-realtime",
+      "document_rev": "d7289245be0e8c2d81dedb3f1fd4a9f9",
+      "readback_sha256": "d45968a47b0dc4c43855d4e0b83d4ff27201a8529e559a6e55baa715d214884d",
+      "block_count": 20,
+      "body_html_chars": 9450,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T07:09:57Z"
+    },
+    {
+      "document_id": "felix-findings-schemas-changesets",
+      "document_rev": "3d5bab334823479b4a24f2c62c9104bf",
+      "readback_sha256": "019b15942bfc4af9ca6323e32ad04eb184f0b0cba6fb16b23d0948e2bb5bd44f",
+      "block_count": 18,
+      "body_html_chars": 9280,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T07:09:58Z"
+    },
+    {
+      "document_id": "felix-findings-security-tenancy",
+      "document_rev": "1ae3afd165ff8c67407f561c31a6b473",
+      "readback_sha256": "5bf32c7981e795abb393418c24af2006ea03ae5db15c642d782280978237377c",
+      "block_count": 24,
+      "body_html_chars": 0,
+      "status": "pinned_revision_read",
+      "read_at": "2026-07-29T07:09:59Z"
+    }
+  ],
+  "all_pinned_revisions_read": true,
+  "count": 10
+}
