@@ -2131,7 +2131,10 @@ Backlog filed: `task-felix-w22-bl-recorder-bounds` (P2), `task-felix-w22-bl-webh
   client input" FULL STOP is FALSE, and the first reader who greps `import_member` correctly rejects all
   fifteen. That sentence is load-bearing and must not be trimmed as verbosity.
 
-- **D149 — `felix-w23-bl-bundle-member-guard` IS MIS-PRICED AT P0 → REPRICED TO P3.** After D148 the only
+- **D149 — `felix-w23-bl-bundle-member-guard` IS NOT A P0 — AND IT WAS NEVER P0 ON THE LEDGER.**
+  The wish calls it "the epic's only P0" and both the survey and the verify round repeated that. **Read back live
+  during Decide, it is `priority: 3`.** Nobody re-derived the number they were all arguing about; the reprice this
+  wave set out to make was already true. The SUBSTANTIVE ruling stands and is what matters: After D148 the only
   input that reaches it is an admin bundle — an actor who already holds `File.rm` authority by other
   means. Under hook (1) it names no reachable failure. It ships as scar-class defence-in-depth (hook 3)
   or it does not ship. **A LATENT SEAM FOUND WHILE PROVING IT, and worth more than the P0 was:**
