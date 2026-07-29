@@ -1,0 +1,462 @@
+{
+  "schema_version": "paper-perfection-successor-survey-report/v1",
+  "assignment_id": "PPCC2-S056",
+  "assignment_snapshot_sha256": "5ac83e7c02f20623b1466eb090bb1f19a01764771a404633a3839c91d7c1e7b4",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "worker": "worker-2",
+  "effort": "medium",
+  "wave": 19,
+  "dispatch_slot": 2,
+  "cyclefleet_binding": {
+    "status": "cyclefleet_bound",
+    "wave_id": "paper-perfection-successor-wave-2026-07-29",
+    "live_wave_revision": "552a7065-368e-4e45-9eec-5113e60510a3",
+    "inventory_digest": "03e3407dcb145b4ed9633b095096a3103990dee1addd1560a4b8e1daf9b233e7",
+    "source_snapshot_sha256": "2b2019346d803ea8ee9b68fe0a65587f27a1c72f66fa0ffe20920c90a1f75bb0"
+  },
+  "mutation_policy": "read-only",
+  "subagent_method": "Direct bound worker review; no subagent delegation or production mutation. Every pinned raw revision was read and locally hashed.",
+  "direct_answer": "All nine pinned verification ledgers were read: 99 native top-level blocks and no legacy documents. Keep Waves 02, 03, 05, 07, and 09; repair Waves 01, 04, 06, and 08. Wave 01 overstates complete coverage after ranks 18–34 went unvisited. Waves 04, 06, and 08 preserve exact transport but lack semantic values for one shard each. These immutable rank ledgers are non-overlapping receipts, not merge candidates; share a structured reader projection and one envelope-decoder repair contract.",
+  "verdict_counts": {
+    "keep": 5,
+    "repair": 4
+  },
+  "checked_unit_ids": [
+    "paper:task-quality-verify-wave-01-2026-07-18",
+    "paper:task-quality-verify-wave-02-2026-07-18",
+    "paper:task-quality-verify-wave-03-2026-07-18",
+    "paper:task-quality-verify-wave-04-2026-07-18",
+    "paper:task-quality-verify-wave-05-2026-07-18",
+    "paper:task-quality-verify-wave-06-2026-07-18",
+    "paper:task-quality-verify-wave-07-2026-07-18",
+    "paper:task-quality-verify-wave-08-2026-07-18",
+    "paper:task-quality-verify-wave-09-2026-07-18"
+  ],
+  "coverage_checks": {
+    "bound_snapshot_status": "cyclefleet_bound",
+    "bound_snapshot_sha256_verified": true,
+    "source_snapshot_sha256_verified": true,
+    "pinned_revision_reads": 9,
+    "native_top_level_blocks_read": 99,
+    "legacy_html_documents_read": 0,
+    "legacy_html_semantic_units_read": 0,
+    "legacy_html_chars_read": 0,
+    "all_pinned_revisions_matched": true
+  },
+  "best_pattern_evidence": [
+    {
+      "block_ref": "paper:task-quality-verify-wave-01-2026-07-18 blocks[7]",
+      "evidence": "The verifier refuses to invent PASS records for an unvisited 17-rank shard."
+    },
+    {
+      "block_ref": "paper:task-quality-verify-wave-02-2026-07-18 blocks[7]",
+      "evidence": "Exact reads, criteria evidence, unmet state, and stale tombstones remain differentiated."
+    },
+    {
+      "block_ref": "paper:task-quality-verify-wave-05-2026-07-18 blocks[2]",
+      "evidence": "A deterministic internal error is preserved as a blocker instead of fabricated content."
+    },
+    {
+      "block_ref": "paper:task-quality-verify-wave-09-2026-07-18 blocks[2]",
+      "evidence": "Durable-session recovery is disclosed, validated against ownership, and explicitly not a reread."
+    }
+  ],
+  "failure_evidence": [
+    {
+      "block_ref": "paper:task-quality-verify-wave-01-2026-07-18 blocks[2]",
+      "evidence": "The all-51 headline conflicts with the explicitly unvisited middle shard.",
+      "lesson": "Aggregate coverage claims must reconcile with shard outcomes."
+    },
+    {
+      "block_ref": "paper:task-quality-verify-wave-04-2026-07-18 blocks[7]",
+      "evidence": "A decoder missed the envelope for 17 records.",
+      "lesson": "Validate response-shape decoding before a fixed-read run."
+    },
+    {
+      "block_ref": "paper:task-quality-verify-wave-06-2026-07-18 blocks[8]",
+      "evidence": "The emitter retained schema but not semantic values.",
+      "lesson": "Emit values required by downstream dispositions."
+    },
+    {
+      "block_ref": "paper:task-quality-verify-wave-08-2026-07-18 blocks[7]",
+      "evidence": "The middle shard is transport-stable but semantically indeterminate.",
+      "lesson": "Stable bytes are not semantic truth."
+    }
+  ],
+  "duplicate_candidates": [
+    {
+      "candidate_set": [
+        "task-quality-verify-wave-01-2026-07-18",
+        "task-quality-verify-wave-02-2026-07-18",
+        "task-quality-verify-wave-03-2026-07-18",
+        "task-quality-verify-wave-04-2026-07-18",
+        "task-quality-verify-wave-05-2026-07-18",
+        "task-quality-verify-wave-06-2026-07-18",
+        "task-quality-verify-wave-07-2026-07-18",
+        "task-quality-verify-wave-08-2026-07-18",
+        "task-quality-verify-wave-09-2026-07-18"
+      ],
+      "basis": "All nine use the same immutable verify-ledger frame, but each owns a distinct rank range and evidence shard.",
+      "disposition": "Do not merge. Preserve each receipt and link them through a canonical manifest/digest plus structured reader projection."
+    },
+    {
+      "candidate_set": [
+        "task-quality-verify-wave-04-2026-07-18",
+        "task-quality-verify-wave-06-2026-07-18",
+        "task-quality-verify-wave-08-2026-07-18"
+      ],
+      "basis": "Each contains one shard whose exact reads survived while semantic values were lost at a decoder or emitter boundary.",
+      "disposition": "Do not merge rank evidence; reuse one envelope-decoder/value-retention repair contract across the three follow-up proofs."
+    },
+    {
+      "candidate_set": [
+        "task-quality-verify-wave-01-2026-07-18",
+        "task-quality-verify-wave-09-2026-07-18"
+      ],
+      "basis": "Both record orchestration interruption or recovery, but Wave 01 has an unvisited shard while Wave 09 recovered complete finals from durable session logs.",
+      "disposition": "Do not merge; preserve distinct scopes and recovery semantics."
+    }
+  ],
+  "reader_risks": [
+    "Studio: lead with owned rank span, decoded-versus-indeterminate count, and preliminary disposition; collapse the three exact-report callouts behind structured per-record summaries.",
+    "TUI80: paginate the giant report callouts, wrap evidence rows, and keep rank, ID, revision, lifecycle, criteria, and indeterminate state in stable columns.",
+    "email: send count, verdict, one blocker, and an authority link; omit raw IDs, hashes, temporary paths, and per-record command transcripts.",
+    "public: redact internal Task IDs, paths, hashes, credential-adjacent details, and operational topology while preserving honest decoded, blocked, and indeterminate totals.",
+    "CLI/API: preserve exact rank ownership, requested versus canonical identity, immutable revisions, two-read counts, decoded-versus-indeterminate fields, and explicit mutation boundaries."
+  ],
+  "unit_verdicts": [
+    {
+      "unit_id": "paper:task-quality-verify-wave-01-2026-07-18",
+      "document_id": "task-quality-verify-wave-01-2026-07-18",
+      "document_rev": "d30936c1223eb6cf37c0da84a217d9cf",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Immutable verification ledger for closure-first ranks 1–51, intended to preserve exact point-read, provenance, disposition, and no-mutation evidence across three verifier shards.",
+      "opening_and_criteria": "The headline says ranks 1–51 were proved, but the second shard states ranks 18–34 were not supplied or visited; the criteria claim therefore outruns the evidence.",
+      "outline_and_hierarchy": "A compact authority frame surrounds three exact shard reports and a coverage warning; the hierarchy is clear even though the shard payloads are oversized.",
+      "human_voice_and_precision": "The second report is admirably candid: it refuses to invent per-record PASS results when ownership data was unavailable.",
+      "compression_and_restraint": "Retain the immutable ledger but repair the summary and ownership count, then present a structured 34-proved/17-unvisited projection before raw callouts.",
+      "evidence_and_truth": "blocks[6] and blocks[8] document two complete 17-record exact-read shards, while blocks[7] explicitly leaves the middle 17 records unvisited.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "The verifier explicitly says ranks 18–34 were not present, were not visited, and received no invented per-record PASS.",
+          "lesson": "Make missing assignment data a first-class outcome rather than hiding it behind a successful transport headline."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The summary says ranks 1–51 were proved even though the middle 17 ranks were not visited.",
+          "lesson": "Aggregate claims must equal the union of evidenced shard coverage."
+        }
+      ],
+      "duplicate_disposition": "Do not merge with other ledgers: it owns a unique rank range. Link through a shared index and repair only its overbroad aggregate summary.",
+      "reader_risks": [
+        "Studio: lead with owned rank span, decoded-versus-indeterminate count, and preliminary disposition; collapse the three exact-report callouts behind structured per-record summaries.",
+        "TUI80: paginate the giant report callouts, wrap evidence rows, and keep rank, ID, revision, lifecycle, criteria, and indeterminate state in stable columns.",
+        "email: send count, verdict, one blocker, and an authority link; omit raw IDs, hashes, temporary paths, and per-record command transcripts.",
+        "public: redact internal Task IDs, paths, hashes, credential-adjacent details, and operational topology while preserving honest decoded, blocked, and indeterminate totals.",
+        "CLI/API: preserve exact rank ownership, requested versus canonical identity, immutable revisions, two-read counts, decoded-versus-indeterminate fields, and explicit mutation boundaries."
+      ],
+      "rationale": "Repair because the immutable shard evidence is useful and honest, but the top-level success claim and all-51 ownership language contradict the explicit unvisited shard."
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-02-2026-07-18",
+      "document_id": "task-quality-verify-wave-02-2026-07-18",
+      "document_rev": "53671cf68ceadfdfb8648362f71f2a48",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Verification ledger for ranks 52–102 covering chat, site-spawner, and renderer Tasks through stable reads plus bounded provenance and gate evidence.",
+      "opening_and_criteria": "The opening names 102 reads, per-Task dispositions, carried risks, and the read-only boundary before the detailed reports.",
+      "outline_and_hierarchy": "Three complete 17-rank reports sit between authority metadata and a clear limitation block; the sequence supports audit and recovery.",
+      "human_voice_and_precision": "The reports distinguish met criteria, unmet criteria, stale tombstones, aliases, and missing proof without treating every stable read as success.",
+      "compression_and_restraint": "Keep the immutable ledger; add a compact table projection for constrained readers instead of rewriting or merging its raw receipts.",
+      "evidence_and_truth": "blocks[6]-[8] cover all 51 owned ranks with paired exact reads and semantic dispositions; blocks[10] fences unvisited production and reader gates.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "The middle shard reports 34/34 successful reads, 55 criteria, 38 fully evidenced criteria, and 17 unmet criteria while distinguishing stale tombstones.",
+          "lesson": "Summaries should preserve the difference between retrieval, evidence, and criterion satisfaction."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[10]",
+          "evidence": "GUI/TUI/email/Projects rendering, external operations, security/load probes, and production mutation remain unvisited.",
+          "lesson": "A verification ledger should not be presented as full reader or production proof."
+        }
+      ],
+      "duplicate_disposition": "Do not merge with other verify ledgers: the common template hides non-overlapping rank authority. Link by manifest/digest and expose structured projections.",
+      "reader_risks": [
+        "Studio: lead with owned rank span, decoded-versus-indeterminate count, and preliminary disposition; collapse the three exact-report callouts behind structured per-record summaries.",
+        "TUI80: paginate the giant report callouts, wrap evidence rows, and keep rank, ID, revision, lifecycle, criteria, and indeterminate state in stable columns.",
+        "email: send count, verdict, one blocker, and an authority link; omit raw IDs, hashes, temporary paths, and per-record command transcripts.",
+        "public: redact internal Task IDs, paths, hashes, credential-adjacent details, and operational topology while preserving honest decoded, blocked, and indeterminate totals.",
+        "CLI/API: preserve exact rank ownership, requested versus canonical identity, immutable revisions, two-read counts, decoded-versus-indeterminate fields, and explicit mutation boundaries."
+      ],
+      "rationale": "Keep because all three shards are complete, semantically bounded, and candid about the proof they do not supply."
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-03-2026-07-18",
+      "document_id": "task-quality-verify-wave-03-2026-07-18",
+      "document_rev": "1755dd9366a5645fdb2f38c2a8cf220c",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Verification ledger for ranks 103–153, focused on deployment, authentication, provenance, and reader-related Task evidence.",
+      "opening_and_criteria": "The summary accurately states 102 stable reads, bounded provenance, per-Task dispositions, carried risks, and zero mutation.",
+      "outline_and_hierarchy": "Authority, three exact reports, and a terminal coverage warning create an auditable evidence path without competing current-status claims.",
+      "human_voice_and_precision": "The reports use precise GitHub and repository language and avoid converting absent commits or open issues into implementation claims.",
+      "compression_and_restraint": "Keep as a rank-specific receipt; compress exact IDs into expandable tables for Studio/TUI/email while leaving the immutable raw evidence addressable.",
+      "evidence_and_truth": "blocks[6]-[8] supply complete paired reads for all 51 ranks and bounded issue/commit provenance; blocks[10] states the unvisited surface.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "The shard combines 34 stable point reads with bounded parent/root and structured provenance checks rather than broad inference.",
+          "lesson": "Tie each disposition to the narrow command evidence actually collected."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[6]",
+          "evidence": "The report does not fetch remote main, so repository currency beyond the local reference remains unvisited.",
+          "lesson": "Local Git evidence must not be advertised as remote-current implementation proof."
+        }
+      ],
+      "duplicate_disposition": "Do not merge with adjacent rank ledgers; preserve as immutable non-overlapping evidence and link through the campaign manifest.",
+      "reader_risks": [
+        "Studio: lead with owned rank span, decoded-versus-indeterminate count, and preliminary disposition; collapse the three exact-report callouts behind structured per-record summaries.",
+        "TUI80: paginate the giant report callouts, wrap evidence rows, and keep rank, ID, revision, lifecycle, criteria, and indeterminate state in stable columns.",
+        "email: send count, verdict, one blocker, and an authority link; omit raw IDs, hashes, temporary paths, and per-record command transcripts.",
+        "public: redact internal Task IDs, paths, hashes, credential-adjacent details, and operational topology while preserving honest decoded, blocked, and indeterminate totals.",
+        "CLI/API: preserve exact rank ownership, requested versus canonical identity, immutable revisions, two-read counts, decoded-versus-indeterminate fields, and explicit mutation boundaries."
+      ],
+      "rationale": "Keep because the evidence is complete for its pinned scope, provenance is bounded, and limitations are explicit."
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-04-2026-07-18",
+      "document_id": "task-quality-verify-wave-04-2026-07-18",
+      "document_rev": "49cefc0d9c6d89a66821fb68dc204790",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Verification ledger for ranks 154–204 that preserves two decoded shards and one transport-stable but semantically indeterminate shard.",
+      "opening_and_criteria": "The opening correctly says all records were read twice and explicitly refuses to inflate the undecoded middle shard into content proof.",
+      "outline_and_hierarchy": "The standard three-report frame is clear, but the success-tone aggregate must foreground the 17-record semantic gap.",
+      "human_voice_and_precision": "The prose models epistemic honesty by calling stable transport insufficient when the decoder failed to unwrap the returned envelope.",
+      "compression_and_restraint": "Retain the ledger, repair the decoder-derived shard with a later fenced proof, and show 34 decoded/17 indeterminate before raw reports.",
+      "evidence_and_truth": "blocks[6] and blocks[8] preserve decoded truth; blocks[7] records 17 stable envelopes whose semantic fields remain indeterminate.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The summary explicitly separates decoded Task truth from stable transport and says no content proof is inflated.",
+          "lesson": "A failed decoder should yield an indeterminate semantic verdict, not a synthetic pass."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "The middle shard's one-pass decoder missed the returned envelope, leaving all 17 records semantically indeterminate.",
+          "lesson": "Decoder compatibility must be validated before an exact-read cap makes correction impossible."
+        }
+      ],
+      "duplicate_disposition": "Not a duplicate of Waves 06 or 08: it owns different ranks, though all three should share one repaired envelope-decoder contract.",
+      "reader_risks": [
+        "Studio: lead with owned rank span, decoded-versus-indeterminate count, and preliminary disposition; collapse the three exact-report callouts behind structured per-record summaries.",
+        "TUI80: paginate the giant report callouts, wrap evidence rows, and keep rank, ID, revision, lifecycle, criteria, and indeterminate state in stable columns.",
+        "email: send count, verdict, one blocker, and an authority link; omit raw IDs, hashes, temporary paths, and per-record command transcripts.",
+        "public: redact internal Task IDs, paths, hashes, credential-adjacent details, and operational topology while preserving honest decoded, blocked, and indeterminate totals.",
+        "CLI/API: preserve exact rank ownership, requested versus canonical identity, immutable revisions, two-read counts, decoded-versus-indeterminate fields, and explicit mutation boundaries."
+      ],
+      "rationale": "Repair because one third of the owned semantic scope is indeterminate even though transport exactness and the other two shards are preserved."
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-05-2026-07-18",
+      "document_id": "task-quality-verify-wave-05-2026-07-18",
+      "document_rev": "82feadbb2c0e7cb3af4d9aac12cac6ef",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Retrieval-integrity ledger for ranks 205–255 that records 50 decoded Tasks and one deterministic API failure without inventing missing content.",
+      "opening_and_criteria": "The opening gives the exact 50/1 split and identifies the blocked Task, making the exception visible before raw evidence.",
+      "outline_and_hierarchy": "Three exact shard reports are framed by authority/redaction metadata and a targeted retrieval boundary.",
+      "human_voice_and_precision": "The voice is precise and trustworthy: the repeated internal error is preserved as a blocker rather than normalized away.",
+      "compression_and_restraint": "Keep as an honest immutable receipt; surface the one blocker prominently and route it to a later targeted retrieval proof.",
+      "evidence_and_truth": "blocks[6]-[8] account for all 51 IDs; blocks[2] and blocks[10] separate 50 decoded records from the one stable retrieval failure.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The summary records the same server internal error twice for the blocked Task and refuses any additional read or content claim.",
+          "lesson": "Stable failure is evidence and should remain visible rather than being counted as decoded truth."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[10]",
+          "evidence": "The blocked record still lacks semantic content and cannot support a repair decision until targeted retrieval succeeds.",
+          "lesson": "Complete coverage accounting can legitimately include a precisely bounded blocker."
+        }
+      ],
+      "duplicate_disposition": "Do not merge with adjacent ledgers; preserve the unique rank scope and link the blocker to a targeted follow-up proof.",
+      "reader_risks": [
+        "Studio: lead with owned rank span, decoded-versus-indeterminate count, and preliminary disposition; collapse the three exact-report callouts behind structured per-record summaries.",
+        "TUI80: paginate the giant report callouts, wrap evidence rows, and keep rank, ID, revision, lifecycle, criteria, and indeterminate state in stable columns.",
+        "email: send count, verdict, one blocker, and an authority link; omit raw IDs, hashes, temporary paths, and per-record command transcripts.",
+        "public: redact internal Task IDs, paths, hashes, credential-adjacent details, and operational topology while preserving honest decoded, blocked, and indeterminate totals.",
+        "CLI/API: preserve exact rank ownership, requested versus canonical identity, immutable revisions, two-read counts, decoded-versus-indeterminate fields, and explicit mutation boundaries."
+      ],
+      "rationale": "Keep because the document fully and honestly accounts for every owned unit, including the single stable retrieval blocker."
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-06-2026-07-18",
+      "document_id": "task-quality-verify-wave-06-2026-07-18",
+      "document_rev": "861670f0136e348836c5d59058f40a4a",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Verification ledger for ranks 256–306 emphasizing credential boundaries, closure truth, and exact read accounting.",
+      "opening_and_criteria": "The opening says all IDs were read twice and immediately marks verify-18 lifecycle and criteria as unasserted where values were not retained.",
+      "outline_and_hierarchy": "The three-report ledger is structurally coherent, but the third shard requires a semantic repair path rather than only a schema-shaped receipt.",
+      "human_voice_and_precision": "The report avoids credential disclosure and does not overclaim values that its emitter failed to retain.",
+      "compression_and_restraint": "Retain the immutable transport evidence, repair the verify-18 projection from a fenced semantic proof, and distinguish schema presence from captured values.",
+      "evidence_and_truth": "blocks[6]-[7] retain decoded Task truth; blocks[8] preserves stable identity/publication signals but lacks the semantic values needed for disposition.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The summary explicitly leaves lifecycle and criteria unasserted instead of deriving them from a schema-only emitter.",
+          "lesson": "Missing semantic values should remain unknown even when identity and transport are stable."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "The emitter retained field schema but not lifecycle and criteria values for the third 17-record shard.",
+          "lesson": "Evidence emitters must serialize the values required by downstream verdicts, not merely their keys."
+        }
+      ],
+      "duplicate_disposition": "Not a duplicate of Waves 04 or 08: keep its rank-specific receipts but repair all decoder/emitter-loss waves with one common capture contract.",
+      "reader_risks": [
+        "Studio: lead with owned rank span, decoded-versus-indeterminate count, and preliminary disposition; collapse the three exact-report callouts behind structured per-record summaries.",
+        "TUI80: paginate the giant report callouts, wrap evidence rows, and keep rank, ID, revision, lifecycle, criteria, and indeterminate state in stable columns.",
+        "email: send count, verdict, one blocker, and an authority link; omit raw IDs, hashes, temporary paths, and per-record command transcripts.",
+        "public: redact internal Task IDs, paths, hashes, credential-adjacent details, and operational topology while preserving honest decoded, blocked, and indeterminate totals.",
+        "CLI/API: preserve exact rank ownership, requested versus canonical identity, immutable revisions, two-read counts, decoded-versus-indeterminate fields, and explicit mutation boundaries."
+      ],
+      "rationale": "Repair because 17 records cannot receive semantic dispositions from retained evidence even though their exact reads were completed."
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-07-2026-07-18",
+      "document_id": "task-quality-verify-wave-07-2026-07-18",
+      "document_rev": "738fe1e0d2d201c69d5a60f1a5c35998",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Reader-surface and secret-sanitization verification ledger for ranks 307–357 across connector, PortableDoc, visual parity, and deploy-control Tasks.",
+      "opening_and_criteria": "The opening states 51 Tasks, 102 reads, zero mutations, retained semantic fields, and excluded credential-like values.",
+      "outline_and_hierarchy": "Authority and three complete exact reports flow to a sharply bounded read-only limitation statement.",
+      "human_voice_and_precision": "The writing is operationally precise while keeping secrets out and preserving per-ID evidence, lifecycle, and criteria states.",
+      "compression_and_restraint": "Keep as complete rank evidence; offer a structured projection and avoid duplicating its raw receipts in other campaign papers.",
+      "evidence_and_truth": "blocks[6]-[8] cover all 51 ranks with decoded semantic fields and stable pairs; blocks[10] fences repo/Paper/GitHub body and broad-list proof.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[8]",
+          "evidence": "The third shard reports 34/34 successful exact reads, semantic pair equality, and per-ID lifecycle and criteria evidence.",
+          "lesson": "A useful verification receipt connects transport stability to retained semantic values per record."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[10]",
+          "evidence": "No repository inspection, Paper/GitHub body dereference, broad Task listing, or reader execution was performed.",
+          "lesson": "Reader-surface subject matter does not itself prove rendered-reader behavior."
+        }
+      ],
+      "duplicate_disposition": "Do not merge with other ledgers; preserve non-overlapping rank authority and link it through a canonical index.",
+      "reader_risks": [
+        "Studio: lead with owned rank span, decoded-versus-indeterminate count, and preliminary disposition; collapse the three exact-report callouts behind structured per-record summaries.",
+        "TUI80: paginate the giant report callouts, wrap evidence rows, and keep rank, ID, revision, lifecycle, criteria, and indeterminate state in stable columns.",
+        "email: send count, verdict, one blocker, and an authority link; omit raw IDs, hashes, temporary paths, and per-record command transcripts.",
+        "public: redact internal Task IDs, paths, hashes, credential-adjacent details, and operational topology while preserving honest decoded, blocked, and indeterminate totals.",
+        "CLI/API: preserve exact rank ownership, requested versus canonical identity, immutable revisions, two-read counts, decoded-versus-indeterminate fields, and explicit mutation boundaries."
+      ],
+      "rationale": "Keep because coverage, semantic retention, redaction, and mutation boundaries are complete for the pinned scope."
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-08-2026-07-18",
+      "document_id": "task-quality-verify-wave-08-2026-07-18",
+      "document_rev": "e5014d3d8e4b071b7040b1edbbd8c801",
+      "verdict": "repair",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Human-gates and Task-identity verification ledger for ranks 358–408, preserving decoded boundary states and one indeterminate decoder shard.",
+      "opening_and_criteria": "The opening honestly says only two shards decoded full Task truth and calls the third shard semantically indeterminate.",
+      "outline_and_hierarchy": "The familiar authority/reports/boundary frame works, but the success-tone title should emphasize 33 decoded versus 17 indeterminate records.",
+      "human_voice_and_precision": "The report treats draft placement, expired claims, legal/credential gates, and missing dependencies as facts for later experiment design rather than closure proof.",
+      "compression_and_restraint": "Retain the ledger, repair verify-23 with a compatible envelope decoder, and surface the decoded/indeterminate split before the giant callouts.",
+      "evidence_and_truth": "blocks[6] and blocks[8] contain decoded evidence; blocks[7] records stable exact responses for 17 IDs but no decoded semantic fields.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The summary explicitly converts the decoder boundary into indeterminate semantic fields rather than a pass.",
+          "lesson": "Unknown state at a human gate must remain unknown until evidence is decoded."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[7]",
+          "evidence": "The nested document envelope was not decoded for all 17 verify-23 IDs, leaving identity, lifecycle, criteria, and gate semantics indeterminate.",
+          "lesson": "Envelope decoding must be tested across response shapes before a fixed-read survey begins."
+        }
+      ],
+      "duplicate_disposition": "Not a duplicate of Waves 04 or 06: it owns different ranks; reuse one repair contract for their shared decoder-loss failure mode.",
+      "reader_risks": [
+        "Studio: lead with owned rank span, decoded-versus-indeterminate count, and preliminary disposition; collapse the three exact-report callouts behind structured per-record summaries.",
+        "TUI80: paginate the giant report callouts, wrap evidence rows, and keep rank, ID, revision, lifecycle, criteria, and indeterminate state in stable columns.",
+        "email: send count, verdict, one blocker, and an authority link; omit raw IDs, hashes, temporary paths, and per-record command transcripts.",
+        "public: redact internal Task IDs, paths, hashes, credential-adjacent details, and operational topology while preserving honest decoded, blocked, and indeterminate totals.",
+        "CLI/API: preserve exact rank ownership, requested versus canonical identity, immutable revisions, two-read counts, decoded-versus-indeterminate fields, and explicit mutation boundaries."
+      ],
+      "rationale": "Repair because one shard lacks the semantic evidence necessary for preliminary dispositions despite stable raw responses."
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-09-2026-07-18",
+      "document_id": "task-quality-verify-wave-09-2026-07-18",
+      "document_rev": "fd58b1ec45855281c29f30f769424e54",
+      "verdict": "keep",
+      "coverage_result": "found",
+      "purpose_and_larger_goal": "Human-cutover and epic-closure verification ledger for ranks 408–455, reconstructed from durable verifier session records after team auto-clean.",
+      "opening_and_criteria": "The opening immediately explains the recovery event, exact 48-Task scope, validation against owned IDs, and absence of Task rereads.",
+      "outline_and_hierarchy": "Recovery authority, three complete reports, and an explicit no-rerun boundary make the exceptional provenance inspectable.",
+      "human_voice_and_precision": "The prose is candid about artifact recovery and avoids synthesizing a commit or pretending the workers were still live.",
+      "compression_and_restraint": "Keep as an immutable recovered receipt; make its local-artifact provenance prominent and avoid presenting it as fresh live reread evidence.",
+      "evidence_and_truth": "blocks[6]-[8] account for 48 IDs with paired reads and decoded semantic results; blocks[2]-[4] explain and hash the durable recovery path.",
+      "best_pattern_evidence": [
+        {
+          "block_ref": "blocks[2]",
+          "evidence": "The ledger discloses auto-clean, durable-session recovery, owned-ID validation, and no Task reread in one concise opening.",
+          "lesson": "Recovery provenance should be explicit enough to distinguish original execution from later evidence collection."
+        }
+      ],
+      "failure_evidence": [
+        {
+          "block_ref": "blocks[10]",
+          "evidence": "Recovery relied on local durable session artifacts and performed no Barkpark rereads, external gate actions, or repository checks.",
+          "lesson": "Recovered evidence should not be mistaken for a fresh-current observation."
+        }
+      ],
+      "duplicate_disposition": "Do not merge with Wave 01 despite both containing orchestration interruption history; their rank scope and recovery facts differ.",
+      "reader_risks": [
+        "Studio: lead with owned rank span, decoded-versus-indeterminate count, and preliminary disposition; collapse the three exact-report callouts behind structured per-record summaries.",
+        "TUI80: paginate the giant report callouts, wrap evidence rows, and keep rank, ID, revision, lifecycle, criteria, and indeterminate state in stable columns.",
+        "email: send count, verdict, one blocker, and an authority link; omit raw IDs, hashes, temporary paths, and per-record command transcripts.",
+        "public: redact internal Task IDs, paths, hashes, credential-adjacent details, and operational topology while preserving honest decoded, blocked, and indeterminate totals.",
+        "CLI/API: preserve exact rank ownership, requested versus canonical identity, immutable revisions, two-read counts, decoded-versus-indeterminate fields, and explicit mutation boundaries."
+      ],
+      "rationale": "Keep because all three recovered reports are complete, hashed, validated against ownership, and clear about their temporal and operational limits."
+    }
+  ],
+  "unvisited_scope": [],
+  "mutation_attestation": {
+    "production_papers_mutated": false,
+    "cyclefleet_mutated": false,
+    "bp_cycle_assign_called": false,
+    "bp_cycle_result_called": false,
+    "local_report_artifacts_only": true
+  }
+}

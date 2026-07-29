@@ -1,0 +1,89 @@
+{
+  "schema_version": "paper-perfection-successor-readback-index/v1",
+  "assignment_id": "PPCC2-S056",
+  "count": 9,
+  "all_pinned_revisions_read": true,
+  "reads": [
+    {
+      "unit_id": "paper:task-quality-verify-wave-01-2026-07-18",
+      "document_id": "task-quality-verify-wave-01-2026-07-18",
+      "document_rev": "d30936c1223eb6cf37c0da84a217d9cf",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S056/readbacks/task-quality-verify-wave-01-2026-07-18.json",
+      "readback_sha256": "413c4ed0542aaddb367894855db49e8557f31707e6bc1aad2345a3bbb33d3e97",
+      "block_count": 11,
+      "body_html_chars": 23348
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-02-2026-07-18",
+      "document_id": "task-quality-verify-wave-02-2026-07-18",
+      "document_rev": "53671cf68ceadfdfb8648362f71f2a48",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S056/readbacks/task-quality-verify-wave-02-2026-07-18.json",
+      "readback_sha256": "5c295a5eae2efe6ad219cbf9983ecc072d2f44e4be504a8758706d0f0de36181",
+      "block_count": 11,
+      "body_html_chars": 36730
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-03-2026-07-18",
+      "document_id": "task-quality-verify-wave-03-2026-07-18",
+      "document_rev": "1755dd9366a5645fdb2f38c2a8cf220c",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S056/readbacks/task-quality-verify-wave-03-2026-07-18.json",
+      "readback_sha256": "267554f9eb72642f5ba492ed8088195e0def6387d6366d45250d105678450d18",
+      "block_count": 11,
+      "body_html_chars": 28530
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-04-2026-07-18",
+      "document_id": "task-quality-verify-wave-04-2026-07-18",
+      "document_rev": "49cefc0d9c6d89a66821fb68dc204790",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S056/readbacks/task-quality-verify-wave-04-2026-07-18.json",
+      "readback_sha256": "05f4ac36e887957d9cde03a5df66b6a7eedda90eeaa7c4eaf50d82b3aa16b7f1",
+      "block_count": 11,
+      "body_html_chars": 29146
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-05-2026-07-18",
+      "document_id": "task-quality-verify-wave-05-2026-07-18",
+      "document_rev": "82feadbb2c0e7cb3af4d9aac12cac6ef",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S056/readbacks/task-quality-verify-wave-05-2026-07-18.json",
+      "readback_sha256": "9ced36bb792140357e14fe0d8503c472dd9246c7c69f825b470ce6e6455fac40",
+      "block_count": 11,
+      "body_html_chars": 24838
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-06-2026-07-18",
+      "document_id": "task-quality-verify-wave-06-2026-07-18",
+      "document_rev": "861670f0136e348836c5d59058f40a4a",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S056/readbacks/task-quality-verify-wave-06-2026-07-18.json",
+      "readback_sha256": "332280c9b300b92abb32e68c81edcdc56566b18f41b9ffae5f7940baa82ff9b1",
+      "block_count": 11,
+      "body_html_chars": 60252
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-07-2026-07-18",
+      "document_id": "task-quality-verify-wave-07-2026-07-18",
+      "document_rev": "738fe1e0d2d201c69d5a60f1a5c35998",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S056/readbacks/task-quality-verify-wave-07-2026-07-18.json",
+      "readback_sha256": "a01443bcc3413c9869c97b4a448c0f93ea25de0a7e0e225d622667bc255af0b7",
+      "block_count": 11,
+      "body_html_chars": 16990
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-08-2026-07-18",
+      "document_id": "task-quality-verify-wave-08-2026-07-18",
+      "document_rev": "e5014d3d8e4b071b7040b1edbbd8c801",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S056/readbacks/task-quality-verify-wave-08-2026-07-18.json",
+      "readback_sha256": "72fb17fb8fd7861ba980c1c080d461adc9a8890bf710852924cf226643f3e492",
+      "block_count": 11,
+      "body_html_chars": 39842
+    },
+    {
+      "unit_id": "paper:task-quality-verify-wave-09-2026-07-18",
+      "document_id": "task-quality-verify-wave-09-2026-07-18",
+      "document_rev": "fd58b1ec45855281c29f30f769424e54",
+      "readback_path": ".omx/state/paper-perfection-successor-2026-07-29/survey-reports/PPCC2-S056/readbacks/task-quality-verify-wave-09-2026-07-18.json",
+      "readback_sha256": "b448367aae95b2d23ba14c297448cfe48e3578d06ac25564d1b3aab0d45d6acb",
+      "block_count": 11,
+      "body_html_chars": 15912
+    }
+  ]
+}
