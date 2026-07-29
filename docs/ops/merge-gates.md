@@ -187,6 +187,10 @@ Elixir security gates, path-triggered on `api/**`:
    6 `Config.CSRF`, 3 `XSS.Raw`, 2 `SQL.Stream`, and one each of
    `XSS.SendResp`, `XSS.ContentType`, `Traversal.SendFile`, `RCE.CodeModule`,
    `Config.HTTPS`, `Config.Headers`, `CI.System`. (It read 108 on 2026-07-28.)
+   Wave 24 slice S3 then deleted **32 dead rows** — entries that were no longer
+   the thing suppressing any finding, proven by running Sobelow with the
+   baseline emptied — taking it to **57**. Which is why the paragraph above
+   says derive, not quote.
 
    **Amended precondition — the floor is 10, not 0.** The flip is gated on the
    baseline holding **ONLY entries that provably cannot carry an inline
