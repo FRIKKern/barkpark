@@ -9,8 +9,9 @@ name: security
 #
 # Jobs:
 #   1. sobelow    — Phoenix-aware static analysis. Surfaces NEW insecure
-#                   patterns: the 98 pre-existing findings on main are captured
-#                   in api/.sobelow-skips (the reviewed baseline); `--exit Low`
+#                   patterns: the pre-existing findings on main are captured
+#                   in api/.sobelow-skips (the reviewed baseline — 57 rows after
+#                   wave 24 deleted 32 dead waivers); `--exit Low`
 #                   reports any non-baselined finding at Low confidence or above.
 #                   ADVISORY (continue-on-error: true) — Sobelow fingerprints are
 #                   derived from compiled AST and are NOT stable across Elixir
@@ -145,10 +146,9 @@ jobs:
     # PASSES for a row that drifted out of its annotation span, for a moved
     # file, and for a file with annotations and zero rows. The staleness check
     # never looks at annotations — it asks whether each entry's file:line still
-    # holds a construct of its own detector type. Also ~1s, no BEAM. Its
-    # SELFTEST is blocking (hermetic, must always pass); its run against the
-    # real baseline is reporting-only until the residue reaches zero — see the
-    # measured numbers on that step.
+    # holds a construct of its own detector type. Also ~1s, no BEAM. Both its
+    # SELFTEST and its run against the real baseline are blocking as of wave 24
+    # — the residue reached zero; see the measured numbers on that step.
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -162,25 +162,43 @@ jobs:
       - name: Selftest (the staleness ratchet must be able to fail)
         run: bash api/scripts/sobelow-baseline-staleness-check.sh --selftest
 
-      # REPORTING-ONLY UNTIL THE RESIDUE REACHES ZERO — measured, not assumed.
-      # On origin/main today this check reds with 50 stale entries; with wave
-      # 23 S1's 19-row migration applied it still reds with 31 (re-measured
-      # 2026-07-28 against S1's tree AND its pruned baseline together, because
-      # S1's added comment lines shift line numbers inside the files it edits).
-      # Left BLOCKING, this step would turn `sobelow-inline-overlap` — a job
-      # that is GREEN and meaningful today — permanently red on every PR in the
-      # repo, which is precisely the blind-gate failure mode this wave exists to
-      # remove: a gate nobody can distinguish from broken cannot report the next
-      # real regression. So the step runs, prints the full stale list, and does
-      # not fail the job.
+      # BLOCKING as of wave 24 — the residue is zero, measured by execution.
       #
-      # FLIP CONDITION (delete this one line, nothing else): the step exits 0 on
-      # main. That is reached by migrating the remaining stale rows to inline
-      # annotations — 15 of the 31 are the blobstore rows owned by
-      # `felix-w23-s5-blobstore-migration`; the residue is tracked at
-      # `task-felix-w23-bl-staleness-blocking-flip`.
+      # The prior comment here was wrong twice and is corrected rather than
+      # deleted, because a gate that misdescribes itself is the same blind-gate
+      # failure this job exists to remove. (1) It claimed "15 of the 31 are the
+      # blobstore rows"; `grep -c blobstore api/.sobelow-skips` was 0, so that
+      # migration would have moved the residue by exactly zero. (2) It reported
+      # 31 as the whole residue; 31 is only what THIS check can see. Config.*
+      # rows are whole-file findings with no per-line anchor, so they are
+      # SKIPPED — which hid a 32nd dead row, `Config.Headers … router.ex:2550`.
+      #
+      # The split was re-derived by EXECUTION, not by reading the file. Three
+      # runs of `mix sobelow --format json` over api/ at 606fefd15:
+      #   A  no --skip, no baseline           167 findings
+      #   B  baseline EMPTIED, annotations honoured   90 findings
+      #   C  tracked baseline                   32 findings
+      # A baseline row is LIVE iff its exact (type, file, line) appears in run
+      # B — i.e. it is still the only thing suppressing a real finding. 57 of
+      # the 89 rows were live; the other 32 were dead waivers and are deleted.
+      # What killed each, again measured rather than classified by eye:
+      #   25  superseded by a named inline annotation — a finding of that same
+      #       type in that same file is suppressed by annotation alone (it is
+      #       in run A and not in run B; 77 findings are in that set overall)
+      #    6  closed by content: the 5 media.ex rows at 1e0b43e67 (#6283 —
+      #       media.ex retains no traversal-eligible File call at all), and
+      #       archive.ex:36 `File.read!` (no `File.read!` remains in the file)
+      #    1  invisible to this check: `Config.Headers … router.ex:2550`. The
+      #       finding moved to router.ex:2609 and is ALREADY in the residue of
+      #       32, so the row at 2550 was suppressing nothing.
+      #
+      # Measured after the prune: this step exits 0, the overlap ratchet exits
+      # 0, and `mix sobelow --skip` is UNCHANGED at 32 findings — deleting a
+      # dead row suppresses nothing, which is what "dead" means. That last
+      # number is a proof and not a tautology because the mutation was run:
+      # deleting ONE row proven live (DOS.StringToAtom, content/validation.ex:
+      # 109) raises the count to 33, and restoring it returns it to 32.
       - name: Every baseline entry still points at a construct of its own type
-        continue-on-error: true
         run: bash api/scripts/sobelow-baseline-staleness-check.sh
 
   mix-audit:
