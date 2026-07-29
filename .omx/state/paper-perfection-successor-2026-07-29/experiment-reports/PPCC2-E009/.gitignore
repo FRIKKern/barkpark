@@ -1,0 +1,5 @@
+artifacts/
+bin/
+logs/
+__pycache__/
+e004-render-manifest.json
