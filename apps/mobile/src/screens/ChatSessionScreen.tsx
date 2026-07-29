@@ -132,7 +132,11 @@ export const ESTIMATED_ROW_HEIGHT = 180
 
 export type Row =
   | { key: string; kind: 'message'; message: ChatMessage }
-  | { key: string; kind: 'local'; content: string; queued: boolean }
+  /** An optimistic echo. `failed` is the honesty flag: the POST was rejected,
+   * so this text is NOT on the server and the bubble must not keep wearing the
+   * delivered paint. Optional because a row that says nothing about delivery
+   * is, by construction, one that was never told a send failed. */
+  | { key: string; kind: 'local'; content: string; queued: boolean; failed?: boolean }
   | { key: string; kind: 'tail'; text: string }
   /** A work-log disclosure header — the collapsed stand-in for a run of
    * apparatus rows (workLog.ts owns which rows those are and whether the run
@@ -193,8 +197,16 @@ export function messageRows(messages: readonly ChatMessage[]): Row[] {
   return messages.map((message) => ({ key: `m-${message.seq}`, kind: 'message', message }))
 }
 
-export function localRows(local: readonly { content: string; queued: boolean }[]): Row[] {
-  return local.map((l, i) => ({ key: `l-${i}`, kind: 'local', content: l.content, queued: l.queued }))
+export function localRows(
+  local: readonly { content: string; queued: boolean; failed?: boolean }[],
+): Row[] {
+  return local.map((l, i) => ({
+    key: `l-${i}`,
+    kind: 'local',
+    content: l.content,
+    queued: l.queued,
+    failed: l.failed === true,
+  }))
 }
 
 /** The committed segments as list rows, THROUGH A MEMO TABLE keyed on the row
@@ -979,6 +991,27 @@ export function TranscriptRow({
     )
   }
   if (row.kind === 'local') {
+    // A rejected send keeps the user's words — losing them would be worse than
+    // relabelling them — but it stops wearing the delivered bubble: the danger
+    // family (the app's vocabulary for "this did not happen", where `warn` is
+    // reserved for "unconfirmed"), and a line that says so in words rather than
+    // in colour alone. `queued` never shows alongside it: a failed send is not
+    // waiting its turn.
+    if (row.failed === true) {
+      return (
+        <View
+          accessibilityLabel={`Not sent: ${row.content}`}
+          style={[
+            styles.userBubble,
+            styles.failedBubble,
+            { backgroundColor: theme.dangerSoft, borderColor: theme.danger },
+          ]}
+        >
+          <Text style={[styles.userText, { color: theme.text }]}>{row.content}</Text>
+          <Text style={[styles.queuedBadge, { color: theme.danger }]}>⚠ not sent</Text>
+        </View>
+      )
+    }
     return (
       <View style={[styles.userBubble, { backgroundColor: theme.bubble }]}>
         <Text style={[styles.userText, { color: theme.text }]}>{row.content}</Text>
@@ -1210,6 +1243,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     maxWidth: '80%',
   },
+  // The rejected echo: same geometry as the delivered bubble (the words did not
+  // move), a different SKIN. The border is what survives a reader who cannot
+  // separate the two fills, so it is the assertable half of the difference.
+  failedBubble: { borderWidth: 1 },
   // THE BUBBLE LAW (#6126): 16/23 user, 16/26 assistant — the user turn is
   // deliberately tighter than the answer. Both are token-owned now; the
   // rendered pairs are byte-identical to what #6126 settled.
