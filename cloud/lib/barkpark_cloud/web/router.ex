@@ -5908,26 +5908,59 @@ defmodule BarkparkCloud.Web.Router do
         |> Map.take(["theme", "doc_type", "prebuilt_enabled"])
         |> Map.new(fn {k, v} -> {String.to_existing_atom(k), v} end)
 
-      if attrs == %{} do
-        json(conn, 422, %{
-          error: "nothing_to_update",
-          detail:
-            "mutable fields: theme (palette), doc_type (featured content type), prebuilt_enabled (accept off-box builds)"
-        })
-      else
-        case Registry.update_site_settings(site, attrs) do
-          {:ok, updated} ->
-            push_event(updated.team_id, "sites")
-            bp = Registry.get_barkpark(updated.barkpark_id)
+      # TURNING ON off-box builds is a CAPABILITY GRANT, not a content setting,
+      # and it needs the `deploy` ability — the same one domain bind/unbind
+      # demands, and for the same reason: it changes what this site will accept
+      # and serve rather than what it renders. Without this, ONE `write` PAT both
+      # ENABLES the prebuilt lane and USES it, so the per-site opt-in gates
+      # nothing against the credential most likely to be over-scoped.
+      #
+      # Scoped deliberately to the ON transition. Turning it OFF is a
+      # de-escalation any `write` holder may perform (never trap a site in a
+      # riskier mode than its operator can leave), and `theme`/`doc_type` stay
+      # plain `write` — this adds one gate, it does not re-tier the family.
+      # NOTE the sibling asymmetry that is NOT a defect: DELETE /v1/sites/:id is
+      # `write`. Deleting a site destroys it; enabling off-box builds makes it
+      # serve bytes the box never built. Those are different risks, and only the
+      # second one is a lasting grant.
+      # Read the resolved credential the same way `Auth.require_ability/2` does —
+      # `root` is its documented superset, so a browser SESSION (which carries
+      # ["root"]) is never locked out of the dashboard toggle.
+      abilities = conn.assigns[:current_abilities] || []
+      may_grant? = "root" in abilities or "deploy" in abilities
+      enabling_prebuilt? = Map.get(attrs, :prebuilt_enabled) == true
 
-            json(conn, 200, %{
-              site: site_json(updated, bp),
-              note: "settings apply on the next deploy"
-            })
+      cond do
+        enabling_prebuilt? and not may_grant? ->
+          json(conn, 403, %{
+            error: "deploy_ability_required",
+            detail:
+              "enabling off-box builds grants this site the right to serve bytes it did not build — " <>
+                "this needs the deploy ability IN ADDITION to write (abilities are a set, not a " <>
+                "hierarchy), the same ability domain binding requires. Turning it OFF needs only write."
+          })
 
-          {:error, cs} ->
-            json(conn, 422, %{error: "invalid_settings", detail: errors(cs)})
-        end
+        attrs == %{} ->
+          json(conn, 422, %{
+            error: "nothing_to_update",
+            detail:
+              "mutable fields: theme (palette), doc_type (featured content type), prebuilt_enabled (accept off-box builds)"
+          })
+
+        true ->
+          case Registry.update_site_settings(site, attrs) do
+            {:ok, updated} ->
+              push_event(updated.team_id, "sites")
+              bp = Registry.get_barkpark(updated.barkpark_id)
+
+              json(conn, 200, %{
+                site: site_json(updated, bp),
+                note: "settings apply on the next deploy"
+              })
+
+            {:error, cs} ->
+              json(conn, 422, %{error: "invalid_settings", detail: errors(cs)})
+          end
       end
     end)
   end
