@@ -697,53 +697,6 @@ func TestAddDomain(t *testing.T) {
 	}
 }
 
-// TestUploadArtifact exercises the streaming tarball upload (P7).
-func TestUploadArtifact(t *testing.T) {
-	var gotPath, gotCT, gotAuth string
-	var gotBody []byte
-	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
-		gotPath = r.URL.Path
-		gotCT = r.Header.Get("Content-Type")
-		gotAuth = r.Header.Get("Authorization")
-		gotBody, _ = io.ReadAll(r.Body)
-		w.WriteHeader(http.StatusCreated)
-		_, _ = io.WriteString(w, `{"artifact_url":"file:///tmp/x.tar.gz","bytes":7,"filename":"x.tar.gz"}`)
-	})
-
-	body := strings.NewReader("hello!\n")
-	up, err := c.UploadArtifact(context.Background(), "site-1", body)
-	if err != nil {
-		t.Fatalf("UploadArtifact: %v", err)
-	}
-	if gotPath != "/v1/sites/site-1/artifact" {
-		t.Fatalf("hit %q, want /v1/sites/site-1/artifact", gotPath)
-	}
-	if gotCT != "application/octet-stream" {
-		t.Fatalf("content-type = %q, want application/octet-stream", gotCT)
-	}
-	if gotAuth != "Bearer sess-abc" {
-		t.Fatalf("auth = %q, want Bearer sess-abc", gotAuth)
-	}
-	if string(gotBody) != "hello!\n" {
-		t.Fatalf("body = %q, want %q", string(gotBody), "hello!\n")
-	}
-	if up.ArtifactURL != "file:///tmp/x.tar.gz" || up.Bytes != 7 || up.Filename != "x.tar.gz" {
-		t.Fatalf("decoded ArtifactUpload = %+v", up)
-	}
-}
-
-// TestUploadArtifact413 surfaces the control plane's 413 too-large response.
-func TestUploadArtifact413(t *testing.T) {
-	c := newFake(t, "sess-abc", func(w http.ResponseWriter, r *http.Request) {
-		w.WriteHeader(http.StatusRequestEntityTooLarge)
-		_, _ = io.WriteString(w, `{"error":"artifact_too_large","max_bytes":104857600}`)
-	})
-	_, err := c.UploadArtifact(context.Background(), "site-1", strings.NewReader("x"))
-	if err == nil || !strings.Contains(err.Error(), "artifact_too_large") {
-		t.Fatalf("413 should surface artifact_too_large; got %v", err)
-	}
-}
-
 // slowReader delivers its payload after a fixed delay, forcing the request body
 // stream to outlast a wall-clock http.Client.Timeout.
 type slowReader struct {
@@ -761,40 +714,51 @@ func (s *slowReader) Read(p []byte) (int, error) {
 	return copy(p, s.data), nil
 }
 
-// TestUploadArtifactNoWallClockCap pins the fix: the upload path must NOT carry
-// an absolute http.Client.Timeout (which ctx cannot extend), so a body that
-// streams longer than such a cap still completes. A client whose Timeout is set
-// (mimicking the old shared 30s DefaultTimeout, scaled down) dies mid-stream;
-// the production path (nil HTTP → no Timeout) rides the ctx only and succeeds.
-func TestUploadArtifactNoWallClockCap(t *testing.T) {
+// TestUploadDeploymentArtifactNoWallClockCap pins a property that outlived the
+// route it was first written against: an upload path must NOT carry an absolute
+// http.Client.Timeout, because that is a deadline over the whole body stream and
+// ctx cannot extend it — a big artifact on a slow link would die mid-stream with
+// a deadline the caller never asked for.
+//
+// site-spawner W10: this was TestUploadArtifactNoWallClockCap, aimed at the
+// retired site-scoped upload. The property is REPOINTED, not dropped, because
+// UploadDeploymentArtifact is now the only upload in the client and inherited the
+// same nil-HTTP-means-no-cap construction.
+func TestUploadDeploymentArtifactNoWallClockCap(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = io.ReadAll(r.Body)
 		w.WriteHeader(http.StatusCreated)
-		_, _ = io.WriteString(w, `{"artifact_url":"file:///tmp/x.tar.gz","bytes":7,"filename":"x.tar.gz"}`)
+		_, _ = io.WriteString(w, `{"bytes":7}`)
 	}))
 	t.Cleanup(srv.Close)
 
+	slow := func() *slowReader {
+		return &slowReader{data: []byte("hello!\n"), delay: 250 * time.Millisecond}
+	}
+
 	// A wall-clock-capped client kills the slow upload — the pre-fix behavior.
 	capped := &Client{BaseURL: srv.URL, Token: "t", HTTP: &http.Client{Timeout: 50 * time.Millisecond}}
-	if _, err := capped.UploadArtifact(context.Background(), "s", &slowReader{data: []byte("hello!\n"), delay: 250 * time.Millisecond}); err == nil {
+	if _, err := capped.UploadDeploymentArtifact(context.Background(), "s", "dep-1", slow(), 7, "abc"); err == nil {
 		t.Fatal("a wall-clock-capped client must kill an upload slower than its Timeout")
 	}
 
 	// The production path (nil HTTP, no absolute Timeout) completes regardless.
 	uncapped := &Client{BaseURL: srv.URL, Token: "t"}
-	up, err := uncapped.UploadArtifact(context.Background(), "s", &slowReader{data: []byte("hello!\n"), delay: 250 * time.Millisecond})
+	up, err := uncapped.UploadDeploymentArtifact(context.Background(), "s", "dep-1", slow(), 7, "abc")
 	if err != nil {
 		t.Fatalf("nil-HTTP upload must have no wall-clock cap: %v", err)
 	}
-	if up.ArtifactURL != "file:///tmp/x.tar.gz" {
+	if up.Bytes != 7 {
 		t.Fatalf("decoded ArtifactUpload = %+v", up)
 	}
 }
 
-// TestUploadArtifactNilBody refuses a nil reader (a misuse of the SDK).
-func TestUploadArtifactNilBody(t *testing.T) {
+// TestUploadDeploymentArtifactNilBody refuses a nil reader (a misuse of the SDK).
+// Repointed from TestUploadArtifactNilBody in site-spawner W10 — the same misuse,
+// on the surviving upload.
+func TestUploadDeploymentArtifactNilBody(t *testing.T) {
 	c := &Client{BaseURL: "http://x", Token: "t"}
-	if _, err := c.UploadArtifact(context.Background(), "site-1", nil); err == nil {
+	if _, err := c.UploadDeploymentArtifact(context.Background(), "site-1", "dep-1", nil, 7, "abc"); err == nil {
 		t.Fatal("nil body must error")
 	}
 }

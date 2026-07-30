@@ -285,11 +285,22 @@ func TestDeployPostsCorrectBody(t *testing.T) {
 	}
 }
 
-// TestDeployTarballsCwdByDefault: with neither --artifact-url nor --git-ref
-// the command tarballs the project dir (here a tmpdir with one tiny file),
-// streams it to /v1/sites/:id/artifact, then POSTs /v1/sites/:id/deploy with
-// the returned `file://` URL. This is the P7 "heroku moment".
-func TestDeployTarballsCwdByDefault(t *testing.T) {
+// TestDeployWithNoSourceRefusesByName: with neither --artifact-url nor --git-ref,
+// `bp deploy` REFUSES and names `bp cloud site deploy <site> --prebuilt ./dist`.
+//
+// site-spawner W10. This replaces TestDeployTarballsCwdByDefault, and that test's
+// FIXTURE is the reason the live breakage was invisible: it scripted the artifact
+// route as returning `{"artifact_url":…,"filename":…}` — a shape the real route
+// STOPPED EMITTING in W9, when the sink moved to Postgres and the `file://` plane
+// was retired. From then on the CLI was reading `up.ArtifactURL` off a body that
+// no longer carried it, posting an EMPTY artifact_url onto /deploy, and the suite
+// stayed green because the fake still said what the server used to. A fake that
+// is allowed to drift from its server does not test the server, it tests itself.
+//
+// The upload is gone now, so the assertion is the negative one: ZERO artifact
+// POSTs and ZERO deploy POSTs. A refusal that still reached the wire would be a
+// deploy nobody asked for.
+func TestDeployWithNoSourceRefusesByName(t *testing.T) {
 	withTempConfigHome(t)
 
 	tmp := t.TempDir()
@@ -300,37 +311,64 @@ func TestDeployTarballsCwdByDefault(t *testing.T) {
 	s := newScriptedCloud(t).
 		route("GET", "/v1/sites", http.StatusOK, `{"sites":[
 			{"id":"site-1","barkpark_id":"bp-1","team_id":"team-1","name":"Blog","slug":"blog","framework":"nextjs","domains":["blog.example.com"],"scale_mode":"always_on"}
-		]}`).
-		route("POST", "/v1/sites/site-1/artifact", http.StatusCreated, `{"artifact_url":"file:///tmp/blog-abc.tar.gz","bytes":1234,"filename":"blog-abc.tar.gz"}`).
-		route("POST", "/v1/sites/site-1/deploy", http.StatusCreated, `{"deployment":{"id":"dep-9","site_id":"site-1","status":"queued","artifact_url":"file:///tmp/blog-abc.tar.gz"}}`)
+		]}`)
 
 	srv := httptest.NewServer(s.handler())
 	defer srv.Close()
 	seedCloudLogin(t, srv.URL)
 
-	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+	_, stderr, code := runCloudCapture(t, false, func(out *writer) int {
 		out.output = "table"
 		return runDeploy(out, []string{"blog", "--dir", tmp})
 	})
-	if code != exitOK {
-		t.Fatalf("exit = %d, want 0\n%s", code, stdout)
+	if code != exitUsage {
+		t.Fatalf("exit = %d, want %d (usage)", code, exitUsage)
 	}
 
-	// The artifact upload landed first.
-	upReqs := s.requestsFor("POST", "/v1/sites/site-1/artifact")
-	if len(upReqs) != 1 {
-		t.Fatalf("expected one artifact POST, got %d", len(upReqs))
+	// Named by name — the replacement verb, with the site the user already typed.
+	for _, want := range []string{
+		"bp cloud site deploy blog --prebuilt ./dist",
+		"--artifact-url",
+		"--git-ref",
+		"--dir only ever chose which directory to tarball",
+	} {
+		if !strings.Contains(stderr, want) {
+			t.Fatalf("refusal must mention %q:\n%s", want, stderr)
+		}
 	}
-	// Then the deploy was queued with the returned URL.
-	depReqs := s.requestsFor("POST", "/v1/sites/site-1/deploy")
-	if len(depReqs) != 1 {
-		t.Fatalf("expected one deploy POST, got %d", len(depReqs))
+
+	// ZERO artifact POSTs and ZERO deploy POSTs — the refusal never reaches the
+	// wire at all (it precedes even the site resolve).
+	if n := len(s.requestsFor("POST", "/v1/sites/site-1/artifact")); n != 0 {
+		t.Fatalf("expected ZERO artifact POSTs, got %d", n)
 	}
-	if depReqs[0].body["artifact_url"] != "file:///tmp/blog-abc.tar.gz" {
-		t.Fatalf("deploy did not echo uploaded URL: %v", depReqs[0].body)
+	if n := len(s.requestsFor("POST", "/v1/sites/site-1/deploy")); n != 0 {
+		t.Fatalf("expected ZERO deploy POSTs, got %d", n)
 	}
-	if !strings.Contains(stdout, "queued deployment dep-9") {
-		t.Fatalf("expected queued-deployment confirmation:\n%s", stdout)
+	if len(s.requests) != 0 {
+		t.Fatalf("a usage error must not hit the wire; got %d requests", len(s.requests))
+	}
+}
+
+// TestDeployHelpDoesNotAdvertiseTheRetiredFlow: `bp deploy -h` must not promise
+// the tar+gzip upload or the `file://` artifact plane, both retired. A help text
+// that still describes a deleted flow is worse than no help — the user follows it
+// and gets a refusal.
+func TestDeployHelpDoesNotAdvertiseTheRetiredFlow(t *testing.T) {
+	stdout, _, code := runCloudCapture(t, false, func(out *writer) int {
+		out.output = "table"
+		return runDeploy(out, []string{"--help"})
+	})
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0", code)
+	}
+	for _, gone := range []string{"tar+gzip", "file://", "heroku moment", "--dir"} {
+		if strings.Contains(stdout, gone) {
+			t.Fatalf("help still advertises the retired flow (%q):\n%s", gone, stdout)
+		}
+	}
+	if !strings.Contains(stdout, "--prebuilt ./dist") {
+		t.Fatalf("help must point at the prebuilt lane:\n%s", stdout)
 	}
 }
 

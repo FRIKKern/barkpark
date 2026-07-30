@@ -22,13 +22,13 @@ package cli
 //
 // All commands require a Cloud session token (gated by requireCloud). The
 // `<site>` argument accepts either the site's UUID or its slug; when it doesn't
-// look like a UUID we resolve the slug by walking ListSites once. Tarball
-// upload is NOT implemented — `bp deploy` takes --artifact-url and posts it
-// verbatim; the upload route is a P7 enhancement.
+// look like a UUID we resolve the slug by walking ListSites once. `bp deploy`
+// takes --artifact-url or --git-ref and posts it verbatim; local-build uploads
+// live on `bp cloud site deploy --prebuilt ./dist` (site-spawner W9/W10), never
+// here.
 
 import (
 	"fmt"
-	"os"
 	"regexp"
 	"sort"
 	"strings"
@@ -36,9 +36,6 @@ import (
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
 
-// osGetwdReal is the unfaked os.Getwd — wrapped so the package-level test seam
-// (`osGetwd`) can override the cwd without monkey-patching os.
-func osGetwdReal() (string, error) { return os.Getwd() }
 
 // uuidLike matches the rough shape of a control-plane id (UUID-ish). It is the
 // cheap "is this an id or a slug?" sniff `bp sites` uses before falling back to
@@ -445,20 +442,23 @@ func resolveSite(client *cloudclient.Client, handle string) (cloudclient.Site, e
 	return cloudclient.Site{}, fmt.Errorf("no site matches %q (try 'bp sites' to see them all)", handle)
 }
 
-// runDeploy is `bp deploy <site> [--artifact-url <url>] [--git-ref <ref>]
-// [--dir <path>]`. The DEFAULT flow (no flags) is the P7 "heroku moment": tar+
-// gzip the project dir, stream it to /v1/sites/:id/artifact, then POST the
-// returned `file://` URL onto /v1/sites/:id/deploy. `--artifact-url` remains
-// the escape hatch for advanced callers (already-built artifacts, signed URLs
-// the builder can fetch directly).
+// runDeploy is `bp deploy <site> --artifact-url <url> | --git-ref <ref>` — the
+// CONTAINER-model enqueue, which points an out-of-band builder at an artifact it
+// can already fetch or a ref it can already clone.
 //
-// `--dir` lets the user point at a project root other than cwd — the default
-// is cwd, matching `cd ~/my-next-app && bp deploy --site demo`.
+// site-spawner W10: the no-flag "heroku moment" is GONE. It tar+gzipped the whole
+// project dir into POST /v1/sites/:id/artifact, and every row that route wrote
+// carried no deployment_id while the only read and the only delete both keyed on
+// one — so the bytes were unreachable AND unreapable, and the deploy that
+// followed never read them anyway (the deploy route kind-branches to the static
+// path before it looks at artifact_url). Rather than fail silently, no flags now
+// REFUSES BY NAME and points at the lane that actually works:
+// `bp cloud site deploy <site> --prebuilt ./dist`. Nothing hits the wire.
+//
+// `--dir` is accepted and ignored-with-a-refusal for exactly that reason: it only
+// ever meant "which directory to tarball", and a flag whose behaviour vanished
+// must say so rather than quietly enqueue something else.
 func runDeploy(out *writer, args []string) int {
-	// structured is true for any machine-readable output (json OR yaml), so the
-	// packing/upload progress lines are suppressed and never pollute stdout.
-	structured := out.output == "json" || out.output == "yaml"
-
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
 			printDeployHelp(out)
@@ -471,7 +471,16 @@ func runDeploy(out *writer, args []string) int {
 		return useError(out, "usage", perr.Error(), exitUsage)
 	}
 	if handle == "" {
-		return useError(out, "usage", "missing <site> — bp deploy <site> [--artifact-url <url>] [--git-ref <ref>] [--dir <path>]", exitUsage)
+		return useError(out, "usage", "missing <site> — bp deploy <site> --artifact-url <url> | --git-ref <ref>", exitUsage)
+	}
+
+	// THE RETIRED DEFAULT (site-spawner W10). No source flag used to mean "tarball
+	// this directory and upload it"; the route that received it is gone, so this
+	// refuses BY NAME and names the verb that replaced it. Deliberately before
+	// requireCloud: a usage error must not touch the network, must not need a
+	// login, and must not resolve a site.
+	if artifactURL == "" && gitRef == "" {
+		return useError(out, "usage", noDeploySourceRefusal(handle, dir), exitUsage)
 	}
 
 	cfg, ok := requireCloud(out)
@@ -482,17 +491,6 @@ func runDeploy(out *writer, args []string) int {
 	site, err := resolveSite(client, handle)
 	if err != nil {
 		return useError(out, "failed", "resolve site: "+err.Error(), exitGeneric)
-	}
-
-	// The default path: no --artifact-url AND no --git-ref means "tar this dir
-	// up and ship it". --artifact-url is the escape hatch; --git-ref is for
-	// the eventual GitHub-webhook builder (P-future).
-	if artifactURL == "" && gitRef == "" {
-		uploadedURL, uperr := uploadTarball(out, client, site, dir, structured)
-		if uperr != nil {
-			return useError(out, "failed", "upload artifact: "+uperr.Error(), exitGeneric)
-		}
-		artifactURL = uploadedURL
 	}
 
 	dep, err := client.Deploy(cloudCtx(), site.ID, gitRef, artifactURL)
@@ -907,53 +905,27 @@ func parseDeployArgs(args []string) (handle, artifactURL, gitRef, dir string, er
 	return handle, artifactURL, gitRef, dir, nil
 }
 
-// uploadTarball is the P7 "heroku moment" — tar+gzip `dir` (cwd when empty),
-// stream the bytes to /v1/sites/:id/artifact, and return the `file://` URL
-// the control plane wrote. Errors out of the helper bubble up to runDeploy
-// where they surface as a "failed" CLI error; success lands the URL the next
-// /deploy call wants.
+// noDeploySourceRefusal is what `bp deploy <site>` says when it is given no
+// source. It replaced an upload (site-spawner W10) whose every row landed in the
+// control plane's Postgres with no deployment_id, unreadable by the only reader
+// and unreapable by the only reaper — and which the deploy that followed never
+// read, because the deploy route branches to the static path before it looks at
+// artifact_url. A silent success there was worse than this refusal.
 //
-// The streaming model (io.Pipe → tar → gzip → http.Request body) means a
-// 100 MB project doesn't peak RAM as one slice. The user sees no progress
-// bar (cloud uploads are short enough that a spinner adds noise); a future
-// pass can add one without changing the cloudclient surface.
-func uploadTarball(out *writer, client *cloudclient.Client, site cloudclient.Site, dir string, structured bool) (string, error) {
-	root := dir
-	if root == "" {
-		cwd, err := osGetwd()
-		if err != nil {
-			return "", fmt.Errorf("getwd: %w", err)
-		}
-		root = cwd
+// It names the replacement verb and the site the user already typed, so the fix is
+// one copy-paste and not a trip to the docs. `--dir` gets its own line when it was
+// passed: that flag ONLY ever chose what to tarball, so a user who reached for it
+// is exactly the user this message is for.
+func noDeploySourceRefusal(handle, dir string) string {
+	msg := "bp deploy needs a source — pass --artifact-url <url> (an artifact the builder can fetch) or --git-ref <ref> (a ref it can clone).\n" +
+		"  The no-flag tarball upload is retired: it stored bytes nothing could read and nothing could reap, and the deploy never read them.\n" +
+		"  To ship a local build, use the prebuilt lane instead:\n" +
+		"      bp cloud site deploy " + handle + " --prebuilt ./dist"
+	if dir != "" {
+		msg += "\n  (--dir only ever chose which directory to tarball; --prebuilt takes that directory directly.)"
 	}
-
-	if !structured {
-		out.outf("→ packing %s …", root)
-	}
-
-	body, err := streamTarball(tarballOptions{
-		Root:     root,
-		MaxBytes: 1024 * 1024 * 1024, // 1 GiB uncompressed safety net
-	})
-	if err != nil {
-		return "", err
-	}
-	defer body.Close()
-
-	up, err := client.UploadArtifact(cloudCtx(), site.ID, body)
-	if err != nil {
-		return "", err
-	}
-	if !structured {
-		out.outf("→ uploaded %d bytes → %s", up.Bytes, up.Filename)
-	}
-	return up.ArtifactURL, nil
+	return msg
 }
-
-// osGetwd is a tiny indirection so tests can fake the project-root resolution
-// without monkey-patching os.Getwd at the package level. The default value
-// points at the real os.Getwd; tests in this package may swap it.
-var osGetwd = func() (string, error) { return osGetwdReal() }
 
 // --- help text ---------------------------------------------------------------
 
@@ -1126,33 +1098,35 @@ func parseGithubConnectArgs(args []string) (handle, repo, branch, secret string,
 }
 
 func printDeployHelp(out *writer) {
+	// The header line is pinned verbatim by cli_test.go's help-header sweep — keep
+	// it stable and say what changed in the body.
 	const help = `bp deploy — enqueue a deployment for a hosted site (Barkpark Cloud).
 
+  The CONTAINER-model enqueue: it points a builder at a source, uploading nothing.
+
 USAGE
-  bp deploy <site> [--dir <path>] [--artifact-url <url>] [--git-ref <ref>]
-  bp deploy --site <site>                # --site is an alias for the positional
+  bp deploy <site> --artifact-url <url>   # an artifact the builder can fetch
+  bp deploy <site> --git-ref <ref>        # a ref the builder can clone
+  bp deploy --site <site> …               # --site is an alias for the positional
 
 WHAT IT DOES
-  The DEFAULT flow is the "heroku moment": tar+gzip the project dir, stream
-  it to the control plane's artifact-upload route, then enqueue a Deployment
-  that points at the uploaded file:// URL. The off-box builder polls for the
-  queued row and walks it through building → pushing → live.
+  Enqueues a Deployment row pointing at a source an out-of-band builder can
+  reach, and prints the queued row. It uploads nothing and builds nothing
+  locally — one of the two source flags is REQUIRED.
 
-      cd ~/my-next-app
-      bp deploy --site demo
+TO SHIP A LOCAL BUILD, USE THE PREBUILT LANE
+  The no-flag "tarball the cwd and upload it" flow is RETIRED. Build locally
+  and hand the output over instead — the control plane relays those bytes to
+  the site's box, which extracts and serves them without running npm:
 
-  With no flags the cwd is tarballed (defaulting to .gitignore + a built-in
-  ignore list — node_modules, .next, .git, _build, deps, dist, build, …).
+      cd ~/my-astro-site && npm run build
+      bp cloud site deploy demo --prebuilt ./dist
 
-ESCAPE HATCHES
-  --artifact-url   skip the upload; the builder fetches the artifact directly
-                   from a pre-built file:// or https:// URL
-  --git-ref        ask the builder to build a specific ref (no local upload)
-  --dir            project root to tar (defaults to the current directory)
+  That lane needs the site to have opted in (prebuilt_enabled); a deploy on a
+  site that has not says so and names the PATCH that enables it.
 
 FLAGS
-  --dir <path>           project root to archive (default: cwd)
-  --artifact-url <url>   pointer to a pre-built artifact the builder will pick up
+  --artifact-url <url>   pointer to a pre-built artifact the builder will fetch
   --git-ref <ref>        git ref (branch / tag / sha) the builder will build
   --site <site>          alias for the positional <site> argument
   -o json                emit one machine-readable JSON object on stdout`

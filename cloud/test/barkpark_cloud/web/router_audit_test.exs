@@ -1263,8 +1263,15 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
       assert ev.metadata["has_artifact"] == true
     end
 
-    test "POST /v1/sites/:id/artifact writes site.artifact_uploaded (digest + bytes)" do
-      {user, team, token} = logged_in()
+    # site-spawner W10: the site-scoped upload route is RETIRED, so
+    # `site.artifact_uploaded` is a dead action — and that it was ALWAYS dead in
+    # practice is the evidence that retiring it costs nothing. Prod's audit table
+    # holds 244 rows across four weeks and ZERO with `target_type: "site"`, while
+    # the deployment-scoped sibling's rows prove auditing fires; no human ever
+    # called this route. Its only caller was `bp deploy`'s no-flag branch, whose
+    # every insert was an orphan by construction.
+    test "POST /v1/sites/:id/artifact is unrouted → 404 and NO audit is written" do
+      {_user, team, token} = logged_in()
       site = site_fixture(team)
 
       conn =
@@ -1273,17 +1280,8 @@ defmodule BarkparkCloud.Web.RouterAuditTest do
         |> put_req_header("authorization", "Bearer #{token}")
         |> Router.call(@opts)
 
-      assert conn.status == 201
-
-      assert [ev] = events(team, "site.artifact_uploaded")
-      assert ev.actor_user_id == user.id
-      assert ev.metadata["bytes"] > 0
-      # site-spawner W9: the sink is Postgres, so the audit names the DIGEST of
-      # the bytes rather than a filename on a disk nothing could ever read.
-      assert ev.metadata["sha256"] ==
-               :sha256 |> :crypto.hash("tarball-bytes") |> Base.encode16(case: :lower)
-
-      refute Map.has_key?(ev.metadata, "filename")
+      assert conn.status == 404
+      assert events(team, "site.artifact_uploaded") == []
     end
 
     test "POST /v1/sites/:id/env writes site.env_changed — key names only, NEVER the values" do

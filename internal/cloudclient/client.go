@@ -1019,8 +1019,15 @@ type Site struct {
 	GithubRepo              string `json:"github_repo,omitempty"`
 	GithubBranch            string `json:"github_branch,omitempty"`
 	GithubWebhookConfigured bool   `json:"github_webhook_configured,omitempty"`
-	InsertedAt              string `json:"inserted_at"`
-	UpdatedAt               string `json:"updated_at"`
+	// PrebuiltEnabled is the site's opt-in to accepting builds produced somewhere
+	// other than its box (site-spawner W9). The control plane has serialized it
+	// since W9 and PATCH /v1/sites/:id accepts it, but no Go field decoded it — so
+	// `bp` could TURN the opt-in on and then never read it back, and a `--prebuilt`
+	// deploy's 409 was the first place a user learned the site was not enabled.
+	// NOT omitempty: a false here is an answer, not an absence.
+	PrebuiltEnabled bool   `json:"prebuilt_enabled"`
+	InsertedAt      string `json:"inserted_at"`
+	UpdatedAt       string `json:"updated_at"`
 }
 
 // Deployment is one build-and-release of a Site, as returned by the
@@ -1178,63 +1185,16 @@ func (c *Client) SetEnv(ctx context.Context, siteID string, env map[string]strin
 	return nil
 }
 
-// ArtifactUpload is the response shape from POST /v1/sites/:id/artifact: the
-// `file://` URL the control plane wrote the tarball to (passed verbatim into
-// /deploy as `artifact_url`), the byte count for the user-facing summary, and
-// the on-disk filename so logs can echo it.
-type ArtifactUpload struct {
-	ArtifactURL string `json:"artifact_url"`
-	Bytes       int64  `json:"bytes"`
-	Filename    string `json:"filename"`
-}
-
-// UploadArtifact streams a tarball to POST /v1/sites/:id/artifact as
-// application/octet-stream (Bearer). The reader is read in full and shipped
-// without buffering — a 100 MB project tar.gz never goes through json.Marshal
-// or sits in a byte slice. The returned `artifact_url` is the `file://` URL
-// the builder reads next; the caller hands it to Deploy.
+// ArtifactUpload is the response shape from
+// POST /v1/sites/:id/deployments/:dep_id/artifact — the byte count the control
+// plane recorded, which the caller reconciles against what it sent.
 //
-// A 413 surfaces as "artifact_too_large" via cloudError; a 404 (site in
-// another team, or no such id) propagates the control plane's no-leak error.
-func (c *Client) UploadArtifact(ctx context.Context, siteID string, body io.Reader) (ArtifactUpload, error) {
-	if body == nil {
-		return ArtifactUpload{}, fmt.Errorf("upload artifact: nil body")
-	}
-	req, err := http.NewRequestWithContext(ctx, "POST", c.url("/v1/sites/"+esc(siteID)+"/artifact"), body)
-	if err != nil {
-		return ArtifactUpload{}, err
-	}
-	req.Header.Set("Content-Type", "application/octet-stream")
-	if c.Token != "" {
-		req.Header.Set("Authorization", "Bearer "+c.Token)
-	}
-
-	// A large tarball over a slow link easily exceeds the shared 30s
-	// DefaultTimeout — and http.Client.Timeout is an absolute deadline over the
-	// whole body stream that ctx cannot extend. So the upload path deliberately
-	// uses a client with no wall-clock cap: cancellation is bounded only by the
-	// caller's ctx. The injected client (tests) is honored when present.
-	client := c.HTTP
-	if client == nil {
-		client = &http.Client{}
-	}
-	resp, err := client.Do(req)
-	if err != nil {
-		return ArtifactUpload{}, err
-	}
-	defer resp.Body.Close()
-	raw, err := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
-	if err != nil {
-		return ArtifactUpload{}, fmt.Errorf("read upload response: %w", err)
-	}
-	if !ok(resp.StatusCode) {
-		return ArtifactUpload{}, cloudError(resp.StatusCode, raw)
-	}
-	var out ArtifactUpload
-	if err := json.Unmarshal(raw, &out); err != nil {
-		return ArtifactUpload{}, fmt.Errorf("decode upload response: %w", err)
-	}
-	return out, nil
+// site-spawner W10: the `artifact_url` and `filename` fields are GONE with the
+// site-scoped route that emitted them. That route's `file://` URL named a file on
+// a host the builder could never reach; W9 stopped emitting both keys, and
+// nothing but a test fixture noticed. `Bytes` is the only field any caller reads.
+type ArtifactUpload struct {
+	Bytes int64 `json:"bytes"`
 }
 
 // AddDomain appends a hostname to the site's domains array via
@@ -1613,8 +1573,8 @@ func (c *Client) postSiteDeploy(ctx context.Context, id string, req map[string]a
 // application/octet-stream, the sha256 the client computed over exactly these
 // bytes in X-Artifact-Sha256, and a REAL Content-Length.
 //
-// The declared size is the point. UploadArtifact (the container-model sibling)
-// hands http.Client an opaque io.Reader, which sends the body chunked with
+// The declared size is the point. The retired site-scoped upload (W10) handed
+// http.Client an opaque io.Reader, which sends the body chunked with
 // Content-Length -1: the server cannot reject an oversized upload until it has
 // read it, and the client learns the true size only after the last byte. Here
 // the caller has already buffered the artifact to a temp file, so the size and
@@ -1622,8 +1582,9 @@ func (c *Client) postSiteDeploy(ctx context.Context, id string, req map[string]a
 // the digest travels WITH the bytes it describes so the box can re-verify before
 // it stages anything.
 //
-// Like UploadArtifact this deliberately uses a client with no wall-clock cap:
-// an upload's deadline is the caller's ctx, not the shared 30s DefaultTimeout.
+// This deliberately uses a client with NO wall-clock cap: an upload's deadline is
+// the caller's ctx, not the shared 30s DefaultTimeout, which is an absolute
+// deadline over the whole body stream that ctx cannot extend.
 func (c *Client) UploadDeploymentArtifact(ctx context.Context, siteID, deploymentID string, body io.Reader, size int64, sha256hex string) (ArtifactUpload, error) {
 	if body == nil {
 		return ArtifactUpload{}, fmt.Errorf("upload artifact: nil body")

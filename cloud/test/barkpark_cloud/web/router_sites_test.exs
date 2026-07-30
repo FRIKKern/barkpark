@@ -194,14 +194,6 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   # writes have landed.
   defp started_snapshot(deployment_id), do: Process.get({:deploy_started, deployment_id})
 
-  defp artifacts_for_site(site_id) do
-    import Ecto.Query
-
-    BarkparkCloud.Repo.all(
-      from a in BarkparkCloud.Registry.SiteArtifact, where: a.site_id == ^site_id
-    )
-  end
-
   ## POST /v1/sites — create
 
   describe "POST /v1/sites" do
@@ -561,128 +553,146 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     end
   end
 
-  ## POST /v1/sites/:id/artifact — tarball upload.
+  ## POST /v1/sites/:id/artifact — RETIRED (site-spawner W10).
   ##
-  ## site-spawner W9 (charter D91/D97): the sink is POSTGRES now, not a
-  ## host-local dir behind a `file://` URL nothing could open, and the gate is
-  ## write ABILITY, not the session-only default that 401'd every PAT.
+  ## The site-scoped upload route is GONE, and this describe block is what keeps it
+  ## gone. It inserted a SiteArtifact with a site_id and NO deployment_id, while
+  ## the only read (`Sites.Deploy.artifact_for/1`) and the only delete
+  ## (`drop_artifact/1`) both key on deployment_id — so every row it wrote was a
+  ## permanent up-to-32 MB bytea nothing could find and nothing could reap. Its
+  ## six W9 tests all asserted the STORE worked; none asserted anyone could ever
+  ## read what was stored, which is why the leak shipped green.
+  ##
+  ## Restore the route and the first test goes red (201 instead of 404).
 
-  describe "POST /v1/sites/:id/artifact" do
-    test "stores the bytes in Postgres and returns an opaque id + digest → 201" do
+  describe "POST /v1/sites/:id/artifact (retired)" do
+    test "the site-scoped upload path no longer exists → 404, and NOTHING is stored" do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
-      {:ok, site} = Registry.create_site(bp, %{name: "Demo", slug: "demo"})
+      {:ok, site} = Registry.create_site(bp, %{name: "Demo", slug: "demo-retired"})
       token = login_token(user)
 
-      payload = :crypto.strong_rand_bytes(2048)
+      conn = call_binary(:post, "/v1/sites/#{site.id}/artifact", "tarball-bytes", token)
+
+      # 404 from the router's fall-through `match _`, not from the site lookup:
+      # the path itself is unrouted now.
+      assert conn.status == 404
+
+      # The whole point: an unrouted POST cannot leave an orphan behind.
+      assert BarkparkCloud.Repo.aggregate(BarkparkCloud.Registry.SiteArtifact, :count) == 0
+    end
+
+    test "the DEPLOYMENT-scoped route is the replacement and still binds its bytes" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+      token = login_token(user)
+
+      dep = mint_prebuilt(site, token)
 
       conn =
-        call_binary(:post, "/v1/sites/#{site.id}/artifact", payload, token)
+        call_binary(
+          :post,
+          "/v1/sites/#{site.id}/deployments/#{dep["id"]}/artifact",
+          "real-bytes",
+          token
+        )
 
       assert conn.status == 201
-      body = json_body(conn)
 
-      assert body["sha256"] == sha256_hex(payload)
-      assert body["bytes"] == byte_size(payload)
-      assert is_binary(body["artifact_id"])
-
-      # The file:// plane is GONE — no path, no filename, nothing a caller could
-      # be tempted to open.
-      refute Map.has_key?(body, "artifact_url")
-      refute Map.has_key?(body, "filename")
-
-      # And the row holds the exact bytes that came in.
-      stored = BarkparkCloud.Repo.get!(BarkparkCloud.Registry.SiteArtifact, body["artifact_id"])
-      assert stored.bytes == payload
+      # Bound at INSERT — findable by artifact_for/1, reapable by drop_artifact/1.
+      # That is the whole difference from the route retired above.
+      stored = Sites.Deploy.artifact_for(dep["id"])
+      assert stored.deployment_id == dep["id"]
       assert stored.site_id == site.id
-      assert stored.deployment_id == nil
+      assert stored.bytes == "real-bytes"
+    end
+  end
+
+  ## THE TYPED REFUSAL HAS TO REACH THE USER (site-spawner W10).
+  ##
+  ## The box answers every refusal NESTED: `BarkparkWeb.SiteDeployController`'s
+  ## `bad_request/3`, `feature_not_configured/1` and `build_id_mismatch/3` all
+  ## render `%{error: %{code: …, message: …}}`, and `Registry.relay_with/5` decodes
+  ## it with string keys. `box_refusal/2` read a FLAT `body["error"]`, so it bound
+  ## a map, failed its `is_binary` guard, and produced the bare "the instance
+  ## refused the deploy (HTTP 400)" — which made all eighteen typed codes
+  ## (`invalid_artifact`, `invalid_artifact_digest`, `artifact_too_large`, the
+  ## `DeployRequest` validation set …) invisible, and the refusals that name their
+  ## cause most precisely the ones that named it least. There is no BPSTAGE line
+  ## to fall back on either: a request-decode refusal happens BEFORE
+  ## `site-deploy.sh` runs, so there are no stages at all.
+  ##
+  ## Revert `refusal_detail/1`'s nested clause and the first test goes red.
+
+  describe "site-spawner W10: a typed box refusal travels intact" do
+    test "the box's NESTED %{error: %{code, message}} lands in failure_reason, both halves" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+
+      # Byte-for-byte the shape `SiteDeployController.bad_request/3` renders, with
+      # a real `DeployRequest` code (deploy_request.ex:314) — read off the actual
+      # decode site (`Registry.relay_with/5` → `Jason.decode` → string keys), not
+      # assumed.
+      FakeBoxRelay.program(
+        start:
+          {:ok, 400,
+           %{
+             "error" => %{
+               "code" => "invalid_artifact_digest",
+               "message" => "artifact_sha256 must be 64 lowercase hex characters"
+             }
+           }}
+      )
+
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+
+      reason = Registry.get_deployment(d.id).failure_reason
+      assert reason =~ "invalid_artifact_digest"
+      assert reason =~ "artifact_sha256 must be 64 lowercase hex characters"
+      assert reason =~ "HTTP 400"
     end
 
-    test "another team's site → 404 (no existence leak)" do
-      {_o, other_team} = user_with_team()
-      other_bp = barkpark_fixture(other_team)
-      {:ok, other_site} = Registry.create_site(other_bp, %{name: "S", slug: "s"})
+    test "a nested error with only a code still names the code" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
 
-      {user, _team} = user_with_team()
-      token = login_token(user)
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(start: {:ok, 503, %{"error" => %{"code" => "feature_not_configured"}}})
 
-      conn = call_binary(:post, "/v1/sites/#{other_site.id}/artifact", "ignored", token)
-      assert conn.status == 404
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+      assert Registry.get_deployment(d.id).failure_reason =~ "feature_not_configured"
     end
 
-    test "body larger than the cap → 413 + nothing stored" do
-      {user, team} = user_with_team()
-      bp = barkpark_fixture(team)
-      {:ok, site} = Registry.create_site(bp, %{name: "Big", slug: "big"})
-      token = login_token(user)
+    test "a FLAT string body still works — the pre-existing arm is not regressed" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
 
-      # The route's own cap is 32 MB (a build OUTPUT, not a project dir); the
-      # test env overrides it to 1 MiB so this ships kilobytes, not megabytes.
-      big = :binary.copy(<<0>>, 2 * 1024 * 1024)
-      conn = call_binary(:post, "/v1/sites/#{site.id}/artifact", big, token)
-      assert conn.status == 413
-      assert json_body(conn)["error"] == "artifact_too_large"
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+      FakeBoxRelay.program(start: {:ok, 409, %{"error" => "another deploy holds the lock"}})
 
-      assert artifacts_for_site(site.id) == []
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+      assert Registry.get_deployment(d.id).failure_reason =~ "another deploy holds the lock"
     end
 
-    test "an EMPTY body → 422, not a 500" do
-      {user, team} = user_with_team()
-      bp = barkpark_fixture(team)
-      {:ok, site} = Registry.create_site(bp, %{name: "Empty", slug: "empty"})
-      token = login_token(user)
+    test "an UNREADABLE body degrades to the status alone rather than crashing" do
+      {_user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
 
-      conn = call_binary(:post, "/v1/sites/#{site.id}/artifact", "", token)
-      assert conn.status == 422
-      assert json_body(conn)["error"] == "empty_artifact"
-      assert artifacts_for_site(site.id) == []
-    end
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+      # `relay_with/5`'s own fallback for a body it cannot decode as an object.
+      FakeBoxRelay.program(start: {:ok, 502, %{}})
 
-    ## THE AUTH-AXIS FLIP (charter D97).
-    ##
-    ## This route used to run on `with_team_site/2`'s `:session` default, which
-    ## 401s EVERY PAT — including a root one. A CI runner could therefore START a
-    ## deploy (`/deploy` is `{:ability, "write"}`) but could not UPLOAD to it:
-    ## uploading was not more gated, it was gated on the wrong AXIS. Nothing in
-    ## the suite pinned the old behaviour, so the flip ships with its own tests.
-    ## Revert the route to `with_team_site(conn, fn conn, site -> …`, and the
-    ## write-PAT test below goes red (401 instead of 201).
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
 
-    test "AUTH FLIP: a WRITE PAT can upload → 201" do
-      {user, team} = user_with_team()
-      bp = barkpark_fixture(team)
-      {:ok, site} = Registry.create_site(bp, %{name: "Pat", slug: "pat-w"})
-
-      {:ok, pat, _} =
-        Accounts.create_personal_access_token(user, team, %{
-          name: "ci-runner",
-          abilities: ["write"]
-        })
-
-      conn = call_binary(:post, "/v1/sites/#{site.id}/artifact", "tarball", pat)
-      assert conn.status == 201
-      assert json_body(conn)["sha256"] == sha256_hex("tarball")
-    end
-
-    test "AUTH FLIP: a READ-only PAT is refused → 403 (the ability, not the axis)" do
-      {user, team} = user_with_team()
-      bp = barkpark_fixture(team)
-      {:ok, site} = Registry.create_site(bp, %{name: "Pat", slug: "pat-r"})
-
-      {:ok, pat, _} =
-        Accounts.create_personal_access_token(user, team, %{
-          name: "read-only",
-          abilities: ["read"]
-        })
-
-      conn = call_binary(:post, "/v1/sites/#{site.id}/artifact", "tarball", pat)
-      assert conn.status == 403
-      assert artifacts_for_site(site.id) == []
-    end
-
-    test "without auth → 401" do
-      conn = call_binary(:post, "/v1/sites/x/artifact", "x", nil)
-      assert conn.status == 401
+      assert Registry.get_deployment(d.id).failure_reason ==
+               "the instance refused the deploy (HTTP 502)"
     end
   end
 

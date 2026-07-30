@@ -179,7 +179,6 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/sites/:id/rollback user    roll a site back to a prior deployment (write ability)
       POST    /v1/sites/:id/deployments/:dep_id/promote user rollback/redeploy — mint a NEW queued prod deployment pinned to the source artifact
       GET     /v1/sites/:id/previews user    list a site's branch previews (gh-6), one per branch
-      POST    /v1/sites/:id/artifact user    upload tarball (octet-stream) → artifact id + sha256 (write ability)
       POST    /v1/sites/:id/deployments/:dep_id/artifact user  upload a PREBUILT dist for a minted deployment, then start it (write ability)
       POST    /v1/sites/:id/env    user      replace the encrypted env blob
       POST    /v1/sites/:id/domains user     add a domain to a site
@@ -6247,75 +6246,29 @@ defmodule BarkparkCloud.Web.Router do
     end)
   end
 
-  # POST /v1/sites/:id/artifact (application/octet-stream body) → 201
-  # {artifact_id, sha256, bytes}.
+  # POST /v1/sites/:id/artifact — RETIRED (site-spawner W10). No replacement at
+  # this path: the DEPLOYMENT-scoped route below is the whole artifact plane.
   #
-  # site-spawner W9 (charter D91): the sink is POSTGRES, not the filesystem. This
-  # route used to write the tarball to a host-local dir and hand back a `file://`
-  # URL "the builder process shares" — it shared nothing. The control-plane
-  # container declares no volume for that path, and the box that would read it
-  # runs on a DIFFERENT HOST, so the URL named a file nothing could ever open
-  # (and runtime.exs claimed it survived restarts, which the compose file
-  # refutes). `cloud_pgdata` is the control plane's only durable volume.
+  # It was not deprecated for tidiness, it was broken by construction. The route
+  # inserted a `SiteArtifact` carrying a `site_id` and NO `deployment_id`, while
+  # the only read (`Sites.Deploy.artifact_for/1`) and the only delete
+  # (`Sites.Deploy.drop_artifact/1`) BOTH key on `deployment_id`, and nothing ever
+  # backfilled it. So every row it created was unreadable AND unreapable: a
+  # permanent up-to-32 MB bytea on `cloud_pgdata`, the control plane's only
+  # durable volume, in flat contradiction of the read-once-then-drop lifecycle
+  # `Registry.SiteArtifact`'s own moduledoc documents.
   #
-  # AUTH (charter D97): `{:ability, "write"}`, not the `:session` default. The old
-  # gate 401'd every PAT — including a root one — so a CI runner could START a
-  # deploy but could not UPLOAD to it. That is not "uploading is more sensitive",
-  # it is gating on the wrong AXIS. Both artifact routes now take the same
-  # credential the deploy route does.
+  # Nothing consumed it, either. `POST /v1/sites/:id/deploy` kind-branches to
+  # `deploy_static_site/2` BEFORE it ever reads `artifact_url`, so for every site
+  # this epic serves the tarball was never opened — which made `bp deploy`'s
+  # default no-flag path a guaranteed orphan insert. Prod agreed: 0 rows in
+  # `site_artifacts`, and 0 audit rows with `target_type: "site"` across four
+  # weeks while the deployment-scoped sibling's rows prove the audit fires at all.
   #
-  # Size cap: 32 MB (`@max_artifact_bytes`), refused with 413. A build OUTPUT is
-  # 12-16 KB for an Astro `dist/` and ~18 MB for a Next standalone; the 100 MB of
-  # the file:// era was sized for uploading a whole project dir, node_modules and
-  # all, which is exactly the shape this wave stops shipping.
-  #
-  # Ownership: a site in another team returns 404 (existence-leak protection),
-  # same shape as a nonexistent id — never 403.
-  post "/v1/sites/:id/artifact" do
-    with_team_site(conn, {:ability, "write"}, fn conn, site ->
-      case read_artifact_body(conn, max_artifact_bytes()) do
-        # An EMPTY body is a caller error, not a server one: `bytes` is required,
-        # so the insert would fail its changeset and a bare `{:ok, _} =` match
-        # would turn "you posted nothing" into a 500 with no detail.
-        {:ok, conn, ""} ->
-          json(conn, 422, %{
-            error: "empty_artifact",
-            detail: "the request body was empty — POST the tar.gz as application/octet-stream"
-          })
-
-        {:ok, conn, bytes} ->
-          sha = sha256_hex(bytes)
-          {:ok, artifact} = Sites.Deploy.store_site_artifact(site, bytes, sha)
-
-          # activity-audit-log: the upload is its own transaction, so the audit is
-          # a post-commit best-effort record_audit/1. Detail carries the digest +
-          # byte count — never the artifact bytes.
-          _ =
-            Accounts.record_audit(%{
-              team_id: site.team_id,
-              actor_user_id: conn.assigns.current_user.id,
-              action: "site.artifact_uploaded",
-              target_type: "site",
-              target_id: site.id,
-              metadata: %{sha256: sha, bytes: byte_size(bytes)}
-            })
-
-          push_event(site.team_id, "audit")
-
-          json(conn, 201, %{
-            artifact_id: artifact.id,
-            sha256: sha,
-            bytes: byte_size(bytes)
-          })
-
-        {:error, :too_large, conn} ->
-          json(conn, 413, %{error: "artifact_too_large", max_bytes: max_artifact_bytes()})
-
-        {:error, reason, conn} ->
-          json(conn, 500, %{error: "upload_failed", reason: inspect(reason)})
-      end
-    end)
-  end
+  # The lane that replaces it binds bytes to a deployment at INSERT — mint
+  # (`POST /v1/sites/:id/deploy {"source": "prebuilt"}`) → upload (below) → drive
+  # → drop — so they can always be found and always be reaped.
+  # `bp cloud site deploy <site> --prebuilt ./dist` speaks it end to end.
 
   # POST /v1/sites/:id/deployments/:dep_id/artifact (application/octet-stream)
   # → 201 {deployment, artifact_sha256, bytes} — the UPLOAD half of
