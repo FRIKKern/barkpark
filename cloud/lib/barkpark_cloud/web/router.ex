@@ -28,7 +28,8 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/auth/device/deny    user   {user_code} → {ok: true}
       GET     /v1/auth/oauth/providers           —  enabled OAuth providers (SPA buttons)
       GET     /v1/auth/oauth/:provider           —  302 → IdP authorize URL (signed, single-use state)
-      GET     /v1/auth/oauth/:provider/callback  —  exchange → session → 302 /#oauth=<token>&team=<id>
+      GET     /v1/auth/oauth/:provider/callback  —  identity → 302 /#oauth_code=<one-time code>&team=<id>
+      POST    /v1/auth/oauth/exchange            —  burn the one-time code → session token (no GET twin)
       DELETE  /v1/auth/logout      user      revoke the calling session token
       POST    /v1/auth/sse-ticket  user      mint a 60s single-use ticket for GET /v1/events
       POST    /v1/account/two-factor/enroll user   start TOTP enroll → {otpauth_uri, secret}
@@ -545,6 +546,16 @@ defmodule BarkparkCloud.Web.Router do
   # of the D14 trap.
   defp side_effecting_get?(["v1", "auth", "oauth", "providers"]), do: false
 
+  # cch-w10: `/v1/auth/oauth/exchange` is a POST-ONLY path that shares the
+  # initiator's segment arity, so without this clause the fence would 405 it — and
+  # a 405 with `allow: GET` would be a LIE about a path that has no GET handler.
+  # It is not side-effecting under a GET either: `OAuth.authorize_url/1` resolves
+  # the provider before `mint_state/1` runs, and "exchange" resolves to nothing, so
+  # the initiator answers 404 `provider_not_enabled` having written no row. Same
+  # shape as the `providers` exclusion above (the D14 trap) and it must likewise
+  # come FIRST.
+  defp side_effecting_get?(["v1", "auth", "oauth", "exchange"]), do: false
+
   # Mints an `oauth_states` row per hit (OAuth.authorize_url → mint_state), on an
   # UNAUTHENTICATED route.
   defp side_effecting_get?(["v1", "auth", "oauth", _provider]), do: true
@@ -994,17 +1005,25 @@ defmodule BarkparkCloud.Web.Router do
 
   ## OAuth / SSO (oauth-sso) — "Continue with GitHub / Google".
   ##
-  ## Three UNAUTHENTICATED routes (they PRECEDE a session, exactly like
+  ## Four UNAUTHENTICATED routes (they PRECEDE a session, exactly like
   ## /v1/auth/login). The flow is cookieless: a stateless HMAC-signed, SINGLE-USE
-  ## `state` guards CSRF + replay, and the final session token rides back on the
-  ## URL FRAGMENT (never the query — a fragment stays out of access logs /
-  ## Referer), where app.js's bootstrap reads it into setSession. See
-  ## BarkparkCloud.OAuth.
+  ## `state` guards CSRF + replay.
   ##
-  ##   GET /v1/auth/oauth/providers          200 {providers:[…]}  (enabled only)
-  ##   GET /v1/auth/oauth/:provider          302 → IdP authorize URL (404 if off)
-  ##   GET /v1/auth/oauth/:provider/callback 302 → /#oauth=<token>&team=<id>
-  ##                                         (302 → /#oauth_error=oauth_failed on any failure)
+  ## cch-w10 — WHAT COMES BACK ON THE FRAGMENT IS NO LONGER A SESSION TOKEN. A
+  ## fragment stays out of access logs and Referer, which is what made the
+  ## original handoff defensible, but `location` is a RESPONSE HEADER and the
+  ## 302 that carried `#oauth=<30-day token>` handed a live credential to every
+  ## TLS-terminating middlebox, reverse proxy and APM on the path. The callback
+  ## now mints a 120s, hashed, single-use EXCHANGE CODE; the SPA POSTs it to
+  ## /v1/auth/oauth/exchange at boot and gets the real token in a response BODY.
+  ## See BarkparkCloud.OAuth and Accounts.create_oauth_exchange_code/2.
+  ##
+  ##   GET  /v1/auth/oauth/providers          200 {providers:[…]}  (enabled only)
+  ##   GET  /v1/auth/oauth/:provider          302 → IdP authorize URL (404 if off)
+  ##   GET  /v1/auth/oauth/:provider/callback 302 → /#oauth_code=<code>&team=<id>
+  ##                                          (302 → /#oauth_error=oauth_failed on any failure)
+  ##   POST /v1/auth/oauth/exchange           200 {token, team_id} | 401 {error:"invalid_code"}
+  ##                                          (no GET twin on the path — see the route)
 
   # The SPA reads this to decide which "Continue with …" buttons to render —
   # only fully-configured providers (client_id+secret set) appear. No auth: a
@@ -1048,14 +1067,26 @@ defmodule BarkparkCloud.Web.Router do
   # redirect, never a crash and never an exchange attempt. Otherwise: verify the
   # single-use state (CSRF + replay), trade the code for the user's VERIFIED
   # identity, resolve-or-birth the Cloud user (safe (provider, provider_uid)
-  # linking — never email), mint a session token CARRYING the caller's IP +
-  # User-Agent (so the OAuth session is covered by the sessions list and
-  # sign-out-everywhere), and 302 to the SPA with the token on the fragment.
+  # linking — never email), mint a ONE-TIME EXCHANGE CODE, and 302 to the SPA
+  # with THAT on the fragment.
   #
-  # Every failure collapses to ONE generic /#oauth_error=oauth_failed redirect
+  # cch-w10 — WHAT USED TO RIDE THE FRAGMENT AND WHY IT MOVED. This handler used
+  # to mint the session token itself and 302 to `/#oauth=<token>`. `redirect_to/2`
+  # is `put_resp_header("location", …) + send_resp(302, "")`, so the ONE
+  # legitimate response of the whole sign-in carried a live 30-day session token
+  # in a RESPONSE HEADER. A fragment never reaches a SERVER access log, which is
+  # what made the original design defensible — but it is fully visible to
+  # anything that logs RESPONSE headers: a TLS-terminating middlebox, a reverse
+  # proxy, an APM agent. Same class as the `?token=` that `GET /v1/events` used
+  # to take, and the same answer: make the thing on the wire worthless. The code
+  # here lives 120 seconds, is stored only as a SHA-256 hash, and is burned by the
+  # SPA's own `POST /v1/auth/oauth/exchange`.
+  #
+  # IDENTITY RESOLUTION STAYS HERE. Only the session mint moved. Every failure
+  # therefore still collapses to ONE generic /#oauth_error=oauth_failed redirect
   # (like Coolify's single translated `auth.failed`) — no provider/internal
   # detail leaks, and a bad/expired/forged/replayed state creates NO user and NO
-  # token.
+  # credential of any kind.
   get "/v1/auth/oauth/:provider/callback" do
     provider = conn.path_params["provider"]
 
@@ -1072,19 +1103,74 @@ defmodule BarkparkCloud.Web.Router do
            :ok <- OAuth.verify_state(state, provider),
            {:ok, identity} <- OAuth.fetch_identity(provider, code),
            {:ok, user} <- Accounts.get_or_create_user_from_oauth(identity),
-           # ORIGIN "oauth:<provider>": `provider` is already bound by this
-           # with-chain and IS the answer — no inference, and each provider
-           # reports itself rather than collapsing to a generic "oauth".
-           {:ok, token} <-
-             Accounts.create_user_session_token(
-               user,
-               session_opts(conn) ++ [origin: "oauth:#{provider}"]
-             ) do
+           # `provider` is already bound by this with-chain and IS the answer, so
+           # it rides the code's own `sent_to` as "oauth:<provider>" — that is how
+           # the honest `origin: "oauth:<provider>"` survives the mint moving to
+           # the exchange. No inference anywhere; each provider reports itself
+           # rather than collapsing to a generic "oauth".
+           {:ok, exchange_code} <- Accounts.create_oauth_exchange_code(user, provider) do
         team = Accounts.primary_team(user)
-        redirect_to(conn, "/#oauth=#{token}&team=#{team && team.id}")
+        redirect_to(conn, "/#oauth_code=#{exchange_code}&team=#{team && team.id}")
       else
         _ -> redirect_to(conn, "/#oauth_error=oauth_failed")
       end
+    end
+  end
+
+  # POST /v1/auth/oauth/exchange {code} → 200 {token, team_id} | 401
+  # {error: "invalid_code"}. The second half of the cch-w10 handoff: the SPA boots,
+  # reads the one-time code off its own fragment, and trades it here for the real
+  # session token — over a request whose credential is in the BODY, never in a
+  # response header.
+  #
+  # UNAUTHENTICATED by construction (there is no session yet), so it is NOT behind
+  # Auth.require_user. What stands in for auth is the code itself: 32 bytes of
+  # `:crypto.strong_rand_bytes`, hashed at rest, 120s TTL, burned matched-row-only
+  # under `FOR UPDATE`, plus a per-IP rate limit on the redemption attempt.
+  #
+  # DELIBERATELY NO GET TWIN ON THIS PATH — and the PATH-has-no-GET part is the
+  # actual invariant, not the verb. `plug(Plug.Head)` rewrites HEAD→GET
+  # unconditionally BEFORE matching, so a HEAD prober can only be refused by there
+  # being no GET clause that reaches this handler. (Measured counterexample
+  # elsewhere in this router: HEAD /v1/tokens answers 401, not 404, precisely
+  # because a GET twin lives beside its POST.) Pinned by router_oauth_test.exs.
+  #
+  # HONEST FOOTNOTE ON THAT 404, because "no GET clause on the path" is not
+  # literally true here: `get "/v1/auth/oauth/:provider"` has the same segment
+  # arity and DOES pattern-match "/v1/auth/oauth/exchange". It answers 404
+  # `provider_not_enabled` because `OAuth.authorize_url/1` resolves the provider
+  # BEFORE it mints anything, so "exchange" fails closed with zero side effects —
+  # no oauth_states row, no credential, no reachable handler. The prober's outcome
+  # is the one the invariant is about; the route it fell through is named here so
+  # nobody later reads the test's `== 404` as proof of a route that isn't there.
+  #
+  # SESSION METADATA MOVES WITH THE MINT: session_opts(conn) now captures the
+  # BROWSER's own IP + User-Agent (this XHR) instead of the IdP redirect hop's, so
+  # the sessions security panel gets the more useful of the two.
+  post "/v1/auth/oauth/exchange" do
+    code = conn.body_params["code"]
+
+    # 30/min/IP, an EXPLICIT entry rather than the limiter's @default_limit of 10:
+    # this is the last hop of a sign-in and every user behind one corporate NAT
+    # shares a peer_ip, so 10 starves exactly the population the module's own
+    # push_register docstring flags. It is still a hard bound on guessing a
+    # 256-bit code.
+    case DeviceAuthRateLimiter.check("oauth_exchange:" <> (peer_ip(conn) || "unknown")) do
+      {:error, :rate_limited} ->
+        json(conn, 429, %{error: "rate_limited"})
+
+      :ok ->
+        with true <- is_binary(code),
+             {user, origin} <- Accounts.consume_oauth_exchange_code(code),
+             {:ok, token} <-
+               Accounts.create_user_session_token(user, session_opts(conn) ++ [origin: origin]) do
+          team = Accounts.primary_team(user)
+          json(conn, 200, %{token: token, team_id: team && team.id})
+        else
+          # ONE generic refusal for unknown / burned / expired / malformed, exactly
+          # like the callback's single redirect: a prober must not learn which.
+          _ -> json(conn, 401, %{error: "invalid_code"})
+        end
     end
   end
 

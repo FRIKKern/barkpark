@@ -13153,14 +13153,27 @@
   }
 
   // =========================================================== OAUTH (SSO)
-  // The cookieless token handoff: the OAuth callback 302s to /#oauth=<token>&team=<id>
-  // (fragment, never the query, so it stays out of access logs). On boot we read
-  // it, store the session exactly like a password login, and clean the hash.
-  // /#oauth_error=<reason> surfaces a generic toast. Returns true when a token
-  // was consumed (so render() proceeds as logged-in).
-  function handleOAuthReturn() {
-    var h = (location.hash || "").replace(/^#/, "");
-    if (h.indexOf("oauth=") === -1 && h.indexOf("oauth_error=") === -1) return false;
+  // The cookieless handoff, cch-w10 shape. The callback 302s to
+  // /#oauth_code=<one-time code>&team=<id> — NOT a session token. The code lives
+  // 120s server-side, is stored only as a hash, and is burned by the single
+  // POST /v1/auth/oauth/exchange this module makes at boot. Why: `location` is a
+  // RESPONSE HEADER, so the old /#oauth=<30-day token> handed a live credential to
+  // every TLS-terminating middlebox, reverse proxy and APM on the path.
+  //
+  // TWO RULES HOLD THIS TOGETHER, and both used to be broken here:
+  //   1. The credential-bearing URL is REPLACED, never PUSHED. The old code did
+  //      `location.hash = "#fleet"`, which is a history PUSH — /#oauth=<token>
+  //      stayed one Back press away for the life of the tab. Every comparable
+  //      cleanup in this file (the checkout + billing-portal returns above) uses
+  //      history.replaceState, and so does this one.
+  //   2. The scrub happens BEFORE the network hop, not after it. A slow or failed
+  //      exchange must not leave the code sitting in the address bar.
+
+  // Pure classifier over the landing fragment. → null (not an OAuth return)
+  // | {code, team} | {error: true}. Node-pinned via __bpTestHook.
+  function oauthReturnFromHash(hash) {
+    var h = (hash || "").replace(/^#/, "");
+    if (h.indexOf("oauth_code=") === -1 && h.indexOf("oauth_error=") === -1) return null;
 
     var params = {};
     h.split("&").forEach(function (kv) {
@@ -13169,17 +13182,103 @@
       params[safeDecode(kv.slice(0, i))] = safeDecode(kv.slice(i + 1));
     });
 
-    if (params.oauth) {
-      // OAuth sign-ins persist (there is no "remember me" checkbox in this flow).
-      setSession({ token: params.oauth, team_id: params.team || null }, true);
-      location.hash = "#fleet";
-      return true;
+    if (params.oauth_code) return { code: params.oauth_code, team: params.team || null };
+    if (params.oauth_error) return { error: true };
+    return null;
+  }
+
+  // One-shot: set by a SUCCESSFUL bootOAuth exchange, read (and cleared) by the
+  // first handleOAuthReturn(). This is what keeps render() SYNCHRONOUS — the
+  // await lives in the boot gate, and render()'s 8 call sites are untouched.
+  var oauthJustLanded = false;
+
+  // Unchanged name + signature + meaning ("did this render follow an OAuth
+  // sign-in?"), so render()'s `didOAuth` branches are byte-identical. It is now a
+  // flag read rather than the consumer, and it is one-shot: a later render() in
+  // the same page life must not re-trigger the /new and /activate bounces.
+  function handleOAuthReturn() {
+    var landed = oauthJustLanded;
+    oauthJustLanded = false;
+    return landed;
+  }
+
+  // The honest in-between state. The exchange is a full round trip on a cold SPA
+  // boot, and without this the user stares at the LOGGED-OUT auth screen while
+  // their sign-in is still succeeding. Hides the login card rather than replacing
+  // its markup, so a failed exchange can put it straight back.
+  function renderOAuthPending(on) {
+    var card = $("#login-card");
+    var center = card && card.parentNode;
+    var existing = $("#oauth-pending");
+
+    if (!on) {
+      if (existing && existing.parentNode) existing.parentNode.removeChild(existing);
+      if (card) card.hidden = false;
+      return;
     }
-    if (params.oauth_error) {
-      location.hash = "";
+
+    show($("#auth-screen"));
+    if (card) card.hidden = true;
+    if (existing || !center) return;
+
+    var el = document.createElement("div");
+    el.id = "oauth-pending";
+    el.className = "auth-card card";
+    el.setAttribute("role", "status");
+    el.setAttribute("aria-live", "polite");
+    el.innerHTML =
+      '<div class="auth-brand">' +
+      '<svg class="wordmark-mark" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2 6.5 10H9l-4.5 7h6v3.5h3V17h6L15 10h2.5Z"/></svg>' +
+      '<span class="wordmark-text">Barkpark <b>Cloud</b></span></div>' +
+      '<p class="auth-foot dim">Signing you in…</p>';
+    center.appendChild(el);
+  }
+
+  // The boot gate. Runs ONCE, from init(), in place of the bare `render()` — it
+  // resolves any OAuth landing first and then hands control to `done` (which IS
+  // render). Not an OAuth landing → `done()` on the spot, so a normal boot costs
+  // nothing.
+  //
+  // Intentional behaviour change: the fragment used to be consumable by ANY of
+  // render()'s 8 entry points; now only at boot. Safe — the callback is always a
+  // full navigation to "/".
+  function bootOAuth(done) {
+    var ret = oauthReturnFromHash(location.hash);
+    if (!ret) { done(); return; }
+
+    if (ret.error) {
+      history.replaceState(null, "", "/");
       toast({ kind: "error", title: "Sign-in failed", body: "We couldn't complete that sign-in. Please try again." });
+      done();
+      return;
     }
-    return false;
+
+    // SCRUB FIRST (rule 2 above), and by REPLACE (rule 1): the code is out of the
+    // address bar and out of the history entry before a single byte goes out.
+    history.replaceState(null, "", "/#fleet");
+    renderOAuthPending(true);
+
+    api("POST", "/v1/auth/oauth/exchange", { code: ret.code }, { noAuth: true }).then(function (r) {
+      renderOAuthPending(false);
+      if (r && r.ok && r.data && r.data.token) {
+        // OAuth sign-ins persist (there is no "remember me" checkbox in this flow).
+        setSession({ token: r.data.token, team_id: r.data.team_id || ret.team || null }, true);
+        oauthJustLanded = true;
+      } else {
+        // Degrades into the EXISTING generic failure copy — a burned, expired or
+        // rate-limited code must not read differently from a refused consent.
+        toast({ kind: "error", title: "Sign-in failed", body: "We couldn't complete that sign-in. Please try again." });
+      }
+      done();
+    }).catch(function () {
+      // api() resolves its OWN rejections, so this covers only a throw INSIDE the
+      // handler above (setSession, toast, a DOM restore). Without it that throw
+      // swallows done() and the user is left staring at "Signing you in…"
+      // forever — a permanent lie about an in-flight sign-in, which is exactly
+      // the class this epic exists to abolish. Fail into the login form instead.
+      renderOAuthPending(false);
+      done();
+    });
   }
 
   function providerLabel(p) {
@@ -16611,8 +16710,9 @@
 
   // =========================================================== RENDER
   function render() {
-    // A returning OAuth callback lands a session token on the fragment; consume
-    // it BEFORE the logged-in/out decision so the user lands straight in.
+    // Did this render follow an OAuth sign-in? bootOAuth() resolved the landing
+    // before the first render() ran, so this is a one-shot flag read — the value
+    // is true exactly once, on the render that immediately follows the exchange.
     var didOAuth = handleOAuthReturn();
 
     // dwb-6: an OAuth/checkout round-trip that began in the /new flow lands back
@@ -17199,7 +17299,11 @@
     var activateTheme = $("#activate-theme-toggle");
     if (activateTheme) activateTheme.addEventListener("click", toggleTheme);
 
-    render();
+    // The ONLY call-site edit in this file: an OAuth landing is resolved (code
+    // exchanged for a session) BEFORE the first paint, then render() runs exactly
+    // as it always did. render() itself stays synchronous and its other 8 call
+    // sites are untouched.
+    bootOAuth(render);
   }
 
   if (document.readyState === "loading") {
@@ -18051,6 +18155,14 @@
       siteCreateBody: siteCreateBody,
       // search-template W8: site theme-edit pure helpers.
       siteThemeOptionsHtml: siteThemeOptionsHtml, siteThemePatchBody: siteThemePatchBody,
+      // cch-w10 — the OAuth landing gate. The fragment now carries a ONE-TIME
+      // exchange code, not a session token, so the boot path has a network hop in
+      // it and is no longer assertable by reading render()'s return. Exported so
+      // __app.test.mjs can drive all three: the pure classifier, the gate (scrub
+      // by REPLACE before the hop, exchange, session lands, render deferred), and
+      // the one-shot flag.
+      oauthReturnFromHash: oauthReturnFromHash, bootOAuth: bootOAuth,
+      handleOAuthReturn: handleOAuthReturn,
       // "Log in with Barkpark Cloud" (instance-login deep link): parse + match.
       studioLoginFromHash: studioLoginFromHash, studioLoginHost: studioLoginHost,
       studioLoginMatch: studioLoginMatch,

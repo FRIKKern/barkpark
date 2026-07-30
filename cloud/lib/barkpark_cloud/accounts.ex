@@ -79,6 +79,19 @@ defmodule BarkparkCloud.Accounts do
   # than tuned tightly against one browser.
   @sse_ticket_validity_seconds 60
 
+  # cch-w10 — how long a one-time OAuth EXCHANGE CODE stays redeemable. 120s, and
+  # the number is sized against a measured page weight rather than copied from the
+  # SSE ticket above: the window has to cover IdP 302 → COLD SPA BOOT → POST, and
+  # a cold boot here downloads app.js (959,628 bytes) plus app.css (198,954) off a
+  # `Plug.Static` with no `gzip:` option and no `.gz` siblings on disk. The SSE
+  # ticket's 60s is NOT the same physics — its redeemer is an `EventSource` opened
+  # in the same tick as the mint, with the app already parsed and running.
+  #
+  # It is still short by design: the code is the ONLY thing on the wire that a
+  # response-header log can capture, and it buys the holder nothing after two
+  # minutes or after the browser's own POST, whichever lands first.
+  @oauth_exchange_validity_seconds 120
+
   # How long a freshly minted invitation stays acceptable. A module attribute
   # mirroring `UserToken.@default_validity_days`; promote to config only if ops
   # needs to tune it.
@@ -2259,6 +2272,171 @@ defmodule BarkparkCloud.Accounts do
     {count, _} =
       from(t in UserToken,
         where: t.context == "sse",
+        where: not is_nil(t.revoked_at) or t.expires_at <= ^now
+      )
+      |> Repo.delete_all()
+
+    %{reaped: count}
+  end
+
+  ## OAuth exchange codes
+
+  ## A FOURTH single-use credential on the same polymorphic `user_tokens` table,
+  ## `context = "oauth_exchange"`. NO MIGRATION: `UserToken.changeset/2` casts
+  ## `:context` with no `validate_inclusion` and the column is plain text.
+  ##
+  ## WHY IT EXISTS (cch-w10). The OAuth callback used to 302 the browser to
+  ## `/#oauth=<session token>` — and `redirect_to/2` is `put_resp_header("location",
+  ## …) + send_resp(302, "")`, so the ONE legitimate response of the whole sign-in
+  ## carried a live 30-day session token in a RESPONSE HEADER. A fragment is
+  ## invisible to a SERVER access log, but it is fully visible to anything that
+  ## logs RESPONSE headers: a TLS-terminating middlebox, a reverse proxy, an APM
+  ## agent. Same defect class as the `?token=` on `GET /v1/events`, and it gets the
+  ## same answer: make the thing on the wire worthless. What rides the header now
+  ## is a 120s, hashed, burn-on-first-POST code that mints nothing by itself.
+
+  @doc "The OAuth exchange-code TTL in seconds — reported as `expires_in` is NOT needed (the SPA redeems immediately); exposed for the tests and the reaper."
+  @spec oauth_exchange_validity_seconds() :: pos_integer()
+  def oauth_exchange_validity_seconds, do: @oauth_exchange_validity_seconds
+
+  @doc """
+  Mint a single-use OAuth exchange code (#{@oauth_exchange_validity_seconds}s TTL)
+  for `user`, remembering which `provider` authenticated them. Returns the
+  plaintext exactly once.
+
+  `sent_to` carries `"oauth:<provider>"` — the SAME string the session row's
+  `origin` used to be stamped with at the callback. The mint moved to the
+  exchange, so the provider has to survive the hop somewhere, and `sent_to` is
+  already the "who was this token issued FOR" column on this table (the confirm /
+  change_email contexts use it for exactly that). Without it every OAuth session
+  would collapse to a generic origin and the sessions security panel would stop
+  naming the provider.
+
+  Mint is MATCHED-ROW-ONLY and NON-SUPERSEDING, like `create_sse_ticket/1`: it
+  never revokes the user's other live codes. Two tabs mid-sign-in are rare but not
+  impossible (a user clicking "Continue with GitHub" in two windows), and a mint
+  in one evicting the other's unredeemed code would fail a sign-in that was going
+  to work.
+  """
+  @spec create_oauth_exchange_code(User.t(), binary()) ::
+          {:ok, binary()} | {:error, Ecto.Changeset.t()}
+  def create_oauth_exchange_code(%User{} = user, provider) when is_binary(provider) do
+    plaintext = generate_token()
+
+    expires_at =
+      DateTime.utc_now()
+      |> DateTime.add(@oauth_exchange_validity_seconds, :second)
+      |> DateTime.truncate(:microsecond)
+
+    %UserToken{}
+    |> UserToken.changeset(%{
+      user_id: user.id,
+      context: "oauth_exchange",
+      token_hash: UserToken.hash_token(plaintext),
+      sent_to: "oauth:#{provider}",
+      expires_at: expires_at
+    })
+    |> Repo.insert()
+    |> case do
+      {:ok, _token} -> {:ok, plaintext}
+      {:error, changeset} -> {:error, changeset}
+    end
+  end
+
+  @doc """
+  Redeem an OAuth exchange code exactly once: resolve it to `{user, provider}` and
+  burn it in the SAME transaction. Returns `nil` for an unknown, already-burned,
+  expired, or wrong-context code.
+
+  STRICTLY SINGLE-USE and MATCHED-ROW-ONLY — the `consume_sse_ticket/1` shape,
+  deliberately: the lookup locks the ONE row matching the presented hash
+  `FOR UPDATE` and stamps `revoked_at` on THAT row before commit, so two
+  concurrent redemptions serialize and the loser finds it revoked.
+
+  `verify_two_factor_pending_token/1` is explicitly NOT the model. Its own comment
+  records that it omits the `revoked_at` filter — through that shape a burned code
+  would still resolve, and single-use here is the entire point: the code is the
+  value a response-header log can hold, so a second redemption must be worthless.
+
+  `provider` comes back from `sent_to` (`"oauth:<provider>"`) so the caller can
+  stamp the honest `origin: "oauth:<provider>"` on the session it mints. A row
+  written before this field existed, or one with a malformed `sent_to`, degrades
+  to `"oauth"` rather than raising — an unnamed provider is a weaker audit line,
+  never a failed sign-in.
+  """
+  @spec consume_oauth_exchange_code(binary()) :: {User.t(), binary()} | nil
+  def consume_oauth_exchange_code(plaintext) when is_binary(plaintext) do
+    hash = UserToken.hash_token(plaintext)
+    now = lifecycle_now()
+
+    result =
+      Repo.transaction(fn ->
+        token =
+          Repo.one(
+            from t in UserToken,
+              where: t.token_hash == ^hash,
+              where: t.context == "oauth_exchange",
+              where: is_nil(t.revoked_at),
+              where: is_nil(t.expires_at) or t.expires_at > ^now,
+              lock: "FOR UPDATE"
+          )
+
+        case token do
+          %UserToken{user_id: user_id, sent_to: sent_to} = t ->
+            {:ok, _burned} = Repo.update(UserToken.changeset(t, %{revoked_at: now}))
+
+            case Repo.get(User, user_id) do
+              %User{} = user -> {user, oauth_origin(sent_to)}
+              nil -> nil
+            end
+
+          nil ->
+            nil
+        end
+      end)
+
+    case result do
+      {:ok, pair} -> pair
+      {:error, _reason} -> nil
+    end
+  end
+
+  def consume_oauth_exchange_code(_), do: nil
+
+  # `sent_to` is the mint's `"oauth:<provider>"`; hand back the whole string so the
+  # caller stamps it verbatim as `origin`. Anything else collapses to the generic
+  # "oauth" — honest about not knowing, rather than inventing a provider.
+  defp oauth_origin("oauth:" <> provider) when byte_size(provider) > 0, do: "oauth:" <> provider
+  defp oauth_origin(_), do: "oauth"
+
+  @doc """
+  Delete every `"oauth_exchange"` row that is BURNED (`revoked_at` stamped) or past
+  its `expires_at`. Hygiene only — returns `%{reaped: count}`; the
+  `BarkparkCloud.Workers.OAuthExchangeReaper` Oban worker calls this per minute.
+
+  THIS SHIPS WITH THE MINT, ON PURPOSE. Every prior single-use context on this
+  surface accreted first and got its reaper later — `oauth_states` (cch-w2) and
+  `"sse"` (cch-w3) were both "a row nothing ever deletes" findings. The mint here
+  is a bare `Repo.insert` on the tail of an UNAUTHENTICATED route, and the burn is
+  a soft `revoked_at` stamp rather than a DELETE, so it is the identical shape:
+  every completed sign-in, and every abandoned one, would leave a permanent row.
+
+  Correctness never depends on this running — `consume_oauth_exchange_code/1`
+  already filters `is_nil(revoked_at)` and `expires_at > now`. What this stops is
+  the pile.
+
+  STRICTLY `context == "oauth_exchange"`, for the same reason `reap_sse_tickets/0`
+  is strictly `"sse"`: `user_tokens` is polymorphic and a revoked `session` row is
+  the tombstone the active-sessions UI renders. Widening this `where` by one
+  context would delete other people's evidence. Pinned by test.
+  """
+  @spec reap_oauth_exchange_codes() :: %{reaped: non_neg_integer()}
+  def reap_oauth_exchange_codes do
+    now = lifecycle_now()
+
+    {count, _} =
+      from(t in UserToken,
+        where: t.context == "oauth_exchange",
         where: not is_nil(t.revoked_at) or t.expires_at <= ^now
       )
       |> Repo.delete_all()
