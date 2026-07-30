@@ -22,6 +22,7 @@ on:
           - site-artifact-fetch
           - box-logs
           - builder-token-fix
+          - box-file-tail
       team:
         description: "grant-forever: team UUID (as shown by bp whoami / bp teams)"
         required: false
@@ -39,6 +40,9 @@ on:
         required: false
       unit:
         description: "box-logs: systemd unit (barkpark-builder | barkpark-runtime | barkpark-agent)"
+        required: false
+      file_path:
+        description: "box-file-tail: file under /var/log/barkpark-builder/ to tail (200 lines)"
         required: false
 
 jobs:
@@ -59,6 +63,7 @@ jobs:
           ARTIFACT_REPO: ${{ inputs.artifact_repo }}
           ARTIFACT_REF: ${{ inputs.artifact_ref }}
           UNIT: ${{ inputs.unit }}
+          FILE_PATH: ${{ inputs.file_path }}
           OP: ${{ inputs.operation }}
         run: |
           set -euo pipefail
@@ -66,6 +71,19 @@ jobs:
           chmod 600 /tmp/deploy_key
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
           case "$OP" in
+            box-file-tail)
+              # Tail a file on a managed box, restricted to the builder log dir.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              [[ "$FILE_PATH" =~ ^/var/log/barkpark-builder/[A-Za-z0-9._-]+$ ]] \
+                || { echo "file_path must be a plain file under /var/log/barkpark-builder/"; exit 1; }
+              $SSH "root@${CP_HOST}" "
+                set -euo pipefail
+                KEY=/root/.ssh/barkpark_indx
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} \
+                  'ls /var/log/barkpark-builder/ && tail -n 200 ${FILE_PATH} 2>/dev/null || echo FILE-MISSING'
+              "
+              ;;
             builder-token-fix)
               # The /v1/builder/claim route authenticates with the CP's shared
               # WORKER_TOKEN (require_worker), not an agent token. Extract it
