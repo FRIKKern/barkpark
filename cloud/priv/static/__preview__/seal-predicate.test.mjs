@@ -145,7 +145,11 @@ test('a resolvable successor over a clean fixture still SEALS at exit 0', () => 
   assert.match(out, /to cch-fixture-successor-epic/);
   // A fixture green says so, in the same breath, and in the machine-readable line.
   assert.match(out, /FIXTURE-ONLY GREEN: 2 guard\(s\) STUBBED/);
-  assert.match(out, /mode=fixture stubbed=2 waived=1/);
+  // `waived=0` since wave 8: sealable.json still CARRIES an `unmeasuredWaivers` entry
+  // for CCH-D5, but a waiver is only consulted for a rung-3 entry and CCH-D5 is now
+  // measured, so nothing is waived. The waiver machinery is consequently unexercised
+  // by any fixture — tracked as cch-bl-waiver-path-unexercised, not papered over here.
+  assert.match(out, /mode=fixture stubbed=2 waived=0/);
 });
 
 test('clause (a) still reds: a resolvable successor does not forgive unnamed residue', () => {
@@ -307,11 +311,24 @@ test('MUTATION PROOF: with `considering` dropped from the residue set, the same 
   assert.doesNotMatch(out.split('VERDICT: SEAL')[0], /gr-fixture-considering-1/);
 });
 
-// ── CLAUSE (b): THE THREE-RUNG LADDER ───────────────────────────────────────
+// ── CLAUSE (b): THE MEASUREMENT LADDER ──────────────────────────────────────
 // Run WITHOUT --guard-cmd, so the two committed guards actually execute.
-test('clause (b) prints three distinct outcomes and FAILS on the rate limiter by name', () => {
+//
+// WAVE 8 REWROTE THIS TEST, AND SAYING WHY IS THE POINT. Through waves 7 and 8's
+// Decide, CCH-D5 sat at rung 3 and clause (b) failed on it BY NAME, and this test
+// asserted exactly that. Wave 8 paid the gap — `router_signin_rate_bucket_test.exs`
+// measures the bucket separation through a real `Router.call/2` — so CCH-D5 is rung 2
+// and clause (b) passes on its own merits for the first time. The four assertions that
+// named rung 3 as "the reason for the red" INVERTED with the measurement; keeping them
+// would have made a green suite that certified a stale sentence.
+//
+// The property under test did not change: rung 3 is still a LOUD, by-name failure. It
+// is now proven by MUTATION (stripping CCH-D5's measurement back to `unmeasured:`)
+// rather than by the register happening to contain a rung-3 entry — which is the
+// stronger form, because it survives the register being paid off again.
+test('clause (b): every registered defect is measured, and rung 3 would still red by name', () => {
   const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO]);
-  assert.equal(status, NO_SEAL, 'a rung-3 entry must make clause (b) fail');
+  assert.equal(status, SEAL, `no rung-3 entry remains, so clause (b) passes: ${token(out)}`);
 
   // rung 1 — measured HERE, and the guard's own output had to name the measurement.
   assert.match(out, /MEASURED HERE by cloud\/priv\/static\/__app\.test\.mjs/);
@@ -323,11 +340,43 @@ test('clause (b) prints three distinct outcomes and FAILS on the rate limiter by
   assert.match(out, /MEASURED-ELSEWHERE by cloud\/test\/barkpark_cloud\/web\/router_test\.exs, run by \.github\/workflows\/cloud\.yml job `test` on cloud\/\*\*/);
   assert.match(out, /THIS RUN DID NOT EXECUTE IT/);
 
-  // rung 3 — neither. Named, with the gap stated, and it is the reason for the red.
-  assert.match(out, /✗ CCH-D5-rate-limiter-sees-every-user-as-one  \(rung 3\)/);
-  assert.match(out, /NO MEASUREMENT \(rung 3\): no test anywhere asserts that two clients/);
-  assert.match(out, /unlanded, unverifiable or UNMEASURED \(clause b\): CCH-D5-rate-limiter-sees-every-user-as-one/);
-  assert.match(token(out), /b=FAIL/);
+  // CCH-D5 specifically: at rung 2, named with the file that measures it, and no
+  // longer anywhere in the failure list.
+  assert.match(out, /◐ CCH-D5-rate-limiter-sees-every-user-as-one  \(rung 2 — MEASURED-ELSEWHERE\)/);
+  assert.match(out, /MEASURED-ELSEWHERE by cloud\/test\/barkpark_cloud\/web\/router_signin_rate_bucket_test\.exs/);
+  assert.doesNotMatch(out, /rung 3/, 'no register entry is unmeasured any more');
+  assert.match(token(out), /b=PASS/);
+
+  // MUTATION: put the gap back — CCH-D5 loses its measurement and regains the rung-3
+  // `unmeasured:` sentence — and the identical run reds by name. Rung 3 is still loud.
+  const regressed = mutatedRun(
+    (src) => src.replace(
+      /    measured_by: \['cloud\/test\/barkpark_cloud\/web\/router_signin_rate_bucket_test\.exs'\],\n    measured_in_ci: \{ workflow: '\.github\/workflows\/cloud\.yml', job: 'test', paths: 'cloud\/\*\*' \},\n/,
+      "    unmeasured: 'no test anywhere asserts that two clients behind the front door get SEPARATE rate buckets.',\n",
+    ),
+    ['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO],
+  );
+  assert.equal(regressed.status, NO_SEAL, 'a rung-3 entry must make clause (b) fail');
+  assert.match(regressed.out, /✗ CCH-D5-rate-limiter-sees-every-user-as-one  \(rung 3\)/);
+  assert.match(regressed.out, /NO MEASUREMENT \(rung 3\): no test anywhere asserts that two clients/);
+  assert.match(regressed.out, /unlanded, unverifiable or UNMEASURED \(clause b\): CCH-D5-rate-limiter-sees-every-user-as-one/);
+  assert.match(token(regressed.out), /b=FAIL/);
+
+  // AND the rung-2 claim is not satisfied by merely ASSERTING a file. CCH-D5 carries
+  // exactly ONE measured_by path on purpose — the classifier raises only when EVERY
+  // named path is missing, so a second path would let the entry survive the deletion of
+  // the file that actually measures it. Rename that one path and the entry fails closed.
+  const absent = mutatedRun(
+    (src) => src.replace(
+      "'cloud/test/barkpark_cloud/web/router_signin_rate_bucket_test.exs'],",
+      "'cloud/test/barkpark_cloud/web/router_signin_rate_bucket_test_DELETED.exs'],",
+    ),
+    ['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO],
+  );
+  assert.equal(absent.status, NO_SEAL, 'a measurement that is asserted but absent must not seal');
+  assert.match(absent.out, /and NONE of them exist — the measurement is asserted, not present/);
+  assert.match(absent.out, /✗ CCH-D5-rate-limiter-sees-every-user-as-one/);
+  assert.match(token(absent.out), /b=FAIL/);
 });
 
 test('a rung-1 guard that exits 0 without naming its measurement does NOT count as measured', () => {
