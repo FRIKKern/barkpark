@@ -388,6 +388,7 @@ defmodule Barkpark.Tasks.StageTest do
       assert row.content["lifecycle_status"] == "done"
       # The adjudication triple landed on the durable keys.
       assert row.content["disposition"] == "closed"
+
       assert row.content["disposition_reason"] ==
                "closed by #4711, verified against origin/main by content"
 
