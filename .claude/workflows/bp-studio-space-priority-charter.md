@@ -2564,3 +2564,418 @@ not caused by this wave).
 browser; the deployed 200 on `/studio/rest` and `/studio/plugins` is unconfirmed until slice 4 merges and
 someone re-probes them authenticated; and the desk is measured at 1500x1000 only. The instrument to do all
 three now exists and is committed — that is the difference this wave made.
+
+## Wave-19 amendment (THE ANSWER CONTRACT, 2026-07-30) — D251–D269
+
+**The law this wave writes is not "never blank" — it is NOTHING THE DESK DOES IS SILENT.** A deliberate press either
+changes the screen, or names by name why it cannot, inside a bounded time, with a keyboard-reachable way out. Wave 18
+closed three of the five ways this desk answers a human with nothing; wave 19 closes the fifth, generalises the first,
+and pays two debts wave 18 handed forward. Every decision below was re-derived on `origin/main` at `051112568`, and
+where a wave-18 conclusion was overturned it is overturned by executed output, not by reading.
+
+- **D251 — #7899 IS SETTLED IN FAVOUR OF THE REVIEWER'S POLICY-AWARE FORK, and the fork was BUILT AND RUN before this
+  ruling, not argued.** `resolve_paths/2` gets `:raise` → raise, `_` → warn-and-fall-back, instead of the builder's
+  fall-back-under-both. Three independent grounds, each measured. (1) **Production safety is byte-identical**: main's
+  only head is `def resolve_paths(name, policy \\ @unknown_icon_policy) when is_binary(name)` (`icons.ex:258`), so a
+  `nil` name raises `FunctionClauseError` under `:warn` too — prod was NEVER saved by policy, and both arms make
+  `:warn` warn. With the fork installed, all three of the PR's render tests (`/studio/plugins`, `/studio/rest`, the
+  iconless-schema editor) PASS, so the fork fixes the three authenticated 500s exactly as well as the PR does.
+  (2) **Zero collateral, measured**: fork + the PR's unmodified test file = `2123 tests, 2 failures`, and both
+  failures are the PR's OWN assertions at `nil_icon_never_crashes_test.exs:148` and `:155`; after inverting those two,
+  `2124 tests, 0 failures, exit 0`, plus `25 tests, 0 failures` over every other `resolve_paths` caller and the icons
+  tripwire, and `mix format --check-formatted` exit 0. (3) **The fork extends the module's own shape**: `unknown_icon/3`
+  on main is ALREADY policy-aware (`:raise` at `:267` raising `ArgumentError`, `:warn` at `:281` warning and painting
+  `"file"`), so fall-back-under-both would be the module's ONLY policy-blind clause. **The honest bound, recorded so
+  nobody oversells it:** the `:raise` arm is unreachable from all 15 current dynamic `<.icon name={…}>` sites — every
+  one routes through a total helper, or `|| "file"`, or sits inside `if item.icon`. It is a tripwire for regressions,
+  not a fix for anything live. It catches two future shapes: a new unguarded dynamic site, and a **truthy** non-binary
+  (`:folder || "file"` evaluates to `:folder`) at `nav.ex:427`, `components.ex:1154`, `components.ex:1199`. Modest,
+  real, free. **The builder's counter-argument is genuinely strong and loses narrowly**: "nobody writes `name={nil}`,
+  so `:raise` cannot catch an authorship bug" is partly right — but the bug that shipped WAS an authorship bug
+  (`plugin_group_node/2` omitted `:icon`), and the PR's replacement guard is two hand-written `known_icon?` loops
+  covering only today's two emitters.
+
+- **D252 — adopting the fork costs THREE COUPLED EDITS, and shipping only the code half leaves the module contradicting
+  itself.** (a) The two test assertions invert. (b) The in-code comment "Warn and paint the 'file' glyph under BOTH
+  policies" and the moduledoc section "The non-binary fail-safe" both argue for as-is and must be rewritten.
+  (c) **`spd-w18-nil-icon-500`'s acceptance criterion C4 reads "Icons.resolve_paths no longer raises for a non-binary
+  name" — under the fork it DOES raise under `:raise`.** C4 must be amended to scope the promise to `:warn` (dev/prod)
+  or the merged code contradicts its own task. **#7899 is CLOSED AS SUPERSEDED, not amended in place**: both halves of
+  its diff apply clean to current `origin/main` despite 11 commits of drift (`git apply --check` CLEAN on both), so a
+  fresh branch carrying the whole diff plus the fork is cheaper and avoids cross-session branch contention on
+  `loop-epic/the-desk-destination-stops-raising-a-nil-3`.
+
+- **D253 — TWO SCOPE ADDITIONS TO #7899 ARE REFUSED, and one of their premises is FALSE.**
+  `components.ex:1199` is NOT an unguarded third site: it sits inside `<%= if item.icon do %>` (the `plugin_link`
+  anchor) and is nil-safe by construction — its only exposure is an unknown *binary*, a class D232 already owns.
+  All three dynamic `item.icon` sites existed at the PR's merge base `453ee749a`, so it is not drift. And
+  `spd-bl-plugin-link-aria-current` is already OPEN at priority 3 with its own description citing **D245** as a
+  deliberate wave-18 decision not to spend a slice; riding it in #7899's successor would contradict D245 and expand a
+  diff an independent reviewer was asked to judge. **One precision gap in the builder's census is recorded rather than
+  fixed**: C9(3) omits `nav.ex:427` (`tab[:icon] || "file"`) and `components.ex:1154` (`pane[:icon] || "file"`) — both
+  nil-safe, so no defect, but the census is not exhaustive as claimed and those two are exactly where a truthy
+  non-binary slips through.
+
+- **D254 — `origin/main` IS RED ON `doc-gates`, THE CAUSE IS WAVE 18'S OWN #7897, AND THE FIX IS TO HARDEN THE
+  DETECTOR — NOT TO ANNOTATE.** `scripts/studio-literal-check.sh:92`'s `LITERAL` regex reads the HTML numeric entity
+  `&#160;` at `components.ex:1769` as a 3-digit hex colour (`&#xa0;` does not match — `x` is not hex). Blame:
+  `88ec6fb8b (#7897)`. **The blast radius is far larger than one red**: the step is
+  `Studio literal-color gate (blocking)` at `doc-gates.yml:388` with no `continue-on-error`, and on run
+  `30511684123` the **14 steps after it were SKIPPED — including 7 further BLOCKING gates** (studio-link-lint,
+  web-literal-check, go-literal-check, the code-comment citation guard, tenant fail-open read baseline, preview-env
+  isolation, PortableDoc render-parity completeness, scaffy anchor-drift) plus all 5 tripwire self-tests. Seven
+  blocking gates have not run on main since #7897 merged, and no wave-19 builder can distinguish their own red from
+  the standing one on any of the eight. **The annotation path is REFUTED BY MUTATION and is the WEAKENING option**:
+  `lit-allow-next-line` exempts the ENTIRE LINE, and with it in place a genuine `#ff0000` appended to that same line
+  reported **PASS**. The hardened form `(?<!&)#(?:…)` caught that identical mutant and named it, still catches injected
+  `#abc` / `hsl(210 40% 50%)` / `color:#ff0000`, and stops matching only an `&`-prefixed hex run, which cannot be a
+  working colour in any scanned surface. It also fixes a LATENT CLASS, not an instance: `sheet_grid.ex` carries six
+  numeric entities (`&#9664 &#9654 &#10697 &#9679 &#9662 &#9662`) that escape only by digit-count luck, and any future
+  3- or 6-digit typographic entity reds the gate again. Part E is unmoved either way and this is STRUCTURAL, not
+  lucky: `design/exemptions.json` ledgers 9 paths and `components.ex` is not one of them, so five injected colour
+  literals moved Part E by `740 → 740`, every row delta 0.
+
+- **D255 — the detector edit OBLIGES a `--selftest`, because `studio-literal-check.sh` is the only one of the three
+  literal gates without one.** `go-literal-check.sh --selftest` and `studio-link-lint.sh --selftest` both run as CI
+  tripwire steps (`doc-gates.yml:434`, `:404`); the Studio gate has none. Since this fix EDITS THE DETECTOR, that
+  asymmetry becomes load-bearing: nothing automated would catch a future edit that blinds the `LITERAL` regex.
+  `go-literal-check.sh:59-103` is directly copyable and is the only durable form of the mutation proof. **And evidence
+  for this gate must quote the scanned-file COUNT (372 today; the charter's historical figure of 367 is stale), never
+  just the word PASS** — `ROOT` derives from `dirname $0`, so a relocated copy prints
+  `PASS — 0 Studio chrome file(s) scanned` and exits 0.
+
+- **D256 — D235 HALF-HOLDS, and the half that holds is the half that matters.** Re-derived as a RENDER, not a trace:
+  a `session` persisted through the real Studio create path (`Handlers.Fields.new_document` →
+  `Shared.seed_new_doc_content("session")` → `%{"blocks" => []}`) and mounted authenticated shows, at
+  `BARKPARK_PAPER_CANVAS=1`, **318 visible characters** carrying the named sentence at `paper_editor.ex:238-239`
+  verbatim plus the Add-block form and a `0 words · 0 blocks` footer. So D221's "second blank" is REFUTED on its
+  render half at the prod default, and a fourth seam there would be vacuous work on a passing screen — the wish's
+  constraint 2 is answered by citation, not by a slice. **At `BARKPARK_PAPER_CANVAS=0` the same document renders ZERO
+  visible characters** and `data-test-id="paper-unrenderable-notice"` is absent from the ENTIRE page: `read_blocks([])`
+  returns a list ⇒ `paper_block_mode` true ⇒ the arm at `components.ex:253` wins and `:279`'s `blank_body?` is never
+  evaluated, so **#7897's notice is structurally unreachable for any blocks-list document**. The flag-OFF arm also
+  loses the shell's `aria-label="Editing <slug>"`. **This is a DECISION, not a build**: `BARKPARK_PAPER_CANVAS` is
+  set NOWHERE on either live host — absent from `/opt/barkpark/.env`, absent from all of `/etc/systemd/system/`, and
+  absent from the environ of BOTH running BEAMs on BOTH boxes (guerrilla `157.180.90.121` pids 2468576/2489148; prod
+  `89.167.28.206` pids 1980542/2095796; both serving `/api/schemas` 200) — and `paper_canvas_enabled?/0` reads
+  `nil -> true`. The wordless arm is reachable only from `System.put_env` inside the suite. Building a named state
+  there is exactly the `paper.ex:701` mistake D222 spent a ruling avoiding. **The guard that makes this decision
+  falsifiable ships anyway**: a test asserting the flag-OFF body is non-empty would red the moment an operator exports
+  `BARKPARK_PAPER_CANVAS=0`, and that is filed.
+
+- **D257 — WAVE 18'S SHIPPED WAY OUT DOES NOT GET YOU OUT, BOTH WAYS, AND THE REPAIR BUTTON IS A THREE-STAGE TRAP.**
+  Measured on a blockless-seeded paper through a real `live/2` mount. **Stage A**: the write LANDS
+  (`blocks=[paragraph]`, `save_status="Auto-saved"`) but `paper_pane_op/2`'s `{:ok,_}` arm calls only
+  `sync_paper_edit_doc/1`, which assigns `paper_doc` and NOTHING ELSE (`shared/paper.ex:567-574`), so
+  `paper_block_mode` stays FALSE and the notice re-renders; the writer's own broadcast cannot save it because
+  `Handlers.Lifecycle.paper_block/2` returns `{:noreply, socket}` on `frame[:sender] == self()`
+  (`lifecycle.ex:71-73`). **Stage B, unpredicted and the sharp part**: the block write ALWAYS mints
+  `body_html = "<p></p>"` (`block_ops.ex:366-368` → `put_body_html/2`), so `html_backed_body` flips true,
+  `repairable` flips FALSE, **the repair button VANISHES after one press**, and the reason text flips to the
+  HTML-backed variant which now asserts "…was stored as saved HTML that renders nothing a reader can see … the body
+  cannot be started from here" — FALSE about a document that gained a real block list 200ms ago. **A named state
+  that lies is worse than a blank.** **Stage C**: the write path stays open behind the vanished button — replaying
+  `paper-add-block` appends a SECOND empty paragraph, notice still present, editor still absent. Net: the document is
+  PERMANENTLY TRAPPED with zero working ways out after one press of the control wave 18 shipped as the way out.
+  **And the second way out is a 404 for every viewer**: the emitted href is `/d/production/studio/paper`,
+  `route_info` returns `:error` and a real `get/2` returns **404**, because `studio_paper_view/1` never declares
+  `attr(:scope_prefix, …)` and its sole call site (`components.ex:1268-1296`) never passes it — even though
+  `rebuild_panes` already carries `scope_prefix` in the socket and `@scope_prefix` is used 130 lines away at `:1143`.
+  Two independent causes: the missing thread, AND a wrong fallback grammar (`Paths.studio_path("", …)` yields the
+  unroutable `/d/ds/studio/paper`; the routable flat form is `Paths.flat_root(ds) <> "/paper"`).
+
+- **D258 — the repair fix is the ASSIGN-ONLY mode re-derive PLUS the stream fill; `refetch_paper/1` is NOT a safe
+  drop-in and the naive assign-only variant would paint a NEW blank.** Wired into `paper_pane_op/2`, `refetch_paper/1`
+  breaks two existing tests that drive it with a hand-built `%Socket{}`:
+  `** (KeyError) key :lifecycle not found in: %{live_temp: %{}}` from its `stream/3` → `attach_hook`, against a
+  clean-main control of `10 tests, 0 failures` on the same two files. The `assign/3`-only re-derive
+  (`paper_block_mode = is_list(Projection.read_blocks(content))` + `paper_html` + `paper_rev`, guarded on a mode
+  CHANGE) is regression-free at `1500 tests, 0 failures` across `test/barkpark_web/live/studio/` — identical to the
+  clean control. **But it carries an UNMEASURED residual, code-derived and named rather than hidden**: under
+  `BARKPARK_PAPER_CANVAS=0` it flips `paper_block_mode` true while `:paper_blocks` is still the empty stream
+  `setup_paper_view/2` reset (`paper.ex:711`) and `show_editor` is false, so `components.ex:253` renders
+  `<article phx-update="stream">` with zero children — a new blank of exactly the class this wave outlaws. **The fix
+  therefore re-derives the mode AND fills the stream (refetch_paper's body), with the two hand-built-socket unit
+  tests migrated to a real LiveView socket.** Threading `scope_prefix` also scopes the "Open standalone" link at
+  `components.ex:171` (a THIRD instance of the same missing-thread class) to `/w/…/p/…/papers/<slug>`, which IS a
+  real route, reddening one pinned expectation at
+  `studio_live_portable_doc_accessibility_proof_test.exs:175` — a test expectation to update, not a regression.
+
+- **D259 — LANE 2'S ENUMERATION IS AMENDED THREE WAYS, and one of the amendments kills a VACUOUS GREEN.**
+  (a) **`draft_only` is DROPPED from the reason enum**: D220's draft-first fetch means a never-published document
+  RESOLVES (probe: `editor = %{type: "post"}`, non-nil), so it never reaches the empty branch and the reason cannot
+  fire. Ship `not_found`, `no_schema`, `unknown_node`, keeping `nothing_selected` as the distinct default.
+  (b) **The derivation needs THREE arms, and arm 1 is a CI trap.** A pristine `mix ecto.create && mix ecto.migrate`
+  database — exactly what `elixir.yml:348-349` builds, with no seed step before `mix test` at `:417` — holds **ONE**
+  production schema row, `paper`, inserted by migration `20260524120000_move_papers_to_production.exs:151`. Locally
+  it holds 37, and those are runtime residue (inserted 2026-07-18 → 2026-07-26; boot registration is OFF in test per
+  `config/test.exs:138`). `Content.list_schemas` also returns **ZERO** on any dataset but `"production"`, which is
+  the fence's house style for isolated test datasets. So `arm1 == arm2 == 37` locally makes a single `count > 0`
+  assertion pass off arm 1 alone and UNABLE to detect a dead arm 2. **Assert each arm separately, and draw criterion
+  6's floor membership (`paper, sheet, task, session`) from ARM 2, never from `list_schemas`** — `sheet`, `task` and
+  `session` are absent from a pristine DB and would red in CI. (c) **`task` and `listener` are NOT host-bootstrap
+  types** — both come from the Tasks *plugin*'s `register_schemas/1` (`plugins/tasks.ex:78-81` →
+  `tasks/schema.ex:48`, `:826`) and are in arm 2. The genuinely third arm is exactly ONE type: `tag`, via
+  `SchemaBootstrap.init/1` → `TagRegistry.register!/1`, deliberately outside the plugin walk whose `Registry.all()`
+  is empty under `config :barkpark, :plugins, []`. State that honest size rather than implying a large third arm.
+
+- **D260 — THE FOUR REASONS ARE NOT DISTINGUISHABLE FROM THE SHELL'S ATTRS, AND THE SEAM D222 ALREADY PRESCRIBED IS
+  WHERE THEY BECOME DISTINGUISHABLE.** `Shared.rebuild_panes/1` derives every editor assign from one value
+  (`shared.ex:798-801`: `new_schema = editor && editor[:schema]` …), and `PaneBuilder` has **NINE** distinct
+  nil-editor producers all returning the same bare `nil` (`pane_builder.ex:255, 304, 378, 382`, four `build_editor`
+  arms, the `[]` clause at `:156`) — measured: `not_found == unknown_node == no_schema == nothing_selected == nil`.
+  From `@panes` + `@nav_path` they ARE distinguishable, and D222 anticipated this verbatim ("from a NEW assign
+  computed where `editor == nil` but `nav_path` named a document"): `nothing_selected` = `nav_path == []`;
+  `unknown_node` = 1 pane, `role: :nav`, `selected: "nosuchtype"`; `not_found` = 2 panes, last `role: :list` WITH
+  `type_name`; `no_schema` = 2 panes, last is the **…Rest** pane with NO `type_name`. `@nav_path` is already in scope
+  at the fill site, so criterion 3 needs no new plumbing. **The reason is computed in `rebuild_panes` from
+  `(panes, nav_path)`; `PaneBuilder.build/3`'s 2-tuple is NOT widened** — that costs 36 call-site edits (1 lib, 35
+  test, 28 in one file). The fill site is `components.ex:1418` inside `studio_live_shell/1` (`:1018`), not D222's
+  `:1283` nor the task's `:1287`; locate by selector. `no_schema`'s real door is a schemaless orphan degrading to a
+  non-drillable `:document` node under …Rest (`pane_builder.ex:377-378`); the `"open"` backlinks door RESOLVES the
+  same document with `schema: nil` and never reaches the empty branch, so `no_schema` is desk-path-only.
+  **D237 HOLDS and is now a hard fixture prohibition**: a `blocks: []` paper resolves with `view: :paper` and never
+  reaches `studio_editor_shell` at all, so a guard fixtured that way is a FALSE GREEN — fixture non-resolution
+  (missing id, unmatched segment, schemaless orphan), never empty content.
+
+- **D261 — LEG C IS THE INSTRUMENT FOR THE ANCHOR CRITERION, AND THE NAIVE CENSUS IS WRONG THREE WAYS — all three
+  caught by execution, not by reading.** (1) **An unnamed beat is silently UNASSERTED, and it is worse than
+  "unasserted"**: the self-test loop iterates the EXPECTED keys (`journey.mjs:1713`), so with LEG C failing on
+  `/rot/` with five FAIL rows the run still printed `SELF-TEST PASS` and exited 0. The deliverable is therefore a
+  **COVERAGE GUARD that walks the PRODUCED keys** and reds on any beat `SELF_TEST_EXPECT` does not name — proven by
+  deleting one key: `✗ good/DESK-ROWS/pane-doc-item: the run PRODUCED this beat and SELF_TEST_EXPECT does not name
+  it`. Without it every future leg is a decoration by default, and a `HARNESS` abort stops reading as a pass.
+  (2) **Snapshot-diff attribution is UNSOUND**: on `/rot/` the DEAD `#item-sheet` reported
+  `✓ … panes 1 → 2 · rows 6 → 7` — credited with the PREVIOUS row's answer arriving 900ms later; on `/good/` every
+  row reported the previous row's URL. A quiesce fixed the off-by-one and did NOT fix the false green, and cannot:
+  measured answer latency runs 1.6s → never-within-15s, so no bounded quiet window is sound. **Attribution must be BY
+  IDENTITY** — `aria-current` newly on THIS row, or the URL newly carrying THIS row's own `phx-value-id`; pane/row
+  counts are recorded but can never make a beat green alone. (3) **Identity attribution then FABRICATES a dead row for
+  every `plugin_link`**: `<a id="plugin-link-…" class="pane-item nav-plugin-entry" href=…>` matches `.pane-item` so
+  the census enumerates it, and it has NEITHER `phx-value-id` NOR `aria-current` — proven with a fixture anchor that
+  really navigated and was reported DEAD. Anchors attribute to their OWN `href`, and because an anchor row is a real
+  document load the census must explicitly RETURN TO THE DESK after one (the next row then needed 2 presses, not 1 —
+  a fresh dead mount). Bounding: the per-row cap is SOFT (`poll` checks its cap AFTER the predicate,
+  `journey.mjs:196-198`), so a nominal 3.0s cost 6.4–6.9s per row under load; LEG C carries a HARD `LEG_C_BUDGET`
+  (default 90s) and rows past it are **PENDING/"UNMEASURED, which is not the same as working"**, never FAIL —
+  converting an exhausted runner budget into a dead row fabricates a defect.
+
+- **D262 — LEG B'S ORACLE IS NOW VACUOUS AND WILL REPORT FAIL FOREVER ON A FIXED SCREEN.** `EDITOR_SHAPE`
+  (`journey.mjs:754-767`) has NO selector for #7897's notice and scopes `visible_text_chars` to
+  `.bp-paper-editor || [data-test-id='studio-editor']` — the notice lives in `main.bp-paper-shell`, so the region is
+  null and the count is measured against nothing. Live proof of the contradiction on served `051112568`: the harness
+  printed `shell=0 body=0 … visible_text=0 chars — WORDLESSLY BLANK` for a page whose server HTML carries
+  `<div class="bp-paper-unrenderable" role="alert" aria-live="assertive"
+  data-test-id="paper-unrenderable-notice" data-doc-id="paper-b28358ff271b260e" data-doc-type="paper">` exactly once,
+  for BOTH id forms. **So the digest's "notice is structurally unreachable for blocks-list docs" is true and #7897 is
+  simultaneously LIVE AND WORKING on the fossil path — LEG B's FAIL is a false negative.** Fixing the oracle rides
+  in the same file as LEG C and is part of that slice, not a separate one.
+
+- **D263 — A CLIENT-SIDE PRESS ANSWER IS SHIPPABLE, IT WAS PROVEN L1 ON THE DEPLOYED BUILD, AND ITS CLEAR MESSAGE
+  MUST NOT CLAIM SUCCESS.** D225 + D242 close the SERVER route (confirmed at framework level: `channel.ex:911-918` →
+  `sync_handle_params_with_live_redirect` replies with the event's own ref, and `finish_handle_params` does not
+  blanket-reset, so a naive pending assign would STICK). The CLIENT seam is wide open and precedented: 20 hooks in one
+  nonced inline script at `root.html.heex:6115-7500`, `#studio-panes` already mounts `WidthBucket`
+  (`components.ex:1053`) whose entire body is a `resize` listener — zero collision — and `csp.ex`'s nonce covers
+  inline `<script>` blocks, so no policy change. LiveView reads exactly ONE hook per element (`view.js:995-999`), so
+  the shape is EXTEND `WidthBucket.mounted()` with a delegated click listener, not a second hook. **The ordering
+  discovery that makes it work**: our listener is on a descendant container, LiveView's is on `window`
+  (`live_socket.js:830-833`), so ours fires FIRST — `target.hasAttribute("data-phx-ref-src")` read AT CLICK TIME is
+  an exact discriminator for "LiveView is about to discard this press", the same condition as `bindClick`'s own early
+  return (`live_socket.js:857-859`), which is the discard mechanism that alone reproduces the owner's report. Three
+  branches proven live: honoured press → "Opening…" at dt=0, cleared at dt=125ms via ref-drop, five consecutive
+  presses 1009/230/692/1944/850ms all cleared with `pendingStillSet:false`; discarded-in-flight second press → LiveView
+  sends NO frame and changes NOTHING while the hook says "Still working on your last press…" and does NOT stamp a
+  second pending; real CDP-Offline lost press → the named 8s ceiling fired at dt=8003 with words.
+  **THE HARD CONSTRAINT, and it is the most important line in this decision**: pressing `#item-rest` on the deployed
+  build ANSWERS (ref drops in 1944ms) and changes nothing — no URL change, `aria-current` stays on `#item-paper`, six
+  row texts identical. A ref-drop clear that says "Opened." would report SUCCESS for a dead row — the hook would
+  manufacture a NEW lie in place of the old silence. **The clear must be NEUTRAL ("Done") or the hook must verify an
+  actual screen change (URL patch or `aria-current` move) before claiming one.** Two obvious mitigations are refuted:
+  a connectivity gate at click time cannot see the lost-press class (under real Offline `[data-phx-main]` stayed
+  `phx-connected` for OVER 8 SECONDS), and `phx:page-loading-stop` would stick forever because
+  `withPageLoading`'s element path calls `onLoadingDone()` only on the ok branch (`view.js:1326`) — the same defect
+  the shipped `.phx-click-loading{opacity:.6}` has, which is not merely faint but UNBOUNDED (`PUSH_TIMEOUT=30000`).
+  **The live region must render OUTSIDE the LiveView root** or morphdom patches it mid-announce, which means
+  `root.html.heex` — so **D16 gives `root.html.heex` to the press-answer slice this round**, and the a11y-residue
+  slice that also wants two CSS rules there is deferred to round 2.
+
+- **D264 — LANE 4 SHIPS THE ANNOUNCER AND THE ACCELERATOR STAYS SEPARATE, because the PaneBuilder half of the
+  latency is REFUTED.** One Structure-row nav to `["paper"]` costs **25 Repo queries / 8.6–15.4 ms DB / 12.5–28.7 ms
+  wall** at 8,400 documents / 42 types, byte-identical across three runs scoped and unscoped, measured on a host at
+  load 26–42 (so these are UPPER bounds). `type_census` is **ONE** query, 1.85–2.57ms, 21–25% of DB time, and it is
+  NOT a seq scan: `GroupAggregate → Index Scan using documents_type_dataset_index`, `rows=8400`,
+  `Buffers: shared hit=788`, `Execution Time: 4.981 ms`. `Content.list_schemas` fires ONCE, not 2–4 (the second
+  appears only on a genuine gated miss, which `["paper"]` is not — it is a direct root child; `["nope"]` traces
+  `2× Structure.build` and DB doubles to 25.9ms). **The actual dominant cost is a deliberately-disabled memo**:
+  `resolve_read_dataset_id/2` fires 7×, six hit the no-project branch → 18 of the 25 queries are tenancy reads, and
+  the memo that would collapse them (`write_scope.ex:235-255`) is gated OFF for LiveView ON PURPOSE — worth ~2–4ms.
+  **A census TTL cache is ILLEGAL**: `analytics.ex:38-40` documents that totals include DRAFTS so the …Rest counts
+  are honest, `rest_child_node/3` renders `"#{type} (#{total})"` verbatim, and a draft-only create immediately
+  produced the displayed title `"draftyType (1)"` — any TTL makes a displayed integer wrong after any write, which is
+  the lying-surface class this epic keeps closing. So **no query-optimisation slice ships**, D230(2)'s refusal to
+  chase host TTFB stands, and the announcer is bound to a SEPARATE filed root-cause slice with the pending answer
+  FORBIDDEN from citing latency as an acceptance criterion. Honest bound: only `PaneBuilder.build/3` was profiled —
+  not `handle_params` → render → diff → socket encode — so a residual seconds-scale cost could still live there.
+
+- **D265 — THE LANE-4 FLOOR IS REFUSED, NOT MEASURED, AND THE BINARY WAS PURCHASED INSTEAD.** Load never fell below
+  8.05 on 10 cores and peaked at **40.81**, with two processes from another session running **10h47m / 602 CPU-minutes
+  each**, deliberately spawning 24 busy-loops apiece to stress-reproduce `claude_chat_test.exs:808`. Per
+  measure-on-a-quiet-host, no latency number from this wave may be quoted as the floor, and the 10-cold-load
+  measurement is FILED, not built. **What WAS purchased is criterion 1, and it is stronger than the ask**: a discarded
+  press puts **ZERO `"type":"click"` frames** on `/live/websocket`, reproduced 4/4 with a same-run positive control of
+  32/32 answered presses that DID emit one. The source-level reason is at the line:
+  `pushWithReply(e,t,i){if(!this.isConnected())return Promise.reject(new Error("no connection"));` and the drop is
+  SILENT (`exc=0` on every discarded press). **The frame COUNT is a TRAP and any guard that counts frames will pass on
+  a dropped press**: `phx_join` and `WidthBucket`'s own `"type":"hook"` event share the wire, so a discarded press
+  reads `live_frames=2`. Match `"type":"click"`, never count. **And `phx-connected` is REFUTED in BOTH directions as
+  the discriminator**: `connected_at_press` was false in 31/31 probes and 29 were honoured anyway, while the one probe
+  that HAD `phx-loading` is the one dropped — the class is applied post-mount-diff (`view.js:618`), so it is lagging
+  and not on the causal path. The desk also looks pressable before the socket joins: `#item-paper` ships in the
+  dead-mount HTML, 504,500 bytes in 393ms. **A THIRD failure mode is recorded as UNATTRIBUTED and must not become a
+  quoted number**: a 5056–5067ms gap between `readyState="complete"` and a dispatchable press, observed 28 times with
+  an 11ms spread that load jitter does not explain, during which in-page truth says the row was present the whole time
+  — clicks would be QUEUED, not dropped. It is absent from wave 18's ledger of five and it is the first number to
+  re-take on a quiet host.
+
+- **D266 — THE ANCHOR SCOREBOARD AND THE WAVE PLAN ARE MISALIGNED, AND FOUR OF THE FIVE UNMET CRITERIA ARE CLOSABLE
+  WITHOUT NEW CODE.** `task-f559f7c508527010` is 1/6. **C1** ("a person can create a document, add a heading and a
+  paragraph, and save it") is EXACTLY what wave 18's LEG A 7/7 did, and it is now confirmed on TODAY's build by a
+  fourth independent run: `served 051112568 → 051112568, LEG A 7/7 PASS, 46.7s wall, self-clean deleted 1/1`. **C3**'s
+  mutation half is satisfied by `--self-test-site good` (7/7, exit 0) versus `rot` (3/7, exit 1), plus the D241 ExUnit
+  revert-red. **C2 is REFUTED, not merely unstamped** — its two attempt notes cite "the fix is unmerged" and "nobody
+  has looked at the fixed screen", both now FALSE, but the criterion says *an empty paper* and D262 shows the
+  instrument that reports on it is vacuous; C2 gets a `--miss` recording the fossil finding, not a stamp. **C4 is
+  substantively answered by wave 18's verify phase and blocked only mechanically**: that census recorded rows by
+  visible LABEL while the desk serves opaque ids (`item-paper, item-sheet, item-plugin-doclist-75745103,
+  plugin-link-…, item-rest`), so nobody can prove the two censuses describe the same rows — lane 3's remaining work
+  is one line: record element id AND visible label AND outcome in the same row. **C5 is UNSATISFIABLE AS WRITTEN**
+  ("PR merged to main") for a seven-PR report task and must be restated to "every PR this report depends on is merged
+  and LIVE on the deployed build, each named by number, proven by `git merge-base --is-ancestor <sha> <served
+  commit>`". **AND A LATENT ERASER MUST NOT BE TRIPPED**: `drafts.task-f559f7c508527010` agrees on all six `met`
+  flags, is 42 seconds NEWER, and carries ZERO attempts against the published row's three — and
+  `claim.work_field_digests.acceptance_criteria` is byte-identical (`753990f590c6aa31`) on both, so the close/stamp
+  fence is STRUCTURALLY BLIND and will not 409. **Never publish that draft**; stamp the published row one criterion at
+  a time with `--criterion-text`, then read the published perspective back and assert the attempt counts survive.
+
+- **D267 — THE STALE-OPEN MIRROR IS LIVE ON FOUR WAVE-18 TASKS AND IS ONE LEAD ACT FROM TRUE.**
+  `spd-w18-fossil-named-state` 9/10, `spd-w18-save-announces` 7/8, `spd-w18-journey-harness` 10/11 and
+  `spd-w18-nil-icon-500` 10/11 are all `open` with expired claims and `worker: null`, and each one's single unmet
+  criterion is the verbatim "PR merged to main (LEAD closes this criterion)". That criterion is now TRUE for three of
+  them (#7897 `88ec6fb8b`, #7898 `bc05b9168`, #7896 `b43c0b41e`, all ancestors of the served commit) and false only
+  for #7899. `spd-w18-guard-rings-and-label` is the same shape (#7900 `f1ac08c29` MERGED, task open, claim expired
+  04:19Z). Leaving them open makes the board under-report wave 18 and will make wave 19 look like it re-did settled
+  work.
+
+- **D268 — THE SHARED CHECKOUT IS POISONED FOR COMMITS AND THE WAVE-19 CHARTER PR IS BRANCHED FROM #7795's HEAD, NOT
+  FROM `origin/main`.** Local `main` is **48 ahead / 42 behind** `origin/main`, carrying foreign
+  `PPCC2` / `omx(team): merge worker-N` commits from another live session, with 6+ charter `.md` files dirty.
+  Committing the charter from HEAD would drag all 48 into the PR. And because #7795 (which carries D234–D250) is still
+  OPEN, a wave-19 charter branched from `origin/main` would either lose those decisions or conflict with #7795 when it
+  lands — and a conflicted PR silently never runs its workflows. Branching from #7795's head `9ea7344` makes the
+  wave-19 PR a strict DESCENDANT: it carries D234–D250 plus D251–D269, merges cleanly whether or not #7795 lands
+  first, and if #7795 lands the wave-19 branch is a fast-forward. #7795's required contexts are both green
+  (`Elixir gate` success, `PR references an active task` success) and its only reds are the two advisory Vercel
+  deploys, so it remains landable independently.
+
+- **D269 — THE DESK-MARKUP SURFACE IS ONE OWNER, NOT FOUR, and that is why three a11y-residue tasks collapse into one
+  deferred slice.** Five residue items plus lane 2's fill site all live in
+  `api/lib/barkpark_web/live/studio/studio_live/components.ex` and FOUR of them inside `studio_live_shell/1` (`:1018`):
+  `focus_on_mount` at `:1097`, the two title-only `.pane-add-btn`s at `:1106`/`:1116` (the `+` at `:1124` DOES carry
+  `aria-label`), the `role="tablist"` chips at `:1134-1146`, the `aria-current`-less `plugin_link` at `:1191-1203`,
+  and the fill site at `:1418`. Four builders in four worktrees editing one 400-line HEEx sigil is exactly the
+  co-scoped-ordered-merges trap this epic has already logged. `spd-w18-share-access-btn-names` is confirmed and
+  correctly scoped (the workspace-level pair at `:1346-1367` renders visible text and is properly excluded) and is
+  ~20 lines of markup plus ~15 of guard, 28 lines from the chips edit — a separate worktree buys a guaranteed conflict
+  for zero isolation. `spd-bl-doc-checkbox-is-an-unfocusable-span` is already ABSORBED by the chips task's criteria
+  5/6/7 and is closed on that PR, carrying forward one constraint: the outer `.pane-doc-item` must stay a `<div>`
+  because the checkbox is a SIBLING of the row body and a button cannot contain a button. **A MERGED guard already
+  waits for this slice and will RED on main until it is finished**: `studio_desk_focus_ring_guard_test.exs:150-166`
+  `refute`s that `.bp-desk-chip:focus-visible` and `.bp-doc-checkbox:focus-visible` exist, so adding the rings reds
+  main's own guard until the selectors move into `@desk_focus_rings` — that is the guard working, not a regression.
+  **`spd-bl-focus-after-select`'s destination IS DECIDED**: the focus target is the `tabindex="-1"` landmark lane 2
+  builds on the document surface — NOT the 44px collapsed strip (whose `expand-pane` CLOSES the document) and NOT
+  `focus_pane_idx` (structurally unusable at phone, where `pane_columns` is 0). It therefore rides behind lane 2, not
+  beside it. `spd-b18-btn-focus-visible-desk-wide` is RE-DEFERRED IN WRITING: its acceptance is a visual pass over the
+  `.btn` call sites, which is taste, and Fable is unavailable.
+
+## Roadmap — wave 19 (THE ANSWER CONTRACT)
+
+Six slices build this run; two are deferred to round 2 on real dependencies (`root.html.heex` single ownership per
+D16, and a deployed census that would publish a false verdict table before the nil-icon 500 is fixed). Every slice is
+a binary the DOM, the server, the router or a gate answers; none cites taste. **All slices are `opus`: Fable is
+unavailable and forbidden this wave, so the press-answer slice — which would otherwise take fable on the
+visually-designed-surface axis — carries its design constraints written out in D263 instead of a reviewer's eye.**
+
+| # | round | slice | task | model | the binary |
+|---|---|---|---|---|---|
+| 1 | 1 | The nil-icon 500 lands, with the policy-aware fork | `spd-w19-nil-icon-policy-fork` | opus | three authenticated 500s render; `:raise` raises, `:warn` falls back; suite green |
+| 2 | 1 | main stops being red on `doc-gates`, and the detector gets teeth | `spd-w19-literal-gate-entity` | opus | the gate PASSes at 372 files; `--selftest` REDs on a planted literal |
+| 3 | 1 | The way out actually gets you out, both ways | `spd-w19-way-out-works` | opus | one press swaps notice→editor; the "back" href returns 200 |
+| 4 | 1 | `<:empty_state>` filled — the third seam, registry-derived | `spd-w19-empty-state-seam` | opus | a not-found document names its id, type and reason instead of "Select a document to edit" |
+| 5 | 1 | LEG C: the desk-row census instrument, and LEG B stops lying | `spd-w19-legc-census-instrument` | opus | `/good/` green and `/rot/` red per row; an unnamed beat REDS the self-test |
+| 6 | 1 | A press answers in words, and never claims a success it did not get | `spd-w19-press-answer-hook` | opus | a press renders a named state at dt≈0 and clears; a dead row is NOT announced as opened |
+| 7 | 2 | The deployed census + the verdict table (after 1, 5) | `spd-w19-desk-row-census-run` | opus | every row kind pressed on the deployed build; dead ones named by id AND label |
+| 8 | 2 | The desk chips and the nameless buttons answer (after 6) | `spd-w19-desk-chips-and-names` | opus | chips are keyboard-operable and ringed; share/access have accessible names |
+
+**HIGH-FLIP-RISK, named here and in the briefs.** Slice 1's policy judgment: D251 overrides a builder's documented
+decision on a diff an independent reviewer was already asked to judge, and a reviewer could reasonably hold that C4
+as written means the builder delivered exactly what was asked and the fork is a NEW requirement rather than a
+correction — a genuinely independent second reviewer is owed before merge. Slice 4's enumeration-derivation judgment:
+D259 kills a vacuous green that passes in CI off a single migration-inserted row, and the three-arm/per-arm-assertion
+shape is the whole value of the slice — if a reviewer re-derives only the union count, the defect survives review.
+Slice 6's honesty judgment: D263's neutral-clear constraint is what separates an announcer from a new lie, and it is
+the single easiest thing for a builder to get wrong in a way that LOOKS correct.
+
+## Wave log — wave 19 (append at Review)
+
+### Wave 2026-07-30 — Wave 19 (THE ANSWER CONTRACT), Review. Grade **A**.
+
+**Round 1 landed whole: six slices, all reviewed, all gate-green, all pushed with PRs.** The two round-2
+slices are deferred by design on real dependencies, not by failure.
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| `spd-w19-nil-icon-policy-fork` | `…the-desk-destination-stops-raising-a-nil-0` | #8070 | The owed debt, paid the stronger way. #7899's whole 504-line diff replayed clean onto `origin/main` plus the reviewer's policy-aware fork, implemented as a mirror-image private pair above the `unknown_icon/3` pair it copies, so the module carries ONE policy concept. All three coupled edits shipped, including a third stale moduledoc place the builder found while editing. **The reviewer settled the builder's own biggest blind spot by RUN: the FULL suite is 27 doctests / 13026 tests / 0 failures — the `:raise` arm reds nothing anywhere in 13k tests.** No reviewer fixes were needed. HIGH-FLIP-RISK stands and an independent second reviewer is still owed: this overrides a builder's documented decision on a diff a reviewer was already asked to judge. |
+| `spd-w19-literal-gate-entity` | `…main-stops-being-red-on-doc-gates-an-htm-1-r` | #8071 | main's standing `doc-gates` red fixed at the DETECTOR — a `(?<!&)` lookbehind — with `components.ex:1769` byte-identical and no `lit-allow` anywhere; the annotation path is refuted by mutation. The mandatory `--selftest` ships with a blocking CI tripwire, and all 14 previously-skipped steps were run locally rather than guessed at. **Reviewer fix: a vacuous green REPRODUCED on `origin/main` — a relocated copy of the script derives ROOT from `dirname $0`, scans 0 files and printed `PASS — 0 Studio chrome file(s) scanned` with exit 0.** Closed with a `MIN_CHROME_FILES = 200` floor plus a sixth self-test case that copies `$0` out of the tree and asserts it REDS, mutation-proven at floor 0. |
+| `spd-w19-way-out-works` | `…the-way-out-actually-gets-you-out-the-re-2` | #8072 | Both of wave 18's ways out were broken and both are fixed, through a real `live/2` mount on the real fossil shape at BOTH flag values. The repair is the mode re-derive PLUS the stream fill, and the third defect the fix surfaced — the notice arm sharing the STREAMED arm's container id, so the notice would have survived its own repair — is fixed too. The back link is proven as a ROUTE (`route_info/4` + a real 200), never as a string equality against the same `Paths` call the component makes. No reviewer fixes needed. One criterion is a stated DEVIATION, not a pass: glyph count at canvas OFF is 0 by design, so the discriminating assertions were made instead. |
+| `spd-w19-empty-state-seam` | `…the-third-seam-a-document-that-does-not--3-r` | #8073 | The declared-and-never-filled slot is filled and the default shrug is unreachable on that path, with the reason derived from `(panes, nav_path)` and `PaneBuilder.build/3` at ZERO diff. **The enumeration is the slice's real value and it is honest: killing arm 2 leaves the union at 38 — a naive union guard stays GREEN — while arm 2's own assertions red with `count=0`.** The `blocks: []` fixture prohibition is honoured and proven positively. **Reviewer fixes: `tabindex="-1"` shipped on the recovery ANCHOR, which bought nothing (an `<a href>` is already programmatically focusable) while removing the ONLY way out from the tab order in the `:no_schema` and `:unknown_node` arms — mouse-only, i.e. the owner's dead control in a new place.** D269 says "the tabindex=-1 LANDMARK", so the `-1` moved onto the `role="alert"` container; mutation-proven both ways, criterion 10 amended via `bp`. Copy fix: `:no_schema` rendered "orphanType names a orphanType". |
+| `spd-w19-legc-census-instrument` | `…leg-c-the-desk-row-census-instrument-a-c-4` | #8074 | The coverage guard is the deliverable that matters and it works in both directions — deleting `CENSUS: PASS` from the expectation now reds with "an unnamed beat is silently unasserted, so it can never red and it is a decoration", and on its first run it caught four real defects the beat-level check called PASS. Attribution is by identity, counts reach no decision (structurally: `identityWitness()` is the only producer of a PASS), and the `/rot/` decoy that moves both counts without naming itself is red for it. **LEG B's vacuous oracle is fixed and the reviewer re-observed the difference: `named_state=1[role=alert] region=main.bp-paper-shell visible_text=210 chars · the page SAYS SO BY NAME` where it used to print `WORDLESSLY BLANK`.** No reviewer fixes needed. Budget default is 150s not 90s — a flagged, measured deviation named inside the criterion's own evidence. |
+| `spd-w19-press-answer-hook` | `…a-press-answers-in-words-within-a-frame--5-r` | #8075 | A press answers in words within one frame, outside the LiveView root so morphdom cannot patch it mid-announce, riding the existing nonced hook with zero CSP change. **D263's hard case is honoured: words are bound to observed evidence (URL patch / `aria-current` move), and with neither witness the answer is the neutral "Done." — so `#item-rest`, which answers and changes nothing, is never announced as opened.** Two lost-press shapes get words instead of silence, proven on the deployed build with an in-page MutationObserver because a `Runtime.evaluate` on that thread was measuring its own sampler. **Reviewer fixes, both invisible to a browser-only gate: (1) it REDS a merged guard — `editor_panel_containment_test.exs` censuses every `position: fixed` selector in `root.html.heex` and `.bp-press-answer` was unclassified, so this would have gone RED on the required Elixir gate at merge; (2) ZERO `api/test/**` coverage against the wave's own D241, now `press_answer_region_guard_test.exs` — the region in the SERVED html of a real authenticated desk GET, structurally outside the LiveView root, and the three literals that bind the clear to evidence, each with a sabotage control. Mutation-proven: renaming the region id reds 3 of 11.** The reviewer also settled the builder's top risk: the HEEx compiles, `--warnings-as-errors` clean. |
+
+**Cross-slice integration, verified rather than assumed.** All 15 branch pairs merge clean (`git merge-tree`),
+and a combined integration branch of all six slices runs **2174 tests, 0 failures** on
+`test/barkpark_web/{studio,components,live/studio}/` with `studio-literal-check`, its selftest and
+`design/check.mjs` all green. Two slices edit wave 18's leg-A journey test at different lines; they merge.
+
+**What the wave did NOT do, honestly.** The anchor criterion the wish calls "nobody has touched" —
+*whatever the Desk Structure buttons do when clicked is verified to do it, or the dead ones are named* —
+is still **not answered as a binary on the deployed desk**. Wave 19 built the instrument that can answer
+it and proved it can produce a legible per-row table, but `spd-w19-desk-row-census-run` is round 2 by
+design: pressing before the nil-icon fork merges would record `/studio/rest` and `/studio/plugins` rows
+as DEAD when the cause is a crash this wave already fixed — a published false verdict. That sequencing is
+correct and it is also the reason the owner's second complaint survives another wave.
+
+**Ledger.** All six slice tasks in_progress, published, evidence-bearing, correct parent and `wave_paper`,
+with only the merge-gated criterion open for the lead — the honest state. Both round-2 tasks untouched at
+0/N. Eight builder follow-ups all exist and are published. Reviewer ledger work: criterion 10 of
+`spd-w19-empty-state-seam` amended (its stored wording contradicted the shipped landmark placement, with
+the original evidence preserved); `pr_url` + `final_branch` stamped on all six; two new findings filed —
+`spd-w19r-literal-gate-floor-siblings` (p3: `go-literal-check.sh` and `web-literal-check.sh` carry the
+identical relocated-ROOT hole with no floor) and `spd-w19r-live-studio-suite-flake` (p3: two
+non-reproducible reds in `test/barkpark_web/live/studio/` across eight runs, and the brief's clean-main
+13015/2 control did not reproduce either — a review run measured 13026/0).
+
+**Next wave takes, in this order.** (1) Merge round 1 — `spd-w19-literal-gate-entity` FIRST, because it
+unblocks 7 further blocking `doc-gates` steps for everyone else. (2) Dispatch
+`spd-w19-desk-row-census-run` the moment `spd-w19-nil-icon-policy-fork` and
+`spd-w19-legc-census-instrument` are both ancestors of the served commit — that is the owner's second
+complaint, and it is the last binary in the original report still unanswered. (3) Dispatch
+`spd-w19-desk-chips-and-names` once `spd-w19-press-answer-hook` merges (it owns `root.html.heex` next
+under D16 and a merged guard is already REFUTING the two rings it must add). (4) Then the residue this
+wave named and did not take: `task-34d256d198849a98` (p2 — the legacy-HTML body arm still shares the
+streamed arm's container id, the same trap one arm over), `spd-w19-click-loading-falls-through` (p2 — an
+in-flight row is transparent to hit-testing, so a second press lands on whatever is underneath), and the
+`blocks: []` honesty residue D235 named: the sentence still says "This **paper**" to someone editing a
+**session**, carries neither the id nor the type, and is painted the same faint grey the owner read as
+inert.
