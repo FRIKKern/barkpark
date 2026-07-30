@@ -151,12 +151,17 @@ func stampRequestOf(cmd manifest.Command, forward []string) (stampRequest, bool)
 // this wave is to stop claiming the difference away.
 func confirmStampLanded(out *writer, ctx manifest.Context, req stampRequest) int {
 	client := apiclient.New(apiclient.Config{
-		BaseURL:     ctx.Server,
-		Token:       ctx.Token,
-		Workspace:   ctx.Workspace,
-		Project:     ctx.Project,
-		Dataset:     ctx.Dataset,
-		Perspective: "drafts", // tasks live as drafts, exactly like the board reads
+		BaseURL:   ctx.Server,
+		Token:     ctx.Token,
+		Workspace: ctx.Workspace,
+		Project:   ctx.Project,
+		Dataset:   ctx.Dataset,
+		// Perspective is inert for this call: GET /v1/tasks/:doc_id is the flat,
+		// token-scoped task route and carries no perspective query param. It is
+		// set only so this client is constructed identically to every other one
+		// in the CLI — the read-back always sees the row `bp task stamp` wrote,
+		// which is the PUBLISHED one (PDS-D360).
+		Perspective: "drafts",
 	})
 	stored, err := taskboard.FetchCriterion(client, req.docID, req.index)
 	if err != nil {
@@ -204,7 +209,7 @@ func renderStampVerdict(out *writer, req stampRequest, stored taskboard.Criterio
 func storedCriterionSummary(stored taskboard.CriterionItem) string {
 	ev := "evidence <empty>"
 	if stored.Evidence != "" {
-		ev = fmt.Sprintf("evidence %d chars %q", len(stored.Evidence), truncateCell(stored.Evidence, 48))
+		ev = fmt.Sprintf("evidence %d bytes %q", len(stored.Evidence), truncateCell(stored.Evidence, 48))
 	}
 	s := fmt.Sprintf("met=%v  %s  criterion %q", stored.Met, ev, truncateCell(stored.Criterion, 72))
 	if n := len(stored.Attempts); n > 0 {
@@ -234,7 +239,7 @@ func stampMismatches(req stampRequest, stored taskboard.CriterionItem) []string 
 		if strings.TrimSpace(stored.Evidence) == "" {
 			out = append(out, "the store holds NO evidence on that row — a met without evidence is not a sealed row")
 		} else if sent := strings.TrimSpace(req.evidence); sent != "" && sent != strings.TrimSpace(stored.Evidence) {
-			out = append(out, fmt.Sprintf("the stored evidence differs from what was sent (%d chars stored vs %d sent)",
+			out = append(out, fmt.Sprintf("the stored evidence differs from what was sent (%d bytes stored vs %d sent)",
 				len(stored.Evidence), len(req.evidence)))
 		}
 	}
