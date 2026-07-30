@@ -281,6 +281,37 @@ tmpl_to_regex() {
   printf '%s' "$t"
 }
 
+# A name template that matches an ARBITRARY string is a CATCH-ALL, and a
+# catch-all is not a match — it is a takeover. `.github/workflows/cp-ops.yml`
+# declared `jobs.run.name: ${{ inputs.operation }}`, which tmpl_to_regex turns
+# into `^.+$`; job_for_name returns the FIRST match in a directory read in
+# `sort` order, so cp-ops.yml claimed every name from doc-gates.yml, elixir.yml,
+# pr-task-gate.yml and reland-check.yml and handed each one ITS OWN provenance:
+# coe=0, pf=0, needs="". Those are exactly the three fields S2/S3/S4 exclude on,
+# so the run emitted SIX contexts at exit 0 — promoting a paths-filtered name
+# whose absence would have deadlocked main with a permanent "is expected."
+#
+# The refusal is deliberately at INDEX-BUILD time, not at match time: a
+# catch-all is a defect in the workflow source, so whether it happens to win a
+# race against some sampled name must not decide whether the run is trusted.
+# The probe carries no space and no parenthesis so that legitimately partial
+# templates (`Test (${{ matrix.otp }})`, `${{ matrix.pkg }} lint`) are NOT
+# flagged — only a template that matches literally anything is.
+CATCHALL_PROBE='rc-catchall-probe-9f2c1dz'
+
+assert_no_catchall_job_names() {
+  local idx="$1" file job tmpl re
+  while IFS=$'\t' read -r file job tmpl _matrixed _coe _pf _needs; do
+    [ -n "$job" ] || continue
+    re="$(tmpl_to_regex "$tmpl")"
+    if grep -qE "^${re}$" <<<"$CATCHALL_PROBE"; then
+      die "CATCH-ALL JOB NAME: $file job '$job' declares \`name: $tmpl\`, whose match regex is ^${re}\$ — it matches EVERY rendered check-run name and would misattribute other workflows' checks to this job (erasing continue-on-error / paths-filter / needs). Give the job a STATIC name and move the interpolation into a STEP name."
+    fi
+  done <<EOF
+$idx
+EOF
+}
+
 # rendered check-run name -> "file<TAB>job<TAB>coe<TAB>pf<TAB>needs", or empty.
 #
 # Every grep here is fed by a HERE-STRING, never by a pipe. Under `set -o
@@ -400,6 +431,7 @@ main() {
   local idx
   idx="$(build_workflow_index)"
   [ -n "$idx" ] || die "the workflow index is empty — the parser is broken, not the repo"
+  assert_no_catchall_job_names "$idx"
 
   # ── stage 1: the poison filter, per sha ──
   local sha rows accepted_all="" first=1 intersection=""

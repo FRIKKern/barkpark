@@ -296,6 +296,128 @@ else
   bad "the committed spec has unmapped names: $(jq -c '[.exclusions[] | select(.reason|startswith("S0")).context]' "$SPEC")"
 fi
 
+section "3d. a job named after an INPUT is a catch-all — the generator refuses it instead of letting it claim every name"
+
+# THE SPECIMEN, and it was live in this repo: .github/workflows/cp-ops.yml
+# declared `jobs.run.name: ${{ inputs.operation }}`. tmpl_to_regex turns that
+# into `^.+$`, job_for_name returns the FIRST match in sort order, and cp-ops
+# sorts ahead of doc-gates / elixir / pr-task-gate / reland-check — so every one
+# of their names was attributed to cp-ops's job and handed ITS provenance
+# (coe=0, pf=0, needs=""). That erases the three fields S2/S3/S4 exclude on, and
+# the run emitted SIX contexts at exit 0 including a PATHS-FILTERED name, which
+# would have deadlocked main with a permanent "is expected."
+#
+# The harness could not see it: this fixture dir is hermetic and never reads
+# .github/workflows/. So the specimen is planted HERE, and the real tree is
+# asserted separately below.
+cat > "$WF/poison.yml" <<'YAML'
+name: poison
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: choice
+        options:
+          - alpha
+jobs:
+  run:
+    name: ${{ inputs.operation }}
+    runs-on: ubuntu-latest
+YAML
+# `poison.yml` sorts ahead of probe.yml and red.yml, exactly as cp-ops.yml sorted
+# ahead of the workflows it hijacked — so a first-match implementation loses.
+POISON_OUT="$(bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --sha shaA --sha shaB 2>&1)" && POISON_RC=0 || POISON_RC=$?
+if [ "$POISON_RC" -ne 0 ] && grep -q "CATCH-ALL JOB NAME: poison.yml job 'run'" <<<"$POISON_OUT"; then
+  ok "the generator REFUSES a catch-all job name and names the file and the job (exit $POISON_RC)"
+else
+  bad "the catch-all was not refused (exit $POISON_RC): $(head -2 <<<"$POISON_OUT")"
+fi
+
+# MUTATION PROOF. Remove the guard's CALL — one line, and the refusal is the
+# only thing that goes — and the poison must come back: the run goes green and
+# the advisory specimen S2 exists to catch is silently PROMOTED, because its
+# continue-on-error provenance now belongs to poison.yml's job.
+NOGUARD="$TMP/gen-noguard.sh"
+sed -E 's/^( *)assert_no_catchall_job_names "\$idx"/\1: # GUARD REMOVED/' "$GEN" > "$NOGUARD"
+if ! grep -q 'GUARD REMOVED' "$NOGUARD"; then
+  bad "the mutation did not apply — the guard call is no longer on its own line, so the proof below is vacuous"
+else
+  ok "the mutation applies: the guard's call site is removed from a copy of the generator"
+fi
+NG_OUT="$(bash "$NOGUARD" --workflows "$WF" --fixture-dir "$FIX" --sha shaA --sha shaB --explain --out "$TMP/poison-spec.json" 2>&1)" && NG_RC=0 || NG_RC=$?
+if [ "$NG_RC" -eq 0 ] && grep -q "keep     Advisory gate  (poison.yml job 'run')" <<<"$NG_OUT"; then
+  ok "…and without the guard the run goes GREEN and misattributes 'Advisory gate' to poison.yml — S2 is erased, the promotion is live (mutation-proven able to fail)"
+else
+  bad "the unguarded run did not reproduce the poison (exit $NG_RC): $(grep -E '  (keep|exclude) ' <<<"$NG_OUT" | head -3)"
+fi
+if [ -f "$TMP/poison-spec.json" ] && jq -e '[.protection.required_status_checks.checks[].context] | index("Advisory gate")' "$TMP/poison-spec.json" >/dev/null 2>&1; then
+  ok "…and the unguarded SPEC really pins the advisory name (the promotion reaches the file that would be PUT, not just the ledger)"
+else
+  bad "the unguarded spec did not carry 'Advisory gate': $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/poison-spec.json" 2>&1)"
+fi
+rm -f "$WF/poison.yml" "$TMP/poison-spec.json"
+
+# The guard must not be a blanket ban on interpolation: a PARTIAL template is
+# how every matrixed job in this repo is named, and refusing those would make
+# the generator unusable rather than trustworthy.
+cat > "$WF/partial.yml" <<'YAML'
+name: partial
+on:
+  pull_request:
+jobs:
+  part:
+    name: Partial ${{ matrix.otp }} gate
+    runs-on: ubuntu-latest
+YAML
+PART_OUT="$(bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --sha shaA --sha shaB 2>&1)" && PART_RC=0 || PART_RC=$?
+if [ "$PART_RC" -eq 0 ] && ! grep -q "CATCH-ALL" <<<"$PART_OUT"; then
+  ok "a PARTIAL interpolation (\`Partial \${{ matrix.otp }} gate\`) is NOT refused — the guard bans catch-alls, not templates"
+else
+  bad "the guard refused a partial template (exit $PART_RC): $(grep CATCH-ALL <<<"$PART_OUT" | head -1)"
+fi
+rm -f "$WF/partial.yml"
+
+# THE REAL TREE. The hermetic specimen proves the guard fires; this proves the
+# repo it protects is actually clean — the assertion that would have caught
+# cp-ops.yml on the day it landed.
+REAL_OUT="$(bash "$GEN" --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIX" \
+  --sha shaA --sha shaA --allow-single-sha 2>&1)" || true
+if ! grep -q "CATCH-ALL JOB NAME" <<<"$REAL_OUT"; then
+  ok "no job in .github/workflows/ carries a catch-all name — the real tree the generator reads in anger is clean"
+else
+  bad "a real workflow carries a catch-all job name: $(grep -o "CATCH-ALL JOB NAME: [^,]*" <<<"$REAL_OUT" | head -1)"
+fi
+
+# …AND THAT SILENCE HAS TO MEAN SOMETHING. The assertion above passes on the
+# ABSENCE of a string, so it also passes when the generator dies before the scan
+# ever reaches the real tree — an unrelated early `die`, a renamed flag, a broken
+# fixture dir. That is the vacuous-green shape this epic exists to remove, so the
+# same invocation over a COPY of the real tree, with one catch-all planted in it,
+# must REFUSE. Clean + able-to-fail together are the claim; neither alone is.
+REALCOPY="$TMP/real-workflows"
+mkdir -p "$REALCOPY"
+cp "$REPO_ROOT"/.github/workflows/*.yml "$REALCOPY/"
+cat > "$REALCOPY/aaa-planted-poison.yml" <<'YAML'
+name: planted
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: string
+jobs:
+  run:
+    name: ${{ inputs.operation }}
+    runs-on: ubuntu-latest
+YAML
+PLANT_OUT="$(bash "$GEN" --workflows "$REALCOPY" --fixture-dir "$FIX" \
+  --sha shaA --sha shaA --allow-single-sha 2>&1)" && PLANT_RC=0 || PLANT_RC=$?
+if [ "$PLANT_RC" -ne 0 ] && grep -q "CATCH-ALL JOB NAME: aaa-planted-poison.yml job 'run'" <<<"$PLANT_OUT"; then
+  ok "…and the identical invocation over a COPY of the real tree with one catch-all planted REFUSES — the clean verdict above is a read, not a silence"
+else
+  bad "the real-tree scan could not be made to fail (exit $PLANT_RC): $(head -2 <<<"$PLANT_OUT")"
+fi
+rm -rf "$REALCOPY"
+
 # ═══ 4. fail-closed feeds ════════════════════════════════════════════════════
 
 section "4. the generator fails closed — an unreadable or empty feed is never an empty spec"
