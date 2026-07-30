@@ -19,6 +19,9 @@ defmodule BarkparkWeb.Icons do
       not have is a bug, and the enumeration tripwire in
       `BarkparkWeb.IconsTripwireTest` turns the whole of `lib/` into one
       assertion of that.
+
+      The policy governs BOTH failure shapes — an unknown BINARY name, and a
+      NON-BINARY name (`nil`, an atom, a number). See the fail-safe below.
     * `:dev` and `:prod` → `Logger.warning/1` plus the "file" fallback. A page
       is NEVER crashed over a cosmetic glyph. `:dev` is deliberately grouped
       with `:prod` rather than with `:test` (which the brief's recommendation
@@ -29,9 +32,50 @@ defmodule BarkparkWeb.Icons do
       gating idiom follows `live_auth.ex:163`, but resolved at COMPILE time so
       nothing depends on `Mix` being loaded at runtime.
 
+  ## The non-binary fail-safe (spd-w18-nil-icon-500)
+
+  `resolve_paths/2` used to be a SINGLE `when is_binary(name)` clause, so a
+  non-binary name did not fall back — it raised `FunctionClauseError`, in every
+  environment, `:warn` policy included. The moduledoc's own promise ("a page is
+  NEVER crashed over a cosmetic glyph") was therefore FALSE for `nil`, and the
+  authenticated Studio proved it: `/studio/rest` and `/studio/plugins` both
+  returned HTTP 500 (`resolve_paths(nil, :warn)` ← `icon/1` ←
+  `studio_live_shell/1`) while `/studio` returned 200, and clicking the …Rest
+  desk row was simply DEAD because `Scope.select` only `push_patch`es and cannot
+  distinguish a crashing destination from a no-op.
+
+  There is now a non-binary clause, and it is POLICY-AWARE — the same fork
+  `unknown_icon/3` already carries, so the module holds ONE policy concept
+  rather than one policy-aware clause and one policy-blind one:
+
+    * `:warn` (`:dev` and `:prod`) → `Logger.warning/1` plus the "file" glyph.
+      This is the arm that PRODUCTION runs, and it is what makes the moduledoc's
+      promise true: a nil icon never crashes a page again. All three
+      spd-w18-nil-icon-500 destinations are served by this arm.
+    * `:raise` (`:test`) → `ArgumentError`. A non-binary name reaching `icon/1`
+      means some call site forwarded unbounded data without `drawable_name/2`,
+      and `:test` is exactly where we want to hear about that. Falling back
+      under `:raise` too would have bought nothing at runtime (prod is `:warn`)
+      while spending the only tripwire this shape can have — the literal
+      scanner structurally cannot see `name={item.icon}`.
+    * The literal contract keeps every tooth it had: an unknown *binary* name
+      still raises under `:raise`, and `IconsTripwireTest` still enumerates
+      every literal in `lib/`.
+
+  Bound, stated honestly: no CURRENT dynamic `name={…}` site can reach the
+  `:raise` arm — each routes through `drawable_name/2`, or `|| "file"`, or sits
+  inside `if item.icon`. It is a REGRESSION TRIPWIRE for the next unguarded
+  site (and for a TRUTHY non-binary, where `|| "file"` does not save you:
+  `:folder || "file"` is `:folder`), not a fix for anything live.
+
+  The tripwire is a literal scanner and structurally CANNOT see
+  `name={item.icon}`. The guard for that shape is `drawable_name/2` at the call
+  site plus a test that RENDERS — `BarkparkWeb.Studio.NilIconNeverCrashesTest`.
+
   `known_icon?/1` is the public predicate behind all of this — it answers the
   same question `icon/1` asks (emoji alias resolved, then map membership), so a
-  caller holding an unbounded string can check before rendering.
+  caller holding an unbounded string can check before rendering, and
+  `drawable_name/2` is the one-liner that turns it into a name you can pass on.
   """
 
   use Phoenix.Component
@@ -250,18 +294,84 @@ defmodule BarkparkWeb.Icons do
 
   def known_icon?(_), do: false
 
+  @doc """
+  The name to actually render for an UNBOUNDED icon name — schema data, plugin
+  data, a `Barkpark.Structure.Node`'s `:icon` — collapsing BOTH failure shapes
+  (non-binary, and an unknown string) to `fallback` at the CALL SITE, before
+  `icon/1` is ever asked.
+
+  This is the guard for the shape the `lib/`-wide literal tripwire structurally
+  cannot see: `name={item.icon}`. `resolve_paths/2`'s fail-safe clause keeps such
+  a call site from CRASHING in dev/prod (and reds it in `:test`, so it gets
+  guarded); `drawable_name/2` is the guard, and it also keeps the call site from
+  silently returning the wrong picture, by letting it choose a glyph that means
+  something there (`"folder"` for a section header, `"circle"` for a tab).
+  You want both — see the moduledoc.
+
+      iex> BarkparkWeb.Icons.drawable_name("folder")
+      "folder"
+      iex> BarkparkWeb.Icons.drawable_name(nil)
+      "file"
+      iex> BarkparkWeb.Icons.drawable_name("no-such-glyph", "circle")
+      "circle"
+  """
+  @spec drawable_name(term(), String.t()) :: String.t()
+  def drawable_name(name, fallback \\ "file") do
+    if known_icon?(name), do: name, else: fallback
+  end
+
   @doc false
   # The whole resolution, with the unknown-name policy passed in rather than
   # baked in, so BOTH branches are provable from a single `:test` run — the
   # `:warn` (dev/prod) path must be shown to still fall back and NOT raise.
-  @spec resolve_paths(String.t(), :raise | :warn) :: String.t()
-  def resolve_paths(name, policy \\ @unknown_icon_policy) when is_binary(name) do
+  @spec resolve_paths(term(), :raise | :warn) :: String.t()
+  def resolve_paths(name, policy \\ @unknown_icon_policy)
+
+  def resolve_paths(name, policy) when is_binary(name) do
     svg_name = Map.get(@emoji_map, name, name)
 
     case Map.fetch(@icons, svg_name) do
       {:ok, paths} -> paths
       :error -> unknown_icon(name, svg_name, policy)
     end
+  end
+
+  # THE FAIL-SAFE (spd-w18-nil-icon-500). A non-binary name is runtime DATA that
+  # reached an interpolated `name={item.icon}` — never a developer-authored
+  # literal. It is POLICY-AWARE, mirroring `unknown_icon/3` below: warn and paint
+  # the "file" glyph under `:warn` (dev/prod), so a nil never 500s a page again;
+  # raise under `:raise` (test), because an unguarded dynamic call site is a bug
+  # and the literal tripwire structurally cannot see `name={item.icon}`.
+  def resolve_paths(name, policy), do: non_binary_icon(name, policy)
+
+  defp non_binary_icon(name, :raise) do
+    raise ArgumentError, """
+    non-binary icon name #{inspect(name)}.
+
+    `<.icon name={…} />` was handed runtime DATA (a schema's `:icon`, a
+    `Barkpark.Structure.Node`'s `:icon`, a plugin's) that is not a string, so it
+    would have painted the "file" document glyph instead of the picture the row
+    asked for. Guard the call site:
+
+        <.icon name={BarkparkWeb.Icons.drawable_name(item.icon, "folder")} />
+
+    so the fallback glyph is chosen where it means something. Note `|| "file"`
+    does NOT cover this shape when the value is truthy — `:folder || "file"` is
+    `:folder`.
+
+    Outside :test this warns and falls back rather than raising — a cosmetic
+    glyph never crashes a page.
+    """
+  end
+
+  defp non_binary_icon(name, _policy) do
+    Logger.warning(
+      "BarkparkWeb.Icons: non-binary icon name #{inspect(name)} — falling back to the " <>
+        ~s("file" glyph. Guard the call site with `drawable_name/2` to choose a ) <>
+        "meaningful glyph instead."
+    )
+
+    Map.get(@icons, "file", "")
   end
 
   defp unknown_icon(name, svg_name, :raise) do
