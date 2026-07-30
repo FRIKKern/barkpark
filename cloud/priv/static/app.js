@@ -13270,6 +13270,14 @@
         toast({ kind: "error", title: "Sign-in failed", body: "We couldn't complete that sign-in. Please try again." });
       }
       done();
+    }).catch(function () {
+      // api() resolves its OWN rejections, so this covers only a throw INSIDE the
+      // handler above (setSession, toast, a DOM restore). Without it that throw
+      // swallows done() and the user is left staring at "Signing you in…"
+      // forever — a permanent lie about an in-flight sign-in, which is exactly
+      // the class this epic exists to abolish. Fail into the login form instead.
+      renderOAuthPending(false);
+      done();
     });
   }
 
