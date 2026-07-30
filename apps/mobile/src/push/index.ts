@@ -50,6 +50,47 @@ export async function runPushRegistration(
 }
 
 /**
+ * What the USER is told when this device is not registered for push.
+ *
+ * `registerDeviceToken` already computes an exemplary verdict — it refuses to
+ * report `registered` on a 2xx whose body carries no id — and until now the
+ * shell threw that verdict away, so a real 401/422/429 would have been as
+ * silent as a healthy launch. Every non-registered outcome gets a line; only a
+ * confirmed registration (and a verdict that has not landed yet, which claims
+ * nothing) is silent.
+ *
+ * `unavailable` is deliberately included even though it is today's state on
+ * every build (no `expo-notifications`, no entitlements — one human gate). A
+ * phone that will never buzz when an agent blocks is a fact the owner of the
+ * phone is entitled to; it is worded as a quiet statement, not an error.
+ */
+export function pushNotice(result: RegisterPushResult | undefined): string | undefined {
+  if (result === undefined) return undefined // not attempted yet — no claim either way
+  switch (result.status) {
+    case 'registered':
+      return undefined
+    case 'unavailable':
+      return 'Push is off on this device — nothing will alert you when an agent needs you.'
+    case 'network-error':
+      return 'Push is not set up: this device could not reach Barkpark Cloud.'
+    case 'rate-limited':
+      return 'Push is not set up yet: Cloud is rate-limiting registration. It retries on the next launch.'
+    case 'unauthorized':
+      return 'Push is not set up: Cloud refused your session. Sign out and back in to fix it.'
+    case 'rejected':
+      return 'Push is not set up: Cloud refused this device token.'
+    case 'server-error':
+      return `Push is not set up: Cloud returned HTTP ${result.httpStatus}.`
+  }
+  // EXHAUSTIVENESS, not decoration: a new RegisterPushResult variant must be
+  // given words deliberately. Without this binding TypeScript would let the
+  // switch fall through and return `undefined` — i.e. the new verdict would be
+  // SILENT, which is precisely the defect this function exists to kill.
+  const unhandled: never = result
+  return `Push is not set up: ${(unhandled as RegisterPushResult).status}.`
+}
+
+/**
  * The app-side call site: register this device once per Cloud session.
  *
  * Keyed on `session.url + session.token` and guarded by a ref, so a re-render
@@ -60,8 +101,9 @@ export async function runPushRegistration(
  * → a welcome-frame storm). One attempt per session, and the next cold start
  * re-registers for free via the idempotent upsert.
  *
- * Returns the last outcome for a future debug surface; nothing renders from it
- * today and nothing should — a device without push is not an error state.
+ * Returns the last outcome, and the shell RENDERS it through `pushNotice`: a
+ * device without push is not an error state, but it is a state, and an app
+ * that swallows its own verdict is claiming a push channel it never confirmed.
  */
 export function usePushRegistration(
   session: CloudSessionRef | undefined,

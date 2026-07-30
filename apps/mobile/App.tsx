@@ -8,7 +8,7 @@
 // transition writes it first, then mirrors it into React state — reopening
 // the app lands exactly where the user left off (last-location memory).
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { StyleSheet, View } from 'react-native'
+import { StyleSheet, Text, View } from 'react-native'
 import { StatusBar } from 'expo-status-bar'
 
 import type { ConnectTarget } from './src/cascade/fleetPick'
@@ -23,7 +23,7 @@ import {
   saveCloudSession,
 } from './src/state/appConfig'
 import { useChatRollup } from './src/chat/useChatRollup'
-import { usePushRegistration } from './src/push'
+import { pushNotice, usePushRegistration } from './src/push'
 import { ChatScreen } from './src/screens/ChatScreen'
 import { ConnectScreen } from './src/screens/ConnectScreen'
 import { LoginScreen, type CloudSession } from './src/screens/LoginScreen'
@@ -32,6 +32,7 @@ import { TasksScreen } from './src/screens/TasksScreen'
 import { TabBar, type TabKey } from './src/ui/TabBar'
 import { haptic, needsYouRisingEdge } from './src/ui/haptics'
 import { useTheme } from './src/ui/theme'
+import { scale } from './src/ui/typography'
 
 export default function App() {
   const theme = useTheme()
@@ -69,8 +70,18 @@ export default function App() {
   const connection = useMemo(() => connectionFromConfig(config), [config])
 
   // Needs-you badge (ratified R3): blocked sessions from GET /v1/chat/rollup.
-  const rollup = useChatRollup(connection)
-  const chatBadge = rollup?.counts.blocked ?? 0
+  //
+  // The feed carries the count AND its standing: once the poll has failed
+  // often enough (or the last confirmed answer is old enough) the shell stops
+  // vouching for the number, and the tab bar paints it as last-known instead
+  // of as a reading. The judgement lives here because the shell owns the feed;
+  // TabBar owns only the two paints.
+  const feed = useChatRollup(connection)
+  const rollup = feed.rollup
+  const chatBadge = useMemo(
+    () => ({ count: rollup?.counts.blocked ?? 0, confirmed: feed.freshness === 'confirmed' }),
+    [rollup, feed.freshness],
+  )
 
   // needsYou haptic (charter D33) — the app's ONE stage-1 haptic call site.
   // The shell owns badge derivation, so the shell owns the edge; TabBar stays
@@ -110,7 +121,11 @@ export default function App() {
         : undefined,
     [config.cloudUrl, config.cloudToken],
   )
-  usePushRegistration(cloudSession)
+  // The verdict is RENDERED, not discarded (last-mile wave): registerDevice
+  // already refuses to report `registered` without a row id, and an app that
+  // then throws that verdict away would keep a 401/422/429 as silent as a
+  // healthy launch — the phone would simply never buzz and never say why.
+  const pushLine = pushNotice(usePushRegistration(cloudSession))
 
   let body
   if (!hasCloudSession(config)) {
@@ -125,6 +140,11 @@ export default function App() {
           {tab === 'chat' && <ChatScreen connection={connection} />}
           {tab === 'papers' && <PapersScreen connection={connection} />}
         </View>
+        {pushLine !== undefined && (
+          <Text style={[styles.pushNotice, { color: theme.textMuted, borderTopColor: theme.border }]}>
+            {pushLine}
+          </Text>
+        )}
         <TabBar active={tab} onSelect={setTab} badges={{ chat: chatBadge }} />
       </View>
     )
@@ -142,4 +162,11 @@ const styles = StyleSheet.create({
   root: { flex: 1 },
   shell: { flex: 1 },
   content: { flex: 1 },
+  pushNotice: {
+    ...scale.xs,
+    borderTopWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 6,
+    textAlign: 'center',
+  },
 })
