@@ -63,8 +63,9 @@
 //  · CHROME (binary override) · PORT (preview port; default = a free port).
 //
 //  Exit codes:  0 = every state asserted clean · 1 = an assertion FAILED (the
-//  mechanism is named on stderr) · 2 = ROSTER GUARD — an unknown SCEN or THEME,
-//  refused BEFORE Chrome boots.
+//  mechanism is named on stderr) · 2 = GUARD — refused BEFORE measuring: an
+//  unknown SCEN or THEME, or no usable Chrome. 1 is a claim about the console;
+//  2 is a claim about the environment, and the two must never be confused.
 //
 //  THE ROSTER GUARD IS NOT OPTIONAL — it is the second false green this
 //  instrument's own mutation proof found *inside the instrument*.
@@ -183,8 +184,22 @@ function freePort() {
   });
 }
 
+// The accessSync check MUST cover the CHROME env branch, not only the candidate
+// sweep. .github/workflows/console-harness.yml pins CHROME=/usr/bin/google-chrome
+// for every console run, so on CI the env branch is the ONLY branch taken — an
+// unchecked `return process.env.CHROME` makes the exit-2 "no Chrome" GUARD below
+// dead code, and a runner image that drops the binary dies instead with a raw
+// `spawn … ENOENT` node stack at exit 1. Exit 1 means "a measured modal defect";
+// a missing browser is an ENVIRONMENTAL REFUSAL and must speak as exit 2.
 function findChrome() {
-  if (process.env.CHROME) return process.env.CHROME;
+  if (process.env.CHROME) {
+    try {
+      fs.accessSync(process.env.CHROME, fs.constants.X_OK);
+      return process.env.CHROME;
+    } catch {
+      return null; // fall through to the exit-2 GUARD naming the missing path
+    }
+  }
   const candidates = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -197,6 +212,15 @@ function findChrome() {
     try { fs.accessSync(c, fs.constants.X_OK); return c; } catch { /* next */ }
   }
   return null;
+}
+
+// The refusal line for a findChrome() miss — names the path that was pinned and
+// not found, so a runner-image regression reads as "this binary is gone", never
+// as an anonymous red.
+function chromeGuardLine() {
+  return process.env.CHROME
+    ? `!! GUARD (exit 2): CHROME=${process.env.CHROME} is not an executable file. Environment refusal, not a modal defect.\n`
+    : "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n";
 }
 
 function httpOk(url) {
@@ -376,8 +400,11 @@ async function main() {
 
   const chromeBin = findChrome();
   if (!chromeBin) {
-    process.stderr.write("!! No Chrome/Chromium found. Set CHROME=/path/to/chrome and retry.\n");
-    process.exit(1);
+    // Exit 2, not 1: cssom-parity.mjs and overflow-guard.mjs already code this
+    // identical condition as a GUARD. A missing browser is a refusal to measure,
+    // and must never be laundered into "a modal defect was measured".
+    process.stderr.write(chromeGuardLine());
+    process.exit(2);
   }
 
   const port = Number(process.env.PORT || (await freePort()));
