@@ -21,7 +21,7 @@ import vm from "node:vm";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { SCENARIOS, route } from "./scenarios.mjs";
+import { SCENARIOS, SCENARIO_NAMES, route } from "./scenarios.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
@@ -62,17 +62,40 @@ const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
 //     reads empty and six pre-existing scenarios go red. Modelling that
 //     properly means a real tree; until someone builds one, containers stay
 //     unparsed and those fallbacks keep working.
-//   • Selectors: a single `.class` (and a bare `#id`) only. Anything richer
-//     answers [] / null rather than throwing, so a compound selector silently
-//     matches NOTHING. ⇒ EVERY click-driven check MUST assert a positive
-//     click count (the `fired` idiom below); otherwise an empty node list reads
-//     as a clean pass and you have written a false green inside the harness
-//     whose whole job is to catch them.
+//   • Selectors: a single `.class`, a bare `#id`, and (cch-w10) a single
+//     ATTRIBUTE selector — `[attr]` or `[attr="v"]`. Anything richer (a
+//     COMPOUND like `.token-revoke[data-id]`, or a descendant path) answers
+//     [] / null rather than throwing, so it silently matches NOTHING.
+//     ⇒ EVERY click-driven check MUST assert a positive click count (the
+//     `fired` idiom below); otherwise an empty node list reads as a clean pass
+//     and you have written a false green inside the harness whose whole job is
+//     to catch them.
+//
+// cch-w10-destroy-shrink-oracle-merged — WHY THE ATTRIBUTE GRAMMAR EXISTS.
+// Before it, `.session-revoke` was the ONLY destructive list control the shim
+// could resolve: every other one is authored as an attribute hook
+// (`[data-prov-disconnect]`, `[data-member-remove]`, `[data-invite-revoke]`,
+// `[data-env-delete]`, `[data-life-verb="decommission"]`), so app.js's
+// `box.querySelectorAll("[data-…]").forEach(addEventListener)` looped over an
+// EMPTY list and wired nothing — and a loop over nothing is a clean pass.
+// Widening is safe by construction: every one of those call sites only ATTACHES
+// handlers, so coming alive cannot change any pre-existing rendered markup
+// (measured: all 98 scenarios stayed green across the widening alone).
+// Two halves are needed and neither works without the other:
+//   • the SELECTOR half (ATTR_SEL below), so `[data-x]` resolves against kids;
+//   • the PARSE half (ATTR_RE), so a VALUELESS attribute is captured at all —
+//     `data-prov-disconnect` and `data-wh-delete` are authored bare, and an
+//     attribute the parse never recorded can never satisfy a selector.
+// NOT widened, deliberately: PARSED_TAGS (the mountUsageTab detached-stub
+// hazard above stands) and the DOCUMENT-level querySelectorAll (it hard-returns
+// [] and six document-level attribute loops stay dead — a separate, unmeasured
+// decision, filed as backlog rather than smuggled in here).
 const PARSED_TAGS = "button|a";
 const TAG_RE = new RegExp("<(" + PARSED_TAGS + ")\\b([^>]*?)/?>", "gi");
-const ATTR_RE = /([\w:.-]+)="([^"]*)"/g;
+const ATTR_RE = /([\w:.-]+)(?:="([^"]*)")?/g;
 const CLASS_SEL = /^\.[\w-]+$/;
 const ID_SEL_SUB = /^#[\w-]+$/;
+const ATTR_SEL = /^\[([\w:.-]+)(?:="([^"]*)")?\]$/;
 
 // Flat scan: every whitelisted OPEN tag in `html` becomes a sibling stub
 // carrying its double-quoted attributes (so getAttribute("data-id") answers a
@@ -86,7 +109,10 @@ function parseChildren(html, makeEl) {
     const raw = m[2] || "";
     ATTR_RE.lastIndex = 0;
     let a;
-    while ((a = ATTR_RE.exec(raw)) !== null) el.setAttribute(a[1], a[2]);
+    // a[2] is undefined for a bare attribute (`data-prov-disconnect`), which the
+    // DOM reflects as the empty string — the value nobody reads, but the
+    // PRESENCE `[attr]` selectors and hasAttribute() ask about.
+    while ((a = ATTR_RE.exec(raw)) !== null) el.setAttribute(a[1], a[2] === undefined ? "" : a[2]);
     el.disabled = /\bdisabled\b/.test(raw);
     out.push(el);
   }
@@ -206,6 +232,13 @@ function makeDom() {
         if (ID_SEL_SUB.test(sel)) {
           const want = sel.slice(1);
           return kids.filter((k) => k.id === want);
+        }
+        const at = ATTR_SEL.exec(sel);
+        if (at) {
+          const name = at[1];
+          const want = at[2];
+          return kids.filter((k) =>
+            k.hasAttribute(name) && (want === undefined || k.getAttribute(name) === want));
         }
         return [];
       },
@@ -606,11 +639,29 @@ const EXPECTATIONS = {
       assert.ok(sheet.includes("btn-danger"),
         "GR41: a grave-but-reversible action wears the danger tier's weight");
 
-      // D54: the confirm click goes BETWEEN the trigger and the settle. The
-      // tier is `danger`, NOT `destroy` — a destroy sheet would additionally
-      // need #cm-typed's value set plus an "input" event before #cm-confirm
-      // arms, and (measured) an un-armed #cm-confirm STILL returns 1 from
-      // click(), so the harness's `fired == 1` idiom cannot detect the disarm.
+      // D54, AS AMENDED BY cch-w10. The confirm click goes BETWEEN the trigger
+      // and the settle. The tier is `danger`, NOT `destroy` — a destroy sheet
+      // would additionally need #cm-typed's value set plus an "input" event
+      // before #cm-confirm arms, and (measured) an un-armed #cm-confirm STILL
+      // returns 1 from click(), so the `fired == 1` idiom cannot detect the
+      // disarm. D54 concluded from that that the disarm was UNOBSERVABLE here.
+      // IT IS OBSERVABLE — on two objects D54 did not separate:
+      //   • #modal-body's PARSED child carries the SHIPPED state (the `disabled`
+      //     attribute confirmModalHtml emitted). This is the line below.
+      //   • the WIRE carries the effect: openConfirmModal's handler bails at
+      //     `if (!confirmModalArmed(state)) return;`, so an unarmed Confirm
+      //     issues zero requests (asserted on all three destroy legs).
+      // What is NOT observable is the disarm on `reg.get("cm-confirm")` — a
+      // fresh registry stub answers disabled=false whether or not any sheet
+      // mounted, which is why reading it would be a false green.
+      // THIS LINE IS THE DISCRIMINATOR'S OTHER HALF: the same read that must
+      // answer `true` on a destroy sheet must answer `false` here, or it is not
+      // measuring the tier at all.
+      const parsedDanger = parsedConfirmButton(reg);
+      assert.ok(parsedDanger, "the danger sheet's Confirm must be parsed out of #modal-body");
+      assert.equal(parsedDanger.disabled, false,
+        "a DANGER-tier Confirm ships ARMED (no typed echo). If this reads true, the destroy-tier " +
+        "disarm assertions elsewhere are measuring something other than the tier.");
       const cmConfirm = reg.get("cm-confirm");
       assert.ok(cmConfirm, "#cm-confirm was never touched — openConfirmModal did not wire the sheet");
       assert.equal(cmConfirm.click(), 1, "the sheet's Confirm must be wired for \"click\"");
@@ -1291,8 +1342,8 @@ const EXPECTATIONS = {
   // The scenario predates this wave with a fixture but ZERO assertions (the
   // GR30 vacuous-green finding) — these are its first EXPECTATIONS.
   "panel-overview": {
-    what: "the v4 instance workspace: two-axis header, bp CLI card, composed Overview",
-    check(reg) {
+    what: "the v4 instance workspace: two-axis header, bp CLI card, composed Overview — AND a real typed Decommission that tears the instance out of the SERVER's fleet",
+    async check(reg, hooks, ctx) {
       const body = reg.get("instance-body").innerHTML || "";
       // D-02 header: H1 + the two-axis compound pill + mono address + copy.
       assert.ok(body.includes("detail-head--inst"), "the v4 header renders");
@@ -1328,6 +1379,49 @@ const EXPECTATIONS = {
       // Sites slot resolves to the honest empty state (fixture has no sites).
       const sites = reg.get("instance-sites").innerHTML || "";
       assert.ok(sites.includes("No sites yet"), "the Sites empty state renders");
+
+      // ── cch-w10 LEG 5/5: DECOMMISSION, CLICKED FOR REAL ───────────────────
+      // THIS LEG'S ORACLE HAS A DIFFERENT SHAPE FROM THE OTHER FOUR, and the
+      // difference is not cosmetic. runDecommission drops fleetCache and sets
+      // location.hash = "#fleet" — it NAVIGATES AWAY rather than refetching the
+      // surface, so there is no repainted list to count. A UI row count here
+      // would either assert a stale panel (green forever) or a panel the shim's
+      // inert location never re-routes (red forever). The only honest oracle is
+      // the SERVER's own list, read straight off the state bag.
+      //
+      // DELETE /v1/barkparks/:id was UNMODELLED until this wave: it fell through
+      // the terminal `/v1/` 200 {} catch-all, so the console's most destructive
+      // verb succeeded against a fixture that never lost anything.
+      const bp = SCENARIOS["panel-overview"].data.barkparks[0];
+      assert.equal(ctx.state.barkparks.length, 1, "the fleet starts at one instance");
+      const cardEl = reg.get("inst-lifecycle-actions");
+      const decomm = cardEl.querySelectorAll('[data-life-verb="decommission"]');
+      assert.equal(decomm.length, 1,
+        "the CLI card must carry exactly one wired Decommission; got " + decomm.length +
+        " — 0 means the shim's attribute selector regressed and this leg proves nothing");
+      assert.equal(decomm[0].click(), 1, "Decommission dispatched no click handler — it is DEAD");
+      const bpPath = "/v1/barkparks/" + bp.id;
+      assert.equal(ctx.countCalls("DELETE", bpPath), 0,
+        "Decommission tore down the server on the row click — the typed-confirm gate is gone");
+      assertDestroySheetDisarmed(reg, "Decommission");
+      reg.get("cm-confirm").click();
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", bpPath), 0,
+        "an UNARMED destroy Confirm tore down a live server");
+      assert.equal(ctx.state.barkparks.length, 1, "and nothing left the fleet while it was unarmed");
+
+      armConfirmSheet(reg, bp.name).click();
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", bpPath), 1, "the armed Confirm must issue exactly one teardown");
+      assert.equal(ctx.state.barkparks.length, 0,
+        "the SERVER's fleet must shrink by exactly one (1 → 0); got " + ctx.state.barkparks.length +
+        " — an unchanged fleet means the teardown hit the catch-all and did nothing");
+      const fleetAfter = route("panel-overview", "GET", "/v1/barkparks", ctx.state);
+      assert.equal(fleetAfter.body.barkparks.length, 0,
+        "and a fresh fleet READ agrees — the shrink is served, not just spliced into a bag nobody reads");
+      const decomToast = (reg.get("toast-stack") || {}).innerHTML || "";
+      assert.ok(decomToast.includes("Decommissioning " + bp.name) && decomToast.includes("is gone"),
+        "the teardown must report itself, with the server's own 200-vs-202 distinction; got: " + decomToast.slice(0, 200));
     },
   },
 
@@ -1659,8 +1753,8 @@ const EXPECTATIONS = {
   // connect card + the 9-verb capability matrix (dev-tier filtered, server-owned
   // gap reasons, bare dash where the server owns no reason).
   "providers-connected": {
-    what: "the roster (2 kinds, Disconnect…), the all-connected ROTATION state, and the honest capability matrix render",
-    check(reg) {
+    what: "the roster (2 kinds, Disconnect…), the ROTATION state, the honest matrix — AND a real Disconnect click that arms the typed gate and shrinks the SERVER roster 2→1",
+    async check(reg, hooks, ctx) {
       const roster = (reg.get("provider-roster") || {}).innerHTML || "";
       assert.ok(roster.includes("set-section"), "the roster rides the .set-* anatomy");
       assert.ok(roster.includes("prov-roster") && roster.includes("prov-row"), "roster rows render");
@@ -1693,6 +1787,61 @@ const EXPECTATIONS = {
       assert.ok(matrix.includes("Adopt needs an existing resource-group import"), "the azure adopt gap renders verbatim");
       // dev-tier `fake` is FILTERED — it is never a matrix column.
       assert.ok(!matrix.includes(">Fake<"), "the dev-tier provider is filtered out of the matrix");
+
+      // ── cch-w10 LEG 1/5: DISCONNECT, CLICKED FOR REAL ─────────────────────
+      // AMENDED IN PLACE, never forked (the cch-w2-revoke-ux-honesty precedent):
+      // a parallel "providers-disconnect" scenario would duplicate the fixture
+      // and leave two places to keep true. Everything above reads the FIRST
+      // paint; everything below happens after it, on the same one boot — which
+      // is also what keeps the handler count honest (a re-opened surface
+      // accumulates handlers on the immortal #id registry nodes, so `fired == 1`
+      // is only safe on a surface opened ONCE).
+      //
+      // Until this wave `[data-prov-disconnect]` resolved to [] — the wiring
+      // loop ran over nothing, and a loop over nothing passes.
+      const rosterEl = reg.get("provider-roster");
+      const disconnects = rosterEl.querySelectorAll("[data-prov-disconnect]");
+      assert.equal(disconnects.length, 2,
+        "both roster rows must carry a wired Disconnect; got " + disconnects.length +
+        " — if this is 0 the shim's attribute selector regressed and nothing below proves anything");
+      const kind = disconnects[0].getAttribute("data-prov-kind");
+      assert.equal(kind, "hetzner", "the first row is the Hetzner credential");
+      assert.equal(disconnects[0].click(), 1,
+        "the Disconnect button dispatched no click handler — it is DEAD");
+
+      // The trigger opens the sheet and issues NOTHING.
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", "/v1/providers/" + kind), 0,
+        "Disconnect fired its DELETE straight off the row click — the typed-confirm gate is gone");
+      assertDestroySheetDisarmed(reg, "Disconnect");
+
+      // THE DISARM, PROVEN BY THE WIRE. The shim delivers clicks to disabled
+      // elements (D56), so `fired` cannot see the gate; the request count can.
+      assert.equal(reg.get("cm-confirm").click(), 1, "the sheet's Confirm must be wired for \"click\"");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", "/v1/providers/" + kind), 0,
+        "an UNARMED destroy Confirm put the DELETE on the wire — the typed echo is decorative");
+
+      // THE ARM: type the kind, then confirm.
+      armConfirmSheet(reg, kind).click();
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", "/v1/providers/" + kind), 1,
+        "the armed Confirm must issue exactly one DELETE");
+
+      // THE SHRINK, read off the SERVER's own list — the assertion a stateless
+      // fixture cannot pass, because it answers a byte-identical roster whether
+      // or not the DELETE ever arrived (D39).
+      assert.equal(ctx.state.providers.length, 1,
+        "the server roster must shrink by exactly one (2 → 1); got " + ctx.state.providers.length);
+      assert.ok(!ctx.state.providers.some((x) => x.kind === kind), "and the disconnected kind is the one gone");
+      // …and the UI refetched, so the operator sees the truth rather than a
+      // stale row they could click again.
+      const repainted = reg.get("provider-roster").innerHTML || "";
+      assert.ok(repainted.includes("Azure") && !repainted.includes("Hetzner"),
+        "the roster must repaint from the refetch (Azure alone survives); got: " + repainted.slice(0, 200));
+      const provToast = (reg.get("toast-stack") || {}).innerHTML || "";
+      assert.ok(provToast.includes("Hetzner Cloud disconnected"),
+        "a successful disconnect must say so; toast stack: " + provToast.slice(0, 200));
     },
   },
   "providers-empty": {
@@ -1885,8 +2034,8 @@ const EXPECTATIONS = {
   // The roster on the GR33 .set-* anatomy: view-members visible, both cards, the
   // 3-role chips, per-manageable-row Change role + Remove, the "(you)" self-tag.
   "members-populated": {
-    what: "Members (admin) — roster + invitations on the .set-* anatomy, 3 real roles",
-    check(reg) {
+    what: "Members (admin) — roster + invitations, 3 real roles — AND real clicks: Remove shrinks the SERVER roster 3→2, Revoke shrinks invitations 2→1",
+    async check(reg, hooks, ctx) {
       assert.equal(reg.get("view-members").hidden, false, "the Members view must be visible");
       const body = reg.get("members-body").innerHTML || "";
       assert.ok(body.includes("set-section"), "the roster rides the .set-section anatomy");
@@ -1900,6 +2049,63 @@ const EXPECTATIONS = {
       assert.ok(!body.includes("Operator") && !body.includes("Supporter"), "no design-fiction 5-role vocabulary is rendered");
       // Manage affordances present for the admin; Remove is the destroy path.
       assert.ok(body.includes(">Change role<") && body.includes(">Remove<"), "manager rows carry Change role + Remove");
+
+      // ── cch-w10 LEG 2/5: REMOVE MEMBER, CLICKED FOR REAL ──────────────────
+      // The path carries the team id, which this check has no business
+      // hard-coding — so the wire assertion matches the SHAPE and reads the id
+      // the app actually used.
+      const wire = (method, re) => ctx.calls.filter((c) => c.method === method && re.test(c.path)).length;
+      const panel = reg.get("members-body");
+      const removes = panel.querySelectorAll("[data-member-remove]");
+      assert.equal(removes.length, 2,
+        "the two manageable rows carry a wired Remove (the acting owner never self-removes); got " + removes.length);
+      const victimId = removes[0].getAttribute("data-member-remove");
+      const victimEmail = removes[0].getAttribute("data-email");
+      assert.ok(victimId && victimEmail, "the Remove button must carry both the user id and the email it types against");
+      assert.equal(removes[0].click(), 1, "the Remove button dispatched no click handler — it is DEAD");
+      await ctx.settle();
+      const memberRe = new RegExp("^/v1/teams/[^/]+/members/" + victimId + "$");
+      assert.equal(wire("DELETE", memberRe), 0, "Remove must open the typed sheet, never fire on the row click");
+      assertDestroySheetDisarmed(reg, "Remove member");
+      reg.get("cm-confirm").click();
+      await ctx.settle();
+      assert.equal(wire("DELETE", memberRe), 0, "an UNARMED destroy Confirm removed a member");
+      // The typed echo is the EMAIL for this verb (resourceName), not the id.
+      armConfirmSheet(reg, victimEmail).click();
+      await ctx.settle();
+      assert.equal(wire("DELETE", memberRe), 1, "the armed Confirm must issue exactly one member DELETE");
+      assert.equal(ctx.state.members.length, 2,
+        "the server roster must shrink by exactly one (3 → 2); got " + ctx.state.members.length);
+      assert.ok(!ctx.state.members.some((m) => m.user_id === victimId), "and the removed member is the one gone");
+      const afterRemove = reg.get("members-body").innerHTML || "";
+      assert.ok(!afterRemove.includes(victimEmail),
+        "the roster must repaint without the removed member; got: " + afterRemove.slice(0, 200));
+
+      // ── cch-w10 LEG 3/5: REVOKE INVITATION, CLICKED FOR REAL ──────────────
+      // A DIFFERENT sheet shape on purpose: revoking a pending invite is a plain
+      // openModal with its own #invite-revoke-go, not the typed destroy tier —
+      // one template would not have driven both, and pretending otherwise is how
+      // an oracle ends up asserting a sheet that isn't there.
+      const invites = reg.get("members-body").querySelectorAll("[data-invite-revoke]");
+      assert.equal(invites.length, 2, "both pending invitations carry a wired Revoke; got " + invites.length);
+      const invId = invites[0].getAttribute("data-invite-revoke");
+      const invEmail = invites[0].getAttribute("data-email");
+      assert.equal(invites[0].click(), 1, "the invitation Revoke dispatched no click handler — it is DEAD");
+      const invRe = new RegExp("^/v1/teams/[^/]+/invitations/" + invId + "$");
+      assert.equal(wire("DELETE", invRe), 0, "the row click must only open the confirm sheet");
+      const invSheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(invSheet.includes("Revoke invitation?") && invSheet.includes(invEmail),
+        "the sheet must name the invitation it is about to kill; got: " + invSheet.slice(0, 200));
+      const go = reg.get("invite-revoke-go");
+      assert.equal(go.click(), 1, "the sheet's Revoke must be wired for \"click\"");
+      assert.equal(go.disabled, true, "the in-flight Revoke must disable itself against a double-fire");
+      await ctx.settle();
+      assert.equal(wire("DELETE", invRe), 1, "exactly one invitation DELETE on the wire");
+      assert.equal(ctx.state.invitations.length, 1,
+        "the server invitation list must shrink by exactly one (2 → 1); got " + ctx.state.invitations.length);
+      const afterRevoke = reg.get("members-body").innerHTML || "";
+      assert.ok(!afterRevoke.includes(invEmail) && afterRevoke.includes("max@acme.com"),
+        "the panel must repaint with only the surviving invitation; got: " + afterRevoke.slice(0, 200));
     },
   },
   // The plain-member seam (GR33 plain-member law): read-only roster, no
@@ -1919,8 +2125,8 @@ const EXPECTATIONS = {
   // Env-vars (admin): view-env visible, the row grammar (mono keys, scope +
   // secret + write-once chips, the sealed write-once note) + the add FORM.
   "env-populated": {
-    what: "Environment variables (admin) — rows (secret/write-once/scopes) + add form",
-    check(reg) {
+    what: "Environment variables (admin) — rows (secret/write-once/scopes) + add form — AND a real Delete click that shrinks the SERVER list 4→3",
+    async check(reg, hooks, ctx) {
       assert.equal(reg.get("view-env").hidden, false, "the Environment-variables view must be visible");
       const body = reg.get("env-body").innerHTML || "";
       assert.ok(body.includes("set-section"), "the rows ride the .set-section anatomy");
@@ -1935,6 +2141,37 @@ const EXPECTATIONS = {
       // The admin add-var FORM section with its own save-row.
       assert.ok(body.includes("Add a variable") && body.includes("set-save-row"), "the add-var form section renders with a save-row");
       assert.ok(body.includes(">Delete<"), "admin rows carry Delete");
+
+      // ── cch-w10 LEG 4/5: DELETE A VARIABLE, CLICKED FOR REAL ──────────────
+      const rows = reg.get("env-body").querySelectorAll("[data-env-delete]");
+      assert.equal(rows.length, 4, "every admin row carries a wired Delete; got " + rows.length);
+      const varId = rows[0].getAttribute("data-env-delete");
+      const varKey = rows[0].getAttribute("data-key");
+      assert.equal(rows[0].click(), 1, "the row Delete dispatched no click handler — it is DEAD");
+      assert.equal(ctx.countCalls("DELETE", "/v1/env-vars/" + varId), 0,
+        "the row click must only open the confirm sheet — a sealed value must never go on a single click");
+      const sheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(sheet.includes("Delete variable?") && sheet.includes(varKey),
+        "the sheet must name the variable; got: " + sheet.slice(0, 200));
+      assert.ok(sheet.includes("can&#39;t be recovered") || sheet.includes("can't be recovered"),
+        "the sheet must state the value is unrecoverable — the whole reason this verb needs a sheet");
+      const go = reg.get("env-delete-go");
+      assert.equal(go.click(), 1, "the sheet's Delete must be wired for \"click\"");
+      assert.equal(go.disabled, true, "the in-flight Delete must disable itself against a double-fire");
+      await ctx.settle();
+      assert.equal(ctx.countCalls("DELETE", "/v1/env-vars/" + varId), 1, "exactly one env-var DELETE on the wire");
+      assert.equal(ctx.state.envVars.length, 3,
+        "the server list must shrink by exactly one (4 → 3); got " + ctx.state.envVars.length);
+      assert.ok(!ctx.state.envVars.some((v) => v.id === varId), "and the deleted row is the one gone");
+      const after = reg.get("env-body").innerHTML || "";
+      // Anchored on the ROW markup, not a bare substring: the add-var form
+      // carries "DATABASE_URL" as its placeholder, so a naive includes() would
+      // have reported the deleted row as still present and sent the next reader
+      // hunting a bug that isn't there.
+      assert.ok(!after.includes('set-row-key">' + varKey + "<"),
+        "the deleted row must be gone from the repaint; got: " + after.slice(0, 300));
+      assert.equal(countMatches(after, 'class="set-row-key"'), 3, "three rows survive the refetch");
+      assert.ok(after.includes('set-row-key">STRIPE_SECRET_KEY<'), "and the survivors are still listed");
     },
   },
   // The write-once 409 twin renders the same sealed note; the POST-collision copy
@@ -2186,6 +2423,54 @@ function countMatches(hay, needle) {
   return hay.split(needle).length - 1;
 }
 
+// ── cch-w10: the destroy-tier confirm sheet, driven as an operator drives it ──
+// The typed echo is the gate: openConfirmModal's click handler bails at
+// `if (!confirmModalArmed(state)) return;`, so an UNARMED Confirm is a real,
+// wired, dispatching button that issues nothing. That makes the disarm
+// observable BY THE WIRE (0 requests), which is the only observation that
+// cannot be faked by a stub.
+//
+// WHICH OBJECT CARRIES WHICH FACT — this CORRECTS D54, which recorded the
+// disarm as unobservable here and told every later check to skip it:
+//   • the SHIPPED disarm lives on #modal-body's PARSED child, because it is an
+//     attribute of the markup confirmModalHtml emitted (`<button … disabled>`);
+//   • the ARM lives on the #id REGISTRY node, because that is the object
+//     app.js's input handler writes (`confirmBtn.disabled = !armed`).
+// They are DIFFERENT OBJECTS. reg.get("cm-confirm").disabled is `false` on a
+// fresh stub whether or not a destroy sheet ever mounted — asserting it as the
+// disarm is a false green planted inside the anti-false-green scenario.
+function parsedConfirmButton(reg) {
+  return reg.get("modal-body").querySelectorAll("#cm-confirm")[0] || null;
+}
+
+// Assert the sheet MOUNTED and SHIPPED DISARMED, then return the parsed child.
+function assertDestroySheetDisarmed(reg, where) {
+  const parsed = parsedConfirmButton(reg);
+  assert.ok(parsed, "no #cm-confirm inside #modal-body — the " + where +
+    " confirm sheet never mounted; #modal-body is: " +
+    JSON.stringify((reg.get("modal-body").innerHTML || "").slice(0, 160)));
+  assert.equal(parsed.disabled, true,
+    "the " + where + " destroy sheet shipped its Confirm ARMED — the typed-echo gate is gone");
+  assert.equal(reg.get("cm-confirm").disabled, false,
+    "D54 CORRECTION GUARD: the #id registry stub answers disabled=false here. If this ever " +
+    "flips, the two objects have merged and the disarm assertion above may be read off either — " +
+    "until then, reading the registry node instead of the parsed child proves NOTHING.");
+  return parsed;
+}
+
+// Type the exact resource name into #cm-typed and fire the "input" event the
+// arming handler listens for; returns the (now armed) registry Confirm node.
+function armConfirmSheet(reg, resourceName) {
+  const typed = reg.get("cm-typed");
+  typed.value = resourceName;
+  assert.ok(typed.dispatchEvent({ type: "input" }) > 0,
+    "#cm-typed has no \"input\" handler — the typed echo can never arm the sheet");
+  const confirm = reg.get("cm-confirm");
+  assert.equal(confirm.disabled, false,
+    "typing the exact resource name did not ARM the Confirm button");
+  return confirm;
+}
+
 async function runScenario(name) {
   const exp = EXPECTATIONS[name];
   if (!exp) throw new Error("no expectations for scenario " + name);
@@ -2227,7 +2512,38 @@ async function runScenario(name) {
   return exp.what;
 }
 
+// ── cch-w10: THE CENSUS GUARD ────────────────────────────────────────────────
+// The runner iterates EXPECTATIONS, never SCENARIO_NAMES. Nothing bound the two
+// together, so a committed scenario with no expectation was simply NEVER RUN —
+// it rendered nowhere, asserted nothing, and the suite still printed a total and
+// exited 0. That is the cross-slice census hole in miniature: each half looks
+// complete on its own, and only the pair exposes the gap. (The file's own
+// comment has documented the trap for waves; the guard was never written.)
+// Both directions matter: an EXPECTATION whose scenario was renamed or deleted
+// would otherwise boot the DEFAULT fixture and quietly assert against the wrong
+// data. This runs BEFORE any scenario, and it exits non-zero on its own.
+function assertCensus() {
+  const unrun = SCENARIO_NAMES.filter((n) => !EXPECTATIONS[n]);
+  const orphans = Object.keys(EXPECTATIONS).filter((n) => !SCENARIOS[n]);
+  if (!unrun.length && !orphans.length) return true;
+  if (unrun.length) {
+    process.stdout.write(
+      "\nCENSUS: " + unrun.length + " committed scenario(s) have NO expectation and were never run — " +
+      "a fixture nothing asserts on is a green that means nothing:\n  " + unrun.join("\n  ") + "\n");
+  }
+  if (orphans.length) {
+    process.stdout.write(
+      "\nCENSUS: " + orphans.length + " expectation(s) name a scenario that does not exist, so they " +
+      "assert against the DEFAULT fixture:\n  " + orphans.join("\n  ") + "\n");
+  }
+  return false;
+}
+
 async function main() {
+  if (!assertCensus()) {
+    process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");
+    process.exit(1);
+  }
   const names = Object.keys(EXPECTATIONS);
   let failed = 0;
   for (const name of names) {
