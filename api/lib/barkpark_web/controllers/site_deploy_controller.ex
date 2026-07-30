@@ -23,10 +23,14 @@ defmodule BarkparkWeb.SiteDeployController do
       `E_MALFORMED` / `E_PATH_TRAVERSAL` / `E_ABSOLUTE_PATH` / `E_SYMLINK` /
       `E_HARDLINK` / `E_SPECIAL_FILE` / `E_UNKNOWN_TYPE` / `E_MODE_BITS` /
       `E_BAD_NAME` / `E_UNSAFE_PARENT` / `E_ENTRY_TOO_LARGE` /
-      `E_TOTAL_TOO_LARGE` / `E_COMPRESSION_RATIO` / `E_TOO_MANY_ENTRIES` — a
-      PREBUILT artifact the box refused (`Barkpark.Sites.PrebuiltArtifact`).
-      These are 400s, not 500s: the bytes are the caller's, and the box never
-      falls back to building the site itself when it refuses them.
+      `E_TOTAL_TOO_LARGE` / `E_COMPRESSION_RATIO` / `E_TOO_MANY_ENTRIES` /
+      `E_NO_INDEX` — the 18 typed refusals a PREBUILT artifact can draw from the
+      box (`Barkpark.Sites.PrebuiltArtifact`). These are 400s, not 500s: the
+      bytes are the caller's, and the box never falls back to building the site
+      itself when it refuses them. `E_MALFORMED` covers framing as well as
+      corruption — a stream with no end-of-archive marker, or a gzip member that
+      never terminates, is a truncated upload; `E_NO_INDEX` is the archive that
+      arrived WHOLE and still has nothing to serve.
     * **409** `already_running` — a run for THAT SLUG is in flight. A different
       slug (or an unrelated self-update) never collides.
     * **202** `started` — with the fresh run status.

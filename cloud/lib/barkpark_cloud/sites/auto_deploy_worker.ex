@@ -40,6 +40,32 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   auto-rebuild is swept exactly like a crashed manual one. The `:site_deploy`
   queue is concurrency-1 so the enqueue+start step is serial per box, and the box
   itself flock-serializes the build.
+
+  ## The PREBUILT REFUSAL (charter D92/D105) — with a USER-VISIBLE row
+
+  A site whose CURRENT release was uploaded (`source = "prebuilt"`) is REFUSED
+  here. Unguarded, this worker is the FAST half of the unbidden overwrite: it
+  enqueues with `source` at its `"box-build"` default, the box rebuilds from
+  source, HEALTH passes honestly on the box's OWN bytes, SWITCH is
+  provenance-blind — and the uploaded release is replaced by bytes this fleet
+  invented, then eventually DELETED by RETIRE (keep newest 5) so rollback cannot
+  recover it. It fires on the next content publish, i.e. within the debounce
+  window; the hourly `TemplateFreshnessWorker` sweep is the slower half (a
+  one-hour ceiling — see its moduledoc).
+
+  The refusal MINTS A ROW (status `cancelled`, trigger `content-auto`, source
+  `prebuilt`) and only then returns a cancel tuple. It owes that row because the
+  content-publish webhook already answered `202 ok` BEFORE any guard could run:
+  a silent Oban cancel would make the control plane's only trace of a refused
+  promise a job record no user surface reads. No migration — `cancelled` is
+  already in the status enum, and `detail`/`failure_reason` already exist.
+
+  It MUST be `{:cancel, _}`, never `{:error, _}`: Oban maps an error tuple to a
+  failure, retries to `max_attempts`, then DISCARDS — a permanent, correct
+  refusal would then be indistinguishable from a box outage.
+
+  The guard keys on the CURRENT RELEASE'S `source`, NEVER on
+  `sites.prebuilt_enabled` — the flag is an opt-in, not a provenance fact.
   """
 
   use Oban.Worker,
@@ -59,7 +85,8 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   @unique [keys: [:site_id], states: [:available, :scheduled], period: 300]
 
   alias BarkparkCloud.Registry
-  alias BarkparkCloud.Registry.{Barkpark, Site}
+  alias BarkparkCloud.Registry.{Barkpark, Deployment, Site}
+  alias BarkparkCloud.Repo
   alias BarkparkCloud.Sites.Deploy
 
   require Logger
@@ -108,12 +135,82 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
   def perform(%Oban.Job{args: %{"site_id" => site_id}}) do
     with %Site{} = site <- Registry.get_site(site_id),
          %Barkpark{} = bp <- Registry.get_barkpark(site.barkpark_id) do
-      drive(site, bp)
+      if prebuilt_release?(site) do
+        refuse(site)
+      else
+        drive(site, bp)
+      end
     else
       # The site (or its box) was deleted between the publish and this run — there
       # is nothing to rebuild. Cancel, not retry: a retry would never find it.
       _ -> {:cancel, :site_or_box_gone}
     end
+  end
+
+  # Does this site's CURRENT release carry uploaded bytes? See the moduledoc: the
+  # live release's `source` is the provenance fact; `site.prebuilt_enabled` is
+  # only an opt-in and a site can be enabled while still serving a box build.
+  defp prebuilt_release?(%Site{current_deployment_id: nil}), do: false
+
+  defp prebuilt_release?(%Site{current_deployment_id: id}) do
+    case Registry.get_deployment(id) do
+      %Deployment{} = deployment -> Deployment.prebuilt?(deployment)
+      nil -> false
+    end
+  end
+
+  @refusal_detail "refused: this site's live release was uploaded (prebuilt), so a content publish must not trigger a box rebuild — it would replace bytes this fleet cannot reproduce. Ship new bytes with `bp cloud site deploy <site> --prebuilt <dir>`."
+
+  # The USER-VISIBLE refusal (charter D92/D105). The webhook already answered 202,
+  # so the refusal owes a row in the deployment stream — not just a job record.
+  #
+  # `status` is not castable on create (the schema forbids it; transition_changeset
+  # is the sole status mutator), so the row is born `queued` and moved
+  # `queued → cancelled` (a legal edge) in the SAME transaction: there is no
+  # window in which a claimer or the stale-deployment reaper can observe a
+  # claimable row that was never meant to build.
+  #
+  # `source: "prebuilt"` labels WHAT was protected, not what was built — the row
+  # is the record of a refusal to build, and reading it as a box build would
+  # invert its meaning.
+  defp refuse(%Site{} = site) do
+    result =
+      Repo.transaction(fn ->
+        with {:ok, queued} <-
+               Registry.create_deployment(site, %{
+                 trigger: "content-auto",
+                 source: "prebuilt"
+               }),
+             {:ok, cancelled} <-
+               Registry.transition_deployment(queued, %{
+                 status: "cancelled",
+                 failure_reason: @refusal_detail,
+                 detail: @refusal_detail
+               }) do
+          cancelled
+        else
+          {:error, %Ecto.Changeset{} = cs} -> Repo.rollback(cs)
+        end
+      end)
+
+    case result do
+      {:ok, _cancelled} ->
+        Logger.info(
+          "auto-deploy refused for site #{site.id}: live release is prebuilt — cancelled row minted"
+        )
+
+      {:error, reason} ->
+        # The row is the courtesy; the REFUSAL is the contract. A row we could not
+        # write must never degrade into a box rebuild, and must not retry either
+        # (the retry would rebuild nothing and re-fail the same way).
+        Logger.warning(
+          "auto-deploy refusal row failed for site #{site.id}: #{inspect(reason)} — refusing anyway"
+        )
+    end
+
+    # NEVER {:error, _}: Oban would retry to max_attempts and then DISCARD, making
+    # a permanent, correct refusal look exactly like a box outage.
+    {:cancel, :prebuilt_release_protected}
   end
 
   defp drive(site, bp) do

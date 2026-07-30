@@ -1123,6 +1123,260 @@ FAKENPM
     check "PLAN noop"                                 pb_saw PLAN noop pb1
   fi
 
+  # -------------------------------------------------------------------------
+  # THE FLEET BUILD ADMISSION GATE — one box, one build (D95/D104).
+  #
+  # The per-slug deploy lock makes D7's "queue depth 1" true PER SITE and false
+  # FLEET-WIDE, so N sites build concurrently on 2 cores BY CONSTRUCTION. These
+  # cases drive the REAL script, concurrently, for DIFFERENT slugs, against a
+  # REAL flock(1) — the FAKEBIN stub above is a flock that unconditionally exits
+  # 0, and a gate proven against that stub proves the stub, not the gate.
+  #
+  # The build windows are measured with a SHARED LEDGER both builds append to
+  # (START <slug> / END <slug>): max nesting depth 1 means the box compiled one
+  # site at a time. Each oracle is shown non-vacuous by MUTATING the engine —
+  # deleting the acquire (depth goes to 2) and deleting the refusal's emit (the
+  # anti-hang assertion, and only it, reds).
+  # -------------------------------------------------------------------------
+  if ! command -v flock >/dev/null 2>&1; then
+    # Same reasoning as the e2e skip above, one notch sharper: this block is the
+    # ONLY proof that the box builds one site at a time, and it is worthless
+    # against a stubbed lock. Skip honestly on a laptop; NEVER in CI.
+    if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+      echo "[selftest] FAIL - the fleet build admission gate proof is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but flock(1) is missing from PATH — install util-linux on this runner; a gate proven against the e2e's exit-0 flock stub proves the stub, and a skipped gate proof must not report PASS"
+      exit 1
+    fi
+    echo "[selftest] SKIP fleet build admission gate — needs a REAL flock(1) (stock macOS ships none; brew install flock)"
+  else
+    G="$TD/gate"; GBIN="$G/bin"; GLIB="$G/lib"
+    mkdir -p "$GBIN" "$GLIB" "$G/sites"
+    ENGINE_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+    # A mutant engine copy must find the shared lib it sources by its OWN dirname.
+    cp "$ENGINE_DIR/lib/site-deploy-common.sh" "$GLIB/"
+    g_not() { ! "$@"; }
+    # GBIN carries npm ONLY — no flock stub. The gate npm BRACKETS its build
+    # window in a shared ledger, and barriers on the OTHER site's START so the
+    # interleave a broken gate produces is deterministic instead of a timing race.
+    cat > "$GBIN/npm" <<'GATENPM'
+#!/usr/bin/env bash
+echo "npm $*" >> ./.npm-calls
+[ "${1:-}" = ci ] && exit 0
+led="${BP_GATE_LEDGER:-/dev/null}"
+printf 'START %s\n' "${SITE_SLUG:-?}" >> "$led"
+if [ "${BP_GATE_HANG:-0}" = 1 ]; then
+  # Stay in flight until SIGKILLed (hard cap ~30s so a botched test cannot wedge
+  # CI): the caller kills this subtree to prove the fd lock is what frees the slot.
+  n=0; while [ "$n" -lt 300 ]; do sleep 0.1; n=$((n + 1)); done
+  exit 0
+fi
+# Bounded barrier on a SECOND site's build appearing in the ledger. With the gate
+# in place it never can — that is the point, and it makes the mutant's overlap
+# deterministic rather than dependent on process start-up skew.
+n=0
+while [ "$(grep -c '^START' "$led" 2>/dev/null || echo 0)" -lt 2 ] && [ "$n" -lt 30 ]; do
+  sleep 0.1; n=$((n + 1))
+done
+printf 'END %s\n' "${SITE_SLUG:-?}" >> "$led"
+mkdir -p dist
+{
+  printf '<!doctype html><html><head>\n'
+  printf '<meta name="bp-build-id" content="%s">\n' "${BARKPARK_BUILD_ID:-}"
+  printf '<meta name="bp-content-rev" content="%s">\n' "${BARKPARK_CONTENT_REV:-}"
+  printf '<meta name="bp-doc-id" content="doc-42">\n'
+  printf '</head><body><h1>hello</h1></body></html>\n'
+} > dist/index.html
+exit 0
+GATENPM
+    chmod +x "$GBIN/npm"
+
+    g_deploy() { # <slug> <build_id> [VAR=value…] — rc lands in $G/<slug>.rc, log in $G/<slug>.log
+      local slug="$1" bid="$2"; shift 2
+      mkdir -p "$G/src-$slug"
+      printf '{"name":"gate-%s","private":true}\n' "$slug" > "$G/src-$slug/package.json"
+      env PATH="$GBIN:$PATH" "$@" \
+        SITE_SLUG="$slug" BUILD_ID="$bid" CONTENT_REV=rev-1 \
+        SITE_SRC="$G/src-$slug" \
+        BARKPARK_SITES_DIR="$G/sites" \
+        BARKPARK_CADDYFILE="$G/absent-caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$G/deploy-$slug.lock" \
+        BARKPARK_CADDYFILE_LOCK="$G/caddyfile.lock" \
+        BARKPARK_BUILD_GATE_LOCK="${GATE_LOCK:-$G/build.lock}" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "${GATE_ENGINE:-$SELF}" ${GATE_ARGS[@]+"${GATE_ARGS[@]}"} > "$G/$slug.log" 2>&1
+      echo $? > "$G/$slug.rc"
+    }
+    g_rc()    { cat "$G/$1.rc" 2>/dev/null; }
+    g_live()  { readlink "$G/sites/$1/current" 2>/dev/null || true; }
+    # Max nesting depth of the START/END ledger: 1 = the box built one site at a
+    # time; 2 = two builds were genuinely in flight together.
+    g_depth() { awk '/^START/ { d++; if (d > m) m = d } /^END/ { d-- } END { print m + 0 }' "$1"; }
+    g_quote() { tr '\n' '|' < "$1"; }
+    g_free()  { flock -n "${GATE_LOCK:-$G/build.lock}" -c true 2>/dev/null; }
+    g_has()   { printf '%s' "$1" | grep -q "$2"; }   # a pipe at a check() call site
+                                                    # would swallow check's own output
+    # SIGKILL the whole subtree — for a deploy: the engine, the
+    # `bash -c 'npm ci && npm run build'` wrapper, tee AND the npm child, every one
+    # of which INHERITED fd 7 (proven with lsof; killing only the top leaves the
+    # lock held). For the pin: flock(1) execs its command as a CHILD, so the child
+    # is the holder — kill the parent alone and `sleep` keeps the slot forever.
+    g_kill_tree() { local p="$1" c; for c in $(pgrep -P "$p" 2>/dev/null); do g_kill_tree "$c"; done
+      kill -9 "$p" 2>/dev/null || true; }
+    # Hold the ONE slot with a FOREIGN holder (plain flock(1), no engine). It exits
+    # on a sentinel rather than a signal: a killed holder would print job-control
+    # noise over the suite's output, and this fixture is not what SIGKILL proves.
+    # Hard cap ~60s so a botched test cannot wedge CI.
+    g_pin()   { : > "$G/pinned"
+      flock "$G/build.lock" -c "n=0; while [ -f '$G/pinned' ] && [ \$n -lt 600 ]; do sleep 0.1; n=\$((n + 1)); done" &
+      local n=0
+      while g_free && [ "$n" -lt 60 ]; do sleep 0.1; n=$((n + 1)); done
+    }
+    g_unpin() { rm -f "$G/pinned"; local n=0
+      while ! g_free && [ "$n" -lt 60 ]; do sleep 0.1; n=$((n + 1)); done; }
+    GATE_ARGS=()
+
+    echo "[selftest] gate: two concurrent deploys of DIFFERENT slugs SERIALIZE their build windows"
+    GLED="$G/ledger-healthy"; : > "$GLED"
+    export BP_GATE_LEDGER="$GLED"
+    g_deploy alpha ga1 & gp1=$!
+    g_deploy beta  gb1 & gp2=$!
+    wait "$gp1" "$gp2"
+    check "alpha reached SWITCH (exit 0)"        [ "$(g_rc alpha)" = 0 ]
+    check "beta reached SWITCH (exit 0)"         [ "$(g_rc beta)" = 0 ]
+    check "alpha's current MOVED"                [ "$(g_live alpha)" = releases/ga1 ]
+    check "beta's current MOVED"                 [ "$(g_live beta)" = releases/gb1 ]
+    check "BOTH really built (2 START rows)"     [ "$(grep -c '^START' "$GLED")" = 2 ]
+    check "build windows are DISJOINT (ledger nesting depth 1)" [ "$(g_depth "$GLED")" = 1 ]
+    echo "  ledger (gate ON):  $(g_quote "$GLED")   depth=$(g_depth "$GLED")"
+    check "the slot is free again afterwards"     g_free
+
+    echo "[selftest] gate: MUTATION PROOF — with the acquire deleted the SAME ledger interleaves"
+    GMUT="$G/mutant-noacquire.sh"
+    # Exactly one line changes: the admission decision. The release call stays.
+    sed 's/^  if ! build_gate_acquire; then$/  if false; then/' "$SELF" > "$GMUT"
+    check "the mutant differs from the engine in exactly ONE line" \
+      [ "$(diff "$SELF" "$GMUT" | grep -c '^[<>]')" = 2 ]
+    GMLED="$G/ledger-mutant"; : > "$GMLED"
+    rm -rf "$G/sites/alpha" "$G/sites/beta" "$G/src-alpha" "$G/src-beta"
+    export BP_GATE_LEDGER="$GMLED"
+    GATE_ENGINE="$GMUT" g_deploy alpha ga1 & gp1=$!
+    GATE_ENGINE="$GMUT" g_deploy beta  gb1 & gp2=$!
+    wait "$gp1" "$gp2"
+    check "the mutant still deploys alpha (the mutation is ONLY the gate)" [ "$(g_rc alpha)" = 0 ]
+    check "the mutant still deploys beta"                                 [ "$(g_rc beta)" = 0 ]
+    check "MUTANT: the two builds are genuinely INTERLEAVED (depth 2)" \
+      [ "$(g_depth "$GMLED")" = 2 ]
+    echo "  ledger (gate OFF): $(g_quote "$GMLED")   depth=$(g_depth "$GMLED")"
+    unset BP_GATE_LEDGER
+
+    echo "[selftest] gate: a lapsed wait budget SPEAKS on the stage protocol, then exits the typed 15"
+    g_pin 60
+    check "the foreign holder really pinned the only slot"  g_not g_free
+    g_deploy gamma gg1 BARKPARK_BUILD_GATE_WAIT=1
+    check "refused with the typed 15"            [ "$(g_rc gamma)" = 15 ]
+    check "emitted BUILD failed BEFORE exiting (the anti-hang contract)" \
+      grep -q '^BPSTAGE name=BUILD status=failed' "$G/gamma.log"
+    check "the detail names the FLEET BUILD SLOT" grep -q 'FLEET BUILD SLOT' "$G/gamma.log"
+    check "the detail names the lock file"        grep -q "$G/build.lock" "$G/gamma.log"
+    check "ran NO npm"                            [ ! -f "$G/src-gamma/.npm-calls" ]
+    check "staged NOTHING"                        [ ! -d "$G/sites/gamma/releases/gg1" ]
+    check "never switched"                        [ ! -L "$G/sites/gamma/current" ]
+
+    echo "[selftest] gate: MUTATION PROOF — deleting only the refusal's emit reds ONLY the anti-hang check"
+    GMUT2="$G/mutant-noemit.sh"
+    awk '{ if ($0 == "    emit BUILD failed \"$DETAIL\"") next; print }' "$SELF" > "$GMUT2"
+    check "the no-emit mutant differs by exactly ONE deleted line" \
+      [ "$(diff "$SELF" "$GMUT2" | grep -c '^[<>]')" = 1 ]
+    GATE_ENGINE="$GMUT2" g_deploy delta gd1 BARKPARK_BUILD_GATE_WAIT=1
+    check "MUTANT: still the typed 15 (that assertion does NOT move)" [ "$(g_rc delta)" = 15 ]
+    check "MUTANT: no BUILD line at all — exactly the anti-hang check reds" \
+      g_not grep -q '^BPSTAGE name=BUILD status=failed' "$G/delta.log"
+    check "MUTANT: everything else still holds — nothing staged" [ ! -d "$G/sites/delta/releases/gd1" ]
+
+    echo "[selftest] gate: what COMPILES NOTHING is never admission-controlled (slot still pinned)"
+    # A rollback, a prebuilt STAGE, an already-staged re-gate and a preflight run
+    # no npm — gating them would be pure harm: they are the moves an operator
+    # reaches for WHILE the box is busy.
+    g_unpin
+    g_deploy zeta gz1; check "zeta gz1 deployed (setup)" [ "$(g_rc zeta)" = 0 ]
+    g_deploy zeta gz2; check "zeta gz2 deployed (setup)" [ "$(g_rc zeta)" = 0 ]
+    g_pin 60
+    check "the slot is pinned again"              g_not g_free
+    GATE_SECONDS_START=$SECONDS
+    GATE_ARGS=(--rollback); g_deploy zeta ignored; GATE_ARGS=()
+    check "ROLLBACK exits 0 with the slot pinned" [ "$(g_rc zeta)" = 0 ]
+    check "ROLLBACK actually flipped current to gz1" [ "$(g_live zeta)" = releases/gz1 ]
+    check "ROLLBACK did not queue (under 5s)"     [ "$((SECONDS - GATE_SECONDS_START))" -lt 5 ]
+    check "ROLLBACK never touched the gate"       g_not grep -q 'fleet build slot' "$G/zeta.log"
+    GATE_ARGS=(--rollback-preflight); g_deploy zeta ignored; GATE_ARGS=()
+    check "ROLLBACK PREFLIGHT exits 0 with the slot pinned" [ "$(g_rc zeta)" = 0 ]
+    g_deploy zeta gz2 BARKPARK_BUILD_GATE_WAIT=1
+    check "an ALREADY-STAGED re-gate exits 0 with the slot pinned" [ "$(g_rc zeta)" = 0 ]
+    check "the re-gate compiled nothing"          grep -q '^BPSTAGE name=BUILD status=skipped' "$G/zeta.log"
+    GPRE="$G/prebuilt"; mkdir -p "$GPRE"
+    {
+      printf '<!doctype html><html><head>\n'
+      printf '<meta name="bp-build-id" content="gp1">\n'
+      printf '<meta name="bp-content-rev" content="rev-1">\n'
+      printf '<meta name="bp-doc-id" content="doc-42">\n'
+      printf '</head><body><h1>uploaded</h1></body></html>\n'
+    } > "$GPRE/index.html"
+    g_deploy eta gp1 BARKPARK_BUILD_GATE_WAIT=1 PREBUILT_DIR="$GPRE" \
+      PREBUILT_SHA256=1111111111111111111111111111111111111111111111111111111111111111
+    check "a PREBUILT STAGE exits 0 with the slot pinned" [ "$(g_rc eta)" = 0 ]
+    check "the prebuilt deploy went live"         [ "$(g_live eta)" = releases/gp1 ]
+    check "the prebuilt deploy ran no npm"        [ ! -f "$G/src-eta/.npm-calls" ]
+    # THE CONTROL: the one thing that DOES compile is still refused.
+    g_deploy theta gt1 BARKPARK_BUILD_GATE_WAIT=1
+    check "CONTROL: a build-mode deploy IS still refused (15)" [ "$(g_rc theta)" = 15 ]
+    g_unpin
+
+    echo "[selftest] gate: SIGKILL frees the slot — the fd IS the release (no EXIT trap, no reaper)"
+    check "no script-level EXIT trap exists to release it" \
+      [ "$(grep -c '^trap ' "$SELF")" = 0 ]
+    # NON-VACUITY: the next check is worthless unless the slot is free right now.
+    check "the slot is free BEFORE the doomed build starts" g_free
+    env PATH="$GBIN:$PATH" BP_GATE_HANG=1 \
+      SITE_SLUG=iota BUILD_ID=gi1 CONTENT_REV=rev-1 \
+      SITE_SRC="$G/src-iota" BARKPARK_SITES_DIR="$G/sites" \
+      BARKPARK_CADDYFILE="$G/absent-caddyfile" \
+      BARKPARK_SITE_DEPLOY_LOCK="$G/deploy-iota.lock" \
+      BARKPARK_CADDYFILE_LOCK="$G/caddyfile.lock" \
+      BARKPARK_BUILD_GATE_LOCK="$G/build.lock" BARKPARK_SITE_NO_CAP=1 \
+      bash "$SELF" > "$G/iota.log" 2>&1 &
+    gpid=$!
+    mkdir -p "$G/src-iota"; printf '{"name":"gate-iota","private":true}\n' > "$G/src-iota/package.json"
+    gn=0; while g_free && [ "$gn" -lt 100 ]; do sleep 0.1; gn=$((gn + 1)); done
+    check "the in-flight build holds the slot"     g_not g_free
+    g_kill_tree "$gpid"
+    wait "$gpid" 2>/dev/null || true
+    gn=0; while ! g_free && [ "$gn" -lt 60 ]; do sleep 0.1; gn=$((gn + 1)); done
+    check "the SIGKILLed build's slot was freed BY THE KERNEL" g_free
+    g_deploy kappa gk1 BARKPARK_BUILD_GATE_WAIT=1
+    check "the NEXT deploy is ADMITTED (exit 0) on a 1s budget" [ "$(g_rc kappa)" = 0 ]
+
+    echo "[selftest] gate: it FAILS OPEN, loudly, when it cannot lock"
+    # (a) no flock(1) at all — asserted on the FUNCTION, because an engine with no
+    #     flock cannot take its per-slug lock either and would never reach BUILD.
+    # "$BASH" by ABSOLUTE path: with PATH emptied, a bare `bash` cannot be found
+    # either, and the probe would prove nothing but its own typo.
+    gfo="$(PATH=/nonexistent-for-the-gate-proof "$BASH" -c \
+      ". \"$GLIB/site-deploy-common.sh\"; build_gate_acquire; echo GATE_RC=\$?" 2>&1)"
+    check "no flock: ADMITS the build (rc 0)"      g_has "$gfo" 'GATE_RC=0'
+    check "no flock: says so LOUDLY (WARN + OPEN)" g_has "$gfo" 'WARN.*gate is OPEN'
+    # (b) an unopenable lock path (here: a directory) — a full e2e, because this
+    #     one CAN happen on a real box (a root-owned /var/lock and a non-root run).
+    GATE_LOCK="$G" g_deploy lambda gl1
+    check "unopenable lock: the deploy still SUCCEEDS (fail open)" [ "$(g_rc lambda)" = 0 ]
+    check "unopenable lock: WARNs that the gate is OPEN" grep -q 'admission gate is OPEN' "$G/lambda.log"
+    check "unopenable lock: the build really ran"  grep -q 'npm run build' "$G/src-lambda/.npm-calls"
+
+    echo "[selftest] gate: N and the wait budget are NAMED CONSTANTS with their derivation in the script"
+    check "BUILD_GATE_SLOTS=1 is named"           grep -q '^BUILD_GATE_SLOTS=1' "$GLIB/site-deploy-common.sh"
+    check "the wait budget is named"              grep -q '^BUILD_GATE_WAIT_DEFAULT=900' "$GLIB/site-deploy-common.sh"
+    check "N's derivation is written down"        grep -q 'floor(2 cores \* 100% / 150%)' "$GLIB/site-deploy-common.sh"
+    check "the write_env_file/4 allowlist is stated" grep -q 'write_env_file/4' "$GLIB/site-deploy-common.sh"
+  fi
+
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
   [ "$FAILS" -eq 0 ] || { echo "[selftest] FAILED ($FAILS)"; exit 1; }
@@ -1449,6 +1703,22 @@ if [ "$PLAN_MODE" = build ]; then
     log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 11
   fi
 
+  # ---- FLEET BUILD ADMISSION GATE — one box, one build (D95/D104) ----------
+  # The lock taken above is PER-SLUG, so without this second, fleet-wide lock N
+  # sites compile at once on 2 cores. Taken HERE: after BUILD started (so the
+  # stage machine already speaks) and after the two cheap validations (a payload
+  # that has no source or no package.json must fail on its own merits, never
+  # after a 15-minute queue). Released right after BUILD ok, below.
+  if ! build_gate_acquire; then
+    DETAIL="waited ${BUILD_GATE_WAIT}s for the FLEET BUILD SLOT ($BUILD_GATE_LOCK) and it never freed — this box runs ONE build at a time (2 cores, MemoryMax=1500M each), so another site's build is still compiling; nothing was built, staged or switched and the live release is untouched. Retry once it drains, or run this build off-box and deploy it with --prebuilt. In flight: $(build_gate_holders)"
+    log "BUILD: $DETAIL"
+    # emit BEFORE the exit, ALWAYS. This refusal fires AFTER `emit PLAN ok`, so a
+    # bare exit here leaves a stage-watching orchestrator waiting on a BUILD line
+    # that never comes — the hang class this engine has already fixed twice.
+    emit BUILD failed "$DETAIL"
+    exit 15
+  fi
+
   # BUILD_ID + base path + content rev are EXPORTED under their BARKPARK_ build-var
   # names (inherited by the child, never on its argv) so the adapter can bake the
   # bp-build-id / bp-content-rev markers HEALTH asserts on.  The rest of the D7
@@ -1504,6 +1774,12 @@ if [ "$PLAN_MODE" = build ]; then
   fi
   [ "$BUILD_LOG_KEEP" = 1 ] || rm -f "$BUILD_LOG"
   emit BUILD ok "npm ci && npm run build"
+  # The compile is over — hand the box's only build slot to whoever is queued.
+  # STAGE/HEALTH/SWITCH are copies, a curl and a symlink: they are not what the
+  # 2 cores are scarce for, and holding the slot across them would serialize the
+  # cheap tail of every deploy for no gain. (The build-failure exits above drop
+  # the fd by dying, which is the release that also survives a SIGKILL.)
+  build_gate_release
 
   # ---- STAGE — copy ONLY dist/ (D8) ---------------------------------------
   emit STAGE started

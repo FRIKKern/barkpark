@@ -133,12 +133,66 @@ defmodule BarkparkCloud.Web.Auth do
     end
   end
 
+  # THE ABILITY IMPLICATION TABLE (site-spawner wave 10).
+  #
+  # The ability strings on a PAT are a FLAT set on the wire and the mint is
+  # EXCLUSIVE, not hierarchical (`UserToken.normalize_abilities/1` collapses
+  # `root` → ["root"] and `deploy` → ["deploy"], mirroring Coolify's
+  # ApiTokens.updatedPermissions). So a `write` PAT holds literally ["write"] and
+  # a `deploy` PAT literally ["deploy"] — neither carries `read`.
+  #
+  # Honouring only the literal string made the programmatic surface unusable: a
+  # write PAT could POST /v1/sites/:id/deploy but was 403'd on GET /v1/sites, so
+  # `bp cloud site deploy` — which resolves the site handle via ListSites and then
+  # POLLS GET /v1/sites/:id/deployments/:dep_id — could not complete a deploy it
+  # was allowed to START. Same for a deploy PAT and go-live.
+  #
+  # The fix is an EXPLICIT table, spelled out rather than derived, so widening it
+  # is an edit to this map and nothing else. Implication runs in the READ
+  # direction ONLY:
+  #
+  #   root   ⊇ read, write, deploy   — the session/superset credential
+  #   write  ⊇ read                  — "may change it" implies "may look at it"
+  #   deploy ⊇ read                  — "may launch it" implies "may resolve it"
+  #   deploy ⊉ write                  — DELIBERATE. The mint sells `deploy` as
+  #     "Launch / go-live only (exclusive)"; implying `write` would hand a
+  #     launch-only credential all seven write-gated site routes, DELETE
+  #     /v1/sites/:id included.
+  #   write  ⊉ deploy                 — DELIBERATE. A CI key must not be able to
+  #     provision a paid box.
+  #
+  # The bound that makes the read direction safe is that EVERY route gated on
+  # `read` is a GET. That is not a convention to remember — it is machine-checked
+  # each run by RouterAbilityMatrixTest, which scans router.ex and fails naming
+  # the offending route.
+  @ability_implies %{
+    "root" => ~w(root read write deploy),
+    "write" => ~w(write read),
+    "deploy" => ~w(deploy read),
+    "read" => ~w(read)
+  }
+
   @doc """
-  Require `ability` (or the superset `root`) on the resolved credential. Run
-  AFTER `require_user_or_pat/2`. A session credential carries `["root"]` so the
-  browser dashboard always passes; a PAT is gated by its `abilities` array.
-  Halts with a 403 JSON body on a miss (and is a no-op pass-through if the conn
-  is already halted, so it composes cleanly after the require step).
+  The ability implication table: `held ability => every ability it satisfies`.
+  Exposed so tests (and the ability-matrix invariant) can assert against the
+  table itself rather than restating it.
+  """
+  def ability_implies, do: @ability_implies
+
+  # Does a HELD ability satisfy the REQUIRED one? An unknown held string
+  # satisfies only itself — an unrecognised ability never widens anything.
+  defp implies?(held, required) when is_binary(held) and is_binary(required) do
+    required in Map.get(@ability_implies, held, [held])
+  end
+
+  @doc """
+  Require `ability` on the resolved credential. Run AFTER
+  `require_user_or_pat/2`. A session credential carries `["root"]` so the browser
+  dashboard always passes; a PAT is gated by its `abilities` array, widened only
+  by the READ-direction implication table above (`write`/`deploy` satisfy
+  `read`; neither satisfies the other). Halts with a 403 JSON body on a miss
+  (and is a no-op pass-through if the conn is already halted, so it composes
+  cleanly after the require step).
   """
   def require_ability(conn, ability) when is_binary(ability) do
     if conn.halted do
@@ -146,7 +200,7 @@ defmodule BarkparkCloud.Web.Auth do
     else
       abilities = conn.assigns[:current_abilities] || []
 
-      if "root" in abilities or ability in abilities do
+      if Enum.any?(abilities, &implies?(&1, ability)) do
         conn
       else
         forbidden(conn)
