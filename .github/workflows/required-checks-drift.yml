@@ -1,61 +1,78 @@
-# required-checks-drift — the three-way drift gate for branch protection.
+# required-checks-drift — the required-check toolchain's own gate, in two halves.
 #
 # Live protection, the committed .github/required-checks.json, and the check-run
-# names a real PR head actually renders must agree. This job fails when they do
-# not, and — the part that matters — it fails when it cannot SEE one of them.
+# names a real PR head actually renders must agree. This workflow fails when they
+# do not, and — the part that matters — it fails when it cannot SEE one of them.
 #
-# WHY IT IS ADVISORY-BY-INTENT AND NOT IN THE REQUIRED SET
+# TWO JOBS, SPLIT ON WHETHER THEY NEED A CREDENTIAL (wave 10)
 #
-# It reads the GitHub API on every run, so it is exactly the shape that must
-# never gate a merge while the epic is still installing gates: an API blip would
-# stall the fleet. It is also paths-filtered, and `.github/required-checks.json`
-# names it in its own exclusions. Both facts are enforced by the generator, not
-# by convention — a paths-filtered or continue-on-error job cannot enter the
-# required set (stages S2 and S4).
+#   `Required-check spec gate`          BLOCKING. Hermetic: no network, no token,
+#                                       no writes. Runs the mutation suite with
+#                                       --hermetic (72 assertions, ~40s).
+#   `Required-check spec drift (advisory)`  ADVISORY. Everything that reads the
+#                                       GitHub API on a BREAKGLASS credential.
 #
-# BEFORE THE FLIP (enforced:false) it still runs the deadlock detector against a
-# real PR head, so it is never a vacuous pass. AFTER hgw2-s7 flips enforced to
-# true, an unreadable protection API is a hard red here.
+# Until wave 10 the whole workflow was advisory, and it was the exact defect
+# class this epic exists to attack, one layer up: the catch-all poison detector
+# that guards branch protection could not itself stop anything. The half that
+# needs no credential now can.
 #
-# WHY `BREAKGLASS_TOKEN` AND NOT `github.token` (honest-gates D85)
+# THE WORKFLOW IS DELIBERATELY UNFILTERED — THAT IS THE PAYMENT, AND IT IS THE
+# PART THAT MATTERS MORE THAN THE BLOCKING FLAG
 #
-# `GET /repos/:o/:r/branches/:b/protection` requires ADMIN. `administration` is
-# not one of the scopes a workflow `permissions:` block can grant to
-# `github.token` — the key does not exist — so the runner's token returns 403 on
-# that endpoint no matter what is listed above. And
+# There is no `on:.paths` key on either trigger, and adding one back would undo
+# this change. A paths-filtered workflow emits NO check run on a PR that misses
+# the paths, and an absent required context routes to `is expected.` forever —
+# i.e. registering a filtered job's name deadlocks main. The filter also bought
+# nothing here: the catch-all detector is a whole-directory scan of the REAL
+# workflow tree that never consults the diff, so a name poisoned by an unrelated
+# PR is invisible to any path glob. #8093 is the measured case — it DID trigger
+# drift (`.github/workflows/**` had been in the glob list since 43fab05c9) and
+# drift concluded success on both its head and its merge commit. It missed the
+# poisoning because the detector did not exist yet, not because of a filter.
+#
+# Same precedent, same words as elixir.yml's `path-escape` job: it costs a few
+# seconds of bash, and the alternative is a gate with a hole in it.
+#
+# WHY THE DRIFT JOB STAYS ADVISORY — AND THE REASON IS NOT "API BLIPS"
+#
+# The old header argued that "an API blip would stall the fleet." That is
+# REFUTED by measurement: 67 of 67 non-cancelled runs concluded success on all
+# three steps. Flakiness is not why this job cannot block.
+#
+# The real reason is CREDENTIAL LIFETIME AND SCOPE.
+# `GET /repos/:o/:r/branches/:b/protection` requires ADMIN, and `administration`
+# is not a scope a workflow `permissions:` block can grant to `github.token` —
+# the key does not exist — so the runner's own token returns 403 there no matter
+# what is listed below. The job therefore runs on `BREAKGLASS_TOKEN`, which is a
+# broad `gh` OAuth USER token (`repo`, `workflow`): it belongs to a person, it
+# rotates whenever that person re-logs in, and it can be revoked out from under
+# CI without anyone touching this repo. A required context whose green depends on
+# one human's session cookie is a gate that reds for a reason no PR author caused
+# and no PR author can fix — which is the same disease, wearing the other mask.
+# It is also far more scope than `administration: read` in a PUBLIC repository;
+# secrets are not exposed to fork PRs, but any workflow change merged to main can
+# read it. The fix is a fine-grained PAT scoped to this repo with
+# Administration: Read-only and nothing else, mintable only in the web UI —
+# filed as the human gate `hg-breakglass-token-fine-grained`. When that lands,
+# the lifetime/scope argument expires and this job becomes registrable.
+#
 # `required-checks-verify.sh` hard-fails on a protection read it cannot make,
-# deliberately: an unreadable input is a failure and never a skip. Put together,
-# the flip would have made this job PERMANENTLY red for a reason that has
-# nothing to do with drift — the exact "red that means nothing" this epic
-# exists to abolish, installed by the epic itself.
+# deliberately: an unreadable input is a failure and never a skip. The
+# `|| github.token` fallback keeps the job RUNNABLE if the secret is ever
+# removed; it will then red on the protection read, which is the honest outcome
+# and not a silent skip.
 #
-# THE TRADEOFF IS REAL AND IS WRITTEN DOWN RATHER THAN HIDDEN. `BREAKGLASS_TOKEN`
-# is currently a broad user token (`repo`, `workflow`): far more than the
-# `administration: read` this job needs, in a PUBLIC repository. Secrets are not
-# exposed to fork PRs, but any workflow change merged to main can read it. The
-# fix is a fine-grained PAT scoped to this repo with Administration: Read-only
-# and nothing else, which can only be minted in the web UI — filed as the human
-# gate `hg-breakglass-token-fine-grained`. The `|| github.token` fallback keeps
-# the job runnable if the secret is ever removed; it will then red on the
-# protection read, which is the honest outcome and not a silent skip.
+# `.github/required-checks.json` names the advisory job in its own exclusions,
+# and that is enforced by the generator rather than by convention: a
+# continue-on-error job cannot enter the required set (stage S2).
 
 name: required-checks-drift
 
 on:
   pull_request:
-    paths:
-      - ".github/required-checks.json"
-      - ".github/workflows/required-checks-drift.yml"
-      - "scripts/required-checks-*.sh"
-      - "scripts/required-checks.test.sh"
-      - ".github/workflows/**"
   push:
     branches: [main]
-    paths:
-      - ".github/required-checks.json"
-      - "scripts/required-checks-*.sh"
-      - "scripts/required-checks.test.sh"
-      - ".github/workflows/**"
 
 permissions:
   contents: read
@@ -68,6 +85,32 @@ concurrency:
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  # ── the blocking half ───────────────────────────────────────────────────────
+  # Unmatrixed (one job, one rendered name — no `(27.0, 1.18.1)` tuple to pin),
+  # path-unfiltered, and it depends on NO dispatcher job: a `needs:` on a
+  # dispatch job would reintroduce exactly the conditional-absence shape the
+  # paths filter had. It renders on every PR, always, and its name is stable.
+  spec-gate:
+    name: Required-check spec gate
+    runs-on: ubuntu-latest
+    steps:
+      # actions/checkout is REQUIRED, not incidental: §13's prose ratchet runs
+      # `git ls-files` from the repo root and §3c/§3d scan the real workflow
+      # tree. Without a git index §13 produces a spurious FAIL.
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+
+      # The whole hermetic suite: the poison filter's five rejections each
+      # disarmed and watched failing to fire, the catch-all job-name refusal
+      # (the #8093 specimen) asserted against a COPY of the real workflow tree
+      # with one poison planted, the deadlock detector, the superset floor, and
+      # verify's own 16 mutation clauses via §9. No network, no token.
+      - name: Prove the toolchain by mutation (hermetic)
+        run: bash scripts/required-checks.test.sh --hermetic
+
+  # ── the advisory half ───────────────────────────────────────────────────────
   required-checks-drift:
     name: Required-check spec drift (advisory)
     continue-on-error: true
@@ -76,13 +119,13 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      # The tripwire's own tripwire. If these mutation proofs stop failing where
-      # they should, the guard below is decoration and this run says so BEFORE
-      # it reports on anything else.
-      - name: Prove the guard can fail (verify --selftest)
-        run: bash scripts/required-checks-verify.sh --selftest
-
-      - name: Prove the toolchain by mutation (required-checks.test.sh)
+      # The API stage, §10 and §11: the committed spec's `enforced` flag against
+      # whether the branch is REALLY protected, and full-mode verify against live
+      # protection — including the phantom-context mutation, which now has to
+      # NAME the phantom rather than merely exit non-zero. (The bare run is the
+      # hermetic suite PLUS these; there is no third home for --selftest, which
+      # §9 runs internally.)
+      - name: Prove the toolchain against the live API (§10, §11)
         env:
           GH_TOKEN: ${{ secrets.BREAKGLASS_TOKEN || github.token }}
         run: bash scripts/required-checks.test.sh

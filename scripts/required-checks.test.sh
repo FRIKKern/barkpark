@@ -7,14 +7,33 @@
 # removed and the name watched surviving; every verify clause is corrupted one
 # field at a time.
 #
-#   scripts/required-checks.test.sh          # hermetic, no network, no writes
-#   scripts/required-checks.test.sh --live   # + a throwaway PROTECTED branch:
-#                                            #   the contexts+checks 422, the
-#                                            #   non-convergence red, and the
-#                                            #   converged green, for real
+#   scripts/required-checks.test.sh --hermetic  # no network, no credentials,
+#                                               #   no writes — the BLOCKING run
+#   scripts/required-checks.test.sh             # + §10/§11: READ-ONLY calls to
+#                                               #   the GitHub API (needs a token
+#                                               #   with admin on this repo)
+#   scripts/required-checks.test.sh --live      # + a throwaway PROTECTED branch:
+#                                               #   the contexts+checks 422, the
+#                                               #   non-convergence red, and the
+#                                               #   converged green, for real
 #
-# The hermetic run is what CI executes. --live mutates a throwaway branch in the
-# repo (never main; it refuses) and cleans up after itself.
+# THREE STAGES, AND THE DEFAULT IS NOT THE HERMETIC ONE (wave 10)
+#
+# The header of this file used to claim the bare run was "hermetic, no network,
+# no writes". It was not, and had not been for some time: §10 makes one admin
+# protection read and §11 makes three bare full-mode `verify` runs, each of which
+# reads live branch protection. Measured with a `gh` shim on PATH that exits 1
+# (note that `env -u GH_TOKEN -u GITHUB_TOKEN` does NOT deauthenticate gh — the
+# credential lives in the keyring), the bare run is 72 passed / 3 FAILED with
+# nothing wrong with the repo at all. So the claim is retired and replaced by a
+# FLAG: `--hermetic` (or `RC_HERMETIC=1`) skips exactly §10 and §11's three
+# API clauses and nothing else, and that is the run CI blocks on.
+#
+# The remaining stages are additive, never alternative: `--live` implies the API
+# stage, and neither can be reached from `--hermetic`.
+#
+# --live mutates a throwaway branch in the repo (never main; it refuses) and
+# cleans up after itself.
 
 set -euo pipefail
 
@@ -25,7 +44,23 @@ VERIFY="$REPO_ROOT/scripts/required-checks-verify.sh"
 SPEC="$REPO_ROOT/.github/required-checks.json"
 
 LIVE=0
-[ "${1:-}" = "--live" ] && LIVE=1
+# `--hermetic` gates the API stage the way `--live` gates the branch stage: a
+# named flag on a named function, never a line range. A line range rots the next
+# time anyone adds a section above it, and the whole point of this file is that a
+# guard which cannot be shown to fail has not been shown to work.
+HERMETIC="${RC_HERMETIC:-0}"
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --live)     LIVE=1; shift ;;
+    --hermetic) HERMETIC=1; shift ;;
+    -h|--help)  awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
+    *) echo "unknown argument: $1 (try --help)" >&2; exit 2 ;;
+  esac
+done
+if [ "$LIVE" -eq 1 ] && [ "$HERMETIC" -eq 1 ]; then
+  echo "--hermetic and --live are contradictory: --live is the API stage plus a branch write" >&2
+  exit 2
+fi
 
 PASS=0
 FAIL=0
@@ -418,6 +453,79 @@ else
 fi
 rm -rf "$REALCOPY"
 
+section "3e. S5 reads the NEWEST head in the main window, not the oldest"
+
+# THE SPECIMEN: a name that was RED on main ten commits ago and has been GREEN
+# ever since — which is what every freshly-fixed aggregator looks like on the day
+# somebody wants to require it. `main_conclusions()` appends one row per (sha,
+# name) in the order the shas arrive and `GET /commits` returns them NEWEST
+# FIRST, so the FIRST row is the latest head. S5 took `tail -1` — the OLDEST head
+# in the window — while its own comment said "latest COMPLETED conclusion" and
+# the string it printed said the same. The two orderings disagree on exactly this
+# fixture, and the disagreement excludes the name.
+#
+# Every other fixture in this file supplies ONE main sha, where head and tail are
+# the same row; that is why the defect survived a suite this adversarial.
+S5W="$TMP/s5-workflows"
+S5F="$TMP/s5-fixtures"
+mkdir -p "$S5W" "$S5F"
+cat > "$S5W/cloud.yml" <<'YAML'
+name: cloud
+on:
+  pull_request:
+jobs:
+  gate:
+    name: Cloud gate
+    runs-on: ubuntu-latest
+YAML
+# Two PR heads (the intersection needs two path shapes), both rendering it green.
+for s in s5A s5B; do
+  cat > "$S5F/checkruns-$s.json" <<'JSON'
+{ "check_runs": [
+  { "name": "Cloud gate", "conclusion": "success", "started_at": "2026-07-28T01:00:00Z", "app": { "id": 15368 } }
+] }
+JSON
+done
+# main window, NEWEST FIRST: the tip is green, the tail of the window is the old
+# failure. head -1 -> success (keep); tail -1 -> failure (S5 RED ON MAIN).
+printf 's5MAINnew\ns5MAINold\n' > "$S5F/main-shas.txt"
+cat > "$S5F/checkruns-s5MAINnew.json" <<'JSON'
+{ "check_runs": [
+  { "name": "Cloud gate", "conclusion": "success", "started_at": "2026-07-29T00:00:00Z", "app": { "id": 15368 } }
+] }
+JSON
+cat > "$S5F/checkruns-s5MAINold.json" <<'JSON'
+{ "check_runs": [
+  { "name": "Cloud gate", "conclusion": "failure", "started_at": "2026-07-20T00:00:00Z", "app": { "id": 15368 } }
+] }
+JSON
+
+S5_OUT="$(bash "$GEN" --workflows "$S5W" --fixture-dir "$S5F" --sha s5A --sha s5B --explain 2>&1 || true)"
+if kept_in "$S5_OUT" "Cloud gate"; then
+  ok "S5 keeps a name whose NEWEST main head is green (the old failure is out of date, not disqualifying)"
+else
+  bad "S5 excluded a name that is green on the newest main head: $(grep -E '  (keep|exclude) ' <<<"$S5_OUT" | head -2)"
+fi
+
+# MUTATION PROOF, and it is the whole point: put the ordering back the way it
+# was, on a COPY, and the identical fixtures must exclude the name. Without this
+# the assertion above passes on any implementation that happens to be green.
+S5REG="$TMP/gen-s5-oldest.sh"
+# `{ print $2; exit }` (first match wins) -> `{ v = $2 } END { print v }` (last
+# match wins). Same awk program, same fields, opposite end of the window.
+sed 's/{ print \$2; exit }/{ v = $2 } END { print v }/' "$GEN" > "$S5REG"
+if ! grep -q 'END { print v }' "$S5REG"; then
+  bad "the S5 ordering mutation did not apply — the awk clause moved, so the proof below is vacuous"
+else
+  ok "the S5 ordering mutation applies: a copy of the generator reads the OLDEST row again"
+fi
+S5_REG_OUT="$(bash "$S5REG" --workflows "$S5W" --fixture-dir "$S5F" --sha s5A --sha s5B --explain 2>&1 || true)"
+if excluded_by "$S5_REG_OUT" "Cloud gate" "S5 RED ON MAIN"; then
+  ok "…and the OLDEST-row reading excludes it as 'S5 RED ON MAIN' — the ordering is load-bearing, and it is exactly the name wave 10 wants to register"
+else
+  bad "the regressed ordering did not exclude 'Cloud gate' — the fixture no longer discriminates: $(grep -E '  (keep|exclude) ' <<<"$S5_REG_OUT" | head -2)"
+fi
+
 # ═══ 4. fail-closed feeds ════════════════════════════════════════════════════
 
 section "4. the generator fails closed — an unreadable or empty feed is never an empty spec"
@@ -497,31 +605,136 @@ else
   ok "apply refuses without --confirm"
 fi
 
+section "5c. apply runs the FLOOR before the PUT — a shrink never reaches the API"
+
+# The floor script has existed since #6926 and, until this wave, was called by
+# NOTHING: `grep -rn required-checks-floor .github/` returned no workflow hit and
+# apply.sh never mentioned it. So the only brake on a spec that silently drops a
+# required name was the `enforced=false` refusal — which a human regenerating and
+# flipping the flag in one PR satisfies while the loss rides along.
+#
+# HERMETIC: driven through `--floor-reference`, exactly as §12 drives the floor
+# itself through `--reference`, so this needs no remote ref in a depth-1 checkout.
+# The DEFAULT (git) reference is asserted by reading the source, below.
+APPLY_REF="$TMP/apply-floor-ref.json"
+jq '{protection: {required_status_checks: {strict: false, checks: [
+      {context: "Elixir gate", app_id: 15368},
+      {context: "PR references an active task", app_id: 15368}]}}}' -n > "$APPLY_REF"
+
+# (a) LOSS. `Elixir gate` dropped, protection enforced, --confirm given: every
+#     pre-existing refusal is satisfied and only the floor stands in the way.
+jq '.enforced = true
+    | .protection.required_status_checks.checks = [{context: "PR references an active task", app_id: 15368}]' \
+  "$SPEC" > "$TMP/apply-shrunk.json"
+AOUT="$(bash "$APPLY" --confirm --spec "$TMP/apply-shrunk.json" --floor-reference "$APPLY_REF" 2>&1)" && ARC=0 || ARC=$?
+if [ "$ARC" -ne 0 ] && grep -q "FLOOR BREACH" <<<"$AOUT" && grep -q "LOST  Elixir gate" <<<"$AOUT"; then
+  ok "apply REFUSES a candidate that drops \`Elixir gate\` and names the lost context (FLOOR BREACH, exit $ARC) — with enforced=true and --confirm both satisfied"
+else
+  bad "apply did not refuse the shrink (exit $ARC): $(head -3 <<<"$AOUT")"
+fi
+# …and it refused BEFORE the PUT, not after it: the applying/verifying lines are
+# the only two things printed on the write path, and neither appears.
+if ! grep -qE "^(applying|verifying)" <<<"$AOUT"; then
+  ok "…and it refused BEFORE the protection PUT (no 'applying …' line was reached)"
+else
+  bad "apply reached the PUT before the floor: $(grep -E '^(applying|verifying)' <<<"$AOUT" | head -1)"
+fi
+
+# (b) GROWTH is not a loss, but it is a decision: exit 2 must refuse UNLESS
+#     acknowledged, and the acknowledgement must be the only way past it.
+jq '.enforced = true
+    | .protection.required_status_checks.checks += [{context: "Doc budgets + anchors", app_id: 15368}]' \
+  "$SPEC" > "$TMP/apply-grown.json"
+AOUT="$(bash "$APPLY" --confirm --spec "$TMP/apply-grown.json" --floor-reference "$APPLY_REF" 2>&1)" && ARC=0 || ARC=$?
+if [ "$ARC" -ne 0 ] && grep -q "FLOOR GROWTH" <<<"$AOUT"; then
+  ok "apply REFUSES unacknowledged GROWTH (a promoted name is a decision every future PR pays for)"
+else
+  bad "apply accepted unacknowledged growth (exit $ARC): $(head -3 <<<"$AOUT")"
+fi
+
+# MUTATION PROOF: remove the floor's CALL from a copy and the shrink must sail
+# through to the PUT. Without this, (a) passes on any refusal at all.
+NOFLOOR="$TMP/apply-nofloor.sh"
+sed -E 's|^( *)floor_out="\$\(bash "\$REPO_ROOT/scripts/required-checks-floor.sh".*|\1floor_out=""; floor_rc=0 # FLOOR REMOVED|' "$APPLY" > "$NOFLOOR"
+if ! grep -q "FLOOR REMOVED" "$NOFLOOR"; then
+  bad "the floor mutation did not apply — the call is no longer on its own line, so the proof below is vacuous"
+else
+  ok "the mutation applies: the floor's call site is removed from a copy of apply"
+fi
+# `gh` is never reached in the guarded run; in the UNGUARDED one it is, so the
+# PUT is aimed at a branch name that cannot exist. The assertion is that the run
+# got PAST the floor, which the "applying …" line is the marker for.
+NF_OUT="$(bash "$NOFLOOR" --confirm --spec "$TMP/apply-shrunk.json" --floor-reference "$APPLY_REF" \
+          --branch "rc-floor-mutation-probe-does-not-exist" 2>&1)" || true
+if grep -q "^applying 1 required context" <<<"$NF_OUT" && ! grep -q "FLOOR BREACH" <<<"$NF_OUT"; then
+  ok "…and without the floor the SAME shrunk spec reaches the PUT — the wiring is load-bearing (mutation-proven able to fail)"
+else
+  bad "the unguarded apply did not reach the PUT: $(head -3 <<<"$NF_OUT")"
+fi
+
+# The floor's DEFAULT reference, in apply's own invocation: no `--reference` is
+# passed unless the caller overrode it, so the floor falls back to
+# `git show origin/main:.github/required-checks.json` — never the worktree copy
+# the PR rewrites.
+if grep -q 'required-checks-floor.sh" \${floor_args\[@\]+"\${floor_args\[@\]}"}' "$APPLY"; then
+  ok "apply passes NO --reference by default, so the floor reads its reference out of git (the PR cannot be its own floor)"
+else
+  bad "apply hard-codes a floor reference — the candidate would be compared against the file the PR just rewrote"
+fi
+
 # ═══ 6. non-convergence, caught ═════════════════════════════════════════════
 
 section "6. convergence — an out-of-band boolean the spec never asked for must red"
 
-cat > "$TMP/rb.json" <<'JSON'
-{
-  "required_status_checks": { "strict": false, "checks": [
-    { "context": "Elixir gate", "app_id": 15368 },
-    { "context": "PR references an active task", "app_id": 15368 } ] },
-  "enforce_admins": { "enabled": true },
-  "required_signatures": { "enabled": false },
-  "required_linear_history": { "enabled": false },
-  "allow_force_pushes": { "enabled": false },
-  "allow_deletions": { "enabled": false },
-  "block_creations": { "enabled": false },
-  "required_conversation_resolution": { "enabled": false },
-  "lock_branch": { "enabled": false },
-  "allow_fork_syncing": { "enabled": false }
+# THE FIXTURES ARE DERIVED FROM THE COMMITTED SPEC, NEVER TYPED (wave 10).
+#
+# Both this section and §7 used to hand-write `Elixir gate` and `PR references
+# an active task` into their read-back and check-run heredocs. That was correct
+# for exactly as long as the spec required those two names and no others. The
+# moment a third context is registered, the typed read-back stops matching the
+# spec, and this suite reports THREE failures — `a converged read-back did not
+# verify`, `an extra rendered name was treated as drift`, `duplicate check-run
+# rows broke the detector` — none of which is about the code under test, all of
+# which land on the PR that registers the name. Measured: a 4-context spec sends
+# the OFFLINE suite to 67 passed / 3 FAILED, unfixable by re-ordering anything.
+#
+# So the read-back mirrors $SPEC's own protection block and the rendered feed is
+# built from $SPEC's own context list. The fixtures now widen with the spec.
+SPEC_CONTEXTS() { jq -r '.protection.required_status_checks.checks[].context' "$SPEC"; }
+
+jq '{
+  required_status_checks: {
+    strict: .protection.required_status_checks.strict,
+    checks: .protection.required_status_checks.checks
+  },
+  enforce_admins:                   { enabled: .protection.enforce_admins },
+  required_signatures:              { enabled: false },
+  required_linear_history:          { enabled: .protection.required_linear_history },
+  allow_force_pushes:               { enabled: .protection.allow_force_pushes },
+  allow_deletions:                  { enabled: .protection.allow_deletions },
+  block_creations:                  { enabled: .protection.block_creations },
+  required_conversation_resolution: { enabled: .protection.required_conversation_resolution },
+  lock_branch:                      { enabled: .protection.lock_branch },
+  allow_fork_syncing:               { enabled: .protection.allow_fork_syncing }
+}' "$SPEC" > "$TMP/rb.json"
+
+# `runs.json`: one green rendered row per required context.
+runs_from_spec() { # [jq filter applied to the rows array]
+  jq -c --argjson f 0 '[ .protection.required_status_checks.checks[]
+        | { name: .context, conclusion: "success", started_at: "2026-07-28T01:00:00Z" } ]
+      | { check_runs: . }' "$SPEC"
 }
-JSON
-cat > "$TMP/runs.json" <<'JSON'
-{ "check_runs": [
-  { "name": "Elixir gate", "conclusion": "success", "started_at": "2026-07-28T01:00:00Z" },
-  { "name": "PR references an active task", "conclusion": "success", "started_at": "2026-07-28T01:00:00Z" } ] }
-JSON
+runs_from_spec > "$TMP/runs.json"
+
+# The derivation is only meaningful if the spec actually carries contexts, and a
+# silent zero here would make every clause below vacuous.
+if [ "$(SPEC_CONTEXTS | grep -c . || true)" -ge 1 ] \
+   && [ "$(jq '.check_runs | length' "$TMP/runs.json")" = "$(jq '.protection.required_status_checks.checks | length' "$SPEC")" ]; then
+  ok "the §6/§7 fixtures are DERIVED from the committed spec ($(jq '.protection.required_status_checks.checks | length' "$SPEC") context(s)) — registering a name widens them instead of reding them"
+else
+  bad "the derived fixtures do not match the committed spec's context list"
+fi
+
 if bash "$VERIFY" --spec "$TMP/enforced.json" --readback "$TMP/rb.json" --runs "$TMP/runs.json" --sha probe >/dev/null 2>&1; then
   ok "the converged read-back verifies green"
 else
@@ -538,8 +751,12 @@ fi
 
 section "7. the deadlock detector — a SET DIFFERENCE, at N=2 where the refusal message names nothing"
 
-jq '.protection.required_status_checks.checks = [
-      {"context":"Elixir gate","app_id":15368},
+# N=2 exactly, and the KEPT name is the spec's first context rather than a typed
+# one — so the "the rendered context is not reported" assertion below still has a
+# rendered name to point at whatever the spec grows to.
+KEPT_CTX="$(SPEC_CONTEXTS | head -1)"
+jq --arg keep "$KEPT_CTX" '.protection.required_status_checks.checks = [
+      {"context":$keep,"app_id":15368},
       {"context":"A name no workflow emits","app_id":15368}]' "$TMP/enforced.json" > "$TMP/dead2.json"
 set +e
 OUT="$(bash "$VERIFY" --spec "$TMP/dead2.json" --runs "$TMP/runs.json" --sha probe --deadlock 2>&1)"
@@ -555,30 +772,27 @@ if grep -q "A name no workflow emits" <<<"$OUT"; then
 else
   bad "the detector did not name the missing context at N=2"
 fi
-if grep -q "Elixir gate" <<<"$OUT"; then
-  bad "the detector reported a context that IS rendered"
+if grep -qF "$KEPT_CTX" <<<"$OUT"; then
+  bad "the detector reported a context that IS rendered ($KEPT_CTX)"
 else
   ok "the rendered context is not reported — the difference is a set operation, not a message grep"
 fi
 
-cat > "$TMP/runs-extra.json" <<'JSON'
-{ "check_runs": [
-  { "name": "Elixir gate", "conclusion": "success", "started_at": "2026-07-28T01:00:00Z" },
-  { "name": "PR references an active task", "conclusion": "success", "started_at": "2026-07-28T01:00:00Z" },
-  { "name": "Some brand new advisory gate", "conclusion": "failure", "started_at": "2026-07-28T01:00:00Z" } ] }
-JSON
+# Every required context rendered, PLUS one name the spec never asked for.
+jq -c '.check_runs += [
+  { "name": "Some brand new advisory gate", "conclusion": "failure", "started_at": "2026-07-28T01:00:00Z" } ]' \
+  "$TMP/runs.json" > "$TMP/runs-extra.json"
 if bash "$VERIFY" --spec "$TMP/enforced.json" --runs "$TMP/runs-extra.json" --sha probe --deadlock >/dev/null 2>&1; then
   ok "EXTRA rendered names are tolerated (new advisory checks land constantly)"
 else
   bad "an extra rendered name was treated as drift"
 fi
 
-cat > "$TMP/runs-dupe.json" <<'JSON'
-{ "check_runs": [
-  { "name": "Elixir gate", "conclusion": "failure", "started_at": "2026-07-28T01:00:00Z" },
-  { "name": "Elixir gate", "conclusion": "success", "started_at": "2026-07-28T03:00:00Z" },
-  { "name": "PR references an active task", "conclusion": "success", "started_at": "2026-07-28T01:00:00Z" } ] }
-JSON
+# The first required context twice: an older FAILURE and a newer success, which
+# is what a re-run leaves behind. Only the newest row is the truth.
+jq -c --arg dupe "$KEPT_CTX" '.check_runs += [
+  { "name": $dupe, "conclusion": "failure", "started_at": "2026-07-27T01:00:00Z" } ]' \
+  "$TMP/runs.json" > "$TMP/runs-dupe.json"
 if bash "$VERIFY" --spec "$TMP/enforced.json" --runs "$TMP/runs-dupe.json" --sha probe --deadlock >/dev/null 2>&1; then
   ok "duplicate rows reduce to the latest per name (a re-run leaves both)"
 else
@@ -614,35 +828,15 @@ fi
 section "9. verify --selftest is itself green"
 
 if bash "$VERIFY" --selftest >/dev/null 2>&1; then
-  ok "verify --selftest passes (12 mutation clauses)"
+  # The count is the selftest's OWN numbering (`1/16` … `16/16`), which this
+  # label had drifted four clauses behind. It is also the reason drift.yml no
+  # longer runs `--selftest` as a step of its own: §9 IS that home.
+  ok "verify --selftest passes (16 mutation clauses)"
 else
   bad "verify --selftest is red"
 fi
 
-section "10. the committed spec agrees with reality about whether protection exists"
-
-# This assertion follows the spec, not the calendar: while enforced is false the
-# branch MUST be unprotected (this slice ships the tooling and nothing else);
-# once hgw2-s7 flips it, the same assertion inverts and an unprotected main is
-# the failure. A test hard-coded to "main is unprotected" would have to be
-# deleted on the day it finally mattered.
-PROTECTED=0
-gh api "repos/$(jq -r .repo "$SPEC")/branches/$(jq -r .branch "$SPEC")/protection" >/dev/null 2>&1 && PROTECTED=1
-if jq -e '.enforced == false' "$SPEC" >/dev/null; then
-  if [ "$PROTECTED" -eq 0 ]; then
-    ok "spec says enforced=false and main is unprotected — the flip belongs to hgw2-s7"
-  else
-    bad "main IS protected while the committed spec says enforced=false"
-  fi
-else
-  if [ "$PROTECTED" -eq 1 ]; then
-    ok "spec says enforced=true and main is protected"
-  else
-    bad "the committed spec says enforced=true but main is NOT protected — the guard is claiming a gate that does not exist"
-  fi
-fi
-
-section "11. full mode tracks the COMMITTED spec against reality, in BOTH eras"
+section "11 (hermetic half). the section-11 mutation is DERIVED, not typed"
 
 # hgw2-s7's own slice gate is the bare `scripts/required-checks-verify.sh`, so
 # full mode has to be meaningful on both sides of the flip: green on whatever
@@ -673,35 +867,81 @@ else
   ok "the section-11 mutation is DERIVED (\`.enforced |= not\`) and differs from the committed spec in both eras"
 fi
 
-if bash "$VERIFY" >/dev/null 2>&1; then
-  ok "full mode is green on the COMMITTED spec (enforced=$(jq -r .enforced "$SPEC")) — hgw2-s7's slice gate passes"
-else
-  bad "full mode reds on the committed spec — hgw2-s7's slice gate cannot pass"
-fi
 
-if jq -e '.enforced == false' "$SPEC" >/dev/null; then
-  if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then
-    bad "full mode PASSED with enforced=true against an unprotected main — it cannot fail"
+# ═══ the API stage — §10 and §11's three live clauses ════════════════════════
+#
+# EVERYTHING ABOVE THIS LINE IS HERMETIC. Everything below reads the live GitHub
+# API, needs a token with ADMIN on this repo, and is therefore SKIPPED under
+# --hermetic — which is the run CI blocks on. Measured with a failing `gh` shim
+# on PATH: the four clauses in here are the ONLY ones that move.
+api_stage() {
+  section "10. the committed spec agrees with reality about whether protection exists"
+
+  # This assertion follows the spec, not the calendar: while enforced is false the
+  # branch MUST be unprotected; once the flip lands, the same assertion inverts and
+  # an unprotected main is the failure. A test hard-coded to "main is unprotected"
+  # would have to be deleted on the day it finally mattered.
+  local protected=0
+  gh api "repos/$(jq -r .repo "$SPEC")/branches/$(jq -r .branch "$SPEC")/protection" >/dev/null 2>&1 && protected=1
+  if jq -e '.enforced == false' "$SPEC" >/dev/null; then
+    if [ "$protected" -eq 0 ]; then
+      ok "spec says enforced=false and main is unprotected — the flip belongs to hgw2-s7"
+    else
+      bad "main IS protected while the committed spec says enforced=false"
+    fi
   else
-    ok "…and RED with enforced=true while main is unprotected (mutation-proven able to fail)"
+    if [ "$protected" -eq 1 ]; then
+      ok "spec says enforced=true and main is protected"
+    else
+      bad "the committed spec says enforced=true but main is NOT protected — the guard is claiming a gate that does not exist"
+    fi
   fi
-else
-  # Post-flip. The flag inversion is green BY DESIGN (see above), so the
-  # falsifying mutation is a context live protection does not publish.
-  CONTENTMUT="$TMP/phantom-context.json"
-  jq '.protection.required_status_checks.checks += [{"context":"No workflow emits me","app_id":15368}]' \
-    "$SPEC" > "$CONTENTMUT"
-  if bash "$VERIFY" --spec "$CONTENTMUT" >/dev/null 2>&1; then
-    bad "full mode PASSED with a required context live protection does not carry — it cannot fail"
+
+  section "11 (live half). full mode tracks the COMMITTED spec against reality"
+
+  if bash "$VERIFY" >/dev/null 2>&1; then
+    ok "full mode is green on the COMMITTED spec (enforced=$(jq -r .enforced "$SPEC")) — hgw2-s7's slice gate passes"
   else
-    ok "…and RED on a spec context live protection does not carry (mutation-proven able to fail post-flip)"
+    bad "full mode reds on the committed spec — hgw2-s7's slice gate cannot pass"
   fi
-  if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then
-    ok "…and the INVERTED flag (enforced=false) is green by design — a committed, reviewable state, never a swallowed one"
+
+  if jq -e '.enforced == false' "$SPEC" >/dev/null; then
+    if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then
+      bad "full mode PASSED with enforced=true against an unprotected main — it cannot fail"
+    else
+      ok "…and RED with enforced=true while main is unprotected (mutation-proven able to fail)"
+    fi
   else
-    bad "full mode reds on enforced=false, which is a committed state the guard is documented to accept"
+    # Post-flip. The flag inversion is green BY DESIGN (see above), so the
+    # falsifying mutation is a context live protection does not publish.
+    #
+    # AND THE RED MUST BE THE RIGHT RED (wave 10). This clause used to assert
+    # nothing but `verify exited non-zero`, which it does for a phantom context
+    # AND for an unreadable protection API — so with the network down, or the
+    # token lacking admin, it PASSED while proving nothing at all. It could not
+    # tell its own claim from an outage. It now requires the phantom name to be
+    # NAMED in the output, so a token-shaped red fails the clause instead of
+    # satisfying it.
+    local contentmut phantom cmout cmrc=0
+    contentmut="$TMP/phantom-context.json"
+    phantom="No workflow emits me"
+    jq --arg p "$phantom" '.protection.required_status_checks.checks += [{"context":$p,"app_id":15368}]' \
+      "$SPEC" > "$contentmut"
+    cmout="$(bash "$VERIFY" --spec "$contentmut" 2>&1)" || cmrc=$?
+    if [ "$cmrc" -eq 0 ]; then
+      bad "full mode PASSED with a required context live protection does not carry — it cannot fail"
+    elif grep -qF "MISSING from live: $phantom" <<<"$cmout"; then
+      ok "…and RED *naming* the phantom context (mutation-proven able to fail post-flip, and proven to red for the RIGHT reason)"
+    else
+      bad "full mode red (exit $cmrc) without naming '$phantom' — that is an outage-shaped red, indistinguishable from the finding: $(grep -m2 -E 'FAIL|DRIFT' <<<"$cmout")"
+    fi
+    if bash "$VERIFY" --spec "$FULLMUT" >/dev/null 2>&1; then
+      ok "…and the INVERTED flag (enforced=false) is green by design — a committed, reviewable state, never a swallowed one"
+    else
+      bad "full mode reds on enforced=false, which is a committed state the guard is documented to accept"
+    fi
   fi
-fi
+}
 
 # ═══ 12. the superset floor ══════════════════════════════════════════════════
 
@@ -806,10 +1046,27 @@ fi
 #     Inside the generator it would run against the harness fixture shape that
 #     section 3 builds and refuse it; inside verify it has no second reference,
 #     because verify treats the committed spec AS truth.
-if ! grep -q "required-checks-floor" "$GEN" && ! grep -q "required-checks-floor" "$VERIFY"; then
-  ok "the floor is called by neither the generator nor verify (it needs a second reference; those two have none)"
+#     CODE ONLY, not prose: both files legitimately DISCUSS the floor in their
+#     headers (the generator's emit path points at it as the brake on a silent
+#     shrink), and a grep that counts a comment as a call site makes writing down
+#     why something is not wired indistinguishable from wiring it.
+floor_call_sites() { # [extra file…]
+  { printf '%s\n' "$GEN" "$VERIFY" "$@"; } \
+    | while IFS= read -r f; do sed 's/#.*//' "$f" | grep -Hn --label="$f" "required-checks-floor" || true; done
+}
+if [ -z "$(floor_call_sites)" ]; then
+  ok "the floor is CALLED by neither the generator nor verify (it needs a second reference; those two have none)"
 else
-  bad "the floor has been wired into the generator or verify — see the header for why that cannot work"
+  bad "the floor has been wired into the generator or verify — see the header for why that cannot work: $(floor_call_sites | head -1)"
+fi
+# …and the scan can see a call. Same function, one extra file — never a second
+# copy of the grep, which would prove nothing about the first.
+FLOOR_CANARY="$TMP/floor-canary.sh"
+printf 'bash "$REPO_ROOT/scripts/required-checks-floor.sh" "$SPEC"\n' > "$FLOOR_CANARY"
+if grep -q 'floor-canary' <<<"$(floor_call_sites "$FLOOR_CANARY")"; then
+  ok "…and that scan FIRES on a planted floor call (mutation-proven able to fail, not a grep that only passes)"
+else
+  bad "the floor call-site scan did not fire on the planted canary"
 fi
 
 # ═══ 13. the prose ratchet ═══════════════════════════════════════════════════
@@ -947,9 +1204,16 @@ live_stage() {
   fi
 }
 
+if [ "$HERMETIC" -eq 1 ]; then
+  section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
+  echo "  Run without --hermetic, with a token carrying admin on this repo, to exercise them."
+else
+  api_stage
+fi
+
 [ "$LIVE" -eq 1 ] && live_stage
 
 echo
 echo "════════════════════════════════════════════════════════════"
-echo "required-checks: $PASS passed, $FAIL failed"
+echo "required-checks: $PASS passed, $FAIL failed$([ "$HERMETIC" -eq 1 ] && echo " (hermetic — the API stage was skipped)")"
 [ "$FAIL" -eq 0 ] || exit 1
