@@ -8,7 +8,7 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
   so it proves the plug is actually MOUNTED on the read pipelines and clamps a
   token minted `["public-read"]`.
 
-  Two routes, one clamp:
+  Three pipelines, one clamp:
 
     * SCOPED `/w/:ws/p/:project/v1/data/query|doc/...` (`:shared_docs_api`) —
       the route the site-spawner BUILD token fetches over. Workspace membership
@@ -16,12 +16,19 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
       published-vs-draft, so a member public-read token could read drafts.
       PublicRead is the missing clamp.
     * FLAT `/v1/data/query|doc/...` (`:api_grant_read`).
+    * `:require_token` — the bearer-gated surface behind BOTH
+      `[:api, :require_token]` and `[:scoped_api, :require_token]`. The clamp
+      was absent here, which is where the live leak lived (see the
+      `bearer-gated` describe below: export/analytics/history/revision served
+      200s and `listen` held an open SSE stream).
 
   ## Fail-before (the leak this closes)
 
   `BarkparkWeb.Plugs.PublicRead` was written + unit-tested but mounted NOWHERE
-  (`grep PublicRead router.ex` = 0 hits before this slice). Live-proven on
-  guerrilla: a `public-read` token read `?perspective=drafts` and private-schema
+  when the read-route cases below were written (`grep PublicRead router.ex` = 0
+  hits then; the `:require_token` mount came later, with the bearer-gated cases).
+  Live-proven on guerrilla: a `public-read` token read `?perspective=drafts` and
+  private-schema
   content byte-identical to an admin token, because `QueryController.authed?/1`
   is merely "a token is present" and the anonymous perspective guard EXEMPTS any
   token. With the mount removed, the `perspective=drafts` assertions below flip
@@ -32,8 +39,12 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
   returns the suite to green.
 
   read/write/admin tokens are NOT clamped — PublicRead acts ONLY on a token
-  whose permissions == `["public-read"]`; every other principal (and anonymous)
-  passes through untouched. The `admin token is unaffected` cases prove that.
+  whose permissions CARRY `"public-read"` (membership, mirroring
+  `AnonPerspective.anon_pinned?/1` — list EQUALITY was the bypass a
+  `["public-read", "read"]` token walked through, and there is a test below that
+  used to prove that bypass and now proves it closed). Every other principal
+  (and anonymous) passes through untouched: the `admin token is unaffected` and
+  `a read token still gets 200 on export` cases prove that.
   """
 
   use BarkparkWeb.ConnCase, async: false
@@ -68,9 +79,13 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
 
       # A PUBLISHED post and a DRAFT-ONLY post: `drafts.d1` exists but the
       # published `d1` does not, so a drafts leak is observable.
-      {:ok, _} = Content.create_document("post", %{"_id" => "p1", "title" => "Live"}, @dataset, scope)
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => "p1", "title" => "Live"}, @dataset, scope)
+
       {:ok, _} = Content.publish_document("p1", "post", @dataset, scope)
-      {:ok, _} = Content.create_document("post", %{"_id" => "d1", "title" => "Draft"}, @dataset, scope)
+
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => "d1", "title" => "Draft"}, @dataset, scope)
 
       raw = "site-build-#{System.unique_integer([:positive])}"
       {:ok, _} = Auth.create_token(raw, "site-spawner build", @dataset, ["public-read"], ws.id)
@@ -101,7 +116,12 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
       refute "d1" in ids
     end
 
-    test "reads a published doc by id (200)", %{conn: conn, ws: ws, project: project, token: token} do
+    test "reads a published doc by id (200)", %{
+      conn: conn,
+      ws: ws,
+      project: project,
+      token: token
+    } do
       body =
         conn
         |> authed(token)
@@ -123,7 +143,8 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
         |> get(scoped(ws, project, "query/#{@dataset}/post?perspective=drafts"))
         |> json_response(403)
 
-      assert body["error"] == "perspective not allowed"
+      assert body["error"]["code"] == "forbidden"
+      assert body["error"]["message"] == "perspective not allowed"
     end
 
     test "?perspective=raw is DENIED (403)", %{conn: conn, ws: ws, project: project, token: token} do
@@ -145,7 +166,7 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
         |> get(scoped(ws, project, "query/#{@dataset}/secret"))
         |> json_response(404)
 
-      assert body["error"] == "not found"
+      assert body["error"]["code"] == "not_found"
     end
 
     test "a private-schema doc-by-id is DENIED (404)", %{
@@ -196,7 +217,9 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
           scope
         )
 
-      {:ok, _} = Content.create_document("fpost", %{"_id" => "fp1", "title" => "Live"}, @dataset, scope)
+      {:ok, _} =
+        Content.create_document("fpost", %{"_id" => "fp1", "title" => "Live"}, @dataset, scope)
+
       {:ok, _} = Content.publish_document("fp1", "fpost", @dataset, scope)
 
       raw = "flat-build-#{System.unique_integer([:positive])}"
@@ -223,7 +246,8 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
         |> get("/v1/data/query/#{@dataset}/fpost?perspective=drafts")
         |> json_response(403)
 
-      assert body["error"] == "perspective not allowed"
+      assert body["error"]["code"] == "forbidden"
+      assert body["error"]["message"] == "perspective not allowed"
     end
 
     test "a private-schema type is DENIED (404)", %{conn: conn, token: token} do
@@ -233,7 +257,180 @@ defmodule BarkparkWeb.Integration.PublicReadEnforcementTest do
         |> get("/v1/data/query/#{@dataset}/fsecret")
         |> json_response(404)
 
-      assert body["error"] == "not found"
+      assert body["error"]["code"] == "not_found"
     end
+  end
+
+  # ── The BEARER-GATED surface (`:require_token`) — the leak D83 never named ──
+  #
+  # Five routes, not four. Each rode `[:api, :require_token]` (flat) and
+  # `[:scoped_api, :require_token]` (scoped) where PublicRead was NOT mounted, so
+  # a freshly minted public-read token got:
+  #
+  #   export     200, 52,208,330 bytes / 2,500 documents / 129 drafts
+  #   analytics  200
+  #   history    200, including draft-status revision titles
+  #   revision   reached HistoryController (404 for a missing id — a 404 from the
+  #              CONTROLLER is proof the pipeline let the token through)
+  #   listen     200 text/event-stream, and HELD THE CONNECTION OPEN — an
+  #              unbounded-connection primitive, not only disclosure
+  #
+  # Every assertion below FAILS on origin/main without the `plug(PublicRead)`
+  # line in `pipeline :require_token`; that failure IS the proof of the mount.
+  describe "bearer-gated /v1/data routes — a public-read token is denied" do
+    setup do
+      ws = create_workspace!("clamp-ws")
+      project = create_project!(ws, "clamp-proj")
+      scope = [workspace_id: ws.id, project_id: project.id]
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "post", "title" => "Post", "visibility" => "public", "fields" => []},
+          @dataset,
+          scope
+        )
+
+      {:ok, _} =
+        Content.create_document("post", %{"_id" => "p1", "title" => "Live"}, @dataset, scope)
+
+      {:ok, _} = Content.publish_document("p1", "post", @dataset, scope)
+
+      %{
+        ws: ws,
+        project: project,
+        # The site-spawner BUILD credential.
+        public_read: mint!(ws, ["public-read"], "clamp public-read"),
+        # What TokenController's PUBLIC mint route actually hands out when the
+        # caller asks for both allowlisted permissions — the literal-list bypass.
+        mixed: mint!(ws, ["public-read", "read"], "clamp public-read+read"),
+        read: mint!(ws, ["read"], "clamp read")
+      }
+    end
+
+    # {label, flat suffix} — the scoped mirror is the same suffix under /w/../p/..
+    @leak_routes [
+      {"export", "export/production"},
+      {"analytics", "analytics/production"},
+      {"history", "history/production/post/p1"},
+      {"revision", "revision/production/00000000-0000-4000-8000-000000000000"}
+    ]
+
+    for {label, suffix} <- @leak_routes do
+      test "#{label}: FLAT is 403 forbidden for a public-read token", %{
+        conn: conn,
+        public_read: token
+      } do
+        body =
+          conn
+          |> authed(token)
+          |> get("/v1/data/" <> unquote(suffix))
+          |> json_response(403)
+
+        assert body["error"]["code"] == "forbidden"
+      end
+
+      test "#{label}: SCOPED is 403 forbidden for a public-read token", %{
+        conn: conn,
+        ws: ws,
+        project: project,
+        public_read: token
+      } do
+        body =
+          conn
+          |> authed(token)
+          |> get(scoped(ws, project, unquote(suffix)))
+          |> json_response(403)
+
+        assert body["error"]["code"] == "forbidden"
+      end
+    end
+
+    # MOVED from PublicReadTest, where it called the plug DIRECTLY on a
+    # hand-built conn for a route the router never sent through it — a green
+    # certifying a live 200. Through the real endpoint it must halt AT THE
+    # PIPELINE: unclamped, `listen` upgrades to SSE and holds the socket, so the
+    # yield below expires and this test flunks (that is the fail-before).
+    test "listen: halts at the pipeline and never opens an SSE stream", %{
+      conn: conn,
+      public_read: token
+    } do
+      task = Task.async(fn -> conn |> authed(token) |> get("/v1/data/listen/#{@dataset}") end)
+
+      case Task.yield(task, 5_000) || Task.shutdown(task, :brutal_kill) do
+        {:ok, response} ->
+          assert json_response(response, 403)["error"]["code"] == "forbidden"
+          refute response.resp_body =~ "event:"
+
+        nil ->
+          flunk("""
+          /v1/data/listen held the connection open for 5s with a public-read token.
+          The clamp is not mounted on :require_token — this is the unbounded-stream leak.
+          """)
+      end
+    end
+
+    # The schemas twin of the same vacuous unit assertion, likewise moved to the
+    # real endpoint. HONEST NOTE: `/v1/schemas/:dataset` rides `:require_admin`,
+    # not `:require_token`, so RequireAdmin already denied it — this case is 403
+    # BEFORE and after. It is kept because the plug-level green was proving
+    # nothing about the route; this one proves the route.
+    test "schemas: 403 forbidden for a public-read token (via RequireAdmin)", %{
+      conn: conn,
+      public_read: token
+    } do
+      body =
+        conn
+        |> authed(token)
+        |> get("/v1/schemas/#{@dataset}")
+        |> json_response(403)
+
+      assert body["error"]["code"] == "forbidden"
+    end
+
+    # THE LITERAL-LIST BYPASS, INVERTED. With the clamp mounted but the gate
+    # still `permissions == ["public-read"]`, this returned 200 and the whole
+    # dataset with it — the clamp would have shipped as a false claim, because
+    # TokenController's public mint route hands out exactly this token. The gate
+    # is now MEMBERSHIP (`"public-read" in perms`, copied from
+    # AnonPerspective.anon_pinned?/1), so it is 403.
+    test "a public-read + read token does NOT bypass the clamp (membership, not equality)", %{
+      conn: conn,
+      ws: ws,
+      project: project,
+      mixed: token
+    } do
+      assert conn |> authed(token) |> get("/v1/data/export/#{@dataset}") |> json_response(403)
+
+      assert conn
+             |> authed(token)
+             |> get(scoped(ws, project, "export/#{@dataset}"))
+             |> json_response(403)
+    end
+
+    # NON-REGRESSION: the clamp no-ops for every other principal, so the
+    # bearer-gated surface is byte-identical for a plain read token.
+    test "a read token still gets 200 on export, flat and scoped", %{
+      conn: conn,
+      ws: ws,
+      project: project,
+      read: token
+    } do
+      # Export streams chunked NDJSON, so assert the STATUS and the content-type
+      # the ExportController negotiated: reaching either means the request got
+      # past `pipeline :require_token` instead of being halted at 403. (The body
+      # is not asserted — ConnTest does not accumulate this controller's chunks.)
+      flat = conn |> authed(token) |> get("/v1/data/export/#{@dataset}")
+      assert flat.status == 200
+      assert get_resp_header(flat, "content-type") == ["application/x-ndjson; charset=utf-8"]
+
+      scoped_resp = conn |> authed(token) |> get(scoped(ws, project, "export/#{@dataset}"))
+      assert scoped_resp.status == 200
+    end
+  end
+
+  defp mint!(ws, permissions, label) do
+    raw = "#{label}-#{System.unique_integer([:positive])}"
+    {:ok, _} = Auth.create_token(raw, label, @dataset, permissions, ws.id)
+    raw
   end
 end
