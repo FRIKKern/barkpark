@@ -5935,8 +5935,9 @@ defmodule BarkparkCloud.Web.Router do
             error: "deploy_ability_required",
             detail:
               "enabling off-box builds grants this site the right to serve bytes it did not build — " <>
-                "this needs the deploy ability IN ADDITION to write (abilities are a set, not a " <>
-                "hierarchy), the same ability domain binding requires. Turning it OFF needs only write."
+                "use a SESSION (the dashboard) or a root credential. A deploy PAT cannot do it today: " <>
+                "the mint collapses [write, deploy] to [deploy], and deploy does not satisfy write, so " <>
+                "no PAT can hold both. Turning it OFF needs only write."
           })
 
         attrs == %{} ->
