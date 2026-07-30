@@ -2507,3 +2507,60 @@ filenames 35 snake_case strings of which ~17 are strings no doclist carries plus
 dataset; deployed 39–47 including types in no code registry), `post` and `page` exist in NO code-level derivation
 (they are DB rows from `seeds/demo.ex`), and an enablement-filtered derivation silently drops `ticket` plus 25 frt
 types. A genuinely independent second reviewer is owed on both before merge.
+
+## Wave log — wave 18 (append at Review)
+
+### Wave 2026-07-30 — Wave 18 (LOOK AT THE FIXED SCREEN, THEN MAKE ABSENCE ILLEGAL), Review. Grade **A**.
+
+**The confirmation the owner and the lead were owed now EXISTS, and it is committed.** The lead's three
+attempts died in `studio-desk-measure.mjs`'s instrument-failure path. This wave built the instrument
+instead: `tooling/studio-journey/journey.mjs` walks create → open → type a heading and a paragraph →
+persist, in real authenticated chromium on the DEPLOYED build, and reports **LEG A 7/7 PASS, exit 0 on
+two different served builds of guerrilla with PRE == POST provenance on both** (`e4ed31a10` created
+`paper-a84538babb6a928a`; `25e69158a` created `paper-92511c83866819e0`). Persistence is read back from
+the drafts-perspective API, never from the DOM behind the `phx-update="ignore"` wrapper. **Wave 17's fix
+is real.** LEG B refutes the other half live: both D228 fossils render `shell=1 body=0 contenteditable=0
+addblock=0 footer=0 visible_text=0` — the owner's disease, still on the deployed build, which is what
+slice 2 fixes.
+
+**Round 1 landed — five slices, all reviewed, all gate-green, all pushed with PRs.**
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| `spd-w18-journey-harness` | `…commit-the-journey-harness-create-type-s-0-r` | #7896 | The wave's crown: the confirmation is now a re-runnable instrument with a mutation-proven `--self-test` (good=0, rot=1) and a report-only CI lane whose header states in capitals that it gates nothing and cannot. Six traps encoded, three of them found by producing a FALSE verdict first — the stale-canvas decoy alone passed HYDRATE in 0.0s on the previous document. Reviewer fix: the litter sweep deleted by TIMESTAMP alone, so a document a human created in the same seconds was a deletion candidate; now bounded by shape too (untitled, no more blocks than the seed), with the residual window documented. |
+| `spd-w18-fossil-named-state` | `…a-resolved-paper-that-cannot-render-says-1-r` | #7897 | The owner's blank has a name. A never-blank arm in FRONT of the legacy `true ->` arm, keeping the `<article>`, its id and its `data-rev` verbatim and replacing only the emptiness with `role="alert"` copy carrying the published id, the REAL type, a reason and keyboard ways out. `blank_body?/1` is neither `== ""` nor a bare tag-strip, so an image-only legacy body stays byte-identical. D237's fixture law honoured and wave 17's vacuum closed. Reviewer fix: the repair button was offered on an HTML-backed blank, which `reject_implicit_html_conversion/1` HALTS — a control that cannot do what it says. Now withheld there, with the honest reason, and the refusal is DRIVEN in the test. |
+| `spd-w18-save-announces` | `…a-save-that-lands-says-so-paper-ops-stop-2` | #7898 | One line, exactly right: `paper_ops/2`'s `{:ok,_}` branch assigns the SAME `"Auto-saved"` token the single-op seam already assigned, so the page's only `aria-live` region can finally say success instead of only silence or failure. Three tests including both arms on one mounted view. Nothing to fix. |
+| `spd-w18-nil-icon-500` | `…the-desk-destination-stops-raising-a-nil-3` | #7899 | D239's HTTP 500 closed at both layers, plus a third and larger crash site the survey had not named: `editor.ex:407` 500'd the WHOLE Studio editor for any document of an iconless schema. The new guard RENDERS — the reason nothing caught this is that none of the five `pane_builder*` suites does. Nothing to fix; the flip-prone `:raise` judgment is re-derived below. |
+| `spd-w18-guard-rings-and-label` | `…guard-the-desk-focus-rings-and-the-plus--4` | #7900 | D243's unguarded shipped work, guarded: three rings pinned from one list with per-selector sabotage controls, and the `+`'s accessible name pinned by computing it in a mounted desk (`title` deliberately does not count). Reviewer re-proved BOTH mutations rather than reading them: cutting `.pane-item:focus-visible` reds 2/10 by name, `aria-label={nil}` reds 2/2. |
+
+**Cross-slice proof, not per-slice hope.** All five branches were merged locally onto `origin/main` —
+clean, no conflicts — and `test/barkpark_web/{studio,components,live/studio}` run **2123 tests, 0
+failures** on that merge. Two slices touch `studio_live/components.ex` (2 and 4); they merge cleanly but
+merge them in a known order and re-run the combined suites.
+
+**HIGH-FLIP-RISK, re-derived independently, NOT flipped.** Slice 4 made the non-binary `resolve_paths/2`
+clause fall back under `:raise` too. The builder's case holds (a non-binary name is runtime DATA, never
+an authored literal, and the tripwire it trades away was never able to fire — no studio test rendered).
+But the POLICY-AWARE alternative is strictly stronger at identical production safety: raise under
+`:raise` (test only), warn + fall back under `:warn` (dev/prod), so a future unguarded `name={item.icon}`
+site reds in any test that renders it. That fork is named in #7899 for a genuinely independent second
+reviewer, and it was not flipped because verifying it needs a full-suite run this host could not give.
+
+**Held at round 2 BY DESIGN** (the sequenced-rounds law, not a stall): `spd-w18-empty-state-seam` after
+slices 2 and 4 merge; `spd-w18-desk-chips-answer` after slice 4. The chips slice must EXTEND slice 5's
+`@desk_focus_rings` — slice 5 pins the two chip rings as ABSENT on purpose, so it will red for that
+builder, by design.
+
+**Filed, not fixed** (four published children, three of them because guerrilla's `/v1/data/mutate` was
+500ing while builders tried): `spd-w18-bl-repair-button-endtoend` (the repair direction of the never-blank
+button is a code reading, not a run — the refusal direction IS proven), `spd-w18-bl-select-detects-dead-destination`
+(the nil-icon 500 is gone, the BLINDNESS in `Scope.select` is not), `spd-w18-share-access-btn-names`
+(`airdrop-open` / `access-open` carry `title=` only — the `+`'s defect, unfixed, two buttons over), and
+`spd-w18-bl-chat-render-golden-flake` (found by the reviewer: `chat_render_golden_test.exs:200` red once
+in the combined studio run, green alone and green on the pinned re-run — D249's shape in a new file, and
+not caused by this wave).
+
+**What this wave still has NOT done.** Nobody has watched a REFUSED save, or the repair button, in a real
+browser; the deployed 200 on `/studio/rest` and `/studio/plugins` is unconfirmed until slice 4 merges and
+someone re-probes them authenticated; and the desk is measured at 1500x1000 only. The instrument to do all
+three now exists and is committed — that is the difference this wave made.
