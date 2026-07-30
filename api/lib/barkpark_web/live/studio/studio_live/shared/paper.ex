@@ -458,7 +458,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
 
     TaskResolver.preview(
       blocks,
-      fn query -> Barkpark.Tasks.Query.rows_for_query(query, scope) end,
+      # The preview path NEVER stamps `dataset` into the block query, so the
+      # visibility gate MUST be threaded the session dataset explicitly (the same
+      # `socket.assigns.dataset` the agg fetcher below already carries) — deriving
+      # it from the raw query map would seal against the wrong (production
+      # default) schema on a cross-dataset preview. Charter W-one decision 10.
+      fn query ->
+        Barkpark.Tasks.Query.rows_for_query(query, scope, dataset: socket.assigns.dataset)
+      end,
       fn query ->
         Barkpark.Tasks.Query.agg_for_query(query, scope, dataset: socket.assigns.dataset)
       end

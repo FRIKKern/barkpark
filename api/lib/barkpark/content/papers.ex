@@ -1100,7 +1100,7 @@ defmodule Barkpark.Content.Papers do
       fn query ->
         query
         |> task_query_dataset(dataset)
-        |> Barkpark.Tasks.Query.rows_for_query(scope)
+        |> Barkpark.Tasks.Query.rows_for_query(scope, dataset: dataset)
       end,
       fn query ->
         query
