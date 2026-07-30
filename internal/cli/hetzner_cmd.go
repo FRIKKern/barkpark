@@ -931,10 +931,27 @@ type hzPost struct {
 	// verb did all it promises (shutdown only sends a signal), so it reports an
 	// honest partial and exits 0.
 	partial bool
+	// bindHolds specializes the predicate for a verb whose post-condition
+	// depends on WHAT WAS ASKED FOR — rebuild's --image, resize's --type,
+	// attach-iso's <iso>. The OBSERVATION stays argument-free (the receipt
+	// reports what the server says now, never the request), so only holds and
+	// unmet are bound; hzBoundPost is the one place that binds them. A verb
+	// declares bindHolds OR a static holds, never both.
+	bindHolds func(want string) (func(*hcloud.Server) bool, func(*hcloud.Server, time.Duration) string)
+	// unreadable names a FRESH server on which the post-condition cannot be
+	// evaluated at all — rebuild's Image comes back nil for sources the API
+	// declines to echo. That is CONFIRMATION UNAVAILABLE (the same escape a
+	// failed read-back takes), never a failed verb. Empty string = readable.
+	unreadable func(*hcloud.Server) string
 }
 
-// hzServerPostConditions maps every verb that funnels through
-// runHetznerServerAction to what it must observe. The executor never GUESSES a
+// hzServerPostConditions maps every verb that reports a completed-verb receipt
+// for a server to what it must observe — the nine that funnel through
+// runHetznerServerAction AND the flag verbs that carry their own opts struct
+// and finish through hzFlagVerbDone (PDS-D366). ONE table, because
+// hzActionObserved reads it by name and the success-claim registry rows
+// traverse that seam; a sibling map would fork the owner.
+// The executor never GUESSES a
 // post-condition: a verb missing from this map degrades to the zero hzPost, so
 // it still re-reads but asserts nothing and its receipt carries only id/name —
 // silently back to the defect this block exists to kill. That degradation is
@@ -977,7 +994,7 @@ var hzServerPostConditions = map[string]hzPost{
 	// E — metadata flips, settled once the action completes.
 	"disable-rescue": {
 		holds:   func(s *hcloud.Server) bool { return !s.RescueEnabled },
-		observe: func(s *hcloud.Server) map[string]any { return map[string]any{"rescue_enabled": s.RescueEnabled} },
+		observe: hzObserveRescue,
 		unmet: func(s *hcloud.Server, _ time.Duration) string {
 			return "the disable-rescue action completed but the server still reports rescue mode enabled"
 		},
@@ -1003,6 +1020,163 @@ var hzServerPostConditions = map[string]hzPost{
 			return "the detach-ISO action completed but the server still reports an ISO attached"
 		},
 	},
+	// F — the flag verbs. Same shape E settling (one read, no poll: the field
+	// is decided once the action completes), but the predicate compares the
+	// server against WHAT WAS ASKED FOR, so it is bound at call time.
+	"rebuild": {
+		observe: hzObserveImage,
+		unreadable: func(s *hcloud.Server) string {
+			if s.Image == nil {
+				return "the server reports no image after the rebuild, so the image it now runs could not be confirmed"
+			}
+			return ""
+		},
+		bindHolds: func(want string) (func(*hcloud.Server) bool, func(*hcloud.Server, time.Duration) string) {
+			return func(s *hcloud.Server) bool { return hzImageMatches(s.Image, want) },
+				func(s *hcloud.Server, _ time.Duration) string {
+					return fmt.Sprintf("the rebuild action completed but the server reports image %s, not the requested %q",
+						hzImageName(s.Image), want)
+				}
+		},
+	},
+	"resize": {
+		observe: hzObserveServerType,
+		unreadable: func(s *hcloud.Server) string {
+			if s.ServerType == nil {
+				return "the server reports no type after the resize, so the type it now runs could not be confirmed"
+			}
+			return ""
+		},
+		bindHolds: func(want string) (func(*hcloud.Server) bool, func(*hcloud.Server, time.Duration) string) {
+			return func(s *hcloud.Server) bool { return hzServerTypeMatches(s.ServerType, want) },
+				func(s *hcloud.Server, _ time.Duration) string {
+					return fmt.Sprintf("the resize action completed but the server reports type %s, not the requested %q",
+						hzServerTypeName(s.ServerType), want)
+				}
+		},
+	},
+	"enable-rescue": {
+		holds:   func(s *hcloud.Server) bool { return s.RescueEnabled },
+		observe: hzObserveRescue,
+		unmet: func(s *hcloud.Server, _ time.Duration) string {
+			return "the enable-rescue action completed but the server does not report rescue mode enabled"
+		},
+	},
+	"attach-iso": {
+		observe: hzObserveISO,
+		bindHolds: func(want string) (func(*hcloud.Server) bool, func(*hcloud.Server, time.Duration) string) {
+			return func(s *hcloud.Server) bool { return hzISOMatches(s.ISO, want) },
+				func(s *hcloud.Server, _ time.Duration) string {
+					if s.ISO == nil {
+						return "the attach-ISO action completed but the server reports no ISO attached"
+					}
+					return fmt.Sprintf("the attach-ISO action completed but the server reports ISO %q attached, not the requested %q",
+						s.ISO.Name, want)
+				}
+		},
+	},
+}
+
+// hzServerPostConditionExemptions names the verbs that report a completed-verb
+// receipt in this file and legitimately have NO post-condition on the SERVER —
+// with the reason, so an exemption is a stated argument that a reviewer can
+// refuse rather than a silent omission. The derivation gate reads this map:
+// an exemption for a verb that no longer exists is as much a defect as a
+// missing post-condition, and a verb may not be exempt AND keyed.
+var hzServerPostConditionExemptions = map[string]string{
+	"create": "runHetznerServerCreate already re-reads the server it created — the running+IPv4 poll is its post-condition, " +
+		"so its receipt is observation and not a request echo",
+	"delete": "a deleted server has no state to re-read: its honest post-condition is a 404 on GET /servers/<id>, " +
+		"which the delete action completing already implies",
+	"create-image": "create-image changes no field on hcloud.Server — it returns an *hcloud.Image, so its honest post-condition " +
+		"is GET /images/<id>, a different resource (filed: pds-w26-create-image-image-postcondition)",
+}
+
+// hzBoundPost resolves the post-condition a verb actually runs: the table entry
+// for the argument-free verbs, and the entry with its predicate bound to the
+// requested ref for rebuild/resize/attach-iso.
+func hzBoundPost(verb, want string) hzPost {
+	post := hzServerPostConditions[verb]
+	if post.bindHolds == nil {
+		return post
+	}
+	post.holds, post.unmet = post.bindHolds(want)
+	return post
+}
+
+// hzImageMatches / hzServerTypeMatches / hzISOMatches read the OBSERVED ref the
+// same way the request built it: hzImageRef (and hzServerTypeRef, and the
+// attach-iso body) send a numeric arg as an id and anything else as a name, so
+// the confirmation has to fork on exactly that — a snapshot image carries an
+// EMPTY Name, and comparing it to the numeric id the caller typed would
+// false-red a rebuild that worked.
+func hzImageMatches(img *hcloud.Image, want string) bool {
+	if img == nil {
+		return false
+	}
+	if id, err := strconv.ParseInt(want, 10, 64); err == nil {
+		return img.ID == id
+	}
+	return img.Name == want
+}
+
+func hzServerTypeMatches(st *hcloud.ServerType, want string) bool {
+	if st == nil {
+		return false
+	}
+	if id, err := strconv.ParseInt(want, 10, 64); err == nil {
+		return st.ID == id
+	}
+	return strings.EqualFold(st.Name, want)
+}
+
+func hzISOMatches(iso *hcloud.ISO, want string) bool {
+	if iso == nil {
+		return false
+	}
+	if id, err := strconv.ParseInt(want, 10, 64); err == nil {
+		return iso.ID == id
+	}
+	return iso.Name == want
+}
+
+func hzImageName(img *hcloud.Image) string {
+	if img == nil {
+		return "none"
+	}
+	return strconv.Quote(hzImageLabel(img))
+}
+
+func hzServerTypeName(st *hcloud.ServerType) string {
+	if st == nil {
+		return "none"
+	}
+	return strconv.Quote(st.Name)
+}
+
+func hzObserveImage(s *hcloud.Server) map[string]any {
+	if s.Image == nil {
+		return map[string]any{"image_observed": false}
+	}
+	return map[string]any{"image_observed": true, "image": hzImageLabel(s.Image), "image_id": s.Image.ID}
+}
+
+// hzObserveServerType is the NARROWED resize receipt. `--upgrade-disk` used to
+// ride the receipt as a pure request echo ("upgrade_disk: true" whether or not
+// a byte of disk moved); hcloud.Server carries no "disk was upgraded" field, so
+// the receipt reports the primary disk size it READ and asserts nothing about
+// an upgrade having happened.
+func hzObserveServerType(s *hcloud.Server) map[string]any {
+	row := map[string]any{"primary_disk_size": s.PrimaryDiskSize}
+	if s.ServerType != nil {
+		row["server_type"] = s.ServerType.Name
+		row["server_type_id"] = s.ServerType.ID
+	}
+	return row
+}
+
+func hzObserveRescue(s *hcloud.Server) map[string]any {
+	return map[string]any{"rescue_enabled": s.RescueEnabled}
 }
 
 func hzObserveStatus(s *hcloud.Server) map[string]any {
@@ -1163,6 +1337,57 @@ func runHetznerServerAction(out *writer, g globals, verb string, args []string, 
 	return hzDone(out, verb, fresh, extra)
 }
 
+// hzFlagVerbDone finishes a flag-carrying server verb (rebuild, resize,
+// enable-rescue, attach-iso). Those four cannot ride runHetznerServerAction —
+// each has its own opts struct, its own response payload and its own
+// confirmation prompt — but the receipt obligation is IDENTICAL: never report
+// the server that was resolved before the action fired. So the re-read, the
+// confirmation-unavailable escape and the unmet sentence live here and read the
+// same hzServerPostConditions table the executor reads.
+//
+// `extra` is the response-sourced part of the receipt — today only the root
+// password from rebuild and enable-rescue, which the API never re-exposes and
+// which therefore CANNOT come from a read-back. Everything else in the receipt
+// is observed.
+func hzFlagVerbDone(ctx context.Context, out *writer, hc *hcloud.Client, verb string, srv *hcloud.Server, want string, extra map[string]any) int {
+	post := hzBoundPost(verb, want)
+	fresh, rerr := hzReadBack(ctx, hc, srv.ID, post)
+	if rerr != nil {
+		// The action was fired AND waited to success; only the confirming read
+		// failed. Same escape runHetznerServerAction takes, for the same reason.
+		return hzDone(out, verb, srv, hzMergeExtra(extra, map[string]any{
+			"confirmation":       "unavailable",
+			"confirmation_error": rerr.Error(),
+		}))
+	}
+	if post.unreadable != nil {
+		if why := post.unreadable(fresh); why != "" {
+			return hzDone(out, verb, fresh, hzMergeExtra(extra, map[string]any{
+				"confirmation":       "unavailable",
+				"confirmation_error": why,
+			}))
+		}
+	}
+	observed := hzActionObserved(verb, fresh)
+	if post.holds != nil && !post.holds(fresh) {
+		return useError(out, "failed", verb+" server "+fresh.Name+": "+post.unmet(fresh, hzActionWindow()), exitGeneric)
+	}
+	return hzDone(out, verb, fresh, hzMergeExtra(extra, observed))
+}
+
+// hzMergeExtra combines the response-sourced and the observed halves of a
+// receipt into one payload, without mutating either.
+func hzMergeExtra(a, b map[string]any) map[string]any {
+	merged := make(map[string]any, len(a)+len(b))
+	for k, v := range a {
+		merged[k] = v
+	}
+	for k, v := range b {
+		merged[k] = v
+	}
+	return merged
+}
+
 func runHetznerServerRebuild(out *writer, g globals, args []string) int {
 	const usage = "bp cloud hetzner server rebuild <id|name> --image <img> [--yes]"
 	a, err := parseHzArgs(args, []string{"image"}, []string{"yes"}, usage)
@@ -1192,11 +1417,14 @@ func runHetznerServerRebuild(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "rebuild server "+srv.Name+": action failed", werr)
 	}
-	extra := map[string]any{"image": a.val("image")}
+	// The root password is response-only — the API never re-exposes it — so it
+	// is the one field that legitimately cannot be observed. The image is NOT:
+	// it used to be echoed back from --image, and is now read off the server.
+	extra := map[string]any{}
 	if result.RootPassword != "" {
 		extra["root_password"] = result.RootPassword
 	}
-	return hzDone(out, "rebuild", srv, extra)
+	return hzFlagVerbDone(ctx, out, hc, "rebuild", srv, a.val("image"), extra)
 }
 
 func runHetznerServerResize(out *writer, g globals, args []string) int {
@@ -1228,10 +1456,7 @@ func runHetznerServerResize(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "resize server "+srv.Name+": action failed", werr)
 	}
-	return hzDone(out, "resize", srv, map[string]any{
-		"type":         a.val("type"),
-		"upgrade_disk": a.bools["upgrade-disk"],
-	})
+	return hzFlagVerbDone(ctx, out, hc, "resize", srv, a.val("type"), nil)
 }
 
 func runHetznerServerEnableRescue(out *writer, g globals, args []string) int {
@@ -1273,7 +1498,7 @@ func runHetznerServerEnableRescue(out *writer, g globals, args []string) int {
 	if result.RootPassword != "" {
 		extra["root_password"] = result.RootPassword
 	}
-	return hzDone(out, "enable-rescue", srv, extra)
+	return hzFlagVerbDone(ctx, out, hc, "enable-rescue", srv, "", extra)
 }
 
 func runHetznerServerCreateImage(out *writer, g globals, args []string) int {
@@ -1313,6 +1538,10 @@ func runHetznerServerCreateImage(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "create-image for server "+srv.Name+": action failed", werr)
 	}
+	// DECLARED EXEMPTION — see hzServerPostConditionExemptions["create-image"].
+	// This verb moves no field on hcloud.Server, so there is nothing to
+	// re-read on the server; its honest post-condition is a GET /images/<id>,
+	// a different resource, and it is filed rather than faked here.
 	extra := map[string]any{"type": string(imgType)}
 	if result.Image != nil {
 		extra["image_id"] = result.Image.ID
@@ -1350,7 +1579,7 @@ func runHetznerServerAttachISO(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "attach-iso to server "+srv.Name+": action failed", werr)
 	}
-	return hzDone(out, "attach-iso", srv, map[string]any{"iso": a.pos[1]})
+	return hzFlagVerbDone(ctx, out, hc, "attach-iso", srv, a.pos[1], nil)
 }
 
 func runHetznerServerIP(out *writer, g globals, args []string) int {
