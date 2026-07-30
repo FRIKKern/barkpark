@@ -1846,11 +1846,17 @@ func TestCloudSitePrebuiltSiteBaseIgnoresADeploymentURL(t *testing.T) {
 	}
 }
 
-// TestCloudSitePrebuiltSiteBaseFallsBackToTheRef: the slug is read from the site
-// row, which is the authoritative source. When that read fails the ref the user
-// typed is the best available slug — the line still prints, because a missing
-// export is how this bug shipped in the first place.
-func TestCloudSitePrebuiltSiteBaseFallsBackToTheRef(t *testing.T) {
+// TestCloudSitePrebuiltSiteBaseUnreadableRowWithAnIDRef: the slug is read from
+// the site row, which is the authoritative source. When that read fails AND the
+// caller addressed the site by its UUID, there is no slug anywhere in scope — so
+// the line still prints (a missing export is how this bug shipped in the first
+// place) but it prints a PLACEHOLDER plus a warning, never the id.
+//
+// Baking the id would produce `base="/sites/<uuid>/"`: a build whose every asset
+// href 404s, and one the box cannot catch — HEALTH asserts bp-build-id,
+// bp-content-rev and bp-doc-id by value and never looks at bp-site-base. A
+// plausible wrong value is worse than an obvious placeholder.
+func TestCloudSitePrebuiltSiteBaseUnreadableRowWithAnIDRef(t *testing.T) {
 	dir := writeDistFixture(t, "STALE-BUILD-ID")
 
 	cp := newSiteCP(t)
@@ -1860,8 +1866,14 @@ func TestCloudSitePrebuiltSiteBaseFallsBackToTheRef(t *testing.T) {
 
 	stdout, stderr, _ := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
 	all := stdout + stderr
-	if !strings.Contains(all, "export BARKPARK_SITE_BASE=/sites/"+testSiteID+"/") {
-		t.Fatalf("with no readable site row the ref is the slug, and the export still prints:\n%s", all)
+	if !strings.Contains(all, "export BARKPARK_SITE_BASE=/sites/<slug>/") {
+		t.Fatalf("an unreadable site row + an id ref must print the placeholder base:\n%s", all)
+	}
+	if strings.Contains(all, "BARKPARK_SITE_BASE=/sites/"+testSiteID+"/") {
+		t.Fatalf("the site id was baked into the base — every asset href would 404:\n%s", all)
+	}
+	if !strings.Contains(all, "is an id rather than a slug") {
+		t.Fatalf("the placeholder must say WHY it is a placeholder and what to substitute:\n%s", all)
 	}
 }
 

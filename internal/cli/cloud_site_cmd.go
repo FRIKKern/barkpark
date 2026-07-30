@@ -468,7 +468,13 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 		if cr := strings.TrimSpace(dep.ContentRev); cr != "" {
 			out.progressf("  export BARKPARK_CONTENT_REV=%s", cr)
 		}
-		out.progressf("  export BARKPARK_SITE_BASE=%s", prebuiltSiteBase(cfg, id, ref))
+		base, exact := prebuiltSiteBase(cfg, id, ref)
+		out.progressf("  export BARKPARK_SITE_BASE=%s", base)
+		if !exact {
+			out.progressf(
+				"  (could not read the site row, and %q is an id rather than a slug — replace <slug> above with the site's slug before you build; a wrong base 404s every asset and HEALTH cannot see it)",
+				ref)
+		}
 		have := marker
 		if have == "" {
 			have = "(none)"
@@ -523,15 +529,25 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 // slug; when that read fails the ref the caller typed is the best slug available
 // (it is the slug or name in every path that reaches here), because a missing
 // export is precisely the failure being fixed.
-func prebuiltSiteBase(cfg *Config, id, ref string) string {
-	slug := ""
+//
+// The second return value is whether the printed base is KNOWN-GOOD. There is one
+// case where it cannot be: the site read failed AND the caller addressed the site
+// by its UUID, so no slug exists anywhere in scope. Guessing there would bake the
+// id into `base=` — a page whose every asset href 404s, which is exactly the class
+// of silent breakage this function was written to end, and which HEALTH cannot see
+// (it asserts bp-build-id/bp-content-rev/bp-doc-id, never bp-site-base). So that
+// case prints a PLACEHOLDER the caller flags rather than a plausible wrong value.
+func prebuiltSiteBase(cfg *Config, id, ref string) (string, bool) {
 	if site, err := cfg.CloudClient().GetSpawnSite(cloudCtx(), id); err == nil {
-		slug = strings.TrimSpace(site.Slug)
+		if slug := strings.TrimSpace(site.Slug); slug != "" {
+			return "/sites/" + slug + "/", true
+		}
 	}
-	if slug == "" {
-		slug = strings.Trim(strings.TrimSpace(ref), "/")
+	slug := strings.Trim(strings.TrimSpace(ref), "/")
+	if slug == "" || uuidLike.MatchString(slug) {
+		return "/sites/<slug>/", false
 	}
-	return "/sites/" + slug + "/"
+	return "/sites/" + slug + "/", true
 }
 
 // resolvePrebuiltDeployment gets the deployment the bytes will be attached to:
