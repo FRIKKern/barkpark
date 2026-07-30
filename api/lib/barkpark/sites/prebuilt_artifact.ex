@@ -43,6 +43,30 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       name. `Path.expand/1` of the destination-joined name must stay strictly
       under the staging root.
 
+    * **The archive must be WHOLE, and framing is the only proof of that.** A
+      tar ends with two zero blocks and a gzip member ends with a CRC32/ISIZE
+      trailer; both are the ONLY evidence that the bytes handed to us are all
+      the bytes there were. A transfer cut on a 512-byte boundary parses
+      cleanly and is silently SHORT — for a site that is not a half-written
+      file but MISSING PAGES, going live under the team's domain. So a stream
+      with no end-of-archive marker, and a gzip member that never terminates,
+      are both `E_MALFORMED`. Bytes PAST the marker are not parsed (a real
+      writer pads there) but they are still BUDGETED — a bomb appended after
+      the marker must not ride in free.
+
+    * **A bundle with nothing to serve is refused (`E_NO_INDEX`).** An archive
+      that stages no regular files at all, or stages files but no root
+      `index.html`, deploys green and then 404s at the domain. This is the
+      server half of a contract the CLI already states one hop earlier
+      (`validatePrebuiltDir` in `internal/cli/sites_tarball.go`, same message);
+      the box is the only place that sees what the archive actually CONTAINS.
+      This is NOT a widening of what the lane refuses: the engine's own PLAN arm
+      already refuses a staged tree with no root `index.html`
+      (`deploy/site-deploy.sh:1371`, `exit 11`) — and so does HEALTH one stage
+      later. What moves is WHERE the answer comes from: a typed `E_NO_INDEX`
+      naming the caller's archive, instead of a PLAN detail telling the operator
+      to "check the ingest step ran", two hops from the mistake.
+
     * **Extract aside, then swap.** Everything lands in a sibling
       `<dest>.staging-<n>` directory; only a fully-accepted archive is renamed
       into place, so a refusal leaves NO partial tree. That is the idiom
@@ -223,8 +247,14 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       :zlib.inflateInit(z, @gzip_window_bits)
 
       case feed_all(z, raw, initial_state(staging, opts)) do
-        {:ok, state} -> finish(state)
-        {:error, code, message, state} -> close_io(state, {:error, code, message})
+        {:ok, state} ->
+          case stream_complete(z) do
+            :ok -> finish(state)
+            {:error, code, message} -> close_io(state, {:error, code, message})
+          end
+
+        {:error, code, message, state} ->
+          close_io(state, {:error, code, message})
       end
     catch
       # zlib raises on a corrupt member. Caught NARROWLY (only zlib's own
@@ -241,6 +271,32 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     end
   end
 
+  # Did the gzip MEMBER terminate? `inflateEnd/1` is the only thing that answers
+  # that: it raises `data_error` when the last inflate was not for the end of the
+  # stream — i.e. when the CRC32/ISIZE trailer never arrived. Every deflate block
+  # of a trailer-cut body still inflates, so the tar underneath looks whole and
+  # the truncation is otherwise INVISIBLE.
+  #
+  # Called from inside `run_stream/3`'s `try`, so anything outside zlib's own
+  # narrow error set still surfaces through that existing catch rather than being
+  # mistranslated here.
+  defp stream_complete(z) do
+    :zlib.inflateEnd(z)
+    :ok
+  catch
+    :error, %ErlangError{original: original}
+    when original in [:data_error, :stream_error, :buf_error] ->
+      truncated_in_transit(original)
+
+    :error, original when original in [:data_error, :stream_error, :buf_error] ->
+      truncated_in_transit(original)
+  end
+
+  defp truncated_in_transit(original) do
+    {:error, "E_MALFORMED",
+     "the gzip stream never terminates — the artifact was truncated in transit (#{original})"}
+  end
+
   defp initial_state(staging, opts) do
     %{
       root: staging,
@@ -252,6 +308,10 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       remaining: 0,
       padding: 0,
       entries: 0,
+      # `entries` counts directories too; `files` is what would actually be
+      # SERVED, and `root_index` is whether one of them is the root `index.html`.
+      files: 0,
+      root_index: false,
       bytes: 0,
       out_bytes: 0,
       in_bytes: 0,
@@ -267,6 +327,11 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   # Feed the COMPRESSED bytes in bounded chunks so `in_bytes` — the ratio's
   # denominator — advances honestly, and drain each chunk's inflated output
   # through the parser before feeding the next.
+  #
+  # Feeding does NOT stop at the end-of-archive marker. The parser stops PARSING
+  # there (see `parse/1`'s halted clause), but every remaining byte still goes
+  # through `absorb/2`, so `max_total_bytes` and the ratio guard keep judging a
+  # tail appended after the marker instead of letting it ride in free.
   defp feed_all(_z, <<>>, state), do: {:ok, state}
 
   defp feed_all(z, raw, state) do
@@ -279,7 +344,6 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     state = %{state | in_bytes: state.in_bytes + byte_size(chunk)}
 
     case drain(z, chunk, state) do
-      {:ok, %{halted: true} = state} -> {:ok, state}
       {:ok, state} -> feed_all(z, rest, state)
       {:error, _code, _msg, _state} = refusal -> refusal
     end
@@ -292,7 +356,6 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     case :zlib.safeInflate(z, chunk) do
       {:continue, out} ->
         case absorb(out, state) do
-          {:ok, %{halted: true} = state} -> {:ok, state}
           {:ok, state} -> drain(z, [], state)
           {:error, _c, _m, _s} = refusal -> refusal
         end
@@ -375,6 +438,13 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     end
   end
 
+  # Past the end-of-archive marker. GNU tar pads to its 20-block blocking factor
+  # and `:erl_tar` to 2, so there is normally zero padding of interest here — the
+  # bytes are DROPPED rather than parsed (the archive is over) but they have
+  # already been counted by `absorb/2`, which is what keeps a post-marker bomb
+  # inside the budget.
+  defp parse(%{phase: :header, halted: true} = state), do: {:ok, %{state | buf: <<>>}}
+
   defp parse(%{phase: :header} = state) do
     if byte_size(state.buf) < @block do
       {:ok, state}
@@ -384,9 +454,12 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
       if zero_block?(header) do
         # Two consecutive zero blocks END the archive; whatever follows them is
-        # padding this parser deliberately never looks at.
-        state = %{state | zero_blocks: state.zero_blocks + 1}
-        if state.zero_blocks >= 2, do: {:ok, %{state | halted: true}}, else: parse(state)
+        # padding this parser deliberately never looks at. `halted` is the flag
+        # `finish/1` requires — an archive that never sets it was cut before its
+        # marker was written.
+        zero_blocks = state.zero_blocks + 1
+        state = %{state | zero_blocks: zero_blocks, halted: state.halted or zero_blocks >= 2}
+        parse(state)
       else
         case entry(header, %{state | zero_blocks: 0}) do
           {:ok, state} -> parse(state)
@@ -588,9 +661,20 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     with {:ok, state} <- count_entry(state),
          :ok <- mkdir_entry(Path.dirname(path)),
          {:ok, io} <- open_entry(path) do
+      state = %{
+        state
+        | files: state.files + 1,
+          root_index: state.root_index or root_index?(path, state)
+      }
+
       {:ok, %{state | phase: :body, io: io, remaining: size, padding: padding_for(size)}}
     end
   end
+
+  # The one file the static runtime serves for `/` and HEALTH reads its markers
+  # out of. `path` is already the EXPANDED join, so `index.html` and
+  # `./index.html` are the same answer here and a nested `blog/index.html` is not.
+  defp root_index?(path, state), do: path == state.root_prefix <> "index.html"
 
   defp count_entry(state) do
     entries = state.entries + 1
@@ -669,14 +753,51 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
   defp close_io(_state, refusal), do: refusal
 
-  # End of stream. A dangling body means the archive was truncated mid-entry; an
-  # archive with no entries at all is not a bundle.
+  # End of stream, in the order the questions have to be asked: was an entry cut
+  # in half, was the archive itself cut before its marker, does it hold anything
+  # at all, and is what it holds a SITE.
   defp finish(%{phase: :body, remaining: remaining} = state) when remaining > 0 do
     _ = File.close(state.io)
     {:error, "E_MALFORMED", "the archive ends mid-entry (#{remaining} bytes short)"}
   end
 
-  defp finish(%{entries: 0}), do: {:error, "E_MALFORMED", "the archive holds no entries"}
+  # No end-of-archive marker. A tar cut ON a 512-byte boundary yields entries
+  # that all parse — the loss is whole FILES, and nothing else in the stream
+  # says so.
+  defp finish(%{halted: false} = state) do
+    if state.io, do: File.close(state.io)
+
+    {:error, "E_MALFORMED",
+     "the archive has no end-of-archive marker (its two zero blocks) — " <>
+       "it was truncated after #{state.entries} entries"}
+  end
+
+  defp finish(%{entries: 0} = state) do
+    if state.io, do: File.close(state.io)
+    {:error, "E_MALFORMED", "the archive holds no entries"}
+  end
+
+  # The SHAPE assert. Same contract the CLI states one hop earlier in
+  # `validatePrebuiltDir` (internal/cli/sites_tarball.go): a build-output
+  # directory has a root `index.html`, and a bundle without one deploys green
+  # and 404s. Two flavours because the two mistakes are different mistakes — a
+  # `dist` that packed hollow, versus a project directory packed instead of its
+  # output.
+  defp finish(%{files: 0} = state) do
+    if state.io, do: File.close(state.io)
+
+    {:error, "E_NO_INDEX",
+     "the archive stages no files at all — the served tree would be empty " <>
+       "(pass the build OUTPUT directory, e.g. ./dist)"}
+  end
+
+  defp finish(%{root_index: false} = state) do
+    if state.io, do: File.close(state.io)
+
+    {:error, "E_NO_INDEX",
+     "the archive has no index.html at its root — the site would 404 at its own " <>
+       "domain (pass the build OUTPUT directory, e.g. ./dist)"}
+  end
 
   defp finish(state) do
     if state.io, do: File.close(state.io)
