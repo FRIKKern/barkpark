@@ -21,6 +21,12 @@ if ! command -v docker >/dev/null; then
   systemctl enable --now docker
 fi
 docker --version
+# nixpacks builds need BuildKit's buildx component (docker.io ships without it).
+if ! docker buildx version >/dev/null 2>&1; then
+  echo "== install docker-buildx =="
+  apt-get update -qq && apt-get install -y -qq docker-buildx
+fi
+docker buildx version
 
 if ! command -v nixpacks >/dev/null; then
   echo "== install nixpacks =="
