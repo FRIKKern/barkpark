@@ -686,9 +686,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
   def apply_paper_block_ops(slug, ops, dataset \\ @paper_default_dataset, opts \\ [])
       when is_binary(slug) and is_list(ops) do
     with %Document{} = doc <- get_block_op_paper(slug, dataset, opts),
-         :ok <- reject_implicit_html_conversion(doc),
-         :ok <- check_paper_if_rev(doc, Keyword.get(opts, :if_rev)),
-         blocks = get_in(doc.content || %{}, ["blocks"]) || [],
+         if_rev = Keyword.get(opts, :if_rev),
+         :ok <- check_paper_if_rev(doc, if_rev),
+         {:ok, blocks} <- resolve_batch_paper_blocks(doc, if_rev),
          {:ok, folded, block_ids} <- fold_paper_ops(blocks, ops),
          # Same quality-gate RATCHET as the single-op path, applied to the
          # atomic batch RESULT: the whole batch is refused (paper unchanged)
@@ -826,6 +826,39 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp reject_implicit_html_conversion(_doc), do: :ok
+
+  # A small legacy cohort stores its authoritative PortableDoc list under
+  # content.body.blocks while also carrying the rendered body_html cache. That
+  # is block-bearing content, not opaque HTML-only authorship. Permit its
+  # one-time promotion to content.blocks only on the atomic batch path and only
+  # when the caller supplied an optimistic revision fence. True HTML-only rows
+  # remain read-only, and the single-op path remains unable to convert either
+  # legacy shape implicitly.
+  defp resolve_batch_paper_blocks(%Document{content: content}, if_rev) when is_map(content) do
+    top_blocks = Map.get(content, "blocks")
+    nested_blocks = get_in(content, ["body", "blocks"])
+
+    cond do
+      is_list(top_blocks) ->
+        {:ok, top_blocks}
+
+      is_list(nested_blocks) and not is_nil(if_rev) ->
+        {:ok, nested_blocks}
+
+      is_list(nested_blocks) ->
+        {:error,
+         {:halted,
+          "Legacy body.blocks papers require an explicit revision-fenced batch conversion."}}
+
+      is_binary(Map.get(content, "body_html")) ->
+        {:error, {:halted, @html_conversion_message}}
+
+      true ->
+        {:ok, []}
+    end
+  end
+
+  defp resolve_batch_paper_blocks(_doc, _if_rev), do: {:ok, []}
 
   # PROVENANCE tap for attributed batch writes (lvw-t2 accept-baseline, D4).
   # When the caller supplies `:revision_action`, record a revision row off the
