@@ -144,7 +144,7 @@ defmodule BarkparkWeb.Studio.EditorEmptyStateSeamTest do
 
       html = render_notice(st)
       assert html =~ ~s(data-reason="no_schema")
-      assert html =~ "no schema for"
+      assert html =~ "No schema for"
       assert html =~ "orphanType"
     end
 
@@ -239,18 +239,19 @@ defmodule BarkparkWeb.Studio.EditorEmptyStateSeamTest do
       assert html =~ "ghost-id"
       assert html =~ "session"
 
-      # Named recovery controls, both reachable: the primary one is the DECIDED
-      # focus destination for spd-bl-focus-after-select (charter D269), hence
-      # tabindex="-1"; the second stays in the natural tab order so a keyboard
-      # user is never left without a tabbable way out.
+      # Named recovery controls, both natively tabbable. The DECIDED focus
+      # destination for spd-bl-focus-after-select (charter D269) is the
+      # tabindex="-1" LANDMARK — this notice's own role="alert" container, so a
+      # `.focus()` announces the whole reason — and NOT the recovery control:
+      # `tabindex="-1"` on an `<a href>` buys nothing (an anchor is already
+      # programmatically focusable) while removing it from the tab order.
       assert html =~ ~s(data-test-id="studio-unresolved-recovery")
-      assert html =~ ~s(tabindex="-1")
       assert html =~ ~s(href="/d/production/studio/session")
       assert html =~ "Back to the session list"
       assert html =~ ~s(data-test-id="studio-unresolved-back-to-desk")
     end
 
-    test "the recovery control is present in EVERY alert arm, with tabindex=-1" do
+    test "EVERY alert arm offers a way out that a KEYBOARD can reach" do
       for {reason, opts} <- [
             {:not_found, [list_href: "/d/production/studio/post"]},
             {:no_schema, []},
@@ -261,9 +262,35 @@ defmodule BarkparkWeb.Studio.EditorEmptyStateSeamTest do
         assert html =~ ~s(data-test-id="studio-unresolved-recovery"),
                "#{reason} must offer a named way out"
 
-        assert html =~ ~s(tabindex="-1"),
-               "#{reason}'s recovery control is the decided focus destination (D269)"
+        # The binary that matters: the way out is in the TAB ORDER. `:no_schema`
+        # and `:unknown_node` render ONE control apiece, so a `tabindex="-1"` on
+        # it (which is how this shipped) left them mouse-only — a dead control to
+        # a keyboard user, which is the owner's original complaint in a new place.
+        recovery =
+          html
+          |> LazyHTML.from_fragment()
+          |> LazyHTML.query(~s([data-test-id="studio-unresolved-recovery"]))
+
+        assert Enum.count(recovery) == 1
+        assert LazyHTML.attribute(recovery, "href") != [], "#{reason}'s way out has no href"
+
+        assert LazyHTML.attribute(recovery, "tabindex") == [],
+               "#{reason}'s only way out carries a tabindex — an <a href> is already focusable, and -1 removes it from the tab order"
       end
+    end
+
+    test "the DECIDED focus destination (D269) is the alert LANDMARK, not the control" do
+      html = render_notice(%{reason: :unknown_node, doc_id: "x", doc_type: "gone"})
+
+      landmark =
+        html
+        |> LazyHTML.from_fragment()
+        |> LazyHTML.query(~s([data-test-id="studio-unresolved-document-notice"]))
+
+      assert LazyHTML.attribute(landmark, "tabindex") == ["-1"],
+             "a later slice must be able to .focus() the whole reason, not just a button label"
+
+      assert LazyHTML.attribute(landmark, "role") == ["alert"]
     end
 
     test "the shrug string is unreachable from every arm of the notice" do

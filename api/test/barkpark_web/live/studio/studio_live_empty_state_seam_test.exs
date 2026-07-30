@@ -57,10 +57,19 @@ defmodule BarkparkWeb.Studio.StudioLiveEmptyStateSeamTest do
     assert html =~ ~s(data-doc-type="post")
     assert html =~ "spdw19-ghost"
 
-    # A named, focusable way out — and its href is a real Studio path.
+    # A named way out, natively tabbable (no tabindex on the anchor — that would
+    # remove the only control from the tab order), and its href is a real Studio
+    # path. The tabindex="-1" landmark is the notice container itself (D269).
     assert html =~ ~s(data-test-id="studio-unresolved-recovery")
-    assert html =~ ~s(tabindex="-1")
     assert html =~ "/d/#{@dataset}/studio/post"
+
+    recovery =
+      html
+      |> LazyHTML.from_fragment()
+      |> LazyHTML.query(~s([data-test-id="studio-unresolved-recovery"]))
+
+    assert LazyHTML.attribute(recovery, "tabindex") == [],
+           "the way out must stay in the tab order on a real mounted desk"
 
     refute html =~ "Select a document to edit",
            "THE OWNER'S COMPLAINT: a document that was named must never be answered with a shrug"

@@ -194,9 +194,16 @@ defmodule BarkparkWeb.StudioComponents.Editor do
   # `aria-live="assertive"` + a stable `data-test-id` + the document's OWN id and
   # its REAL type + a plain-language reason + a named, focusable way out.
   #
-  # The primary recovery control carries `tabindex="-1"`: it is the decided focus
-  # destination for the focus-after-select seam (charter D269), so a later slice
-  # can `.focus()` it without adding markup here.
+  # THE FOCUS DESTINATION (charter D269) IS THE LANDMARK, NOT THE CONTROL.
+  # D269 decided "the tabindex=-1 landmark", and the landmark is this notice's own
+  # `role="alert"` container: `tabindex="-1"` sits there, so a later slice can
+  # `.focus()` it and an assistive-tech user hears the WHOLE reason rather than
+  # just the label of a button. It shipped on the primary recovery ANCHOR instead,
+  # which was actively wrong twice over: an `<a href>` is ALREADY programmatically
+  # focusable without any tabindex, so `-1` bought nothing there — and it REMOVES
+  # the element from the tab order, which in the `:no_schema` and `:unknown_node`
+  # arms (a single control apiece) left the only way out reachable by mouse only.
+  # The recovery controls are therefore natively tabbable, in every arm.
   attr :reason, :atom, default: :nothing_selected
   attr :doc_id, :string, default: nil
   attr :doc_type, :string, default: nil
@@ -222,6 +229,7 @@ defmodule BarkparkWeb.StudioComponents.Editor do
       class="bp-paper-unrenderable"
       role="alert"
       aria-live="assertive"
+      tabindex="-1"
       data-test-id="studio-unresolved-document-notice"
       data-reason={@reason}
       data-doc-id={@doc_id}
@@ -235,9 +243,9 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         have been deleted, or it may live in another workspace or project.
       </p>
       <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
-        <code><%= @doc_id %></code> names a <%= @doc_type %>, but no schema for
-        <code><%= @doc_type %></code> is installed in this dataset, so Studio has no fields to show
-        it with. Whatever is stored under that id is untouched.
+        No schema for <code><%= @doc_type %></code> is installed in this dataset, so Studio has no
+        fields to show its documents with<%= if @doc_id && @doc_id != @doc_type do %> (you asked for <code><%= @doc_id %></code>)<% end %>.
+        Whatever is stored under that type is untouched.
       </p>
       <p :if={@reason == :unknown_node} class="bp-paper-unrenderable-reason">
         This desk has no section named <code><%= @doc_type %></code>, so the path could not be
@@ -248,7 +256,6 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <a
           href={@list_href || @desk_href}
           class="btn btn-primary btn-sm"
-          tabindex="-1"
           data-test-id="studio-unresolved-recovery"
         >
           <%= if @list_href, do: "Back to the #{@doc_type} list", else: "Back to the desk" %>
