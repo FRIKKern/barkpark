@@ -104,10 +104,16 @@
 //  It had been unwired on purpose (GR93(b)): a gate promoted before it is trusted
 //  is a gate that gets disabled. It has now survived a wave of real use.
 //
-//  NOTE THE LIMIT, HONESTLY: main is NOT branch-protected, so a red here reds the
-//  PR page but does not BLOCK the merge until a human registers this check by name
-//  in branch-protection settings. That registration is a human gate, not something
-//  this file or that workflow can claim.
+//  NOTE THE LIMIT, HONESTLY — AND NOTE THAT THE PREMISE FLIPPED. Through wave 8
+//  this paragraph read "main is NOT branch-protected". That is FALSE as of
+//  2026-07-28: `main` carries branch protection with `enforce_admins: true`, and
+//  the required contexts are recorded in .github/required-checks.json. The limit
+//  that survives is narrower and still real: THIS job is not one of them, so a red
+//  here reds the PR page and does not yet block the merge. Registration is also NOT
+//  "a human clicking in settings" — the roster is committed in
+//  .github/required-checks.json and applied by scripts/required-checks-apply.sh, and
+//  the name to register is the aggregator `Console gate`, never this leaf (a leaf can
+//  be legitimately `skipped`). That registration is `cch-w9-register-console-and-cloud-gates`.
 //
 //  D19 — AN ENVIRONMENT FAILURE MUST EXIT 2, NOT 1. This instrument speaks CDP over
 //  a bare global `WebSocket`, stable-by-default only from Node 22. Under Node 20 it
