@@ -15,6 +15,8 @@
 #   bash deploy/site-spawner-live-proof.sh              # the full live proof
 #   bash deploy/site-spawner-live-proof.sh --preflight  # read-only walls; mutates NOTHING
 #   bash deploy/site-spawner-live-proof.sh --self-check # offline; proves every red fires
+#   bash deploy/site-spawner-live-proof.sh --prebuilt --slug <site> [--dist <dir>]
+#                                                       # the off-box build lane, ssh-free
 #
 # WHY THE PURE `judge_*` LAYER
 #   Fetching and judging are deliberately split. Every assertion is a pure
@@ -39,6 +41,14 @@
 #   33 PREFLIGHT_NO_CONTENT         — the doc type has 0 published docs (would build an EMPTY page)
 #   40 CREATE_FAILED                — `bp cloud site create` did not return a site
 #   41 CREATE_NOT_CONTENT_BOUND     — the ghost 201: no read token stored, no dataset binding
+#   42 PREBUILT_NOT_ENABLED         — the site has not opted in to prebuilt uploads
+#   43 PREBUILT_NO_DIST             — there is no local build output to ship
+#   44 PREBUILT_MINT_NOT_NAMED      — the mint did not name a deployment id + build id to build against
+#   45 PREBUILT_SHIP_NOT_LIVE       — the uploaded bytes never reached live
+#   46 PREBUILT_BUILD_NOT_SKIPPED   — the two runs AGREE about BUILD: the box built the prebuilt deploy too
+#   47 PREBUILT_BUILD_NOT_FASTER    — BUILD did not differ by an order of magnitude between the two runs
+#   48 PREBUILT_BYTES_NOT_LIVE      — the served page is not the build we uploaded
+#   49 PREBUILT_BASE_BROKEN         — served bp-site-base != /sites/<slug>/ (every asset href is dead; HEALTH cannot see it)
 #   50 DEPLOY_FAILED                — the deployment never reached live
 #   51 DEPLOY_STAGES_INCOMPLETE     — the six stages did not all land, in order
 #   60 LIVE_NOT_200                 — the live URL does not serve
@@ -84,6 +94,10 @@ MODE="full"
 
 CFG="${BARKPARK_CONFIG:-$HOME/.config/barkpark/config.json}"
 
+# The repo root, so the prebuilt journey can build the SHIPPED starter no matter
+# where it was invoked from.
+ROOT="$(CDPATH='' cd -- "$(dirname -- "$0")/.." && pwd)"
+
 # ---- Named failures ----------------------------------------------------------
 
 E_NO_BP=30
@@ -92,6 +106,14 @@ E_NO_BARKPARK=32
 E_NO_CONTENT=33
 E_CREATE_FAILED=40
 E_CREATE_NOT_BOUND=41
+E_PB_NOT_ENABLED=42
+E_PB_NO_DIST=43
+E_PB_MINT_NOT_NAMED=44
+E_PB_SHIP_NOT_LIVE=45
+E_PB_BUILD_NOT_SKIPPED=46
+E_PB_BUILD_NOT_FASTER=47
+E_PB_BYTES_NOT_LIVE=48
+E_PB_BASE_BROKEN=49
 E_DEPLOY_FAILED=50
 E_DEPLOY_STAGES=51
 E_LIVE_NOT_200=60
@@ -114,6 +136,14 @@ codename() {
     "$E_NO_CONTENT") echo "PREFLIGHT_NO_CONTENT" ;;
     "$E_CREATE_FAILED") echo "CREATE_FAILED" ;;
     "$E_CREATE_NOT_BOUND") echo "CREATE_NOT_CONTENT_BOUND" ;;
+    "$E_PB_NOT_ENABLED") echo "PREBUILT_NOT_ENABLED" ;;
+    "$E_PB_NO_DIST") echo "PREBUILT_NO_DIST" ;;
+    "$E_PB_MINT_NOT_NAMED") echo "PREBUILT_MINT_NOT_NAMED" ;;
+    "$E_PB_SHIP_NOT_LIVE") echo "PREBUILT_SHIP_NOT_LIVE" ;;
+    "$E_PB_BUILD_NOT_SKIPPED") echo "PREBUILT_BUILD_NOT_SKIPPED" ;;
+    "$E_PB_BUILD_NOT_FASTER") echo "PREBUILT_BUILD_NOT_FASTER" ;;
+    "$E_PB_BYTES_NOT_LIVE") echo "PREBUILT_BYTES_NOT_LIVE" ;;
+    "$E_PB_BASE_BROKEN") echo "PREBUILT_BASE_BROKEN" ;;
     "$E_DEPLOY_FAILED") echo "DEPLOY_FAILED" ;;
     "$E_DEPLOY_STAGES") echo "DEPLOY_STAGES_INCOMPLETE" ;;
     "$E_LIVE_NOT_200") echo "LIVE_NOT_200" ;;
@@ -314,6 +344,86 @@ judge_broken() {
   return 0
 }
 
+# ---- the prebuilt lane's judges (charter D85/D103) ---------------------------
+#
+# THE ORACLE PROBLEM, AND WHY THESE ARE THE ANSWER. The claim under test is "the
+# SERVING BOX ran no npm for this deploy". The human walk proved it with `ps` over
+# ssh. A harness a stranger can run has no shell on that box, so the oracle here
+# is THE ENGINE'S OWN WORDS: the SAME site is deployed twice, once with
+# `--prebuilt` and once from source, and the two runs must DISAGREE about BUILD —
+# skipped versus a real build, and a BUILD duration an ORDER OF MAGNITUDE apart,
+# taken from the engine's own per-stage started_at/finished_at. A box that
+# secretly ran npm on the prebuilt deploy cannot produce that pair.
+
+# judge_prebuilt_mint <deployment_id> <build_id>
+# The mint is the only place a client can learn the build id its bytes must carry
+# (HEALTH asserts that marker by value) — and the deployment id to resume against,
+# because the mint is NONCED and a plain re-run can never converge on the same id.
+judge_prebuilt_mint() {
+  local dep="$1" build="$2"
+  [ -n "$dep" ] && [ -n "$build" ] || return "$E_PB_MINT_NOT_NAMED"
+  return 0
+}
+
+# judge_prebuilt_ship <deployment_status>
+judge_prebuilt_ship() {
+  [ "$1" = "live" ] || return "$E_PB_SHIP_NOT_LIVE"
+  return 0
+}
+
+# judge_build_disagree <prebuilt_build_status> <source_build_status>
+# The prebuilt run must report BUILD skipped and the source run must report a real
+# BUILD. AGREEMENT is the red: two skips would mean the source deploy did not
+# build either (so the comparison proves nothing), and a done/ok on the prebuilt
+# side means the box built the uploaded bytes' site anyway.
+judge_build_disagree() {
+  local pb="$1" src="$2"
+  [ "$pb" = "skipped" ] || return "$E_PB_BUILD_NOT_SKIPPED"
+  case "$src" in
+    done | ok) ;;
+    *) return "$E_PB_BUILD_NOT_SKIPPED" ;;
+  esac
+  return 0
+}
+
+# judge_build_orders <prebuilt_build_ms> <source_build_ms> [factor]
+# An order of magnitude, with a FLOOR on the source side: a "source build" that
+# took 40ms did not run npm either, so the ratio would be a comparison between two
+# no-ops. A real Astro build on this fleet is tens of seconds; 1000ms is the
+# generous line under which we refuse to call it a build at all.
+judge_build_orders() {
+  local pb="$1" src="$2" factor="${3:-10}"
+  [ "$pb" -ge 0 ] 2>/dev/null || return "$E_PB_BUILD_NOT_FASTER"
+  [ "$src" -ge 1000 ] 2>/dev/null || return "$E_PB_BUILD_NOT_FASTER"
+  [ "$src" -ge $(( (pb + 1) * factor )) ] || return "$E_PB_BUILD_NOT_FASTER"
+  return 0
+}
+
+# judge_prebuilt_live <http_code> <served_build_id> <minted_build_id>
+# "The uploaded bytes are what is live": the page the public gets must carry the
+# build id the mint handed out, which is the one stamped into the bytes we packed.
+judge_prebuilt_live() {
+  local code="$1" served="$2" expect="$3"
+  [ "$code" = "200" ] || return "$E_PB_BYTES_NOT_LIVE"
+  [ -n "$expect" ] || return "$E_PB_BYTES_NOT_LIVE"
+  [ "$served" = "$expect" ] || return "$E_PB_BYTES_NOT_LIVE"
+  return 0
+}
+
+# judge_site_base <served_bp_site_base> <want_base>
+# The one marker HEALTH does NOT assert (it checks bp-build-id, bp-content-rev and
+# bp-doc-id). Every asset href on the page is prefixed with this base, so a wrong
+# value serves a 200 whose CSS and JS all 404 — a green deploy of a broken page.
+# The value has to be the PATH `/sites/<slug>/`: astro.config.mjs prefixes a
+# leading slash to anything not already leading-slashed, so a full URL here bakes
+# base="/https://host/sites/slug/" and kills every asset.
+judge_site_base() {
+  local got="$1" want="$2"
+  [ -n "$got" ] || return "$E_PB_BASE_BROKEN"
+  [ "$got" = "$want" ] || return "$E_PB_BASE_BROKEN"
+  return 0
+}
+
 # =============================================================================
 # SELF-CHECK — offline. Proves every named red actually fires on input that must
 # trigger it, and that the greens still pass. Runs anywhere; no network, no bp,
@@ -386,6 +496,32 @@ self_check() {
     judge_broken failed "" "marker bp-doc-id empty: the build fetched no content" b-old b-old
   expect_code "$E_BROKEN_NOT_NAMED" "failed with a shrug for a reason" \
     judge_broken failed HEALTH "error" b-old b-old
+
+  note "prebuilt lane (the off-box build, judged by the ENGINE'S OWN WORDS)"
+  expect_pass      "the mint named a deployment and a build id"       judge_prebuilt_mint dep-1 b-abc
+  expect_code "$E_PB_MINT_NOT_NAMED" "minted with no deployment id (nothing to resume)" judge_prebuilt_mint "" b-abc
+  expect_code "$E_PB_MINT_NOT_NAMED" "minted with no build id (nothing to stamp)"       judge_prebuilt_mint dep-1 ""
+  expect_pass      "the uploaded bytes reached live"                 judge_prebuilt_ship live
+  expect_code "$E_PB_SHIP_NOT_LIVE" "the upload stalled at queued"   judge_prebuilt_ship queued
+  expect_code "$E_PB_SHIP_NOT_LIVE" "the upload died"                judge_prebuilt_ship failed
+  expect_pass      "prebuilt BUILD skipped, source BUILD done"       judge_build_disagree skipped "done"
+  expect_code "$E_PB_BUILD_NOT_SKIPPED" "THE CORE RED: the box built the prebuilt deploy too" \
+    judge_build_disagree "done" "done"
+  expect_code "$E_PB_BUILD_NOT_SKIPPED" "both runs skipped — the comparison proves nothing" \
+    judge_build_disagree skipped skipped
+  expect_code "$E_PB_BUILD_NOT_SKIPPED" "the source run reported no BUILD stage at all" \
+    judge_build_disagree skipped missing
+  expect_pass      "BUILD 0ms vs 47000ms — orders apart"             judge_build_orders 0 47000
+  expect_code "$E_PB_BUILD_NOT_FASTER" "42000ms vs 47000ms — the same build twice" judge_build_orders 42000 47000
+  expect_code "$E_PB_BUILD_NOT_FASTER" "the 'source' BUILD took 40ms — that is not a build either" \
+    judge_build_orders 0 40
+  expect_pass      "the served page carries the minted build id"     judge_prebuilt_live 200 b-mint b-mint
+  expect_code "$E_PB_BYTES_NOT_LIVE" "the site 404s after the upload"        judge_prebuilt_live 404 b-mint b-mint
+  expect_code "$E_PB_BYTES_NOT_LIVE" "200, but an OLDER build is still live" judge_prebuilt_live 200 b-old b-mint
+  expect_pass      "bp-site-base is the /sites/<slug>/ path"         judge_site_base /sites/perfect-proof/ /sites/perfect-proof/
+  expect_code "$E_PB_BASE_BROKEN" "bp-site-base is a full URL — every asset href is dead" \
+    judge_site_base "/https://guerrilla.barkpark.cloud/sites/perfect-proof/" /sites/perfect-proof/
+  expect_code "$E_PB_BASE_BROKEN" "bp-site-base is empty"            judge_site_base "" /sites/perfect-proof/
 
   note "the red must have a NAME"
   local unnamed; unnamed="$(codename 255)"
@@ -752,6 +888,296 @@ PY
   printf '  %s%s%s\n' "$BLD" "https://$LIVE_HOST/sites/$SLUG/" "$OFF" >&2
 }
 
+# =============================================================================
+# THE PREBUILT JOURNEY — the off-box build lane (charter D85/D103), walked end to
+# end by a STRANGER with no shell on the serving box: `bp` and `curl`, nothing
+# else. `--prebuilt --slug <site>`.
+#
+# WHY THERE IS NO `ps` IN HERE
+#   The human walk (D103) proved "the box ran no npm" with `ps` over ssh. A
+#   harness anyone can re-run cannot have a shell on that box, so this walks the
+#   same claim through the engine's own reported stages instead — see the judges
+#   above. Nothing in this journey shells into anything.
+#
+# THE NONCE TRAP, MEASURED RATHER THAN HIDDEN
+#   `validatePrebuiltDir` runs BEFORE the mint (a mistyped path must never mint a
+#   row), so a dist has to exist to mint at all — and the mint folds a NONCE, so
+#   the build id it hands out is not knowable before it. That is a two-build dance
+#   by construction: build once to have bytes, mint against them, then rebuild
+#   with the exports the mint printed and ship to THAT deployment with
+#   `--deployment <id>`. A plain re-run mints a NEW build id and refuses again,
+#   forever — the resume half is what makes the loop terminate. Both local builds
+#   are timed and both are reported.
+#
+# WHY THE SECOND BUILD USES THE CLI'S PRINTED EXPORTS VERBATIM
+#   Because that is what a human does, and it puts the CLI's own receipt under
+#   test: build #2 is driven by the BARKPARK_BUILD_ID / BARKPARK_CONTENT_REV /
+#   BARKPARK_SITE_BASE the refusal printed, and the journey then asserts the
+#   served bp-site-base is the `/sites/<slug>/` path. HEALTH never looks at that
+#   marker, so a wrong export ships a cheerful 200 whose every asset href is dead.
+# =============================================================================
+
+DIST_IN=""
+JOURNEY_FACTOR="${JOURNEY_FACTOR:-10}"
+JB_SRV=""; JB_WS=""; JB_PROJ=""; JB_DS=""; JB_TOKEN=""
+TMPL=""
+
+# stage_status_ms <deploy-json> <STAGE> — prints "<status> <ms>" for that stage,
+# taken from the ENGINE'S OWN started_at/finished_at. A stage the engine never
+# reported prints "missing 0", which every judge treats as a red.
+stage_status_ms() {
+  python3 - "$1" "$2" <<'PY' 2>/dev/null || printf 'missing 0\n'
+import json, sys
+from datetime import datetime
+
+def ts(v):
+    if not v:
+        return None
+    try:
+        return datetime.fromisoformat(str(v).replace("Z", "+00:00"))
+    except Exception:
+        return None
+
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    print("missing 0"); raise SystemExit(0)
+want = sys.argv[2].upper()
+for s in (d.get("deployment") or {}).get("stages") or []:
+    if str(s.get("name", "")).upper() == want:
+        a, b = ts(s.get("started_at")), ts(s.get("finished_at"))
+        ms = int((b - a).total_seconds() * 1000) if a and b else 0
+        print("%s %d" % (str(s.get("status", "")).lower() or "missing", max(ms, 0)))
+        break
+else:
+    print("missing 0")
+PY
+}
+
+# restamp_markers <dir> <build-id> <content-rev> — rewrite the deploy markers in
+# an ALREADY-BUILT tree. Only used for a user-supplied --dist, which this script
+# cannot rebuild; it prints how many files it touched so the reduced form of the
+# dance is visible in the output rather than implied.
+restamp_markers() {
+  python3 - "$1" "$2" "$3" <<'PY' 2>/dev/null || printf '0\n'
+import os, re, sys
+root, bid, crev = sys.argv[1], sys.argv[2], sys.argv[3]
+n = 0
+for dirpath, _dirs, files in os.walk(root):
+    for f in files:
+        if not f.endswith(".html"):
+            continue
+        p = os.path.join(dirpath, f)
+        try:
+            s = open(p, encoding="utf-8", errors="replace").read()
+        except Exception:
+            continue
+        out = s
+        for name, val in (("bp-build-id", bid), ("bp-content-rev", crev)):
+            if not val:
+                continue
+            pat = r'(<meta[^>]*name="%s"[^>]*content=")[^"]*(")' % re.escape(name)
+            out = re.sub(pat, lambda m, v=val: m.group(1) + v + m.group(2), out)
+        if out != s:
+            open(p, "w", encoding="utf-8").write(out)
+            n += 1
+print(n)
+PY
+}
+
+# local_astro_build <build-id> <content-rev> <base> — build the shipped starter
+# LOCALLY (this is the laptop half of the lane) and print the elapsed ms. The env
+# is the starter's documented build contract; the markers are what the box's
+# HEALTH gate asserts by value.
+local_astro_build() {
+  local bid="$1" crev="$2" b="$3" t0 t1 log
+  log="$TMP/npm-build-$(printf '%s' "$bid" | tr -c 'A-Za-z0-9._-' '_').log"
+  t0="$(now_ms)"
+  BARKPARK_API_URL="$JB_SRV" BARKPARK_WORKSPACE="$JB_WS" BARKPARK_PROJECT="$JB_PROJ" \
+    BARKPARK_DATASET="$JB_DS" BARKPARK_TOKEN="$JB_TOKEN" BARKPARK_DOC_TYPE="$DOC_TYPE" \
+    BARKPARK_BUILD_ID="$bid" BARKPARK_CONTENT_REV="$crev" BARKPARK_SITE_BASE="$b" \
+    npm --prefix "$TMPL" run build >"$log" 2>&1 || {
+    say ""
+    tail -n 20 "$log" | sed 's/^/    │ /' >&2 || true
+    return 1
+  }
+  t1="$(now_ms)"
+  printf '%s' "$(( t1 - t0 ))"
+}
+
+prebuilt_journey() {
+  local slug="${SLUG:-perfect-proof}"
+  step "PREBUILT JOURNEY — the off-box lane on '$slug' (bp + curl only; nothing shells into the box)"
+  note "oracle: the SAME site deployed twice must DISAGREE about BUILD — skipped vs a real build,"
+  note "        and BUILD durations ${JOURNEY_FACTOR}x apart, both read from the engine's own stage timestamps."
+
+  command -v "$BP" >/dev/null 2>&1 ||
+    fail "$E_NO_BP" "the \`$BP\` binary is not on PATH." "make cli-build"
+  local ctoken; ctoken="$(cfgval cloud_token)"
+  [ -n "$ctoken" ] ||
+    fail "$E_NO_SESSION" "no cloud session token in $CFG — this journey deploys a REAL site twice." "bp login"
+  ok "bp present, cloud session present"
+
+  JB_SRV="$(cfgval server)"; JB_SRV="${JB_SRV:-https://$LIVE_HOST}"
+  JB_WS="${DATASET%%/*}"; JB_DS="${DATASET##*/}"
+  JB_PROJ="$(printf '%s' "$DATASET" | cut -d/ -f2)"
+  JB_TOKEN="$(cfgval token)"
+  TMPL="$ROOT/templates/astro-starter"
+  local base="/sites/$slug/"
+
+  # ---- 1/6 OPT-IN -----------------------------------------------------------
+  step "1/6 OPT-IN — prebuilt uploads are per-site and OFF by default"
+  local sx=0
+  "$BP" cloud site settings "$slug" --prebuilt-enabled true -o json \
+    >"$TMP/pb-settings.json" 2>"$TMP/pb-settings.err" || sx=$?
+  [ "$sx" -eq 0 ] ||
+    fail "$E_PB_NOT_ENABLED" "\`bp cloud site settings $slug --prebuilt-enabled true\` exited $sx: $(head -c 300 "$TMP/pb-settings.err")" \
+      "the control plane answers 422 prebuilt_not_enabled until the SITE opts in; a 404 here means this cloud session's team does not own '$slug'"
+  ok "prebuilt_enabled=true on '$slug'"
+
+  # ---- 2/6 BUILD #1 (the dance's first half) --------------------------------
+  step "2/6 LOCAL BUILD #1 — a dist must EXIST before anything can be minted"
+  local dist ms1=0
+  if [ -n "$DIST_IN" ]; then
+    dist="$DIST_IN"
+    [ -f "$dist/index.html" ] ||
+      fail "$E_PB_NO_DIST" "--dist '$dist' has no index.html — that is the OUTPUT directory (./dist), not the project." \
+        "point --dist at the build output, or drop it and let this journey build $TMPL itself"
+    note "using the supplied --dist $dist (this journey will RESTAMP it rather than rebuild it)"
+  else
+    command -v npm >/dev/null 2>&1 ||
+      fail "$E_PB_NO_DIST" "npm is not on PATH, so this journey cannot build the starter locally." \
+        "install node/npm, or build the dist yourself and pass --dist <dir>"
+    [ -d "$TMPL" ] ||
+      fail "$E_PB_NO_DIST" "the shipped starter is not at $TMPL." "run this from a checkout, or pass --dist <dir>"
+    if [ ! -d "$TMPL/node_modules" ]; then
+      note "installing the starter's deps once (npm ci)…"
+      npm --prefix "$TMPL" ci >"$TMP/npm-ci.log" 2>&1 ||
+        fail "$E_PB_NO_DIST" "npm ci failed in $TMPL: $(tail -n 5 "$TMP/npm-ci.log" | tr '\n' ' ')" \
+          "or build the dist yourself and pass --dist <dir>"
+    fi
+    ms1="$(local_astro_build "pre-mint-$$" "pre-mint" "$base")" ||
+      fail "$E_PB_NO_DIST" "the local Astro build failed (see the tail above) — there are no bytes to ship." \
+        "the starter needs a readable dataset: BARKPARK_DOC_TYPE=$DOC_TYPE over $DATASET at $JB_SRV"
+    dist="$TMPL/dist"
+    [ -f "$dist/index.html" ] ||
+      fail "$E_PB_NO_DIST" "the build reported success but $dist/index.html does not exist."
+    ok "built locally in ${ms1}ms → $dist  (ON THE LAPTOP: this is the npm the box will not run)"
+  fi
+
+  # ---- 3/6 MINT ------------------------------------------------------------
+  step "3/6 MINT — the nonced deployment, and the exports its bytes must carry"
+  # This run is EXPECTED to refuse: the mint's build id cannot be in bytes that
+  # were built before the mint existed. The refusal is the receipt we parse.
+  "$BP" cloud site deploy "$slug" --prebuilt "$dist" >"$TMP/pb-mint.out" 2>"$TMP/pb-mint.err" || true
+  local mintall; mintall="$(cat "$TMP/pb-mint.out" "$TMP/pb-mint.err" 2>/dev/null)"
+  printf '%s\n' "$mintall" | sed 's/^/    │ /' >&2 || true
+
+  local dep_id mint_bid mint_crev mint_base
+  dep_id="$(printf '%s\n' "$mintall" | sed -n 's/.*--deployment \([A-Za-z0-9][A-Za-z0-9-]*\).*/\1/p' | tail -n 1)"
+  mint_bid="$(printf '%s\n' "$mintall" | sed -n 's/.*BARKPARK_BUILD_ID=\([^ ]*\).*/\1/p' | tail -n 1)"
+  mint_crev="$(printf '%s\n' "$mintall" | sed -n 's/.*BARKPARK_CONTENT_REV=\([^ ]*\).*/\1/p' | tail -n 1)"
+  mint_base="$(printf '%s\n' "$mintall" | sed -n 's/.*BARKPARK_SITE_BASE=\([^ ]*\).*/\1/p' | tail -n 1)"
+  if [ -z "$dep_id" ]; then
+    # No refusal to parse: the mint either failed outright, or (only possible when
+    # the bytes already carried the minted id) it shipped. Both are named, neither
+    # is guessed at.
+    dep_id="$(printf '%s\n' "$mintall" | sed -n 's/.*minted prebuilt deployment \([A-Za-z0-9][A-Za-z0-9-]*\).*/\1/p' | tail -n 1)"
+    mint_bid="$(printf '%s\n' "$mintall" | sed -n 's/.*minted prebuilt deployment [A-Za-z0-9-]* (build \([^)]*\)).*/\1/p' | tail -n 1)"
+  fi
+  judge_prebuilt_mint "$dep_id" "$mint_bid" ||
+    fail $? "the mint named deployment='${dep_id:-none}' build_id='${mint_bid:-none}' — the journey cannot build against a build id it was never told, and cannot resume a deployment it cannot name. Output above." \
+      "a 422 prebuilt_not_enabled here means step 1 did not take; a 404 means the team does not own '$slug'"
+  ok "minted deployment $dep_id, build id $mint_bid"
+  [ -n "$mint_crev" ] && ok "content_rev $mint_crev  (computed ON THE BOX — no client can know it before the mint)"
+  # THE EXPORT UNDER TEST (charter: this line used to be printed from the
+  # deployment URL and therefore never printed at all — see criterion 6).
+  [ -n "$mint_base" ] && ok "site base $mint_base"
+  judge_site_base "$mint_base" "$base" ||
+    fail $? "the mint printed BARKPARK_SITE_BASE='${mint_base:-<nothing>}' but the site is served at '$base'. Astro prefixes a leading slash to anything not already leading-slashed, so a full URL here bakes base=\"/https://…\" and every asset href on the page is dead — and HEALTH cannot see it (it asserts bp-build-id, bp-content-rev and bp-doc-id, never bp-site-base)." \
+      "the CLI must print the PATH \`/sites/<slug>/\`, derived from the slug, unconditionally"
+
+  # ---- 4/6 BUILD #2 (the dance's second half) ------------------------------
+  step "4/6 LOCAL BUILD #2 — the bytes are stamped with the id the mint just handed out"
+  local ms2=0
+  if [ -n "$DIST_IN" ]; then
+    local touched; touched="$(restamp_markers "$dist" "$mint_bid" "$mint_crev")"
+    [ "${touched:-0}" -gt 0 ] 2>/dev/null ||
+      fail "$E_PB_NO_DIST" "restamping $dist changed 0 files — the supplied dist has no bp-build-id marker to stamp, so HEALTH would reject it." \
+        "build with the starter (drop --dist) so the markers are baked, or bake bp-build-id into your own template"
+    ok "restamped $touched file(s) in the supplied dist (the reduced dance: no rebuild is possible here)"
+  else
+    ms2="$(local_astro_build "$mint_bid" "$mint_crev" "$mint_base")" ||
+      fail "$E_PB_NO_DIST" "the second local build (with the minted exports) failed — see the tail above."
+    ok "rebuilt locally in ${ms2}ms with the exports the CLI printed, verbatim"
+  fi
+  note "THE DANCE, MEASURED: build #1 ${ms1}ms (needed before the mint) + build #2 ${ms2}ms (carries the minted id)."
+  note "A plain re-run of the same command would mint a NEW nonced build id and refuse again, forever —"
+  note "which is exactly why the ship below passes --deployment $dep_id instead."
+
+  # ---- 5/6 SHIP ------------------------------------------------------------
+  step "5/6 SHIP — upload to THAT deployment; the box runs no npm"
+  local shipx=0
+  "$BP" cloud site deploy "$slug" --prebuilt "$dist" --deployment "$dep_id" -o json \
+    >"$TMP/pb-ship.json" 2>"$TMP/pb-ship.stream" || shipx=$?
+  say ""
+  sed 's/^/    │ /' "$TMP/pb-ship.stream" >&2 || true
+  say ""
+  local pb_status; pb_status="$(jget "$TMP/pb-ship.json" deployment.status)"
+  judge_prebuilt_ship "$pb_status" ||
+    fail $? "the prebuilt deploy exited $shipx and ended status='${pb_status:-none}' (want live); stage=$(jget "$TMP/pb-ship.json" deployment.stage), reason=$(jget "$TMP/pb-ship.json" deployment.failure_reason). Stream above." \
+      "a HEALTH failure here means the uploaded bytes do not carry the minted markers; a 409 means the deployment left queued"
+  local pb_build pb_ms
+  read -r pb_build pb_ms <<<"$(stage_status_ms "$TMP/pb-ship.json" BUILD)"
+  ok "live — BUILD reported '$pb_build' in ${pb_ms}ms (the engine's own words)"
+
+  # The uploaded bytes ARE what is live — asserted on the public page, by value.
+  local url="https://$LIVE_HOST$base" hc served sbase
+  curl -sS -m 30 -o "$TMP/pb-live.html" -w '%{http_code}' "$url" >"$TMP/pb-live.code" 2>/dev/null || true
+  hc="$(cat "$TMP/pb-live.code" 2>/dev/null || echo 000)"
+  served="$(meta_content "$TMP/pb-live.html" bp-build-id)"
+  sbase="$(meta_content "$TMP/pb-live.html" bp-site-base)"
+  judge_prebuilt_live "$hc" "$served" "$mint_bid" ||
+    fail $? "$url answered HTTP $hc serving bp-build-id='$served' — the uploaded bytes are NOT what is live (want '$mint_bid')." \
+      "if an older build is still live, SWITCH did not flip; if this 404s, Caddy never armed the path handle"
+  ok "$url → 200, bp-build-id=$served (the bytes we packed on this laptop)"
+  judge_site_base "$sbase" "$base" ||
+    fail $? "the SERVED page carries bp-site-base='$sbase' but the site lives at '$base' — every asset href on that page is dead, and HEALTH cannot see it." \
+      "the marker comes from BARKPARK_SITE_BASE at build time: it must be the PATH, never a full URL"
+  ok "served bp-site-base=$sbase (the marker HEALTH does not check)"
+
+  # ---- 6/6 THE SAME SITE, FROM SOURCE -------------------------------------
+  step "6/6 THE CONTROL — the SAME site built ON THE BOX, so the two runs can be compared"
+  note "--force folds a nonce so this really rebuilds instead of returning the cached deployment."
+  local srcx=0
+  "$BP" cloud site deploy "$slug" --force -o json \
+    >"$TMP/pb-source.json" 2>"$TMP/pb-source.stream" || srcx=$?
+  say ""
+  sed 's/^/    │ /' "$TMP/pb-source.stream" >&2 || true
+  say ""
+  local src_status; src_status="$(jget "$TMP/pb-source.json" deployment.status)"
+  [ "$src_status" = "live" ] ||
+    fail "$E_DEPLOY_FAILED" "the source (on-box) deploy exited $srcx and ended '${src_status:-none}' — without a real box build there is nothing to compare the prebuilt run against." \
+      "this is the ORDINARY deploy path; if it is broken the prebuilt comparison cannot be made at all"
+  local src_build src_ms
+  read -r src_build src_ms <<<"$(stage_status_ms "$TMP/pb-source.json" BUILD)"
+  ok "live — BUILD reported '$src_build' in ${src_ms}ms"
+
+  judge_build_disagree "$pb_build" "$src_build" ||
+    fail $? "the two runs AGREE about BUILD: prebuilt='$pb_build', source='$src_build'. The prebuilt run must report BUILD skipped and the source run a real BUILD — agreement means the box either built both (npm ran for the upload) or built neither (the comparison proves nothing)." \
+      "PLAN_MODE=prebuilt must make the engine report BUILD skipped and run no npm"
+  ok "the runs DISAGREE about BUILD: prebuilt='$pb_build' vs source='$src_build'"
+  judge_build_orders "$pb_ms" "$src_ms" "$JOURNEY_FACTOR" ||
+    fail $? "BUILD took ${pb_ms}ms prebuilt and ${src_ms}ms from source — not the ${JOURNEY_FACTOR}x apart a skipped build must be (and a 'source' build under 1000ms is not a build either)." \
+      "if these are close, the box is doing the same work on both paths"
+  ok "BUILD ${pb_ms}ms vs ${src_ms}ms — orders apart, without a shell on the box"
+
+  say ""
+  printf '%s✓ PREBUILT PROVEN%s — %s: minted %s → built here → uploaded → live, BUILD skipped (%sms) against a real box build (%sms).\n' \
+    "$GRN$BLD" "$OFF" "$slug" "$dep_id" "$pb_ms" "$src_ms" >&2
+  printf '  %s%s%s\n' "$BLD" "$url" "$OFF" >&2
+}
+
 # ---- main --------------------------------------------------------------------
 
 usage() {
@@ -763,6 +1189,8 @@ while [ $# -gt 0 ]; do
   case "$1" in
     --preflight | --preflight-only) MODE="preflight" ;;
     --self-check) MODE="self-check" ;;
+    --prebuilt | --prebuilt-journey) MODE="prebuilt" ;;
+    --dist) shift; DIST_IN="${1:-}" ;;
     --keep) KEEP=1 ;;
     --slug) shift; SLUG="${1:-}" ;;
     --instance) shift; INSTANCE="${1:-}"; LIVE_HOST="${INSTANCE}.barkpark.cloud" ;;
@@ -778,6 +1206,12 @@ case "$MODE" in
     ;;
   preflight)
     preflight
+    ;;
+  prebuilt)
+    # The judges are proven offline FIRST — the same rule the full proof follows:
+    # a journey whose reds were never executed is itself a vacuous green.
+    self_check
+    prebuilt_journey
     ;;
   full)
     self_check

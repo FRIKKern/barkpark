@@ -468,8 +468,12 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 		if cr := strings.TrimSpace(dep.ContentRev); cr != "" {
 			out.progressf("  export BARKPARK_CONTENT_REV=%s", cr)
 		}
-		if u := strings.TrimSpace(dep.URL); u != "" {
-			out.progressf("  export BARKPARK_SITE_BASE=%s", u)
+		base, exact := prebuiltSiteBase(cfg, id, ref)
+		out.progressf("  export BARKPARK_SITE_BASE=%s", base)
+		if !exact {
+			out.progressf(
+				"  (could not read the site row, and %q is an id rather than a slug — replace <slug> above with the site's slug before you build; a wrong base 404s every asset and HEALTH cannot see it)",
+				ref)
 		}
 		have := marker
 		if have == "" {
@@ -502,6 +506,48 @@ func runCloudSitePrebuiltDeploy(out *writer, cfg *Config, ref, id, dir, deployme
 	out.progressf("→ uploaded — the box verifies the digest, then stages these bytes (BUILD is skipped: no npm runs there)")
 
 	return streamSiteDeploy(out, cfg, ref, id, dep, follow)
+}
+
+// prebuiltSiteBase is the value BARKPARK_SITE_BASE must carry: the PATH the site
+// is served under, `/sites/<slug>/` — byte-for-byte what the deploy engine exports
+// for an on-box build (deploy/site-deploy.sh: BARKPARK_SITE_BASE="/sites/$SITE_SLUG/").
+//
+// It used to be printed from the DEPLOYMENT'S URL, and only when that URL was
+// non-empty. Both halves were wrong, and the two hid each other:
+//
+//   - DEAD. The control plane's deployment_url is nil for anything not live, and a
+//     prebuilt mint is deliberately queued — so the guard was never true at mint
+//     time and this export, one of the three the help promises, could never print.
+//     The live walk saw exactly two.
+//   - WRONG IF IT HAD FIRED. A base is a PATH. astro.config.mjs prefixes a leading
+//     slash to anything not already leading-slashed, so an absolute URL here bakes
+//     base="/https://host/sites/slug/" and every asset href on the page 404s. The
+//     box's HEALTH gate cannot see it: it asserts bp-build-id, bp-content-rev and
+//     bp-doc-id by value, and never looks at bp-site-base.
+//
+// So it prints UNCONDITIONALLY, from the slug. The site row is the authoritative
+// slug; when that read fails the ref the caller typed is the best slug available
+// (it is the slug or name in every path that reaches here), because a missing
+// export is precisely the failure being fixed.
+//
+// The second return value is whether the printed base is KNOWN-GOOD. There is one
+// case where it cannot be: the site read failed AND the caller addressed the site
+// by its UUID, so no slug exists anywhere in scope. Guessing there would bake the
+// id into `base=` — a page whose every asset href 404s, which is exactly the class
+// of silent breakage this function was written to end, and which HEALTH cannot see
+// (it asserts bp-build-id/bp-content-rev/bp-doc-id, never bp-site-base). So that
+// case prints a PLACEHOLDER the caller flags rather than a plausible wrong value.
+func prebuiltSiteBase(cfg *Config, id, ref string) (string, bool) {
+	if site, err := cfg.CloudClient().GetSpawnSite(cloudCtx(), id); err == nil {
+		if slug := strings.TrimSpace(site.Slug); slug != "" {
+			return "/sites/" + slug + "/", true
+		}
+	}
+	slug := strings.Trim(strings.TrimSpace(ref), "/")
+	if slug == "" || uuidLike.MatchString(slug) {
+		return "/sites/<slug>/", false
+	}
+	return "/sites/" + slug + "/", true
 }
 
 // resolvePrebuiltDeployment gets the deployment the bytes will be attached to:
