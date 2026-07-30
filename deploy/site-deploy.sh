@@ -391,8 +391,15 @@ PY
   # emit() clips detail= at 240 chars, so on a pathologically long path it is the
   # cause hint that degrades, never the "do not retry this artifact" move. The
   # human log line below is unclipped and always carries the whole sentence.
+  #
+  # The prose is kept DELIBERATELY TIGHT for that clip: at 202 fixed characters it
+  # leaves 38 for the percent-encoded path, which covers a real accented slug
+  # (`/d/caf%C3%A9/` is 13) — the very case this probe exists for. An earlier,
+  # wordier draft cost 218 and left only 22, so the FIRST thing to truncate on the
+  # BPSTAGE channel would have been the cause hint for the wave's own bug. If you
+  # add words here, re-measure against emit()'s 240.
   if [ -n "$deep" ] && [ "$deep_code" != 200 ]; then
-    HEALTH_DETAIL="index.html links to /$deep — served HTTP $deep_code, want 200. Re-pack the dist and re-upload; do not retry the same artifact. Likely a tar dropped or mangled a non-ASCII path component, or names are NFD on disk vs NFC in the href"
+    HEALTH_DETAIL="index.html links to /$deep — served HTTP $deep_code, want 200. Re-pack and re-upload; do not retry this artifact. Cause: a tar dropped or mangled a non-ASCII path component, or disk names are NFD vs NFC in the href"
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
   if [ -n "$deep" ]; then
@@ -828,7 +835,7 @@ RCF
     check "the refusal does NOT name the mangled on-disk path" \
       absent 'links to /d/caf/' "$TD/hd_mangled.log"
     check "the refusal carries got, want, both causes and the do-not-retry move" \
-      grep -q 'served HTTP 404, want 200\. Re-pack the dist and re-upload; do not retry the same artifact\. Likely a tar dropped or mangled a non-ASCII path component, or names are NFD on disk vs NFC in the href' \
+      grep -q 'served HTTP 404, want 200\. Re-pack and re-upload; do not retry this artifact\. Cause: a tar dropped or mangled a non-ASCII path component, or disk names are NFD vs NFC in the href' \
       "$TD/hd_mangled.log"
 
     mkidx "$TD/hd_missing" none '<a href="about.html">about</a>'
@@ -1363,7 +1370,7 @@ FAKENPM
     check "index.html's own markers were FINE (no marker complaint)" \
       sh -c "! grep -q 'marker is' '$E2E/dp.out'"
     check "the refusal rides the BPSTAGE detail too (dual-channel)" \
-      grep -qE '^BPSTAGE name=HEALTH status=failed build_id=dp1 detail="index.html links to /d/caf%C3%A9/ .* served HTTP [0-9]+, want 200\. Re-pack the dist and re-upload; do not retry the same artifact\.' "$E2E/dp.out"
+      grep -qE '^BPSTAGE name=HEALTH status=failed build_id=dp1 detail="index.html links to /d/caf%C3%A9/ .* served HTTP [0-9]+, want 200\. Re-pack and re-upload; do not retry this artifact\. Cause: a tar dropped' "$E2E/dp.out"
     check "the re-gate ran no npm (it re-gated the STAGED bytes)" [ ! -s "$DPSRC/.npm-calls" ]
     check "every BPSTAGE name+status on the wire is still whitelisted" \
       sh -c "! grep '^BPSTAGE ' '$E2E/dp.out' | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |\$)'"
