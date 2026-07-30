@@ -1005,6 +1005,112 @@ FAKENPM
   check "node lock-starved teardown left the Caddyfile byte-identical" \
     cmp -s "$TD/cf-before-lockstarve" "$CF"
 
+  # -------------------------------------------------------------------------
+  # THE FLEET BUILD ADMISSION GATE — one box, one build (D95/D104), node side.
+  #
+  # THE HAZARD THIS EXISTS FOR: fd 7 is inherited by children, and THIS engine's
+  # HEALTH stage BOOTS THE SLOT PROCESS, which outlives the run by design (it is
+  # what serves the site). Hold the slot past BUILD ok and that process inherits
+  # the box's only build slot and keeps it for the LIFETIME OF THE SITE — one
+  # deploy permanently denies every other site's build, fleet-wide, and no reaper
+  # exists to notice. The probe is the real semantic, not fd introspection: after
+  # a completed deploy, can anyone else still TAKE the slot?
+  #
+  # Needs a REAL flock(1) — the FAKEBIN above stubs it to `exit 0`, and a gate
+  # proven against that stub proves the stub.
+  # -------------------------------------------------------------------------
+  if ! command -v flock >/dev/null 2>&1; then
+    if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+      echo "[selftest] FAIL - the fleet build admission gate proof is REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but flock(1) is missing from PATH — install util-linux on this runner; a gate proven against the fake exit-0 flock proves the stub, and a skipped gate proof must not report PASS"
+      exit 1
+    fi
+    echo "[selftest] SKIP fleet build admission gate — needs a REAL flock(1) (stock macOS ships none; brew install flock)"
+  else
+    NG="$TD/gate"; GBIN="$NG/bin"; GSRC="$NG/src"; GLIB="$NG/lib"
+    mkdir -p "$NG" "$GBIN" "$GSRC" "$GLIB"
+    ENGINE_DIR="$(cd "$(dirname "$SELF")" && pwd)"
+    cp "$ENGINE_DIR/lib/site-deploy-common.sh" "$GLIB/"      # a mutant sources by its OWN dirname
+    # GBIN is FAKEBIN MINUS the flock stub: same fake npm/caddy/systemctl, real flock.
+    for gf in "$FAKEBIN"/*; do
+      case "$(basename "$gf")" in flock) ;; *) ln -sf "$gf" "$GBIN/" ;; esac
+    done
+    printf '{"name":"selftest-gate-site","private":true}\n' > "$GSRC/package.json"
+    g_free() { flock -n "$NG/build.lock" -c true 2>/dev/null; }
+    g_kill_tree() { local p="$1" c; for c in $(pgrep -P "$p" 2>/dev/null); do g_kill_tree "$c"; done
+      kill -9 "$p" 2>/dev/null || true; }
+    # ONE SLUG PER CASE, deliberately. With the flock STUB every other e2e case
+    # above can redeploy a slug freely; with the REAL flock this block needs, the
+    # HARNESS's fake systemctl launches the slot process as a DIRECT CHILD of the
+    # engine, so that process inherits fd 9 — the PER-SLUG deploy lock — and the
+    # next deploy of the SAME slug queues on it for 1200s. That is an artifact of
+    # the fake (on a real box `systemctl restart` hands the spawn to PID 1, which
+    # inherits nothing), but it is a 20-minute hang if you reuse a slug here.
+    ng_deploy() { # <slug> <build_id> [VAR=value…] -> exit code; log at $NG/out.log
+      local slug="$1" bid="$2" pa pb; shift 2
+      pa="$(free_port)"; pb="$(free_port)"
+      env PATH="$GBIN:$PATH" "$@" \
+        SITE_SLUG="$slug" BUILD_ID="$bid" CONTENT_REV=rev-1 \
+        SITE_SRC="$GSRC" SITE_PORT_A="$pa" SITE_PORT_B="$pb" \
+        BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" \
+        BARKPARK_CADDYFILE="$CF" \
+        BARKPARK_SITE_DEPLOY_LOCK="$NG/deploy-$slug.lock" \
+        BARKPARK_CADDYFILE_LOCK="$NG/caddyfile.lock" \
+        BARKPARK_BUILD_GATE_LOCK="$NG/build.lock" \
+        BARKPARK_NODE_LINK="$TD/barkpark-node" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "${GATE_ENGINE:-$SELF}" > "$NG/out.log" 2>&1
+      echo $?
+    }
+    ng_saw() { grep -q "^BPSTAGE name=$1 status=$2 " "$NG/out.log"; }
+
+    echo "[selftest] gate: the booted slot process must NOT inherit the box's build slot"
+    check "the slot is free before the deploy"      g_free
+    rc="$(ng_deploy gatesite ng1)"
+    check "node deploy exit 0"                      [ "$rc" = 0 ]
+    check "the deploy really built"                 grep -q 'npm run build' "$GSRC/.npm-calls"
+    check "the slot process is RUNNING (it outlives the run)" \
+      sh -c "[ -f '$SLOTPIDS/gatesite__a' ] && kill -0 \"\$(cat '$SLOTPIDS/gatesite__a')\" 2>/dev/null"
+    check "THE SLOT IS FREE with that process still alive (fd 7 was released)" g_free
+
+    echo "[selftest] gate: MUTATION PROOF — delete build_gate_release and the slot leaks into that process"
+    NGMUT="$NG/mutant-norelease.sh"
+    awk '{ if ($0 == "  build_gate_release") next; print }' "$SELF" > "$NGMUT"
+    check "the mutant differs by exactly ONE deleted line" \
+      [ "$(diff "$SELF" "$NGMUT" | grep -c '^[<>]')" = 1 ]
+    mrc="$(GATE_ENGINE="$NGMUT" ng_deploy gatesite2 ng2)"
+    check "MUTANT: the deploy itself still succeeds (the leak is SILENT)" [ "$mrc" = 0 ]
+    if g_free; then ng_leak=0; else ng_leak=1; fi
+    check "MUTANT: the slot is STILL HELD after the run — a fleet-wide deny with no reaper" \
+      [ "$ng_leak" = 1 ]
+    echo "  mutation proof: with 'build_gate_release' deleted, 'flock -n $NG/build.lock -c true' is REFUSED after a SUCCESSFUL deploy — the healthy check above (THE SLOT IS FREE with that process still alive) reds, and nothing on the box ever frees it"
+    # Free it again: only the booted slot process holds it now.
+    ng_slotpid="$(cat "$SLOTPIDS/gatesite2__a" 2>/dev/null || true)"
+    [ -n "$ng_slotpid" ] && g_kill_tree "$ng_slotpid"
+    ngn=0; while ! g_free && [ "$ngn" -lt 60 ]; do sleep 0.1; ngn=$((ngn + 1)); done
+    check "killing the leaking slot process is the only way back" g_free
+
+    echo "[selftest] gate: a lapsed budget refuses on the stage protocol (SKIP_BUILD-keyed, set -u safe)"
+    # The foreign holder exits on a sentinel, not a signal: a killed holder prints
+    # job-control noise over the suite's output, and this fixture is not what the
+    # SIGKILL case (static engine) proves. Hard cap ~60s so it cannot wedge CI.
+    : > "$NG/pinned"
+    flock "$NG/build.lock" -c "n=0; while [ -f '$NG/pinned' ] && [ \$n -lt 600 ]; do sleep 0.1; n=\$((n + 1)); done" &
+    ngn=0; while g_free && [ "$ngn" -lt 60 ]; do sleep 0.1; ngn=$((ngn + 1)); done
+    check "a foreign holder pinned the only slot"   sh -c "! flock -n '$NG/build.lock' -c true 2>/dev/null"
+    : > "$GSRC/.npm-calls"
+    rc="$(ng_deploy gatesite3 ng3 BARKPARK_BUILD_GATE_WAIT=1)"
+    check "refused with the typed 15"               [ "$rc" = 15 ]
+    check "emitted BUILD failed BEFORE exiting"     ng_saw BUILD failed
+    check "the detail names the FLEET BUILD SLOT"   grep -q 'FLEET BUILD SLOT' "$NG/out.log"
+    check "ran NO npm"                              [ ! -s "$GSRC/.npm-calls" ]
+    check "no unbound-variable abort (this engine has NO PLAN_MODE)" \
+      sh -c "! grep -q 'unbound variable' '$NG/out.log'"
+    check "the release was never staged"            [ ! -d "$TD/sites/gatesite3/releases/ng3" ]
+    rm -f "$NG/pinned"
+    ngn=0; while ! g_free && [ "$ngn" -lt 60 ]; do sleep 0.1; ngn=$((ngn + 1)); done
+
+  fi
+
   echo ""
   echo "[selftest] $((TESTS - FAILS))/$TESTS checks passed"
   [ "$FAILS" -eq 0 ] || { echo "[selftest] FAILED ($FAILS)"; exit 1; }
@@ -1282,6 +1388,25 @@ if [ "$SKIP_BUILD" = 0 ]; then
     DETAIL="$SITE_SRC has no package.json — expected a Node app root; check the payload points at the app dir, not the repo root or a monorepo parent"
     log "BUILD: $DETAIL"; emit BUILD failed "$DETAIL"; exit 11
   fi
+
+  # ---- FLEET BUILD ADMISSION GATE — one box, one build (D95/D104) ----------
+  # Identical contract to the static engine's (deploy/site-deploy.sh): the lock
+  # taken above is PER-SLUG, so without this second, fleet-wide lock N sites
+  # compile at once on 2 cores — and a `next build` is the heaviest of them.
+  # Keyed on SKIP_BUILD (this engine has NO PLAN_MODE; naming one would be an
+  # unbound expansion under the `set -u` at the top of this file). Taken after
+  # BUILD started and after the two cheap validations; released right after
+  # BUILD ok, BEFORE HEALTH boots the slot process — see below.
+  if ! build_gate_acquire; then
+    DETAIL="waited ${BUILD_GATE_WAIT}s for the FLEET BUILD SLOT ($BUILD_GATE_LOCK) and it never freed — this box runs ONE build at a time (2 cores, MemoryMax=1500M each), so another site's build is still compiling; nothing was built, staged or flipped and the live slot is untouched. Retry once it drains. In flight: $(build_gate_holders)"
+    log "BUILD: $DETAIL"
+    # emit BEFORE the exit, ALWAYS: this refusal fires AFTER `emit PLAN ok`, so a
+    # bare exit would hang a stage-watching orchestrator on a BUILD line that
+    # never comes.
+    emit BUILD failed "$DETAIL"
+    exit 15
+  fi
+
   # BUILD_ID + base path + content rev are EXPORTED (inherited by the child, never
   # on its argv) so the adapter can bake the markers HEALTH asserts on. The rest of
   # the D7 BUILD_ALLOW set already rides the script's (caller-scrubbed) environment
@@ -1335,6 +1460,16 @@ if [ "$SKIP_BUILD" = 0 ]; then
   fi
   [ "$BUILD_LOG_KEEP" = 1 ] || rm -f "$BUILD_LOG"
   emit BUILD ok "npm ci && npm run build (next standalone)"
+  # RELEASE THE SLOT HERE, AND NOWHERE LATER. fd 7 is inherited by children, and
+  # HEALTH (below) BOOTS THE SLOT PROCESS, which OUTLIVES this run by design — it
+  # is the thing that serves the site. Any long-lived process that inherits fd 7
+  # holds the box's only build slot for the LIFETIME OF THE SITE: a fleet-wide
+  # deny with no reaper to notice it. `start_slot` goes through `systemctl
+  # restart` today, so PID 1 (not this script) spawns the slot and inherits
+  # nothing — but that is a property of the LAUNCH MECHANISM, not of the gate, and
+  # this contract must not rest on it. The self-test pins it against a harness
+  # whose fake systemctl DOES spawn the slot as a direct child.
+  build_gate_release
 
   # ---- STAGE (D64) — three-piece standalone copy into an immutable release ----
   emit STAGE started
