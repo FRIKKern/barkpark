@@ -25,7 +25,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,9 +34,14 @@ const HERE = dirname(fileURLToPath(import.meta.url));
 const PREDICATE = process.env.SEAL_PREDICATE_PATH || join(HERE, 'seal-predicate.mjs');
 const REPO = resolve(HERE, '../../../..');
 const FIX = (name) => join(HERE, 'fixtures', 'seal-predicate', name);
+const CLOUD_WF = join(REPO, '.github', 'workflows', 'cloud.yml');
+const REQUIRED_CHECKS = join(REPO, '.github', 'required-checks.json');
+const AGG = 'Cloud gate';
 
 const SEAL = 0, NO_SEAL = 1, INFRA = 2;
 const EPIC = 'cloud-console-hardening-epic';
+
+const tmp = (prefix) => mkdtempSync(join(tmpdir(), prefix));
 
 function run(args) {
   const r = spawnSync('node', [PREDICATE, ...args], { encoding: 'utf8', timeout: 120000 });
@@ -45,8 +50,28 @@ function run(args) {
   return { status: r.status, out: `${r.stdout}${r.stderr}` };
 }
 
+// ── WHY EVERY FIXTURE NOW CARRIES `requiredContexts` ────────────────────────
+// Wave 9 made rung 2 depend on BRANCH PROTECTION: a measurement counts only if a
+// required status check goes red when its job does. `Cloud gate` is not registered
+// yet — that is `cch-w9-register-console-and-cloud-gates` — so on the REAL branch
+// every rung-2 entry is honestly rung 3 and clause (b) FAILS. Without an override,
+// every clause-(a) fixture below would red for a clause-(b) reason and stop
+// measuring the thing it was written to measure.
+//
+// So the ledger fixture stands in for branch protection exactly as `landed` stands
+// in for ancestry and `diffs` for the patch — fixture-only, and printed as such in
+// the MEASURED-ELSEWHERE line. `liveRun` below keeps the unoverridden truth pinned,
+// and the leg tests drive the FILE, not the override.
+const withRequired = (name, contexts = [AGG]) => {
+  const fx = JSON.parse(readFileSync(FIX(name), 'utf8'));
+  fx.requiredContexts = contexts;
+  const p = join(tmp('seal-pred-fx-'), name);
+  writeFileSync(p, JSON.stringify(fx));
+  return p;
+};
+
 const fixtureRun = (name, extra = []) =>
-  run(['--ledger', FIX(name), '--repo', REPO, '--guard-cmd', 'true', ...extra]);
+  run(['--ledger', withRequired(name), '--repo', REPO, '--guard-cmd', 'true', ...extra]);
 
 // Write a mutated copy of the predicate to a temp dir and run it. The mutation must
 // actually apply — a regex that silently matched nothing would make every mutation
@@ -102,7 +127,8 @@ test('defect 3: an unresolvable successor is refused and never printed as a forw
 test('defect 3b: a successor that exists but is UNPUBLISHED does not resolve', () => {
   const fx = JSON.parse(readFileSync(FIX('sealable.json'), 'utf8'));
   fx.tasks['cch-fixture-successor-epic'].status = 'draft';
-  const path = join(mkdtempSync(join(tmpdir(), 'seal-pred-')), 'draft-successor.json');
+  fx.requiredContexts = [AGG];
+  const path = join(tmp('seal-pred-'), 'draft-successor.json');
   writeFileSync(path, JSON.stringify(fx));
   const { status, out } = run(['--ledger', path, '--repo', REPO, '--guard-cmd', 'true']);
   assert.equal(status, NO_SEAL);
@@ -129,7 +155,7 @@ test('defect 4: an empty KNOWN_DEFECTS register cannot seal (sentinel derived, n
   assert.doesNotMatch(mutated, new RegExp(firstId), 'the register must really be empty');
   const path = join(mkdtempSync(join(tmpdir(), 'seal-pred-')), 'empty-register.mjs');
   writeFileSync(path, mutated);
-  const r = spawnSync('node', [path, '--ledger', FIX('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'], { encoding: 'utf8' });
+  const r = spawnSync('node', [path, '--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'], { encoding: 'utf8' });
   const out = `${r.stdout}${r.stderr}`;
   assert.equal(r.status, NO_SEAL, 'a register of zero defects must not exit 0');
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=EMPTY-DEFECT-REGISTER/);
@@ -161,10 +187,10 @@ test('a resolvable successor over a clean fixture still SEALS at exit 0', () => 
 test('the ledger waiver still consumes a rung-3 entry, and says so in the same breath', () => {
   const waived = mutatedRun(
     (src) => src.replace(
-      /    measured_by: \['cloud\/test\/barkpark_cloud\/web\/router_signin_rate_bucket_test\.exs'\],\n    measured_in_ci: \{ workflow: '\.github\/workflows\/cloud\.yml', job: 'test', paths: 'cloud\/\*\*' \},\n/,
+      /    measured_by: \['cloud\/test\/barkpark_cloud\/web\/router_signin_rate_bucket_test\.exs'\],\n    measured_in_ci: \{ workflow: '\.github\/workflows\/cloud\.yml', job: 'test' \},\n/,
       "    unmeasured: 'nothing measures the bucket separation',\n",
     ),
-    ['--ledger', FIX('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'],
+    ['--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'],
   );
   assert.equal(waived.status, SEAL, `a waived rung-3 entry must still seal: ${token(waived.out)}`);
   assert.match(waived.out, /UNMEASURED — WAIVED BY LEDGER FIXTURE/);
@@ -177,13 +203,13 @@ test('the ledger waiver still consumes a rung-3 entry, and says so in the same b
   // Rename that id and the SAME rung-3 entry reds by name.
   const unwaived = mutatedRun(
     (src) => src.replace(
-      /    measured_by: \['cloud\/test\/barkpark_cloud\/web\/router_signin_rate_bucket_test\.exs'\],\n    measured_in_ci: \{ workflow: '\.github\/workflows\/cloud\.yml', job: 'test', paths: 'cloud\/\*\*' \},\n/,
+      /    measured_by: \['cloud\/test\/barkpark_cloud\/web\/router_signin_rate_bucket_test\.exs'\],\n    measured_in_ci: \{ workflow: '\.github\/workflows\/cloud\.yml', job: 'test' \},\n/,
       "    unmeasured: 'nothing measures the bucket separation',\n",
     ).replace(
       "id: 'CCH-D5-rate-limiter-sees-every-user-as-one',",
       "id: 'CCH-D5-rate-limiter-sees-every-user-as-one-NOT-THE-WAIVED-ID',",
     ),
-    ['--ledger', FIX('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'],
+    ['--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'],
   );
   assert.equal(unwaived.status, NO_SEAL, 'a waiver must not forgive an id it does not name');
   assert.match(unwaived.out, /NO MEASUREMENT \(rung 3\): nothing measures the bucket separation/);
@@ -201,7 +227,10 @@ test('clause (a) still reds: a resolvable successor does not forgive unnamed res
 // Pointing --repo at an empty directory makes the committed guard unreachable; the
 // clause must fail CLOSED, because unmeasured is never cleared.
 test('without --guard-cmd, an uncommitted guard fails closed rather than passing', () => {
-  const empty = mkdtempSync(join(tmpdir(), 'seal-pred-norepo-'));
+  const empty = tmp('seal-pred-norepo-');
+  // RAW fixture on purpose: with no repo there is no workflow either, so this also
+  // pins that rung 2 reports the MISSING WORKFLOW rather than reaching for branch
+  // protection to explain it.
   const { status, out } = run(['--ledger', FIX('sealable.json'), '--repo', empty]);
   assert.equal(status, NO_SEAL);
   assert.match(out, /is NOT COMMITTED — the fix is unmeasured/);
@@ -231,11 +260,11 @@ test('R0: --guard-cmd without --ledger is REFUSED before any clause runs', () =>
 
 test('every run emits exactly one machine-readable VERDICT-TOKEN line', () => {
   for (const args of [
-    ['--ledger', FIX('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'],
+    ['--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'],
     ['--ledger', FIX('orphan-residue.json'), '--repo', REPO, '--guard-cmd', 'true'],
     ['--ledger', FIX('no-successor-key.json'), '--repo', REPO, '--guard-cmd', 'true'],
     ['--ledger', FIX('terminal-clean.json'), '--repo', REPO, '--guard-cmd', 'true'],
-    ['--ledger', FIX('self-successor.json'), '--repo', REPO, '--guard-cmd', 'true'],
+    ['--ledger', withRequired('self-successor.json'), '--repo', REPO, '--guard-cmd', 'true'],
     ['--ledger', join(tmpdir(), 'seal-predicate-no-such-fixture.json'), '--repo', REPO],
   ]) {
     const { out } = run(args);
@@ -289,7 +318,7 @@ test('R4: a successor equal to the epic is REFUSED before any clause is evaluate
 test('R4 MUTATION PROOF: with R4 removed, the identical run seals at a=PASS', () => {
   const { status, out } = mutatedRun(
     (src) => src.replace(/  if \(SUCCESSOR === EPIC\)\n    throw new Refusal\('SELF-SUCCESSOR',[\s\S]*?\);\n/, ''),
-    ['--ledger', FIX('self-successor.json'), '--repo', REPO, '--guard-cmd', 'true'],
+    ['--ledger', withRequired('self-successor.json'), '--repo', REPO, '--guard-cmd', 'true'],
   );
   assert.equal(status, SEAL, `without R4 the self-successor run seals: ${token(out)}`);
   assert.match(out, /a=PASS/, 'clause (a) is structurally unfailable when the successor is the epic');
@@ -341,7 +370,7 @@ test('a considering row is residue: counted into clause (a) and disclosed by nam
 test('MUTATION PROOF: with `considering` dropped from the residue set, the same fixture seals', () => {
   const { status, out } = mutatedRun(
     (src) => src.replace("const PENDING_STATUSES = ['considering'];", 'const PENDING_STATUSES = [];'),
-    ['--ledger', FIX('considering-residue.json'), '--repo', REPO, '--guard-cmd', 'true'],
+    ['--ledger', withRequired('considering-residue.json'), '--repo', REPO, '--guard-cmd', 'true'],
   );
   assert.equal(status, SEAL, `the pre-fix filter seals over an unfinished row: ${token(out)}`);
   assert.match(token(out), /SEAL a=PASS/);
@@ -364,8 +393,17 @@ test('MUTATION PROOF: with `considering` dropped from the residue set, the same 
 // is now proven by MUTATION (stripping CCH-D5's measurement back to `unmeasured:`)
 // rather than by the register happening to contain a rung-3 entry — which is the
 // stronger form, because it survives the register being paid off again.
+// INHERITED RED, MEASURED AT WAVE 9 AND NOT CAUSED BY IT. This test is RED on
+// origin/main as well: the pristine tree runs 31 tests / 30 pass / 1 fail, and the
+// one failure is this. Its cause is CCH-D6's rung-1 guard `design/emit-fence.test.mjs`,
+// which exits 1 because the design-token tree really has drifted (the same drift that
+// keeps `Design-token drift gate (blocking)` red on main itself). That is a TRUE
+// statement about clause (b), so it is left standing: relaxing this assertion to make
+// the suite green would be the exact defect this epic exists to remove, and design/**
+// is outside this slice's fence. Filed rather than smuggled: see the child row on
+// cch-w9-cloud-gate-shim-rung2.
 test('clause (b): every registered defect is measured, and rung 3 would still red by name', () => {
-  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO]);
+  const { status, out } = run(['--ledger', withRequired('ladder-no-waiver.json'), '--repo', REPO]);
   assert.equal(status, SEAL, `no rung-3 entry remains, so clause (b) passes: ${token(out)}`);
 
   // rung 1 — measured HERE, and the guard's own output had to name the measurement.
@@ -374,9 +412,19 @@ test('clause (b): every registered defect is measured, and rung 3 would still re
   assert.match(out, /MEASURED HERE by design\/emit-fence\.test\.mjs/);
 
   // rung 2 — passes, but says in the same breath that it did not run.
+  //
+  // WAVE 9 REWROTE THIS ASSERTION, and the rewrite is the whole point of the slice.
+  // It used to read `… job \`test\` on cloud/**`, because the resolver's third leg was
+  // `src.includes('cloud/**')` against the workflow's raw text — satisfiable by a
+  // COMMENT, and in any case an answer to the wrong question. The sentence now names
+  // the REQUIRED CONTEXT that goes red when that job goes red, because that is what
+  // makes a measurement able to stop something.
   assert.match(out, /rung 2 — MEASURED-ELSEWHERE/);
-  assert.match(out, /MEASURED-ELSEWHERE by cloud\/test\/barkpark_cloud\/web\/router_test\.exs, run by \.github\/workflows\/cloud\.yml job `test` on cloud\/\*\*/);
+  assert.match(out, /MEASURED-ELSEWHERE by cloud\/test\/barkpark_cloud\/web\/router_test\.exs, run by \.github\/workflows\/cloud\.yml job `test`, whose failure is enforced through the REQUIRED status check "Cloud gate"/);
+  assert.doesNotMatch(out, /on cloud\/\*\*/, 'the path-glob sentence is gone, not reworded');
   assert.match(out, /THIS RUN DID NOT EXECUTE IT/);
+  // A fixture-supplied required set says so, in the same breath.
+  assert.match(out, /REQUIRED-CONTEXT SET SUPPLIED BY LEDGER FIXTURE/);
 
   // CCH-D5 specifically: at rung 2, named with the file that measures it, and no
   // longer anywhere in the failure list.
@@ -389,10 +437,10 @@ test('clause (b): every registered defect is measured, and rung 3 would still re
   // `unmeasured:` sentence — and the identical run reds by name. Rung 3 is still loud.
   const regressed = mutatedRun(
     (src) => src.replace(
-      /    measured_by: \['cloud\/test\/barkpark_cloud\/web\/router_signin_rate_bucket_test\.exs'\],\n    measured_in_ci: \{ workflow: '\.github\/workflows\/cloud\.yml', job: 'test', paths: 'cloud\/\*\*' \},\n/,
+      /    measured_by: \['cloud\/test\/barkpark_cloud\/web\/router_signin_rate_bucket_test\.exs'\],\n    measured_in_ci: \{ workflow: '\.github\/workflows\/cloud\.yml', job: 'test' \},\n/,
       "    unmeasured: 'no test anywhere asserts that two clients behind the front door get SEPARATE rate buckets.',\n",
     ),
-    ['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO],
+    ['--ledger', withRequired('ladder-no-waiver.json'), '--repo', REPO],
   );
   assert.equal(regressed.status, NO_SEAL, 'a rung-3 entry must make clause (b) fail');
   assert.match(regressed.out, /✗ CCH-D5-rate-limiter-sees-every-user-as-one  \(rung 3\)/);
@@ -409,7 +457,7 @@ test('clause (b): every registered defect is measured, and rung 3 would still re
       "'cloud/test/barkpark_cloud/web/router_signin_rate_bucket_test.exs'],",
       "'cloud/test/barkpark_cloud/web/router_signin_rate_bucket_test_DELETED.exs'],",
     ),
-    ['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO],
+    ['--ledger', withRequired('ladder-no-waiver.json'), '--repo', REPO],
   );
   assert.equal(absent.status, NO_SEAL, 'a measurement that is asserted but absent must not seal');
   assert.match(absent.out, /and NONE of them exist — the measurement is asserted, not present/);
@@ -423,7 +471,7 @@ test('a rung-1 guard that exits 0 without naming its measurement does NOT count 
       "guardExpect: 'cch-w1: seven fleet ticks after one boot cost 12 requests, not 40',",
       "guardExpect: 'a sentence this guard never prints',",
     ),
-    ['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO],
+    ['--ledger', withRequired('ladder-no-waiver.json'), '--repo', REPO],
   );
   assert.equal(status, NO_SEAL);
   assert.match(out, /guard exited 0 but its output never named the measurement/);
@@ -438,7 +486,7 @@ test('a rung-1 guard that exits 0 without naming its measurement does NOT count 
 // claim about a defect from a read that failed. Two repairs: the guard env is sanitised,
 // and the guard spawn carries a buffer large enough to hold a chatty guard.
 test('a passing guard is never misread as unrun because of who spawned it', () => {
-  const r = spawnSync('node', [PREDICATE, '--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO],
+  const r = spawnSync('node', [PREDICATE, '--ledger', withRequired('ladder-no-waiver.json'), '--repo', REPO],
     { encoding: 'utf8', timeout: 120000, env: { ...process.env, NODE_TEST_CONTEXT: 'child-v8' } });
   const out = `${r.stdout}${r.stderr}`;
   assert.match(out, /MEASURED HERE by cloud\/priv\/static\/__app\.test\.mjs/,
@@ -461,7 +509,7 @@ test('a passing guard is never misread as unrun because of who spawned it', () =
     (src) => src
       .replace(/for \(const k of \['NODE_TEST_CONTEXT'[^\n]*\n/, '')
       .replace(', env: GUARD_ENV, maxBuffer: 16 * 1024 * 1024 });', ', maxBuffer: 64 * 1024 });'),
-    ['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO],
+    ['--ledger', withRequired('ladder-no-waiver.json'), '--repo', REPO],
   );
   assert.match(leaky.out, /guard cloud\/priv\/static\/__app\.test\.mjs NEVER RAN \(ENOBUFS\)/,
     'pre-fix, a guard whose output overflowed the spawn buffer was reported as never having run');
@@ -492,7 +540,7 @@ test('the live commit fetch never reads the commit message at all', () => {
 // measurement that never happened. The GUARD-side fix belongs to the open row
 // `hg-overflow-guard-refusal-exits-1`; this file only reads the code honestly.
 test('a guard exiting 2 is INFRA FAULT (exit 2), never a NO SEAL defect claim', () => {
-  const { status, out } = run(['--ledger', FIX('sealable.json'), '--repo', REPO, '--guard-cmd', 'exit 2']);
+  const { status, out } = run(['--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'exit 2']);
   assert.equal(status, INFRA, 'a refusal to measure must not be reported as a verdict');
   assert.match(out, /INFRA FAULT at /);
   assert.match(out, /that is a REFUSAL to measure/);
@@ -503,7 +551,7 @@ test('a guard exiting 2 is INFRA FAULT (exit 2), never a NO SEAL defect claim', 
 });
 
 test('a guard exiting 1 IS a defect claim — exit 2 is not merely "any non-zero"', () => {
-  const { status, out } = run(['--ledger', FIX('sealable.json'), '--repo', REPO, '--guard-cmd', 'exit 1']);
+  const { status, out } = run(['--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'exit 1']);
   assert.equal(status, NO_SEAL);
   assert.match(out, /guard exited 1 — the defect is still measurable at origin\/main/);
   assert.match(token(out), /NO-SEAL .*b=FAIL/);
@@ -529,10 +577,217 @@ test('the permanent human gate bucket is exactly three, and billing is gone', ()
 test('bucket (c) still reds when a hardcoded gate stops resolving', () => {
   const fx = JSON.parse(readFileSync(FIX('sealable.json'), 'utf8'));
   delete fx.gates['cch-hg-compose-network-recreation'];
-  const path = join(mkdtempSync(join(tmpdir(), 'seal-pred-')), 'gate-vanished.json');
+  fx.requiredContexts = [AGG];
+  const path = join(tmp('seal-pred-'), 'gate-vanished.json');
   writeFileSync(path, JSON.stringify(fx));
   const { status, out } = run(['--ledger', path, '--repo', REPO, '--guard-cmd', 'true']);
   assert.equal(status, NO_SEAL, 'a gate that silently vanished is NO SEAL, not a clean sheet');
   assert.match(out, /✗ cch-hg-compose-network-recreation/);
   assert.match(token(out), /c=FAIL/);
+});
+
+// ═══ WAVE 9 — RUNG 2 IS A THREE-LEG STRUCTURAL READ ═════════════════════════
+//
+// The pre-wave-9 resolver asked `src.includes('cloud/**')` of cloud.yml's raw text.
+// Two facts about it, both measured:
+//
+//   * the four rung-2 register entries were 100% UNTESTED. Deleting BOTH of that
+//     branch's problem-pushes left this suite 31/31 green.
+//   * the check was satisfiable by a COMMENT. Delete the real `paths:` key, add
+//     `# cloud/**` anywhere in the file, and clause (b) went back to PASS.
+//
+// Every leg below is therefore proven by MUTATION against a SYNTHETIC REPO: the
+// legs read `.github/workflows/cloud.yml` and `.github/required-checks.json` from
+// `--repo`, so pointing `--repo` at a tree carrying deliberately-broken copies of
+// those two files drives each leg to both polarities. Nothing here writes inside
+// the real repo.
+
+// A minimal repo the rung-2 legs can read: the two structural files (copied from
+// the real ones, optionally mutated) plus an empty stand-in for every measured_by
+// path the register names. `--guard-cmd true` covers the rung-1 guards, and fixture
+// mode covers ancestry, so those two files are the ONLY inputs the legs consume.
+function synthRepo({ workflow, requiredChecks } = {}) {
+  const root = tmp('seal-pred-synth-');
+  const wfDir = join(root, '.github', 'workflows');
+  mkdirSync(wfDir, { recursive: true });
+  const wfSrc = readFileSync(CLOUD_WF, 'utf8');
+  writeFileSync(join(wfDir, 'cloud.yml'), workflow ? workflow(wfSrc) : wfSrc);
+  const rc = JSON.parse(readFileSync(REQUIRED_CHECKS, 'utf8'));
+  // The real file does NOT list `Cloud gate` yet — that is the honest interim state
+  // pinned by the live test at the bottom. The synthetic default DOES, so each leg
+  // below varies exactly one thing away from a working configuration.
+  rc.protection.required_status_checks.checks.push({ context: AGG, app_id: 15368 });
+  writeFileSync(join(root, '.github', 'required-checks.json'),
+    JSON.stringify(requiredChecks ? requiredChecks(rc) : rc, null, 2));
+  for (const q of new Set(readFileSync(PREDICATE, 'utf8').match(/'cloud\/test\/[^']+'/g) || [])) {
+    const rel = q.slice(1, -1);
+    mkdirSync(join(root, dirname(rel)), { recursive: true });
+    writeFileSync(join(root, rel), '');
+  }
+  return root;
+}
+
+const synthRun = (opts) =>
+  run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', synthRepo(opts), '--guard-cmd', 'true']);
+
+// ── THE CONTROL. Every leg satisfied -> rung 2, and clause (b) passes. ───────
+// Without this, each red below could be a broken rig rather than a working leg.
+test('wave 9 CONTROL: workflow intact + aggregator registered -> rung 2, clause (b) passes', () => {
+  const { status, out } = synthRun({});
+  assert.equal(status, SEAL, `all three legs satisfied must reach a SEAL: ${token(out)}`);
+  assert.match(out, /◐ CCH-D2-session-peer-ip-is-the-docker-bridge  \(rung 2 — MEASURED-ELSEWHERE\)/);
+  assert.match(out, /whose failure is enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /REQUIRED-CONTEXT SET SUPPLIED BY LEDGER FIXTURE/,
+    'this run read the FILE, not a fixture override — otherwise the legs below prove nothing');
+  assert.match(token(out), /b=PASS/);
+});
+
+// ── LEG A — enforced:false is an INFRA FAULT, never a claim ─────────────────
+// Until 2026-07-28 this repo had NO branch protection, and this epic's own charter
+// asserted so as a standing fact. Under that condition every required context is
+// decorative: "measured in CI" would certify a job nobody has to pass. The honest
+// answer is not NO SEAL (that is a verdict about the product) — it is exit 2:
+// nothing was measured, so nothing is claimed.
+test('wave 9 LEG A: enforced:false REFUSES with an INFRA FAULT rather than claiming rung 2', () => {
+  const { status, out } = synthRun({ requiredChecks: (rc) => ({ ...rc, enforced: false }) });
+  assert.equal(status, INFRA, 'an unenforced boundary must not be reported through the verdict code');
+  assert.match(out, /INFRA FAULT at /);
+  assert.match(out, /says enforced=false — branch protection is NOT applied to main/);
+  assert.match(out, /REFUSING to evaluate rung 2 rather than claiming it/);
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN/);
+  assert.doesNotMatch(out, /VERDICT: SEAL$/m);
+  assert.doesNotMatch(out, /MEASURED-ELSEWHERE/, 'nothing may be reported measured off an unenforced branch');
+});
+
+test('wave 9 LEG A: a missing required-checks.json is INFRA FAULT, not a silent rung 2', () => {
+  const root = synthRepo({});
+  rmSync(join(root, '.github', 'required-checks.json'));
+  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', root, '--guard-cmd', 'true']);
+  assert.equal(status, INFRA);
+  assert.match(out, /required-checks\.json does not exist/);
+  assert.match(out, /Nothing is asserted about clause \(b\)/);
+});
+
+// ── LEG B — no always()-aggregator over the job -> rung 3, BY NAME ───────────
+test('wave 9 LEG B: deleting the Cloud gate job drops all four entries to rung 3 by name', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    const cut = src.replace(/\n {2}cloud-gate:\n[\s\S]*$/, '\n');
+    assert.notEqual(cut, src, 'the cloud-gate job must actually be removed');
+    assert.doesNotMatch(cut, /^ {2}cloud-gate:/m);
+    return cut;
+  } });
+  assert.equal(status, NO_SEAL);
+  assert.match(out, /NO job both `needs:` `test` and carries `if: always\(\)`/);
+  assert.match(out, /This measurement cannot stop a merge: rung 3/);
+  for (const id of ['CCH-D2-session-peer-ip-is-the-docker-bridge', 'CCH-D3-bearer-token-in-the-access-log',
+    'CCH-D4-head-prober-gets-a-session-token', 'CCH-D5-rate-limiter-sees-every-user-as-one'])
+    assert.match(out, new RegExp(`✗ ${id}  \\(rung 3\\)`), `${id} must drop to rung 3`);
+  assert.match(token(out), /b=FAIL/);
+});
+
+// ── LEG B — a MATRIXED aggregator is refused, and refused by name ────────────
+// This is why the aggregator had to be a NEW job and never a rename of `test`: a
+// matrixed job's published check-run name is not its `name:`, so it can never be a
+// required context (honest-gates D20). Silently accepting one would certify a name
+// that branch protection can never match.
+test('wave 9 LEG B: a matrixed aggregator cannot render a requirable context', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    const mutated = src.replace(/^ {4}name: Cloud gate$/m,
+      '    name: Cloud gate\n    strategy:\n      matrix:\n        otp: ["27.0"]');
+    assert.notEqual(mutated, src, 'the matrix must actually be added');
+    return mutated;
+  } });
+  assert.equal(status, NO_SEAL);
+  assert.match(out, /carry a `strategy\.matrix`, so their published check-run name is not their `name:`/);
+  assert.match(out, /A matrixed job cannot be a required context \(D20\)/);
+  assert.match(token(out), /b=FAIL/);
+});
+
+// ── LEG C — the aggregator exists but nobody has to pass it -> rung 3 ────────
+// THE DEFECT THIS SLICE REMOVES, stated as a test. An aggregator that exists,
+// runs, and reds while the PR merges green is not a measurement; it is a display.
+test('wave 9 LEG C: an UNREGISTERED aggregator is rung 3, named, with the fix named too', () => {
+  const { status, out } = synthRun({ requiredChecks: (rc) => {
+    rc.protection.required_status_checks.checks =
+      rc.protection.required_status_checks.checks.filter((c) => c.context !== AGG);
+    return rc;
+  } });
+  assert.equal(status, NO_SEAL, 'an unenforced aggregator must not be certified as a measurement');
+  assert.match(out, /is aggregated by "Cloud gate", and "Cloud gate" is NOT a required status check on main/);
+  assert.match(out, /required today: Elixir gate, PR references an active task/,
+    'the required set that DOES exist is printed, so the gap is readable');
+  assert.match(out, /The job can go red and the PR still merges/);
+  assert.match(out, /cch-w9-register-console-and-cloud-gates/, 'the row that pays this is named');
+  assert.match(out, /✗ CCH-D2-session-peer-ip-is-the-docker-bridge  \(rung 3\)/);
+  assert.match(token(out), /b=FAIL/);
+});
+
+// ── THE COMMENT CAN SATISFY NOTHING ─────────────────────────────────────────
+// The measured cheap escape: with the real `paths:` key deleted, a bare YAML
+// comment containing `cloud/**` restored the pre-wave-9 check to PASS. Here the
+// same comment is added to a workflow whose aggregator has been removed — if any
+// leg were textual, this would go green.
+test('wave 9: a YAML comment naming cloud/** satisfies NO leg', () => {
+  const commented = synthRun({ workflow: (src) => {
+    const cut = src.replace(/\n {2}cloud-gate:\n[\s\S]*$/, '\n');
+    return `${cut}\n# paths: cloud/**\n# - "cloud/**"\n# name: Cloud gate\n# needs: [test]\n# if: always()\n`;
+  } });
+  assert.equal(commented.status, NO_SEAL, 'prose must never satisfy a structural read');
+  assert.match(commented.out, /NO job both `needs:` `test` and carries `if: always\(\)`/);
+  assert.match(token(commented.out), /b=FAIL/);
+
+  // …and the SAME comment block on an INTACT workflow changes nothing either way:
+  // the entries resolve on structure alone, so the comment is inert in both
+  // directions rather than merely "not enough".
+  const intact = synthRun({ workflow: (src) => `${src}\n# paths: cloud/**\n` });
+  assert.equal(intact.status, SEAL, `an inert comment must not disturb a real resolution: ${token(intact.out)}`);
+  assert.match(token(intact.out), /b=PASS/);
+});
+
+test('wave 9: the resolver never greps the workflow text for the registered path glob', () => {
+  const raw = readFileSync(PREDICATE, 'utf8');
+  // CODE only. The file's own header narrates the removed `src.includes(...)` call by
+  // name — that prose is the record of why the legs exist and must not make this
+  // assertion unsatisfiable. Stripping `//` lines is what makes the check about
+  // behaviour rather than about vocabulary.
+  const code = raw.split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.match(raw, /src\.includes\(/, 'sanity: the header still explains what was removed');
+  assert.doesNotMatch(code, /src\.includes\(/,
+    'no leg may be a substring test against the workflow source');
+  assert.doesNotMatch(code, /measured_in_ci\.paths/,
+    'the `paths` field is gone from the register, not merely unread');
+  assert.doesNotMatch(code, /paths: 'cloud/,
+    'no register entry may still carry a path glob for something to grep');
+});
+
+// ── BOTH `needs:` SPELLINGS ─────────────────────────────────────────────────
+// cloud.yml writes the inline flow sequence, but a block sequence is equally legal
+// YAML and a resolver that assumed one style would silently find no aggregator —
+// i.e. red a correct configuration.
+test('wave 9: the aggregator is found through EITHER YAML needs: spelling', () => {
+  const asBlock = synthRun({ workflow: (src) => {
+    const mutated = src.replace('    needs: [changes, compile, test, path-escape]',
+      '    needs:\n      - changes\n      - compile\n      - test\n      - path-escape');
+    assert.notEqual(mutated, src, 'the needs: rewrite must actually apply');
+    return mutated;
+  } });
+  assert.equal(asBlock.status, SEAL, `a block-sequence needs: must resolve identically: ${token(asBlock.out)}`);
+  assert.match(asBlock.out, /enforced through the REQUIRED status check "Cloud gate"/);
+});
+
+// ── THE LIVE STATE, PINNED HONESTLY ─────────────────────────────────────────
+// No fixture override, no synthetic repo: the real cloud.yml and the real
+// required-checks.json. `Cloud gate` is NOT registered at this commit, so clause (b)
+// FAILS — deliberately, and this test says so out loud rather than papering over it.
+// When `cch-w9-register-console-and-cloud-gates` lands, THIS is the assertion that
+// must be flipped, and flipping it is the proof the registration took effect.
+test('wave 9 LIVE: until Cloud gate is registered, clause (b) reads FAIL on the real branch', () => {
+  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(status, NO_SEAL, 'the interim state is NO SEAL, and that is the honest answer');
+  assert.match(out, /"Cloud gate" is NOT a required status check on main/);
+  assert.match(token(out), /b=FAIL/);
+  const rc = JSON.parse(readFileSync(REQUIRED_CHECKS, 'utf8'));
+  assert.equal(rc.enforced, true, 'branch protection IS live — that is what makes this readable at all');
+  assert.ok(!rc.protection.required_status_checks.checks.some((c) => c.context === AGG),
+    'if Cloud gate has been registered, flip this test rather than deleting it');
 });

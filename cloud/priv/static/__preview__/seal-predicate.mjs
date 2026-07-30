@@ -43,8 +43,9 @@
 //   rung 1  guard:            a node executable that RUNS here, and whose stdout must
 //                             NAME the measurement (`guardExpect`) — an exit 0 alone
 //                             is an exit code, not a post-condition read.
-//   rung 2  measured_by: +    an ExUnit file plus the CI workflow+job that runs it.
-//           measured_in_ci:   PASSES, but is printed MEASURED-ELSEWHERE, never silently
+//   rung 2  measured_by: +    an ExUnit file, the CI workflow+job that runs it, AND a
+//           measured_in_ci:   merge boundary that cannot pass while that job is red.
+//                             PASSES, but is printed MEASURED-ELSEWHERE, never silently
 //                             green: this run verified that the test file and the CI
 //                             job EXIST, and says in the same breath that it did not
 //                             execute them.
@@ -57,6 +58,47 @@
 // measures the bucket separation through a real `Router.call/2`, so CCH-D5 is rung 2 and
 // clause (b) can pass on its own merits. No rung-3 entry remains in the register. If a
 // later wave adds one, this is where it will say so.
+//
+// ---------------------------------------------------------------------------
+// WHY RUNG 2 IS A THREE-LEG STRUCTURAL READ AND NOT A grep FOR A PATHS FILTER
+//
+// Through wave 8 this file resolved rung 2 by `src.includes(d.measured_in_ci.paths)`
+// against the workflow's RAW TEXT. Three things were wrong with that, and only the
+// third is fatal:
+//
+//   1. It matched TEXT. A YAML COMMENT containing `cloud/**` satisfied it — measured
+//      this wave. The epic's own honesty instrument could be greened with prose.
+//   2. It asserted the WRONG STRUCTURE. A workflow-level `on: … paths:` filter is not
+//      evidence that a job runs; it is evidence the whole workflow — and therefore the
+//      check run — is ABSENT on every other PR (honest-gates D18).
+//   3. It never asked the only question that matters: CAN THIS MEASUREMENT STOP A
+//      MERGE? A job can exist, run, and go red while the PR merges green, because the
+//      job is not a required status check. "Measured in CI" over an unenforced job is
+//      a success claim backed by nothing — which is the exact class of lie this epic
+//      was chartered to remove, sitting inside the instrument that certifies it.
+//
+// So rung 2 now reads STRUCTURE, in three legs, and each leg fails LOUDLY BY NAME:
+//
+//   Leg A  `.github/required-checks.json` — the committed record of this branch's
+//          protection. `enforced !== true` is an INFRA FAULT, never a verdict: with no
+//          enforcing boundary there is nothing to read a rung-2 claim against, so the
+//          honest answer is "nothing was measured", not "measured".
+//   Leg B  the AGGREGATOR over the named job, found structurally: the job in that same
+//          workflow whose `needs:` contains the named job AND which carries
+//          `if: always()`. Its rendered check-run context is its `name:` — which is
+//          only true because it carries no `strategy.matrix`, so a matrixed candidate
+//          is rejected by name rather than silently accepted.
+//   Leg C  that aggregator's name is IN the required-context set. If not, the entry
+//          drops to RUNG 3 and says which name is missing from which branch.
+//
+// A comment satisfies none of the three. The `paths` field is gone from the register
+// entirely rather than left as data nothing reads.
+//
+// KNOWN AND ACCEPTED at the commit that introduced this: `Cloud gate` exists in
+// cloud.yml and is NOT yet in the required set, so all four rung-2 entries read RUNG 3
+// and clause (b) is FAIL. Registration is `cch-w9-register-console-and-cloud-gates`.
+// Leg C is deliberately NOT softened to hide that window — a predicate that green-lights
+// an unenforced job is worse than one that reds honestly for a week.
 //
 // ---------------------------------------------------------------------------
 // WHY A GUARD'S EXIT 2 IS AN INFRA FAULT AND NOT A DEFECT CLAIM
@@ -142,7 +184,11 @@ const PERMANENT_HUMAN_GATES = {
 //   guard     rung 1: repo-relative node executable, spawned with `--defect <id>`
 //   guardExpect  the string that guard's own output must contain — an exit code alone
 //                is never a post-condition read
-//   measured_by / measured_in_ci   rung 2
+//   measured_by / measured_in_ci   rung 2. `measured_in_ci` is { workflow, job } — and
+//                                  deliberately NOT a `paths:` string any more: the
+//                                  resolver reads the workflow's JOB GRAPH and the
+//                                  branch's required-context set, so there is nothing
+//                                  left for a path glob to be grepped against.
 //   unmeasured                     rung 3: the stated gap. FAILS clause (b).
 const KNOWN_DEFECTS = [
   {
@@ -159,7 +205,7 @@ const KNOWN_DEFECTS = [
     commit: '8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4',
     diff: { paths: ['cloud/lib/barkpark_cloud/web/router.ex'], grep: /trusted_proxy_peers/ },
     measured_by: ['cloud/test/barkpark_cloud/web/router_test.exs'],
-    measured_in_ci: { workflow: '.github/workflows/cloud.yml', job: 'test', paths: 'cloud/**' },
+    measured_in_ci: { workflow: '.github/workflows/cloud.yml', job: 'test' },
   },
   {
     id: 'CCH-D3-bearer-token-in-the-access-log',
@@ -174,7 +220,7 @@ const KNOWN_DEFECTS = [
       'cloud/test/barkpark_cloud/web/router_sse_ticket_test.exs',
       'cloud/test/barkpark_cloud/web/router_oauth_test.exs',
     ],
-    measured_in_ci: { workflow: '.github/workflows/cloud.yml', job: 'test', paths: 'cloud/**' },
+    measured_in_ci: { workflow: '.github/workflows/cloud.yml', job: 'test' },
   },
   {
     id: 'CCH-D4-head-prober-gets-a-session-token',
@@ -185,7 +231,7 @@ const KNOWN_DEFECTS = [
       'cloud/test/barkpark_cloud/web/router_head_and_favicon_test.exs',
       'cloud/test/barkpark_cloud/web/router_oauth_test.exs',
     ],
-    measured_in_ci: { workflow: '.github/workflows/cloud.yml', job: 'test', paths: 'cloud/**' },
+    measured_in_ci: { workflow: '.github/workflows/cloud.yml', job: 'test' },
   },
   {
     id: 'CCH-D5-rate-limiter-sees-every-user-as-one',
@@ -210,7 +256,7 @@ const KNOWN_DEFECTS = [
     commit: '8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4',
     diff: { paths: ['cloud/lib/barkpark_cloud/web/router.ex'], grep: /trusted_proxy_peers/ },
     measured_by: ['cloud/test/barkpark_cloud/web/router_signin_rate_bucket_test.exs'],
-    measured_in_ci: { workflow: '.github/workflows/cloud.yml', job: 'test', paths: 'cloud/**' },
+    measured_in_ci: { workflow: '.github/workflows/cloud.yml', job: 'test' },
   },
   {
     id: 'CCH-D6-css-check-passes-on-deleted-code',
@@ -302,6 +348,104 @@ function verifyCommit(d, commit, fixture, problems) {
   if (missing.length) problems.push(`commit ${commit} does not touch ${missing.join(', ')} — the registered fix is not in this diff`);
   if (!d.diff.grep.test(body)) problems.push(`commit ${commit}'s diff never matches ${d.diff.grep} — verified by DIFF, never by subject line`);
   return `diff ${paths.length} file(s)`;
+}
+
+// ---------------------------------------------------------------------------
+// RUNG 2 — THE THREE STRUCTURAL LEGS
+//
+// No YAML dependency (this file is spawned as a bare `node <path>`, with no package
+// resolution to lean on), so the workflow is read with a deliberately narrow
+// line parser over the `jobs:` block ALONE. Narrow is the point: everything it can
+// see is a key at a KNOWN indent, so a `#` comment — at any indent, carrying any
+// text — is structurally unreachable to it. That is the property leg 1 above lost.
+
+// Parse `jobs:` into { <key>: { name, if, needs: [], matrix: bool } }.
+// Both `needs:` spellings are handled, because both are legal and this repo uses one
+// of each: the inline flow sequence (`needs: [a, b]`) and the block sequence
+// (`needs:` then `  - a`). A bare scalar (`needs: changes`) is legal too.
+function parseWorkflowJobs(src) {
+  const lines = src.split('\n');
+  let i = lines.findIndex((l) => /^jobs:\s*$/.test(l));
+  if (i === -1) return null;
+  const jobs = {};
+  let cur = null;
+  for (i += 1; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^\S/.test(line)) break;                    // left the jobs: block
+    const jobKey = line.match(/^ {2}([A-Za-z0-9_.-]+):\s*$/);
+    if (jobKey) {
+      cur = { key: jobKey[1], name: null, if: null, needs: [], matrix: false };
+      jobs[cur.key] = cur;
+      continue;
+    }
+    if (!cur) continue;
+    // Only keys at EXACTLY four spaces are job-level keys. A comment line starts
+    // with `#` after its indent and matches none of these patterns; a `run: |`
+    // body lives at six spaces or deeper and cannot reach here either.
+    const key = line.match(/^ {4}([A-Za-z0-9_-]+):(.*)$/);
+    if (key) {
+      const [, k, restRaw] = key;
+      const rest = restRaw.replace(/\s+#.*$/, '').trim();
+      if (k === 'name') cur.name = rest.replace(/^['"]|['"]$/g, '');
+      else if (k === 'if') cur.if = rest;
+      else if (k === 'strategy') cur.strategyAt = i;
+      else if (k === 'needs') {
+        const flow = rest.match(/^\[(.*)\]$/);
+        if (flow) {
+          cur.needs = flow[1].split(',').map((s) => s.trim().replace(/^['"]|['"]$/g, '')).filter(Boolean);
+        } else if (rest) {
+          cur.needs = [rest.replace(/^['"]|['"]$/g, '')];
+        } else {
+          for (let j = i + 1; j < lines.length; j++) {
+            const item = lines[j].match(/^ {6}-\s*(.+?)\s*$/);
+            if (!item) break;
+            cur.needs.push(item[1].replace(/^['"]|['"]$/g, ''));
+          }
+        }
+      }
+      continue;
+    }
+    // `matrix:` nested under this job's `strategy:`
+    if (cur.strategyAt !== undefined && /^ {6}matrix:\s*$/.test(line)) cur.matrix = true;
+  }
+  return jobs;
+}
+
+// A job's rendered check-run CONTEXT is its `name:` when it has one and the job key
+// otherwise — and that equivalence holds ONLY for an unmatrixed job. A matrixed job
+// publishes `name (27.0, 1.18.1)`, or the literal uninterpolated `${{ matrix.x }}` if
+// it never started (honest-gates D20), so neither is a name anything can require.
+const renderedContext = (job) => job.name || job.key;
+
+// Leg A. Memoised, and read LAZILY: an entry whose workflow or job does not exist has
+// already failed, and consulting branch protection to explain a measurement that is
+// not there would replace a precise problem with a vague one.
+let _requiredCache = null;
+function requiredContexts(fixture) {
+  if (_requiredCache) return _requiredCache;
+  // FIXTURE-ONLY. A ledger fixture may stand in for branch protection exactly as
+  // `landed` stands in for ancestry and `diffs` for the patch — otherwise every
+  // clause-(a) fixture would inherit whatever the real branch happens to be
+  // configured with today, and the clause-(a) suite would red for a clause-(b)
+  // reason. It is unreachable on a live run: there is no flag for it, and `fixture`
+  // is non-null only under `--ledger`.
+  if (fixture && Array.isArray(fixture.requiredContexts)) {
+    _requiredCache = { set: new Set(fixture.requiredContexts), branch: 'LEDGER FIXTURE', fromFixture: true };
+    return _requiredCache;
+  }
+  const p = `${REPO}/.github/required-checks.json`;
+  if (!existsSync(p))
+    throw new Infra(`.github/required-checks.json does not exist under ${REPO}. Rung 2 asserts that a measurement can STOP A MERGE, and that claim is unreadable without the committed record of this branch's protection. Nothing is asserted about clause (b).`);
+  let j;
+  try { j = JSON.parse(readFileSync(p, 'utf8')); }
+  catch (e) { throw new Infra(`.github/required-checks.json is not JSON (${String(e.message).slice(0, 90)}) — rung 2 cannot be evaluated, so nothing about clause (b) is claimed.`); }
+  if (j.enforced !== true)
+    throw new Infra(`.github/required-checks.json says enforced=${JSON.stringify(j.enforced)} — branch protection is NOT applied to ${j.branch || 'main'}. With no enforcing boundary, EVERY required context is decorative and "measured in CI" would certify a job nobody has to pass. REFUSING to evaluate rung 2 rather than claiming it.`);
+  const checks = ((j.protection || {}).required_status_checks || {}).checks;
+  if (!Array.isArray(checks))
+    throw new Infra('.github/required-checks.json has no protection.required_status_checks.checks array — the required set is unreadable, so rung 2 is unevaluable.');
+  _requiredCache = { set: new Set(checks.map((c) => c.context)), branch: j.branch || 'main', fromFixture: false };
+  return _requiredCache;
 }
 
 // ---------------------------------------------------------------------------
@@ -469,17 +613,43 @@ function main() {
       const missing = d.measured_by.filter((p) => !existsSync(`${REPO}/${p}`));
       if (missing.length === d.measured_by.length)
         problems.push(`measured_by names ${missing.join(', ')} and NONE of them exist — the measurement is asserted, not present`);
-      const wf = `${REPO}/${d.measured_in_ci.workflow}`;
-      if (!existsSync(wf)) problems.push(`measured_in_ci names ${d.measured_in_ci.workflow}, which does not exist`);
+      const { workflow, job } = d.measured_in_ci;
+      const wf = `${REPO}/${workflow}`;
+      let aggregator = null;
+      let required = null;
+      if (!existsSync(wf)) problems.push(`measured_in_ci names ${workflow}, which does not exist`);
       else {
-        const src = readFileSync(wf, 'utf8');
-        if (!new RegExp(`^\\s{2}${d.measured_in_ci.job}:\\s*$`, 'm').test(src))
-          problems.push(`${d.measured_in_ci.workflow} has no job \`${d.measured_in_ci.job}\` — the CI leg of this measurement does not exist`);
-        if (!src.includes(d.measured_in_ci.paths))
-          problems.push(`${d.measured_in_ci.workflow} does not filter on \`${d.measured_in_ci.paths}\` — the job exists but this code path would not trigger it`);
+        const jobs = parseWorkflowJobs(readFileSync(wf, 'utf8'));
+        if (!jobs) problems.push(`${workflow} has no \`jobs:\` block — it is not a workflow this measurement can live in`);
+        else if (!jobs[job])
+          problems.push(`${workflow} has no job \`${job}\` — the CI leg of this measurement does not exist`);
+        else {
+          // ── Leg B: the aggregator, found by STRUCTURE. Not by name, not by a
+          // convention, and never by a comment: the job that `needs:` this one AND
+          // carries `if: always()` is the only job whose check run can be red when
+          // this one is red. That is what "enforced" has to mean.
+          const candidates = Object.values(jobs).filter(
+            (j) => j.needs.includes(job) && /^always\(\)$/.test(String(j.if || '').trim()));
+          const matrixed = candidates.filter((j) => j.matrix);
+          const usable = candidates.filter((j) => !j.matrix);
+          if (!usable.length) {
+            problems.push(matrixed.length
+              ? `${workflow}: the only job(s) aggregating \`${job}\` (${matrixed.map((j) => j.key).join(', ')}) carry a \`strategy.matrix\`, so their published check-run name is not their \`name:\` — it gains the matrix tuple, or the uninterpolated \`\${{ matrix.… }}\` template when the job never starts. A matrixed job cannot be a required context (D20), so \`${job}\` has no enforceable aggregator: rung 3.`
+              : `${workflow}: NO job both \`needs:\` \`${job}\` and carries \`if: always()\`. Without such an aggregator the only check runs over \`${job}\` are \`${job}\` itself — which is matrixed and/or skippable — so nothing publishes a requirable name for it. This measurement cannot stop a merge: rung 3.`);
+            rung = 3;
+          } else {
+            // ── Leg C: is that aggregator actually REQUIRED on this branch?
+            aggregator = renderedContext(usable[0]);
+            required = requiredContexts(fixture);
+            if (!required.set.has(aggregator)) {
+              problems.push(`${workflow} job \`${job}\` is aggregated by "${aggregator}", and "${aggregator}" is NOT a required status check on ${required.branch} (required today: ${[...required.set].join(', ') || 'NONE'}). The job can go red and the PR still merges, so this measurement enforces nothing: rung 3, not rung 2. Register the name — cch-w9-register-console-and-cloud-gates owns that, via scripts/required-checks-apply.sh. Softening this leg would reinstate exactly the defect it removes.`);
+              rung = 3;
+            }
+          }
+        }
       }
       if (problems.length === mBefore)
-        notes.push(`MEASURED-ELSEWHERE by ${d.measured_by.filter((p) => existsSync(`${REPO}/${p}`)).join(', ')}, run by ${d.measured_in_ci.workflow} job \`${d.measured_in_ci.job}\` on ${d.measured_in_ci.paths}. THIS RUN DID NOT EXECUTE IT — it verified only that the test file and the CI job exist.`);
+        notes.push(`MEASURED-ELSEWHERE by ${d.measured_by.filter((p) => existsSync(`${REPO}/${p}`)).join(', ')}, run by ${workflow} job \`${job}\`, whose failure is enforced through the REQUIRED status check "${aggregator}" on ${required.branch}${required.fromFixture ? ' (REQUIRED-CONTEXT SET SUPPLIED BY LEDGER FIXTURE — not this branch\'s real protection)' : ''}. THIS RUN DID NOT EXECUTE IT — it verified that the test file exists, that the CI job exists, and that a merge cannot pass while that job is red.`);
     } else if (waivers.has(d.id)) {
       // FIXTURE-ONLY. Named, printed, and unreachable on a live run (a waiver can only
       // arrive through --ledger). It exists so the clause-(a) fixtures can reach a SEAL
