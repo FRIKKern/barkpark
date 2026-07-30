@@ -76,6 +76,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # UNASSIGNED on a fresh paper open (the outer call site Map.get-guards it).
   attr(:save_status, :string, default: "")
   attr(:paper_halt, :string, default: nil)
+  # spd-w19 / D257 — the `/w/:ws/p/:proj` scope prefix, threaded from the shell.
+  # It was MISSING (a third instance of the b39 missing-thread class): every URL
+  # this component emits fell to `assigns[:scope_prefix] || ""`, which on a
+  # scoped Studio mount — the ONLY Studio mount since the P3 cutover — produced
+  # an UNROUTABLE flat `/d/:dataset/studio/...` href. The default keeps a
+  # hypothetical unthreaded call site rendering the flat grammar, which
+  # `doc_list_href/3` at the bottom of this module now spells routably too.
+  attr(:scope_prefix, :string, default: "")
 
   def studio_paper_view(assigns) do
     slug = assigns.paper_doc && assigns.paper_doc.doc_id
@@ -172,7 +180,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           </button>
           <a
             :if={@slug}
-            href={Paths.paper_path(assigns[:scope_prefix] || "", @slug)}
+            href={Paths.paper_path(@scope_prefix, @slug)}
             class="btn btn-ghost btn-sm"
             target="_blank"
             rel="noopener"
@@ -295,11 +303,27 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       ⇒ `paper_block_mode` false ⇒ `show_editor` false) and no
                       body_html either — the two production draft-only fossils.
 
-                      The <article> wrapper, its id and its data-rev are kept
-                      verbatim so the DOM contract of this branch is unchanged;
-                      only the emptiness inside it is replaced by a named,
-                      announced state. --%>
-                <article id={"paper-body-#{@slug}"} data-rev={@paper_rev}>
+                      The <article> wrapper and its data-rev are kept verbatim so
+                      the DOM contract of this branch is unchanged; only the
+                      emptiness inside it is replaced by a named, announced
+                      state.
+
+                      spd-w19 — its id is the ONE thing that had to change, and
+                      it is a correctness fix, not cosmetics. This arm shipped
+                      with the SAME `paper-body-<slug>` id the streamed block arm
+                      uses, and the repair below crosses precisely that
+                      boundary: with `BARKPARK_PAPER_CANVAS=0` the repaired
+                      document renders the streamed arm, so LiveView saw one node
+                      keep its id while GAINING `phx-update="stream"` — and a
+                      stream container never removes children it did not insert
+                      (`dom_patch.js` deletes only `[data-phx-stream-ref]` rows
+                      on reset). The notice would have SURVIVED its own repair,
+                      sitting above the new paragraph. `LiveViewTest` refuses the
+                      same transition outright ("phx-update stream requires
+                      setting an ID on each child"), which is how it was caught.
+                      A distinct id makes the swap a node REPLACEMENT, which is
+                      what a swap is. --%>
+                <article id={"paper-body-unrenderable-#{@slug}"} data-rev={@paper_rev}>
                   <%!-- The id the human owns is the PUBLISHED id: `drafts.` is a
                         storage prefix, and a never-published fossil arrives here
                         as `drafts.paper-…` (the same normalisation the sidebar's
@@ -311,9 +335,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     doc_type={@doc_type}
                     html_backed={@html_backed_body}
                     repairable={@doc_type == Content.paper_type() and not @html_backed_body}
-                    list_href={
-                      Paths.studio_path(assigns[:scope_prefix] || "", [@doc_type], @dataset)
-                    }
+                    list_href={doc_list_href(@scope_prefix, @doc_type, @dataset)}
                   />
                 </article>
               <% true -> %>
@@ -1269,6 +1291,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             therefore pinned to the wide branch, and the Tier-3 destination
             predicate could never fire at all. One attribute closes it, and the
             default keeps the pre-connect first paint byte-identical. --%>
+      <%!-- spd-w19 — and `scope_prefix` below closes the SAME class of missing
+            thread one attribute further down. Without it every href the paper
+            pane emits (the never-blank notice's way back, "Open standalone")
+            was built against an empty prefix — i.e. against a grammar this
+            router does not serve. `rebuild_panes/1` already carries it. --%>
       <%= cond do %>
         <% @editor_view == :paper -> %>
         <.studio_paper_view
@@ -1282,6 +1309,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           paper_halt={Map.get(assigns, :paper_halt)}
           shares_admin?={@caps.admin}
           dataset={@dataset}
+          scope_prefix={@scope_prefix}
           streams={@streams}
           backlinks_used_by={@backlinks_used_by}
           backlinks_linked={@backlinks_linked}
@@ -1725,6 +1753,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # the uncovered one.
   defp inspector_destination?(width_bucket, user_opened) do
     width_bucket in ["narrow", "phone"] and user_opened == true
+  end
+
+  # spd-w19 / D257 — the never-blank notice's way BACK, spelled as a ROUTE.
+  #
+  # Both grammars this router actually serves, and neither of them is the one the
+  # notice shipped with. `Paths.studio_path("", ["paper"], ds)` yields
+  # `/d/:dataset/studio/paper` — a path that exists ONLY under the
+  # `/w/:ws/p/:proj` scope, so with an empty prefix `Router.route_info/4` returns
+  # `:error` and a real request 404s. The scoped form is that same suffix WITH
+  # the prefix; the flat form the router serves is `/studio/:dataset/*path`
+  # (`Paths.flat_root/1`), which 302s into the scoped canonical.
+  #
+  # Composed from the two existing `Paths` owners rather than interpolated here —
+  # `Paths` stays the single owner of both grammars.
+  defp doc_list_href(scope_prefix, doc_type, dataset) do
+    if is_binary(scope_prefix) and scope_prefix != "" do
+      Paths.studio_path(scope_prefix, [doc_type], dataset)
+    else
+      Paths.flat_root(dataset) <> "/" <> doc_type
+    end
   end
 
   # Where the desk crumb trail renders (D168 + D180). Two clauses of the same
