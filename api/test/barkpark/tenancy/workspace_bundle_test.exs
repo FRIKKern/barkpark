@@ -1285,14 +1285,27 @@ defmodule Barkpark.Tenancy.WorkspaceBundleTest do
       assert {:ok, free} = Archive.free_space(dir)
       assert free > 0
 
-      # Sufficient → verified, with the number.
-      assert {:ok, {:verified, ^free}} = Archive.check_free_space(dir, 1)
+      # NEAR, not EQUAL. `free` was read by a previous syscall, and the disk under
+      # a CI runner moves between two reads: this assertion was `^free` and failed
+      # by 24_576 bytes on #8222, reddening a dependency bump that had nothing to
+      # do with it. A test that can fail for a reason other than the one it
+      # measures is worse than no test, because its red teaches people to re-run.
+      #
+      # The property is still asserted, and the tolerance is still tight enough to
+      # catch every way this could go wrong: a hardcoded 0, a constant, the
+      # REQUIRED bytes echoed back, or a reading of a different filesystem would
+      # all be orders of magnitude outside 64 MiB on a volume with ~85 GiB free.
+      drift = 64 * 1024 * 1024
+
+      # Sufficient → verified, with a fresh reading of the same filesystem.
+      assert {:ok, {:verified, verified}} = Archive.check_free_space(dir, 1)
+      assert_in_delta verified, free, drift
 
       # Short → a NAMED refusal carrying both sides of the comparison.
       assert {:error, {:insufficient_disk_space, info}} =
                Archive.check_free_space(dir, free + 1_000_000)
 
-      assert info.free_bytes == free
+      assert_in_delta info.free_bytes, free, drift
       assert info.required_bytes == free + 1_000_000
       assert info.dir == dir
 
