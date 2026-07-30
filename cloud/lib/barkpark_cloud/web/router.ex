@@ -9826,6 +9826,14 @@ defmodule BarkparkCloud.Web.Router do
       build_log_url: d.build_log_url,
       # Humanize the raw internal reason (reaper/builder jargon) at the JSON
       # boundary — server-side twin of app.js failureCopy() (#939). DB stays raw.
+      #
+      # site-spawner W11: `humanize/1` passes a TYPED refusal (an `E_*` extractor
+      # code, or the box-refusal prefix) through verbatim — see
+      # `FailureCopy.typed_refusal?/1`. That is what keeps this field and the raw
+      # `detail` below (`Sites.Deploy.fail/2` writes the SAME string to both) from
+      # contradicting each other in one response, which is exactly what happened
+      # while an `E_ABSOLUTE_PATH` on "/quota/index.html" rendered here as
+      # "Hetzner ran out of server capacity".
       failure_reason: FailureCopy.humanize(d.failure_reason),
       became_live_at: d.became_live_at,
       # gh-6: branch-preview identity. `environment` is "production"|"preview";

@@ -42,7 +42,69 @@ defmodule BarkparkCloud.FailureCopy do
   BEFORE the generic capacity class because a "dns zone quota" failure is a
   domain problem, not a server-capacity one. All output copy is idempotent under
   a second `humanize` pass (none of it re-matches a class token).
+
+  ## Typed refusals are NEVER humanized (site-spawner W11)
+
+  `humanize/1` matches SUBSTRINGS and replaces the WHOLE string. That is safe
+  over reaper/provider jargon (a closed set of strings we emit ourselves) and
+  actively dangerous over a refusal that interpolates a PRODUCER-CONTROLLED
+  name: nine of the prebuilt extractor's typed messages
+  (`Barkpark.Sites.PrebuiltArtifact` — `E_ABSOLUTE_PATH`, `E_PATH_TRAVERSAL`,
+  `E_BAD_NAME`, `E_UNSAFE_PARENT`, `E_WRITE_FAILED`) carry the offending tar
+  entry name. Driven through the real deploy pipeline,
+
+      the instance refused the deploy (HTTP 400): E_ABSOLUTE_PATH — entry
+      "/quota/index.html" is an absolute path — refused
+
+  matched the capacity clause and rendered as "Hetzner ran out of server
+  capacity", and a `../timeout/` PATH TRAVERSAL — a security event — rendered as
+  "A network step timed out." Eight of nine ordinary static-site slugs collide
+  (`/quota`, `/timeout`, `/unauthorized`, `/dns/failed.html`, …), and the token
+  list CANNOT be made safe: the tokens are single common English words and the
+  input is user-authored paths.
+
+  So `typed_refusal?/1` is checked FIRST and such a reason passes through
+  VERBATIM. A reason is typed when it carries an `E_*` extractor code or the
+  `box_refusal/2` prefix — in both cases the box has already said, precisely and
+  in human words, what it refused and why; canned provider copy could only
+  replace a true statement with a false one. This also keeps `failure_reason`
+  and the raw `detail` in the same JSON payload from contradicting each other.
+
+  ### The browser's second pass does NOT need the same guard (reviewed W11)
+
+  `cloud/priv/static/app.js` runs its own `failureCopy()` over whatever this
+  module already rendered, so the natural worry is that the dashboard re-mangles
+  a typed refusal after the API has stopped doing so. It does not, and the reason
+  is structural rather than lucky: every clause over there matches a LONG,
+  DISTINCTIVE phrase — `"no build source"`, `"artifact_url is empty"`,
+  `"unsupported artifact scheme"`, and `isGithubPushBlocked/1`'s
+  `"github push builds"` / `"can't be built yet"` — never a single common English
+  word, so no producer-authored tar entry name can collide with one. That is the
+  exact property this module's reaper/provider token list LACKS. If a short token
+  is ever added to `app.js`, it needs this guard mirrored there.
   """
+
+  # An extractor refusal code: `E_` followed by SCREAMING_SNAKE. Anchored on a
+  # word boundary so a provider code that merely ENDS in `…E_…`
+  # (`SERVER_LIMIT_EXCEEDED`, `RESOURCE_UNAVAILABLE`) can't match — `_` is a word
+  # character, so there is no boundary inside those.
+  @typed_code ~r/\bE_[A-Z][A-Z0-9_]*\b/
+
+  # `BarkparkCloud.Sites.Deploy.box_refusal/2`'s prefix: the box answered and said
+  # no, in its own words.
+  @box_refusal "the instance refused the deploy"
+
+  @doc """
+  Whether a raw failure reason already carries a typed refusal — an `E_*`
+  extractor code or the box-refusal prefix — and therefore must reach the user
+  unrewritten.
+  """
+  @spec typed_refusal?(term()) :: boolean()
+  def typed_refusal?(reason) when is_binary(reason) do
+    String.contains?(reason, @box_refusal) or Regex.match?(@typed_code, reason)
+  end
+
+  def typed_refusal?(_other), do: false
 
   @doc """
   Map a raw internal deploy/provision failure string to human-facing copy.
@@ -59,6 +121,13 @@ defmodule BarkparkCloud.FailureCopy do
     down = String.downcase(reason)
 
     cond do
+      # site-spawner W11: a typed refusal is already precise and already human —
+      # and it interpolates a producer-controlled entry name, so any substring
+      # clause below could replace a traversal refusal with unrelated provider
+      # copy. Checked FIRST, before any token can see it. See the moduledoc.
+      typed_refusal?(reason) ->
+        reason
+
       # dwb-webhook fail-fast interim: a GitHub push was recorded as a
       # born-`failed` deployment because source builds need the GitHub App
       # integration (gh-1, human-gated). Blocked-tone, names the workaround.
