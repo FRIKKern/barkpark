@@ -176,6 +176,7 @@ defmodule Barkpark.Content.Mutations do
     with :ok <- ensure_rev(existing, expected),
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
+         :ok <- ensure_disposition_via_verb(type, existing, incoming_content(attrs), opts),
          {:ok, doc} <- Content.create_document(type, attrs, dataset, with_if_rev(opts, expected)) do
       {:ok, doc, "createOrReplace"}
     end
@@ -267,6 +268,7 @@ defmodule Barkpark.Content.Mutations do
          :ok <- ensure_rev(existing, if_rev(attrs)),
          :ok <- ensure_task_close_is_cas(type, existing, incoming_content(attrs), attrs, opts),
          :ok <- ensure_claim_not_dropped(type, existing, incoming_content(attrs), opts),
+         :ok <- ensure_disposition_via_verb(type, existing, incoming_content(attrs), opts),
          {:ok, doc} <-
            Content.create_document(type, attrs, dataset, with_if_rev(opts, if_rev(attrs))) do
       {:ok, doc, "replace"}
@@ -311,6 +313,7 @@ defmodule Barkpark.Content.Mutations do
 
       with :ok <- ensure_task_close_is_cas(type, existing, merged, patch, opts),
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
+           :ok <- ensure_disposition_via_verb(type, existing, merged, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            do: {:ok, doc, "update"}
@@ -340,6 +343,7 @@ defmodule Barkpark.Content.Mutations do
 
       with :ok <- ensure_task_close_is_cas(type, existing, merged, patch, opts),
            :ok <- ensure_claim_not_dropped(type, existing, merged, opts),
+           :ok <- ensure_disposition_via_verb(type, existing, merged, opts),
            {:ok, doc} <-
              Content.upsert_document(type, attrs, dataset, with_if_rev(opts, if_rev(patch))),
            do: {:ok, doc, "update"}
@@ -601,6 +605,161 @@ defmodule Barkpark.Content.Mutations do
           "`claim.epoch`), so the row becomes uncloseable by its real owner. A revision " <>
           "precondition does NOT unlock this — claim, renew, release or close it through the " <>
           "task lifecycle (`bp task claim`/`release`/`close`), which record who holds the claim."
+      ]
+    }
+  end
+
+  # ── The adjudication's own fence (PDS wave 24, charter D298 amended) ──────
+  #
+  # THE CLASS THIS CLOSES: a `type:task` row that SAYS it was adjudicated and
+  # cannot say on what terms. `content.disposition` is the epic's adjudication
+  # vocabulary — `open` / `parked` / `closed` — and until this slice it had ZERO
+  # code writers repo-wide (re-derived 2026-07-30: `git grep '"disposition'`
+  # over `api/lib`, `internal`, `js` and `scripts` returned exactly two hits,
+  # neither a writer of the term). It existed because charter D298 instructed
+  # AGENTS to hand-patch it through this very door. A field with no writer has,
+  # by construction, no normaliser and no requirement, and the measured
+  # consequence was both: a vocabulary reading `OPEN` 57 / `open` 47 / `parked`
+  # 27 / ABSENT 37, and parked rows carrying nothing that says what would ever
+  # reopen them. `content.reopen_trigger` existed in zero files and on zero
+  # rows.
+  #
+  # WHY A GUARD HERE IS NOT ENOUGH ON ITS OWN, AND WHY THE VERB IS NOT EITHER.
+  # This is the two-door judgment, and it is settled by measurement, not taste:
+  #   * `Barkpark.Tasks.Stage` — the sole sanctioned writer of a durable
+  #     adjudication REASON — could not write the TERM at all. Measured pre-fix:
+  #     after a stage the persisted keys were exactly
+  #     ["description","disposition_reason","engagement","kind",
+  #      "lifecycle_status","tags"]. A stage-side requirement therefore cannot
+  #     even SEE a parked disposition, so it can never fire.
+  #   * Conversely a guard ONLY here leaves that sanctioned writer unfenced:
+  #     `api/lib/barkpark/tasks/` contains ZERO references to
+  #     `Content.apply_mutations` (the same fact the close guard above relies
+  #     on), and `Stage` persists with a bare `Repo.update_all` inside its own
+  #     advisory lock.
+  # Both doors are therefore load-bearing: this one refuses the raw write and
+  # NAMES the verb; `Tasks.Stage` makes the verb able to write the whole triple
+  # (term + reason + trigger) atomically, and refuses a park with no trigger.
+  #
+  # SCOPE: ANY CHANGE OF THE TERM, NOT JUST A HOLLOW PARK. Refusing only
+  # `parked`-without-a-trigger has a near-zero fire rate — under the charter's
+  # own recipe a park usually arrives WITH a reason, and the ungoverned
+  # two-case `OPEN`/`open` writes would sail past untouched. Refusing every raw
+  # change routes all of them to the one writer that normalises, which is what
+  # makes the vocabulary converge instead of merely making one shape harder.
+  # `now == was` is NOT a change: bookkeeping on already-adjudicated rows
+  # (digests, github sync fingerprints, compaction) passes untouched, exactly
+  # as it does for the two sibling guards.
+  #
+  # THE SECOND STEP IS FENCED TOO. Writing the term through the verb and then
+  # erasing `reopen_trigger` through this door would restore hollowness in two
+  # moves, so an api-door write that BLANKS or DROPS the trigger of a row whose
+  # resulting disposition is `parked` is refused as well. ADDING a trigger raw
+  # is deliberately still allowed — it can only make an existing hollow park
+  # honest, and the 27 already-parked rows need exactly that remediation.
+  #
+  # THERE IS NO REVISION ESCAPE, UNLIKE THE CLOSE GUARD. A rev precondition
+  # proves the caller READ the row; it says nothing about whether the value
+  # being written is a governed term with its trigger. The escape here is the
+  # verb, and the message says so.
+  #
+  # REPLICATION IS EXEMPT, checked FIRST, for the same concrete reason the
+  # claim fence states: `Sync.Applier.apply_upsert` mirrors an upstream row with
+  # `createOrReplace` + the FULL remote document, and because `apply_mutations`
+  # wraps the batch in one transaction, a refusal would roll back the ENTIRE
+  # sync batch and wedge the replica on that row with no operator recourse.
+  # `:source` is server-set (`MutateController` prepends `source: :api`), so a
+  # request body can never reach the `:sync` value.
+  #
+  # RESIDUAL HARM, MEASURED (disposition). The FRESH-CREATE exemption is
+  # inherited and unclosable at this seam: `ensure_*("task", nil, …), do: :ok`
+  # is the head of every sibling guard, and the plain `create` clause calls no
+  # guard at all. So a `createOrReplace` on a BRAND-NEW id carrying
+  # `disposition: "parked"` and no trigger is STILL ACCEPTED — measured, not
+  # assumed, and pinned by `test "a createOrReplace on a BRAND-NEW id carrying a
+  # hollow park is still ACCEPTED"`. That is not a preference: a birth has no
+  # prior revision and no prior term, so a guard there would degrade from a
+  # fence into a ban on FILING an already-adjudicated row and would break the
+  # dataset-importer shape the substrate anticipates (migration
+  # 20260528100000). The exposure is real and is stated rather than implied
+  # away: a fleet file-order that mints rows with `createOrReplace` can still
+  # birth a hollow park. Closing it needs an attribution requirement on task
+  # BIRTHS — a separate fence, tracked as its own row. If that pinning test ever
+  # inverts, that is the intended signal that the birth fence landed.
+  @disposition_key "disposition"
+  @reopen_trigger_key "reopen_trigger"
+  @trigger_required_dispositions ~w(parked)
+
+  defp ensure_disposition_via_verb("task", nil, _merged, _opts), do: :ok
+
+  defp ensure_disposition_via_verb("task", existing, merged, opts) do
+    was = existing.content || %{}
+    was_term = was[@disposition_key]
+    now_term = merged[@disposition_key]
+
+    cond do
+      # Replication mirrors upstream rows verbatim — checked BEFORE any change
+      # predicate so a mirror always applies.
+      Keyword.get(opts, :source, :api) != :api ->
+        :ok
+
+      # The term CHANGED through the raw door. Route it to the verb.
+      now_term != was_term ->
+        {:error, {:invalid_task_content, disposition_bypass_error(was_term, now_term)}}
+
+      # The term is unchanged, but the trigger that makes a park honest is
+      # being erased underneath it.
+      now_term in @trigger_required_dispositions and
+          trigger_erased?(was[@reopen_trigger_key], merged[@reopen_trigger_key]) ->
+        {:error, {:invalid_task_content, trigger_erasure_error(now_term)}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp ensure_disposition_via_verb(_type, _existing, _merged, _opts), do: :ok
+
+  # A trigger is "erased" when the row carried a real one and the write's result
+  # carries none. A blank string is not a trigger — the verb normalises the same
+  # way (`Tasks.Stage.normalize_note/1`), so the two doors agree on what
+  # "present" means.
+  defp trigger_erased?(was, now), do: present_trigger?(was) and not present_trigger?(now)
+
+  defp present_trigger?(value) when is_binary(value), do: String.trim(value) != ""
+  defp present_trigger?(_), do: false
+
+  # Same `invalid_task_content` family as the close and claim siblings (422
+  # `validation_failed` with a per-field details map) — no new error code, no
+  # new controller branch. Keyed on the field the caller actually wrote, and the
+  # message is the retry instruction: it names the verb, the flags, and the fact
+  # that the verb writes the triple atomically.
+  defp disposition_bypass_error(was, now) do
+    %{
+      @disposition_key => [
+        "cannot be set to #{inspect(now)} through /v1/data/mutate" <>
+          if(is_binary(was), do: " (currently #{inspect(was)})", else: "") <>
+          ". A disposition is an adjudication: written raw it carries no normalised term, no " <>
+          "durable reason and — for a park — nothing that says what would ever reopen it, " <>
+          "which is a row that claims to be decided and has decided nothing. A revision " <>
+          "precondition does NOT unlock this. Write it through the sanctioned verb instead " <>
+          "(`bp task stage <id> <state> --disposition <open|parked|closed> " <>
+          "--note <why> --reopen-trigger <what would reconsider it>`, " <>
+          "POST /v1/tasks/:id/stage), which normalises the term and writes term, reason and " <>
+          "trigger in one atomic write — and refuses a park with no trigger."
+      ]
+    }
+  end
+
+  defp trigger_erasure_error(term) do
+    %{
+      @reopen_trigger_key => [
+        "cannot be erased through /v1/data/mutate while this task is #{inspect(term)}. The " <>
+          "reopen trigger is the only thing that makes a park a deferral rather than a silent " <>
+          "drop: without it nothing states what would bring the row back. Re-adjudicate it " <>
+          "through the sanctioned verb (`bp task stage <id> <state> --disposition open` to " <>
+          "un-park, or `--reopen-trigger <new condition>` to replace the condition), " <>
+          "POST /v1/tasks/:id/stage."
       ]
     }
   end

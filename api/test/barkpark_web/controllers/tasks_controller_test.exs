@@ -2990,7 +2990,11 @@ defmodule BarkparkWeb.TasksControllerTest do
       mk_task!(id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
 
       content =
-        conn |> nonadmin() |> get("/v1/tasks/#{id}") |> json_response(200) |> get_in(["doc", "content"])
+        conn
+        |> nonadmin()
+        |> get("/v1/tasks/#{id}")
+        |> json_response(200)
+        |> get_in(["doc", "content"])
 
       refute Map.has_key?(content, "secret_field"),
              "private field leaked through the single-task JSON echo"
@@ -3004,7 +3008,11 @@ defmodule BarkparkWeb.TasksControllerTest do
       mk_task!(id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
 
       content =
-        conn |> authed() |> get("/v1/tasks/#{id}") |> json_response(200) |> get_in(["doc", "content"])
+        conn
+        |> authed()
+        |> get("/v1/tasks/#{id}")
+        |> json_response(200)
+        |> get_in(["doc", "content"])
 
       assert content["secret_field"] == "TOP-SECRET"
       assert content["public_field"] == "VISIBLE"
@@ -3024,6 +3032,7 @@ defmodule BarkparkWeb.TasksControllerTest do
         |> Enum.find(&(&1["doc_id"] == task.doc_id))
 
       assert doc, "task not present in the list response"
+
       refute Map.has_key?(doc["content"], "secret_field"),
              "private field leaked through the task LIST JSON echo"
 
@@ -3035,7 +3044,9 @@ defmodule BarkparkWeb.TasksControllerTest do
       from_id = uniq("seal-edge-from")
       dep_id = uniq("seal-edge-dep")
       from = mk_task!(from_id, scope, %{"public_field" => "root"})
-      dep = mk_task!(dep_id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
+
+      dep =
+        mk_task!(dep_id, scope, %{"secret_field" => "TOP-SECRET", "public_field" => "VISIBLE"})
 
       {:ok, _} = Tasks.add_dep(from.id, dep.id, "blocks", nil)
 
@@ -3053,6 +3064,106 @@ defmodule BarkparkWeb.TasksControllerTest do
              "private field leaked through the deps/edges JSON echo"
 
       assert dep_doc["content"]["public_field"] == "VISIBLE"
+    end
+  end
+
+  # -- The adjudication triple reaches the verb (PDS wave 24) ----------------
+  #
+  # WHY THIS TEST EXISTS. `Mutations.ensure_disposition_via_verb/4` refuses a
+  # raw `/v1/data/mutate` write of `content.disposition` and its 422 names
+  # `bp task stage ... --disposition ... --reopen-trigger ...` as the remedy.
+  # That message is only TRUE if this route forwards both params: as built, the
+  # slice shipped the refusal and the primitive but not the forwarding, so the
+  # refusal's own retry instruction was unexecutable -- a verb lying about its
+  # remedy, inside the fix for verbs that lie. These assert the forwarding by
+  # POST, not by reading the controller.
+  describe "POST /v1/tasks/:doc_id/stage -- the adjudication triple" do
+    test "a park with a trigger persists all three keys", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("stage-triple"), scope)
+
+      body =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/stage",
+          Jason.encode!(%{
+            state: "considering",
+            disposition: "  PARKED  ",
+            note: "waiting on the ARM runner",
+            "reopen-trigger": "when CI grows an arm64 lane"
+          })
+        )
+        |> json_response(200)
+
+      assert body["ok"] == true
+
+      content = Repo.get_by!(Document, doc_id: task.doc_id).content
+      # Trimmed AND downcased by the one writer -- this is what collapses the
+      # measured OPEN/open split, and it only happens if the param arrived.
+      assert content["disposition"] == "parked"
+      assert content["disposition_reason"] == "waiting on the ARM runner"
+      assert content["reopen_trigger"] == "when CI grows an arm64 lane"
+    end
+
+    test "a park with no trigger is a 422 that names the flag, and writes NOTHING",
+         %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("stage-hollow"), scope)
+
+      body =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/stage",
+          Jason.encode!(%{state: "considering", disposition: "parked"})
+        )
+        |> json_response(422)
+
+      assert body["reason"] == "missing_reopen_trigger"
+      assert body["disposition"] == "parked"
+      assert body["message"] =~ "--reopen-trigger"
+
+      # NOTHING was written -- not the term, and not the transition.
+      content = Repo.get_by!(Document, doc_id: task.doc_id).content
+      refute Map.has_key?(content, "disposition")
+      assert content["lifecycle_status"] == "open"
+    end
+
+    test "an off-vocabulary term is a 400 naming the vocabulary", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("stage-vocab"), scope)
+
+      body =
+        conn
+        |> authed()
+        |> post(
+          "/v1/tasks/#{task.doc_id}/stage",
+          Jason.encode!(%{state: "considering", disposition: "shelved"})
+        )
+        |> json_response(400)
+
+      assert body["reason"] == "bad_request"
+      assert body["message"] =~ "\"parked\""
+      assert body["message"] =~ "\"shelved\""
+
+      refute Map.has_key?(Repo.get_by!(Document, doc_id: task.doc_id).content, "disposition")
+    end
+
+    test "the underscore spelling of the trigger is accepted too", %{conn: conn, scope: scope} do
+      task = mk_task!(uniq("stage-underscore"), scope)
+
+      conn
+      |> authed()
+      |> post(
+        "/v1/tasks/#{task.doc_id}/stage",
+        Jason.encode!(%{
+          state: "considering",
+          disposition: "parked",
+          reopen_trigger: "when the census ratifies a second case"
+        })
+      )
+      |> json_response(200)
+
+      content = Repo.get_by!(Document, doc_id: task.doc_id).content
+      assert content["reopen_trigger"] == "when the census ratifies a second case"
     end
   end
 end

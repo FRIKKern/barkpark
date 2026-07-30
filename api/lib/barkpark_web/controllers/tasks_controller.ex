@@ -605,9 +605,18 @@ defmodule BarkparkWeb.TasksController do
 
   # ─── POST /v1/tasks/:doc_id/stage ───────────────────────────────────────
   # The sanctioned lifecycle-transition verb for the thought/backlog states
-  # (charter D8): `bp task stage <id> <state> [--object …] [--note …]`. Body:
+  # (charter D8): `bp task stage <id> <state> [--object …] [--note …]
+  #   [--disposition open|parked|closed] [--reopen-trigger …]`. Body:
   #   { "worker_id": "cycle-42", "state": "researching",
-  #     "object": "research", "note": "surveying candidate" }
+  #     "object": "research", "note": "surveying candidate",
+  #     "disposition": "parked", "reopen-trigger": "when the ARM runner exists" }
+  # PDS wave 24: disposition + reopen_trigger are forwarded because this verb is
+  # the ONLY sanctioned writer of content.disposition — the raw door refuses and
+  # names this route, so a route that dropped the params would make that refusal
+  # unfixable. `reopen_trigger` is accepted in both spellings: the manifest flag
+  # is hyphenated (`--reopen-trigger`, matching `criterion-text`) and the CLI
+  # sends the flag name verbatim, while a hand-written JSON body naturally uses
+  # the content key's underscore.
   # `state` is the target (considering | researching | open — kills go through
   # close, claims through claim). `Tasks.stage/3` enforces the shared
   # Transitions legality table, writes/clears content.engagement, and emits
@@ -623,6 +632,12 @@ defmodule BarkparkWeb.TasksController do
         |> Params.put_opt(:object, params["object"])
         |> Params.put_opt(:holder, params["worker"] || params["worker_id"])
         |> Params.put_opt(:note, params["note"])
+        # The adjudication triple (PDS wave 24). Without these two forwards the
+        # 422 that `Mutations.ensure_disposition_via_verb/4` raises names a
+        # retry instruction no operator can execute — a refusal that lies about
+        # its own remedy, which is the exact class this wave exists to close.
+        |> Params.put_opt(:disposition, params["disposition"])
+        |> Params.put_opt(:reopen_trigger, params["reopen_trigger"] || params["reopen-trigger"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       case Tasks.stage(task.id, state, opts) do
@@ -650,6 +665,30 @@ defmodule BarkparkWeb.TasksController do
             conn,
             "object must be \"research\" or \"build\", got #{inspect(object)}"
           )
+
+        {:error, {:invalid_disposition, value}} ->
+          bad_request(
+            conn,
+            "disposition must be one of " <>
+              Enum.map_join(Tasks.Stage.dispositions(), ", ", &inspect/1) <>
+              " (trimmed and downcased), got #{inspect(value)}"
+          )
+
+        # A park that cannot say what would reopen it has decided nothing. The
+        # refusal is a 422 naming the flag that fixes it — and NOTHING was
+        # written, so a retry with the flag is the whole remedy.
+        {:error, {:missing_reopen_trigger, disposition}} ->
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            ok: false,
+            reason: "missing_reopen_trigger",
+            disposition: disposition,
+            message:
+              "cannot stage a #{inspect(disposition)} disposition with no reopen trigger: " <>
+                "pass --reopen-trigger \"<what would make this worth reconsidering>\" " <>
+                "(or leave the row's existing trigger in place). Nothing was written."
+          })
 
         {:error, :not_found} ->
           not_found(conn, "task not found")
