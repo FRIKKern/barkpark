@@ -972,7 +972,7 @@ defmodule Barkpark.Plugins.Tasks do
         noun: "task",
         verb: "stage",
         summary:
-          "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,lapse_ttl_seconds,lapses_at} — an EPHEMERAL lease the TtlSweeper deletes wholesale after ~900s — on →considering/researching and clears it on →open; a `note` does NOT ride that lease, it lands on the DURABLE content.disposition_reason (no sweeper owns it) on EVERY target including →open; emits a task.staged event carrying staged.note_key. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
+          "Stage a task between the thought/backlog states — the sanctioned lifecycle-transition verb. `state` is the target: considering | researching | open. Enforces the charter-D7 transition-legality table for those targets: considering⇄researching; considering|researching→open; open→considering; the terminal/blocked reopen edges done→open, cancelled→open, blocked→open, in_progress→open; same→same. (The false-done reopen recipe DEPENDS on reopening a done task — it legitimately re-enters the ready backlog via stage, KEEPING its claim; no epoch machinery.) Writes content.engagement {object,holder,ts,lapse_ttl_seconds,lapses_at} — an EPHEMERAL lease the TtlSweeper deletes wholesale after ~900s — on →considering/researching and clears it on →open; a `note` does NOT ride that lease, it lands on the DURABLE content.disposition_reason (no sweeper owns it) on EVERY target including →open; emits a task.staged event carrying staged.note_key. PDS wave 24: this verb also owns the ADJUDICATION TRIPLE — --disposition (open|parked|closed, normalised here because one writer means one normaliser), --note/content.disposition_reason and --reopen-trigger are written in that same CAS update or not at all, and a --disposition parked with no trigger on the stage and none on the row is refused BEFORE anything is written. Raw /v1/data/mutate changes of content.disposition on a type:task are refused and name this verb. done is reached ONLY through `bp task close`, in_progress ONLY through `bp task claim`, kills go through close (→ cancelled); an illegal transition (e.g. → done) is a 422 naming from,to. NO epoch fence — thought is not contended work.",
         http: %{method: "POST", path_template: "/v1/tasks/:doc_id/stage"},
         auth_tier: "read",
         args: [
@@ -1007,6 +1007,18 @@ defmodule Barkpark.Plugins.Tasks do
             type: "string",
             summary:
               "The agent/worker owning the thought, stamped into content.engagement.holder."
+          },
+          %{
+            name: "disposition",
+            type: "string",
+            summary:
+              "The adjudication TERM (PDS wave 24): open | parked | closed, trimmed and downcased by this one writer. Written to the DURABLE content.disposition in the SAME CAS update as the transition and the reason. This verb is the ONLY writer: /v1/data/mutate refuses a raw change of content.disposition on a type:task and names this flag. Omitted → the row's existing term is left exactly as it was. Anything outside the vocabulary is a 400."
+          },
+          %{
+            name: "reopen-trigger",
+            type: "string",
+            summary:
+              "What would make a parked row worth reconsidering. Written to the DURABLE content.reopen_trigger. REQUIRED with --disposition parked unless the row already carries one — a park with no trigger is a 422 (missing_reopen_trigger) and NOTHING is written, because a park that cannot say what would reopen it has decided nothing. Blank counts as absent."
           }
         ],
         writes: true,
