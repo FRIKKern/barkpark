@@ -78,6 +78,23 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
     |> Repo.update!()
   end
 
+  # Mark the site deployed with a PREBUILT current release — bytes uploaded from
+  # somewhere else, which this fleet cannot reproduce.
+  defp deployed_prebuilt(site, bp) do
+    {:ok, marker} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+    assert marker.source == "prebuilt"
+
+    site
+    |> Ecto.Changeset.change(current_deployment_id: marker.id)
+    |> Repo.update!()
+  end
+
+  defp enable_prebuilt(site) do
+    site |> Ecto.Changeset.change(prebuilt_enabled: true) |> Repo.update!()
+  end
+
+  defp live_release(site), do: Registry.get_deployment(site.current_deployment_id)
+
   defp deployments(site), do: Registry.list_deployments(site)
 
   defp sweep, do: TemplateFreshnessWorker.perform(%Oban.Job{args: %{}})
@@ -296,6 +313,124 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
       StudioLinkFakeHttpClient.program(%{})
       assert {:ok, %{enqueued: 1, duplicate: 1}} = sweep()
       assert analytics_reads() == 2
+    end
+  end
+
+  describe "the PREBUILT refusal (charter D92/D105)" do
+    test "FAIL-BEFORE: the UNGUARDED enqueue mints a box build that DISPLACES the uploaded release" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+      site = site_fixture(bp, "static", "astro") |> deployed_prebuilt(bp)
+
+      live = live_release(site)
+      assert live.source == "prebuilt"
+
+      # This is the pre-guard sweep, VERBATIM: `enqueue_unforced/3` called
+      # `Deploy.enqueue(site, bp, false, "template-auto", rev)` and let `source`
+      # default. Reproduced here so the hazard is RECORDED, not asserted about.
+      {:ok, rev} = Deploy.content_rev_probe(site, bp)
+      assert {:ok, ghost} = Deploy.enqueue(site, bp, false, "template-auto", rev)
+
+      assert ghost.source == "box-build",
+             "the unguarded sweep enqueues a BOX build over an uploaded release"
+
+      refute ghost.build_id == live.build_id,
+             "and at a DIFFERENT build_id — the prebuilt mint folds a nonce, so the " <>
+               "unforced no-op can never protect it: SWITCH would serve box-built bytes " <>
+               "and RETIRE would eventually delete the upload"
+
+      # AFTER: the guarded sweep refuses the same site instead. The summary is the
+      # proof, quoted key-for-key.
+      assert {:ok,
+              %{
+                refused: 1,
+                enqueued: 0,
+                duplicate: 0,
+                skipped: 0,
+                failed: 0,
+                deferred: 0,
+                code_rev_unknown: 0
+              }} = sweep()
+    end
+
+    test "keys on the LIVE RELEASE's source, BOTH ways: prebuilt-current refused, enabled-but-box-built STILL SWEPT" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+
+      # (a) live release is prebuilt, and the OPT-IN FLAG IS OFF — the flag is not
+      # what the guard reads.
+      prebuilt = site_fixture(bp, "static", "astro") |> deployed_prebuilt(bp)
+      refute prebuilt.prebuilt_enabled
+
+      assert {:ok, %{refused: 1, enqueued: 0}} = sweep()
+
+      # (b) the mirror image: prebuilt_enabled TRUE but the live release is a box
+      # build. Keying on the flag would freeze this site's template freshness
+      # forever — it must still be swept.
+      _boxy =
+        site_fixture(bp, "static", "astro")
+        |> enable_prebuilt()
+        |> deployed(bp)
+
+      assert {:ok, %{refused: 1, enqueued: 1}} = sweep(),
+             "an OPT-IN flag is not a provenance fact: a site serving box-built bytes " <>
+               "must keep receiving template freshness"
+    end
+
+    test "mints NO deployment row for a refused site — the counted outcome and a log line are the whole trace" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+      site = site_fixture(bp, "static", "astro") |> deployed_prebuilt(bp)
+
+      before = length(deployments(site))
+      assert {:ok, %{refused: 1}} = sweep()
+      # A second tick too: 24 rows/day/site would bury the deployment stream.
+      assert {:ok, %{refused: 1}} = sweep()
+
+      assert length(deployments(site)) == before,
+             "the hourly sweep is a TIMER — no user intent stands behind it, so it owes no row"
+    end
+
+    test "FLEET-ABORT LANDMINE: :refused is a SEEDED key, and a healthy site on another box still builds" do
+      # Mutation proof, asserted rather than trusted: `perform/1` reduces with
+      # `Map.update!(acc, outcome, …)`, so returning :refused UNSEEDED raises
+      # KeyError mid-reduce — aborting the sweep for the WHOLE FLEET, and
+      # asymmetrically (sites ordered before the offender already enqueued).
+      unseeded = %{
+        enqueued: 0,
+        duplicate: 0,
+        skipped: 0,
+        failed: 0,
+        deferred: 0,
+        code_rev_unknown: 0
+      }
+
+      assert_raise KeyError, fn -> Map.update!(unseeded, :refused, &(&1 + 1)) end
+
+      # And the surviving-site half, against the real sweep: the refused site is
+      # created FIRST (list_deployed_content_sites orders inserted_at ASC), so an
+      # unseeded atom would have raised before the healthy site was ever visited.
+      StudioLinkFakeHttpClient.program(%{})
+      bp1 = team_fixture() |> live_barkpark()
+      bp2 = team_fixture() |> live_barkpark("https://beta.barkpark.cloud")
+
+      _refused = site_fixture(bp1, "static", "astro") |> deployed_prebuilt(bp1)
+      healthy = site_fixture(bp2, "static", "astro") |> deployed(bp2)
+
+      assert {:ok, %{refused: 1, enqueued: 1, failed: 0, skipped: 0}} = sweep()
+
+      assert Enum.any?(deployments(healthy), &(&1.trigger == "template-auto")),
+             "one refused site must never cost the rest of the fleet its freshness sweep"
+    end
+
+    test "a refused site costs NO analytics read — the guard runs before the box is touched" do
+      StudioLinkFakeHttpClient.program(%{})
+      bp = team_fixture() |> live_barkpark()
+      _site = site_fixture(bp, "static", "astro") |> deployed_prebuilt(bp)
+
+      StudioLinkFakeHttpClient.program(%{})
+      assert {:ok, %{refused: 1}} = sweep()
+      assert analytics_reads() == 0
     end
   end
 

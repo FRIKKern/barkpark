@@ -75,8 +75,8 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
 
   Per-site failures are isolated and logged; one unreachable box never aborts the
   sweep for the rest of the fleet. `perform/1` returns `{:ok, summary}` with the
-  counts (`enqueued`, `duplicate`, `skipped`, `failed`, `deferred`) so a run
-  reads honestly in the Oban job record.
+  counts (`enqueued`, `duplicate`, `skipped`, `failed`, `deferred`, `refused`) so
+  a run reads honestly in the Oban job record.
 
   ## The INERT-SWEEP counter (`code_rev_unknown`)
 
@@ -92,6 +92,40 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
   It is a KEY, never a sixth OUTCOME atom: the reduce is `Map.update!(acc,
   outcome, …)` over a seeded map, so an unseeded atom raises `KeyError` at
   runtime. It is incremented ALONGSIDE the real outcome, not instead of it.
+
+  ## The PREBUILT REFUSAL (charter D92/D105) — and its one-hour perishability
+
+  A site whose CURRENT release was uploaded (`source = "prebuilt"`) is REFUSED,
+  counted `refused`, and gets NO deployment row. Without the refusal this sweep
+  is the unbidden overwrite: it enqueues an ordinary box build (`source`
+  defaults to `"box-build"`), the box rebuilds from source, HEALTH passes
+  honestly on the box's OWN bytes, SWITCH is provenance-blind — and the uploaded
+  release is gone. RETIRE (keep newest 5) eventually DELETES it, so rollback
+  cannot get it back either.
+
+  PERISHABILITY, the reason this refusal is not optional: the unforced sweep
+  no-ops only while an UNFORCED BOX-BUILD row already exists at the current
+  `code_rev`/`content_rev`/config tuple, and a prebuilt `build_id` can NEVER be
+  that row — the mint folds a `prebuilt_nonce` (`Deploy.maybe_prebuilt_nonce/2`),
+  so it hashes outside the unforced tuple by construction. Therefore an
+  unguarded sweep mints a real box build for a prebuilt-current site on its very
+  next tick: any live prebuilt release has a ONE-HOUR ceiling (the 41-past cron)
+  and a floor of the next tick.
+
+  The guard keys on the CURRENT RELEASE'S `source`, NEVER on
+  `sites.prebuilt_enabled`. The flag is an OPT-IN, not a provenance fact: a site
+  can be enabled and still be serving a box build, and keying on the flag would
+  freeze that site's template freshness FOREVER. Both directions are tested.
+
+  NO deployment row is minted for a refusal, deliberately: 24 rows per day per
+  site would bury the deployment stream, and no user intent stands behind a
+  timer tick (the CONTENT path is the opposite case — a human published, and the
+  webhook already answered 202, so `AutoDeployWorker` owes a visible row).
+
+  `refused` is a SEEDED key in the zero map for the same reason
+  `code_rev_unknown` is: the reduce is `Map.update!(acc, outcome, …)`, so an
+  unseeded atom raises `KeyError` mid-reduce and aborts the sweep for the WHOLE
+  FLEET asymmetrically — every site ordered after the offender gets nothing.
 
   ## One analytics read per site per tick
 
@@ -114,7 +148,7 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
     ]
 
   alias BarkparkCloud.Registry
-  alias BarkparkCloud.Registry.{Barkpark, Site}
+  alias BarkparkCloud.Registry.{Barkpark, Deployment, Site}
   alias BarkparkCloud.Sites.Deploy
 
   require Logger
@@ -125,18 +159,23 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
 
   @impl Oban.Worker
   def perform(%Oban.Job{}) do
-    # FIVE OUTCOME KEYS plus ONE OBSERVABILITY KEY. `code_rev_unknown` is
+    # SIX OUTCOME KEYS plus ONE OBSERVABILITY KEY. `code_rev_unknown` is
     # deliberately NOT a sixth outcome: the reduce below is `Map.update!(acc,
     # outcome, …)`, so a sixth ATOM returned from `sweep_site/1` would raise
     # KeyError at runtime. It is a key seeded here and incremented ALONGSIDE the
     # real outcome — a site is counted once as enqueued/duplicate/… and, when
     # its box has no code revision, once again here.
+    # `refused` is an OUTCOME (a site is counted refused INSTEAD of
+    # enqueued/duplicate/…), and it is seeded HERE in the same edit that returns
+    # the atom — an unseeded atom raises KeyError inside the Map.update!/3 below
+    # and aborts the sweep for the whole fleet. See "The PREBUILT REFUSAL".
     zero = %{
       enqueued: 0,
       duplicate: 0,
       skipped: 0,
       failed: 0,
       deferred: 0,
+      refused: 0,
       code_rev_unknown: 0
     }
 
@@ -173,6 +212,17 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
       )
     end
 
+    # ONE log line for the whole tick, and NO deployment row — see "The PREBUILT
+    # REFUSAL" in the moduledoc: 24 rows/day/site would bury the deployment
+    # stream, and no user intent stands behind a timer tick.
+    if summary.refused > 0 do
+      Logger.info(
+        "template-freshness: #{summary.refused} site(s) refused — their CURRENT release was " <>
+          "uploaded (source=prebuilt), and a box build here would overwrite bytes this fleet " <>
+          "cannot reproduce. Re-upload with `bp cloud site deploy <site> --prebuilt <dir>`."
+      )
+    end
+
     if summary.code_rev_unknown > 0 do
       Logger.warning(
         "template-freshness: #{summary.code_rev_unknown} site(s) ride a box reporting NO " <>
@@ -189,6 +239,34 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorker do
   # code_rev_known?}` — the second element is the observability half (residue 1)
   # and never replaces the outcome.
   defp sweep_site(%Site{} = site) do
+    # The refusal comes FIRST — before the box is even read. A refused site costs
+    # no analytics read, and it must not be diagnosed code-rev-unknown either:
+    # one site, one outcome (the `skipped` arm reasons the same way).
+    if prebuilt_release?(site) do
+      {:refused, true}
+    else
+      sweep_box_built_site(site)
+    end
+  end
+
+  # Does this site's CURRENT release carry uploaded bytes? Keys on the live
+  # release's `source`, NEVER on `site.prebuilt_enabled` — the flag is an opt-in,
+  # not a provenance fact, and keying on it would freeze an enabled-but-box-built
+  # site's template freshness forever (proven both ways in the suite).
+  #
+  # A never-deployed site cannot reach here (`list_deployed_content_sites/0`
+  # requires `current_deployment_id`), but nil-safety is still explicit: an
+  # unreadable pointer must not be read as "not prebuilt" by accident.
+  defp prebuilt_release?(%Site{current_deployment_id: nil}), do: false
+
+  defp prebuilt_release?(%Site{current_deployment_id: id}) do
+    case Registry.get_deployment(id) do
+      %Deployment{} = deployment -> Deployment.prebuilt?(deployment)
+      nil -> false
+    end
+  end
+
+  defp sweep_box_built_site(%Site{} = site) do
     with %Barkpark{} = bp <- Registry.get_barkpark(site.barkpark_id),
          {:ok, rev} <- Deploy.content_rev_probe(site, bp) do
       # Hand the ALREADY-PROBED rev to enqueue (residue 2a). Without it
