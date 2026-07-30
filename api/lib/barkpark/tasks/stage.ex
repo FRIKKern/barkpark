@@ -17,9 +17,10 @@ defmodule Barkpark.Tasks.Stage do
        the same per-task key the close/pulse/move family uses, so a stage
        serializes with any concurrent CAS write on the same row.
     2. **Legality gate** — read the current `lifecycle_status` (`from`); refuse
-       with `{:error, {:illegal_transition, from, to}}` when `to` is not a
-       staging target OR `Transitions.legal?/2` says no. The controller renders
-       that as a 422 naming `from`, `to`, and the sanctioned verb.
+       with `{:error, {:illegal_transition, from, to}}` when `to` is neither a
+       staging target nor the row's own current state, OR when
+       `Transitions.legal?/2` says no. The controller renders that as a 422
+       naming `from`, `to`, and the sanctioned verb.
     3. **Engagement map** (charter D3) — a `→ considering`/`→ researching`
        stage WRITES `content.engagement = %{object, holder, ts,
        lapse_ttl_seconds, lapses_at}` (`object ∈ {"research","build"}`, how a
@@ -38,10 +39,29 @@ defmodule Barkpark.Tasks.Stage do
        transaction (`document.staged = %{from, to, object, holder, note}`), then
        a post-commit PubSub broadcast so live boards see the thought move.
 
-  A same→same stage (`from == to`, both a staging target) is legal (the no-op
-  clause in `Transitions`) and still writes — it lets a worker refresh the
-  engagement object/holder on a task already in that state, mirroring how
-  `relabel_by_id` always persists even on a no-op label set.
+  A same→same stage (`from == to`) is legal (the no-op clause in `Transitions`)
+  and still writes — it lets a worker refresh the engagement object/holder on a
+  task already in that state, mirroring how `relabel_by_id` always persists even
+  on a no-op label set.
+
+  ## Adjudication without resurrection (PDS wave 25)
+
+  The same→same no-op is admitted on EVERY status, not just the staging targets
+  — `done → done`, `blocked → blocked`, `in_progress → in_progress` included.
+  That is the door through which a FINISHED row states its verdict.
+
+  Stage is the only sanctioned writer of `content.disposition` (the raw
+  `/v1/data/mutate` door refuses a disposition change on a `type:task` and names
+  this verb), so while `@stageable` gated the target alone, a done row could be
+  adjudicated only by first being reopened — trading an off-vocabulary lie for a
+  LIFECYCLE lie (a row saying `open` while carrying `claim.closed_by`, back in
+  `bp task ready`). It is now `to in @stageable or from == to`.
+
+  This widens ADJUDICATION, never MOVEMENT: `from` is read from the row under
+  the advisory lock, never from caller input, so `from == to` can only ever be
+  satisfied by a row already in that state — `any → done` and `any → in_progress`
+  stay refused exactly as before, and `do_stage` never touches `content.claim`,
+  so a `done → done` adjudication leaves close attribution byte-identical.
 
   ## The durable/ephemeral split (PDS wave 23)
 
@@ -258,8 +278,9 @@ defmodule Barkpark.Tasks.Stage do
   Returns `{:ok, doc}`, or:
 
     * `{:error, :not_found}` — no such task.
-    * `{:error, {:illegal_transition, from, to}}` — `to` is not a staging
-      target, or `from → to` is refused by the legality table.
+    * `{:error, {:illegal_transition, from, to}}` — `to` is neither a staging
+      target nor the row's own current state (the in-place adjudication no-op),
+      or `from → to` is refused by the legality table.
     * `{:error, {:invalid_object, object}}` — engagement object not in
       `#{inspect(@objects)}`.
     * `{:error, {:invalid_disposition, value}}` — term outside
@@ -328,13 +349,30 @@ defmodule Barkpark.Tasks.Stage do
     end
   end
 
-  # `to` must be a staging target AND the transition must be legal. Both refusals
-  # collapse to one `{:illegal_transition, from, to}` shape — the controller
-  # renders either as a 422 naming from/to and the sanctioned verb (a caller
-  # asking to stage to `cancelled`/`in_progress`/`done` is told which verb to
-  # use). Legal same→same no-ops pass (Transitions.legal?/2).
+  # `to` must be a staging target OR a same-state no-op on the row we hold the
+  # lock on, AND the transition must be legal. Both refusals collapse to one
+  # `{:illegal_transition, from, to}` shape — the controller renders either as a
+  # 422 naming from/to and the sanctioned verb (a caller asking to MOVE a task
+  # to `cancelled`/`in_progress`/`done` is told which verb to use).
+  #
+  # THE `from == to` CLAUSE IS AN ADJUDICATION DOOR, NOT A MOVEMENT DOOR (PDS
+  # wave 25 / D348). Before it, a finished row was UNWRITABLE: `stage` is the
+  # only sanctioned writer of `content.disposition`, the raw `/v1/data/mutate`
+  # door refuses a disposition change on a `type:task`, and `done` was not in
+  # `@stageable` — so a done/blocked/in_progress row could be adjudicated only
+  # by first being RESURRECTED (`→ open`), trading an off-vocabulary lie for a
+  # lifecycle lie. This clause lets such a row carry its verdict in place.
+  #
+  # It cannot be used to reach a state: `from` is read from the locked row
+  # (`current_status/1`), never from caller input, so `from == to` is satisfiable
+  # only by a row ALREADY in that state — the `any → done` / `any → in_progress`
+  # refusals are untouched. It cannot forge a claim either: `do_stage` writes
+  # `lifecycle_status`, the engagement lease and the adjudication triple, and
+  # never reads or writes `content.claim`, so close attribution survives a
+  # `done → done` adjudication byte-for-byte. `Transitions.legal?/2` still gates
+  # it, which is what keeps an unknown status string (not in `@statuses`) out.
   defp check_stageable(from, to) do
-    if to in @stageable and Transitions.legal?(from, to) do
+    if (to in @stageable or from == to) and Transitions.legal?(from, to) do
       :ok
     else
       {:error, {:illegal_transition, from, to}}

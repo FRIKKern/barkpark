@@ -618,9 +618,11 @@ defmodule BarkparkWeb.TasksController do
   # sends the flag name verbatim, while a hand-written JSON body naturally uses
   # the content key's underscore.
   # `state` is the target (considering | researching | open — kills go through
-  # close, claims through claim). `Tasks.stage/3` enforces the shared
-  # Transitions legality table, writes/clears content.engagement, and emits
-  # task.staged. An illegal transition (e.g. → done) is a 422 naming from/to
+  # close, claims through claim) OR the row's own current state, the PDS-wave-25
+  # same-state no-op that lets a FINISHED row record its adjudication without
+  # being resurrected. `Tasks.stage/3` enforces the shared Transitions legality
+  # table, writes/clears content.engagement, and emits task.staged. An illegal
+  # transition (e.g. open → done) is a 422 naming from/to
   # and the sanctioned verb — never a silent no-op. Mirrors close/2's shape
   # (find_task_by_doc_id → primitive → minimal receipt) MINUS the epoch fence
   # (thought is not contended work).
@@ -647,6 +649,14 @@ defmodule BarkparkWeb.TasksController do
         {:error, {:illegal_transition, from, to}} ->
           # A refused transition (bad target OR an illegal table pair) is a 422
           # naming both ends and the sanctioned verb — the guard TEACHES.
+          #
+          # PDS-D349: the old text said stage "moves only between
+          # considering|researching|open", which the wave-25 widening made
+          # FALSE — a row can also be staged to its OWN current state to carry
+          # an adjudication in place (`done → done`). In an epic about verbs
+          # that lie, a refusal that misstates its own rule is the same defect
+          # one layer down, so the message now names BOTH doors: what stage
+          # MOVES between, and the no-op it adjudicates on.
           conn
           |> put_status(:unprocessable_entity)
           |> json(%{
@@ -655,9 +665,14 @@ defmodule BarkparkWeb.TasksController do
             from: from,
             to: to,
             message:
-              "cannot stage #{from} → #{to}: stage moves only between " <>
-                "considering|researching|open — use `bp task close` (→ cancelled) " <>
-                "or `bp task claim` (→ in_progress); `done` is reached only via close"
+              "cannot stage #{from} → #{to}: stage MOVES a task only between " <>
+                "considering|researching|open (plus the sanctioned reopen edges " <>
+                "→ open), and otherwise only accepts a same-state no-op " <>
+                "(state == the row's current #{inspect(from)}) to record an " <>
+                "adjudication in place — use `bp task close` (→ cancelled) or " <>
+                "`bp task claim` (→ in_progress); `done` is REACHED only via close, " <>
+                "though a done row can be adjudicated with " <>
+                "`bp task stage <id> done --disposition …`"
           })
 
         {:error, {:invalid_object, object}} ->
