@@ -69,6 +69,19 @@ defmodule BarkparkCloud.FailureCopy do
   in human words, what it refused and why; canned provider copy could only
   replace a true statement with a false one. This also keeps `failure_reason`
   and the raw `detail` in the same JSON payload from contradicting each other.
+
+  ### The browser's second pass does NOT need the same guard (reviewed W11)
+
+  `cloud/priv/static/app.js` runs its own `failureCopy()` over whatever this
+  module already rendered, so the natural worry is that the dashboard re-mangles
+  a typed refusal after the API has stopped doing so. It does not, and the reason
+  is structural rather than lucky: every clause over there matches a LONG,
+  DISTINCTIVE phrase — `"no build source"`, `"artifact_url is empty"`,
+  `"unsupported artifact scheme"`, and `isGithubPushBlocked/1`'s
+  `"github push builds"` / `"can't be built yet"` — never a single common English
+  word, so no producer-authored tar entry name can collide with one. That is the
+  exact property this module's reaper/provider token list LACKS. If a short token
+  is ever added to `app.js`, it needs this guard mirrored there.
   """
 
   # An extractor refusal code: `E_` followed by SCREAMING_SNAKE. Anchored on a
