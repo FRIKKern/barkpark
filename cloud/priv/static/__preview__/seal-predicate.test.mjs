@@ -393,15 +393,6 @@ test('MUTATION PROOF: with `considering` dropped from the residue set, the same 
 // is now proven by MUTATION (stripping CCH-D5's measurement back to `unmeasured:`)
 // rather than by the register happening to contain a rung-3 entry — which is the
 // stronger form, because it survives the register being paid off again.
-// INHERITED RED, MEASURED AT WAVE 9 AND NOT CAUSED BY IT. This test is RED on
-// origin/main as well: the pristine tree runs 31 tests / 30 pass / 1 fail, and the
-// one failure is this. Its cause is CCH-D6's rung-1 guard `design/emit-fence.test.mjs`,
-// which exits 1 because the design-token tree really has drifted (the same drift that
-// keeps `Design-token drift gate (blocking)` red on main itself). That is a TRUE
-// statement about clause (b), so it is left standing: relaxing this assertion to make
-// the suite green would be the exact defect this epic exists to remove, and design/**
-// is outside this slice's fence. Filed rather than smuggled: see the child row on
-// cch-w9-cloud-gate-shim-rung2.
 test('clause (b): every registered defect is measured, and rung 3 would still red by name', () => {
   const { status, out } = run(['--ledger', withRequired('ladder-no-waiver.json'), '--repo', REPO]);
   assert.equal(status, SEAL, `no rung-3 entry remains, so clause (b) passes: ${token(out)}`);

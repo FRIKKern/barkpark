@@ -2989,6 +2989,35 @@ function sessionsOf(d, state) {
   return state.sessions;
 }
 
+// cch-w10-destroy-shrink-oracle-merged — sessionsOf's SHAPE, generalised to the
+// other lists a destroy verb shrinks (providers, members, invitations, env-vars,
+// barkparks). The three properties that make a shrink OBSERVABLE, all inherited
+// verbatim from sessionsOf and all load-bearing:
+//   1. OPT-IN. No `state` → the old read-only `.slice()`, byte-for-byte. mock.js
+//      is the 3-arg caller and must stay stateless and unchanged.
+//   2. PER-BOOT COPY. Rows are copied, so a destroy can never leak across boots
+//      by mutating the module-level fixture (scenario order would decide truth).
+//   3. THE GET READS THROUGH THE SAME FUNCTION. This is the whole point: a
+//      DELETE that splices a list nobody re-reads proves nothing, because the
+//      refetch would answer the pristine fixture either way.
+// `key` is the SCENARIO field name and doubles as the state-bag slot, so the two
+// can never drift apart.
+function listOf(d, state, key) {
+  if (!state) return (d[key] || []).slice();
+  if (!state[key]) state[key] = (d[key] || []).map((x) => Object.assign({}, x));
+  return state[key];
+}
+
+// The destroy half: 404 on a miss (never a silent success — a wrong id must be
+// distinguishable from a right one), 200 {ok} on a hit, and the splice ONLY when
+// a state bag was supplied, so the stateless caller keeps its old 200.
+function destroyFrom(list, state, pred) {
+  const i = list.findIndex(pred);
+  if (i < 0) return { status: 404, body: { error: "not_found" } };
+  if (state) list.splice(i, 1);
+  return { status: 200, body: { ok: true } };
+}
+
 // route(name, method, path, state) → { status, body } | null.
 //   Returns null for a path this harness does not model, so a caller can decide
 //   whether to 404 or pass through. Query strings are ignored (the SPA never
@@ -3209,7 +3238,21 @@ export function route(name, method, path, state) {
     if (method === "GET") return { status: 200, body: { onboarding: d.me ? d.me.onboarding : null } };
     return { status: 200, body: { onboarding: d.me ? d.me.onboarding : null } };
   }
-  if (p === "/v1/barkparks") return { status: 200, body: { barkparks: d.barkparks } };
+  if (p === "/v1/barkparks") return { status: 200, body: { barkparks: listOf(d, state, "barkparks") } };
+  // DELETE /v1/barkparks/:id → the teardown BOTH console destroy verbs issue
+  // (the CLI card's typed Decommission and the header's Retry removal). It was
+  // UNMODELLED: it fell through to the terminal `/v1/` 200 {} at the bottom of
+  // route(), so the fleet answered the same list before and after and no oracle
+  // could tell a teardown from a no-op.
+  // METHOD-GUARDED, deliberately: the exact-path arm above carries no method
+  // guard at all, and an unguarded two-segment matcher here would swallow the
+  // instance GET. There is no other two-segment /v1/barkparks matcher (the
+  // domain-status / metrics / app-token arms are all three-segment), so this is
+  // the whole of the surface.
+  const bpOne = p.match(/^\/v1\/barkparks\/([^/]+)$/);
+  if (bpOne && method === "DELETE") {
+    return destroyFrom(listOf(d, state, "barkparks"), state, (b) => b.id === bpOne[1]);
+  }
   if (p === "/v1/subscription") return { status: 200, body: { subscription: d.subscription } };
   // gr-p4-billing (G-01): the owner-gated billing WRITES, unmodeled before this
   // slice. Default 200; a scenario overrides via d.billingPortal / d.billingCancel
@@ -3387,13 +3430,16 @@ export function route(name, method, path, state) {
   // the /:kind/catalog GET (those are two-segment; these are exact or one-segment
   // DELETE, so they never collide with the capabilities/catalog reads above).
   if (p === "/v1/providers" && method === "GET") {
-    return { status: 200, body: { providers: d.providers || [] } };
+    return { status: 200, body: { providers: listOf(d, state, "providers") } };
   }
   if (p === "/v1/providers" && method === "POST") {
     return d.providerConnect || { status: 201, body: { provider: { kind: "hetzner", label: "main" } } };
   }
-  if (method === "DELETE" && /^\/v1\/providers\/[^/]+$/.test(p)) {
-    return { status: 200, body: { ok: true } };
+  // Disconnect is a per-KIND destroy (the server deletes every credential of that
+  // kind), so the roster shrinks by the row whose kind matches — not by id.
+  const provOne = p.match(/^\/v1\/providers\/([^/]+)$/);
+  if (method === "DELETE" && provOne) {
+    return destroyFrom(listOf(d, state, "providers"), state, (x) => (x.kind || "") === provOne[1]);
   }
 
   // S13: the per-host DNS/TLS checklist. A scenario without a `domainStatus`
@@ -3462,13 +3508,20 @@ export function route(name, method, path, state) {
   // A scenario carries `members`/`invitations` fixtures; absent → honest empty
   // lists (the panel never errors on an empty team). Invitations are admin-gated
   // server-side, but the client already skips the call for a plain member, so a
-  // member scenario simply omits the fixture. POST/DELETE are click-driven (inert
-  // in smoke) — modelled here so a live/browser exercise reconciles.
+  // member scenario simply omits the fixture. The DELETEs are click-driven and,
+  // since cch-w10, actually DRIVEN: members-populated clicks Remove and Revoke
+  // for real, so both lists are served from the per-boot store and shrink.
   if (/^\/v1\/teams\/[^/]+\/members$/.test(p) && method === "GET") {
-    return { status: 200, body: { members: d.members || [] } };
+    return { status: 200, body: { members: listOf(d, state, "members") } };
   }
-  if (/^\/v1\/teams\/[^/]+\/members\/[^/]+$/.test(p) && (method === "DELETE" || method === "PATCH")) {
-    return d.memberWrite || { status: 200, body: { ok: true } };
+  const memberOne = p.match(/^\/v1\/teams\/[^/]+\/members\/([^/]+)$/);
+  if (memberOne && (method === "DELETE" || method === "PATCH")) {
+    // A scenario that pins a failure (memberWrite) keeps its exact envelope AND
+    // its roster: a 403 that still shrank the list would be a fixture lying in
+    // the opposite direction. PATCH is a role change, never a removal.
+    if (d.memberWrite) return d.memberWrite;
+    if (method === "PATCH") return { status: 200, body: { ok: true } };
+    return destroyFrom(listOf(d, state, "members"), state, (x) => x.user_id === memberOne[1]);
   }
   if (/^\/v1\/teams\/[^/]+\/invitations$/.test(p)) {
     if (method === "POST") {
@@ -3477,10 +3530,11 @@ export function route(name, method, path, state) {
         body: { invitation: { id: "inv_new", email: "new@acme.com", role: "member", expires_at: tPlus(7 * 86400), inserted_at: T }, accept_url: "http://localhost/#/invitations/accept?token=preview-new" },
       };
     }
-    return { status: 200, body: { invitations: d.invitations || [] } };
+    return { status: 200, body: { invitations: listOf(d, state, "invitations") } };
   }
-  if (/^\/v1\/teams\/[^/]+\/invitations\/[^/]+$/.test(p) && method === "DELETE") {
-    return { status: 200, body: { ok: true } };
+  const inviteOne = p.match(/^\/v1\/teams\/[^/]+\/invitations\/([^/]+)$/);
+  if (inviteOne && method === "DELETE") {
+    return destroyFrom(listOf(d, state, "invitations"), state, (x) => x.id === inviteOne[1]);
   }
 
   // G-06 ENV-VARS: the ROW model (member-read / admin-write). GET is member-
@@ -3495,10 +3549,11 @@ export function route(name, method, path, state) {
       };
     }
     if (d.envVarsDenied) return { status: 403, body: { error: "forbidden" } };
-    return { status: 200, body: { env_vars: d.envVars || [] } };
+    return { status: 200, body: { env_vars: listOf(d, state, "envVars") } };
   }
-  if (/^\/v1\/env-vars\/[^/]+$/.test(p) && method === "DELETE") {
-    return { status: 200, body: { ok: true } };
+  const envOne = p.match(/^\/v1\/env-vars\/([^/]+)$/);
+  if (envOne && method === "DELETE") {
+    return destroyFrom(listOf(d, state, "envVars"), state, (x) => x.id === envOne[1]);
   }
 
   // gr-p5 OPERATOR: the session-gated /v1/operator/* seam. `operatorDenied`
