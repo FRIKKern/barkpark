@@ -5392,3 +5392,101 @@ grepped for export consumers by the survey (the verify round closed that — zer
 and the terminal-verb lane did NOT read this charter for a prior ruling on terminal adjudication (this
 decision is that ruling). The wave-25 charter reaches main as a docs-only PR, so the WAVE PAPER
 `pds-wave-25-2026-07-30` carries these decisions IN FULL for any builder flying before it merges.
+
+### Wave 25 2026-07-30 — "The Round, and the Fixes Are the Round" — REVIEWED. Grade A− (paper `pds-wave-25-2026-07-30`)
+
+**THE ROUND RAN. That is the headline, and it is the debt wave 24 left.** Wave 24 was graded B+ because
+it built the apparatus for a triage round and wrote ZERO adjudications — "the backlog is exactly as long
+and exactly as untruthful as at Strategize." Wave 25 was chartered to make the round itself the spine,
+and the round is done. **The reviewer re-derived every shard independently from the pinned manifest off
+the charter branch rather than trusting a single shard report**, and the numbers hold:
+
+| Shard class | Pinned | Counted OK | Failing |
+|---|---|---|---|
+| `parked` | 27 | **27** | 0 |
+| `open-normalise` | 103 | **103** | 0 |
+| `bare` | 34 | **33** | 1 (the honestly-handed-off blocked row) |
+| `terminal-with-disposition` | 15 | 0 | 15 — **deferred round 2, by design** |
+
+The live census agrees: `--assert-round-done` now reads `live adjudicated rows carrying a reason
+155/155 PASS` and `live parked rows carrying a reopen_trigger 29/29 PASS`, against 178 non-empty reasons
+and **178 distinct reason hashes** — no two rows share a reason. At Strategize those same lines read
+34 silent, 27 untriggered, 74 off-vocabulary.
+
+**RECOVERY BEAT INVENTION, AND IT WAS MEASURED.** All 19 boilerplate parks had their row-specific
+`engagement.note` mined out of the revision archive through `bp doc history` + `bp doc revision`, serial
+and fail-loud on 429 — 19 of 19 recovered, 19 distinct by md5, zero 429s and zero 500s across the mine,
+so no note was silently missed and read as "absent". 16 were pure restorations; 3 pre-template stubs were
+enriched ON TOP of their archived sentence with a provenance line saying so outright. **The boilerplate's
+own claim that "the original adjudication text is NOT recoverable" was FALSE 19 of 19 and now appears on
+ZERO rows.** The 8 buried exemplar parks were left byte-identical — their `reopen_trigger` was added
+ADDITIVELY through the raw `/v1/data/mutate` door precisely because `do_stage` rewrites the whole triple
+in one CAS, and `md5(disposition_reason)` is proven identical before and after on all 8.
+
+**THE 13 FREE CLOSES ARE THE PART THAT SHRANK THE BOARD, and they were earned by reading the tree, not
+by replaying citations.** Two were traps pointing in opposite directions: the scratch-pointer pair's own
+cited line still holds a legacy `POINTER_FILE` and reads "still broken" (a citation-follower would have
+kept it open), while `pds-bl-close-holder-and-criteria-gate`'s cited `check_fencing` still has no worker
+comparison — the fix is a SEPARATE `check_close_holder` guard in the same chain (a citation-follower
+would have kept it open too). 103 open rows became 90 open + 13 closed.
+
+**WHAT LANDED IN THE TREE (four slices, all gates re-run green by the reviewer, all file-disjoint):**
+
+- `pds-w25-census-clause-4` → **PR #8217**, branch `…tha-0-r`. Clause 4 sits BESIDE the untouched
+  closure-scoped clauses 1-3 and is the only LIVE-scoped one, with three independently-failing
+  sub-lines. `structured_trigger(row)` reads `row['reopen_trigger']` and NOTHING else — the old
+  `REOPEN_TRIGGER_RE … or …` is gone and the regex is quarantined to a DISPLAY counter that is split,
+  never summed (`0 structured` beside `40 prose-only DECORATION` on the day's board; a summed counter
+  would have read 40 and called it coverage). Selftest 38 → 54 checks. **Removes the `reopen_triggers`
+  `--json` key** in favour of two split keys — a repo-wide grep finds no other consumer.
+- `pds-w25-stage-terminal-widening` → **PR #8218**, branch `…withou-1-r`. One logic line:
+  `(to in @stageable or from == to) and Transitions.legal?(from, to)`. **HIGH-FLIP-RISK, and the
+  reviewer re-derived it independently rather than re-reading the builder's argument**: `from` comes
+  from `current_status/1` reading the row fetched inside `pg_advisory_xact_lock`, no controller
+  parameter reaches it, `legal?/2` requires `from in @statuses` on the same→same branch, and
+  `do_stage/7`'s write set provably excludes `content.claim`. `any → done` and `any → in_progress`
+  stay refused. **A genuinely independent SECOND reviewer is still owed before merge.**
+- `pds-w25-hetzner-nine-verb-receipt` → **PR #8219**, branch `…claimi-5-r`. **The verb list was DERIVED
+  and it is NINE, not the SIX in PDS-D344** — a slice scoped to the charter's number would have shipped
+  three unfixed lies, and `hzActionVerbsFromSource` re-does that parse at test time so a tenth verb
+  fails instead of shipping. Reviewer's independent mutation (revert to `hzDone(out, verb, srv, nil)`)
+  turns **15 assertions RED across 7 tests**, including the literal *"reboot printed BYTE-IDENTICAL
+  output whether the machine came up or stayed down"*. Shape C is honest mitigation, not a fix: reboot
+  still cannot prove a restart, because nothing in the API can.
+- `pds-w25-export-sidecar` → **PR #8220**, branch `…completenes-6-r`. `--out` writes `FILE.meta` only
+  after a clean completion, and clears a stale sidecar BEFORE the first byte, so **absence is the
+  truncation signal**. `--verify` fails closed on four shapes — reviewer's independent mutation into
+  the permissive `scripts/pds-pull-proof.sh` shape reds `TestRunExportVerifyRefusesMissingSidecar`.
+  Zero body-shape change.
+
+**WHAT STALLED, HONESTLY.**
+
+- **`pds-w25-round-bare` is 33 of 34, not 34.** `pds-w12-crown-climb-preconditions` is lifecycle
+  `blocked` and has NO in-place door: the shard probed BOTH live and got `illegal_transition: cannot
+  stage blocked -> blocked` from the verb and `validation_failed` from the raw door. `blocked → open`
+  WAS available and was **deliberately refused** — that is the forbidden stopgap. It was handed to
+  `pds-w25-round-terminal` with `disposition_owner` set and no fabricated term. This is the correct
+  outcome and the task says so at 5/8 criteria.
+- **`pds-w25-round-terminal` (15 rows) was not built — round 2, by design**, gated on the widening
+  MERGING *and DEPLOYING*. Those 15 rows ARE the census's entire remaining off-vocabulary floor
+  (8 × `OPEN`, 7 × `in-flight`), so the epic's done-condition cannot green until the deploy happens.
+- **The wave's own three ledger shards cannot be adjudicated in place today.** They sit
+  `in_progress`, and `in_progress → in_progress` is precisely the edge PR #8218 opens. The reviewer set
+  their `disposition_owner` (unfenced) and left the disposition for after the deploy rather than
+  resurrect them to `open`. **The wave demonstrated its own thesis on itself.**
+- **Guerrilla was intermittently 500ing under wave load.** Two builders could not file follow-up tasks
+  at all (7 attempts, `/v1/data/mutate` alternating 500 and client timeout, `/v1/capabilities` itself
+  500ing) while `/v1/tasks` stamp+pulse kept working. Filed as `pds-bl-census-read-path-500-under-load`.
+- **A stamp write of ~1.1 kB returned exit 0 with a normal envelope and DID NOT LAND** — read-back
+  showed `met:false, evidence:""`. A shorter re-issue landed. **That is a verb saying it did something
+  it did not do, inside the ledger writer itself** — the exact class this wave hunts, and it is
+  UNFILED because the create path was 500ing. It is the single most on-theme finding of the wave.
+
+**WHAT THE NEXT WAVE MUST TAKE.** (1) Merge #8218 and **watch it deploy to guerrilla**, then dispatch
+`pds-w25-round-terminal` — it is fully specified and it is the last 15 rows under the off-vocabulary
+clause. (2) File and fix the silent stamp non-land; a ledger writer that drops a write is worse than
+any receipt this wave repaired. (3) **Clause 4(a) can never green while a wave files residue** — every
+newly-filed row is born bare, and 19 of the 19 remaining bare rows are this wave's own residue. Either
+the round's close must adjudicate its own residue, or 4(a) needs a birth-grace rule; deciding which is
+a charter question, not a builder question. (4) `resize`, `attach-iso`, `rebuild` and `hzResDone` carry
+the same receipt lie one function away from the fix that just landed.
