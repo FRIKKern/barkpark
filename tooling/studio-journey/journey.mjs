@@ -16,7 +16,7 @@
 //  A check that cannot open the artifact it certifies is not a check.
 //
 // ─────────────────────────────────────────────────────────────────────────────
-//  THE TWO LEGS
+//  THE THREE LEGS
 // ─────────────────────────────────────────────────────────────────────────────
 //  LEG A — CREATE → TYPE → PERSIST, and it creates its OWN document.
 //    AUTH      a login ticket is minted and redeemed, and an IDENTITY
@@ -51,6 +51,18 @@
 //    Leg B NEVER moves the exit code: it is a measurement of a known-open
 //    defect, not a regression gate. When the named-state contract merges, these
 //    beats go green on their own and the harness needs no edit.
+//
+//  LEG C — THE DESK-ROW CENSUS (report-only). Presses every row the desk offers,
+//    of every KIND it offers, and records ROW KIND · ELEMENT ID · VISIBLE LABEL ·
+//    OUTCOME in one line. A row goes green ONLY on an effect that NAMES it
+//    (aria-current on that element, or the URL newly carrying that row's own
+//    phx-value-id, or — for a plugin anchor — the page becoming its own href);
+//    pane and row counts are recorded and decide nothing. Controls that cannot be
+//    pressed without destroying the measurement (the three id-less
+//    `.pane-add-btn` header controls) are INVENTORIED WITH THE REASON, and the
+//    reason itself is asserted. Bounded by a HARD LEG_C_BUDGET; whatever it does
+//    not reach is UNMEASURED, never FAIL. See the leg's own header for the three
+//    ways the naive version of it published a false verdict table.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  RUN
@@ -161,6 +173,30 @@ const FETCH_CAP = 20000; // one plain-HTTP call to the API
 const BROWSER_CLOSE_CAP = 2000;
 const TERM_POLL_CAP = 3000;
 const KILL_POLL_CAP = 2000;
+
+// LEG C's bounding, and it is a HARD budget rather than a per-row cap.
+// `poll()` checks its cap AFTER the predicate has run (see poll below), so a
+// nominal 3.0s row cap cost a MEASURED 6.4–6.9s per row on a loaded host, and a
+// census of a real desk multiplies that by the row count. A soft cap therefore
+// cannot bound the leg. The budget is checked before and after every press and
+// what is left over is reported UNMEASURED — never FAIL, because converting an
+// exhausted runner budget into a dead row FABRICATES A DEFECT, which is the one
+// failure mode this whole epic exists to stop.
+//
+// THE DEFAULT IS 150s, NOT THE 90s THIS SLICE WAS BRIEFED WITH, and the number
+// is measured rather than chosen. 90s was derived from a /rot/ pass of ~41s over
+// a paper-only roster. This roster is four row KINDS plus a decoy and the row it
+// spawns, and an UNANSWERED row costs a measured 16.2s (uniform across four of
+// them: 16.2 / 16.2 / 16.3 / 16.4) against a nominal 2 × 3.0s row cap — the
+// overshoot is in the click and probe round trips, not in the wait loop, which is
+// clock-checked before every evaluate. /rot/ therefore needs ~125s and truncated
+// at 90s with two rows still UNMEASURED, which is honest and useless. Tightening
+// this back makes the expected verdicts load-dependent, which is the failure the
+// brief's own reasoning warns about; LEG_C_BUDGET_MS moves it either way.
+const LEG_C_BUDGET = Number(process.env.LEG_C_BUDGET_MS || 150000);
+const LEG_C_ROW_CAP = Number(process.env.LEG_C_ROW_CAP_MS || 3000); // per-row, SOFT
+const LEG_C_MAX_ROWS = Number(process.env.LEG_C_MAX_ROWS || 40);
+const LEG_C_PRESS_ATTEMPTS = 2;
 
 const POLL_TICK = 150; // the poll loop's interval
 const KEY_GAP = 25; // pacing between synthetic keystrokes
@@ -749,13 +785,43 @@ const CANVAS_FOR = (docId) =>
     `try{b=(el.blocks||[]).length}catch(e){b=-1}` +
     `return {host:true,ed:!!el._editor,blocks:b,pm:pm?pm.children.length:0,wrapper:w.id};})()`;
 
-// The four structural counts LEG B reports per fossil, plus how much visible
-// text the editor region carries. Zero text with zero controls IS the blank.
+// THE NAMED STATE, BY NAME — and its absence is what made LEG B lie.
+// #7897's notice renders as
+//   main.bp-paper-shell[data-test-id=studio-paper-shell]
+//     > article#paper-body-<slug>
+//       > .bp-paper-unrenderable[role=alert][data-test-id=paper-unrenderable-notice]
+// (components.ex:296 call site, components.ex:378 the component). There is NO
+// `.bp-paper-editor` ANYWHERE on that branch: `.bp-paper-editor` is the CANVAS
+// surface (paper_editor.ex:186) and a document that cannot render never reaches
+// it. So the old region lookup (`.bp-paper-editor || [data-test-id=studio-editor]`)
+// resolved to NULL, `visible_text_chars` was measured against nothing, and the
+// beat printed "WORDLESSLY BLANK" for a page whose server HTML carries the
+// shipped named state exactly once — measured on served 051112568, for BOTH id
+// forms. A count taken against a null region is not a low number, it is NO
+// MEASUREMENT, so the region that was actually measured is now REPORTED.
+const NAMED_STATE_SEL = "[data-test-id='paper-unrenderable-notice'], .bp-paper-unrenderable";
+const EDITOR_REGION_SEL = [
+  ".bp-paper-editor", // the canvas surface (a renderable document)
+  "[data-test-id='studio-editor']",
+  "main.bp-paper-shell", // the shell the unrenderable notice lives in
+  "[data-test-id='studio-paper-shell']",
+  "[data-test-id='studio-doc-beta-shell']",
+];
+
+// The four structural counts LEG B reports per fossil, plus the named state and
+// how much visible text the editor region carries. Zero text with zero controls
+// AND NO NAMED STATE is the blank; a named state is the fix, by name.
 const EDITOR_SHAPE = `(function(){
   var q = function (s) { return document.querySelectorAll(s).length; };
-  var region = document.querySelector(".bp-paper-editor") || document.querySelector("[data-test-id='studio-editor']");
+  var cands = ${JSON.stringify(EDITOR_REGION_SEL)};
+  var region = null, regionSel = null;
+  for (var i = 0; i < cands.length; i++) {
+    region = document.querySelector(cands[i]);
+    if (region) { regionSel = cands[i]; break; }
+  }
   var vis = 0;
   if (region) vis = (region.innerText || region.textContent || "").trim().length;
+  var named = document.querySelector(${JSON.stringify(NAMED_STATE_SEL)});
   return {
     shell: q(".bp-paper-editor"),
     body: q(".bp-paper-editor-body"),
@@ -763,6 +829,10 @@ const EDITOR_SHAPE = `(function(){
     addblock: q(".bp-paper-add-block"),
     footer: q("[data-test-id='bp-paper-footer-save']"),
     canvas: q("bp-paper-canvas"),
+    named_state: q(${JSON.stringify(NAMED_STATE_SEL)}),
+    named_state_role: named ? (named.getAttribute("role") || "(no role)") : null,
+    named_state_text: named ? (named.innerText || named.textContent || "").replace(/\\s+/g, " ").trim().slice(0, 140) : null,
+    region: regionSel || "(NO REGION MATCHED — the char count below is measured against nothing)",
     visible_text_chars: vis
   };
 })()`;
@@ -1184,22 +1254,508 @@ async function legB(page, ctx, ledger, run) {
     // measurement and not a wait: whatever it settles on gets reported.
     await poll(async () => {
       const s = await page.evaluate(EDITOR_SHAPE);
-      return s && !s.__throw && (s.body > 0 || s.contenteditable > 0 || s.visible_text_chars > 0) ? s : null;
+      return s && !s.__throw && (s.body > 0 || s.contenteditable > 0 || s.named_state > 0 || s.visible_text_chars > 0) ? s : null;
     }, SETTLE_CAP, "fossil editor shows anything");
     const shape = await page.evaluate(EDITOR_SHAPE);
-    const named = !!shape && !shape.__throw && shape.visible_text_chars > 0;
+    // A NAMED STATE COUNTS ON ITS OWN NAME, not only on a char count: the notice
+    // is the shipped answer to "this document cannot render", so finding it by
+    // `data-test-id` is the primary witness and the char count is corroboration.
+    // Both are reported, so a notice that renders EMPTY (a named state with no
+    // words in it) is still visible as `named_state=1 visible_text=0`.
+    const named = !!shape && !shape.__throw && (shape.named_state > 0 || shape.visible_text_chars > 0);
     run.fossils.push({ ...f, exists_in_drafts: exists, api_block_count: apiBlocks, shape });
 
     const checks = [
       check("the document exists in the drafts perspective", exists ? PASS : FAIL,
         exists ? `${f.draftId} · blocks=${apiBlocks} · _updatedAt=${api1.doc?._updatedAt}` : `not found via ${api1.url?.replace(ctx.base, "")}`),
       check("the editor answers with a NAMED VISIBLE STATE, never absence", named ? PASS : FAIL,
-        `shell=${shape?.shell} body=${shape?.body} contenteditable=${shape?.contenteditable} addblock=${shape?.addblock} footer=${shape?.footer} canvas=${shape?.canvas} visible_text=${shape?.visible_text_chars} chars` +
-        (named ? "" : " — WORDLESSLY BLANK: this is the open never-blank defect, not a regression"),
+        `shell=${shape?.shell} body=${shape?.body} contenteditable=${shape?.contenteditable} addblock=${shape?.addblock} footer=${shape?.footer} canvas=${shape?.canvas} ` +
+        `named_state=${shape?.named_state}${shape?.named_state ? `[role=${shape.named_state_role}]` : ""} ` +
+        `region=${shape?.region} visible_text=${shape?.visible_text_chars} chars` +
+        (named
+          ? `${shape?.named_state ? ` · the page SAYS SO BY NAME: "${shape.named_state_text}"` : ""}`
+          : " — WORDLESSLY BLANK: this is the open never-blank defect, not a regression"),
       ),
     ];
     ledger.add(`FOSSIL/${f.docId.slice(-8)}`, rollup(checks), f.docId, checks, { gating: false });
   }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  LEG C — the desk-row census (report-only)
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE QUESTION: "whatever the Desk Structure buttons do when clicked is
+//  verified to do it, or the dead ones are named." Wave 18 proved the rows are
+//  real <button>s with aria-current and aria-label and focus rings. Nobody had
+//  CLICKED each row and recorded what came back. This leg does that, per row,
+//  and records ROW KIND · ELEMENT ID · VISIBLE LABEL · OUTCOME in ONE line —
+//  wave 18's census recorded labels while the desk serves opaque ids, so nobody
+//  could prove the two censuses were describing the same rows.
+//
+//  IT IS REPORT-ONLY ({gating:false}) AND CANNOT BE MADE A GATE. Ledger.add
+//  honours `gating:false` and clean/failed/pending all filter to gatingBeats, so
+//  a red row here cannot move the exit code; and per charter D241 tooling/**
+//  dodges the required gate anyway, so this is EVIDENCE, never a merge gate.
+//
+//  THE NAIVE CENSUS IS WRONG THREE WAYS, and all three were caught by RUNNING it
+//  rather than by reading it:
+//
+//  1. SNAPSHOT-DIFF ATTRIBUTION IS UNSOUND. Diffing {url, aria-current, pane
+//     count, row count} before/after credited the DEAD #item-sheet with the
+//     PREVIOUS row's answer arriving 900 ms later, and on /good/ every row
+//     reported its predecessor's URL. A quiesce fixed the off-by-one and did NOT
+//     fix the false green, and CANNOT: measured answer latency is 1.6s to
+//     never-within-15s, so no bounded quiet window is sound. So the effect must
+//     NAME THE ROW — aria-current newly on THIS element, or the URL newly
+//     carrying THIS row's OWN phx-value-id as a path segment. Pane and row counts
+//     are still recorded, and they can NEVER make a row green on their own.
+//
+//  2. IDENTITY THEN FABRICATES A DEAD ROW FOR EVERY plugin_link. A plugin entry
+//     is `<a id="plugin-link-…" class="pane-item nav-plugin-entry" href=…>`
+//     (components.ex:1192): it matches `.pane-item` so the census enumerates it,
+//     and it has NEITHER phx-value-id NOR aria-current, so both witnesses are
+//     structurally unavailable. Proven with a fixture anchor that really
+//     navigated and was reported DEAD. An anchor is attributed to its OWN href.
+//     And an anchor is a real page load, so the census RETURNS TO THE DESK
+//     afterwards and re-arms it: the row after one needed 2 presses, not 1,
+//     because it landed in a fresh dead mount.
+//
+//  3. AN UNNAMED BEAT IS SILENTLY UNASSERTED — see SELF_TEST_EXPECT's coverage
+//     guard. This leg's first version failed on /rot/ with five FAIL rows and the
+//     self-test still printed SELF-TEST PASS and exited 0.
+//
+//  WHAT IS NOT PRESSED, AND WHY IT IS STILL A ROW IN THE TABLE. The three
+//  `.pane-add-btn` header controls are INVENTORIED with the reason instead of
+//  pressed: "+" CREATES A DOCUMENT and the other two open a modal OVER the desk,
+//  so pressing any of them would litter the dataset or destroy the state the
+//  remaining rows are measured against. None of the three carries an `id` (two
+//  carry a data-test-id, the "+" carries neither — components.ex:1106/1116/1124),
+//  which is recorded, because a builder reaching for `#…` cannot address them at
+//  all. `.pane-section-header` is dead by construction at its only desk call site
+//  (components.ex:1187 passes no attrs, so `collapsible` defaults false and it
+//  renders a STATIC DIV with no phx-click — panes.ex:305). Both inventory rows
+//  carry a REAL assertion about the reason, so the day one of them stops being
+//  true the row goes red and says "re-decide" instead of quietly staying green.
+
+const CENSUS_STAMP = "data-legc-row";
+
+/** The enumeration, as a JS FUNCTION EXPRESSION so it can be called both to
+ *  enumerate and to re-locate one row after a LiveView patch. It STAMPS each
+ *  matched element with `data-legc-row=<index>`, which is how a row without an
+ *  id is addressable at all — and it re-stamps on every call, because a patch
+ *  replaces the node and takes the stamp with it. Rows are identified across
+ *  patches by KEY (kind + owning id + visible label + occurrence), never by
+ *  index. */
+const CENSUS_FN = `(function(){
+  var out = [], seen = [], keys = {};
+  var text = function (el) {
+    return (el.getAttribute("aria-label") || el.innerText || el.textContent || "")
+      .replace(/\\s+/g, " ").trim().slice(0, 80);
+  };
+  // The VISIBLE LABEL, and \`title\` is reported as \`title:"…"\` rather than folded
+  // in silently: two of the three .pane-add-btn controls have NOTHING BUT a
+  // title, and a census that printed that as an ordinary label would hide the
+  // fact that their only accessible name is a tooltip.
+  var labelOf = function (el) {
+    var t = text(el);
+    if (t) return t;
+    var title = el.getAttribute("title");
+    return title ? 'title:"' + title.replace(/\\s+/g, " ").trim().slice(0, 60) + '"' : "";
+  };
+  var push = function (el, kind, extra) {
+    if (!el || seen.indexOf(el) !== -1) return;
+    seen.push(el);
+    var idx = out.length;
+    el.setAttribute(${JSON.stringify(CENSUS_STAMP)}, String(idx));
+    var label = labelOf(el) || "(no visible label)";
+    var owner = (extra && extra.wrapper_id) || el.id || "(no id)";
+    var key = kind + "#" + owner + "|" + label;
+    keys[key] = (keys[key] || 0) + 1;
+    if (keys[key] > 1) key = key + "@" + keys[key];
+    var row = {
+      index: idx, key: key, kind: kind, tag: el.tagName,
+      id: el.id || null, label: label,
+      test_id: el.getAttribute("data-test-id") || null,
+      phx_click: el.getAttribute("phx-click") || null,
+      phx_value_id: el.getAttribute("phx-value-id") || null,
+      phx_value_idx: el.getAttribute("phx-value-idx") || null,
+      href: el.getAttribute("href") || null,
+      aria_label: el.getAttribute("aria-label") || null,
+      aria_current: el.getAttribute("aria-current") || null,
+      disabled: !!el.disabled
+    };
+    if (extra) for (var k in extra) row[k] = extra[k];
+    out.push(row);
+  };
+  var each = function (sel, fn) { Array.prototype.forEach.call(document.querySelectorAll(sel), fn); };
+  // ORDER IS THE KIND DISCRIMINATOR: the most specific shape claims an element
+  // first and \`seen\` stops a broader selector re-claiming it under a wrong kind.
+  // .pane-item and .pane-doc-item BOTH carry phx-click="select", so nothing here
+  // keys off phx-click.
+  each(".pane-doc-item", function (w) {
+    var b = w.querySelector("button.bp-doc-row-body");
+    if (b) push(b, "pane_doc_item", { wrapper_id: w.id || null,
+      note: "the .pane-doc-item DIV is only a wrapper (it hosts the bulk-publish checkbox); the control is the inner button.bp-doc-row-body, which owns phx-value-id, aria-label AND aria-current" });
+    else push(w, "pane_doc_item_bodyless", { wrapper_id: w.id || null,
+      note: "a .pane-doc-item with NO inner button.bp-doc-row-body — there is no control in this row to press" });
+  });
+  each("a.pane-item", function (el) { push(el, "plugin_link", {}); });
+  each("button.pane-item", function (el) { push(el, "pane_item", {}); });
+  each(".pane-item", function (el) { push(el, "pane_item_inert", {
+    note: "matches .pane-item but is neither <a> nor <button> — no keyboard can reach it" }); });
+  each("button.pane-column--collapsed", function (el) { push(el, "collapsed_strip", {}); });
+  each(".pane-add-btn", function (el) { push(el, "add_btn", {}); });
+  each(".pane-section-header", function (el) { push(el, "section_header", {}); });
+  return {
+    rows: out,
+    url: location.pathname + location.search,
+    panes: document.querySelectorAll(".pane-column").length,
+    doc_rows: document.querySelectorAll(".pane-doc-item").length,
+    item_rows: document.querySelectorAll(".pane-item").length
+  };
+})`;
+
+/** Re-locate ONE row by key and read the state its witnesses live in. `selfId`
+ *  is read separately because a collapsed strip STOPS being enumerable the
+ *  moment it works (it is no longer `button.pane-column--collapsed`), so its
+ *  witness has to be read off the element's own id. */
+const censusProbe = (key, selfId) => `(function(){
+  var c = ${CENSUS_FN}();
+  var r = null;
+  for (var i = 0; i < c.rows.length; i++) if (c.rows[i].key === ${JSON.stringify(key)}) { r = c.rows[i]; break; }
+  var byId = ${selfId ? `document.getElementById(${JSON.stringify(selfId)})` : "null"};
+  return {
+    found: !!r,
+    press_selector: r ? "[${CENSUS_STAMP}='" + r.index + "']" : null,
+    aria_current: r ? r.aria_current : null,
+    url: c.url, panes: c.panes, doc_rows: c.doc_rows, item_rows: c.item_rows,
+    self_exists: !!byId,
+    self_collapsed: byId ? (String(byId.className || "").indexOf("pane-column--collapsed") !== -1) : null
+  };
+})()`;
+
+/** The WITNESS probe, and it is deliberately CHEAP. The enumeration above walks
+ *  every candidate in the document and writes an attribute onto each one; asking
+ *  it for one row's aria-current on every poll tick cost a MEASURED 8.1s for a
+ *  3.0s row cap on a loaded host, which blew the hard budget by 5s. This reads
+ *  the row by id (free), the counts with three selector counts, and nothing else. */
+function censusWitnessProbe(rec, stampSel) {
+  const byId = rec.id ? `document.getElementById(${JSON.stringify(rec.id)})` : "null";
+  const byWrapper = rec.wrapper_id
+    ? `(function(){var w=document.getElementById(${JSON.stringify(rec.wrapper_id)});return w?w.querySelector("button.bp-doc-row-body"):null;})()`
+    : "null";
+  const byStamp = stampSel ? `document.querySelector(${JSON.stringify(stampSel)})` : "null";
+  return `(function(){
+    var own = ${byId};
+    var el = own || ${byWrapper} || ${byStamp};
+    return {
+      found: !!el,
+      aria_current: el ? (el.getAttribute("aria-current") || null) : null,
+      self_exists: !!own,
+      self_collapsed: own ? (String(own.className || "").indexOf("pane-column--collapsed") !== -1) : null,
+      url: location.pathname + location.search,
+      panes: document.querySelectorAll(".pane-column").length,
+      doc_rows: document.querySelectorAll(".pane-doc-item").length,
+      item_rows: document.querySelectorAll(".pane-item").length
+    };
+  })()`;
+}
+
+/** Address the row WITHOUT the stamp wherever it has an id of its own — the
+ *  `[id="…"]` attribute form needs no CSS escaping, which `#drafts.paper-…`
+ *  would. Only a genuinely id-less row (all three `.pane-add-btn` controls, a
+ *  section header) needs the stamp, and those are never pressed. */
+function pressSelectorFor(rec) {
+  if (rec.kind === "pane_doc_item" && rec.wrapper_id) {
+    return `[id=${JSON.stringify(rec.wrapper_id)}] button.bp-doc-row-body`;
+  }
+  return rec.id ? `[id=${JSON.stringify(rec.id)}]` : null;
+}
+
+const UNMEASURED = "UNMEASURED, which is not the same as working";
+const PRESSABLE = new Set(["pane_item", "pane_doc_item", "plugin_link", "collapsed_strip"]);
+
+// `aria-current` is `"true"` on both row components (panes.ex pane_item and
+// pane_doc_item), never `aria-selected` — but an absent attribute reads back as
+// null and a removed one as "", and LiveView can render the literal "false".
+const isCurrent = (v) => v != null && v !== "" && v !== "false";
+
+/** Path-SEGMENT containment, never substring. `url.includes("post")` is true for
+ *  `/studio/posts` and for `/w/postmortem/...`, so a substring test hands one
+ *  row's green to a neighbour whose id happens to be a prefix. */
+const urlNames = (url, id) =>
+  !!id && String(url || "").split(/[/?#&=]/).filter(Boolean).includes(String(id));
+
+const hrefPath = (href) => {
+  if (!href) return null;
+  try { return new URL(href, "http://x").pathname; } catch { return String(href).split("?")[0]; }
+};
+
+/** THE ONLY WAY A ROW GOES GREEN: an effect that NAMES THIS ROW. Returns the
+ *  witness sentence, or null. Pane/row/doc-row counts are deliberately NOT
+ *  consulted here — they are recorded in the row's detail and they cannot reach
+ *  this function, which is what makes "counts cannot make a beat green" a
+ *  property of the code rather than a promise in a comment. */
+function identityWitness(rec, before, after) {
+  const urlNewlyNames = (id) => !!id && !urlNames(before.url, id) && urlNames(after.url, id);
+  if (rec.kind === "plugin_link") {
+    const p = hrefPath(rec.href);
+    const now = String(after.url || "").split("?")[0];
+    if (p && after.url !== before.url && (now === p || now.endsWith(p))) {
+      return `the page is now this anchor's OWN href (${p})`;
+    }
+    return null;
+  }
+  if (rec.kind === "collapsed_strip") {
+    if (before.self_collapsed === true && after.self_exists && after.self_collapsed === false) {
+      return `#${rec.id} is no longer .pane-column--collapsed — THIS strip expanded`;
+    }
+    if (urlNewlyNames(rec.phx_value_idx)) {
+      return `the URL newly carries this strip's own phx-value-idx (${rec.phx_value_idx})`;
+    }
+    return null;
+  }
+  if (!isCurrent(before.aria_current) && isCurrent(after.aria_current)) {
+    return `aria-current="${after.aria_current}" landed on THIS element`;
+  }
+  if (urlNewlyNames(rec.phx_value_id)) {
+    return `the URL newly carries this row's own phx-value-id (${rec.phx_value_id})`;
+  }
+  return null;
+}
+
+/** The rows that are NOT pressed still get a verdict, and the verdict asserts
+ *  the REASON they are not pressed. A row whose reason has gone stale reds and
+ *  says so, so the inventory cannot rot into a list of excuses. */
+function inventoryVerdict(rec) {
+  if (rec.kind === "add_btn") {
+    const why = {
+      "new-document": 'pressing it CREATES A DOCUMENT (the "+")',
+      "airdrop-open": "it opens the share-access modal OVER the desk",
+      "access-open": "it opens the scoped-access modal OVER the desk",
+    }[rec.phx_click] || `its phx-click="${rec.phx_click}" is not one this census knows`;
+    const addressing = `id=${rec.id || "(NONE — #id addressing cannot reach it)"} · data-test-id=${rec.test_id || "(none)"} · aria-label=${rec.aria_label || "(none)"} · title-only=${!rec.aria_label}`;
+    return rec.id
+      ? { status: FAIL, detail: `THE RECORDED REASON IS STALE: this .pane-add-btn now carries id="${rec.id}", so it IS addressable — re-decide whether the census should press it. (${addressing})` }
+      : { status: PASS, detail: `NOT PRESSED BY DESIGN — ${why}, and either would litter the dataset or destroy the desk state the remaining rows are measured against. ${addressing}` };
+  }
+  if (rec.kind === "section_header") {
+    return rec.phx_click
+      ? { status: FAIL, detail: `NO LONGER DEAD BY CONSTRUCTION: this .pane-section-header carries phx-click="${rec.phx_click}" (tag=${rec.tag}) — it is a live control now and the census must press it.` }
+      : { status: PASS, detail: `DEAD BY CONSTRUCTION — tag=${rec.tag}, no phx-click. Its only desk call site passes no attrs, so \`collapsible\` defaults false and panes.ex:305 renders a static <div>. Nothing to press; nothing missing.` };
+  }
+  if (rec.kind === "pane_doc_item_bodyless") {
+    return { status: FAIL, detail: `a .pane-doc-item (wrapper ${rec.wrapper_id || "(no id)"}) with NO inner button.bp-doc-row-body — the row has no control at all, so no keyboard and no pointer can open this document.` };
+  }
+  return { status: FAIL, detail: `${rec.tag} matches .pane-item but is neither <a> nor <button> — it is not in the tab order, which is exactly what "the buttons look inert" felt like.` };
+}
+
+async function legC(page, ctx, ledger, run) {
+  const t0 = Date.now();
+  const deadline = t0 + LEG_C_BUDGET;
+
+  /** Re-arm the desk. A REAL navigation lands a fresh DEAD MOUNT: the rows paint
+   *  before the socket joins and the first press after that is dropped on the
+   *  floor with no error anywhere — which is why the row after an anchor needed
+   *  two presses. Re-arming is a predicate, never a sleep. */
+  const backToDesk = async () => {
+    await page.goto(ctx.base + DESK_PATH);
+    const rows = await poll(async () => (await page.count(".pane-item")) > 0 || null, SETTLE_CAP, "desk rows painted");
+    const live = await poll(async () => {
+      const s = await page.evaluate(
+        `(function(){var m=document.querySelector("[data-phx-main]");` +
+          `return m?(m.classList.contains("phx-connected")?"connected":null):null;})()`,
+      );
+      return s === "connected" ? s : null;
+    }, SETTLE_CAP, "the socket rejoined");
+    return { rows: !!rows.value, live: !!live.value };
+  };
+
+  const armed = await backToDesk();
+
+  const roster = [];
+  const byKey = new Map();
+  let overflow = 0;
+  const absorb = async () => {
+    const c = await page.evaluate(`${CENSUS_FN}()`);
+    if (!c || c.__throw || !Array.isArray(c.rows)) return null;
+    for (const r of c.rows) {
+      if (byKey.has(r.key)) continue;
+      if (roster.length >= LEG_C_MAX_ROWS) { overflow++; continue; }
+      const rec = { ...r, outcome: null, witness: null, detail: null, presses: 0, waited_ms: 0 };
+      byKey.set(r.key, rec);
+      roster.push(rec);
+    }
+    return c;
+  };
+  const first = await absorb();
+
+  // The roster GROWS while it is walked, and that is the point: on the real desk
+  // the document rows do not exist until a Structure row has been pressed, so a
+  // roster fixed at enumeration time can only ever census Structure rows. Every
+  // press re-enumerates and appends what the desk grew.
+  let truncated = false;
+  for (let i = 0; i < roster.length; i++) {
+    const rec = roster[i];
+    if (!PRESSABLE.has(rec.kind)) {
+      const v = inventoryVerdict(rec);
+      rec.outcome = v.status;
+      rec.witness = "inventory (asserted, not pressed)";
+      rec.detail = v.detail;
+      continue;
+    }
+    if (Date.now() >= deadline) {
+      truncated = true;
+      rec.outcome = PENDING;
+      rec.witness = "none";
+      rec.detail = `the ${ms(LEG_C_BUDGET)} LEG_C_BUDGET ran out before this row's turn — ${UNMEASURED}`;
+      continue;
+    }
+    const r = await pressCensusRow(page, rec, deadline);
+    rec.outcome = r.status;
+    rec.witness = r.witness;
+    rec.detail = r.detail;
+    rec.presses = r.presses;
+    rec.waited_ms = r.waited;
+
+    // An anchor is a real page load: come back, and RE-ARM, before the next row
+    // is judged. Same for any press that left a page with no desk rows on it.
+    if (rec.kind === "plugin_link" || (await page.count(".pane-item")) === 0) {
+      const back = await backToDesk();
+      rec.detail += ` · returned to the desk afterwards (rows=${back.rows} socket=${back.live})`;
+    }
+    await absorb();
+  }
+
+  const wall = Date.now() - t0;
+  const counted = (s) => roster.filter((r) => r.outcome === s).length;
+  const pressed = roster.filter((r) => PRESSABLE.has(r.kind));
+  run.census = {
+    budget_ms: LEG_C_BUDGET,
+    row_cap_ms: LEG_C_ROW_CAP,
+    max_rows: LEG_C_MAX_ROWS,
+    wall_ms: wall,
+    truncated,
+    overflowed_rows: overflow,
+    armed,
+    desk_at_start: first ? { url: first.url, panes: first.panes, item_rows: first.item_rows, doc_rows: first.doc_rows } : null,
+    rows: roster,
+  };
+
+  const checks = roster.map((rec) =>
+    // ROW KIND · ELEMENT ID · VISIBLE LABEL, in ONE line with the outcome, so a
+    // later census can be diffed against this one row by row.
+    check(
+      `${rec.kind.padEnd(12)} ${(rec.id || rec.wrapper_id || "(no id)").padEnd(24)} "${rec.label}"`,
+      rec.outcome,
+      `${rec.witness} — ${rec.detail}`,
+    ),
+  );
+  if (!armed.rows || !armed.live) {
+    checks.unshift(check("the desk was armed before any row was pressed", FAIL,
+      `rows=${armed.rows} socket-joined=${armed.live} — with no joined socket every phx-click on this page is swallowed, so no row's verdict below means anything about the control`));
+  }
+  if (overflow) {
+    checks.push(check(`${overflow} further row(s) beyond LEG_C_MAX_ROWS=${LEG_C_MAX_ROWS}`, PENDING, UNMEASURED));
+  }
+  if (roster.length === 0) {
+    checks.push(check("the desk offered any row to census at all", FAIL, "zero rows enumerated — a census of nothing is not a census"));
+  }
+
+  ledger.add(
+    "CENSUS",
+    rollup(checks),
+    `${pressed.length} pressed · ${roster.length - pressed.length} inventoried · ` +
+      `${counted(PASS)} PASS ${counted(FAIL)} FAIL ${counted(PENDING)} UNMEASURED · ` +
+      `${ms(wall)} of the ${ms(LEG_C_BUDGET)} budget${truncated ? " (TRUNCATED)" : ""}`,
+    checks,
+    { gating: false },
+  );
+}
+
+/** Press ONE row and decide by IDENTITY. The press is retried once, for the same
+ *  reason `clickUntil` retries: a mount patch replaces the node and a click that
+ *  lands in that window is discarded silently. The press count is reported, so
+ *  "it answered the first press" and "it answered the second" stay different
+ *  facts. This can rescue a raced control; it can never turn a dead one green. */
+async function pressCensusRow(page, rec, deadline) {
+  const t0 = Date.now();
+  const selfId = rec.kind === "collapsed_strip" ? rec.id : null;
+  const locate = await page.evaluate(censusProbe(rec.key, selfId));
+  if (!locate || locate.__throw || !locate.found) {
+    return {
+      status: PENDING, witness: "none", presses: 0, waited: Date.now() - t0,
+      detail: `the row was gone from the desk when its turn came (an earlier press replaced the pane it lived in) — ${UNMEASURED}`,
+    };
+  }
+  const witnessExpr = censusWitnessProbe(rec, locate.press_selector);
+  const before = await page.evaluate(witnessExpr);
+  if (!before || before.__throw) {
+    return { status: PENDING, witness: "none", presses: 0, waited: Date.now() - t0,
+      detail: `the page would not answer a witness probe for this row — ${UNMEASURED}` };
+  }
+  let after = before, won = null, presses = 0, landed = false, ranOut = false;
+  for (let attempt = 1; attempt <= LEG_C_PRESS_ATTEMPTS && !won; attempt++) {
+    if (Date.now() >= deadline) { ranOut = true; break; }
+    presses = attempt;
+    let sel = pressSelectorFor(rec);
+    if (!sel) {
+      const loc = attempt === 1 ? locate : await page.evaluate(censusProbe(rec.key, selfId));
+      sel = loc && !loc.__throw ? loc.press_selector : null;
+    }
+    if (!sel) break;
+    landed = (await page.click(sel)) || landed;
+    // THE HARD BOUND, and it is why this does not call `poll()`: poll checks its
+    // cap AFTER the predicate has run, so its overshoot is as long as one
+    // predicate takes — measured 8.1s against a 3.0s cap on a loaded host, which
+    // walked LEG C 5s PAST its 90s budget. Here the clock is checked BEFORE every
+    // evaluate, so the budget holds to within one round trip.
+    const until = Date.now() + Math.max(400, Math.min(LEG_C_ROW_CAP, deadline - Date.now()));
+    for (;;) {
+      const now = await page.evaluate(witnessExpr);
+      if (now && !now.__throw) {
+        after = now;
+        const w = identityWitness(rec, before, now);
+        if (w) { won = w; break; }
+      }
+      if (Date.now() >= deadline) { ranOut = true; break; }
+      if (Date.now() >= until) break;
+      await pause(POLL_TICK); // the poll tick — not a wait for anything in particular
+    }
+  }
+  const waited = Date.now() - t0;
+  // THE COUNTS ARE IN THE RECORD AND THEY DECIDE NOTHING. They are the drift a
+  // snapshot diff used to call an answer, which is how the dead #item-sheet was
+  // credited with its neighbour's URL 900 ms later.
+  const drift =
+    `counts(recorded, non-deciding): panes ${before.panes}→${after.panes} · ` +
+    `.pane-item ${before.item_rows}→${after.item_rows} · .pane-doc-item ${before.doc_rows}→${after.doc_rows} · ` +
+    `url ${before.url} → ${after.url}`;
+  if (won) {
+    return { status: PASS, witness: `IDENTITY: ${won}`, presses, waited,
+      detail: `answered in ${ms(waited)} after ${presses} press(es) · ${drift}` };
+  }
+  // THE BUDGET IS NOT A VERDICT. A row whose measurement was cut off mid-flight
+  // is UNMEASURED, never dead: converting an exhausted runner budget into a dead
+  // row fabricates a defect, which is the failure mode this whole epic exists to
+  // stop.
+  if (ranOut) {
+    return { status: PENDING, witness: "none", presses, waited,
+      detail: `the ${ms(LEG_C_BUDGET)} LEG_C_BUDGET ran out WHILE this row was being measured (${presses} press(es), ${ms(waited)}) — ${UNMEASURED} · ${drift}` };
+  }
+  if (!landed) {
+    return { status: FAIL, witness: "none", presses, waited,
+      detail: `NO PRESS EVER LANDED on it in ${ms(waited)} (${presses} attempt(s)) — the element had no layout box to click, so it is on the page and cannot be pointed at · ${drift}` };
+  }
+  const unavailable =
+    rec.kind === "plugin_link"
+      ? `it has no phx-value-id and no aria-current — an anchor's ONLY witness is its own href (${rec.href || "(no href!)"})`
+      : rec.kind === "collapsed_strip"
+        ? `witness = #${rec.id || "(NO ID — nothing can name this strip; only the strip COUNT could move, and a count cannot name a row)"} losing .pane-column--collapsed`
+        : `aria-current ${isCurrent(before.aria_current) ? `was ALREADY "${before.aria_current}" before the press, so that witness was unavailable and only the URL could name this row` : `stayed ${after.aria_current === null ? "absent" : `"${after.aria_current}"`}`}, and the URL never carried ${rec.phx_value_id ? `"${rec.phx_value_id}"` : "(this row has NO phx-value-id)"} as a path segment`;
+  return { status: FAIL, witness: "none", presses, waited,
+    detail: `NOTHING NAMED THIS ROW after ${presses} press(es) in ${ms(waited)}: ${unavailable} · ${drift} — whatever moved above, no effect claimed THIS row, so it is DEAD as far as any observer can tell` +
+      ` · READ IT AS "no witness within ${ms(LEG_C_ROW_CAP)}": measured answer latency on this seam runs 1.6s to never-within-15s, so against a LIVE host this row is either dead or slower than the cap, and LEG_C_ROW_CAP_MS raises the cap` };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1217,47 +1773,173 @@ async function legB(page, ctx, ledger, run) {
 
 const FIXTURE_TOKEN = "fixture-admin-token";
 
+// THE DESK ROSTER IS A ROW-KIND ROSTER, not a list of Structure rows. LEG C's
+// first version censused six identical `button.pane-item` rows, which is why
+// three of its four bugs were invisible: the plugin ANCHOR (no phx-value-id, no
+// aria-current — both identity witnesses structurally unavailable), the
+// COLLAPSED STRIP (a `button.pane-column--collapsed` whose answer is its own
+// expansion, not a URL), and the real `.pane-doc-item` (a DIV wrapper whose
+// control is the INNER `button.bp-doc-row-body`) were all absent. So the fixture
+// serves one of each, in the real markup, plus the three id-less `.pane-add-btn`
+// header controls and a static `.pane-section-header`.
+//
+// AND /good/ IS HONEST: every row on it either answers or names its refusal. The
+// old fixture wired ONE row (#item-paper) and left five dead IDENTICALLY on both
+// sites, so LEG C's red on /rot/ arrived for free and proved nothing about
+// /rot/. /rot/ now differs on purpose: only #item-paper answers, the strip and
+// the doc row are dead, and #item-counts-decoy MOVES THE PANE AND ROW COUNTS
+// WITHOUT NAMING ITSELF — the exact shape a snapshot diff called an answer.
 function fixtureDeskHtml(site) {
-  const rows = ["paper", "sheet", "task", "plugin-doclist-tickets", "projects", "rest"];
+  const base = `/${site}/w/default/p/default/d/production`;
+  const rows = [
+    { id: "item-paper", value: "paper", label: "Papers" },
+    // Two selecting rows is the coverage: one that /good/ answers and /rot/ does
+    // not. A third identical one only costs another 16s of dead-row cap on /rot/.
+    { id: "item-sheet", value: "sheet", label: "Sheets" },
+  ];
+  const decoy =
+    site === "rot"
+      ? `<button type="button" class="pane-item" id="item-counts-decoy" phx-click="select" phx-value-id="counts-decoy" phx-value-pane="0"><span class="pane-item-label">Counts only</span></button>`
+      : "";
   return `<!doctype html><meta charset="utf-8"><title>fixture desk</title><body>
 <div data-phx-main id="phx-fixture" class="phx-connecting">
 <button type="button" phx-click="shares-open" aria-label="Network shares">S</button>
 <div id="studio-panes">
+<!-- The collapsed strip IS the pane, collapsed (panes.ex:178): a real <button>
+     carrying phx-value-idx and an aria-label, and NO phx-value-id and NO
+     aria-current — so its only witness is that IT stops being collapsed. -->
+<button type="button" class="pane-column pane-column--collapsed" id="pane-navigate"
+        data-role="navigate" phx-click="expand-pane" phx-value-idx="0"
+        title="Back to Navigate" aria-label="Back to Navigate" aria-controls="studio-panes">
+  <div class="pane-header"></div>
+  <div class="pane-column-collapsed-label">Navigate</div>
+</button>
 <div class="pane-column" id="pane-structure">
-${rows.map((r) => `<button type="button" class="pane-item" id="item-${r}" phx-click="select" phx-value-id="${r}" phx-value-pane="0"><span class="pane-item-label">${r}</span></button>`).join("\n")}
+<div class="pane-section-header">Content</div>
+${rows.map((r) => `<button type="button" class="pane-item" id="${r.id}" phx-click="select" phx-value-id="${r.value}" phx-value-pane="0"><span class="pane-item-label">${r.label}</span></button>`).join("\n")}
+${decoy}
+<div class="pane-section-header">Plugins</div>
+<!-- components.ex:1192 — an <a>, not a button. It matches .pane-item, so a
+     census enumerates it, and neither identity witness exists on it. -->
+<a id="plugin-link-tickets" href="${base}/plugin/tickets" class="pane-item nav-plugin-entry" data-test-id="nav-plugin-entry"><span class="pane-item-label">Tickets</span></a>
 </div>
 <div id="docs"></div>
 </div>
 </div>
 <script>
   var site = ${JSON.stringify(site)};
+  var BASE = ${JSON.stringify(base)};
+  var LIVE_ROWS = ${site === "rot" ? "false" : "true"};   // /rot/: only #item-paper answers
   // The swallowed-click trap, reproduced: the rows are in the DEAD markup and
   // the socket "joins" a beat later. A click before that is dropped silently, so
   // a harness that does not gate on .phx-connected fails against this fixture
   // for the same reason it failed against guerrilla.
   var main = document.getElementById("phx-fixture");
   setTimeout(function () { main.className = "phx-connected"; }, 700);
+  // The ONE honest answer a selecting row gives: aria-current moves onto THIS
+  // element and the URL gains THIS row's own phx-value-id. Both are per-row
+  // identity, which is what LEG C attributes on.
+  function answer(el) {
+    var all = document.querySelectorAll("[aria-current]");
+    for (var i = 0; i < all.length; i++) all[i].removeAttribute("aria-current");
+    el.setAttribute("aria-current", "true");
+  }
   document.getElementById("item-paper").addEventListener("click", function () {
     if (!main.classList.contains("phx-connected")) return;   // dropped on the floor
+    var self = this;
     // Two-stage, exactly like the real desk: Scope.select push_patches the URL
     // first (measured at 2.4s on guerrilla) and the pane column arrives with the
     // patch. Nothing here is instant — a harness that samples once instead of
     // polling must fail against this fixture.
     setTimeout(function () {
-      history.pushState({}, "", "/" + site + "/w/default/p/default/d/production/studio/paper");
+      if (LIVE_ROWS) answer(self);
+      history.pushState({}, "", BASE + "/studio/paper");
     }, 400);
     setTimeout(function () {
       document.getElementById("docs").innerHTML =
         '<div class="pane-column" id="pane-papers">' +
-        // The DECOY first, exactly as components.ex:973 renders it: same class,
+        // The DECOY first, exactly as components.ex:1106 renders it: same class,
         // same phx-value-type, NO aria-label, a different event. A driver keying
         // off .pane-add-btn[phx-value-type=paper] clicks THIS one and opens the
         // share sheet while believing it pressed "+".
-        '<button type="button" class="pane-add-btn" phx-click="airdrop-open" phx-value-type="paper" title="Share access to paper" data-test-id="airdrop-open-type">S</button>' +
-        '<button type="button" class="pane-add-btn" phx-click="new-document" phx-value-type="paper" aria-label="New paper">+</button>' +
-        '<div class="pane-doc-item" id="doc-old-1" phx-click="select"><button type="button" class="bp-doc-row-body"><span>An older paper</span></button></div>' +
+        // ICON-ONLY, like the real ones (an .icon component renders an svg):
+        // innerText is EMPTY, so the ONLY name these two carry is a title
+        // tooltip. The census prints that as title:"…" rather than folding it
+        // in, because a tooltip-only name is a finding, not a label.
+        '<button type="button" class="pane-add-btn" phx-click="airdrop-open" phx-value-type="paper" title="Share access to paper" data-test-id="airdrop-open-type"><svg width="14" height="14" aria-hidden="true"></svg></button>' +
+        // The access-panel entry: a THIRD .pane-add-btn, with no phx-value-type
+        // and no aria-label either (components.ex:1116). All three are id-less,
+        // which is the fact the census inventories.
+        '<button type="button" class="pane-add-btn" phx-click="access-open" title="Review scoped access grants" data-test-id="access-open-type"><svg width="14" height="14" aria-hidden="true"></svg></button>' +
+        '<button type="button" class="pane-add-btn" phx-click="new-document" phx-value-type="paper" title="New paper" aria-label="New paper">+</button>' +
+        // THE REAL DOC-ROW SHAPE (panes.ex:474-508): the .pane-doc-item is a DIV
+        // wrapper and the control is the INNER button.bp-doc-row-body, which owns
+        // phx-value-id, title, aria-label and aria-current. A census that clicks
+        // the wrapper clicks nothing.
+        '<div class="pane-doc-item" id="doc-fossil-old">' +
+        '<span class="bp-doc-checkbox" phx-click="toggle-doc-checkbox" phx-value-id="paper-fossil-old" data-test-id="doc-checkbox-paper-fossil-old"><span class="bp-doc-checkbox-box"></span></span>' +
+        '<button type="button" class="bp-doc-row-body" title="paper-fossil-old" aria-label="An older paper, published" phx-click="select" phx-value-pane="1" phx-value-id="paper-fossil-old">' +
+        '<span class="pane-doc-main"><span class="pane-doc-title"><span class="pane-doc-dot published"></span>An older paper</span></span>' +
+        '</button></div>' +
         '</div>';
     }, 900);
+  });
+  // Every OTHER selecting row, on /good/ only. /rot/ leaves them dead, which is
+  // what makes /rot/'s census red for a REASON instead of by accident.
+  var others = document.querySelectorAll("button.pane-item:not(#item-paper)");
+  for (var i = 0; i < others.length; i++) {
+    (function (el) {
+      el.addEventListener("click", function () {
+        if (!main.classList.contains("phx-connected")) return;
+        if (el.id === "item-counts-decoy") {
+          // THE COUNTS-ONLY DECOY, and it exists so "counts cannot make a row
+          // green" is DEMONSTRATED rather than promised. It moves the pane count
+          // AND the .pane-item count and it never touches aria-current or the
+          // URL — the precise shape that credited the dead #item-sheet with its
+          // neighbour's answer 900 ms later.
+          setTimeout(function () {
+            // IDEMPOTENT: the census presses a silent row twice (a mount patch
+            // can swallow the first press), and a decoy that spawned a second
+            // pane on the retry would mint a DUPLICATE #item-decoy-spawn — two
+            // rows with one id, which is a fixture bug wearing a census finding.
+            if (document.getElementById("pane-decoy")) return;
+            var d = document.createElement("div");
+            d.className = "pane-column";
+            d.id = "pane-decoy";
+            d.innerHTML = '<button type="button" class="pane-item" id="item-decoy-spawn" phx-click="select" phx-value-id="decoy-spawn"><span class="pane-item-label">Spawned by the counts decoy</span></button>';
+            document.getElementById("studio-panes").appendChild(d);
+          }, 300);
+          return;
+        }
+        if (!LIVE_ROWS) return;                    // /rot/: the row is dead
+        setTimeout(function () {
+          answer(el);
+          history.pushState({}, "", BASE + "/studio/" + el.getAttribute("phx-value-id"));
+        }, 250);
+      });
+    })(others[i]);
+  }
+  // The collapsed strip's answer is ITS OWN EXPANSION — no URL, no aria-current.
+  document.getElementById("pane-navigate").addEventListener("click", function () {
+    if (!LIVE_ROWS || !main.classList.contains("phx-connected")) return;
+    var el = this;
+    setTimeout(function () {
+      var d = document.createElement("div");
+      d.className = "pane-column";
+      d.id = el.id;                                 // same id: the witness is by id
+      d.setAttribute("data-role", "navigate");
+      d.innerHTML = '<div class="pane-header"><span class="pane-title">Navigate</span></div>';
+      el.replaceWith(d);
+    }, 250);
+  });
+  // Document rows are created with the pane, so they are wired by delegation.
+  document.addEventListener("click", function (ev) {
+    var b = ev.target.closest ? ev.target.closest("button.bp-doc-row-body") : null;
+    if (!b || !LIVE_ROWS) return;
+    setTimeout(function () {
+      answer(b);
+      history.pushState({}, "", BASE + "/studio/paper/" + b.getAttribute("phx-value-id"));
+    }, 250);
   });
   document.addEventListener("click", function (ev) {
     var b = ev.target.closest ? ev.target.closest("button.pane-add-btn") : null;
@@ -1280,19 +1962,37 @@ ${rows.map((r) => `<button type="button" class="pane-item" id="item-${r}" phx-cl
  *           document's id and a way out.
  *    /rot/  is today's guerrilla — the editor region renders and says NOTHING.
  *  So LEG B's red is demonstrated offline instead of being a comment claiming
- *  the beat would catch something. */
+ *  the beat would catch something.
+ *
+ *  /good/ RENDERS THE SHIPPED SHAPE, NOT A CONVENIENT ONE. It used to wrap the
+ *  notice in a `.bp-paper-editor`, which is the ONE thing the real page does not
+ *  do — so the fixture agreed with a broken oracle and LEG B's false negative
+ *  survived a green self-test. The real branch is
+ *  `main.bp-paper-shell > article#paper-body-<slug> > .bp-paper-unrenderable`
+ *  with NO `.bp-paper-editor` anywhere (components.ex:223/296/378), which is
+ *  what is reproduced here: revert EDITOR_REGION_SEL to the two old selectors
+ *  and /good/'s FOSSIL beats go red offline, by construction. */
 function fixtureBlankHtml(site, id) {
   if (site === "rot") {
     return `<!doctype html><meta charset="utf-8"><title>fixture blank</title><body>
 <div class="bp-paper-editor"></div></body>`;
   }
   return `<!doctype html><meta charset="utf-8"><title>fixture named state</title><body>
-<div class="bp-paper-editor">
-  <div role="status" data-test-id="studio-editor-unrenderable">
-    <strong>This document has nothing to render yet.</strong>
-    <span>${id} carries no blocks. Add a block, or delete the document.</span>
-  </div>
-</div></body>`;
+<main class="bp-paper-shell bp-paper-surface" data-test-id="studio-paper-shell">
+  <div id="paper-sentinel" data-slug="${id}" hidden></div>
+  <article id="paper-body-${id}" data-rev="1">
+    <div class="bp-paper-unrenderable" role="alert" aria-live="assertive"
+         data-test-id="paper-unrenderable-notice" data-doc-id="${id}" data-doc-type="paper">
+      <p class="bp-paper-unrenderable-title">Studio cannot render the body of this paper.</p>
+      <p class="bp-paper-unrenderable-reason"><code>${id}</code> (paper) was stored without a body
+        block list and without saved HTML, so there is nothing here to show or edit yet.</p>
+      <div class="bp-paper-unrenderable-actions">
+        <button type="button" data-test-id="paper-unrenderable-start-body">Start the body</button>
+        <a href="/studio/paper">All papers</a>
+      </div>
+    </div>
+  </article>
+</main></body>`;
 }
 
 function fixtureEditorHtml(site, id, doc) {
@@ -1502,6 +2202,15 @@ function startFixture() {
       return;
     }
 
+    // A plugin entry's destination. It only has to be a real page load at the
+    // anchor's OWN href: that is the entire witness LEG C has for a plugin_link,
+    // and the row LEG C reported DEAD while this page was on the screen.
+    const pl = /^\/plugin\/([\w-]+)$/.exec(rest);
+    if (pl) {
+      if (role !== "admin") return send(200, "<!doctype html><body><form action='/login'><h1>Sign in</h1></form></body>");
+      return send(200, `<!doctype html><meta charset="utf-8"><title>fixture plugin</title><body><h1>Plugin: ${pl[1]}</h1></body>`);
+    }
+
     // The Studio itself — admin-gated, so an anonymous or USER session gets a
     // desk with no shares button and the discriminator goes red.
     const dm = /^\/w\/default\/p\/default\/d\/production\/studio(\/paper\/(.+))?$/.exec(rest);
@@ -1622,6 +2331,11 @@ async function journeyOne(cdp, ctx, opts) {
   try {
     await legA(page, ctx, ledger, run);
     await legB(page, ctx, ledger, run);
+    // LAST, and report-only: it presses every desk row, so it must not be able
+    // to disturb the document LEG A typed into before PERSIST/RELOAD have read
+    // it back. It presses nothing that creates a document, so the litter sweep
+    // below still holds after it.
+    await legC(page, ctx, ledger, run);
   } catch (err) {
     if (err instanceof Guard) throw err;
     // A harness-side throw must still produce a ledger: the beats that already
@@ -1670,13 +2384,53 @@ const withFossils = (base, verdict) =>
   Object.assign({}, base, Object.fromEntries(FOSSIL_BEATS.map((b) => [b, verdict])));
 
 const SELF_TEST_EXPECT = {
-  good: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: PASS, TYPE: PASS, PERSIST: PASS, RELOAD: PASS }, PASS),
-  rot: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: FAIL, TYPE: PENDING, PERSIST: PENDING, RELOAD: PENDING }, FAIL),
+  good: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: PASS, TYPE: PASS, PERSIST: PASS, RELOAD: PASS, CENSUS: PASS }, PASS),
+  rot: withFossils({ AUTH: PASS, DESK: PASS, CREATE: PASS, HYDRATE: FAIL, TYPE: PENDING, PERSIST: PENDING, RELOAD: PENDING, CENSUS: FAIL }, FAIL),
+};
+
+// ── THE CENSUS, ROW BY ROW ───────────────────────────────────────────────────
+// A beat-level expectation is too coarse for LEG C: "CENSUS: FAIL on /rot/" is
+// satisfied by ANY red row, including a row that is red because the harness is
+// broken. So every fixture row is named with the outcome it must produce, and
+// the map is COVERAGE-GUARDED in both directions — a produced row nobody named
+// reds, and a named row that stopped being produced reds. That is what makes
+// these three claims mechanical rather than editorial:
+//   · the plugin ANCHOR passes on BOTH sites, by its own href (a real anchor
+//     navigates with or without a socket) — the row identity-attribution
+//     fabricated as DEAD.
+//   · #item-counts-decoy FAILS on /rot/ even though it moves the pane count and
+//     the .pane-item count, because counts cannot name a row.
+//   · the pane_doc_item passes only when the INNER button.bp-doc-row-body is the
+//     thing that was pressed.
+const CENSUS_ROWS_GOOD = {
+  'plugin_link#plugin-link-tickets|Tickets': PASS,
+  'pane_item#item-paper|Papers': PASS,
+  'pane_item#item-sheet|Sheets': PASS,
+  'collapsed_strip#pane-navigate|Back to Navigate': PASS,
+  'section_header#(no id)|Content': PASS,
+  'section_header#(no id)|Plugins': PASS,
+  'pane_doc_item#doc-fossil-old|An older paper, published': PASS,
+  'add_btn#(no id)|title:"Share access to paper"': PASS,
+  'add_btn#(no id)|title:"Review scoped access grants"': PASS,
+  'add_btn#(no id)|New paper': PASS,
+};
+const SELF_TEST_CENSUS_EXPECT = {
+  good: CENSUS_ROWS_GOOD,
+  rot: {
+    ...CENSUS_ROWS_GOOD,
+    // /rot/'s dead rows — the reds LEG C exists to produce, each for a stated
+    // reason rather than because the fixture wired nothing.
+    'pane_item#item-sheet|Sheets': FAIL,
+    'collapsed_strip#pane-navigate|Back to Navigate': FAIL,
+    'pane_doc_item#doc-fossil-old|An older paper, published': FAIL,
+    'pane_item#item-counts-decoy|Counts only': FAIL,
+    'pane_item#item-decoy-spawn|Spawned by the counts decoy': FAIL,
+  },
 };
 
 async function selfTest(opts) {
   const { server, port, store } = await startFixture();
-  const results = {}, exits = {}, residue = {};
+  const results = {}, exits = {}, residue = {}, censuses = {};
   const sites = opts.selfTestSite ? [opts.selfTestSite] : Object.keys(SELF_TEST_EXPECT);
   try {
     await withChrome(async (cdp) => {
@@ -1686,6 +2440,7 @@ async function selfTest(opts) {
         const r = await journeyOne(cdp, ctx, opts);
         process.stdout.write(report(r.ledger, { base, mode: `FIXTURE/${site}`, wall: r.wall, pre: r.pre, post: r.post }));
         results[site] = r.ledger.statuses();
+        censuses[site] = r.run.census || null;
         exits[site] = r.ledger.clean ? 0 : 1;
         // THE LITTER SWEEP, asserted rather than trusted. After a run the store
         // must hold exactly the two pre-seeded fossils: anything else is a draft
@@ -1714,6 +2469,61 @@ async function selfTest(opts) {
     for (const [beat, want] of Object.entries(expected)) {
       const got = results[site]?.[beat];
       if (got !== want) problems.push(`${site}/${beat}: expected ${want}, got ${got ?? "(missing)"}`);
+    }
+  }
+
+  // ── THE COVERAGE GUARD ─────────────────────────────────────────────────────
+  // AN UNNAMED BEAT IS SILENTLY UNASSERTED, and that is not a hypothetical: the
+  // loop above walks the EXPECTED keys, so the first LEG C ran on /rot/ with five
+  // FAIL rows and this self-test printed SELF-TEST PASS and exited 0. Every leg
+  // added after that would have been a decoration by default, and a HARNESS abort
+  // beat — the one the catch in journeyOne adds when the harness itself throws —
+  // read as a pass for exactly the same reason.
+  //
+  // So the guard walks the PRODUCED keys and reds on anything SELF_TEST_EXPECT
+  // does not name. It is the mechanism that makes "the harness asserts what it
+  // measures" true rather than intended, and it is proven by MUTATION: delete a
+  // key from SELF_TEST_EXPECT and this reds while the run itself is unchanged.
+  for (const site of sites) {
+    for (const [beat, got] of Object.entries(results[site] || {})) {
+      if (Object.prototype.hasOwnProperty.call(SELF_TEST_EXPECT[site] || {}, beat)) continue;
+      problems.push(
+        `${site}/${beat}: THE RUN PRODUCED THIS BEAT (${got}) AND SELF_TEST_EXPECT DOES NOT NAME IT — ` +
+          `an unnamed beat is silently unasserted, so it can never red and it is a decoration. Name it.`,
+      );
+    }
+  }
+
+  // The same guard, one level down, over LEG C's rows — plus the per-row verdicts
+  // themselves, because "CENSUS: FAIL on /rot/" is satisfied by ANY red row,
+  // including one that is red because the harness broke.
+  for (const site of sites) {
+    const want = SELF_TEST_CENSUS_EXPECT[site] || {};
+    const rows = censuses[site]?.rows || [];
+    if (!rows.length) { problems.push(`${site}: LEG C produced NO census rows at all — a census of nothing is not a census`); continue; }
+    if (censuses[site]?.truncated) {
+      problems.push(
+        `${site}: LEG C hit its ${LEG_C_BUDGET}ms LEG_C_BUDGET on the FIXTURE, which is a few local rows — ` +
+          `the row verdicts below are load-dependent and this self-test cannot assert them. Raise LEG_C_BUDGET_MS or run on a quieter host.`,
+      );
+    }
+    for (const rec of rows) {
+      if (!Object.prototype.hasOwnProperty.call(want, rec.key)) {
+        problems.push(
+          `${site}: LEG C CENSUSED A ROW NOBODY NAMED — "${rec.key}" came back ${rec.outcome}. ` +
+            `Name it in SELF_TEST_CENSUS_EXPECT or an unasserted row can never red.`,
+        );
+        continue;
+      }
+      if (rec.outcome !== want[rec.key]) {
+        problems.push(`${site}: census row "${rec.key}" expected ${want[rec.key]}, got ${rec.outcome} — ${rec.detail}`);
+      }
+    }
+    const producedKeys = new Set(rows.map((r) => r.key));
+    for (const key of Object.keys(want)) {
+      if (!producedKeys.has(key)) {
+        problems.push(`${site}: census row "${key}" is named in SELF_TEST_CENSUS_EXPECT and the run never produced it — the fixture row is gone, or the enumeration stopped seeing its kind`);
+      }
     }
   }
   if (exits.good !== 0) problems.push(`good: expected product exit 0, got ${exits.good}`);

@@ -33,6 +33,11 @@
 #     succeeds and the tsx runner exists, and is DISABLED again if it does not
 #     stay active (no crash-loop); connectors.env is 0600, pins the stable
 #     public front, and carries NO chat token (the multi-tenant hole)
+#   - the name-encoding pin: the committed slot unit pins a UTF-8 locale BEFORE
+#     its EnvironmentFile (so a per-slot env file still wins) and api/start.sh
+#     defaults the same mode without clobbering an operator LANG — asserted by
+#     replaying start.sh's own guard, because a fresh host image has no
+#     /etc/default/locale and boots the VM in latin1
 #   - advance vs stall (D292): the fake git keeps a STATEFUL HEAD, so a deploy
 #     that reports SUCCESS without moving the box off its pre-deploy sha is
 #     distinguishable from one that advances — the script's own claims (STATE,
@@ -51,6 +56,22 @@ fails=0
 pass() { echo "  PASS: $*"; }
 fail() { echo "  FAIL: $*"; fails=$((fails + 1)); }
 check() { if eval "$2"; then pass "$1"; else fail "$1 (cond: $2)"; fi; }
+
+# Replays api/start.sh's committed name-encoding guard in a clean shell, so the
+# start.sh half of the pin is asserted BEHAVIOURALLY (what LANG ends up as) and
+# not by grepping for a line. $1 is an operator-supplied LANG; '' means unset.
+start_sh_locale_guard() {
+  local guard body
+  guard="$(awk '/name-encoding pin \(start\)/,/name-encoding pin \(end\)/' "$HERE/../api/start.sh")"
+  body="$guard"$'\n''printf %s "${LANG:-}"'
+  if [ -n "$1" ]; then
+    LANG="$1" bash -c "unset LC_ALL
+$body"
+  else
+    bash -c "unset LANG LC_ALL
+$body"
+  fi
+}
 
 command -v caddy >/dev/null 2>&1 || { echo "SKIP: caddy binary required (real validation)"; exit 0; }
 
@@ -338,6 +359,19 @@ check "committed unit holds NO token env line" "! grep -qiE '^(Environment|ExecS
 check "committed unit is PLAIN (never the slot@ template)" "! grep -q '%i' '$HERE/systemd/barkpark-connectors.service'"
 check "committed unit ExecStart uses the deploy-resolved node link" "grep -q '^ExecStart=/usr/local/bin/barkpark-node ' '$HERE/systemd/barkpark-connectors.service'"
 check "committed unit hardcodes NO node version" "! grep -qE 'ExecStart=.*(asdf|nodejs/[0-9])' '$HERE/systemd/barkpark-connectors.service'"
+# NAME-ENCODING PIN. The live box runs utf8 only because /etc/default/locale
+# leaks LANG through systemd's MANAGER environment — strip it and the same erl
+# reports latin1 with the VM warning it may malfunction, so a fresh image boots
+# latin1. Both reachable paths are asserted: the slot unit (the service) and
+# api/start.sh (a manual `mix` invocation). The ordering row matters — an
+# Environment= placed AFTER EnvironmentFile= would stop a per-slot env file from
+# overriding it. start.sh is asserted behaviourally, by replaying its guard.
+check "committed slot unit pins a UTF-8 name-encoding locale" "grep -qE '^Environment=(LANG|LC_ALL)=(C|[A-Za-z_]+)\.(UTF-8|utf8)\$' '$HERE/systemd/barkpark-slot@.service'"
+check "committed slot unit pins it BEFORE EnvironmentFile (slot env can still override)" "[ \"\$(grep -n '^Environment=' '$HERE/systemd/barkpark-slot@.service' | head -1 | cut -d: -f1)\" -lt \"\$(grep -n '^EnvironmentFile=' '$HERE/systemd/barkpark-slot@.service' | head -1 | cut -d: -f1)\" ]"
+check "committed slot unit records WHY (host-image accident, not a staging fix)" "grep -q 'host-image accident' '$HERE/systemd/barkpark-slot@.service' && grep -q 'NOT A STAGING FIX' '$HERE/systemd/barkpark-slot@.service'"
+check "start.sh guard defaults the name mode to UTF-8 (fresh image, no locale)" "[ \"\$(start_sh_locale_guard '')\" = 'C.UTF-8' ]"
+check "start.sh guard does NOT clobber an operator-supplied LANG" "[ \"\$(start_sh_locale_guard 'en_US.UTF-8')\" = 'en_US.UTF-8' ]"
+check "start.sh records the measurement trap (Elixir readback measures the decoder)" "grep -q 'MEASUREMENT TRAP' '$HERE/../api/start.sh' && grep -q 'shell find/od' '$HERE/../api/start.sh'"
 check "old slot + legacy unit retired"    "grep -q 'disable --now barkpark-slot@blue' '$SYSCTLLOG' && grep -q 'disable --now barkpark' '$SYSCTLLOG'"
 check "green slot enabled (reboot-safe)"  "grep -q 'enable barkpark-slot@green' '$SYSCTLLOG'"
 check "state file = newsha"               "[ \"\$(cat '$APP/.instance-deploy-last' 2>/dev/null)\" = 'newsha' ]"

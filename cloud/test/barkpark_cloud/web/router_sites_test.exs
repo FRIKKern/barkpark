@@ -696,6 +696,225 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
     end
   end
 
+  ## THE TYPED REFUSAL HAS TO SURVIVE THE JSON BOUNDARY TOO (site-spawner W11).
+  ##
+  ## W10 above proved STORAGE: all four of its tests read
+  ## `Registry.get_deployment(d.id).failure_reason` — the RAW DB column. The user
+  ## never sees that column. `deployment_json/1` renders
+  ## `FailureCopy.humanize(d.failure_reason)`, and `humanize/1` is a cond of
+  ## SUBSTRING matches that replaces the WHOLE string.
+  ##
+  ## Nine of the extractor's typed messages interpolate a PRODUCER-CONTROLLED tar
+  ## entry name (`Barkpark.Sites.PrebuiltArtifact` — E_ABSOLUTE_PATH,
+  ## E_PATH_TRAVERSAL, E_BAD_NAME, E_UNSAFE_PARENT x3, E_WRITE_FAILED x2), so the
+  ## refusal on a site whose content includes `/quota/index.html` rendered here as
+  ## "Hetzner ran out of server capacity", and a `../timeout/` PATH TRAVERSAL — a
+  ## security event — as "A network step timed out." The SAME response already
+  ## carried the honest bytes in `detail` (`Sites.Deploy.fail/2` writes the
+  ## identical string to both columns; only `failure_reason` was humanized), so the
+  ## payload contradicted itself.
+  ##
+  ## These are the repo's first tests driving a real extractor `E_*` code across
+  ## that boundary. Delete `FailureCopy`'s `typed_refusal?(reason) -> reason`
+  ## clause and they go red on canned provider copy.
+
+  # The user-facing read of one deployment: what `deployment_json/1` renders, not
+  # the raw DB column. Every W11 test below reads through it.
+  defp rendered_deployment(site, d, token) do
+    json_body(call(:get, "/v1/sites/#{site.id}/deployments/#{d.id}", nil, token))["deployment"]
+  end
+
+  describe "site-spawner W11: a typed extractor refusal survives deployment_json/1" do
+    test "E_ABSOLUTE_PATH on /quota/index.html reaches the user as itself, not as Hetzner capacity" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+      # prebuilt_artifact.ex:626, byte-for-byte, nested exactly as
+      # SiteDeployController.bad_request/3 renders it.
+      FakeBoxRelay.program(
+        start:
+          {:ok, 400,
+           %{
+             "error" => %{
+               "code" => "E_ABSOLUTE_PATH",
+               "message" => ~s(entry "/quota/index.html" is an absolute path — refused)
+             }
+           }}
+      )
+
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+
+      raw = Registry.get_deployment(d.id).failure_reason
+
+      assert raw ==
+               ~s|the instance refused the deploy (HTTP 400): E_ABSOLUTE_PATH — entry "/quota/index.html" is an absolute path — refused|
+
+      dep = rendered_deployment(site, d, token)
+
+      # THE BOUNDARY: what the CLI and the dashboard actually read.
+      assert dep["failure_reason"] == raw,
+             ~s(rendered failure_reason diverged from the raw refusal:\n  raw      = #{raw}\n  rendered = #{dep["failure_reason"]})
+
+      assert dep["failure_reason"] =~ "E_ABSOLUTE_PATH"
+      assert dep["failure_reason"] =~ "/quota/index.html"
+      refute dep["failure_reason"] =~ "Hetzner ran out of server capacity"
+    end
+
+    test "a PATH TRAVERSAL is never rendered as a network timeout" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 400,
+           %{
+             "error" => %{
+               "code" => "E_PATH_TRAVERSAL",
+               "message" => ~s(entry "../timeout/index.html" escapes the artifact root)
+             }
+           }}
+      )
+
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+
+      dep = rendered_deployment(site, d, token)
+
+      assert dep["failure_reason"] =~ "E_PATH_TRAVERSAL"
+      assert dep["failure_reason"] =~ "escapes the artifact root"
+
+      refute dep["failure_reason"] =~ "A network step timed out",
+             "a traversal refusal is a SECURITY event — it must never read as a retryable blip"
+    end
+
+    test "the BASELINE non-colliding refusal (the accented-slug E_UNKNOWN_TYPE) arrives intact too" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+
+      # The headline defect of this wave: Go emits a PAX ('x') header for a
+      # non-ASCII entry name, and the extractor refuses it (prebuilt_artifact.ex:572).
+      FakeBoxRelay.program(
+        start:
+          {:ok, 400,
+           %{
+             "error" => %{
+               "code" => "E_UNKNOWN_TYPE",
+               "message" => ~s(unsupported tar entry type "x")
+             }
+           }}
+      )
+
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+
+      dep = rendered_deployment(site, d, token)
+
+      assert dep["failure_reason"] =~ "E_UNKNOWN_TYPE"
+      assert dep["failure_reason"] =~ ~s(unsupported tar entry type "x")
+    end
+
+    test "every colliding static-site slug keeps its typed code across the boundary" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      token = login_token(user)
+
+      # Ordinary static-site paths: /quota and /dns/failed.html are content slugs,
+      # and timeout.html / unauthorized.html are what framework error pages are
+      # CALLED. Each is a single common English word inside a producer-controlled
+      # name — which is why the token list can never be made safe.
+      cases = [
+        {"E_ABSOLUTE_PATH", ~s(entry "/quota/index.html" is an absolute path — refused),
+         "Hetzner ran out of server capacity"},
+        {"E_ABSOLUTE_PATH", ~s(entry "/timeout.html" is an absolute path — refused),
+         "A network step timed out"},
+        {"E_ABSOLUTE_PATH", ~s(entry "/unauthorized.html" is an absolute path — refused),
+         "The hosting provider rejected our credentials"},
+        {"E_PATH_TRAVERSAL", ~s(entry "../dns/failed.html" escapes the artifact root),
+         "Securing the domain failed on the provider side."}
+      ]
+
+      for {code, message, canned} <- cases do
+        site = static_site(bp)
+        {:ok, d} = Sites.Deploy.enqueue(site, bp)
+
+        FakeBoxRelay.program(
+          start: {:ok, 400, %{"error" => %{"code" => code, "message" => message}}}
+        )
+
+        assert {:ok, :failed} = Sites.Deploy.run(d.id)
+
+        dep = rendered_deployment(site, d, token)
+
+        assert dep["failure_reason"] =~ code, "#{code} lost for #{message}"
+        assert dep["failure_reason"] =~ message
+        refute dep["failure_reason"] =~ canned
+      end
+    end
+
+    test "failure_reason and detail in the SAME response agree about the typed code" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 400,
+           %{
+             "error" => %{
+               "code" => "E_UNSAFE_PARENT",
+               "message" => ~s(the archive names "/srv/blog/quota/index.html" more than once)
+             }
+           }}
+      )
+
+      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+
+      dep = rendered_deployment(site, d, token)
+
+      # `Sites.Deploy.fail/2` writes the SAME string to failure_reason and detail;
+      # `detail` is passed through RAW. Before W11 the humanize hop made the two
+      # halves of one payload contradict each other. They must agree now.
+      assert dep["detail"] =~ "E_UNSAFE_PARENT"
+      assert dep["failure_reason"] == dep["detail"]
+    end
+
+    test "an UNTYPED provider failure is still humanized — the guard is not a blanket bypass" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+      token = login_token(user)
+
+      # A reason with no typed code and no box-refusal prefix: the reaper/provider
+      # jargon FailureCopy exists for. Written straight onto the row because no box
+      # path produces it — the point here is the JSON boundary, not the producer.
+      {:ok, d} = Sites.Deploy.enqueue(site, bp)
+
+      d
+      |> Ecto.Changeset.change(
+        status: "failed",
+        failure_reason: "account quota exceeded for servers"
+      )
+      |> BarkparkCloud.Repo.update!()
+
+      dep = rendered_deployment(site, d, token)
+
+      assert dep["failure_reason"] ==
+               "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+    end
+  end
+
   ## site-spawner (D28/D29/D30) — the STATIC spawn spine.
   ##
   ## Everything below is the wire the `bp cloud site` CLI already speaks. The CLI
@@ -2138,6 +2357,118 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
 
       assert conn.status == 200
       refute Registry.get_site(site.id).prebuilt_enabled
+    end
+  end
+
+  # Turning the prebuilt lane ON is a CAPABILITY GRANT: afterwards this site will
+  # serve bytes its box never built. Wave 9's D97 gated the artifact UPLOAD on
+  # `write` and justified it by asserting ability tiers are flat
+  # (read/write/root) — but `@abilities ~w(read write deploy root)` has FOUR, and
+  # `deploy` already gates domain bind/unbind. So a single `write` PAT both
+  # ENABLED the lane and USED it, and the per-site opt-in gated nothing against
+  # exactly the credential most likely to be over-scoped.
+  describe "PATCH /v1/sites/:id {prebuilt_enabled} credential gating" do
+    test "a write-only PAT cannot ENABLE off-box builds → 403, the row is untouched" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      {:ok, write_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "write-key",
+          abilities: ["write"]
+        })
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{prebuilt_enabled: true}, write_token)
+
+      assert conn.status == 403
+      assert json_body(conn)["error"] == "deploy_ability_required"
+      refute Registry.get_site(site.id).prebuilt_enabled
+    end
+
+    # A SESSION carries ["root"], which is `require_ability/2`'s documented
+    # superset, so the dashboard toggle keeps working. This is the ONLY credential
+    # that can enable the lane today, and that is a consequence of a PRE-EXISTING
+    # defect this gate merely exposes — see the deploy-PAT test below.
+    test "a session (root) CAN enable it → 200 and the row flips" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{prebuilt_enabled: true}, login_token(user))
+
+      assert conn.status == 200
+      assert Registry.get_site(site.id).prebuilt_enabled
+    end
+
+    # PINS A PRE-EXISTING DEFECT, deliberately, rather than papering over it.
+    # The ability model is HIERARCHICAL when minting and FLAT when checking:
+    # `UserToken.normalize_abilities/1` collapses ["write","deploy"] to ["deploy"]
+    # (treating deploy as ranking above write), but `Auth.require_ability/2`
+    # special-cases only "root". So a deploy PAT holds ["deploy"], fails every
+    # `write`-gated route — patch, delete, deploy, rollback, promote — and can
+    # therefore never reach the gate above. You cannot hold write AND deploy
+    # either; normalization removes the write.
+    #
+    # This assertion documents TODAY's behaviour so the defect is visible instead
+    # of folklore. When the model is reconciled, this test should flip to 200 and
+    # that flip is the proof the reconciliation worked.
+    test "a deploy PAT is refused — the mint/check hierarchy mismatch, pinned" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      {:ok, deploy_pat, token_row} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "deploy-key",
+          abilities: ["write", "deploy"]
+        })
+
+      # The mint collapsed the pair — this is the hierarchy half of the mismatch.
+      assert token_row.abilities == ["deploy"]
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{prebuilt_enabled: true}, deploy_pat)
+
+      # ...and the check half refuses it, because only "root" is a superset there.
+      assert conn.status == 403
+      refute Registry.get_site(site.id).prebuilt_enabled
+    end
+
+    # De-escalation is never trapped: whoever may mutate the site may take it
+    # back OUT of the riskier mode. Gating the OFF transition too would leave a
+    # site stuck accepting off-box bytes with no way for its operator to stop it.
+    test "a write-only PAT CAN still turn it off — de-escalation is not gated" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+
+      {:ok, write_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "write-key",
+          abilities: ["write"]
+        })
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{prebuilt_enabled: false}, write_token)
+
+      assert conn.status == 200
+      refute Registry.get_site(site.id).prebuilt_enabled
+    end
+
+    # This adds ONE gate; it does not re-tier the settings family.
+    test "a write-only PAT still patches theme — the family is not re-tiered" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      {:ok, write_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "write-key",
+          abilities: ["write"]
+        })
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{theme: "ember"}, write_token)
+
+      assert conn.status == 200
     end
   end
 end

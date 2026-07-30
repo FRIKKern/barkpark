@@ -17,12 +17,14 @@ package cli
 import (
 	"archive/tar"
 	"bufio"
+	"bytes"
 	"compress/gzip"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -127,13 +129,23 @@ type prebuiltArtifact struct {
 // tar.gz whose ROOT is that directory (so `index.html` lands at the archive root
 // with no `dist/` prefix — the box extracts it straight into the release dir).
 //
-// The four guards are here because the packer gives none of them: an empty
+// The guards are here because the packer gives none of them: an empty
 // directory packs SILENTLY into a valid, zero-entry archive that uploads and
 // deploys to a 404; a project directory handed to --prebuilt by mistake packs
 // the source instead of the output; and the wire cap is the server's, in the
-// server's units. Escaping symlinks are emitted verbatim by design — the box's
-// extraction refuses them, and that refusal is the load-bearing one; refusing
-// them here too would only make the honest error arrive earlier.
+// server's units.
+//
+// SYMLINKS ARE NOW A CLIENT-SIDE REFUSAL (charter D120, and this reverses the
+// rationale that stood here). The old comment argued that the box's refusal was
+// "the load-bearing one" and that refusing here would "only make the honest
+// error arrive earlier" — that reasoning is about ESCAPING links, but the code
+// emits EVERY link verbatim, and a CONTAINED `home.html -> index.html` (a
+// hand-made pretty-URL alias) has no honest earlier error at all: it packs, it
+// uploads against an already-minted nonced deployment, and only then does
+// stage/4 answer E_SYMLINK "the archive contains a symlink — refused (a staged
+// symlink is SERVED)" and throw the whole deploy away. The same dist deploys
+// fine as an ON-BOX build, because that path copies with `cp -a`. So the seam
+// is closed at the client: what the box will refuse never leaves the laptop.
 func packPrebuiltDir(dir string) (prebuiltArtifact, error) {
 	abs, err := validatePrebuiltDir(dir)
 	if err != nil {
@@ -156,9 +168,20 @@ func packPrebuiltDir(dir string) (prebuiltArtifact, error) {
 	return art, nil
 }
 
-// validatePrebuiltDir is the network-free half of packPrebuiltDir: the three
-// refusals that must happen BEFORE the CLI mints a deployment, let alone opens
-// an upload. It returns the absolute path on success.
+// validatePrebuiltDir is the network-free half of packPrebuiltDir: every refusal
+// that must happen BEFORE the CLI mints a deployment, let alone opens an upload.
+// It returns the absolute, SYMLINK-RESOLVED path on success.
+//
+// It is called from TWO places and that is deliberate: cloud_site_cmd.go's
+// deploy branch calls it PRE-MINT (above siteCloudConfig/resolveOpenSiteID, so a
+// bad dir can never mint a deployment) and packPrebuiltDir calls it again on the
+// way to the packer. So the per-entry walk below runs TWICE per deploy. That is
+// intentional, not an oversight — a built dist/ is kilobytes, and "fixing" it by
+// moving the walk into packPrebuiltDir would silently lose the PRE-MINT arm,
+// which is the only one that runs before the nonce is spent. The two call sites
+// render the same error differently (pre-mint is usage/exitUsage, post-mint is
+// failed/exitGeneric); since the pre-mint arm always fires first on the real
+// command, a refusal from here surfaces as usage/exitUsage.
 func validatePrebuiltDir(dir string) (string, error) {
 	root := strings.TrimSpace(dir)
 	if root == "" {
@@ -175,6 +198,18 @@ func validatePrebuiltDir(dir string) (string, error) {
 	if !info.IsDir() {
 		return "", fmt.Errorf("--prebuilt %s is not a directory — pass the build OUTPUT directory (e.g. ./dist)", root)
 	}
+	// RESOLVE THE ROOT. `dist -> packages/site/dist` is the monorepo shape, and
+	// os.Stat/os.ReadDir both FOLLOW it — so every guard below passes while
+	// filepath.Walk, which LSTATS the root, sees a non-directory, calls its walkFn
+	// once with rel="." and stops. Measured on main: a 32-byte, ZERO-entry archive
+	// that uploads against a nonced deployment and comes back E_MALFORMED "the
+	// archive holds no entries". Handing the resolved path to the packer makes the
+	// tree pack instead, and D93's non-empty guard stops being bypassable.
+	resolved, err := filepath.EvalSymlinks(abs)
+	if err != nil {
+		return "", fmt.Errorf("--prebuilt %s: resolving the directory failed: %w", root, err)
+	}
+	abs = resolved
 	entries, err := os.ReadDir(abs)
 	if err != nil {
 		return "", fmt.Errorf("read %q: %w", root, err)
@@ -188,7 +223,122 @@ func validatePrebuiltDir(dir string) (string, error) {
 	if err != nil || !idx.Mode().IsRegular() {
 		return "", fmt.Errorf("--prebuilt %s has no index.html at its root — that is the build OUTPUT directory (e.g. ./dist), not the project directory", root)
 	}
+	if err := preflightPrebuiltEntries(abs, root); err != nil {
+		return "", err
+	}
 	return abs, nil
+}
+
+// prebuiltAcceptedTypeflags is the box's own accept list, transcribed from
+// `type/1` in api/lib/barkpark/sites/prebuilt_artifact.ex: a regular file ('0' or
+// the historical NUL), a directory ('5'), and the pax extension header ('x').
+// EVERY other byte at offset 156 of a 512-byte block is a typed refusal there —
+// '2' E_SYMLINK, '1' E_HARDLINK, '3'/'4'/'6' E_SPECIAL_FILE, and the remaining
+// extension headers ('g' pax GLOBAL, 'L'/'K' the GNU long-name pair)
+// E_UNKNOWN_TYPE.
+//
+// 'x' IS IN THE LIST ON PURPOSE, and getting this wrong would have re-broken the
+// exact lane this wave exists to open. `archive/tar` elects a pax header for any
+// non-ASCII name and for any path component that cannot be split under 100
+// bytes, so REFUSING 'x' here means refusing to deploy a Norwegian blog — the
+// headline defect, merely relocated from the box to the laptop. The extractor
+// admits 'x' narrowly as of this wave (only the `path` and `size` records are
+// applied, and the effective name then re-enters the whole of name/1 AND
+// safe_path/2), which is what makes it safe to let these bytes leave.
+//
+// 'x' is an accepted HEADER, not a stageable entry — hence "accepted", not
+// "stageable". BOX-LAGS-CLI (charter D112) is a supported product state, so a box
+// that predates the extractor's pax arm still answers E_UNKNOWN_TYPE for these
+// bytes; the client cannot know the box's version and must not pre-emptively
+// refuse a name that every current box stages. That refusal now reaches the user
+// with its code and message intact (FailureCopy.typed_refusal?/1), which is the
+// honest way for a version skew to surface.
+var prebuiltAcceptedTypeflags = map[byte]struct{}{
+	'0': {}, 0: {}, '5': {}, 'x': {},
+}
+
+// preflightPrebuiltEntries is the per-entry, NETWORK-FREE half of the seam: for
+// every entry the packer would actually emit, it asks THE SAME ENCODER what byte
+// lands at offset 156 and refuses anything the box would refuse — locally, by
+// name, before a deployment is minted.
+//
+// It shares writeTarball's walk, its ignore set and its header construction by
+// CONSTRUCTION (walkTarballEntries + tarballIgnoreSet + tarHeaderFor), not by
+// copy. Sharing the CONTROL FLOW is load-bearing, not tidiness: a naive walk
+// flags `.git/refs/heads/café-branch` while the real packer never emits it,
+// because the ignore arm returns filepath.SkipDir on a directory.
+func preflightPrebuiltEntries(abs, root string) error {
+	return walkTarballEntries(abs, tarballIgnoreSet(abs, prebuiltTarballIgnores), func(path, rel string, info os.FileInfo) error {
+		name := filepath.ToSlash(rel)
+		hdr, err := tarHeaderFor(path, rel, info)
+		if err != nil {
+			return err
+		}
+		// Symlinks are answered BEFORE the dry encode. The encode would also catch
+		// them (typeflag '2'), but a link whose TARGET is over 100 bytes elects a
+		// PAX header instead and the verdict would name the less useful reason.
+		if info.Mode()&os.ModeSymlink != 0 {
+			return fmt.Errorf("--prebuilt %s: %s is a symlink to %q — the box refuses a staged symlink outright (E_SYMLINK: \"the archive contains a symlink — refused (a staged symlink is SERVED)\"), so these bytes would be thrown away AFTER the deployment is minted. Replace it with a real file — %s — or emit the alias from your build; an on-box build accepts it only because that path copies with `cp -a`", root, name, hdr.Linkname, symlinkReplaceHint(root, name, hdr.Linkname))
+		}
+		flag, blockBytes, err := observedTarTypeflag(hdr)
+		if err != nil {
+			return fmt.Errorf("--prebuilt %s: %s cannot be written into a tar archive at all: %w", root, name, err)
+		}
+		if _, ok := prebuiltAcceptedTypeflags[flag]; ok {
+			return nil
+		}
+		if flag == 'g' || flag == 'L' || flag == 'K' {
+			return fmt.Errorf("--prebuilt %s: %s encodes as a %d-byte %s extension header (typeflag %q), and the box's extractor refuses that one (E_UNKNOWN_TYPE: unsupported tar entry type) — unlike the pax 'x' header, whose name it applies and re-validates. Repack in POSIX/pax format (`tar --format=posix …`; GNU tar defaults to `--format=gnu`), or shorten the path component that is over 100 bytes", root, name, blockBytes, map[byte]string{'g': "pax GLOBAL", 'L': "GNU long-name", 'K': "GNU long-linkname"}[flag], string(flag))
+		}
+		return fmt.Errorf("--prebuilt %s: %s encodes as tar typeflag %q, which the box's extractor refuses — only regular files and directories are staged. Remove it from the build output", root, name, string(flag))
+	})
+}
+
+// symlinkReplaceHint renders a COPY-PASTEABLE command that replaces one symlink
+// with the bytes it points at. The subtlety it exists for: a relative link target
+// is resolved against the LINK'S OWN DIRECTORY, not against the dist root, so
+// for `assets/home.html -> index.html` the source is `assets/index.html` and a
+// naive `cp index.html assets/home.html` copies the WRONG file (the root
+// index.html) — silently, and only on nested links, which is the shape a
+// pretty-URL alias actually takes.
+//
+// `name` is the slash-separated archive name, `link` the raw target. An absolute
+// or root-escaping target gets no cp at all: copying it in would stage bytes from
+// outside the dist, which is exactly the exfiltration D120 refuses.
+func symlinkReplaceHint(root, name, link string) string {
+	if link == "" || path.IsAbs(link) {
+		return "its target is an ABSOLUTE path OUTSIDE the build output, so there is no copy to suggest: emit the file into the dist instead"
+	}
+	src := path.Join(path.Dir(name), link)
+	if src == ".." || strings.HasPrefix(src, "../") {
+		return "its target resolves OUTSIDE " + root + ", so there is no copy to suggest: copying it in would stage bytes from outside the build output"
+	}
+	return fmt.Sprintf("cd %s && cp %s %s", root, src, name)
+}
+
+// observedTarTypeflag is a DRY ENCODE, and that is the whole point: Go's
+// USTAR-vs-PAX election lives in the unexported Header.allowedFormats, so any
+// hand-written predicate forks stdlib internals — and gets it wrong. The trigger
+// is UNSPLITTABILITY, not length: measured on go1.26.2, a 141-byte path that
+// splits at a '/' takes no PAX, while a 121-byte single directory component
+// does, and the PAX header lands on the DIRECTORY entry rather than the leaf.
+//
+// So we ask the same encoder the packer uses and READ THE BYTE the extractor
+// reads: offset 156 of the first 512-byte block. tar.Writer emits header blocks
+// on WriteHeader and body bytes only on Write, and we never Write and never
+// Close — so this costs exactly one block for a well-formed name (three for a
+// PAX name) regardless of the file's size, opens no file and no socket.
+func observedTarTypeflag(hdr *tar.Header) (byte, int, error) {
+	var buf bytes.Buffer
+	tw := tar.NewWriter(&buf)
+	if err := tw.WriteHeader(hdr); err != nil {
+		return 0, 0, err
+	}
+	b := buf.Bytes()
+	if len(b) < 512 {
+		return 0, len(b), fmt.Errorf("tar header encoded to %d bytes, expected at least one 512-byte block", len(b))
+	}
+	return b[156], len(b), nil
 }
 
 // bufferTarball packs opts into a temp file and returns the wire byte count plus
@@ -275,7 +425,25 @@ func streamTarball(opts tarballOptions) (io.ReadCloser, error) {
 		return nil, fmt.Errorf("%q is not a directory", root)
 	}
 
-	ignores := opts.Ignores
+	ignoreSet := tarballIgnoreSet(root, opts.Ignores)
+
+	pr, pw := io.Pipe()
+	go func() {
+		_ = pw.CloseWithError(writeTarball(pw, root, ignoreSet, opts.MaxBytes))
+	}()
+	return pr, nil
+}
+
+// tarballIgnoreSet normalizes an ignore list into the lookup set isIgnored
+// consumes. `ignores` is NIL-SENSITIVE: nil means "fall back to the project's
+// .gitignore plus the defaults", which is a different payload from an empty
+// slice ("ignore nothing"), so the nil arm lives here rather than in a caller.
+//
+// Keys are normalized to a basename-or-suffix shape. We deliberately keep this
+// simple — no glob support, no negation — to match the documented "default
+// ignore list" shape. A user who needs glob handling can pre-build the tarball
+// and pass --artifact-url.
+func tarballIgnoreSet(root string, ignores []string) map[string]struct{} {
 	if ignores == nil {
 		ignores = loadGitignore(root)
 	}
@@ -285,28 +453,18 @@ func streamTarball(opts tarballOptions) (io.ReadCloser, error) {
 		if p == "" || strings.HasPrefix(p, "#") {
 			continue
 		}
-		// Normalize to a basename-or-suffix key. We deliberately keep this
-		// simple — no glob support, no negation — to match the documented
-		// "default ignore list" shape. A user who needs glob handling can
-		// pre-build the tarball and pass --artifact-url.
 		ignoreSet[strings.TrimRight(p, "/")] = struct{}{}
 	}
-
-	pr, pw := io.Pipe()
-	go func() {
-		_ = pw.CloseWithError(writeTarball(pw, root, ignoreSet, opts.MaxBytes))
-	}()
-	return pr, nil
+	return ignoreSet
 }
 
-// writeTarball is the goroutine body — walks `root`, writes each file into the
-// tar+gzip pipeline, and closes both writers cleanly.
-func writeTarball(w io.Writer, root string, ignores map[string]struct{}, maxBytes int64) error {
-	gz := gzip.NewWriter(w)
-	tw := tar.NewWriter(gz)
-	written := int64(0)
-
-	err := filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
+// walkTarballEntries is THE walk: it visits exactly the entries the packer
+// emits, in the packer's order, applying the packer's ignore arm — including the
+// filepath.SkipDir on an ignored DIRECTORY, which is why an ignored `.git` never
+// contributes a single entry. The preflight and the packer share this function
+// so the two can never disagree about what is in the archive.
+func walkTarballEntries(root string, ignores map[string]struct{}, visit func(path, rel string, info os.FileInfo) error) error {
+	return filepath.Walk(root, func(path string, info os.FileInfo, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -323,24 +481,46 @@ func writeTarball(w io.Writer, root string, ignores map[string]struct{}, maxByte
 			}
 			return nil
 		}
+		return visit(path, rel, info)
+	})
+}
 
-		link := ""
-		if info.Mode()&os.ModeSymlink != 0 {
-			link, err = os.Readlink(path)
-			if err != nil {
-				return fmt.Errorf("readlink %q: %w", path, err)
-			}
+// tarHeaderFor builds the EXACT header the packer writes for one walked entry —
+// shared with the preflight so a dry encode elects the same tar format the wire
+// bytes will.
+func tarHeaderFor(path, rel string, info os.FileInfo) (*tar.Header, error) {
+	link := ""
+	if info.Mode()&os.ModeSymlink != 0 {
+		var err error
+		link, err = os.Readlink(path)
+		if err != nil {
+			return nil, fmt.Errorf("readlink %q: %w", path, err)
 		}
+	}
+	hdr, err := tar.FileInfoHeader(info, link)
+	if err != nil {
+		return nil, err
+	}
+	// Use forward-slash relative paths so the archive is portable across
+	// builder OSes (the builder runs Linux containers).
+	hdr.Name = filepath.ToSlash(rel)
+	if info.IsDir() {
+		hdr.Name += "/"
+	}
+	return hdr, nil
+}
 
-		hdr, err := tar.FileInfoHeader(info, link)
+// writeTarball is the goroutine body — walks `root`, writes each file into the
+// tar+gzip pipeline, and closes both writers cleanly.
+func writeTarball(w io.Writer, root string, ignores map[string]struct{}, maxBytes int64) error {
+	gz := gzip.NewWriter(w)
+	tw := tar.NewWriter(gz)
+	written := int64(0)
+
+	err := walkTarballEntries(root, ignores, func(path, rel string, info os.FileInfo) error {
+		hdr, err := tarHeaderFor(path, rel, info)
 		if err != nil {
 			return err
-		}
-		// Use forward-slash relative paths so the archive is portable across
-		// builder OSes (the builder runs Linux containers).
-		hdr.Name = filepath.ToSlash(rel)
-		if info.IsDir() {
-			hdr.Name += "/"
 		}
 
 		if err := tw.WriteHeader(hdr); err != nil {
