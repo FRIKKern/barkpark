@@ -388,6 +388,36 @@ else
   bad "a real workflow carries a catch-all job name: $(grep -o "CATCH-ALL JOB NAME: [^,]*" <<<"$REAL_OUT" | head -1)"
 fi
 
+# …AND THAT SILENCE HAS TO MEAN SOMETHING. The assertion above passes on the
+# ABSENCE of a string, so it also passes when the generator dies before the scan
+# ever reaches the real tree — an unrelated early `die`, a renamed flag, a broken
+# fixture dir. That is the vacuous-green shape this epic exists to remove, so the
+# same invocation over a COPY of the real tree, with one catch-all planted in it,
+# must REFUSE. Clean + able-to-fail together are the claim; neither alone is.
+REALCOPY="$TMP/real-workflows"
+mkdir -p "$REALCOPY"
+cp "$REPO_ROOT"/.github/workflows/*.yml "$REALCOPY/"
+cat > "$REALCOPY/aaa-planted-poison.yml" <<'YAML'
+name: planted
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        type: string
+jobs:
+  run:
+    name: ${{ inputs.operation }}
+    runs-on: ubuntu-latest
+YAML
+PLANT_OUT="$(bash "$GEN" --workflows "$REALCOPY" --fixture-dir "$FIX" \
+  --sha shaA --sha shaA --allow-single-sha 2>&1)" && PLANT_RC=0 || PLANT_RC=$?
+if [ "$PLANT_RC" -ne 0 ] && grep -q "CATCH-ALL JOB NAME: aaa-planted-poison.yml job 'run'" <<<"$PLANT_OUT"; then
+  ok "…and the identical invocation over a COPY of the real tree with one catch-all planted REFUSES — the clean verdict above is a read, not a silence"
+else
+  bad "the real-tree scan could not be made to fail (exit $PLANT_RC): $(head -2 <<<"$PLANT_OUT")"
+fi
+rm -rf "$REALCOPY"
+
 # ═══ 4. fail-closed feeds ════════════════════════════════════════════════════
 
 section "4. the generator fails closed — an unreadable or empty feed is never an empty spec"
