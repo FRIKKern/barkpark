@@ -183,7 +183,7 @@ defmodule Barkpark.Content.Papers.BackfillBlockIds do
     case Map.get(content, "blocks") do
       blocks when is_list(blocks) ->
         id_blocks = BlockOps.ensure_block_ids(blocks)
-        new_blocks = BlockOps.normalize_list_items(id_blocks)
+        new_blocks = BlockOps.normalize_render_shapes(id_blocks)
 
         cond do
           new_blocks == blocks ->

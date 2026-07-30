@@ -61,3 +61,79 @@ func TestPdTableRendersNormally(t *testing.T) {
 		}
 	}
 }
+
+func TestPdTableRendersObjectWrappedRowsAndCells(t *testing.T) {
+	reg := testRegistry()
+	b := Block{
+		Type: "table",
+		Attrs: map[string]any{
+			"rows": []any{
+				map[string]any{"header": true, "cells": []any{
+					map[string]any{"content": []any{map[string]any{"type": "text", "value": "Name"}}},
+				}},
+				map[string]any{"cells": []any{
+					map[string]any{"content": []any{map[string]any{"type": "text", "value": "Ada"}}},
+				}},
+			},
+		},
+	}
+
+	out := strings.Join(reg.Render(b, RenderCtx{Width: 40, Theme: DarkTheme(), Profile: NoColor}), "\n")
+	for _, want := range []string{"NAME", "Ada"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected wrapped table to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestPdCalloutRendersLegacyTextBody(t *testing.T) {
+	reg := testRegistry()
+	b := Block{Type: "callout", Attrs: map[string]any{"text": "Visible body"}}
+	out := strings.Join(reg.Render(b, RenderCtx{Width: 40, Theme: DarkTheme(), Profile: NoColor}), "\n")
+	if !strings.Contains(out, "Visible body") {
+		t.Fatalf("expected legacy callout text to remain visible, got:\n%s", out)
+	}
+}
+
+func TestPdTableRendersDeclaredRecordRows(t *testing.T) {
+	reg := testRegistry()
+	b := Block{
+		Type: "table",
+		Attrs: map[string]any{
+			"columns": []any{
+				map[string]any{"key": "k", "label": "Key"},
+				map[string]any{"key": "why", "label": "Why"},
+			},
+			"rows": []any{map[string]any{"k": "A", "why": "Because"}},
+		},
+	}
+	out := strings.Join(reg.Render(b, RenderCtx{Width: 50, Theme: DarkTheme(), Profile: NoColor}), "\n")
+	for _, want := range []string{"KEY", "WHY", "A", "Because"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected record table to contain %q, got:\n%s", want, out)
+		}
+	}
+}
+
+func TestPdTableRendersTextWrappedColumnsAndCells(t *testing.T) {
+	reg := testRegistry()
+	b := Block{
+		Type: "table",
+		Attrs: map[string]any{
+			"columns": []any{
+				map[string]any{"text": "Surface"},
+				map[string]any{"text": "Proof"},
+			},
+			"rows": []any{[]any{
+				map[string]any{"text": "CLI"},
+				map[string]any{"text": "visible"},
+			}},
+		},
+	}
+	out := strings.Join(reg.Render(b, RenderCtx{Width: 50, Theme: DarkTheme(), Profile: NoColor}), "\n")
+	for _, want := range []string{"SURFACE", "PROOF", "CLI", "visible"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected text-wrapped table to contain %q, got:\n%s", want, out)
+		}
+	}
+}

@@ -48,6 +48,8 @@ done
 if [[ "$url" == */source ]]; then
   if [[ "$url" == *html-paper* ]]; then
     printf '%s' '{"source":{"kind":"html","html":"<p>legacy</p>"}}' >"$out"
+  elif [[ "${BP_FIXTURE_STRUCTURAL:-}" == "1" ]]; then
+    printf '%s' '{"_rev":"rev-1","source":{"kind":"blocks","blocks":[{"type":"list","items":[{"content":[{"type":"text","value":"invisible"}]}]}]}}' >"$out"
   else
     printf '%s' '{"source":{"kind":"blocks","blocks":[]}}' >"$out"
   fi
@@ -103,6 +105,7 @@ fi
 
 jq -e '
   .ok and .inventory == 2 and .audited == 2 and .passed == 2 and .failed == 0 and
+  .structure.papers_scanned == 1 and .structure.violations == 0 and
   .inventory_ids == ["blocks-paper", "html-paper"] and
   (.inventory_digest | test("^[0-9a-f]{64}$")) and
   (.results | length == 2) and
@@ -168,6 +171,20 @@ jq -e '
   .ok == false and .failed == 2 and
   all(.failures[]; .email.content.links_valid == false and .email.content.invalid_links == 1)
 ' "$tmp/bad-link-result.json" >/dev/null
+
+if PATH="$tmp:$PATH" BP_FIXTURE_STRUCTURAL=1 BP_AUDIT_BIN="$tmp/fake-bp" \
+  BP_AUDIT_BASE_URL="https://fixture.invalid" \
+  "$repo/scripts/audit-paper-readers.sh" >"$tmp/structural-result.json"; then
+  printf 'structurally invisible block content unexpectedly passed\n' >&2
+  exit 1
+fi
+
+jq -e '
+  .ok == false and .failed == 0 and
+  .structure.papers_affected == 1 and
+  .structure.violations == 1 and
+  .structure.violation_counts.list_item_object_wrapper == 1
+' "$tmp/structural-result.json" >/dev/null
 
 if PATH="$tmp:$PATH" BP_FIXTURE_STALLED=1 BP_AUDIT_BIN="$tmp/fake-bp" \
   BP_AUDIT_BASE_URL="https://fixture.invalid" \

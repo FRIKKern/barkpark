@@ -44,6 +44,7 @@ defmodule Barkpark.Content.Lifecycle do
     WriteScope
   }
 
+  alias Barkpark.Content.Papers.BlockOps
   alias Barkpark.Tasks.Transitions
 
   # TIMED: the publish/lifecycle hot path had ZERO telemetry, so "what is p95 of
@@ -87,7 +88,8 @@ defmodule Barkpark.Content.Lifecycle do
         # The publish-door lifecycle gate — immediately after the draft read,
         # BEFORE the wall and the :before_publish hook fire, so a refusal is
         # side-effect-free (the Writer-seam gate-position precedent).
-        with :ok <- ensure_task_publish_transition_legal(type, draft, pid, dataset, opts) do
+        with {:ok, draft} <- prepare_paper_render_shapes(draft, type),
+             :ok <- ensure_task_publish_transition_legal(type, draft, pid, dataset, opts) do
           publish_after_gate(draft, pid, type, dataset, opts)
         end
 
@@ -95,6 +97,25 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, :not_found}
     end
   end
+
+  defp prepare_paper_render_shapes(
+         %Document{content: %{"blocks" => blocks} = content} = draft,
+         "paper"
+       )
+       when is_list(blocks) do
+    normalized = BlockOps.normalize_render_shapes(blocks)
+
+    case BlockOps.validate_render_shapes(normalized) do
+      :ok -> {:ok, %{draft | content: Map.put(content, "blocks", normalized)}}
+      {:error, _reason} = error -> error
+    end
+  end
+
+  defp prepare_paper_render_shapes(%Document{content: content}, "paper")
+       when is_map(content) and is_map_key(content, "blocks"),
+       do: BlockOps.validate_render_shapes(content["blocks"])
+
+  defp prepare_paper_render_shapes(draft, _type), do: {:ok, draft}
 
   defp publish_after_gate(%Document{} = draft, pid, type, dataset, opts) do
     ctx = WriteScope.build_ctx(opts)

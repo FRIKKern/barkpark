@@ -39,6 +39,8 @@ defmodule Barkpark.Content.Errors do
       "A plugin's lifecycle hook vetoed this write — read the message for the policy that rejected it, then adjust the document to satisfy it (or disable the plugin).",
     "label_spine" =>
       "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix. Learn where the authoring standards live in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan.",
+    "invalid_paper_structure" =>
+      "Fix the listed block paths so every list item, table row/cell, and nested block has a reader-supported content shape, then republish.",
     "rate_limited" =>
       "Back off and retry after the Retry-After header's value; reduce request rate.",
     "idempotency_key_in_use" =>
@@ -416,6 +418,14 @@ defmodule Barkpark.Content.Errors do
     do: %{
       code: "label_spine",
       message: "document failed the publish wall's label spine",
+      status: 422,
+      details: details
+    }
+
+  defp build({:error, {:invalid_paper_structure, details}}),
+    do: %{
+      code: "invalid_paper_structure",
+      message: "paper contains block content that readers cannot render",
       status: 422,
       details: details
     }

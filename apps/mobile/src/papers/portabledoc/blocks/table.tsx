@@ -8,13 +8,31 @@ import { ScrollView, Text, View } from 'react-native'
 
 import { scale } from '../../../ui/typography'
 import { renderInlineNodes } from '../inlines'
-import { asList } from '../model'
+import { asList, isMap } from '../model'
 import type { Render } from '../register'
 
 const table: Render = (b, ctx, key) => {
-  const headRaw = b.head ?? b.header
-  const head = Array.isArray(headRaw) ? headRaw : []
-  const rows = asList(b.rows)
+  let head = asList(b.head ?? b.header)
+  let rows = asList(b.rows)
+  const columns = asList(b.columns)
+  if (!head.length && columns.length && columns.every(isMap)) {
+    const maps = columns as Array<Record<string, unknown>>
+    const keys = maps.map((column) => (typeof column.key === 'string' ? column.key : ''))
+    head = maps.map((column, index) => column.text ?? column.label ?? keys[index])
+    if (keys.every(Boolean)) {
+      rows = rows.map((row) =>
+        isMap(row) ? keys.map((key) => row[key] ?? '') : row,
+      )
+    }
+  } else if (
+    !head.length &&
+    rows.length &&
+    isMap(rows[0]) &&
+    (rows[0].header || allHeaderCells(rowCells(rows[0])))
+  ) {
+    head = rowCells(rows[0])
+    rows = rows.slice(1)
+  }
   const cellMin = 96
   return (
     <ScrollView key={key} horizontal style={{ marginVertical: 10 }}>
@@ -24,7 +42,7 @@ const table: Render = (b, ctx, key) => {
             {head.map((cell, i) => (
               <View key={i} style={{ minWidth: cellMin, maxWidth: 220, padding: 8 }}>
                 <Text style={{ ...scale.sm, fontWeight: '700', color: ctx.theme.text }}>
-                  {renderInlineNodes(Array.isArray(cell) ? cell : [cell], ctx)}
+                  {renderInlineNodes(asInlineCell(cell), ctx)}
                 </Text>
               </View>
             ))}
@@ -35,10 +53,10 @@ const table: Render = (b, ctx, key) => {
             key={ri}
             style={{ flexDirection: 'row', borderTopWidth: 1, borderTopColor: ctx.theme.border }}
           >
-            {asList(row).map((cell, ci) => (
+            {rowCells(row).map((cell, ci) => (
               <View key={ci} style={{ minWidth: cellMin, maxWidth: 220, padding: 8 }}>
                 <Text style={{ ...scale.sm, color: ctx.theme.text }}>
-                  {renderInlineNodes(Array.isArray(cell) ? cell : [cell], ctx)}
+                  {renderInlineNodes(asInlineCell(cell), ctx)}
                 </Text>
               </View>
             ))}
@@ -47,6 +65,22 @@ const table: Render = (b, ctx, key) => {
       </View>
     </ScrollView>
   )
+}
+
+function rowCells(row: unknown): unknown[] {
+  return isMap(row) && Array.isArray(row.cells) ? row.cells : asList(row)
+}
+
+function asInlineCell(cell: unknown): unknown[] {
+  if (isMap(cell) && typeof cell.text === 'string') return [cell.text]
+  const content = isMap(cell) && Array.isArray(cell.content) ? cell.content : [cell]
+  return content.flatMap((node) =>
+    isMap(node) && Array.isArray(node.content) ? node.content : [node],
+  )
+}
+
+function allHeaderCells(cells: unknown[]): boolean {
+  return cells.every((cell) => isMap(cell) && !!cell.header)
 }
 
 export const tableRenderers: Record<string, Render> = {

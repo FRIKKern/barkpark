@@ -37,6 +37,30 @@ type tableRenderer struct{ ir InlineRenderer }
 func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 	head := attrSlice(b.Attrs, "head")
 	rows := attrSlice(b.Attrs, "rows")
+	columnHead, columnKeys := tableColumns(attrSlice(b.Attrs, "columns"))
+	if len(head) == 0 && len(columnHead) > 0 {
+		head = columnHead
+		if len(columnKeys) > 0 {
+			normalizedRows := make([]any, 0, len(rows))
+			for _, row := range rows {
+				normalizedRows = append(normalizedRows, recordRow(row, columnKeys))
+			}
+			rows = normalizedRows
+		}
+	}
+	if len(head) == 0 && len(rows) > 0 {
+		if row, ok := rows[0].(map[string]any); ok {
+			if header, _ := row["header"].(bool); header {
+				if cells, ok := row["cells"].([]any); ok {
+					head = cells
+					rows = rows[1:]
+				}
+			} else if cells, ok := row["cells"].([]any); ok && allHeaderCells(cells) {
+				head = cells
+				rows = rows[1:]
+			}
+		}
+	}
 	colTypes := parseColTypes(attrSlice(b.Attrs, "cols"))
 
 	t := ltable.New().
@@ -105,6 +129,11 @@ func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 // each cell rendered per its column type (index-aligned to colTypes; text/legacy
 // when colTypes is nil or the index is out of range).
 func (tr tableRenderer) rowCells(row any, colTypes []string, ctx RenderCtx) []string {
+	if wrapped, ok := row.(map[string]any); ok {
+		if cells, ok := wrapped["cells"].([]any); ok {
+			row = cells
+		}
+	}
 	cells, ok := row.([]any)
 	if !ok {
 		// A bare scalar row coerces to a single cell (column 0).
@@ -216,12 +245,96 @@ func colRightAlign(types []string, col int) bool {
 func (tr tableRenderer) cellString(cell any, ctx RenderCtx) string {
 	switch v := cell.(type) {
 	case []any:
-		return tr.ir.Inline(v, ctx)
+		return tr.ir.Inline(flattenCellNodes(v), ctx)
+	case map[string]any:
+		if content, ok := v["content"].([]any); ok {
+			return tr.ir.Inline(flattenCellNodes(content), ctx)
+		}
+		if text, ok := v["text"].(string); ok {
+			return tr.ir.Inline([]any{text}, ctx)
+		}
+		return tr.ir.Inline([]any{v}, ctx)
 	case nil:
 		return ""
 	default:
 		return tr.ir.Inline([]any{v}, ctx)
 	}
+}
+
+func flattenCellNodes(nodes []any) []any {
+	out := make([]any, 0, len(nodes))
+	for _, node := range nodes {
+		if block, ok := node.(map[string]any); ok && attrStr(block, "type") == "paragraph" {
+			if content, ok := block["content"].([]any); ok {
+				out = append(out, content...)
+				continue
+			}
+		}
+		out = append(out, node)
+	}
+	return out
+}
+
+func tableColumns(columns []any) ([]any, []string) {
+	if len(columns) == 0 {
+		return nil, nil
+	}
+	head := make([]any, 0, len(columns))
+	keys := make([]string, 0, len(columns))
+	for _, raw := range columns {
+		column, ok := raw.(map[string]any)
+		if !ok {
+			return nil, nil
+		}
+		key := attrStr(column, "key")
+		if key == "" {
+			text := attrStr(column, "text")
+			if text == "" {
+				return nil, nil
+			}
+			head = append(head, text)
+			continue
+		}
+		label := attrStr(column, "label")
+		if label == "" {
+			label = key
+		}
+		keys = append(keys, key)
+		head = append(head, label)
+	}
+	if len(keys) == 0 && len(head) == len(columns) {
+		return head, nil
+	}
+	if len(keys) != len(columns) {
+		return nil, nil
+	}
+	return head, keys
+}
+
+func recordRow(raw any, keys []string) any {
+	row, ok := raw.(map[string]any)
+	if !ok {
+		return raw
+	}
+	cells := make([]any, 0, len(keys))
+	for _, key := range keys {
+		cells = append(cells, row[key])
+	}
+	return cells
+}
+
+func allHeaderCells(cells []any) bool {
+	if len(cells) == 0 {
+		return false
+	}
+	for _, raw := range cells {
+		cell, ok := raw.(map[string]any)
+		header, _ := cell["header"].(bool)
+		if !ok || !header {
+			return false
+		}
+	}
+	return true
 }
 
 // ── figure ─────────────────────────────────────────────────────────────────

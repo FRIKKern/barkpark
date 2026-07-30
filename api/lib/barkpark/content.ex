@@ -659,6 +659,7 @@ defmodule Barkpark.Content do
   `Content.Papers.BlockOps.normalize_list_items/1`.
   """
   defdelegate normalize_list_items(blocks), to: Papers.BlockOps
+  defdelegate normalize_render_shapes(blocks), to: Papers.BlockOps
 
   @doc "Resolve the block list for editing a document. See `Content.Papers`."
   defdelegate resolve_blocks_for_edit(doc, type, dataset), to: Papers

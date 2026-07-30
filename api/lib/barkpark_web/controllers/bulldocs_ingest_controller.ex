@@ -187,6 +187,9 @@ defmodule BarkparkWeb.BulldocsIngestController do
       {:error, {:label_spine, _}} = err ->
         render_error(conn, err)
 
+      {:error, {:invalid_paper_structure, _}} = err ->
+        render_error(conn, err)
+
       {:error, {:unknown_tag, _}} = err ->
         render_error(conn, err)
 
@@ -599,10 +602,11 @@ defmodule BarkparkWeb.BulldocsIngestController do
 
       true ->
         op_opts =
-          case Map.get(params, "ifRev") do
-            nil -> []
-            if_rev -> [if_rev: if_rev]
-          end
+          paper_scope_opts(conn, params) ++
+            case Map.get(params, "ifRev") do
+              nil -> []
+              if_rev -> [if_rev: if_rev]
+            end
 
         dataset = params["dataset"] || Content.paper_default_dataset()
 
@@ -688,7 +692,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
       true ->
         dataset = params["dataset"] || Content.paper_default_dataset()
 
-        case Content.apply_paper_block_op(slug, op, dataset) do
+        case Content.apply_paper_block_op(
+               slug,
+               op,
+               dataset,
+               paper_scope_opts(conn, params)
+             ) do
           {:ok, result} ->
             conn
             |> put_status(:ok)
@@ -730,8 +739,6 @@ defmodule BarkparkWeb.BulldocsIngestController do
             |> put_status(:unprocessable_entity)
             |> json(%{error: %{code: "invalid_op", message: "op could not be applied"}})
 
-          # Server veto ({:halted, reason}) — surface the reason VERBATIM
-          # (see batch clause).
           {:error, {:halted, reason}} ->
             conn
             |> put_status(:conflict)
@@ -744,6 +751,12 @@ defmodule BarkparkWeb.BulldocsIngestController do
         end
     end
   end
+
+  # W1.5-C / session-handoff parity: Paper block ops, like reads and session
+  # ops, must resolve the row in the request's workspace/project. Without this
+  # option threading, two tenants sharing a slug can patch whichever Default
+  # row the server happens to resolve.
+  defp paper_scope_opts(conn, params), do: session_scope_opts(conn, params)
 
   @doc """
   The AI-proposes loop (lvw-t4). Apply INSERT-ONLY block ops to the paper's

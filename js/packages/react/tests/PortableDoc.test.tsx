@@ -612,6 +612,54 @@ describe('PortableDoc — the type-keyed renderer', () => {
       expect(html).toContain('<td class="bp-table__td"><span>c</span></td>')
     })
 
+    it('renders object-wrapped table rows/cells and promotes a legacy header row', () => {
+      const html = renderPortableDocument([
+        {
+          type: 'table',
+          rows: [
+            {
+              header: true,
+              cells: [{ content: [{ type: 'text', value: 'Name' }] }],
+            },
+            {
+              cells: [{ content: [{ type: 'text', value: 'Ada' }] }],
+            },
+          ],
+        },
+      ])
+      expect(html).toContain('<th class="bp-table__th"><span>Name</span></th>')
+      expect(html).toContain('<td class="bp-table__td"><span>Ada</span></td>')
+    })
+
+    it('renders declared record rows in column order', () => {
+      const html = renderPortableDocument([
+        {
+          type: 'table',
+          columns: [
+            { key: 'k', label: 'Key' },
+            { key: 'why', label: 'Why' },
+          ],
+          rows: [{ why: 'Because', k: 'A' }],
+        },
+      ])
+      expect(html).toContain('<th class="bp-table__th"><span>Key</span></th>')
+      expect(html).toContain('<td class="bp-table__td"><span>A</span></td>')
+      expect(html).toContain('<td class="bp-table__td"><span>Because</span></td>')
+    })
+
+    it('renders legacy text-wrapped columns and cells instead of empty shells', () => {
+      const html = renderPortableDocument([
+        {
+          type: 'table',
+          columns: [{ text: 'Surface' }, { text: 'Proof' }],
+          rows: [[{ text: 'CLI' }, { text: 'visible' }]],
+        },
+      ])
+      expect(html).toContain('<th class="bp-table__th"><span>Surface</span></th>')
+      expect(html).toContain('<td class="bp-table__td"><span>CLI</span></td>')
+      expect(html).toContain('<td class="bp-table__td"><span>visible</span></td>')
+    })
+
     it('heatmap normalizes --i by the grid max, not a 1.0 floor (data_viz heat_grid_html)', () => {
       // cells max 0.9 → 0.9/0.9 = 1.000 for the top cell, 0.1/0.9 = 0.111 for the low.
       const html = renderPortableDocument([{ type: 'heatmap', cells: [[0.1, 0.9]] }])

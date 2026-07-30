@@ -238,7 +238,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
           list
           |> maybe_seed_template(type, existing, attrs)
           |> ensure_block_ids()
-          |> normalize_list_items()
+          |> normalize_render_shapes()
           |> Sheets.hydrate_sheet_blocks(embed_scope, slug)
 
         other ->
@@ -274,6 +274,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
     # title-only stub gets the honest hard stop instead of a hollow
     # published paper. HTML-only writes (no blocks list) stay exempt.
     with [] <- template_declaration_errors(type, blocks),
+         :ok <- validate_render_shapes_for_type(type, blocks),
          :ok <- maybe_reject_hollow_result(type, blocks),
          :ok <- reject_new_field_loss(existing_paper_blocks(existing), blocks),
          {:ok, blocks} <-
@@ -310,6 +311,11 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # blocks. Additive for non-paper types: no declarations, no errors.
   defp template_declaration_errors(@paper_type, blocks), do: Papers.Template.validate(blocks)
   defp template_declaration_errors(_type, _blocks), do: []
+
+  defp validate_render_shapes_for_type(@paper_type, blocks) when is_list(blocks),
+    do: validate_render_shapes(blocks)
+
+  defp validate_render_shapes_for_type(_type, _blocks), do: :ok
 
   # Paper-only: the hollow-result quality gate (p-quality-gate, D3) enforces
   # the PAPER doctrine's "title but no content" copy — not a generic
@@ -572,7 +578,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # additive + idempotent — they only fill a missing id / coerce a string
          # item, never disturb an op-supplied id or a canonical inline item. Run
          # BEFORE locate so the affected block + fragment_html see the final list.
-         new_blocks = patched |> ensure_block_ids() |> normalize_list_items(),
+         new_blocks = patched |> ensure_block_ids() |> normalize_render_shapes(),
          # Field-encryption CHOKEPOINT (Phase 2): encrypt marked bound block
          # values BEFORE locate/render/project, so the streaming editor stores
          # ciphertext-at-rest and the delta fragment + body_html cache redact the
@@ -696,7 +702,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
          # id is filled, and any flat-string list item is canonicalized, before
          # persistence. Both additive + idempotent, so a batch of well-formed
          # (id-bearing, canonical-item) ops is byte-identical through it.
-         normalized = folded |> ensure_block_ids() |> normalize_list_items(),
+         normalized = folded |> ensure_block_ids() |> normalize_render_shapes(),
          # Field-encryption CHOKEPOINT (Phase 2): same as the single-op path —
          # encrypt marked bound block values before render/project/persist so the
          # batch write stores ciphertext-at-rest. No-op for an unmarked schema;
@@ -1382,6 +1388,352 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   def normalize_list_items(other), do: other
+
+  @doc """
+  Canonicalize the lossless persisted block dialects that otherwise render
+  differently across Paper readers.
+
+  The transform is deliberately conservative: wrappers carrying metadata are
+  retained byte-for-byte for the tolerant readers, while unambiguous wrappers
+  are reduced to the canonical wire shape. It is recursive and idempotent.
+  """
+  @spec normalize_render_shapes(list()) :: list()
+  def normalize_render_shapes(blocks) when is_list(blocks) do
+    blocks
+    |> normalize_list_items()
+    |> Enum.map(&normalize_render_block/1)
+  end
+
+  def normalize_render_shapes(other), do: other
+
+  @doc """
+  Reject a Paper block tree that still contains a reader-incompatible shape
+  after normalization. Metadata-bearing wrappers are accepted when every
+  reader has a lossless fallback for their content field.
+  """
+  @spec validate_render_shapes(term()) :: :ok | {:error, {:invalid_paper_structure, map()}}
+  def validate_render_shapes(blocks) when is_list(blocks) do
+    case render_shape_errors(blocks, "blocks") do
+      [] -> :ok
+      errors -> {:error, {:invalid_paper_structure, %{"blocks" => errors}}}
+    end
+  end
+
+  def validate_render_shapes(_),
+    do:
+      {:error,
+       {:invalid_paper_structure,
+        %{"blocks" => ["must be an array when a Paper declares a block body"]}}}
+
+  defp render_shape_errors(blocks, prefix) do
+    blocks
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {block, index} when is_map(block) ->
+        render_block_errors(block, "#{prefix}[#{index}]")
+
+      {_block, index} ->
+        ["#{prefix}[#{index}] must be an object"]
+    end)
+  end
+
+  defp render_block_errors(%{"type" => "list"} = block, path) do
+    case Map.get(block, "items") do
+      items when is_list(items) ->
+        items
+        |> Enum.with_index()
+        |> Enum.flat_map(fn
+          {item, _index} when is_list(item) ->
+            []
+
+          {%{"content" => content}, _index} when is_list(content) ->
+            []
+
+          {%{"text" => text}, _index} when is_binary(text) ->
+            []
+
+          {_item, index} ->
+            ["#{path}.items[#{index}] has no renderable inline content"]
+        end)
+
+      _ ->
+        ["#{path}.items must be an array"]
+    end
+  end
+
+  defp render_block_errors(%{"type" => "table"} = block, path) do
+    rows = Map.get(block, "rows")
+
+    cond do
+      not is_list(rows) ->
+        ["#{path}.rows must be an array"]
+
+      valid_record_table?(block, rows) ->
+        []
+
+      true ->
+        row_errors =
+          rows
+          |> Enum.with_index()
+          |> Enum.flat_map(fn {row, index} ->
+            render_table_row_errors(row, "#{path}.rows[#{index}]")
+          end)
+
+        head_errors =
+          case Map.get(block, "head") || Map.get(block, "header") do
+            nil -> []
+            [] -> []
+            head -> render_table_row_errors(head, "#{path}.head")
+          end
+
+        head_errors ++ row_errors
+    end
+  end
+
+  defp render_block_errors(block, path) do
+    case Map.get(block, "blocks") do
+      children when is_list(children) -> render_shape_errors(children, "#{path}.blocks")
+      _ -> []
+    end
+  end
+
+  defp render_table_row_errors(%{"cells" => cells}, path) when is_list(cells),
+    do: render_table_cell_errors(cells, path)
+
+  defp render_table_row_errors(cells, path) when is_list(cells),
+    do: render_table_cell_errors(cells, path)
+
+  defp render_table_row_errors(_row, path), do: ["#{path} has no renderable cells"]
+
+  defp render_table_cell_errors(cells, path) do
+    cells
+    |> Enum.with_index()
+    |> Enum.flat_map(fn
+      {cell, _index} when is_list(cell) ->
+        []
+
+      {%{"content" => content}, _index} when is_list(content) ->
+        []
+
+      {%{"text" => text}, _index} when is_binary(text) ->
+        []
+
+      {_cell, index} ->
+        ["#{path}.cells[#{index}] has no renderable inline content"]
+    end)
+  end
+
+  defp valid_record_table?(%{"columns" => columns}, rows)
+       when is_list(columns) and columns != [] do
+    keys =
+      if Enum.all?(columns, &is_map/1),
+        do: Enum.map(columns, &Map.get(&1, "key")),
+        else: []
+
+    Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
+      Enum.uniq(keys) == keys and
+      Enum.all?(columns, fn column ->
+        label = Map.get(column, "label")
+        is_nil(label) or is_binary(label)
+      end) and
+      Enum.all?(rows, fn row ->
+        is_map(row) and Map.keys(row) -- keys == [] and
+          Enum.all?(Map.values(row), &record_table_scalar?/1)
+      end)
+  end
+
+  defp valid_record_table?(_block, _rows), do: false
+
+  defp normalize_render_block(%{"type" => "list", "items" => items} = block)
+       when is_list(items) do
+    Map.put(block, "items", Enum.map(items, &normalize_wrapped_list_item/1))
+  end
+
+  defp normalize_render_block(%{"type" => "table"} = block) do
+    normalize_table_shape(block)
+  end
+
+  defp normalize_render_block(%{"type" => "callout", "text" => text} = block)
+       when is_binary(text) do
+    content = Map.get(block, "content")
+    slots = Map.get(block, "slots")
+
+    if String.trim(text) != "" and content in [nil, []] and slots in [nil, %{}] do
+      block
+      |> Map.delete("text")
+      |> Map.put("content", [%{"type" => "text", "value" => text}])
+    else
+      block
+    end
+  end
+
+  defp normalize_render_block(block) when is_map(block) do
+    case Map.get(block, "blocks") do
+      children when is_list(children) ->
+        Map.put(block, "blocks", normalize_render_shapes(children))
+
+      _ ->
+        block
+    end
+  end
+
+  defp normalize_render_block(block), do: block
+
+  defp normalize_wrapped_list_item(%{"content" => content} = item)
+       when is_list(content) and map_size(item) == 1,
+       do: content
+
+  defp normalize_wrapped_list_item(%{"text" => text} = item)
+       when is_binary(text) and map_size(item) == 1,
+       do: [%{"type" => "text", "value" => text}]
+
+  defp normalize_wrapped_list_item(item), do: item
+
+  defp normalize_table_shape(%{"rows" => rows} = block) when is_list(rows) do
+    case normalize_record_table(block, rows) do
+      {:ok, record_table} ->
+        record_table
+
+      :not_record_table ->
+        normalize_array_table(block, rows)
+    end
+  end
+
+  defp normalize_table_shape(block), do: block
+
+  defp normalize_record_table(%{"columns" => columns} = block, rows)
+       when is_list(columns) and columns != [] do
+    keys =
+      if Enum.all?(columns, &is_map/1),
+        do: Enum.map(columns, &Map.get(&1, "key")),
+        else: []
+
+    valid? =
+      Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
+        Enum.uniq(keys) == keys and
+        Enum.all?(columns, fn column ->
+          label = Map.get(column, "label")
+          is_nil(label) or is_binary(label)
+        end) and
+        Enum.all?(rows, fn row ->
+          is_map(row) and Map.keys(row) -- keys == [] and
+            Enum.all?(Map.values(row), &record_table_scalar?/1)
+        end)
+
+    if valid? do
+      head =
+        Enum.map(columns, fn column ->
+          [%{"type" => "text", "value" => Map.get(column, "label") || Map.get(column, "key")}]
+        end)
+
+      normalized_rows =
+        Enum.map(rows, fn row ->
+          Enum.map(keys, fn key ->
+            [%{"type" => "text", "value" => record_table_text(Map.get(row, key))}]
+          end)
+        end)
+
+      {:ok,
+       block
+       |> Map.delete("columns")
+       |> Map.put("head", head)
+       |> Map.put("rows", normalized_rows)}
+    else
+      :not_record_table
+    end
+  end
+
+  defp normalize_record_table(_block, _rows), do: :not_record_table
+
+  defp record_table_scalar?(value),
+    do: is_nil(value) or is_binary(value) or is_number(value) or is_boolean(value)
+
+  defp record_table_text(nil), do: ""
+  defp record_table_text(value), do: to_string(value)
+
+  defp normalize_array_table(block, rows) do
+    block =
+      case {Map.get(block, "head") || Map.get(block, "header"), Map.get(block, "columns")} do
+        {head, columns} when head in [nil, []] and is_list(columns) and columns != [] ->
+          if Enum.all?(columns, fn
+               %{"text" => text} = column when is_binary(text) -> map_size(column) == 1
+               _ -> false
+             end) do
+            block
+            |> Map.delete("columns")
+            |> Map.put(
+              "head",
+              Enum.map(columns, fn %{"text" => text} ->
+                [%{"type" => "text", "value" => text}]
+              end)
+            )
+          else
+            block
+          end
+
+        _ ->
+          block
+      end
+
+    {block, rows} =
+      case {Map.get(block, "head") || Map.get(block, "header"), rows} do
+        {head, [%{"header" => true, "cells" => cells} = row | rest]}
+        when head in [nil, []] and is_list(cells) and map_size(row) == 2 ->
+          {Map.put(block, "head", Enum.map(cells, &normalize_wrapped_table_cell/1)), rest}
+
+        {head, [%{"cells" => cells} | rest]}
+        when head in [nil, []] and is_list(cells) ->
+          if cells != [] and Enum.all?(cells, &(is_map(&1) and Map.get(&1, "header") == true)) do
+            {Map.put(block, "head", Enum.map(cells, &normalize_header_table_cell/1)), rest}
+          else
+            {block, rows}
+          end
+
+        _ ->
+          {block, rows}
+      end
+
+    rows = Enum.map(rows, &normalize_wrapped_table_row/1)
+    Map.put(block, "rows", rows)
+  end
+
+  defp normalize_wrapped_table_row(%{"cells" => cells} = row)
+       when is_list(cells) and map_size(row) == 1,
+       do: Enum.map(cells, &normalize_wrapped_table_cell/1)
+
+  defp normalize_wrapped_table_row(%{"cells" => cells, "header" => header} = row)
+       when is_list(cells) and header != true and map_size(row) == 2,
+       do: Enum.map(cells, &normalize_wrapped_table_cell/1)
+
+  defp normalize_wrapped_table_row(row) when is_list(row),
+    do: Enum.map(row, &normalize_wrapped_table_cell/1)
+
+  defp normalize_wrapped_table_row(row), do: row
+
+  defp normalize_wrapped_table_cell(%{"content" => content} = cell)
+       when is_list(content) and map_size(cell) == 1,
+       do: flatten_table_cell_content(content)
+
+  defp normalize_wrapped_table_cell(%{"text" => text} = cell)
+       when is_binary(text) and map_size(cell) == 1,
+       do: [%{"type" => "text", "value" => text}]
+
+  defp normalize_wrapped_table_cell(cell), do: cell
+
+  defp normalize_header_table_cell(%{"content" => content}) when is_list(content),
+    do: flatten_table_cell_content(content)
+
+  defp normalize_header_table_cell(%{"text" => text}) when is_binary(text),
+    do: [%{"type" => "text", "value" => text}]
+
+  defp normalize_header_table_cell(cell), do: cell
+
+  defp flatten_table_cell_content(content) do
+    Enum.flat_map(content, fn
+      %{"type" => "paragraph", "content" => inline} when is_list(inline) -> inline
+      item -> [item]
+    end)
+  end
 
   # Normalize ONE block. A `list` block has its `items` coerced item-by-item to
   # canonical inline arrays; every other block is untouched EXCEPT for recursion
