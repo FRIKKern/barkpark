@@ -65,7 +65,12 @@ echo "== binaries built =="
 
 mkdir -p /var/lib/barkpark-builder/images /var/log/barkpark-builder
 
-# Both services authenticate with the box's existing agent identity.
+# The builder claims with the shared WORKER token when the box has one
+# (installed by cp-ops builder-token-fix); reinstalls must not clobber that.
+BUILDER_TOKEN=/etc/barkpark/agent.token
+[ -f /etc/barkpark/worker.token ] && BUILDER_TOKEN=/etc/barkpark/worker.token
+
+# Both services otherwise authenticate with the box's existing agent identity.
 cat > /etc/systemd/system/barkpark-builder.service <<'UNIT'
 [Unit]
 Description=Barkpark site builder (build plane, co-located)
@@ -74,7 +79,7 @@ After=network-online.target docker.service
 [Service]
 ExecStart=/usr/local/bin/barkpark-builder \
   --control-url https://api.barkpark.cloud \
-  --token-file /etc/barkpark/agent.token \
+  --token-file __BUILDER_TOKEN__ \
   --cache-dir /var/lib/barkpark-builder/images \
   --log-dir /var/log/barkpark-builder \
   --platform __PLATFORM__
@@ -104,7 +109,7 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 
-sed -i "s#__PLATFORM__#$PLATFORM#" /etc/systemd/system/barkpark-builder.service
+sed -i "s#__PLATFORM__#$PLATFORM#;s#__BUILDER_TOKEN__#$BUILDER_TOKEN#" /etc/systemd/system/barkpark-builder.service
 
 systemctl daemon-reload
 systemctl enable --now barkpark-builder barkpark-runtime
