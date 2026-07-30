@@ -51,10 +51,19 @@ page() {
 
 # A row, as the query endpoint serves it. Deliberately three levels deep so a
 # one-level lens has a grandchild to lose.
+#
+# The SIXTH field is the STRUCTURED `reopen_trigger`, and it is omitted from the
+# JSON entirely when empty -- exactly how a row that never carried one is served.
+# Clause 4(c) reads this field and nothing else, so a fixture that could only
+# express a trigger as prose could not tell the two apart.
 row() {
-  local id=$1 parent=$2 lifecycle=$3 disposition=$4 reason=$5
-  printf '{"_id":"%s","_type":"task","_updatedAt":"2020-01-01T00:00:00.000000Z","parent_id":%s,"lifecycle_status":"%s","disposition":"%s","disposition_reason":"%s"}' \
-    "$id" "$parent" "$lifecycle" "$disposition" "$reason"
+  local id=$1 parent=$2 lifecycle=$3 disposition=$4 reason=$5 trigger=${6:-}
+  local extra=''
+  if [[ -n $trigger ]]; then
+    extra=$(printf ',"reopen_trigger":"%s"' "$trigger")
+  fi
+  printf '{"_id":"%s","_type":"task","_updatedAt":"2020-01-01T00:00:00.000000Z","parent_id":%s,"lifecycle_status":"%s","disposition":"%s","disposition_reason":"%s"%s}' \
+    "$id" "$parent" "$lifecycle" "$disposition" "$reason" "$extra"
 }
 
 # A well-formed page envelope.
@@ -67,14 +76,17 @@ envelope() {
 # THE HEALTHY CORPUS. 7 rows over 2 pages of limit 4, so the walk MUST reach
 # page 1 to be complete: `deep-a` and `deep-b` are grandchildren that live only
 # on the second page. Every reason is distinct, every disposition is in
-# vocabulary, every row carries a reopen trigger.
+# vocabulary, every reason MENTIONS a reopen trigger in prose -- and exactly one
+# row, `kid-c`, the only LIVE park, carries the STRUCTURED `reopen_trigger`
+# field. That asymmetry is the point: a healthy board is 1 structured against 4
+# prose-only, and the two numbers are reported side by side, never summed.
 build_healthy() {
   local dir=$1
   local p0 p1
   p0="$(row "$ROOT_SLUG" 'null' open open 'root row. REOPEN: never'),"
   p0+="$(row kid-a "\"$ROOT_SLUG\"" open open 'kid a reason one. REOPEN: alpha'),"
   p0+="$(row kid-b "\"$ROOT_SLUG\"" done closed 'kid b reason two. REACTIVATE: bravo'),"
-  p0+="$(row kid-c "\"$ROOT_SLUG\"" blocked parked 'kid c reason three. REOPEN: charlie')"
+  p0+="$(row kid-c "\"$ROOT_SLUG\"" blocked parked 'kid c reason three. REOPEN: charlie' 'TRIGGER: charlie ships')"
   p1="$(row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta'),"
   p1+="$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),"
   p1+="$(row unrelated 'null' open open 'not under the root at all. REOPEN: foxtrot')"
@@ -158,7 +170,11 @@ expect_output_contains "live is 3 (done + cancelled are terminal)" "live        
   run --page-limit 4 --fixture-dir "$HEALTHY"
 expect_output_contains "reasons are all distinct" "distinct reason hashes          5" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
-expect_output_contains "every row carries a reopen trigger" "carrying a reopen trigger       5" \
+# STRUCTURED and PROSE are counted separately and never summed: 1 row carries the
+# field, 4 only talk about it. A summed counter would print 5 and call it coverage.
+expect_output_contains "structured triggers are counted alone" "carrying a reopen trigger       1   (structured" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "prose mentions are counted as DECORATION, beside" "prose-only REOPEN mention       4   (DECORATION" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
 expect_output_contains "no off-vocabulary dispositions" "(none)" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
@@ -356,6 +372,99 @@ expect_status_matching "an all-empty board is unstarted, not done" 1 "zero non-e
 echo
 
 # =============================================================================
+# CLAUSE 4 — LIVE COVERAGE. Every fixture below EXITS 0 against the census as it
+# stood on origin/main before this clause existed, because clauses 1-3 are
+# closure-scoped and structurally cannot see a live row that says nothing. Three
+# reds and four greens: the reds prove the clause can say no, and the greens
+# prove it says no to the RIGHT rows — a clause 4 that reds on terminal rows, or
+# on a shared family trigger, would be a different and worse instrument.
+# =============================================================================
+echo "clause 4 — a LIVE row that says nothing must red the round-done predicate"
+
+# (a) BARE: a live row with no disposition at all. It lands in the `<unset>`
+# bucket that clauses 1-3 never read.
+BARE="$TMP/live-bare"
+build_healthy "$BARE"
+page "$BARE" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open '' 'deep a reason four. REOPEN: delta'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status_matching "a live row with no disposition reds the predicate" 1 "LIVE row(s) carry NO disposition" \
+  run --page-limit 4 --fixture-dir "$BARE" --assert-round-done
+expect_status_matching "and it NAMES the silent row" 1 "deep-a" \
+  run --page-limit 4 --fixture-dir "$BARE" --assert-round-done
+expect_output_contains "live_bare is a ROW-ID LIST in --json" "$(printf '"live_bare": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$BARE" --json
+
+# (b) an adjudicated live row with no reason: a verdict it cannot prove.
+NOREASONLIVE="$TMP/live-adjudicated-no-reason"
+build_healthy "$NOREASONLIVE"
+page "$NOREASONLIVE" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open closed ''),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status_matching "a live verdict with no reason reds the predicate" 1 "carry NO disposition_reason" \
+  run --page-limit 4 --fixture-dir "$NOREASONLIVE" --assert-round-done
+expect_output_contains "live_adjudicated_no_reason is a ROW-ID LIST in --json" "$(printf '"live_adjudicated_no_reason": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$NOREASONLIVE" --json
+
+# (c) LIVEPARK: a live park with no way back out.
+LIVEPARK="$TMP/live-park-no-trigger"
+build_healthy "$LIVEPARK"
+page "$LIVEPARK" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open parked 'deep a reason four, parked with no way back'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status_matching "a live park with no reopen_trigger reds the predicate" 1 "carry NO structured reopen_trigger" \
+  run --page-limit 4 --fixture-dir "$LIVEPARK" --assert-round-done
+expect_output_contains "live_park_no_trigger is a ROW-ID LIST in --json" "$(printf '"live_park_no_trigger": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$LIVEPARK" --json
+
+# DECORATED — THE FIXTURE THAT EARNS THE CLAUSE. `kid-c` is a live park whose
+# reason SAYS "REOPEN: charlie" in prose while the structured field is DROPPED.
+# A trigger test that inherited the prose regex would call this covered. It is
+# decoration, and PDS-D336(b) condemns scoring it.
+DECORATED="$TMP/decorated-trigger"
+build_healthy "$DECORATED"
+page "$DECORATED" 0 200 "$(envelope 4 0 4 "$(row "$ROOT_SLUG" 'null' open open 'root row. REOPEN: never'),$(row kid-a "\"$ROOT_SLUG\"" open open 'kid a reason one. REOPEN: alpha'),$(row kid-b "\"$ROOT_SLUG\"" done closed 'kid b reason two. REACTIVATE: bravo'),$(row kid-c "\"$ROOT_SLUG\"" blocked parked 'kid c reason three. REOPEN: charlie')")"
+expect_status_matching "prose 'REOPEN: charlie' is NOT a trigger" 1 "carry NO structured reopen_trigger" \
+  run --page-limit 4 --fixture-dir "$DECORATED" --assert-round-done
+expect_status_matching "and the decorated row is named" 1 "kid-c" \
+  run --page-limit 4 --fixture-dir "$DECORATED" --assert-round-done
+expect_output_contains "the prose mention is still visible, as DECORATION" "prose-only REOPEN mention       5" \
+  run --page-limit 4 --fixture-dir "$DECORATED"
+
+# TERMBARE / TERMPARK — the SAME two mutations on TERMINAL rows. Clause 4 is
+# live-scoped: a finished row is allowed to be silent, and a clause that reds
+# here would demand the round re-adjudicate history.
+echo
+echo "clause 4 — but a TERMINAL row is allowed to be silent (live-scoped, not closure-scoped)"
+TERMBARE="$TMP/terminal-bare"
+build_healthy "$TERMBARE"
+page "$TERMBARE" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta'),$(row deep-b '"kid-b"' cancelled '' 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status "a TERMINAL row with no disposition does not red" 0 \
+  run --page-limit 4 --fixture-dir "$TERMBARE" --assert-round-done
+TERMPARK="$TMP/terminal-park"
+build_healthy "$TERMPARK"
+page "$TERMPARK" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta'),$(row deep-b '"kid-b"' cancelled parked 'deep b reason five, parked and finished'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status "a TERMINAL park with no reopen_trigger does not red" 0 \
+  run --page-limit 4 --fixture-dir "$TERMPARK" --assert-round-done
+
+# SHAREDTRIG — PDS-D336(a), pinned in the other direction. Three live parks, two
+# of them sharing ONE trigger verbatim over DISTINCT reasons. Only REASONS must
+# be distinct; a family trigger is legitimate and is what the board's best eight
+# rows already do. This fixture exists so a later wave cannot quietly tighten
+# clause 4(c) into a trigger-distinctness check and break them.
+SHAREDTRIG="$TMP/shared-trigger"
+build_healthy "$SHAREDTRIG"
+page "$SHAREDTRIG" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open parked 'deep a reason four, its own distinct reason' 'REOPEN when the Hetzner rate cap lifts'),$(row deep-b '"kid-b"' open parked 'deep b reason five, a different distinct reason' 'REOPEN when the Hetzner rate cap lifts'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status "a family trigger shared over distinct reasons does NOT red" 0 \
+  run --page-limit 4 --fixture-dir "$SHAREDTRIG" --assert-round-done
+expect_output_contains "all three live parks count as covered" "live parked with NO reopen_trigger     0   (of 3 parked)" \
+  run --page-limit 4 --fixture-dir "$SHAREDTRIG"
+
+# TERMDUP — clauses 1-3 were NOT silently rescoped to live. A duplicate reason on
+# a TERMINAL row still reds, because distinctness is a property of everything
+# ever written.
+TERMDUP="$TMP/terminal-duplicate-reason"
+build_healthy "$TERMDUP"
+page "$TERMDUP" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta'),$(row deep-b '"kid-b"' cancelled closed 'kid b reason two. REACTIVATE: bravo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status_matching "a duplicate reason on a TERMINAL row still reds (1-3 stay closure-scoped)" 1 "collapse to 4 hashes" \
+  run --page-limit 4 --fixture-dir "$TERMDUP" --assert-round-done
+echo
+
+# =============================================================================
 # USAGE. Bad input is exit 3, never a quietly smaller board.
 # =============================================================================
 echo "usage — bad input is a usage error, never a board"
@@ -379,7 +488,12 @@ count exceeds its documents, a source that stops answering mid-read, a wrong
 echoed offset, a one-level .children lens, a /v1/tasks-shaped 200 failure, a
 non-object body, a non-JSON body, a result with no documents, a 500, a missing
 or unreadable _updatedAt, a row served twice, an empty population, a missing
-root and a childless root -- and its done-condition can say no in all three of
-its own directions (duplicate reasons, off-vocabulary dispositions, no reasons
-at all).
+root and a childless root -- and its done-condition can say no in all six of
+its own directions: closure-scoped (duplicate reasons, off-vocabulary
+dispositions, no reasons at all) and LIVE-scoped clause 4 (a live row with no
+disposition, a live verdict with no reason, a live park with no STRUCTURED
+reopen_trigger -- prose that merely says "REOPEN: charlie" is decoration and
+reds). Clause 4 stays live-scoped: the same two mutations on TERMINAL rows do
+NOT red, a family trigger shared over distinct reasons does NOT red, and a
+duplicate reason on a terminal row STILL reds -- clauses 1-3 were not rescoped.
 SUMMARY
