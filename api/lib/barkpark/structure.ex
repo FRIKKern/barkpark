@@ -250,8 +250,21 @@ defmodule Barkpark.Structure do
 
   # One per-plugin group node under the Plugins tier — "grouped per plugin"
   # (charter Decision 1). A nested :list, so it recurses on every consumer.
+  #
+  # `:icon` is "puzzle" — the same glyph the Plugins tier itself carries ("🧩"
+  # aliases to it), because a per-plugin group IS a Plugins-tier row. It used to
+  # be omitted entirely, which left EVERY `plugin-grp-*` child with `icon: nil`
+  # and 500'd `/studio/plugins` on a clean database (spd-w18-nil-icon-500) —
+  # structural, not data-dependent. The renderer is fail-safe now too; this
+  # emitter still names a real glyph so the rows say "plugin", not "file".
   defp plugin_group_node(name, nodes) do
-    %Node{id: "plugin-grp-#{name}", title: plugin_display_name(name), type: :list, items: nodes}
+    %Node{
+      id: "plugin-grp-#{name}",
+      title: plugin_display_name(name),
+      icon: "puzzle",
+      type: :list,
+      items: nodes
+    }
   end
 
   # Human labels for the Plugins-tier group headers. Falls back to a
@@ -298,6 +311,12 @@ defmodule Barkpark.Structure do
   # only forward the workspace id (dropping :project_id).
   defp census_opts(opts), do: Keyword.take(opts, [:workspace_id])
 
+  # Both branches name a REAL glyph. They used to leave `:icon` nil — the orphan
+  # branch by omission, the schema branch whenever the schema declared no icon —
+  # which 500'd `/studio/rest` for an authenticated admin (spd-w18-nil-icon-500).
+  # "file" is the neutral document glyph the desk already falls back to for a
+  # pane with no icon (`studio_live/components.ex`), so a …Rest row now reads as
+  # "documents of a type with no home" rather than as absence.
   defp rest_child_node(type, total, schemas) do
     title = "#{type} (#{total})"
 
@@ -306,13 +325,13 @@ defmodule Barkpark.Structure do
         # Orphaned type — no schema in scope. A plain, non-drillable :document
         # leaf (Go keeps it; pane_builder renders nothing to drill). Truth over
         # silence: these rows exist and the tree says so.
-        %Node{id: "rest-#{type}", title: title, type: :document, type_name: type}
+        %Node{id: "rest-#{type}", title: title, icon: "file", type: :document, type_name: type}
 
       schema ->
         %Node{
           id: "rest-#{type}",
           title: title,
-          icon: Map.get(schema, :icon),
+          icon: Map.get(schema, :icon) || "file",
           type: :document_type_list,
           type_name: type
         }
