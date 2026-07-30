@@ -372,9 +372,10 @@ defmodule BarkparkWeb.ListenController do
   # A real anonymous SSE subscriber arrives as a `%CallerContext{}` (anonymous),
   # NOT nil — `scope_opts/1` → `CallerContext.from_conn/1` always falls back to
   # `anonymous()`, never nil — and is fail-closed through the `%CallerContext{}`
-  # clause below (re-render under the anonymous principal ⇒ public-only). The
-  # `nil` clause is a back-compat no-op that is UNREACHABLE from any request
-  # path; it survives only as the direct testing seam (verbatim snapshot).
+  # clause below (re-render under the anonymous principal ⇒ public-only). There
+  # is NO `nil` clause: a caller-less call has no request-path origin, and the
+  # fail-OPEN verbatim-forward it used to do was REMOVED (ctx-s3). The seam now
+  # has exactly two shapes — the admin fast-path and the fail-closed re-render.
   #
   # When the live document is UNREADABLE for this caller, distinguish the two
   # causes the bare `not_found` conflated:
@@ -390,10 +391,6 @@ defmodule BarkparkWeb.ListenController do
   # — same testing seam as `replay_since/3`, `format_event/2` and
   # `forward_event?/2` (the live `receive` loop is otherwise un-assertable).
   @doc false
-  # nil caller: UNREACHABLE from any request path (scope_opts/1 always yields an
-  # anonymous %CallerContext{}, never nil) — back-compat no-op kept as a test seam.
-  def redacted_result(event, _dataset, nil, _scope), do: event.document
-
   def redacted_result(event, dataset, %CallerContext{} = ctx, scope) do
     case Content.get_document(event.doc_id, event.type, dataset, scope) do
       {:ok, doc} ->

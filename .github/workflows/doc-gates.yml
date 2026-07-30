@@ -101,6 +101,12 @@ on:
       - "api/lib/**/*.ex"
       - "scripts/tenant-scope-check.sh"
       - "scripts/tenant-scope-baseline.txt"
+      # Nil-polarity fail-CLOSED gate (ctx-compression W1 s3). A caller-less/nil
+      # principal must be the MOST RESTRICTIVE anonymous one — never a bypass. This
+      # gate reds if a fail-OPEN nil/catch-all clause of Envelope.field_readable?/3
+      # or ListenController.redacted_result/4 reappears. Its sources ride the
+      # api/lib/**/*.ex glob above; the .sh itself needs its own trigger.
+      - "scripts/nil-polarity-check.sh"
       # Preview-env isolation gate — a NEW test that mutates the process-global
       # Application.put_env(:barkpark, :preview, …) must declare `async: false`
       # + an `on_exit` restore (preview-route pollution tripwire).
@@ -225,6 +231,12 @@ on:
       - "api/lib/**/*.ex"
       - "scripts/tenant-scope-check.sh"
       - "scripts/tenant-scope-baseline.txt"
+      # Nil-polarity fail-CLOSED gate (ctx-compression W1 s3). A caller-less/nil
+      # principal must be the MOST RESTRICTIVE anonymous one — never a bypass. This
+      # gate reds if a fail-OPEN nil/catch-all clause of Envelope.field_readable?/3
+      # or ListenController.redacted_result/4 reappears. Its sources ride the
+      # api/lib/**/*.ex glob above; the .sh itself needs its own trigger.
+      - "scripts/nil-polarity-check.sh"
       # Preview-env isolation gate — a NEW test that mutates the process-global
       # Application.put_env(:barkpark, :preview, …) must declare `async: false`
       # + an `on_exit` restore (preview-route pollution tripwire). `**/*.exs`
@@ -477,6 +489,19 @@ jobs:
       # the tree. Guards the gate against a future edit that weakens the scanner.
       - name: Tenant fail-open read gate self-test (tripwire)
         run: bash scripts/tenant-scope-check.sh --selftest
+
+      # Nil-polarity fail-CLOSED gate (ctx-compression W1 s3). A caller-less/nil
+      # principal is the MOST RESTRICTIVE anonymous one — never a full-content
+      # bypass (the WS-B leak class). This reds if a fail-OPEN nil/catch-all clause
+      # of Envelope.field_readable?/3 or the removed ListenController.redacted_result/4
+      # nil seam reappears. Credo does not exist in this repo, so a bash+python
+      # static grep gate is the fence. --selftest runs first (distrust vacuous
+      # green): it proves the gate REDs on each planted fail-open shape and greens
+      # on the fail-closed forms, planting nothing in the tree.
+      - name: Nil-polarity fail-closed gate (blocking)
+        run: |
+          bash scripts/nil-polarity-check.sh --selftest
+          bash scripts/nil-polarity-check.sh
 
       # Preview-env isolation gate — a test that flips the process-global
       # Application.put_env(:barkpark, :preview, …) key while other async cases
