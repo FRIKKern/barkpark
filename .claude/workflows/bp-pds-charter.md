@@ -4839,3 +4839,273 @@ necessity, not caution. (2) The ~116 open rows on the same standard, and D330 fi
 it undermines the standard itself. (3) The three HIGH-FLIP-RISK slices (#6548, #6549, #6552) are owed an
 INDEPENDENT second reviewer before merge — this workflow spawns exactly one, so that dispatch is a
 manual lead step.
+
+### Wave 24 2026-07-30 — "The Backlog Stops Lying"
+
+Wave 23's debrief named this wave itself: *"`pds-w23-triage-round` is unblocked the moment #6550
+merges."* #6550 merged as `a190984df`. So wave 24 IS round 2 — the triage round — but taken as a SPINE
+rather than a chore: the epic's no-success-on-an-exit-code law turned one level up, onto the LEDGER the
+epic is audited on. Nine verifiers ran; three of the direction's own premises were refuted by
+measurement, and one of them was refuted by four independent surveyors against the strategist's own
+smoke.
+
+- **PDS-D331 — THE BOARD IS 168 LIVE ROWS IN A 285-NODE CLOSURE, AND THE ONE-LEVEL LENS UNDERCOUNTS BY
+  34% WHILE EXITING 0.** Re-derived at 2026-07-30T14:48Z from a PAGED corpus of 4,111 `type:task` docs:
+  285 descendants (`open 136 · done 91 · considering 31 · cancelled 26 · blocked 1`), **168 LIVE**, depth
+  bottoming at 2. `bp task get … | .children` returns 179 — a ONE-LEVEL read — and 57 live rows hang
+  under parents whose own lifecycle is `done` or `cancelled`, invisible to it. The wish's "~135" is the
+  OPEN count and is CORRECT; the direction's 110 was the level-1 slice. `blocked` appears in the closure
+  and NOWHERE at level 1, so a status enumeration built from `.children` does not know it is a legal
+  value. **A census that reads `.children` once scores 63% of the board and greens** — the exact vacuous
+  green wave 23 refused to ship.
+- **PDS-D332 — PDS-D322 STANDS; THE DIGEST INVERTED IT, AND ACTING ON THE INVERSION WOULD HAVE DEGRADED
+  THE BEST ROWS IN THE EPIC.** Three independent verifiers plus this phase's own re-derivation agree: of
+  27 live `parked` rows, **19 carry md5 `4f556ba7…` at exactly 644 B, and 8 of those 19 are ALL of the
+  direct children.** Every one of the 8 row-specific parks (343–543 B, 8 distinct hashes, each with a
+  REACTIVATE) is a BURIED level-2 row. The digest read four buried grandchildren, concluded the direct
+  children were "the best rows on the board", and would have pointed builders at repairing the
+  exemplars. No descendant was written between the two readings, so this was a MEASUREMENT disagreement,
+  not a repair-in-between. **The repair set is the 19 boilerplate rows (8 direct + 11 buried); the 8
+  buried row-specific parks are the TEMPLATE and must not be touched.**
+- **PDS-D333 — THE BOILERPLATE ASSERTS A FALSEHOOD ABOUT ITSELF, ON 19 OF 19 ROWS, AND RECOVERY NEEDS
+  NEITHER psql NOR A NEW ENDPOINT.** Its own text reads *"the original adjudication text is NOT
+  recoverable."* Every one of the 19 has exactly one recoverable `content.engagement.note` in the
+  DOCUMENT REVISION ARCHIVE, reachable today through `bp doc history` + `bp doc revision`: 120–1058 B,
+  16 of 19 already carrying a REACTIVATE, 18 of 19 within the ≤900 B bound, and 16 of them written
+  2026-07-27T21:04–21:28Z — roughly one hour BEFORE the boilerplate overwrote them at 22:2x. The epic's
+  ledger therefore carries nineteen rows each stating, in a durable field, a thing that is false about
+  that same row. **Recovery precedes invention: a restored reason with a revision id beats a fluent new
+  one.** Two bounds: `Tasks.Stage` writes via `Repo.update_all` and creates NO Revision, so the "158
+  recoverable" figure (measured on `mutation_events`) MUST NOT be quoted through the revision route; and
+  `ttl_sweeper`'s promote-only-when-blank rule recovers ZERO here, because the boilerplate already
+  occupies the field — the repair must overwrite exactly the `4f556ba7` hash and nothing else.
+- **PDS-D334 — THE "PROPAGATION LAG" IS A DRAFT/PUBLISHED ASYMMETRY, NOT EVENTUAL CONSISTENCY, AND THE
+  PROOF STANDARD IS SAFE ONLY WITH A NAMED RECIPE.** `bp doc patch` writes the DRAFT row (`_id:
+  drafts.<id>`, `_draft: true`). A bare patch then serves the PRE-WRITE value on the published route,
+  on `?perspective=drafts` against the BARE id, on `/v1/data/query` and on `bp task get` for a VARIABLE
+  5–40 s window (measured 5.5 s in one round, still stale at 30.3 s in another) before a background
+  collapse flips them together — so **no fixed sleep is a fix; only publishing is.** Patch THEN publish
+  is read-your-write on every perspective at t+1.6 s (1.44 s combined write). The raw read on
+  `drafts.<id>` is immediate but 404s once the draft collapses, making it a write-confirmation tool and
+  a TRAP as a census primitive. **LAW: publish after every patch, then re-read and COUNT.**
+- **PDS-D335 — THE CENSUS RECIPE IS LAW, AND EVERY CLAUSE OF IT WAS EARNED BY A SILENT UNDERCOUNT.**
+  (1) PAGE: `/v1/data/query/production/task` silently caps `limit` at 1000 while reporting `total`
+  4,111 — one unpaginated read builds a 127-descendant closure and exits 0, a 54% undercount with no
+  error. (2) WALK THE TRANSITIVE CLOSURE from `parent_id`, never `.children` (D331). (3) SCORE ON HTTP
+  STATUS, never an envelope key: `/v1/data/*` returns `error.code`, `/v1/tasks/*` returns `reason` — a
+  census keyed on `error.code` reads every tasks-API failure as a success, and the 429 body
+  `{"ok":false,"error":{"code":"rate_limited"}}` is VALID JSON, so a `json.load` success test reads a
+  rate-limit as data. (4) SERIAL WITH BACKOFF: a 10-way parallel walk returned 191 of 285 nodes and
+  exited 0, caching five rate-limited responses AS DOCUMENTS; `bp` re-fetches `/v1/capabilities` on
+  every invocation and 429s against the same budget, surfacing as a config-shaped `BARKPARK_MANIFEST`
+  error. (5) NAME THE INSTANT and assert coherence. **A number that exists only in a Paper is a number
+  nobody can re-derive: the census is a COMMITTED SCRIPT under `scripts/pds-*` or it did not happen.**
+- **PDS-D336 — THE REOPEN-TRIGGER BAR IS "NAMED AND CHECKABLE", NOT "SCRIPT-EVALUABLE", AND THE STRICT
+  BAR WOULD HAVE FORCED THE WAVE TO DEGRADE ITS OWN EXEMPLARS.** No trigger anywhere on this board is
+  machine-evaluable — the 8 template parks all end *"REACTIVATE: reopen when a crown fire is licensed"*,
+  a human licence. The direction's finished-experience bar ("a reopen trigger a script could evaluate")
+  fails all 27 parked rows INCLUDING the best 8. Two corollaries. (a) A SHARED FAMILY TRIGGER IS
+  LEGITIMATE when the rows share one real blocker — the 8 exemplars carry ONE trigger across EIGHT
+  distinct reason hashes, and one licence event then evaluates eight rows at once. **Hash the REASON;
+  allow a shared trigger.** (b) A census keyed on the literal string `REACTIVATE` greens on all 27 and
+  measures NOTHING, because the boilerplate contains it too. The template that survives is four-part:
+  provenance (wave + charter D) / row-specific BLOCKER / **the explicit negative naming what would NOT
+  unblock it** / one named REACTIVATE condition. The third part is the non-obvious one.
+- **PDS-D337 — PDS-D298's VOCABULARY CLAUSE IS AMENDED: IT IS THE HOLLOWING MECHANISM, AND IT IS THE
+  SOLE PRODUCER OF AN UNGOVERNED FIELD.** D298's PARKED clause routes the reason to
+  `content.engagement.note`, which **PDS-D306 already overturned** (the engagement lease is swept at 900 s;
+  the durable key is `content.disposition_reason`) — D298 has been stale on main since D306 landed. Its
+  OPEN clause (*"patch `content.disposition` … and re-publish"*) is worse: `git grep` finds **ZERO code
+  writers of `content.disposition` repo-wide**, so the field exists solely because the charter told
+  agents to hand-patch it. That is the mechanical explanation for `OPEN 57 / open 47 / parked 27 /
+  ABSENT 37` — a vocabulary with no writer has no normaliser by construction, and this is an authoring
+  RECIPE defect, not an authoring lapse a guard could ever have caught. **AMENDED: PARKED and OPEN both
+  land through a VERB that owns the triple `disposition` + `disposition_reason` + `reopen_trigger`
+  atomically; the raw-patch recipe is retired, and the raw door refuses.**
+- **PDS-D338 — THE REFUSAL NEEDS TWO INSERTION POINTS, PROVEN BY A PROBE THAT REDS 3 OF 4 ON MAIN.**
+  `mutations.ex` already runs its task guards as a PAIR at exactly four clauses (`:177/:178`, `:268/:269`,
+  `:312/:313`, `:341/:342`) and a third sibling slots in with no new plumbing, reusing the
+  `close_bypass_error/1` 422 template whose message names the sanctioned verb. But the file's own comment
+  at `:507` states *"`api/lib/barkpark/tasks/` contains ZERO references to `Content.apply_mutations`"* —
+  `Tasks.Stage` persists with a bare `Repo.update_all` inside its own advisory lock. A mutations-only
+  guard therefore leaves the SOLE sanctioned reason-writer unguarded, while a stage-only guard cannot
+  even SEE a parked disposition: a live probe proved Stage's persisted content keys after a stage are
+  `["description","disposition_reason","engagement","kind","lifecycle_status","tags"]` — **no
+  `disposition` key at all.** A third bound, inherited and unclosable at this seam: `ensure_*("task",
+  nil, …), do: :ok` exempts fresh creates at `:430`/`:542` and the plain `create` clause at `:155` calls
+  no guard, so a `createOrReplace` of a hollow park is ACCEPTED today and will stay accepted — that
+  residue must be NAMED in the guard's own comment with a pinning test, exactly as `:406-429` already
+  does for its sibling. `content.reopen_trigger` exists on ZERO rows and in ZERO files: greenfield in
+  both halves.
+- **PDS-D339 — `bp task create` IS AN OWNER-FACING LIE, AND IT IS ALSO AN OPERATIONAL CONSTRAINT ON THIS
+  WAVE.** Same server, same minute: a **20 MB** generic doc write returns 200 in 0.33 s, while an
+  **EMPTY** task create costs 10.3 s and a **2 KB** description 500s. The chain is code-anchored:
+  `writer.ex:139` runs `Tasks.Dedup.check_new_task/5` on every task birth → `dedup.ex:136-151` selects
+  FULL `content` JSONB for every `type:task` row (`limit 5000`, no draft filter, so drafts and published
+  twins both count) over a 4,111-row corpus → `similarity.ex:118-124` recomputes `tokens(new_task)`
+  INSIDE the per-candidate loop, making it O(N × |new description|). The request loses a race against a
+  15 s DB checkout budget and the owner is handed `{"code":"internal_error","message":"unknown error"}`
+  — the catch-all at `errors.ex:578`. Worse, the CLI's 30 s budget ABANDONS requests the server keeps
+  executing for up to 61 s. Cost tracks DISTINCT TOKENS, not bytes (realistic prose at 2 KB succeeds
+  where nonsense at 2 KB fails). **Until fixed: file rows TERSE (<1 KB), then patch, then publish — a
+  patch skips dedup entirely at 0.42 s.**
+- **PDS-D340 — THE PIDFILE SHORT-CIRCUIT IS FULLY UNPAID, AND THE STRATEGIST'S OWN PREMISE SMOKE WAS
+  WRONG.** The direction recorded *"`start_server` at :151 already calls `listener_pid`, so this may be
+  partly paid by #6554."* Four surveyors independently refuted it: `server_running()` is a bare pidfile
+  + `kill -0`; `start_server` returns 0 on it at `:147-150`; the `listener_pid` call at `:151` is the
+  ELSE branch — the port-conflict guard, reached only AFTER the pidfile check already failed. `git log
+  -S` traces the block to `248b94f6e`; #6554 never touched it. So `barkpark up` prints "server already
+  running" and exits 0 whenever the pidfile names ANY live pid. **The cheapest fix anchor in the epic is
+  fifteen lines below it:** the same file's `status` verb explicitly refuses to trust the pidfile and
+  documents this exact failure mode in prose. A file that argues with itself is a fix, not a design.
+- **PDS-D341 — `criteria_progress` IS A POISONED HONESTY KEY, AND THE FAKE-DONE HUNT CAME BACK EMPTY.**
+  All five wave-22 rows resolve to five DISTINCT merged PRs whose merge commits are ancestors of
+  origin/main (#6420/#6421/#6422/#6423/#6426) — ZERO fake-dones. And the five `done` rows at `met==0`
+  are the epic's BEST closes: each carries a 615–977 B `close_reason` naming supersession or a fixing
+  commit, three of which re-derive by content today. **So a census keyed on `met == 0` manufactures five
+  false findings and a census keyed on `met < total` manufactures five more.** The honest predicate is
+  `done AND close_reason empty-or-boilerplate`, never criteria arithmetic. Note the field asymmetry a
+  census must handle: closed rows carry their adjudication in `close_reason` with `disposition` ABSENT,
+  while live rows carry it in `disposition_reason` — two fields, one question.
+- **PDS-D342 — THE MERGE GATE IS SPLIT ACROSS TWO VOCABULARIES THAT CANNOT SEE EACH OTHER, WHICH IS WHY
+  FIVE SHIPPED CRITERIA ARE STILL UNSTAMPED.** A TEXT convention `"[MERGE-GATED] …"` inside the criterion
+  string is read ONLY by the Go CLI, as a REFUSAL tripwire (`tasks_stamp_cmd.go:128`
+  `strings.Contains(u,"MERGE-GATED")`). A STRUCTURED marker `"merge_gate" => true` on the criterion map is
+  the ONLY thing the Elixir bridge acts on (`close.ex:201`). All five wave-22 rows carry the TEXT and not
+  the KEY, and `content.landed` is null on 5/5 — so the CLI refuses to stamp them AND the server can never
+  autostamp them. **A classification string standing in for a machine-evaluable marker is exactly what
+  wave 23 refused on the Go CLI, found one level up on the ledger.** Fixing the five stamps without
+  closing the split guarantees wave 25 re-accumulates them.
+- **PDS-D343 — WHAT THE CENSUS FREED FOR NOTHING, AND WHAT IT DID NOT.** Adjudicated BY CONTENT against
+  origin/main: `6f4ca7904` (#6553) pays FIVE rows at once — `pds-w23-harness-liveness-and-registry` plus
+  the four it names — and the payment is MUTATION-PROVEN, not asserted: `pds-scratch-target_test.sh`
+  exits 0 with 32 PASS on main and exits 1 with 21 FAIL against `6f4ca7904^`, naming the exact strand.
+  `pds-bl-spill-dir-path-drift` is paid (the only surviving `/tmp/bp-ws-` hits are two docs saying the
+  path is NOT `/tmp`); `pds-w20-crown-fire` is MOOT (it arms a crown sealed 12/12);
+  `pds-bl-bp-search-false-negative`'s premise is REFUTED (a bare `bp search <noun>` self-routes to
+  `query` and returns hits). Two wave-23 carrier rows are stale-open evidence-closes:
+  `pds-w23-success-claim-registry` (merged `3885e572a`) and `pds-w23-cold-owner-verb-honesty` at 5/6 with
+  only its merge gate unmet (merged `0bff57e4f`). NOT paid, checked and standing:
+  `pds-bl-w16-full-meta-permissive-default` (a non-tar body still yields `p=""` and is ACCEPTED, on the
+  crown's own greening path), `pds-bl-pid-live-identity-blind`, `pds-bl-deployed-sha-override-unimplemented`
+  (`pds-climb-preflight.sh:208` HONOURS `PDS_DEPLOYED_SHA`; `pds-pull-proof.sh` only ADVERTISES it —
+  one script implements, the other lies), `pds-bl-scripts-md-budgets-unenforced` (17 `scripts/*.md`
+  declare a budget; `check-doc-budgets.sh` has ZERO `scripts/` entries), and
+  `pds-bl-bandit-request-line-ceiling` (documented in 6 places, configured in zero Elixir files).
+- **PDS-D344 — THE GO SUCCESS-CLAIM REGISTRY IS UNDER-BOUND, PROVEN BY MUTATION, AND ITS WEAKNESS IS A
+  LIVE LIE ON SIX VERBS.** The reviewer's published note on #6549 ("`hzDone`, `emitDeviceLoginSuccess`,
+  `hzResDone` … are floor, not proof") is now measured. Patch `hzDone` to throw its post-condition
+  `extra` away entirely and **both enrolled rows still PASS**; reduce the header to the verb alone and
+  they RED. The rows bind `srv.Name`/`srv.ID` and ONLY those — they test the request echo. And that is
+  not academic: `runHetznerServerAction` passes `extra = nil` with a PRE-action server that is never
+  re-read, so `bp cloud hetzner server reboot web-1` prints the identical receipt whether the machine
+  came up or stayed down — **six verbs, class A3, on a product whose promise is fearless reset.** Exactly
+  one caller (`create`, `hetzner_cmd.go:827`) passes a genuinely measured status, fifteen hundred lines
+  away. Two structural bounds for whoever pays this: `readPackageSources` does `os.ReadDir(".")` and skips
+  directories, so **anything under `internal/cli/cloud/` is UNENROLLABLE**; and a `ClaimedField string` is
+  illegal by construction (`TestSuccessClaimRegistryCarriesNoProse` permits exactly one string field).
+- **PDS-D345 — COVERAGE, HONESTLY.** Every dispatched surveyor and verifier reported; there is no
+  coverage deficit. But four verifiers hit a host ENOSPC that killed the Bash tool mid-run, leaving named
+  gaps this wave inherits rather than hides: `#6551`'s trim was DESIGNED and PARTIALLY MEASURED, never
+  proven green; the untruncated cross-branch collision union was never computed (the fence is a LOWER
+  BOUND); `mutation_events` was never probed, so the "158 recoverable" figure is neither confirmed nor
+  refuted, only shown not to hold through the revision route. **A gate that cannot run reads as silence,
+  not as red** — which is this epic's own founding lie appearing in the wave's own tooling.
+
+**THE WAVE 24 PLAN (8 slices).** Round 1 lands what is built and arms the instrument BEFORE any
+adjudication: **S1** ships #6551 (a ≥267 B `docs/api-v1.md` trim — the spine has 3 bytes of headroom and
+every owner card is at cap, so relocation is unavailable — plus the two inline `sobelow_skip`
+annotations its own `archive.ex:229-231` already models). **S2** commits the census instrument under
+`scripts/pds-*` with a MUTATION selftest that reds on a rate-limited fetch, on an unpaginated read and on
+a `.children` lens. **S4** ships the two-door refusal + the D337 vocabulary amendment (HIGH-FLIP-RISK).
+**S5** renders `disposition_reason` on the Go TUI detail strip — a durable field nothing shows is
+write-only, and a write-only adjudication is indistinguishable from none. **S6/S7/S8** are the
+owner-facing lies that are simultaneously ledger closes: the pidfile short-circuit, the export residue
+(the `chunk/2` MatchError and the missing ndjson Accept branch, both on the BACKUP verb), and the
+`bp task create` dedup scan. **S3 is round 2** — the round itself, recovery-then-adjudication over 168
+rows, dispatched only after S2's instrument is on main, because a round run on an uncalibrated
+instrument is precisely the failure the debate's sharpest attack predicts.
+
+**WHAT THE NEXT WAVE TAKES.** (1) D344's registry rebind and the six-verb `hzDone` re-read — proven RED
+today, unfiled until this wave. (2) D342's split merge-gate vocabulary, and the five wave-22 stamps it
+strands. (3) D330's stamp write-back revert, still unexplained and still undermining the standard. (4) The
+`writes` fail-open (two defects in three rows, latent-zero blast radius — 39/39 in-tree plugin commands
+declare the bit, so a widened guard needs a FIXTURE plugin or it greens vacuously). (5) A second
+INDEPENDENT reviewer is owed on S4 before merge; this workflow spawns exactly one, so that dispatch is a
+manual lead step.
+
+### Wave 24 2026-07-30 — "The Backlog Stops Lying" — REVIEWED. Grade B+ (paper `pds-wave-24-2026-07-30`)
+
+**WHAT LANDED: seven slices, all built, all gate-green on their final branch, ALL PUSHED WITH PRs OPEN.**
+That last clause is the one this epic has failed six waves running, and it is stated first on purpose.
+`#8130` S1 (docs/api-v1.md wins 275 B back, #6551 unblocked) · `#8131` S2 (the ledger census instrument,
+38 mutation fixtures) · `#8132` S4 (hollowness unwritable at both doors + the D298 amendment) · `#8133`
+S5 (the Go TUI renders the durable adjudication) · `#8134` S6 (`bin/barkpark` stops trusting the
+pidfile) · `#8135` S7 (the backup verb survives a disconnect; x-ndjson stops 406ing pre-auth) · `#8136`
+S8 (`bp task create` stops paying a full-backlog dedup scan). Every PR head is the `-r` review branch.
+
+**THE WAVE'S OWN LAW CAUGHT THE WAVE, TWICE, AND BOTH CATCHES WERE CROSS-SLICE.** Neither was visible
+from inside a single slice, which is the argument for reviewing the wave rather than the diffs.
+
+1. **The census canon was unreachable by the only door that could write it.** S2 shipped
+   `CANONICAL_OPEN = "OPEN"` because the wave brief said so. The brief predates the SAME wave's D337
+   verb: `Tasks.Stage` normalises the term with `String.trim/1 + String.downcase/1` against
+   `~w(open parked closed)` and, once the raw door refuses, is the ONLY sanctioned writer. So every
+   governed row would have counted OFF-VOCABULARY and `--assert-round-done` could never have passed on
+   any board, ever — and that predicate IS the gate on round 2 (`pds-w23-triage-round`). Shipping both
+   slices as built would have handed wave 25 a gate that cannot go green by construction: the exact
+   vacuous green this epic legislates against, one level up. **The writer is the normaliser, so the
+   census follows the writer.** Mutation-proven load-bearing (restoring `OPEN` reds 2 of 38).
+2. **A dedup OUTAGE was wearing the dedup VETO's tag.** S8 correctly turned dedup's silent fail-OPEN
+   into a loud refusal, and spelled it `{:error, {:halted, msg}}` — the plugin-veto tag.
+   `Plugins.Github.Intake` already branches on that tag and branches the WRONG way: it logs "lifecycle
+   gate refused" and returns a clean 2xx, on the correct reasoning that "GitHub redelivery would only
+   hit the same veto forever." That holds for a deterministic veto and INVERTS for a transient DB
+   hiccup — so a momentary outage during issue intake would be answered 2xx, GitHub would never
+   redeliver, and the issue would be **dropped permanently, logged as a policy refusal that never
+   happened, on an unattended path.** Fixed with a distinct internal tag plus an Intake clause that
+   5xxs so GitHub redelivers, and a `refute match?({:error, {:halted, _}}, result)` tripwire.
+
+**A THIRD FIX CLOSED A LIE INSIDE THE FIX FOR LIES.** S4's 422 named `bp task stage … --disposition …
+--reopen-trigger …` as its retry instruction, and that command did not work: the slice's FILES fence
+excluded `tasks_controller.ex` and the `task.stage` manifest entry. Merging the refusal alone would have
+shipped a verb lying about its own remedy. Re-derived at review that no other wave-24 slice touches
+either file, so the fence's reason had lapsed; the wiring, two real error branches (replacing an
+unactionable catch-all 409) and both manifest flags landed on the S4 branch, mutation-proven failable.
+`pds-w24-stage-disposition-wiring` is CLOSED with that fixing commit rather than carried.
+
+**WHAT THE REVIEW DECLINED TO DO, ON THE RECORD.** The honest wire answer for a dedup outage is a 503
+`dedup_unavailable`. It was built and then backed out: a new public code enters `known_codes/0`, which
+`errors_doc_coverage_test` then requires in `docs/api-v1.md` §9 — the file S1 had just rescued to **8
+bytes** of headroom (measured: the coverage test failed naming `dedup_unavailable`). Paying for it means
+a second branch editing §9 while S1 edits §9. So the wire keeps `halted`/409 exactly as before this
+wave — no contract drift, no budget risk — and the upgrade is named for wave 25 rather than smuggled in.
+**`docs/api-v1.md` now has 8 B of headroom and no remaining cheap in-place dedup. The next additive
+`/v1` error code re-fires this crisis, and that is a standing constraint, not a one-off.**
+
+**WHAT STALLED, honestly.** Nothing stalled on the merits — the one deferred slice, `pds-w23-triage-round`
+(the round itself, 168 rows), was NOT built BY DESIGN under the sequenced-rounds law, because a round run
+on an uncalibrated instrument is precisely the failure the debate's sharpest attack predicts. It is now
+unblocked the moment `#8131` merges. Genuinely unpaid: **no adjudication was written this wave.** The
+board still reads `OPEN` 67 / `open` 44 / `parked` 27, and the ~135-row backlog is not one row smaller.
+This wave built the instrument, the writer, the refusal and the display; wave 25 owes the adjudication.
+
+**A SLICE-LEVEL GATE WORTH COPYING.** S6's `barkpark-boot-selftest.sh` runs every fixture against BOTH
+the working tree and a PINNED pre-fix blob (`0bff57e4f` — not a moving `origin/main`, which would make
+every fixture pass on both sides the moment it merges), and FAILS a fixture that passes on both as
+non-discriminating. The builder's first harness passed everything, including pre-fix; only the
+differential structure exposed it. That is the shape a gate should take when the claim is "this fixes X".
+
+**WHAT THE NEXT WAVE TAKES.** (1) `pds-w23-triage-round` the moment `#8131` merges — the round, with the
+census's lowercase canon; expect it to rewrite 67 `OPEN` rows, and note the epic's OWN slice rows still
+carry `disposition: "OPEN"` and are in that 67. (2) The 503 `dedup_unavailable` upgrade, WITH the
+`docs/api-v1.md` §9 bytes it costs — that byte budget is now the epic's tightest constraint and deserves
+a slice of its own (relocation, not compression). (3) D344's registry rebind and the six-verb `hzDone`
+re-read, proven RED and still unfiled. (4) D342's split merge-gate vocabulary and the five wave-22 stamps
+it strands. (5) The export disconnect signal is still only a LOG LINE — on an unattended personal
+instance nobody reads logs, so the owner-facing fix is a client-verifiable document count. (6) **S4 is
+owed a genuinely INDEPENDENT second reviewer before merge.** This workflow spawns exactly one; that
+dispatch is a manual lead step. The reviewer DID re-derive the two-insertion-point judgment from
+`origin/main` source (zero `apply_mutations` under `tasks/`; pre-fix `Stage` persists no `disposition`
+key) and both doors are load-bearing — but a re-derivation by the same agent that reviewed the diff is
+not independence.
