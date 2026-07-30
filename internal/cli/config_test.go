@@ -961,3 +961,32 @@ func TestConfigCloudTokenPATShapeIsOpaque(t *testing.T) {
 		}
 	}
 }
+
+// TestConfigCloudTokenReachesTheDoctorProbe closes the seam the env tier opened
+// in a NEIGHBOURING file. doctorGateOpts arms its cloud-sites probe behind
+// HasCloudToken(), which now answers true for an env-only credential — but the
+// Bearer it attached came from cfg.CloudToken, the PERSISTED tier, which is empty
+// in exactly that case. So CI got a probe pointed at /v1/sites with NO
+// Authorization value and reported the 401 as a failed doctor check: a false red
+// produced by the credential that works for every other Cloud command.
+func TestConfigCloudTokenReachesTheDoctorProbe(t *testing.T) {
+	withTempConfigHome(t)
+	t.Setenv(CloudTokenEnv, testCloudPAT)
+
+	g := doctorGateOpts("", "")
+	if g.CloudSitesURL == "" {
+		t.Fatalf("an env-only credential must still arm the cloud-sites probe; got %+v", g)
+	}
+	if g.CloudSitesToken != testCloudPAT {
+		t.Fatalf("the probe must carry the RESOLVED token, not the empty persisted field; got %q", g.CloudSitesToken)
+	}
+
+	// And the persisted tier still works on its own, unchanged.
+	t.Setenv(CloudTokenEnv, "")
+	if err := SaveConfig(&Config{CloudToken: "from-the-file"}); err != nil {
+		t.Fatalf("SaveConfig: %v", err)
+	}
+	if g := doctorGateOpts("", ""); g.CloudSitesToken != "from-the-file" {
+		t.Fatalf("the persisted tier regressed; got %q", g.CloudSitesToken)
+	}
+}
