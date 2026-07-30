@@ -32,17 +32,20 @@ defmodule Barkpark.Tasks.Dedup do
   computed, on the ledger the epic is audited on.
 
   It now fails LOUD. A candidate fetch that errors or times out returns
-  `{:error, {:halted, msg}}` (409) whose message names precisely what could not
-  be done and how to proceed. The owner's escape hatch is
+  `{:error, {:dedup_unavailable, msg}}` (503) whose message names precisely what
+  could not be done and how to proceed. The owner's escape hatch is
   **`content.dedup_bypass: true`** — file it unchecked, deliberately, and the
   flag persists on the document as the trail (same shape as `distinct_from`).
 
   Two honest caveats, both live:
 
-    * `{:halted, …}` is a borrowed code. A dedicated `dedup_unavailable` code
-      belongs in `Barkpark.Content.Errors`, which is another slice's fence this
-      wave — filed as `pds-bl-dedup-unavailable-error-code`. The *message* is
-      already exact; only the machine code is generic.
+    * The code is `dedup_unavailable` (503), NOT the plugin-veto `{:halted, …}`.
+      That distinction is load-bearing, not cosmetic: `halted` means a policy
+      DELIBERATELY refused, so consumers treat it as deterministic and stop —
+      `Plugins.Github.Intake` answers a clean 2xx on it precisely because
+      "GitHub redelivery would only hit the same veto forever". A dedup outage
+      is TRANSIENT and must be retried, so borrowing `halted` for it would turn
+      a DB hiccup into a permanently dropped GitHub issue.
     * The dedup query is bounded (`@query_timeout_ms`) so it fails fast and named
       instead of eating the request's 15 s DB-checkout budget and poisoning the
       INSERT that follows. That closes dedup's share of the window in which the
@@ -76,13 +79,13 @@ defmodule Barkpark.Tasks.Dedup do
 
   @doc """
   `:ok`, `{:error, {:duplicate_task, payload}}` when a new task duplicates an
-  existing one, or `{:error, {:halted, message}}` when the gate could not run at
+  existing one, or `{:error, {:dedup_unavailable, message}}` when the gate could not run at
   all (the message names what could not be done — it never passes silently).
   Only fires for `type == "task"` with **no `prev_doc`** (a genuine birth —
   updates/autosaves/publishes are never gated). All other shapes → `:ok`.
   """
   @spec check_new_task(String.t(), map(), String.t(), Document.t() | nil, keyword()) ::
-          :ok | {:error, {:duplicate_task, map()}} | {:error, {:halted, String.t()}}
+          :ok | {:error, {:duplicate_task, map()}} | {:error, {:dedup_unavailable, String.t()}}
   def check_new_task("task", attrs, dataset, nil, opts) do
     content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
     new_task = to_task(attrs, content)
@@ -112,7 +115,7 @@ defmodule Barkpark.Tasks.Dedup do
 
     case fetch_candidates(dataset, opts) do
       {:degraded, reason} ->
-        {:error, {:halted, degraded_message(reason)}}
+        {:error, {:dedup_unavailable, degraded_message(reason)}}
 
       {:ok, candidates} ->
         assessment =

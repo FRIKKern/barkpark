@@ -215,6 +215,21 @@ defmodule Barkpark.Plugins.Github.Intake do
 
             {:refused, doc_id}
 
+          # The dedup gate could not RUN (PDS wave 24). This looks like the
+          # veto above and is its exact opposite: the veto is deterministic, so
+          # answering 2xx is right; a dedup outage is TRANSIENT, so answering
+          # 2xx would drop this issue FOREVER — GitHub never redelivers a 2xx —
+          # while logging it as a policy refusal that never happened. It must
+          # fall through to the 5xx path so redelivery re-runs the check, which
+          # the deterministic `gh-<num>` doc_id keeps idempotent.
+          {:error, {:dedup_unavailable, reason}} ->
+            Logger.warning(
+              "github intake: dedup gate unavailable for #{doc_id}: #{inspect(reason)} — " <>
+                "answering 5xx so GitHub redelivers rather than dropping the issue"
+            )
+
+            {:error, {:dedup_unavailable, reason}}
+
           # A genuine, non-dedup/non-gate failure (transient DB, etc.) stays an error so
           # the controller answers 5xx and GitHub redelivers — the deterministic
           # `gh-<num>` doc_id keeps that redelivery idempotent.

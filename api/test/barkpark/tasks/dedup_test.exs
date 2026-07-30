@@ -165,7 +165,7 @@ defmodule Barkpark.Tasks.DedupTest do
 
   describe "degraded candidate scan" do
     test "REFUSES with a message naming what could not be done — never a silent pass" do
-      assert {:error, {:halted, message}} =
+      assert {:error, {:dedup_unavailable, message}} =
                check_with_failing_scan("deg-new", @rate_limit, %{
                  "kind" => "task",
                  "description" => @rate_limit_desc
@@ -181,14 +181,31 @@ defmodule Barkpark.Tasks.DedupTest do
     end
 
     test "the refusal renders as a NAMED error body, not internal_error/unknown error" do
-      assert {:error, {:halted, _}} =
+      assert {:error, {:dedup_unavailable, _}} =
                result = check_with_failing_scan("deg-env", @rate_limit, %{"kind" => "task"})
 
       env = Barkpark.Content.Errors.to_envelope(result)
 
       refute env.code == "internal_error"
       refute env.message == "unknown error"
+      # 503, not the plugin-veto 409: a dedup outage is TRANSIENT, and the code
+      # is what tells an unattended caller (Github.Intake) to come back rather
+      # than treat the refusal as a permanent policy decision and drop the row.
+      # On the wire this stays 409 `halted` for now: a new public code must be
+      # registered in known_codes/0, which docs/api-v1.md §9 must then document,
+      # and §9 has 3 bytes of headroom against a CI-enforced cap. The INTERNAL
+      # tag is what had to split; the wire upgrade to a 503 dedup_unavailable is
+      # named as next-wave work, not claimed here.
       assert env.status == 409
+
+      # THE TRIPWIRE. `:halted` is the plugin-VETO tag, and consumers treat it
+      # as deterministic: `Plugins.Github.Intake` answers a clean 2xx on
+      # `{:error, {:halted, _}}` on the explicit reasoning that "GitHub
+      # redelivery would only hit the same veto forever". A dedup outage is
+      # TRANSIENT, so wearing that tag would make an unattended intake drop the
+      # issue permanently and log it as a policy refusal that never happened.
+      # If a future change borrows `:halted` here again, this reds.
+      refute match?({:error, {:halted, _}}, result)
       assert env.message =~ "task dedup gate could not complete"
     end
 

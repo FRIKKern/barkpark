@@ -405,6 +405,29 @@ defmodule Barkpark.Content.Errors do
   defp build({:error, {:halted, reason}}),
     do: %{code: "halted", message: halt_message(reason), status: 409}
 
+  # The task dedup gate could not RUN (PDS wave 24). It carries its OWN internal
+  # tag rather than reusing `:halted`, and that distinction is load-bearing
+  # rather than cosmetic: `halted` means a policy DELIBERATELY vetoed the write,
+  # so consumers treat it as deterministic and stop retrying —
+  # `Plugins.Github.Intake` answers a clean 2xx on `{:halted, _}` on the explicit
+  # reasoning that "GitHub redelivery would only hit the same veto forever". A
+  # dedup outage is the opposite: TRANSIENT. Sharing the tag made a DB hiccup
+  # into a permanently dropped GitHub issue, logged as a policy refusal that
+  # never happened. The tag split is what lets Intake route the two apart.
+  #
+  # ON THE WIRE it deliberately keeps `halted` / 409, unchanged from before this
+  # wave. A new public code must be registered in `@hints`, which puts it in
+  # `known_codes/0`, which `errors_doc_coverage_test` requires in
+  # `docs/api-v1.md` §9 — a file sitting on 3 bytes of headroom against a
+  # CI-enforced cap that PDS wave 24 spent its last cheap dedup to clear. So the
+  # honest 503 `dedup_unavailable` is deferred to a slice that can pay those
+  # bytes, and is NOT claimed here. What ships is the part that fixes the
+  # unattended data loss; the residual imperfection is that an external client
+  # still reads a transient outage as a 409 whose registered hint talks about
+  # plugin vetoes. The MESSAGE is exact either way.
+  defp build({:error, {:dedup_unavailable, reason}}),
+    do: %{code: "halted", message: halt_message(reason), status: 409}
+
   # The publish wall's label spine (authoring-excellence D5): the document
   # failed `Barkpark.Content.LabelSpine.validate` at publish and is not in the
   # legacy exemption ledger. 422 with the validator's documentation-grade
