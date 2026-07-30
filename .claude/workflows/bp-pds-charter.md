@@ -5033,3 +5033,79 @@ strands. (3) D330's stamp write-back revert, still unexplained and still undermi
 declare the bit, so a widened guard needs a FIXTURE plugin or it greens vacuously). (5) A second
 INDEPENDENT reviewer is owed on S4 before merge; this workflow spawns exactly one, so that dispatch is a
 manual lead step.
+
+### Wave 24 2026-07-30 — "The Backlog Stops Lying" — REVIEWED. Grade B+ (paper `pds-wave-24-2026-07-30`)
+
+**WHAT LANDED: seven slices, all built, all gate-green on their final branch, ALL PUSHED WITH PRs OPEN.**
+That last clause is the one this epic has failed six waves running, and it is stated first on purpose.
+`#8130` S1 (docs/api-v1.md wins 275 B back, #6551 unblocked) · `#8131` S2 (the ledger census instrument,
+38 mutation fixtures) · `#8132` S4 (hollowness unwritable at both doors + the D298 amendment) · `#8133`
+S5 (the Go TUI renders the durable adjudication) · `#8134` S6 (`bin/barkpark` stops trusting the
+pidfile) · `#8135` S7 (the backup verb survives a disconnect; x-ndjson stops 406ing pre-auth) · `#8136`
+S8 (`bp task create` stops paying a full-backlog dedup scan). Every PR head is the `-r` review branch.
+
+**THE WAVE'S OWN LAW CAUGHT THE WAVE, TWICE, AND BOTH CATCHES WERE CROSS-SLICE.** Neither was visible
+from inside a single slice, which is the argument for reviewing the wave rather than the diffs.
+
+1. **The census canon was unreachable by the only door that could write it.** S2 shipped
+   `CANONICAL_OPEN = "OPEN"` because the wave brief said so. The brief predates the SAME wave's D337
+   verb: `Tasks.Stage` normalises the term with `String.trim/1 + String.downcase/1` against
+   `~w(open parked closed)` and, once the raw door refuses, is the ONLY sanctioned writer. So every
+   governed row would have counted OFF-VOCABULARY and `--assert-round-done` could never have passed on
+   any board, ever — and that predicate IS the gate on round 2 (`pds-w23-triage-round`). Shipping both
+   slices as built would have handed wave 25 a gate that cannot go green by construction: the exact
+   vacuous green this epic legislates against, one level up. **The writer is the normaliser, so the
+   census follows the writer.** Mutation-proven load-bearing (restoring `OPEN` reds 2 of 38).
+2. **A dedup OUTAGE was wearing the dedup VETO's tag.** S8 correctly turned dedup's silent fail-OPEN
+   into a loud refusal, and spelled it `{:error, {:halted, msg}}` — the plugin-veto tag.
+   `Plugins.Github.Intake` already branches on that tag and branches the WRONG way: it logs "lifecycle
+   gate refused" and returns a clean 2xx, on the correct reasoning that "GitHub redelivery would only
+   hit the same veto forever." That holds for a deterministic veto and INVERTS for a transient DB
+   hiccup — so a momentary outage during issue intake would be answered 2xx, GitHub would never
+   redeliver, and the issue would be **dropped permanently, logged as a policy refusal that never
+   happened, on an unattended path.** Fixed with a distinct internal tag plus an Intake clause that
+   5xxs so GitHub redelivers, and a `refute match?({:error, {:halted, _}}, result)` tripwire.
+
+**A THIRD FIX CLOSED A LIE INSIDE THE FIX FOR LIES.** S4's 422 named `bp task stage … --disposition …
+--reopen-trigger …` as its retry instruction, and that command did not work: the slice's FILES fence
+excluded `tasks_controller.ex` and the `task.stage` manifest entry. Merging the refusal alone would have
+shipped a verb lying about its own remedy. Re-derived at review that no other wave-24 slice touches
+either file, so the fence's reason had lapsed; the wiring, two real error branches (replacing an
+unactionable catch-all 409) and both manifest flags landed on the S4 branch, mutation-proven failable.
+`pds-w24-stage-disposition-wiring` is CLOSED with that fixing commit rather than carried.
+
+**WHAT THE REVIEW DECLINED TO DO, ON THE RECORD.** The honest wire answer for a dedup outage is a 503
+`dedup_unavailable`. It was built and then backed out: a new public code enters `known_codes/0`, which
+`errors_doc_coverage_test` then requires in `docs/api-v1.md` §9 — the file S1 had just rescued to **8
+bytes** of headroom (measured: the coverage test failed naming `dedup_unavailable`). Paying for it means
+a second branch editing §9 while S1 edits §9. So the wire keeps `halted`/409 exactly as before this
+wave — no contract drift, no budget risk — and the upgrade is named for wave 25 rather than smuggled in.
+**`docs/api-v1.md` now has 8 B of headroom and no remaining cheap in-place dedup. The next additive
+`/v1` error code re-fires this crisis, and that is a standing constraint, not a one-off.**
+
+**WHAT STALLED, honestly.** Nothing stalled on the merits — the one deferred slice, `pds-w23-triage-round`
+(the round itself, 168 rows), was NOT built BY DESIGN under the sequenced-rounds law, because a round run
+on an uncalibrated instrument is precisely the failure the debate's sharpest attack predicts. It is now
+unblocked the moment `#8131` merges. Genuinely unpaid: **no adjudication was written this wave.** The
+board still reads `OPEN` 67 / `open` 44 / `parked` 27, and the ~135-row backlog is not one row smaller.
+This wave built the instrument, the writer, the refusal and the display; wave 25 owes the adjudication.
+
+**A SLICE-LEVEL GATE WORTH COPYING.** S6's `barkpark-boot-selftest.sh` runs every fixture against BOTH
+the working tree and a PINNED pre-fix blob (`0bff57e4f` — not a moving `origin/main`, which would make
+every fixture pass on both sides the moment it merges), and FAILS a fixture that passes on both as
+non-discriminating. The builder's first harness passed everything, including pre-fix; only the
+differential structure exposed it. That is the shape a gate should take when the claim is "this fixes X".
+
+**WHAT THE NEXT WAVE TAKES.** (1) `pds-w23-triage-round` the moment `#8131` merges — the round, with the
+census's lowercase canon; expect it to rewrite 67 `OPEN` rows, and note the epic's OWN slice rows still
+carry `disposition: "OPEN"` and are in that 67. (2) The 503 `dedup_unavailable` upgrade, WITH the
+`docs/api-v1.md` §9 bytes it costs — that byte budget is now the epic's tightest constraint and deserves
+a slice of its own (relocation, not compression). (3) D344's registry rebind and the six-verb `hzDone`
+re-read, proven RED and still unfiled. (4) D342's split merge-gate vocabulary and the five wave-22 stamps
+it strands. (5) The export disconnect signal is still only a LOG LINE — on an unattended personal
+instance nobody reads logs, so the owner-facing fix is a client-verifiable document count. (6) **S4 is
+owed a genuinely INDEPENDENT second reviewer before merge.** This workflow spawns exactly one; that
+dispatch is a manual lead step. The reviewer DID re-derive the two-insertion-point judgment from
+`origin/main` source (zero `apply_mutations` under `tasks/`; pre-fix `Stage` persists no `disposition`
+key) and both doors are load-bearing — but a re-derivation by the same agent that reviewed the diff is
+not independence.
