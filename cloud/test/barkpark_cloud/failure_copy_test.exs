@@ -114,6 +114,109 @@ defmodule BarkparkCloud.FailureCopyTest do
     assert FailureCopy.humanize(:oops) == :oops
   end
 
+  ## A TYPED REFUSAL IS NEVER HUMANIZED (site-spawner W11).
+  ##
+  ## humanize/1 matches SUBSTRINGS and replaces the WHOLE string. Nine of the
+  ## prebuilt extractor's typed messages interpolate the offending tar entry name
+  ## (`Barkpark.Sites.PrebuiltArtifact` — E_ABSOLUTE_PATH, E_PATH_TRAVERSAL,
+  ## E_BAD_NAME, E_UNSAFE_PARENT x3, E_WRITE_FAILED x2), so a user-authored path
+  ## carrying one common English word used to swallow the whole refusal: an
+  ## absolute-path refusal on "/quota/index.html" rendered as "Hetzner ran out of
+  ## server capacity", and a "../timeout/" TRAVERSAL — a security event — as "A
+  ## network step timed out." The token list cannot be made safe (single common
+  ## words vs user-authored paths), so the guard is on the TYPE of the reason.
+  ##
+  ## Delete the `typed_refusal?(reason) -> reason` clause and every test below
+  ## goes red on canned provider copy.
+
+  test "an E_ABSOLUTE_PATH refusal naming /quota/index.html is NOT rewritten as Hetzner capacity" do
+    # Byte-for-byte the string `Sites.Deploy.box_refusal/2` composes from the
+    # box's nested %{error: %{code, message}} (prebuilt_artifact.ex:626).
+    raw =
+      ~s|the instance refused the deploy (HTTP 400): E_ABSOLUTE_PATH — entry "/quota/index.html" is an absolute path — refused|
+
+    assert FailureCopy.humanize(raw) == raw
+
+    refute FailureCopy.humanize(raw) =~ "Hetzner ran out of server capacity"
+  end
+
+  test "a PATH TRAVERSAL through ../timeout/ is NOT rewritten as a network timeout" do
+    raw =
+      ~s|the instance refused the deploy (HTTP 400): E_PATH_TRAVERSAL — entry "../timeout/index.html" escapes the artifact root|
+
+    assert FailureCopy.humanize(raw) == raw
+    refute FailureCopy.humanize(raw) =~ "A network step timed out"
+  end
+
+  test "the colliding static-site slugs are pinned as a set, not one example" do
+    # Ordinary static-site error pages and doc paths — `timeout.html` and
+    # `unauthorized.html` are what a framework's error pages are CALLED, and
+    # /quota, /dns/failed.html are ordinary content slugs.
+    slugs = [
+      {"E_ABSOLUTE_PATH", ~s(entry "/quota/index.html" is an absolute path — refused)},
+      {"E_ABSOLUTE_PATH", ~s(entry "/timeout.html" is an absolute path — refused)},
+      {"E_ABSOLUTE_PATH", ~s(entry "/unauthorized.html" is an absolute path — refused)},
+      {"E_PATH_TRAVERSAL", ~s(entry "../dns/failed.html" escapes the artifact root)},
+      {"E_BAD_NAME", ~s(entry "docs/quota/index.html" names the artifact root itself as a file)},
+      {"E_UNSAFE_PARENT",
+       ~s(the archive names "/srv/x/errors/unauthorized/index.html" more than once)}
+    ]
+
+    canned = [
+      "Hetzner ran out of server capacity",
+      "A network step timed out",
+      "The hosting provider rejected our credentials",
+      "Securing the domain failed"
+    ]
+
+    for {code, message} <- slugs do
+      raw = "the instance refused the deploy (HTTP 400): #{code} — #{message}"
+      out = FailureCopy.humanize(raw)
+
+      assert out == raw, "#{code} was rewritten: #{out}"
+      assert out =~ code
+      assert out =~ message
+
+      for copy <- canned do
+        refute out =~ copy
+      end
+    end
+  end
+
+  test "a bare E_* code with no box-refusal prefix is still recognized as typed" do
+    raw = ~s(E_UNKNOWN_TYPE — unsupported tar entry type "x")
+    assert FailureCopy.humanize(raw) == raw
+  end
+
+  test "the box-refusal prefix alone is enough — the box already said no in its own words" do
+    raw = "the instance refused the deploy (HTTP 502)"
+    assert FailureCopy.humanize(raw) == raw
+  end
+
+  test "typed pass-through is idempotent (a second client-side pass changes nothing)" do
+    raw =
+      ~s|the instance refused the deploy (HTTP 400): E_PATH_TRAVERSAL — entry "../timeout/" escapes the artifact root|
+
+    assert raw |> FailureCopy.humanize() |> FailureCopy.humanize() == raw
+  end
+
+  test "the guard is NOT a blanket bypass: untyped provider jargon is still humanized" do
+    # The two clauses the colliding slugs above stole. A reason with no typed code
+    # and no box-refusal prefix keeps the pre-W11 behaviour exactly.
+    assert FailureCopy.humanize("account quota exceeded for servers") ==
+             "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+
+    assert FailureCopy.humanize("dial tcp: i/o timeout") ==
+             "A network step timed out. Retry usually fixes this."
+
+    # An ALL-CAPS provider code that merely ENDS in `E_…` must not read as typed:
+    # `_` is a word character, so `\bE_` has no boundary to match inside it.
+    refute FailureCopy.typed_refusal?("server type unavailable (SERVER_LIMIT_EXCEEDED)")
+    refute FailureCopy.typed_refusal?("RESOURCE_UNAVAILABLE")
+    refute FailureCopy.typed_refusal?(nil)
+    assert FailureCopy.typed_refusal?("E_NO_INDEX — the archive has no index.html")
+  end
+
   # ── Azure provider classes (provider-neutral hosting) — each names the exact
   # Azure Portal fix, and none collides with the Hetzner classes above.
 
