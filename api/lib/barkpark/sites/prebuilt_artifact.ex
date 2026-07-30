@@ -60,8 +60,12 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       server half of a contract the CLI already states one hop earlier
       (`validatePrebuiltDir` in `internal/cli/sites_tarball.go`, same message);
       the box is the only place that sees what the archive actually CONTAINS.
-      Stated trade: a site with no root route is now refused at ingest instead
-      of failing at HEALTH.
+      This is NOT a widening of what the lane refuses: the engine's own PLAN arm
+      already refuses a staged tree with no root `index.html`
+      (`deploy/site-deploy.sh:1371`, `exit 11`) — and so does HEALTH one stage
+      later. What moves is WHERE the answer comes from: a typed `E_NO_INDEX`
+      naming the caller's archive, instead of a PLAN detail telling the operator
+      to "check the ingest step ran", two hops from the mistake.
 
     * **Extract aside, then swap.** Everything lands in a sibling
       `<dest>.staging-<n>` directory; only a fully-accepted archive is renamed
