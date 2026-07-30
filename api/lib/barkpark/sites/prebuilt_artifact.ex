@@ -31,9 +31,50 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       /opt/barkpark/.env` becomes an HTTP GET. There is no safe rewrite of a
       symlink here, only refusal.
 
-    * **Regular files and directories ONLY.** Hard links, fifos, devices and
-      every pax/GNU extension header are refused — the extension headers in
-      particular exist to OVERRIDE the fields we just validated.
+    * **Regular files and directories ONLY.** Hard links, fifos, devices, the
+      pax GLOBAL header (`g`) and the GNU long-name headers (`L`/`K`) are
+      refused — the extension headers in particular exist to OVERRIDE the fields
+      we just validated.
+
+    * **The pax `x` header is the ONE narrow exception, and it is APPLIED then
+      RE-VALIDATED — never trusted.** Refusing it outright was wrong on real
+      bytes: `archive/tar` (this repo's OWN packer, `packPrebuiltDir` in
+      `internal/cli/sites_tarball.go`) emits an `x` block for ANY non-ASCII name
+      and for any single path component over 100 bytes, so `bp cloud site deploy
+      --prebuilt` could not deploy a `café/` slug at all — while GNU tar, which
+      writes such a name RAW into an ordinary ustar header, sailed through. Our
+      own first-party client was the stricter, dead-on-arrival one.
+
+      SKIPPING the `x` block is not a fix either, measured on the packer's bytes:
+      Go writes a ustar shadow header after each `x` with the name pushed through
+      an ASCII fallback, so `café/index.html` becomes `caf/index.html` (the
+      accented byte DROPPED, not escaped) and a 121-byte component TRUNCATES to
+      100 — the directory's shadow name then no longer matches the leaf's prefix.
+      A skip stages plausible-looking ASCII paths that 404, silently. Only
+      apply-then-re-validate is correct.
+
+      So exactly two records are honoured — `path` and `size` — and EVERY other
+      record is discarded (`linkpath`, `uid`, `gid`, `mode`, `mtime`, `atime`,
+      every `SCHILY.*`): those are precisely the fields whose purpose is to
+      override a validated one. The effective name then re-enters the WHOLE of
+      `name/1` **and** `safe_path/2` unchanged, because the five `name/1` arms are
+      not the rule set — ABSOLUTE and TRAVERSAL live in `safe_path/2`, on the
+      cleaned joined path.
+
+      Why a `path`+`size` allowlist cannot re-open the override path this module
+      refuses extension headers for: `type/1` reads **byte 156 of the FILE
+      header**, and no standard pax keyword overrides a typeflag — there is no
+      pax `mode` keyword either. So the symlink, hardlink, device and
+      setuid/setgid refusals stay UN-BYPASSABLE no matter what an `x` block
+      carries. The `x` entry's own name (Go writes `caf/PaxHeaders.0/index.html`,
+      bsdtar nests deeper) never reaches `name/1`, `safe_path/2` or the disk.
+
+      The record block gets its OWN small budget — `@max_pax_block_bytes` plus
+      `@max_extension_records` and a per-record byte cap — and NOT a share of the
+      entry counter: an `x` block must never `count_entry/1`, because Go emits one
+      per non-ASCII entry and counting them halves the effective entry cap
+      (measured: a legitimate 10 001-file accented `dist/` refused
+      `E_TOO_MANY_ENTRIES`).
 
     * **Modes are sanitized, and setuid/setgid/sticky is a REFUSAL.** We write
       0644/0755 ourselves and ignore Uid/Gid; an archive that asks for a setuid
@@ -87,6 +128,9 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   | compression ratio | 200:1 | only judged past 32 MiB of output, so real bundles are never ratio-judged |
   | name bytes | 255 | one POSIX filename budget for the WHOLE path |
   | path segments | 32 | site bundles are shallow; 32 is already generous |
+  | pax block bytes | 8 KiB | a real record block is tens of bytes; 8 KiB is generous |
+  | pax records | 32 | Go writes 1–2 per entry; 32 leaves room for every writer |
+  | pax record bytes | 1 KiB | a `path` record cannot beat the 255-byte name cap |
   """
 
   @max_entries 20_000
@@ -99,6 +143,20 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   @ratio_floor_bytes 32 * 1024 * 1024
   @max_name_bytes 255
   @max_segments 32
+
+  # The pax record block's OWN budget — deliberately NOT a share of
+  # `@max_entries`. It trips at the `x` HEADER (before a single record byte is
+  # buffered) and then again per record, so a 64 MiB "extension header" is refused
+  # on its size field rather than accumulated.
+  @max_pax_block_bytes 8 * 1024
+  @max_extension_records 32
+  @max_extension_record_bytes 1024
+
+  # The only two pax keywords this module applies. Everything else is DISCARDED —
+  # see the moduledoc: an extension record's whole purpose is to override a field
+  # that was just validated, and these two are the only ones that must survive
+  # re-validation for a legitimate archive to stage at all.
+  @pax_applied_keys ["path", "size"]
 
   # zlib window bits 31 = 16 + 15 = "gzip only". NOT 47 (auto-detect
   # zlib-or-gzip): the contract says `.tar.gz` and that is what is accepted.
@@ -149,7 +207,10 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       max_entry_bytes: @max_entry_bytes,
       max_ratio: @max_ratio,
       max_name_bytes: @max_name_bytes,
-      max_segments: @max_segments
+      max_segments: @max_segments,
+      max_pax_block_bytes: @max_pax_block_bytes,
+      max_extension_records: @max_extension_records,
+      max_extension_record_bytes: @max_extension_record_bytes
     }
   end
 
@@ -307,6 +368,13 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       io: nil,
       remaining: 0,
       padding: 0,
+      # The pending pax override, `nil` when there is none: a map carrying at most
+      # `:path` and `:size`, consumed by the NEXT file/dir header and cleared the
+      # moment it is applied. `pax_buf`/`pax_remaining` hold the record block while
+      # it streams in.
+      pax: nil,
+      pax_buf: <<>>,
+      pax_remaining: 0,
       entries: 0,
       # `entries` counts directories too; `files` is what would actually be
       # SERVED, and `root_index` is whether one of them is the root `index.html`.
@@ -423,6 +491,38 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     end
   end
 
+  # Pax-record phase: the `x` entry's body is a record block, so it is BUFFERED
+  # (bounded by `@max_pax_block_bytes`, already enforced on the header) instead of
+  # written — nothing about an extension header ever reaches the disk.
+  defp parse(%{phase: :pax_body, pax_remaining: remaining} = state) when remaining > 0 do
+    take = min(byte_size(state.buf), remaining)
+
+    if take == 0 do
+      {:ok, state}
+    else
+      <<data::binary-size(take), rest::binary>> = state.buf
+
+      parse(%{
+        state
+        | buf: rest,
+          pax_buf: state.pax_buf <> data,
+          pax_remaining: remaining - take
+      })
+    end
+  end
+
+  # The record block is whole: parse it, keep `path`/`size`, discard the rest, and
+  # hand the pending override to the NEXT header through the shared padding phase.
+  defp parse(%{phase: :pax_body, pax_remaining: 0} = state) do
+    case pax_records(state.pax_buf) do
+      {:ok, overrides} ->
+        parse(%{state | phase: :padding, pax_buf: <<>>, pax: overrides})
+
+      {:error, code, message} ->
+        refuse(state, code, message)
+    end
+  end
+
   # Body done — close the file, then skip the entry's 512-block padding.
   defp parse(%{phase: :body, remaining: 0} = state) do
     _ = File.close(state.io)
@@ -453,13 +553,20 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
       state = %{state | buf: rest}
 
       if zero_block?(header) do
-        # Two consecutive zero blocks END the archive; whatever follows them is
-        # padding this parser deliberately never looks at. `halted` is the flag
-        # `finish/1` requires — an archive that never sets it was cut before its
-        # marker was written.
-        zero_blocks = state.zero_blocks + 1
-        state = %{state | zero_blocks: zero_blocks, halted: state.halted or zero_blocks >= 2}
-        parse(state)
+        if state.pax do
+          # An extension header describes the entry that FOLLOWS it. One followed
+          # by the end-of-archive marker describes nothing — refuse rather than
+          # let a pending override sit there.
+          refuse(state, "E_MALFORMED", pax_dangling_message())
+        else
+          # Two consecutive zero blocks END the archive; whatever follows them is
+          # padding this parser deliberately never looks at. `halted` is the flag
+          # `finish/1` requires — an archive that never sets it was cut before its
+          # marker was written.
+          zero_blocks = state.zero_blocks + 1
+          state = %{state | zero_blocks: zero_blocks, halted: state.halted or zero_blocks >= 2}
+          parse(state)
+        end
       else
         case entry(header, %{state | zero_blocks: 0}) do
           {:ok, state} -> parse(state)
@@ -471,15 +578,31 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
   defp zero_block?(block), do: block == <<0::size(@block)-unit(8)>>
 
-  # One header: checksum, then name, then type, then mode, then size, then the
-  # CLEANED path — each refusal typed.
+  # One header: checksum, then TYPE, then the name, then mode, then size, then
+  # the CLEANED path — each refusal typed.
+  #
+  # Type comes before name for one reason: an `x` extension header's own name is
+  # the writer's pseudo-path (`caf/PaxHeaders.0/index.html` from Go, a nested
+  # `./x/PaxHeaders/y` from bsdtar) and it must never reach `name/1`, `safe_path/2`
+  # or the disk. Knowing the type first is what keeps it out.
   defp entry(header, state) do
     with :ok <- checksum(header),
-         {:ok, name} <- name(header),
-         {:ok, type} <- type(header),
+         {:ok, type} <- type(header) do
+      place_entry(type, header, state)
+    end
+  end
+
+  defp place_entry(:pax, header, state), do: pax_begin(header, state)
+
+  defp place_entry(type, header, state) do
+    with {:ok, name} <- effective_name(header, state),
          :ok <- mode_bits(header),
-         {:ok, size} <- size(header, type, state),
+         {:ok, size} <- effective_size(header, type, state),
          {:ok, path} <- safe_path(name, type, state) do
+      # The pending override has now been applied AND re-validated: drop it so it
+      # can never leak onto a second entry.
+      state = %{state | pax: nil}
+
       case {type, path} do
         # `tar czf - -C dist .` emits the root itself as a `./` DIRECTORY entry.
         # It is not an escape and it is not a file to write — it is the staging
@@ -508,6 +631,18 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
   defp sum_bytes(bin), do: bin |> :binary.bin_to_list() |> Enum.sum()
 
+  # The EFFECTIVE name: a pending pax `path` record when one arrived, otherwise
+  # the header's own ustar name/prefix pair. Either way it goes through the SAME
+  # `validate_name/1` — and then, in `place_entry/3`, through `safe_path/2`, which
+  # is where ABSOLUTE and TRAVERSAL are caught. Both halves matter: `validate_name/1`
+  # has five arms and NONE of them is a traversal check.
+  defp effective_name(header, state) do
+    case pax_override(state, :path) do
+      nil -> name(header)
+      path -> validate_name(path)
+    end
+  end
+
   defp name(header) do
     <<name::binary-size(100), _mid::binary-size(245), prefix::binary-size(155),
       _tail::binary-size(12)>> = header
@@ -516,6 +651,10 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     prefix = trim_nul(prefix)
     full = if prefix == "", do: name, else: prefix <> "/" <> name
 
+    validate_name(full)
+  end
+
+  defp validate_name(full) do
     cond do
       full == "" ->
         {:error, "E_BAD_NAME", "the archive has an entry with an empty name"}
@@ -538,9 +677,16 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   end
 
   # The typeflag picks which refusal applies. `0`/NUL is a regular file and `5`
-  # a directory; NOTHING else is stageable, and the pax/GNU extension headers
-  # (x, g, L, K) are refused precisely because their job is to override the
-  # fields validated here.
+  # a directory; `x` is the pax record block, whose `path`/`size` are applied and
+  # then RE-VALIDATED (moduledoc). Nothing else is stageable, and the OTHER
+  # extension headers (`g`, `L`, `K`) stay refused precisely because their job is
+  # to override the fields validated here.
+  #
+  # This function reads BYTE 156 of the FILE header, and no pax keyword overrides
+  # a typeflag — which is exactly why admitting `x` under a `path`+`size`
+  # allowlist cannot re-open the symlink/hardlink/device/setuid refusals below.
+  # There is no pax `mode` keyword either, so `mode_bits/1` is equally
+  # un-bypassable. Keep it that way.
   defp type(<<_::binary-size(156), flag::binary-size(1), _::binary>>) do
     case flag do
       "0" ->
@@ -551,6 +697,9 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
       "5" ->
         {:ok, :dir}
+
+      "x" ->
+        {:ok, :pax}
 
       "1" ->
         {:error, "E_HARDLINK", "the archive contains a hard link — refused"}
@@ -567,6 +716,24 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
       "6" ->
         {:error, "E_SPECIAL_FILE", "the archive contains a fifo — refused"}
+
+      # A GLOBAL pax header sets defaults for EVERY following entry, including
+      # entries in a later member. A site bundle has no use for that, and honouring
+      # it would mean carrying override state across the whole archive — the exact
+      # thing the per-entry `x` handling refuses to do.
+      "g" ->
+        {:error, "E_UNKNOWN_TYPE",
+         "the archive contains a pax GLOBAL extension header (type \"g\"), which sets " <>
+           "defaults for every following entry — refused; repack with per-entry headers " <>
+           "(e.g. `tar --format=posix -czf site.tar.gz -C ./dist .`)"}
+
+      # GNU's long-name/long-linkname headers, and the reason they are a REFUSAL
+      # rather than a skip: measured on GNU tar 1.35, an `L` block's two shadow
+      # headers carry BYTE-IDENTICAL truncated 100-byte names, so skipping `L`
+      # would stage a directory and a regular file at the SAME effective path.
+      # There is no honest way to recover the real name from the ustar blocks.
+      flag when flag in ["L", "K"] ->
+        {:error, "E_UNKNOWN_TYPE", gnu_longname_message(flag)}
 
       other ->
         {:error, "E_UNKNOWN_TYPE", "unsupported tar entry type #{inspect(other)}"}
@@ -592,24 +759,37 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
     end
   end
 
-  defp size(_header, :dir, _state), do: {:ok, 0}
+  # A pax `size` record REPLACES the header's size field — it is how a writer
+  # expresses a body the octal field cannot hold — so it is applied and then run
+  # through the very same per-entry and total caps.
+  defp effective_size(_header, :dir, _state), do: {:ok, 0}
+
+  defp effective_size(header, :regular, state) do
+    case pax_override(state, :size) do
+      nil -> size(header, :regular, state)
+      declared -> check_size(declared, state)
+    end
+  end
 
   defp size(<<_::binary-size(124), field::binary-size(12), _::binary>>, :regular, state) do
     case octal(field) do
-      {:ok, size} when size > state.max_entry_bytes ->
+      {:ok, size} -> check_size(size, state)
+      :error -> {:error, "E_MALFORMED", "entry size field is not octal"}
+    end
+  end
+
+  defp check_size(size, state) do
+    cond do
+      size > state.max_entry_bytes ->
         {:error, "E_ENTRY_TOO_LARGE",
          "an entry declares #{size} bytes, over the #{state.max_entry_bytes} byte per-entry cap"}
 
-      {:ok, size} ->
-        if state.bytes + size > state.max_total_bytes do
-          {:error, "E_TOTAL_TOO_LARGE",
-           "the archive's entries declare more than the #{state.max_total_bytes} byte total cap"}
-        else
-          {:ok, size}
-        end
+      state.bytes + size > state.max_total_bytes ->
+        {:error, "E_TOTAL_TOO_LARGE",
+         "the archive's entries declare more than the #{state.max_total_bytes} byte total cap"}
 
-      :error ->
-        {:error, "E_MALFORMED", "entry size field is not octal"}
+      true ->
+        {:ok, size}
     end
   end
 
@@ -649,6 +829,148 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
         end
     end
   end
+
+  # ── the pax extension header: narrow, budgeted, RE-VALIDATED ──────────────
+
+  # An `x` header. Note what does NOT happen here: `count_entry/1` is never
+  # called (an extension header is not an entry — Go emits one per non-ASCII
+  # entry, and counting them would halve the effective `@max_entries`),
+  # `name/1` never sees the block's own pseudo-path, and nothing is opened or
+  # written. The block's declared size is capped BEFORE a byte is buffered.
+  defp pax_begin(_header, %{pax: pax}) when not is_nil(pax) do
+    {:error, "E_MALFORMED",
+     "the archive has two pax extension headers in a row — an extension header must be " <>
+       "followed by the file or directory entry it describes"}
+  end
+
+  defp pax_begin(<<_::binary-size(124), field::binary-size(12), _::binary>>, state) do
+    case octal(field) do
+      {:ok, size} when size > @max_pax_block_bytes ->
+        {:error, "E_ENTRY_TOO_LARGE",
+         "a pax extension header declares #{size} bytes of records, over the " <>
+           "#{@max_pax_block_bytes} byte extension-header cap"}
+
+      {:ok, size} ->
+        {:ok,
+         %{
+           state
+           | phase: :pax_body,
+             pax_buf: <<>>,
+             pax_remaining: size,
+             padding: padding_for(size)
+         }}
+
+      :error ->
+        {:error, "E_MALFORMED", "pax extension header size field is not octal"}
+    end
+  end
+
+  defp pax_override(%{pax: nil}, _key), do: nil
+  defp pax_override(%{pax: pax}, key), do: Map.get(pax, key)
+
+  defp pax_dangling_message do
+    "the archive ends with a pax extension header that describes no entry — an extension " <>
+      "header must be followed by the file or directory it describes"
+  end
+
+  defp gnu_longname_message(flag) do
+    kind = if flag == "L", do: "long NAME", else: "long LINK NAME"
+
+    "the archive uses a GNU #{kind} extension header (type #{inspect(flag)}) — refused, " <>
+      "because its shadow headers carry only a TRUNCATED name and two entries can collapse " <>
+      "onto the same path. Repack in POSIX/pax format, which the box does accept: " <>
+      "`tar --format=posix -czf site.tar.gz -C ./dist .` (GNU tar defaults to " <>
+      "`--format=gnu`), or shorten the path component that is over 100 bytes."
+  end
+
+  # Parse a pax record block: a run of `"<len> <key>=<value>\n"` records where
+  # `<len>` counts the WHOLE record, digits and newline included. Length-driven on
+  # purpose — a value may itself contain `=` or a newline, so scanning for
+  # delimiters would be wrong.
+  #
+  # Only `path` and `size` survive; every other key is DISCARDED but still counted
+  # against `@max_extension_records`, so a block padded with 10 000 `SCHILY.*`
+  # records is refused rather than walked.
+  defp pax_records(block), do: pax_records(block, %{}, 0)
+
+  defp pax_records(<<>>, acc, _count), do: {:ok, acc}
+
+  defp pax_records(_rest, _acc, count) when count >= @max_extension_records do
+    {:error, "E_MALFORMED",
+     "a pax extension header holds more than #{@max_extension_records} records — refused"}
+  end
+
+  defp pax_records(block, acc, count) do
+    with {:ok, len} <- pax_record_length(block),
+         {:ok, record, rest} <- pax_split_record(block, len),
+         {:ok, key, value} <- pax_key_value(record) do
+      acc = if key in @pax_applied_keys, do: pax_apply(acc, key, value), else: acc
+
+      case acc do
+        {:error, _code, _message} = refusal -> refusal
+        acc -> pax_records(rest, acc, count + 1)
+      end
+    end
+  end
+
+  defp pax_record_length(block) do
+    case :binary.split(block, " ") do
+      [digits, _rest] ->
+        case Integer.parse(digits) do
+          {len, ""} when len > 0 -> {:ok, len}
+          _ -> {:error, "E_MALFORMED", pax_malformed_record()}
+        end
+
+      _ ->
+        {:error, "E_MALFORMED", pax_malformed_record()}
+    end
+  end
+
+  defp pax_split_record(block, len) do
+    cond do
+      len > @max_extension_record_bytes ->
+        {:error, "E_MALFORMED",
+         "a pax extension record declares #{len} bytes, over the " <>
+           "#{@max_extension_record_bytes} byte per-record cap"}
+
+      len > byte_size(block) ->
+        {:error, "E_MALFORMED",
+         "a pax extension record declares #{len} bytes but only #{byte_size(block)} remain"}
+
+      true ->
+        <<record::binary-size(len), rest::binary>> = block
+        {:ok, record, rest}
+    end
+  end
+
+  # The record's own declared length said where it ends, so the only framing left
+  # to check is that it ends in a newline and carries a non-empty `<key>=`.
+  defp pax_key_value(record) do
+    with [_digits, payload] <- :binary.split(record, " "),
+         true <- String.ends_with?(payload, "\n"),
+         [key, value] <- :binary.split(binary_part(payload, 0, byte_size(payload) - 1), "="),
+         true <- key != "" do
+      {:ok, key, value}
+    else
+      _ -> {:error, "E_MALFORMED", pax_malformed_record()}
+    end
+  end
+
+  defp pax_apply(acc, "path", value), do: Map.put(acc, :path, value)
+
+  defp pax_apply(acc, "size", value) do
+    case Integer.parse(value) do
+      {size, ""} when size >= 0 ->
+        Map.put(acc, :size, size)
+
+      _ ->
+        {:error, "E_MALFORMED",
+         "a pax extension header declares a size record that is not a number"}
+    end
+  end
+
+  defp pax_malformed_record,
+    do: "a pax extension header holds a malformed record (expected \"<len> <key>=<value>\\n\")"
 
   defp place_dir(path, state) do
     with {:ok, state} <- count_entry(state),
@@ -723,8 +1045,20 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
         _ = chmod_quiet(path, 0o644)
         {:ok, io}
 
+      # `O_CREAT|O_EXCL` answers `:eexist` for ANY existing path, file or
+      # directory, so this one arm is what covers BOTH collisions — and the
+      # message has to say which, because "names it more than once" is wrong and
+      # unactionable for a file landing on a staged DIRECTORY. That collision is
+      # the one a pax `path` record makes reachable: an `x` block can rewrite a
+      # leaf onto a directory the archive already created.
+      #
+      # The remaining direction — a DIRECTORY header naming an already-staged
+      # DIRECTORY — is covered by no rule ON PURPOSE: `File.mkdir_p/1` on an
+      # existing directory is idempotent and writes no bytes, so a duplicate dir
+      # header can neither overwrite nor shadow anything, and its children are each
+      # validated on their own headers.
       {:error, :eexist} ->
-        {:error, "E_UNSAFE_PARENT", "the archive names #{inspect(path)} more than once"}
+        {:error, "E_UNSAFE_PARENT", eexist_message(path)}
 
       {:error, :enotdir} ->
         {:error, "E_UNSAFE_PARENT",
@@ -732,6 +1066,19 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
 
       {:error, reason} ->
         {:error, "E_WRITE_FAILED", "could not open #{inspect(path)}: #{inspect(reason)}"}
+    end
+  end
+
+  # Reachability: a `safe_path/2`-validated path under the staging root, read only
+  # to name the collision that just happened.
+  # sobelow_skip ["Traversal.FileModule"]
+  defp eexist_message(path) do
+    case File.lstat(path) do
+      {:ok, %{type: :directory}} ->
+        "the archive names #{inspect(path)} as a file after already staging it as a directory"
+
+      _ ->
+        "the archive names #{inspect(path)} more than once"
     end
   end
 
@@ -759,6 +1106,22 @@ defmodule Barkpark.Sites.PrebuiltArtifact do
   defp finish(%{phase: :body, remaining: remaining} = state) when remaining > 0 do
     _ = File.close(state.io)
     {:error, "E_MALFORMED", "the archive ends mid-entry (#{remaining} bytes short)"}
+  end
+
+  # Cut INSIDE a pax record block: the override never arrived whole, so the entry
+  # it describes could not be validated even if its header did arrive.
+  defp finish(%{phase: :pax_body} = state) do
+    if state.io, do: File.close(state.io)
+
+    {:error, "E_MALFORMED",
+     "the archive ends inside a pax extension header (#{state.pax_remaining} bytes short)"}
+  end
+
+  # A pending override with no entry to describe — the archive stopped between an
+  # extension header and its file.
+  defp finish(%{pax: pax} = state) when not is_nil(pax) do
+    if state.io, do: File.close(state.io)
+    {:error, "E_MALFORMED", pax_dangling_message()}
   end
 
   # No end-of-archive marker. A tar cut ON a 512-byte boundary yields entries
