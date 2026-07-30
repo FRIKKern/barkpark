@@ -227,9 +227,12 @@ func TestRunExportOutWritesSidecarAfterCleanCompletion(t *testing.T) {
 	}
 }
 
-// ABSENCE IS THE SIGNAL. A truncated stream must leave the partial file (it is
-// evidence) but NO sidecar — that is the whole design: an unattended owner who
-// only ever sees the directory listing can tell a whole backup from a stub.
+// ABSENCE IS THE SIGNAL, AND THE STUB IS OFF TO THE SIDE. A truncated stream
+// keeps what it got — it is evidence — but that wreckage lives at
+// <file>.partial, never at <file>, and it is never attested. The destination
+// name is not touched at all on this path: with no earlier backup there it does
+// not even exist afterwards, which is why an unattended owner reading only the
+// directory listing still cannot mistake a stub for a backup.
 func TestRunExportOutTruncatedLeavesNoSidecar(t *testing.T) {
 	srv := exportServeTruncated(t)
 	path := filepath.Join(t.TempDir(), "backup.ndjson")
@@ -246,26 +249,43 @@ func TestRunExportOutTruncatedLeavesNoSidecar(t *testing.T) {
 		t.Fatalf("sidecar %s exists after a truncated export (err=%v) — absence IS the truncation signal",
 			path+exportMetaSuffix, err)
 	}
-	// The partial artifact itself is kept, and named as PARTIAL on stderr.
-	body, err := os.ReadFile(path)
+	if _, err := os.Stat(path + exportPartialSuffix + exportMetaSuffix); !os.IsNotExist(err) {
+		t.Fatalf("the partial carries a sidecar %s (err=%v) — nothing incomplete may be attested anywhere",
+			path+exportPartialSuffix+exportMetaSuffix, err)
+	}
+	// The destination is never opened on a failed run, so a first-ever export
+	// that dies leaves no file there to be mistaken for a backup.
+	if _, err := os.Stat(path); !os.IsNotExist(err) {
+		t.Fatalf("%s exists after a truncated first export (err=%v) — the destination must not be touched", path, err)
+	}
+	// The stub itself is kept at .partial, and named as PARTIAL on stderr.
+	body, err := os.ReadFile(path + exportPartialSuffix)
 	if err != nil {
 		t.Fatalf("read partial artifact: %v", err)
 	}
 	if n := strings.Count(string(body), "\n"); n != 3 {
 		t.Errorf("partial artifact = %q, want the 3 documents that did arrive", string(body))
 	}
-	if !strings.Contains(se.String(), path+" is PARTIAL, do not restore from it") {
-		t.Errorf("stderr = %q, want it to name %s PARTIAL", se.String(), path)
+	if !strings.Contains(se.String(), path+exportPartialSuffix+" is PARTIAL, do not restore from it") {
+		t.Errorf("stderr = %q, want it to name %s PARTIAL", se.String(), path+exportPartialSuffix)
 	}
 }
 
-// A sidecar from an EARLIER, complete export would vouch for the file a later
-// run truncates on top of. It must be cleared before the first byte lands.
-func TestRunExportOutClearsStaleSidecarBeforeWriting(t *testing.T) {
+// THE INVERSION. This test used to demand that a sidecar be cleared before the
+// first byte landed, which was correct only while the first byte destroyed the
+// file that sidecar attested. Under the rename that file survives a failed
+// re-export untouched — so removing its sidecar would strip the attestation off
+// an intact backup and `--verify`, which fails closed, would then REFUSE the
+// one good copy the operator has. The sidecar must survive with its file.
+func TestRunExportOutTruncatedKeepsPriorSidecar(t *testing.T) {
 	srv := exportServeTruncated(t)
 	path := filepath.Join(t.TempDir(), "backup.ndjson")
-	if err := os.WriteFile(path+exportMetaSuffix, []byte(`{"documents":999,"sha256":"stale"}`), 0o644); err != nil {
-		t.Fatalf("seed stale sidecar: %v", err)
+	prior := []byte(`{"documents":999,"sha256":"prior"}`)
+	if err := os.WriteFile(path, []byte(`{"_id":"old"}`+"\n"), 0o644); err != nil {
+		t.Fatalf("seed prior artifact: %v", err)
+	}
+	if err := os.WriteFile(path+exportMetaSuffix, prior, 0o644); err != nil {
+		t.Fatalf("seed prior sidecar: %v", err)
 	}
 
 	var so, se bytes.Buffer
@@ -275,8 +295,72 @@ func TestRunExportOutClearsStaleSidecarBeforeWriting(t *testing.T) {
 	if code := runExport(out, globals{}, ctx, []string{"--out", path}); code != exitGeneric {
 		t.Fatalf("runExport exit = %d, want %d; stderr=%s", code, exitGeneric, se.String())
 	}
-	if _, err := os.Stat(path + exportMetaSuffix); !os.IsNotExist(err) {
-		t.Fatalf("stale sidecar survived a truncated re-export (err=%v) — it would attest a stub", err)
+	got, err := os.ReadFile(path + exportMetaSuffix)
+	if err != nil {
+		t.Fatalf("prior sidecar did not survive a truncated re-export: %v — it attests a file that survived", err)
+	}
+	if !bytes.Equal(got, prior) {
+		t.Errorf("prior sidecar = %q, want it byte-identical to %q — nothing in this run wrote it", got, prior)
+	}
+}
+
+// THE INVARIANT THIS SLICE EXISTS FOR, end to end. Last night's export is real
+// and attested; tonight's dies mid-stream on top of it. Afterwards the operator
+// must still have last night's backup — the same bytes, the same sidecar — and
+// `bp export --verify` must still PASS on it. Before the rename this scenario
+// left a zero-truncated file and no sidecar: the good backup was gone and the
+// verb had reported the loss only on a stderr nobody reads.
+func TestRunExportOutTruncatedReExportLeavesPriorBackupVerifiable(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "backup.ndjson")
+
+	var so, se bytes.Buffer
+	out := newWriter(&so, &se)
+	ctx := manifest.Context{Server: exportServeDocs(t, "a", "b", "c").URL, Workspace: "ws", Project: "proj", Dataset: "production"}
+	if code := runExport(out, globals{}, ctx, []string{"--out", path}); code != exitOK {
+		t.Fatalf("seeding export exit = %d; stderr=%s", code, se.String())
+	}
+	good, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("read good backup: %v", err)
+	}
+	goodMeta, err := os.ReadFile(path + exportMetaSuffix)
+	if err != nil {
+		t.Fatalf("read good sidecar: %v", err)
+	}
+
+	// Tonight's run dies after three documents, aimed at the same path.
+	var fo, fe bytes.Buffer
+	fout := newWriter(&fo, &fe)
+	fctx := manifest.Context{Server: exportServeTruncated(t).URL, Dataset: "production"}
+	if code := runExport(fout, globals{}, fctx, []string{"--out", path}); code != exitGeneric {
+		t.Fatalf("truncated re-export exit = %d, want %d; stderr=%s", code, exitGeneric, fe.String())
+	}
+
+	nowBody, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatalf("the good backup is GONE after a failed re-export: %v", err)
+	}
+	if !bytes.Equal(nowBody, good) {
+		t.Errorf("backup = %q, want last night's bytes %q — a failed run may not edit the destination", nowBody, good)
+	}
+	nowMeta, err := os.ReadFile(path + exportMetaSuffix)
+	if err != nil {
+		t.Fatalf("the good backup's sidecar is GONE: %v — an intact backup must stay attested", err)
+	}
+	if !bytes.Equal(nowMeta, goodMeta) {
+		t.Errorf("sidecar = %q, want the untouched %q", nowMeta, goodMeta)
+	}
+
+	// The proof that matters to the operator: the verb that fails closed still
+	// says yes.
+	var vo, ve bytes.Buffer
+	vout := newWriter(&vo, &ve)
+	if code := runExport(vout, globals{}, manifest.Context{}, []string{"--verify", path}); code != exitOK {
+		t.Fatalf("verify exit = %d, want %d on the INTACT prior backup; stderr=%s", code, exitOK, ve.String())
+	}
+	if !strings.Contains(vo.String(), "verified: 3 documents") {
+		t.Errorf("stdout = %q, want the prior backup verified", vo.String())
 	}
 }
 
