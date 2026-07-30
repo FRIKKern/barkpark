@@ -362,6 +362,38 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
              "a non-empty STRING that paints an empty screen is the blank being fixed"
     end
 
+    test "an HTML-backed blank offers NO repair button, because the op layer refuses it",
+         %{conn: conn} do
+      seed_blockless!(@legacy_slug, %{"rev" => 0, "body_html" => "<p></p>"})
+
+      {:ok, view, html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@legacy_slug}"))
+
+      assert html =~ ~s(data-test-id="paper-unrenderable-notice")
+
+      # spd-w18 review: `reject_implicit_html_conversion/1` HALTS a block op on a
+      # document that has a body_html string and no block list, so offering
+      # "Start the body with a paragraph" here would be a control that cannot do
+      # what it says — the owner's complaint in a new costume. The way out is the
+      # link, and the reason says why.
+      refute html =~ ~s(data-test-id="paper-unrenderable-start-body"),
+             "a repair the write layer refuses must not be offered"
+
+      assert html =~ "will not silently convert stored HTML into"
+      assert html =~ ~s(data-test-id="paper-unrenderable-back")
+
+      # And the refusal is REAL, not a guess: driving the op this button would
+      # have sent halts and leaves the document untouched.
+      assert {:error, {:halted, _}} =
+               Barkpark.Content.apply_paper_block_op(
+                 "drafts.#{@legacy_slug}",
+                 %{"op" => "append-block", "block" => %{"id" => "b1", "type" => "paragraph"}},
+                 @dataset
+               )
+
+      assert render(view) =~ ~s(data-test-id="paper-unrenderable-notice")
+    end
+
     test "a body_html with no text but a visible element is left alone — the predicate is not too wide",
          %{conn: conn} do
       seed_blockless!(@legacy_slug, %{

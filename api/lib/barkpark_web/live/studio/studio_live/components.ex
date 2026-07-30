@@ -120,11 +120,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     # so the no-document paint stays byte-identical.
     doc_type = (assigns.paper_doc && Map.get(assigns.paper_doc, :type)) || Content.paper_type()
 
+    # spd-w18 review — mirror the OP layer's own refusal so the never-blank
+    # notice never offers a repair the write path rejects.
+    # `Papers.BlockOps.reject_implicit_html_conversion/1` halts any block op on a
+    # document whose content carries a `body_html` STRING while `blocks` is not a
+    # list — precisely the shape `blank_body?/1` routes here when that HTML
+    # paints nothing (`"<p></p>"`, `"&nbsp;"`, `""`).
+    html_backed_body =
+      is_binary(get_in((assigns.paper_doc && assigns.paper_doc.content) || %{}, ["body_html"]))
+
     assigns =
       assign(assigns,
         slug: slug,
         title: title,
         doc_type: doc_type,
+        html_backed_body: html_backed_body,
         edit_blocks: edit_blocks,
         canvas_on: canvas_on,
         show_editor: show_editor,
@@ -293,7 +303,8 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                   <.unrenderable_document_notice
                     doc_id={Content.published_id(@slug)}
                     doc_type={@doc_type}
-                    writable={@doc_type == Content.paper_type()}
+                    html_backed={@html_backed_body}
+                    repairable={@doc_type == Content.paper_type() and not @html_backed_body}
                     list_href={
                       Paths.studio_path(assigns[:scope_prefix] || "", [@doc_type], @dataset)
                     }
@@ -350,9 +361,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # mints the missing list — and a plain link back to the type's list for the
   # types whose pane is read-only (a session refuses writes by design, so
   # offering it a repair button would be a second lie).
+  #
+  # spd-w18 review — `repairable` is NOT "is a paper". The op layer's
+  # `reject_implicit_html_conversion/1` HALTS an append on a document that has a
+  # `body_html` STRING but no block list, and `blank_body?/1` deliberately calls
+  # a visually-empty `"<p></p>"` / `"&nbsp;"` body blank — so an HTML-backed
+  # blank paper reaches this notice and the write layer would refuse its repair.
+  # A button that cannot do what it says is the owner's complaint in a new
+  # costume, so that case gets the honest reason and the link only.
   attr(:doc_id, :string, required: true)
   attr(:doc_type, :string, required: true)
-  attr(:writable, :boolean, default: false)
+  attr(:repairable, :boolean, default: false)
+  attr(:html_backed, :boolean, default: false)
   attr(:list_href, :string, required: true)
 
   def unrenderable_document_notice(assigns) do
@@ -368,14 +388,20 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       <p class="bp-paper-unrenderable-title">
         Studio cannot render the body of this {@doc_type}.
       </p>
-      <p class="bp-paper-unrenderable-reason">
+      <p :if={not @html_backed} class="bp-paper-unrenderable-reason">
         <code>{@doc_id}</code> ({@doc_type}) was stored without a body block list and without
         saved HTML, so there is nothing here to show or edit yet. The document itself is intact —
         its metadata is in the panel beside this message.
       </p>
+      <p :if={@html_backed} class="bp-paper-unrenderable-reason">
+        <code>{@doc_id}</code> ({@doc_type}) was stored as saved HTML that renders nothing a reader
+        can see, and it has no body block list. Studio will not silently convert stored HTML into
+        blocks, so the body cannot be started from here — the document itself is intact, and its
+        metadata is in the panel beside this message.
+      </p>
       <div class="bp-paper-unrenderable-actions">
         <button
-          :if={@writable}
+          :if={@repairable}
           type="button"
           class="btn btn-primary btn-sm"
           phx-click="paper-add-block"
