@@ -63,6 +63,17 @@
 //       assertions could not either (they regex app.css as TEXT). The mirror
 //       case — EOF reached while still inside a comment — is the same defect
 //       from the other end and is reported too.
+//       COVERAGE BOUNDARY (charter D40 — a check states what it does NOT own):
+//       E10 owns the COMMENT-nesting class only. Unclosed `{` and stray `}` are
+//       a DIFFERENT class and are NOT E10's: measured by mutation on app.css,
+//       appending an unclosed `{` or a bare `}` leaves this whole file at exit
+//       0 while the brace-depth walk in __app.test.mjs ("app.css is
+//       BRACE-BALANCED") goes red; appending an orphan `*/` does the reverse.
+//       The two instruments are therefore a DELIBERATE SPLIT, not a duplicate
+//       — deleting either reopens a shipped defect class. Fixture:
+//       __css_check.orphan.fixture.css; targeted run:
+//       `node __css_check.mjs --orphan-check __css_check.orphan.fixture.css`
+//       (exit 1). Both fixture proofs are executed by __app.test.mjs.
 //   E11 banned source line-number citation (charter D41; bp-honest-gates D5):
 //       any scanned SPA / preview-harness file (top-level *.js|*.mjs +
 //       __preview__/*) citing `app.js:<line>` (also `app.js ~<line>` or an
@@ -576,6 +587,25 @@ function citationScanFiles() {
     const errs = swallowedTokenErrors(fs.readFileSync(f, "utf8"));
     for (const e of errs) console.error("FAIL  " + e);
     console.log(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
+    process.exit(errs.length ? 1 : 0);
+  }
+}
+
+// Targeted fixture mode: `node __css_check.mjs --orphan-check <file.css>` runs
+// ONLY the E10 comment-nesting walk against one file and exits non-zero if it
+// fires — the committed #4592/GR74 regression proof (see
+// __css_check.orphan.fixture.css). Symmetric with --swallow-check above and
+// added for the same reason: orphanCommentErrors had no fixture and no way to
+// be run against one, so its green on app.css was unfalsified. Both fixture
+// proofs are executed by __app.test.mjs, which console-harness already runs —
+// a regression fixture nobody runs is an instrument that cannot fail.
+{
+  const i = process.argv.indexOf("--orphan-check");
+  if (i !== -1) {
+    const f = process.argv[i + 1];
+    const errs = orphanCommentErrors(fs.readFileSync(f, "utf8"), path.basename(f));
+    for (const e of errs) console.error("FAIL  " + e);
+    console.log(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
     process.exit(errs.length ? 1 : 0);
   }
 }

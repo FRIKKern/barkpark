@@ -19,6 +19,9 @@ import assert from "node:assert/strict";
 import { test } from "node:test";
 import vm from "node:vm";
 import fs from "node:fs";
+import { spawnSync } from "node:child_process";
+// fileURLToPath is imported once, further down with the path helpers — ESM
+// imports hoist, so the CSS-fixture tests above that line resolve it fine.
 
 // ── vm sandbox: the minimal browser surface the IIFE touches at eval time ───
 // Only the tail `document.readyState` check actually executes; the rest are
@@ -1335,6 +1338,53 @@ test("gr-p5: app.css is BRACE-BALANCED — no rule is silently swallowed by an u
   assert.equal(firstNegative, -1, "a stray closing brace ends a block early");
   assert.equal(depth, 0, "app.css has " + depth + " unclosed block(s) — every rule after it is nested and dead");
   assert.equal(inComment, false, "an unterminated /* comment eats the rest of the stylesheet");
+});
+
+// ── gr-backlog-css-brace-detector · the CSS fixtures are actually RUN ────────
+// Both __css_check fixtures document a proof command in their own header, and
+// until now neither command was executed by anything: console-harness runs bare
+// __css_check.mjs (which scans app.css, never a fixture), so the two regression
+// proofs were instruments that could not fail. These two tests execute them,
+// and this harness IS run by console-harness — no workflow edit needed.
+//
+// The two checks are DISJOINT, not redundant, and each test proves that in both
+// directions: the E9 fixture reds --swallow-check, and the E10 fixture reds
+// --orphan-check while staying GREEN under --swallow-check (the semicolon parse
+// genuinely cannot see an orphan terminator). The brace-depth tripwire directly
+// above owns the third class — unclosed '{' and stray '}' — which BOTH
+// __css_check modes miss; that is why it was not deleted.
+const CSS_CHECK = fileURLToPath(new URL("./__css_check.mjs", import.meta.url));
+const runCssCheck = (...args) => {
+  const r = spawnSync(process.execPath, [CSS_CHECK, ...args], { encoding: "utf8" });
+  return { status: r.status, out: (r.stdout || "") + (r.stderr || "") };
+};
+
+test("gr-backlog-css: the E9 fixture reds --swallow-check exactly as its header claims", () => {
+  const fixture = fileURLToPath(new URL("./__css_check.fixture.css", import.meta.url));
+  const r = runCssCheck("--swallow-check", fixture);
+  assert.equal(r.status, 1, "the committed #4251 fixture must exit 1 — a green fixture is a dead proof:\n" + r.out);
+  assert.match(r.out, /: 1 E9 error\(s\)/, "exactly one E9 error, per the fixture header:\n" + r.out);
+});
+
+test("gr-backlog-css: the E10 fixture reds --orphan-check and ONLY --orphan-check", () => {
+  const fixture = fileURLToPath(new URL("./__css_check.orphan.fixture.css", import.meta.url));
+  const red = runCssCheck("--orphan-check", fixture);
+  assert.equal(red.status, 1, "the committed #4592/GR74 fixture must exit 1:\n" + red.out);
+  assert.match(red.out, /: 1 E10 error\(s\)/, "exactly one E10 error, per the fixture header:\n" + red.out);
+  assert.match(red.out, /orphan '\*\/' outside any comment/, "and it must be the orphan-terminator diagnosis:\n" + red.out);
+  // The other direction: E9's semicolon-delimited parse is blind to this class,
+  // so the two modes are pinned as complements rather than substitutes.
+  const green = runCssCheck("--swallow-check", fixture);
+  assert.equal(green.status, 0, "E9 does not see the orphan class — that is E10's whole reason to exist:\n" + green.out);
+  // Inherited obligation from the E9 fixture header: a fixture .css that the
+  // served bundle can reach is not a fixture, it is live CSS. Asserted, not
+  // asserted-in-prose.
+  const indexHtml = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const appJs = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  for (const name of ["__css_check.fixture.css", "__css_check.orphan.fixture.css"]) {
+    assert.ok(!indexHtml.includes(name), name + " must never be linked from index.html");
+    assert.ok(!appJs.includes(name), name + " must never be loaded by the SPA");
+  }
 });
 
 // ── gr-p5 OPERATOR CONSOLE (GR39/GR40/GR48/GR49/GR50) ───────────────────────
