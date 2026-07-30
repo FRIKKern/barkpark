@@ -48,8 +48,8 @@ There is no D139 catch-22 to work around: `claim.worker` is already null and
 
 | | command | result |
 |---|---|---|
-| **unclaimed** | `bp task stamp …` | stderr `bp: not_in_progress:open`, **exit 2** |
-| **unclaimed** | the same through this script | **exit 2**, nothing written — `criteria_progress` unchanged |
+| **unclaimed** | `bp task stamp …` | stderr `bp: not_in_progress:open`, **exit 6** (was `2` before PDS-D371 split the vocabulary) |
+| **unclaimed** | the same through this script | **exit 6**, nothing written — `criteria_progress` unchanged |
 | **claimed first** | the *identical* script stamp | **exit 0**, read-back `CONFIRMED … now at 2/2` |
 
 ### Why this one strands you rather than stopping you
@@ -61,6 +61,12 @@ back, re-stamp with `15`, and fail **identically**. The advice is correct for
 the failure it was written for and actively misleading for this one. **If the
 reason string is `not_in_progress:open`, the epoch is not your problem — the
 claim is. Stop reading epochs.**
+
+Since PDS-D371 the exit code says which of the two it is without reading the
+message: **6** = the lease/state moved (re-claim, then retry) · **5** = the
+payload is wrong (`criteria_mismatch`, `criterion_text_required`, …; retrying it
+verbatim can never work) · **2** is now only a genuinely malformed command line.
+Canonical mapping: `docs/cli/error-exit-table.md`.
 
 ### Claiming is also what re-arms the auto-close (PDS-D140)
 
@@ -81,12 +87,13 @@ Both halves of this were proven live before the script existed.
 
 | | what was done | what happened |
 |---|---|---|
-| **Control** | criterion 6 pasted **inline** into a double-quoted string | backticks ran as command substitution → server rejected `criteria_mismatch`, **exit 2, nothing written** |
+| **Control** | criterion 6 pasted **inline** into a double-quoted string | backticks ran as command substitution → server rejected `criteria_mismatch`, **exit 5** (`2` when this was measured, pre-PDS-D371), **nothing written** |
 | **Recipe** | identical 2490 chars via `--criterion-text "$(cat c6.txt)"` | **exit 0**, clean stamp |
 
 Re-proven in this slice against a disposable scratch task carrying text of
 comparable length and character mix (1145 chars, 24 backticks, 21 single
-quotes): inline → rejected, `EXIT=2`, `criteria_progress` unchanged at `0/3`.
+quotes): inline → rejected, `EXIT=2` as measured then (a `criteria_mismatch`
+exits `5` since PDS-D371), `criteria_progress` unchanged at `0/3`.
 The same text through the script → `EXIT=0`, read-back `CONFIRMED`.
 
 ### The law is uniform fetch-to-file for all twelve (PDS-D226)
