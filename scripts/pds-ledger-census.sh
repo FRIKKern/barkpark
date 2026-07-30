@@ -105,6 +105,55 @@
 # 2026-07-30 that is 0 structured against 40 prose-only, and a summed counter
 # would have read 40 and called it coverage.
 #
+# CLAUSE 4(a) IS ROUND-ANCHORED (wave 26, PDS-D364/D365). Clause 4(a) as wave 25
+# shipped it is STRUCTURALLY UNREACHABLE by any round that discovers work: a row
+# is BORN with no disposition, so a round that files a single new row can never
+# satisfy "every live row carries a disposition" at the instant it wants to
+# certify. Wave 25 ended with 19 bare rows that were ITS OWN residue. The fix is
+# not to weaken the clause but to say WHICH ROUND it is asking about:
+#
+#   --anchor-from-paper <wave-slug> resolves GET /v1/data/doc/<dataset>/paper/
+#   <slug> and reads `result._createdAt` -- the instant the round was born.
+#   4(a) then asserts over the live rows that existed AT OR BEFORE that instant,
+#   and every live bare row born AFTER it is printed as a NAMED residue list:
+#   the next round's inbox, not this round's failure.
+#
+# THE ANCHOR IS DERIVED, NEVER ARGUED. `--anchor 2020-01-01T00:00:00Z` was
+# measured on the LIVE board to flip 4(a) from `157/172 FAIL` to `172/172 PASS`
+# -- a round could seal itself by argv. So the raw `--anchor` is reachable ONLY
+# under --fixture-dir (it is the selftest's clock), and --anchor-from-paper FAILS
+# CLOSED on a non-200 or an unreadable `_createdAt`. It NEVER falls back to now():
+# an anchor at now() is an anchor that excuses every row the round just filed.
+#
+# IT TERMINATES, AND THAT WAS OBSERVED, NOT ARGUED. Anchored at wave 25's Paper
+# the live board reports residue 14 and 4(a) 171/172; anchored at wave 26's,
+# residue 0 and 4(a) 157/172. The SAME 14 rows are residue for round N and
+# in-scope for round N+1 -- deferred by exactly one round, never forever, and
+# adjudicating a row files no new rows.
+#
+# FAIL CLOSED ON A ROW THE PREDICATE CANNOT PLACE. A live bare row with a missing
+# or unreadable `_createdAt` exits 2, exactly as clause 5 does for `_updatedAt`.
+# A row that cannot be placed on either side of the anchor must never be silently
+# excused into the residue.
+#
+# THE ANCHOR ENTERS IN EXACTLY ONE PLACE: census()'s clause-4(a) live subset. It
+# does NOT touch build_closure or read_corpus -- the closure stays WHOLE or the
+# fixpoint assertion stops being able to catch a truncated walk (PDS-D347: clause
+# 4 is added BESIDE clauses 1-3 and never rescopes them). 4(b) and 4(c) stay
+# whole-live: a row that HAS a disposition owes a reason regardless of birth.
+#
+# CLAUSE 5 IS ORTHOGONAL AND STAYS SO. Its window is THIS CENSUS'S OWN READ
+# WINDOW (`started` below, measured 17.9-30.8s wide live), not the round window.
+# Widening it to the round window would trip on every residue write by
+# construction and make a certifying run impossible. Because exit 4 fires BEFORE
+# the predicate block prints, the operational rule is:
+#
+#     ADJUDICATE -> QUIESCE -> CERTIFY
+#
+# adjudicate the board, stop writing to it, and only then run the census with
+# --assert-round-done --anchor-from-paper <this wave's Paper>. Exit 4 is
+# retryable and means only "you were still writing"; re-run once quiet.
+#
 # PDS-D336(a) is pinned in the other direction too: triggers are NOT required to
 # be distinct. One family trigger over several distinct reasons ("REOPEN when
 # the Hetzner rate cap lifts") is legitimate and is what the board's best rows
@@ -142,13 +191,16 @@
 #   scripts/pds-ledger-census.sh [--root SLUG] [--page-limit N] [--pace SECS]
 #                                [--retries N] [--lens closure|children]
 #                                [--assert-round-done] [--json]
+#                                [--anchor-from-paper WAVE-PAPER-SLUG]
 #                                [--fixture-dir DIR] [--server URL]
 #   bash scripts/pds-ledger-census_test.sh    # the mutation fixtures
 #
 # --fixture-dir DIR replaces the network with canned HTTP responses
-# (DIR/page-<i>.http, first line "HTTP <status>", remainder the body). It is
-# the selftest's transport and the only reason the selftest can prove this
-# instrument REDS rather than merely prove it runs.
+# (DIR/page-<i>.http, first line "HTTP <status>", remainder the body; and
+# DIR/paper-<slug>.http for the anchor read). It is the selftest's transport and
+# the only reason the selftest can prove this instrument REDS rather than merely
+# prove it runs. --anchor <ISO-8601> is the selftest's clock and is REFUSED
+# outside --fixture-dir; a certifying run derives its anchor or has none.
 
 set -euo pipefail
 
@@ -251,7 +303,14 @@ class HttpTransport(object):
         return self.server
 
     def get(self, path, query, page_index, attempt):
-        url = "%s%s?%s" % (self.server, path, query)
+        return self._request("%s%s?%s" % (self.server, path, query))
+
+    def get_doc(self, path, slug):
+        """The anchor read. Same status-first discipline, no retry budget: an
+        anchor that could not be resolved is a fail, never a default."""
+        return self._request("%s%s" % (self.server, path))
+
+    def _request(self, url):
         req = urllib.request.Request(url, headers={
             "Authorization": "Bearer %s" % self.token,
             "Accept": "application/json",
@@ -294,6 +353,20 @@ class FixtureTransport(object):
                 "fixture exhausted: no %s (the read wanted another page and the "
                 "source stopped answering -- that is a truncated read, not a "
                 "smaller board)" % os.path.basename(path_i))
+        return self._read(path_i)
+
+    def get_doc(self, path, slug):
+        """The anchor read, canned as DIR/paper-<slug>.http. A fixture with no
+        such file models a Paper the server does not serve -- which must fail
+        closed, not default."""
+        path_i = os.path.join(self.dir, "paper-%s.http" % slug)
+        if not os.path.exists(path_i):
+            die(EXIT_FAIL_CLOSED,
+                "fixture has no %s: the anchor Paper could not be resolved, and an "
+                "unresolvable anchor is never a default" % os.path.basename(path_i))
+        return self._read(path_i)
+
+    def _read(self, path_i):
         with open(path_i, "rb") as fh:
             raw = fh.read()
         head, _, body = raw.partition(b"\n")
@@ -507,7 +580,43 @@ def parse_instant(value):
     return parsed
 
 
-def census(corpus, closure, depth_of, started, finished, duplicates):
+def resolve_anchor_from_paper(transport, dataset, slug):
+    """THE ROUND ANCHOR, DERIVED. The wave Paper's `_createdAt` IS the instant
+    the round was born, and it is the only anchor a certifying run may use.
+
+    Fails closed on every step -- a non-2xx, a body that is not the asserted
+    shape, a missing or unreadable `_createdAt`. There is deliberately NO
+    fallback: an anchor at now() excuses every row the round just filed, which
+    is the exact vacuous green clause 4 exists to make impossible.
+    """
+    path = "/v1/data/doc/%s/paper/%s" % (dataset, slug)
+    status, body = transport.get_doc(path, slug)
+    if status < 200 or status >= 300:
+        die(EXIT_FAIL_CLOSED,
+            "HTTP %d resolving the anchor Paper `%s` -- refusing to fall back to "
+            "now(), which would excuse every row this round filed" % (status, slug),
+            ["GET %s" % path,
+             "body: %s" % body[:300].decode("utf-8", "replace")])
+    try:
+        payload = json.loads(body.decode("utf-8"))
+    except (ValueError, UnicodeDecodeError) as exc:
+        die(EXIT_FAIL_CLOSED, "HTTP %d but unparseable body resolving anchor Paper `%s`: %s"
+            % (status, slug, exc))
+    result = payload.get("result") if isinstance(payload, dict) else None
+    if not isinstance(result, dict):
+        die(EXIT_FAIL_CLOSED,
+            "HTTP %d but no `result` object resolving anchor Paper `%s` -- this is "
+            "the shape a cleanly-parsing failure envelope takes" % (status, slug))
+    raw = result.get("_createdAt")
+    born = parse_instant(raw)
+    if born is None:
+        die(EXIT_FAIL_CLOSED,
+            "anchor Paper `%s` has a missing or unreadable _createdAt %r -- an "
+            "anchor that cannot be read is not an anchor" % (slug, raw))
+    return born, raw
+
+
+def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None):
     rows = [corpus[i] for i in closure]
     lifecycle = Counter((r.get("lifecycle_status") or "<unset>") for r in rows)
     live = [r for r in rows if (r.get("lifecycle_status") or "") not in TERMINAL_LIFECYCLE]
@@ -534,7 +643,32 @@ def census(corpus, closure, depth_of, started, finished, duplicates):
 
     # CLAUSE 4: live coverage. Row-ID LISTS, not counts -- a shard consumes the
     # worklist, and a count nobody can turn back into rows is not a worklist.
-    live_bare = sorted(r["_id"] for r in live if not disposition_of(r))
+    #
+    # 4(a) IS THE ONE ROUND-ANCHORED LINE, and this is the ONE place the anchor
+    # enters (PDS-D364/D365). A row born AFTER the round started cannot have been
+    # adjudicated by it, so it is the NEXT round's inbox -- named, never merely
+    # counted. Everything else here, including 4(b) and 4(c), stays whole-live: a
+    # row that HAS a disposition owes a reason regardless of when it was born.
+    # With no anchor, `residue` is empty and 4(a) is exactly what wave 25 shipped.
+    live_bare_rows = [r for r in live if not disposition_of(r)]
+    live_bare_residue = []
+    if anchor is not None:
+        in_round = []
+        for row in live_bare_rows:
+            raw = row.get("_createdAt")
+            born = parse_instant(raw)
+            if born is None:
+                # FAIL CLOSED, exactly as clause 5 does for _updatedAt: a row the
+                # predicate cannot place on either side of the anchor must never
+                # be silently excused into the residue.
+                die(EXIT_FAIL_CLOSED,
+                    "live row %s has a missing or unreadable _createdAt %r -- the "
+                    "round-anchored predicate cannot place it before or after the "
+                    "anchor, and a row it cannot place is never excused" % (row["_id"], raw))
+            (in_round if born <= anchor else live_bare_residue).append(row)
+        live_bare_rows = in_round
+    live_bare = sorted(r["_id"] for r in live_bare_rows)
+    live_bare_residue = sorted(r["_id"] for r in live_bare_residue)
     live_adjudicated = [r for r in live if disposition_of(r)]
     live_adjudicated_no_reason = sorted(r["_id"] for r in live_adjudicated if not reason_of(r))
     live_parked = [r for r in live if disposition_of(r).lower() == PARKED_DISPOSITION]
@@ -583,6 +717,7 @@ def census(corpus, closure, depth_of, started, finished, duplicates):
         "live_adjudicated": len(live_adjudicated),
         "live_parked": len(live_parked),
         "live_bare": live_bare,
+        "live_bare_residue": live_bare_residue,
         "live_adjudicated_no_reason": live_adjudicated_no_reason,
         "live_park_no_trigger": live_park_no_trigger,
         "off_vocabulary": dict(off_vocab),
@@ -609,6 +744,9 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
                   report["instant"]["seconds"]))
     out.append("  source      %s" % source)
     out.append("  root        %s" % root)
+    if report.get("round_anchor"):
+        out.append("  round       born %s  (anchor: %s)"
+                   % (report["round_anchor"], report["round_anchor_source"]))
     out.append("  paging      %d page(s) of limit %d -> corpus %d rows  (page sizes: %s)"
                % (len(pages), page_limit, corpus_size, ", ".join(str(p) for p in pages)))
     out.append("  closure     %d descendants over parent_id (lens=%s, max depth %d)"
@@ -636,6 +774,9 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     out.append("  live rows                          %5d" % report["live"])
     out.append("  live rows with NO disposition      %5d%s"
                % (len(report["live_bare"]), _eg(report["live_bare"])))
+    if report.get("round_anchor"):
+        out.append("  ^ born after the anchor (RESIDUE)  %5d%s"
+                   % (len(report["live_bare_residue"]), _eg(report["live_bare_residue"])))
     out.append("  live adjudicated with NO reason    %5d   (of %d adjudicated)%s"
                % (len(report["live_adjudicated_no_reason"]), report["live_adjudicated"],
                   _eg(report["live_adjudicated_no_reason"])))
@@ -667,6 +808,15 @@ def main(argv):
                              "one-level undercounting lens, present only so the "
                              "selftest can inject it.")
     parser.add_argument("--assert-round-done", action="store_true")
+    parser.add_argument("--anchor-from-paper", metavar="WAVE-PAPER-SLUG",
+                        help="derive the round anchor from the wave Paper's "
+                             "_createdAt. Clause 4(a) then asserts only over live "
+                             "rows born at or before it; rows born after it are "
+                             "named as residue.")
+    parser.add_argument("--anchor", metavar="ISO-8601",
+                        help="SELFTEST CLOCK ONLY -- refused outside --fixture-dir, "
+                             "because a caller-supplied anchor lets a round seal "
+                             "itself by argv.")
     parser.add_argument("--json", action="store_true")
     parser.add_argument("--fixture-dir")
     parser.add_argument("--server")
@@ -677,6 +827,19 @@ def main(argv):
         die(EXIT_USAGE, "--page-limit must be >= 1")
     if args.pace < 0 or args.retries < 0:
         die(EXIT_USAGE, "--pace and --retries must be >= 0")
+
+    # THE ANCHOR GUARD. A raw --anchor is the selftest's clock and nothing else:
+    # on the live board `--anchor 2020-01-01T00:00:00Z` flips 4(a) from 157/172
+    # FAIL to 172/172 PASS, so a certifying run that could accept one could seal
+    # itself by argv.
+    if args.anchor and not args.fixture_dir:
+        die(EXIT_USAGE,
+            "--anchor is refused outside --fixture-dir: a caller-supplied anchor "
+            "lets a round seal itself by argv (measured: --anchor 2020-01-01 flips "
+            "clause 4(a) from 157/172 FAIL to 172/172 PASS on the live board). Use "
+            "--anchor-from-paper <wave-slug>, which derives the instant.")
+    if args.anchor and args.anchor_from_paper:
+        die(EXIT_USAGE, "--anchor and --anchor-from-paper are mutually exclusive")
 
     if args.fixture_dir:
         if not os.path.isdir(args.fixture_dir):
@@ -698,6 +861,20 @@ def main(argv):
                 "BARKPARK_TOKEN, or run `bp login`")
         transport = HttpTransport(server, token)
 
+    # THE ANCHOR IS RESOLVED BEFORE THE READ WINDOW OPENS, so it can never be
+    # mistaken for part of the snapshot clause 5 asserts coherence over.
+    anchor = None
+    anchor_source = None
+    if args.anchor_from_paper:
+        anchor, anchor_raw = resolve_anchor_from_paper(
+            transport, args.dataset, args.anchor_from_paper)
+        anchor_source = "paper/%s _createdAt %s" % (args.anchor_from_paper, anchor_raw)
+    elif args.anchor:
+        anchor = parse_instant(args.anchor)
+        if anchor is None:
+            die(EXIT_USAGE, "--anchor %r is not an ISO-8601 instant" % args.anchor)
+        anchor_source = "--anchor (fixture clock)"
+
     # CLAUSE 5: the window is named before the first byte is read.
     started = datetime.now(timezone.utc)
     corpus, pages, duplicates = read_corpus(
@@ -714,7 +891,10 @@ def main(argv):
         die(EXIT_FAIL_CLOSED,
             "root %s has zero descendants in a %d-row corpus" % (args.root, len(corpus)))
 
-    report = census(corpus, closure, depth_of, started, finished, duplicates)
+    report = census(corpus, closure, depth_of, started, finished, duplicates, anchor)
+    report["round_anchor"] = (
+        anchor.isoformat().replace("+00:00", "Z") if anchor is not None else None)
+    report["round_anchor_source"] = anchor_source
     report["root"] = args.root
     report["lens"] = args.lens
     report["corpus_size"] = len(corpus)
@@ -771,10 +951,23 @@ def main(argv):
         # closure-scoped on purpose: distinctness and vocabulary are properties
         # of everything ever written. Three sub-lines, each able to say no alone.
         bare = report["live_bare"]
+        residue = report["live_bare_residue"]
         no_reason = report["live_adjudicated_no_reason"]
         no_trigger = report["live_park_no_trigger"]
+        if report["round_anchor"]:
+            print("  round anchor                                  %s   (%s)"
+                  % (report["round_anchor"], report["round_anchor_source"]))
         print("  live rows carrying a disposition               %d/%d    %s"
               % (report["live"] - len(bare), report["live"], "PASS" if not bare else "FAIL"))
+        if report["round_anchor"]:
+            # A NAMED WORKLIST, NEVER A BARE COUNT: these rows were born after the
+            # round started, so they are the NEXT round's inbox -- deferred by
+            # exactly one round, and in scope the moment it anchors on its own
+            # Paper.
+            print("  ^ deferred to the next round (RESIDUE)        %d        %s"
+                  % (len(residue), "next-round inbox"))
+            for row_id in residue:
+                print("      residue: %s" % row_id)
         if bare:
             failures.append("%d LIVE row(s) carry NO disposition -- a live row that says "
                             "nothing is what clauses 1-3 cannot see: %s"
