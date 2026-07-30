@@ -147,9 +147,47 @@ test('a resolvable successor over a clean fixture still SEALS at exit 0', () => 
   assert.match(out, /FIXTURE-ONLY GREEN: 2 guard\(s\) STUBBED/);
   // `waived=0` since wave 8: sealable.json still CARRIES an `unmeasuredWaivers` entry
   // for CCH-D5, but a waiver is only consulted for a rung-3 entry and CCH-D5 is now
-  // measured, so nothing is waived. The waiver machinery is consequently unexercised
-  // by any fixture — tracked as cch-bl-waiver-path-unexercised, not papered over here.
+  // MEASURED, so nothing is waived. The waiver branch is therefore no longer reachable
+  // by any unmutated fixture — the test directly below keeps it measured rather than
+  // leaving live code with no test, which is this epic's own disease.
   assert.match(out, /mode=fixture stubbed=2 waived=0/);
+});
+
+// The waiver branch (`seal-predicate.mjs`, `waivers.has(d.id)`) exists so a clause-(a)
+// fixture can reach a SEAL while a rung-3 entry stands unmeasured in the register. Wave
+// 8 paid CCH-D5 off, which emptied the register of rung-3 entries and left that branch
+// live but unexercised. It is kept measured by MUTATION: put a rung-3 entry back and the
+// waiver in the ledger must consume it — named, printed, and counted in the token.
+test('the ledger waiver still consumes a rung-3 entry, and says so in the same breath', () => {
+  const waived = mutatedRun(
+    (src) => src.replace(
+      /    measured_by: \['cloud\/test\/barkpark_cloud\/web\/router_signin_rate_bucket_test\.exs'\],\n    measured_in_ci: \{ workflow: '\.github\/workflows\/cloud\.yml', job: 'test', paths: 'cloud\/\*\*' \},\n/,
+      "    unmeasured: 'nothing measures the bucket separation',\n",
+    ),
+    ['--ledger', FIX('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'],
+  );
+  assert.equal(waived.status, SEAL, `a waived rung-3 entry must still seal: ${token(waived.out)}`);
+  assert.match(waived.out, /UNMEASURED — WAIVED BY LEDGER FIXTURE/);
+  assert.match(waived.out, /1 unmeasured entr\(ies\) WAIVED by the ledger fixture/);
+  assert.match(token(waived.out), /waived=1/);
+  // A waiver is fixture-only and must never be a silent one: the green says so.
+  assert.match(waived.out, /FIXTURE-ONLY GREEN/);
+
+  // AND the waiver is not a blanket forgiveness — it clears only the id it names.
+  // Rename that id and the SAME rung-3 entry reds by name.
+  const unwaived = mutatedRun(
+    (src) => src.replace(
+      /    measured_by: \['cloud\/test\/barkpark_cloud\/web\/router_signin_rate_bucket_test\.exs'\],\n    measured_in_ci: \{ workflow: '\.github\/workflows\/cloud\.yml', job: 'test', paths: 'cloud\/\*\*' \},\n/,
+      "    unmeasured: 'nothing measures the bucket separation',\n",
+    ).replace(
+      "id: 'CCH-D5-rate-limiter-sees-every-user-as-one',",
+      "id: 'CCH-D5-rate-limiter-sees-every-user-as-one-NOT-THE-WAIVED-ID',",
+    ),
+    ['--ledger', FIX('sealable.json'), '--repo', REPO, '--guard-cmd', 'true'],
+  );
+  assert.equal(unwaived.status, NO_SEAL, 'a waiver must not forgive an id it does not name');
+  assert.match(unwaived.out, /NO MEASUREMENT \(rung 3\): nothing measures the bucket separation/);
+  assert.match(token(unwaived.out), /b=FAIL waived=0|waived=0/);
 });
 
 test('clause (a) still reds: a resolvable successor does not forgive unnamed residue', () => {
