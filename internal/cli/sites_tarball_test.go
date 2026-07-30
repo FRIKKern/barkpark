@@ -195,8 +195,13 @@ func tarEntryNames(t *testing.T, r io.Reader) map[string]struct{} {
 // writePrebuiltFixture lays down a dist/-shaped tree: a root index.html, a
 // hashed-asset dir, a page route literally named `build` (a real site can route
 // /build/, and `build` is on defaultTarballIgnores — so it is the control that
-// proves WHICH ignore list ran), an empty directory, a symlink, an executable
-// file, and a `.env` a framework dropped next to the assets.
+// proves WHICH ignore list ran), an empty directory, an executable file, and a
+// `.env` a framework dropped next to the assets.
+//
+// It carries NO symlink. It used to, and the fixture was the bug: a contained
+// symlink is now a client-side refusal (charter D120), so a fixture that packs
+// one could not reach the packer at all. addPrettyURLSymlink adds one back for
+// the tests that are ABOUT that refusal.
 func writePrebuiltFixture(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -219,10 +224,17 @@ func writePrebuiltFixture(t *testing.T) string {
 	if err := os.MkdirAll(filepath.Join(dir, "empty-dir"), 0o755); err != nil {
 		t.Fatalf("mkdir empty-dir: %v", err)
 	}
+	return dir
+}
+
+// addPrettyURLSymlink adds the live vector: a hand-made `home.html -> index.html`
+// alias INSIDE the dist. It escapes nothing, so no traversal guard would ever
+// name it — and the box refuses it anyway, because a staged symlink is SERVED.
+func addPrettyURLSymlink(t *testing.T, dir string) {
+	t.Helper()
 	if err := os.Symlink("index.html", filepath.Join(dir, "home.html")); err != nil {
 		t.Fatalf("symlink: %v", err)
 	}
-	return dir
 }
 
 // tarEntry is one decoded archive member — enough of it to prove a round trip.
@@ -278,10 +290,11 @@ func tarEntryKeys(m map[string]tarEntry) []string {
 }
 
 // TestPackPrebuiltDirShipsTheBuildOutput is the round trip: every file survives
-// byte-for-byte with its mode, the empty dir and the symlink survive, index.html
-// lands at the ARCHIVE ROOT with no dist/ prefix, `.env` is gone — and the same
-// fixture packed the DEFAULT way loses `build/index.html`, which is what "today's
-// packer would delete the payload" means in one assertion.
+// byte-for-byte with its mode, the empty dir survives, index.html lands at the
+// ARCHIVE ROOT with no dist/ prefix, `.env` is gone, a contained symlink is
+// REFUSED — and the same fixture packed the DEFAULT way loses
+// `build/index.html`, which is what "today's packer would delete the payload"
+// means in one assertion.
 func TestPackPrebuiltDirShipsTheBuildOutput(t *testing.T) {
 	dir := writePrebuiltFixture(t)
 
@@ -316,8 +329,18 @@ func TestPackPrebuiltDirShipsTheBuildOutput(t *testing.T) {
 	if e, ok := entries["empty-dir"]; !ok || e.typeflag != tar.TypeDir {
 		t.Fatalf("empty dir did not survive: %+v ok=%v", e, ok)
 	}
-	if e, ok := entries["home.html"]; !ok || e.typeflag != tar.TypeSymlink || e.link != "index.html" {
-		t.Fatalf("symlink did not survive as a symlink: %+v ok=%v", e, ok)
+	// THE FLIPPED ASSERTION (charter D120 — a CONTRACT CHANGE, not a deleted
+	// guard). This used to assert that `home.html -> index.html` SURVIVED as
+	// typeflag 2. Surviving was the defect: the box's stage/4 answers E_SYMLINK on
+	// that entry and throws the whole upload away, after the deployment is already
+	// minted. The client now refuses it first, by name. TestPackPrebuiltDirRefuses
+	// ContainedSymlink below proves both halves on raw bytes.
+	symDir := writePrebuiltFixture(t)
+	addPrettyURLSymlink(t, symDir)
+	if _, err := packPrebuiltDir(symDir); err == nil {
+		t.Fatalf("a contained symlink must be refused by the preflight, not packed as typeflag 2")
+	} else if !strings.Contains(err.Error(), "home.html") || !strings.Contains(err.Error(), "E_SYMLINK") {
+		t.Fatalf("the symlink refusal must name the path and the box's code, got: %v", err)
 	}
 	if _, ok := entries[".env"]; ok {
 		t.Fatalf(".env was packed — the prebuilt ignore list must keep secrets off the wire")
@@ -435,5 +458,466 @@ func TestValidatePrebuiltDirRefusals(t *testing.T) {
 	}
 	if _, err := validatePrebuiltDir(""); err == nil {
 		t.Fatalf("an empty --prebuilt value must be refused")
+	}
+}
+
+// --- the client never ships what the box will refuse (wave 11) ---------------
+//
+// Everything below was established by reading RAW 512-byte BLOCKS out of the
+// REAL packer, not by reading code that reads bytes. The extractor's own accept
+// list (Barkpark.Sites.PrebuiltArtifact.entry_type/1) is regular file ('0'/NUL)
+// and directory ('5'); every other byte at offset 156 is a typed refusal there.
+
+// packWithTheRealPacker packs `dir` with the REAL prebuilt packer (bufferTarball
+// + streamTarball + writeTarball — every line the wire bytes go through, minus
+// the validate the preflight now owns) and returns the entries it actually
+// emitted, decoded from the gzip'd tar.
+func packWithTheRealPacker(t *testing.T, dir string) map[string]tarEntry {
+	t.Helper()
+	art, err := bufferTarball(tarballOptions{
+		Root:     dir,
+		Ignores:  prebuiltTarballIgnores,
+		MaxBytes: prebuiltMaxUncompressedBytes,
+	})
+	if err != nil {
+		t.Fatalf("bufferTarball: %v", err)
+	}
+	t.Cleanup(art.Cleanup)
+	return readTarGzFile(t, art.Path)
+}
+
+// TestPackPrebuiltDirRefusesContainedSymlink is the FAIL-BEFORE and the fix in
+// one test.
+//
+// FAIL-BEFORE, on the real packer's bytes: writeTarball emits `home.html` with
+// typeflag 2 (tar.TypeSymlink) and linkname `index.html`. Those bytes are DEAD ON
+// ARRIVAL — api/lib/barkpark/sites/prebuilt_artifact.ex answers
+//
+//	{:error, "E_SYMLINK", "the archive contains a symlink — refused (a staged
+//	 symlink is SERVED)"}
+//
+// and never creates the destination. The deployment has already been minted with
+// a nonced build id by then, so today the user pays a round trip to learn it.
+//
+// THE FIX: the same tree is refused locally, first, naming the path, its target
+// and the fix.
+func TestPackPrebuiltDirRefusesContainedSymlink(t *testing.T) {
+	dir := writePrebuiltFixture(t)
+	addPrettyURLSymlink(t, dir)
+
+	// FAIL-BEFORE: the packer itself still emits the symlink verbatim. This is not
+	// a mock of the packer — it IS the packer's bytes.
+	entries := packWithTheRealPacker(t, dir)
+	home, ok := entries["home.html"]
+	if !ok {
+		t.Fatalf("the packer no longer emits home.html at all; entries: %v", tarEntryKeys(entries))
+	}
+	if home.typeflag != tar.TypeSymlink || home.link != "index.html" {
+		t.Fatalf("fail-before premise broken: home.html is typeflag %q link %q, expected 2/index.html — the E_SYMLINK refusal this test guards would no longer trigger", string(home.typeflag), home.link)
+	}
+	t.Logf("fail-before: real packer emitted home.html typeflag=%q link=%q → box answers E_SYMLINK", string(home.typeflag), home.link)
+
+	// THE FIX: refused locally, before any mint.
+	_, verr := validatePrebuiltDir(dir)
+	if verr == nil {
+		t.Fatalf("validatePrebuiltDir must refuse a contained symlink")
+	}
+	for _, want := range []string{"home.html", "index.html", "E_SYMLINK", "a staged symlink is SERVED", "cp "} {
+		if !strings.Contains(verr.Error(), want) {
+			t.Fatalf("the refusal must carry %q (path, target, the box's own code, the fix); got: %v", want, verr)
+		}
+	}
+
+	// And the whole packer refuses too, since packPrebuiltDir validates first.
+	if _, perr := packPrebuiltDir(dir); perr == nil || perr.Error() != verr.Error() {
+		t.Fatalf("packPrebuiltDir must refuse with the SAME string as validatePrebuiltDir:\n  pack:     %v\n  validate: %v", perr, verr)
+	}
+}
+
+// TestPrebuiltRefusalReachesBothCallSites drives BOTH entry points and compares
+// the rendered refusal. cloud_site_cmd.go's deploy branch validates PRE-MINT —
+// above siteCloudConfig and resolveOpenSiteID — so this test opens no socket and
+// needs no config: the refusal returns before any of that runs.
+//
+// It asserts the usage/exitUsage shape, NOT failed/exitGeneric. The post-mint arm
+// inside runCloudSitePrebuiltDeploy does render exitGeneric, but the pre-mint arm
+// always fires first on the real command, so asserting the generic shape would be
+// asserting an unreachable branch.
+func TestPrebuiltRefusalReachesBothCallSites(t *testing.T) {
+	dir := writePrebuiltFixture(t)
+	addPrettyURLSymlink(t, dir)
+
+	var stdout, stderr strings.Builder
+	w := newWriter(&stdout, &stderr)
+	code := runCloudSiteDeploy(w, globals{}, []string{"some-site", "--prebuilt", dir, "--no-follow"})
+	if code != exitUsage {
+		t.Fatalf("the pre-mint refusal renders as usage/exitUsage; got exit %d (stdout=%q stderr=%q)", code, stdout.String(), stderr.String())
+	}
+
+	// Call site 2: the packer's own validate. Byte-identical message.
+	_, perr := packPrebuiltDir(dir)
+	if perr == nil {
+		t.Fatalf("packPrebuiltDir must refuse the same tree")
+	}
+	if !strings.Contains(stderr.String(), perr.Error()) {
+		t.Fatalf("the two call sites must emit the same refusal string:\n  cli:  %q\n  pack: %q", stderr.String(), perr.Error())
+	}
+}
+
+// TestValidatePrebuiltDirResolvesASymlinkedRoot: `dist -> packages/site/dist` is
+// the monorepo shape. os.Stat and os.ReadDir FOLLOW it, so every D93 guard used
+// to pass — and then filepath.Walk LSTATS the root, sees a non-directory, calls
+// its walkFn once with rel="." and returns, producing a valid archive with ZERO
+// entries. The fail-before count is asserted, not described.
+func TestValidatePrebuiltDirResolvesASymlinkedRoot(t *testing.T) {
+	base := t.TempDir()
+	real := filepath.Join(base, "packages", "site", "dist")
+	if err := os.MkdirAll(real, 0o755); err != nil {
+		t.Fatalf("mkdir: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "index.html"), []byte(`<meta name="bp-build-id" content="abc123">`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(real, "app.css"), []byte("body{}"), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	link := filepath.Join(base, "dist")
+	if err := os.Symlink(real, link); err != nil {
+		t.Fatalf("symlink root: %v", err)
+	}
+
+	// FAIL-BEFORE: hand the packer the UNRESOLVED path, which is exactly what main
+	// passed, and count the entries.
+	before := packWithTheRealPacker(t, link)
+	if len(before) != 0 {
+		t.Fatalf("fail-before premise broken: packing a symlinked root emitted %d entries (%v); it used to emit ZERO", len(before), tarEntryKeys(before))
+	}
+	art, err := bufferTarball(tarballOptions{Root: link, Ignores: prebuiltTarballIgnores, MaxBytes: prebuiltMaxUncompressedBytes})
+	if err != nil {
+		t.Fatalf("bufferTarball: %v", err)
+	}
+	defer art.Cleanup()
+	t.Logf("fail-before: symlinked root packed %d wire bytes, entries: 0 → box answers E_MALFORMED \"the archive holds no entries\"", art.WireBytes)
+
+	// THE FIX: validate resolves the root, so the packer walks the real tree.
+	abs, verr := validatePrebuiltDir(link)
+	if verr != nil {
+		t.Fatalf("a symlinked dist root must resolve (or be refused by name), got: %v", verr)
+	}
+	if abs == link {
+		t.Fatalf("validatePrebuiltDir returned the unresolved symlink %q — the packer would walk it and emit zero entries", abs)
+	}
+	fixed, perr := packPrebuiltDir(link)
+	if perr != nil {
+		t.Fatalf("packPrebuiltDir over a symlinked root: %v", perr)
+	}
+	defer fixed.Cleanup()
+	after := readTarGzFile(t, fixed.Path)
+	for _, name := range []string{"index.html", "app.css"} {
+		if _, ok := after[name]; !ok {
+			t.Fatalf("%s missing after the fix; entries: %v", name, tarEntryKeys(after))
+		}
+	}
+}
+
+// TestPrebuiltNameShapeMatchesTheRealPackerByte156 is the differential that makes
+// the preflight's verdict trustworthy: for each name shape, the DRY ENCODE's
+// verdict is compared against the typeflags the REAL packer wrote for the same
+// tree, read out of the raw 512-byte blocks. No predicate is asserted — Go's
+// USTAR/PAX election lives in the unexported Header.allowedFormats, and the
+// trigger is UNSPLITTABILITY, not length. Measured on go1.26.2: a 141-byte path
+// that splits at a '/' takes no PAX; a 121-byte DIRECTORY component does, and the
+// PAX lands on the DIRECTORY entry, not on its 137-byte child.
+func TestPrebuiltNameShapeMatchesTheRealPackerByte156(t *testing.T) {
+	long121 := strings.Repeat("d", 121)
+	deep := strings.TrimRight(strings.Repeat("ab/", 26), "/")
+
+	cases := []struct {
+		label   string
+		rel     string
+		wantPax bool
+		// paxOn names the entry the refusal must name, which is not always the
+		// file: for long121 the PAX header lands on the DIRECTORY.
+		paxOn string
+	}{
+		{label: "plain ascii", rel: "blog/post.html", wantPax: false},
+		{label: "accented NFC leaf", rel: "blog/hvorfor-nå.html", wantPax: true, paxOn: "blog/hvorfor-nå.html"},
+		{label: "accented directory", rel: "kafé/index.html", wantPax: true, paxOn: "kafé"},
+		{label: "121-byte unsplittable DIRECTORY component — the DIRECTORY is the trigger, not its 137-byte child", rel: long121 + "/leaf.html", wantPax: true, paxOn: long121},
+		{label: "141-byte path splittable at '/' — a length predicate would be WRONG here", rel: strings.Repeat("a", 60) + "/" + strings.Repeat("b", 60) + "/" + strings.Repeat("c", 14) + ".html", wantPax: false},
+		{label: "deep 26-segment short-component path", rel: deep + "/i.html", wantPax: false},
+	}
+
+	for _, tc := range cases {
+		dir := t.TempDir()
+		if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(`<meta name="bp-build-id" content="abc123">`), 0o644); err != nil {
+			t.Fatalf("write index: %v", err)
+		}
+		full := filepath.Join(dir, filepath.FromSlash(tc.rel))
+		if err := os.MkdirAll(filepath.Dir(full), 0o755); err != nil {
+			t.Fatalf("%s: mkdir: %v", tc.label, err)
+		}
+		if err := os.WriteFile(full, []byte("x"), 0o644); err != nil {
+			t.Fatalf("%s: write: %v", tc.label, err)
+		}
+
+		// GROUND TRUTH: the raw 512-byte blocks the real packer produced.
+		flags := rawBlockTypeflags(t, dir)
+		gotRealPax := false
+		for _, f := range flags {
+			if f == 'x' {
+				gotRealPax = true
+			}
+		}
+		if gotRealPax != tc.wantPax {
+			t.Fatalf("%s: REAL PACKER emitted pax=%v, expected %v (raw block typeflags: %s)", tc.label, gotRealPax, tc.wantPax, flagString(flags))
+		}
+
+		// THE PREFLIGHT: same verdict, from a dry encode, over the same walk.
+		verr := preflightPrebuiltEntries(dir, "./dist")
+		if tc.wantPax && verr == nil {
+			t.Fatalf("%s: the real packer emitted a pax header but the preflight allowed it", tc.label)
+		}
+		if !tc.wantPax && verr != nil {
+			t.Fatalf("%s: the real packer emitted plain USTAR headers but the preflight refused: %v", tc.label, verr)
+		}
+		if tc.wantPax {
+			if !strings.Contains(verr.Error(), tc.paxOn) {
+				t.Fatalf("%s: the refusal must name the offending path %q, got: %v", tc.label, tc.paxOn, verr)
+			}
+			for _, want := range []string{"E_UNKNOWN_TYPE", "extension header"} {
+				if !strings.Contains(verr.Error(), want) {
+					t.Fatalf("%s: the refusal must carry %q, got: %v", tc.label, want, verr)
+				}
+			}
+		}
+	}
+}
+
+// rawBlockTypeflags walks the REAL packer's output as 512-byte blocks and returns
+// every typeflag byte in wire order — the same traversal the Elixir extractor
+// performs (header block, then a size-derived body skip). Reading the blocks is
+// the point: a verdict about a header format that was not taken from an actual
+// block is not evidence.
+func rawBlockTypeflags(t *testing.T, dir string) []byte {
+	t.Helper()
+	art, err := bufferTarball(tarballOptions{Root: dir, Ignores: prebuiltTarballIgnores, MaxBytes: prebuiltMaxUncompressedBytes})
+	if err != nil {
+		t.Fatalf("bufferTarball: %v", err)
+	}
+	defer art.Cleanup()
+	f, err := os.Open(art.Path)
+	if err != nil {
+		t.Fatalf("open: %v", err)
+	}
+	defer f.Close()
+	gz, err := gzip.NewReader(f)
+	if err != nil {
+		t.Fatalf("gzip: %v", err)
+	}
+	defer gz.Close()
+	raw, err := io.ReadAll(gz)
+	if err != nil {
+		t.Fatalf("inflate: %v", err)
+	}
+
+	var flags []byte
+	for off := 0; off+512 <= len(raw); {
+		block := raw[off : off+512]
+		if isZeroBlock(block) {
+			break
+		}
+		flags = append(flags, block[156])
+		size := octalSizeField(block[124:136])
+		off += 512 + int(size) + int((512-(size%512))%512)
+	}
+	return flags
+}
+
+// octalSizeField decodes the tar size field the way the extractor does: NUL/space
+// trimmed octal digits.
+func octalSizeField(field []byte) int64 {
+	var size int64
+	for _, c := range field {
+		if c < '0' || c > '7' {
+			continue
+		}
+		size = size*8 + int64(c-'0')
+	}
+	return size
+}
+
+func isZeroBlock(b []byte) bool {
+	for _, c := range b {
+		if c != 0 {
+			return false
+		}
+	}
+	return true
+}
+
+func flagString(flags []byte) string {
+	out := make([]string, 0, len(flags))
+	for _, f := range flags {
+		out = append(out, string(f))
+	}
+	return strings.Join(out, ",")
+}
+
+// TestPrebuiltPreflightSharesThePackersSkipDirArm: sharing the ignore SET is not enough,
+// the CONTROL FLOW is load-bearing. A pax-triggering name under `.git` must
+// produce ZERO complaints, because writeTarball returns filepath.SkipDir on an
+// ignored directory and therefore never emits it. Measured before this slice: a
+// naive walk flagged `.git/refs/heads/café-branch` while the real packer emitted
+// only [index.html].
+func TestPrebuiltPreflightSharesThePackersSkipDirArm(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.WriteFile(filepath.Join(dir, "index.html"), []byte(`<meta name="bp-build-id" content="abc123">`), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	refs := filepath.Join(dir, ".git", "refs", "heads")
+	if err := os.MkdirAll(refs, 0o755); err != nil {
+		t.Fatalf("mkdir .git: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(refs, "café-branch"), []byte("deadbeef\n"), 0o644); err != nil {
+		t.Fatalf("write ref: %v", err)
+	}
+
+	// The real packer's entry list: .git contributes nothing.
+	entries := packWithTheRealPacker(t, dir)
+	if len(entries) != 1 {
+		t.Fatalf("the real packer emitted %d entries (%v); expected only index.html", len(entries), tarEntryKeys(entries))
+	}
+	if err := preflightPrebuiltEntries(dir, "./dist"); err != nil {
+		t.Fatalf("the preflight complained about an entry the packer never emits: %v", err)
+	}
+	if _, err := validatePrebuiltDir(dir); err != nil {
+		t.Fatalf("validatePrebuiltDir must accept this tree: %v", err)
+	}
+}
+
+// TestPrebuiltPreflightDryEncodeCostsOneBlockAndNoBody pins the two claims that make the
+// preflight cheap enough to run twice per deploy: the encode emits exactly one
+// 512-byte block for a well-formed name, REGARDLESS of the file's size (a
+// 200 000-byte file is never read — tar.Writer writes body bytes only on Write,
+// and observedTarTypeflag never Writes and never Closes).
+func TestPrebuiltPreflightDryEncodeCostsOneBlockAndNoBody(t *testing.T) {
+	dir := t.TempDir()
+	big := filepath.Join(dir, "big.bin")
+	if err := os.WriteFile(big, make([]byte, 200000), 0o644); err != nil {
+		t.Fatalf("write: %v", err)
+	}
+	info, err := os.Stat(big)
+	if err != nil {
+		t.Fatalf("stat: %v", err)
+	}
+	hdr, err := tarHeaderFor(big, "big.bin", info)
+	if err != nil {
+		t.Fatalf("tarHeaderFor: %v", err)
+	}
+	if hdr.Size != 200000 {
+		t.Fatalf("header size %d — the fixture is not the size this test claims", hdr.Size)
+	}
+	flag, n, err := observedTarTypeflag(hdr)
+	if err != nil {
+		t.Fatalf("observedTarTypeflag: %v", err)
+	}
+	if n != 512 {
+		t.Fatalf("a USTAR header must cost exactly one 512-byte block, got %d bytes (a body read would be ~200 704)", n)
+	}
+	if flag != '0' {
+		t.Fatalf("a plain file must encode as typeflag '0', got %q", string(flag))
+	}
+
+	// A pax name costs three blocks (extension header + its record + the real
+	// header) — still no body.
+	hdr.Name = "hvorfor-nå.bin"
+	_, paxN, err := observedTarTypeflag(hdr)
+	if err != nil {
+		t.Fatalf("observedTarTypeflag pax: %v", err)
+	}
+	if paxN != 1536 {
+		t.Fatalf("a pax name must cost three header blocks, got %d bytes", paxN)
+	}
+}
+
+// TestPrebuiltStageableTypeflagsMatchTheExtractor: the accept list is transcribed
+// from api/lib/barkpark/sites/prebuilt_artifact.ex's entry_type/1 table. If it
+// ever grows a fourth member, the client would start shipping something the box
+// answers with a typed refusal.
+func TestPrebuiltStageableTypeflagsMatchTheExtractor(t *testing.T) {
+	for flag := range prebuiltStageableTypeflags {
+		switch flag {
+		case '0', 0, '5':
+		default:
+			t.Fatalf("prebuiltStageableTypeflags drifted from the extractor's accept list: %q", string(flag))
+		}
+	}
+	if len(prebuiltStageableTypeflags) != 3 {
+		t.Fatalf("the extractor stages exactly regular files ('0', NUL) and dirs ('5'); got %d entries", len(prebuiltStageableTypeflags))
+	}
+}
+
+// TestTarballIgnoreSetVerbatimDifferential pins the factored-out ignore-set build
+// against a VERBATIM COPY of the pre-factoring body from streamTarball. It exists
+// because the suite going green is VACUOUS evidence for this refactor: measured,
+// every Tarball|Prebuilt|Ignore|Gitignore test passes with
+// `strings.TrimRight(p, "/")` mutated to a bare `p`.
+func TestTarballIgnoreSetVerbatimDifferential(t *testing.T) {
+	// legacyIgnoreSet is the body that lived inline in streamTarball before this
+	// slice factored it out — copied character for character.
+	legacyIgnoreSet := func(root string, ignoresIn []string) map[string]struct{} {
+		ignores := ignoresIn
+		if ignores == nil {
+			ignores = loadGitignore(root)
+		}
+		ignoreSet := make(map[string]struct{}, len(ignores))
+		for _, p := range ignores {
+			p = strings.TrimSpace(p)
+			if p == "" || strings.HasPrefix(p, "#") {
+				continue
+			}
+			ignoreSet[strings.TrimRight(p, "/")] = struct{}{}
+		}
+		return ignoreSet
+	}
+
+	withGitignore := t.TempDir()
+	if err := os.WriteFile(filepath.Join(withGitignore, ".gitignore"), []byte("secrets/\n# a comment\n\n  spaced/  \n!negated\nnode_modules\n"), 0o644); err != nil {
+		t.Fatalf("write .gitignore: %v", err)
+	}
+	noGitignore := t.TempDir()
+
+	cases := []struct {
+		label   string
+		root    string
+		ignores []string
+	}{
+		{label: "nil + .gitignore present (nil means loadGitignore, NOT empty)", root: withGitignore, ignores: nil},
+		{label: "nil + no .gitignore (loadGitignore falls back to the defaults)", root: noGitignore, ignores: nil},
+		{label: "empty slice (ignores NOTHING — the other nil hazard)", root: withGitignore, ignores: []string{}},
+		{label: "the prebuilt list the deploy lane actually passes", root: noGitignore, ignores: prebuiltTarballIgnores},
+		{label: "the project defaults", root: noGitignore, ignores: defaultTarballIgnores},
+		{label: "trailing slashes, comments, blanks and whitespace", root: noGitignore, ignores: []string{"dist/", "  build/  ", "", "   ", "# comment", "out"}},
+		{label: "a nested path with a trailing slash", root: noGitignore, ignores: []string{"pkg/node_modules/", "a/b/c"}},
+	}
+	for _, tc := range cases {
+		want := legacyIgnoreSet(tc.root, tc.ignores)
+		got := tarballIgnoreSet(tc.root, tc.ignores)
+		if len(want) != len(got) {
+			t.Fatalf("%s: factored set has %d keys, legacy body had %d", tc.label, len(got), len(want))
+		}
+		for k := range want {
+			if _, ok := got[k]; !ok {
+				t.Fatalf("%s: factored set is missing legacy key %q", tc.label, k)
+			}
+		}
+		// And the keys are load-bearing, not merely counted: the differential must
+		// notice a mutated normalization, so assert the trailing slash is gone.
+		for k := range got {
+			if strings.HasSuffix(k, "/") && k != "/" {
+				t.Fatalf("%s: key %q kept its trailing slash — isIgnored compares against basenames and path SEGMENTS, which never carry one", tc.label, k)
+			}
+		}
 	}
 }
