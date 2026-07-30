@@ -47,12 +47,19 @@ on:
 
 jobs:
   run:
-    name: ${{ inputs.operation }}
+    # STATIC on purpose. A job `name:` that is nothing but an input
+    # interpolation renders as a different check-run name on every dispatch, and
+    # scripts/required-checks-generate.sh reads job names as TEMPLATES: an
+    # all-interpolation template regexes to `^.+$` and claims EVERY rendered
+    # name in the repo, erasing the continue-on-error/paths-filter/needs
+    # provenance the selection stage excludes on. The operation still shows in
+    # the UI — on the step below, where it cannot enter the workflow index.
+    name: cp-ops operator command
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Run operator command on the control plane
+      - name: Run ${{ inputs.operation }} on the control plane
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           CP_HOST: ${{ secrets.CP_HOST }}
