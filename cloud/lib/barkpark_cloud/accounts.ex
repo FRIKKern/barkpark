@@ -577,6 +577,12 @@ defmodule BarkparkCloud.Accounts do
     end
   end
 
+  # Once-per-minute is enough resolution for "is this device still around?";
+  # inside the window the stamp is skipped so a chatty SPA does not turn every
+  # read into an UPDATE. Mirrors the PAT twin's `@last_used_throttle_seconds`
+  # and api/'s `@session_last_used_throttle_seconds` (both 60).
+  @session_last_used_throttle_seconds 60
+
   @doc """
   Verify a presented session-token `plaintext`. Returns the owning `%User{}` when
   the token exists, is a `"session"` row, is NOT revoked, and is not past
@@ -592,7 +598,35 @@ defmodule BarkparkCloud.Accounts do
   `last_used_at` best-effort so the sessions list shows real activity.
   """
   @spec verify_user_session_token(binary()) :: User.t() | nil
-  def verify_user_session_token(plaintext) when is_binary(plaintext) do
+  def verify_user_session_token(plaintext), do: verify_user_session_token(plaintext, [])
+
+  @doc """
+  `verify_user_session_token/1` with control over the `last_used_at` stamp.
+
+  Options:
+
+    * `:touch` — `true` (default) stamps EAGERLY, right here, throttled to the
+      `#{@session_last_used_throttle_seconds}s` window. `false` stamps NOTHING
+      and leaves it to the caller.
+
+  WHY THE OPTION EXISTS. `last_used_at` is a LIVENESS claim — the sessions card
+  renders it as "Active just now" — but this function runs during
+  AUTHENTICATION, strictly before AUTHORIZATION has ruled. `Web.Auth` has six
+  distinct `forbidden(conn)` sites, every one of them downstream of this call,
+  so an eager stamp here makes a device that was REFUSED 403 look active. A
+  throttle cannot fix that (an idle device satisfies any staleness guard —
+  measured: idle 3600s, one request, 403, stamp still jumped a full hour), so
+  the plug pipeline passes `touch: false` and re-stamps from
+  `Plug.Conn.register_before_send/2` once the status is known.
+
+  `touch: true` remains the default for the callers that hold no `Plug.Conn` and
+  make no authorization decision of their own — notably the SSE stream open,
+  whose conn status is set ONCE at `send_chunked` and then parks for hours, so
+  deferring its stamp would buy nothing and risks under-reporting a device that
+  really is streaming.
+  """
+  @spec verify_user_session_token(binary(), keyword()) :: User.t() | nil
+  def verify_user_session_token(plaintext, opts) when is_binary(plaintext) and is_list(opts) do
     hash = UserToken.hash_token(plaintext)
     now = DateTime.utc_now()
 
@@ -606,7 +640,7 @@ defmodule BarkparkCloud.Accounts do
 
     case Repo.one(query) do
       %UserToken{user_id: user_id} ->
-        touch_last_used(hash, now)
+        if Keyword.get(opts, :touch, true), do: touch_last_used(hash, now)
         Repo.get(User, user_id)
 
       nil ->
@@ -614,14 +648,42 @@ defmodule BarkparkCloud.Accounts do
     end
   end
 
-  def verify_user_session_token(_), do: nil
+  def verify_user_session_token(_, _), do: nil
 
-  # Best-effort "last seen" refresh keyed by hash. update_all never raises on a
-  # zero-row match, so a token revoked between the verify SELECT and this UPDATE
-  # is a harmless no-op — the return contract (User | nil) is unaffected.
+  @doc """
+  Stamp `last_used_at` on the session row behind `plaintext`, throttled to the
+  #{@session_last_used_throttle_seconds}s window. Always `:ok` — a token revoked
+  or deleted since the verify matches zero rows, which `update_all` treats as a
+  no-op.
+
+  Public because the stamp does not belong at the verify: `Web.Auth` defers it
+  to `register_before_send/2` so it fires only for a request the platform
+  actually SERVED (`conn.status < 400`), never for one it refused.
+  """
+  @spec touch_session_last_used(binary()) :: :ok
+  def touch_session_last_used(plaintext) when is_binary(plaintext) do
+    touch_last_used(UserToken.hash_token(plaintext), DateTime.utc_now())
+  end
+
+  def touch_session_last_used(_), do: :ok
+
+  # Best-effort "last seen" refresh keyed by hash. The throttle rides the WHERE
+  # clause rather than a read-then-write, so the skip costs one statement and
+  # cannot race itself. `last_used_at <= now - window` is the `>=`-seconds
+  # predicate: a row stamped EXACTLY `window` seconds ago is stale and writes.
+  # update_all never raises on a zero-row match, so a token revoked between the
+  # verify SELECT and this UPDATE is a harmless no-op — the return contract
+  # (User | nil) is unaffected.
   defp touch_last_used(hash, now) do
-    from(t in UserToken, where: t.token_hash == ^hash)
+    cutoff = DateTime.add(now, -@session_last_used_throttle_seconds, :second)
+
+    from(t in UserToken,
+      where: t.token_hash == ^hash,
+      where: is_nil(t.last_used_at) or t.last_used_at <= ^cutoff
+    )
     |> Repo.update_all(set: [last_used_at: DateTime.truncate(now, :microsecond)])
+
+    :ok
   end
 
   @doc """

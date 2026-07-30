@@ -307,6 +307,48 @@ defmodule BarkparkCloud.AccountsTest do
       assert DateTime.compare(after_touch.last_used_at, before.last_used_at) in [:eq, :gt]
       assert DateTime.compare(after_touch.last_used_at, past) == :gt
     end
+
+    # The backdate above is EXACTLY the throttle window (60s), and it stays that
+    # way on purpose: it pins the boundary as STALE (`>=`), which is what
+    # `touch_last_used/2`'s `last_used_at <= now - 60s` clause encodes. A `>`
+    # predicate would leave this test red at left: :lt.
+
+    test "touch: false verifies WITHOUT stamping — the plug pipeline owns the stamp" do
+      user = user_fixture()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+
+      past = DateTime.utc_now() |> DateTime.add(-1, :hour) |> DateTime.truncate(:microsecond)
+      Repo.update_all(UserToken, set: [last_used_at: past])
+
+      assert Accounts.verify_user_session_token(plaintext, touch: false).id == user.id
+
+      [row] = Accounts.list_user_sessions(user)
+
+      assert DateTime.compare(row.last_used_at, past) == :eq,
+             "verify stamped anyway — Web.Auth could not then withhold it from a refused request"
+    end
+
+    test "the stamp is throttled: a second touch inside the 60s window writes nothing" do
+      user = user_fixture()
+      {:ok, plaintext} = Accounts.create_user_session_token(user)
+
+      past = DateTime.utc_now() |> DateTime.add(-1, :hour) |> DateTime.truncate(:microsecond)
+      Repo.update_all(UserToken, set: [last_used_at: past])
+
+      :ok = Accounts.touch_session_last_used(plaintext)
+      [first] = Accounts.list_user_sessions(user)
+      assert DateTime.compare(first.last_used_at, past) == :gt
+
+      :ok = Accounts.touch_session_last_used(plaintext)
+      [second] = Accounts.list_user_sessions(user)
+
+      assert DateTime.compare(second.last_used_at, first.last_used_at) == :eq,
+             "the second stamp wrote inside the window — every request is an UPDATE again"
+    end
+
+    test "touching an unknown plaintext is a no-op, not a raise" do
+      assert Accounts.touch_session_last_used("not-a-real-token") == :ok
+    end
   end
 
   describe "create_user_session_token/2 origin (gr-p5-session-provenance)" do
