@@ -2,11 +2,14 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
   @moduledoc """
   Instance custom domains — the Registry half. Proves:
 
-    * `set_custom_host/2` — v1 format gate (exactly ONE label under the
-      platform zone), normalization (lowercase / trim / trailing dot), and the
-      cross-surface taken check: a Site domain, another barkpark's custom_host,
-      or a provisioning FQDN each → `{:error, :taken}` (re-setting your OWN
-      host is an idempotent no-op, not a conflict)
+    * `set_custom_host/2` — the platform format gate (exactly ONE label under
+      the platform zone), the V2 external-FQDN gate (any well-formed lowercase
+      customer FQDN; the apex / bare-IP shapes / shell-hostile junk all die at
+      validation), normalization (lowercase / trim / trailing dot), and the
+      cross-surface taken check: a Site domain, another barkpark's custom_host
+      (exact or, cross-team, as a parent of the new host), or a provisioning
+      FQDN each → `{:error, :taken}` (re-setting your OWN host is an
+      idempotent no-op, not a conflict)
     * the attach_domain job queue — enqueue (one active per barkpark via the
       partial index), kind-filtered claim, succeed/fail with the
       deprovision-grade idempotency + claim-token fencing
@@ -109,13 +112,11 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       assert {:error, :taken} = Registry.set_custom_host(claimer, "fresh.barkpark.cloud")
     end
 
-    test "v1 format gate: anything but ONE label under the platform zone → {:error, changeset}" do
+    test "platform format gate: anything under the zone but ONE label → {:error, changeset}" do
       bp = barkpark_fixture(team_fixture())
 
       for bad <- [
-            # foreign zone — arbitrary customer domains are a later wave
-            "gyldendal.example.com",
-            # two labels under the zone
+            # two labels under the zone — never claimable, we own that DNS
             "a.b.barkpark.cloud",
             # the bare apex
             "barkpark.cloud",
@@ -134,6 +135,80 @@ defmodule BarkparkCloud.RegistryAttachDomainTest do
       end
 
       assert Registry.get_barkpark(bp.id).custom_host == nil
+    end
+
+    test "V2 external FQDN: a well-formed customer domain persists, ask-gate approves, dns label is nil" do
+      bp = barkpark_fixture(team_fixture())
+
+      refute Registry.domain_registered?("barkpark.jarl.no")
+
+      # The SAME normalization as platform hosts: case, whitespace, trailing dot.
+      assert {:ok, %Barkpark{custom_host: "barkpark.jarl.no"} = bp} =
+               Registry.set_custom_host(bp, "  Barkpark.Jarl.No. ")
+
+      assert Registry.domain_registered?("barkpark.jarl.no")
+      assert Registry.domain_registered?("BARKPARK.jarl.no.")
+
+      # No platform DNS halves for an external host — the customer owns DNS.
+      assert Barkpark.custom_host_label(bp) == nil
+      refute Barkpark.platform_custom_host?(bp.custom_host)
+      assert Barkpark.platform_custom_host?("gyldendal.barkpark.cloud")
+    end
+
+    test "V2 external format gate: malformed / hostile FQDNs → {:error, changeset}" do
+      bp = barkpark_fixture(team_fixture())
+
+      overlong =
+        String.duplicate(String.duplicate("a", 63) <> ".", 4) |> String.trim_trailing(".")
+
+      for bad <- [
+            # a single label is not a customer FQDN
+            "intranet",
+            # bare-IP shape (numeric TLD) — never a Caddy vhost
+            "203.0.113.9",
+            # shell/Caddyfile-hostile junk
+            "foo.bar;rm -rf",
+            "$(x).evil.com",
+            "`x`.evil.com",
+            # unicode / uppercase-after-normalization is fine, raw punycode-less unicode is not
+            "bärkpark.jarl.no",
+            # malformed labels
+            "-bad.jarl.no",
+            "bad-.jarl.no",
+            "a..no",
+            "foo_bar.jarl.no",
+            "foo bar.jarl.no",
+            # over the 63-char label cap / the 253-char FQDN cap
+            String.duplicate("a", 64) <> ".jarl.no",
+            overlong <> ".no"
+          ] do
+        assert {:error, %Ecto.Changeset{}} = Registry.set_custom_host(bp, bad),
+               "expected #{inspect(bad)} to be rejected"
+      end
+
+      assert Registry.get_barkpark(bp.id).custom_host == nil
+    end
+
+    test "V2 suffix guard: a host under a DIFFERENT team's custom host → :taken; under your own team's → ok" do
+      owner_team = team_fixture()
+      owner = barkpark_fixture(owner_team)
+      assert {:ok, _} = Registry.set_custom_host(owner, "barkpark.jarl.no")
+
+      # Another team cannot nest under jarl.no's attached host…
+      intruder = barkpark_fixture(team_fixture())
+      assert {:error, :taken} = Registry.set_custom_host(intruder, "sub.barkpark.jarl.no")
+
+      # …but the SAME team can hang a second instance under its own host.
+      sibling = barkpark_fixture(owner_team)
+      assert {:ok, _} = Registry.set_custom_host(sibling, "sub2.barkpark.jarl.no")
+    end
+
+    test "V2 exact-match taken: another barkpark's external custom_host → :taken" do
+      other = barkpark_fixture(team_fixture())
+      assert {:ok, _} = Registry.set_custom_host(other, "barkpark.jarl.no")
+
+      bp = barkpark_fixture(team_fixture())
+      assert {:error, :taken} = Registry.set_custom_host(bp, "barkpark.jarl.no")
     end
 
     test "taken by a Site domain → {:error, :taken}" do

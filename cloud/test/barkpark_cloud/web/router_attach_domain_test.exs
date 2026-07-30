@@ -158,7 +158,10 @@ defmodule BarkparkCloud.Web.RouterAttachDomainTest do
       bp = live_barkpark(team)
       token = session_token(user)
 
-      for bad <- ["gyldendal.example.com", "a.b.barkpark.cloud", "-bad.barkpark.cloud"] do
+      # (V2: a well-formed foreign FQDN like gyldendal.example.com is no longer
+      # malformed — it rides the external ownership-proof path, proven in
+      # RouterAttachDomainV2Test.)
+      for bad <- ["barkpark.cloud", "a.b.barkpark.cloud", "-bad.barkpark.cloud"] do
         conn = call(:post, "/v1/barkparks/#{bp.id}/domain", %{domain: bad}, token)
         assert conn.status == 422
         assert json_body(conn) == %{"error" => "invalid_domain"}

@@ -92,12 +92,25 @@ defmodule BarkparkCloud.Registry.Barkpark do
   # alphanumerics, dot, colon, underscore, hyphen.
   @host_format ~r/^[A-Za-z0-9.:_-]+$/
 
-  # Instance custom domains, v1 DELIBERATELY narrow: exactly ONE RFC-1035 label
-  # under the platform zone (`gyldendal.barkpark.cloud`) — we own that DNS zone,
-  # so the attach worker can stand the record up unassisted. Arbitrary customer
-  # domains (their own zone, CNAME/A verification) are a later wave. The regex is
+  # Instance custom domains — the PLATFORM shape: exactly ONE RFC-1035 label
+  # under the platform zone (`gyldendal.barkpark.cloud`) — we own that DNS
+  # zone, so the attach worker can stand the record up unassisted. The regex is
   # the whole gate: anything it rejects never reaches a Caddyfile or a shell.
   @custom_host_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.barkpark\.cloud$/
+
+  # Attach-domain V2 — the EXTERNAL customer-domain shape: an arbitrary
+  # customer-owned FQDN (`barkpark.jarl.no`), TWO OR MORE well-formed lowercase
+  # RFC labels. Same defensive posture as the platform regex: the value is
+  # interpolated into a Caddyfile and a shell script on the box, so ONLY dots,
+  # hyphens, and alphanumerics are admitted — every shell/Caddy metacharacter
+  # dies here. The 253-char FQDN cap and the numeric-TLD (bare-IP) reject ride
+  # alongside in `custom_host_changeset/2`. A host UNDER the platform zone never
+  # takes this path — it must match the strict single-label platform shape.
+  @external_host_format ~r/^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/
+
+  # An all-digit final label is the bare-IP shape (`203.0.113.9`) — no real TLD
+  # is numeric, and an IP must never become an on-demand-ACME Caddy vhost.
+  @numeric_tld_format ~r/\.[0-9]+$/
 
   schema "barkparks" do
     field :name, :string
@@ -208,8 +221,9 @@ defmodule BarkparkCloud.Registry.Barkpark do
     field :vercel_claim_encrypted, :string
     field :vercel_claim_minted_at, :utc_datetime_usec
 
-    # Instance custom domain (isu follow-up) — the bare platform-zone host
-    # (`gyldendal.barkpark.cloud`) attached to this managed instance. Written
+    # Instance custom domain (isu follow-up; arbitrary FQDNs since attach-domain
+    # V2) — the platform-zone host (`gyldendal.barkpark.cloud`) OR external
+    # customer FQDN (`barkpark.jarl.no`) attached to this managed instance. Written
     # ONLY through the narrow `custom_host_changeset/2` (via
     # `Registry.set_custom_host/2`, which also runs the cross-surface taken
     # check); globally unique via `barkparks_custom_host_unique_idx`.
@@ -381,16 +395,34 @@ defmodule BarkparkCloud.Registry.Barkpark do
   def subdomain_from_url(%__MODULE__{} = bp), do: provisioning_subdomain(bp)
 
   @doc """
-  The DNS label of the attached custom host — `"gyldendal"` for
-  `gyldendal.barkpark.cloud`. A v1 custom host is exactly one label under
+  The platform DNS label of the attached custom host — `"gyldendal"` for
+  `gyldendal.barkpark.cloud`. A platform custom host is exactly one label under
   `#{@base_domain}` (enforced by `custom_host_changeset/2`), so stripping the
-  zone suffix is the whole derivation. `nil` when no custom host is attached.
+  zone suffix is the whole derivation. `nil` when no custom host is attached
+  OR when the attached host is an EXTERNAL customer FQDN (attach-domain V2) —
+  the customer owns that DNS, so there is no platform label to upsert.
   """
   @spec custom_host_label(t()) :: String.t() | nil
-  def custom_host_label(%__MODULE__{custom_host: host}) when is_binary(host),
-    do: String.replace_suffix(host, "." <> @base_domain, "")
+  def custom_host_label(%__MODULE__{custom_host: host}) when is_binary(host) do
+    if platform_custom_host?(host),
+      do: String.replace_suffix(host, "." <> @base_domain, ""),
+      else: nil
+  end
 
   def custom_host_label(%__MODULE__{}), do: nil
+
+  @doc """
+  Is `host` a platform-zone custom host (any host under `#{@base_domain}`), as
+  opposed to an external customer FQDN (attach-domain V2)? Splits the claim
+  payload: platform hosts carry `dns_label`/`dns_zone` for the worker's
+  A-record upsert; external hosts carry nil halves and the worker verifies
+  resolution instead of writing platform DNS.
+  """
+  @spec platform_custom_host?(String.t() | nil) :: boolean()
+  def platform_custom_host?(host) when is_binary(host),
+    do: String.ends_with?(host, "." <> @base_domain)
+
+  def platform_custom_host?(_), do: false
 
   @doc """
   A subdomain-safe, stable short id for a team UUID: the first
@@ -673,11 +705,19 @@ defmodule BarkparkCloud.Registry.Barkpark do
   (the same containment posture as `vercel_changeset/2`). The value is
   normalized (lowercased, trimmed, trailing dot stripped — the SAME
   normalization `Registry.domain_registered?/1` applies, so the stored host and
-  the ask-gate lookup can never diverge) and validated against the v1
-  one-label-under-`#{@base_domain}` format. Written only by
-  `Registry.set_custom_host/2`, which layers the cross-surface taken check on
-  top; the `barkparks_custom_host_unique_idx` unique constraint is the atomic
-  race backstop.
+  the ask-gate lookup can never diverge) and shape-validated, split by zone
+  (attach-domain V2):
+
+    * under `#{@base_domain}` → the strict one-label platform format (we own
+      the zone; deeper nesting is never claimable)
+    * the `#{@base_domain}` apex itself → always rejected
+    * anywhere else → a well-formed lowercase external FQDN (≥ 2 labels,
+      ≤ 253 chars, dots/hyphens/alphanumerics only, non-numeric TLD)
+
+  Written only by `Registry.set_custom_host/2`, which layers the cross-surface
+  taken check (and, router-side, the DNS ownership proof) on top; the
+  `barkparks_custom_host_unique_idx` unique constraint is the atomic race
+  backstop.
   """
   def custom_host_changeset(barkpark, attrs) do
     barkpark
@@ -685,13 +725,34 @@ defmodule BarkparkCloud.Registry.Barkpark do
     |> update_change(:custom_host, &normalize_custom_host/1)
     |> validate_required([:custom_host])
     |> validate_length(:custom_host, max: 253)
-    |> validate_format(:custom_host, @custom_host_format,
-      message: "must be a single label under #{@base_domain}"
-    )
+    |> validate_custom_host_shape()
     |> unique_constraint(:custom_host,
       name: :barkparks_custom_host_unique_idx,
       message: "is already taken"
     )
+  end
+
+  # The zone-split shape gate (see `custom_host_changeset/2`). Runs on the
+  # NORMALIZED value; anything it rejects never reaches a Caddyfile or a shell.
+  defp validate_custom_host_shape(changeset) do
+    validate_change(changeset, :custom_host, fn :custom_host, host ->
+      cond do
+        host == @base_domain ->
+          [custom_host: {"the platform apex itself cannot be attached", []}]
+
+        String.ends_with?(host, "." <> @base_domain) ->
+          if Regex.match?(@custom_host_format, host),
+            do: [],
+            else: [custom_host: {"must be a single label under #{@base_domain}", []}]
+
+        Regex.match?(@external_host_format, host) and
+            not Regex.match?(@numeric_tld_format, host) ->
+          []
+
+        true ->
+          [custom_host: {"must be a well-formed lowercase fully-qualified domain", []}]
+      end
+    end)
   end
 
   defp normalize_custom_host(host) when is_binary(host),

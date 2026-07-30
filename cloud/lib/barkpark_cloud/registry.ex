@@ -1006,8 +1006,10 @@ defmodule BarkparkCloud.Registry do
   @doc """
   Enqueue a `pending` ATTACH-DOMAIN job for `barkpark` — the custom-domain
   attach path (instance custom domains). The Go worker drains it, upserts the
-  DNS A record for the custom host, wires the box (extra origin + Caddy vhost +
-  restarts), and reports back; the `custom_host` itself was already persisted by
+  platform DNS A record (platform-zone hosts) or re-verifies the customer's own
+  DNS already points at the box (external FQDNs, attach-domain V2), wires the
+  box (extra origin + Caddy vhost + restarts), and reports back; the
+  `custom_host` itself was already persisted by
   `set_custom_host/2` before this enqueue, so the job's success just flips the
   job row.
 
@@ -4871,20 +4873,45 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
-  Attach custom domain `domain` (a bare platform-zone host, e.g.
-  `gyldendal.barkpark.cloud`) to `barkpark` — the persist half of the attach
-  flow, run BEFORE `enqueue_attach_domain_job/1` so the worker's claim payload
-  (and the TLS ask-gate) read the host off the row.
+  Shape-validate `domain` for `barkpark` WITHOUT persisting: `{:ok, normalized}`
+  or `{:error, changeset}`. The router's attach flow runs this FIRST so the V2
+  DNS-ownership pre-check (`BarkparkCloud.DomainOwnership`) sees the normalized
+  host and runs only for well-formed EXTERNAL FQDNs — a malformed domain is a
+  422 before any resolver call, and nothing is written on a failed ownership
+  proof. `set_custom_host/2` re-runs the same changeset at persist time.
+  """
+  @spec validate_custom_host(Barkpark.t(), term()) ::
+          {:ok, String.t()} | {:error, Ecto.Changeset.t()}
+  def validate_custom_host(%Barkpark{} = barkpark, domain) do
+    changeset = Barkpark.custom_host_changeset(barkpark, %{custom_host: domain})
 
-  Validation + normalization live in `Barkpark.custom_host_changeset/2` (v1:
-  exactly one label under the platform zone). On top of that, the host must not
-  already be claimed by ANY other surface that answers on the zone — a Site
-  domain, another barkpark's `custom_host`, or a provisioning FQDN (any
-  barkpark's `url`, clean or suffixed) — each of those would silently shadow or
-  be shadowed by the attach. Taken → `{:error, :taken}`. The pre-check is
-  check-then-write; the `barkparks_custom_host_unique_idx` unique constraint is
-  the atomic backstop for a custom_host↔custom_host race (translated to the
-  same `:taken`).
+    if changeset.valid? do
+      {:ok, Ecto.Changeset.fetch_field!(changeset, :custom_host)}
+    else
+      {:error, %{changeset | action: :validate}}
+    end
+  end
+
+  @doc """
+  Attach custom domain `domain` — a platform-zone host
+  (`gyldendal.barkpark.cloud`) or, since attach-domain V2, an arbitrary
+  customer-owned FQDN (`barkpark.jarl.no`) — to `barkpark`: the persist half of
+  the attach flow, run BEFORE `enqueue_attach_domain_job/1` so the worker's
+  claim payload (and the TLS ask-gate) read the host off the row. The V2
+  DNS-ownership proof for external FQDNs lives ABOVE this call (the router's
+  pre-check + the worker's re-check), not here.
+
+  Validation + normalization live in `Barkpark.custom_host_changeset/2` (one
+  label under the platform zone, or a well-formed external FQDN). On top of
+  that, the host must not already be claimed by ANY other surface that answers
+  on our boxes — a Site domain, another barkpark's `custom_host` (exact, or as
+  a PARENT domain owned by a different team: `sub.barkpark.jarl.no` is refused
+  while `barkpark.jarl.no` belongs to someone else), or a provisioning FQDN
+  (any barkpark's `url`, clean or suffixed) — each of those would silently
+  shadow or be shadowed by the attach. Taken → `{:error, :taken}`. The
+  pre-check is check-then-write; the `barkparks_custom_host_unique_idx` unique
+  constraint is the atomic backstop for a custom_host↔custom_host race
+  (translated to the same `:taken`).
 
   Returns `{:ok, %Barkpark{}}`, `{:error, :taken}`, or a validation
   `{:error, %Ecto.Changeset{}}` for a malformed domain.
@@ -4898,7 +4925,7 @@ defmodule BarkparkCloud.Registry do
       not changeset.valid? ->
         {:error, %{changeset | action: :update}}
 
-      custom_host_taken?(Ecto.Changeset.fetch_field!(changeset, :custom_host), barkpark.id) ->
+      custom_host_taken?(Ecto.Changeset.fetch_field!(changeset, :custom_host), barkpark) ->
         {:error, :taken}
 
       true ->
@@ -4906,16 +4933,35 @@ defmodule BarkparkCloud.Registry do
     end
   end
 
-  # Is `norm` (already normalized by the changeset) claimed anywhere else on the
-  # zone? Three surfaces, fail-closed OR: a Site's domains array, ANOTHER
+  # Is `norm` (already normalized by the changeset) claimed anywhere else on
+  # our boxes? Four surfaces, fail-closed OR: a Site's domains array, ANOTHER
   # barkpark's custom_host (self is excluded — re-attaching your own host is an
-  # idempotent no-op, not a conflict), or any barkpark's provisioning FQDN
-  # (`url` stores `https://<fqdn>` — including this barkpark's own primary FQDN,
-  # which never needs attaching).
-  defp custom_host_taken?(norm, self_id) do
+  # idempotent no-op, not a conflict), a DIFFERENT team's custom_host as a
+  # PARENT of `norm` (attach-domain V2: you may nest under your own attached
+  # domain, never under someone else's), or any barkpark's provisioning FQDN
+  # (`url` stores `https://<fqdn>` — including this barkpark's own primary
+  # FQDN, which never needs attaching).
+  defp custom_host_taken?(norm, %Barkpark{id: self_id, team_id: team_id}) do
     registered_site_domain?(norm) or
       other_barkpark_custom_host?(norm, self_id) or
+      foreign_custom_host_suffix?(norm, team_id) or
       provisioning_fqdn_taken?(norm)
+  end
+
+  # Does `norm` sit UNDER a custom_host owned by a different team? The stored
+  # custom_host is changeset-validated ([a-z0-9.-] only), so it is safe on the
+  # right side of LIKE — it can never smuggle a wildcard.
+  defp foreign_custom_host_suffix?(norm, team_id) do
+    Barkpark
+    |> where([b], not is_nil(b.custom_host) and b.team_id != ^team_id)
+    |> where([b], fragment("? LIKE '%.' || ?", ^norm, b.custom_host))
+    |> select([b], 1)
+    |> limit(1)
+    |> Repo.one()
+    |> case do
+      nil -> false
+      _ -> true
+    end
   end
 
   defp other_barkpark_custom_host?(norm, self_id) do

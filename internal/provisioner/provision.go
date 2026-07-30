@@ -53,6 +53,13 @@ type Seams struct {
 	Runner  cloud.StepRunner
 	Secrets cloud.SecretGen // nil → the real secret-gen
 
+	// LookupHost resolves a hostname to its A/AAAA addresses via the SYSTEM
+	// resolver — the attach-domain V2 ownership re-check for EXTERNAL customer
+	// domains (the worker re-verifies the host already points at the box before
+	// touching it; it cannot trust the control plane's own pre-check). nil →
+	// net.DefaultResolver.LookupHost. Tests inject a fake.
+	LookupHost func(ctx context.Context, host string) ([]string, error)
+
 	// Mail is the SHARED transactional-mail relay every provisioned instance is
 	// pointed at (magic-link / password-reset / verify-email). Zero value → the
 	// instance is provisioned without SMTP (Local adapter, no delivery). Sourced

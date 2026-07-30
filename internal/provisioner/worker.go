@@ -112,11 +112,14 @@ const supportClaimPath = "/v1/internal/support-jobs/claim"
 // AttachDomainSpec is one claimed attach-domain job as the control plane hands
 // it back — the EXACT JSON the Elixir attach-domain claim endpoint returns on
 // 200 (a 204 means no pending job). ip is the box the instance lives on (the
-// barkpark's host), custom_host the full platform-zone host to attach
-// (gyldendal.barkpark.cloud), dns_label/dns_zone the A record's halves, and
-// app_port the local Phoenix port the new Caddy vhost proxies to. The worker
-// re-validates ALL of it defensively (validateAttachDomainSpec) before any side
-// effect — the claim payload is never trusted blindly.
+// barkpark's host), custom_host the full host to attach — a platform-zone host
+// (gyldendal.barkpark.cloud) or, V2, an arbitrary external customer FQDN
+// (barkpark.jarl.no) — and app_port the local Phoenix port the new Caddy vhost
+// proxies to. dns_label/dns_zone are the platform A record's halves for a
+// platform host and EMPTY (null) for an external host, whose DNS the customer
+// owns. The worker re-validates ALL of it defensively
+// (validateAttachDomainSpec) before any side effect — the claim payload is
+// never trusted blindly.
 type AttachDomainSpec struct {
 	JobID string `json:"job_id"`
 	// ClaimToken (claim-fence bp-c55) is the per-claim token the control plane
