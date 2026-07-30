@@ -308,6 +308,9 @@ OUT="$TMPROOT/step.out"
 DR="$TMPROOT/dispatchrepo"
 mkdir -p "$DR/api/lib" "$DR/docs" "$DR/.github/workflows"
 : >"$DR/api/lib/thing.ex"
+# NON-EMPTY on purpose: the rename cases below need git's rename detection to
+# actually fire, and an empty blob is not a rename source worth the name.
+printf 'moved-a\nmoved-b\nmoved-c\n' >"$DR/api/lib/moved.ex"
 : >"$DR/docs/guide.md"
 : >"$DR/.github/workflows/security.yml"
 : >"$DR/.github/workflows/elixir.yml"
@@ -380,17 +383,66 @@ dispatch "elixir.yml-only PR" 0 false pull_request "$BASE_SHA"
 # push to main never skips, regardless of what changed
 dispatch "push event" 0 true push ""
 
-# THE FAILURE PATHS — the polarity that makes the shim safe. Every refusal is
-# `::error::` + exit 1, never a silent skip.
-dispatch "empty diff (base == HEAD)" 1 - pull_request "$(git -C "$DR" rev-parse HEAD)"
-says "changed-file set is EMPTY" "says the diff is wrong, not the PR"
-says "::error::" "refuses with an annotation"
+# ── THE FALSE-GREEN CLASSES the plain `--name-only` producer let through ────
+# Wave 10 closed these in elixir.yml, cloud.yml and console-harness.yml; this
+# workflow was transplanted from the PRE-FIX shim and carried them in. Every
+# probe above this line is ASCII and rename-free, which is exactly why the shape
+# ratchet could not have caught either family — and here the consequence is that
+# `Security gate` greens over a Sobelow/mix-audit run that never happened.
+# `git diff --name-only` QUOTES a path containing `"` (even under
+# core.quotepath=false), and rename detection prints only the DESTINATION.
+
+# (1) a DOUBLE-QUOTE path inside the declared set. Not merely a non-ASCII one:
+#     core.quotepath=false silences the octal escaping and leaves this class
+#     wide open, so a fix tested only against é would certify a hole.
+git -C "$DR" checkout -q -b dquote "$BASE_SHA"
+printf 'x\n' >"$DR/api/lib/we\"ird.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm dquote >/dev/null 2>&1
+dispatch 'a path containing a double quote' 0 true pull_request "$BASE_SHA"
+
+# (2) a rename OUT of the declared set. Analysed code just left api/** — the
+#     scan MUST run — but rename detection names only docs/.
+git -C "$DR" checkout -q -b renameout "$BASE_SHA"
+git -C "$DR" mv api/lib/moved.ex docs/moved.ex >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renameout >/dev/null 2>&1
+dispatch "a rename OUT of the declared set" 0 true pull_request "$BASE_SHA"
+
+# (3) …and a rename INTO the set still classifies true — `--no-renames` prints
+#     BOTH sides, so closing (2) must not have cost the obvious direction.
+git -C "$DR" checkout -q -b renamein "$BASE_SHA"
+git -C "$DR" mv docs/guide.md api/lib/guide.md >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
+dispatch "a rename INTO the declared set" 0 true pull_request "$BASE_SHA"
+
+# THE FAILURE PATHS — the polarity that makes the shim safe.
+# An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a
+# branch-sync PR nets to nothing and is perfectly legal, and an ::error:: there
+# leaves its author with a red check run and no self-service fix. It dispatches
+# TRUE — the whole security suite: expensive, never wrong. Everything else reds.
+git -C "$DR" checkout -q -b emptydiff "$BASE_SHA"
+dispatch "empty diff (base == HEAD)" 0 true pull_request "$(git -C "$DR" rev-parse HEAD)"
+says "changed-file set is EMPTY" "names the shape"
+says "::warning" "as a WARNING, not a brick"
 dispatch "unresolvable base sha" 1 - pull_request 0000000000000000000000000000000000000000
 says "not resolvable in this checkout" "refuses to guess a base"
 says "::error::" "refuses with an annotation"
 dispatch "missing base sha" 1 - pull_request ""
 says "carries no base sha" "says why"
 says "::error::" "refuses with an annotation"
+
+# a base with NO common ancestor: `git diff base...HEAD` exits 128 with a bare
+# `fatal: … no merge base` and zero annotation. Named, not fatalled.
+git -C "$DR" checkout -q --orphan noancestor >/dev/null 2>&1
+git -C "$DR" rm -rq --cached . >/dev/null 2>&1 || true
+rm -rf "${DR:?}/api" "${DR:?}/docs"
+mkdir -p "$DR/api/lib"
+printf 'z\n' >"$DR/api/lib/orphan.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm orphan >/dev/null 2>&1
+dispatch "a base with no common ancestor" 1 - pull_request "$BASE_SHA"
+says "share NO common ancestor" "names the condition, not a raw git fatal"
+says "refusing a two-dot fallback" "refuses the fallback that sweeps in the whole base"
 echo
 
 # ── case 6: the Security gate decides, and can be made red on purpose ───────
@@ -419,21 +471,28 @@ gate() {
 }
 
 gate "everything succeeded" 0 \
-  R_CHANGES=success R_OVERLAP=success R_AUDIT=success O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=success O_API=true
 gate "docs-only: gated jobs skipped against api=false" 0 \
-  R_CHANGES=success R_OVERLAP=skipped R_AUDIT=skipped O_API=false
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=skipped R_AUDIT=skipped O_API=false
 gate "a blocking job FAILED" 1 \
-  R_CHANGES=success R_OVERLAP=success R_AUDIT=failure O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=failure O_API=true
 gate "the CVE audit was CANCELLED" 1 \
-  R_CHANGES=success R_OVERLAP=success R_AUDIT=cancelled O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=cancelled O_API=true
 gate "a job skipped though its gate said true" 1 \
-  R_CHANGES=success R_OVERLAP=success R_AUDIT=skipped O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=skipped O_API=true
 gate "the dispatcher itself failed" 1 \
-  R_CHANGES=failure R_OVERLAP=skipped R_AUDIT=skipped O_API=
+  R_CHANGES=failure R_SHAPE=success R_OVERLAP=skipped R_AUDIT=skipped O_API=
 gate "an EMPTY result (job not in needs)" 1 \
-  R_CHANGES=success R_OVERLAP=success R_AUDIT= O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT= O_API=true
 gate "an unrecognised result" 1 \
-  R_CHANGES=success R_OVERLAP=success R_AUDIT=neutral O_API=true
+  R_CHANGES=success R_SHAPE=success R_OVERLAP=success R_AUDIT=neutral O_API=true
+# The shape ratchet is unfiltered, so a SKIP of it is never legitimate — it can
+# only mean the job never ran. Without this clause the new needs entry would be
+# judged by `decide` but never exercised in any direction that can red.
+gate "the shape ratchet was SKIPPED (never legitimate — it is unfiltered)" 1 \
+  R_CHANGES=success R_SHAPE=skipped R_OVERLAP=success R_AUDIT=success O_API=true
+gate "the shape ratchet FAILED" 1 \
+  R_CHANGES=success R_SHAPE=failure R_OVERLAP=success R_AUDIT=success O_API=true
 echo
 
 echo "----"
