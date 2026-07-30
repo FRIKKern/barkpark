@@ -293,6 +293,63 @@ health_gate() { # 0 healthy, 1 not
     [ "$code" = 200 ] && break
     sleep 0.2
   done
+  # DEEP PATH — probe ONE non-index page while the throwaway server is still up.
+  # WHY: every assertion in this gate is about index.html, so a release whose
+  # OTHER pages 404 (a tar that mangled an accented directory name to `caf/`, or
+  # a dist whose names are NFD while its links are NFC) passed HEALTH and
+  # SWITCHed live. The probe target is taken from the SERVED html's own links —
+  # NEVER from a directory listing. That matters twice:
+  #   * a disk-derived target is self-fulfilling (enumerate the tree, find
+  #     `caf/`, ask for `caf/`, get 200 — the mangling is invisible), whereas the
+  #     page's href is the INTENT a visitor's browser will actually request;
+  #   * no filename is ever enumerated, so nothing depends on the shell's (or the
+  #     BEAM's) filename encoding mode and nothing is word-split: python3 hands
+  #     back a PERCENT-ENCODED, pure-ASCII path, and that ASCII string is the
+  #     only thing this shell and curl ever touch (quoted).
+  # Root-relative hrefs in a real dist carry the site base (`/sites/<slug>/`, the
+  # bp-site-base marker the template bakes; the real content template emits
+  # `${base}d/${doc.slug}/`), which the throwaway server — rooted at the release
+  # dir — does not have: strip it, and SKIP a root-relative href that does not
+  # start with it rather than manufacture a refusal. No internal link at all (a
+  # single-page build) is `n/a`, never a failure.
+  # RECORDED, NOT FIXED: through the real Caddy on the box EVERY miss on a static
+  # site answers 503, not 404 (a plain missing ASCII path 503s too) — the cause
+  # was not derived. The assertion below is "not 200", so it holds either way;
+  # the 503 mystery is its own backlog row (task ssw11-bl-static-miss-503-not-404).
+  local deep="" deep_code=000 site_base=""
+  if [ "$code" = 200 ]; then
+    site_base="$(meta_value "$body" bp-site-base)"
+    deep="$(python3 - "$body" "$site_base" <<'PY' 2>/dev/null || true
+import re, sys, urllib.parse
+html = open(sys.argv[1], "rb").read().decode("utf-8", "replace")
+base = (sys.argv[2] or "/").strip()
+if not base.startswith("/"): base = "/" + base
+if not base.endswith("/"): base += "/"
+ATTR = r"(?:href|src)\s*=\s*(?:\"([^\"]*)\"|'([^']*)'|([^\s\"'>]+))"
+SCHEME = r"^[A-Za-z][A-Za-z0-9+.\-]*:"
+cands = []
+for m in re.finditer(ATTR, html, re.I):
+    raw = (m.group(1) or m.group(2) or m.group(3) or "").strip()
+    if not raw or raw.startswith("//"): continue
+    if re.match(SCHEME, raw): continue
+    p = urllib.parse.unquote(urllib.parse.urlsplit(raw).path)
+    if p.startswith("./"): p = p[2:]
+    if p.startswith("/"):
+        if not p.startswith(base): continue
+        p = p[len(base):]
+    if not p or p == "index.html": continue
+    if ".." in p.split("/"): continue
+    cands.append(p)
+if cands:
+    cands.sort(key=lambda p: (p.isascii(), not (p.endswith("/") or p.endswith(".html")), len(p), p))
+    print(urllib.parse.quote(cands[0], safe="/"))
+PY
+)"
+    if [ -n "$deep" ]; then
+      deep_code="$(curl -sL -o /dev/null -w '%{http_code}' --max-time 2 "http://127.0.0.1:$port/$deep" 2>/dev/null || echo 000)"
+      [ -n "$deep_code" ] || deep_code=000
+    fi
+  fi
   kill "$srv" 2>/dev/null || true
   wait "$srv" 2>/dev/null || true
   if [ "$code" != 200 ]; then
@@ -325,6 +382,23 @@ health_gate() { # 0 healthy, 1 not
   fi
   if [ -z "${CONTENT_REV:-}" ]; then
     log "HEALTH: no CONTENT_REV supplied — asserting bp-content-rev is non-empty only (nothing to cross-check against)"
+  fi
+
+  # The deep-path verdict (its target was chosen above, while the server was up).
+  # It is a REFUSAL, not a warning: a linked page that 404s is a 404 for visitors,
+  # and switching to it ships the hole (charter D116). The reason names the link,
+  # both codes, the move and the two causes — ACTION FIRST after the path, because
+  # emit() clips detail= at 240 chars, so on a pathologically long path it is the
+  # cause hint that degrades, never the "do not retry this artifact" move. The
+  # human log line below is unclipped and always carries the whole sentence.
+  if [ -n "$deep" ] && [ "$deep_code" != 200 ]; then
+    HEALTH_DETAIL="index.html links to /$deep — served HTTP $deep_code, want 200. Re-pack the dist and re-upload; do not retry the same artifact. Likely a tar dropped or mangled a non-ASCII path component, or names are NFD on disk vs NFC in the href"
+    log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
+  fi
+  if [ -n "$deep" ]; then
+    log "HEALTH: deep path /$deep serves 200 from the staged tree (site base '${site_base:-/}')"
+  else
+    log "HEALTH: no non-index internal link in the served index.html — deep-path probe n/a (single-page build)"
   fi
 
   # Finder integrity (only when the build ships a finder — a `search-seed.json`).
@@ -675,7 +749,17 @@ RCF
   # health_gate against hand-built release dirs (needs the throwaway server).
   # -------------------------------------------------------------------------
   if ! command -v python3 >/dev/null 2>&1 || ! command -v curl >/dev/null 2>&1; then
-    echo "[selftest] SKIP HEALTH finder integrity — needs python3 + curl"
+    # A SKIP is honest on a laptop and a VACUOUS GREEN in CI. The deep-path probe
+    # below is worse than the finder rows in that respect: without python3 the
+    # extractor yields an empty target, health_gate logs 'n/a' and PASSES — the
+    # guard is OFF and the suite still prints PASS. CI sets
+    # BARKPARK_SELFTEST_REQUIRE_E2E=1 (.github/workflows/deploy-harnesses.yml), so
+    # a runner missing python3/curl fails LOUDLY here instead.
+    if [ "${BARKPARK_SELFTEST_REQUIRE_E2E:-0}" = 1 ]; then
+      echo "[selftest] FAIL - the HEALTH gate proofs (finder integrity + the deep-path probe) are REQUIRED here (BARKPARK_SELFTEST_REQUIRE_E2E=1) but python3 and/or curl are missing from PATH — install them on this runner; without python3 the deep-path probe silently degrades to 'n/a' and PASSES every broken release, and a skipped block must not report PASS"
+      exit 1
+    fi
+    echo "[selftest] SKIP HEALTH finder integrity + deep-path probe — needs python3 + curl"
   else
     echo "[selftest] HEALTH refuses a corrupt seed / a boundary-less island; spares seedless sites"
     mkrel() { # <dir> <seed|none> <island-js|none>
@@ -699,6 +783,99 @@ RCF
     mkrel "$TD/h_badjson" "$SEED_BADJSON" "$ISL_OK";  check "corrupt-JSON seed FAILS"                        not gate "$TD/h_badjson"
     mkrel "$TD/h_noeb"    "$SEED_OK"      "$ISL_BAD"; check "island without error boundary (#4047) FAILS"    not gate "$TD/h_noeb"
     mkrel "$TD/h_plain"   none            none;       check "seedless plain template passes (finder n/a)"    gate "$TD/h_plain"
+
+    # -----------------------------------------------------------------------
+    # HEALTH deep path — the gate must certify a page the SERVED html LINKS TO,
+    # not only /index.html. Before this block the gate fetched exactly one
+    # hardcoded url, so a release with a perfect index.html and a LINKED page
+    # that 404s passed and SWITCHed live: the mangled-accented-dir, NFD-on-disk
+    # and missing-page fixtures below were all measured PASSING on main.
+    # The one choice these rows exist to pin: the probe target comes from the
+    # HTML'S OWN href, never from a directory listing — h_deep_mangled has the
+    # mangled dir PRESENT on disk, so a disk-derived probe would ask for `caf/`,
+    # get 200, and certify the hole.
+    # -----------------------------------------------------------------------
+    echo "[selftest] HEALTH probes a page the SERVED html links to (deep path), base-aware, n/a for single-page builds"
+    mkidx() { # <dir> <base|none> <body-html>
+      local d="$1" base="$2"; mkdir -p "$d"
+      { printf '<!doctype html><html><head>'
+        printf '<meta name="bp-build-id" content="fb"><meta name="bp-content-rev" content="fr"><meta name="bp-doc-id" content="fd">'
+        [ "$base" != none ] && printf '<meta name="bp-site-base" content="%s">' "$base"
+        printf '</head><body>%s</body></html>' "$3"
+      } > "$d/index.html"
+      return 0
+    }
+    mkpage() { mkdir -p "$1"; printf '<html><body>deep</body></html>' > "$1/index.html"; }
+    # Same subject as gate(), but keeps the gate's own prose for assertions — the
+    # log is one of the two channels the refusal must ride.
+    gate_log() { RELDIR="$1"; BUILD_ID=fb; CONTENT_REV=fr; health_gate > "$2" 2>&1; }
+    ACC="$(printf 'caf\xc3\xa9')"                 # NFC "café" — the href's bytes
+    NFD="$(printf 'cafe\xcc\x81')"                # the same grapheme, decomposed
+
+    mkidx "$TD/hd_ok" none '<a href="d/hello/">hello</a>'
+    mkpage "$TD/hd_ok/d/hello"
+    check "a linked deep page that SERVES passes"        gate_log "$TD/hd_ok" "$TD/hd_ok.log"
+    check "the pass names the probed path (not index.html)" \
+      grep -q 'deep path /d/hello/ serves 200' "$TD/hd_ok.log"
+
+    mkidx "$TD/hd_mangled" none "<a href=\"d/$ACC/\">kaffe</a>"
+    mkpage "$TD/hd_mangled/d/caf"                 # THE MANGLING: accented name lost
+    check "the mangled dir IS on disk (a disk-derived probe would have passed it)" \
+      [ -f "$TD/hd_mangled/d/caf/index.html" ]
+    check "a MANGLED accented deep page FAILS"           not gate_log "$TD/hd_mangled" "$TD/hd_mangled.log"
+    check "the refusal names the HREF's path, percent-encoded" \
+      grep -q 'links to /d/caf%C3%A9/' "$TD/hd_mangled.log"
+    check "the refusal does NOT name the mangled on-disk path" \
+      absent 'links to /d/caf/' "$TD/hd_mangled.log"
+    check "the refusal carries got, want, both causes and the do-not-retry move" \
+      grep -q 'served HTTP 404, want 200\. Re-pack the dist and re-upload; do not retry the same artifact\. Likely a tar dropped or mangled a non-ASCII path component, or names are NFD on disk vs NFC in the href' \
+      "$TD/hd_mangled.log"
+
+    mkidx "$TD/hd_missing" none '<a href="about.html">about</a>'
+    check "a plain MISSING ASCII linked page FAILS too"  not gate_log "$TD/hd_missing" "$TD/hd_missing.log"
+    check "that refusal names /about.html"               grep -q 'links to /about.html' "$TD/hd_missing.log"
+
+    # Base-awareness. The real content template emits ${base}d/${doc.slug}/ —
+    # root-relative AND base-prefixed — while the throwaway server is rooted at
+    # the release dir, so an un-stripped href would 404 on EVERY healthy site.
+    mkidx "$TD/hd_base" /sites/blog/ '<a href="/sites/blog/d/x/">x</a>'
+    mkpage "$TD/hd_base/d/x"
+    check "a base-prefixed root-relative href is stripped and PASSES" gate_log "$TD/hd_base" "$TD/hd_base.log"
+    check "it was fetched at the base-stripped path"      grep -q 'deep path /d/x/ serves 200' "$TD/hd_base.log"
+    check "the pass names the base it stripped"           grep -q "site base '/sites/blog/'" "$TD/hd_base.log"
+
+    mkidx "$TD/hd_outside" /sites/blog/ '<a href="/elsewhere/other.html">off-base</a>'
+    check "a root-relative href OUTSIDE the base is SKIPPED, not refused" gate_log "$TD/hd_outside" "$TD/hd_outside.log"
+    check "and it says the probe was n/a"                 grep -q 'deep-path probe n/a' "$TD/hd_outside.log"
+
+    # The real shape end to end: base + accented slug + trailing-slash dir url.
+    mkidx "$TD/hd_real" /sites/blog/ "<a href=\"/sites/blog/d/$ACC/\">kaffe</a>"
+    mkpage "$TD/hd_real/d/$ACC"
+    check "base + ACCENTED slug + directory url PASSES when the page is there" gate_log "$TD/hd_real" "$TD/hd_real.log"
+    check "and the log proves it was fetched percent-encoded" \
+      grep -q 'deep path /d/caf%C3%A9/ serves 200' "$TD/hd_real.log"
+
+    mkidx "$TD/hd_single" none '<h1>hello</h1>'
+    check "a single-page build passes (deep-path probe n/a)" gate_log "$TD/hd_single" "$TD/hd_single.log"
+    check "and says so"                                   grep -q 'deep-path probe n/a (single-page build)' "$TD/hd_single.log"
+    mkidx "$TD/hd_ext" none '<a href="https://example.com/a/b/">out</a><a href="mailto:a@b.c">mail</a><a href="#top">top</a>'
+    check "external / mailto / fragment hrefs are not internal links (n/a, no refusal)" gate_log "$TD/hd_ext" "$TD/hd_ext.log"
+    check "and that says n/a too"                         grep -q 'deep-path probe n/a' "$TD/hd_ext.log"
+
+    # NFC vs NFD. The VERDICT is deliberately not asserted: APFS is
+    # normalization-INSENSITIVE (measured — a dir created with NFD bytes answers
+    # for the NFC name), so a "refusal" row here would pass on Linux and pass on
+    # macOS for the OPPOSITE reason. What IS provable anywhere, and is the whole
+    # point, is that the probe requests the HREF's bytes (NFC) and never the
+    # disk's (NFD) — a disk-derived probe would ask for the decomposed name and
+    # certify itself. The 404 is a box-only proof and belongs to the crown walk.
+    mkidx "$TD/hd_nfd" none "<a href=\"d/$ACC/\">kaffe</a>"
+    mkpage "$TD/hd_nfd/d/$NFD"
+    gate_log "$TD/hd_nfd" "$TD/hd_nfd.log" || true
+    check "NFD-on-disk: the probe requests the HREF's NFC bytes (%C3%A9), not the disk's" \
+      grep -q '/d/caf%C3%A9/' "$TD/hd_nfd.log"
+    check "NFD-on-disk: it never requests a decomposed path (%CC%81)" \
+      absent '%CC%81' "$TD/hd_nfd.log"
   fi
 
   # -------------------------------------------------------------------------
@@ -1121,6 +1298,75 @@ FAKENPM
     rc="$(pb_deploy pb1 "$PB" "$SHA_C")"
     check "a same-digest redeploy of the live build is a no-op (exit 0)" [ "$rc" = 0 ]
     check "PLAN noop"                                 pb_saw PLAN noop pb1
+
+    # -----------------------------------------------------------------------
+    # DEEP PATH, THROUGH THE WHOLE ENGINE — the fixtures above drive health_gate
+    # directly; this arm proves the probe is WIRED: a real uploaded dist whose
+    # index.html links to an ACCENTED deep page goes live (exit 0, zero npm),
+    # and then the SAME staged tree, with ONLY that directory's name mangled,
+    # is refused at exit 14 with no SWITCH and the live symlink unmoved.
+    # Its own slug and its own npm sentinel, so a regression here cannot be
+    # masked by (or mask) the prebuilt slug's rows.
+    # -----------------------------------------------------------------------
+    echo "[selftest] e2e: a release whose LINKED accented deep page is missing is REFUSED (14), never switched"
+    DPSRC="$E2E/dpsrc"; DP_SITE="$E2E/sites/deeppath"
+    mkdir -p "$DPSRC"
+    printf '{"name":"selftest-deeppath","private":true}\n' > "$DPSRC/package.json"
+    dp_deploy() { # <build_id> [prebuilt_dir] [sha256] -> exit code; stdout at $E2E/dp.out
+      env PATH="$FAKEBIN:$PATH" \
+        SITE_SLUG=deeppath BUILD_ID="$1" CONTENT_REV=rev-1 SITE_SRC="$DPSRC" \
+        PREBUILT_DIR="${2:-}" PREBUILT_SHA256="${3:-}" \
+        BARKPARK_SITES_DIR="$E2E/sites" BARKPARK_CADDYFILE="$E2E/absent-caddyfile" \
+        BARKPARK_SITE_DEPLOY_LOCK="$E2E/deeppath.lock" BARKPARK_CADDYFILE_LOCK="$E2E/caddyfile.lock" \
+        BARKPARK_SITE_NO_CAP=1 \
+        bash "$SELF" > "$E2E/dp.out" 2> "$E2E/dp.err"
+      echo $?
+    }
+    dp_saw() { grep -q "^BPSTAGE name=$1 status=$2 build_id=$3" "$E2E/dp.out"; }
+    dp_livenow() { readlink "$DP_SITE/current" 2>/dev/null || true; }
+    # The artifact: the real content template's shape — base-prefixed,
+    # root-relative, trailing-slash directory url, accented slug.
+    ACC="$(printf 'caf\xc3\xa9')"                     # NFC "café", the href's bytes
+    DPA="$E2E/dp-artifact"; rm -rf "$DPA"; mkdir -p "$DPA/d/$ACC"
+    { printf '<!doctype html><html><head>'
+      printf '<meta name="bp-build-id" content="dp1">'
+      printf '<meta name="bp-content-rev" content="rev-1">'
+      printf '<meta name="bp-doc-id" content="doc-42">'
+      printf '<meta name="bp-site-base" content="/sites/deeppath/">'
+      printf '</head><body><a href="/sites/deeppath/d/%s/">kaffe</a></body></html>' "$ACC"
+    } > "$DPA/index.html"
+    printf '<html><body>UPLOADED-DEEP-dp1</body></html>' > "$DPA/d/$ACC/index.html"
+    : > "$DPSRC/.npm-calls"
+    rc="$(dp_deploy dp1 "$DPA" "$SHA_A")"
+    check "accented deep page present: deploy exit 0"   [ "$rc" = 0 ]
+    check "HEALTH ok"                                   dp_saw HEALTH ok dp1
+    check "SWITCH ok"                                   dp_saw SWITCH ok dp1
+    check "current -> releases/dp1"                     [ "$(dp_livenow)" = releases/dp1 ]
+    check "the box ran NO npm for it"                   [ ! -s "$DPSRC/.npm-calls" ]
+    check "the log proves the DEEP page was fetched, percent-encoded" \
+      grep -q 'deep path /d/caf%C3%A9/ serves 200' "$E2E/dp.out"
+    # Park a second build live so dp1 is re-gateable (PLAN's staged arm), then
+    # MUTATE ONLY the staged directory's name — the exact shape of a tar that
+    # dropped the accented component. Nothing else about dp1 changes.
+    mk_prebuilt "$E2E/dp-artifact2" dp2 "UPLOADED-dp2"
+    rc="$(dp_deploy dp2 "$E2E/dp-artifact2" "$SHA_B")"
+    check "a second build goes live so dp1 is no longer live" [ "$(dp_livenow)" = releases/dp2 ]
+    mv "$DP_SITE/releases/dp1/d/$ACC" "$DP_SITE/releases/dp1/d/caf"
+    : > "$DPSRC/.npm-calls"
+    rc="$(dp_deploy dp1)"
+    check "the mangled release exits 14"                [ "$rc" = 14 ]
+    check "HEALTH failed"                               dp_saw HEALTH failed dp1
+    check "no SWITCH stage line at all"                 sh -c "! grep -q '^BPSTAGE name=SWITCH ' '$E2E/dp.out'"
+    check "current did NOT move (still dp2)"            [ "$(dp_livenow)" = releases/dp2 ]
+    check "it was the DEEP page that failed, not index.html" \
+      grep -q '\[site-deploy .*HEALTH: index.html links to /d/caf%C3%A9/' "$E2E/dp.out"
+    check "index.html's own markers were FINE (no marker complaint)" \
+      sh -c "! grep -q 'marker is' '$E2E/dp.out'"
+    check "the refusal rides the BPSTAGE detail too (dual-channel)" \
+      grep -qE '^BPSTAGE name=HEALTH status=failed build_id=dp1 detail="index.html links to /d/caf%C3%A9/ .* served HTTP [0-9]+, want 200\. Re-pack the dist and re-upload; do not retry the same artifact\.' "$E2E/dp.out"
+    check "the re-gate ran no npm (it re-gated the STAGED bytes)" [ ! -s "$DPSRC/.npm-calls" ]
+    check "every BPSTAGE name+status on the wire is still whitelisted" \
+      sh -c "! grep '^BPSTAGE ' '$E2E/dp.out' | grep -qvE '^BPSTAGE name=(PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE) status=(started|ok|skipped|noop|failed) build_id=[A-Za-z0-9._-]+( |\$)'"
   fi
 
   # -------------------------------------------------------------------------
