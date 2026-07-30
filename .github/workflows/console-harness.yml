@@ -9,40 +9,171 @@ name: console-harness
 # ci.yml's node:test is scoped to web/**. A regression to the rail/freshness/
 # rollback helpers shipped blind. This zero-dependency job closes that gap.
 #
-# NOTE: this workflow only *gates* a PR once it is registered as a required
-# check in the repo's branch-protection settings (a human GitHub step). Until
-# then it still runs and reds the PR page on failure.
+# Jobs:
+#   0. changes       — the DISPATCHER. Always runs. Computes the changed-path
+#                      set against the PR base and emits the one boolean the
+#                      expensive jobs are gated on.
+#   1. console-unit  — the node:vm harness, the preview smoke run, the seal
+#                      predicate's own tests, the CSS/token drift gate.
+#   2. cssom-parity  — the only check here that PARSES the artifact (see below).
+#   3. path-escape   — the path ratchet + its harness. Unfiltered, blocking.
+#   4. console-gate  — the AGGREGATOR. The one name that should be REQUIRED.
 #
-# PATH FILTERS COVER THE GOLDENS TOO. The harness compares the fixtures embedded
-# in cloud/priv/static/__preview__/coherence.html against the committed Go
-# goldens under internal/**/testdata/. Scoping the triggers to cloud/priv/static
-# alone let a foreign PR regenerate a golden without ever running this job:
-# #4393 added the considering/researching lifecycle rows and main went red on
-# the NEXT cloud PR instead of its own (repaired by gr-p5-coherence-fixture).
-# Any path this harness reads belongs in both filters below.
+# ── THE SKIP SHIM (transplanted from elixir.yml — honest-gates D18/D19/D31) ──
+#
+# THIS WORKFLOW MUST NEVER REGAIN A WORKFLOW-LEVEL `on: … paths:` KEY.
+#
+# It carried two until wave 9. Measured on live GitHub: a paths-filtered
+# workflow emits NO workflow run and NO check run at all, so a branch-protection
+# rule requiring a name from it leaves the PR BLOCKED forever — reported as
+#     Required status check "X" is expected.   <- never reported: deadlock
+#     Required status check "X" is failing.    <- an actual red
+# and PR #7805's docs-only head f1c33790 rendered 13 check runs with not one
+# console-harness name among them. So path decisions are made at JOB level,
+# behind the always-running `changes` dispatcher, and this workflow now renders
+# a check run on EVERY head.
+#
+# A job skipped by a job-level `if:` DOES publish a check run, with conclusion
+# `skipped`, and GitHub counts `skipped` as PASSING for a required context.
+# That is what makes the shim work — and it is also the trap: a job whose
+# `needs` dependency FAILED reports `skipped` too. `if: always()` buys the RIGHT
+# TO DECIDE; it does not decide. Hence `console-gate` below, which enumerates
+# every upstream result and fails on anything outside an explicit allow-set.
+#
+# REGISTRATION IS NOT A HUMAN CLICKING IN SETTINGS. The required-context roster
+# is committed in .github/required-checks.json and applied by
+# `scripts/required-checks-apply.sh --confirm`. The name to register from this
+# workflow is `Console gate` — the aggregator, NEVER a leaf job: a leaf can be
+# legitimately `skipped`, and a matrixed or never-started leaf publishes a name
+# that does not match what was registered.
+#
+# THE PATH SET COVERS THE GOLDENS — AND THE READS NOBODY DECLARED. The harness
+# compares fixtures embedded in cloud/priv/static/__preview__/coherence.html
+# against committed Go goldens under internal/**/testdata/, and the seal
+# predicate's tests reach .github/workflows/cloud.yml, design/emit-fence.test.mjs
+# and five cloud/test/barkpark_cloud/web/*_test.exs files. Scoping the old
+# triggers to cloud/priv/static alone let a foreign PR regenerate a golden
+# without ever running this job (#4393). The set itself now lives in
+# scripts/console-path-escape-check.sh, not here, for one reason: that script is
+# also the RATCHET that re-derives the harness's real cross-tree reads from the
+# working tree and fails when one is not dispatched on. One declaration, so the
+# filter and its proof cannot drift.
 
 on:
+  pull_request:
   push:
     branches: [main]
-    paths:
-      - "cloud/priv/static/**"
-      - "internal/taskboard/testdata/**"
-      - "internal/pdrender/testdata/**"
-      - ".github/workflows/console-harness.yml"
-  pull_request:
-    paths:
-      - "cloud/priv/static/**"
-      - "internal/taskboard/testdata/**"
-      - "internal/pdrender/testdata/**"
-      - ".github/workflows/console-harness.yml"
 
 concurrency:
   group: console-harness-${{ github.ref }}
   cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
 
 jobs:
+  changes:
+    # THE DISPATCHER. No `if:`, no matrix, no path filter — it runs on every
+    # event, always, so the jobs behind it always have a defined answer.
+    #
+    # It FAILS rather than skips on an empty diff or an unresolvable base. That
+    # polarity is the whole point: a dispatcher that "couldn't tell" and emitted
+    # all-false would skip the entire console harness and publish a green
+    # required context. Failure when it cannot tell.
+    name: Dispatch (console paths)
+    runs-on: ubuntu-latest
+    outputs:
+      console: ${{ steps.sets.outputs.console }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # THE PR HEAD, not the merge ref. With no `ref:`, checkout lands on
+          # `refs/pull/N/merge` — a commit that already contains main's advance
+          # — while `pull_request.base.sha` LAGS the base branch tip. The
+          # three-dot diff below then sweeps in every commit main gained since
+          # that stale base, and the skip never fires (charter D34).
+          #
+          # This job ONLY. The other jobs here deliberately keep the merge ref:
+          # they must test the merged result, not the head in isolation.
+          # `github.sha` is the fallback for `push` events, which have no PR.
+          ref: ${{ github.event.pull_request.head.sha || github.sha }}
+          # Full history: the PR base sha must be resolvable locally for the
+          # three-dot diff below. A shallow checkout makes `git cat-file -e`
+          # miss it, which this step treats as a hard failure.
+          fetch-depth: 0
+
+      - id: sets
+        name: Compute the changed-path set
+        run: |
+          set -euo pipefail
+
+          event="${{ github.event_name }}"
+          if [ "$event" != "pull_request" ]; then
+            # push-to-main (and anything else): NEVER skip. Main is the branch
+            # every other run is compared against; a partial main is worse than
+            # a slow one, and there is no reviewer left to notice.
+            echo "event '$event' is not a pull_request — the console path set is true."
+            echo "console=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+
+          base="${{ github.event.pull_request.base.sha }}"
+          if [ -z "$base" ]; then
+            echo "::error::dispatcher: the PR carries no base sha. Refusing to guess — a guessed base skips the harness and reports green."
+            exit 1
+          fi
+
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            # The base commit can be absent from this checkout during burst
+            # merges. Try to fetch it once, then give up loudly.
+            git fetch --no-tags --quiet origin "$base" 2>/dev/null || true
+          fi
+          if ! git cat-file -e "${base}^{commit}" 2>/dev/null; then
+            echo "::error::dispatcher: PR base sha ${base} is not resolvable in this checkout. Refusing to emit a path verdict from an unknown base."
+            exit 1
+          fi
+
+          echo "diff base: ${base} (three-dot against HEAD)"
+          changed="$(git diff --name-only "${base}...HEAD")"
+          echo "changed files:"
+          printf '%s\n' "$changed"
+
+          if [ -z "$changed" ]; then
+            echo "::error::dispatcher: the changed-file set is EMPTY. That is impossible for a real PR, so the diff — not the PR — is wrong. Failing instead of skipping the harness."
+            exit 1
+          fi
+
+          # The path set is declared ONCE, in the ratchet that proves it.
+          console="$(printf '%s\n' "$changed" | bash scripts/console-path-escape-check.sh --match console)"
+
+          case "${console}" in
+            true | false) ;;
+            *)
+              echo "::error::dispatcher: refusing to emit the uninterpretable verdict console=${console}."
+              exit 1
+              ;;
+          esac
+
+          echo "verdict: console=${console}"
+          echo "console=${console}" >> "$GITHUB_OUTPUT"
+
+  path-escape:
+    # DELIBERATELY UNFILTERED — no `if:`, no dependency on the dispatcher. This
+    # job proves the dispatcher's path set still covers everything the harness
+    # reads, so gating it on that same set would let it go dark exactly when it
+    # is needed (charter D26). It costs a few seconds of bash.
+    name: Console path-escape ratchet
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Harness (the ratchet must be able to fail)
+        run: bash scripts/console-path-escape-check.sh --selftest
+
+      - name: Every repo-root read is dispatched on
+        run: bash scripts/console-path-escape-check.sh
+
   console-unit:
     name: Console client unit harness
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -79,6 +210,10 @@ jobs:
       # spawns the predicate against committed fixtures with `--guard-cmd true`
       # (verified: with a sentinel curl shim first on PATH, BP_TOKEN unset and
       # BP_SERVER on a dead port, the sentinel never fired and it passed 11/11).
+      #
+      # It passes `--repo <the real repo root>`, which is why the console path
+      # set reaches .github/workflows/cloud.yml, design/emit-fence.test.mjs and
+      # cloud/test/barkpark_cloud/web/** — see scripts/console-path-escape-check.sh.
       - name: Seal predicate tests
         run: node --test cloud/priv/static/__preview__/seal-predicate.test.mjs
 
@@ -105,14 +240,16 @@ jobs:
   # stable-by-default only from Node 22, so a fourth step would inherit 20 and
   # fail. Bumping console-unit to 22 instead would silently change the runtime
   # under the __app.test.mjs harness AND __css_check.mjs — a risk-bearing
-  # edit to two working gates to buy nothing. A separate job also earns its own
-  # name in branch protection and runs its ~26s in parallel.
+  # edit to two working gates to buy nothing. A separate job also runs its ~26s
+  # in parallel.
   #
-  # It inherits the `on:` path filters above verbatim — they are workflow-level,
-  # and the header note about keeping every read path in both filters applies to
-  # this job too (it reads cloud/priv/static/app.css).
+  # It takes the SAME job-level `if:` as console-unit (it reads
+  # cloud/priv/static/app.css), and it reaches branch protection through
+  # `Console gate`, never under its own name.
   cssom-parity:
     name: CSSOM parity (authored CSS vs browser)
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -130,7 +267,139 @@ jobs:
       # the missing path, instead of silently falling through to a different
       # browser. Both sides go through one normalise(), so a floating Chrome
       # version can only cost sensitivity, never manufacture a false miss.
+      #
+      # THE WRAPPER PRESERVES THE INSTRUMENT'S EXIT VOCABULARY. cssom-parity.mjs
+      # distinguishes 2 (GUARD: it REFUSED to measure — no Chrome, no baseline
+      # sidecar, wrong Node) from 1 (a real parity DEFECT). Bare `run:` collapses
+      # both into "the job failed", and the first thing a reader does with a red
+      # CSS gate is go hunting for a CSS bug that does not exist. Both still exit
+      # 1: a refusal is not a pass. `set -uo pipefail` WITHOUT `-e` — `-e` would
+      # kill the shell at the `node` line before the case could read `rc`. And
+      # NEVER `continue-on-error`: for such a job `needs.<job>.result` reads
+      # `success` even when it failed, which would launder the lie straight into
+      # `Console gate`.
       - name: CSSOM parity gate
         env:
           CHROME: /usr/bin/google-chrome
-        run: node cloud/priv/static/__preview__/cssom-parity.mjs
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/cssom-parity.mjs || rc=$?
+          case "$rc" in
+            0)
+              echo "CSSOM parity: authored CSS and the browser agree."
+              ;;
+            2)
+              echo "::error title=CSSOM parity REFUSED::The instrument refused to measure (exit 2) — an ENVIRONMENT fault, not a stylesheet defect. app.css was never parsed and NO parity claim is being made about it. Do not go looking for a CSS bug: fix the environment (Chrome binary, Node 22, the cssom-heads.baseline sidecar) named in the log above."
+              exit 1
+              ;;
+            1)
+              echo "::error title=CSSOM parity DEFECT::The browser's CSSOM disagrees with the authored stylesheet (exit 1). This is a REAL CSS defect in cloud/priv/static/app.css — rules the browser dropped or rewrote. See the diff above."
+              exit 1
+              ;;
+            *)
+              echo "::error title=CSSOM parity UNINTERPRETABLE::cssom-parity.mjs exited ${rc}, which is outside its vocabulary (0 pass / 1 defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
+  console-gate:
+    # ── THE AGGREGATOR — the one name that should carry branch protection ──
+    #
+    # Deliberate shape, every part of it load-bearing:
+    #
+    #   * NO `strategy.matrix`. The published check-run name is then exactly the
+    #     `name:` string below. A matrixed job's name either gains the full
+    #     matrix tuple or, if it never STARTED, publishes the literal
+    #     uninterpolated `${{ matrix.x }}` — both unusable as a required context
+    #     (charter D20). This name is a constant.
+    #
+    #   * `if: always()`. Without it this job would itself be `skipped` whenever
+    #     an upstream failed — publishing a PASSING required context out of a
+    #     failed run.
+    #
+    #   * It ASSERTS on every upstream result instead of echoing them.
+    #     `if: always()` buys the right to decide; it does not decide. A probe
+    #     aggregator that merely printed `needs.will-fail.result` reported
+    #     `success`, and a PR merged through it (charter D19).
+    #
+    #   * NO job here carries `continue-on-error`. For such a job
+    #     `needs.<job>.result` reads `success` EVEN WHEN IT FAILED; including
+    #     one would launder the run-level lie straight into the required
+    #     context. If a job is worth aggregating it is worth blocking.
+    #
+    # Allow-set, exhaustively: `success` always; `skipped` ONLY when the
+    # dispatcher output that gated that job was literally 'false'. Everything
+    # else — `failure`, `cancelled`, an unrecognised value, an empty string —
+    # is a FAILURE, including a failure of the dispatcher itself.
+    name: Console gate
+    if: always()
+    needs: [changes, console-unit, cssom-parity, path-escape]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Decide (fail-closed over every upstream result)
+        env:
+          R_CHANGES: ${{ needs.changes.result }}
+          R_UNIT: ${{ needs.console-unit.result }}
+          R_CSSOM: ${{ needs.cssom-parity.result }}
+          R_ESCAPE: ${{ needs.path-escape.result }}
+          O_CONSOLE: ${{ needs.changes.outputs.console }}
+        run: |
+          set -euo pipefail
+
+          echo "dispatcher outputs: console='${O_CONSOLE}'"
+          echo
+
+          bad=0
+
+          # decide <job-name> <result> <gate-value>
+          #   gate-value is the dispatcher output that gated the job, or the
+          #   literal string NEVER for jobs that must always run. A skip is
+          #   accepted only against a gate-value of exactly 'false'.
+          decide() {
+            local job="$1" result="$2" gate="$3"
+            case "$result" in
+              success)
+                echo "  ok      ${job}: success"
+                ;;
+              skipped)
+                if [ "$gate" = "false" ]; then
+                  echo "  ok      ${job}: skipped — dispatcher said this path set was not touched (gate='false')"
+                else
+                  echo "  FAIL    ${job}: skipped, but its gate is '${gate}', not 'false'."
+                  echo "          A skip here does NOT mean 'not needed'. It means the job never ran —"
+                  echo "          most often because an upstream FAILED. Refusing to green a required"
+                  echo "          context on it."
+                  bad=1
+                fi
+                ;;
+              failure | cancelled)
+                echo "  FAIL    ${job}: ${result}"
+                bad=1
+                ;;
+              '')
+                echo "  FAIL    ${job}: EMPTY result — this job is not in the aggregator's needs set,"
+                echo "          or the run object is malformed. Cannot tell, therefore red."
+                bad=1
+                ;;
+              *)
+                echo "  FAIL    ${job}: unrecognised result '${result}'. Cannot tell, therefore red."
+                bad=1
+                ;;
+            esac
+          }
+
+          # The dispatcher itself may never skip: without it there are no gate
+          # values, so nothing downstream can be judged. Same for the ratchet,
+          # which is deliberately unfiltered.
+          decide "changes (dispatcher)"    "${R_CHANGES}" "NEVER"
+          decide "path-escape ratchet"     "${R_ESCAPE}"  "NEVER"
+          decide "console-unit"            "${R_UNIT}"    "${O_CONSOLE}"
+          decide "cssom-parity"            "${R_CSSOM}"   "${O_CONSOLE}"
+
+          echo
+          if [ "$bad" -ne 0 ]; then
+            echo "::error::Console gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose."
+            exit 1
+          fi
+          echo "Console gate: every upstream job either succeeded or was legitimately not dispatched."
