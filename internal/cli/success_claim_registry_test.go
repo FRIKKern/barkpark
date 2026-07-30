@@ -370,6 +370,22 @@ func successClaimRegistry() []claimSite {
 			Contradicted: spawnSiteRowFixture(func(s *cloudclient.SpawnSite) { s.Theme = "fjord" }),
 		},
 
+		// ── tasks_stamp_cmd.go — the LEDGER ROW the store actually holds ────────
+		{
+			// PDS-D359/D361, wave 26. `bp task stamp` is the verb every acceptance
+			// criterion in this epic is written with, and it was observed returning
+			// exit 0 on a write the store never took. Its receipt is now rendered
+			// from the SECOND READ: the request is held fixed (stampVerdictReq) and
+			// the pair varies only on the row the store handed back, so a receipt
+			// that echoed the request would print the same bytes for both halves.
+			Name: "renderStampVerdict",
+			Render: func(out *writer, resp any) {
+				renderStampVerdict(out, stampVerdictReq, resp.(taskboard.CriterionItem))
+			},
+			Backed:       stampStoredBacked(),
+			Contradicted: stampStoredContradicted(),
+		},
+
 		{
 			Name: "supportAddRun.success",
 			Render: func(out *writer, resp any) {
@@ -440,6 +456,119 @@ var requiredEnrollments = []string{
 	"renderSiteRolledBack",
 	"renderSiteDeleted",
 	"renderSiteSettingsUpdated",
+	// PDS wave 26 — the ledger writer this epic's own evidence is made of.
+	"renderStampVerdict",
+}
+
+// ── LEDGER ROWS (charter PDS-D363) ──────────────────────────────────────────
+//
+// The site rows are held to their provenance convention by
+// TestSiteClaimsAreProbedWithResponseTypes, which parses internal/cloudclient
+// for the types its methods RETURN. That arm was PROVEN unable to cover a
+// ledger row: it gates on `pinned[base] || HasPrefix(base,"renderSite")` and on
+// a PkgPath ending internal/cloudclient, and renaming an honest stamp probe to
+// renderSiteStampVerdict made it fire and then REJECT taskboard.CriterionItem,
+// because cloudclient never returns one. Copying the regex arm is no fix
+// either: it is UNSOUND on internal/apiclient (Doc is both a returned field and
+// a request parameter, so "returned type" stops telling request from response)
+// and VACUOUS on internal/taskboard (neither CriterionItem producer returns an
+// error, so the `) (T, error)` scan finds nothing and the check passes on an
+// empty set).
+//
+// So a ledger row is constrained STRUCTURALLY instead, on the three facts that
+// make a second read a second read:
+//
+//  1. Backed and Contradicted are the SAME Go type — two halves of one row,
+//     not a request compared against a response.
+//  2. That type is the READ-BACK type: what the store's decode produces.
+//  3. The request is a SHARED package-level fixture both halves render through
+//     — proven behaviorally by mutating it and requiring BOTH halves to move.
+//     A half that baked its own request in place, or one that never reads the
+//     request at all, fails here.
+//
+// The decisive measurement behind this: a render that ignores the store entirely
+// goes FULLY GREEN across every other registry test once its pair is varied on
+// the request. This is the arm that refuses that green.
+type ledgerRow struct {
+	// Name is the registry Name (minus any "/variant" suffix) this constrains.
+	Name string
+	// ReadBack is a zero value of the type the verb's SECOND READ decodes into.
+	ReadBack any
+	// MutateRequest perturbs the shared package-level request fixture and
+	// returns the restore. Both halves must visibly move under it.
+	MutateRequest func() func()
+}
+
+var ledgerRows = []ledgerRow{
+	{
+		Name:     "renderStampVerdict",
+		ReadBack: taskboard.CriterionItem{},
+		MutateRequest: func() func() {
+			prev := stampVerdictReq
+			stampVerdictReq.index = prev.index + 7
+			return func() { stampVerdictReq = prev }
+		},
+	},
+}
+
+// TestLedgerRowsAreProbedWithTheStoredRow enforces the three facts above for
+// every enrolled ledger row, and fails if an enrolled row is not in the
+// registry at all (so the check can never pass vacuously).
+func TestLedgerRowsAreProbedWithTheStoredRow(t *testing.T) {
+	byName := map[string]ledgerRow{}
+	for _, r := range ledgerRows {
+		byName[r.Name] = r
+	}
+	seen := map[string]bool{}
+	for _, site := range successClaimRegistry() {
+		base := strings.SplitN(site.Name, "/", 2)[0]
+		row, ok := byName[base]
+		if !ok {
+			continue
+		}
+		seen[base] = true
+
+		bt, ct := reflect.TypeOf(site.Backed), reflect.TypeOf(site.Contradicted)
+		if bt != ct {
+			t.Errorf("%s: Backed is %v but Contradicted is %v — a ledger row's two halves are the SAME "+
+				"stored row differing in state, never a request weighed against a response", site.Name, bt, ct)
+			continue
+		}
+		if want := reflect.TypeOf(row.ReadBack); bt != want {
+			t.Errorf("%s is probed with %v, but the verb's second read decodes into %v — "+
+				"a ledger receipt must be probed with what the STORE handed back", site.Name, bt, want)
+			continue
+		}
+
+		// The shared-request-fixture proof, asserted behaviorally: perturb the ONE
+		// package-level request var and both halves must print something different.
+		beforeBacked := renderClaim(t, site, site.Backed)
+		beforeContradicted := renderClaim(t, site, site.Contradicted)
+		restore := row.MutateRequest()
+		afterBacked := renderClaim(t, site, site.Backed)
+		afterContradicted := renderClaim(t, site, site.Contradicted)
+		restore()
+		for _, h := range []struct {
+			half          string
+			before, after string
+		}{
+			{"Backed", beforeBacked, afterBacked},
+			{"Contradicted", beforeContradicted, afterContradicted},
+		} {
+			if h.before == h.after {
+				t.Errorf("%s.%s prints the same bytes after the SHARED request fixture changed — "+
+					"that half is not rendering through the one package-level request, so the pair is not "+
+					"a request-fixed / store-varied ledger row.\nbefore: %q\nafter:  %q",
+					site.Name, h.half, h.before, h.after)
+			}
+		}
+	}
+	for _, r := range ledgerRows {
+		if !seen[r.Name] {
+			t.Errorf("%s is enrolled as a ledger row but is not in the success-claim registry — "+
+				"the ledger-row property would pass vacuously", r.Name)
+		}
+	}
 }
 
 // siteResponseTypedRows are the enrollments whose Backed/Contradicted MUST be

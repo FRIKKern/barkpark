@@ -63,6 +63,11 @@ type Criteria struct{ Met, Total int }
 type CriterionItem struct {
 	Criterion string
 	Met       bool
+	// Evidence is the proof text the met-flip carries (content.acceptance_
+	// criteria[N].evidence). A met with empty evidence is not a sealed row —
+	// the server refuses that flip — so a read-back that finds one has found a
+	// write that did NOT land the way it was asked for. Empty on an unmet row.
+	Evidence string
 	// Attempts is the honest-miss trail (charter D8): `bp task stamp --miss`
 	// appends {note,ts,worker} WITHOUT flipping met, bounded server-side to the
 	// 5 most recent. A recorded attempt on an unmet criterion is what turns its
