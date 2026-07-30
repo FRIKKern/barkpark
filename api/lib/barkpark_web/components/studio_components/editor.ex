@@ -164,6 +164,108 @@ defmodule BarkparkWeb.StudioComponents.Editor do
     """
   end
 
+  # ── The third seam: a named document that does not resolve (spd-w19) ────────
+  #
+  # THE DISEASE, generalised past papers: when the desk walk cannot produce an
+  # editor, the shell fell to `<.empty_editor message="Select a document to
+  # edit">` — a shrug that reads identically whether the viewer selected
+  # nothing, opened a deleted document, or drilled a type whose schema is not
+  # installed. spd-w18 fixed the paper-body case (`unrenderable_document_notice/1`,
+  # a document that RESOLVES and cannot render). This is its sibling arm: a
+  # document that does not resolve at all.
+  #
+  # The four states are DERIVED from `(panes, nav_path)` by
+  # `StudioLive.Shared.empty_editor_state/2`, because every nil-editor producer
+  # in `PaneBuilder` returns a bare `nil` and is therefore indistinguishable at
+  # the shell's attrs (charter D260). This component only renders what that
+  # derivation named; it never re-derives and never guesses.
+  #
+  #   * `:not_found`        — the type is real, the id is not in this dataset.
+  #   * `:no_schema`        — the id names a type with no installed schema.
+  #   * `:unknown_node`     — the first path segment names no desk node at all.
+  #   * `:nothing_selected` — nav_path is empty. The calm state, NOT an alert:
+  #                           nothing went wrong, so nothing shouts.
+  #
+  # `unrenderable_content` is deliberately NOT a reason here — #7897's
+  # `unrenderable_document_notice/1` owns that arm, at the resolved-document end.
+  #
+  # Shape copied from the one member of this family whose markup a test actually
+  # pins (`unrenderable_document_notice/1`): `role="alert"` +
+  # `aria-live="assertive"` + a stable `data-test-id` + the document's OWN id and
+  # its REAL type + a plain-language reason + a named, focusable way out.
+  #
+  # The primary recovery control carries `tabindex="-1"`: it is the decided focus
+  # destination for the focus-after-select seam (charter D269), so a later slice
+  # can `.focus()` it without adding markup here.
+  attr :reason, :atom, default: :nothing_selected
+  attr :doc_id, :string, default: nil
+  attr :doc_type, :string, default: nil
+  # The type's own list URL — nil when no real type is known (`:unknown_node`),
+  # in which case the primary control falls back to the desk root.
+  attr :list_href, :string, default: nil
+  attr :desk_href, :string, required: true
+
+  def unresolved_document_notice(%{reason: :nothing_selected} = assigns) do
+    ~H"""
+    <div class="editor-empty" data-test-id="studio-editor-nothing-selected" data-reason="nothing_selected">
+      <div style="color: var(--fg-dim); text-align: center;">
+        <div style="margin-bottom: 12px; opacity: 0.4;"><.icon name="file-text" size={40} /></div>
+        <div class="text-sm">No document is open. Pick one from the list to start editing.</div>
+      </div>
+    </div>
+    """
+  end
+
+  def unresolved_document_notice(assigns) do
+    ~H"""
+    <div
+      class="bp-paper-unrenderable"
+      role="alert"
+      aria-live="assertive"
+      data-test-id="studio-unresolved-document-notice"
+      data-reason={@reason}
+      data-doc-id={@doc_id}
+      data-doc-type={@doc_type}
+    >
+      <p class="bp-paper-unrenderable-title">
+        Studio could not open this document.
+      </p>
+      <p :if={@reason == :not_found} class="bp-paper-unrenderable-reason">
+        No <%= @doc_type %> with the id <code><%= @doc_id %></code> exists in this dataset. It may
+        have been deleted, or it may live in another workspace or project.
+      </p>
+      <p :if={@reason == :no_schema} class="bp-paper-unrenderable-reason">
+        <code><%= @doc_id %></code> names a <%= @doc_type %>, but no schema for
+        <code><%= @doc_type %></code> is installed in this dataset, so Studio has no fields to show
+        it with. Whatever is stored under that id is untouched.
+      </p>
+      <p :if={@reason == :unknown_node} class="bp-paper-unrenderable-reason">
+        This desk has no section named <code><%= @doc_type %></code>, so the path could not be
+        walked to a document<%= if @doc_id && @doc_id != @doc_type do %> (<code><%= @doc_id %></code>)<% end %>.
+        The link may predate a structure change, or the plugin that owned it may be disabled.
+      </p>
+      <div class="bp-paper-unrenderable-actions">
+        <a
+          href={@list_href || @desk_href}
+          class="btn btn-primary btn-sm"
+          tabindex="-1"
+          data-test-id="studio-unresolved-recovery"
+        >
+          <%= if @list_href, do: "Back to the #{@doc_type} list", else: "Back to the desk" %>
+        </a>
+        <a
+          :if={@list_href}
+          href={@desk_href}
+          class="btn btn-ghost btn-sm"
+          data-test-id="studio-unresolved-back-to-desk"
+        >
+          Back to the desk
+        </a>
+      </div>
+    </div>
+    """
+  end
+
   @doc """
   Renders one schema field row: the `<.editor_field>` wrapper plus the
   v1/v2 fork that dispatches to either `FieldInputs.input/1` (v1 leaf

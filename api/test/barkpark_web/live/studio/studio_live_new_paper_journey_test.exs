@@ -159,8 +159,11 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
 
       # Before the click there is no document selected — the empty state here is
       # CORRECT, and pinning it is what makes its survival after the click a
-      # real failure rather than a coincidence.
-      assert html =~ "Select a document to edit"
+      # real failure rather than a coincidence. spd-w19 replaced the shrug
+      # ("Select a document to edit") with the derived `:nothing_selected` state:
+      # drilling to a list and picking nothing is not an error and still does not
+      # shout, but it no longer shares its copy with a document that FAILED to open.
+      assert html =~ ~s(data-test-id="studio-editor-nothing-selected")
 
       # SCOPE the selector: the airdrop/access header buttons share the
       # `.pane-add-btn` class, and more than one element carries
