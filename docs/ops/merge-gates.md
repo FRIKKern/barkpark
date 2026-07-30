@@ -86,8 +86,9 @@ A PR targeting `main` must clear:
    Optional `.github/pr-task-workers.json` (`{ "<gh-login>": "<worker>" }`)
    tightens the check to require the task be claimed by the author's mapped
    worker (matched against the lapsed claim's `previous_worker` when the
-   lapsed-claim rule applies). The file does not exist today. **Currently advisory** until made
-   required-by-name (below).
+   lapsed-claim rule applies). The file does not exist today. **This gate is
+   BINDING**: `PR references an active task` is required-by-name on `main` as of
+   2026-07-28 — see *Making `pr-task-gate` binding (required-by-name)* below.
 
 8. **`reland-check` CI job** — `.github/workflows/reland-check.yml`. **Advisory
    only** (`continue-on-error: true`): flags when a PR changes files a
@@ -332,8 +333,8 @@ a workflow that silently never runs on a conflicting PR must read as
 **Bootstrap is a `PUT` on `protection` itself — there is no `PATCH` route.**
 This file previously prescribed
 `gh api -X PATCH .../branches/main/protection/required_status_checks`; run
-verbatim against this repo today it returns
-`{"message":"Branch not protected","status":"404"}`, because
+verbatim against this repo **before protection existed** (measured pre-2026-07-28)
+it returned `{"message":"Branch not protected","status":"404"}`, because
 `required_status_checks` is a **child** of protection and cannot create its
 parent. `gh api -X PATCH .../branches/main/protection` is a plain
 `404 Not Found` — that route does not exist at all. The only bootstrap verb is
