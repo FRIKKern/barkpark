@@ -591,6 +591,73 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-07-31 — wave 10 REVIEW — six round-1 slices shipped, grade A−; half one is LEGAL but NOT YET DONE
+
+**Landed, all six pushed with PRs open** (the lead merges; every task's last criterion is
+merge-gated and stays open for them):
+
+| slice | branch | PR | gate on the final tree |
+|---|---|---|---|
+| `cch-w10-dispatcher-hardening` | `…close-five-false-green-classes-and-the-e-0` | #8251 | 144 / 121 / 113, 0 failed |
+| `cch-w10-registration-sample-instrument` | `…the-registration-precondition-becomes-a--1` | #8252 | 43 / 0 |
+| `cch-w10-required-checks-toolchain-honest` | `…the-required-checks-toolchain-becomes-bl-2` | #8253 | 82 / 0 hermetic + selftest OK |
+| `cch-w10-security-gate-shim` | `…security-yml-renders-a-check-run-on-ever-3-r` | #8255 | 68 / 0 |
+| `cch-w10-oauth-exchange-code` | `…a-leaked-oauth-callback-response-header--4-r` | #8256 | 732 JS + 2571 cloud, 0 failed |
+| `cch-w10-destroy-shrink-oracle-merged` | `…the-preview-s-destroy-verbs-shrink-a-rea-5` | #8257 | 98 scenarios + 43 + 722 |
+
+**HALF ONE: the sample is legal; registration is still unshipped.** Review re-derived it
+independently — `registration-sample.sh --since 5ddae0dc2 --limit 12` → qualifying 5, of which
+NEITHER-shape 4, unsettled 0, shim defects 0, **exit 0**. D114 holds and is now a script's exit code
+rather than a paragraph. But `cch-w10-register-console-and-cloud-gates` is round 2 by the
+sequenced-rounds law and did not build: it waits on #8251/#8252/#8253 merging, then on the sampler
+exiting 0 on the POST-MERGE window. The wish's first priority therefore lands one wave late, for a
+reason review judges sound — the same verify round found live false-green classes in the dispatchers
+and a brick that permanently reds a legal revert-pair PR, and registering over either installs a gate
+that can green while never running, on `Elixir gate` which blocks main today.
+
+**HALF TWO: the thesis paid, one layer out.** `required-checks-drift.yml` lost both workflow-level
+`paths:` keys and gained a blocking, unmatrixed, dispatcher-free `Required-check spec gate`;
+`security.yml` got the same treatment plus an unmatrixed `Security gate` that EXCLUDES `sobelow` by
+name, because `needs.<job>.result` reads `success` for a `continue-on-error` job that concluded
+FAILURE and the information is destroyed before the aggregator's shell starts.
+
+**WAVE 9'S STANDING LESSON EARNED ITS KEEP — twice.** Review built the merged tree of all six
+branches and ran every ratchet on it (all green, including the hermetic suite that scans the real
+workflow tree while two other slices rewrite workflows). And the per-slice gates hid a genuine
+cross-slice hole: **`security.yml`'s shim was transplanted from the PRE-FIX wave-9 shape**, so it
+shipped the byte-identical defective diff producer and empty-diff brick that slice 1 removed from the
+other three workflows *in the same wave*. Every slice gate was green over it. Fixed in review on the
+owning branch, mutation-proven (64/2 against the pre-fix line).
+
+**Two more reviewer fixes.** `security-gate-shape.test.sh` was run by no CI job (D26 — a harness
+nobody runs is not a ratchet); an unfiltered `gate-shape` job now runs it and sits in the
+aggregator's `needs` and `decide()`. And `bootOAuth`'s `.then` had no `.catch`: a throw in the
+handler swallowed `done()` and left the user on "Signing you in…" forever.
+
+**Ledger: clean.** Six slice tasks, all `in_progress`, every non-merge-gated criterion MET with
+concrete run output, every merge-gated row OPEN for the lead, `wave_paper` set on all seven. No
+fabricated done, no batched honesty. No foreign task touched.
+
+**NO SEAL, honestly.** The seal predicate REFUSES before evaluating anything under `--successor
+TERMINAL`; a=b=c=UNEVALUATED, 66 live rows. D83 binds. This wave moved clause (b)'s honesty and
+three free closes; it did not move the verdict by rhetoric.
+
+**What the next wave must take, in order.** (1) Merge round 1, then dispatch
+`cch-w10-register-console-and-cloud-gates` — re-run the sampler on the POST-MERGE window first, and
+STOP on a non-zero exit. It is HIGH-FLIP-RISK on blast radius: every foreign session's PR is gated
+the moment it merges. (2) `Required-check spec gate` and `Security gate` are new names that have
+never rendered; they become registrable only after they render on qualifying heads, and `Security
+gate` additionally waits on #8222 clearing mix-audit. (3) The residue this wave named rather than
+hid: `cch-w10-diff-producer-sweep` (`reland-check.yml` still carries the forbidden two-dot fallback;
+`deploy.yml:72` decides whether the CONTROL PLANE deploys), `cch-bl-nul-native-path-matcher` (the one
+residual false-green class — a newline inside a directory prefix), `cch-w10-required-checks-generate-jq-merge`
+(the generator still OVERWRITES, D111), and criterion 1 of
+`cch-w10-merge-gates-doc-drift-security-topology`, deliberately left to the registration PR because
+it owns `.github/required-checks.json`. (4) Weight 2 took two slices this wave; the vision still has
+rows. Do not let the instruments crowd it out again.
+
+Paper: `cloud-console-hardening-wave-10-2026-07-30`.
+
 ### 2026-07-30 — wave 10 DECIDE — 7 slices cut (6 round-1, 1 round-2), half one CLEARS on re-derivation
 
 The wave's own headline reversed under measurement. Strategize and Digest both concluded the
