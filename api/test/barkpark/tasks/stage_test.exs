@@ -340,6 +340,165 @@ defmodule Barkpark.Tasks.StageTest do
     end
   end
 
+  # ─── The terminal same-state adjudication edge (PDS wave 25 / D348) ───────
+  #
+  # `stage` is the ONLY sanctioned writer of content.disposition (the raw
+  # /v1/data/mutate door refuses a disposition change on a type:task and names
+  # this verb). While `check_stageable/2` gated the TARGET alone, a done row was
+  # therefore UNWRITABLE: it could be adjudicated only by first being reopened,
+  # which trades an off-vocabulary lie for a LIFECYCLE lie (a row saying `open`
+  # while carrying claim.closed_by, back in `bp task ready`).
+  #
+  # The widening is `to in @stageable or from == to`. These fixtures pin BOTH
+  # halves — that the adjudication door opened, and that the MOVEMENT door did
+  # not. Revert the `or from == to` clause and the first test reds with
+  # {:illegal_transition, "done", "done"}; delete the `and Transitions.legal?/2`
+  # AND-guard and the open→done fixtures red instead.
+  describe "POST /v1/tasks/:doc_id/stage — terminal same-state adjudication (PDS wave 25)" do
+    test "done → done WITH a disposition succeeds, stays done, and leaves the claim byte-identical",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-done-done")
+
+      # A properly CLOSED row: lifecycle done, with the close attribution the
+      # adjudication must not disturb.
+      claim = %{
+        "worker" => "cycle-42",
+        "epoch" => 3,
+        "ts_iso" => "2026-07-01T00:00:00Z",
+        "closed_by" => "cycle-42",
+        "closed_at" => "2026-07-02T09:00:00Z",
+        "now" => %{"text" => "shipped", "ts" => "2026-07-02T09:00:00Z"}
+      }
+
+      task = mk_task!(doc_id, scope, %{"lifecycle_status" => "done", "claim" => claim})
+
+      resp =
+        stage(conn, doc_id, %{
+          state: "done",
+          worker: "reconciler",
+          disposition: "closed",
+          note: "closed by #4711, verified against origin/main by content"
+        })
+
+      assert resp.status == 200
+      assert Jason.decode!(resp.resp_body)["doc"]["lifecycle_status"] == "done"
+
+      row = reload(task)
+      # NOT resurrected — it is still a finished row.
+      assert row.content["lifecycle_status"] == "done"
+      # The adjudication triple landed on the durable keys.
+      assert row.content["disposition"] == "closed"
+      assert row.content["disposition_reason"] ==
+               "closed by #4711, verified against origin/main by content"
+
+      # THE POINT: do_stage's write set excludes content.claim, so close
+      # attribution survives an in-place adjudication byte-for-byte.
+      assert row.content["claim"] == claim
+      assert row.content["claim"]["closed_by"] == "cycle-42"
+      assert row.content["claim"]["epoch"] == 3
+    end
+
+    test "the PRIMITIVE returns {:ok, doc} for done → done (the mutation quote)",
+         %{scope: scope} do
+      # Asserted at the primitive so the mutation proof reads in one line: with
+      # the `or from == to` clause reverted this fails with the literal
+      # `{:error, {:illegal_transition, "done", "done"}}` on the right.
+      doc_id = uniq("stage-done-primitive")
+      task = mk_task!(doc_id, scope, %{"lifecycle_status" => "done"})
+
+      assert {:ok, %Document{} = doc} =
+               Tasks.stage(task.id, "done", disposition: "closed", note: "adjudicated in place")
+
+      assert doc.content["lifecycle_status"] == "done"
+      assert doc.content["disposition"] == "closed"
+    end
+
+    test "the widening admits blocked → blocked and in_progress → in_progress too",
+         %{conn: conn, scope: scope} do
+      # Stated out loud rather than discovered later: `from == to` is not
+      # done-specific. A live-claimed or blocked row can also carry a verdict in
+      # place — and still cannot be MOVED anywhere new by this door.
+      for state <- ~w(blocked in_progress) do
+        doc_id = uniq("stage-same-#{state}")
+        task = mk_task!(doc_id, scope, %{"lifecycle_status" => state})
+
+        resp =
+          stage(conn, doc_id, %{
+            state: state,
+            worker: "reconciler",
+            disposition: "parked",
+            note: "parked pending the ARM runner",
+            "reopen-trigger": "when an ARM CI runner exists"
+          })
+
+        assert resp.status == 200, "same-state stage on #{state} was refused"
+
+        row = reload(task)
+        assert row.content["lifecycle_status"] == state
+        assert row.content["disposition"] == "parked"
+        assert row.content["reopen_trigger"] == "when an ARM CI runner exists"
+      end
+    end
+
+    test "the adjudication door is not a movement door: open → done is STILL a 422",
+         %{conn: conn, scope: scope} do
+      # `from` is read from the locked row, never from caller input, so
+      # `from == to` cannot be satisfied by a row that is not already there.
+      doc_id = uniq("stage-open-to-done")
+      task = mk_task!(doc_id, scope)
+
+      resp = stage(conn, doc_id, %{state: "done", worker: "forger", disposition: "closed"})
+      assert resp.status == 422
+
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["reason"] == "illegal_transition"
+      assert payload["from"] == "open"
+      assert payload["to"] == "done"
+
+      # Nothing was written — not the status, not the disposition.
+      row = reload(task)
+      assert row.content["lifecycle_status"] == "open"
+      refute Map.has_key?(row.content, "disposition")
+    end
+
+    test "a same-state no-op on an UNKNOWN status is still refused (legal?/2 still gates)",
+         %{scope: scope} do
+      # `from == to` alone must NOT be sufficient — the AND with
+      # Transitions.legal?/2 is what keeps a junk status string out of the door.
+      refute Barkpark.Tasks.Transitions.legal?("marinating", "marinating")
+
+      # Belt AND braces: such a row cannot even be persisted — the task schema
+      # constrains lifecycle_status to the seven statuses — so the widened
+      # clause has no reachable input outside that closed set.
+      assert {:error, {:invalid_task_content, errors}} =
+               Content.create_document(
+                 "task",
+                 %{
+                   "doc_id" => uniq("stage-junk-state"),
+                   "title" => "junk",
+                   "content" => %{"kind" => "task", "lifecycle_status" => "marinating"}
+                 },
+                 @dataset,
+                 scope
+               )
+
+      assert errors["lifecycle_status"]
+    end
+
+    test "the manifest description NAMES the terminal same-state adjudication edge" do
+      summary = stage_verb_summary()
+
+      for edge <- ~w(done→done blocked→blocked in_progress→in_progress) do
+        assert summary =~ edge,
+               "task.stage manifest description omits the same-state adjudication edge #{edge}"
+      end
+
+      assert summary =~ "TERMINAL SAME-STATE ADJUDICATION EDGE"
+      # …and it still says the widening does not forge a claim.
+      assert summary =~ "content.claim"
+    end
+  end
+
   describe "POST /v1/tasks/:doc_id/stage — validation" do
     test "an invalid engagement object is a 400", %{conn: conn, scope: scope} do
       doc_id = uniq("stage-obj")
