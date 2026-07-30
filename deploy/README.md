@@ -91,7 +91,8 @@ NEXT TO Phoenix on a content box, at `https://<instance>/sites/<slug>/`. It is a
 NEW state machine — deliberately not a parameterization of `instance-deploy.sh`
 (that one is Phoenix-specific: mix/ecto, port-pair slots, `/api/schemas` gate,
 git-reset rollback) — but it mirrors the same proven skeleton: per-slug `flock`
-serialize (queue depth 1), typed exit codes, Caddy backup+`validate`+reload-or-
+serialize (queue depth 1 *per site*; the fleet-wide build gate below is what keeps
+N sites from compiling at once), typed exit codes, Caddy backup+`validate`+reload-or-
 revert, fail-closed on any error. Deploy is one state machine over an immutable
 `sites/<slug>/releases/<build_id>/` layout: **PLAN** (caller passes `BUILD_ID`;
 already-live ⇒ exit 0 no-op) → **BUILD** (`npm ci && npm run build` under
@@ -161,9 +162,13 @@ Caddy port-flip back (`<1 s`, no reboot/re-gate); a cold older release reboots t
 idle slot onto it + gates + flips. The slot unit is
 `deploy/systemd/barkpark-site@.service` (§below). Offline gate (fake
 `systemctl`/`caddy`/`npm`, no real systemd/network): `bash
-deploy/site-deploy-node.sh --self-test` — 108 checks: the six-stage protocol,
+deploy/site-deploy-node.sh --self-test` — 124 checks: the six-stage protocol,
 boot-in-place HEALTH with the marker-value gate, the marker-anchored port flip,
-retire protecting both live slots, and the warm-rollback flip.
+retire protecting both live slots, the warm-rollback flip, and the fleet build
+admission gate (below) — including the hazard specific to THIS engine: HEALTH
+boots the slot process, which outlives the run, so the gate must be released
+before it. Deleting the release call is proven to leave the box's only build slot
+held after a *successful* deploy, with no reaper to free it.
 
 **The slot unit (`deploy/systemd/barkpark-site@.service`).** ONE generic template
 for every node site's every slot — `%i = <slug>__<slot>`. `EnvironmentFile=/opt/
@@ -225,11 +230,45 @@ writable). Both acquire in the same order — own lock (fd 9) → Caddyfile lock
 8) — and the Caddyfile lock is a leaf, never held across a build, so a site
 deploy never waits on the instance deploy's multi-minute run.
 
+**One box, one build (the fleet build admission gate).** The lock above is
+PER-SLUG, so "queue depth 1" is true per site and false FLEET-WIDE: N sites built
+concurrently on 2 cores BY CONSTRUCTION (measured on guerrilla: 20 per-slug lock
+files, four stamped in one minute; peak 8 concurrent BUILD windows in 7 days; 80%
+of astro crashes / 52% of 503s / 49% of unreachable fired with a *foreign* build
+mid-flight, on a MEMORY-bound box). So both engines take a SECOND, fleet-wide lock
+— `/var/lock/barkpark-site-build.lock` on **fd 7** (`build_gate_acquire` /
+`build_gate_release` in `lib/site-deploy-common.sh`; `BARKPARK_BUILD_GATE_LOCK` /
+`BARKPARK_BUILD_GATE_WAIT` are dev+self-test knobs only — `write_env_file/4` is an
+explicit allowlist, so neither can reach the engine from a control-plane deploy).
+`N=1` is not a preference: `CPUQuota=150%` on 2 cores and `MemoryMax=1500M`
+against 304–894M available each floor to one, so the semaphore D95 sketched
+collapses to one exclusive lock (raise the caps first if you want N>1). Taken
+INSIDE the build arm only — after `BUILD started` and the two cheap validations —
+and released right after `BUILD ok`, before STAGE: **nothing that compiles nothing
+is admission-controlled** (a rollback, a preflight, a prebuilt STAGE and an
+already-staged re-gate all run with the slot pinned; those are exactly the moves
+an operator makes *while* the box is busy). Budget lapse ⇒ `BUILD failed` with the
+reason and a `ps` read, THEN the typed **15** — emitted before the exit, because
+this refusal fires after `PLAN ok` and a bare exit would hang a stage-watching
+caller. Neither engine has a script-level EXIT trap and there is no reaper, so the
+fd form is mandatory: the kernel dropping fd 7 is the only release that survives
+SIGKILL. Fails OPEN and loudly (no `flock(1)`, unopenable lock) — a gate that
+denies every deploy is worse than the contention it prevents.
+
 Offline gate (no npm/caddy/systemd): `bash deploy/site-deploy.sh --self-test` —
-128 checks: the symlink flip, forward/back rollback and retire-N over fixture
+228 checks: the symlink flip, forward/back rollback and retire-N over fixture
 release dirs, the marker reader, then the real script driven end-to-end against a
 fake npm (the six-stage protocol, a lying build failing HEALTH with exit 14 and
-being purged, the retry rebuilding, a BUILD failure carrying its 401 to stdout).
+being purged, the retry rebuilding, a BUILD failure carrying its 401 to stdout),
+and the admission gate against a REAL `flock(1)`: two genuinely concurrent deploys
+of DIFFERENT slugs whose build windows are measured DISJOINT via a shared
+START/END ledger (nesting depth 1), each oracle shown non-vacuous by mutating the
+engine (delete the acquire ⇒ depth 2 and interleaved; delete the refusal's `emit`
+⇒ only the anti-hang check reds), a SIGKILLed build whose slot the kernel frees so
+the next deploy is admitted, and both fail-open paths. That block needs a real
+`flock`, so it SKIPS on stock macOS and HARD-FAILS under
+`BARKPARK_SELFTEST_REQUIRE_E2E=1` (set on both harness steps in CI) — a gate
+proven against the harness's exit-0 `flock` stub would prove the stub.
 `bash deploy/instance-deploy_test.sh` covers the blue/green script, including the
 Caddyfile-lock regression (fail-before: the flip is lost; fixed: both writers
 survive) — it needs a real `caddy` and `flock(1)`, so that case skips on macOS.

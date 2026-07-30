@@ -54,7 +54,12 @@ jobs:
       # content-truth HEALTH gate, "the box ran no npm" on a prebuilt deploy)
       # SKIPS itself when python3/curl are absent — and the run then prints PASS
       # and exits 0 with this engine's central claims untested. In CI that skip
-      # is a green vacuum, so make it a hard failure here.
+      # is a green vacuum, so make it a hard failure here. The SAME flag also
+      # hard-fails the fleet build admission gate proof (one box, one build) when
+      # flock(1) is missing: that block drives two concurrent deploys against a
+      # REAL flock, and a gate "proven" against the e2e's exit-0 flock stub proves
+      # the stub. ubuntu-latest ships util-linux, so this only ever fires on a
+      # runner image change — loudly, which is the point.
       - name: Site deploy engine self-test
         env:
           BARKPARK_SELFTEST_REQUIRE_E2E: "1"
@@ -65,5 +70,12 @@ jobs:
       # reasoning as its static sibling above: an untested deploy engine is the
       # weakest link, so gate it here. The script self-gates and exits non-zero
       # on any failure — no hardcoded total (check counts grow over time).
+      # BARKPARK_SELFTEST_REQUIRE_E2E=1 for the same reason it is set above: this
+      # engine's gate block proves that the slot process HEALTH boots does not
+      # inherit the box's only build slot (a permanent fleet-wide deny), and that
+      # proof needs a REAL flock(1) — without the flag it would skip itself and
+      # still print PASS.
       - name: Site deploy engine (Node) self-test
+        env:
+          BARKPARK_SELFTEST_REQUIRE_E2E: "1"
         run: bash deploy/site-deploy-node.sh --self-test
