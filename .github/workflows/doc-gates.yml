@@ -392,9 +392,11 @@ jobs:
       # the gate actually REDs on a planted literal — a temp-dir self-test that
       # plants #ff0000, asserts the REAL scanner exits non-zero naming file:line,
       # then asserts clean + commented-hex files pass, an HTML numeric character
-      # reference (`&#160;`) passes, and a genuine literal SHARING an entity line
-      # still REDs. Plants nothing in the tree; guards the detector against a
-      # future edit that silently blinds LITERAL or the comment strip.
+      # reference (`&#160;`) passes, a genuine literal SHARING an entity line
+      # still REDs, and a RELOCATED copy of the script (which scans 0 files and
+      # used to print "PASS — 0 …") is REFUSED by the MIN_CHROME_FILES floor.
+      # Plants nothing in the tree; guards the detector against a future edit
+      # that silently blinds LITERAL, the comment strip, or the corpus walk.
       - name: Studio literal-color gate self-test (tripwire)
         run: bash scripts/studio-literal-check.sh --selftest
 

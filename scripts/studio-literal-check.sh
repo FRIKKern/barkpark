@@ -105,7 +105,7 @@ EX
     #    (spd-w19: `&#160;` read as `#160` and reddened main for 7 further gates).
     cat >"$tmp/entity.ex" <<'EX'
 defmodule Demo do
-  def strip(s), do: String.replace(s, ~r/&nbsp;|&#160;|&#8212;|&#100000;/i, " ")
+  def strip(s), do: String.replace(s, ~r/&nbsp;|&#160;|&#8212;|&#127775;/i, " ")
 end
 EX
     if ! STUDIO_LIT_SELFTEST="$tmp/entity.ex" bash "$0" >/dev/null 2>&1; then
@@ -129,7 +129,23 @@ EX
         echo "$out"
         exit 1
     fi
-    echo "studio-literal-check --selftest: PASS — gate REDs on a planted literal, names file:line, passes clean + commented hex + HTML numeric entities, and still REDs a real literal sharing an entity line."
+    # 6) A RELOCATED copy of this script MUST NOT pass vacuously. Reproduced on
+    #    origin/main: ROOT comes from `dirname $0`, so a copy outside the repo
+    #    finds no api/lib, scans 0 files and printed "PASS — 0 Studio chrome
+    #    file(s) scanned" with exit 0. The MIN_CHROME_FILES floor closes it, and
+    #    this case is the only thing that keeps the floor honest.
+    cp "$0" "$tmp/relocated.sh"
+    if out="$(bash "$tmp/relocated.sh" 2>&1)"; then
+        echo "studio-literal-check --selftest: FAIL — a RELOCATED copy scanning no files PASSED (vacuous green)."
+        echo "$out"
+        exit 1
+    fi
+    if ! grep -q 'file(s) were scanned' <<<"$out"; then
+        echo "studio-literal-check --selftest: FAIL — the relocated copy failed for the wrong reason."
+        echo "$out"
+        exit 1
+    fi
+    echo "studio-literal-check --selftest: PASS — gate REDs on a planted literal, names file:line, passes clean + commented hex + HTML numeric entities, still REDs a real literal sharing an entity line, and REFUSES to pass vacuously from a relocated copy."
     exit 0
 fi
 
@@ -281,6 +297,16 @@ def chrome_files():
                     yield os.path.join(dirpath, fn)
 
 
+# A gate that scans nothing PASSES. Two ways to reach it, both real and both
+# reproduced: ROOT derives from `dirname $0`, so a RELOCATED copy of this script
+# prints "PASS — 0 Studio chrome file(s) scanned" and exits 0; and
+# STUDIO_LIT_SELFTEST, if it ever leaked into the real CI step, would narrow the
+# scan to a single file. So the real run asserts a NON-ZERO, PLAUSIBLE corpus
+# before it is allowed to pass. 372 files scanned today; the floor is set far
+# below that so ordinary deletions never trip it, and far above 0/1 so neither
+# vacuous-green path can.
+MIN_CHROME_FILES = 200
+
 failures = []
 scanned = 0
 for path in chrome_files():
@@ -290,6 +316,16 @@ for path in chrome_files():
     scanned += 1
     for ln, text in scan(path, rel):
         failures.append((rel, ln, text))
+
+if not SELFTEST and scanned < MIN_CHROME_FILES:
+    print(f"studio-literal-check: FAILED — only {scanned} Studio chrome file(s) were scanned, "
+          f"below the {MIN_CHROME_FILES}-file floor.\n")
+    print(f"  Scanned root: {lib}")
+    print("  A gate that scans nothing PASSES, so this refuses to. Either the script was")
+    print("  run from a relocated copy (ROOT comes from `dirname $0`), or STUDIO_LIT_SELFTEST")
+    print("  leaked into the real gate step, or the Studio chrome tree genuinely shrank — in")
+    print("  which case lower MIN_CHROME_FILES deliberately, in the same commit.")
+    sys.exit(1)
 
 if not failures:
     print(f"studio-literal-check: PASS — {scanned} Studio chrome file(s) scanned, "
