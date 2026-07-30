@@ -1794,8 +1794,17 @@ defmodule BarkparkCloud.Accounts do
 
   Pass `touch: false` to verify WITHOUT stamping — the caller then owns the
   stamp and can place it downstream of the response decision (see
-  `touch_pat_last_used/1` and `Web.Auth`'s `defer_pat_touch/2`). The arity-1
-  form keeps the eager default so no existing caller changes meaning.
+  `touch_pat_last_used/1` and `Web.Auth`'s `defer_pat_touch/2`).
+
+  WHICH FORM PRODUCTION TAKES, stated so the default is not misread as the live
+  path: after this change the ONE production call site (`Web.Auth`, the PAT
+  branch of `require_user_or_pat/2`) passes `touch: false`, so the eager stamp
+  runs for no served request. The arity-1 form keeps the eager default because
+  it is the published contract of a public function — not because a caller
+  still depends on it — and `accounts_test.exs` pins that behaviour. A future
+  caller that genuinely wants the stamp at the verify gets it by asking for
+  arity 1; anything that serves an HTTP response should defer instead, because
+  authentication runs strictly before authorization.
   """
   @spec verify_personal_access_token(binary()) :: {User.t(), UserToken.t()} | nil
   def verify_personal_access_token(plaintext), do: verify_personal_access_token(plaintext, [])
