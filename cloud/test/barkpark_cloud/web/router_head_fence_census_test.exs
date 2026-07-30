@@ -116,9 +116,21 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # when the SSE ticket lands: `require_user_sse` tries the Bearer header FIRST
   # and still reaches `verify_user_session_token` → `touch_last_used`; the ticket
   # is an ADDITIONAL fallback branch, not a replacement (D47).
-  @baseline_total 62
+  # 2026-07-30: 64 / 45 / 7 / 12. #8182 added two agent/worker GET routes,
+  # `/v1/agent/sites/:id/env` and `/v1/builder/sites/:id/env`, and did not move
+  # this baseline — main went red and stayed red, because until the Cloud gate
+  # aggregator landed (#8202) the cloud suite was advisory and nothing surfaced
+  # it. RULED NOT SIDE-EFFECTING, by reading the whole path rather than the
+  # route name: the handler is `site_env_response/2` → `Registry.reveal_site_env/1`,
+  # which is `Vault.decrypt` + `Jason.decode` and writes nothing; and the auth
+  # wrapper `Auth.require_agent/2` → `Registry.verify_agent_token/1` is a
+  # `Repo.one` + `Repo.get` with no update — no row minted, no credential burned,
+  # no nonce spent. So a bare HEAD of either is inert and no `side_effecting_get?/1`
+  # clause is owed. Session and public are unchanged, which is the reassuring
+  # half: no existing route silently changed auth class.
+  @baseline_total 64
   @baseline_session 45
-  @baseline_machine 5
+  @baseline_machine 7
   @baseline_public 12
 
   # THE FENCE. Every `side_effecting_get?/1` clause, as {path_segments, verdict}.
