@@ -316,16 +316,26 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
 
       # The deployed-DOM fingerprint from the report: the body article opened and
       # closed with nothing in between. The article id carries the RAW resolved
-      # slug (a draft-only fossil resolves as `drafts.<id>`), unchanged by this
-      # slice — only its emptiness is gone.
-      article_id = "paper-body-drafts.#{@blank_slug}"
+      # slug (a draft-only fossil resolves as `drafts.<id>`).
+      #
+      # spd-w19 UPDATES the id, and this is an expectation change, not a
+      # regression: the never-blank arm shipped sharing `paper-body-<slug>` with
+      # the STREAMED block arm, and the repair button crosses exactly that
+      # boundary (canvas OFF renders the streamed arm). One node keeping its id
+      # while gaining `phx-update="stream"` means the notice is preserved as an
+      # untracked child of a stream container — it survives its own repair.
+      # `paper-body-unrenderable-<slug>` makes the repair a node replacement.
+      article_id = "paper-body-unrenderable-drafts.#{@blank_slug}"
 
       refute html =~ ~r/<article id="#{Regex.escape(article_id)}" data-rev="0">\s*<\/article>/,
              "the resolved-but-unrenderable body must never render as an empty article"
 
-      # …and it is still the SAME article: id and data-rev unchanged, the named
-      # state lives inside it.
+      # …and it is still ONE article carrying the whole named state, data-rev
+      # unchanged.
       assert html =~ ~s(<article id="#{article_id}" data-rev="0">)
+
+      refute html =~ ~s(<article id="paper-body-drafts.#{@blank_slug}"),
+             "the notice arm must not share the streamed arm's container id"
     end
 
     test "the header badge and the notice both name the real type, never a literal",
