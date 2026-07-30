@@ -5146,3 +5146,347 @@ dispatch is a manual lead step. The reviewer DID re-derive the two-insertion-poi
 `origin/main` source (zero `apply_mutations` under `tasks/`; pre-fix `Stage` persists no `disposition`
 key) and both doors are load-bearing — but a re-derivation by the same agent that reviewed the diff is
 not independence.
+
+---
+
+## WAVE 25 — THE ROUND ITSELF (decided 2026-07-30)
+
+Wave 24 built the apparatus and wrote ZERO adjudications. Wave 25's spine is `pds-w23-triage-round`:
+the round, run against a census that has been taught to measure COVERAGE first. One artifact, and it is
+not a PR — `bash scripts/pds-ledger-census.sh --assert-round-done` exits 0.
+
+**BOARD RE-DERIVED AT DECIDE, 2026-07-30T18:19:34Z→18:20:06Z** (`bash scripts/pds-ledger-census.sh
+--assert-round-done`, exit 1): corpus 3,821 rows, closure **291**, live **164**; disposition `<unset>`
+146 closure / **34 live**, `OPEN` 67, `open` 44, `parked` 27, `in-flight` 7; reasons non-empty 145
+collapsing to **127** hashes; off-vocabulary **74**. Two independent verifier walks reproduced this to
+the row, and a third measured **ZERO drift** across a 12-minute window (291 closure constant, no row
+changed `_rev`/`_updatedAt`). **The "board is moving" premise is REFUTED for the round's write window:**
+the last closure write was `lead-merge` at 16:55:00Z sealing wave 24, not a live foreign wave.
+
+- **PDS-D346 — THE CENSUS IS BLIND TO SILENCE, AND CLAUSE 4 SHIPS BEFORE THE ROUND STARTS.** Proven in
+  code and by mutation, not inferred: `census()` computes `live` at `:446` and discards it to `len()` at
+  `:495`; all four counting loops iterate the WHOLE closure; `--assert-round-done` reads exactly three
+  scalars (`:636-639`) and **none is falsified by a row that says nothing** — a blank `disposition`
+  contributes to a `<unset>` bucket the predicate never reads, a blank reason is skipped at `:456`, and
+  an unset disposition is skipped at `:466`. THE DECISIVE PROOF: a verifier built the fixtures and ran
+  them against the UNMODIFIED origin/main census — **five clause-4 red fixtures ALL EXIT 0**, i.e. a
+  board where 34 live rows are silent genuinely passes `--assert-round-done` on main today. Separately a
+  fixture built from the REAL corpus (uniquify all 145 reasons, normalise all 74 off-vocabulary terms,
+  touch nothing else) printed **`VERDICT: ROUND DONE`, exit 0**, with 34 silent live rows and 0/27
+  triggers. Running the round to today's instrument would ship the exact vacuous green the instrument
+  was built to prevent, INSIDE the instrument built to prevent it. Clause 4 is therefore a WAVE-25
+  PREREQUISITE, red on today's board at **34 + 27**, with seven fixtures.
+- **PDS-D347 — CLAUSE 4 IS LIVE-SCOPED, STRUCTURED-ONLY, AND ADDED BESIDE CLAUSES 1-3, NEVER RESCOPING
+  THEM.** Clauses 1-3 are DISTINCTNESS and VOCABULARY clauses and are correctly closure-scoped —
+  boilerplate on a `done` row is still boilerplate. Clause 4 is a COVERAGE clause and is the only one
+  whose scope must be live, or it demands adjudicating 127 terminal rows nobody will read. Three
+  sub-lines, each able to say no independently: live rows with no disposition; live adjudicated rows
+  with no reason; live parked rows with no STRUCTURED `reopen_trigger`. **THE TRIGGER TEST READS
+  `row["reopen_trigger"]` ALONE and must NOT inherit `:458`'s `REOPEN_TRIGGER_RE.search(reason) or …`
+  OR** — that OR is exactly what PDS-D336(b) condemns, and on the live board it reports **0 structured
+  vs 40 prose-only**, i.e. 40 is the size of the lie the single number tells. Scope boundary is PINNED
+  by fixture: `TERMBARE`/`TERMPARK` exit 0 (clause 4 never converts terminal rows into work) while
+  `TERMDUP` still exits 1 (clauses 1-3 were NOT silently rescoped). `SHAREDTRIG` pins PDS-D336(a): two
+  live parks sharing one trigger verbatim over distinct reasons exit 0, so no future wave can "tighten"
+  clause 4 into a trigger-distinctness check that would break the board's best eight rows.
+  **KEY-PATH SETTLED, FAVOURABLY:** `/v1/data/query` FLATTENS `content.*` to the document top level, so
+  the census's top-level read is CORRECT and the 0/27 is a REAL absence — verified two ways (the one
+  corpus row carrying a structured trigger returns it top-level with no `content` key; a corpus-wide
+  scan of 3,810 rows found 15 reopen-ish keys, all `reopen_note`, zero `reopen_trigger` in the closure).
+  `bp task get` is the ONE read path that nests (`.doc.content.<field>`) — the Strategize false negative.
+- **PDS-D348 — THE TERMINAL DEAD END IS REAL, IT IS 15 ROWS NOT 14, AND THE FIX IS ONE LINE IN
+  `@stageable`.** Both doors proven shut LIVE on a throwaway row: raw `/v1/data/mutate` refuses even a
+  pure `OPEN`→`open` case fix (422, guard is `now_term != was_term` at `mutations.ex:707` with no
+  rev/case/terminal exemption), and `bp task stage <done-row> done --disposition closed` returns 422
+  `illegal_transition` — because `Transitions.legal?("done","done")` is TRUE (same→same) and the AND
+  with `@stageable ~w(considering researching open)` at `stage.ex:337` is the ENTIRE refusal. Off-
+  vocabulary therefore floors at 15 and `--assert-round-done` is PERMANENTLY UNREACHABLE unless
+  something widens that check. **THE WIDENING IS `if (to in @stageable or from == to) and
+  Transitions.legal?(from, to)` AND IT BREAKS NOTHING** — mutation-proven both directions (`REFUSED
+  {:error, {:illegal_transition, "done", "done"}}` without it; `OK lifecycle="done"
+  disposition="closed" claim.closed_by="probe-worker"` with it), with `test/barkpark/tasks/` at 471
+  tests 0 failures before AND after, the manifest/gate/controller trio at 147/0 before and after, and
+  the FULL suite at 27 doctests / 13,159 tests / **2 failures identical on both sides** (both
+  pre-existing: `ProjectorWorkerEnqueueTest`, `Studio.ChatRenderGoldenTest`). The three refusal fixtures
+  at `stage_test.exs:254/:269/:278` are all `from="open"` and ALL survive — a non-done row can still
+  never reach `done`. `do_stage` never touches `content.claim`, so close attribution is preserved.
+  **THE STOPGAP IS REFUSED ON THE RECORD:** `stage <done-row> open --disposition closed` works (live
+  200, 7/8 fields, claim intact) but flips 15 finished rows into `live` and into `bp task ready`, and
+  produces rows saying `open` while carrying `claim.closed_by` — trading an off-vocabulary lie for a
+  LIFECYCLE lie, the top of this wish's build list. A census EXEMPTION for terminal rows is refused too:
+  it reaches exit 0 by not looking.
+- **PDS-D349 — TRUTH-IN-REFUSAL RIDES WITH THE WIDENING OR THE GUARD STARTS LYING ABOUT ITSELF.**
+  `tasks_controller.ex:658` tells every refused caller "stage moves only between
+  considering|researching|open", which becomes FALSE the moment the widening lands, and the capability
+  manifest enumerates the reopen edges but not the terminal same→same adjudication edge. In an epic
+  about verbs that lie, shipping the widening without both text fixes ships a new lie. Constraint:
+  `stage_test.exs:255` asserts the literal substring `considering|researching|open`, so a message
+  rewrite must preserve it or update the assertion in the SAME commit. The widening needs the API
+  deploy ONLY — no `bp` rebuild (proven: `bp task stage <id> done` reached the server and returned the
+  server's 422, so the CLI does not client-side validate the state enum).
+- **PDS-D350 — PDS-D336 GOVERNS THE TRIGGER BAR; THE WISH'S "SCRIPT-EVALUABLE" PHRASING IS OVERTURNED BY
+  NAME, AND THE 8 EXEMPLARS ARE MADE COMPLIANT ADDITIVELY, NOT REWRITTEN.** D336 already ruled the bar
+  is "NAMED AND CHECKABLE, NOT script-evaluable" and recorded that the strict bar fails all 27 parked
+  rows INCLUDING the best 8. Clause 4 implements D336 exactly: it checks the trigger is NAMED IN A
+  DEDICATED FIELD and never inspects its text. **This dissolves a self-contradiction inside
+  `pds-w23-triage-round` itself** — its criterion 8 demands every parked row carry a trigger while its
+  criterion 5 demands the 8 exemplars be shown UNCHANGED, and `stage.ex:380-391` accepts a carried
+  trigger only from `content.reopen_trigger` (an in-reason `REACTIVATE:` does NOT satisfy it) while
+  `do_stage` writes the triple in ONE CAS. THE ESCAPE HATCH IS LEGAL AND MUST BE NAMED IN THE BRIEF:
+  `mutations.ex:713` refuses only `trigger_erased?`, so ADDING `content.reopen_trigger` through the raw
+  door is permitted, and D298 already calls it "the sanctioned remediation for rows parked hollow before
+  this fence". The 8 exemplars get their EXISTING `REACTIVATE:` clause copied VERBATIM into
+  `reopen_trigger`; "do not touch" is defined as **`md5(disposition_reason)` identical before and after,
+  proven per row**. D332's "343-543 B" is CHARACTERS; in BYTES the family is 345-549 B (em-dashes) —
+  any length bound must name its unit.
+- **PDS-D351 — RECOVERY IS 16 RESTORATIONS + 3 ENRICHMENTS, AND THE BOILERPLATE'S OWN TEXT IS THE
+  NINETEENTH LIE.** All 19 rows sharing md5 `4f556ba7` have a recoverable, row-specific
+  `content.engagement.note` in the revision archive via `bp doc history` + `bp doc revision` — 19/19
+  distinct by md5, no psql. TWO INHERITED PREMISES CORRECTED: (a) the boilerplate lives in
+  `disposition_reason` at **646 B** and the live rows carry NO `engagement` field at all, so the write
+  is CROSS-FIELD (archived `engagement.note` → live `disposition_reason`), and a builder hunting a live
+  `engagement.note` to overwrite will find nothing; (b) the yield is TWO STRATA — 16 rich notes
+  (485-1062 B, all 2026-07-27 19:40-21:28Z, all carrying `REACTIVATE`, 15/16 carrying an explicit
+  negative) and 3 pre-template stubs (120-137 B, 2026-07-22) that need enrichment on top of recovery.
+  Strategize's "822 B at 8f7ca193" is **828 B**. **THE BOILERPLATE ASSERTS "the original adjudication
+  text is NOT recoverable" — FALSE 19 OF 19, an owner-facing lie on nineteen ledger rows.** The 19 are
+  fully disjoint from the 15 terminal rows (zero terminal members) and from the 8 exemplars.
+  OPERATIONAL: `/v1/data/revision` rate-limits hard — a 6×8 fan-out produced 66×429 + 39×500 out of
+  ~600 fetches while serial-with-0.15s-sleep produced zero errors, and **a missed note reads exactly
+  like "no note in the archive"**, so the recovery script must fail LOUDLY on 429, never skip.
+- **PDS-D352 — DISJOINTNESS IS A PLAN-TIME PINNED MANIFEST OR IT IS NOTHING, AND THE PACING IS 0.75
+  WRITES/SEC.** `Tasks.Stage` takes a BLOCKING `pg_advisory_xact_lock` and re-reads `observed_rev`
+  INSIDE the lock (`stage.ex:289/:405/:422`), so the CAS can essentially never lose: two builders both
+  get **200** and the second SILENTLY OVERWRITES the first — corroborated by 20 same→same stages
+  against one row, every one 200. The controller accepts no `observed_rev`/`If-Match` (contrast `stamp`,
+  which requires `observed_epoch`). There is nothing to catch at write time. The round therefore flies
+  off `tooling/grip/ledger/pds-w25-board-manifest-2026-07-30.tsv` — 179 rows, `class<TAB>doc_id`,
+  pairwise-disjoint (`cut -f2 | sort | uniq -d` → 0 lines), union of the three live classes == the live
+  set exactly (164 == 164). **No shard may re-derive its own row set from a live query.** PACING,
+  MEASURED not assumed: the write bucket is capacity 60 / refill 1.0 per second keyed
+  `token:<hash>:<class>:<dataset||"global">`, an 80-way burst returned exactly 63×200 / 17×429, and
+  `/v1/tasks/:id/stage` carries NO `:dataset` param so it bills the **"global"** bucket, disjoint from
+  `/v1/data/mutate/production` (proven live: 5 stage POSTs routed while a 150-way production burst was
+  returning 135×429). One `bp task stage` = 2 HTTP requests (a 304 capabilities GET + the POST); pinning
+  `BARKPARK_MANIFEST` collapses it to ONE and raises throughput from 0.46 to 3.23 writes/s. **RULE: pin
+  the manifest, at most 3 concurrent shards, `sleep 4` after every stage call → 0.75 w/s aggregate,
+  ~240s for 165 rows, the 60-token reserve never touched and 0.25 w/s left for foreign workers who share
+  this same admin token.** A 429 on `/v1/capabilities` is rendered by `bp` as "acquire manifest …
+  unexpected status 429" — it reads exactly like a broken install and MUST be treated as backpressure.
+  Also: `--note` rides the QUERY STRING; 9,000 B is 200, 10,000 B is 414, and `bp` renders the failure
+  as an opaque `stream error: … INTERNAL_ERROR`.
+- **PDS-D353 — THE RE-READ LAW IS NECESSARY BUT HISTORICALLY INSUFFICIENT, AND THE FREE CLOSES ARE
+  EIGHT, NOT THREE.** Wave 22 lost **2 rows AFTER they had been individually verified present** (the
+  `TtlSweeper` ate wave 10's notes at a measured 15m00.97s; PDS-D309 refutes PDS-D298's factual verdict
+  while reaffirming its proof standard). The split shipped, so today's target keys are unswept — but a
+  sampled DELAYED re-read is owed on top of the immediate one. Separately, the `Retires:` trailer
+  convention is **exactly ONE commit repo-wide** (`6f4ca7904`) and is not a mine to work: free closes
+  come from SLUG GREP + CONTENT, and a sweep of the 34 bare rows yielded **8 CLOSED verified by content
+  on origin/main**, 5-6 PARKS whose reason is already written in code or in the row, and 16 OPEN whose
+  fix is demonstrably absent. **THE SHARPEST FINDING IS OUTSIDE THE BARE SET:**
+  `pds-bl-scratch-pointer-concurrency` and `pds-bl-scratch-pointer-explicit-default` carry
+  `disposition: open` with 570/560-byte reasons that `6f4ca7904` made FALSE three days ago — and a naive
+  re-check of their own citation (`pds-scratch-target.sh:124`, where the legacy `POINTER_FILE` survives
+  as a hint) would wrongly conclude "still broken". **So "carries a disposition" ≠ "carries a TRUE
+  disposition": the open-normalise shard needs a CONTENT re-check clause, not just a case normaliser, or
+  it launders stale reasons into freshly-normalised stale reasons.**
+- **PDS-D354 — `disposition_owner` IS NOT AN EMPTY FIELD; 30 OF 103 OPEN ROWS ARE SELF-OWNED AND THE
+  CENSUS READS THE FIELD ZERO TIMES.** 0 of 103 live-open rows have an unset owner, so S-open is not
+  "invent semantics" — it is "adjudicate 30 owners that name nobody and unify four incompatible value
+  shapes". The split maps exactly onto the case split: all **44** lowercase `open` rows carry a ROLE
+  slug (the exemplar); the **59** uppercase `OPEN` rows split **30 SELF-OWNED (`disposition_owner` ==
+  the row's own `_id`)**, 23 pointing at ANOTHER task id (a subsumption claim, not an owner), 6 role
+  strings. A non-empty check greens on 30 rows that name nobody. `disposition_owner` has **ZERO code
+  writers repo-wide** — `stage.ex` owns only `disposition`/`disposition_reason`/`reopen_trigger` — so
+  there is no normaliser and `Wave 25`, `wave-25` and `truth-grip-epic lead (wave-10 steward)` are three
+  different owners forever. **RATIFIED SHAPE: a lowercase kebab role slug — `pds-<thing>-maintainer
+  |steward|owner`, `lead-pds`, or `wave-N`. OWNER == SELF IS BANNED. The 23 task-id pointers move to
+  `disposition_reason` prose ("subsumed by <id>") and inherit the POINTED-AT row's owner**, which turns
+  23 decisions into 23 lookups and leaves 30 genuine judgments.
+- **PDS-D355 — D344 IS WRONG ABOUT ITS OWN COUNT (NINE VERBS, FIVE POST-CONDITION SHAPES) AND ITS
+  REGISTRY ROW IS VACUOUSLY GREEN.** `grep -c runHetznerServerAction` on origin/main returns **9**, not
+  six: `poweron poweroff reboot reset shutdown disable-rescue enable-backup disable-backup detach-iso`.
+  A slice scoped to D344's number ships three unfixed lies, so **the verb list comes from the grep at
+  build time, never from the charter prose**. THE MUTATION PROOF: deleting hzDone's `extra` handling
+  ENTIRELY — so the receipt can carry no post-condition at all — leaves
+  `TestSuccessClaimsChangeWhenTheResponseDoes/hzDone` **PASSING**, while five unrelated tests catch it.
+  The row's pair differs only by `ID`/`Name` and hand-injects `extra={"status":"running"}` that **no
+  action verb ever passes** (`runHetznerServerAction:892` passes `nil`). The registry must be repaired
+  in the SAME commit — vary the pair on the POST-CONDITION holding identity fixed — or the ledger close
+  is stamped by a check that structurally could not fail. FIVE SHAPES, not one predicate: (A) start →
+  `running`, bounded poll; (B) hard stop → `off`, bounded poll; (C) **`reboot`/`reset` have NO
+  DISCRIMINATOR** — `hcloud.Server` carries no boot-time/uptime field, pre-state and post-state are both
+  `running`, so **the SENTENCE must be NARROWED ("the reboot action completed and the server is
+  running"), never strengthened**; (D) **`shutdown` is ACPI and MANDATES a bounded poll** — the official
+  Hetzner CLI polls to `off` against a 30s timeout and without `--wait` prints only "Sent shutdown
+  signal", so a single `GetByID` would FALSE-RED a healthy shutdown; (E) metadata flips read
+  `RescueEnabled`/`BackupWindow`/`ISO`. `runHetznerServerCreate:807-827` is the in-file precedent
+  ("Actions done ≠ booted"), so this is a PORT, not an invention. HAZARD TO STATE OUT LOUD: every
+  post-condition read is a NEW failure mode on a verb that previously could not fail there — a
+  rate-limited `GetByID` after a successful reboot must not report the reboot as failed. **UNFILED
+  SIBLING, LARGER THAN THE ONE BEING FIXED: `hzResDone` has 50 production callers, 13 passing
+  `extra=nil`, and an identity-only registry row PINNED in `requiredEnrollments` — a second instance of
+  this wave's theme, filed to the backlog rather than smuggled in.**
+- **PDS-D356 — S7 IS "THE EXPORT ARTIFACT IS SELF-VERIFIABLE", NOT "BUILD A RECEIPT"; TRAILERS ARE
+  IMPOSSIBLE AND A BODY RECEIPT LINE IS REFUSED.** `grep -rn trailer api/deps/plug/lib/` returns **0
+  lines**; `Plug.Conn` exports zero trailer functions, `Plug.Conn.Adapter` declares zero trailer
+  callbacks, `Bandit.Adapter` exports zero — Bandit mentions trailers only REQUEST-side, to discard
+  them. The design space is FORCED. A terminal receipt LINE is refused because three line-oriented
+  consumers break: `export_cmd.go:73-79` prints every line verbatim into `backup.ndjson` AND increments
+  the count; `js/packages/core/src/export.ts` does a bare `JSON.parse(line) as BarkparkDocument` with no
+  shape check, so a receipt object is yielded to callers AS A DOCUMENT; and three docs publish "one
+  document per line". **The wish's premise is HALF WRONG and must not be re-litigated: `bp export`
+  ALREADY ships an owner receipt — non-zero exit plus `"<path> is PARTIAL, do not restore from it"` plus
+  a count — test-pinned by `TestRunExportTruncatedStreamIsPartialAndNonZero`.** The genuine holes are
+  (a) the HTTP layer, where `send_chunked(200)` commits the status before byte one and the only signal
+  is a `Logger.warning` that fires ONLY on client hangup, and (b) **artifact non-durability** — `bp
+  export > backup.ndjson` puts the count on stderr, so a cron box keeps a partial file BYTE-
+  INDISTINGUISHABLE from a complete one. S7 ships a SIDECAR (`FILE.meta` with
+  `{documents,bytes,sha256,scope,completed_at}` written only on clean completion, plus `--verify`),
+  copying `internal/backup/backup.go`'s proven pattern and `scripts/pds-pull-proof.sh:1232-1245`'s
+  precedent — **and it must FAIL CLOSED on a missing sidecar**, unlike that precedent's
+  `""|full) return 0`. Zero body-shape change, so every existing consumer keeps working.
+- **PDS-D357 — D342's MERGE-GATE SPLIT HAS NO CHOKEPOINT AND IS CUT FROM WAVE 25.** The premise "one
+  normaliser at one chokepoint" is REFUTED: **four** independent writers reach
+  `content.acceptance_criteria` (`Writer.create_document`, `Writer.upsert_document`,
+  `Stamp.apply_stamp_update` via `Repo.update_all`, and the `Close` body / `reconcile_merge_gate`), the
+  last two bypassing `:before_save` entirely — and a `before_save` hook is CONTRACTUALLY NON-MUTATING
+  ("no mutation (Q2)"; a non-`:ok` return is logged and treated as `:ok`), so the obvious home cannot
+  host a normaliser. The blast radius is not ~5 rows: **562 tasks carry a MERGE-GATED criterion across
+  563 gated rows and only 9 carry the machine key**, spanning every epic that used the convention, and
+  `bp search` under-reports it (hard cap at 500). `merge_gate` is not even a declared schema field.
+  24 `done` + 5 `cancelled` rows carry an unmet gated criterion (not 5), and **8 of the 24 carry a
+  SECOND, NON-GATED unmet criterion — a builder told to "stamp the merge gate" fabricates eight dones**.
+  `bp task stamp` is REFUSED on a `done` row (`not_in_progress:done`, `_rev` unchanged, proven live), so
+  the backfill cannot be a stamp. Filed to the backlog with this finding attached, at its true size.
+- **PDS-D358 — THE `docs/api-v1.md` RELOCATION IS REAL, IS 947 BYTES, AND CARRIES A HIDDEN CI BREAK BOTH
+  DOC GATES ARE BLIND TO — SO IT IS NOT A DOCS-ONLY SLICE.** The inherited "it duplicates
+  `docs/cli/error-exit-table.md`" premise is WRONG: the two backticked lists overlap on **4 of 39**
+  codes and 35 endpoint-specific codes are documented NOWHERE ELSE, so deletion+pointer would destroy
+  documentation — the honest move is RELOCATION, exactly as this charter already ruled. Measured:
+  `docs/api-v1.md` is **13,998 B of 14,000** on origin/main (the charter's "8 bytes" is stale); moving
+  line 171 (1,093 B) to a new capped `docs/api/error-codes.md` and leaving a 140 B markdown-LINK pointer
+  frees **947 B** with both gates green, and the dedup row's two real doc lines measure **390 B** —
+  covered with 559 B to spare. All four anti-laundering invariants proved BY MUTATION (cap reds at +100
+  B; stripped G1 header reds; colliding `canonical-for` reds; a dangling pointer reds — and the pointer
+  must be a markdown LINK, since §3c never resolves inline backticks). **THE BREAK:**
+  `errors_doc_coverage_test.exs:25` pins the doc BY PATH and slices §9 BY HEADING; after the move
+  **39 of 70 `known_codes/0` members vanish from §9 and the `known_codes` sentinel goes with the moved
+  paragraph** — the slice ships GREEN on `check-doc-budgets.sh` and `docs-anchors-check.sh` and RED on
+  the Elixir suite. The slice is relocation + the test amendment (read §9 ∪ the new doc) + the dedup
+  row's lines, in ONE PR, Elixir-gated. Filed to the backlog, fully specified, for the next wave.
+
+**THE WAVE-25 PLAN.** Round 1, eight slices, three of them LEDGER-ONLY (no repo files, no PR — the
+`cch` wave-7 shape, with THE TREE WINS on any disagreement between a pre-written disposition and
+origin/main): `pds-w25-census-clause-4` (the gate), `pds-w25-stage-terminal-widening` (the code
+prerequisite for round 2), `pds-w25-round-parked` (19 recoveries + 8 additive triggers),
+`pds-w25-round-open` (103 rows, case + owner + content re-check), `pds-w25-round-bare` (34 rows, 8 free
+closes verified by content), `pds-w25-hetzner-nine-verb-receipt`, `pds-w25-export-sidecar`. Round 2:
+`pds-w25-round-terminal` (15 rows) dispatches only AFTER the widening MERGES **and DEPLOYS** to
+guerrilla — no `bp` rebuild needed, but the API deploy is a hard gate.
+
+**COVERAGE HONESTY, ON THE RECORD.** Every dispatched surveyor and verifier reported; there is no
+coverage deficit. What nobody did: no verifier opened any wave Paper; `js/` and `web/` were never
+grepped for export consumers by the survey (the verify round closed that — zero source consumers, all
+`web/` hits are `.next` build artefacts); `hzResDone` was sized only at verify and is filed, not fixed;
+and the terminal-verb lane did NOT read this charter for a prior ruling on terminal adjudication (this
+decision is that ruling). The wave-25 charter reaches main as a docs-only PR, so the WAVE PAPER
+`pds-wave-25-2026-07-30` carries these decisions IN FULL for any builder flying before it merges.
+
+### Wave 25 2026-07-30 — "The Round, and the Fixes Are the Round" — REVIEWED. Grade A− (paper `pds-wave-25-2026-07-30`)
+
+**THE ROUND RAN. That is the headline, and it is the debt wave 24 left.** Wave 24 was graded B+ because
+it built the apparatus for a triage round and wrote ZERO adjudications — "the backlog is exactly as long
+and exactly as untruthful as at Strategize." Wave 25 was chartered to make the round itself the spine,
+and the round is done. **The reviewer re-derived every shard independently from the pinned manifest off
+the charter branch rather than trusting a single shard report**, and the numbers hold:
+
+| Shard class | Pinned | Counted OK | Failing |
+|---|---|---|---|
+| `parked` | 27 | **27** | 0 |
+| `open-normalise` | 103 | **103** | 0 |
+| `bare` | 34 | **33** | 1 (the honestly-handed-off blocked row) |
+| `terminal-with-disposition` | 15 | 0 | 15 — **deferred round 2, by design** |
+
+The live census agrees: `--assert-round-done` now reads `live adjudicated rows carrying a reason
+155/155 PASS` and `live parked rows carrying a reopen_trigger 29/29 PASS`, against 178 non-empty reasons
+and **178 distinct reason hashes** — no two rows share a reason. At Strategize those same lines read
+34 silent, 27 untriggered, 74 off-vocabulary.
+
+**RECOVERY BEAT INVENTION, AND IT WAS MEASURED.** All 19 boilerplate parks had their row-specific
+`engagement.note` mined out of the revision archive through `bp doc history` + `bp doc revision`, serial
+and fail-loud on 429 — 19 of 19 recovered, 19 distinct by md5, zero 429s and zero 500s across the mine,
+so no note was silently missed and read as "absent". 16 were pure restorations; 3 pre-template stubs were
+enriched ON TOP of their archived sentence with a provenance line saying so outright. **The boilerplate's
+own claim that "the original adjudication text is NOT recoverable" was FALSE 19 of 19 and now appears on
+ZERO rows.** The 8 buried exemplar parks were left byte-identical — their `reopen_trigger` was added
+ADDITIVELY through the raw `/v1/data/mutate` door precisely because `do_stage` rewrites the whole triple
+in one CAS, and `md5(disposition_reason)` is proven identical before and after on all 8.
+
+**THE 13 FREE CLOSES ARE THE PART THAT SHRANK THE BOARD, and they were earned by reading the tree, not
+by replaying citations.** Two were traps pointing in opposite directions: the scratch-pointer pair's own
+cited line still holds a legacy `POINTER_FILE` and reads "still broken" (a citation-follower would have
+kept it open), while `pds-bl-close-holder-and-criteria-gate`'s cited `check_fencing` still has no worker
+comparison — the fix is a SEPARATE `check_close_holder` guard in the same chain (a citation-follower
+would have kept it open too). 103 open rows became 90 open + 13 closed.
+
+**WHAT LANDED IN THE TREE (four slices, all gates re-run green by the reviewer, all file-disjoint):**
+
+- `pds-w25-census-clause-4` → **PR #8217**, branch `…tha-0-r`. Clause 4 sits BESIDE the untouched
+  closure-scoped clauses 1-3 and is the only LIVE-scoped one, with three independently-failing
+  sub-lines. `structured_trigger(row)` reads `row['reopen_trigger']` and NOTHING else — the old
+  `REOPEN_TRIGGER_RE … or …` is gone and the regex is quarantined to a DISPLAY counter that is split,
+  never summed (`0 structured` beside `40 prose-only DECORATION` on the day's board; a summed counter
+  would have read 40 and called it coverage). Selftest 38 → 54 checks. **Removes the `reopen_triggers`
+  `--json` key** in favour of two split keys — a repo-wide grep finds no other consumer.
+- `pds-w25-stage-terminal-widening` → **PR #8218**, branch `…withou-1-r`. One logic line:
+  `(to in @stageable or from == to) and Transitions.legal?(from, to)`. **HIGH-FLIP-RISK, and the
+  reviewer re-derived it independently rather than re-reading the builder's argument**: `from` comes
+  from `current_status/1` reading the row fetched inside `pg_advisory_xact_lock`, no controller
+  parameter reaches it, `legal?/2` requires `from in @statuses` on the same→same branch, and
+  `do_stage/7`'s write set provably excludes `content.claim`. `any → done` and `any → in_progress`
+  stay refused. **A genuinely independent SECOND reviewer is still owed before merge.**
+- `pds-w25-hetzner-nine-verb-receipt` → **PR #8219**, branch `…claimi-5-r`. **The verb list was DERIVED
+  and it is NINE, not the SIX in PDS-D344** — a slice scoped to the charter's number would have shipped
+  three unfixed lies, and `hzActionVerbsFromSource` re-does that parse at test time so a tenth verb
+  fails instead of shipping. Reviewer's independent mutation (revert to `hzDone(out, verb, srv, nil)`)
+  turns **15 assertions RED across 7 tests**, including the literal *"reboot printed BYTE-IDENTICAL
+  output whether the machine came up or stayed down"*. Shape C is honest mitigation, not a fix: reboot
+  still cannot prove a restart, because nothing in the API can.
+- `pds-w25-export-sidecar` → **PR #8220**, branch `…completenes-6-r`. `--out` writes `FILE.meta` only
+  after a clean completion, and clears a stale sidecar BEFORE the first byte, so **absence is the
+  truncation signal**. `--verify` fails closed on four shapes — reviewer's independent mutation into
+  the permissive `scripts/pds-pull-proof.sh` shape reds `TestRunExportVerifyRefusesMissingSidecar`.
+  Zero body-shape change.
+
+**WHAT STALLED, HONESTLY.**
+
+- **`pds-w25-round-bare` is 33 of 34, not 34.** `pds-w12-crown-climb-preconditions` is lifecycle
+  `blocked` and has NO in-place door: the shard probed BOTH live and got `illegal_transition: cannot
+  stage blocked -> blocked` from the verb and `validation_failed` from the raw door. `blocked → open`
+  WAS available and was **deliberately refused** — that is the forbidden stopgap. It was handed to
+  `pds-w25-round-terminal` with `disposition_owner` set and no fabricated term. This is the correct
+  outcome and the task says so at 5/8 criteria.
+- **`pds-w25-round-terminal` (15 rows) was not built — round 2, by design**, gated on the widening
+  MERGING *and DEPLOYING*. Those 15 rows ARE the census's entire remaining off-vocabulary floor
+  (8 × `OPEN`, 7 × `in-flight`), so the epic's done-condition cannot green until the deploy happens.
+- **The wave's own three ledger shards cannot be adjudicated in place today.** They sit
+  `in_progress`, and `in_progress → in_progress` is precisely the edge PR #8218 opens. The reviewer set
+  their `disposition_owner` (unfenced) and left the disposition for after the deploy rather than
+  resurrect them to `open`. **The wave demonstrated its own thesis on itself.**
+- **Guerrilla was intermittently 500ing under wave load.** Two builders could not file follow-up tasks
+  at all (7 attempts, `/v1/data/mutate` alternating 500 and client timeout, `/v1/capabilities` itself
+  500ing) while `/v1/tasks` stamp+pulse kept working. Filed as `pds-bl-census-read-path-500-under-load`.
+- **A stamp write of ~1.1 kB returned exit 0 with a normal envelope and DID NOT LAND** — read-back
+  showed `met:false, evidence:""`. A shorter re-issue landed. **That is a verb saying it did something
+  it did not do, inside the ledger writer itself** — the exact class this wave hunts, and it is
+  UNFILED because the create path was 500ing. It is the single most on-theme finding of the wave.
+
+**WHAT THE NEXT WAVE MUST TAKE.** (1) Merge #8218 and **watch it deploy to guerrilla**, then dispatch
+`pds-w25-round-terminal` — it is fully specified and it is the last 15 rows under the off-vocabulary
+clause. (2) File and fix the silent stamp non-land; a ledger writer that drops a write is worse than
+any receipt this wave repaired. (3) **Clause 4(a) can never green while a wave files residue** — every
+newly-filed row is born bare, and 19 of the 19 remaining bare rows are this wave's own residue. Either
+the round's close must adjudicate its own residue, or 4(a) needs a birth-grace rule; deciding which is
+a charter question, not a builder question. (4) `resize`, `attach-iso`, `rebuild` and `hzResDone` carry
+the same receipt lie one function away from the fix that just landed.
