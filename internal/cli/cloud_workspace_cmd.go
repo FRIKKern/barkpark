@@ -207,21 +207,69 @@ func runCloudWorkspaceExport(out *writer, g globals, args []string) int {
 		return exitOK
 	}
 
-	f, ferr := os.Create(outPath)
+	// Stream to a TEMP file beside the destination and rename only after the
+	// bytes check out. `os.Create(outPath)` truncated the destination BEFORE the
+	// first byte arrived, so a network drop mid-transfer destroyed the backup the
+	// export was supposed to replace — on the one verb whose entire promise is
+	// that a backup is safe (PDS-D369). Same directory means same filesystem,
+	// which is what makes the rename atomic.
+	destDir := filepath.Dir(outPath)
+	tmp, ferr := os.CreateTemp(destDir, "."+filepath.Base(outPath)+".part-*")
 	if ferr != nil {
-		return useError(out, "failed", "create output file: "+ferr.Error(), exitGeneric)
+		return useError(out, "failed", "create temp export file in "+destDir+": "+ferr.Error(), exitGeneric)
 	}
-	n, cerr := io.Copy(f, resp.Body)
-	if closeErr := f.Close(); closeErr != nil && cerr == nil {
+	tmpName := tmp.Name()
+	n, cerr := io.Copy(tmp, resp.Body)
+	if syncErr := tmp.Sync(); syncErr != nil && cerr == nil {
+		cerr = syncErr
+	}
+	if closeErr := tmp.Close(); closeErr != nil && cerr == nil {
 		cerr = closeErr
 	}
+
+	// What the server DECLARED, against what we actually received. resp.ContentLength
+	// is -1 whenever Go's transport transparently decompressed the body (it adds
+	// `Accept-Encoding: gzip` itself and then strips the length) or the response
+	// was chunked — on THIS route the controller ends in send_file/2 and the stack
+	// refuses to gzip application/x-tar, so a real length arrives today. But
+	// PDS-D204 already moved this route send_resp -> send_file once; a move back
+	// re-arms the -1 case, and a naive `n != resp.ContentLength` would then fail
+	// EVERY successful export. So -1 is unverified-but-fine, PERMANENTLY, and a
+	// real declared length that disagrees is a NAMED failure.
+	declared := resp.ContentLength
+	verified := declared >= 0 && n == declared
+	if declared >= 0 && n != declared {
+		os.Remove(tmpName)
+		why := fmt.Sprintf("export size mismatch: server declared %d bytes, received %d", declared, n)
+		if cerr != nil {
+			why += " (" + cerr.Error() + ")"
+		}
+		why += "; " + exportDest(outPath) + " left unchanged"
+		return useError(out, "failed", why, exitGeneric)
+	}
 	if cerr != nil {
-		return useError(out, "failed", "write export file: "+cerr.Error(), exitGeneric)
+		os.Remove(tmpName)
+		return useError(out, "failed", "write export file: "+cerr.Error()+"; "+exportDest(outPath)+" left unchanged", exitGeneric)
+	}
+	if rerr := os.Rename(tmpName, outPath); rerr != nil {
+		os.Remove(tmpName)
+		return useError(out, "failed", "move export into place: "+rerr.Error(), exitGeneric)
 	}
 
-	payload := map[string]any{"workspace": slug, "file": outPath, "bytes": n}
+	payload := map[string]any{"workspace": slug, "file": outPath, "bytes": n, "verified": verified}
+	if declared >= 0 {
+		payload["declared_bytes"] = declared
+	}
 	if !out.machineOut() {
 		out.outf("Exported workspace %s → %s (%s)", slug, outPath, humanBytes(float64(n)))
+	}
+	if verified {
+		out.progressf("  %s — %d bytes fetched, size-verified against the server's declared length", outPath, n)
+	} else {
+		// NOT a failure and NOT a pass — the same honest third state the blob
+		// sidecar reports for a NULL media_files.size (fetchWorkspaceBlobs). The
+		// transfer stands; the verification does not.
+		out.progressf("  %s — declared size absent; %d bytes fetched, unverified", outPath, n)
 	}
 
 	// Blob sidecar: DB rows are in the tar, the bytes are not. Run it after the
