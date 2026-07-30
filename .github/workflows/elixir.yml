@@ -79,10 +79,12 @@ jobs:
     # THE DISPATCHER. No `if:`, no matrix, no path filter — it runs on every
     # event, always, so the jobs behind it always have a defined answer.
     #
-    # It FAILS rather than skips on an empty diff or an unresolvable base. That
-    # polarity is the whole point: a dispatcher that "couldn't tell" and emitted
-    # all-false would skip the entire Elixir suite and publish a green required
-    # context. Failure when it cannot tell.
+    # It never emits `false` when it cannot tell. On an unresolvable base, a
+    # base with no common ancestor, or an uninterpretable verdict it FAILS; on
+    # an empty diff — rare but legal — it dispatches TRUE. That polarity is the
+    # whole point: a dispatcher that "couldn't tell" and emitted all-false would
+    # skip the entire Elixir suite and publish a green required context.
+    # Never a silent false: fail, or run everything.
     name: Dispatch (changed-path sets)
     runs-on: ubuntu-latest
     outputs:
@@ -144,14 +146,50 @@ jobs:
             exit 1
           fi
 
+          # A base with NO common ancestor makes the three-dot diff below exit
+          # 128 with a raw `fatal: … no merge base` and ZERO annotation: under
+          # `set -euo pipefail` the assignment dies and the author sees a red
+          # dispatcher with no guidance. Name the condition instead. There is
+          # deliberately NO two-dot fallback — measured, `base HEAD` sweeps in
+          # the base's ENTIRE content and dispatches true for the wrong reason,
+          # which is exactly the "verdict from an unknown base" this job refuses.
+          if ! git merge-base "$base" HEAD >/dev/null 2>&1; then
+            echo "::error::dispatcher: PR base ${base} and HEAD share NO common ancestor, so the three-dot diff is undefined. Refusing to emit a path verdict — and refusing a two-dot fallback, which would sweep in the base's entire content. Rebase the branch onto its base branch."
+            exit 1
+          fi
+
           echo "diff base: ${base} (three-dot against HEAD)"
-          changed="$(git diff --name-only "${base}...HEAD")"
+          # `-z` + `--no-renames` are BOTH load-bearing; either alone certifies
+          # a hole (measured, wave 10). `Elixir gate` is a REGISTERED required
+          # context, so this line is the one that decides whether the suite runs
+          # at all:
+          #   * plain `--name-only` QUOTES and octal-escapes any path holding a
+          #     non-ASCII byte, and keeps quoting `"`, `\` and newline even under
+          #     core.quotepath=false — `api/lib/we"ird.ex` prints as
+          #     `"api/lib/we\"ird.ex"`, the anchored ERE below misses it, and the
+          #     ENTIRE suite is skipped under a green required context. `-z`
+          #     emits the raw bytes, which cannot be quoted; `tr` restores the
+          #     line format the matcher reads.
+          #   * rename detection (default-on since git 2.9) prints only the
+          #     DESTINATION, so `git mv api/lib/a.ex docs/a.ex` yields
+          #     compile=false test=false while compiled code just left the tree.
+          #     `--no-renames` prints both sides.
+          changed="$(git -c core.quotepath=false diff -z --name-only --no-renames "${base}...HEAD" | tr '\0' '\n')"
           echo "changed files:"
           printf '%s\n' "$changed"
 
           if [ -z "$changed" ]; then
-            echo "::error::dispatcher: the changed-file set is EMPTY. That is impossible for a real PR, so the diff — not the PR — is wrong. Failing instead of skipping the suite."
-            exit 1
+            # RARE BUT LEGAL: a revert pair inside one branch, or a branch-sync
+            # PR, nets to nothing against the base. The old polarity failed here
+            # — a permanently red required context on a legal PR, with no
+            # self-service fix for the author. Run everything instead: expensive,
+            # never wrong. Never `false`, which is the only truly unsafe answer.
+            echo "::warning::dispatcher: the changed-file set is EMPTY (a revert pair or a branch-sync PR nets to nothing against ${base}). Dispatching compile=true test=true and running the WHOLE suite rather than skipping it — a skip here would green a required context nothing measured. Cost, and it is real: the full Elixir suite, measured 9m31s-16m29s."
+            {
+              echo "compile=true"
+              echo "test=true"
+            } >> "$GITHUB_OUTPUT"
+            exit 0
           fi
 
           # The path sets are declared ONCE, in the ratchet that proves them.
