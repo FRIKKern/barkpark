@@ -193,7 +193,9 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/builder/deployments/:id/transition worker fenced status update
       POST    /v1/builder/deployments/:id/console worker append a live build-console line {line} (capped, append-only) → SSE (gh-5)
       POST    /v1/builder/deployments/:id/detail  worker set the live sub-caption {detail} (latest-wins) → SSE (dwb-19)
+      GET     /v1/builder/sites/:id/env worker decrypted site env for build-time injection (nixpacks --env)
       GET     /v1/agent/pending    agent     deployments in pushing for this box
+      GET     /v1/agent/sites/:id/env agent  decrypted site env for the running container (own box only)
       POST    /v1/agent/deployments/claim agent atomic pickup of the next pushing
       POST    /v1/agent/deployments/:id/transition agent fenced live transition
       *       (anything else)      —         404 JSON
@@ -7028,6 +7030,34 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # GET /v1/builder/sites/:id/env → 200 {env: {...}} | 404 | 500.
+  #
+  # The DECRYPTED site env for the off-box builder: nixpacks receives each pair
+  # as `--env KEY=VAL` so build-time prerendering (e.g. a Next.js SSG page
+  # reading BARKPARK_READ_TOKEN) sees the values the user set via
+  # `bp sites env set`. A site with no blob answers `{env: {}}` — the build
+  # proceeds env-less rather than failing.
+  #
+  # WORKER-gated, same reasoning as /claim above: the builder is a faceless
+  # fleet principal that builds any team's site, so the route must be reachable
+  # by the shared WORKER_TOKEN only — a user session or agent token → 401
+  # (require_worker does its own constant-time compare and fails closed when no
+  # worker token is configured). Reveals are not audit-logged — matching the
+  # existing secret-reveal surfaces (/v1/barkparks/:id/credentials, /bootstrap),
+  # which record writes (`site.env_changed`) but not reads.
+  get "/v1/builder/sites/:id/env" do
+    conn = Auth.require_worker(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case Registry.get_site(conn.path_params["id"]) do
+        %Registry.Site{} = site -> site_env_response(conn, site)
+        _ -> json(conn, 404, %{error: "not_found"})
+      end
+    end
+  end
+
   ## Agent runtime routes (P3 / Move A finish) — agent-authed via require_agent.
   ## The on-box runtime executor calls these to walk a Deployment from `pushing`
   ## (set by the builder) → `live` (running container behind Caddy) or `failed`
@@ -7184,6 +7214,36 @@ defmodule BarkparkCloud.Web.Router do
                   json(conn, 422, %{error: "invalid", details: errors(cs)})
               end
           end
+      end
+    end
+  end
+
+  # GET /v1/agent/sites/:id/env → 200 {env: {...}} | 404 | 500.
+  #
+  # The DECRYPTED site env for the ON-BOX runtime executor: each pair becomes a
+  # `-e KEY=VAL` on the `docker run` so the live container (not just the build)
+  # sees the values from `bp sites env set`. A site with no blob answers
+  # `{env: {}}`.
+  #
+  # AGENT-gated + BOX-SCOPED, fail-closed: the site must belong to the agent's
+  # current_barkpark — a site on another box (or nonexistent / non-UUID) is the
+  # SAME 404, indistinguishable from missing (no existence leak), mirroring
+  # agent_owns_deployment?/2 on the transition route above. Reveals are not
+  # audit-logged (see the builder twin above for why).
+  get "/v1/agent/sites/:id/env" do
+    conn = Auth.require_agent(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      bp = conn.assigns.current_barkpark
+
+      case Registry.get_site(conn.path_params["id"]) do
+        %Registry.Site{barkpark_id: bp_id} = site when bp_id == bp.id ->
+          site_env_response(conn, site)
+
+        _ ->
+          json(conn, 404, %{error: "not_found"})
       end
     end
   end
@@ -9986,6 +10046,20 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   defp agent_owns_deployment?(_, _), do: false
+
+  # The shared tail of the two site-env read routes (builder: worker-gated;
+  # agent: box-scoped) — decrypt the blob and answer it, ONCE the caller has
+  # already authenticated and scoped the site. `{:ok, %{}}` when no blob was
+  # ever set (the fleet proceeds env-less); `:error` (tampered/undecryptable
+  # ciphertext, fail-closed in Vault.decrypt) is a 500, never a silent `{}` —
+  # building a site without the env it was configured with would ship a broken
+  # deploy that LOOKS healthy.
+  defp site_env_response(conn, site) do
+    case Registry.reveal_site_env(site) do
+      {:ok, env} -> json(conn, 200, %{env: env})
+      :error -> json(conn, 500, %{error: "decrypt_failed"})
+    end
+  end
 
   defp maybe_put(map, _key, nil), do: map
   defp maybe_put(map, key, value), do: Map.put(map, key, value)

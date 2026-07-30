@@ -627,9 +627,11 @@ func renderDeploymentsTable(out *writer, ds []Deployment) {
 // runSitesEnv handles `bp sites env <verb> <site> …`. Today the only verb is
 // `set` — the control plane replaces the whole env blob on every write, so an
 // incremental "merge K=V into the existing env" needs the CLI to know the prior
-// state. There is no GET /env endpoint (the encrypted blob never leaves the
-// server), so this command treats KEY=VAL... as the full desired env: it is
-// NOT a merge with existing values, and the help text says so loudly.
+// state. There is no USER-facing GET /env endpoint (the decrypted blob is
+// served only to the fleet — the builder injects it into the nixpacks build,
+// the box agent into the docker run; site-env-injection), so this command
+// treats KEY=VAL... as the full desired env: it is NOT a merge with existing
+// values, and the help text says so loudly.
 func runSitesEnv(out *writer, args []string) int {
 	for _, a := range args {
 		if a == "-h" || a == "--help" {
@@ -947,9 +949,13 @@ WHAT IT DOES
   drives the Barkpark Cloud control plane's hosted-site surface — a site is a
   website running co-located with a Barkpark instance. Requires 'bp login'.
 
-  'bp sites env set' REPLACES the whole env blob (the encrypted blob never
-  leaves the server, so there is no per-key merge); list every key you want to
-  ship.
+  'bp sites env set' REPLACES the whole env blob (the blob is stored encrypted
+  and never echoed back, so there is no per-key merge); list every key you
+  want to ship. The env is injected on the NEXT deploy, in both places that
+  matter: the builder passes each pair to the nixpacks build (so build-time
+  prerendering sees it) and the box starts the container with the same pairs
+  (so the running site sees it). Changing env alone changes nothing until you
+  redeploy.
 
   'bp sites github connect' returns the webhook URL + a webhook secret you
   paste into GitHub's "Add webhook" form (Settings → Webhooks → Add webhook,

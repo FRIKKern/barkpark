@@ -23,6 +23,7 @@ import (
 	"io"
 	"net/http"
 	"os/exec"
+	"sort"
 	"strings"
 	"time"
 
@@ -40,6 +41,7 @@ const (
 	pendingPath        = "/v1/agent/pending"
 	claimPath          = "/v1/agent/deployments/claim"
 	transitionPathFmt  = "/v1/agent/deployments/%s/transition"
+	siteEnvPathFmt     = "/v1/agent/sites/%s/env"
 	defaultPortMin     = 7001
 	defaultPortMax     = 7999
 	containerInnerPort = 3000
@@ -398,23 +400,49 @@ func (e *Executor) executeDeploy(
 		return "", "", nil, 0, 0, fmt.Errorf("port allocate: %w", err)
 	}
 
-	// 3. Run the new container.
+	// 3. Fetch the site's env (site-env-injection): the DECRYPTED blob the user
+	// set via `bp sites env set`, injected as `-e KEY=VAL` pairs so the RUNNING
+	// container (not just the build) sees it. A missing blob — or a control
+	// plane predating the route (404 either way) — runs env-less; any other
+	// error fails the deploy rather than silently starting a container without
+	// the env its site was configured with.
+	//
+	// Leak posture: `-e` pairs over an --env-file. The values land in the
+	// container's config either way (`docker inspect`, root-only), the runner
+	// exec's docker DIRECTLY (no shell, output to devNull — nothing reaches the
+	// journal or any log writer), and an on-disk env-file would add a real
+	// leak: a crash between write and cleanup strands the secrets in a file
+	// forever. The argv is visible in /proc only for the docker CLI's lifetime
+	// on a single-tenant root-owned box.
+	env, err := e.fetchSiteEnv(ctx, d.SiteID)
+	if err != nil {
+		return "", "", nil, 0, 0, fmt.Errorf("site env: %w", err)
+	}
+
+	// 4. Run the new container. Site env rides FIRST and the platform pairs
+	// (HOSTNAME/PORT) LAST — with docker the last `-e` wins, so a site env that
+	// names PORT can never repoint the container off the port Caddy proxies to.
 	containerName := fmt.Sprintf("site-%s-%s", slug, short(d.ID))
 	args := []string{
 		"run", "-d",
 		"--name", containerName,
 		"--restart", "unless-stopped",
 		"--memory=512m", "--cpus=1",
+	}
+	for _, k := range sortedKeys(env) {
+		args = append(args, "-e", k+"="+env[k])
+	}
+	args = append(args,
 		"-e", fmt.Sprintf("HOSTNAME=0.0.0.0"),
 		"-e", fmt.Sprintf("PORT=%d", containerInnerPort),
 		"-p", fmt.Sprintf("127.0.0.1:%d:%d", port, containerInnerPort),
 		d.ImageTag,
-	}
+	)
 	if err := e.runner().Run(ctx, devNull{}, "docker", args...); err != nil {
 		return "", "", nil, 0, 0, fmt.Errorf("docker run: %w", err)
 	}
 
-	// 4. Health-check the container until /` answers (any non-5xx).
+	// 5. Health-check the container until /` answers (any non-5xx).
 	if err := e.healthCheck(ctx, port); err != nil {
 		// Tear down the failed container before bailing.
 		_ = e.runner().Run(ctx, devNull{}, "docker", "rm", "-f", containerName)
@@ -422,6 +450,56 @@ func (e *Executor) executeDeploy(
 	}
 
 	return site, slug, domains, port, livePort, nil
+}
+
+// fetchSiteEnv GETs the site's decrypted env from the agent surface of the
+// control plane (box-scoped by the agent token). Returns:
+//   - (map, nil) on 200 — the KEY=VAL pairs to inject (`{}` when no blob set).
+//   - (nil, nil) on 404 — tolerated: a control plane predating the route (or a
+//     site racing a delete) must not brick every deploy; it runs env-less.
+//   - (nil, err) on anything else — the caller fails the deploy rather than
+//     silently running without the env the site was configured with.
+func (e *Executor) fetchSiteEnv(ctx context.Context, siteID string) (map[string]string, error) {
+	url := strings.TrimRight(e.ControlURL, "/") + fmt.Sprintf(siteEnvPathFmt, siteID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	e.attachAuth(req)
+
+	resp, err := e.http().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var out struct {
+			Env map[string]string `json:"env"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return nil, fmt.Errorf("decode site env: %w", err)
+		}
+		return out.Env, nil
+
+	case http.StatusNotFound:
+		return nil, nil
+
+	default:
+		return nil, statusError(resp)
+	}
+}
+
+// sortedKeys returns env's keys sorted — a deterministic `-e` order, so two
+// deploys of the same site produce identical docker invocations.
+func sortedKeys(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // resolveSite returns (slug, domains, livePort) for the deployment. The

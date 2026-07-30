@@ -30,6 +30,12 @@ type scriptedCP struct {
 	consoleResp    int      // status for console posts; 0 → 200
 	detailLines    []string // dwb-19: the live sub-captions posted to /detail
 	detailResp     int      // status for detail posts; 0 → 200
+
+	// site-env-injection: the env GET /v1/builder/sites/:id/env answers with.
+	// nil siteEnv + siteEnvCode 0 → 404, emulating a control plane that
+	// predates the route (the build must proceed env-less).
+	siteEnv     map[string]string
+	siteEnvCode int // 0 → 404 when siteEnv is nil, else 200
 }
 
 type claimReply struct {
@@ -74,6 +80,32 @@ func (s *scriptedCP) handler() http.Handler {
 			return
 		}
 		w.WriteHeader(reply.status)
+	})
+
+	mux.HandleFunc("/v1/builder/sites/", func(w http.ResponseWriter, r *http.Request) {
+		if !s.expectAuth(w, r) {
+			return
+		}
+		if !strings.HasSuffix(r.URL.Path, "/env") {
+			http.NotFound(w, r)
+			return
+		}
+
+		s.mu.Lock()
+		env := s.siteEnv
+		code := s.siteEnvCode
+		s.mu.Unlock()
+
+		switch {
+		case code != 0 && code != http.StatusOK:
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(`{"error":"decrypt_failed"}`))
+		case env == nil:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not_found"}`))
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"env": env})
+		}
 	})
 
 	mux.HandleFunc("/v1/builder/deployments/", func(w http.ResponseWriter, r *http.Request) {
@@ -779,6 +811,170 @@ func TestBuildConsole_LatchesOffAfterRepeatedFailures(t *testing.T) {
 	}
 	if got < maxConsoleFails {
 		t.Errorf("latch engaged too early: only %d POSTs (want >= %d)", got, maxConsoleFails)
+	}
+}
+
+// --- site-env-injection ------------------------------------------------------
+
+// quietRunner records calls WITHOUT echoing argv into the writer — the
+// env-injection tests assert secret values never reach the log/console, and the
+// default scriptedRunner's "[fake] <argv>" echo would plant them there itself.
+type quietRunner struct {
+	calls []runCall
+}
+
+func (r *quietRunner) Run(ctx context.Context, w io.Writer, name string, args ...string) error {
+	r.calls = append(r.calls, runCall{name: name, args: append([]string(nil), args...)})
+	return nil
+}
+
+func envBuilder(srv *httptest.Server, runner CommandRunner) *Builder {
+	return &Builder{
+		ControlURL: srv.URL,
+		Token:      "test-token",
+		WorkerID:   "w-1",
+		CacheDir:   "/tmp/p2-cache",
+		LogDir:     "/tmp/p2-logs",
+		HTTPClient: srv.Client(),
+		Runner:     runner,
+	}
+}
+
+var envClaim = claimReply{
+	deployment: Deployment{
+		ID:          "d-env12345678",
+		SiteID:      "s-env87654321",
+		Status:      "building",
+		GitRef:      "main",
+		ArtifactURL: "file:///tmp/p2-fixture",
+	},
+	epoch: 1,
+}
+
+// The builder fetches the site env and hands every pair to nixpacks as
+// `--env KEY=VAL`, sorted by key (deterministic invocation) — and the VALUES
+// never reach the durable build log or the live console (key names only).
+func TestRunOnce_SiteEnv_PassesNixpacksEnvFlags(t *testing.T) {
+	cp := newScriptedCP(t)
+	cp.claims = []claimReply{envClaim}
+	cp.siteEnv = map[string]string{
+		"BARKPARK_READ_TOKEN": "tok-secret-value",
+		"API_BASE":            "https://api.example.com",
+	}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	logBuf, restore := swapInMemoryLogs()
+	defer restore()
+
+	runner := &quietRunner{}
+	b := envBuilder(srv, runner)
+
+	had, err := b.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce err: %v", err)
+	}
+	if !had {
+		t.Fatalf("expected had=true")
+	}
+
+	if len(runner.calls) == 0 {
+		t.Fatal("no runner calls recorded")
+	}
+	joined := strings.Join(runner.calls[0].args, " ")
+	// Sorted by key: API_BASE before BARKPARK_READ_TOKEN.
+	if !strings.Contains(joined,
+		"--env API_BASE=https://api.example.com --env BARKPARK_READ_TOKEN=tok-secret-value") {
+		t.Errorf("nixpacks args missing sorted --env pairs: %q", joined)
+	}
+
+	// The deployment still reaches pushing.
+	if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "pushing" {
+		t.Fatalf("expected one pushing transition, got %+v", cp.transitions)
+	}
+
+	// Values NEVER hit the durable log or the console; key names may.
+	for name, text := range map[string]string{
+		"build log": logBuf.String(),
+		"console":   cp.consoleJoined(),
+		"captions":  cp.detailJoined(),
+	} {
+		if strings.Contains(text, "tok-secret-value") {
+			t.Errorf("secret value leaked into the %s:\n%s", name, text)
+		}
+	}
+	if !strings.Contains(cp.consoleJoined(), "env: injecting 2 site env var(s)") {
+		t.Errorf("console should narrate the key COUNT: %q", cp.consoleJoined())
+	}
+	if !strings.Contains(logBuf.String(), "site env keys=API_BASE,BARKPARK_READ_TOKEN") {
+		t.Errorf("build log should carry key NAMES only: %q", logBuf.String())
+	}
+}
+
+// An empty blob (200 {env:{}}) and a control plane predating the route (404)
+// both build env-less: no --env flag at all, and the build still lands pushing.
+func TestRunOnce_SiteEnvEmptyOr404_BuildsEnvless(t *testing.T) {
+	cases := map[string]func(*scriptedCP){
+		"empty blob": func(cp *scriptedCP) { cp.siteEnv = map[string]string{} },
+		"route 404":  func(cp *scriptedCP) {}, // nil siteEnv → 404
+	}
+	for name, arrange := range cases {
+		t.Run(name, func(t *testing.T) {
+			cp := newScriptedCP(t)
+			cp.claims = []claimReply{envClaim}
+			arrange(cp)
+			srv := httptest.NewServer(cp.handler())
+			defer srv.Close()
+
+			_, restore := swapInMemoryLogs()
+			defer restore()
+
+			runner := &quietRunner{}
+			b := envBuilder(srv, runner)
+
+			if _, err := b.RunOnce(context.Background()); err != nil {
+				t.Fatalf("RunOnce err: %v", err)
+			}
+			for _, c := range runner.calls {
+				for _, a := range c.args {
+					if a == "--env" {
+						t.Errorf("env-less build must pass no --env flag: %v", c.args)
+					}
+				}
+			}
+			if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "pushing" {
+				t.Fatalf("expected one pushing transition, got %+v", cp.transitions)
+			}
+		})
+	}
+}
+
+// A 500 from the env route FAILS the build (transition failed, reason names the
+// env fetch) — never a silent env-less build of a site that configured env.
+func TestRunOnce_SiteEnvFetch500_FailsBuild(t *testing.T) {
+	cp := newScriptedCP(t)
+	cp.claims = []claimReply{envClaim}
+	cp.siteEnvCode = http.StatusInternalServerError
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	_, restore := swapInMemoryLogs()
+	defer restore()
+
+	b := envBuilder(srv, &quietRunner{})
+
+	had, err := b.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce err: %v", err)
+	}
+	if !had {
+		t.Fatalf("expected had=true")
+	}
+	if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "failed" {
+		t.Fatalf("expected one failed transition, got %+v", cp.transitions)
+	}
+	if reason, _ := cp.transitions[0]["failure_reason"].(string); !strings.Contains(reason, "site env") {
+		t.Errorf("failure_reason should name the env fetch: %q", reason)
 	}
 }
 

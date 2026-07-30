@@ -20,6 +20,7 @@ import (
 	"net/http"
 	"os/exec"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 )
@@ -32,6 +33,7 @@ const DefaultInterval = 5 * time.Second
 const (
 	claimPath      = "/v1/builder/claim"
 	transitionPath = "/v1/builder/deployments/%s/transition"
+	siteEnvPathFmt = "/v1/builder/sites/%s/env"
 )
 
 // Builder is the long-running build worker. WorkerID identifies this instance
@@ -306,10 +308,31 @@ func (b *Builder) build(ctx context.Context, d *claimedDeployment, con *buildCon
 
 	runner := b.runner()
 
-	// nixpacks build <source> --platform <plat> --name <tag>
+	// Site env (site-env-injection): fetch the DECRYPTED env the user set via
+	// `bp sites env set` and hand each pair to nixpacks as `--env KEY=VAL`, so
+	// build-time prerendering (a Next.js SSG page reading BARKPARK_READ_TOKEN)
+	// sees the same values the running container will. A missing blob (or a
+	// control plane predating the route — 404 either way) builds env-less; a
+	// transport/500 error FAILS the build instead of silently shipping a site
+	// without the env it was configured with. Only KEY NAMES are narrated /
+	// logged — the values never touch the build log or the live console.
+	env, err := b.fetchSiteEnv(ctx, d.SiteID)
+	if err != nil {
+		return "", logPath, fmt.Errorf("site env: %w", err)
+	}
+	envKeys := sortedKeys(env)
+
+	// nixpacks build <source> --platform <plat> --name <tag> [--env KEY=VAL ...]
 	args := []string{"build", source, "--name", imageTag}
 	if b.Platform != "" {
 		args = append(args, "--platform", b.Platform)
+	}
+	for _, k := range envKeys {
+		args = append(args, "--env", k+"="+env[k])
+	}
+	if len(envKeys) > 0 {
+		con.logf("env: injecting %d site env var(s): %s", len(envKeys), strings.Join(envKeys, ", "))
+		fmt.Fprintf(logFile, "barkpark-builder site env keys=%s (values withheld)\n", strings.Join(envKeys, ","))
 	}
 
 	con.caption("Building your site…")
@@ -378,6 +401,55 @@ func (b *Builder) resolveArtifact(url string) (string, error) {
 	default:
 		return "", fmt.Errorf("unsupported artifact scheme: %q (only file:// is implemented)", url)
 	}
+}
+
+// fetchSiteEnv GETs the site's decrypted env from the control plane. Returns:
+//   - (map, nil) on 200 — the KEY=VAL pairs to inject (`{}` when no blob set).
+//   - (nil, nil) on 404 — tolerated: a control plane predating the route (or a
+//     site row racing a delete) must not brick every build; it proceeds env-less.
+//   - (nil, err) on anything else — the caller fails the build rather than
+//     silently building without the env the site was configured with.
+func (b *Builder) fetchSiteEnv(ctx context.Context, siteID string) (map[string]string, error) {
+	url := strings.TrimRight(b.ControlURL, "/") + fmt.Sprintf(siteEnvPathFmt, siteID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return nil, err
+	}
+	b.attachAuth(req)
+
+	resp, err := b.http().Do(req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusOK:
+		var out struct {
+			Env map[string]string `json:"env"`
+		}
+		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
+			return nil, fmt.Errorf("decode site env: %w", err)
+		}
+		return out.Env, nil
+
+	case http.StatusNotFound:
+		return nil, nil
+
+	default:
+		return nil, statusError(resp)
+	}
+}
+
+// sortedKeys returns env's keys sorted — a deterministic flag order, so two
+// builds of the same site produce identical nixpacks invocations.
+func sortedKeys(env map[string]string) []string {
+	keys := make([]string, 0, len(env))
+	for k := range env {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	return keys
 }
 
 // http returns the injected client, or a Timeout-bearing fallback (30s) so a
