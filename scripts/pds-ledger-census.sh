@@ -82,9 +82,8 @@
 #
 # CASE IS PART OF THE VALUE. Dispositions are counted CASE-EXACT, so `OPEN`
 # (67 rows on 2026-07-30) and `open` (44) are two different things and the
-# split is visible rather than averaged away. `OPEN` is the ratified canonical
-# form and lives in one named constant (CANONICAL_OPEN) — change it there,
-# nowhere else.
+# split is visible rather than averaged away. `open` is the canonical form and
+# lives in one named constant (CANONICAL_OPEN) — change it there, nowhere else.
 #
 # READ-ONLY. This instrument never writes, never creates, never publishes.
 # Charter PDS-D334 (a bare patch writes the DRAFT and the published route
@@ -140,11 +139,22 @@ from datetime import datetime, timezone
 # The PDS epic root. Every count in this census is relative to it.
 DEFAULT_ROOT = "task-2ac1f95237c4a8e5"
 
-# The canonical case for the OPEN disposition, ratified by the wave. `open`
-# (44 rows on 2026-07-30) is off-vocabulary against it. ONE constant: if the
-# round ratifies the other case, this line is the whole change.
-CANONICAL_OPEN = "OPEN"
-DISPOSITION_VOCABULARY = (CANONICAL_OPEN, "CLOSED", "PARKED")
+# The canonical case for the OPEN disposition. `OPEN` (67 rows on 2026-07-30)
+# is off-vocabulary against it. ONE constant: if a later round ratifies the
+# other case, this line is the whole change.
+#
+# WAVE-24 REVIEW CORRECTION (2026-07-30). This was `OPEN` as the wave brief
+# instructed. The brief predates the same wave's D337 verb: `Tasks.Stage` now
+# owns the triple and NORMALISES the term with String.trim/1 + String.downcase/1
+# (`stage.ex` @dispositions ~w(open parked closed)), and it is the ONLY
+# sanctioned writer. An uppercase canon is therefore UNREACHABLE by the only
+# door that can write it — every governed row would count as off-vocabulary and
+# `--assert-round-done` could never pass, on any board, forever. The writer is
+# the normaliser, so the census follows the writer. Lowercase also matches the
+# 27 `parked` template exemplars (PDS-D332) and the `lifecycle_status` idiom,
+# so the round rewrites 67 rows rather than 71.
+CANONICAL_OPEN = "open"
+DISPOSITION_VOCABULARY = (CANONICAL_OPEN, "closed", "parked")
 
 # lifecycle_status values that mean the row is finished. Everything else --
 # including `blocked`, which appears only in the closure and never at level 1 --
@@ -515,7 +525,7 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
         out.append("  %-16s %5d" % (key, count))
     out.append("")
     out.append("disposition (closure, CASE-EXACT -- `%s` and `%s` are different values)"
-               % (CANONICAL_OPEN, CANONICAL_OPEN.lower()))
+               % (CANONICAL_OPEN, CANONICAL_OPEN.upper()))
     for key, count in sorted(report["dispositions"].items(), key=lambda kv: (-kv[1], kv[0])):
         out.append("  %-16s %5d" % (key, count))
     out.append("")
