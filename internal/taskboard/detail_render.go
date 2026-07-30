@@ -197,6 +197,11 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 	b.emitStrip("blocked", d.BlockedReason, warnStyle, width)
 	b.emitStrip("closed", d.CloseReason, dimStyle, width)
 	b.emitStrip("resolution", d.ResolutionNote, dimStyle, width)
+	b.emitStrip(dispositionLabel(d.Disposition), d.DispositionReason, dispositionStyle(d.Disposition), width)
+	// The trigger sits directly under the reason it qualifies. The server
+	// refuses a park without one, so a parked row showing a reason and no
+	// trigger means the row predates that refusal — worth seeing, not hiding.
+	b.emitStrip("reopens when", d.ReopenTrigger, dispositionStyle(d.Disposition), width)
 	b.emitCodeRefs(d, width)
 	if d.TwinOf != "" {
 		partner := d.TwinTitle
@@ -663,6 +668,26 @@ func (b *detailBuilder) emitStrip(label, text string, style lipgloss.Style, widt
 	for _, w := range detailWrap(label+" — "+text, width-2) {
 		b.add(style.Render("▍ " + w))
 	}
+}
+
+// dispositionLabel names the durable-adjudication strip after the disposition
+// itself, so a row disposed OPEN is never mislabelled "parked". The label stays
+// prefixed with "disposition" because a bare "closed" would be indistinguishable
+// from the close_reason strip directly above it.
+func dispositionLabel(disposition string) string {
+	if d := strings.ToLower(strings.TrimSpace(disposition)); d != "" {
+		return "disposition " + d
+	}
+	return "disposition"
+}
+
+// dispositionStyle tints a PARKED row's reason as a warning — a park is a
+// deferral its owner should be able to spot — and every other disposition dim.
+func dispositionStyle(disposition string) lipgloss.Style {
+	if strings.EqualFold(strings.TrimSpace(disposition), "parked") {
+		return warnStyle
+	}
+	return dimStyle
 }
 
 // emitCodeRefs renders the dim code_refs list, capped honestly.
