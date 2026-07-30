@@ -388,6 +388,16 @@ jobs:
       - name: Studio literal-color gate (blocking)
         run: bash scripts/studio-literal-check.sh
 
+      # Durable tripwire (spd-w19; mirrors the Go + link-gate self-tests): prove
+      # the gate actually REDs on a planted literal — a temp-dir self-test that
+      # plants #ff0000, asserts the REAL scanner exits non-zero naming file:line,
+      # then asserts clean + commented-hex files pass, an HTML numeric character
+      # reference (`&#160;`) passes, and a genuine literal SHARING an entity line
+      # still REDs. Plants nothing in the tree; guards the detector against a
+      # future edit that silently blinds LITERAL or the comment strip.
+      - name: Studio literal-color gate self-test (tripwire)
+        run: bash scripts/studio-literal-check.sh --selftest
+
       # Studio link/path gate (bp-studio-deep-link W1). Every Studio destination
       # has ONE canonical path, built through BarkparkWeb.Studio.StudioLive.Paths.
       # A hand-built, interpolated scope/dataset Studio URL literal anywhere in
