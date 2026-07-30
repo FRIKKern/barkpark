@@ -36,7 +36,6 @@ import (
 	"github.com/FRIKKern/barkpark/internal/cloudclient"
 )
 
-
 // uuidLike matches the rough shape of a control-plane id (UUID-ish). It is the
 // cheap "is this an id or a slug?" sniff `bp sites` uses before falling back to
 // a ListSites slug lookup. A real UUID matches; a slug like "blog" doesn't.
