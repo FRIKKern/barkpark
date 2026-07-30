@@ -7,28 +7,56 @@ defmodule BarkparkWeb.Plugs.PublicRead do
   Three outcomes:
 
     * no token → pass-through (anonymous handling applies downstream)
-    * token whose permissions list is anything *other than* exactly
-      `["public-read"]` → pass-through (read/write/admin unaffected)
-    * token whose permissions list is exactly `["public-read"]` → strict
-      enforcement:
+    * token whose permissions do NOT carry `"public-read"` → pass-through
+      (read/write/admin unaffected)
+    * token whose permissions CARRY `"public-read"` → strict enforcement:
 
         - allow `GET /v1/data/query/:dataset/:type`
         - allow `GET /v1/data/doc/:dataset/:type/:doc_id`
         - reject `?perspective` not in `[nil, "", "published"]` with
-          `403 {"error": "perspective not allowed"}`
+          `403 forbidden` / "perspective not allowed"
         - reject types whose schema visibility is not `"public"` with
-          `404 {"error": "not found"}`
-        - reject every other route/method with
-          `403 {"error": "forbidden"}`
+          `404 not_found`
+        - reject every other route/method with `403 forbidden`
 
   Default posture is DENY on ambiguity.
 
-  ## Both route shapes
+  ## MEMBERSHIP, never list equality
 
-  The clamp rides BOTH the flat read scope (`:api_grant_read`, paths like
-  `/v1/data/query/:dataset/:type`) AND the tenancy-scoped mirror
-  (`:shared_docs_api`, paths like `/w/:ws/p/:project/v1/data/query/...`). The
-  scoped prefix `["w", ws, "p", project]` is stripped before matching so a
+  The gate is `"public-read" in permissions`, mirroring
+  `BarkparkWeb.AnonPerspective.anon_pinned?/1` — NOT `== ["public-read"]`.
+  `BarkparkWeb.TokenController` mints from the allowlist `~w(public-read read)`
+  over a PUBLIC route, so a caller can ask for `["public-read", "read"]` and a
+  list-equality gate would let that token walk straight past the clamp on every
+  pipeline. Equality was the bypass; membership closes it.
+
+  ## Error envelope
+
+  Denials go through `BarkparkWeb.ErrorResponse.emit/3`, i.e. the canonical
+  `%{"error" => %{"code", "message", "hint"?, "request_id"?}}` body every other
+  auth plug emits. The plug used to hand-build a FLAT `%{"error" => "forbidden"}`
+  string, which was survivable while it governed two read routes and is not now
+  that it governs the whole `:require_token` surface — a client keying on
+  `error.code` would have seen a shape change per route.
+
+  ## Every pipeline a token can reach
+
+  The clamp rides the flat read scope (`:api_grant_read`, paths like
+  `/v1/data/query/:dataset/:type`), the tenancy-scoped mirror
+  (`:shared_docs_api`, paths like `/w/:ws/p/:project/v1/data/query/...`) AND
+  `:require_token` — the two-plug pipeline behind every bearer-gated route,
+  flat (`[:api, :require_token]`) and scoped (`[:scoped_api, :require_token]`)
+  alike. Mounting it there is what closed the live leak: a freshly minted
+  public-read token read `GET /v1/data/export/production` (52,208,330 bytes,
+  2,500 documents, 129 drafts), `analytics`, `history`, `revision/:dataset/:id`
+  and held an open `text/event-stream` on `listen` — none of which is a
+  PublicRead-allowed route, all of which rode `:require_token` where the plug
+  was absent. Because `allowed_route?/1` whitelists only the two GET data
+  routes, and because a non-public-read token no-ops out of `call/2` before any
+  of this, the mount denies exactly the public-read tier and leaves every other
+  principal byte-identical.
+
+  The scoped prefix `["w", ws, "p", project]` is stripped before matching so a
   public-read token minted for a workspace (the site-spawner BUILD token) is
   clamped on the SCOPED route it fetches over — the scoped route already gates
   workspace membership (necessary) but does NOT pin published-vs-draft within
@@ -47,13 +75,22 @@ defmodule BarkparkWeb.Plugs.PublicRead do
 
   import Plug.Conn
   alias Barkpark.Content
+  alias BarkparkWeb.ErrorResponse
 
   def init(opts), do: opts
 
   def call(conn, _opts) do
+    if public_read_token?(conn), do: enforce(conn), else: conn
+  end
+
+  # MEMBERSHIP, mirroring AnonPerspective.anon_pinned?/1 — a token minted
+  # `["public-read", "read"]` by TokenController is still the public tier. The
+  # map pattern requires the `:permissions` key and a list value: a token struct
+  # without it is NOT clamped (absence of the key is not evidence of the tier).
+  defp public_read_token?(conn) do
     case conn.assigns[:api_token] do
-      %{permissions: ["public-read"]} -> enforce(conn)
-      _ -> conn
+      %{permissions: perms} when is_list(perms) -> "public-read" in perms
+      _ -> false
     end
   end
 
@@ -61,10 +98,21 @@ defmodule BarkparkWeb.Plugs.PublicRead do
     conn = fetch_query_params(conn)
 
     cond do
-      not allowed_route?(conn) -> halt_json(conn, 403, "forbidden")
-      not allowed_perspective?(conn) -> halt_json(conn, 403, "perspective not allowed")
-      not schema_public?(conn) -> halt_json(conn, 404, "not found")
-      true -> conn
+      not allowed_route?(conn) ->
+        deny(
+          conn,
+          {:error, :forbidden},
+          "public-read tokens may only read published public documents"
+        )
+
+      not allowed_perspective?(conn) ->
+        deny(conn, {:error, :forbidden}, "perspective not allowed")
+
+      not schema_public?(conn) ->
+        deny(conn, {:error, :not_found}, "not found")
+
+      true ->
+        conn
     end
   end
 
@@ -109,10 +157,8 @@ defmodule BarkparkWeb.Plugs.PublicRead do
   defp put_scope(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
   defp put_scope(opts, _key, _other), do: opts
 
-  defp halt_json(conn, status, message) do
-    conn
-    |> put_resp_content_type("application/json")
-    |> send_resp(status, Jason.encode!(%{error: message}))
-    |> halt()
-  end
+  # The repo's ONE envelope emitter (`@canonical capability:error-response-emit`)
+  # — canonical code/status from Content.Errors, hint + request_id stamped, halt
+  # included. Never hand-build the body here.
+  defp deny(conn, reason, message), do: ErrorResponse.emit(conn, reason, message)
 end

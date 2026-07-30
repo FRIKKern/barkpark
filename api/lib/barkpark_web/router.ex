@@ -460,6 +460,14 @@ defmodule BarkparkWeb.Router do
 
   pipeline :require_token do
     plug(BarkparkWeb.Plugs.RequireToken)
+    # Deny-by-default clamp for a `public-read` token (site-spawner D6/D106).
+    # RequireToken has just proven a token exists; PublicRead then allows ONLY
+    # `GET /v1/data/query|doc` — which no route on this pipeline is — so the
+    # public tier is denied the whole bearer-gated surface it was never meant to
+    # reach (export/analytics/history/revision returned 200 and `listen` held an
+    # open SSE stream before this line). No-op for read/write/admin/ops tokens by
+    # the plug's own construction, so every other principal is byte-identical.
+    plug(BarkparkWeb.Plugs.PublicRead)
   end
 
   # The low-trust TICKET-KEY tier (Barkpark Tickets, charter Decision 1 + 7).
