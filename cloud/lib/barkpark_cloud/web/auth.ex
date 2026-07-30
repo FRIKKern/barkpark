@@ -40,15 +40,57 @@ defmodule BarkparkCloud.Web.Auth do
   @doc """
   Require a valid USER session token. On success assigns `:current_user` and
   `:current_team`; otherwise halts the conn with a 401 JSON body.
+
+  The session's `last_used_at` stamp is DEFERRED (`defer_session_touch/2`), not
+  written here — see that function for why authentication is the wrong place to
+  make a liveness claim.
   """
   def require_user(conn, _opts) do
     with token when is_binary(token) <- bearer_token(conn),
-         %{} = user <- Accounts.verify_user_session_token(token) do
+         %{} = user <- Accounts.verify_user_session_token(token, touch: false) do
       conn
       |> assign(:current_user, user)
       |> assign(:current_team, resolve_team(conn, user))
+      |> defer_session_touch(token)
     else
       _ -> unauthorized(conn)
+    end
+  end
+
+  # THE LIVENESS STAMP BELONGS DOWNSTREAM OF THE RESPONSE DECISION.
+  #
+  # `last_used_at` is what the sessions card renders as "Active just now", so it
+  # is a claim that the platform SERVED this device — but authentication runs
+  # strictly before authorization. `require_platform_operator/2` resolves the
+  # user, THEN checks the allowlist and answers `forbidden(conn)`; there are six
+  # `forbidden(conn)` sites in this module and every one of them is downstream
+  # of the verify. An eager stamp therefore made a REFUSED device print as
+  # active, and a throttle at the write site could not touch it: an idle device
+  # satisfies any staleness guard (measured — idle 3600s, one request, 403, and
+  # the stamp still jumped a full hour).
+  #
+  # `register_before_send/2` is the first point where the status is known, and
+  # it runs for every terminal path (`send_resp`, `send_file`, `send_chunked`),
+  # including the halts above. `status < 400` is the gate: served ⇒ claim
+  # activity, refused (401/403/404/422) ⇒ claim nothing. A request that never
+  # sends (an unhandled crash) stamps nothing either, which is the honest answer.
+  #
+  # Registered ONCE per conn: `require_team_role/3` and friends re-enter
+  # `require_user/2`, and a second callback would be a redundant (throttled, but
+  # pointless) statement.
+  defp defer_session_touch(conn, token) do
+    if conn.private[:barkpark_session_touch_deferred] do
+      conn
+    else
+      conn
+      |> put_private(:barkpark_session_touch_deferred, true)
+      |> register_before_send(fn sent ->
+        if is_integer(sent.status) and sent.status < 400 do
+          Accounts.touch_session_last_used(token)
+        end
+
+        sent
+      end)
     end
   end
 
@@ -106,11 +148,12 @@ defmodule BarkparkCloud.Web.Auth do
     case bearer_token(conn) do
       token when is_binary(token) ->
         cond do
-          user = Accounts.verify_user_session_token(token) ->
+          user = Accounts.verify_user_session_token(token, touch: false) ->
             conn
             |> assign(:current_user, user)
             |> assign(:current_team, resolve_team(conn, user))
             |> assign(:current_abilities, ["root"])
+            |> defer_session_touch(token)
 
           result = Accounts.verify_personal_access_token(token) ->
             {user, pat} = result
