@@ -20,17 +20,24 @@ type TaskDetail struct {
 	BlockedReason  string
 	CloseReason    string
 	ResolutionNote string
-	// Disposition / DispositionReason are the durable backlog adjudication:
-	// content.disposition ("OPEN"/"PARKED"/"CLOSED") and the reason the
-	// adjudicator recorded with it ("" when never adjudicated).
+	// The durable backlog adjudication, all three parts of it: the term
+	// (content.disposition — "open"/"parked"/"closed", lowercase-canonical
+	// because Tasks.Stage trims and downcases as the one writer), the reason
+	// recorded with it, and — for a park — what would make the row worth
+	// reconsidering. All "" when the row was never adjudicated.
+	//
+	// A park is REFUSED server-side without a trigger, so rendering the reason
+	// without the trigger would show half of a thing the server treats as
+	// indivisible.
 	Disposition       string
 	DispositionReason string
-	CodeRefs       []string
-	Assignee       string
-	PreviousWorker string    // claim.previous_worker ("" when absent)
-	ClaimExpiredAt time.Time // claim.expired_at (zero when absent)
-	LastWorkedAt   time.Time // content.last_worked_at (zero when absent)
-	Purpose        TaskPurpose
+	ReopenTrigger     string
+	CodeRefs          []string
+	Assignee          string
+	PreviousWorker    string    // claim.previous_worker ("" when absent)
+	ClaimExpiredAt    time.Time // claim.expired_at (zero when absent)
+	LastWorkedAt      time.Time // content.last_worked_at (zero when absent)
+	Purpose           TaskPurpose
 }
 
 type PurposeScore struct {

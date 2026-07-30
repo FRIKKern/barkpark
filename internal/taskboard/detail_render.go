@@ -198,6 +198,10 @@ func RenderTaskDetail(d TaskDetail, children []Task, cursor, width int, now time
 	b.emitStrip("closed", d.CloseReason, dimStyle, width)
 	b.emitStrip("resolution", d.ResolutionNote, dimStyle, width)
 	b.emitStrip(dispositionLabel(d.Disposition), d.DispositionReason, dispositionStyle(d.Disposition), width)
+	// The trigger sits directly under the reason it qualifies. The server
+	// refuses a park without one, so a parked row showing a reason and no
+	// trigger means the row predates that refusal — worth seeing, not hiding.
+	b.emitStrip("reopens when", d.ReopenTrigger, dispositionStyle(d.Disposition), width)
 	b.emitCodeRefs(d, width)
 	if d.TwinOf != "" {
 		partner := d.TwinTitle

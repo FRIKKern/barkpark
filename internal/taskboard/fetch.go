@@ -449,6 +449,7 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	d.ResolutionNote = strField(m, "resolution_note")
 	d.Disposition = strField(m, "disposition")
 	d.DispositionReason = strField(m, "disposition_reason")
+	d.ReopenTrigger = strField(m, "reopen_trigger")
 	d.CodeRefs = flattenCodeRefs(m["code_refs"])
 	d.Assignee = strField(m, "assignee")
 	d.LastWorkedAt = timeField(m, "last_worked_at")
