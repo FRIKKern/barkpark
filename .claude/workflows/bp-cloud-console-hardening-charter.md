@@ -545,6 +545,31 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-07-30 — wave 9 REVIEW — grade A, six slices shipped, all PUSHED with PRs open, NO SEAL confirmed honest
+
+**All six round-1 slices landed green and are on `origin` with PRs open.** Every final branch is the `-r` branch: the reviewer changed something on all six.
+
+| Slice | Task | Final branch | PR |
+|---|---|---|---|
+| Console shim + `Console gate` | `cch-w9-console-gate-shim` | `…renders-a-check-run--0-r` | #8201 |
+| Cloud shim + `Cloud gate` + structural rung 2 | `cch-w9-cloud-gate-shim-rung2` | `…and-the-seal-1-r` | #8202 |
+| Guard refusal vocabulary | `cch-w9-guard-refusal-vocabulary` | `…not-defect-wh-2-r` | #8203 |
+| Generator catch-all poison | `cch-w9-generator-catchall-poison` | `…poisons-the-r-3-r` | #8204 |
+| Stale protection claims | `cch-w9-stale-protection-claims` | `…is-unprote-4-r` | #8205 |
+| PAT twin of the session-touch lie | `cch-bl-pat-touch-not-authz-aware` | `…touch-lie-a--5-r` | #8206 |
+
+**THE WAVE'S OWN FINDING — a hole that existed only in the MERGE.** `cch-w9-cloud-gate-shim-rung2` gives the seal predicate a rung-2 leg A that reads `` `${REPO}/.github/required-checks.json` ``. The console harness runs that predicate's tests. With both branches merged, `console-path-escape-check.sh` still printed **"OK: 9 reads"** — a backtick template carries no comma and no quotes, so the `join(REPO, "…")` grep could not see it. A ratchet reporting OK over a live escape is the exact vacuous pass it exists to remove, and **neither builder could observe it**: each half looks complete on its own branch. Fixed on #8201 (census learns the `${REPO}/…` idiom; the path is declared AHEAD of the read so main stays green whichever slice lands first; three assertions pin both directions). **Standing lesson: a per-slice gate cannot see a cross-slice census hole. Review must run the merged pair.**
+
+**Four more reviewer fixes, each an honesty defect inside an honesty instrument.** (1) Rung-2 Leg C resolved to `usable[0]`, so an ENFORCED job could read rung 3 purely on job order in a file — now prefers the REGISTERED aggregator, mutation-proven. (2) Leg A reads the COMMITTED spec, not live GitHub; the output now says which of the two it read. (3) `cssom-parity.mjs`'s own header still asserted *"main is NOT branch-protected"* — the retracted premise, inside a wave-9 file. (4) `required-checks.test.sh`'s real-tree tripwire passed on the ABSENCE of a string, so it would pass if the generator died before the scan; now paired with a planted-catch-all control.
+
+**THE SEAL, HONESTLY: NO SEAL, and it is now honest for a BETTER reason than before.** Wave 8 shipped clause (b) so it could pass. It does not pass, twice over: (a) `Cloud gate` is not yet a required context, so all four rung-2 entries correctly read rung 3 — that is the instrument working, and it clears the moment round 2 registers; (b) **CCH-D6's rung-1 guard `design/emit-fence.test.mjs` exits 1 on real design-token drift**, and registration does NOT fix that. That red is INHERITED — measured identical on pristine `origin/main` — and it also keeps `Design-token drift gate (blocking)` red on main itself. **A seal is not reachable until the emit-fence drift is paid** (`cch-w9-emit-fence-guard-red-on-main`). D83's ruling that a null successor is a manufactured seal still binds.
+
+**Three criteria stay honestly OPEN because they embed that inherited red** (`cch-w9-console-gate-shim` #6, `cch-w9-cloud-gate-shim-rung2` #5, `cch-w9-guard-refusal-vocabulary` #4 all demand `seal-predicate 31/31`). Each carries a reviewer miss-note. **Do not stamp them met on merge — re-word them against the emit-fence row.**
+
+**What stalled, by design:** `cch-w9-register-console-and-cloud-gates` is round 2 and did not dispatch. It is unblocked only when #8201, #8202 and #8204 are all MERGED **and** the merge train produced ≥2 post-shim heads on which both aggregators rendered and concluded success. If it did not, **do not register** — a partial registration is worse than none.
+
+**Next wave must know.** (1) **Nothing in the two shims has run on GitHub.** The property they exist for — that `Console gate` / `Cloud gate` publish check runs of those exact names on a docs-only head — is measurable only on #8201/#8202. Read the check-run list **by name**, never the rollup. (2) **HIGH-FLIP-RISK, independence owed:** rung-2 Leg B/C decides whether a seal certificate can be issued over a job nobody has to pass. The reviewer re-derived it independently and endorses it, naming two residues: Leg B certifies STRUCTURE (`needs` + `if: always()`), not that the aggregator ASSERTS — D19's measured false green is covered for these two workflows by the `needs_without_decide` emitters in the path-escape harnesses, not by the predicate; and Leg A is L3 (a committed file), with live drift owned by `required-checks-verify.sh`, which is itself advisory and paths-filtered. (3) **D99 is stale and must be re-run** after #8204 lands. (4) `required-checks-drift.yml` is `continue-on-error: true` AND paths-filtered, so the generator's new catch-all tripwire is ADVISORY today — the same defect class this wave attacked, one layer out. (5) Filed, not smuggled in: `cch-bl-bp-graph-drift-stale-protection-claims-2` — two more files still cite the `404 "Branch not protected"` measurement, out of fence. (6) `pat_touch`'s shared `:barkpark_session_touch_deferred` key is safe only while session and PAT are mutually exclusive branches of one `cond`; that is a comment, not an assertion.
+
 ### 2026-07-30 — wave 9 DECIDE — 7 slices cut (6 round-1, 1 round-2), charter premise corrected by content
 
 **The founding premise flipped and the charter still asserted the old one.** D58, D64 and D89 now carry inline dated retractions (D106); D104 had corrected D89 alone. Two more live spans are a build slice.
