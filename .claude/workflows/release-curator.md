@@ -35,11 +35,24 @@ ratified (see the paper's open decisions).
 2. **Gate — do nothing unless it's real and green.**
    - `commit_count == 0` → nothing since the last release. Stop.
    - `ci.status == "failure"` → main is red on a **required** check. Do NOT
-     propose. Report the failing checks (`ci.failures` where `advisory:false`).
-     Advisory reds (Format, Lighthouse — `advisory:true`) never block, per the
-     project's always-merge rule.
+     propose. Report the failing checks — `ci.failures` where `advisory` is
+     `"blocking"` **or** `"cannot_tell"`. `advisory` is a three-valued STRING,
+     never a boolean: `"advisory"` (its check suite rolled up green, so GitHub
+     itself excluded it — `continue-on-error`), `"blocking"` (sole red in a red
+     suite, which a `continue-on-error` job could not have caused), and
+     `"cannot_tell"` (a red suite with several reds — GitHub does not expose
+     which of them were advisory). Each entry carries `advisory_basis` in
+     words; quote it rather than paraphrasing. `ci.advisory_certainty` is
+     `"known"` only when no entry is `"cannot_tell"` — when it is
+     `"cannot_tell"`, say so in the run log instead of implying a clean read.
+     Advisory reds never block, per the project's always-merge rule.
    - `ci.status == "pending"` → checks still running. Re-run next tick; don't
      propose a half-verified build.
+   - `ci.status == "unknown"` → the reader could not decide (no referenced
+     suites, or this sha's suites were cancelled/stale — `status_reason` says
+     which). **Cancelled is not failure**: `ci.cancelled_runs[]` classifies each
+     one `superseded` / `cancelled` / `unknown` with its `basis`. Do not report
+     a superseded run as a failure, and do not call main jammed on one.
 
 3. **Judge worthiness.** Is there user-facing substance (features, fixes), or
    only chore/docs/test churn? A pile of `chore:`/`docs:` commits is not a

@@ -14,6 +14,13 @@ name: Shell harnesses
 # no network — so it cannot rot into a skip. The paths list below is EXPLICIT
 # per file: D26's finding was that a `pr-task-gate.sh` edit did not even trigger
 # this workflow, so every script a job here executes gets its own entry.
+#
+# Third tenant: scripts/release-scan.test.sh, the verdict-derivation matrix for
+# scripts/release-scan.sh — the one machine reader of CI state the
+# release-curation agent trusts. NOTHING in .github/workflows/** invoked
+# release-scan.sh at all before this: no syntax check, no test, no caller, while
+# it classified advisory jobs by a NAME REGEX and counted `cancelled` as
+# failure. Same lesson as doctor.sh — an unguarded reader drifts silently.
 
 on:
   pull_request:
@@ -23,6 +30,8 @@ on:
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
       - "scripts/required-checks-verify.sh"
+      - "scripts/release-scan.sh"
+      - "scripts/release-scan.test.sh"
       - ".github/workflows/shell-harnesses.yml"
   push:
     branches: [main]
@@ -32,6 +41,8 @@ on:
       - "scripts/bp-merge.sh"
       - "scripts/bp-merge.test.sh"
       - "scripts/required-checks-verify.sh"
+      - "scripts/release-scan.sh"
+      - "scripts/release-scan.test.sh"
       - ".github/workflows/shell-harnesses.yml"
 
 permissions:
@@ -71,3 +82,23 @@ jobs:
         # The merge verb's pre-flight IS this script, so its own selftest rides
         # the same lane. It needs no token: --selftest drives temp fixtures only.
         run: bash scripts/required-checks-verify.sh --selftest
+
+  release-scan-verdict:
+    name: release-scan.sh CI-verdict derivation
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # MUST be a full clone: the harness proves release-scan.sh's own
+          # shallow-clone guard both directions, and the green direction needs
+          # a checkout that is genuinely not shallow.
+          fetch-depth: 0
+      - name: release-scan.sh syntax check
+        run: bash -n scripts/release-scan.sh
+      - name: release-scan.sh verdict matrix (recorded fixtures, no network)
+        # The advisory/cancelled cases replay API payloads captured from two
+        # FROZEN shas (025c2497, 2c8fe0da) through a fake `gh` on PATH, so a
+        # sibling task making Sobelow green can never turn this green
+        # vacuously. Set RELEASE_SCAN_TEST_LIVE=1 locally to re-verify the
+        # recordings against the real API.
+        run: bash scripts/release-scan.test.sh
