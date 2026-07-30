@@ -39,6 +39,76 @@ defmodule Barkpark.Tasks.SimilarityTest do
     end
   end
 
+  # ── cost: the new task is tokenized ONCE per assess/3 ──────────────────────
+  #
+  # This is the perf gate for the dedup outage of 2026-07-30. It counts WORK,
+  # not wall clock: `tokens/1` emits a telemetry event per call, so N candidates
+  # must produce exactly N + 1 tokenizations (N candidates + 1 probe). The
+  # pre-fix code recomputed `tokens(new_task)` inside the per-candidate loop and
+  # produced 2N — this test reds on it (10 ≠ 6 at N = 5).
+  # Telemetry handlers are global and run in the EMITTING process, so the
+  # handler counts only events raised by this very test process — a concurrent
+  # async test that also tokenizes cannot inflate the count.
+  defp attach_tokenize_counter do
+    me = self()
+    handler = "tokenize-count-#{System.unique_integer([:positive])}"
+
+    :telemetry.attach(
+      handler,
+      [:barkpark, :tasks, :similarity, :tokenize],
+      fn _event, measurements, _meta, _cfg ->
+        if self() == me, do: send(me, {:tokenize, measurements})
+      end,
+      nil
+    )
+
+    ExUnit.Callbacks.on_exit(fn -> :telemetry.detach(handler) end)
+    :ok
+  end
+
+  defp count_tokenizations do
+    receive do
+      {:tokenize, _} -> 1 + count_tokenizations()
+    after
+      0 -> 0
+    end
+  end
+
+  describe "assess/3 tokenization cost" do
+    setup do: attach_tokenize_counter()
+
+    test "tokenizes the new task once per call, not once per candidate" do
+      candidates =
+        for i <- 1..5 do
+          task("c#{i}", "candidate #{i} title words", desc: "some description body #{i}")
+        end
+
+      new_task =
+        task("new", "brand new task title words",
+          desc: String.duplicate("a long description with plenty of distinct vocabulary ", 20)
+        )
+
+      Similarity.assess(new_task, candidates)
+
+      assert count_tokenizations() == 6,
+             "expected 5 candidate tokenizations + 1 probe; a per-candidate re-tokenization of " <>
+               "the new task would give 10"
+    end
+
+    test "the count scales with candidates only — +1 candidate is +1 tokenization" do
+      new_task = task("new", "brand new task title words", desc: "with a description")
+
+      Similarity.assess(new_task, [task("c1", "one")])
+      one = count_tokenizations()
+
+      Similarity.assess(new_task, [task("c1", "one"), task("c2", "two")])
+      two = count_tokenizations()
+
+      assert one == 2
+      assert two == 3
+    end
+  end
+
   describe "structural_relation/3" do
     test "same parent → :sibling" do
       a = task("au-w5-a", "author blocks", parent: "aesthetic-epic")
