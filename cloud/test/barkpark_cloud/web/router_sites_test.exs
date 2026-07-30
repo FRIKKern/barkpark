@@ -2140,4 +2140,116 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       refute Registry.get_site(site.id).prebuilt_enabled
     end
   end
+
+  # Turning the prebuilt lane ON is a CAPABILITY GRANT: afterwards this site will
+  # serve bytes its box never built. Wave 9's D97 gated the artifact UPLOAD on
+  # `write` and justified it by asserting ability tiers are flat
+  # (read/write/root) — but `@abilities ~w(read write deploy root)` has FOUR, and
+  # `deploy` already gates domain bind/unbind. So a single `write` PAT both
+  # ENABLED the lane and USED it, and the per-site opt-in gated nothing against
+  # exactly the credential most likely to be over-scoped.
+  describe "PATCH /v1/sites/:id {prebuilt_enabled} credential gating" do
+    test "a write-only PAT cannot ENABLE off-box builds → 403, the row is untouched" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      {:ok, write_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "write-key",
+          abilities: ["write"]
+        })
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{prebuilt_enabled: true}, write_token)
+
+      assert conn.status == 403
+      assert json_body(conn)["error"] == "deploy_ability_required"
+      refute Registry.get_site(site.id).prebuilt_enabled
+    end
+
+    # A SESSION carries ["root"], which is `require_ability/2`'s documented
+    # superset, so the dashboard toggle keeps working. This is the ONLY credential
+    # that can enable the lane today, and that is a consequence of a PRE-EXISTING
+    # defect this gate merely exposes — see the deploy-PAT test below.
+    test "a session (root) CAN enable it → 200 and the row flips" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{prebuilt_enabled: true}, login_token(user))
+
+      assert conn.status == 200
+      assert Registry.get_site(site.id).prebuilt_enabled
+    end
+
+    # PINS A PRE-EXISTING DEFECT, deliberately, rather than papering over it.
+    # The ability model is HIERARCHICAL when minting and FLAT when checking:
+    # `UserToken.normalize_abilities/1` collapses ["write","deploy"] to ["deploy"]
+    # (treating deploy as ranking above write), but `Auth.require_ability/2`
+    # special-cases only "root". So a deploy PAT holds ["deploy"], fails every
+    # `write`-gated route — patch, delete, deploy, rollback, promote — and can
+    # therefore never reach the gate above. You cannot hold write AND deploy
+    # either; normalization removes the write.
+    #
+    # This assertion documents TODAY's behaviour so the defect is visible instead
+    # of folklore. When the model is reconciled, this test should flip to 200 and
+    # that flip is the proof the reconciliation worked.
+    test "a deploy PAT is refused — the mint/check hierarchy mismatch, pinned" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      {:ok, deploy_pat, token_row} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "deploy-key",
+          abilities: ["write", "deploy"]
+        })
+
+      # The mint collapsed the pair — this is the hierarchy half of the mismatch.
+      assert token_row.abilities == ["deploy"]
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{prebuilt_enabled: true}, deploy_pat)
+
+      # ...and the check half refuses it, because only "root" is a superset there.
+      assert conn.status == 403
+      refute Registry.get_site(site.id).prebuilt_enabled
+    end
+
+    # De-escalation is never trapped: whoever may mutate the site may take it
+    # back OUT of the riskier mode. Gating the OFF transition too would leave a
+    # site stuck accepting off-box bytes with no way for its operator to stop it.
+    test "a write-only PAT CAN still turn it off — de-escalation is not gated" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = prebuilt_site(bp)
+
+      {:ok, write_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "write-key",
+          abilities: ["write"]
+        })
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{prebuilt_enabled: false}, write_token)
+
+      assert conn.status == 200
+      refute Registry.get_site(site.id).prebuilt_enabled
+    end
+
+    # This adds ONE gate; it does not re-tier the settings family.
+    test "a write-only PAT still patches theme — the family is not re-tiered" do
+      {user, team} = user_with_team()
+      bp = live_barkpark(team)
+      site = static_site(bp)
+
+      {:ok, write_token, _} =
+        Accounts.create_personal_access_token(user, team, %{
+          name: "write-key",
+          abilities: ["write"]
+        })
+
+      conn = call(:patch, "/v1/sites/#{site.id}", %{theme: "ember"}, write_token)
+
+      assert conn.status == 200
+    end
+  end
 end
