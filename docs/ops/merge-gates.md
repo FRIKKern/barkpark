@@ -218,39 +218,42 @@ Elixir security gates, path-triggered on `api/**`:
    Re-derive the floor from the table above after any such fix; do not treat 10
    as a constant.
 
-   **Topology: no `security.yml` check can be required — and live protection
-   does NOT change that.** The conclusion is unchanged; the argument that used
-   to carry it was wrong and has been replaced. It rested on "`main` has no
-   branch protection" and "`required-checks.json` carries `enforced: false`" —
-   **both of those are FALSE as of 2026-07-28**: protection is live with
-   `enforce_admins: true` and two required contexts, and the tracked file
-   carries `"enforced": true` (see *Pre-merge gates* above for the re-derivation).
-   Note the trap: `gh api …/rulesets` → `[]` is still a TRUE reading, and it is
-   the reading that produces the WRONG conclusion, because this repo's
-   protection is not a ruleset.
+   **Topology: the S4 objection is DEAD as of wave 10 — one blocker remains.**
+   This entry used to conclude "no `security.yml` check can be required", on two
+   successive arguments that are both now retired. The first rested on "`main`
+   has no branch protection" — **false since 2026-07-28**: protection is live
+   with `enforce_admins: true` and the tracked file carries `"enforced": true`.
+   (Trap worth keeping: `gh api …/rulesets` → `[]` is a TRUE reading that
+   produces the WRONG conclusion, because this repo's protection is not a
+   ruleset.) The second rested on **S4**, and wave 10 paid it:
 
-   The conclusion survives on **S4 alone**, which is about workflow topology and
-   nothing to do with whether the branch is protected:
+   - `security.yml` **no longer carries a workflow-level `paths:` key** on either
+     trigger, so it renders a check run on every head. Path decisions moved to
+     JOB level behind an always-running `changes` dispatcher — the elixir.yml /
+     console-harness.yml shim, transplanted. A job skipped by a job-level `if:`
+     still publishes a `skipped` check run, and GitHub counts `skipped` as
+     satisfying a required context.
+   - The registrable name is **`Security gate`**: unmatrixed, `if: always()`, and
+     it ASSERTS over every upstream result rather than echoing them.
+   - `sobelow` is deliberately **NOT in that aggregator's `needs`**. Measured: a
+     `continue-on-error: true` job that exits 1 concludes FAILURE and renders a
+     RED check run while `needs.<job>.result` reads `success` — byte-identical to
+     a genuine pass, and undecomposable, because the information is destroyed
+     before the aggregator's shell starts. There is no honest "tolerate sobelow"
+     branch to write, so its own red check run is the only truthful signal it
+     has. `scripts/security-gate-shape.test.sh` forces this shape (deriving the
+     continue-on-error set FROM the workflow, so it self-corrects the day Sobelow
+     becomes blocking), and the unfiltered `gate-shape` job runs it on every head.
+   - **The remaining blocker is not topology — it is that `mix-audit` is red on
+     main.** Registering `Security gate` today would install a permanently
+     CORRECT red. The dep bump that clears it is open as #8222. Once it merges
+     and the name has rendered on qualifying heads (`scripts/registration-sample.sh`
+     is the instrument), `Security gate` is registrable.
 
-   - `security.yml` is **workflow-level paths-filtered** on `api/**`
-     (`.github/workflows/security.yml`, `on.pull_request.paths`).
-   - `scripts/required-checks-generate.sh` **stage S4 excludes every check
-     defined in a paths-filtered workflow** — "an ABSENT check is a permanent
-     *expected*", i.e. a required context that never reports deadlocks the
-     branch. The `pf` flag is computed **once per FILE** by the parser and
-     stamped onto every job row it emits, so *every* job in `security.yml` is
-     S4-excluded regardless of blocking-ness.
-   - Proof that this is topology and not the advisory flag: the **`mix-audit`
-     job carries no `continue-on-error` and is still excluded**, with reason
-     `S4 PATHS-FILTERED` — while `sobelow` is excluded under `S2 ADVISORY`.
-
-   So flipping `continue-on-error: true` → `false` on `sobelow` would make the
-   *job* red but would still not gate any merge — the branch being protected
-   does not make the check requireable, because the generator never offers it.
-   Making Sobelow actually block requires **moving it out of a paths-filtered
-   workflow** (or aggregating it behind a non-paths-filtered context) *first*;
-   that is a separate change from the baseline drain, and any plan that treats
-   live protection as sufficient is wrong.
+   So flipping `continue-on-error: true` → `false` on `sobelow` now DOES change
+   the picture: the shape ratchet immediately demands it be added to the
+   aggregator's `needs`, and from then on a Sobelow regression reds `Security
+   gate`. That is a consequence to intend, not a side effect to discover.
 
    **Sobelow's greenness therefore is not a branch-protection concern — it is
    still a real one.** A permanently-red regression gate cannot report a
