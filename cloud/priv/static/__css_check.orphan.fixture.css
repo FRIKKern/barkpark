@@ -1,0 +1,27 @@
+/* __css_check.orphan.fixture.css — regression fixture for the E10 comment-
+   nesting guard (orphanCommentErrors in __css_check.mjs). Reproduces the EXACT
+   #4592/GR74 shape: a review paragraph whose OPENING comment marker was lost,
+   so its terminator is met in CODE position. The browser then parses that prose
+   as raw CSS and error recovery discards tokens up to the next block, silently
+   swallowing the whole rule that follows — while every byte of that rule is
+   still present in the file, which is why no source-text check can see it.
+   Neither the flat token scan nor the E9 semicolon-delimited parse fires here
+   (proved in the harness: this file is GREEN under --swallow-check), so E10 is
+   the only owner of this class. Proof:
+   `node __css_check.mjs --orphan-check __css_check.orphan.fixture.css` MUST
+   print exactly one E10 error and exit 1. This file is a FIXTURE, never served
+   — it is not linked from index.html and app.js never loads it, and the harness
+   asserts that unreachability rather than trusting this sentence. */
+.modal-shell {
+  position: fixed;
+  inset: 0;
+}
+
+REVIEW ADDENDUM: the opening comment marker of this paragraph was lost in
+   review, so the browser parses this prose as raw CSS, error recovery discards
+   tokens up to the next block, and the .modal-root rule below is swallowed
+   whole even though every byte of it is still in this file. */
+.modal-root {
+  position: fixed;
+  z-index: 60;
+}
