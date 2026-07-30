@@ -89,7 +89,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
              ) do
           {:ok, _result} ->
             socket
-            |> sync_paper_edit_doc()
+            |> resync_pane_after_op()
             |> assign(save_status: "Auto-saved")
             # A prior halt cleared: the next accepted edit dismisses the banner.
             |> assign(paper_halt: nil)
@@ -161,6 +161,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             |> push_canvas_echo()
             |> push_task_previews()
             |> push_block_renders()
+            # A LANDED batch must SAY it landed. The batch path used to assign
+            # save_status only on its three error branches, so the footer save
+            # region ([data-test-id="bp-paper-footer-save"], the page's only
+            # role="status" aria-live region) could say "Save failed" or nothing
+            # — never success. Measured on the deployed build: after a save the
+            # API proved persisted, that region was the EMPTY STRING for 25s
+            # while the footer counts moved. Same "Auto-saved" token the
+            # single-op path (paper_pane_op/2) already assigns — ONE vocabulary
+            # across both write seams, no third state and NO in-flight
+            # "Saving…" transient (charter D242 defers pending feedback).
+            |> assign(save_status: "Auto-saved")
             # A prior halt cleared: the next accepted batch dismisses the banner.
             |> assign(paper_halt: nil)
 
@@ -189,6 +200,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   end
 
   def paper_ops(socket, _ops), do: socket
+
+  # spd-w19 / D258 — THE WAY OUT HAS TO GET YOU OUT.
+  #
+  # After an accepted single op the pane used to re-assign `paper_doc` and
+  # NOTHING else (`sync_paper_edit_doc/1`). That is correct while the pane is
+  # ALREADY in block mode — the canvas re-renders off `paper_doc.content`, and
+  # the read-only stream is kept live by the per-block delta path — but it is
+  # exactly wrong on the ONE transition the never-blank notice exists to serve:
+  # a resolved-but-unrenderable document whose repair button (`paper-add-block`)
+  # MINTS the missing block list. The write landed, `paper_block_mode` stayed
+  # false, and the notice re-rendered over a document that now had a real body.
+  # The writer's own broadcast cannot rescue it either —
+  # `Handlers.Lifecycle.paper_block/2` is a deliberate no-op for `sender ==
+  # self()`.
+  #
+  # `refetch_paper/1` is the whole repair, and BOTH halves of it are load-bearing:
+  # it re-derives `paper_block_mode` / `paper_rev` from the fresh document AND
+  # fills the `:paper_blocks` stream. The assign half alone would flip
+  # `paper_block_mode` true while the stream is still `setup_paper_view/2`'s
+  # empty reset — under `BARKPARK_PAPER_CANVAS=0` (`show_editor` false) that
+  # renders an `<article phx-update="stream">` with ZERO children: a NEW blank
+  # of precisely the class this wave outlaws.
+  #
+  # It runs ONLY on the mode transition, keyed on the assign the render actually
+  # branches on. In block mode the cheap path stays cheap — `refetch_paper/1`
+  # re-renders every top-level block server-side, and paying that on every
+  # keystroke-sized op would be a perf regression for zero rendered difference.
+  defp resync_pane_after_op(socket) do
+    if socket.assigns[:paper_block_mode] do
+      sync_paper_edit_doc(socket)
+    else
+      refetch_paper(socket)
+    end
+  end
 
   # "constraint: at most 1 block of \"featured\" allowed, found 2" →
   # "Edit rejected — at most 1 block of \"featured\" allowed, found 2".

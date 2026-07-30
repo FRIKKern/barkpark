@@ -1,0 +1,142 @@
+name: studio-journey-smoke
+
+# Browser-level coverage for the Studio create → type → save journey (studio
+# space-priority desk, wave 18). The owner reported that the desk buttons looked
+# inert and that he could not add things. Wave 17 found three real defects on
+# that seam and fixed them; the confirmation was then a hand-driven walk written
+# down as prose, and this epic has SIX logged overturns of that shape. So the
+# confirmation is a committed instrument, and this is where it runs unattended.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#  READ THIS BEFORE ADDING THIS WORKFLOW TO ANY REQUIRED-CHECK LIST
+# ─────────────────────────────────────────────────────────────────────────────
+# NEITHER JOB HERE GATES A MERGE, AND NEITHER CAN BE MADE TO (charter D241):
+#
+#   1. `tooling/**` is in neither ELIXIR_COMPILE_PATHS nor
+#      ELIXIR_TEST_ONLY_PATHS, so a tooling-only PR gets mix-test SKIPPED
+#      against a gate value of literally `false`, the aggregator accepts that as
+#      legitimate, and the required "Elixir gate" reports GREEN having run
+#      nothing. A green on such a PR says nothing about this workflow.
+#
+#   2. required-checks-generate.sh stage S4 excludes BY NAME every check that
+#      comes from a paths-filtered `pull_request` workflow. The self-test job
+#      below carries a paths filter, so it is structurally unpromotable.
+#
+# NOTE for anyone comparing this file with .github/workflows/search-starter-smoke.yml:
+# that file's comment calls its paths-filtered check "safe to make a required
+# check". THAT SENTENCE IS FALSE and is contradicted twice in-repo by the two
+# facts above. It is not repeated here.
+#
+# What these jobs ARE: a rot alarm and an instrument check. Their OUTPUT is the
+# signal; their exit codes gate nothing.
+#
+# ─────────────────────────────────────────────────────────────────────────────
+#  TWO JOBS, TWO DIFFERENT QUESTIONS
+# ─────────────────────────────────────────────────────────────────────────────
+#   harness-self-test  "is the instrument itself sound?" Offline, zero network,
+#     zero credentials, zero npm. Boots headless Chrome against two in-process
+#     fixtures and asserts the harness goes green on the healthy one and RED on
+#     the rotten one — whose canvas upgrades with a truthy `_editor` and never
+#     populates `blocks`, the exact trap that burned three verifiers on this
+#     seam. A check whose red has never been demonstrated is not a check.
+#
+#   live-journey       "can a person add a thing in the deployed Studio right
+#     now?" REPORT MODE, scheduled + manually dispatchable, never on a PR. It
+#     reaches a live host, so it could never gate a diff even if the two facts
+#     above did not already settle it: a deploy outage is not a property of
+#     anybody's changes.
+#
+# The strict live run (no --report, exit 1 on any non-PASS LEG A beat) is
+# deliberately NOT wired here. That run is the wave-seal evidence, taken by hand
+# after a redeploy; scheduling it would red the repo daily for as long as any
+# known defect is knowingly in flight, and a gate that cries wolf gets disabled.
+#
+# Cost reference: the comparable lane (search-starter-smoke live-journey) runs
+# 1m07s–2m16s on system Chrome with no npm install. This one is in the same
+# range; LEG A's hydration ceiling makes a fully-failing run the slow case.
+
+on:
+  # The paths list names EVERY file these jobs execute (charter D26): the
+  # harness, the wrapper the jobs actually invoke, and this workflow.
+  push:
+    branches: [main]
+    paths:
+      - "tooling/studio-journey/**"
+      - "scripts/studio-journey-smoke.sh"
+      - ".github/workflows/studio-journey-smoke.yml"
+  pull_request:
+    paths:
+      - "tooling/studio-journey/**"
+      - "scripts/studio-journey-smoke.sh"
+      - ".github/workflows/studio-journey-smoke.yml"
+  schedule:
+    # 06:40 UTC daily — twenty minutes after the search-starter lane, so the two
+    # browser jobs do not contend for the same runner minute.
+    - cron: "40 6 * * *"
+  workflow_dispatch:
+    inputs:
+      base:
+        description: "Barkpark base URL to walk (report mode). Needs JOURNEY_TOKEN in secrets."
+        required: false
+        default: "https://guerrilla.barkpark.cloud"
+
+concurrency:
+  group: studio-journey-smoke-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref != 'refs/heads/main' }}
+
+jobs:
+  harness-self-test:
+    name: Studio journey — self-test (fixtures, no network)
+    # Nothing to certify at 06:40: there is no diff, and the live job below is
+    # the only reason that run exists.
+    if: github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # Node 22: the harness speaks CDP over a bare global WebSocket, stable by
+      # default only from 22. On an older build it refuses on the GUARD path
+      # (exit 2) rather than reporting an environment failure as a product one.
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # No setup-chrome action: ubuntu-latest already ships Google Chrome and
+      # findChrome() honours CHROME first. Pinning the path explicitly means a
+      # future runner image that drops the binary exits 2 as a GUARD naming what
+      # is missing, instead of silently falling through to another browser.
+      - name: Self-test (healthy fixture green, rotten fixture red)
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: scripts/studio-journey-smoke.sh self-test
+
+  live-journey:
+    name: Studio journey — deployed (report mode, gates nothing)
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # REPORT MODE. Exit 0 even when LEG A beats fail — read the step's log, not
+      # its exit code. `|| true` is NOT used here and must not be added: the
+      # harness already separates a product failure (reported and swallowed in
+      # this mode) from an ENVIRONMENT failure (exit 2), and `|| true` would
+      # erase the second, turning "no credentials" or "Chrome is missing" into a
+      # permanent silent green.
+      #
+      # JOURNEY_TOKEN is an admin token for the target host; there is no
+      # ~/.config/barkpark on a runner. Without it the harness exits 2 as a
+      # GUARD naming the missing credential — which is the correct outcome, not
+      # a product verdict, and is why this step is not allowed to swallow it.
+      - name: Deployed journey report
+        env:
+          CHROME: /usr/bin/google-chrome
+          JOURNEY_BASE: ${{ github.event.inputs.base || 'https://guerrilla.barkpark.cloud' }}
+          JOURNEY_TOKEN: ${{ secrets.GUERRILLA_ADMIN_TOKEN }}
+        run: scripts/studio-journey-smoke.sh report

@@ -978,7 +978,17 @@ defmodule BarkparkWeb.Studio.PaneBuilder do
               type: :item,
               id: child.id,
               title: child.title,
-              icon: child.icon,
+              # `|| "file"` closes the asymmetry that WAS the bug
+              # (spd-w18-nil-icon-500): the placed-node paths above already
+              # fall back (`node.icon || (schema && schema.icon)`), this
+              # forwarding did not, and its render site draws the icon
+              # UNCONDITIONALLY — so a nil here 500'd the whole desk column.
+              # No schema is in hand at this depth, hence the neutral glyph
+              # rather than a schema icon. (`:plugin_link` above stays
+              # nil-tolerant on purpose: its render site is wrapped in
+              # `if item.icon`, so nil means "draw no glyph" there, a real
+              # design state rather than a crash.)
+              icon: child.icon || "file",
               drillable: drillable
             }
           ]

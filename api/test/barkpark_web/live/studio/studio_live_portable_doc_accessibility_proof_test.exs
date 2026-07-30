@@ -172,7 +172,14 @@ defmodule BarkparkWeb.Studio.StudioLivePortableDocAccessibilityProofTest do
       editor
       |> LazyHTML.query(~s(a[data-test-id="paper-open-standalone"]))
 
-    assert LazyHTML.attribute(standalone, "href") == ["/papers/#{@slug}"]
+    # spd-w19 — an EXPECTATION CHANGE, not a regression. This link fell to the
+    # paper pane's missing `scope_prefix` thread and emitted the FLAT
+    # `/papers/:slug`, while the viewer sits on a scoped Studio mount; the pane
+    # now carries the viewer's own scope, and
+    # `/w/:ws/p/:proj/papers/:slug` is a real route (the gated scoped paper
+    # reader, `:scoped_paper_reader`). The scoped spelling is asserted through the
+    # same helper that built the mount, so the two can never drift apart.
+    assert LazyHTML.attribute(standalone, "href") == [scoped_studio("") <> "/papers/#{@slug}"]
     assert LazyHTML.attribute(standalone, "target") == ["_blank"]
     assert LazyHTML.attribute(standalone, "rel") == ["noopener"]
 

@@ -18,6 +18,13 @@
 #   • rgb()/rgba() function VALUES are not scanned literals (the gate detects only
 #     hsl()/#hex) — elevation shadows / overlays pass inherently. A hex/hsl that
 #     shares a line with an rgba() is NOT masked by it: it needs its own lit-allow.
+#   • an AMPERSAND-PREFIXED hex run is an HTML numeric character reference, not a
+#     colour: `&#160;` (non-breaking space), `&#8212;` (em dash). The hex branch
+#     carries a `(?<!&)` lookbehind for exactly that (spd-w19 — `&#160;` in
+#     components.ex read as the 3-digit colour `#160` and reddened main). Like the
+#     rgba() note, this masks NOTHING else on the line: a genuine `#c0ffee`
+#     sharing the line with an entity is still caught, which is precisely why the
+#     regex — not a whole-line `lit-allow` — is the non-weakening fix.
 #   • --paper-* / .bp-paper-* / .bp-canvas-* — the paper surface + paper editor
 #     (a separate surface, explicitly out of this task's scope)
 #   • --sheet-* / .sheet-* — the Sheets grid categorical CF palette (Q3)
@@ -37,16 +44,123 @@
 # palettes, color-picker DATA defaults, and the out-of-scope paper surface) are
 # listed in EXEMPT below, each with a reason.
 #
-# Usage: scripts/studio-literal-check.sh   (check; CI + merge gate)
+# Usage: scripts/studio-literal-check.sh             (check; CI + merge gate)
+#        scripts/studio-literal-check.sh --selftest  (tripwire; CI, see below)
 set -euo pipefail
 
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 LIB="$ROOT/api/lib"
 
+# --selftest — the DURABLE tripwire (spd-w19; the shape is copied from
+# scripts/go-literal-check.sh, which has carried it since au-w4-cli-ratchet AC5).
+# It proves the gate actually REDs on a planted literal, repeatably, planting
+# NOTHING in the real tree (a temp dir, cleaned on exit — so the self-test can
+# never trip the real gate). It drives the REAL scanner via STUDIO_LIT_SELFTEST,
+# so a future edit that weakens LITERAL / the comment strip / the allow logic is
+# caught HERE rather than in prose. Cases 4 and 5 are this gate's own scar: an
+# HTML numeric character reference must pass, and it must NOT mask a genuine
+# colour literal sharing its line (which is exactly what a whole-line lit-allow
+# would have done). CI wires this right after the main check (doc-gates.yml).
+if [ "${1:-}" = "--selftest" ]; then
+    tmp="$(mktemp -d)"
+    trap 'rm -rf "$tmp"' EXIT
+    # 1) A file with a planted hex literal in Studio chrome MUST fail, by file:line.
+    cat >"$tmp/planted.heex" <<'HEEX'
+<div class="bp-chrome">
+  <span style="color:#ff0000">planted</span>
+</div>
+HEEX
+    if out="$(STUDIO_LIT_SELFTEST="$tmp/planted.heex" bash "$0" 2>&1)"; then
+        echo "studio-literal-check --selftest: FAIL — planted #ff0000 was NOT caught (gate is blind)."
+        echo "$out"
+        exit 1
+    fi
+    if ! grep -q 'planted.heex:2' <<<"$out"; then
+        echo "studio-literal-check --selftest: FAIL — RED did not name the planted file:line."
+        echo "$out"
+        exit 1
+    fi
+    # 2) A clean file (tokens via var(--…), no literal) MUST pass.
+    cat >"$tmp/clean.heex" <<'HEEX'
+<div style="color: var(--text); background: var(--bg)">
+  <span style="border-color: var(--border)">clean</span>
+</div>
+HEEX
+    if ! STUDIO_LIT_SELFTEST="$tmp/clean.heex" bash "$0" >/dev/null 2>&1; then
+        echo "studio-literal-check --selftest: FAIL — a clean file was wrongly flagged (gate over-triggers)."
+        exit 1
+    fi
+    # 3) A hex inside a comment (documented, not applied) MUST pass — the strip works.
+    cat >"$tmp/comment.ex" <<'EX'
+defmodule Demo do
+  # palette note: brand accent is #ff0000 — documented, not applied.
+  def x, do: 1
+end
+EX
+    if ! STUDIO_LIT_SELFTEST="$tmp/comment.ex" bash "$0" >/dev/null 2>&1; then
+        echo "studio-literal-check --selftest: FAIL — a #hex in a COMMENT was flagged (comment strip broke)."
+        exit 1
+    fi
+    # 4) An HTML numeric character reference is NOT a colour and MUST pass
+    #    (spd-w19: `&#160;` read as `#160` and reddened main for 7 further gates).
+    cat >"$tmp/entity.ex" <<'EX'
+defmodule Demo do
+  def strip(s), do: String.replace(s, ~r/&nbsp;|&#160;|&#8212;|&#127775;/i, " ")
+end
+EX
+    if ! STUDIO_LIT_SELFTEST="$tmp/entity.ex" bash "$0" >/dev/null 2>&1; then
+        echo "studio-literal-check --selftest: FAIL — an HTML numeric entity was read as a colour."
+        exit 1
+    fi
+    # 5) …and that exclusion must NOT mask a genuine literal sharing the line —
+    #    the non-weakening property a whole-line lit-allow would have destroyed.
+    cat >"$tmp/entity_and_literal.ex" <<'EX'
+defmodule Demo do
+  def strip(s), do: String.replace(s, ~r/&#160;/i, " ") <> ~s(style="color:#c0ffee")
+end
+EX
+    if out="$(STUDIO_LIT_SELFTEST="$tmp/entity_and_literal.ex" bash "$0" 2>&1)"; then
+        echo "studio-literal-check --selftest: FAIL — a real #c0ffee sharing an entity line was NOT caught."
+        echo "$out"
+        exit 1
+    fi
+    if ! grep -q 'entity_and_literal.ex:2' <<<"$out"; then
+        echo "studio-literal-check --selftest: FAIL — the entity-line RED did not name file:line."
+        echo "$out"
+        exit 1
+    fi
+    # 6) A RELOCATED copy of this script MUST NOT pass vacuously. Reproduced on
+    #    origin/main: ROOT comes from `dirname $0`, so a copy outside the repo
+    #    finds no api/lib, scans 0 files and printed "PASS — 0 Studio chrome
+    #    file(s) scanned" with exit 0. The MIN_CHROME_FILES floor closes it, and
+    #    this case is the only thing that keeps the floor honest.
+    cp "$0" "$tmp/relocated.sh"
+    if out="$(bash "$tmp/relocated.sh" 2>&1)"; then
+        echo "studio-literal-check --selftest: FAIL — a RELOCATED copy scanning no files PASSED (vacuous green)."
+        echo "$out"
+        exit 1
+    fi
+    if ! grep -q 'file(s) were scanned' <<<"$out"; then
+        echo "studio-literal-check --selftest: FAIL — the relocated copy failed for the wrong reason."
+        echo "$out"
+        exit 1
+    fi
+    echo "studio-literal-check --selftest: PASS — gate REDs on a planted literal, names file:line, passes clean + commented hex + HTML numeric entities, still REDs a real literal sharing an entity line, and REFUSES to pass vacuously from a relocated copy."
+    exit 0
+fi
+
 python3 - "$LIB" <<'PY'
 import os, re, sys
 
 lib = sys.argv[1]
+
+# STUDIO_LIT_SELFTEST override: when set, scan ONLY that one file (the --selftest
+# tripwire points the REAL scanner at a throwaway temp file — same LITERAL, same
+# comment strip, same allow logic — so the tripwire proves the actual gate, not a
+# fork of it). Reported as its bare basename, which is what the tripwire greps.
+SELFTEST = os.environ.get("STUDIO_LIT_SELFTEST")
+if SELFTEST:
+    lib = os.path.dirname(os.path.abspath(SELFTEST))
 
 # The scanned chrome roots, relative to api/lib. barkpark/plugins joined in
 # au-r3 (plugin-owned Studio LiveViews are live chrome no other gate scanned).
@@ -89,7 +203,13 @@ EXEMPT = {
     "barkpark/plugins/sheets/html.ex",
 }
 
-LITERAL = re.compile(r"hsl\(\s*[0-9]|#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
+# A hex run introduced by `&` is an HTML numeric character reference (`&#160;`,
+# `&#8212;`), never a colour — the `(?<!&)` lookbehind is the narrow exclusion
+# documented in the header. Nothing else about the hex branch changes: a real
+# literal on the SAME line is still caught (unlike a lit-allow, which would blind
+# the whole line).
+LITERAL = re.compile(
+    r"hsl\(\s*[0-9]|(?<!&)#(?:[0-9a-fA-F]{8}|[0-9a-fA-F]{6}|[0-9a-fA-F]{3})\b")
 GEN_BLOCK = re.compile(
     r"BEGIN GENERATED: tokens.*?END GENERATED: tokens", re.S)
 
@@ -166,20 +286,46 @@ def scan(path, rel):
         hits.append((i, rawline.strip()))
     return hits
 
+def chrome_files():
+    if SELFTEST:
+        yield os.path.abspath(SELFTEST)
+        return
+    for scan_root in SCAN_ROOTS:
+        for dirpath, _dirs, files in os.walk(os.path.join(lib, scan_root)):
+            for fn in sorted(files):
+                if fn.endswith(".ex") or fn.endswith(".heex"):
+                    yield os.path.join(dirpath, fn)
+
+
+# A gate that scans nothing PASSES. Two ways to reach it, both real and both
+# reproduced: ROOT derives from `dirname $0`, so a RELOCATED copy of this script
+# prints "PASS — 0 Studio chrome file(s) scanned" and exits 0; and
+# STUDIO_LIT_SELFTEST, if it ever leaked into the real CI step, would narrow the
+# scan to a single file. So the real run asserts a NON-ZERO, PLAUSIBLE corpus
+# before it is allowed to pass. 372 files scanned today; the floor is set far
+# below that so ordinary deletions never trip it, and far above 0/1 so neither
+# vacuous-green path can.
+MIN_CHROME_FILES = 200
+
 failures = []
 scanned = 0
-for scan_root in SCAN_ROOTS:
-    for dirpath, _dirs, files in os.walk(os.path.join(lib, scan_root)):
-        for fn in sorted(files):
-            if not (fn.endswith(".ex") or fn.endswith(".heex")):
-                continue
-            path = os.path.join(dirpath, fn)
-            rel = os.path.relpath(path, lib)
-            if rel in EXEMPT:
-                continue
-            scanned += 1
-            for ln, text in scan(path, rel):
-                failures.append((rel, ln, text))
+for path in chrome_files():
+    rel = os.path.relpath(path, lib)
+    if rel in EXEMPT:
+        continue
+    scanned += 1
+    for ln, text in scan(path, rel):
+        failures.append((rel, ln, text))
+
+if not SELFTEST and scanned < MIN_CHROME_FILES:
+    print(f"studio-literal-check: FAILED — only {scanned} Studio chrome file(s) were scanned, "
+          f"below the {MIN_CHROME_FILES}-file floor.\n")
+    print(f"  Scanned root: {lib}")
+    print("  A gate that scans nothing PASSES, so this refuses to. Either the script was")
+    print("  run from a relocated copy (ROOT comes from `dirname $0`), or STUDIO_LIT_SELFTEST")
+    print("  leaked into the real gate step, or the Studio chrome tree genuinely shrank — in")
+    print("  which case lower MIN_CHROME_FILES deliberately, in the same commit.")
+    sys.exit(1)
 
 if not failures:
     print(f"studio-literal-check: PASS — {scanned} Studio chrome file(s) scanned, "

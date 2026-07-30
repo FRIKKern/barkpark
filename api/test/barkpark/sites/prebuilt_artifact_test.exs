@@ -81,6 +81,10 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
 
   defp tarball(entries), do: IO.iodata_to_binary(entries) <> trailer()
 
+  # The SAME entries with the end-of-archive marker never written — what a
+  # transfer cut on a 512-byte boundary leaves behind.
+  defp headless_tarball(entries), do: IO.iodata_to_binary(entries)
+
   defp gz(tar), do: :zlib.gzip(tar)
 
   defp artifact(tar_or_gz, opts \\ []) do
@@ -133,7 +137,10 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
     end
 
     test "REPLACES a previous staging — no bytes of the old bundle survive", %{dest: dest} do
-      assert {:ok, _} = stage(tarball([file_entry("stale.html", "old")]), dest)
+      # The root index.html is what makes this a stageable SITE at all (see the
+      # served-shape table); `stale.html` is the byte that must not survive.
+      old = tarball([file_entry("index.html", "old"), file_entry("stale.html", "old")])
+      assert {:ok, _} = stage(old, dest)
       assert File.exists?(Path.join(dest, "stale.html"))
 
       assert {:ok, _} = stage(astro_dist(), dest)
@@ -319,6 +326,225 @@ defmodule Barkpark.Sites.PrebuiltArtifactTest do
 
       assert {:error, "E_TOO_MANY_ENTRIES", _} = stage(tar, dest)
       refute File.exists?(dest)
+    end
+  end
+
+  # ── framing: the archive has to be WHOLE ──────────────────────────────────
+
+  # A tar ends with two zero blocks and a gzip member ends with a CRC32/ISIZE
+  # trailer. Both are the ONLY signals that the bytes we were handed are all the
+  # bytes there were — a transfer cut on a 512-byte boundary produces a tree that
+  # parses cleanly and is silently SHORT, which for a site is not a partial file
+  # but MISSING PAGES that then go live under the team's domain.
+  describe "framing" do
+    test "a tar cut ON an entry boundary is refused — no end-of-archive marker",
+         %{dest: dest} do
+      cut =
+        headless_tarball([
+          file_entry("index.html", "<!doctype html><title>bp</title>"),
+          dir_entry("_astro"),
+          file_entry("_astro/app.css", "body{margin:0}")
+        ])
+
+      assert {:error, "E_MALFORMED", message} = stage(cut, dest)
+      assert message =~ "end-of-archive marker"
+      refute File.exists?(dest)
+    end
+
+    test "a gzip whose CRC32/ISIZE trailer was cut is refused as truncated", %{dest: dest} do
+      gzipped = gz(astro_dist())
+      # Drop exactly the 8-byte gzip trailer: every deflate block still inflates,
+      # so the tar underneath is COMPLETE and only the envelope is short.
+      beheaded = binary_part(gzipped, 0, byte_size(gzipped) - 8)
+      b64 = Base.encode64(beheaded)
+      sha = :sha256 |> :crypto.hash(beheaded) |> Base.encode16(case: :lower)
+
+      assert {:error, "E_MALFORMED", message} = PrebuiltArtifact.stage(b64, sha, dest)
+      assert message =~ "truncated in transit"
+      refute File.exists?(dest)
+    end
+
+    test "bytes appended AFTER the end-of-archive marker are still BUDGETED", %{dest: dest} do
+      # The tail is INCOMPRESSIBLE and 512 KiB, so it spans many 64 KiB input
+      # chunks: a parser that stops FEEDING at the marker never sees it and the
+      # blob rides in for free, unbudgeted. The honest bundle is 3 blocks
+      # (1536 bytes), so only the tail can cross a 200 000-byte total cap.
+      tail = :crypto.strong_rand_bytes(512 * 1024)
+      tar = tarball([file_entry("index.html", "<!doctype html><title>bp</title>")]) <> tail
+
+      assert {:error, code, _} = stage(tar, dest, max_total_bytes: 200_000)
+      assert code in ["E_TOTAL_TOO_LARGE", "E_COMPRESSION_RATIO"]
+      refute File.exists?(dest)
+    end
+
+    test "the marker still ends the archive — trailing zero padding is not an entry",
+         %{dest: dest} do
+      # GNU tar pads to its 20-block blocking factor; those zero blocks past the
+      # marker must not be parsed, counted or refused.
+      padded = astro_dist() <> :binary.copy(<<0>>, 11 * @block)
+
+      assert {:ok, summary} = stage(padded, dest)
+      assert summary.entries == 5
+    end
+  end
+
+  # ── the served shape ──────────────────────────────────────────────────────
+
+  # The CLI already refuses to PACK a directory with no root `index.html`
+  # (`validatePrebuiltDir` in internal/cli/sites_tarball.go — the same message,
+  # one hop earlier). This is the server half of that contract: the box is the
+  # only place that sees what the archive actually CONTAINS, and an archive that
+  # stages an empty or index-less tree deploys green and then 404s at the domain.
+  describe "the served shape" do
+    test "a `./`-only archive is refused — it would stage nothing", %{dest: dest} do
+      assert {:error, "E_NO_INDEX", message} = stage(tarball([dir_entry(".")]), dest)
+      assert message =~ "no files"
+      refute File.exists?(dest)
+    end
+
+    test "a directories-only archive is refused", %{dest: dest} do
+      tar = tarball([dir_entry("."), dir_entry("_astro"), dir_entry("blog")])
+
+      assert {:error, "E_NO_INDEX", message} = stage(tar, dest)
+      assert message =~ "no files"
+      refute File.exists?(dest)
+    end
+
+    test "files with no index.html AT THE ROOT are refused", %{dest: dest} do
+      tar =
+        tarball([
+          file_entry("about.html", "<!doctype html>"),
+          dir_entry("blog"),
+          file_entry("blog/index.html", "<!doctype html><title>blog</title>")
+        ])
+
+      assert {:error, "E_NO_INDEX", message} = stage(tar, dest)
+      assert message =~ "index.html"
+      assert message =~ "root"
+      refute File.exists?(dest)
+    end
+
+    test "`./index.html` satisfies the root requirement", %{dest: dest} do
+      tar = tarball([dir_entry("."), file_entry("./index.html", "<!doctype html>")])
+
+      assert {:ok, summary} = stage(tar, dest)
+      assert summary.entries == 2
+    end
+  end
+
+  # ── the tightening is SAFE against writers that are not hand-built ─────────
+
+  # Every archive below was produced by a real writer and is checked in AS BYTES
+  # (base64, so it runs in CI with no external tool and no env-var escape hatch).
+  # If requiring the end-of-archive marker refused what real writers emit, THESE
+  # are the tests that red — which is the whole point of pasting them here.
+
+  # `tar (GNU tar) 1.34`, `tar czf - -C /d .` over index.html,
+  # _astro/app.a1b2c3.css and blog/index.html: 6 entries (the `./` root entry
+  # included), 20 blocks total, 11 trailing zero blocks past the marker.
+  @gnu_tar_134_b64 "H4sIAAAAAAAAA+3X7WqDMBQG4FyKu4EkJ5oIQ7yV4RdVsI1oBitj9760+2AtdCI0ytj7/EmIQg6c8Gq4YMFJL9X6PHrX43lOWsVKk9FS+fU0JcUiHb40xp4nV4xRxEZr3W/vzT3/o7joDnXzwlu370PtcWqwSZLb/dfmsv9EKUkWyVAF/fTP+5891LZyx6GJTicgz1zn+iYvh0x8zLKW8rbpe5sJP9u6Wrg3Lp6KyY025Gdgcf4TKUnI/zV8978YBl5QqaqYV9N01z1m85+u8z9OEoX8X0Np6+Prvhh33eFRvm1dDayNi7K3u7CXgOX5L02skf9r+Ox/0EvAbP77sL/svzLKIP/XcOP/35+JrxvA1hUCAAAAAAAAAAAAAMBS77MUmmgAKAAA"
+
+  # The repo's OWN packer: `packPrebuiltDir` (internal/cli/sites_tarball.go), Go
+  # archive/tar + compress/gzip, no `./` root entry, exactly 2 trailing zero blocks.
+  @cli_packer_b64 "H4sIAAAAAAAA/+yT72rDIBTFfZTsBZJ7/VcY4qsMk9gZsFWig5Wxdx/F9kth3ZcmYdTflxOIcI/3eN5MynPoyJIAAOyEKCqLAuVFCwQFZVSglAgEkEpGSSMWdXXhI2UzE4Bovbd3zqVs9vs7/68Xueo/4ZK/ibE12NOBtUNKD55x3ofk/Pf8Ud7kL2DHSLPKEp88/z6Mp6+Dmd+n4yt8b+2msjbTcbSfrcsHv9yMP/svbvvPGMfa/zVQL2MY8ina5vwGtMpT9lb3UXXlSznUznofVOdQb+22UqlUKo/iJwAA//9RZPqOAA4AAA=="
+
+  # CPython 3.9 `tarfile`, USTAR_FORMAT. PAX_FORMAT (tarfile's default) emits
+  # `x` extension headers, which this module refuses today for a separate,
+  # deliberate reason — that question belongs to the packer/extractor format
+  # seam, not to framing, so this fixture pins the ustar writer only.
+  @python_tarfile_ustar_b64 "H4sIALGdamoC/+3TXYrCMBQF4CxFN5DfJoKEbkXSNthCtaGNqIh7N1p8EXRepkVmzvdyb6EPISeHMjI5nqy0HqcZZ/Kcj11oqaQWRmeCcMGlMmShyQwOQ3R9Okrwbes//HesvW/Jn0PZxg2x79hX5Z++NPKfNX8XAnWikKWi5TD8ev4my97nL8xL/mplUv858p9c0VXny87122a/5lcC/wxlzb7yJ1rH3WSv+8f+69f+S6ky9H8Odll1ZTwHv7i/gNzGJrY+L4Jl42ZrkdfpajrL0oa+AAAAAAAAAAAAAAAAAAB8qxt6ymWyACgAAA=="
+
+  defp stage_bytes(raw, dest) do
+    PrebuiltArtifact.stage(
+      Base.encode64(raw),
+      :sha256 |> :crypto.hash(raw) |> Base.encode16(case: :lower),
+      dest
+    )
+  end
+
+  describe "archives from real writers" do
+    test "GNU tar 1.34 output is accepted", %{dest: dest} do
+      assert {:ok, summary} = stage_bytes(Base.decode64!(@gnu_tar_134_b64), dest)
+      assert summary.entries == 6
+      assert File.read!(Path.join(dest, "index.html")) =~ "hello"
+      assert File.read!(Path.join(dest, "_astro/app.a1b2c3.css")) == "body{margin:0}"
+      assert File.read!(Path.join(dest, "blog/index.html")) =~ "blog"
+    end
+
+    test "the CLI's own packPrebuiltDir output is accepted", %{dest: dest} do
+      assert {:ok, summary} = stage_bytes(Base.decode64!(@cli_packer_b64), dest)
+      assert summary.entries == 3
+      assert File.read!(Path.join(dest, "index.html")) =~ "hello"
+      assert File.read!(Path.join(dest, "_astro/app.a1b2c3.css")) == "body{margin:0}"
+    end
+
+    test "CPython tarfile (ustar) output is accepted", %{dest: dest} do
+      assert {:ok, summary} = stage_bytes(Base.decode64!(@python_tarfile_ustar_b64), dest)
+      assert summary.entries == 4
+      assert File.read!(Path.join(dest, "index.html")) =~ "hello"
+    end
+
+    test ":erl_tar.create/3 [:compressed] output is accepted", %{base: base, dest: dest} do
+      src = Path.join(base, "erl-src")
+      File.mkdir_p!(Path.join(src, "_astro"))
+      File.write!(Path.join(src, "index.html"), "<!doctype html><title>bp</title><h1>hello</h1>")
+      File.write!(Path.join(src, "_astro/app.css"), "body{margin:0}")
+      archive = Path.join(base, "erl.tar.gz")
+
+      :ok =
+        :erl_tar.create(
+          String.to_charlist(archive),
+          [
+            {~c"index.html", String.to_charlist(Path.join(src, "index.html"))},
+            {~c"_astro/app.css", String.to_charlist(Path.join(src, "_astro/app.css"))}
+          ],
+          [:compressed]
+        )
+
+      assert {:ok, summary} = stage_bytes(File.read!(archive), dest)
+      assert summary.entries == 2
+      assert File.read!(Path.join(dest, "index.html")) =~ "hello"
+      assert File.read!(Path.join(dest, "_astro/app.css")) == "body{margin:0}"
+    end
+  end
+
+  # ── PINNED, not fixed ─────────────────────────────────────────────────────
+
+  describe "already-refused and parity behaviours (pins, NOT fixes)" do
+    test "a corrupted gzip CRC32 with an intact ISIZE is ALREADY refused", %{dest: dest} do
+      # zlib checks the CRC itself, so this needs no work from us — it is pinned
+      # so nobody 'fixes' a hole that is not there. Only a MISSING trailer
+      # escaped, and that is what the framing test above closes.
+      gzipped = gz(astro_dist())
+      size = byte_size(gzipped)
+      <<head::binary-size(size - 8), crc::binary-size(4), isize::binary-size(4)>> = gzipped
+      <<first, rest::binary>> = crc
+      corrupt = head <> <<Bitwise.bxor(first, 0xFF)>> <> rest <> isize
+
+      assert byte_size(corrupt) == size
+      assert {:error, "E_MALFORMED", _} = stage_bytes(corrupt, dest)
+      refute File.exists?(dest)
+    end
+
+    test "an OVER-DECLARED entry size is parity with GNU tar, not a differential",
+         %{dest: dest} do
+      # `swallow.txt` declares 1024 bytes with only 512 bytes of body written, so
+      # the following block is read as its body. GNU tar 1.34 does EXACTLY this:
+      #   $ tar xzf sizelie.tar.gz; echo EXIT=$?   ->  EXIT=0   (no warning)
+      #   -rw-r--r-- 1 root root 1024 swallow.txt
+      # so the extracted tree matches byte for byte. Pinned, not fixed: making
+      # this a refusal would refuse what the reference implementation accepts.
+      tar =
+        headless_tarball([
+          file_entry("index.html", "<!doctype html><title>bp</title><h1>hello</h1>"),
+          header("swallow.txt", size: 1024) <> pad_body("x")
+        ]) <> :binary.copy(<<0>>, 22 * @block)
+
+      assert {:ok, summary} = stage(tar, dest)
+      assert summary.entries == 2
+      swallowed = File.read!(Path.join(dest, "swallow.txt"))
+      assert byte_size(swallowed) == 1024
+      assert binary_part(swallowed, 0, 1) == "x"
     end
   end
 

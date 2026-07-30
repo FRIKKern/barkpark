@@ -71,6 +71,30 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
     {bp, static_site(bp)}
   end
 
+  # Mark the site deployed with an UPLOADED current release — bytes this fleet
+  # cannot reproduce.
+  defp deployed_prebuilt(site, bp) do
+    {:ok, marker} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+    assert marker.source == "prebuilt"
+
+    site
+    |> Ecto.Changeset.change(current_deployment_id: marker.id)
+    |> Repo.update!()
+  end
+
+  defp deployed_box_build(site, bp) do
+    {:ok, marker} = Deploy.enqueue(site, bp, true, "manual")
+    assert marker.source == "box-build"
+
+    site
+    |> Ecto.Changeset.change(current_deployment_id: marker.id)
+    |> Repo.update!()
+  end
+
+  defp content_autos(site) do
+    Registry.list_deployments(site, 20) |> Enum.filter(&(&1.trigger == "content-auto"))
+  end
+
   defp pending_jobs(site_id) do
     Repo.all(
       from(j in Oban.Job,
@@ -170,6 +194,90 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       # No site with this id exists — the publish raced a site delete.
       assert {:cancel, :site_or_box_gone} =
                perform_job(AutoDeployWorker, %{"site_id" => Ecto.UUID.generate()})
+    end
+  end
+
+  describe "the PREBUILT refusal (charter D92/D105)" do
+    test "FAIL-BEFORE: unguarded, a content publish mints a BOX build over the uploaded release" do
+      {bp, site} = setup_site()
+      site = deployed_prebuilt(site, bp)
+      live = Registry.get_deployment(site.current_deployment_id)
+
+      # The pre-guard `drive/2`, VERBATIM: force + content-auto, `source` left at
+      # its "box-build" default.
+      assert {:ok, ghost} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert ghost.source == "box-build"
+      refute ghost.build_id == live.build_id
+    end
+
+    test "mints a USER-VISIBLE cancelled row (content-auto/prebuilt) naming the remedy, and cancels BY VALUE" do
+      {bp, site} = setup_site()
+      site = deployed_prebuilt(site, bp)
+
+      # BY VALUE, not by shape: {:error, _} would have Oban retry to max_attempts
+      # and then DISCARD — a permanent, correct refusal made to look like a box
+      # outage.
+      assert {:cancel, :prebuilt_release_protected} =
+               perform_job(AutoDeployWorker, %{"site_id" => site.id})
+
+      assert [row] = content_autos(site)
+      assert row.status == "cancelled"
+      assert row.source == "prebuilt"
+      assert row.trigger == "content-auto"
+
+      # The webhook already answered 202 ok, so the row is the ONLY place a user
+      # can learn the publish did not reach live — it must name the way forward.
+      assert row.detail =~ "--prebuilt"
+      assert row.detail =~ "bp cloud site deploy"
+      assert row.failure_reason == row.detail
+
+      # And it never became a build: no queued/building row was left behind.
+      refute Enum.any?(content_autos(site), &(&1.status in ~w(queued building pushing live)))
+    end
+
+    test "a BOX-BUILT live release is untouched by the guard — the auto-deploy still fires" do
+      {bp, site} = setup_site()
+      site = deployed_box_build(site, bp)
+
+      assert :ok = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+
+      assert [row] = content_autos(site)
+      assert row.status == "queued"
+      assert row.source == "box-build"
+    end
+
+    test "keys on the LIVE RELEASE, not sites.prebuilt_enabled — an ENABLED site serving a box build still auto-deploys" do
+      {bp, site} = setup_site()
+
+      # The opt-in is ON, but this site's live bytes came from the box. Keying on
+      # the flag would kill its content auto-deploy outright.
+      site =
+        site
+        |> Ecto.Changeset.change(prebuilt_enabled: true)
+        |> Repo.update!()
+        |> deployed_box_build(bp)
+
+      assert :ok = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+      assert [%{status: "queued", source: "box-build"}] = content_autos(site)
+    end
+
+    test "a never-deployed site is not refused (nil current release is not provenance)" do
+      {_bp, site} = setup_site()
+      assert site.current_deployment_id == nil
+
+      assert :ok = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+      assert [%{source: "box-build"}] = content_autos(site)
+    end
+
+    test "the MANUAL path is unchanged: a manual deploy of a prebuilt-current site still enqueues" do
+      {bp, site} = setup_site()
+      site = deployed_prebuilt(site, bp)
+
+      # The guard belongs to the UNBIDDEN paths only. A human running
+      # `bp cloud site deploy` asked for exactly this.
+      assert {:ok, manual} = Deploy.enqueue(site, bp, true, "manual")
+      assert manual.status == "queued"
+      assert manual.trigger == "manual"
     end
   end
 

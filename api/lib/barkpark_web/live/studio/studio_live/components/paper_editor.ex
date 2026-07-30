@@ -94,6 +94,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
   # streamed surface; this editor reads from `paper_doc.content["blocks"]`.
   attr(:slug, :string, required: true)
   attr(:blocks, :list, required: true)
+  # spd-w18 — the document's REAL type. This editor is opened by every blocks-doc
+  # type (paper today, session too), and the empty-body sentence below used to
+  # tell a session's author "This paper has no body blocks yet". Default "paper"
+  # keeps the Beta document-editor call site (which passes none) unchanged.
+  attr(:doc_type, :string, default: "paper")
   attr(:paper_rev, :integer, default: 0)
   attr(:dataset, :string, default: "production")
   attr(:api_token_raw, :string, default: "")
@@ -224,8 +229,14 @@ defmodule BarkparkWeb.Studio.StudioLive.Components.PaperEditor do
         api_token_raw={@api_token_raw}
       />
 
+      <%!-- spd-w18 — an honest empty state names WHICH document is empty and
+            WHAT it is. It used to read "This paper has no body blocks yet" to
+            someone editing a SESSION (sessions take this identical path), with
+            no id to tell one empty document from another, painted in the same
+            faint grey the owner read as inert chrome (contrast raised in
+            root.html.heex). --%>
       <p :if={@free_blocks == []} class="bp-paper-editor-empty">
-        This paper has no body blocks yet. Add one below.
+        This {@doc_type} (<code>{@slug}</code>) has no body blocks yet. Add one below.
       </p>
 
       <%= if @canvas_on? do %>

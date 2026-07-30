@@ -289,23 +289,11 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
-  @doc """
-  Store an uploaded tarball that is not (yet) bound to any deployment — the
-  site-scoped upload route's sink. Returns `{:ok, artifact}`.
-  """
-  @spec store_site_artifact(Site.t(), binary(), String.t()) ::
-          {:ok, SiteArtifact.t()} | {:error, Ecto.Changeset.t()}
-  def store_site_artifact(%Site{} = site, bytes, sha256)
-      when is_binary(bytes) and is_binary(sha256) do
-    %SiteArtifact{}
-    |> SiteArtifact.changeset(%{
-      bytes: bytes,
-      sha256: sha256,
-      byte_size: byte_size(bytes),
-      site_id: site.id
-    })
-    |> Repo.insert()
-  end
+  # site-spawner W10: `store_site_artifact/3` is GONE. It inserted a SiteArtifact
+  # with a site_id and no deployment_id — which `artifact_for/1` and
+  # `drop_artifact/1` below both key on — so every row it wrote was unreadable and
+  # unreapable, an unbounded leak on the control plane's only durable volume.
+  # Artifact bytes are bound to a deployment at insert or they are not stored.
 
   @doc "The stored artifact for `deployment_id`, or nil."
   @spec artifact_for(binary()) :: SiteArtifact.t() | nil
@@ -942,13 +930,50 @@ defmodule BarkparkCloud.Sites.Deploy do
   # A box that answered, but said no. Its own words travel — never a generic
   # "deploy failed".
   defp box_refusal(status, body) when is_map(body) do
-    detail = body["error"] || body["detail"] || body["reason"] || body["failure_reason"]
-
-    case detail do
+    case refusal_detail(body) do
       d when is_binary(d) and d != "" -> "the instance refused the deploy (HTTP #{status}): #{d}"
       _ -> "the instance refused the deploy (HTTP #{status})"
     end
   end
+
+  # site-spawner W10: the box renders its typed refusals NESTED —
+  # `BarkparkWeb.SiteDeployController.bad_request/3` (and its
+  # `feature_not_configured` / `build_id_mismatch` siblings) all answer
+  # `%{error: %{code: …, message: …}}`, and `Registry.relay_with/5` decodes that
+  # with STRING keys. The old flat `body["error"]` therefore bound a MAP, failed
+  # the `is_binary` guard, and fell through to the bare "the instance refused the
+  # deploy (HTTP 400)" — so every typed extraction refusal the prebuilt ingest
+  # raises (`artifact_missing`, `artifact_digest_mismatch`, the symlink/absolute
+  # /traversal path refusals, …) was invisible to the user, and the deploy that
+  # names its cause most precisely was the one that named it least.
+  #
+  # The nested arm is tried FIRST and both halves travel: the code is what a user
+  # greps or files a bug about, the message is what tells them what to fix.
+  defp refusal_detail(%{"error" => %{} = err}) do
+    code = string_or_nil(err["code"])
+    message = string_or_nil(err["message"] || err["detail"] || err["reason"])
+
+    case {code, message} do
+      {nil, nil} -> nil
+      {code, nil} -> code
+      {nil, message} -> message
+      {code, message} -> "#{code} — #{message}"
+    end
+  end
+
+  # A flat body: the shape `relay_with/5`'s `%{}` fallback produces, plus any box
+  # route that answers a bare string reason.
+  defp refusal_detail(body),
+    do: body["error"] || body["detail"] || body["reason"] || body["failure_reason"]
+
+  defp string_or_nil(s) when is_binary(s) do
+    case String.trim(s) do
+      "" -> nil
+      trimmed -> trimmed
+    end
+  end
+
+  defp string_or_nil(_), do: nil
 
   defp unreachable(%Barkpark{slug: slug}, :not_live),
     do: "instance #{slug} has no URL yet — it is still provisioning"
