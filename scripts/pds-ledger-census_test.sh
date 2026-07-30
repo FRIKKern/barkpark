@@ -514,8 +514,17 @@ expect_output_contains "the derived anchor is printed with its provenance" "pape
 expect_output_contains "live_bare_residue is a ROW-ID LIST in --json" "$(printf '"live_bare_residue": [\n    "deep-a"\n  ]')" \
   run --page-limit 4 --fixture-dir "$ANCHORED" --anchor-from-paper "$WAVE_SLUG" --json
 # ...and 4(a)'s DENOMINATOR is still the whole live board: deferring a row must
-# not quietly shrink what the clause claims to have covered.
-expect_output_contains "4(a) still scores against the WHOLE live board" "live rows carrying a disposition               3/3" \
+# not quietly shrink what the clause claims to have covered. The NUMERATOR is
+# literal in the other direction (review, wave 26): a deferred row does NOT
+# carry a disposition, so it is not counted as one. 3 live rows, 1 deferred,
+# 2 actually dispositioned -> "2/3 PASS" plus the named residue line. Printing
+# "3/3" here would be a success claim about a row nobody looked at, which is the
+# defect class this whole epic exists to kill.
+expect_output_contains "4(a)'s denominator is the WHOLE live board and its numerator is literal" \
+  "live rows carrying a disposition               2/3" \
+  run --page-limit 4 --fixture-dir "$ANCHORED" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+expect_output_contains "the deferred row is NOT counted as dispositioned" \
+  "deferred to the next round (RESIDUE)        1" \
   run --page-limit 4 --fixture-dir "$ANCHORED" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
 
 # TERMINATION. The same row is IN SCOPE for the next round: anchor after its

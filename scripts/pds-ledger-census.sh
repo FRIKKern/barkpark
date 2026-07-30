@@ -957,8 +957,16 @@ def main(argv):
         if report["round_anchor"]:
             print("  round anchor                                  %s   (%s)"
                   % (report["round_anchor"], report["round_anchor_source"]))
+        # THE NUMERATOR IS LITERAL. `bare` is the ANCHORED subset, so
+        # `live - len(bare)` would count every residue row as carrying a
+        # disposition and print "172/172 PASS" over a board where 15 rows carry
+        # nothing -- a success claim about rows nobody looked at, which is the
+        # exact defect class this epic exists to kill. The residue is subtracted
+        # out and reported on its own line below: the denominator still names the
+        # WHOLE live board, so deferring can never shrink what 4(a) covers.
         print("  live rows carrying a disposition               %d/%d    %s"
-              % (report["live"] - len(bare), report["live"], "PASS" if not bare else "FAIL"))
+              % (report["live"] - len(bare) - len(residue), report["live"],
+                 "PASS" if not bare else "FAIL"))
         if report["round_anchor"]:
             # A NAMED WORKLIST, NEVER A BARE COUNT: these rows were born after the
             # round started, so they are the NEXT round's inbox -- deferred by
