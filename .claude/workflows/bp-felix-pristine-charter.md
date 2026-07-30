@@ -2534,6 +2534,26 @@ new ratchet into a real gate.
   with computed $63.75/62.3M (E4) and $46.61/38.9M (E6) — a 22–26x gap, named not nudged.
   Housekeeping: w18-registry-staleability closed 4/4 on #5917 merge evidence. Grade: pending
   build+review.
+- **Wave 19 — 2026-07-23 — REVIEWED (A, per `felix-pristine-wave-19-2026-07-23`). Arm: E (E7 —
+  E6 + freshness-gated verify).** All 4 round-1 slices BUILT, reviewer-verified, PUSHED with PRs:
+  realtime broadcast field-vis seal (#5914 on `loop-epic/seal-the-realtime-broadcast-card-project-0-r`
+  — reviewer INDEPENDENTLY re-derived the 7-field gated set off to_card/4, exact match, and re-ran
+  the unthread mutation RED→GREEN; one pre-existing format fix folded), D43 walk.ex StatusVocab
+  delegate with the ⠿ still-frame (#5915 — reviewer re-mutated, 3 tests red; golden regen verified
+  exactly 2 chip swaps; NOTE: delegation covers all 9 manifest statuses, a documented superset of
+  D114's literal 5 — manifest-faithful, ruled correct), bind_assignment_task dataset-row 55P03
+  real-drive test (#5916 — reviewer re-ran the FOR-SHARE-delete mutation: "nothing was raised" red,
+  restore green 45/0; test file only), cloud registry hardening + folded tier drift (#5917 —
+  reviewer re-ran BOTH mutations: put_new revert and tier revert each red exactly their guard;
+  105/0). Every gate re-run green on final state. Ledger honest: all 4 tasks in_progress, evidence
+  stamped, merge gates open for the LEAD. E7 quality axis: 0 premise failures escaped — both
+  verify-SKIPPED slices (S1, S4) survived independent adversarial review with zero functional
+  defects; review-repair load = 1 trivial format fix. Token axis awaits the lead's meter read
+  (E6 1.72M baseline is lead-supplied provenance per D117). NEXT: lead merges #5914–#5917 (each
+  WAITS for the Elixir Test gate; #5917 is cloud/), closes each merge criterion; sharpest open
+  children: `felix-w19-bl-authority-lock-remaining-sites` (P3, the other 2 lock sites need their
+  own isolable-row analysis), `felix-w19-bl-email-golden-regen-mixtask` (P4), and the research
+  epic's `grb-append-e4-e6-scoreboard-rows` + the E7 meter read to finish the experiment row.
 
 - **Wave 19 — 2026-07-23 — DECIDED (building). Arm: E (E7 — E6 + freshness-gated verify).**
   Ratified D112–D118. Housekeeping executed at Decide: 3 merged-W18 tasks closed done 4/4 on
