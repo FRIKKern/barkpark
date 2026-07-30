@@ -157,8 +157,14 @@ defmodule BarkparkWeb.Plugs.PublicRead do
   defp put_scope(opts, key, %{id: id}), do: Keyword.put(opts, key, id)
   defp put_scope(opts, _key, _other), do: opts
 
-  # The repo's ONE envelope emitter (`@canonical capability:error-response-emit`)
-  # — canonical code/status from Content.Errors, hint + request_id stamped, halt
-  # included. Never hand-build the body here.
+  # Delegates to the repo's ONE envelope emitter, `BarkparkWeb.ErrorResponse.emit/3`
+  # — the owner of the "error-response-emit" capability (see its own canonical
+  # marker at error_response.ex:34): canonical code/status from Content.Errors,
+  # hint + request_id stamped, halt included. Never hand-build the body here.
+  #
+  # The capability slug is deliberately NOT written here in canonical-marker form.
+  # A second marker for the same slug is a duplicate the docs-anchors gate rejects
+  # by design, and the line below is a private `defp`, which that gate also rejects
+  # — a pointer to an owner is not a claim to be one.
   defp deny(conn, reason, message), do: ErrorResponse.emit(conn, reason, message)
 end
