@@ -107,6 +107,92 @@ defmodule Barkpark.Content.LifecycleTest do
     :ok
   end
 
+  defp task_draft!(doc_id, scope, extra) do
+    content =
+      %{"kind" => "task", "lifecycle_status" => "open"}
+      |> Map.merge(Barkpark.LabelFixtures.weighted_labels())
+      |> Map.merge(extra)
+
+    {:ok, doc} =
+      Content.create_document(
+        "task",
+        %{"doc_id" => doc_id, "title" => "Criteria fence #{doc_id}", "content" => content},
+        @dataset,
+        scope
+      )
+
+    doc
+  end
+
+  defp published_task!(doc_id, scope) do
+    {:ok, doc} = Content.get_document(doc_id, "task", @dataset, scope)
+    doc
+  end
+
+  # What `bp doc patch` does: mint `drafts.<id>` from the CURRENT published
+  # content. The twin is claim-IDENTICAL by construction — that is exactly
+  # why `stale_claim?/2` cannot see the erasure it enables.
+  defp mint_twin_from_published!(doc_id, scope, mutate) do
+    pub = published_task!(doc_id, scope)
+
+    {:ok, draft} =
+      Content.upsert_document(
+        "task",
+        %{
+          "doc_id" => doc_id,
+          "title" => pub.title,
+          "content" => mutate.(pub.content)
+        },
+        @dataset,
+        scope
+      )
+
+    draft
+  end
+
+  @c0 "the fence refuses a publish that would clear a landed stamp"
+  @c1 "a publish that preserves the criteria still succeeds"
+
+  defp two_criteria do
+    [
+      %{"criterion" => @c0, "met" => false, "evidence" => ""},
+      %{"criterion" => @c1, "met" => false, "evidence" => ""}
+    ]
+  end
+
+  # create → publish → claim → mint the twin → stamp criterion 0 on the
+  # PUBLISHED row. Returns {claimed_uuid, epoch}.
+  defp claim_and_stamp!(doc_id, scope, worker) do
+    task_draft!(doc_id, scope, %{"acceptance_criteria" => two_criteria()})
+    {:ok, _} = Content.publish_document(doc_id, "task", @dataset, scope)
+
+    {:ok, claimed} = Barkpark.Tasks.claim_by_id(doc_id, worker, scope)
+    epoch = claimed.content["claim"]["epoch"]
+
+    # The twin is minted HERE — after the claim, before the stamp. This is
+    # the live exposure window.
+    mint_twin_from_published!(doc_id, scope, & &1)
+
+    {:ok, _} =
+      Barkpark.Tasks.stamp(claimed.id, worker,
+        observed_epoch: epoch,
+        criterion: 0,
+        criterion_text: @c0,
+        outcome: {:met, "gate green: mix test lifecycle_test.exs"}
+      )
+
+    stamped = published_task!(doc_id, scope)
+    assert %{"met" => true, "evidence" => evidence} = hd(stamped.content["acceptance_criteria"])
+    assert evidence =~ "gate green"
+
+    {claimed.id, epoch}
+  end
+
+  defp published_inserted_at!(id) do
+    {:ok, doc} = Content.get_document(id, @type_name, @dataset)
+    doc.inserted_at
+  end
+
   # ── publish ─────────────────────────────────────────────────────────────────
 
   test "publish moves draft→published: published row exists, draft row gone" do
@@ -506,6 +592,264 @@ defmodule Barkpark.Content.LifecycleTest do
 
       assert_receive {:wall_rejection, [:barkpark, :authoring, :wall_rejection], %{count: 1},
                       %{code: :label_spine, type: "paper", dataset: @dataset}}
+    end
+  end
+
+  # ── the acceptance_criteria fence at the publish door (PDS wave 26) ─────────
+  #
+  # MECHANISM, observed end-to-end (PDS-D360/D362), not derived: `bp task
+  # stamp` writes the PUBLISHED row (`Tasks.Stamp`, `Repo.update_all`) and
+  # never touches the draft twin, and a draft NEVER rebases. A draft minted
+  # DURING an active claim therefore carries that claim VERBATIM, sails past
+  # `stale_claim?/2` (the only fence this door had), and publish then replaces
+  # the published content WHOLESALE — `met: true` → `met: false`, evidence →
+  # `""`, rc=0, no warning.
+  #
+  # MUTATION-PROVEN, not merely green (run 2026-07-31 in this worktree):
+  # collapsing the new `criteria_regression/2` branch of `gate_task_publish/2`
+  # back to `:ok` (≈ origin/main's door) turns the refusal test red in the
+  # OTHER direction — the publish returns `{:ok, _}` and the read-back shows
+  # `met: false, evidence: ""`. The erasure is real and this fence is what
+  # stops it.
+  describe "publish door — the acceptance_criteria fence" do
+    setup do
+      {ws, project} = Barkpark.TenancyFixtures.ensure_default_scope!()
+      scope = [workspace_id: ws.id, project_id: project.id]
+
+      # The fixture weighted tags every task publish carries.
+      Barkpark.LabelFixtures.register_tags!(@dataset)
+
+      for schema_def <- Barkpark.Tasks.schema_definitions(@dataset) do
+        attrs =
+          schema_def
+          |> Map.from_struct()
+          |> Map.drop([:__meta__, :id, :inserted_at, :updated_at])
+          |> Map.new(fn {k, v} -> {to_string(k), v} end)
+
+        {:ok, _} = Content.upsert_schema(attrs, @dataset, scope)
+      end
+
+      %{scope: scope}
+    end
+
+    test "a claim-identical stale draft that would clear a met:true flag is REFUSED, " <>
+           "and the stamp survives",
+         %{scope: scope} do
+      claim_and_stamp!("fence-erase", scope, "fence-worker")
+
+      # The twin still carries the pre-stamp criteria (met:false, no evidence)
+      # AND the claim byte-identical — the pre-fix erasure shape.
+      {:ok, twin} = Content.get_document("drafts.fence-erase", "task", @dataset, scope)
+      assert hd(twin.content["acceptance_criteria"])["met"] == false
+      assert twin.content["claim"]["worker"] == "fence-worker"
+
+      # THE PROBE (measured pre-fix: {:ok, _} and the stamp gone).
+      assert {:error, {:invalid_task_content, %{"acceptance_criteria" => [message]}}} =
+               Content.publish_document("fence-erase", "task", @dataset, scope)
+
+      assert message =~ "stale draft"
+      assert message =~ "clear the `met: true` flag"
+      assert message =~ "acceptance criterion 0"
+      assert message =~ @c0
+      # The refusal TEACHES the recovery, not just the refusal.
+      assert message =~ "Re-derive the draft from the published row"
+      assert message =~ "bp task stamp"
+
+      # The published row never moved.
+      pub = published_task!("fence-erase", scope)
+      assert %{"met" => true, "evidence" => evidence} = hd(pub.content["acceptance_criteria"])
+      assert evidence =~ "gate green"
+    end
+
+    test "a draft that DROPS the proof-bearing row entirely is REFUSED", %{scope: scope} do
+      claim_and_stamp!("fence-drop", scope, "fence-worker")
+
+      # The whole list goes: criterion 0 has no counterpart by text OR by
+      # position, so the proof is not merely cleared — the row holding it is
+      # gone. (A SHORTENED list that still has a row at index 0 is reported as
+      # a met-clear, not a drop — refused either way; only the verb differs.)
+      mint_twin_from_published!("fence-drop", scope, fn content ->
+        Map.put(content, "acceptance_criteria", [])
+      end)
+
+      assert {:error, {:invalid_task_content, %{"acceptance_criteria" => [message]}}} =
+               Content.publish_document("fence-drop", "task", @dataset, scope)
+
+      assert message =~ "drop the proof-bearing row"
+
+      assert hd(published_task!("fence-drop", scope).content["acceptance_criteria"])["met"] ==
+               true
+    end
+
+    test "a draft that keeps met:true but BLANKS the evidence is REFUSED", %{scope: scope} do
+      claim_and_stamp!("fence-blank", scope, "fence-worker")
+
+      mint_twin_from_published!("fence-blank", scope, fn content ->
+        blanked =
+          content["acceptance_criteria"]
+          |> List.update_at(0, &Map.put(&1, "evidence", "   "))
+
+        Map.put(content, "acceptance_criteria", blanked)
+      end)
+
+      assert {:error, {:invalid_task_content, %{"acceptance_criteria" => [message]}}} =
+               Content.publish_document("fence-blank", "task", @dataset, scope)
+
+      assert message =~ "blank the recorded evidence"
+
+      assert hd(published_task!("fence-blank", scope).content["acceptance_criteria"])["evidence"] =~
+               "gate green"
+    end
+
+    # ── the flip risk: the fence must NOT refuse legitimate publishes ────────
+
+    test "a draft that PRESERVES the criteria and advances another field publishes cleanly",
+         %{scope: scope} do
+      claim_and_stamp!("fence-legit", scope, "fence-worker")
+
+      # Re-derive from the published row — the sanctioned recovery the refusal
+      # message names — and change something else entirely.
+      mint_twin_from_published!("fence-legit", scope, &Map.put(&1, "priority", 2))
+
+      assert {:ok, _} = Content.publish_document("fence-legit", "task", @dataset, scope)
+
+      pub = published_task!("fence-legit", scope)
+      assert pub.content["priority"] == 2
+      assert hd(pub.content["acceptance_criteria"])["met"] == true
+      assert hd(pub.content["acceptance_criteria"])["evidence"] =~ "gate green"
+    end
+
+    test "a draft that ADVANCES a second criterion publishes cleanly", %{scope: scope} do
+      claim_and_stamp!("fence-advance", scope, "fence-worker")
+
+      mint_twin_from_published!("fence-advance", scope, fn content ->
+        advanced =
+          content["acceptance_criteria"]
+          |> List.update_at(1, &Map.merge(&1, %{"met" => true, "evidence" => "also proven"}))
+
+        Map.put(content, "acceptance_criteria", advanced)
+      end)
+
+      assert {:ok, _} = Content.publish_document("fence-advance", "task", @dataset, scope)
+
+      pub = published_task!("fence-advance", scope)
+      assert Enum.map(pub.content["acceptance_criteria"], & &1["met"]) == [true, true]
+    end
+
+    test "a legitimate reopen (done → open) that keeps its evidence is NOT refused",
+         %{scope: scope} do
+      {uuid, epoch} = claim_and_stamp!("fence-reopen", scope, "fence-worker")
+
+      # `close` seals the FULL criteria set, so the second row needs its proof
+      # before the row can legitimately reach `done`.
+      {:ok, _} =
+        Barkpark.Tasks.stamp(uuid, "fence-worker",
+          observed_epoch: epoch,
+          criterion: 1,
+          criterion_text: @c1,
+          outcome: {:met, "second proof, also from the gate"}
+        )
+
+      {:ok, closed} = Barkpark.Tasks.close(uuid, "fence-worker", observed_epoch: epoch)
+      assert closed.content["lifecycle_status"] == "done"
+
+      # The reopen recipe: re-derive from the published row, flip only the
+      # lifecycle. Criteria (and the claim) ride along untouched.
+      mint_twin_from_published!("fence-reopen", scope, &Map.put(&1, "lifecycle_status", "open"))
+
+      assert {:ok, _} = Content.publish_document("fence-reopen", "task", @dataset, scope)
+
+      pub = published_task!("fence-reopen", scope)
+      assert pub.content["lifecycle_status"] == "open"
+      assert hd(pub.content["acceptance_criteria"])["met"] == true
+      assert hd(pub.content["acceptance_criteria"])["evidence"] =~ "gate green"
+    end
+
+    test "an UNMET, evidence-less criteria list stays freely editable — the fence is " <>
+           "keyed on proof, not on content equality",
+         %{scope: scope} do
+      task_draft!("fence-unmet", scope, %{"acceptance_criteria" => two_criteria()})
+      {:ok, _} = Content.publish_document("fence-unmet", "task", @dataset, scope)
+
+      mint_twin_from_published!("fence-unmet", scope, fn content ->
+        Map.put(content, "acceptance_criteria", [
+          %{"criterion" => "a completely rewritten criterion", "met" => false, "evidence" => ""}
+        ])
+      end)
+
+      assert {:ok, _} = Content.publish_document("fence-unmet", "task", @dataset, scope)
+      assert length(published_task!("fence-unmet", scope).content["acceptance_criteria"]) == 1
+    end
+  end
+
+  # ── the census anchor: what `inserted_at` (`_createdAt`) survives ───────────
+  #
+  # `inserted_at` is absent from `Document.changeset`'s cast list and from
+  # `Content.Writer` entirely, so a REPUBLISH over an existing published row
+  # (the `Repo.update` branch of `publish_after_gate/5`) preserves the original
+  # birth — which is what makes it usable as a census anchor. Its ONE evasion
+  # path is `unpublish_document/4`: it `fenced_delete`s the published row, so a
+  # later publish takes the `Repo.insert` branch and mints a FRESH birth.
+  # Neither half was pinned by any test before PDS wave 26.
+  describe "inserted_at as the census anchor" do
+    test "inserted_at SURVIVES a patch + republish cycle (the Repo.update branch)" do
+      draft!("anchor-keep", "v1")
+      {:ok, _} = Content.publish_document("anchor-keep", @type_name, @dataset)
+      born = published_inserted_at!("anchor-keep")
+
+      # Backdate the birth so a preserved value is unmistakable: a fresh insert
+      # would land ~now, an hour away from this.
+      one_hour_ago =
+        DateTime.utc_now() |> DateTime.add(-3600, :second) |> DateTime.truncate(:second)
+
+      {1, _} =
+        Repo.update_all(
+          from(d in Document,
+            where: d.doc_id == "anchor-keep" and d.type == ^@type_name and d.dataset == ^@dataset
+          ),
+          set: [inserted_at: one_hour_ago]
+        )
+
+      assert DateTime.compare(published_inserted_at!("anchor-keep"), born) == :lt
+
+      # Patch (mint a draft from the published row) and republish.
+      {:ok, _} =
+        Content.upsert_document(
+          @type_name,
+          %{"doc_id" => "anchor-keep", "title" => "v2", "content" => %{"note" => "patched"}},
+          @dataset
+        )
+
+      assert {:ok, republished} =
+               Content.publish_document("anchor-keep", @type_name, @dataset)
+
+      assert republished.title == "v2"
+      assert DateTime.compare(published_inserted_at!("anchor-keep"), one_hour_ago) == :eq
+    end
+
+    test "inserted_at is RESET by an unpublish + republish cycle (the Repo.insert branch)" do
+      draft!("anchor-reset", "v1")
+      {:ok, _} = Content.publish_document("anchor-reset", @type_name, @dataset)
+
+      one_hour_ago =
+        DateTime.utc_now() |> DateTime.add(-3600, :second) |> DateTime.truncate(:second)
+
+      {1, _} =
+        Repo.update_all(
+          from(d in Document,
+            where: d.doc_id == "anchor-reset" and d.type == ^@type_name and d.dataset == ^@dataset
+          ),
+          set: [inserted_at: one_hour_ago]
+        )
+
+      assert DateTime.compare(published_inserted_at!("anchor-reset"), one_hour_ago) == :eq
+
+      {:ok, _} = Content.unpublish_document("anchor-reset", @type_name, @dataset)
+      assert {:ok, _} = Content.publish_document("anchor-reset", @type_name, @dataset)
+
+      # A FRESH birth: the published row was deleted, so publish took the
+      # insert branch. This is the anchor's one evasion path.
+      assert DateTime.compare(published_inserted_at!("anchor-reset"), one_hour_ago) == :gt
     end
   end
 end
