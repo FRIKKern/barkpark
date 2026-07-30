@@ -23,6 +23,30 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
        fossils sit in production from 2026-07-06 and 2026-07-09). Same
        assertions, reached by navigation instead of by the button.
 
+  spd-w18 ADDS THREE ARMS, and the first of them exists because arm 2 above was
+  VACUOUS over the blank it was named after (D237). Arm 2 seeds
+  `content: %{"blocks" => []}`, and an explicit empty LIST is exactly the shape
+  D219's template seed re-fills — so its "fossil" opens with `tpl-title` +
+  `tpl-body` and a real editor. The production fossils carry NO `blocks` key at
+  all (`Projection.read_blocks/1` ⇒ nil ⇒ `paper_block_mode` false ⇒
+  `show_editor` false), which is the shape that painted the owner's blank. Arm 2
+  keeps its name honest (it pins the DRAFT-RESOLUTION fix on a template-seeded
+  draft) and arm 3 carries the real shape:
+
+    3. A RESOLVED PAPER WITH NO BLOCK LIST — the pane cannot render it, and it
+       must SAY so: a named, announced state carrying the document's own id, its
+       real type, a plain reason and at least one keyboard-focusable way out,
+       where an empty `<article>` used to be the entire screen.
+
+    4. A LEGACY HTML-ONLY PAPER — the never-blank arm must not swallow it. The
+       blank predicate is text-and-visible-element aware, not `== ""`, so a
+       `"<p></p>"` body IS named (it paints nothing) while an image-only body is
+       NOT (it paints something).
+
+    5. A SESSION IN THE PAPER PANE — the pane is opened by every blocks-doc
+       type, so it must stop calling a session a paper: the header badge renders
+       the real type and the empty-body sentence names the type + id.
+
   DELIBERATELY NOT ASSERTED: that `Content.get_blocks_doc(published_id)`
   resolves. It does not, and must not — `create_document` always writes
   `drafts.<id>` (writer.ex), so the published row genuinely does not exist.
@@ -161,7 +185,7 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
     end
   end
 
-  describe "arm 2 — a pre-existing draft-only paper opened by URL (D228)" do
+  describe "arm 2 — a pre-existing TEMPLATE-SEEDED draft-only paper opened by URL (D228)" do
     setup do
       {:ok, doc} =
         Content.create_document(
@@ -173,6 +197,18 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
       # The fossil is genuinely draft-only: no published row exists for it.
       assert doc.doc_id == "drafts.#{@fossil_slug}"
       assert {:error, :not_found} = Content.get_document(@fossil_slug, "paper", @dataset)
+
+      # spd-w18 / D237 — SAY WHAT THIS FIXTURE IS. `%{"blocks" => []}` is an
+      # explicit empty LIST, so D219's template seed re-filled it: this document
+      # arrives at the pane with `tpl-title` + `tpl-body` and renders the editor.
+      # It therefore proves DRAFT RESOLUTION, and it structurally cannot prove
+      # anything about the owner's blank — that lives on the no-`blocks`-key
+      # shape, pinned in arm 3 below. Asserting the seed here is what keeps the
+      # two arms from being confused for each other again.
+      {:ok, seeded} = Content.get_document("drafts.#{@fossil_slug}", "paper", @dataset)
+
+      assert is_list(seeded.content["blocks"]) and seeded.content["blocks"] != [],
+             "this arm's fixture is template-seeded by D219, NOT the blank shape"
 
       :ok
     end
@@ -196,6 +232,188 @@ defmodule BarkparkWeb.Studio.StudioLiveNewPaperJourneyTest do
         live(conn, scoped_studio("/d/#{@dataset}/studio/open/paper/#{@fossil_slug}"))
 
       assert_real_editor!(view, html)
+    end
+  end
+
+  # ── spd-w18 ────────────────────────────────────────────────────────────────
+
+  @blank_slug "spd-w18-fossil-blank"
+  @legacy_slug "spd-w18-legacy-html"
+
+  # THE REAL FOSSIL SHAPE (D237): content with NO `blocks` key. Proven at the
+  # seam rather than assumed — `create_document` stores this content verbatim, so
+  # the assertion below is what stops a future refactor from quietly re-seeding a
+  # list here and making every test under it vacuous.
+  defp seed_blockless!(slug, content) do
+    {:ok, doc} =
+      Content.create_document(
+        "paper",
+        %{"doc_id" => slug, "title" => "Untitled", "content" => content},
+        @dataset
+      )
+
+    refute Map.has_key?(doc.content, "blocks"),
+           "FIXTURE LAW (D237): this fossil must carry NO blocks key, got #{inspect(doc.content)}"
+
+    assert is_nil(Barkpark.PortableDoc.Projection.read_blocks(doc.content)),
+           "read_blocks must return nil for this shape — that is what blanks the pane"
+
+    doc
+  end
+
+  describe "arm 3 — a resolved paper with no block list says so BY NAME (spd-w18)" do
+    setup do
+      seed_blockless!(@blank_slug, %{"rev" => 0})
+      :ok
+    end
+
+    test "the pane paints a named, announced state with the id, the type and a way out",
+         %{conn: conn} do
+      {:ok, _view, html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@blank_slug}"))
+
+      # NAMED: a stable test-id, not a shrug.
+      assert html =~ ~s(data-test-id="paper-unrenderable-notice")
+
+      # ANNOUNCED: assistive tech is told, the same way doc_conflict_banner/1
+      # tells it. Both attributes on the notice element itself.
+      [notice] =
+        Regex.run(
+          ~r/<div[^>]*data-test-id="paper-unrenderable-notice".*?<\/div>\s*<\/article>/s,
+          html
+        )
+
+      assert notice =~ ~s(role="alert")
+      assert notice =~ ~s(aria-live="assertive")
+
+      # IDENTIFIED: the document's own id and its REAL type, machine-readable
+      # and in the copy a human reads. The id is the PUBLISHED one — `drafts.` is
+      # storage plumbing, and the pane must not quote it back at the author.
+      assert notice =~ ~s(data-doc-id="#{@blank_slug}")
+      assert notice =~ ~s(data-doc-type="paper")
+      assert notice =~ ~s(<code>#{@blank_slug}</code>)
+      refute notice =~ "drafts."
+
+      # A WAY OUT, asserted as a COUNT so its absence reds: every recovery
+      # control inside the notice carries an href or a phx-click.
+      ways = Regex.scan(~r/<(?:a|button)\b[^>]*data-test-id="paper-unrenderable-[a-z-]+"/, notice)
+
+      assert length(ways) >= 1,
+             "the named state must offer at least one keyboard-focusable way out, got: #{notice}"
+
+      assert Enum.all?(ways, fn [tag] -> tag =~ "href=" or tag =~ "phx-click=" end),
+             "every way out must be a real control (href or phx-click): #{inspect(ways)}"
+
+      # The repair is the one the fossil actually needs, on the one path that
+      # can mint the missing list.
+      assert notice =~ ~s(phx-click="paper-add-block")
+      assert notice =~ ~s(data-test-id="paper-unrenderable-start-body")
+    end
+
+    test "the empty <article> that used to BE the whole screen is gone", %{conn: conn} do
+      {:ok, _view, html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@blank_slug}"))
+
+      # The deployed-DOM fingerprint from the report: the body article opened and
+      # closed with nothing in between. The article id carries the RAW resolved
+      # slug (a draft-only fossil resolves as `drafts.<id>`), unchanged by this
+      # slice — only its emptiness is gone.
+      article_id = "paper-body-drafts.#{@blank_slug}"
+
+      refute html =~ ~r/<article id="#{Regex.escape(article_id)}" data-rev="0">\s*<\/article>/,
+             "the resolved-but-unrenderable body must never render as an empty article"
+
+      # …and it is still the SAME article: id and data-rev unchanged, the named
+      # state lives inside it.
+      assert html =~ ~s(<article id="#{article_id}" data-rev="0">)
+    end
+
+    test "the header badge and the notice both name the real type, never a literal",
+         %{conn: conn} do
+      {:ok, _view, html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@blank_slug}"))
+
+      assert html =~ ~s(<span class="badge badge-published">paper</span>)
+    end
+  end
+
+  describe "arm 4 — a legacy HTML-only paper is NOT swallowed by the never-blank arm" do
+    test "a real body_html renders raw, exactly as before, with no notice", %{conn: conn} do
+      seed_blockless!(@legacy_slug, %{
+        "rev" => 0,
+        "body_html" => "<p>Legacy prose that a reader can actually see.</p>"
+      })
+
+      {:ok, _view, html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@legacy_slug}"))
+
+      assert html =~ "Legacy prose that a reader can actually see."
+      refute html =~ ~s(data-test-id="paper-unrenderable-notice")
+    end
+
+    test "a body_html that PAINTS nothing (<p></p>) is named — the reason `== \"\"` was refused",
+         %{conn: conn} do
+      seed_blockless!(@legacy_slug, %{"rev" => 0, "body_html" => "<p></p>\n<div> </div>"})
+
+      {:ok, _view, html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@legacy_slug}"))
+
+      assert html =~ ~s(data-test-id="paper-unrenderable-notice"),
+             "a non-empty STRING that paints an empty screen is the blank being fixed"
+    end
+
+    test "a body_html with no text but a visible element is left alone — the predicate is not too wide",
+         %{conn: conn} do
+      seed_blockless!(@legacy_slug, %{
+        "rev" => 0,
+        "body_html" => ~s(<figure><img src="/media/x.png" alt="A scan"></figure>)
+      })
+
+      {:ok, _view, html} =
+        live(conn, scoped_studio("/d/#{@dataset}/studio/paper/#{@legacy_slug}"))
+
+      assert html =~ ~s(<img src="/media/x.png")
+
+      refute html =~ ~s(data-test-id="paper-unrenderable-notice"),
+             "an image-only legacy body is visible; naming it unrenderable would be a NEW blank"
+    end
+  end
+
+  describe "arm 5 — the paper pane stops calling a session a paper" do
+    # Rendered through the component directly: a session's desk route is not the
+    # subject here, the pane's own honesty is. Every assign is the shape
+    # `setup_paper_view/2` hands it for a blocks-doc.
+    defp session_pane_html(content) do
+      render_component(&BarkparkWeb.Studio.StudioLive.Components.studio_paper_view/1, %{
+        paper_doc: %Barkpark.Content.Document{
+          doc_id: "session-2026-07-30-x",
+          type: "session",
+          title: "A work session",
+          status: "draft",
+          content: content
+        },
+        paper_rev: 0,
+        paper_html: "",
+        paper_block_mode: true,
+        paper_edit_mode: false,
+        dataset: @dataset,
+        streams: %{paper_blocks: []}
+      })
+    end
+
+    test "the header badge renders the document's real type" do
+      html = session_pane_html(%{"blocks" => []})
+
+      assert html =~ ~s(<span class="badge badge-published">session</span>)
+      refute html =~ ~s(<span class="badge badge-published">paper</span>)
+    end
+
+    test "the empty-body sentence names the type and the id, not \"This paper\"" do
+      html = session_pane_html(%{"blocks" => []})
+
+      assert html =~ "This session"
+      assert html =~ "session-2026-07-30-x"
+      refute html =~ "This paper has no body blocks yet"
     end
   end
 end

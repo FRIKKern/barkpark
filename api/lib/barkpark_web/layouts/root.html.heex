@@ -3934,7 +3934,40 @@
        the move/delete controls + drag grip are de-emphasised, hover-revealed
        (a floating toolbar replaces them in B2). */
     .bp-paper-editor { display: flex; flex-direction: column; gap: 0; padding: 0; }
-    .bp-paper-editor-empty { color: var(--paper-ink-faint); font-style: italic; }
+    /* spd-w18 — the empty-body sentence is a real message, not chrome. It was
+       `--paper-ink-faint` + italic, which is the same faint-grey family the
+       owner read as a dead control; raised to `--paper-ink-soft` upright so it
+       reads as text the product means. */
+    .bp-paper-editor-empty { color: var(--paper-ink-soft); }
+    .bp-paper-editor-empty code {
+      font-family: var(--font-mono); font-size: 0.9em; color: var(--paper-ink);
+    }
+
+    /* spd-w18 — the never-blank state for a document Studio resolved but cannot
+       render (no block list, no body_html). It replaces an EMPTY <article>: the
+       whole point is that it is impossible to mistake for absence, so it carries
+       weight, a border and full-ink copy rather than faint chrome. */
+    .bp-paper-unrenderable {
+      display: flex; flex-direction: column; gap: 10px;
+      margin: 8px 0 4px; padding: 16px 18px;
+      border: 1px solid var(--paper-ink-faint);
+      border-left: 3px solid var(--paper-accent);
+      border-radius: 6px;
+      background: var(--paper-bg-deep);
+      color: var(--paper-ink);
+    }
+    .bp-paper-unrenderable-title {
+      margin: 0; font-family: var(--font); font-weight: 600; font-size: 15px;
+      color: var(--paper-ink);
+    }
+    .bp-paper-unrenderable-reason {
+      margin: 0; font-family: var(--font); font-size: 13px; line-height: 1.55;
+      color: var(--paper-ink-soft);
+    }
+    .bp-paper-unrenderable-reason code {
+      font-family: var(--font-mono); font-size: 12px; color: var(--paper-ink);
+    }
+    .bp-paper-unrenderable-actions { display: flex; flex-wrap: wrap; gap: 8px; }
     /* No uniform inter-block gap — prose rhythm rides on the element margins
        inside `.bp-paper-editor-body` (type-aware) so we don't double-space.
        Bound-FIELD blocks have no such element rhythm, so they get a wrapper
