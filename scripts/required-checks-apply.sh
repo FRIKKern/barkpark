@@ -61,10 +61,31 @@
 # asserts enforce_admins.enabled == true) and reds `breakglass-watch.sh` every
 # 30 minutes, so a break-glass left open is a CI failure and not a quiet drift.
 #
+# THE FLOOR RUNS BEFORE THE PUT, AND IT DID NOT USED TO (wave 10)
+#
+# `scripts/required-checks-floor.sh` has existed since #6926 and correctly
+# refuses a spec that LOSES a committed (context, app_id) pair. It was called by
+# nothing — not this script, not any workflow. The only brake was the
+# `enforced=false` refusal below, which a human regenerating the spec and
+# flipping the flag in the same PR satisfies while a name loss rides along
+# unnoticed; and the loss is invisible to `required-checks-verify.sh` afterwards,
+# because verify compares live protection to the spec and the spec IS the thing
+# that shrank. So the floor is now a precondition of the PUT:
+#
+#   exit 0  superset, no growth       -> apply
+#   exit 1  LOSS                      -> refuse, always, unacknowledgeable
+#   exit 2  GROWTH                    -> refuse unless --acknowledge-growth
+#
+# The reference is the floor's own default (`git show origin/main:.github/
+# required-checks.json`), never the worktree copy the PR rewrites. `--floor-reference`
+# exists for the throwaway-branch probe and for tests; it is not a bypass, and
+# there is deliberately no flag that skips the floor entirely.
+#
 # SAFETY
 #   * refuses unless the spec says enforced:true (so the tooling slice cannot
 #     protect anything by accident)
 #   * refuses without --confirm
+#   * refuses a candidate that loses a required context (the floor, above)
 #   * `--disable` additionally refuses without --reason AND --task, because it
 #     is a break-glass and a break-glass with no why is a shrug
 #   * always verifies the read-back afterwards, and reds if it disagrees
@@ -73,6 +94,7 @@
 #   scripts/required-checks-apply.sh --payload            # print, touch nothing
 #   scripts/required-checks-apply.sh --confirm            # apply + verify
 #   scripts/required-checks-apply.sh --confirm --branch <throwaway>
+#   scripts/required-checks-apply.sh --confirm --acknowledge-growth
 #   scripts/required-checks-apply.sh --disable --confirm --reason "…" --task <id>
 
 set -euo pipefail
@@ -87,6 +109,8 @@ BRANCH_OVERRIDE=""
 REASON=""
 TASK=""
 LOG_OVERRIDE=""
+ACK_GROWTH=0
+FLOOR_REF=""
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 
@@ -121,6 +145,8 @@ main() {
       --reason) REASON="${2:-}"; shift 2 ;;
       --task) TASK="${2:-}"; shift 2 ;;
       --log) LOG_OVERRIDE="${2:-}"; shift 2 ;;
+      --acknowledge-growth) ACK_GROWTH=1; shift ;;
+      --floor-reference) FLOOR_REF="$2"; shift 2 ;;
       # By SHAPE, not a line range: a range silently truncates the moment anyone
       # adds a line to the header above it.
       -h|--help) awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"; exit 0 ;;
@@ -177,6 +203,27 @@ main() {
   [ "$(jq -r '.enforced' "$SPEC")" = "true" ] \
     || fail "$SPEC says enforced=false — regenerate and flip it in the PR that intends the protection, then apply"
   [ "$CONFIRM" -eq 1 ] || fail "refusing to write branch protection without --confirm"
+
+  # ── THE FLOOR, and it gates the PUT rather than reporting after it ──
+  # Ordered AFTER the enforced/--confirm refusals on purpose: those are pure
+  # file reads and must keep refusing identically in a shallow checkout where
+  # `git show origin/main:…` cannot resolve. Everything below this line is the
+  # write path.
+  local floor_rc=0 floor_out
+  # `${a[@]+"${a[@]}"}`, not a bare `"${a[@]}"`: under `set -u` an EMPTY array
+  # expansion is an unbound-variable error on bash 3.2, which is what macOS
+  # ships — i.e. the no-override path, the one that runs in anger, would die.
+  local -a floor_args=()
+  if [ -n "$FLOOR_REF" ]; then floor_args+=(--reference "$FLOOR_REF"); fi
+  floor_out="$(bash "$REPO_ROOT/scripts/required-checks-floor.sh" ${floor_args[@]+"${floor_args[@]}"} "$SPEC" 2>&1)" || floor_rc=$?
+  printf '%s\n' "$floor_out"
+  case "$floor_rc" in
+    0) ;;
+    1) fail "FLOOR BREACH — this candidate LOSES a required context that origin/main's spec commits (above). A shrink is never acknowledgeable: regenerate from heads that render the missing name, or remove it from main's spec in its own reviewed PR." ;;
+    2) [ "$ACK_GROWTH" -eq 1 ] \
+         || fail "FLOOR GROWTH — this candidate ADDS required context(s) (above). Promoting a name makes every PR in the repo render it forever; pass --acknowledge-growth to say a human decided that." ;;
+    *) fail "the floor could not be evaluated (exit $floor_rc) — an unreadable reference is a refusal, never a pass" ;;
+  esac
 
   echo "applying $(jq '.required_status_checks.checks | length' <<<"$payload") required context(s) to $repo/$branch"
   printf '%s' "$payload" | gh api -X PUT "repos/$repo/branches/$branch/protection" --input - >/dev/null \
