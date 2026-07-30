@@ -84,12 +84,23 @@ set -euo pipefail
 # (cloud/priv/static/__app.test.mjs:5369-5370). Over-inclusion costs the shim
 # precisely what it exists to save; the ratchet below is what makes the narrow
 # declaration safe — a new read reds instead of skipping.
+#
+# `.github/required-checks.json` is declared AHEAD of the read that needs it, and
+# that is deliberate. The sibling slice `cch-w9-cloud-gate-shim-rung2` makes the
+# seal predicate's rung-2 leg A read `${REPO}/.github/required-checks.json`; the
+# console harness runs the predicate's tests, so an edit to that file changes
+# what those tests conclude. Neither slice's own tree shows the pair — this half
+# declares a path it does not yet read, the other half writes a read it does not
+# dispatch on — which is exactly how the two would have merged into a live hole
+# with both ratchets reporting OK. Declaring it here is also what keeps main
+# GREEN whichever of the two lands first.
 CONSOLE_PATHS='cloud/priv/static/**
 internal/taskboard/testdata/styleguide_lifecycle.txt
 internal/pdrender/testdata/styleguide_tokens.txt
 .github/workflows/cloud.yml
 design/emit-fence.test.mjs
 cloud/test/barkpark_cloud/web/**
+.github/required-checks.json
 .github/workflows/console-harness.yml
 scripts/console-path-escape-check.sh
 scripts/console-path-escape-check.test.sh'
@@ -217,6 +228,17 @@ list_escapes() {
       {
         grep -Eoh "(REPO_ROOT|REPO)[[:space:]]*,[[:space:]]*['\"][^'\"]*['\"]" "$REPO_ROOT/$f" || true
         grep -Eoh "(guard|workflow)[[:space:]]*:[[:space:]]*['\"][^'\"]*['\"]" "$REPO_ROOT/$f" || true
+        #  (2b) THE TEMPLATE-LITERAL IDIOM: `${REPO}/some/path`. Not a variant of
+        #      (1) — that one matches a `join(REPO, "…")` CALL, and this one is a
+        #      backtick string with no comma and no quotes anywhere near it, so
+        #      the (1) grep cannot see it. seal-predicate.mjs reads
+        #      `${REPO}/.github/required-checks.json` in exactly this shape (its
+        #      rung-2 leg A), and the two are written by DIFFERENT slices, which
+        #      is precisely how a census goes quietly blind: each half looks
+        #      complete on its own branch. The static prefix is emitted bare —
+        #      the quoted-literal sed below leaves a line it cannot match alone.
+        grep -Eoh '\$\{(REPO_ROOT|REPO)\}/[^`'"'"'"[:space:],)]*' "$REPO_ROOT/$f" \
+          | sed -E 's/^\$\{(REPO_ROOT|REPO)\}\///' || true
         #  (3) the walk-up idiom: any `"../…"` literal, resolved against the
         #      reading file's own directory. Nothing in the tree uses it today
         #      (the two idioms above are how the harness is written), but it is

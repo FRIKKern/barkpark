@@ -234,6 +234,38 @@ if has_line "$census_fx" 'cloud/test/barkpark_cloud/web/router_oauth_test.exs'; 
 else
   no "the multi-line measured_by array was half-read"
 fi
+# …and THE TEMPLATE-LITERAL IDIOM, `${REPO}/some/path`, must red too. This is
+# not a variant of the join(REPO, "…") grep: a backtick template carries no
+# comma and no quotes, so that grep cannot see it. It is the shape the seal
+# predicate's rung-2 leg A uses to read .github/required-checks.json — written
+# by a SIBLING slice, on a branch this ratchet never saw. Measured on the merged
+# pair before this case existed: the census reported "OK, 9 reads" with that
+# read live and undeclared. A cross-slice blind spot is still a blind spot.
+FXT="$TMPROOT/template"
+make_fixture "$FXT"
+mkdir -p "$FXT/policy"
+: >"$FXT/policy/required.json"
+cat >"$FXT/cloud/priv/static/__preview__/tmpl.mjs" <<'JS'
+const p = `${REPO}/policy/required.json`;
+const q = readFileSync(p, 'utf8');
+JS
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXT" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on an uncovered TEMPLATE-LITERAL read"
+else
+  no "PASSED with an uncovered \${REPO}/… read — the template idiom is invisible"
+fi
+if has "$out" "UNCOVERED repo-root read: policy/required.json"; then
+  ok "resolves \${REPO}/… to a repo-relative path"
+else
+  no "did not resolve the template-literal read: $out"
+fi
+# The real read this idiom exists for is DECLARED, so the real tree stays green.
+if printf '%s\n' "$("$SCRIPT" --print-set console)" | grep -qx '.github/required-checks.json'; then
+  ok ".github/required-checks.json is in the declared set (the sibling slice's leg-A read)"
+else
+  no ".github/required-checks.json is not declared — the merged pair would red on main"
+fi
 echo
 
 # ── case 4: THE UNTRACKED CASE — the measured vacuous pass ──────────────────
