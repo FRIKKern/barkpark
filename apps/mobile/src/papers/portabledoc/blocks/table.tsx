@@ -12,23 +12,23 @@ import { asList, isMap } from '../model'
 import type { Render } from '../register'
 
 const table: Render = (b, ctx, key) => {
-  const headRaw = b.head ?? b.header
-  let head = Array.isArray(headRaw) ? headRaw : []
+  let head = asList(b.head ?? b.header)
   let rows = asList(b.rows)
-  const columns = tableColumns(b.columns)
-  const textColumns = tableTextColumns(b.columns)
-  if (head.length === 0 && textColumns.length > 0) {
-    head = textColumns
-  } else if (head.length === 0 && columns.length > 0) {
-    head = columns.map(({ key, label }) => label || key)
-    rows = rows.map((row) =>
-      isMap(row) ? columns.map(({ key }) => row[key] ?? '') : row,
-    )
+  const columns = asList(b.columns)
+  if (!head.length && columns.length && columns.every(isMap)) {
+    const maps = columns as Array<Record<string, unknown>>
+    const keys = maps.map((column) => (typeof column.key === 'string' ? column.key : ''))
+    head = maps.map((column, index) => column.text ?? column.label ?? keys[index])
+    if (keys.every(Boolean)) {
+      rows = rows.map((row) =>
+        isMap(row) ? keys.map((key) => row[key] ?? '') : row,
+      )
+    }
   } else if (
-    head.length === 0 &&
-    rows.length > 0 &&
+    !head.length &&
+    rows.length &&
     isMap(rows[0]) &&
-    (rows[0].header === true || allHeaderCells(rowCells(rows[0])))
+    (rows[0].header || allHeaderCells(rowCells(rows[0])))
   ) {
     head = rowCells(rows[0])
     rows = rows.slice(1)
@@ -75,35 +75,12 @@ function asInlineCell(cell: unknown): unknown[] {
   if (isMap(cell) && typeof cell.text === 'string') return [cell.text]
   const content = isMap(cell) && Array.isArray(cell.content) ? cell.content : [cell]
   return content.flatMap((node) =>
-    isMap(node) && node.type === 'paragraph' && Array.isArray(node.content)
-      ? node.content
-      : [node],
+    isMap(node) && Array.isArray(node.content) ? node.content : [node],
   )
 }
 
-function tableTextColumns(value: unknown): string[] {
-  if (!Array.isArray(value) || value.length === 0) return []
-  return value.every((column) => isMap(column) && typeof column.text === 'string')
-    ? value.map((column) => String((column as Record<string, unknown>).text))
-    : []
-}
-
-function tableColumns(value: unknown): Array<{ key: string; label: string }> {
-  if (!Array.isArray(value)) return []
-  const columns = value.map((column) => {
-    if (!isMap(column) || typeof column.key !== 'string' || column.key === '') return null
-    return {
-      key: column.key,
-      label: typeof column.label === 'string' ? column.label : '',
-    }
-  })
-  return columns.every((column) => column !== null)
-    ? (columns as Array<{ key: string; label: string }>)
-    : []
-}
-
 function allHeaderCells(cells: unknown[]): boolean {
-  return cells.length > 0 && cells.every((cell) => isMap(cell) && cell.header === true)
+  return cells.every((cell) => isMap(cell) && !!cell.header)
 }
 
 export const tableRenderers: Record<string, Render> = {
