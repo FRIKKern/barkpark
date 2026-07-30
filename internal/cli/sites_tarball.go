@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 )
@@ -259,7 +260,7 @@ func preflightPrebuiltEntries(abs, root string) error {
 		// them (typeflag '2'), but a link whose TARGET is over 100 bytes elects a
 		// PAX header instead and the verdict would name the less useful reason.
 		if info.Mode()&os.ModeSymlink != 0 {
-			return fmt.Errorf("--prebuilt %s: %s is a symlink to %q — the box refuses a staged symlink outright (E_SYMLINK: \"the archive contains a symlink — refused (a staged symlink is SERVED)\"), so these bytes would be thrown away AFTER the deployment is minted. Replace it with a real file (cp %s %s) or emit the alias from your build; an on-box build accepts it only because that path copies with `cp -a`", root, name, hdr.Linkname, hdr.Linkname, name)
+			return fmt.Errorf("--prebuilt %s: %s is a symlink to %q — the box refuses a staged symlink outright (E_SYMLINK: \"the archive contains a symlink — refused (a staged symlink is SERVED)\"), so these bytes would be thrown away AFTER the deployment is minted. Replace it with a real file — %s — or emit the alias from your build; an on-box build accepts it only because that path copies with `cp -a`", root, name, hdr.Linkname, symlinkReplaceHint(root, name, hdr.Linkname))
 		}
 		flag, blockBytes, err := observedTarTypeflag(hdr)
 		if err != nil {
@@ -273,6 +274,28 @@ func preflightPrebuiltEntries(abs, root string) error {
 		}
 		return fmt.Errorf("--prebuilt %s: %s encodes as tar typeflag %q, which the box's extractor refuses — only regular files and directories are staged. Remove it from the build output", root, name, string(flag))
 	})
+}
+
+// symlinkReplaceHint renders a COPY-PASTEABLE command that replaces one symlink
+// with the bytes it points at. The subtlety it exists for: a relative link target
+// is resolved against the LINK'S OWN DIRECTORY, not against the dist root, so
+// for `assets/home.html -> index.html` the source is `assets/index.html` and a
+// naive `cp index.html assets/home.html` copies the WRONG file (the root
+// index.html) — silently, and only on nested links, which is the shape a
+// pretty-URL alias actually takes.
+//
+// `name` is the slash-separated archive name, `link` the raw target. An absolute
+// or root-escaping target gets no cp at all: copying it in would stage bytes from
+// outside the dist, which is exactly the exfiltration D120 refuses.
+func symlinkReplaceHint(root, name, link string) string {
+	if link == "" || path.IsAbs(link) {
+		return "its target is an ABSOLUTE path OUTSIDE the build output, so there is no copy to suggest: emit the file into the dist instead"
+	}
+	src := path.Join(path.Dir(name), link)
+	if src == ".." || strings.HasPrefix(src, "../") {
+		return "its target resolves OUTSIDE " + root + ", so there is no copy to suggest: copying it in would stage bytes from outside the build output"
+	}
+	return fmt.Sprintf("cd %s && cp %s %s", root, src, name)
 }
 
 // observedTarTypeflag is a DRY ENCODE, and that is the whole point: Go's

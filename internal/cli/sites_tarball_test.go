@@ -534,6 +534,51 @@ func TestPackPrebuiltDirRefusesContainedSymlink(t *testing.T) {
 	}
 }
 
+// TestPrebuiltSymlinkHintResolvesAgainstTheLinksOwnDirectory pins the one part of
+// the refusal that is a COMMAND the user will paste. A relative symlink target is
+// resolved against the LINK'S directory, not the dist root, so for
+// `assets/home.html -> index.html` the bytes live at `assets/index.html`. A hint
+// that printed `cp index.html assets/home.html` would copy the ROOT index.html —
+// wrong file, no error, and only ever wrong for NESTED links, which is exactly
+// the shape a pretty-URL alias takes.
+func TestPrebuiltSymlinkHintResolvesAgainstTheLinksOwnDirectory(t *testing.T) {
+	dir := writePrebuiltFixture(t)
+	if err := os.MkdirAll(filepath.Join(dir, "assets"), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "assets", "index.html"), []byte("<!doctype html><h1>nested</h1>"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("index.html", filepath.Join(dir, "assets", "home.html")); err != nil {
+		t.Skipf("this filesystem cannot create a symlink: %v", err)
+	}
+
+	_, verr := validatePrebuiltDir(dir)
+	if verr == nil {
+		t.Fatalf("validatePrebuiltDir must refuse a nested contained symlink")
+	}
+	if !strings.Contains(verr.Error(), "cp assets/index.html assets/home.html") {
+		t.Fatalf("the cp hint must name the target relative to the LINK's own directory; got: %v", verr)
+	}
+
+	// An ESCAPING target is offered no cp at all — copying it in would stage bytes
+	// from outside the build output, the exfiltration D120 refuses.
+	esc := writePrebuiltFixture(t)
+	if err := os.Symlink("../../../etc/hosts", filepath.Join(esc, "leak.html")); err != nil {
+		t.Skipf("this filesystem cannot create a symlink: %v", err)
+	}
+	_, eerr := validatePrebuiltDir(esc)
+	if eerr == nil {
+		t.Fatalf("validatePrebuiltDir must refuse an escaping symlink")
+	}
+	if strings.Contains(eerr.Error(), "&& cp ") {
+		t.Fatalf("an escaping target must NOT be offered a cp; got: %v", eerr)
+	}
+	if !strings.Contains(eerr.Error(), "OUTSIDE") {
+		t.Fatalf("an escaping target's refusal must say the target resolves outside the dist; got: %v", eerr)
+	}
+}
+
 // TestPrebuiltRefusalReachesBothCallSites drives BOTH entry points and compares
 // the rendered refusal. cloud_site_cmd.go's deploy branch validates PRE-MINT —
 // above siteCloudConfig and resolveOpenSiteID — so this test opens no socket and
