@@ -18,11 +18,15 @@ on:
         options:
           - grant-forever
           - guerrilla-logs-grep
+          - site-runtime-install
       team:
         description: "grant-forever: team UUID (as shown by bp whoami / bp teams)"
         required: false
       needle:
         description: "guerrilla-logs-grep: request id or token to grep (90-min journal window)"
+        required: false
+      box_ip:
+        description: "site-runtime-install: managed-box IPv4 to install the site-hosting stack on"
         required: false
 
 jobs:
@@ -30,6 +34,8 @@ jobs:
     name: ${{ inputs.operation }}
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+
       - name: Run operator command on the control plane
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
@@ -37,6 +43,7 @@ jobs:
           GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
           TEAM: ${{ inputs.team }}
           NEEDLE: ${{ inputs.needle }}
+          BOX_IP: ${{ inputs.box_ip }}
           OP: ${{ inputs.operation }}
         run: |
           set -euo pipefail
@@ -44,6 +51,26 @@ jobs:
           chmod 600 /tmp/deploy_key
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
           case "$OP" in
+            site-runtime-install)
+              # Install the site-hosting stack (docker, nixpacks, barkpark-builder,
+              # barkpark-runtime) on a managed box that `bp launch` provisioned
+              # WITHOUT it — the gap that leaves site deployments queued forever.
+              # Hops: runner → CP (DEPLOY_SSH_KEY) → box (the CP's warm-pool key
+              # ~/.ssh/barkpark_indx — the same key the provisioner's attach-domain
+              # worker uses). Idempotent: every step checks before it installs.
+              [[ "$BOX_IP" =~ ^[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}$ ]] \
+                || { echo "box_ip must be an IPv4"; exit 1; }
+              # Stream the repo's installer to the CP, which relays it to the box
+              # with the warm-pool key and runs it there.
+              $SSH "root@${CP_HOST}" "
+                set -euo pipefail
+                cat > /tmp/site-runtime-install.sh
+                KEY=/root/.ssh/barkpark_indx
+                [ -f \"\$KEY\" ] || { echo 'warm-pool key missing on CP'; exit 1; }
+                scp -i \"\$KEY\" -o StrictHostKeyChecking=accept-new /tmp/site-runtime-install.sh root@${BOX_IP}:/tmp/
+                ssh -i \"\$KEY\" -o StrictHostKeyChecking=accept-new root@${BOX_IP} 'bash /tmp/site-runtime-install.sh'
+              " < deploy/site-runtime-install.sh
+              ;;
             guerrilla-logs-grep)
               # Request ids / tokens only — the needle is interpolated into a
               # remote grep, so the charset is the whole security boundary.
