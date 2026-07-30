@@ -1,0 +1,59 @@
+# cp-ops — operator commands on the control plane, from a workflow_dispatch.
+#
+# The control plane's operator surface (mix barkpark_cloud.grant_forever, IEx
+# rpc) lives on the CP box, but operator SSH is deliberately narrow: CI is the
+# one place that already holds DEPLOY_SSH_KEY + CP_HOST (deploy.yml). This
+# workflow reuses exactly those secrets to run a NAMED operator command — never
+# a free-form remote shell. Each operation is an explicit case arm with its own
+# validation; adding one is a reviewed diff, not an input string.
+name: cp-ops
+
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: "Operator command to run"
+        type: choice
+        required: true
+        options:
+          - grant-forever
+      team:
+        description: "Team UUID (as shown by bp whoami / bp teams)"
+        required: true
+
+jobs:
+  run:
+    name: ${{ inputs.operation }}
+    runs-on: ubuntu-latest
+    steps:
+      - name: Run operator command on the control plane
+        env:
+          DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
+          CP_HOST: ${{ secrets.CP_HOST }}
+          TEAM: ${{ inputs.team }}
+          OP: ${{ inputs.operation }}
+        run: |
+          set -euo pipefail
+          # UUID only — the rpc string below is built from validated parts.
+          [[ "$TEAM" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+            || { echo "team must be a UUID"; exit 1; }
+          printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
+          chmod 600 /tmp/deploy_key
+          SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
+          case "$OP" in
+            grant-forever)
+              # rpc into the LIVE release node (mix tasks don't exist in a prod
+              # release). grant_forever is idempotent; the caveat about a
+              # surviving Stripe-side subscription is the operator's to handle.
+              $SSH "root@${CP_HOST}" "
+                set -euo pipefail
+                c=\$(docker ps -q --filter ancestor=cloud-control_plane:latest | head -1)
+                [ -n \"\$c\" ] || { echo 'no running control_plane container'; exit 1; }
+                docker exec \"\$c\" bin/barkpark_cloud rpc \
+                  'BarkparkCloud.Billing.grant_forever(\"$TEAM\") |> IO.inspect(label: \"grant_forever\")'
+              "
+              ;;
+            *)
+              echo "unknown operation: $OP"; exit 1
+              ;;
+          esac
