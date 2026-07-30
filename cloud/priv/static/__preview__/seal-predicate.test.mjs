@@ -358,10 +358,22 @@ test('a passing guard is never misread as unrun because of who spawned it', () =
     'an inherited NODE_TEST_CONTEXT must not change what the guard is read to have said');
 
   // MUTATION: put both leaks back, and the SAME passing guard is reported as unrun.
+  //
+  // THE CLAIM THIS MUTATION MAKES, NARROWED (charter wave 8). The mutant pins the
+  // buffer at 64 KiB rather than deleting the options wholesale, because the deleting
+  // form asserted something no code in this repo controls: that the guard's serialised
+  // stream exceeds spawnSync's 1 MiB DEFAULT. That byte count is driven by the ABSOLUTE
+  // PATH LENGTH of the checkout — measured at one commit: macOS deep path 1,173,861
+  // (over, green), macOS short path 978,921 (under, red), linux CI 896,566 (under, red)
+  // — so main failed here on four consecutive runs while a deep builder worktree passed.
+  // What is proven now is the honest, path-independent half: the pre-fix code misreads
+  // ANY overflow of the guard's stream as NEVER RAN, i.e. it makes a defect claim from a
+  // read that failed. It is NOT proven that the real 16 MiB buffer is load-bearing for
+  // this particular guard on any particular host — that depends on the checkout path.
   const leaky = mutatedRun(
     (src) => src
       .replace(/for \(const k of \['NODE_TEST_CONTEXT'[^\n]*\n/, '')
-      .replace(', env: GUARD_ENV, maxBuffer: 16 * 1024 * 1024 });', '});'),
+      .replace(', env: GUARD_ENV, maxBuffer: 16 * 1024 * 1024 });', ', maxBuffer: 64 * 1024 });'),
     ['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO],
   );
   assert.match(leaky.out, /guard cloud\/priv\/static\/__app\.test\.mjs NEVER RAN \(ENOBUFS\)/,
