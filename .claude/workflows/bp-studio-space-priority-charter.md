@@ -2926,3 +2926,56 @@ D259 kills a vacuous green that passes in CI off a single migration-inserted row
 shape is the whole value of the slice — if a reviewer re-derives only the union count, the defect survives review.
 Slice 6's honesty judgment: D263's neutral-clear constraint is what separates an announcer from a new lie, and it is
 the single easiest thing for a builder to get wrong in a way that LOOKS correct.
+
+## Wave log — wave 19 (append at Review)
+
+### Wave 2026-07-30 — Wave 19 (THE ANSWER CONTRACT), Review. Grade **A**.
+
+**Round 1 landed whole: six slices, all reviewed, all gate-green, all pushed with PRs.** The two round-2
+slices are deferred by design on real dependencies, not by failure.
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| `spd-w19-nil-icon-policy-fork` | `…the-desk-destination-stops-raising-a-nil-0` | #8070 | The owed debt, paid the stronger way. #7899's whole 504-line diff replayed clean onto `origin/main` plus the reviewer's policy-aware fork, implemented as a mirror-image private pair above the `unknown_icon/3` pair it copies, so the module carries ONE policy concept. All three coupled edits shipped, including a third stale moduledoc place the builder found while editing. **The reviewer settled the builder's own biggest blind spot by RUN: the FULL suite is 27 doctests / 13026 tests / 0 failures — the `:raise` arm reds nothing anywhere in 13k tests.** No reviewer fixes were needed. HIGH-FLIP-RISK stands and an independent second reviewer is still owed: this overrides a builder's documented decision on a diff a reviewer was already asked to judge. |
+| `spd-w19-literal-gate-entity` | `…main-stops-being-red-on-doc-gates-an-htm-1-r` | #8071 | main's standing `doc-gates` red fixed at the DETECTOR — a `(?<!&)` lookbehind — with `components.ex:1769` byte-identical and no `lit-allow` anywhere; the annotation path is refuted by mutation. The mandatory `--selftest` ships with a blocking CI tripwire, and all 14 previously-skipped steps were run locally rather than guessed at. **Reviewer fix: a vacuous green REPRODUCED on `origin/main` — a relocated copy of the script derives ROOT from `dirname $0`, scans 0 files and printed `PASS — 0 Studio chrome file(s) scanned` with exit 0.** Closed with a `MIN_CHROME_FILES = 200` floor plus a sixth self-test case that copies `$0` out of the tree and asserts it REDS, mutation-proven at floor 0. |
+| `spd-w19-way-out-works` | `…the-way-out-actually-gets-you-out-the-re-2` | #8072 | Both of wave 18's ways out were broken and both are fixed, through a real `live/2` mount on the real fossil shape at BOTH flag values. The repair is the mode re-derive PLUS the stream fill, and the third defect the fix surfaced — the notice arm sharing the STREAMED arm's container id, so the notice would have survived its own repair — is fixed too. The back link is proven as a ROUTE (`route_info/4` + a real 200), never as a string equality against the same `Paths` call the component makes. No reviewer fixes needed. One criterion is a stated DEVIATION, not a pass: glyph count at canvas OFF is 0 by design, so the discriminating assertions were made instead. |
+| `spd-w19-empty-state-seam` | `…the-third-seam-a-document-that-does-not--3-r` | #8073 | The declared-and-never-filled slot is filled and the default shrug is unreachable on that path, with the reason derived from `(panes, nav_path)` and `PaneBuilder.build/3` at ZERO diff. **The enumeration is the slice's real value and it is honest: killing arm 2 leaves the union at 38 — a naive union guard stays GREEN — while arm 2's own assertions red with `count=0`.** The `blocks: []` fixture prohibition is honoured and proven positively. **Reviewer fixes: `tabindex="-1"` shipped on the recovery ANCHOR, which bought nothing (an `<a href>` is already programmatically focusable) while removing the ONLY way out from the tab order in the `:no_schema` and `:unknown_node` arms — mouse-only, i.e. the owner's dead control in a new place.** D269 says "the tabindex=-1 LANDMARK", so the `-1` moved onto the `role="alert"` container; mutation-proven both ways, criterion 10 amended via `bp`. Copy fix: `:no_schema` rendered "orphanType names a orphanType". |
+| `spd-w19-legc-census-instrument` | `…leg-c-the-desk-row-census-instrument-a-c-4` | #8074 | The coverage guard is the deliverable that matters and it works in both directions — deleting `CENSUS: PASS` from the expectation now reds with "an unnamed beat is silently unasserted, so it can never red and it is a decoration", and on its first run it caught four real defects the beat-level check called PASS. Attribution is by identity, counts reach no decision (structurally: `identityWitness()` is the only producer of a PASS), and the `/rot/` decoy that moves both counts without naming itself is red for it. **LEG B's vacuous oracle is fixed and the reviewer re-observed the difference: `named_state=1[role=alert] region=main.bp-paper-shell visible_text=210 chars · the page SAYS SO BY NAME` where it used to print `WORDLESSLY BLANK`.** No reviewer fixes needed. Budget default is 150s not 90s — a flagged, measured deviation named inside the criterion's own evidence. |
+| `spd-w19-press-answer-hook` | `…a-press-answers-in-words-within-a-frame--5-r` | #8075 | A press answers in words within one frame, outside the LiveView root so morphdom cannot patch it mid-announce, riding the existing nonced hook with zero CSP change. **D263's hard case is honoured: words are bound to observed evidence (URL patch / `aria-current` move), and with neither witness the answer is the neutral "Done." — so `#item-rest`, which answers and changes nothing, is never announced as opened.** Two lost-press shapes get words instead of silence, proven on the deployed build with an in-page MutationObserver because a `Runtime.evaluate` on that thread was measuring its own sampler. **Reviewer fixes, both invisible to a browser-only gate: (1) it REDS a merged guard — `editor_panel_containment_test.exs` censuses every `position: fixed` selector in `root.html.heex` and `.bp-press-answer` was unclassified, so this would have gone RED on the required Elixir gate at merge; (2) ZERO `api/test/**` coverage against the wave's own D241, now `press_answer_region_guard_test.exs` — the region in the SERVED html of a real authenticated desk GET, structurally outside the LiveView root, and the three literals that bind the clear to evidence, each with a sabotage control. Mutation-proven: renaming the region id reds 3 of 11.** The reviewer also settled the builder's top risk: the HEEx compiles, `--warnings-as-errors` clean. |
+
+**Cross-slice integration, verified rather than assumed.** All 15 branch pairs merge clean (`git merge-tree`),
+and a combined integration branch of all six slices runs **2174 tests, 0 failures** on
+`test/barkpark_web/{studio,components,live/studio}/` with `studio-literal-check`, its selftest and
+`design/check.mjs` all green. Two slices edit wave 18's leg-A journey test at different lines; they merge.
+
+**What the wave did NOT do, honestly.** The anchor criterion the wish calls "nobody has touched" —
+*whatever the Desk Structure buttons do when clicked is verified to do it, or the dead ones are named* —
+is still **not answered as a binary on the deployed desk**. Wave 19 built the instrument that can answer
+it and proved it can produce a legible per-row table, but `spd-w19-desk-row-census-run` is round 2 by
+design: pressing before the nil-icon fork merges would record `/studio/rest` and `/studio/plugins` rows
+as DEAD when the cause is a crash this wave already fixed — a published false verdict. That sequencing is
+correct and it is also the reason the owner's second complaint survives another wave.
+
+**Ledger.** All six slice tasks in_progress, published, evidence-bearing, correct parent and `wave_paper`,
+with only the merge-gated criterion open for the lead — the honest state. Both round-2 tasks untouched at
+0/N. Eight builder follow-ups all exist and are published. Reviewer ledger work: criterion 10 of
+`spd-w19-empty-state-seam` amended (its stored wording contradicted the shipped landmark placement, with
+the original evidence preserved); `pr_url` + `final_branch` stamped on all six; two new findings filed —
+`spd-w19r-literal-gate-floor-siblings` (p3: `go-literal-check.sh` and `web-literal-check.sh` carry the
+identical relocated-ROOT hole with no floor) and `spd-w19r-live-studio-suite-flake` (p3: two
+non-reproducible reds in `test/barkpark_web/live/studio/` across eight runs, and the brief's clean-main
+13015/2 control did not reproduce either — a review run measured 13026/0).
+
+**Next wave takes, in this order.** (1) Merge round 1 — `spd-w19-literal-gate-entity` FIRST, because it
+unblocks 7 further blocking `doc-gates` steps for everyone else. (2) Dispatch
+`spd-w19-desk-row-census-run` the moment `spd-w19-nil-icon-policy-fork` and
+`spd-w19-legc-census-instrument` are both ancestors of the served commit — that is the owner's second
+complaint, and it is the last binary in the original report still unanswered. (3) Dispatch
+`spd-w19-desk-chips-and-names` once `spd-w19-press-answer-hook` merges (it owns `root.html.heex` next
+under D16 and a merged guard is already REFUTING the two rings it must add). (4) Then the residue this
+wave named and did not take: `task-34d256d198849a98` (p2 — the legacy-HTML body arm still shares the
+streamed arm's container id, the same trap one arm over), `spd-w19-click-loading-falls-through` (p2 — an
+in-flight row is transparent to hit-testing, so a second press lands on whatever is underneath), and the
+`blocks: []` honesty residue D235 named: the sentence still says "This **paper**" to someone editing a
+**session**, carries neither the id nor the type, and is painted the same faint grey the owner read as
+inert.
