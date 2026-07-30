@@ -1364,6 +1364,12 @@ test("gr-backlog-css: the E9 fixture reds --swallow-check exactly as its header 
   const r = runCssCheck("--swallow-check", fixture);
   assert.equal(r.status, 1, "the committed #4251 fixture must exit 1 — a green fixture is a dead proof:\n" + r.out);
   assert.match(r.out, /: 1 E9 error\(s\)/, "exactly one E9 error, per the fixture header:\n" + r.out);
+  // AND the diagnostic must name the file it actually READ. The E9 message hard-
+  // coded "app.css" until this wave, so the fixture run cited a file it never
+  // opened — a report that misnames its own subject, which is precisely the class
+  // this checker exists to catch. Same shape as --orphan-check, pinned below.
+  assert.match(r.out, /E9 __css_check\.fixture\.css:\d+/, "E9 must cite the scanned file:\n" + r.out);
+  assert.ok(!/E9 app\.css:/.test(r.out), "E9 cited app.css while scanning a fixture:\n" + r.out);
 });
 
 test("gr-backlog-css: the E10 fixture reds --orphan-check and ONLY --orphan-check", () => {
@@ -1372,6 +1378,7 @@ test("gr-backlog-css: the E10 fixture reds --orphan-check and ONLY --orphan-chec
   assert.equal(red.status, 1, "the committed #4592/GR74 fixture must exit 1:\n" + red.out);
   assert.match(red.out, /: 1 E10 error\(s\)/, "exactly one E10 error, per the fixture header:\n" + red.out);
   assert.match(red.out, /orphan '\*\/' outside any comment/, "and it must be the orphan-terminator diagnosis:\n" + red.out);
+  assert.match(red.out, /E10 __css_check\.orphan\.fixture\.css:\d+/, "E10 must cite the scanned file:\n" + red.out);
   // The other direction: E9's semicolon-delimited parse is blind to this class,
   // so the two modes are pinned as complements rather than substitutes.
   const green = runCssCheck("--swallow-check", fixture);

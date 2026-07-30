@@ -401,7 +401,10 @@ const lineOf = (src, index) => src.slice(0, index).split("\n").length;
 // the flat scan sees but the declaration parse rejects = swallowed = E9.
 // stripCssComments blanks comments to SPACES (byte-preserving), so a legitimate
 // `--x:` written inside a comment vanishes here and never false-fires.
-export function swallowedTokenErrors(cssRawText) {
+// `label` names the file actually scanned. It defaults to "app.css" (the main
+// run's only subject) but MUST be passed by --swallow-check: a diagnostic that
+// cites a file it never read is the very thing this checker exists to catch.
+export function swallowedTokenErrors(cssRawText, label = "app.css") {
   const stripped = stripCssComments(cssRawText);
   const lineAt = (i) => stripped.slice(0, i).split("\n").length;
   // Bare token blocks only — :root, [data-theme="dark"], and the identity ramps
@@ -437,7 +440,7 @@ export function swallowedTokenErrors(cssRawText) {
         if (seen.has(key)) continue;
         seen.add(key);
         errs.push(
-          `E9 app.css:${ln}  ${tok}: reads as a declaration to the flat token scan but the ` +
+          `E9 ${label}:${ln}  ${tok}: reads as a declaration to the flat token scan but the ` +
             `browser's ;-delimited parse rejects it — an early-terminated comment ` +
             `(a '*/' inside comment text, e.g. '… --ok*/ …') likely swallowed it (#4251)`,
         );
@@ -584,7 +587,7 @@ function citationScanFiles() {
   const i = process.argv.indexOf("--swallow-check");
   if (i !== -1) {
     const f = process.argv[i + 1];
-    const errs = swallowedTokenErrors(fs.readFileSync(f, "utf8"));
+    const errs = swallowedTokenErrors(fs.readFileSync(f, "utf8"), path.basename(f));
     for (const e of errs) console.error("FAIL  " + e);
     console.log(`__css_check --swallow-check ${f}: ${errs.length} E9 error(s)`);
     process.exit(errs.length ? 1 : 0);
