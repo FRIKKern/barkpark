@@ -26,6 +26,12 @@ type scriptedCP struct {
 	idx            int
 	transitions    []map[string]any
 	transitionCode int
+
+	// site-env-injection: the env GET /v1/agent/sites/:id/env answers with.
+	// nil siteEnv + siteEnvCode 0 → 404, emulating a control plane that
+	// predates the route (the deploy must proceed env-less).
+	siteEnv     map[string]string
+	siteEnvCode int // 0 → 404 when siteEnv is nil, else 200
 }
 
 type claimReply struct {
@@ -59,6 +65,33 @@ func (s *scriptedCP) handler() http.Handler {
 			"deployment":     reply.deployment,
 			"observed_epoch": reply.epoch,
 		})
+	})
+
+	mux.HandleFunc("/v1/agent/sites/", func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Authorization") != "Bearer test-token" {
+			http.Error(w, `{"error":"unauthorized"}`, http.StatusUnauthorized)
+			return
+		}
+		if !strings.HasSuffix(r.URL.Path, "/env") {
+			http.NotFound(w, r)
+			return
+		}
+
+		s.mu.Lock()
+		env := s.siteEnv
+		code := s.siteEnvCode
+		s.mu.Unlock()
+
+		switch {
+		case code != 0 && code != http.StatusOK:
+			w.WriteHeader(code)
+			_, _ = w.Write([]byte(`{"error":"decrypt_failed"}`))
+		case env == nil:
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write([]byte(`{"error":"not_found"}`))
+		default:
+			_ = json.NewEncoder(w).Encode(map[string]any{"env": env})
+		}
 	})
 
 	mux.HandleFunc("/v1/agent/deployments/", func(w http.ResponseWriter, r *http.Request) {
@@ -830,6 +863,180 @@ func TestRunOnce_DirectServingMode_StaysOnDemand(t *testing.T) {
 		if strings.Contains(caddy, "trusted_proxies") {
 			t.Errorf("%s serving_mode is not CF-fronted, must not emit trusted_proxies:\n%s", name, caddy)
 		}
+	}
+}
+
+// --- site-env-injection ------------------------------------------------------
+
+// dockerRunCall returns the args of the `docker run` invocation, or nil.
+func dockerRunCall(calls []call) []string {
+	for _, c := range calls {
+		if c.name == "docker" && len(c.args) > 0 && c.args[0] == "run" {
+			return c.args
+		}
+	}
+	return nil
+}
+
+// envDeploy walks one claim→live cycle with the given site env scripted on the
+// CP (nil env + code 0 → the route 404s) and returns the fake runner.
+func envDeploy(t *testing.T, arrange func(*scriptedCP)) *fakeRunner {
+	t.Helper()
+	cp := newCP(t)
+	cp.pending = []claimReply{{
+		deployment: Deployment{
+			ID:       "d-env12345678",
+			SiteID:   "s-envaabbccdd",
+			Status:   "pushing",
+			ImageTag: "site-shop-d-env12345",
+			Site:     InlineSite{Slug: "shop", Domains: []string{"shop.example.com"}},
+		},
+		epoch: 1,
+	}}
+	arrange(cp)
+
+	containerSrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer containerSrv.Close()
+
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	runner := &fakeRunner{}
+	e := &Executor{
+		ControlURL:    srv.URL,
+		AgentToken:    "test-token",
+		WorkerID:      "agent-1",
+		CacheDir:      "/var/lib/barkpark-builder/images",
+		CaddyfilePath: "/etc/caddy/Caddyfile",
+		HTTPClient:    srv.Client(),
+		Runner:        runner,
+		FS:            newMapFS(),
+		Ports:         &fixedPorts{next: mustPort(t, containerSrv.URL)},
+		HealthTimeout: 2 * time.Second,
+	}
+	had, err := e.RunOnce(context.Background(), State{})
+	if err != nil {
+		t.Fatalf("RunOnce err: %v", err)
+	}
+	if !had {
+		t.Fatalf("expected had=true")
+	}
+	return runner
+}
+
+// The executor fetches the site env and injects each pair as `-e KEY=VAL` on
+// the docker run, sorted by key, BEFORE the platform pairs — so the platform's
+// PORT/HOSTNAME (last -e wins in docker) can never be overridden off the port
+// Caddy proxies to.
+func TestRunOnce_SiteEnv_InjectsDockerEnvPairs(t *testing.T) {
+	runner := envDeploy(t, func(cp *scriptedCP) {
+		cp.siteEnv = map[string]string{
+			"BARKPARK_READ_TOKEN": "tok-secret-value",
+			"API_BASE":            "https://api.example.com",
+			"PORT":                "9999", // hostile: tries to repoint the container
+		}
+	})
+
+	args := dockerRunCall(runner.calls)
+	if args == nil {
+		t.Fatalf("no docker run call: %+v", runner.calls)
+	}
+	joined := strings.Join(args, " ")
+
+	// Sorted site pairs present.
+	if !strings.Contains(joined,
+		"-e API_BASE=https://api.example.com -e BARKPARK_READ_TOKEN=tok-secret-value -e PORT=9999") {
+		t.Errorf("docker run missing sorted site -e pairs: %q", joined)
+	}
+	// Platform pairs still present and LAST — docker's last -e wins, so the
+	// site's PORT=9999 loses to the platform's PORT=3000.
+	sitePort := strings.Index(joined, "-e PORT=9999")
+	platPort := strings.Index(joined, "-e PORT=3000")
+	if platPort < 0 || !strings.Contains(joined, "-e HOSTNAME=0.0.0.0") {
+		t.Fatalf("docker run lost the platform HOSTNAME/PORT pairs: %q", joined)
+	}
+	if sitePort > platPort {
+		t.Errorf("site PORT must come BEFORE the platform PORT (last -e wins): %q", joined)
+	}
+}
+
+// An empty blob (200 {env:{}}) and a control plane predating the route (404)
+// both run env-less: exactly the two platform -e pairs, nothing more.
+func TestRunOnce_SiteEnvEmptyOr404_RunsEnvless(t *testing.T) {
+	cases := map[string]func(*scriptedCP){
+		"empty blob": func(cp *scriptedCP) { cp.siteEnv = map[string]string{} },
+		"route 404":  func(cp *scriptedCP) {}, // nil siteEnv → 404
+	}
+	for name, arrange := range cases {
+		t.Run(name, func(t *testing.T) {
+			runner := envDeploy(t, arrange)
+			args := dockerRunCall(runner.calls)
+			if args == nil {
+				t.Fatalf("no docker run call: %+v", runner.calls)
+			}
+			var envs []string
+			for i, a := range args {
+				if a == "-e" && i+1 < len(args) {
+					envs = append(envs, args[i+1])
+				}
+			}
+			if len(envs) != 2 || envs[0] != "HOSTNAME=0.0.0.0" || envs[1] != "PORT=3000" {
+				t.Errorf("env-less run must carry exactly the platform pairs, got %v", envs)
+			}
+		})
+	}
+}
+
+// A 500 from the env route FAILS the deploy (transition failed, reason names
+// the env fetch) — never a silent env-less container for a site that
+// configured env. And no docker run was attempted at all.
+func TestRunOnce_SiteEnvFetch500_TransitionsFailed(t *testing.T) {
+	cp := newCP(t)
+	cp.pending = []claimReply{{
+		deployment: Deployment{
+			ID:       "d-env500",
+			SiteID:   "s-env500",
+			Status:   "pushing",
+			ImageTag: "site-shop-d-env500",
+			Site:     InlineSite{Slug: "shop", Domains: []string{"shop.example.com"}},
+		},
+		epoch: 2,
+	}}
+	cp.siteEnvCode = http.StatusInternalServerError
+
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	runner := &fakeRunner{}
+	e := &Executor{
+		ControlURL:    srv.URL,
+		AgentToken:    "test-token",
+		WorkerID:      "agent-1",
+		CaddyfilePath: "/etc/caddy/Caddyfile",
+		HTTPClient:    srv.Client(),
+		Runner:        runner,
+		FS:            newMapFS(),
+		Ports:         &fixedPorts{next: 7001},
+		HealthTimeout: time.Second,
+	}
+
+	had, err := e.RunOnce(context.Background(), State{})
+	if err != nil {
+		t.Fatalf("err: %v", err)
+	}
+	if !had {
+		t.Fatalf("expected had=true even on env-fetch failure")
+	}
+	if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "failed" {
+		t.Fatalf("expected one failed transition, got %+v", cp.transitions)
+	}
+	if reason, _ := cp.transitions[0]["failure_reason"].(string); !strings.Contains(reason, "site env") {
+		t.Errorf("failure_reason should name the env fetch: %q", reason)
+	}
+	if args := dockerRunCall(runner.calls); args != nil {
+		t.Errorf("no container may start when the env fetch failed: %v", args)
 	}
 }
 
