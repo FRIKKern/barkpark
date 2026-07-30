@@ -25,6 +25,14 @@ Credentials for `live`/`report` come from `~/.config/barkpark/config.json` (the
 `JOURNEY_BASE` + `JOURNEY_TOKEN` **together**. `--keep` leaves the document the
 run created; by default the run deletes it, so re-running never litters.
 
+The sweep is bounded twice: a candidate must have been created **after** the `+`
+press *and* still look untouched (no title of its own, no more blocks than the
+seeded `tpl-title` + `tpl-body` template). A document with a title or with
+authored content is never deleted, whatever its timestamp says. What remains is
+a seconds-wide window in which an empty untitled draft created by somebody else
+could be swept — pass `--keep` when running against a host other people are
+using right now.
+
 ## Exit codes
 
 | code | means |

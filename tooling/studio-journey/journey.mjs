@@ -613,16 +613,37 @@ function draftQueryUrl(ctx, type, id) {
  *  never moved to it, so the URL-derived id was null while documents piled up —
  *  three per run, once clickUntil started retrying. An instrument that leaks a
  *  draft on every failed run is worse than no instrument, so cleanup is keyed off
- *  what the DATASET gained during the leg, not off what the URL admitted to. */
+ *  what the DATASET gained during the leg, not off what the URL admitted to.
+ *
+ *  BOUNDED BY SHAPE, NOT ONLY BY TIME (review, spd-w18). The window is a real
+ *  dataset on a real host, so "everything created since I pressed +" can in
+ *  principle name a document a HUMAN created in the same seconds — and this
+ *  function's caller DELETES what it returns. So a candidate must also still
+ *  look like the thing the "+" makes and nobody has touched: no title of its
+ *  own, and no more blocks than the seeded template (`tpl-title` + `tpl-body`).
+ *  A document with a title or with authored content is NEVER a sweep candidate,
+ *  whatever its timestamp says. The typed document is added by the caller from
+ *  `run.created_doc_id`, so narrowing here cannot orphan the run's own paper.
+ *  Residual risk, stated rather than hidden: an empty untitled draft created by
+ *  someone else inside the same few seconds would still be swept. Use `--keep`
+ *  on a busy host. */
+const SEEDED_TEMPLATE_BLOCKS = 2;
+
+function sweepCandidate(d, since) {
+  if (!d?._draft || Date.parse(d._createdAt || 0) < since) return false;
+  const title = (d.title ?? "").trim();
+  if (title !== "" && title.toLowerCase() !== "untitled") return false;
+  const blocks = d.blocks ?? d.content?.blocks ?? [];
+  return Array.isArray(blocks) && blocks.length <= SEEDED_TEMPLATE_BLOCKS;
+}
+
 async function draftsCreatedSince(ctx, type, sinceIso) {
   const q = new URLSearchParams({ perspective: "drafts", limit: "50", order: "_createdAt:desc" });
   const r = await api(ctx, `${ctx.base}/v1/data/query/${encodeURIComponent(ctx.dataset)}/${encodeURIComponent(type)}?${q}`, { method: "GET" });
   if (!r.ok) return { ok: false, error: r.error, ids: [] };
   const docs = r.body?.result?.documents || [];
   const since = Date.parse(sinceIso);
-  const ids = docs
-    .filter((d) => d?._draft && Date.parse(d._createdAt || 0) >= since)
-    .map((d) => d._id);
+  const ids = docs.filter((d) => sweepCandidate(d, since)).map((d) => d._id);
   return { ok: true, ids };
 }
 
