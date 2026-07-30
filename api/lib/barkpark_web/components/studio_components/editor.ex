@@ -404,7 +404,13 @@ defmodule BarkparkWeb.StudioComponents.Editor do
         <div class="editor-body editor-panel-main">
           <%= if @editor_schema do %>
             <div class="editor-meta">
-              <.icon name={@editor_schema.icon} size={14} /> <%= @editor_schema.title %> &middot; <%= length(@editor_schema.fields) %> fields
+              <%!-- A schema's `:icon` is workspace DATA and nullable, so it gets
+                    the same `drawable_icon/1` guard `tab_icon/1` and
+                    `doc_action_glyph/1` already use. Unguarded, an iconless
+                    schema 500'd the WHOLE Studio editor for every document of
+                    that type — the largest of the three spd-w18-nil-icon-500
+                    crash sites. --%>
+              <.icon name={drawable_icon(@editor_schema.icon) || "file"} size={14} /> <%= @editor_schema.title %> &middot; <%= length(@editor_schema.fields) %> fields
             </div>
           <% end %>
 

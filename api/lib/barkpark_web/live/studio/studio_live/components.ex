@@ -19,6 +19,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   import BarkparkWeb.Studio.StudioLive.Components.PaperEditor
 
   alias Barkpark.Content
+  # `Icons.drawable_name/2` guards the DYNAMIC `name={…}` sites below — a pane
+  # item's icon is Structure/schema/plugin data, so it can be nil or an
+  # unmapped string, and both used to reach `icon/1` bare (spd-w18-nil-icon-500:
+  # HTTP 500 on /studio/rest and /studio/plugins). The literal `name="…"` sites
+  # in this file stay literal — the icons tripwire owns those.
+  alias BarkparkWeb.Icons
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
   alias Phoenix.LiveView.JS
@@ -1054,7 +1060,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
                 <% :header -> %>
                   <.pane_section_header>
-                    <.icon name={item.icon} size={12} /> <%= item.title %>
+                    <.icon name={Icons.drawable_name(item[:icon], "folder")} size={12} /> <%= item.title %>
                   </.pane_section_header>
 
                 <% :plugin_link -> %>
@@ -1103,7 +1109,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     phx_value_pane={"#{idx}"}
                     selected={item.id == pane[:selected]}
                   >
-                    <:icon><.icon name={item.icon} size={16} /></:icon>
+                    <:icon><.icon name={Icons.drawable_name(item.icon)} size={16} /></:icon>
                     <%= item.title %>
                     <:trailing :if={item[:drillable]}>
                       <.icon name="chevron-right" size={14} />
