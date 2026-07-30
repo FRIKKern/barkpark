@@ -73,17 +73,68 @@ var codeExit = map[string]int{
 	"blocked_by_unsatisfied_deps": exitConflict,
 	"already_claimed":             exitConflict,
 	"resource_conflict":           exitConflict,
+	// The stamp/close refusal vocabulary (PDS-D371). Every one of these used to
+	// land on exit 2 — the SAME code as a malformed `--met --miss` command line —
+	// so a retry wrapper could not tell "the world moved, re-claim and retry"
+	// apart from "your arguments are wrong, give up". They split by RETRYABILITY:
+	//   6 (conflict): the lease/state moved under you — re-read, re-claim, retry.
+	"not_holder":              exitConflict,
+	"not_in_progress":         exitConflict,
+	"doc_changed_since_claim": exitConflict,
+	"claimed_has_worker":      exitConflict,
+	//   5 (validation): the REQUEST is wrong — never retryable as sent.
+	// illegal_transition is emitted with :unprocessable_entity (a 422) and is the
+	// one member of this family that can never succeed on a retry, so it belongs
+	// with the payload guards rather than the conflict bucket.
+	"criteria_mismatch":           exitValidation,
+	"criteria_index_out_of_range": exitValidation,
+	"criterion_text_required":     exitValidation,
+	"note_required":               exitValidation,
+	"illegal_transition":          exitValidation,
 	"rate_limited":                exitRateLimit,
 	"internal_error":              exitServer,
+}
+
+// reasonKey reduces a COMPOUND server reason token to its table key. The tasks
+// controller mints reasons that carry their detail inline — `not_holder:<worker>`,
+// `not_in_progress:<status>`, `criteria_unmet:<indices>`, `invalid_lifecycle:<s>`,
+// `sentinel_worker_id:<w>` (api/lib/barkpark_web/controllers/tasks_controller/
+// params.ex, reason_to_string/1) — and a literal map key misses every one of
+// them. Splitting at the FIRST ':' keeps the family name and drops the detail.
+// It reads the reason STRING only; it never consults the HTTP status, so the
+// contract-spine rule at the top of this file (code, never status) holds.
+func reasonKey(code string) string {
+	if i := strings.IndexByte(code, ':'); i >= 0 {
+		return code[:i]
+	}
+	return code
+}
+
+// lookupExit is the ONE codeExit lookup — the literal code first, then its
+// compound-token family name. It reports whether the code was KNOWN, because
+// the two callers disagree about the fallback: exitForCode falls back to
+// exitGeneric (the table's documented unknown-envelope-code rule) while the
+// {"ok":false,"reason":…} branch falls back to exitUsage (preserving the
+// historical add-edge `invalid_edge` behaviour). Both MUST consult the same
+// table the same way: before this existed, classifyError did a second LITERAL
+// codeExit lookup that overrode a compound-token match back to exit 2.
+func lookupExit(code string) (int, bool) {
+	if e, ok := codeExit[code]; ok {
+		return e, true
+	}
+	if key := reasonKey(code); key != code {
+		if e, ok := codeExit[key]; ok {
+			return e, true
+		}
+	}
+	return exitGeneric, false
 }
 
 // exitForCode maps an envelope error.code to a process exit code. An unknown or
 // empty code falls back to exitGeneric (1), per the table's documented fallback.
 func exitForCode(code string) int {
-	if e, ok := codeExit[code]; ok {
-		return e
-	}
-	return exitGeneric
+	e, _ := lookupExit(code)
+	return e
 }
 
 // classifyError decodes an error response body into an apiError with the mapped
@@ -133,7 +184,14 @@ func classifyError(status int, body []byte) apiError {
 		case "invalid", "settings_object_required":
 			return apiError{exit: exitUsage, code: strErr.Error, message: strErr.Error}
 		default:
-			// Unknown string error: bucket conservatively as usage.
+			// A bare-string error the two branches above don't name (the cloud
+			// router emits {"error":"illegal_transition"} this way). Route it
+			// through the SAME table as the coded envelope so one token cannot
+			// mean two exit codes depending on which shape carried it; an
+			// unknown string still buckets conservatively as usage.
+			if e, known := lookupExit(strErr.Error); known {
+				return apiError{exit: e, code: strErr.Error, message: strErr.Error}
+			}
 			return apiError{exit: exitUsage, code: strErr.Error, message: strErr.Error}
 		}
 	}
@@ -145,8 +203,8 @@ func classifyError(status int, body []byte) apiError {
 	// exitForCode; we keep usage for the historical add-edge `invalid_edge` shape
 	// by letting the table miss surface there.
 	if strErr.OK != nil && !*strErr.OK && strErr.Reason != "" {
-		exit := exitForCode(strErr.Reason)
-		if _, known := codeExit[strErr.Reason]; !known {
+		exit, known := lookupExit(strErr.Reason)
+		if !known {
 			// Unknown reason (e.g. invalid_edge): bucket conservatively as usage,
 			// preserving the prior behaviour for the add-edge validation shape.
 			exit = exitUsage
