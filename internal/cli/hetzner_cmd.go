@@ -71,6 +71,13 @@ var hetznerCreatePoll = 2 * time.Second
 // hetznerCreatePollMax bounds the running+IP read-back loop.
 const hetznerCreatePollMax = 60
 
+// hetznerActionPollMax bounds the POST-CONDITION read-back the power verbs do
+// (poweron/poweroff/shutdown). At hetznerCreatePoll (2s) that is ~30s, matching
+// the official hcloud CLI's `--wait` shutdown timeout: long enough that a guest
+// reacting to ACPI is not called a failure, short enough that a stuck box is
+// reported while the owner is still watching.
+const hetznerActionPollMax = 15
+
 // runCloud is the `bp cloud …` dispatcher. It carries two kinds of subcommand:
 // a PROVIDER (today only hetzner) for direct provider-API control, and the
 // control-plane fleet verbs — `status` (the decision-15 triage view), `open`
@@ -864,9 +871,250 @@ func runHetznerServerDelete(out *writer, g globals, args []string) int {
 	return hzDone(out, "delete", srv, nil)
 }
 
+// ---------------------------------------------------------------------------
+// server-action post-conditions (PDS-D355)
+//
+// runHetznerServerAction used to end at `hzDone(out, verb, srv, nil)` with the
+// server object it had resolved BEFORE firing the action. The receipt therefore
+// carried `id` and `name` — precisely the two fields an action cannot change —
+// so `bp cloud hetzner server reboot web-1` printed byte-identical output
+// whether the machine came back up or stayed down.
+//
+// SHARPLY: hzWait already catches an ACTION-level failure (the Action goes to
+// `error` and the verb exits non-zero). What was uncaught is the resulting
+// SERVER STATE. So every action verb now re-reads the server after the action
+// and reports what it OBSERVED, which is the same move runHetznerServerCreate
+// makes 60 lines up ("Actions done ≠ booted"). This is a port, not an
+// invention.
+//
+// There is no single predicate: the nine verbs fall into five shapes.
+//
+//	A  poweron       → Status == running, BOUNDED POLL (transient `starting`)
+//	B  poweroff      → Status == off,     BOUNDED POLL (transient `stopping`)
+//	C  reboot, reset → NO DISCRIMINATOR EXISTS. hcloud.Server carries no boot
+//	                   time, uptime or boot id, and the pre- and post-states are
+//	                   both `running`. The sentence is therefore NARROWED — it
+//	                   says what it confirmed and names what it cannot — never
+//	                   strengthened. Reporting `Status == running` under an
+//	                   unchanged "✓ reboot" would still be vacuous.
+//	D  shutdown      → ACPI. The guest OS has to react, so a SINGLE read would
+//	                   false-red a healthy shutdown; the poll is mandatory and a
+//	                   timeout is an honest PARTIAL ("signal sent; the guest has
+//	                   not powered off after N"), not a failure.
+//	E  metadata      → disable-rescue/enable-backup/disable-backup/detach-iso
+//	                   flip a field that is already settled once the action
+//	                   completes: one read is enough.
+//
+// THE NEW FAILURE MODE, HANDLED EXPLICITLY. Every post-condition read is a way
+// for a verb to fail where it previously could not. A rate-limited or otherwise
+// erroring GetByID after a SUCCESSFUL reboot must never tell the owner the
+// reboot failed — that is the same lie pointing the other way. A read-back that
+// errors is reported as "confirmation unavailable" and exits 0; only a read-back
+// that SUCCEEDS and disagrees is a failed post-condition.
+// ---------------------------------------------------------------------------
+
+// hzPost is one verb's post-condition: what to re-read, whether the state is
+// reached asynchronously, what the receipt reports, and how to say it did not
+// hold.
+type hzPost struct {
+	// holds is the post-condition, read off a FRESH server. nil means the verb
+	// has no observable discriminator (reboot/reset): its claim is narrowed
+	// instead, and it can never fail here.
+	holds func(*hcloud.Server) bool
+	// poll re-reads up to hetznerActionPollMax times while holds is false.
+	poll bool
+	// observe is the state the receipt carries, always off the FRESH server.
+	observe func(*hcloud.Server) map[string]any
+	// unmet phrases the post-condition NOT holding, for the receipt or error.
+	unmet func(srv *hcloud.Server, window time.Duration) string
+	// partial marks a verb whose unmet post-condition is not a failure: the
+	// verb did all it promises (shutdown only sends a signal), so it reports an
+	// honest partial and exits 0.
+	partial bool
+}
+
+// hzServerPostConditions maps every verb that funnels through
+// runHetznerServerAction to what it must observe. A verb missing from this map
+// would report on the pre-action object again, so the executor refuses to guess
+// and hetzner_cmd_test.go derives the verb list from the switch at test time
+// rather than trusting this map to be complete.
+var hzServerPostConditions = map[string]hzPost{
+	// A — start.
+	"poweron": {
+		holds:   func(s *hcloud.Server) bool { return s.Status == hcloud.ServerStatusRunning },
+		poll:    true,
+		observe: hzObserveStatus,
+		unmet: func(s *hcloud.Server, w time.Duration) string {
+			return fmt.Sprintf("the power-on action completed but the server still reports %q after %s", s.Status, w)
+		},
+	},
+	// B — hard stop.
+	"poweroff": {
+		holds:   func(s *hcloud.Server) bool { return s.Status == hcloud.ServerStatusOff },
+		poll:    true,
+		observe: hzObserveStatus,
+		unmet: func(s *hcloud.Server, w time.Duration) string {
+			return fmt.Sprintf("the power-off action completed but the server still reports %q after %s", s.Status, w)
+		},
+	},
+	// C — no discriminator: narrow, never strengthen.
+	"reboot": {observe: hzObserveRestart("reboot")},
+	"reset":  {observe: hzObserveRestart("reset")},
+	// D — ACPI: the guest has to react, and not reacting yet is not a failure.
+	"shutdown": {
+		holds:   func(s *hcloud.Server) bool { return s.Status == hcloud.ServerStatusOff },
+		poll:    true,
+		partial: true,
+		observe: hzObserveStatus,
+		unmet: func(s *hcloud.Server, w time.Duration) string {
+			return fmt.Sprintf("shutdown signal sent; the guest has not powered off after %s (it still reports %q) — "+
+				"ACPI needs the guest OS to react, so re-check with `bp cloud hetzner server get %s`", w, s.Status, s.Name)
+		},
+	},
+	// E — metadata flips, settled once the action completes.
+	"disable-rescue": {
+		holds:   func(s *hcloud.Server) bool { return !s.RescueEnabled },
+		observe: func(s *hcloud.Server) map[string]any { return map[string]any{"rescue_enabled": s.RescueEnabled} },
+		unmet: func(s *hcloud.Server, _ time.Duration) string {
+			return "the disable-rescue action completed but the server still reports rescue mode enabled"
+		},
+	},
+	"enable-backup": {
+		holds:   func(s *hcloud.Server) bool { return s.BackupWindow != "" },
+		observe: hzObserveBackups,
+		unmet: func(s *hcloud.Server, _ time.Duration) string {
+			return "the enable-backup action completed but the server reports no backup window"
+		},
+	},
+	"disable-backup": {
+		holds:   func(s *hcloud.Server) bool { return s.BackupWindow == "" },
+		observe: hzObserveBackups,
+		unmet: func(s *hcloud.Server, _ time.Duration) string {
+			return fmt.Sprintf("the disable-backup action completed but the server still reports backup window %q", s.BackupWindow)
+		},
+	},
+	"detach-iso": {
+		holds:   func(s *hcloud.Server) bool { return s.ISO == nil },
+		observe: hzObserveISO,
+		unmet: func(s *hcloud.Server, _ time.Duration) string {
+			return "the detach-ISO action completed but the server still reports an ISO attached"
+		},
+	},
+}
+
+func hzObserveStatus(s *hcloud.Server) map[string]any {
+	return map[string]any{"status": string(s.Status)}
+}
+
+// hzObserveRestart is shape C's narrowed sentence. It reports the status it
+// re-read AND states, in the same breath, the thing the receipt does NOT prove:
+// the Hetzner API exposes no boot time, so no field can distinguish "rebooted"
+// from "never went down".
+func hzObserveRestart(verb string) func(*hcloud.Server) map[string]any {
+	return func(s *hcloud.Server) map[string]any {
+		return map[string]any{
+			"status": string(s.Status),
+			"confirmed": fmt.Sprintf("the %s action completed and the server now reports %q — "+
+				"the API exposes no boot time, so this does not confirm the OS restarted", verb, s.Status),
+		}
+	}
+}
+
+// hzObserveBackups reports the window the SERVER chose: EnableBackup's window
+// argument is deprecated and ignored (`_ = window` in the SDK), so re-reading it
+// is both the post-condition and the only way an owner learns when backups run.
+func hzObserveBackups(s *hcloud.Server) map[string]any {
+	return map[string]any{"backups_enabled": s.BackupWindow != "", "backup_window": s.BackupWindow}
+}
+
+func hzObserveISO(s *hcloud.Server) map[string]any {
+	row := map[string]any{"iso_attached": s.ISO != nil}
+	if s.ISO != nil {
+		row["iso"] = s.ISO.Name
+	}
+	return row
+}
+
+// hzActionObserved is the receipt payload one action verb carries, read off the
+// FRESH server. runHetznerServerAction and the success-claim registry both go
+// through it, so the enrolled row probes the REAL call shape instead of a
+// hand-injected map no verb ever passes.
+func hzActionObserved(verb string, srv *hcloud.Server) map[string]any {
+	post, ok := hzServerPostConditions[verb]
+	if !ok || post.observe == nil || srv == nil {
+		return nil
+	}
+	return post.observe(srv)
+}
+
+// hzActionWindow is the wall-clock the bounded read-back spans. Derived, not
+// hard-coded, so the honest-partial sentence stays true when tests shrink the
+// poll interval.
+func hzActionWindow() time.Duration {
+	return time.Duration(hetznerActionPollMax) * hetznerCreatePoll
+}
+
+// hzReadBack re-reads the server after an action, polling while the
+// post-condition is unsettled. An error here means CONFIRMATION is unavailable,
+// never that the verb failed — the caller must not convert it into one.
+func hzReadBack(ctx context.Context, hc *hcloud.Client, id int64, post hzPost) (*hcloud.Server, error) {
+	fresh, _, err := hc.Server.GetByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	if fresh == nil {
+		return nil, fmt.Errorf("server %d is no longer readable", id)
+	}
+	if !post.poll || post.holds == nil {
+		return fresh, nil
+	}
+	for i := 0; i < hetznerActionPollMax && !post.holds(fresh); i++ {
+		time.Sleep(hetznerCreatePoll)
+		next, _, gerr := hc.Server.GetByID(ctx, id)
+		if gerr != nil {
+			return nil, gerr
+		}
+		if next != nil {
+			fresh = next
+		}
+	}
+	return fresh, nil
+}
+
+// hzPartial reports a verb that did everything it promises without the owner's
+// end state having arrived — today only ACPI shutdown, where a guest that has
+// not reacted inside the window is a slow guest, not a failed verb. It is
+// deliberately NOT a ✓: the receipt says what was sent and what was observed.
+func hzPartial(out *writer, action string, srv *hcloud.Server, note string, extra map[string]any) int {
+	payload := map[string]any{
+		"ok":       true,
+		"action":   action,
+		"complete": false,
+		"note":     note,
+		"server":   map[string]any{"id": srv.ID, "name": srv.Name},
+	}
+	for k, v := range extra {
+		payload[k] = v
+	}
+	if out.emitStructured(payload) {
+		return exitOK
+	}
+	out.outf("⚠ %s — server %s (id %d): %s", action, srv.Name, srv.ID, note)
+	keys := make([]string, 0, len(extra))
+	for k := range extra {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	for _, k := range keys {
+		out.outf("  %s: %s", k, cellString(extra[k]))
+	}
+	return exitOK
+}
+
 // runHetznerServerAction is the shared executor for the flag-less action verbs
 // (poweron/poweroff/reboot/…): resolve the server, fire the action, WAIT it to
-// completion, report.
+// completion, RE-READ the server, and report the state it observed — see the
+// hzPost block above for why every one of those steps is load-bearing.
 func runHetznerServerAction(out *writer, g globals, verb string, args []string, act func(ctx context.Context, hc *hcloud.Client, srv *hcloud.Server) (*hcloud.Action, error)) int {
 	target, ok := hzOneTarget(out, args, "bp cloud hetzner server "+verb+" <id|name>")
 	if !ok {
@@ -889,7 +1137,27 @@ func runHetznerServerAction(out *writer, g globals, verb string, args []string, 
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, verb+" server "+srv.Name+": action failed", werr)
 	}
-	return hzDone(out, verb, srv, nil)
+
+	post := hzServerPostConditions[verb]
+	fresh, rerr := hzReadBack(ctx, hc, srv.ID, post)
+	if rerr != nil {
+		// The action was fired AND waited to success; only the confirming read
+		// failed. Say exactly that — reporting it as a failed verb would be the
+		// same lie in the opposite direction.
+		return hzDone(out, verb, srv, map[string]any{
+			"confirmation":       "unavailable",
+			"confirmation_error": rerr.Error(),
+		})
+	}
+	extra := hzActionObserved(verb, fresh)
+	if post.holds != nil && !post.holds(fresh) {
+		note := post.unmet(fresh, hzActionWindow())
+		if post.partial {
+			return hzPartial(out, verb, fresh, note, extra)
+		}
+		return useError(out, "failed", verb+" server "+fresh.Name+": "+note, exitGeneric)
+	}
+	return hzDone(out, verb, fresh, extra)
 }
 
 func runHetznerServerRebuild(out *writer, g globals, args []string) int {

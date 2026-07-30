@@ -76,6 +76,7 @@ import (
 	"regexp"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/cli/cloud"
@@ -189,12 +190,44 @@ func successClaimRegistry() []claimSite {
 
 		// ── hetzner_cmd.go / hetzner_net_cmd.go — the SDK's returned resource ────
 		{
-			Name: "hzDone",
+			// PDS-D355 REPAIR. The pre-repair row varied its pair on ID/Name —
+			// the two fields an action CANNOT change — and hand-injected an
+			// extra map no action verb ever passed (`runHetznerServerAction`
+			// passed nil). It was vacuously green: deleting hzDone's whole extra
+			// handling left it PASSING. So: identity is held FIXED, the pair
+			// varies on the POST-CONDITION, and Render calls hzDone exactly as
+			// runHetznerServerAction calls it — the extra comes from the
+			// production builder against the re-read server.
+			Name: "hzDone/post-condition",
 			Render: func(out *writer, resp any) {
-				hzDone(out, "reboot", resp.(*hcloud.Server), map[string]any{"status": "running"})
+				srv := resp.(*hcloud.Server)
+				hzDone(out, "poweroff", srv, hzActionObserved("poweroff", srv))
 			},
-			Backed:       &hcloud.Server{ID: 42, Name: "web-1"},
-			Contradicted: &hcloud.Server{ID: 43, Name: "web-2"},
+			Backed:       &hcloud.Server{ID: 42, Name: "web-1", Status: hcloud.ServerStatusOff},
+			Contradicted: &hcloud.Server{ID: 42, Name: "web-1", Status: hcloud.ServerStatusRunning},
+		},
+		{
+			// Shape C (reboot/reset) has no discriminator, so its receipt is
+			// NARROWED rather than strengthened — and a narrowed sentence still
+			// has to move when the observed state moves, or "✓ reboot" is back
+			// to meaning nothing.
+			Name: "hzDone/narrowed-restart",
+			Render: func(out *writer, resp any) {
+				srv := resp.(*hcloud.Server)
+				hzDone(out, "reboot", srv, hzActionObserved("reboot", srv))
+			},
+			Backed:       &hcloud.Server{ID: 42, Name: "web-1", Status: hcloud.ServerStatusRunning},
+			Contradicted: &hcloud.Server{ID: 42, Name: "web-1", Status: hcloud.ServerStatusOff},
+		},
+		{
+			// The honest partial: an ACPI shutdown the guest has not reacted to.
+			Name: "hzPartial",
+			Render: func(out *writer, resp any) {
+				srv := resp.(*hcloud.Server)
+				hzPartial(out, "shutdown", srv, hzServerPostConditions["shutdown"].unmet(srv, time.Minute), hzActionObserved("shutdown", srv))
+			},
+			Backed:       &hcloud.Server{ID: 42, Name: "web-1", Status: hcloud.ServerStatusRunning},
+			Contradicted: &hcloud.Server{ID: 42, Name: "web-1", Status: hcloud.ServerStatusOff},
 		},
 		{
 			Name: "hzResDone",
@@ -393,6 +426,7 @@ var requiredEnrollments = []string{
 	"renderRollbackResult",
 	"renderProvisioned",
 	"hzDone",
+	"hzPartial",
 	"hzResDone",
 	"instTransferDone",
 	"emitDeviceLoginSuccess",
