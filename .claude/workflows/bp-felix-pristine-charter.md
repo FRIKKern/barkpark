@@ -2523,6 +2523,30 @@ new ratchet into a real gate.
   precedent. Janitor ruled UNBOUNDED-BUT-CONTAINED (rescue does not cover hangs — the
   "already-good-with-rescue" phrasing rejected as dishonest), backlog not build. 5 backlog
   children filed. Grade: pending build+review.
+- **Wave 20 — 2026-07-23 — REVIEWED (A, per `felix-pristine-wave-20-2026-07-23`). Arm: E
+  (E6+E7 winning recipe, 3rd surface — cloud/ FK-abort refute-and-tripwire).** Both round-1
+  slices BUILT, reviewer-verified with ZERO fixes needed, PUSHED with PRs. S1
+  `task-felix-w20-fk-census-tripwire` (PR #5920, `loop-epic/cloud-fk-abort-scar-class-closed-as-a-cl-0`):
+  `cloud/test/barkpark_cloud/fk_census_test.exs` reflection tripwire — reviewer re-ran the full
+  cloud gate green on final state (format + compile --warnings-as-errors + **2209/0**; diagnostic
+  24 schemas / 19 belongs_to-bearing / 26 live pg FKs / 27 FK casts, all >=19 floors met,
+  non-vacuous) AND independently re-ran the D124 mutation proof: strip `assoc_constraint(:barkpark)`
+  → RED `:missing_constraint` for `:barkpark_id`; `name: :env_vars_barkpark_id_WRONG_fkey` → RED
+  `:inert_name`; restore → GREEN 5/0 with `git diff cloud/lib` empty. cloud/** open-PR fence
+  re-checked empty at PR time. S2 `grb-append-e4-e6-scoreboard-rows` (PR #5921,
+  `loop-epic/durable-meter-tally-labeled-computed-e4--1`, research epic task-09f4775e7ccc2cca):
+  `tooling/scaffy-duels/tally_wf.py` — reviewer re-ran both tallies reproducing the figures
+  byte-exactly (E4 $63.7514 / 62,319,436 all-axis tok / 677 ids / 20 transcripts; E6 $46.6116 /
+  38,866,530 / 477 / 24, `<synthetic>` honestly unrated); constants verified against METER.md
+  (1.25x/2.00x/0.10x); abcde t4 rows 9+12 + callout `c-e4e6-meter` verified LIVE on guerrilla
+  (~23–26x gap over the copied 2.40M/1.72M named, not nudged; per-phase split honestly
+  not-attributable — per-model split given). Ledger honest: both tasks in_progress 3/4 with
+  merge gates open for the LEAD; D124 backlog children published (devauth-approve P3,
+  cloud-testdb-drift P4). W20's own meter row: run
+  `python3 tooling/scaffy-duels/tally_wf.py …/subagents/workflows/wf_2c9b2e75-d63` post-wave.
+  NEXT: lead merges #5920 (waits on cloud.yml — cloud/ has its own gate, api/ Elixir gate does
+  not cover it) + #5921 (tooling-only), closes each merge criterion; sharpest open felix children
+  stay the W18 realtime broadcast seal (`task-e98797b38ca3b51e`) + the two W20 backlog tripwires.
 
 - **Wave 20 — 2026-07-23 — DECIDED (building). Arm: E (E6+E7 winning recipe, 3rd surface —
   cloud/ FK-abort sweep).** Ratified D119–D124. Headline: the wish's "~17 unguarded cloud FK
