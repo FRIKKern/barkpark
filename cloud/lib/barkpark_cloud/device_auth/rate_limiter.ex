@@ -46,7 +46,15 @@ defmodule BarkparkCloud.DeviceAuth.RateLimiter do
     "approve" => 10,
     "app_token" => 10,
     "app_token_revoke" => 10,
-    "push_register" => 10
+    "push_register" => 10,
+    # cch-w10: `"oauth_exchange:"<peer_ip>` — 30 / 60s, on `POST
+    # /v1/auth/oauth/exchange`. An EXPLICIT entry, not the @default_limit of 10,
+    # and the reason is the one push_register above documents from the other side:
+    # this bucket is per-IP because there is no session yet to key on, and a whole
+    # office behind one corporate NAT shares that IP on the LAST hop of their
+    # sign-in. 10/min would starve them. 30 is still a hard bound on guessing a
+    # 256-bit code — the code's own 120s TTL and burn-on-use do the real work.
+    "oauth_exchange" => 30
   }
 
   @doc false

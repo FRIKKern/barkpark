@@ -416,9 +416,11 @@ defmodule BarkparkCloud.AccountsTest do
     end
 
     # The CLOSED-SET guard. Three of the six mint sites (login, password change,
-    # device link) carry end-to-end round-trip probes above; the OAuth callback
-    # and `register/4` do not — one needs a stubbed provider exchange, the other
-    # the full billing/trial transaction. This reads the source instead, so a
+    # device link) carry end-to-end round-trip probes above, and since cch-w10 the
+    # OAuth site has two of its own in router_oauth_test.exs (a github code yields
+    # origin "oauth:github", a google code "oauth:google"); only `register/4` still
+    # has none — it needs the full billing/trial transaction. This reads the source
+    # instead, so a
     # seventh mint site added without an origin, or a literal typo'd at either
     # untested site, reds HERE rather than shipping a silently-NULL column.
     # Source-text by construction: it is refactor-brittle on purpose, and the
@@ -451,8 +453,25 @@ defmodule BarkparkCloud.AccountsTest do
               "the #{literal} origin literal is gone from router.ex"
             )
 
-      assert String.contains?(router, ~S|origin: "oauth:#{provider}"|),
-             "the oauth callback stopped reporting its own provider"
+      # cch-w10 — the OAuth origin no longer has a literal in router.ex. The mint
+      # moved off the callback (whose 302's `location` header was handing out a
+      # live session token) to POST /v1/auth/oauth/exchange, and the provider
+      # travels there on the exchange code's own `sent_to`, so the router now
+      # forwards a BOUND value. That makes the seam — not a literal — the thing to
+      # guard, in three links, each of which fails silently on its own: the
+      # callback must name its provider, the mint must carry it, and the exchange
+      # must forward what it consumed.
+      assert String.contains?(router, ~S|Accounts.create_oauth_exchange_code(user, provider)|),
+             "the callback stopped handing its own provider to the exchange code"
+
+      assert String.contains?(router, "session_opts(conn) ++ [origin: origin]"),
+             "the exchange stopped forwarding the consumed code's own origin"
+
+      assert String.contains?(
+               File.read!(Path.join(lib, "accounts.ex")),
+               ~S|sent_to: "oauth:#{provider}"|
+             ),
+             "the exchange code stopped carrying the provider that authenticated the user"
 
       assert String.contains?(List.last(sources), ~s|origin: "device_link"|),
              "device_auth stopped stamping device_link"

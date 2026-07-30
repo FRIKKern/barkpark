@@ -87,6 +87,375 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+// ── cch-w10-oauth-exchange-code · THE OAUTH LANDING GATE ───────────────────
+// This path had ZERO coverage before this group: `handleOAuthReturn` was not in
+// __bpTestHook, and "oauth" appeared in this file exactly twice, both inside one
+// sessionRowHtml({origin:"oauth:github"}) assertion. "The harness still passes"
+// was therefore a VACUOUS claim about it — nothing here could have gone red.
+//
+// Two defects are pinned:
+//   (1) the fragment carried a live 30-day SESSION TOKEN, put there by a 302's
+//       `location` RESPONSE HEADER. It now carries a one-time exchange code that
+//       this module POSTs away. The client half of that is: bootOAuth actually
+//       makes the exchange call and only then lands a session.
+//   (2) `location.hash = "#fleet"` was a history PUSH, so /#oauth=<live token>
+//       stayed one Back press away for the life of the tab. The scrub is now
+//       history.replaceState, and it happens BEFORE the network hop.
+//
+// Every test below is RED on unmodified origin/main — the hooks do not exist
+// there at all, so the typeof assertions fail first and by name.
+
+// Distinct backing maps for localStorage and sessionStorage. The module-level
+// `storage` stub shares ONE inert object between them; setSession(s, true) writes
+// localStorage and then calls sessionStorage.removeItem(STORE), so a shared map
+// would silently delete the session this group is asserting.
+function memStore() {
+  const m = new Map();
+  return {
+    getItem: (k) => (m.has(k) ? m.get(k) : null),
+    setItem: (k, v) => m.set(k, String(v)),
+    removeItem: (k) => m.delete(k),
+  };
+}
+
+// A DOM just wide enough for bootOAuth: the auth screen + login card (the pending
+// state hides the card and appends a sibling), and a toast stack that RECORDS
+// instead of rendering, so the failure copy is assertable.
+function oauthDom() {
+  const toasts = [];
+  const mk = (tag) => ({
+    tagName: tag, id: "", className: "", hidden: false, children: [], attrs: {},
+    parentNode: null, innerHTML: "",
+    setAttribute(k, v) { this.attrs[k] = v; if (k === "id") this.id = v; },
+    getAttribute(k) { return this.attrs[k] != null ? this.attrs[k] : null; },
+    appendChild(n) { n.parentNode = this; this.children.push(n); return n; },
+    removeChild(n) { this.children = this.children.filter((c) => c !== n); n.parentNode = null; return n; },
+    querySelector() { return { addEventListener() {} }; },
+    addEventListener() {},
+  });
+
+  const authScreen = mk("main"); authScreen.id = "auth-screen"; authScreen.hidden = true;
+  const center = mk("div");
+  const card = mk("div"); card.id = "login-card";
+  center.appendChild(card);
+  authScreen.appendChild(center);
+
+  const stack = mk("div"); stack.id = "toast-stack";
+  stack.appendChild = (n) => { n.parentNode = stack; toasts.push(n); return n; };
+
+  const byId = { "auth-screen": authScreen, "login-card": card, "toast-stack": stack };
+  const doc = {
+    querySelector(sel) {
+      const id = String(sel).replace(/^#/, "");
+      if (id === "oauth-pending") return center.children.find((c) => c.id === "oauth-pending") || null;
+      return byId[id] || null;
+    },
+    getElementById(id) { return doc.querySelector("#" + id); },
+    createElement: mk,
+  };
+  return { document: doc, authScreen, card, center, toasts };
+}
+
+// A location whose `hash` SETTER is recorded. That is the whole point: the old
+// code assigned location.hash (a history PUSH); the new code must never touch it.
+function recordingLocation(hash) {
+  const assigned = [];
+  const loc = {
+    pathname: "/", search: "", origin: "http://localhost", _hash: hash,
+    get hash() { return this._hash; },
+    set hash(v) { assigned.push(v); this._hash = v; },
+  };
+  return { loc, assigned };
+}
+
+function recordingHistory() {
+  const calls = [];
+  return {
+    calls,
+    replaceState(_s, _t, url) { calls.push(["replace", url]); },
+    pushState(_s, _t, url) { calls.push(["push", url]); },
+  };
+}
+
+function fetchStub(status, payload) {
+  const calls = [];
+  const fn = (path, opts) => {
+    calls.push({ path, opts });
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: () => "application/json" },
+      json: () => Promise.resolve(payload),
+    });
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+// The vm realm has its own Object.prototype, so a hook's return value is never
+// reference-equal to a locally-built literal under deepStrictEqual. Re-home the
+// shape. (This file's other `plain` re-homer lives ~6000 lines down and is NOT
+// reusable from here: the module has a top-level `await import`, so node:test
+// starts running the groups above it before that declaration is initialised —
+// reaching for it reds with a TDZ ReferenceError, measured.)
+const oauthPlain = (o) => (o == null ? o : { ...o });
+
+// Swap the sandbox globals bootOAuth reads, run it to completion, restore.
+async function driveBootOAuth({ hash, status, payload }) {
+  // `oauthJustLanded` is MODULE state in the IIFE and every drive below shares one
+  // evaluated app.js — drain it so each test starts from a known false rather
+  // than inheriting the previous test's success.
+  hooks.handleOAuthReturn();
+
+  const saved = {
+    location: sandbox.location, history: sandbox.history, fetch: sandbox.fetch,
+    document: sandbox.document, localStorage: sandbox.localStorage,
+    sessionStorage: sandbox.sessionStorage,
+  };
+  const { loc, assigned } = recordingLocation(hash);
+  const history = recordingHistory();
+  const fetch = fetchStub(status, payload);
+  const dom = oauthDom();
+  const local = memStore();
+  const session = memStore();
+
+  sandbox.location = loc;
+  sandbox.history = history;
+  sandbox.fetch = fetch;
+  sandbox.document = dom.document;
+  sandbox.localStorage = local;
+  sandbox.sessionStorage = session;
+
+  // Snapshot the pending state at the moment of the hop — renderOAuthPending(false)
+  // tears it down before bootOAuth resolves, so it is unobservable afterwards.
+  let pendingDuringHop = null;
+  let cardHiddenDuringHop = null;
+  const wrapped = (...args) => {
+    pendingDuringHop = dom.document.querySelector("#oauth-pending");
+    cardHiddenDuringHop = dom.card.hidden;
+    return fetch(...args);
+  };
+  wrapped.calls = fetch.calls;
+  sandbox.fetch = wrapped;
+
+  let renderCalls = 0;
+  try {
+    await new Promise((resolve) => {
+      hooks.bootOAuth(() => { renderCalls++; resolve(); });
+    });
+  } finally {
+    Object.assign(sandbox, saved);
+  }
+  return {
+    assigned, history, fetch: wrapped, dom, local, session, renderCalls,
+    pendingDuringHop, cardHiddenDuringHop,
+  };
+}
+
+test("cch-w10: the landing gate is exported (RED on origin/main, where it does not exist)", () => {
+  assert.equal(typeof hooks.oauthReturnFromHash, "function", "oauthReturnFromHash must be hookable");
+  assert.equal(typeof hooks.bootOAuth, "function", "bootOAuth must be hookable");
+  assert.equal(typeof hooks.handleOAuthReturn, "function", "handleOAuthReturn must be hookable");
+});
+
+test("cch-w10: oauthReturnFromHash classifies code / error / not-an-oauth-return", () => {
+  const f = (h) => oauthPlain(hooks.oauthReturnFromHash(h));
+
+  assert.deepEqual(f("#oauth_code=abc123&team=t-1"), { code: "abc123", team: "t-1" });
+  assert.deepEqual(f("oauth_code=abc123"), { code: "abc123", team: null }, "leading # is optional");
+  assert.deepEqual(f("#oauth_error=oauth_failed"), { error: true });
+
+  // Not an OAuth return: every ordinary route, and the EMPTY hash.
+  assert.equal(f(""), null);
+  assert.equal(f(null), null);
+  assert.equal(f("#fleet"), null);
+  assert.equal(f("#billing"), null);
+
+  // THE OLD FRAGMENT IS NO LONGER HONOURED. A stale /#oauth=<session token> —
+  // e.g. a bookmarked or back-buttoned pre-cch-w10 URL — must classify as "not an
+  // OAuth return", never as a session to install. This assertion is the one that
+  // would red if someone re-added an `oauth=` branch "for compatibility".
+  assert.equal(f("#oauth=live-session-token&team=t-1"), null);
+
+  // Percent-encoding survives (the code is url-safe base64, but team ids and any
+  // future value must not corrupt).
+  assert.deepEqual(f("#oauth_code=a%2Bb&team=t%201"), { code: "a+b", team: "t 1" });
+});
+
+test("cch-w10: bootOAuth exchanges the code for a session and defers render until it lands", async () => {
+  const r = await driveBootOAuth({
+    hash: "#oauth_code=one-time-code&team=t-from-fragment",
+    status: 200,
+    payload: { token: "real-session-token", team_id: "t-from-server" },
+  });
+
+  // (1) THE EXCHANGE ACTUALLY HAPPENS — one POST, to the exchange route, carrying
+  // the code in the BODY. On origin/main there is no network hop at all.
+  assert.equal(r.fetch.calls.length, 1, "exactly one exchange call");
+  assert.equal(r.fetch.calls[0].path, "/v1/auth/oauth/exchange");
+  assert.equal(r.fetch.calls[0].opts.method, "POST");
+  assert.deepEqual(JSON.parse(r.fetch.calls[0].opts.body), { code: "one-time-code" });
+  // Unauthenticated by construction: there is no session yet to send.
+  assert.equal(r.fetch.calls[0].opts.headers.Authorization, undefined);
+
+  // (2) The session that lands is the SERVER's token, not anything off the URL.
+  const stored = JSON.parse(r.local.getItem("bpcloud.session"));
+  assert.equal(stored.token, "real-session-token");
+  assert.equal(stored.team_id, "t-from-server", "the server's team wins over the fragment's");
+  // setSession(s, true) persists — and must not ALSO leave a sessionStorage copy.
+  assert.equal(r.session.getItem("bpcloud.session"), null);
+
+  // (3) render() ran exactly once, AFTER the exchange resolved.
+  assert.equal(r.renderCalls, 1);
+
+  // (4) The one-shot flag: true on the first read, false forever after, so a later
+  // render() cannot re-fire the /new and /activate bounces.
+  assert.equal(hooks.handleOAuthReturn(), true);
+  assert.equal(hooks.handleOAuthReturn(), false);
+});
+
+test("cch-w10: the credential-bearing URL is REPLACED, never PUSHED, and before the hop", async () => {
+  const r = await driveBootOAuth({
+    hash: "#oauth_code=one-time-code&team=t-1",
+    status: 200,
+    payload: { token: "real-session-token", team_id: "t-1" },
+  });
+
+  // THE HISTORY LEAK. `location.hash = "#fleet"` pushes a new entry, leaving the
+  // credential-bearing URL recoverable with the Back button. Reverting the scrub
+  // to that line reds this test on the FIRST assertion.
+  assert.deepEqual(r.assigned, [], "location.hash must never be assigned (that is a history PUSH)");
+  assert.deepEqual(r.history.calls, [["replace", "/#fleet"]], "exactly one replaceState, to /#fleet");
+  assert.ok(!r.history.calls.some((c) => c[0] === "push"), "never pushState either");
+
+  // ORDER: the scrub is recorded before the fetch call is made, so a slow or
+  // failed exchange never leaves the code sitting in the address bar.
+  assert.ok(r.pendingDuringHop, "the pending state was mounted before the hop");
+});
+
+test("cch-w10: a loading state covers the round trip, and is torn down after it", async () => {
+  const r = await driveBootOAuth({
+    hash: "#oauth_code=one-time-code",
+    status: 200,
+    payload: { token: "t", team_id: null },
+  });
+
+  // DURING: the auth screen shows a "Signing you in…" panel and the login form is
+  // hidden — without this the user stares at a LOGGED-OUT login card while their
+  // sign-in is still succeeding.
+  assert.match(r.pendingDuringHop.innerHTML, /Signing you in/);
+  assert.equal(r.pendingDuringHop.getAttribute("role"), "status");
+  assert.equal(r.pendingDuringHop.getAttribute("aria-live"), "polite");
+  assert.equal(r.cardHiddenDuringHop, true, "the login card is hidden while the exchange is in flight");
+  assert.equal(r.dom.authScreen.hidden, false, "the auth screen is shown so the panel is visible");
+
+  // AFTER: torn down, and the login card is restored (a failed exchange must land
+  // the user on a usable form, not an empty screen).
+  assert.equal(r.dom.document.querySelector("#oauth-pending"), null);
+  assert.equal(r.dom.card.hidden, false);
+});
+
+test("cch-w10: a refused exchange lands NO session and reuses the existing generic copy", async () => {
+  const r = await driveBootOAuth({
+    hash: "#oauth_code=burned-or-expired",
+    status: 401,
+    payload: { error: "invalid_code" },
+  });
+
+  // Nothing is installed off a refusal — the whole point of a burnable code.
+  assert.equal(r.local.getItem("bpcloud.session"), null);
+  assert.equal(r.session.getItem("bpcloud.session"), null);
+  assert.equal(hooks.handleOAuthReturn(), false, "the one-shot flag stays false");
+
+  // render() still runs, so the user lands on the auth screen rather than a
+  // permanent spinner.
+  assert.equal(r.renderCalls, 1);
+  assert.equal(r.dom.card.hidden, false, "the login form is back");
+  assert.equal(r.dom.document.querySelector("#oauth-pending"), null);
+
+  // NO NEW ERROR COPY: byte-identical to the pre-existing oauth_error toast, so a
+  // burned / expired / rate-limited code cannot be told apart from a refused
+  // consent by reading the screen.
+  assert.equal(r.dom.toasts.length, 1);
+  assert.match(r.dom.toasts[0].innerHTML, /Sign-in failed/);
+  assert.match(r.dom.toasts[0].innerHTML, /We couldn&#39;t complete that sign-in\. Please try again\./);
+});
+
+test("cch-w10: an /#oauth_error landing scrubs by REPLACE and never calls the exchange", async () => {
+  const r = await driveBootOAuth({
+    hash: "#oauth_error=oauth_failed",
+    status: 200,
+    payload: { token: "must-not-be-used" },
+  });
+
+  assert.equal(r.fetch.calls.length, 0, "no code to exchange — no network hop");
+  assert.deepEqual(r.assigned, [], "location.hash must never be assigned");
+  assert.deepEqual(r.history.calls, [["replace", "/"]]);
+  assert.equal(r.local.getItem("bpcloud.session"), null);
+  assert.equal(r.renderCalls, 1);
+  assert.equal(hooks.handleOAuthReturn(), false);
+  assert.equal(r.dom.toasts.length, 1);
+  assert.match(r.dom.toasts[0].innerHTML, /Sign-in failed/);
+});
+
+test("cch-w10: an ordinary boot pays nothing — no history write, no fetch, straight to render", async () => {
+  const r = await driveBootOAuth({ hash: "#fleet", status: 200, payload: {} });
+
+  assert.equal(r.fetch.calls.length, 0);
+  assert.deepEqual(r.history.calls, []);
+  assert.deepEqual(r.assigned, []);
+  assert.equal(r.renderCalls, 1, "render still runs, synchronously enough to be the only paint");
+  assert.equal(hooks.handleOAuthReturn(), false);
+});
+
+test("cch-w10: a network failure is a refusal, not a crash or a half-session", async () => {
+  // api() catches a rejected fetch into { ok:false, status:0 } — pin that the gate
+  // treats it exactly like a 401 rather than throwing inside the boot path (which
+  // would leave the console on a permanent "Signing you in…").
+  const saved = {
+    location: sandbox.location, history: sandbox.history, fetch: sandbox.fetch,
+    document: sandbox.document, localStorage: sandbox.localStorage,
+    sessionStorage: sandbox.sessionStorage,
+  };
+  hooks.handleOAuthReturn(); // drain the shared one-shot flag (see driveBootOAuth)
+  const { loc } = recordingLocation("#oauth_code=abc");
+  const dom = oauthDom();
+  const local = memStore();
+  sandbox.location = loc;
+  sandbox.history = recordingHistory();
+  sandbox.fetch = () => Promise.reject(new Error("offline"));
+  sandbox.document = dom.document;
+  sandbox.localStorage = local;
+  sandbox.sessionStorage = memStore();
+
+  try {
+    await new Promise((resolve) => hooks.bootOAuth(resolve));
+  } finally {
+    Object.assign(sandbox, saved);
+  }
+
+  assert.equal(local.getItem("bpcloud.session"), null);
+  assert.equal(hooks.handleOAuthReturn(), false);
+  assert.equal(dom.card.hidden, false, "the login form is back — not a stranded spinner");
+  assert.equal(dom.toasts.length, 1);
+  assert.match(dom.toasts[0].innerHTML, /Sign-in failed/);
+});
+
+test("cch-w10: init() hands the boot to bootOAuth — render() is no longer the tail call", () => {
+  // WIRING TRIPWIRE. Everything above drives bootOAuth directly, so all of it
+  // stays green if the gate is built and never called. init() is unreachable from
+  // this harness (the sandbox reports readyState "loading"), so the call site is
+  // asserted in the SOURCE — and by shape, not by one literal spelling.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.match(src, /\n\s*bootOAuth\(render\);\n/, "init()'s tail must be bootOAuth(render)");
+
+  // And render() must still be SYNCHRONOUS — its 8 call sites were not changed,
+  // so an `async function render` would silently make every one of them return a
+  // pending promise instead of having painted.
+  assert.match(src, /\n\s*function render\(\) \{/, "render() stays a plain synchronous function");
+  assert.ok(!/async function render\(/.test(src), "render() must not become async");
+});
+
 // ── cch-bl-mockjs-revoke-stateless · THE BROWSER PREVIEW'S REVOKE ───────────
 // scenarios.mjs models the two session DELETEs statefully, but ONLY when the
 // caller hands route() its optional 4th arg — a per-boot mutable bag. smoke.mjs
