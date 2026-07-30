@@ -112,10 +112,29 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
       assigns.paper_doc != nil and
         inspector_destination?(assigns.width_bucket, assigns.sidebar_user_opened)
 
+    # spd-w18 — the pane's REAL document type. The paper pane is opened by every
+    # blocks-doc type (`PaneBuilder` keys on `Content.blocks_type?/1`), so a
+    # session lands on this exact component; the header badge used to print the
+    # literal "paper" over it and the empty-body sentence used to call it a
+    # paper. Fall back to the paper type ONLY when there is no document at all,
+    # so the no-document paint stays byte-identical.
+    doc_type = (assigns.paper_doc && Map.get(assigns.paper_doc, :type)) || Content.paper_type()
+
+    # spd-w18 review — mirror the OP layer's own refusal so the never-blank
+    # notice never offers a repair the write path rejects.
+    # `Papers.BlockOps.reject_implicit_html_conversion/1` halts any block op on a
+    # document whose content carries a `body_html` STRING while `blocks` is not a
+    # list — precisely the shape `blank_body?/1` routes here when that HTML
+    # paints nothing (`"<p></p>"`, `"&nbsp;"`, `""`).
+    html_backed_body =
+      is_binary(get_in((assigns.paper_doc && assigns.paper_doc.content) || %{}, ["body_html"]))
+
     assigns =
       assign(assigns,
         slug: slug,
         title: title,
+        doc_type: doc_type,
+        html_backed_body: html_backed_body,
         edit_blocks: edit_blocks,
         canvas_on: canvas_on,
         show_editor: show_editor,
@@ -126,7 +145,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     <div class="editor-panel" data-role="content" data-test-id="studio-paper-editor">
       <.document_header dataset={@dataset} title={@title}>
         <:status_pill>
-          <span class="badge badge-published">paper</span>
+          <span class="badge badge-published">{@doc_type}</span>
         </:status_pill>
         <:actions>
           <%!-- View ⇄ Edit toggle — the flag-OFF OPT-OUT path ONLY. With the
@@ -221,6 +240,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                       opt-out path it renders once the user toggles into Edit. --%>
                 <.paper_block_editor
                   slug={@slug}
+                  doc_type={@doc_type}
                   blocks={@edit_blocks}
                   paper_rev={@paper_rev}
                   dataset={@dataset}
@@ -256,6 +276,40 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
                     {raw(block.html)}
                   </div>
                 </article>
+              <% blank_body?(@paper_html) -> %>
+                <%!-- spd-w18 — THE NEVER-BLANK ARM. A document RESOLVED into the
+                      pane but with no renderable body used to fall through to
+                      the legacy HTML arm below and paint an EMPTY <article>:
+                      the paper shell plus the metadata sidebar and nothing
+                      between — no editor, no message, no way out. That is the
+                      owner's bug in its general form (an unrenderable document
+                      answering "I cannot render this" with absence), and it is
+                      still reachable for any document whose content carries no
+                      block LIST at all (`Projection.read_blocks/1` returns nil
+                      ⇒ `paper_block_mode` false ⇒ `show_editor` false) and no
+                      body_html either — the two production draft-only fossils.
+
+                      The <article> wrapper, its id and its data-rev are kept
+                      verbatim so the DOM contract of this branch is unchanged;
+                      only the emptiness inside it is replaced by a named,
+                      announced state. --%>
+                <article id={"paper-body-#{@slug}"} data-rev={@paper_rev}>
+                  <%!-- The id the human owns is the PUBLISHED id: `drafts.` is a
+                        storage prefix, and a never-published fossil arrives here
+                        as `drafts.paper-…` (the same normalisation the sidebar's
+                        slug field does — showing the raw prefix is the product
+                        quoting its own plumbing back at the author). The
+                        <article> id above keeps the raw slug, unchanged. --%>
+                  <.unrenderable_document_notice
+                    doc_id={Content.published_id(@slug)}
+                    doc_type={@doc_type}
+                    html_backed={@html_backed_body}
+                    repairable={@doc_type == Content.paper_type() and not @html_backed_body}
+                    list_href={
+                      Paths.studio_path(assigns[:scope_prefix] || "", [@doc_type], @dataset)
+                    }
+                  />
+                </article>
               <% true -> %>
                 <%!-- HTML-only (legacy): whole opaque body, re-assigned on
                       update. Keyed on the slug too so a jump swaps the node. --%>
@@ -285,6 +339,80 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
           backlinks_linked={@backlinks_linked}
           backlinks_unlinked={@backlinks_unlinked}
         />
+      </div>
+    </div>
+    """
+  end
+
+  # ── spd-w18: the never-blank state for a resolved-but-unrenderable doc ───────
+  #
+  # A document the pane RESOLVED but cannot render must say so BY NAME. Modelled
+  # on `StudioComponents.Editor.doc_conflict_banner/1` (role="alert" +
+  # aria-live="assertive" + a stable data-test-id + a recovery control carrying
+  # its own test-id) and deliberately NOT on `empty_editor/1`, which has no
+  # action slot — an actionless empty state is exactly where the owner's bug
+  # landed.
+  #
+  # It carries four things, because a state that omits any of them is still a
+  # shrug: the document's OWN id, its REAL type (not the literal "paper"), a
+  # plain-language reason, and at least one keyboard-focusable way out. The way
+  # out is a REAL repair on the paper path — `paper-add-block` appends through
+  # `Content.apply_paper_block_op/4`, whose `get_in(content, ["blocks"]) || []`
+  # mints the missing list — and a plain link back to the type's list for the
+  # types whose pane is read-only (a session refuses writes by design, so
+  # offering it a repair button would be a second lie).
+  #
+  # spd-w18 review — `repairable` is NOT "is a paper". The op layer's
+  # `reject_implicit_html_conversion/1` HALTS an append on a document that has a
+  # `body_html` STRING but no block list, and `blank_body?/1` deliberately calls
+  # a visually-empty `"<p></p>"` / `"&nbsp;"` body blank — so an HTML-backed
+  # blank paper reaches this notice and the write layer would refuse its repair.
+  # A button that cannot do what it says is the owner's complaint in a new
+  # costume, so that case gets the honest reason and the link only.
+  attr(:doc_id, :string, required: true)
+  attr(:doc_type, :string, required: true)
+  attr(:repairable, :boolean, default: false)
+  attr(:html_backed, :boolean, default: false)
+  attr(:list_href, :string, required: true)
+
+  def unrenderable_document_notice(assigns) do
+    ~H"""
+    <div
+      class="bp-paper-unrenderable"
+      role="alert"
+      aria-live="assertive"
+      data-test-id="paper-unrenderable-notice"
+      data-doc-id={@doc_id}
+      data-doc-type={@doc_type}
+    >
+      <p class="bp-paper-unrenderable-title">
+        Studio cannot render the body of this {@doc_type}.
+      </p>
+      <p :if={not @html_backed} class="bp-paper-unrenderable-reason">
+        <code>{@doc_id}</code> ({@doc_type}) was stored without a body block list and without
+        saved HTML, so there is nothing here to show or edit yet. The document itself is intact —
+        its metadata is in the panel beside this message.
+      </p>
+      <p :if={@html_backed} class="bp-paper-unrenderable-reason">
+        <code>{@doc_id}</code> ({@doc_type}) was stored as saved HTML that renders nothing a reader
+        can see, and it has no body block list. Studio will not silently convert stored HTML into
+        blocks, so the body cannot be started from here — the document itself is intact, and its
+        metadata is in the panel beside this message.
+      </p>
+      <div class="bp-paper-unrenderable-actions">
+        <button
+          :if={@repairable}
+          type="button"
+          class="btn btn-primary btn-sm"
+          phx-click="paper-add-block"
+          phx-value-block-type="paragraph"
+          data-test-id="paper-unrenderable-start-body"
+        >
+          Start the body with a paragraph
+        </button>
+        <a href={@list_href} class="btn btn-ghost btn-sm" data-test-id="paper-unrenderable-back">
+          Back to the {@doc_type} list
+        </a>
       </div>
     </div>
     """
@@ -827,7 +955,10 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         :inspector_leaf,
         has_editor and inspector_destination?(assigns.width_bucket, assigns.sidebar_user_opened)
       )
-      |> assign(:trail_visible, crumb_trail_bucket?(assigns.width_bucket, has_editor, assigns.sidebar_user_opened))
+      |> assign(
+        :trail_visible,
+        crumb_trail_bucket?(assigns.width_bucket, has_editor, assigns.sidebar_user_opened)
+      )
 
     ~H"""
     <nav
@@ -1609,4 +1740,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     do: JS.push("sidebar-toggle-panel") |> JS.focus(to: return_to)
 
   defp dismiss_or_toggle(_not_destination, _return_to), do: "sidebar-toggle-panel"
+
+  # spd-w18 — "this body renders NOTHING a reader can see", the gate on the
+  # never-blank arm. It is deliberately NOT `html == ""`:
+  #
+  #   * `== ""` is too narrow. A stored `"<p></p>"` / `"<div>\n</div>"` /
+  #     `"&nbsp;"` body_html is a non-empty STRING that paints an empty screen,
+  #     which is the very blank being fixed — the string is not the surface.
+  #   * a bare tag-strip is too WIDE, and that is the byte-identity risk: an
+  #     image-only, table-only or embed-only legacy body carries no text yet is
+  #     perfectly visible, and swallowing it behind a "cannot render" notice
+  #     would be a NEW blank of our own making. So any visible-by-itself element
+  #     answers "not blank" before the text test runs.
+  #
+  # Net effect on a legitimate legacy HTML-only paper: `false`, so it falls
+  # through to the unchanged `raw(@paper_html)` arm byte for byte.
+  @self_visible_tags ~w(img svg picture video audio iframe embed object canvas
+                        table hr input button select textarea math)
+
+  defp blank_body?(html) when is_binary(html) do
+    cond do
+      Regex.match?(~r/<\s*(#{Enum.join(@self_visible_tags, "|")})\b/i, html) ->
+        false
+
+      true ->
+        html
+        |> String.replace(~r/<[^>]*>/, "")
+        |> String.replace(~r/&nbsp;|&#160;|&#xa0;/i, " ")
+        |> String.trim()
+        |> Kernel.==("")
+    end
+  end
+
+  defp blank_body?(_not_a_string), do: true
 end
