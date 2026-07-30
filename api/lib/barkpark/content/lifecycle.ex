@@ -289,15 +289,23 @@ defmodule Barkpark.Content.Lifecycle do
   # contract-shape change must update BOTH seams (the error-emitters-duplicated
   # rule).
   #
-  # WHAT THIS DOOR DOES NOT COVER, stated so nobody reads it as total: the
-  # `source: :sync` exemption below is taken BEFORE any gate runs, so a mirror
-  # write bypasses both the transition check and the criteria fence; and
-  # `Barkpark.Plugins.GitHub.Link.put/4` (`plugins/github/link.ex:193`, reached
-  # automatically from `mirror_job.ex:560` and `inbound_events.ex:172`)
-  # republishes a draft twin with no human in the loop. Both are filed as
-  # backlog rows (`pds-bl-sync-source-bypasses-publish-door`,
-  # `pds-bl-github-linkput-auto-publish-erasure`). This fence covers the
-  # `:api` path.
+  # THE EXACT COVERAGE, re-derived at review rather than assumed (wave 26):
+  #
+  #   * NOT COVERED — `source: :sync`. The exemption below is taken BEFORE any
+  #     gate runs, so a PULL-applied mirror write bypasses both the transition
+  #     check and the criteria fence. Filed as
+  #     `pds-bl-sync-source-bypasses-publish-door`.
+  #   * COVERED, and this is wider than the slice brief assumed — the GitHub
+  #     automatic publishers thread `source: :github`, NOT `:sync`
+  #     (`plugins/github/link.ex:193` via `mirror_job.ex:560` /
+  #     `inbound_events.ex:172`, and `plugins/github/adopt.ex:178`), so they
+  #     fall through to this gate and the criteria fence applies to them. That
+  #     is the intended direction: `Link.collapse_draft_twin/5` already handles
+  #     a rejected collapse without raising or looping — it logs the reason,
+  #     leaves the draft twin in place and still returns `{:ok, _}`, and the
+  #     next reconcile converges — so a fence refusal degrades to "bookkeeping
+  #     deferred", never to a broken mirror. `pds-bl-github-linkput-auto-publish-erasure`
+  #     stays open for the audit-trail half it does not answer.
   defp ensure_task_publish_transition_legal("task", %Document{} = draft, pid, dataset, opts) do
     if Keyword.get(opts, :source, :api) == :sync do
       :ok
