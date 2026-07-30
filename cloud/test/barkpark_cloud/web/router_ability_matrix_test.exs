@@ -111,7 +111,7 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     ]
   end
 
-  # The seven WRITE-gated routes. A `deploy` PAT must be refused by every one of
+  # The six WRITE-gated routes. A `deploy` PAT must be refused by every one of
   # them — that is the rejected `deploy ⊇ write` widening, tripwired.
   defp write_routes(%{site: site, deployment: dep}) do
     [
@@ -119,12 +119,63 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       {:post, "/v1/sites/#{site.id}/deploy", %{artifact_url: "file:///tmp/a.tar.gz"}},
       {:post, "/v1/sites/#{site.id}/rollback", %{}},
       {:post, "/v1/sites/#{site.id}/deployments/#{dep.id}/promote", %{}},
-      {:post, "/v1/sites/#{site.id}/artifact", %{}},
       {:post, "/v1/sites/#{site.id}/deployments/#{dep.id}/artifact", %{}},
       # DELETE is driven LAST: on the admitted row it destroys the site, and every
       # later row would then answer 404 (admitted, but vacuously so).
       {:delete, "/v1/sites/#{site.id}", nil}
     ]
+  end
+
+  # The same census in router.ex's own spelling, checked against the source on
+  # every run (§4 below).
+  #
+  # Why this list exists. The census above substitutes real ids, so a route that
+  # has been DELETED answers 404 — and 404 is admitted-shaped: `assert_admitted`
+  # deliberately allows it, because a live handler may legitimately 404 on its
+  # own terms. `POST /v1/sites/:id/artifact` was deleted as legacy (#7867) and
+  # sat in this census afterwards, passing the three admitted rows vacuously
+  # while the two refusal rows reddened with a status nobody could read as
+  # "the route is gone". This pin makes the deletion the loud failure instead.
+  @driven_routes [
+    {"get", "/v1/me"},
+    {"get", "/v1/barkparks"},
+    {"get", "/v1/sites"},
+    {"get", "/v1/sites/:id/deployments/:dep_id"},
+    {"patch", "/v1/sites/:id"},
+    {"post", "/v1/sites/:id/deploy"},
+    {"post", "/v1/sites/:id/rollback"},
+    {"post", "/v1/sites/:id/deployments/:dep_id/promote"},
+    {"post", "/v1/sites/:id/deployments/:dep_id/artifact"},
+    {"delete", "/v1/sites/:id"},
+    {"post", "/v1/go-live"}
+  ]
+
+  # router.ex writes routes two ways — `post "/p" do … end` and the one-liner
+  # `post("/p", do: …)`. Both are scanned; missing either would make this
+  # tripwire fail-open on the very spelling it is meant to police.
+  defp declared_routes(source) do
+    ~r/^\s*(get|post|patch|put|delete)\(?\s*"([^"]+)"/m
+    |> Regex.scan(source)
+    |> Enum.map(fn [_, verb, path] -> {verb, path} end)
+    |> MapSet.new()
+  end
+
+  defp missing_routes(source) do
+    declared = declared_routes(source)
+    Enum.reject(@driven_routes, &MapSet.member?(declared, &1))
+  end
+
+  defp missing_message(missing) do
+    listed =
+      missing
+      |> Enum.map(fn {verb, path} -> "  #{String.upcase(verb)} #{path}" end)
+      |> Enum.join("\n")
+
+    "the matrix drives #{length(missing)} route(s) router.ex no longer declares:\n" <>
+      listed <>
+      "\n\nA deleted route answers 404, which the admitted rows accept — so the " <>
+      "census would keep passing on a route that does not exist. Delete the row " <>
+      "from read_routes/write_routes AND from @driven_routes, or restore the route."
   end
 
   defp label(method, path), do: "#{method |> Atom.to_string() |> String.upcase()} #{path}"
@@ -351,6 +402,52 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       """
 
       assert scan_read_gated(source) == []
+    end
+  end
+
+  ## 4. The census bound — every route the matrix drives still exists
+
+  describe "the driven-route census is machine-checked against router.ex" do
+    test "every route the matrix drives is still declared in router.ex" do
+      missing = missing_routes(File.read!(@router_source))
+
+      assert missing == [], missing_message(missing)
+    end
+
+    test "@driven_routes and the concrete census stay the same size" do
+      s = %{
+        site: %{id: "11111111-1111-1111-1111-111111111111"},
+        deployment: %{id: "22222222-2222-2222-2222-222222222222"}
+      }
+
+      # read (4) + write (6) + the one deploy-gated row, /v1/go-live.
+      assert length(@driven_routes) == length(read_routes(s)) + length(write_routes(s)) + 1
+    end
+
+    test "the detector FAILS NAMING a route that has been deleted from router.ex" do
+      # A synthetic router carrying every driven route EXCEPT the deployment
+      # artifact upload — the exact shape of the #7867 deletion this pin exists
+      # to catch. Proving the detector on a fixture keeps it honest without
+      # editing router.ex.
+      source =
+        @driven_routes
+        |> Enum.reject(&(&1 == {"post", "/v1/sites/:id/deployments/:dep_id/artifact"}))
+        |> Enum.map_join("\n", fn {verb, path} -> "  #{verb} \"#{path}\" do\n  end\n" end)
+
+      assert [{"post", "/v1/sites/:id/deployments/:dep_id/artifact"}] = missing_routes(source)
+
+      message = missing_message(missing_routes(source))
+      assert message =~ "POST /v1/sites/:id/deployments/:dep_id/artifact"
+      assert message =~ "router.ex no longer declares"
+    end
+
+    test "the detector reads the one-liner route spelling too" do
+      # `post("/v1/go-live", do: go_live(conn))` — router.ex uses both forms, and
+      # a scanner blind to this one would silently pass a deleted go-live.
+      assert MapSet.member?(
+               declared_routes(~s|  post("/v1/go-live", do: go_live(conn))\n|),
+               {"post", "/v1/go-live"}
+             )
     end
   end
 
