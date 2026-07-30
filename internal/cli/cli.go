@@ -94,7 +94,16 @@ func Execute(args []string) int {
 	pendingUpdate := startUpdateCheck(noun)
 	defer finishUpdateNotice(os.Stderr, pendingUpdate)
 
-	// Resolve the target context (flags > env > active > defaults).
+	// A broken repo context file (.barkpark.json) fails LOUDLY before any
+	// dispatch — above all one carrying a "token" field, which is a credential
+	// committed into a repo, never something to skip over quietly. `bp --version`
+	// stays reachable (it returns above, before context resolution).
+	if _, err := loadRepoFile(); err != nil {
+		out.userErr("%v", err)
+		return exitUsage
+	}
+
+	// Resolve the target context (flags > env > repo file > active > defaults).
 	ctx := resolveContext(g)
 
 	// Built-ins are CLI-native and do not consult the manifest tree for
@@ -613,7 +622,7 @@ func Execute(args []string) int {
 
 // resolveContext composes the manifest.Context by precedence:
 //
-//	flags > env(actually-set) > active(persisted config) > baked defaults
+//	flags > env(actually-set) > repo file (.barkpark.json) > active(persisted config) > baked defaults
 //
 // The crucial subtlety: apiclient.ConfigFromEnv() bakes a non-empty
 // localhost/dev-token/default floor even when no BARKPARK_* var is set, which
@@ -632,6 +641,16 @@ func resolveContext(g globals) manifest.Context {
 	if c, err := LoadConfig(); err == nil {
 		cfg = c
 		active = c.ToActiveContext()
+	}
+
+	// The repo-scoped context (.barkpark.json, discovered by walking up from
+	// cwd) folds over the active layer per-field, which slots it between env and
+	// the global config: flags > env > repo file > active > defaults. An
+	// unloadable file is treated as ABSENT here — Execute has already refused to
+	// dispatch on one (the loud token/parse gate), so this lenient read can
+	// never silently honour a rejected file.
+	if repo, err := loadRepoFile(); err == nil {
+		active = repo.overlayActive(cfg, active)
 	}
 
 	flags := map[string]string{}
