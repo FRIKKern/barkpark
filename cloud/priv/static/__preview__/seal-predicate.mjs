@@ -50,9 +50,13 @@
 //                             execute them.
 //   rung 3  NEITHER           FAILS clause (b), by name, with the gap stated.
 //
-// Register entry CCH-D5 (the rate limiter bucketing every user together) is rung 3
-// today — `grep -rn peer_ip cloud/test` returns exactly one hit and it is a COMMENT.
-// Clause (b) therefore FAILS. That is the true answer and it is not engineered around.
+// Register entry CCH-D5 (the rate limiter bucketing every user together) WAS rung 3
+// through waves 7 and 8's Decide — `grep -rn peer_ip cloud/test` returned exactly one
+// hit and it was a COMMENT — and clause (b) failed on it, which was the true answer and
+// was not engineered around. Wave 8 paid it: `router_signin_rate_bucket_test.exs`
+// measures the bucket separation through a real `Router.call/2`, so CCH-D5 is rung 2 and
+// clause (b) can pass on its own merits. No rung-3 entry remains in the register. If a
+// later wave adds one, this is where it will say so.
 //
 // ---------------------------------------------------------------------------
 // WHY A GUARD'S EXIT 2 IS AN INFRA FAULT AND NOT A DEFECT CLAIM
@@ -186,13 +190,27 @@ const KNOWN_DEFECTS = [
   {
     id: 'CCH-D5-rate-limiter-sees-every-user-as-one',
     desc: 'The sign-in rate bucket keyed on the proxy peer, so all users behind the front door shared one bucket — one attacker locks out everyone',
-    // Same root fix as CCH-D2 (peer_ip/1 now resolves the real client IP), but NOTHING
-    // measures the bucket separation: `grep -rn peer_ip cloud/test` returns exactly one
-    // hit and it is a COMMENT (router_test.exs:2215). Rung 3.
+    // Same root fix as CCH-D2 (peer_ip/1 now resolves the real client IP). It stood at
+    // RUNG 3 through waves 7 and 8's Decide, because the only mention of peer_ip in
+    // cloud/test was a COMMENT (router_test.exs:2374 — the cite read 2215 until this
+    // edit corrected it), and a comment measures nothing.
+    //
+    // Now rung 2. router_signin_rate_bucket_test.exs drives TWO forwarded client
+    // addresses through a real `Router.call/2` and asserts one client's exhausted
+    // budget does not touch the other's. It is registered as the SOLE measured_by path
+    // deliberately: the classifier only raises when EVERY named path is missing, so a
+    // second, weaker path would let this entry survive that file's deletion.
+    //
+    // Its two neighbours are NOT registered here, because neither measures this:
+    // device_auth_test.exs's "distinct keys have independent budgets" calls
+    // RateLimiter.check/1 directly and is blind to which key the router builds, and
+    // router_test.exs's "front door" block reads conn.remote_ip on GET /up and never
+    // reaches a bucket. Both stay GREEN (203/0) under the key-collapse mutation at
+    // router.ex:766 that reds the registered file 2/2 — that is the discrimination.
     commit: '8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4',
     diff: { paths: ['cloud/lib/barkpark_cloud/web/router.ex'], grep: /trusted_proxy_peers/ },
-    unmeasured:
-      'no test anywhere asserts that two clients behind the front door get SEPARATE rate buckets. The root fix landed; the BEHAVIOUR is unmeasured, and unmeasured is not cleared. Filed as the measurement gap this clause names.',
+    measured_by: ['cloud/test/barkpark_cloud/web/router_signin_rate_bucket_test.exs'],
+    measured_in_ci: { workflow: '.github/workflows/cloud.yml', job: 'test', paths: 'cloud/**' },
   },
   {
     id: 'CCH-D6-css-check-passes-on-deleted-code',

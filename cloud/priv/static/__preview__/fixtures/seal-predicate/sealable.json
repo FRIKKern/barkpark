@@ -1,5 +1,5 @@
 {
-  "_comment": "Happy path. A resolvable successor, zero residue (no live AND no considering rows), every hardcoded gate of charter D89 resolving. The ONLY non-terminal fixture here that may exit 0. `unmeasuredWaivers` names the rung-3 register entry explicitly: a waiver can only arrive through --ledger, so no live run can carry one.",
+  "_comment": "Happy path. A resolvable successor, zero residue (no live AND no considering rows), every hardcoded gate of charter D89 resolving. The ONLY non-terminal fixture here that may exit 0. `unmeasuredWaivers` names CCH-D5, which was a rung-3 entry until wave 8 measured it — the key is kept, and the waiver branch it feeds is kept measured by mutation in seal-predicate.test.mjs. A waiver can only arrive through --ledger, so no live run can carry one.",
   "successor": "cch-fixture-successor-epic",
   "tasks": {
     "cch-fixture-successor-epic": {

@@ -1,5 +1,5 @@
 {
-  "_comment": "THE MEASUREMENT LADDER, unwaived. Identical to terminal-clean.json except that `unmeasuredWaivers` is EMPTY, so the rung-3 register entry stands. Run WITHOUT --guard-cmd, this is the shape of the honest answer: two entries measured HERE by a committed guard, three MEASURED-ELSEWHERE (named ExUnit file + named CI job, NOT executed), and one measured by nothing at all — which fails clause (b) by name. It is the fixture form of the live verdict.",
+  "_comment": "THE MEASUREMENT LADDER, unwaived. Identical to terminal-clean.json except that `unmeasuredWaivers` is EMPTY, so any rung-3 register entry stands unforgiven. Run WITHOUT --guard-cmd, this is the shape of the honest answer: two entries measured HERE by a committed guard and the rest MEASURED-ELSEWHERE (named ExUnit file + named CI job, NOT executed). SINCE WAVE 8 the register holds NO rung-3 entry — CCH-D5 was measured by router_signin_rate_bucket_test.exs — so this fixture now SEALS, and the rung-3 red it used to demonstrate is asserted by MUTATION in seal-predicate.test.mjs instead. It remains the fixture form of the live verdict.",
   "successor": "TERMINAL",
   "tasks": {},
   "children": [
