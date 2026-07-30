@@ -45,6 +45,13 @@ else
   git clone --depth 1 https://github.com/FRIKKern/barkpark /opt/barkpark-tools
 fi
 
+# Build platform follows the box architecture — never hardcode it.
+case "$(uname -m)" in
+  x86_64) PLATFORM=linux/amd64 ;;
+  aarch64) PLATFORM=linux/arm64 ;;
+  *) echo "unsupported arch $(uname -m)"; exit 1 ;;
+esac
+
 cd /opt/barkpark-tools
 $GO build -o /usr/local/bin/barkpark-builder ./cmd/barkpark-builder
 $GO build -o /usr/local/bin/barkpark-runtime ./cmd/barkpark-runtime
@@ -64,7 +71,7 @@ ExecStart=/usr/local/bin/barkpark-builder \
   --token-file /etc/barkpark/agent.token \
   --cache-dir /var/lib/barkpark-builder/images \
   --log-dir /var/log/barkpark-builder \
-  --platform linux/arm64
+  --platform __PLATFORM__
 Restart=always
 RestartSec=5
 
@@ -91,8 +98,11 @@ RestartSec=5
 WantedBy=multi-user.target
 UNIT
 
+sed -i "s#__PLATFORM__#$PLATFORM#" /etc/systemd/system/barkpark-builder.service
+
 systemctl daemon-reload
 systemctl enable --now barkpark-builder barkpark-runtime
+systemctl restart barkpark-builder barkpark-runtime
 sleep 3
 systemctl is-active barkpark-builder barkpark-runtime
 echo "== site-runtime-install complete =="
