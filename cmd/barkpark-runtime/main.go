@@ -19,10 +19,13 @@
 // With --once the binary runs a single cycle and exits — useful for tests,
 // a one-shot systemd timer, or the manual end-to-end proof.
 //
-// The runtime executor is read-only on the local Caddyfile parse for state
-// recovery in this MVP — the cmd wrapper builds State by reading the existing
-// Caddyfile from disk. A future enhancement is GET /v1/agent/sites for richer
-// state, but it isn't needed for the per-box single-tenant model.
+// State recovery: before every claim cycle the executor re-parses the on-box
+// Caddyfile — blocks marked "# Managed by barkpark-runtime" come back as live
+// sites (slug, domains, upstream port), and every port claimed by a foreign
+// vhost is reserved so the allocator never collides with it. The on-disk file
+// is the source of truth for what Caddy is actually serving; a future GET
+// /v1/agent/sites route could supplement it, but isn't needed for the per-box
+// single-tenant model.
 package main
 
 import (
@@ -35,7 +38,6 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/FRIKKern/barkpark/internal/caddyfile"
 	"github.com/FRIKKern/barkpark/internal/runtime"
 )
 
@@ -110,18 +112,25 @@ func run(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
 
-	// State for the MVP: empty (no prior site state read). The cmd wrapper's
-	// first-deploy path supplies the site shape through the running container
-	// — for first-time deploys the executor falls back to a placeholder slug
-	// and writes a Caddyfile block keyed on the (initially empty) domains
-	// list. Future enhancement: parse the existing Caddyfile on boot to
-	// reconstruct LiveSites, or pull state from a new /v1/agent/sites route.
-	buildState := func(context.Context) (runtime.State, error) {
-		return runtime.State{LiveSites: []caddyfile.Site{}}, nil
-	}
+	// State is reconstructed from the on-box Caddyfile before EVERY cycle —
+	// never assumed empty, never cached from boot. The old MVP stub returned
+	// an empty State each cycle, which broke a real box twice over: (a) the
+	// executor rewrote the Caddyfile from nothing, deleting every vhost it did
+	// not just create (the instance's own API/Studio vhost and the
+	// attach-domain vhost went TLS-dead in production), and (b) with no live
+	// ports visible the allocator re-issued the same port on the second deploy
+	// while the first container still bound it (`docker run` exit 125).
+	// StateFromDisk parses the file fresh per cycle, so a long-running
+	// executor also never goes stale against edits by the provisioner,
+	// attach-domain, or an operator.
+	buildState := e.StateFromDisk
 
 	if *once {
-		state, _ := buildState(ctx)
+		state, err := buildState(ctx)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "barkpark-runtime: %v\n", err)
+			return 1
+		}
 		had, err := e.RunOnce(ctx, state)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "barkpark-runtime: %v\n", err)

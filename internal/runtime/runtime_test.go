@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
+	"io/fs"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -158,7 +159,7 @@ func (m *mapFS) ReadFile(path string) ([]byte, error) {
 	if b, ok := m.files[path]; ok {
 		return b, nil
 	}
-	return nil, errors.New("not found")
+	return nil, fs.ErrNotExist
 }
 
 type fixedPorts struct{ next int }
@@ -260,11 +261,13 @@ func TestRunOnce_HappyPath_FirstDeploy_BluelessSiteGoesLive(t *testing.T) {
 		t.Errorf("docker load did not reference image tag in args: %v", runner.calls[0].args)
 	}
 
-	// 2. docker run with port + memory + cpu caps.
-	if len(runner.calls) < 2 || runner.calls[1].name != "docker" {
+	// 2. docker run with port + memory + cpu caps (preceded by the best-effort
+	// stale-name `docker rm -f` — see TestRunOnce_RemovesStaleSameNameContainer).
+	runArgs := dockerRunCall(runner.calls)
+	if runArgs == nil {
 		t.Fatalf("expected docker run, got %+v", runner.calls)
 	}
-	dockerArgs := strings.Join(runner.calls[1].args, " ")
+	dockerArgs := strings.Join(runArgs, " ")
 	if !strings.Contains(dockerArgs, "--memory=512m") {
 		t.Errorf("docker run missing memory cap: %v", dockerArgs)
 	}
@@ -669,7 +672,7 @@ func (failWriteFS) WriteFile(path string, data []byte, perm uint32) error {
 }
 
 func (failWriteFS) ReadFile(path string) ([]byte, error) {
-	return nil, errors.New("not found")
+	return nil, fs.ErrNotExist
 }
 
 // When the atomic rename fails, OSFS.WriteFile must not strand the <path>.tmp
