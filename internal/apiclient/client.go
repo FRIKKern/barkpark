@@ -1273,6 +1273,58 @@ func (c *Client) TaskRelabel(docID string, add, remove []string) error {
 	return err
 }
 
+// TaskGetContent RE-READS one task via GET /v1/tasks/:doc_id and returns its
+// `doc.content` object verbatim (the flat, token-scoped task route — tenancy
+// rides the bearer token, exactly like the claim/close/stamp POSTs above).
+//
+// It exists for the PDS success-claim law (charter PDS-D359/D361): a ledger
+// writer may not report a write it never read back. `bp task stamp` POSTs and
+// then calls this to ask the STORE what it now holds, so a write dropped by a
+// transport ceiling, a second door, or a bad minute on the box cannot be
+// reported as a success. The content is returned RAW rather than decoded here
+// because the criteria decode (with the server's exact tolerance contract)
+// belongs to internal/taskboard, which owns that shape.
+//
+// An ok:false envelope surfaces the server's reason string VERBATIM as the
+// error; a non-200 carries the status. Both are honest read failures — the
+// caller must NOT read them as "the write landed".
+func (c *Client) TaskGetContent(docID string) (json.RawMessage, error) {
+	resp, err := c.authGet(c.flatURL("/v1/tasks/" + url.PathEscape(docID)))
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+
+	raw, err := io.ReadAll(io.LimitReader(resp.Body, 32<<20))
+	if err != nil {
+		return nil, fmt.Errorf("task read-back %s: %w", docID, err)
+	}
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("task read-back %s: status %d", docID, resp.StatusCode)
+	}
+	var env struct {
+		OK     bool   `json:"ok"`
+		Reason string `json:"reason"`
+		Doc    struct {
+			Content json.RawMessage `json:"content"`
+		} `json:"doc"`
+	}
+	if err := json.Unmarshal(raw, &env); err != nil {
+		return nil, fmt.Errorf("task read-back %s: %w", docID, err)
+	}
+	if !env.OK {
+		reason := env.Reason
+		if reason == "" {
+			reason = "task read-back returned ok:false with no reason"
+		}
+		return nil, fmt.Errorf("%s", reason)
+	}
+	if len(bytes.TrimSpace(env.Doc.Content)) == 0 {
+		return nil, fmt.Errorf("task read-back %s: envelope carried no doc.content", docID)
+	}
+	return env.Doc.Content, nil
+}
+
 // GraphNode is one node of a GET /v1/graph/:id response — the id ↔ doc_id join
 // the edge endpoints need. In the published path `id` is a UUID and `doc_id`
 // the slug; in the drafts path both are the slug. Only the two fields the
