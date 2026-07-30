@@ -518,6 +518,73 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-07-30 — wave 8 REVIEW — grade A−, three slices shipped, all PUSHED with PRs open
+
+**All three round-1 slices landed green, were re-derived rather than re-read, and are on `origin`
+with PRs open — the first thing to say, because six consecutive waves ended with reviewed work
+stranded on local branches.** PR #8125 (`…clause-b…-r`, `task-43f7662b33e8e0b7`), PR #8126
+(`…refused-403…`, `cch-bl-auth-touch-unthrottled`, untouched by review), PR #8127
+(`…unrunnable-guard…-r`, `gr-backlog-css-brace-detector`).
+
+**What shipped.** Clause **(b)** of this epic's own seal predicate PASSES on a live run for the
+first time — `NO-SEAL a=FAIL b=PASS c=PASS orphans=55 considering=1`. Test 23's ENOBUFS mutation is
+path-independent (D97 executed: one literal, 64 KiB), so the console harness stops being red on
+`main` in both `--test` and script mode. CCH-D5 is registered at rung 2 behind a real
+`Router.call/2` proof that two forwarded clients get separate sign-in buckets. The sessions card
+stops claiming a REFUSED device was "Active just now": the `last_used_at` stamp moved downstream of
+the response decision via `register_before_send` gated on `conn.status < 400` (D102 executed), which
+pays both the operator-visible lie and the write amplification the refuted throttle was aimed at.
+And two CSS regression fixtures that nothing had ever executed now run inside a harness CI actually
+runs, with the E10 orphan class given its first fixture at all.
+
+**Every high-flip judgment was re-derived independently, not read.** The reviewer applied the
+`router.ex:766` key collapse in a fresh tree: 2 failures, both in the new file, `device_auth_test`
++ `router_test` still 203/0 — the composition was genuinely unmeasured. The auth boundary's three
+structural claims (before_send fires on every terminal refusal; the once-per-conn `put_private`
+guard cannot drop a stamp on plug re-entry, because every re-entrant gate threads the *same* conn;
+exactly three `verify_user_session_token` call sites exist) were re-derived from the source.
+
+**Three review fixes, each of the epic's own disease found on the epic's own instruments.** (1) The
+rung-2 registration emptied the register of rung-3 entries, leaving `seal-predicate.mjs`'s
+`unmeasuredWaivers` branch live with **no test** — paid by mutation in both directions, non-vacuity
+proven by disabling the branch (the new test is the only one that reds). (2) Two fixture `_comment`
+blocks had inverted with the measurement and still asserted clause (b) fails. (3) `--swallow-check`
+printed `E9 app.css:13` while scanning a *fixture* — a report misnaming its own subject — now
+labelled and pinned, mutation-proven.
+
+**Two things `main` must own, neither caused by this wave.** `router_ability_matrix_test.exs:221`
+and `:236` are RED on `origin/main` today (POST `/v1/sites/:id/artifact` answers 404 where 403 is
+expected), re-derived by the reviewer on a detached `origin/main` checkout — filed as
+`cch-bl-ability-matrix-red-on-main` (P1). And **D105 IS REFUTED**: task create is *not* a wholesale
+outage. A minimal create succeeds; every field the builders needed succeeds individually; the same
+full payload 500s four times and then succeeds unchanged on the fifth. It is INTERMITTENT, and the
+operational rule is RETRY, not "conclude an outage". Both rows two builders abandoned were filed by
+retrying. Filed as `cch-bl-task-create-intermittent-500` (P1). This matters beyond one bug: three
+consecutive waves shrank their scope on a capability outage nobody had measured.
+
+**Ledger.** All three slice tasks in_progress, published, `wave_paper` set, every provable criterion
+stamped with real run output, and only the merge-gated + independent-reviewer rows left open for the
+lead. No tasks outside the wave were touched. Three new rows filed and published
+(`cch-bl-pat-touch-not-authz-aware` P2 — the PAT twin of the session-touch lie, still live).
+
+**Grade A−.** Every slice is invariant-shaped and mutation-proven in both directions; two of the
+three fix the epic's disease on the epic's own instruments; nothing was guessed and the one thing
+that could not be verified (`b=PASS` rests on four MEASURED-ELSEWHERE entries this run did not
+execute) is said out loud rather than quoted as "the defects are fixed". Held short of A by scope:
+three slices against ~58 live rows, with the required-check flip structurally unavailable (D98), and
+by the fact that the wave's own premise about `bp task create` was wrong and cost two builders their
+follow-up rows.
+
+**What the next wave must take.** Merge round 1 in any order (the three slices are file-disjoint —
+verified by a clean octopus merge, 722/722 + 31/31 + 2539 tests/2 pre-existing failures on the
+union), then dispatch the two D105-deferred slices, which now have no excuse: the aggregator
+transplant (D99/D100) and the `console-path-escape-check.sh` prerequisite (D98). Take
+`cch-bl-ability-matrix-red-on-main` FIRST — a red `main` poisons every subsequent wave's baseline.
+Then `cch-bl-pat-touch-not-authz-aware`, which is the same lie in the other credential and whose fix
+shape is already built and merged. `gr-backlog-e02-deploy-actor` and the seal-predicate retarget
+(`cch-bl-seal-predicate-retarget-and-reparent`) were NOT taken an eighth time and must not survive a
+ninth.
+
 ### 2026-07-30 — wave 8 DECIDE (build in flight)
 
 **The wave's first act was voiding its own brief.** Five inherited premises were stale (D96) and the
