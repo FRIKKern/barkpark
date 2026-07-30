@@ -63,9 +63,11 @@
 //    OVERFLOW_GUARD_PORT=4321 node …                                      # port override
 //    CHROME=/path/to/chrome node …
 //
-//  Exit codes: 0 = every requested defect measured fixed · 1 = a defect is
-//  still measurable, the server is stale/squatted, or the run broke ·
-//  2 = GUARD (no Chrome, unknown --defect) refused before measuring.
+//  Exit codes: 0 = every requested defect measured fixed · 1 = a DEFECT WAS
+//  MEASURED and is still present · 2 = REFUSED to measure (no/unusable Chrome,
+//  unknown --defect, no server, a stale/squatted server, CDP bring-up failed,
+//  the probe threw). 1 is a claim about the CSS; 2 is a claim about the
+//  environment, and the two must never be confused under a required context.
 //
 //  ZERO DEPENDENCIES — Node 22 native fetch + native WebSocket speak CDP
 //  directly (the Cdp class is cssom-parity.mjs's, unchanged). Teardown is
@@ -121,8 +123,22 @@ if (di !== -1) {
 const requested = only ? [only] : DEFECTS;
 
 // ── chrome discovery (cssom-parity.mjs's, unchanged) ─────────────────────────
+// The accessSync check MUST cover the CHROME env branch, not only the candidate
+// sweep. .github/workflows/console-harness.yml pins CHROME=/usr/bin/google-chrome
+// for every console run, so on CI the env branch is the ONLY branch taken — an
+// unchecked `return process.env.CHROME` makes the exit-2 "no Chrome" GUARD below
+// dead code, and a runner image that drops the binary dies instead with a raw
+// `spawn … ENOENT` node stack at exit 1. Exit 1 means "a measured overflow";
+// a missing browser is an ENVIRONMENTAL REFUSAL and must speak as exit 2.
 function findChrome() {
-  if (process.env.CHROME) return process.env.CHROME;
+  if (process.env.CHROME) {
+    try {
+      fs.accessSync(process.env.CHROME, fs.constants.X_OK);
+      return process.env.CHROME;
+    } catch {
+      return null; // fall through to the exit-2 GUARD naming the missing path
+    }
+  }
   const candidates = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -135,6 +151,15 @@ function findChrome() {
     try { fs.accessSync(c, fs.constants.X_OK); return c; } catch { /* next */ }
   }
   return null;
+}
+
+// The refusal line for a findChrome() miss — names the path that was pinned and
+// not found, so a runner-image regression reads as "this binary is gone", never
+// as an anonymous red.
+function chromeGuardLine() {
+  return process.env.CHROME
+    ? `!! GUARD (exit 2): CHROME=${process.env.CHROME} is not an executable file. Environment refusal, not an overflow defect.\n`
+    : "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n";
 }
 
 class Cdp {
@@ -185,7 +210,7 @@ class Cdp {
 async function main() {
   const chromeBin = findChrome();
   if (!chromeBin) {
-    process.stderr.write("!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n");
+    process.stderr.write(chromeGuardLine());
     process.exit(2);
   }
 
@@ -224,7 +249,12 @@ async function main() {
     if (profile) { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ } }
   };
 
-  const die = async (msg, code = 1) => {
+  // Default 2 = REFUSED TO MEASURE (environment fault), not 1 = a measured
+  // overflow defect. Every current call site is environmental — server never
+  // came up, a foreign tree squats the port, Chrome never started, CDP failed,
+  // the evaluate threw — so all six take this default deliberately. A future
+  // site that IS a measured defect must pass 1 explicitly and say why.
+  const die = async (msg, code = 2) => {
     await teardown();
     process.stderr.write(`\n!! OVERFLOW GUARD: ${msg}\n`);
     process.exit(code);
@@ -236,6 +266,7 @@ async function main() {
     try { const r = await fetch(`${BASE}/app.css`, { cache: "no-store" }); if (r.ok) { up = true; break; } } catch { /* not yet */ }
     await sleep(100);
   }
+  // AUDITED (exit 2): the local static server never came up. Environment, not CSS.
   if (!up) return die(`no server answered on :${PORT} within ${SERVER_CAP}ms`);
 
   // 2. SERVED BYTES == DISK BYTES (GR125a). Compared for every file the
@@ -247,6 +278,8 @@ async function main() {
     const served = await fetchBytes(rel);
     const disk = fs.readFileSync(path.join(ROOT, rel.slice(1)));
     if (!served.equals(disk)) {
+      // AUDITED (exit 2): a foreign tree squats the port — we refuse to measure
+      // bytes we did not author. Nothing about this tree's CSS has been judged.
       return die(
         `STALE SERVER on :${PORT} — ${rel} served ${served.length} B, disk holds ${disk.length} B.\n` +
         `   A server rooted at a DIFFERENT tree (a foreign worktree?) is squatting this port.\n` +
@@ -262,6 +295,7 @@ async function main() {
       : shell;
     const served = (await fetchBytes("/")).toString("utf8");
     if (served !== expected) {
+      // AUDITED (exit 2): same squatter refusal, on the injected shell.
       return die(`STALE SERVER on :${PORT} — the injected shell "/" does not match this tree's index.html.`);
     }
   }
@@ -297,6 +331,7 @@ async function main() {
     } catch { /* not written yet */ }
     await sleep(100);
   }
+  // AUDITED (exit 2): the browser never started. Environment, not CSS.
   if (!devPort) return die("Chrome never wrote DevToolsActivePort — it did not start");
 
   let sessionId;
@@ -313,6 +348,7 @@ async function main() {
     // without this, a mutated stylesheet measures as the original.
     await cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
   } catch (err) {
+    // AUDITED (exit 2): the debugger transport failed before any measurement ran.
     return die(`CDP bring-up failed: ${err.message}`);
   }
 
@@ -465,6 +501,8 @@ async function main() {
       }
     }
   } catch (err) {
+    // AUDITED (exit 2): the probe itself threw, so NOTHING was measured — an
+    // incomplete run must never be reported as a measured overflow.
     return die(`measurement broke: ${err.message}`);
   }
 

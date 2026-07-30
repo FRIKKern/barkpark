@@ -382,8 +382,22 @@ const COLLECT_JS = `(function () {
 
 // ── 4. plumbing (the CDP client and reap are modal-oracle.mjs's, unchanged) ───
 
+// The accessSync check MUST cover the CHROME env branch, not only the candidate
+// sweep. .github/workflows/console-harness.yml pins CHROME=/usr/bin/google-chrome
+// for every console run, so on CI the env branch is the ONLY branch taken — an
+// unchecked `return process.env.CHROME` makes the exit-2 "no Chrome" GUARD below
+// dead code, and a runner image that drops the binary dies instead with a raw
+// `spawn … ENOENT` node stack at exit 1. Exit 1 means "a measured CSS defect";
+// a missing browser is an ENVIRONMENTAL REFUSAL and must speak as exit 2.
 function findChrome() {
-  if (process.env.CHROME) return process.env.CHROME;
+  if (process.env.CHROME) {
+    try {
+      fs.accessSync(process.env.CHROME, fs.constants.X_OK);
+      return process.env.CHROME;
+    } catch {
+      return null; // fall through to the exit-2 GUARD naming the missing path
+    }
+  }
   const candidates = [
     "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
     "/Applications/Chromium.app/Contents/MacOS/Chromium",
@@ -396,6 +410,15 @@ function findChrome() {
     try { fs.accessSync(c, fs.constants.X_OK); return c; } catch { /* next */ }
   }
   return null;
+}
+
+// The refusal line for a findChrome() miss — names the path that was pinned and
+// not found, so a runner-image regression reads as "this binary is gone", never
+// as an anonymous red.
+function chromeGuardLine() {
+  return process.env.CHROME
+    ? `!! GUARD (exit 2): CHROME=${process.env.CHROME} is not an executable file. Environment refusal, not a CSS defect.\n`
+    : "!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n";
 }
 
 class Cdp {
@@ -469,7 +492,7 @@ async function main() {
   }
   const chromeBin = findChrome();
   if (!chromeBin) {
-    process.stderr.write("!! GUARD (exit 2): no Chrome/Chromium found. Set CHROME=/path/to/chrome.\n");
+    process.stderr.write(chromeGuardLine());
     process.exit(2);
   }
 
