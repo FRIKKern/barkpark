@@ -140,6 +140,25 @@ def audit_blocks(
         if block_type == "table":
             rows = block.get("rows", [])
             columns = block.get("columns")
+            if isinstance(columns, list):
+                for column_index, column in enumerate(columns):
+                    if (
+                        isinstance(column, dict)
+                        and set(column).issubset({"text"})
+                        and isinstance(column.get("text"), str)
+                    ):
+                        findings.append(
+                            _violation(
+                                document,
+                                f"{block_path}.columns[{column_index}]",
+                                "table_column_text_wrapper",
+                                safe=True,
+                                detail=(
+                                    "Text-only table columns are legacy header cells; "
+                                    "canonical headers live in block.head."
+                                ),
+                            )
+                        )
             column_keys = (
                 [column.get("key") for column in columns]
                 if isinstance(columns, list)
@@ -216,18 +235,26 @@ def audit_blocks(
                     if isinstance(cells_to_check, list):
                         for cell_index, cell in enumerate(cells_to_check):
                             if isinstance(cell, dict):
-                                safe = (
+                                content_wrapper = (
                                     "content" in cell
                                     and set(cell).issubset({"content", "header"})
                                     and isinstance(cell.get("content"), list)
                                 )
+                                text_wrapper = (
+                                    "text" in cell
+                                    and set(cell).issubset({"text", "header"})
+                                    and isinstance(cell.get("text"), str)
+                                )
+                                safe = content_wrapper or text_wrapper
                                 findings.append(
                                     _violation(
                                         document,
                                         f"{row_path}.cells[{cell_index}]",
                                         (
                                             "table_cell_object_wrapper"
-                                            if "content" in cell
+                                            if content_wrapper
+                                            else "table_cell_text_wrapper"
+                                            if text_wrapper
                                             else "table_cell_unrenderable"
                                         ),
                                         safe=safe,
@@ -290,12 +317,15 @@ def _flatten_cell(content: list[Any]) -> list[Any]:
 
 
 def _canonical_cell(cell: Any, *, header: bool = False) -> Any:
-    if not isinstance(cell, dict) or not isinstance(cell.get("content"), list):
+    if not isinstance(cell, dict):
         return cell
-    allowed = {"content", "header"} if header else {"content"}
-    if not set(cell).issubset(allowed):
-        return cell
-    return _flatten_cell(cell["content"])
+    allowed = {"content", "text", "header"} if header else {"content", "text"}
+    if set(cell).issubset(allowed):
+        if isinstance(cell.get("content"), list):
+            return _flatten_cell(cell["content"])
+        if isinstance(cell.get("text"), str):
+            return _text_node(cell["text"])
+    return cell
 
 
 def canonicalize_blocks(blocks: Any) -> Any:
@@ -330,6 +360,22 @@ def canonicalize_blocks(blocks: Any) -> Any:
 
         if block_type == "table" and isinstance(block.get("rows"), list):
             columns = block.get("columns")
+            legacy_columns = (
+                isinstance(columns, list)
+                and bool(columns)
+                and all(
+                    isinstance(column, dict)
+                    and set(column).issubset({"text"})
+                    and isinstance(column.get("text"), str)
+                    for column in columns
+                )
+            )
+            if legacy_columns and not block.get("head") and not block.get("header"):
+                block["head"] = [
+                    _text_node(column["text"]) for column in columns  # type: ignore[index]
+                ]
+                block.pop("columns", None)
+                columns = None
             if isinstance(columns, list) and columns:
                 keys = [
                     column.get("key") if isinstance(column, dict) else None

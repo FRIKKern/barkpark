@@ -40,11 +40,13 @@ func (tr tableRenderer) Render(b Block, ctx RenderCtx) []string {
 	columnHead, columnKeys := tableColumns(attrSlice(b.Attrs, "columns"))
 	if len(head) == 0 && len(columnHead) > 0 {
 		head = columnHead
-		normalizedRows := make([]any, 0, len(rows))
-		for _, row := range rows {
-			normalizedRows = append(normalizedRows, recordRow(row, columnKeys))
+		if len(columnKeys) > 0 {
+			normalizedRows := make([]any, 0, len(rows))
+			for _, row := range rows {
+				normalizedRows = append(normalizedRows, recordRow(row, columnKeys))
+			}
+			rows = normalizedRows
 		}
-		rows = normalizedRows
 	}
 	if len(head) == 0 && len(rows) > 0 {
 		if row, ok := rows[0].(map[string]any); ok {
@@ -248,6 +250,9 @@ func (tr tableRenderer) cellString(cell any, ctx RenderCtx) string {
 		if content, ok := v["content"].([]any); ok {
 			return tr.ir.Inline(flattenCellNodes(content), ctx)
 		}
+		if text, ok := v["text"].(string); ok {
+			return tr.ir.Inline([]any{text}, ctx)
+		}
 		return tr.ir.Inline([]any{v}, ctx)
 	case nil:
 		return ""
@@ -283,7 +288,12 @@ func tableColumns(columns []any) ([]any, []string) {
 		}
 		key := attrStr(column, "key")
 		if key == "" {
-			return nil, nil
+			text := attrStr(column, "text")
+			if text == "" {
+				return nil, nil
+			}
+			head = append(head, text)
+			continue
 		}
 		label := attrStr(column, "label")
 		if label == "" {
@@ -291,6 +301,12 @@ func tableColumns(columns []any) ([]any, []string) {
 		}
 		keys = append(keys, key)
 		head = append(head, label)
+	}
+	if len(keys) == 0 && len(head) == len(columns) {
+		return head, nil
+	}
+	if len(keys) != len(columns) {
+		return nil, nil
 	}
 	return head, keys
 }

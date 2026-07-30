@@ -37,16 +37,24 @@ defmodule Barkpark.Content.PaperStructurePublishGateTest do
           %{"content" => [%{"type" => "text", "value" => "visible item"}]}
         ]
       },
-      %{"type" => "callout", "text" => "visible callout"}
+      %{"type" => "callout", "text" => "visible callout"},
+      %{
+        "type" => "table",
+        "columns" => [%{"text" => "Surface"}],
+        "rows" => [[%{"text" => "visible cell"}]]
+      }
     ])
 
     assert {:ok, published} =
              Content.publish_document("normalizes", "paper", @dataset)
 
-    [list, callout] = published.content["blocks"]
+    [list, callout, table] = published.content["blocks"]
     assert list["items"] == [[%{"type" => "text", "value" => "visible item"}]]
     assert callout["content"] == [%{"type" => "text", "value" => "visible callout"}]
     refute Map.has_key?(callout, "text")
+    assert table["head"] == [[%{"type" => "text", "value" => "Surface"}]]
+    assert table["rows"] == [[[%{"type" => "text", "value" => "visible cell"}]]]
+    refute Map.has_key?(table, "columns")
 
     assert {:error, :not_found} =
              Content.get_document("drafts.normalizes", "paper", @dataset)

@@ -16,7 +16,10 @@ const table: Emit = (b) => {
   let head = Array.isArray(headRaw) ? headRaw : []
   let body = asList(b.rows)
   const columns = tableColumns(b.columns)
-  if (head.length === 0 && columns.length > 0) {
+  const textColumns = tableTextColumns(b.columns)
+  if (head.length === 0 && textColumns.length > 0) {
+    head = textColumns
+  } else if (head.length === 0 && columns.length > 0) {
     head = columns.map(({ key, label }) => label || key)
     body = body.map((row) =>
       isMap(row) ? columns.map(({ key }) => row[key] ?? '') : row,
@@ -55,12 +58,21 @@ function rowCells(row: unknown): unknown[] {
 }
 
 function cellContent(cell: unknown): unknown {
-  if (!isMap(cell) || !Array.isArray(cell.content)) return cell
+  if (!isMap(cell)) return cell
+  if (typeof cell.text === 'string') return cell.text
+  if (!Array.isArray(cell.content)) return cell
   return cell.content.flatMap((node) =>
     isMap(node) && node.type === 'paragraph' && Array.isArray(node.content)
       ? node.content
       : [node],
   )
+}
+
+function tableTextColumns(value: unknown): string[] {
+  if (!Array.isArray(value) || value.length === 0) return []
+  return value.every((column) => isMap(column) && typeof column.text === 'string')
+    ? value.map((column) => String((column as Record<string, unknown>).text))
+    : []
 }
 
 function tableColumns(value: unknown): Array<{ key: string; label: string }> {

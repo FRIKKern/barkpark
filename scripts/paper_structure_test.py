@@ -162,7 +162,7 @@ class PaperStructureAuditTest(unittest.TestCase):
             "_rev": "rev-1",
             "blocks": [
                 {"type": "list", "items": [{"id": "item-without-content"}]},
-                {"type": "table", "rows": [[{"text": "not inline content"}]]},
+                {"type": "table", "rows": [[{"label": "not inline content"}]]},
             ],
         }
 
@@ -178,6 +178,25 @@ class PaperStructureAuditTest(unittest.TestCase):
                 "table_cell_unrenderable": 1,
             },
         )
+
+    def test_text_wrapped_table_headers_and_cells_have_a_deterministic_repair(self):
+        blocks = [
+            {
+                "type": "table",
+                "columns": [{"text": "Surface"}, {"text": "Proof"}],
+                "rows": [[{"text": "CLI"}, {"text": "visible"}]],
+            }
+        ]
+        document = {"_id": "text-wrapped-table", "_rev": "rev-1", "blocks": blocks}
+
+        report = audit_documents([document])
+        normalized = canonicalize_blocks(blocks)
+
+        self.assertEqual(report["violations"], 4)
+        self.assertEqual(report["safe_repair_violations"], 4)
+        self.assertEqual(normalized[0]["head"], [text("Surface"), text("Proof")])
+        self.assertEqual(normalized[0]["rows"], [[text("CLI"), text("visible")]])
+        self.assertNotIn("columns", normalized[0])
 
     def test_scalar_list_items_have_a_deterministic_repair(self):
         blocks = [{"type": "list", "items": ["one", 2, None]}]

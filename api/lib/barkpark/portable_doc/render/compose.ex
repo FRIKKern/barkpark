@@ -1938,16 +1938,27 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end)
   end
 
+  defp table_cell_content(%{"text" => text}) when is_binary(text), do: text
+
   defp table_cell_content(cell), do: cell
 
   defp table_column_head(%{"columns" => columns}) when is_list(columns) and columns != [] do
-    keys = Enum.map(columns, &Map.get(&1, "key"))
+    cond do
+      Enum.all?(columns, fn
+        %{"text" => text} -> is_binary(text)
+        _ -> false
+      end) ->
+        {Enum.map(columns, &Map.get(&1, "text")), []}
 
-    if Enum.all?(keys, &(is_binary(&1) and &1 != "")) do
-      head = Enum.map(columns, &(Map.get(&1, "label") || Map.get(&1, "key")))
-      {head, keys}
-    else
-      {nil, []}
+      true ->
+        keys = Enum.map(columns, &Map.get(&1, "key"))
+
+        if Enum.all?(keys, &(is_binary(&1) and &1 != "")) do
+          head = Enum.map(columns, &(Map.get(&1, "label") || Map.get(&1, "key")))
+          {head, keys}
+        else
+          {nil, []}
+        end
     end
   end
 

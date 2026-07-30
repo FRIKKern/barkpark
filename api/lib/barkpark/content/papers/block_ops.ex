@@ -1515,6 +1515,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
       {%{"content" => content}, _index} when is_list(content) ->
         []
 
+      {%{"text" => text}, _index} when is_binary(text) ->
+        []
+
       {_cell, index} ->
         ["#{path}.cells[#{index}] has no renderable inline content"]
     end)
@@ -1649,6 +1652,29 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp record_table_text(value), do: to_string(value)
 
   defp normalize_array_table(block, rows) do
+    block =
+      case {Map.get(block, "head") || Map.get(block, "header"), Map.get(block, "columns")} do
+        {head, columns} when head in [nil, []] and is_list(columns) and columns != [] ->
+          if Enum.all?(columns, fn
+               %{"text" => text} = column when is_binary(text) -> map_size(column) == 1
+               _ -> false
+             end) do
+            block
+            |> Map.delete("columns")
+            |> Map.put(
+              "head",
+              Enum.map(columns, fn %{"text" => text} ->
+                [%{"type" => "text", "value" => text}]
+              end)
+            )
+          else
+            block
+          end
+
+        _ ->
+          block
+      end
+
     {block, rows} =
       case {Map.get(block, "head") || Map.get(block, "header"), rows} do
         {head, [%{"header" => true, "cells" => cells} = row | rest]}
@@ -1688,10 +1714,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
        when is_list(content) and map_size(cell) == 1,
        do: flatten_table_cell_content(content)
 
+  defp normalize_wrapped_table_cell(%{"text" => text} = cell)
+       when is_binary(text) and map_size(cell) == 1,
+       do: [%{"type" => "text", "value" => text}]
+
   defp normalize_wrapped_table_cell(cell), do: cell
 
   defp normalize_header_table_cell(%{"content" => content}) when is_list(content),
     do: flatten_table_cell_content(content)
+
+  defp normalize_header_table_cell(%{"text" => text}) when is_binary(text),
+    do: [%{"type" => "text", "value" => text}]
 
   defp normalize_header_table_cell(cell), do: cell
 

@@ -114,3 +114,26 @@ func TestPdTableRendersDeclaredRecordRows(t *testing.T) {
 		}
 	}
 }
+
+func TestPdTableRendersTextWrappedColumnsAndCells(t *testing.T) {
+	reg := testRegistry()
+	b := Block{
+		Type: "table",
+		Attrs: map[string]any{
+			"columns": []any{
+				map[string]any{"text": "Surface"},
+				map[string]any{"text": "Proof"},
+			},
+			"rows": []any{[]any{
+				map[string]any{"text": "CLI"},
+				map[string]any{"text": "visible"},
+			}},
+		},
+	}
+	out := strings.Join(reg.Render(b, RenderCtx{Width: 50, Theme: DarkTheme(), Profile: NoColor}), "\n")
+	for _, want := range []string{"SURFACE", "PROOF", "CLI", "visible"} {
+		if !strings.Contains(out, want) {
+			t.Fatalf("expected text-wrapped table to contain %q, got:\n%s", want, out)
+		}
+	}
+}
