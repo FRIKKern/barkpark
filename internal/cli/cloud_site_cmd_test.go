@@ -1762,6 +1762,109 @@ func TestCloudSitePrebuiltRefusesABadDirBeforeAnyCall(t *testing.T) {
 	}
 }
 
+// TestCloudSitePrebuiltPrintsThePathSiteBaseFromTheSlug is the fix for a printed
+// export that was BOTH dead and wrong (site-spawner wave 10).
+//
+// DEAD: it was guarded on the deployment's URL, and the control plane's
+// deployment_url returns nil for anything not live. A prebuilt mint is
+// deliberately QUEUED, so that URL is always empty at mint time and the line
+// could never print — while the help promises all three exports. The live walk
+// (D103) saw exactly two.
+//
+// WRONG IF IT HAD FIRED: the URL is an absolute https URL, and
+// templates/astro-starter/astro.config.mjs prefixes a leading slash to anything
+// not already leading-slashed — so the built page would carry
+// base="/https://host/sites/slug/" and EVERY asset href would 404. HEALTH cannot
+// catch it: it asserts bp-build-id, bp-content-rev and bp-doc-id, never
+// bp-site-base.
+//
+// So the export is now printed UNCONDITIONALLY, as the `/sites/<slug>/` PATH the
+// deploy engine itself exports (deploy/site-deploy.sh: BARKPARK_SITE_BASE=
+// "/sites/$SITE_SLUG/"), derived from the site's slug.
+func TestCloudSitePrebuiltPrintsThePathSiteBaseFromTheSlug(t *testing.T) {
+	dir := writeDistFixture(t, "STALE-BUILD-ID")
+
+	cp := newSiteCP(t)
+	// The mint's real shape: queued, and NO url — deployment_url is nil until live.
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"freshbuildid00","content_rev":"cr-42","source":"prebuilt"}}`}
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"Blog","slug":"blog","kind":"static"}}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	if code == exitOK {
+		t.Fatalf("a marker mismatch must not exit 0\n%s%s", stdout, stderr)
+	}
+	all := stdout + stderr
+
+	// The mint envelope carried no url at all — that is the state in which the old
+	// guard silently dropped the line.
+	var mint map[string]any
+	if err := json.Unmarshal([]byte(cp.deployResp.body), &mint); err != nil {
+		t.Fatalf("decode mint fixture: %v", err)
+	}
+	if dep, _ := mint["deployment"].(map[string]any); dep["url"] != nil {
+		t.Fatalf("this test only proves anything while the mint carries no url: %v", dep)
+	}
+
+	// AFTER: the export prints anyway, and it is the PATH.
+	const want = "export BARKPARK_SITE_BASE=/sites/blog/"
+	if !strings.Contains(all, want) {
+		t.Fatalf("the mint receipt must print %q — the help promises this export and a queued mint has no url to derive it from:\n%s", want, all)
+	}
+	// And it is NEVER the absolute URL form, which astro.config.mjs would turn into
+	// base="/https://…" and kill every asset href on the page.
+	if strings.Contains(all, "BARKPARK_SITE_BASE=http") {
+		t.Fatalf("BARKPARK_SITE_BASE must be a path, never a full URL (astro prefixes a slash to it):\n%s", all)
+	}
+
+	// The help promises all three exports, so all three must print.
+	for _, want := range []string{"BARKPARK_BUILD_ID=freshbuildid00", "BARKPARK_CONTENT_REV=cr-42", "BARKPARK_SITE_BASE=/sites/blog/"} {
+		if !strings.Contains(all, want) {
+			t.Fatalf("the receipt is missing the promised export %q:\n%s", want, all)
+		}
+	}
+}
+
+// TestCloudSitePrebuiltSiteBaseIgnoresADeploymentURL: even when a deployment DOES
+// carry a url (a live row, or a control plane that starts emitting one at mint),
+// the export stays the path. The URL is not a base and must never leak into one.
+func TestCloudSitePrebuiltSiteBaseIgnoresADeploymentURL(t *testing.T) {
+	dir := writeDistFixture(t, "STALE-BUILD-ID")
+
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-9","status":"queued","build_id":"freshbuildid00","content_rev":"cr-7","source":"prebuilt","url":"https://guerrilla.barkpark.cloud/sites/blog/"}}`}
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"Blog","slug":"blog"}}`}
+	cp.serve()
+
+	stdout, stderr, _ := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	all := stdout + stderr
+	if !strings.Contains(all, "export BARKPARK_SITE_BASE=/sites/blog/") {
+		t.Fatalf("the export must be the /sites/<slug>/ path:\n%s", all)
+	}
+	if strings.Contains(all, "BARKPARK_SITE_BASE=https://") {
+		t.Fatalf("the deployment url leaked into the site base — that bakes base=\"/https://…\":\n%s", all)
+	}
+}
+
+// TestCloudSitePrebuiltSiteBaseFallsBackToTheRef: the slug is read from the site
+// row, which is the authoritative source. When that read fails the ref the user
+// typed is the best available slug — the line still prints, because a missing
+// export is how this bug shipped in the first place.
+func TestCloudSitePrebuiltSiteBaseFallsBackToTheRef(t *testing.T) {
+	dir := writeDistFixture(t, "STALE-BUILD-ID")
+
+	cp := newSiteCP(t)
+	cp.deployResp = fakeResp{201, `{"deployment":{"id":"dep-1","status":"queued","build_id":"freshbuildid00","source":"prebuilt"}}`}
+	cp.getResp = fakeResp{500, `{"error":"boom"}`}
+	cp.serve()
+
+	stdout, stderr, _ := runSite(t, "table", "deploy", testSiteID, "--prebuilt", dir)
+	all := stdout + stderr
+	if !strings.Contains(all, "export BARKPARK_SITE_BASE=/sites/"+testSiteID+"/") {
+		t.Fatalf("with no readable site row the ref is the slug, and the export still prints:\n%s", all)
+	}
+}
+
 // TestSiteDeploymentDecodesPrebuiltFields: json.Unmarshal DROPS keys the struct
 // does not model — the repo already learned this on Trigger — and content_rev is
 // unrecoverable elsewhere (only the box computes it). This pins all three
