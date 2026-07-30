@@ -934,10 +934,13 @@ type hzPost struct {
 }
 
 // hzServerPostConditions maps every verb that funnels through
-// runHetznerServerAction to what it must observe. A verb missing from this map
-// would report on the pre-action object again, so the executor refuses to guess
-// and hetzner_cmd_test.go derives the verb list from the switch at test time
-// rather than trusting this map to be complete.
+// runHetznerServerAction to what it must observe. The executor never GUESSES a
+// post-condition: a verb missing from this map degrades to the zero hzPost, so
+// it still re-reads but asserts nothing and its receipt carries only id/name —
+// silently back to the defect this block exists to kill. That degradation is
+// why the map is not trusted to be complete: hetzner_cmd_test.go DERIVES the
+// verb list from the switch at test time and fails on a verb this map omits
+// (and on an entry no verb uses).
 var hzServerPostConditions = map[string]hzPost{
 	// A — start.
 	"poweron": {
