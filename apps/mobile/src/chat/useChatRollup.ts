@@ -105,8 +105,17 @@ export function useChatRollup(
   // The clock is a seam for tests, NOT a dependency: putting it in the effect's
   // deps would re-key the poll on every render that passes an inline function —
   // the same re-subscription trap `connection`'s memo exists to avoid.
+  // The write lives in a dep-less effect, not in the render body: writing
+  // `.current` during render is `react-hooks/refs`, and the rule is right —
+  // a render can be discarded or replayed, so a ref written there can end up
+  // holding a value from a render that never committed. The poll only ever
+  // reads this ref inside an async callback that runs after commit, so a
+  // one-render lag is unobservable, and `useRef(now)` already seeds it with
+  // the correct clock for the first poll.
   const nowRef = useRef(now)
-  nowRef.current = now
+  useEffect(() => {
+    nowRef.current = now
+  })
 
   useEffect(() => {
     if (connection === undefined) return
