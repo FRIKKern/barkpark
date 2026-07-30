@@ -15,6 +15,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"sync"
 	"testing"
@@ -221,7 +222,9 @@ func TestHetznerServerCreate(t *testing.T) {
 }
 
 // TestHetznerServerPoweroff asserts the action verb path: name resolution,
-// POST …/actions/poweroff, and the poll of the still-running action.
+// POST …/actions/poweroff, the poll of the still-running action, and the
+// POST-CONDITION read-back — the receipt names the state it observed, not the
+// pre-action object it was handed.
 func TestHetznerServerPoweroff(t *testing.T) {
 	f := newFakeHzAPI(t)
 	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
@@ -239,6 +242,12 @@ func TestHetznerServerPoweroff(t *testing.T) {
 		}
 		hzWriteJSON(w, 200, `{"actions":[{"id":21,"status":"success","progress":100}]}`)
 	})
+	// Shape B is a BOUNDED POLL: the box reports the transient `stopping`
+	// before it reports `off`, so a single read-back would false-red it.
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(
+		`{"id":42,"name":"web-1","status":"stopping"}`,
+		`{"id":42,"name":"web-1","status":"off"}`,
+	))
 
 	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", "poweroff", "web-1")
 	if code != exitOK {
@@ -250,8 +259,339 @@ func TestHetznerServerPoweroff(t *testing.T) {
 	if f.count("GET", "/actions") == 0 {
 		t.Error("poweroff never polled the running action — fire-and-forget")
 	}
+	if n := f.count("GET", "/servers/42"); n < 2 {
+		t.Errorf("poweroff read the server back %d time(s); want a bounded POLL through the transient `stopping`", n)
+	}
 	if !strings.Contains(stdout, "✓ poweroff — server web-1 (id 42)") {
 		t.Errorf("poweroff output = %q, want the ✓ receipt line", stdout)
+	}
+	if !strings.Contains(stdout, "status: off") {
+		t.Errorf("poweroff output = %q, want the OBSERVED post-condition (status: off) — "+
+			"a receipt carrying only id/name says nothing an action could have changed", stdout)
+	}
+}
+
+// hzServerStates serves a `GET /servers/<id>` that walks a script of server
+// bodies, repeating the last one forever. That is how the transient states
+// (`starting`, `stopping`) that make a single read-back a lie get into a test.
+func hzServerStates(bodies ...string) http.HandlerFunc {
+	var mu sync.Mutex
+	i := 0
+	return func(w http.ResponseWriter, r *http.Request) {
+		mu.Lock()
+		body := bodies[i]
+		if i < len(bodies)-1 {
+			i++
+		}
+		mu.Unlock()
+		hzWriteJSON(w, 200, `{"server":`+body+`}`)
+	}
+}
+
+// hzActionVerbsFromSource DERIVES the verb list from the switch in
+// hetzner_cmd.go — the same read as
+// `git grep -c 'runHetznerServerAction(out' -- internal/cli/hetzner_cmd.go`,
+// done at test time. It exists because a charter (PDS-D344) said six and the
+// source said nine: a list transcribed by hand is a claim, and this file's
+// whole subject is claims nobody re-read.
+func hzActionVerbsFromSource(t *testing.T) []string {
+	t.Helper()
+	src, err := os.ReadFile(filepath.Join(".", "hetzner_cmd.go"))
+	if err != nil {
+		t.Fatalf("read hetzner_cmd.go: %v", err)
+	}
+	quoted := regexp.MustCompile(`"([^"]+)"`)
+	var verbs, pending []string
+	for _, raw := range strings.Split(string(src), "\n") {
+		line := strings.TrimSpace(raw)
+		switch {
+		case strings.HasPrefix(line, `case "`):
+			pending = nil
+			for _, m := range quoted.FindAllStringSubmatch(line, -1) {
+				pending = append(pending, m[1])
+			}
+		case strings.Contains(line, "runHetznerServerAction(out") && !strings.HasPrefix(line, "func "):
+			verbs = append(verbs, pending...)
+			pending = nil
+		}
+	}
+	return verbs
+}
+
+// TestHetznerActionVerbsAllDeclareAPostCondition is the anti-undercount gate:
+// EVERY verb that funnels through runHetznerServerAction must declare what it
+// re-reads, and the map may not carry entries for verbs that no longer exist.
+// A tenth verb added tomorrow fails here instead of silently shipping a receipt
+// that asserts nothing.
+func TestHetznerActionVerbsAllDeclareAPostCondition(t *testing.T) {
+	verbs := hzActionVerbsFromSource(t)
+	if len(verbs) < 9 {
+		t.Fatalf("derived %d action verbs (%v) — the scan found fewer call sites than the nine on record, "+
+			"so it is measuring itself, not the switch", len(verbs), verbs)
+	}
+	for _, verb := range verbs {
+		post, ok := hzServerPostConditions[verb]
+		if !ok {
+			t.Errorf("`server %s` goes through runHetznerServerAction but declares no post-condition — "+
+				"its receipt would report the PRE-action server again", verb)
+			continue
+		}
+		if post.observe == nil {
+			t.Errorf("`server %s` declares a post-condition with no observe() — the receipt would carry "+
+				"only id and name, the two fields an action cannot change", verb)
+		}
+		if post.holds != nil && post.unmet == nil {
+			t.Errorf("`server %s` can fail its post-condition but has no sentence for saying so", verb)
+		}
+	}
+	declared := map[string]bool{}
+	for _, v := range verbs {
+		declared[v] = true
+	}
+	for verb := range hzServerPostConditions {
+		if !declared[verb] {
+			t.Errorf("hzServerPostConditions declares %q, which is not a runHetznerServerAction verb — "+
+				"a stale entry makes the map look more complete than it is", verb)
+		}
+	}
+}
+
+// hzActionFake stands up the common wire for one action verb: name resolution,
+// the action POST, and the action poll. The caller adds the read-back.
+func hzActionFake(t *testing.T, verb string) *fakeHzAPI {
+	t.Helper()
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"servers":[{"id":42,"name":"web-1","status":"running","public_net":{"ipv4":{"ip":"192.0.2.10"}}}]}`)
+	})
+	f.mux.HandleFunc("POST /servers/42/actions/"+verb, func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":21,"status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":21,"status":"success","progress":100}]}`)
+	})
+	return f
+}
+
+// TestHetznerServerPoweronPollsToRunning covers shape A: `starting` is
+// transient, so the verb polls, and the receipt carries the state it saw.
+func TestHetznerServerPoweronPollsToRunning(t *testing.T) {
+	f := hzActionFake(t, "poweron")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(
+		`{"id":42,"name":"web-1","status":"starting"}`,
+		`{"id":42,"name":"web-1","status":"starting"}`,
+		`{"id":42,"name":"web-1","status":"running"}`,
+	))
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "server", "poweron", "web-1")
+	if code != exitOK {
+		t.Fatalf("poweron exited %d, stderr: %s", code, stderr)
+	}
+	if n := f.count("GET", "/servers/42"); n < 3 {
+		t.Errorf("poweron read the server back %d time(s); want a poll through the transient `starting`", n)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("poweron -o json emitted invalid JSON: %v\n%s", err, stdout)
+	}
+	if payload["status"] != "running" {
+		t.Errorf("poweron receipt status = %v, want the observed `running`", payload["status"])
+	}
+}
+
+// TestHetznerServerPoweronReportsAStateItNeverReached is the core anti-lie
+// assertion: the action succeeds, the box never comes up, and the verb must NOT
+// print the same ✓ it prints when the box does come up.
+func TestHetznerServerPoweronReportsAStateItNeverReached(t *testing.T) {
+	f := hzActionFake(t, "poweron")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"off"}`))
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", "poweron", "web-1")
+	if code == exitOK {
+		t.Fatalf("poweron exited 0 with the server still off — the receipt claims a state it never re-read; stdout: %s", stdout)
+	}
+	if strings.Contains(stdout, "✓") {
+		t.Errorf("stdout = %q carries a checkmark for a server that never came up", stdout)
+	}
+	if !strings.Contains(stderr, "still reports") || !strings.Contains(stderr, "off") {
+		t.Errorf("stderr = %q, want the OBSERVED state named", stderr)
+	}
+	if n := f.count("GET", "/servers/42"); n < 2 {
+		t.Errorf("poweron gave up after %d read(s) — the bound must be a poll, not a single shot", n)
+	}
+}
+
+// TestHetznerServerShutdownIsAnHonestPartialOnTimeout covers shape D. ACPI needs
+// the guest to react; a guest that has not reacted inside the window is a slow
+// guest, not a failed verb. So: exit 0, no ✓, and a receipt that says exactly
+// what was sent and what was observed.
+func TestHetznerServerShutdownIsAnHonestPartialOnTimeout(t *testing.T) {
+	f := hzActionFake(t, "shutdown")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"running"}`))
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", "shutdown", "web-1")
+	if code != exitOK {
+		t.Fatalf("shutdown exited %d on a guest that simply had not reacted yet — a slow ACPI guest is not a failed verb; stderr: %s", code, stderr)
+	}
+	if strings.Contains(stdout, "✓") {
+		t.Errorf("stdout = %q claims completion for a server still running", stdout)
+	}
+	for _, want := range []string{"signal sent", "has not powered off", "status: running"} {
+		if !strings.Contains(stdout, want) {
+			t.Errorf("stdout = %q, want the honest partial to contain %q", stdout, want)
+		}
+	}
+	if n := f.count("GET", "/servers/42"); n < 2 {
+		t.Errorf("shutdown read back %d time(s) — a SINGLE GetByID false-reds a healthy ACPI shutdown", n)
+	}
+
+	// …and the machine shape says so too.
+	f2 := hzActionFake(t, "shutdown")
+	f2.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"running"}`))
+	jsonOut, _, code2 := runHzCLI(t, "json", "hetzner", "server", "shutdown", "web-1")
+	if code2 != exitOK {
+		t.Fatalf("shutdown -o json exited %d", code2)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("shutdown -o json emitted invalid JSON: %v\n%s", err, jsonOut)
+	}
+	if payload["complete"] != false {
+		t.Errorf("shutdown partial receipt complete = %v, want false", payload["complete"])
+	}
+}
+
+// TestHetznerServerShutdownConfirmsOff is the same verb's happy path: the guest
+// reacts and the receipt is a real ✓ carrying the observed `off`.
+func TestHetznerServerShutdownConfirmsOff(t *testing.T) {
+	f := hzActionFake(t, "shutdown")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(
+		`{"id":42,"name":"web-1","status":"running"}`,
+		`{"id":42,"name":"web-1","status":"off"}`,
+	))
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", "shutdown", "web-1")
+	if code != exitOK {
+		t.Fatalf("shutdown exited %d, stderr: %s", code, stderr)
+	}
+	if !strings.Contains(stdout, "✓ shutdown") || !strings.Contains(stdout, "status: off") {
+		t.Errorf("stdout = %q, want a ✓ carrying the observed `off`", stdout)
+	}
+}
+
+// TestHetznerServerRebootNarrowsItsClaim covers shape C. hcloud.Server carries
+// no boot time, so nothing distinguishes "rebooted" from "never went down" —
+// the receipt must SAY that rather than assert a restart, and it must still move
+// when the observed state moves (otherwise "✓ reboot" is vacuous again).
+func TestHetznerServerRebootNarrowsItsClaim(t *testing.T) {
+	up := hzActionFake(t, "reboot")
+	up.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"running"}`))
+	cameUp, _, code := runHzCLI(t, "table", "hetzner", "server", "reboot", "web-1")
+	if code != exitOK {
+		t.Fatalf("reboot exited %d on a running server", code)
+	}
+	if !strings.Contains(cameUp, "does not confirm the OS restarted") {
+		t.Errorf("reboot receipt = %q — it must name what it CANNOT confirm; there is no boot-time field to key on", cameUp)
+	}
+
+	down := hzActionFake(t, "reboot")
+	down.mux.HandleFunc("GET /servers/42", hzServerStates(`{"id":42,"name":"web-1","status":"off"}`))
+	stayedDown, _, code := runHzCLI(t, "table", "hetzner", "server", "reboot", "web-1")
+	if code != exitOK {
+		t.Fatalf("reboot exited %d — shape C has no discriminator, so it must not INVENT a failure either", code)
+	}
+	if cameUp == stayedDown {
+		t.Fatalf("reboot printed BYTE-IDENTICAL output whether the machine came up or stayed down — "+
+			"that is the defect this slice exists to kill.\ncame up:     %q\nstayed down: %q", cameUp, stayedDown)
+	}
+	if !strings.Contains(stayedDown, "status: off") {
+		t.Errorf("reboot receipt for a machine that stayed down = %q, want the observed `off`", stayedDown)
+	}
+}
+
+// TestHetznerServerMetadataVerbsReadTheFlipBack covers shape E: one read is
+// enough, and enable-backup's window is information the owner cannot get any
+// other way (the SDK's window argument is deprecated and ignored, so the SERVER
+// picks it).
+func TestHetznerServerMetadataVerbsReadTheFlipBack(t *testing.T) {
+	for _, tc := range []struct {
+		verb    string
+		path    string
+		readsAs string
+		want    []string
+	}{
+		{"enable-backup", "enable_backup", `{"id":42,"name":"web-1","status":"running","backup_window":"22-02"}`,
+			[]string{"backups_enabled: true", "backup_window: 22-02"}},
+		{"disable-backup", "disable_backup", `{"id":42,"name":"web-1","status":"running"}`,
+			[]string{"backups_enabled: false"}},
+		{"disable-rescue", "disable_rescue", `{"id":42,"name":"web-1","status":"running","rescue_enabled":false}`,
+			[]string{"rescue_enabled: false"}},
+		{"detach-iso", "detach_iso", `{"id":42,"name":"web-1","status":"running"}`,
+			[]string{"iso_attached: false"}},
+	} {
+		t.Run(tc.verb, func(t *testing.T) {
+			f := hzActionFake(t, tc.path)
+			f.mux.HandleFunc("GET /servers/42", hzServerStates(tc.readsAs))
+			stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", tc.verb, "web-1")
+			if code != exitOK {
+				t.Fatalf("%s exited %d, stderr: %s", tc.verb, code, stderr)
+			}
+			if f.count("GET", "/servers/42") != 1 {
+				t.Errorf("%s issued %d read-backs; a settled metadata flip needs exactly one", tc.verb, f.count("GET", "/servers/42"))
+			}
+			for _, want := range tc.want {
+				if !strings.Contains(stdout, want) {
+					t.Errorf("%s receipt = %q, want %q", tc.verb, stdout, want)
+				}
+			}
+		})
+	}
+}
+
+// TestHetznerServerMetadataFlipNotAppliedFails is the other half of shape E: the
+// action reported success but the field did not move, so the verb must not ✓.
+func TestHetznerServerMetadataFlipNotAppliedFails(t *testing.T) {
+	f := hzActionFake(t, "detach_iso")
+	f.mux.HandleFunc("GET /servers/42", hzServerStates(
+		`{"id":42,"name":"web-1","status":"running","iso":{"id":5,"name":"virtio-win"}}`))
+
+	stdout, stderr, code := runHzCLI(t, "table", "hetzner", "server", "detach-iso", "web-1")
+	if code == exitOK {
+		t.Fatalf("detach-iso exited 0 with the ISO still attached; stdout: %s", stdout)
+	}
+	if !strings.Contains(stderr, "still reports an ISO attached") {
+		t.Errorf("stderr = %q, want the unmet post-condition named", stderr)
+	}
+}
+
+// TestHetznerServerReadBackErrorIsConfirmationUnavailable pins the hazard the
+// fix introduces. Every post-condition read is a NEW way for a verb to fail
+// where it previously could not: a rate-limited or otherwise erroring GetByID
+// after a SUCCESSFUL reboot must never tell the owner the reboot failed. That is
+// the same lie pointing the other way.
+func TestHetznerServerReadBackErrorIsConfirmationUnavailable(t *testing.T) {
+	f := hzActionFake(t, "reboot")
+	f.mux.HandleFunc("GET /servers/42", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 403, `{"error":{"code":"forbidden","message":"token is read-only"}}`)
+	})
+
+	stdout, stderr, code := runHzCLI(t, "json", "hetzner", "server", "reboot", "web-1")
+	if code != exitOK {
+		t.Fatalf("reboot exited %d because the CONFIRMING read failed — the action itself succeeded and was waited to success; stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("reboot -o json emitted invalid JSON: %v\n%s", err, stdout)
+	}
+	if payload["confirmation"] != "unavailable" {
+		t.Errorf("receipt confirmation = %v, want \"unavailable\" — the receipt must distinguish "+
+			"'action succeeded, could not confirm' from 'post-condition not met'", payload["confirmation"])
+	}
+	if msg, _ := payload["confirmation_error"].(string); !strings.Contains(msg, "read-only") {
+		t.Errorf("receipt confirmation_error = %v, want the read failure surfaced", payload["confirmation_error"])
+	}
+	if _, claimed := payload["status"]; claimed {
+		t.Errorf("receipt carries an observed status (%v) it never successfully read", payload["status"])
 	}
 }
 
