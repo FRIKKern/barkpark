@@ -667,12 +667,20 @@ func TestValidatePrebuiltDirResolvesASymlinkedRoot(t *testing.T) {
 
 // TestPrebuiltNameShapeMatchesTheRealPackerByte156 is the differential that makes
 // the preflight's verdict trustworthy: for each name shape, the DRY ENCODE's
-// verdict is compared against the typeflags the REAL packer wrote for the same
-// tree, read out of the raw 512-byte blocks. No predicate is asserted — Go's
+// format election is compared against the typeflags the REAL packer wrote for the
+// same tree, read out of the raw 512-byte blocks. No predicate is asserted — Go's
 // USTAR/PAX election lives in the unexported Header.allowedFormats, and the
 // trigger is UNSPLITTABILITY, not length. Measured on go1.26.2: a 141-byte path
 // that splits at a '/' takes no PAX; a 121-byte DIRECTORY component does, and the
 // PAX lands on the DIRECTORY entry, not on its 137-byte child.
+//
+// WHAT IT DOES NOT ASSERT, and why: a pax election is NOT a refusal. Every shape
+// below — accented leaf, accented directory, 121-byte component — is STAGEABLE,
+// because the extractor applies a pax header's path/size and re-validates them.
+// An earlier draft of this test asserted "pax elected => preflight refuses",
+// which pinned the headline defect in place instead of the fix: it would have
+// held green while `bp cloud site deploy --prebuilt` refused every Norwegian
+// slug on the laptop. The election and the verdict are now separate assertions.
 func TestPrebuiltNameShapeMatchesTheRealPackerByte156(t *testing.T) {
 	long121 := strings.Repeat("d", 121)
 	deep := strings.TrimRight(strings.Repeat("ab/", 26), "/")
@@ -681,14 +689,11 @@ func TestPrebuiltNameShapeMatchesTheRealPackerByte156(t *testing.T) {
 		label   string
 		rel     string
 		wantPax bool
-		// paxOn names the entry the refusal must name, which is not always the
-		// file: for long121 the PAX header lands on the DIRECTORY.
-		paxOn string
 	}{
 		{label: "plain ascii", rel: "blog/post.html", wantPax: false},
-		{label: "accented NFC leaf", rel: "blog/hvorfor-nå.html", wantPax: true, paxOn: "blog/hvorfor-nå.html"},
-		{label: "accented directory", rel: "kafé/index.html", wantPax: true, paxOn: "kafé"},
-		{label: "121-byte unsplittable DIRECTORY component — the DIRECTORY is the trigger, not its 137-byte child", rel: long121 + "/leaf.html", wantPax: true, paxOn: long121},
+		{label: "accented NFC leaf", rel: "blog/hvorfor-nå.html", wantPax: true},
+		{label: "accented directory", rel: "kafé/index.html", wantPax: true},
+		{label: "121-byte unsplittable DIRECTORY component — the DIRECTORY is the trigger, not its 137-byte child", rel: long121 + "/leaf.html", wantPax: true},
 		{label: "141-byte path splittable at '/' — a length predicate would be WRONG here", rel: strings.Repeat("a", 60) + "/" + strings.Repeat("b", 60) + "/" + strings.Repeat("c", 14) + ".html", wantPax: false},
 		{label: "deep 26-segment short-component path", rel: deep + "/i.html", wantPax: false},
 	}
@@ -708,33 +713,43 @@ func TestPrebuiltNameShapeMatchesTheRealPackerByte156(t *testing.T) {
 
 		// GROUND TRUTH: the raw 512-byte blocks the real packer produced.
 		flags := rawBlockTypeflags(t, dir)
-		gotRealPax := false
+		realPax := 0
 		for _, f := range flags {
 			if f == 'x' {
-				gotRealPax = true
+				realPax++
 			}
 		}
-		if gotRealPax != tc.wantPax {
-			t.Fatalf("%s: REAL PACKER emitted pax=%v, expected %v (raw block typeflags: %s)", tc.label, gotRealPax, tc.wantPax, flagString(flags))
+		if (realPax > 0) != tc.wantPax {
+			t.Fatalf("%s: REAL PACKER emitted pax=%v, expected %v (raw block typeflags: %s)", tc.label, realPax > 0, tc.wantPax, flagString(flags))
 		}
 
-		// THE PREFLIGHT: same verdict, from a dry encode, over the same walk.
-		verr := preflightPrebuiltEntries(dir, "./dist")
-		if tc.wantPax && verr == nil {
-			t.Fatalf("%s: the real packer emitted a pax header but the preflight allowed it", tc.label)
-		}
-		if !tc.wantPax && verr != nil {
-			t.Fatalf("%s: the real packer emitted plain USTAR headers but the preflight refused: %v", tc.label, verr)
-		}
-		if tc.wantPax {
-			if !strings.Contains(verr.Error(), tc.paxOn) {
-				t.Fatalf("%s: the refusal must name the offending path %q, got: %v", tc.label, tc.paxOn, verr)
+		// THE DIFFERENTIAL: the dry encode, over the shared walk, must elect PAX
+		// for exactly the same entries — same count, from one 512-byte block per
+		// entry instead of the whole archive.
+		dryPax := 0
+		if err := walkTarballEntries(dir, tarballIgnoreSet(dir, prebuiltTarballIgnores), func(path, rel string, info os.FileInfo) error {
+			hdr, err := tarHeaderFor(path, rel, info)
+			if err != nil {
+				return err
 			}
-			for _, want := range []string{"E_UNKNOWN_TYPE", "extension header"} {
-				if !strings.Contains(verr.Error(), want) {
-					t.Fatalf("%s: the refusal must carry %q, got: %v", tc.label, want, verr)
-				}
+			flag, _, err := observedTarTypeflag(hdr)
+			if err != nil {
+				return err
 			}
+			if flag == 'x' {
+				dryPax++
+			}
+			return nil
+		}); err != nil {
+			t.Fatalf("%s: walk: %v", tc.label, err)
+		}
+		if dryPax != realPax {
+			t.Fatalf("%s: the dry encode elected pax for %d entries, the real packer for %d (raw block typeflags: %s) — the preflight and the packer disagree about the wire format", tc.label, dryPax, realPax, flagString(flags))
+		}
+
+		// THE VERDICT: all of these stage. A pax election is not a refusal.
+		if verr := preflightPrebuiltEntries(dir, "./dist"); verr != nil {
+			t.Fatalf("%s: the extractor stages this shape, so the preflight must allow it; got: %v", tc.label, verr)
 		}
 	}
 }
@@ -886,20 +901,33 @@ func TestPrebuiltPreflightDryEncodeCostsOneBlockAndNoBody(t *testing.T) {
 	}
 }
 
-// TestPrebuiltStageableTypeflagsMatchTheExtractor: the accept list is transcribed
-// from api/lib/barkpark/sites/prebuilt_artifact.ex's entry_type/1 table. If it
-// ever grows a fourth member, the client would start shipping something the box
-// answers with a typed refusal.
-func TestPrebuiltStageableTypeflagsMatchTheExtractor(t *testing.T) {
-	for flag := range prebuiltStageableTypeflags {
+// TestPrebuiltAcceptedTypeflagsMatchTheExtractor: the accept list is transcribed
+// from `type/1` in api/lib/barkpark/sites/prebuilt_artifact.ex. If it ever grows
+// a member the extractor does not accept, the client would start shipping
+// something the box answers with a typed refusal — and if it ever LOSES 'x', the
+// client stops being able to deploy any non-ASCII filename at all, which is the
+// defect this whole wave exists to close.
+func TestPrebuiltAcceptedTypeflagsMatchTheExtractor(t *testing.T) {
+	for flag := range prebuiltAcceptedTypeflags {
 		switch flag {
-		case '0', 0, '5':
+		case '0', 0, '5', 'x':
 		default:
-			t.Fatalf("prebuiltStageableTypeflags drifted from the extractor's accept list: %q", string(flag))
+			t.Fatalf("prebuiltAcceptedTypeflags drifted from the extractor's accept list: %q", string(flag))
 		}
 	}
-	if len(prebuiltStageableTypeflags) != 3 {
-		t.Fatalf("the extractor stages exactly regular files ('0', NUL) and dirs ('5'); got %d entries", len(prebuiltStageableTypeflags))
+	if len(prebuiltAcceptedTypeflags) != 4 {
+		t.Fatalf("the extractor accepts exactly regular files ('0', NUL), dirs ('5') and the pax header ('x'); got %d entries", len(prebuiltAcceptedTypeflags))
+	}
+	// The one direction a bare count cannot catch: 'x' present, by name.
+	if _, ok := prebuiltAcceptedTypeflags['x']; !ok {
+		t.Fatalf("'x' must be accepted — refusing it here refuses every accented filename, which is the bug this wave closes")
+	}
+	// And the remaining extension headers must NOT be accepted: the extractor
+	// applies only the pax 'x' records, never a GNU long-name shadow pair.
+	for _, flag := range []byte{'g', 'L', 'K', '2', '1'} {
+		if _, ok := prebuiltAcceptedTypeflags[flag]; ok {
+			t.Fatalf("%q must not be accepted — the extractor answers a typed refusal for it", string(flag))
+		}
 	}
 }
 

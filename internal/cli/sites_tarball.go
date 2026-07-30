@@ -229,14 +229,32 @@ func validatePrebuiltDir(dir string) (string, error) {
 	return abs, nil
 }
 
-// prebuiltStageableTypeflags is the box's own accept list, transcribed from
-// Barkpark.Sites.PrebuiltArtifact's entry_type/1 table: a regular file ('0' or
-// the historical NUL) and a directory ('5'). EVERY other byte at offset 156 of a
-// 512-byte block is a typed refusal there — '2' E_SYMLINK, '1' E_HARDLINK,
-// '3'/'4'/'6' E_SPECIAL_FILE, and anything else (notably 'x', 'L', 'K' — the
-// PAX/GNU extension headers) E_UNKNOWN_TYPE.
-var prebuiltStageableTypeflags = map[byte]struct{}{
-	'0': {}, 0: {}, '5': {},
+// prebuiltAcceptedTypeflags is the box's own accept list, transcribed from
+// `type/1` in api/lib/barkpark/sites/prebuilt_artifact.ex: a regular file ('0' or
+// the historical NUL), a directory ('5'), and the pax extension header ('x').
+// EVERY other byte at offset 156 of a 512-byte block is a typed refusal there —
+// '2' E_SYMLINK, '1' E_HARDLINK, '3'/'4'/'6' E_SPECIAL_FILE, and the remaining
+// extension headers ('g' pax GLOBAL, 'L'/'K' the GNU long-name pair)
+// E_UNKNOWN_TYPE.
+//
+// 'x' IS IN THE LIST ON PURPOSE, and getting this wrong would have re-broken the
+// exact lane this wave exists to open. `archive/tar` elects a pax header for any
+// non-ASCII name and for any path component that cannot be split under 100
+// bytes, so REFUSING 'x' here means refusing to deploy a Norwegian blog — the
+// headline defect, merely relocated from the box to the laptop. The extractor
+// admits 'x' narrowly as of this wave (only the `path` and `size` records are
+// applied, and the effective name then re-enters the whole of name/1 AND
+// safe_path/2), which is what makes it safe to let these bytes leave.
+//
+// 'x' is an accepted HEADER, not a stageable entry — hence "accepted", not
+// "stageable". BOX-LAGS-CLI (charter D112) is a supported product state, so a box
+// that predates the extractor's pax arm still answers E_UNKNOWN_TYPE for these
+// bytes; the client cannot know the box's version and must not pre-emptively
+// refuse a name that every current box stages. That refusal now reaches the user
+// with its code and message intact (FailureCopy.typed_refusal?/1), which is the
+// honest way for a version skew to surface.
+var prebuiltAcceptedTypeflags = map[byte]struct{}{
+	'0': {}, 0: {}, '5': {}, 'x': {},
 }
 
 // preflightPrebuiltEntries is the per-entry, NETWORK-FREE half of the seam: for
@@ -266,11 +284,11 @@ func preflightPrebuiltEntries(abs, root string) error {
 		if err != nil {
 			return fmt.Errorf("--prebuilt %s: %s cannot be written into a tar archive at all: %w", root, name, err)
 		}
-		if _, ok := prebuiltStageableTypeflags[flag]; ok {
+		if _, ok := prebuiltAcceptedTypeflags[flag]; ok {
 			return nil
 		}
-		if flag == 'x' || flag == 'g' || flag == 'L' || flag == 'K' {
-			return fmt.Errorf("--prebuilt %s: %s cannot be written as a plain tar header — encoding it emits a %d-byte extension header (typeflag %q) first, and the box's extractor refuses every extension header (E_UNKNOWN_TYPE: unsupported tar entry type). Rename it: a non-ASCII character anywhere in the path, or a single path COMPONENT that cannot be split under 100 bytes, forces the extension (a 141-byte path that splits at a '/' does not; a 121-byte directory name does)", root, name, blockBytes, string(flag))
+		if flag == 'g' || flag == 'L' || flag == 'K' {
+			return fmt.Errorf("--prebuilt %s: %s encodes as a %d-byte %s extension header (typeflag %q), and the box's extractor refuses that one (E_UNKNOWN_TYPE: unsupported tar entry type) — unlike the pax 'x' header, whose name it applies and re-validates. Repack in POSIX/pax format (`tar --format=posix …`; GNU tar defaults to `--format=gnu`), or shorten the path component that is over 100 bytes", root, name, blockBytes, map[byte]string{'g': "pax GLOBAL", 'L': "GNU long-name", 'K': "GNU long-linkname"}[flag], string(flag))
 		}
 		return fmt.Errorf("--prebuilt %s: %s encodes as tar typeflag %q, which the box's extractor refuses — only regular files and directories are staged. Remove it from the build output", root, name, string(flag))
 	})
