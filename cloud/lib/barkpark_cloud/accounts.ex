@@ -1791,9 +1791,17 @@ defmodule BarkparkCloud.Accounts do
 
   Best-effort stamps `last_used_at` (throttled to once / minute) so operators
   can spot dead tokens. A stamp failure is swallowed — never block auth on it.
+
+  Pass `touch: false` to verify WITHOUT stamping — the caller then owns the
+  stamp and can place it downstream of the response decision (see
+  `touch_pat_last_used/1` and `Web.Auth`'s `defer_pat_touch/2`). The arity-1
+  form keeps the eager default so no existing caller changes meaning.
   """
   @spec verify_personal_access_token(binary()) :: {User.t(), UserToken.t()} | nil
-  def verify_personal_access_token(plaintext) when is_binary(plaintext) do
+  def verify_personal_access_token(plaintext), do: verify_personal_access_token(plaintext, [])
+
+  @spec verify_personal_access_token(binary(), keyword()) :: {User.t(), UserToken.t()} | nil
+  def verify_personal_access_token(plaintext, opts) when is_binary(plaintext) and is_list(opts) do
     hash = UserToken.hash_token(plaintext)
     now = DateTime.utc_now()
 
@@ -1805,7 +1813,7 @@ defmodule BarkparkCloud.Accounts do
 
     case Repo.one(query) do
       %UserToken{user_id: uid} = token ->
-        stamp_last_used(token, now)
+        if Keyword.get(opts, :touch, true), do: stamp_last_used(token, now)
 
         case Repo.get(User, uid) do
           nil -> nil
@@ -1817,7 +1825,45 @@ defmodule BarkparkCloud.Accounts do
     end
   end
 
-  def verify_personal_access_token(_), do: nil
+  def verify_personal_access_token(_, _), do: nil
+
+  @doc """
+  Stamp `last_used_at` on the PAT row behind `plaintext`, throttled to the
+  #{@last_used_throttle_seconds}s window. Always `:ok` — a token revoked or
+  deleted since the verify matches zero rows, which `update_all` treats as a
+  no-op.
+
+  The PAT mirror of `touch_session_last_used/1`, and public for the same
+  reason: the stamp does not belong at the verify. `last_used_at` is the
+  liveness claim the tokens card renders, and authentication runs strictly
+  before authorization — so `Web.Auth` defers this to `register_before_send/2`
+  and fires it only for a request the platform actually SERVED
+  (`conn.status < 400`), never for one it refused 403.
+  """
+  @spec touch_pat_last_used(binary()) :: :ok
+  def touch_pat_last_used(plaintext) when is_binary(plaintext) do
+    now = DateTime.utc_now()
+    cutoff = DateTime.add(now, -@last_used_throttle_seconds, :second)
+    hash = UserToken.hash_token(plaintext)
+
+    # The throttle rides the WHERE clause rather than a read-then-write, so the
+    # skip costs one statement and cannot race itself. `last_used_at <= cutoff`
+    # is the `>=`-seconds predicate: a row stamped EXACTLY the window ago is
+    # stale and writes.
+    try do
+      from(t in UserToken,
+        where: t.token_hash == ^hash and t.context == "pat",
+        where: is_nil(t.last_used_at) or t.last_used_at <= ^cutoff
+      )
+      |> Repo.update_all(set: [last_used_at: DateTime.truncate(now, :microsecond)])
+    rescue
+      e -> Logger.warning("touch_pat_last_used failed: #{inspect(e)}")
+    end
+
+    :ok
+  end
+
+  def touch_pat_last_used(_), do: :ok
 
   # Best-effort, throttled `last_used_at` stamp. Kept OUT of the verify path's
   # critical work: a single update_all guarded by the throttle, with any error
