@@ -140,6 +140,196 @@ defmodule Barkpark.Tasks.DedupTest do
     assert Enum.any?(payload.similar, &(&1.lifecycle_status == "done"))
   end
 
+  # ── the gate SAYS WHAT IT COULD NOT DO ─────────────────────────────────────
+  #
+  # The 2026-07-30 outage: the candidate scan lost its race with the 15 s DB
+  # checkout budget, the old code swallowed that into an empty candidate set,
+  # and the create either sailed through unchecked or died as
+  # `internal_error / "unknown error"`. Both are the same lie — a create
+  # reporting success on a duplicate check that never ran.
+
+  # A REAL, unmocked scan failure, driven through the production code path: the
+  # candidate query is built with an unusable workspace scope, so `Repo.all`
+  # raises before it can produce a candidate set. What matters is that the gate
+  # cannot compute its answer — the same state the 15 s checkout timeout left it
+  # in — and that it says so instead of returning an empty backlog.
+  defp check_with_failing_scan(doc_id, title, content) do
+    Barkpark.Tasks.Dedup.check_new_task(
+      "task",
+      %{"doc_id" => doc_id, "title" => title, "content" => content},
+      @dataset,
+      nil,
+      workspace_id: "not-a-uuid-so-the-scan-cannot-run"
+    )
+  end
+
+  describe "degraded candidate scan" do
+    test "REFUSES with a message naming what could not be done — never a silent pass" do
+      assert {:error, {:dedup_unavailable, message}} =
+               check_with_failing_scan("deg-new", @rate_limit, %{
+                 "kind" => "task",
+                 "description" => @rate_limit_desc
+               })
+
+      # The body names the gate, the failure, the consequence and the way out.
+      assert message =~ "task dedup gate could not complete"
+      assert message =~ "the backlog scan"
+      assert message =~ "REFUSED rather than filed unchecked"
+      assert message =~ "no duplicate check ran"
+      assert message =~ "content.dedup_bypass: true"
+      refute message =~ "unknown error"
+    end
+
+    test "the refusal renders as a NAMED error body, not internal_error/unknown error" do
+      assert {:error, {:dedup_unavailable, _}} =
+               result = check_with_failing_scan("deg-env", @rate_limit, %{"kind" => "task"})
+
+      env = Barkpark.Content.Errors.to_envelope(result)
+
+      refute env.code == "internal_error"
+      refute env.message == "unknown error"
+      # 503, not the plugin-veto 409: a dedup outage is TRANSIENT, and the code
+      # is what tells an unattended caller (Github.Intake) to come back rather
+      # than treat the refusal as a permanent policy decision and drop the row.
+      # On the wire this stays 409 `halted` for now: a new public code must be
+      # registered in known_codes/0, which docs/api-v1.md §9 must then document,
+      # and §9 has 3 bytes of headroom against a CI-enforced cap. The INTERNAL
+      # tag is what had to split; the wire upgrade to a 503 dedup_unavailable is
+      # named as next-wave work, not claimed here.
+      assert env.status == 409
+
+      # THE TRIPWIRE. `:halted` is the plugin-VETO tag, and consumers treat it
+      # as deterministic: `Plugins.Github.Intake` answers a clean 2xx on
+      # `{:error, {:halted, _}}` on the explicit reasoning that "GitHub
+      # redelivery would only hit the same veto forever". A dedup outage is
+      # TRANSIENT, so wearing that tag would make an unattended intake drop the
+      # issue permanently and log it as a policy refusal that never happened.
+      # If a future change borrows `:halted` here again, this reds.
+      refute match?({:error, {:halted, _}}, result)
+      assert env.message =~ "task dedup gate could not complete"
+    end
+
+    test "the bypass is an OWNER decision, not a server shortcut — it skips a real duplicate", %{
+      scope: scope
+    } do
+      {:ok, _} =
+        create_task("byp2-existing", @rate_limit, scope, %{
+          "description" => @rate_limit_desc,
+          "parent_id" => "epic-a"
+        })
+
+      # Same text, healthy scan: without the flag this is a hard refuse.
+      assert {:error, {:duplicate_task, _}} =
+               create_task("byp2-no-flag", @rate_limit, scope, %{
+                 "description" => @rate_limit_desc,
+                 "parent_id" => "epic-b"
+               })
+
+      assert {:ok, doc} =
+               create_task("byp2-flag", @rate_limit, scope, %{
+                 "description" => @rate_limit_desc,
+                 "parent_id" => "epic-b",
+                 "dedup_bypass" => true
+               })
+
+      # The flag persists on the document as the queryable trail — the same
+      # shape as `distinct_from`, so "who waved this through" stays answerable.
+      assert doc.content["dedup_bypass"] == true
+    end
+  end
+
+  # ── bounded candidate fetch ────────────────────────────────────────────────
+
+  # `Content.create_document/4` always writes a DRAFT (`drafts.<id>`), so a real
+  # twin pair is a published row alongside its draft — the shape every
+  # edited-then-published task on the live corpus has. Mirror the draft row into
+  # a published one to build it.
+  defp publish_twin_of!(%Barkpark.Content.Document{} = draft, published_id) do
+    draft
+    |> Map.from_struct()
+    |> Map.drop([
+      :__meta__,
+      :id,
+      :inserted_at,
+      :updated_at,
+      :search_vector,
+      :task_edges,
+      :tags_meta,
+      :slug_text,
+      :author_text,
+      :category_text
+    ])
+    |> Map.merge(%{doc_id: published_id, status: "published"})
+    |> then(&struct(Barkpark.Content.Document, &1))
+    |> Barkpark.Repo.insert!()
+  end
+
+  describe "candidate projection + twin collapse" do
+    test "a draft/published TWIN pair is scored and reported ONCE, not twice", %{scope: scope} do
+      {:ok, draft} =
+        create_task("twin-rl", @rate_limit, scope, %{
+          "description" => @rate_limit_desc,
+          "parent_id" => "epic-a"
+        })
+
+      assert draft.doc_id == "drafts.twin-rl"
+      published = publish_twin_of!(draft, "twin-rl")
+      assert published.doc_id == "twin-rl"
+
+      assert {:error, {:duplicate_task, payload}} =
+               create_task("twin-new", @rate_limit, scope, %{
+                 "description" => @rate_limit_desc,
+                 "parent_id" => "epic-b"
+               })
+
+      # DISTINCT ON the drafts-stripped id: one row survives per task, and it is
+      # the PUBLISHED one. Before the fix both rows were fetched and scored, and
+      # `similar` carried the same task twice.
+      assert Enum.count(payload.similar, &(&1.id == "twin-rl")) == 1
+      assert [%{id: "twin-rl"}] = payload.similar
+    end
+
+    test "detection is unchanged for a task that exists ONLY as a draft", %{scope: scope} do
+      # No published counterpart: the draft is the one surviving row and must
+      # still block. Collapsing twins narrowed nothing.
+      {:ok, draft} =
+        create_task("only-draft-rl", @rate_limit, scope, %{
+          "description" => @rate_limit_desc,
+          "parent_id" => "epic-a"
+        })
+
+      assert draft.doc_id == "drafts.only-draft-rl"
+
+      assert {:error, {:duplicate_task, payload}} =
+               create_task("only-draft-new", @rate_limit, scope, %{
+                 "description" => @rate_limit_desc,
+                 "parent_id" => "epic-b"
+               })
+
+      # `present/1` reports the canonical id, so the drafts-only row shows up
+      # under the id the author would reference.
+      assert [%{id: "only-draft-rl"}] = payload.similar
+    end
+
+    test "the projected row still carries every scored field (labels included)", %{scope: scope} do
+      {:ok, _} =
+        create_task("proj-a", "alpha beta gamma delta", scope, %{
+          "parent_id" => "epic-a",
+          "labels" => ["proj:x", "phase:1"]
+        })
+
+      # Disjoint titles; only the labels can push this over the advise floor, so
+      # a lost `labels` projection would make this create succeed.
+      assert {:error, {:duplicate_task, payload}} =
+               create_task("proj-b", "alpha beta gamma epsilon", scope, %{
+                 "parent_id" => "epic-b",
+                 "labels" => ["proj:x", "phase:1"]
+               })
+
+      assert [%{id: "proj-a"} | _] = payload.similar
+    end
+  end
+
   # ── tier-2 judge escalation ────────────────────────────────────────────────
 
   defmodule FakeJudge do
