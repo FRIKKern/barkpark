@@ -2262,6 +2262,9 @@ func clearBarkparkEnv(t *testing.T) {
 func TestResolveContextNamedServer(t *testing.T) {
 	withTempConfigHome(t)
 	clearBarkparkEnv(t)
+	// A .barkpark.json anywhere above the test's cwd would inject a repo layer
+	// under the flags being asserted — run from a guaranteed-clean tree.
+	t.Chdir(t.TempDir())
 
 	cfg := &Config{
 		Server:    "http://localhost:4000",
