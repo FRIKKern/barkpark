@@ -12,7 +12,7 @@ bp_bin="${BP_AUDIT_BIN:-bp}"
 curl_connect_timeout="${BP_AUDIT_CONNECT_TIMEOUT:-5}"
 curl_max_time="${BP_AUDIT_MAX_TIME:-30}"
 
-for required in jq curl go shasum "$bp_bin"; do
+for required in jq curl go python3 shasum "$bp_bin"; do
   command -v "$required" >/dev/null || {
     jq -n --arg tool "$required" '{ok:false,error:"missing required command",tool:$tool}'
     exit 2
@@ -24,7 +24,9 @@ trap 'trash "$tmp" >/dev/null 2>&1 || true' EXIT
 inventory="$tmp/inventory.json"
 inventory_stderr="$tmp/inventory.stderr"
 results="$tmp/results.jsonl"
+structures="$tmp/structures.jsonl"
 touch "$results"
+touch "$structures"
 
 if ! go build -o "$tmp/widthcheck" ./internal/pdrender/cmd/widthcheck; then
   jq -n '{ok:false,error:"terminal width checker build failed"}'
@@ -104,7 +106,12 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
   if [[ "$source_code" == "200" ]]; then
     source_kind="$(jq -r '.source.kind // "invalid"' "$tmp/source" 2>/dev/null || printf invalid)"
     if [[ "$source_kind" == "blocks" ]]; then
-      jq -e '.source.blocks | type == "array"' "$tmp/source" >/dev/null 2>&1 && source_ok=true
+      if jq -e '.source.blocks | type == "array"' "$tmp/source" >/dev/null 2>&1; then
+        source_ok=true
+        jq -c --arg id "$id" \
+          '{_id:$id,_rev:(._rev // "published"),blocks:.source.blocks}' \
+          "$tmp/source" >>"$structures"
+      fi
     elif [[ "$source_kind" == "html" ]]; then
       jq -e '.source.html | type == "string" and length > 0' "$tmp/source" >/dev/null 2>&1 && source_ok=true
     fi
@@ -160,10 +167,21 @@ jq -r '.documents[] | (._id // .id // .slug)' "$inventory" | while IFS= read -r 
     >>"$results"
 done
 
+structure_input="$tmp/structures.json"
+structure_report="$tmp/structure-report.json"
+jq -s '.' "$structures" >"$structure_input"
+python3 scripts/paper_structure.py --input "$structure_input" --summary-only \
+  >"$structure_report" || true
+
 jq -s --arg server "$server" --arg base "$base" --argjson inventory "$inventory_count" \
-  --arg inventory_digest "$inventory_digest" --slurpfile inventory_ids "$inventory_ids" '
+  --arg inventory_digest "$inventory_digest" --slurpfile inventory_ids "$inventory_ids" \
+  --slurpfile structure "$structure_report" '
   {
-    ok: (length == $inventory and all(.[]; .ok)),
+    ok: (
+      length == $inventory and
+      all(.[]; .ok) and
+      ($structure | length == 1 and .[0].violations == 0)
+    ),
     server: $server,
     base_url: $base,
     inventory: $inventory,
@@ -172,10 +190,13 @@ jq -s --arg server "$server" --arg base "$base" --argjson inventory "$inventory_
     audited: length,
     passed: map(select(.ok)) | length,
     failed: map(select(.ok | not)) | length,
+    structure: $structure[0],
     failures: map(select(.ok | not)),
     results: .
   }
 ' "$results"
 
-jq -s --argjson inventory "$inventory_count" -e \
-  'length == $inventory and all(.[]; .ok)' "$results" >/dev/null
+jq -s --argjson inventory "$inventory_count" --slurpfile structure "$structure_report" -e \
+  'length == $inventory and all(.[]; .ok) and
+   ($structure | length == 1 and .[0].violations == 0)' \
+  "$results" >/dev/null

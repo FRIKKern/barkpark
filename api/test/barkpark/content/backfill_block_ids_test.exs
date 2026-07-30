@@ -247,6 +247,187 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
     end
   end
 
+  describe "BlockOps.normalize_render_shapes/1" do
+    test "canonicalizes the lossless site-spawner list/table/callout dialect" do
+      text = fn value -> [%{"type" => "text", "value" => value}] end
+
+      blocks = [
+        %{"type" => "list", "items" => [%{"content" => text.("item")}]},
+        %{
+          "type" => "table",
+          "rows" => [
+            %{"header" => true, "cells" => [%{"content" => text.("head")}]},
+            %{"cells" => [%{"content" => text.("body")}]}
+          ]
+        },
+        %{"type" => "callout", "tone" => "info", "text" => "body"}
+      ]
+
+      [list, table, callout] = BlockOps.normalize_render_shapes(blocks)
+
+      assert list["items"] == [text.("item")]
+      assert table["head"] == [text.("head")]
+      assert table["rows"] == [[text.("body")]]
+      assert callout["content"] == text.("body")
+      refute Map.has_key?(callout, "text")
+      assert BlockOps.normalize_render_shapes([list, table, callout]) == [list, table, callout]
+    end
+
+    test "preserves list item ids and promotes metadata-bearing table headers" do
+      blocks = [
+        %{
+          "type" => "list",
+          "items" => [
+            %{
+              "id" => "item-1",
+              "content" => [%{"type" => "text", "value" => "keep id"}]
+            }
+          ]
+        },
+        %{
+          "type" => "table",
+          "rows" => [
+            %{
+              "cells" => [
+                %{
+                  "header" => true,
+                  "content" => [
+                    %{
+                      "type" => "paragraph",
+                      "content" => [%{"type" => "text", "value" => "keep header"}]
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+
+      [list, table] = BlockOps.normalize_render_shapes(blocks)
+      assert list == hd(blocks)
+      assert table["head"] == [[%{"type" => "text", "value" => "keep header"}]]
+      assert table["rows"] == []
+    end
+
+    test "canonicalizes declared record tables and cell-marked header rows" do
+      [record, cell_header] =
+        BlockOps.normalize_render_shapes([
+          %{
+            "type" => "table",
+            "columns" => [
+              %{"key" => "k", "label" => "Key"},
+              %{"key" => "why", "label" => "Why"}
+            ],
+            "rows" => [%{"k" => "A", "why" => "Because"}]
+          },
+          %{
+            "type" => "table",
+            "rows" => [
+              %{
+                "cells" => [
+                  %{
+                    "header" => true,
+                    "content" => [
+                      %{
+                        "type" => "paragraph",
+                        "content" => [%{"type" => "text", "value" => "Head"}]
+                      }
+                    ]
+                  }
+                ]
+              },
+              %{
+                "cells" => [
+                  %{"content" => [%{"type" => "text", "value" => "Body"}]}
+                ]
+              }
+            ]
+          }
+        ])
+
+      refute Map.has_key?(record, "columns")
+
+      assert record["head"] == [
+               [%{"type" => "text", "value" => "Key"}],
+               [%{"type" => "text", "value" => "Why"}]
+             ]
+
+      assert record["rows"] == [
+               [
+                 [%{"type" => "text", "value" => "A"}],
+                 [%{"type" => "text", "value" => "Because"}]
+               ]
+             ]
+
+      assert cell_header["head"] == [[%{"type" => "text", "value" => "Head"}]]
+      assert cell_header["rows"] == [[[%{"type" => "text", "value" => "Body"}]]]
+    end
+
+    test "does not stringify structured record-table values" do
+      blocks = [
+        %{
+          "type" => "table",
+          "columns" => [%{"key" => "proof", "label" => "Proof"}],
+          "rows" => [
+            %{
+              "proof" => [
+                %{"type" => "text", "value" => "preserve this inline structure"}
+              ]
+            }
+          ]
+        }
+      ]
+
+      assert BlockOps.normalize_render_shapes(blocks) == blocks
+    end
+
+    test "fails closed when authored list or table content has no reader shape" do
+      blocks = [
+        %{"type" => "list", "items" => [%{"label" => "stranded"}]},
+        %{"type" => "table", "rows" => [%{"values" => ["stranded"]}]}
+      ]
+
+      assert {:error, {:invalid_paper_structure, %{"blocks" => errors}}} =
+               BlockOps.validate_render_shapes(blocks)
+
+      assert errors == [
+               "blocks[0].items[0] has no renderable inline content",
+               "blocks[1].rows[0] has no renderable cells"
+             ]
+    end
+
+    test "accepts metadata-bearing wrappers when their content is renderable" do
+      blocks = [
+        %{
+          "type" => "list",
+          "items" => [
+            %{
+              "id" => "stable-item",
+              "content" => [%{"type" => "text", "value" => "visible"}]
+            }
+          ]
+        },
+        %{
+          "type" => "table",
+          "rows" => [
+            %{
+              "id" => "stable-row",
+              "cells" => [
+                %{
+                  "id" => "stable-cell",
+                  "content" => [%{"type" => "text", "value" => "visible"}]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+
+      assert :ok = BlockOps.validate_render_shapes(blocks)
+    end
+  end
+
   # ── The backfill task over real paper rows ────────────────────────────────
 
   describe "BackfillBlockIds.run/1" do

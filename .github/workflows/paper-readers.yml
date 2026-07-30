@@ -68,7 +68,8 @@ jobs:
           CI_FAILURE_DETAIL: |
             The nightly production Paper reader audit failed: at least one
             published Paper broke a reader edge (GUI / email / source / CLI /
-            TUI). The exact per-Paper JSON witness is attached to the run as
+            TUI) or contains a block shape that strands authored content. The
+            exact per-Paper JSON witness is attached to the run as
             the `paper-reader-audit-<run_id>` artifact — read `.failures[]`
-            there for which Papers failed and on which edge.
+            for reader failures and `.structure` for block-shape failures.
         run: bash scripts/file-ci-failure-issue.sh

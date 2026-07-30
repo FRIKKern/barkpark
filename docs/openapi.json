@@ -133,6 +133,7 @@
                   "invalid_mode",
                   "invalid_op",
                   "invalid_paper",
+                  "invalid_paper_structure",
                   "invalid_proposal",
                   "invalid_request_id",
                   "invalid_state_report",

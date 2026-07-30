@@ -14,6 +14,7 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
   alias Barkpark.Content.{Errors, Warnings}
   alias Barkpark.Content.Papers.Hollow
   alias Barkpark.LabelFixtures
+  import Barkpark.TenancyFixtures, only: [create_project!: 2, create_workspace!: 1]
   import Ecto.Query, only: [from: 2]
 
   # Convenience accessors — papers are type-"paper" documents now; the block
@@ -690,6 +691,58 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert length(pc(paper, "blocks")) == 1
       assert pc(paper, "rev") == rev0
       refute pc(paper, "body_html") =~ "nope"
+    end
+
+    test "workspace headers scope block ops when two papers share a slug", %{conn: conn} do
+      suffix = System.unique_integer([:positive])
+      ws_a = create_workspace!("paper-ops-a-#{suffix}")
+      ws_b = create_workspace!("paper-ops-b-#{suffix}")
+      project_a = create_project!(ws_a, "default")
+      project_b = create_project!(ws_b, "default")
+      slug = "same-paper-#{suffix}"
+
+      base = fn text, workspace, project ->
+        LabelFixtures.paper_attrs(%{
+          slug: slug,
+          workspace_id: workspace.id,
+          project_id: project.id,
+          blocks: [
+            %{
+              "id" => "intro",
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => text}]
+            }
+          ]
+        })
+      end
+
+      {:ok, _} = Content.upsert_paper(base.("workspace A", ws_a, project_a))
+      {:ok, _} = Content.upsert_paper(base.("workspace B", ws_b, project_b))
+
+      conn =
+        conn
+        |> put_req_header("authorization", "Bearer " <> @token)
+        |> put_req_header("content-type", "application/json")
+        |> put_req_header("x-barkpark-workspace", ws_b.slug)
+        |> put_req_header("x-barkpark-project", project_b.slug)
+        |> post(ops_path_b(slug), %{"ops" => [append_op_b("scoped", "only workspace B")]})
+
+      assert json_response(conn, 200)["ok"] == true
+
+      paper_a =
+        Content.get_paper(slug, Content.paper_default_dataset(),
+          workspace_id: ws_a.id,
+          project_id: project_a.id
+        )
+
+      paper_b =
+        Content.get_paper(slug, Content.paper_default_dataset(),
+          workspace_id: ws_b.id,
+          project_id: project_b.id
+        )
+
+      refute pc(paper_a, "body_html") =~ "only workspace B"
+      assert pc(paper_b, "body_html") =~ "only workspace B"
     end
   end
 

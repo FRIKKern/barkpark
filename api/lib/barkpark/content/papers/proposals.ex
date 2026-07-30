@@ -136,7 +136,7 @@ defmodule Barkpark.Content.Papers.Proposals do
   # becomes visible through the drafts perspective + the publish gate.
   defp write_proposed_blocks(draft, blocks, fresh_ops, applied_ids, source, dataset) do
     with {:ok, folded} <- fold_ops(blocks, fresh_ops),
-         normalized = folded |> BlockOps.ensure_block_ids() |> BlockOps.normalize_list_items(),
+         normalized = folded |> BlockOps.ensure_block_ids() |> BlockOps.normalize_render_shapes(),
          {:ok, new_blocks} <- encrypt_blocks(normalized, dataset, draft.workspace_id) do
       rev = current_rev(draft) + 1
       style = get_in(draft.content || %{}, ["style"])

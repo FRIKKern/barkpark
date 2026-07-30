@@ -396,7 +396,7 @@ defmodule Barkpark.Content.Writer do
       # Canonicalize any flat-string list item the scaffold body carried (the
       # obsidian list-item-crash fix) — additive + idempotent + render-preserving,
       # so a scaffold with no list (or only canonical lists) is byte-identical.
-      |> BlockOps.normalize_list_items()
+      |> BlockOps.normalize_render_shapes()
 
     content =
       provided
@@ -751,7 +751,7 @@ defmodule Barkpark.Content.Writer do
         # the canonical inline-array shape (the obsidian list-item-crash fix). Both
         # additive + idempotent + render-preserving, so a write of a clean
         # (id-bearing, canonical-item) block list passes through byte-identical.
-        new_blocks = blocks |> BlockOps.ensure_block_ids() |> BlockOps.normalize_list_items()
+        new_blocks = blocks |> BlockOps.ensure_block_ids() |> BlockOps.normalize_render_shapes()
         Map.put(attrs, "content", Map.put(content, "blocks", new_blocks))
 
       _ ->

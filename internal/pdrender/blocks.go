@@ -173,6 +173,14 @@ func itemNodes(item any) []any {
 			return nodes
 		}
 		return []any{v}
+	case map[string]any:
+		if content, ok := v["content"].([]any); ok {
+			return content
+		}
+		if text, ok := v["text"].(string); ok {
+			return []any{text}
+		}
+		return []any{v}
 	default:
 		return []any{v}
 	}
@@ -214,7 +222,13 @@ func (cr calloutRenderer) Render(b Block, ctx RenderCtx) []string {
 		head.WriteString(bodyStyle.Bold(true).Render(sanitizeText(title)))
 		head.WriteString(" ")
 	}
-	head.WriteString(cr.ir.Inline(attrSlice(b.Attrs, "content"), ctx))
+	content := attrSlice(b.Attrs, "content")
+	if len(content) == 0 {
+		if text := attrStr(b.Attrs, "text"); text != "" {
+			content = []any{text}
+		}
+	}
+	head.WriteString(cr.ir.Inline(content, ctx))
 	body := head.String()
 
 	const chrome = 4 // "▌ " bar (2) + breathing room (2)

@@ -625,19 +625,47 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
   def compose_block(%{"type" => "table"} = b, _style) do
     compose_cell = fn cell ->
-      cell |> compose_inline_children() |> Enum.map(&to_pd_node_from_inline_child/1)
+      cell
+      |> table_cell_content()
+      |> compose_inline_children()
+      |> Enum.map(&to_pd_node_from_inline_child/1)
     end
 
-    compose_row = fn row -> row |> List.wrap() |> Enum.map(compose_cell) end
+    compose_row = fn row -> row |> table_row_cells() |> Enum.map(compose_cell) end
+
+    {column_head, record_keys} = table_column_head(b)
+    raw_rows = Map.get(b, "rows", []) |> List.wrap()
+
+    {legacy_head, body_rows} =
+      case raw_rows do
+        [%{"header" => true} = row | rest] ->
+          {table_row_cells(row), rest}
+
+        [%{"cells" => cells} = row | rest] when is_list(cells) ->
+          if cells != [] and Enum.all?(cells, &(is_map(&1) and Map.get(&1, "header") == true)) do
+            {table_row_cells(row), rest}
+          else
+            {nil, raw_rows}
+          end
+
+        rows ->
+          {nil, rows}
+      end
+
+    body_rows =
+      if record_keys == [] do
+        body_rows
+      else
+        Enum.map(body_rows, fn row -> Enum.map(record_keys, &Map.get(row, &1, "")) end)
+      end
 
     rows =
-      Map.get(b, "rows", [])
-      |> List.wrap()
+      body_rows
       |> Enum.map(compose_row)
 
     pd = %{"kind" => "PdTable", "rows" => rows}
 
-    case Map.get(b, "head") || Map.get(b, "header") do
+    case Map.get(b, "head") || Map.get(b, "header") || legacy_head || column_head do
       nil -> pd
       [] -> pd
       head_row -> Map.put(pd, "head", compose_row.(head_row))
@@ -1897,7 +1925,33 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     end
   end
 
+  defp normalize_list_item(%{} = item), do: paragraph_inline(item)
   defp normalize_list_item(item), do: item
+
+  defp table_row_cells(%{"cells" => cells}) when is_list(cells), do: cells
+  defp table_row_cells(row), do: List.wrap(row)
+
+  defp table_cell_content(%{"content" => content}) when is_list(content) do
+    Enum.flat_map(content, fn
+      %{"type" => "paragraph", "content" => inline} when is_list(inline) -> inline
+      item -> [item]
+    end)
+  end
+
+  defp table_cell_content(cell), do: cell
+
+  defp table_column_head(%{"columns" => columns}) when is_list(columns) and columns != [] do
+    keys = Enum.map(columns, &Map.get(&1, "key"))
+
+    if Enum.all?(keys, &(is_binary(&1) and &1 != "")) do
+      head = Enum.map(columns, &(Map.get(&1, "label") || Map.get(&1, "key")))
+      {head, keys}
+    else
+      {nil, []}
+    end
+  end
+
+  defp table_column_head(_), do: {nil, []}
 
   # A labelled value row: bold label on its own line, then the value as PdText.
   defp field_row(b, value_text) when is_binary(value_text) do

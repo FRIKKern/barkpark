@@ -21,7 +21,10 @@ defmodule Barkpark.PortableDoc.SlotsTest do
   ]
 
   defp legacy(extra \\ %{}) do
-    Map.merge(%{"id" => "c-1", "type" => "callout", "tone" => "warning", "content" => @body}, extra)
+    Map.merge(
+      %{"id" => "c-1", "type" => "callout", "tone" => "warning", "content" => @body},
+      extra
+    )
   end
 
   defp slotted(extra \\ %{}) do
@@ -60,6 +63,11 @@ defmodule Barkpark.PortableDoc.SlotsTest do
       assert Slots.callout_body_inline(%{"type" => "callout", "content" => nil}) == []
     end
 
+    test "legacy prose stranded under text remains visible" do
+      assert Slots.callout_body_inline(%{"type" => "callout", "text" => "Visible"}) ==
+               [%{"type" => "text", "value" => "Visible"}]
+    end
+
     test "unknown slot / non-callout block synthesizes []" do
       assert Slots.slot_elements(legacy(), "media") == []
       assert Slots.slot_elements(%{"type" => "paragraph"}, "body") == []
@@ -91,7 +99,11 @@ defmodule Barkpark.PortableDoc.SlotsTest do
 
     test "legacy callout renders byte-identical article HTML (standing golden shape)" do
       # Mirrors render_test.exs "non-collapsible callout is byte-identical".
-      html = Render.render_blocks([legacy(%{"tone" => "info", "content" => plain()})], %{style: :article})
+      html =
+        Render.render_blocks([legacy(%{"tone" => "info", "content" => plain()})], %{
+          style: :article
+        })
+
       assert html =~ ~s(<div class="bp-callout bp-callout--info">)
       refute html =~ "<details"
       refute html =~ "border-left:4px solid"
@@ -99,7 +111,12 @@ defmodule Barkpark.PortableDoc.SlotsTest do
       # And the slot form renders the SAME article HTML.
       slot_html =
         Render.render_blocks(
-          [slotted(%{"tone" => "info", "slots" => %{"body" => [%{"type" => "paragraph", "content" => plain()}]}})],
+          [
+            slotted(%{
+              "tone" => "info",
+              "slots" => %{"body" => [%{"type" => "paragraph", "content" => plain()}]}
+            })
+          ],
           %{style: :article}
         )
 
@@ -311,7 +328,13 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     test "a stage renders the IDENTICAL pnode cell one legacy pipeline node emits (drift tripwire)" do
       # A single-node pipeline wraps its ONE cell in bp-pipe-scroll/bp-pipe; a stage IS
       # that inner cell. So stage_html == the pipeline's cell, byte for byte.
-      node = %{"kind" => "source", "title" => "emit", "detail" => "reads the queue", "source" => true}
+      node = %{
+        "kind" => "source",
+        "title" => "emit",
+        "detail" => "reads the queue",
+        "source" => true
+      }
+
       pipeline = %{"type" => "pipeline", "nodes" => [node]}
       stage = Map.merge(%{"type" => "stage"}, node)
 
@@ -344,12 +367,21 @@ defmodule Barkpark.PortableDoc.SlotsTest do
       assert Slots.normalize_widget(stage_scalar()) == Slots.normalize_widget(stage_slotted())
       # Dual-write: the scalar AND the slot entry are both present + in sync.
       assert once["kind"] == "source"
-      assert once["slots"]["kind"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "source"}]}]
+
+      assert once["slots"]["kind"] == [
+               %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "source"}]}
+             ]
     end
 
     test "normalize_widget/1 omits an EMPTY field from BOTH scalar and slots; keeps files/source chrome" do
       normalized =
-        Slots.normalize_widget(%{"type" => "stage", "title" => "t", "detail" => "", "files" => "a.ex", "source" => true})
+        Slots.normalize_widget(%{
+          "type" => "stage",
+          "title" => "t",
+          "detail" => "",
+          "files" => "a.ex",
+          "source" => true
+        })
 
       assert normalized["title"] == "t"
       refute Map.has_key?(normalized, "detail")
@@ -383,14 +415,23 @@ defmodule Barkpark.PortableDoc.SlotsTest do
   describe "live-data task-list: query_decl/1 + normalize_widget/1 + query_type_errors/1" do
     defp live_tl(extra \\ %{}) do
       Map.merge(
-        %{"id" => "t-1", "type" => "task-list", "query" => %{"label" => "proj:x"}, "title" => "Plan"},
+        %{
+          "id" => "t-1",
+          "type" => "task-list",
+          "query" => %{"label" => "proj:x"},
+          "title" => "Plan"
+        },
         extra
       )
     end
 
     defp snap_tl(extra \\ %{}) do
       Map.merge(
-        %{"id" => "t-2", "type" => "task-list", "snapshot" => [%{"title" => "Pinned", "status" => "open"}]},
+        %{
+          "id" => "t-2",
+          "type" => "task-list",
+          "snapshot" => [%{"title" => "Pinned", "status" => "open"}]
+        },
         extra
       )
     end
@@ -475,7 +516,13 @@ defmodule Barkpark.PortableDoc.SlotsTest do
     # A note in the FLAT wire form (label + lead + body `text`).
     defp note_flat(extra \\ %{}) do
       Map.merge(
-        %{"id" => "nw-1", "type" => "note", "label" => "alive", "lead" => "Kept", "text" => "the body"},
+        %{
+          "id" => "nw-1",
+          "type" => "note",
+          "label" => "alive",
+          "lead" => "Kept",
+          "text" => "the body"
+        },
         extra
       )
     end
@@ -487,9 +534,15 @@ defmodule Barkpark.PortableDoc.SlotsTest do
           "id" => "nw-1",
           "type" => "note",
           "slots" => %{
-            "label" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}],
-            "lead" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}],
-            "body" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
+            "label" => [
+              %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}
+            ],
+            "lead" => [
+              %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}
+            ],
+            "body" => [
+              %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}
+            ]
           }
         },
         extra
@@ -509,7 +562,12 @@ defmodule Barkpark.PortableDoc.SlotsTest do
                [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}]
 
       assert Slots.slot_elements(note_flat(), "body") ==
-               [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
+               [
+                 %{
+                   "type" => "paragraph",
+                   "content" => [%{"type" => "text", "value" => "the body"}]
+                 }
+               ]
 
       assert Slots.slot_elements(note_flat(), "lead") ==
                [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}]
@@ -536,7 +594,11 @@ defmodule Barkpark.PortableDoc.SlotsTest do
         %{"type" => "strong", "children" => [%{"type" => "text", "value" => "bold"}]}
       ]
 
-      n = %{"type" => "note", "slots" => %{"body" => [%{"type" => "paragraph", "content" => marked}]}}
+      n = %{
+        "type" => "note",
+        "slots" => %{"body" => [%{"type" => "paragraph", "content" => marked}]}
+      }
+
       assert Slots.note_body_text(n) == "Be bold"
     end
 
@@ -545,9 +607,19 @@ defmodule Barkpark.PortableDoc.SlotsTest do
       assert n["label"] == "alive"
       assert n["text"] == "the body"
       assert n["lead"] == "Kept"
-      assert n["slots"]["label"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}]
-      assert n["slots"]["body"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
-      assert n["slots"]["lead"] == [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}]
+
+      assert n["slots"]["label"] == [
+               %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}
+             ]
+
+      assert n["slots"]["body"] == [
+               %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}
+             ]
+
+      assert n["slots"]["lead"] == [
+               %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}
+             ]
+
       # Idempotent, and a flat-form and slot-form note normalize to the SAME map.
       assert Slots.normalize_widget(n) == n
       assert Slots.normalize_widget(note_slotted()) == n
@@ -593,7 +665,12 @@ defmodule Barkpark.PortableDoc.SlotsTest do
 
     test "Constraints.validate/2 folds in the note D1 gate (clean note zero-error)" do
       assert Constraints.validate([note_flat()], []) == []
-      nested = %{"type" => "note", "slots" => %{"body" => [%{"type" => "section", "children" => []}]}}
+
+      nested = %{
+        "type" => "note",
+        "slots" => %{"body" => [%{"type" => "section", "children" => []}]}
+      }
+
       refute Constraints.validate([nested], []) == []
     end
   end
@@ -621,10 +698,17 @@ defmodule Barkpark.PortableDoc.SlotsTest do
         "type" => "stage",
         "source" => true,
         "slots" => %{
-          "kind" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "source"}]}],
-          "title" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "emit"}]}],
+          "kind" => [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "source"}]}
+          ],
+          "title" => [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "emit"}]}
+          ],
           "detail" => [
-            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "reads the queue"}]}
+            %{
+              "type" => "paragraph",
+              "content" => [%{"type" => "text", "value" => "reads the queue"}]
+            }
           ]
         }
       },

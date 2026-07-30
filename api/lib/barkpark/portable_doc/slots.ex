@@ -299,8 +299,24 @@ defmodule Barkpark.PortableDoc.Slots do
   @spec callout_body_inline(term()) :: [map()]
   def callout_body_inline(block) do
     case slot_elements(block, "body") do
-      [first | _] when is_map(first) -> Map.get(first, "content") || []
-      _ -> []
+      [first | _] when is_map(first) ->
+        case Map.get(first, "content") do
+          content when is_list(content) and content != [] -> content
+          _ -> callout_text_inline(block)
+        end
+
+      _ ->
+        callout_text_inline(block)
+    end
+  end
+
+  defp callout_text_inline(block) do
+    case is_map(block) && Map.get(block, "text") do
+      text when is_binary(text) and text != "" ->
+        [%{"type" => "text", "value" => text}]
+
+      _ ->
+        []
     end
   end
 
