@@ -5490,3 +5490,249 @@ newly-filed row is born bare, and 19 of the 19 remaining bare rows are this wave
 the round's close must adjudicate its own residue, or 4(a) needs a birth-grace rule; deciding which is
 a charter question, not a builder question. (4) `resize`, `attach-iso`, `rebuild` and `hzResDone` carry
 the same receipt lie one function away from the fix that just landed.
+
+### Wave 26 2026-07-31 — "The Verbs That Still Lie, and the Writer That Lies About Writing" — REVIEWED. Grade A− (paper `pds-wave-26-2026-07-30`)
+
+**7 of 7 round-1 slices built, gated and PUSHED WITH PRs.** No stalls, no deferred slices, no
+unpushed branches. Every slice's gate was re-run green on the branch the lead will merge.
+
+| task | final branch | verdict |
+|---|---|---|
+| `pds-w26-stamp-readback` | `…store-say-0-r` | THE SPINE. `bp task stamp` now POSTs → GETs → renders the verdict from the store. Reviewer fixed the receipt's unit label (`chars` → `bytes`) and a comment claiming a perspective the route never sends. |
+| `pds-w26-stamp-exit-taxonomy` | `…command-line-you--1` (unchanged) | 5/6 split shipped exactly as PDS-D371 ruled, compound-prefix `lookupExit` shared by all three lookup sites. Cleanest slice of the wave. |
+| `pds-w26-publish-door-criteria-fence` | `…landed-s-2-r` | Criteria fence + the two `inserted_at` census pins. Reviewer re-derived the coverage independently and CORRECTED the shipped comment. |
+| `pds-w26-hetzner-five-flag-verbs` | `…stop-reporti-3-r` | Four flag verbs read back. Reviewer flipped `poll:true` on rebuild and resize. |
+| `pds-w26-census-anchor-4a` | `…the-round-i-4-r` | `--anchor-from-paper` + argv gate. Reviewer fixed 4(a)'s NUMERATOR. |
+| `pds-w26-export-atomic-out` | `…the-backu-5` (unchanged) | `.partial` + ordered promote, `:161` moved in the same commit. |
+| `pds-w26-workspace-export-declared-size` | `…verifies-t-6` (unchanged) | Declared-size check with the mandatory permanent `-1` branch. |
+
+**THE ONE FINDING THAT IS NOT IN ANY SLICE.** `pds-w26-census-anchor-4a` shipped clause 4(a)'s
+predicate line computing its numerator as `live - len(bare)`, where `bare` is the ANCHORED subset —
+so **every residue row was counted as carrying a disposition.** On the live board that prints
+`172/172 PASS` over 15 rows nobody adjudicated. **The epic's own certifying instrument was emitting
+the exact class of success claim the epic exists to kill**, in the same wave that turned the law onto
+the ledger writer. Fixed at review, mutation-proven (restoring the old numerator reds the selftest,
+79 → 80 checks). The denominator is unchanged and still the whole live board. **Nobody should read
+that as a builder failure — it is what a review is for, and it is the single best argument in this
+epic's history for the reviewer phase existing at all.**
+
+**THE COVERAGE CORRECTION ON THE PUBLISH DOOR.** The fence's shipped comment named
+`Barkpark.Plugins.GitHub.Link.put/4` as an UNCOVERED automatic publisher. It is not. Link.put and
+Adopt both thread `source: :github`, and the wholesale exemption keys on `:sync` ONLY — so both fall
+through the gate and the criteria fence DOES apply to them. That is the right direction and it is
+safe: `collapse_draft_twin/5` already logs a rejected collapse, leaves the draft twin and still
+returns `{:ok, _}`, so a fence refusal defers bookkeeping rather than breaking the mirror job.
+Independently re-derived at review and corrected in the shipped comment. `source: :sync` remains
+genuinely uncovered and genuinely filed.
+
+**CROSS-SLICE PROOF, not assumed.** Five of the seven slices land in `internal/cli`. All five were
+merged onto one integration branch off `origin/main` and `CC=clang go test ./...` ran green across
+every package — so the lead can merge them in any order without a compose surprise.
+
+**HIGH-FLIP-RISK, A SECOND INDEPENDENT HUMAN REVIEWER IS STILL OWED** on both flagged slices.
+For `pds-w26-census-anchor-4a` the residual is exact and unresolved: **the argv gate stops a raw
+timestamp, but nothing binds the anchor SLUG to the round being certified** — `--anchor-from-paper
+pds-wave-20-…` would defer three waves of rows and green. Binding the anchor to the epic task's own
+`wave_paper` field rather than to argv is the obvious next ruling.
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** (1) `pds-w26-close-pulse-readback` — `bp task close` is the
+SEAL and carries the identical exposure the stamp just closed; wave 26 fenced it away deliberately.
+(2) `pds-w26-mcp-stamp-bypasses-readback` (filed at review) — `mcp_tasks.go` calls
+`execManifestCommand` directly and never enters `runTaskStamp`, so an MCP-issued stamp gets NO
+read-back; the caller class most likely to be an agent writing this epic's evidence is the one class
+the new law does not reach. (3) Bind the census anchor to `wave_paper`. (4) `hzResDone` — PDS-D367's
+51-caller class, still a wave-sized slice. (5) `pds-w25-round-terminal` the moment #8218 is DEPLOYED
+(still not merged-equals-deployed; still the human's call).
+
+## WAVE 26 — THE LAW TURNS INWARD (decided 2026-07-31)
+
+**THE THESIS.** Twenty-five waves taught `bp` verbs to re-read the WORLD — a Hetzner box, a deployed
+site, a written bundle. The class this epic had never audited is `bp` writing to its OWN LEDGER: the
+writes every piece of this epic's evidence is made of. **A BARKPARK VERB MAY NOT CLAIM A WRITE IT
+CANNOT SEE IN THE STORE.** The wave's spine survives the verify round; its stated premise does not.
+
+- **PDS-D359 — THE STAMP "SILENT NON-LAND" HAS NO SIZE BOUNDARY AND NO SILENT REFUSAL. BOTH REPORTED
+  MODES TRACE TO A MASKING SHELL PIPELINE, AND THE HYPOTHESIS "AN UNBOUNDED EVIDENCE FIELD MEETING AN
+  UNDECLARED LIMIT" IS DEAD.** A live bisection on guerrilla persisted evidence BYTE-EXACT at
+  100/500/900/1000/**1100**/1200/1500/2000/4000/8000/9000 bytes and failed HONESTLY (rc=1, named error)
+  from 10000 up — a query-string transport ceiling, independently corroborated by `spd-b47`'s
+  8900-OK / 9002-FAIL bisection filed two waves earlier. A non-holder stamp exits **2** with a named
+  `not_holder`. Both "silences" are `bp … | tail; echo $?` — this repo's own recorded trap
+  (`rotating-charter-slot-trap`). The limit exists, sits ~8× above the observed failure, and is loud.
+  **The wave does not hunt a boundary; the boundary hunt was the finding.**
+- **PDS-D360 — THE A2 BOUNDARY. PDS-D313's A2 JUSTIFICATION IS FALSIFIED FOR `type:task`, AND THE
+  PRECISE STATEMENT IS THE GUARD BOUNDARY, NOT "A SECOND DOOR EXISTS".** D313 reads verbatim
+  (origin/main:4603): *"A2 PERSISTED-RECORD ECHO — satisfies the law for claims about THE RECORD …
+  the response IS the record; a second GET reads the same row."* Observed live this wave, not derived:
+  `bp doc patch` mints a `drafts.` twin from the CURRENT published content; `bp task stamp` writes the
+  **published** row directly (`Repo.update_all`) and never touches the twin, whose `_rev` does not move;
+  a later `bp doc publish` replaces the published content **wholesale** from that frozen twin
+  (`lifecycle.ex:139-176`, the only rev fence is `fenced_delete` on the DRAFT) and the landed
+  `met:true` becomes `met:false, evidence:""` — **rc=0, normal envelope, no warning.** A second patch
+  never rebases the twin, so erasure is SELECTIVE at the mint boundary: `TRACER-A` (stamped before the
+  mint) survived, `TRACER-B` (stamped after) was erased. **AMENDMENT, ADOPTED:** *a persisted-record
+  echo satisfies the law only where no second door can revert the record between the echo and the
+  reader; for `type:task` that door is open exactly when the draft twin's `claim` matches the published
+  row's.* A2 is not repealed — it is bounded.
+- **PDS-D361 — THE HONESTY GOES CLIENT-SIDE, AND THAT IS A HARD CONSTRAINT, NOT A PREFERENCE.** An
+  API-side fix does not take effect until guerrilla deploys, and that deploy is the same human gate
+  already holding `pds-w25-round-terminal` (probed live: `bp task stage <done row> done` still returns
+  422 `illegal_transition`, so `21ab0e50d` is merged and NOT deployed). A CLI fix is live the moment
+  `make cli-build` runs. **The spine ships in `bp`.** Every server-side idea is additive.
+- **PDS-D362 — THE PUBLISH DOOR GETS A CRITERIA FENCE, THE HOLE IS ONE GUARD NARROWER THAN THE SURVEY
+  CLAIMED, AND THAT NARROWING IS WHAT MAKES IT SHIPPABLE.** `stale_claim?/2` (`lifecycle.ex:310-313`)
+  compares only the `claim` map, and a stamp writes `acceptance_criteria + rev` and never `claim`.
+  Proved both sides on scratch rows: a draft minted BEFORE the claim is REFUSED (rc=5
+  `validation_failed`, stamp intact); a draft minted AFTER the claim is claim-identical, sails past the
+  guard, and erases every criterion stamped since the mint. Population measured: 336 `drafts.` task
+  twins store-wide, 20 with a published counterpart, 8 terminal/non-terminal pairs, 7 carrying real
+  loss (10,401 bytes / 17 `met:true`) — **and all 7 are claim-divergent, so the door refuses them
+  today.** The exposure is rows patched DURING an active claim, which is exactly what wave 25's own
+  residue-filing pattern produces. The fence is merge-and-test-gated, never deploy-gated: shipping it
+  means a pinned `api/test` proof, not a live probe. **NAMED AND NOT CLOSED:** `source: :sync` is
+  exempted from the publish door wholesale (`lifecycle.ex:277-279`), and `Link.put`'s draft-twin
+  collapse (`plugins/github/link.ex:193`, reached from `mirror_job.ex:560` via the DrainWorker poll and
+  from `inbound_events.ex:172`) is an AUTOMATIC publisher — armed on guerrilla (the webhook route
+  answers 401, not 404) and one config flip from a background erasure loop with zero audit trail.
+- **PDS-D363 — THE SUCCESS-CLAIM REGISTRY'S PROVENANCE ARM CANNOT HOLD A LEDGER ROW, AND THE
+  REPLACEMENT IS A STRUCTURAL PROPERTY, NOT A SECOND SOURCE SCAN.** Proved by mutation:
+  `TestSiteClaimsAreProbedWithResponseTypes` gates on `pinned[base] || HasPrefix(base, "renderSite")`
+  (`:596`) AND on `PkgPath` ending `internal/cloudclient` (`:608`); renaming an honest stamp probe to
+  `renderSiteStampVerdict` made it FIRE and then REJECT the only real store type
+  (`taskboard.CriterionItem, which internal/cloudclient never RETURNS`). Decisive: a request-echo render
+  that ignores the store entirely passes the ENTIRE registry green once the pair is varied on the
+  REQUEST — the main gate bites only when the pair varies on the RESPONSE, and nothing enforces that.
+  A copied regex arm is unsound on `internal/apiclient` (`Doc` is BOTH returned and a request
+  parameter) and vacuous on `internal/taskboard` (neither `CriterionItem` producer returns an error).
+  **RULED:** for a LEDGER row the registry asserts structurally that `Backed`/`Contradicted` are the
+  SAME Go type, that the type is the read-back type, and that the request fixture is a shared
+  package-level var — the `siteCreateReq` pattern made MANDATORY rather than conventional.
+- **PDS-D364 — CLAUSE 4(a) IS ANCHORED, THE ANCHOR IS DERIVED FROM THE WAVE PAPER, AND A
+  CALLER-SUPPLIED ANCHOR IS FORBIDDEN IN A CERTIFYING RUN.** 4(a) is structurally unreachable by any
+  wave that discovers work: a newly-filed row is born bare. Anchoring makes it finite. Proved live:
+  `--anchor 2020-01-01T00:00:00Z` flips 4(a) from `157/172 FAIL` to `172/172 PASS` — **a round could
+  seal itself by argv.** So the only supported form is `--anchor-from-paper <wave-slug>`, resolving the
+  Paper's `_createdAt` (`GET …/paper/pds-wave-26-2026-07-30` → `2026-07-30T21:37:34.085701Z`), failing
+  closed on non-200 or unreadable. **TERMINATION IS OBSERVED, NOT ARGUED:** anchored at wave 25's Paper
+  the live board reports `residue 14`, anchored at wave 26's it reports `residue 0` — the same 14 rows
+  are residue for round N and in-scope for round N+1, deferred by exactly one round, and adjudicating a
+  row files no new rows. It is a DISCRIMINATOR, not an excuse machine: it isolates
+  `pds-w12-crown-climb-preconditions` (born 2026-07-20) as the ONE genuinely-old bare row among 15,
+  refining wave 25's "19 of 19 are this wave's residue" to 14 of 15. **CLAUSE 5 IS ORTHOGONAL AND MUST
+  STAY SO:** its window is the census's own READ window (`started` at `:701`, 17.9–30.8 s wide live),
+  not the round window; widening it to the round window would trip on every residue write by
+  construction. Operational rule: **adjudicate → quiesce → certify.** A row whose `_createdAt` cannot
+  be read FAILS CLOSED, exactly as clause 5 already does for `_updatedAt`.
+- **PDS-D365 — THE ANCHOR HAS EXACTLY ONE EVASION PATH AND IT IS PROHIBITED DURING A ROUND.**
+  `_createdAt` is `doc.inserted_at`, in `@projection_always` (`envelope.ex:64,:354`), absent from
+  `Document.changeset`'s cast list and from `writer.ex` entirely — no request can set it, and republish
+  preserves it (`lifecycle.ex:177` `Repo.update`). BUT `unpublish_document` `fenced_delete`s the
+  published row (`:428`), so a later publish takes the `Repo.insert` branch (`:180`) and mints a FRESH
+  birth: **a row unpublished and republished after the anchor is REBORN as residue.** `bp doc unpublish`
+  is a shipped verb and `unpublish` is a first-class `/v1/data/mutate` op. Ruled: unpublish→republish of
+  a `pds-*` row during a round is forbidden, and the preservation/reset pair is pinned by an
+  `api/test` assertion (none exists today).
+- **PDS-D366 — M2 IS FIVE VERBS NOT THREE, THE GATE IS THE DERIVATION AND NOT THE MAP, AND
+  `create-image` IS NOT A SERVER POST-CONDITION AT ALL.** Derived from origin/main, `hzDone` has seven
+  literal-verb call sites; five are post-action: `rebuild` (:1199), `resize` (:1231), `enable-rescue`
+  (:1276), `create-image` (:1320), `attach-iso` (:1353). Wave 25's own residue note named only three —
+  the undercount is inherited from a real ledger row, not invented. Adding a `resize` key REDS
+  `TestHetznerActionVerbsAllDeclareAPostCondition` on the **stale-entry** arm (`:351-355`), because the
+  verb list is DERIVED from `runHetznerServerAction(out` call sites and all five flag verbs bypass that
+  executor. Proved end to end: the naive widening drags in `create` and `delete` (6 errors); widening +
+  a declared exemption map for those two leaves EXACTLY the four unkeyed flag verbs red; adding all five
+  keys goes GREEN with `./internal/cli` green at 22.4 s. **The error string at `:340` ("goes through
+  runHetznerServerAction") becomes FALSE under the widening and must be reworded — a gate that lies
+  about why it failed, on this epic, is not shippable.** `create-image` returns an `*hcloud.Image` and
+  changes NO field on `hcloud.Server`: its honest post-condition is a `GET /images/<id>`, a different
+  resource, and it takes a DECLARED EXEMPTION with its reason stated rather than a fabricated key.
+  **A green map is not an honest receipt:** the proof obligation is behavioral (a fake API whose
+  post-action GET disagrees, and the receipt differs), the shape of
+  `TestHetznerServerMetadataFlipNotAppliedFails`.
+- **PDS-D367 — `hzResDone` IS NOT A VERB AND IS CUT FROM WAVE 26.** It is a shared printer with 51
+  non-test call sites across five files (lb 21, net 17, dns 6, storage 5, backup 2) and NO
+  post-condition machinery. Its registry row is **vacuously green by mutation proof**: deleting the
+  `extra` payload spread — and then ALL extra handling, sorted table lines and the orphaned `sort`
+  import — left `TestSuccessClaimsChangeWhenTheResponseDoes/hzResDone` PASSING, because the row probes
+  with a `nil` extra and varies only ID and Name, "the fields an action CANNOT change." It fires only
+  when the identity echo itself is severed. This is the exact pre-repair shape PDS-D355 fixed for
+  `hzDone` one entry above it. Fixing it means BUILDING the apparatus and then classifying 50 sites
+  (13 destroy / 12 create / 23 request-echo / 1 measured-uncompared / 1 with no cheap post-read) —
+  a wave-sized slice, filed, not smuggled into a receipt cleanup.
+- **PDS-D368 — THE EXPORT RENAME AND THE PRE-FIRST-BYTE SIDECAR REMOVAL ARE ONE ATOMIC CHANGE;
+  SHIPPING THE RENAME ALONE IS STRICTLY WORSE THAN MAIN TODAY.** `bp export --out` truncates via
+  `os.Create` (`export_cmd.go:165`) and removes `<file>.meta` at `:161` before the first byte — correct
+  under truncation, actively harmful under rename. Proved: with rename added and `:161` kept, a
+  truncated nightly re-export leaves the GOOD backup intact (36 bytes preserved) while its sidecar is
+  gone, and `--verify` on that intact backup exits 1 — **UNVERIFIED and, by design, unoverridable.** A
+  data-destroying bug traded for an attestation-destroying one. Measured cost of the correct change:
+  of #8220's 8 merged tests, 6 stay green untouched, `TestRunExportOutTruncatedLeavesNoSidecar` is a
+  REWRITE (three independent path-bound assertions, the third hidden behind a `Fatalf`) and
+  `TestRunExportOutClearsStaleSidecarBeforeWriting` INVERTS. Meta renames LAST so the only reachable
+  interleaving is good-file/no-sidecar.
+- **PDS-D369 — "COMPARE AGAINST WHAT WAS DECLARED" IS BUILDABLE FOR EXACTLY ONE SINK, AND THE `-1`
+  GUARD IS MANDATORY THERE EVEN THOUGH THAT SINK NEVER TRIPS IT TODAY.** Probed live with the CLI's own
+  `newTransferClient` transport: the workspace export returns `ContentLength=134884864`,
+  `Uncompressed=false`, `copied==ContentLength` — because the controller ends in `send_file/2` and
+  Bandit never compresses that path. On the SAME server with the SAME transport, `/api/schemas` returns
+  `ContentLength=-1, Uncompressed=true, copied=109250, match=false` — Go added `Accept-Encoding: gzip`
+  itself and stripped the length. A naive `n != resp.ContentLength` fails EVERY successful call on any
+  compressible route, and PDS-D204 already moved this route `send_resp`→`send_file`, so a move back
+  re-arms it. `-1` → `verified:false`, never a failure; copy the honest shape already in-tree at
+  `cloud_workspace_cmd.go:660-668`. **The promise does not apply elsewhere:** `bp export --out` composes
+  NDJSON with no declared size (its integrity mechanism is the sha256 sidecar),
+  `hetzner_instance_transfer_cmd.go:229` is an SSH stream by construction, and
+  `hetzner_storage_cmd.go:453` has nothing to compare against because
+  `objstore.Client.GetObject` discards `GetObjectOutput.ContentLength` and the client has no `Head*`
+  method. Also recorded: the export bundle is NOT byte-reproducible (134877184 / 134879744 / 134884864
+  across three consecutive runs) — compare WITHIN one response, never against a cached expectation.
+  There are SIX `os.Create` sinks under `internal/`, not the five previously named:
+  `context_render.go:177` was unlisted.
+- **PDS-D370 — THE RETROACTIVE-DAMAGE HALF OF THE SPINE IS ANSWERED AND CLOSED: THIS EPIC'S EVIDENCE IS
+  NOT HOLLOW.** Re-derived with per-doc reads (no paginated walk in the count path) over all **299**
+  `pds`-prefixed rows store-wide: 1448 acceptance criteria, 787 `met:true`, **0 with empty evidence, 0
+  under 40 bytes**; shortest evidence string 45 bytes, median 531. Restricted to the 205-child epic rail
+  it is 964/503/0. **A dropped stamp leaves `met:false`, not a fabricated `met:true`** — the exposure is
+  UNDER-counted progress, never invented proof. Two structural corrections ride with it: the rail's
+  "205 children" is 204 real rows plus one phantom `drafts.` pointer, and **102 `pds-*` rows live
+  OUTSIDE the rail as grandchildren**, so a rail-scoped audit misses a third of the epic's evidence —
+  quote the census's `closure_size` (310), never 205. Honest limit: this measured HOLLOWNESS, not
+  semantic vacuity, and an erasure leaves `met:false` indistinguishable from never-attempted, so it
+  cannot exculpate past erasures — only `mutation_events` could.
+- **PDS-D371 — THE STAMP REFUSAL VOCABULARY SPLITS 5/6 BY RETRYABILITY, NOT ALL-TO-6.** Today
+  `not_holder`, `not_in_progress:<s>`, `criteria_mismatch`, `criteria_index_out_of_range`,
+  `criterion_text_required`, `note_required` and `illegal_transition` all exit **2** — the same code as
+  `--met --miss`, so a retry wrapper cannot tell a recoverable lease loss from a bad command line.
+  Blast radius measured at ZERO (whole-repo `go test ./...` green across 25 packages, doc gates PASS,
+  no test pins exit 2 on a task refusal, no shell caller branches on a numeric bp exit for these).
+  Two mechanical requirements: the server mints COMPOUND tokens (`not_holder:<worker>`,
+  `not_in_progress:<status>`) that a literal map key misses, and `classifyError`'s ok-false branch does
+  a SECOND literal lookup that defeats normalisation applied only inside `exitForCode` — so the fix is
+  a shared `lookupExit` keyed on the reason PREFIX (never on the HTTP status, which `errors.go:20-22`
+  forbids). **RULED:** exit 6 (conflict — re-claim and retry) for `not_holder` and `not_in_progress`;
+  exit 5 (validation — fix the request, never retry) for the four criteria/note guards AND for
+  `illegal_transition`, which is a 422 and is the one member of the list that is NEVER retryable —
+  bucketing it 6 would contradict PDS-D52's own ruling that 422 is `exitValidation`. `doc_changed_since_claim`
+  and `claimed_has_worker` are added too: the CLI already coaches them by name and still files them as
+  "bad command line".
+
+**WAVE 26 PLAN — 7 slices, all round 1, all disjoint by file.**
+
+| task | surface | gate |
+|---|---|---|
+| `pds-w26-stamp-readback` | `bp task stamp` second read + registry ledger-row property | `CC=clang go test ./internal/cli/...` |
+| `pds-w26-stamp-exit-taxonomy` | `codeExit` 5/6 split + compound-prefix `lookupExit` | `CC=clang go test ./internal/cli/...` |
+| `pds-w26-publish-door-criteria-fence` | `gate_task_publish` criteria fence + `inserted_at` pin | `CC=clang mix test test/barkpark/content/lifecycle_test.exs` |
+| `pds-w26-hetzner-five-flag-verbs` | widened derivation + 5 post-conditions + behavioral proof | `CC=clang go test ./internal/cli/...` |
+| `pds-w26-census-anchor-4a` | `--anchor-from-paper` clause 4(a) | `bash scripts/pds-ledger-census_test.sh` |
+| `pds-w26-export-atomic-out` | `bp export --out` temp+ordered-rename + `:161` move | `CC=clang go test -run TestRunExport ./internal/cli/` |
+| `pds-w26-workspace-export-declared-size` | workspace export rename + declared-size verify + `-1` guard | `CC=clang go test ./internal/cli/...` |
+
+**HIGH-FLIP-RISK, second independent reviewer owed before merge:**
+`pds-w26-publish-door-criteria-fence` (does the widened fence refuse a legitimate publish? does it
+close the `source: :sync` path or merely appear to?) and `pds-w26-census-anchor-4a` (can the anchored
+predicate green a round that has not adjudicated its own work?).
+
+**NOT PLANNED AROUND.** `pds-w25-round-terminal` is not dispatched, not worked around, not the spine —
+it needs #8218 DEPLOYED, which is an operator action on a live paid instance and the human's call.
+`api/mix.exs` and `api/mix.lock` are untouched (#8222 holds them).
