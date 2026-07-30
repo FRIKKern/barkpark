@@ -358,7 +358,12 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
           "prompt" => "Which renderers to keep",
           "options" => ["Elixir", "Go", "JS"]
         },
-        %{"id" => "q4", "type" => "scale", "prompt" => "Confidence", "scale" => %{"min" => 1, "max" => 5}},
+        %{
+          "id" => "q4",
+          "type" => "scale",
+          "prompt" => "Confidence",
+          "scale" => %{"min" => 1, "max" => 5}
+        },
         %{"id" => "q5", "type" => "text", "prompt" => "Anything else?"}
       ]
     },
@@ -383,7 +388,11 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "type" => "chat-todo",
       "todos" => [
         %{"content" => "Author the array", "status" => "completed"},
-        %{"content" => "Wire the generator", "status" => "in_progress", "active_form" => "Wiring the generator"},
+        %{
+          "content" => "Wire the generator",
+          "status" => "in_progress",
+          "active_form" => "Wiring the generator"
+        },
         %{"content" => "Prove parity", "status" => "pending"}
       ]
     },
@@ -492,18 +501,35 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "slots" => %{
         "title" => [%{"type" => "heading", "text" => "Card title"}],
         "body" => [
-          %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Card body text."}]}
+          %{
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Card body text."}]
+          }
         ],
         "action" => [
-          %{"type" => "action", "label" => "Open the board", "href" => "https://example.com/board"}
+          %{
+            "type" => "action",
+            "label" => "Open the board",
+            "href" => "https://example.com/board"
+          }
         ]
       }
     },
     "pipeline" => %{
       "type" => "pipeline",
       "nodes" => [
-        %{"kind" => "source", "title" => "Ingest", "detail" => "reads the queue", "source" => true},
-        %{"kind" => "emit", "title" => "Transform", "detail" => "maps the rows", "source" => "queue.ex:42"},
+        %{
+          "kind" => "source",
+          "title" => "Ingest",
+          "detail" => "reads the queue",
+          "source" => true
+        },
+        %{
+          "kind" => "emit",
+          "title" => "Transform",
+          "detail" => "maps the rows",
+          "source" => "queue.ex:42"
+        },
         %{"kind" => "gate", "title" => "Publish", "detail" => "writes the board"}
       ]
     },
@@ -539,13 +565,23 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
         %{"title" => "Wire the harness", "status" => "ready", "priority" => "1"},
         %{"title" => "Render the board", "status" => "in_progress", "priority" => "0"},
         %{"title" => "Await review", "status" => "blocked"},
-        %{"title" => "Ship the legend", "status" => "done", "criteria" => %{"met" => 2, "total" => 2}}
+        %{
+          "title" => "Ship the legend",
+          "status" => "done",
+          "criteria" => %{"met" => 2, "total" => 2}
+        }
       ]
     },
     "roadmap" => %{
       "type" => "roadmap",
       "snapshot" => [
-        %{"title" => "Foundation", "status" => "done", "phase_row" => true, "left" => 0, "width" => 40},
+        %{
+          "title" => "Foundation",
+          "status" => "done",
+          "phase_row" => true,
+          "left" => 0,
+          "width" => 40
+        },
         %{"title" => "Ship the board", "status" => "in_progress", "left" => 40, "width" => 35}
       ],
       "scale" => ["Q1", "Q2", "Q3"]
@@ -572,8 +608,18 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
     "columns" => %{
       "type" => "columns",
       "columns" => [
-        [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Left column body."}]}],
-        [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Right column body."}]}]
+        [
+          %{
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Left column body."}]
+          }
+        ],
+        [
+          %{
+            "type" => "paragraph",
+            "content" => [%{"type" => "text", "value" => "Right column body."}]
+          }
+        ]
       ]
     },
     "terminal" => %{
@@ -582,15 +628,25 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
       "live" => true,
       "footer" => "q to quit",
       "children" => [
-        %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Inside the frame."}]}
+        %{
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => "Inside the frame."}]
+        }
       ]
     },
     "section" => %{
       "type" => "section",
       "layout" => %{"mode" => "grid", "tracks" => 2, "gap" => "md"},
       "blocks" => [
-        %{"type" => "card", "slots" => %{"title" => [%{"type" => "heading", "text" => "Alpha cell"}]}},
-        %{"type" => "card", "span" => 2, "slots" => %{"title" => [%{"type" => "heading", "text" => "Beta cell"}]}}
+        %{
+          "type" => "card",
+          "slots" => %{"title" => [%{"type" => "heading", "text" => "Alpha cell"}]}
+        },
+        %{
+          "type" => "card",
+          "span" => 2,
+          "slots" => %{"title" => [%{"type" => "heading", "text" => "Beta cell"}]}
+        }
       ]
     },
     "status-legend" => %{"type" => "status-legend"}

@@ -30,11 +30,12 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
                 ~s(<p>hi</p>) <>
                 ~s(<hr class="bp-hr" style="border-top-width:1px"></div>)
 
-  defp stack_section, do: %{
-    "type" => "section",
-    "title" => "Overview",
-    "blocks" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "hi"}]}]
-  }
+  defp stack_section,
+    do: %{
+      "type" => "section",
+      "title" => "Overview",
+      "blocks" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "hi"}]}]
+    }
 
   # ── TEST 8: reader anti-regression — no-layout AND explicit-stack are byte-identical
   describe "byte-identity: stack path is untouched" do
@@ -50,6 +51,7 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
     test "a non-grid mode (or malformed layout) also falls to the stack path" do
       for layout <- [%{"mode" => "flow"}, %{"tracks" => 3}, %{}, "grid", nil, 42] do
         b = Map.put(stack_section(), "layout", layout)
+
         assert Render.render_block(b, @article) == @stack_html,
                "layout #{inspect(layout)} must NOT reach the grid path"
       end
@@ -70,7 +72,11 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
         "title" => "Overview",
         "layout" => %{"mode" => "grid", "tracks" => tracks},
         "blocks" => [
-          %{"type" => "callout", "tone" => "info", "content" => [%{"type" => "text", "value" => "note"}]},
+          %{
+            "type" => "callout",
+            "tone" => "info",
+            "content" => [%{"type" => "text", "value" => "note"}]
+          },
           %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "two"}]}
         ]
       }
@@ -91,8 +97,10 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
 
     test "children still route through their OWN emitters (a callout child emits bp-callout)" do
       html = Render.render_block(grid_section(2), @article)
+
       assert String.contains?(html, "bp-callout"),
              "the callout child must render through its own emitter inside the cell"
+
       assert String.contains?(html, "<p>two</p>"), "the paragraph child renders as a real <p>"
     end
 
@@ -100,7 +108,11 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
       html = Render.render_block(grid_section(2), @article)
       assert String.starts_with?(html, ~s(<div style="display:flex;flex-direction:column">))
       assert String.contains?(html, ~s(<hr class="bp-hr">))
-      assert String.contains?(html, ~s(<div class="bp-section__title" style="font-weight:bold">Overview</div>))
+
+      assert String.contains?(
+               html,
+               ~s(<div class="bp-section__title" style="font-weight:bold">Overview</div>)
+             )
     end
 
     test "an absent title emits NO title node in the grid path" do
@@ -118,7 +130,12 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
     end
 
     test "the default gap resolves to a CSS var (never px)" do
-      html = Render.render_block(%{"type" => "section", "layout" => %{"mode" => "grid"}, "blocks" => []}, @article)
+      html =
+        Render.render_block(
+          %{"type" => "section", "layout" => %{"mode" => "grid"}, "blocks" => []},
+          @article
+        )
+
       style = grid_wrapper_style(html)
       assert String.contains?(style, "--bp-grid-gap:var(--bp-space-md,1.6rem)")
       refute String.contains?(style, "px"), "the grid wrapper style must carry NO px literal (D2)"
@@ -133,7 +150,12 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
       }
 
       for {token, expected} <- tokens do
-        b = %{"type" => "section", "layout" => %{"mode" => "grid", "gap" => token}, "blocks" => []}
+        b = %{
+          "type" => "section",
+          "layout" => %{"mode" => "grid", "gap" => token},
+          "blocks" => []
+        }
+
         style = b |> Render.render_block(@article) |> grid_wrapper_style()
         assert String.contains?(style, "--bp-grid-gap:#{expected}"), "gap #{token} → #{expected}"
         refute String.contains?(style, "px"), "gap #{token} must not emit a px literal"
@@ -244,6 +266,7 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
 
     test "the no-cells grid emits NO per-child style attr (bare cells only)" do
       html = Render.render_block(grid_no_cells(), @article)
+
       refute String.contains?(html, ~s(class="bp-section__cell" style=)),
              "a child with no span/order must emit a BARE cell (byte-compat)"
     end
@@ -330,6 +353,7 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
       html = Render.render_block(email_grid([para("ALPHA"), para("BETA")]), @email)
       refute String.contains?(html, "bp-section__grid"), "email grid must not emit the grid class"
       refute String.contains?(html, "bp-section__cell"), "email grid must not emit cell wrappers"
+
       refute String.contains?(html, "--bp-tracks"),
              "email grid must not emit the tracks custom prop"
 
@@ -380,7 +404,8 @@ defmodule Barkpark.PortableDoc.Render.SectionLayoutTest do
 
       html = Render.render_block(section, @email)
 
-      assert bpos(html, "GAMMA") < bpos(html, "BETA") and bpos(html, "BETA") < bpos(html, "ALPHA"),
+      assert bpos(html, "GAMMA") < bpos(html, "BETA") and
+               bpos(html, "BETA") < bpos(html, "ALPHA"),
              "email degrade must stack children in CSS-order: GAMMA(0) < BETA(1) < ALPHA(2)"
     end
 

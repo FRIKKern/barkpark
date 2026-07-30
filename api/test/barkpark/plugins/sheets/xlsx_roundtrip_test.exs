@@ -680,7 +680,10 @@ defmodule Barkpark.Plugins.Sheets.XlsxRoundtripTest do
     end
 
     test "the tabColor rides inside <sheetPr>, before <pageSetUpPr> (schema order)" do
-      content = %{"tabs" => [%{"name" => "R", "color" => "#1a2b3c", "cells" => %{"A1" => %{"v" => 1}}}]}
+      content = %{
+        "tabs" => [%{"name" => "R", "color" => "#1a2b3c", "cells" => %{"A1" => %{"v" => 1}}}]
+      }
+
       {:ok, binary} = XlsxExport.to_binary(content)
       xml = sheet_n_xml(binary, 1)
 

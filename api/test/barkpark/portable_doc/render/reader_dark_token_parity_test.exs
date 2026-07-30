@@ -106,7 +106,10 @@ defmodule Barkpark.PortableDoc.Render.ReaderDarkTokenParityTest do
   # `{ }` don't end it early.
   defp brace_body(s), do: brace_body(s, 1, [])
   defp brace_body(<<>>, _depth, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
-  defp brace_body(<<?}, _rest::binary>>, 1, acc), do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+
+  defp brace_body(<<?}, _rest::binary>>, 1, acc),
+    do: acc |> Enum.reverse() |> IO.iodata_to_binary()
+
   defp brace_body(<<?{, rest::binary>>, depth, acc), do: brace_body(rest, depth + 1, [?{ | acc])
   defp brace_body(<<?}, rest::binary>>, depth, acc), do: brace_body(rest, depth - 1, [?} | acc])
   defp brace_body(<<c, rest::binary>>, depth, acc), do: brace_body(rest, depth, [c | acc])

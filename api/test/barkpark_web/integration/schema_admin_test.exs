@@ -199,12 +199,20 @@ defmodule BarkparkWeb.Integration.SchemaAdminTest do
          %{conn: conn} do
       {:ok, _} =
         Content.upsert_schema(
-          %{"name" => "populated", "title" => "Populated", "visibility" => "public", "fields" => []},
+          %{
+            "name" => "populated",
+            "title" => "Populated",
+            "visibility" => "public",
+            "fields" => []
+          },
           "test"
         )
 
-      {:ok, _} = Content.create_document("populated", %{"_id" => "pop-1", "title" => "Doc 1"}, "test")
-      {:ok, _} = Content.create_document("populated", %{"_id" => "pop-2", "title" => "Doc 2"}, "test")
+      {:ok, _} =
+        Content.create_document("populated", %{"_id" => "pop-1", "title" => "Doc 1"}, "test")
+
+      {:ok, _} =
+        Content.create_document("populated", %{"_id" => "pop-2", "title" => "Doc 2"}, "test")
 
       resp =
         conn

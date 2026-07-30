@@ -63,19 +63,25 @@ defmodule BarkparkWeb.StatusController do
   # ── Admin ─────────────────────────────────────────────────────────────────────
 
   def create_incident(conn, params) do
-    case Status.create_incident(Map.take(params, ~w(title component impact status body started_at))) do
+    case Status.create_incident(
+           Map.take(params, ~w(title component impact status body started_at))
+         ) do
       {:ok, incident} ->
         conn |> put_status(:created) |> json(%{incident: incident_json(incident)})
 
       {:error, cs} ->
-        conn |> put_status(422) |> json(%{error: %{code: "invalid_incident", message: errors(cs)}})
+        conn
+        |> put_status(422)
+        |> json(%{error: %{code: "invalid_incident", message: errors(cs)}})
     end
   end
 
   def resolve_incident(conn, %{"id" => id}) do
     case Status.get_incident(id) do
       nil ->
-        conn |> put_status(404) |> json(%{error: %{code: "not_found", message: "no such incident"}})
+        conn
+        |> put_status(404)
+        |> json(%{error: %{code: "not_found", message: "no such incident"}})
 
       incident ->
         {:ok, resolved} = Status.resolve_incident(incident)

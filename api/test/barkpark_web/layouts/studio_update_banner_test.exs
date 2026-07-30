@@ -117,7 +117,11 @@ defmodule BarkparkWeb.Layouts.StudioUpdateBannerTest do
         latest: {:ok, %{release: "999.0.0", tag: "v999.0.0"}},
         digest: {:ok, ["fix: a", "feat: b"]},
         release_notes:
-          {:ok, %{body: "## Highlights\nShiny new thing", url: "https://example.test/releases/v999.0.0"}}
+          {:ok,
+           %{
+             body: "## Highlights\nShiny new thing",
+             url: "https://example.test/releases/v999.0.0"
+           }}
       )
 
       assert Barkpark.SelfUpdate.check_now().notes_body =~ "Shiny new thing"

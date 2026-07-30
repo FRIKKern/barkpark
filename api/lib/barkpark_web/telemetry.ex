@@ -162,7 +162,8 @@ defmodule BarkparkWeb.Telemetry do
         tag_values: &lv_view_tag/1,
         reporter_options: [buckets: latency_buckets],
         unit: {:native, :millisecond},
-        description: "LiveView mount latency — p95 via histogram_quantile; tag :view = the module."
+        description:
+          "LiveView mount latency — p95 via histogram_quantile; tag :view = the module."
       ),
       distribution("phoenix.live_view.handle_params.stop.duration",
         tags: [:view],

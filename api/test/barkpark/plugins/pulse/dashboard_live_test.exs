@@ -120,7 +120,12 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
          %{conn: conn} do
       for _ <- 1..3,
           do:
-            Pulse.record_event("test-storm", %{"hue" => 1, "x" => 0.1, "y" => 0.1, "mega" => false})
+            Pulse.record_event("test-storm", %{
+              "hue" => 1,
+              "x" => 0.1,
+              "y" => 0.1,
+              "mega" => false
+            })
 
       {conn, counter_reads} = count_pulse_counter_queries(fn -> get(conn, "/admin/pulse") end)
 
@@ -138,7 +143,12 @@ defmodule Barkpark.Plugins.Pulse.DashboardLiveTest do
     test "the connected mount runs load_rows exactly once per channel (2x -> 1x)", %{conn: conn} do
       for _ <- 1..3,
           do:
-            Pulse.record_event("test-storm", %{"hue" => 1, "x" => 0.1, "y" => 0.1, "mega" => false})
+            Pulse.record_event("test-storm", %{
+              "hue" => 1,
+              "x" => 0.1,
+              "y" => 0.1,
+              "mega" => false
+            })
 
       # `live/2` does the disconnected render THEN connects. The disconnected leg
       # now contributes 0 pulse_counters queries (the fix), so the reads across

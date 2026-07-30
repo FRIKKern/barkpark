@@ -349,9 +349,7 @@ defmodule BarkparkWeb.Studio.StudioLive do
   # ignores a malformed payload without crashing the session.
   def handle_event("width-bucket", %{"bucket" => bucket}, socket)
       when bucket in ~w(wide standard narrow phone),
-      do:
-        {:noreply,
-         Phoenix.Component.assign(socket, width_bucket: bucket, focus_pane_idx: nil)}
+      do: {:noreply, Phoenix.Component.assign(socket, width_bucket: bucket, focus_pane_idx: nil)}
 
   def handle_event("width-bucket", _params, socket), do: {:noreply, socket}
 

@@ -48,7 +48,11 @@ defmodule Barkpark.PortableDoc.Render.FleetRepaintTest do
     test "patch-block{nodes} on a pipeline block replaces nodes and repaints them" do
       doc =
         doc_with([
-          %{"id" => "p1", "type" => "pipeline", "nodes" => [%{"kind" => "gate", "title" => "Build"}]}
+          %{
+            "id" => "p1",
+            "type" => "pipeline",
+            "nodes" => [%{"kind" => "gate", "title" => "Build"}]
+          }
         ])
 
       {:ok, %{"blocks" => [merged]}} =

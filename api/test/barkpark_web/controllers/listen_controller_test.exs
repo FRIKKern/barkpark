@@ -116,10 +116,22 @@ defmodule BarkparkWeb.ListenControllerTest do
       # when it falls on a page boundary.
       for i <- 1..3 do
         {:ok, _} =
-          create_document_in!(ws_a, proj_a, "post", %{"doc_id" => "a#{i}", "title" => "A#{i}"}, @dataset)
+          create_document_in!(
+            ws_a,
+            proj_a,
+            "post",
+            %{"doc_id" => "a#{i}", "title" => "A#{i}"},
+            @dataset
+          )
 
         {:ok, _} =
-          create_document_in!(ws_b, proj_b, "post", %{"doc_id" => "b#{i}", "title" => "B#{i}"}, @dataset)
+          create_document_in!(
+            ws_b,
+            proj_b,
+            "post",
+            %{"doc_id" => "b#{i}", "title" => "B#{i}"},
+            @dataset
+          )
       end
 
       events = ListenController.replay_since(@dataset, 0, ws_a.id, batch: 2) |> Enum.to_list()

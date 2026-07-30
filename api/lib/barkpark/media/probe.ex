@@ -116,17 +116,14 @@ defmodule Barkpark.Media.Probe do
   end
 
   defp webp_dimensions(
-         <<"RIFF", _::32, "WEBP", "VP8 ", _::32, _tag::24, 0x9D, 0x01, 0x2A,
-           w::16-little, h::16-little, _::binary>>
+         <<"RIFF", _::32, "WEBP", "VP8 ", _::32, _tag::24, 0x9D, 0x01, 0x2A, w::16-little,
+           h::16-little, _::binary>>
        ) do
     {:ok, {Bitwise.band(w, 0x3FFF), Bitwise.band(h, 0x3FFF)}}
   end
 
-  defp webp_dimensions(
-         <<"RIFF", _::32, "WEBP", "VP8L", _::32, 0x2F, bits::32-little, _::binary>>
-       ) do
-    {:ok,
-     {Bitwise.band(bits, 0x3FFF) + 1, Bitwise.band(Bitwise.bsr(bits, 14), 0x3FFF) + 1}}
+  defp webp_dimensions(<<"RIFF", _::32, "WEBP", "VP8L", _::32, 0x2F, bits::32-little, _::binary>>) do
+    {:ok, {Bitwise.band(bits, 0x3FFF) + 1, Bitwise.band(Bitwise.bsr(bits, 14), 0x3FFF) + 1}}
   end
 
   defp webp_dimensions(_), do: {:error, :invalid_webp}

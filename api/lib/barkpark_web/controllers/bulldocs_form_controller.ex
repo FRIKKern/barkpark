@@ -76,7 +76,10 @@ defmodule BarkparkWeb.BulldocsFormController do
   defp envelope(conn, status, code, message) do
     conn
     |> put_status(status)
-    |> json(%{ok: false, error: Barkpark.Content.Errors.stamp(%{code: code, message: message}, conn)})
+    |> json(%{
+      ok: false,
+      error: Barkpark.Content.Errors.stamp(%{code: code, message: message}, conn)
+    })
   end
 
   # ── guards ─────────────────────────────────────────────────────────────────

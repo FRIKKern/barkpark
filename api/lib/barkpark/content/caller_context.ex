@@ -86,9 +86,14 @@ defmodule Barkpark.Content.CallerContext do
 
   defp resolve_grants(user_id, opts) do
     cond do
-      Keyword.has_key?(opts, :grants) -> Keyword.fetch!(opts, :grants)
-      Keyword.get(opts, :load_grants, true) -> Barkpark.Access.list_active_grants_for_grantee(user_id)
-      true -> []
+      Keyword.has_key?(opts, :grants) ->
+        Keyword.fetch!(opts, :grants)
+
+      Keyword.get(opts, :load_grants, true) ->
+        Barkpark.Access.list_active_grants_for_grantee(user_id)
+
+      true ->
+        []
     end
   end
 

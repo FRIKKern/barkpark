@@ -272,7 +272,9 @@ defmodule BarkparkWeb.Integration.V1MediaSearchTest do
 
       page2 =
         conn
-        |> get(~p"/v1/media/production/search?facet.tags=paged&limit=2&cursor=#{page1["nextCursor"]}")
+        |> get(
+          ~p"/v1/media/production/search?facet.tags=paged&limit=2&cursor=#{page1["nextCursor"]}"
+        )
         |> json_response(200)
         |> Map.fetch!("result")
 

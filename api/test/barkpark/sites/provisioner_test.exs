@@ -209,7 +209,10 @@ defmodule Barkpark.Sites.ProvisionerTest do
     end
 
     test "a TEMPLATE SWITCH on an existing slug swaps the tree" do
-      assert Provisioner.provision(deploy("switcher", template: "next-starter", runtime_target: "node")) == :ok
+      assert Provisioner.provision(
+               deploy("switcher", template: "next-starter", runtime_target: "node")
+             ) == :ok
+
       src = Provisioner.src_dir("switcher")
       assert File.read!(Path.join(src, "package.json")) == ~s({"name":"next-stub"})
 
@@ -342,20 +345,24 @@ defmodule Barkpark.Sites.ProvisionerTest do
 
     test "template=astro-starter selects astro; template=next-starter selects next" do
       assert Provisioner.provision(deploy("t-astro", template: "astro-starter")) == :ok
+
       assert File.read!(Path.join(Provisioner.src_dir("t-astro"), "package.json")) ==
                ~s({"name":"astro-stub"})
 
       assert Provisioner.provision(deploy("t-next", template: "next-starter")) == :ok
+
       assert File.read!(Path.join(Provisioner.src_dir("t-next"), "package.json")) ==
                ~s({"name":"next-stub"})
     end
 
     test "no template falls back to the runtime_target default — unchanged behavior" do
       assert Provisioner.provision(deploy("fb-node", runtime_target: "node")) == :ok
+
       assert File.read!(Path.join(Provisioner.src_dir("fb-node"), "package.json")) ==
                ~s({"name":"next-stub"})
 
       assert Provisioner.provision(deploy("fb-static")) == :ok
+
       assert File.read!(Path.join(Provisioner.src_dir("fb-static"), "package.json")) ==
                ~s({"name":"astro-stub"})
     end

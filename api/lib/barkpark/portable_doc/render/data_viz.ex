@@ -494,8 +494,15 @@ defmodule Barkpark.PortableDoc.Render.DataViz do
   # ignores unknown attrs by construction (charter D4 lets surfaces diverge).
   defp annotations_of(block) do
     case get(block, "annotations") do
-      %{} = a -> %{regions: as_list(get(a, "regions")), ref_lines: as_list(get(a, "refLines")), points: as_list(get(a, "points"))}
-      _ -> %{regions: [], ref_lines: [], points: []}
+      %{} = a ->
+        %{
+          regions: as_list(get(a, "regions")),
+          ref_lines: as_list(get(a, "refLines")),
+          points: as_list(get(a, "points"))
+        }
+
+      _ ->
+        %{regions: [], ref_lines: [], points: []}
     end
   end
 
