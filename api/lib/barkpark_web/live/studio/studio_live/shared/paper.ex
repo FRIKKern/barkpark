@@ -161,6 +161,17 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
             |> push_canvas_echo()
             |> push_task_previews()
             |> push_block_renders()
+            # A LANDED batch must SAY it landed. The batch path used to assign
+            # save_status only on its three error branches, so the footer save
+            # region ([data-test-id="bp-paper-footer-save"], the page's only
+            # role="status" aria-live region) could say "Save failed" or nothing
+            # — never success. Measured on the deployed build: after a save the
+            # API proved persisted, that region was the EMPTY STRING for 25s
+            # while the footer counts moved. Same "Auto-saved" token the
+            # single-op path (paper_pane_op/2) already assigns — ONE vocabulary
+            # across both write seams, no third state and NO in-flight
+            # "Saving…" transient (charter D242 defers pending feedback).
+            |> assign(save_status: "Auto-saved")
             # A prior halt cleared: the next accepted batch dismisses the banner.
             |> assign(paper_halt: nil)
 
