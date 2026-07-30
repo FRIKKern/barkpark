@@ -5491,6 +5491,59 @@ the round's close must adjudicate its own residue, or 4(a) needs a birth-grace r
 a charter question, not a builder question. (4) `resize`, `attach-iso`, `rebuild` and `hzResDone` carry
 the same receipt lie one function away from the fix that just landed.
 
+### Wave 26 2026-07-31 — "The Verbs That Still Lie, and the Writer That Lies About Writing" — REVIEWED. Grade A− (paper `pds-wave-26-2026-07-30`)
+
+**7 of 7 round-1 slices built, gated and PUSHED WITH PRs.** No stalls, no deferred slices, no
+unpushed branches. Every slice's gate was re-run green on the branch the lead will merge.
+
+| task | final branch | verdict |
+|---|---|---|
+| `pds-w26-stamp-readback` | `…store-say-0-r` | THE SPINE. `bp task stamp` now POSTs → GETs → renders the verdict from the store. Reviewer fixed the receipt's unit label (`chars` → `bytes`) and a comment claiming a perspective the route never sends. |
+| `pds-w26-stamp-exit-taxonomy` | `…command-line-you--1` (unchanged) | 5/6 split shipped exactly as PDS-D371 ruled, compound-prefix `lookupExit` shared by all three lookup sites. Cleanest slice of the wave. |
+| `pds-w26-publish-door-criteria-fence` | `…landed-s-2-r` | Criteria fence + the two `inserted_at` census pins. Reviewer re-derived the coverage independently and CORRECTED the shipped comment. |
+| `pds-w26-hetzner-five-flag-verbs` | `…stop-reporti-3-r` | Four flag verbs read back. Reviewer flipped `poll:true` on rebuild and resize. |
+| `pds-w26-census-anchor-4a` | `…the-round-i-4-r` | `--anchor-from-paper` + argv gate. Reviewer fixed 4(a)'s NUMERATOR. |
+| `pds-w26-export-atomic-out` | `…the-backu-5` (unchanged) | `.partial` + ordered promote, `:161` moved in the same commit. |
+| `pds-w26-workspace-export-declared-size` | `…verifies-t-6` (unchanged) | Declared-size check with the mandatory permanent `-1` branch. |
+
+**THE ONE FINDING THAT IS NOT IN ANY SLICE.** `pds-w26-census-anchor-4a` shipped clause 4(a)'s
+predicate line computing its numerator as `live - len(bare)`, where `bare` is the ANCHORED subset —
+so **every residue row was counted as carrying a disposition.** On the live board that prints
+`172/172 PASS` over 15 rows nobody adjudicated. **The epic's own certifying instrument was emitting
+the exact class of success claim the epic exists to kill**, in the same wave that turned the law onto
+the ledger writer. Fixed at review, mutation-proven (restoring the old numerator reds the selftest,
+79 → 80 checks). The denominator is unchanged and still the whole live board. **Nobody should read
+that as a builder failure — it is what a review is for, and it is the single best argument in this
+epic's history for the reviewer phase existing at all.**
+
+**THE COVERAGE CORRECTION ON THE PUBLISH DOOR.** The fence's shipped comment named
+`Barkpark.Plugins.GitHub.Link.put/4` as an UNCOVERED automatic publisher. It is not. Link.put and
+Adopt both thread `source: :github`, and the wholesale exemption keys on `:sync` ONLY — so both fall
+through the gate and the criteria fence DOES apply to them. That is the right direction and it is
+safe: `collapse_draft_twin/5` already logs a rejected collapse, leaves the draft twin and still
+returns `{:ok, _}`, so a fence refusal defers bookkeeping rather than breaking the mirror job.
+Independently re-derived at review and corrected in the shipped comment. `source: :sync` remains
+genuinely uncovered and genuinely filed.
+
+**CROSS-SLICE PROOF, not assumed.** Five of the seven slices land in `internal/cli`. All five were
+merged onto one integration branch off `origin/main` and `CC=clang go test ./...` ran green across
+every package — so the lead can merge them in any order without a compose surprise.
+
+**HIGH-FLIP-RISK, A SECOND INDEPENDENT HUMAN REVIEWER IS STILL OWED** on both flagged slices.
+For `pds-w26-census-anchor-4a` the residual is exact and unresolved: **the argv gate stops a raw
+timestamp, but nothing binds the anchor SLUG to the round being certified** — `--anchor-from-paper
+pds-wave-20-…` would defer three waves of rows and green. Binding the anchor to the epic task's own
+`wave_paper` field rather than to argv is the obvious next ruling.
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** (1) `pds-w26-close-pulse-readback` — `bp task close` is the
+SEAL and carries the identical exposure the stamp just closed; wave 26 fenced it away deliberately.
+(2) `pds-w26-mcp-stamp-bypasses-readback` (filed at review) — `mcp_tasks.go` calls
+`execManifestCommand` directly and never enters `runTaskStamp`, so an MCP-issued stamp gets NO
+read-back; the caller class most likely to be an agent writing this epic's evidence is the one class
+the new law does not reach. (3) Bind the census anchor to `wave_paper`. (4) `hzResDone` — PDS-D367's
+51-caller class, still a wave-sized slice. (5) `pds-w25-round-terminal` the moment #8218 is DEPLOYED
+(still not merged-equals-deployed; still the human's call).
+
 ## WAVE 26 — THE LAW TURNS INWARD (decided 2026-07-31)
 
 **THE THESIS.** Twenty-five waves taught `bp` verbs to re-read the WORLD — a Hetzner box, a deployed
