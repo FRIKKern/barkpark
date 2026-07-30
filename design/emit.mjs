@@ -1464,14 +1464,27 @@ function elixirTokensGen(themes = loadThemes()) {
     "  defp resolve(_), do: :evergreen",
     "",
     "  # Semantic status tones (design/tokens.json color.status, light theme → hex).",
-    `  @status %{${themes.map(statusEntry).join(", ")}}`,
+    // One entry per LINE, for the same reason `@reading_font` is an attribute
+    // below: `mix format` splits any map literal past 98 columns, and this one
+    // crossed that the moment the theme count went from 1 to 5. A single-line
+    // emit was a format fixed point at N=1 and silently stopped being one — the
+    // drift gate then fires on the NEXT person to run the formatter, blaming
+    // them for a latent property of the emitter. Per-line is a fixed point at
+    // every N. (Each inner status map stays on one line: ~78 columns at the
+    // longest theme name, comfortably under the limit.)
+    "  @status %{",
+    ...themes.map((t, i) => `    ${statusEntry(t)}${isLast(i) ? "" : ","}`),
+    "  }",
     "  def tone_ok(theme \\\\ :evergreen), do: @status[resolve(theme)].ok",
     "  def tone_info(theme \\\\ :evergreen), do: @status[resolve(theme)].info",
     "  def tone_warn(theme \\\\ :evergreen), do: @status[resolve(theme)].warn",
     "  def tone_danger(theme \\\\ :evergreen), do: @status[resolve(theme)].danger",
     "",
     "  # Warm reading accent — the paper terracotta, tokenized.",
-    `  @reading_accent %{${themes.map(readingAccentEntry).join(", ")}}`,
+    // Per-line for the same reason as `@status` above.
+    "  @reading_accent %{",
+    ...themes.map((t, i) => `    ${readingAccentEntry(t)}${isLast(i) ? "" : ","}`),
+    "  }",
     "  def reading_accent(theme \\\\ :evergreen), do: @reading_accent[resolve(theme)]",
     "",
     "  # Reading type (design/tokens.json font.reading / type.reading). Theme-INVARIANT.",
