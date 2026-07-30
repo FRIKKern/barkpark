@@ -1473,6 +1473,37 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
             <:extra_actions>
               <.editor_mode_toggle :if={beta_ok} mode={@editor_mode} beta_ok={beta_ok} />
             </:extra_actions>
+            <%!-- spd-w19 — the third seam. The slot has been DECLARED and never
+                  filled since D222; unfilled it fell to
+                  `<.empty_editor message="Select a document to edit">`, which
+                  answers a named-but-unresolvable document with absence. The
+                  reason is derived ONCE in `Shared.rebuild_panes` (assign
+                  `:editor_empty`, from `(panes, nav_path)`) because every
+                  nil-editor producer in PaneBuilder returns a bare nil. Filling
+                  the slot makes the default string unreachable on this path. --%>
+            <:empty_state>
+              <% empty = Map.get(assigns, :editor_empty) || %{reason: :nothing_selected, doc_id: nil, doc_type: nil} %>
+              <%!-- Only `:not_found` gets a type-list link: for `:no_schema` that
+                    list IS the pane that could not open the document, so
+                    offering it would be a second shrug. --%>
+              <BarkparkWeb.StudioComponents.Editor.unresolved_document_notice
+                reason={empty.reason}
+                doc_id={empty.doc_id}
+                doc_type={empty.doc_type}
+                list_href={
+                  if empty.reason == :not_found and empty.doc_type,
+                    do:
+                      Paths.studio_path(
+                        Map.get(assigns, :scope_prefix) || "",
+                        [empty.doc_type],
+                        @dataset
+                      )
+                }
+                desk_href={
+                  Paths.studio_path(Map.get(assigns, :scope_prefix) || "", [], @dataset)
+                }
+              />
+            </:empty_state>
           </.studio_editor_shell>
         <% end %>
       <% end %>
