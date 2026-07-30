@@ -280,6 +280,13 @@ func TestPrebuiltPaxHeadersAreInvisibleThroughTarNewReader(t *testing.T) {
 // BYTES so CI needs no Go toolchain to run the Elixir half; this test is how you
 // re-derive them (`go test ./internal/cli/ -run Prebuilt -v`) after any change
 // to the packer or the Go toolchain.
+//
+// RE-DERIVE means REPLACE, not reproduce: `tar.FileInfoHeader` copies each file's
+// ModTime into the header, so a fresh run of this test can never emit the bytes
+// already checked in — only an equivalent archive with the same typeflag
+// sequence. Do NOT diff the logged base64 against the committed constant and
+// read the difference as drift; compare the `flags=[…]` line instead, which is
+// the property the Elixir fixtures exist to carry.
 func TestPrebuiltPaxFixturesForTheExtractor(t *testing.T) {
 	cases := []struct {
 		name  string
