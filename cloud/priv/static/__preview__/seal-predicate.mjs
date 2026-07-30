@@ -83,6 +83,13 @@
 //          protection. `enforced !== true` is an INFRA FAULT, never a verdict: with no
 //          enforcing boundary there is nothing to read a rung-2 claim against, so the
 //          honest answer is "nothing was measured", not "measured".
+//          WHAT LEG A IS NOT: this is the committed RECORD, not a live read of GitHub.
+//          The predicate makes no network call by design (it is spawned bare in test
+//          contexts with no token), so a spec that was never applied — or a branch
+//          whose protection was changed out from under it — would read the same here.
+//          That drift is a different instrument's job: `required-checks-verify.sh`
+//          diffs this file against the live branch. The MEASURED-ELSEWHERE line says
+//          which of the two it read, so the claim is never larger than the evidence.
 //   Leg B  the AGGREGATOR over the named job, found structurally: the job in that same
 //          workflow whose `needs:` contains the named job AND which carries
 //          `if: always()`. Its rendered check-run context is its `name:` — which is
@@ -639,17 +646,23 @@ function main() {
             rung = 3;
           } else {
             // ── Leg C: is that aggregator actually REQUIRED on this branch?
-            aggregator = renderedContext(usable[0]);
+            //
+            // More than one always()-aggregator over the same job is legal YAML, and
+            // the question rung 2 asks is "does ANY of them stop a merge" — so the
+            // registered one wins. Picking the first candidate blindly would have
+            // reported rung 3 over a job that IS enforced, purely on job ordering.
             required = requiredContexts(fixture);
+            const enforcedCandidate = usable.find((j) => required.set.has(renderedContext(j)));
+            aggregator = renderedContext(enforcedCandidate || usable[0]);
             if (!required.set.has(aggregator)) {
-              problems.push(`${workflow} job \`${job}\` is aggregated by "${aggregator}", and "${aggregator}" is NOT a required status check on ${required.branch} (required today: ${[...required.set].join(', ') || 'NONE'}). The job can go red and the PR still merges, so this measurement enforces nothing: rung 3, not rung 2. Register the name — cch-w9-register-console-and-cloud-gates owns that, via scripts/required-checks-apply.sh. Softening this leg would reinstate exactly the defect it removes.`);
+              problems.push(`${workflow} job \`${job}\` is aggregated by ${usable.map((j) => `"${renderedContext(j)}"`).join(', ')}, and ${usable.length > 1 ? 'NONE of those names is' : `"${aggregator}" is NOT`} a required status check on ${required.branch} (required today: ${[...required.set].join(', ') || 'NONE'}). The job can go red and the PR still merges, so this measurement enforces nothing: rung 3, not rung 2. Register the name — cch-w9-register-console-and-cloud-gates owns that, via scripts/required-checks-apply.sh. Softening this leg would reinstate exactly the defect it removes.`);
               rung = 3;
             }
           }
         }
       }
       if (problems.length === mBefore)
-        notes.push(`MEASURED-ELSEWHERE by ${d.measured_by.filter((p) => existsSync(`${REPO}/${p}`)).join(', ')}, run by ${workflow} job \`${job}\`, whose failure is enforced through the REQUIRED status check "${aggregator}" on ${required.branch}${required.fromFixture ? ' (REQUIRED-CONTEXT SET SUPPLIED BY LEDGER FIXTURE — not this branch\'s real protection)' : ''}. THIS RUN DID NOT EXECUTE IT — it verified that the test file exists, that the CI job exists, and that a merge cannot pass while that job is red.`);
+        notes.push(`MEASURED-ELSEWHERE by ${d.measured_by.filter((p) => existsSync(`${REPO}/${p}`)).join(', ')}, run by ${workflow} job \`${job}\`, whose failure is enforced through the REQUIRED status check "${aggregator}" on ${required.branch}${required.fromFixture ? ' (REQUIRED-CONTEXT SET SUPPLIED BY LEDGER FIXTURE — not this branch\'s real protection)' : ' (READ FROM THE COMMITTED .github/required-checks.json, not from live GitHub — this program makes no network call; `scripts/required-checks-verify.sh` is what compares that record against the branch)'}. THIS RUN DID NOT EXECUTE IT — it verified that the test file exists, that the CI job exists, and that a merge cannot pass while that job is red.`);
     } else if (waivers.has(d.id)) {
       // FIXTURE-ONLY. Named, printed, and unreachable on a live run (a waiver can only
       // arrive through --ledger). It exists so the clause-(a) fixtures can reach a SEAL

@@ -775,6 +775,53 @@ test('wave 9: the aggregator is found through EITHER YAML needs: spelling', () =
   assert.match(asBlock.out, /enforced through the REQUIRED status check "Cloud gate"/);
 });
 
+// ── TWO AGGREGATORS OVER THE SAME JOB — THE REGISTERED ONE WINS ─────────────
+// Several always()-aggregators over one job is legal YAML. The question rung 2 asks
+// is "can ANY required context go red when this job does", so resolving to whichever
+// candidate the parser happened to see first would report rung 3 over a job that IS
+// enforced — a false NO SEAL decided by job ORDER in a file. The decoy below is
+// declared BEFORE `cloud-gate`, so a first-wins resolver reds this test.
+test('wave 9 LEG C: with a decoy aggregator declared first, the REGISTERED name still resolves', () => {
+  const { status, out } = synthRun({ workflow: (src) => {
+    const decoy = [
+      '  cloud-gate-decoy:',
+      '    name: Cloud gate decoy',
+      '    if: always()',
+      '    needs: [changes, compile, test, path-escape]',
+      '    runs-on: ubuntu-latest',
+      '    steps:',
+      '      - run: "true"',
+      '',
+    ].join('\n');
+    const mutated = src.replace(/^ {2}cloud-gate:$/m, `${decoy}  cloud-gate:`);
+    assert.notEqual(mutated, src, 'the decoy aggregator must actually be inserted');
+    assert.ok(mutated.indexOf('cloud-gate-decoy:') < mutated.indexOf('\n  cloud-gate:'),
+      'the decoy must come FIRST, else this proves nothing about ordering');
+    return mutated;
+  } });
+  assert.equal(status, SEAL, `an enforced aggregator must resolve regardless of file order: ${token(out)}`);
+  assert.match(out, /enforced through the REQUIRED status check "Cloud gate" on main/);
+  assert.doesNotMatch(out, /"Cloud gate decoy"/, 'the unregistered decoy must not be reported as the enforcer');
+  assert.match(token(out), /b=PASS/);
+});
+
+// …and when NEITHER candidate is registered, the failure names BOTH, so the reader
+// is not sent to register a name that was chosen arbitrarily.
+test('wave 9 LEG C: with two unregistered aggregators, the refusal names both', () => {
+  const { status, out } = synthRun({
+    workflow: (src) => src.replace(/^ {2}cloud-gate:$/m,
+      '  cloud-gate-decoy:\n    name: Cloud gate decoy\n    if: always()\n    needs: [changes, compile, test, path-escape]\n    runs-on: ubuntu-latest\n    steps:\n      - run: "true"\n\n  cloud-gate:'),
+    requiredChecks: (rc) => {
+      rc.protection.required_status_checks.checks =
+        rc.protection.required_status_checks.checks.filter((c) => c.context !== AGG);
+      return rc;
+    },
+  });
+  assert.equal(status, NO_SEAL);
+  assert.match(out, /is aggregated by "Cloud gate decoy", "Cloud gate", and NONE of those names is a required status check on main/);
+  assert.match(token(out), /b=FAIL/);
+});
+
 // ── THE LIVE STATE, PINNED HONESTLY ─────────────────────────────────────────
 // No fixture override, no synthetic repo: the real cloud.yml and the real
 // required-checks.json. `Cloud gate` is NOT registered at this commit, so clause (b)
