@@ -79,6 +79,25 @@ defmodule BarkparkCloud.Web.Auth do
   # `require_user/2`, and a second callback would be a redundant (throttled, but
   # pointless) statement.
   defp defer_session_touch(conn, token) do
+    defer_credential_touch(conn, fn -> Accounts.touch_session_last_used(token) end)
+  end
+
+  # The PAT twin. A PAT is the SAME liveness claim on the tokens card, and it
+  # runs through the same authentication-before-authorization ordering: the
+  # branch below resolves the credential, and `require_ability/2` answers
+  # `forbidden(conn)` only afterwards — so an eager stamp made a read-only PAT
+  # that was just 403'd print as freshly used. Measured: backdate 3600s, fire
+  # ONE refused request, and the stamp jumped a full hour past any throttle.
+  defp defer_pat_touch(conn, token) do
+    defer_credential_touch(conn, fn -> Accounts.touch_pat_last_used(token) end)
+  end
+
+  # Registered ONCE per conn under a SHARED private key. Safe because session
+  # and PAT are mutually exclusive branches of one `cond` in
+  # `require_user_or_pat/2` — a single conn can only ever carry one of them, so
+  # the two deferrals can never contend for the key. (Should a conn ever be
+  # able to hold both, this needs one key per credential kind.)
+  defp defer_credential_touch(conn, stamp_fun) do
     if conn.private[:barkpark_session_touch_deferred] do
       conn
     else
@@ -86,7 +105,7 @@ defmodule BarkparkCloud.Web.Auth do
       |> put_private(:barkpark_session_touch_deferred, true)
       |> register_before_send(fn sent ->
         if is_integer(sent.status) and sent.status < 400 do
-          Accounts.touch_session_last_used(token)
+          stamp_fun.()
         end
 
         sent
@@ -155,7 +174,7 @@ defmodule BarkparkCloud.Web.Auth do
             |> assign(:current_abilities, ["root"])
             |> defer_session_touch(token)
 
-          result = Accounts.verify_personal_access_token(token) ->
+          result = Accounts.verify_personal_access_token(token, touch: false) ->
             {user, pat} = result
 
             conn
@@ -166,6 +185,7 @@ defmodule BarkparkCloud.Web.Auth do
             )
             |> assign(:current_token, pat)
             |> assign(:current_abilities, pat.abilities)
+            |> defer_pat_touch(token)
 
           true ->
             unauthorized(conn)
