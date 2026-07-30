@@ -4302,12 +4302,49 @@ unattended owner cannot. **NO CROWN RE-FIRE.** Fences: OFF `.github/workflows/**
   wave's OWN LAW applied to its own bookkeeping: **N disposed rows → N rows RE-READ from the server → N
   non-empty reason fields, with the counting command pasted into the criterion evidence.** Guerrilla writes
   are 15-33s degraded under concurrent waves — re-read AFTER settle, and NEVER conclude a write failed from an
-  exit code. Vocabulary (three classes, each with a real write): CLOSED → `bp task close … "<reason>"` →
-  `content.close_reason`, which must name the fixing commit / charter line / live probe that makes it moot;
-  PARKED → `bp task stage <id> considering --object research --worker <w> --note '<reason + REACTIVATE
-  trigger>' --yes` → `content.engagement.note`; OPEN → patch `content.disposition` /
-  `disposition_owner` / `disposition_reason` and re-publish. A CLAIMED row cannot be parked
-  (`illegal_transition in_progress → considering`); a parent with open children is NOT closed (D71 shape).
+  exit code. (This decision's *ruling* on wave 10's 45 parks — "the mechanism worked; it was never used" — is
+  REFUTED AND SUPERSEDED by PDS-D309: our own `TtlSweeper` was the deleter. The re-read law below stands; the
+  verdict on those 45 rows does not.)
+
+  **VOCABULARY (three classes, each with a real write) — REWRITTEN in wave 24, post-D306 and post-S4.** The
+  recipe this decision used to prescribe is now WRONG TWICE: it routed a park's reason to
+  `content.engagement.note`, which D306 overturned (the engagement map is an EPHEMERAL lease the `TtlSweeper`
+  deletes wholesale after ~900 s; the durable key is `content.disposition_reason`), and it told operators to
+  hand-patch `content.disposition`, which the API now REFUSES — wave 24 slice S4 gave that field its first
+  code writer and fenced the raw door (`Mutations.ensure_disposition_via_verb/4`, all four `apply_mutations`
+  clauses, 422 `invalid_task_content` naming the verb). Use:
+
+  - **CLOSED** → `bp task close <id> <worker> <epoch> done "<reason>"` → `content.close_reason`, which must
+    name the fixing commit / charter line / live probe that makes the row moot.
+  - **PARKED** → `bp task stage <id> considering --object research --worker <w> --disposition parked
+    --note '<why it is parked>' --reopen-trigger '<what would make it worth reconsidering>' --yes` → writes
+    `content.disposition` (normalised), `content.disposition_reason` and `content.reopen_trigger` in ONE
+    atomic CAS write. **A park with no reopen trigger is REFUSED** (`missing_reopen_trigger`) — a deferral
+    that cannot say what would bring the row back has decided nothing. A trigger already on the row satisfies
+    a re-park.
+  - **OPEN** → the same verb with `--disposition open --note '<why it stays open>'`, plus
+    `content.disposition_owner` (a named owner) patched and re-published. `disposition_owner` is NOT fenced;
+    `disposition` is.
+
+  **THE ONE THING THIS RECIPE CANNOT YET DO, STATED RATHER THAN IMPLIED.** S4's fence and verb landed in
+  `content/mutations.ex` + `tasks/stage.ex` only — its slice fence excluded `tasks_controller.ex` and the
+  capability manifest in `plugins/tasks.ex`, both of which are hot in this wave. So `Barkpark.Tasks.stage/3`
+  accepts `:disposition` / `:reopen_trigger` TODAY, but the controller does not yet forward those params and
+  the manifest does not yet advertise the flags — meaning `bp task stage --disposition` and
+  `POST /v1/tasks/:id/stage {"disposition": …}` are INERT until the wiring slice
+  (`pds-w24-stage-disposition-wiring`) merges. **Do not merge S4's refusal ahead of that wiring**: the 422
+  would name a retry instruction no operator can execute. Until then the only working writer is the Elixir
+  seam.
+
+  The term is trimmed and downcased by the verb, which is what closes the measured `OPEN` 57 / `open` 47
+  two-case split at the source. NEVER patch `content.disposition` through `/v1/data/mutate` — the 422 names
+  this recipe as the retry instruction. Erasing `content.reopen_trigger` raw while a row is parked is refused
+  too; ADDING one raw is still allowed, and is the sanctioned remediation for rows parked hollow before this
+  fence. RESIDUE, STATED: a `createOrReplace` on a BRAND-NEW id can still birth a hollow park — the
+  fresh-create exemption is structural and inherited (see the guard's own "RESIDUAL HARM, MEASURED
+  (disposition)" comment); closing it needs an attribution requirement on task BIRTHS. A CLAIMED row cannot
+  be parked (`illegal_transition in_progress → considering`); a parent with open children is NOT closed
+  (D71 shape).
 
 - **PDS-D299 — ADJUDICATE BY CONTENT; CITED LINE NUMBERS ARE UNTRUSTWORTHY, AND EVERY `git log -S` CARRIES
   `--full-history`.** `pds-bl-close-holder-and-criteria-gate` cites `close.ex:157-161`, where main holds

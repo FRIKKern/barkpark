@@ -28,6 +28,10 @@ defmodule Barkpark.Tasks.Stage do
     3b. **Durable reason** (PDS wave 23) — a `:note` does NOT ride the
        engagement map. It lands in `content.disposition_reason`, a key no
        sweeper owns. See "The durable/ephemeral split" below.
+    3c. **The adjudication triple** (PDS wave 24) — `:disposition`,
+       `:disposition_reason` and `:reopen_trigger` are written TOGETHER, in
+       this one CAS update, or not at all. See "Hollowness is unwritable"
+       below.
     4. **CAS-rev update** — `rev = <observed_rev>` guard, mirroring move/pulse;
        0 rows → `{:error, :stale_claim}`.
     5. **Additive event** — one `task.staged` mutation_event in the same
@@ -70,6 +74,41 @@ defmodule Barkpark.Tasks.Stage do
   `TtlSweeper.apply_lapse` additionally PROMOTES a legacy `engagement.note`
   into `disposition_reason` on the way out, so rows written before this split
   keep their reason too.
+
+  ## Hollowness is unwritable (PDS wave 24)
+
+  Wave 23 gave a stage a durable place to put its REASON but no place to put
+  the VOCABULARY TERM the reason is for. `content.disposition` was written
+  exclusively by hand-patching (charter D298), so it had ZERO code writers
+  repo-wide — and a field with no writer has, by construction, no normaliser
+  and no requirement. The measured consequence: an epic-wide vocabulary
+  reading `OPEN` 57 / `open` 47 / `parked` 27 / ABSENT 37, and parked rows
+  carrying no statement of what would ever reopen them.
+
+  A park that cannot say what would reopen it is a disposition that has
+  decided nothing. So stage now owns the whole adjudication:
+
+    * `content.disposition` — the TERM, from `#{inspect(~w(open parked closed))}`,
+      normalised (trimmed + downcased, which is what closes the two-case
+      split);
+    * `content.disposition_reason` — the durable WHY (where `:note` already
+      landed);
+    * `content.reopen_trigger` — the durable WHEN-RECONSIDERED.
+
+  All three are written in the SAME advisory-locked CAS update as the
+  lifecycle transition, so there is no window in which a row is parked without
+  its trigger. A `→ parked` stage that supplies no trigger — and whose row
+  carries none already — is REFUSED with
+  `{:error, {:missing_reopen_trigger, "parked"}}` before anything is written.
+  A stage that supplies no disposition at all is untouched by any of this: the
+  refusal fires on what THIS stage writes, never on what the row carries.
+
+  The RAW door onto the same key is closed in
+  `Barkpark.Content.Mutations` (`ensure_disposition_via_verb/4`), which refuses
+  any `/v1/data/mutate` change of `disposition` on a `type:task` and names this
+  verb as the retry instruction. The two doors are complementary and both are
+  needed: a stage-side requirement cannot see a raw patch, and a raw-side guard
+  would leave the only sanctioned writer unfenced.
   """
 
   import Ecto.Query, only: [from: 2]
@@ -105,6 +144,21 @@ defmodule Barkpark.Tasks.Stage do
   # `TtlSweeper.apply_lapse/1` deletes exactly one key ("engagement"), by name.
   @durable_reason_key "disposition_reason"
 
+  # The adjudication TERM and its reopen condition (PDS wave 24). Both durable,
+  # both owned by this verb, both written in the same CAS update as the reason.
+  @disposition_key "disposition"
+  @reopen_trigger_key "reopen_trigger"
+
+  # The three-class vocabulary, lowercase-canonical. Normalising here is what
+  # closes the measured two-case split (OPEN 57 / open 47): the ONE writer is
+  # the ONE normaliser.
+  @dispositions ~w(open parked closed)
+
+  # The terms that make no sense without a reopen condition. `closed` is
+  # terminal by construction and `open` is not a deferral, so only a park owes
+  # a trigger.
+  @trigger_required ~w(parked)
+
   # Mirrors TtlSweeper's engagement lease default so the receipt can state the
   # half-life the sweeper will actually enforce.
   @default_engagement_ttl_seconds 900
@@ -119,6 +173,36 @@ defmodule Barkpark.Tasks.Stage do
   """
   @spec durable_reason_key() :: String.t()
   def durable_reason_key, do: @durable_reason_key
+
+  @doc """
+  The content key the adjudication TERM is written to (PDS wave 24). Written
+  by this verb only — `Barkpark.Content.Mutations` refuses a raw change of it
+  on a `type:task`.
+  """
+  @spec disposition_key() :: String.t()
+  def disposition_key, do: @disposition_key
+
+  @doc """
+  The content key the reopen condition is written to (PDS wave 24) — what
+  would make a parked row worth reconsidering.
+  """
+  @spec reopen_trigger_key() :: String.t()
+  def reopen_trigger_key, do: @reopen_trigger_key
+
+  @doc """
+  The lowercase-canonical adjudication vocabulary. A `:disposition` is trimmed
+  and downcased into this set; anything else is `{:error, {:invalid_disposition,
+  value}}`.
+  """
+  @spec dispositions() :: [String.t()]
+  def dispositions, do: @dispositions
+
+  @doc """
+  The dispositions that REQUIRE a reopen trigger (supplied on the stage, or
+  already carried by the row).
+  """
+  @spec trigger_required_dispositions() :: [String.t()]
+  def trigger_required_dispositions, do: @trigger_required
 
   @doc """
   The engagement lease TTL, in seconds, as the sweeper will apply it
@@ -157,6 +241,18 @@ defmodule Barkpark.Tasks.Stage do
       payload as `staged.note_key`. Routed on EVERY stageable target,
       including `→ open`, where the reason for resolving the thought is
       exactly the thing worth keeping.
+    * `:disposition_reason` — an explicit spelling of `:note`. Same key, same
+      semantics; it exists so a caller adjudicating a row can name all three
+      parts of the triple by the key each lands on. `:note` wins if both are
+      given (it is the older, wired spelling).
+    * `:disposition` — the adjudication TERM (PDS wave 24):
+      `#{inspect(@dispositions)}`, trimmed and downcased. Absent → the row's
+      existing term is left exactly as it was. Anything outside the vocabulary
+      → `{:error, {:invalid_disposition, value}}`.
+    * `:reopen_trigger` — what would make this row worth reconsidering.
+      Durable, written to `content.#{@reopen_trigger_key}`. Blank is treated
+      as absent. REQUIRED when `:disposition` is one of
+      `#{inspect(@trigger_required)}` and the row does not already carry one.
     * `:caller_token_id` — audit stamp for the mutation_event.
 
   Returns `{:ok, doc}`, or:
@@ -166,6 +262,10 @@ defmodule Barkpark.Tasks.Stage do
       target, or `from → to` is refused by the legality table.
     * `{:error, {:invalid_object, object}}` — engagement object not in
       `#{inspect(@objects)}`.
+    * `{:error, {:invalid_disposition, value}}` — term outside
+      `#{inspect(@dispositions)}`.
+    * `{:error, {:missing_reopen_trigger, disposition}}` — a park with no
+      reopen condition, on the stage or on the row. NOTHING is written.
     * `{:error, :stale_claim}` — CAS lost (rare under the advisory lock).
   """
   @spec stage(binary(), String.t(), keyword()) ::
@@ -174,11 +274,14 @@ defmodule Barkpark.Tasks.Stage do
              :not_found
              | :stale_claim
              | {:illegal_transition, String.t(), String.t()}
-             | {:invalid_object, term()}}
+             | {:invalid_object, term()}
+             | {:invalid_disposition, term()}
+             | {:missing_reopen_trigger, String.t()}}
   def stage(task_id, to, opts \\ []) when is_binary(task_id) and is_binary(to) do
     object = Keyword.get(opts, :object) || "research"
     holder = Keyword.get(opts, :holder)
-    note = normalize_note(Keyword.get(opts, :note))
+    note = normalize_note(Keyword.get(opts, :note) || Keyword.get(opts, :disposition_reason))
+    reopen_trigger = normalize_note(Keyword.get(opts, :reopen_trigger))
     caller_token_id = Keyword.get(opts, :caller_token_id)
 
     result =
@@ -193,9 +296,21 @@ defmodule Barkpark.Tasks.Stage do
           %Document{} = doc ->
             from = current_status(doc)
 
+            # The adjudication is validated against the row we hold the lock on
+            # (a trigger already ON the row satisfies a re-park), and every
+            # refusal happens BEFORE the CAS update — a refused stage writes
+            # nothing at all.
             with :ok <- check_stageable(from, to),
-                 :ok <- check_object(to, object) do
-              do_stage(doc, from, to, object, holder, note, caller_token_id)
+                 :ok <- check_object(to, object),
+                 {:ok, disposition} <- check_disposition(Keyword.get(opts, :disposition)),
+                 :ok <- check_reopen_trigger(doc, disposition, reopen_trigger) do
+              adj = %{
+                note: note,
+                disposition: disposition,
+                reopen_trigger: reopen_trigger
+              }
+
+              do_stage(doc, from, to, object, holder, adj, caller_token_id)
             end
         end
       end)
@@ -235,13 +350,56 @@ defmodule Barkpark.Tasks.Stage do
 
   defp check_object(_to, _object), do: :ok
 
+  # The vocabulary normaliser (PDS wave 24). ONE writer, so ONE normaliser:
+  # trim + downcase is what collapses the measured `OPEN`/`open` split at the
+  # source instead of asking every reader to fold case.
+  #
+  # FAIL CLOSED, NEVER RAISE — chosen deliberately, not discovered. This module
+  # is reachable from `/v1/tasks/:doc_id/stage` and, through the capability
+  # manifest, from any surface that enumerates verbs. Raising on an unexpected
+  # value would turn a caller's typo into a 500 (and, on the manifest/normalise
+  # side, would take the whole `/v1/capabilities` response down for every
+  # third-party plugin sharing that response). An error tuple the controller
+  # already renders as a 422 costs the caller one retry and costs everyone else
+  # nothing.
+  defp check_disposition(nil), do: {:ok, nil}
+
+  defp check_disposition(value) when is_binary(value) do
+    case value |> String.trim() |> String.downcase() do
+      "" -> {:ok, nil}
+      normalized when normalized in @dispositions -> {:ok, normalized}
+      _ -> {:error, {:invalid_disposition, value}}
+    end
+  end
+
+  defp check_disposition(value), do: {:error, {:invalid_disposition, value}}
+
+  # A park owes a reopen condition. The trigger may arrive on THIS stage or
+  # already sit on the row (a re-park of an already-triggered row is honest and
+  # must not be busywork). Checked against the locked row, before the CAS.
+  defp check_reopen_trigger(%Document{content: content}, disposition, trigger)
+       when disposition in @trigger_required do
+    carried = content |> content_map() |> Map.get(@reopen_trigger_key)
+
+    if is_binary(trigger) or is_binary(normalize_note(carried)) do
+      :ok
+    else
+      {:error, {:missing_reopen_trigger, disposition}}
+    end
+  end
+
+  defp check_reopen_trigger(_doc, _disposition, _trigger), do: :ok
+
+  defp content_map(content) when is_map(content), do: content
+  defp content_map(_), do: %{}
+
   defp do_stage(
          %Document{content: content} = doc,
          from,
          to,
          object,
          holder,
-         note,
+         adj,
          caller_token_id
        ) do
     observed_rev = doc.rev
@@ -250,10 +408,15 @@ defmodule Barkpark.Tasks.Stage do
 
     {new_content, engagement} = apply_engagement(content, to, object, holder, ts_iso)
 
+    # The adjudication triple lands in this ONE map, which this ONE CAS update
+    # persists — there is no window in which a row is parked without its
+    # trigger, because there is no second write.
     new_content =
       new_content
       |> Map.put("lifecycle_status", to)
-      |> apply_durable_reason(note)
+      |> apply_durable_reason(adj.note)
+      |> apply_adjudication_key(@disposition_key, adj.disposition)
+      |> apply_adjudication_key(@reopen_trigger_key, adj.reopen_trigger)
 
     {rows, _} =
       from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
@@ -272,7 +435,7 @@ defmodule Barkpark.Tasks.Stage do
             observed_rev,
             "api",
             Map.merge(
-              staged_payload(from, to, engagement, holder, note),
+              staged_payload(from, to, engagement, holder, adj),
               caller_stamp(caller_token_id)
             )
           )
@@ -317,6 +480,12 @@ defmodule Barkpark.Tasks.Stage do
   defp apply_durable_reason(content, nil), do: content
   defp apply_durable_reason(content, note), do: Map.put(content, @durable_reason_key, note)
 
+  # Same "absent means leave it alone" rule as the reason: a stage that says
+  # nothing about the term or the trigger must not erase an earlier
+  # adjudication.
+  defp apply_adjudication_key(content, _key, nil), do: content
+  defp apply_adjudication_key(content, key, value), do: Map.put(content, key, value)
+
   # When the written lease dies, as an ISO-8601 instant. Derived from the same
   # `ts` the sweeper compares against, so this is a statement about the actual
   # enforcement, not a guess.
@@ -345,15 +514,22 @@ defmodule Barkpark.Tasks.Stage do
   # (`note_key`), so the event says where the durable text actually landed
   # instead of implying it rode the lease (PDS wave 23). `lapses_at` echoes the
   # written lease's death so a consumer of the event knows it too.
-  defp staged_payload(from, to, engagement, holder, note) do
+  # The adjudication triple is echoed the same way the note is — the VALUE plus
+  # the KEY it landed on — so a consumer of the event can tell an adjudication
+  # that was written from one that was merely passed.
+  defp staged_payload(from, to, engagement, holder, adj) do
     %{
       "staged" => %{
         "from" => from,
         "to" => to,
         "object" => engagement && Map.get(engagement, "object"),
         "holder" => holder,
-        "note" => note,
-        "note_key" => note && @durable_reason_key,
+        "note" => adj.note,
+        "note_key" => adj.note && @durable_reason_key,
+        "disposition" => adj.disposition,
+        "disposition_key" => adj.disposition && @disposition_key,
+        "reopen_trigger" => adj.reopen_trigger,
+        "reopen_trigger_key" => adj.reopen_trigger && @reopen_trigger_key,
         "lapses_at" => engagement && Map.get(engagement, "lapses_at")
       }
     }
