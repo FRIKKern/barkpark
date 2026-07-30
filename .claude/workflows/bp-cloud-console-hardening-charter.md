@@ -575,9 +575,21 @@ three slices against ~58 live rows, with the required-check flip structurally un
 by the fact that the wave's own premise about `bp task create` was wrong and cost two builders their
 follow-up rows.
 
-**What the next wave must take.** Merge round 1 in any order (the three slices are file-disjoint —
-verified by a clean octopus merge, 722/722 + 31/31 + 2539 tests/2 pre-existing failures on the
-union), then dispatch the two D105-deferred slices, which now have no excuse: the aggregator
+**MERGE ORDER IS LOAD-BEARING — #8125 FIRST.** The three slices are file-disjoint (verified by a
+clean octopus merge: 722/722 + 31/31 + 2539 Elixir tests, 2 pre-existing failures on the union), but
+they are NOT order-free in CI. Read from the live check runs, not assumed:
+
+- **#8125's `Console client unit harness` is GREEN — the first time that job has ever passed.** It
+  carries the test-23 fix.
+- **#8127's is RED at 29/30 on `not ok 23`**, for a reason that is not #8127's: its branch predates
+  the fix. It goes green the moment #8125 lands. Do not read it as a defect in the CSS slice.
+- **`Cloud control-plane (test)` fails on both #8125 and #8126 at 2537 tests / 2 failures**, and the
+  two are `router_ability_matrix_test.exs:221` and `:236` — the pre-existing `main` red, confirmed
+  from the CI log itself, not inferred. Every cloud PR will carry this until
+  `cch-bl-ability-matrix-red-on-main` is paid.
+
+**What the next wave must take.** Merge #8125, then #8127 and #8126 in either order, then dispatch
+the two D105-deferred slices, which now have no excuse: the aggregator
 transplant (D99/D100) and the `console-path-escape-check.sh` prerequisite (D98). Take
 `cch-bl-ability-matrix-red-on-main` FIRST — a red `main` poisons every subsequent wave's baseline.
 Then `cch-bl-pat-touch-not-authz-aware`, which is the same lie in the other credential and whose fix
