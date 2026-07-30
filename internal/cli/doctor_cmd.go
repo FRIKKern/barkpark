@@ -39,7 +39,14 @@ var doctorGateOpts = func(base, token string) setup.HealthGate {
 			url = "https://api.barkpark.cloud"
 		}
 		g.CloudSitesURL = url + "/v1/sites"
-		g.CloudSitesToken = strings.TrimSpace(cfg.CloudToken)
+		// Through the RESOLVER, not cfg.CloudToken: HasCloudToken above answers
+		// true for a BARKPARK_CLOUD_TOKEN in the environment (how CI
+		// authenticates — there is no `bp login` there), while cfg.CloudToken is
+		// the persisted tier only and is EMPTY in that case. Reading the field
+		// directly therefore armed this probe with an empty Bearer and reported a
+		// 401 as a failed check — a false red produced by the very credential
+		// that works for every other Cloud command.
+		g.CloudSitesToken, _ = cfg.ResolveCloudToken()
 	}
 	return g
 }

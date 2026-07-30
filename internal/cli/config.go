@@ -48,6 +48,10 @@ type Config struct {
 	// that owns the whole fleet. `bp login` writes all three; everything else
 	// (bp barkparks / provider add / launch / go-live) reads them. Empty CloudToken
 	// → not logged in; the Cloud commands tell the user to run `bp login`.
+	//
+	// CloudToken is the PERSISTED tier only — read it through ResolveCloudToken so
+	// the BARKPARK_CLOUD_TOKEN env override (how CI authenticates, since there is
+	// no `bp login` there) wins as documented.
 	CloudURL   string `json:"cloud_url,omitempty"`
 	CloudToken string `json:"cloud_token,omitempty"`
 	CloudTeam  string `json:"cloud_team,omitempty"`
@@ -57,28 +61,86 @@ type Config struct {
 	KnownServers []ServerEntry `json:"known_servers,omitempty"`
 }
 
-// CloudClient builds a control-plane client from the persisted Cloud credentials.
+// CloudTokenEnv is the environment variable a NON-INTERACTIVE client (a GitHub
+// Action, any CI job) sets to authenticate against the Cloud control plane
+// without a config.json — there is no `bp login` in CI to write one.
+const CloudTokenEnv = "BARKPARK_CLOUD_TOKEN"
+
+// Where a resolved Cloud token came from. It names the ORIGIN only and never
+// carries any part of the credential, so it is safe in any diagnostic output.
+const (
+	CloudTokenSourceNone   = ""                     // no token anywhere → not logged in
+	CloudTokenSourceEnv    = "env:" + CloudTokenEnv // the CI/env override
+	CloudTokenSourceConfig = "config:cloud_token"   // ~/.config/barkpark/config.json
+)
+
+// ResolveCloudToken picks the Cloud control-plane Bearer by PRECEDENCE:
+//
+//  1. the BARKPARK_CLOUD_TOKEN env var (highest — a per-invocation override)
+//  2. the persisted config.json "cloud_token" (what `bp login` writes)
+//
+// A whitespace-only value at either tier falls through to the next, so an
+// exported-but-empty BARKPARK_CLOUD_TOKEN leaves every interactive user on the
+// value in their config file, unchanged. The token is returned TRIMMED.
+//
+// The second return is the SOURCE — an origin label, never any part of the
+// credential — so a CI failure is debuggable ("which credential did bp even
+// use?") without printing a live secret. Nothing in bp logs, echoes or persists
+// the value: the env tier is resolved at USE time and is deliberately NOT folded
+// into Config.CloudToken, so a load → mutate → SaveConfig cycle (login, logout,
+// setup) can never write a CI credential into config.json.
+//
+// The Bearer is OPAQUE to the client: the control plane's require_user_or_pat
+// accepts a session token (43 chars) or a PAT ("bpc_pat_" + 43 = 51 chars) on
+// the same Authorization header, so a PAT in the env drives this identical path
+// with no other change (the artifact route gates on {:ability,"write"},
+// cloud/…/router.ex:6292 — superseding charter D91's session-only record).
+func (c *Config) ResolveCloudToken() (string, string) {
+	if env := strings.TrimSpace(os.Getenv(CloudTokenEnv)); env != "" {
+		return env, CloudTokenSourceEnv
+	}
+	if c != nil {
+		if tok := strings.TrimSpace(c.CloudToken); tok != "" {
+			return tok, CloudTokenSourceConfig
+		}
+	}
+	return "", CloudTokenSourceNone
+}
+
+// CloudTokenSource names where the active Cloud credential came from (env,
+// config, or none) WITHOUT exposing it — the attributable half of
+// ResolveCloudToken, for receipts and diagnostics.
+func (c *Config) CloudTokenSource() string {
+	_, source := c.ResolveCloudToken()
+	return source
+}
+
+// CloudClient builds a control-plane client from the resolved Cloud credentials.
 // It is the single seam between the on-disk config and internal/cloudclient: the
-// CloudURL falls back to cloudclient.DefaultBaseURL when unset, and the
-// CloudToken is attached as the Bearer for every authed call. HasCloudToken
-// gates whether a command may use it — this just constructs it.
+// CloudURL falls back to cloudclient.DefaultBaseURL when unset, and the token
+// ResolveCloudToken picks (env > config, see there) is attached as the Bearer for
+// every authed call. HasCloudToken gates whether a command may use it — this just
+// constructs it.
 func (c *Config) CloudClient() *cloudclient.Client {
 	base := ""
-	token := ""
 	if c != nil {
 		base = c.CloudURL
-		token = c.CloudToken
 	}
 	if base == "" {
 		base = cloudclient.DefaultBaseURL
 	}
+	token, _ := c.ResolveCloudToken()
 	return &cloudclient.Client{BaseURL: base, Token: token}
 }
 
-// HasCloudToken reports whether a Cloud session token is present — the gate the
-// authed Cloud commands check before making any control-plane call.
+// HasCloudToken reports whether a Cloud credential is present — from the
+// BARKPARK_CLOUD_TOKEN env or the persisted config, same precedence as
+// ResolveCloudToken. It is the gate the authed Cloud commands check before making
+// any control-plane call, so CI sets one env var and the whole authed surface
+// (including `bp cloud site deploy --prebuilt`) becomes reachable.
 func (c *Config) HasCloudToken() bool {
-	return c != nil && strings.TrimSpace(c.CloudToken) != ""
+	token, _ := c.ResolveCloudToken()
+	return token != ""
 }
 
 // DefaultThemeID is the built-in skin every surface falls back to. It mirrors the
