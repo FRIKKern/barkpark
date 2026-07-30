@@ -11,6 +11,7 @@ package taskboard
 // fixed clock; reuses the package's shared -update flag.
 
 import (
+	"encoding/json"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -595,6 +596,84 @@ func TestDetailReasons(t *testing.T) {
 	frame = ansi.Strip(strings.Join(lines, "\n"))
 	if !strings.Contains(frame, "▍ blocked — waiting on the shared-package extraction") {
 		t.Errorf("blocked strip missing:\n%s", frame)
+	}
+}
+
+// TestDetailDispositionStrip pins the durable backlog adjudication onto a
+// VISIBLE surface: content.disposition_reason is written by the park/close
+// paths, and before this strip existed no rendered surface showed it (a
+// write-only adjudication is indistinguishable from none). Deleting the
+// dispositionLabel emitStrip line in RenderTaskDetail REDS this test.
+func TestDetailDispositionStrip(t *testing.T) {
+	const reason = "PARKED until the Hetzner ARM runner exists; reopen when CI grows an arm64 lane."
+	d := TaskDetail{
+		Task:              Task{DocID: "arm-lane", Title: "Build the arm64 CI lane", Lifecycle: "open"},
+		Disposition:       "PARKED",
+		DispositionReason: reason,
+	}
+	lines, _ := RenderTaskDetail(d, nil, 0, 100, detailNow)
+	frame := ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(frame, "▍ disposition parked — PARKED until the Hetzner ARM runner exists;") {
+		t.Errorf("disposition strip missing its label or reason:\n%s", frame)
+	}
+	// The tail wraps onto a continuation line that repeats the bar, so the
+	// reason is never truncated away.
+	if !strings.Contains(frame, "reopen when CI grows an arm64") || !strings.Contains(frame, "▍ lane.") {
+		t.Errorf("disposition reason truncated away by the wrap:\n%s", frame)
+	}
+
+	// The label follows the disposition — an OPEN row is never called parked.
+	d.Disposition = "OPEN"
+	lines, _ = RenderTaskDetail(d, nil, 0, 100, detailNow)
+	frame = ansi.Strip(strings.Join(lines, "\n"))
+	if !strings.Contains(frame, "▍ disposition open — ") {
+		t.Errorf("OPEN disposition mislabelled:\n%s", frame)
+	}
+	if strings.Contains(frame, "disposition parked") {
+		t.Errorf("OPEN row rendered as parked:\n%s", frame)
+	}
+}
+
+// TestDetailDispositionStripEmptyReason: an un-adjudicated row (and a row whose
+// disposition was set with no reason) renders NO strip and NO stray label —
+// the strip must never manufacture an empty bar.
+func TestDetailDispositionStripEmptyReason(t *testing.T) {
+	for _, c := range []struct{ name, disposition, reason string }{
+		{"never adjudicated", "", ""},
+		{"disposition without reason", "PARKED", ""},
+		{"whitespace-only reason", "CLOSED", "   \n  "},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			d := TaskDetail{
+				Task:              Task{DocID: "no-reason", Title: "No durable reason", Lifecycle: "open"},
+				Disposition:       c.disposition,
+				DispositionReason: c.reason,
+			}
+			lines, _ := RenderTaskDetail(d, nil, 0, 100, detailNow)
+			frame := ansi.Strip(strings.Join(lines, "\n"))
+			if strings.Contains(frame, "disposition") {
+				t.Errorf("stray disposition label with no reason:\n%s", frame)
+			}
+			if strings.Contains(frame, "▍  —") || strings.Contains(frame, "▍ —") {
+				t.Errorf("empty strip rendered:\n%s", frame)
+			}
+		})
+	}
+}
+
+// TestDetailDispositionHydratesFromWire proves the reason reaches TaskDetail
+// from the SAME list envelope the board already fetches — no extra request.
+func TestDetailDispositionHydratesFromWire(t *testing.T) {
+	w := taskWire{Content: json.RawMessage(`{
+      "disposition":"PARKED",
+      "disposition_reason":"superseded by the wave-23 census"
+    }`)}
+	d := w.toDetail(Task{DocID: "wire", Title: "Wire", Lifecycle: "open"})
+	if d.Disposition != "PARKED" || d.DispositionReason != "superseded by the wave-23 census" {
+		t.Fatalf("disposition not hydrated: %q / %q", d.Disposition, d.DispositionReason)
+	}
+	if empty := (taskWire{Content: json.RawMessage(`{}`)}).toDetail(Task{}); empty.DispositionReason != "" {
+		t.Fatalf("absent disposition_reason invented a value: %q", empty.DispositionReason)
 	}
 }
 

@@ -447,6 +447,8 @@ func (w taskWire) toDetail(t Task) TaskDetail {
 	d.BlockedReason = strField(m, "blocked_reason")
 	d.CloseReason = strField(m, "close_reason")
 	d.ResolutionNote = strField(m, "resolution_note")
+	d.Disposition = strField(m, "disposition")
+	d.DispositionReason = strField(m, "disposition_reason")
 	d.CodeRefs = flattenCodeRefs(m["code_refs"])
 	d.Assignee = strField(m, "assignee")
 	d.LastWorkedAt = timeField(m, "last_worked_at")

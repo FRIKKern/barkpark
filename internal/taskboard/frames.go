@@ -20,6 +20,11 @@ type TaskDetail struct {
 	BlockedReason  string
 	CloseReason    string
 	ResolutionNote string
+	// Disposition / DispositionReason are the durable backlog adjudication:
+	// content.disposition ("OPEN"/"PARKED"/"CLOSED") and the reason the
+	// adjudicator recorded with it ("" when never adjudicated).
+	Disposition       string
+	DispositionReason string
 	CodeRefs       []string
 	Assignee       string
 	PreviousWorker string    // claim.previous_worker ("" when absent)
