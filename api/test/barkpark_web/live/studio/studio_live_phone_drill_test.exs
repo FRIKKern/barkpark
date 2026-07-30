@@ -307,7 +307,10 @@ defmodule BarkparkWeb.Studio.StudioLivePhoneDrillTest do
 
       # The focus target is the EXPANDED pane, never a strip: the strip is gone.
       assert [[focused]] =
-               Regex.scan(~r/<div\s+class="pane-column[^"]*"[^>]*phx-mounted="[^"]*"/, after_click)
+               Regex.scan(
+                 ~r/<div\s+class="pane-column[^"]*"[^>]*phx-mounted="[^"]*"/,
+                 after_click
+               )
 
       refute focused =~ "pane-column--collapsed"
       assert focused =~ "focus"

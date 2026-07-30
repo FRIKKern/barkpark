@@ -83,7 +83,9 @@ defmodule Barkpark.PortableDoc.Render.PdGoldenParityTest do
       fx = decode!(@api_dir, @type_slug)
       assert is_binary(fx["expectedHtml"])
       assert is_list(fx["shape"])
-      assert fx["shape"] != [], "#{@type_slug} rendered to an empty shape — check the authored input"
+
+      assert fx["shape"] != [],
+             "#{@type_slug} rendered to an empty shape — check the authored input"
     end
   end
 end

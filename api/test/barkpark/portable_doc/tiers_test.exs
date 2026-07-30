@@ -68,6 +68,7 @@ defmodule Barkpark.PortableDoc.TiersTest do
 
     test "classify/1 pairs each block with its tier, nil for unknown" do
       blocks = [%{"type" => "heading"}, %{"type" => "cards"}, %{"type" => "mystery"}]
+
       assert Tiers.classify(blocks) == [
                {%{"type" => "heading"}, :element},
                {%{"type" => "cards"}, :widget},

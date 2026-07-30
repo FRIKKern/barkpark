@@ -237,7 +237,9 @@ defmodule BarkparkWeb.SheetsM4AdversarialTest do
 
   # ── reader render bound ─────────────────────────────────────────────────────
 
-  test "the public reader windows a 600-row sheet at 500 rows/page and pages the rest", %{conn: conn} do
+  test "the public reader windows a 600-row sheet at 500 rows/page and pages the rest", %{
+    conn: conn
+  } do
     cells =
       for r <- 1..600, into: %{} do
         {"A#{r}", %{"v" => "row-#{r}"}}

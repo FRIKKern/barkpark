@@ -96,6 +96,7 @@ defmodule BarkparkWeb.WriteHotpathTelemetryTest do
       assert_receive {:telemetry, ^ref, measurements, metadata}, 1_000
       # before_* hooks used to be timed by NOTHING — now the duration is real.
       assert measurements.duration > 0
+
       assert measurements.duration_ms >= 100,
              "the 120ms before_save gate should measure past the 100ms slow floor"
 

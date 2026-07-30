@@ -28,7 +28,8 @@ defmodule Barkpark.PortableDoc.Render.RenderToleranceTest do
     # 4. nested list where an inline node was expected
     {"nested list inline", %{"type" => "paragraph", "content" => [["a"]]}},
     # 5. numeric text value
-    {"numeric text value", %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => 123}]}},
+    {"numeric text value",
+     %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => 123}]}},
     # 6. list block whose `items` is a bare string, not a list
     {"list items not a list", %{"type" => "list", "items" => "oops"}},
     # 7. heading whose `text` is a map, not a string
@@ -124,12 +125,23 @@ defmodule Barkpark.PortableDoc.Render.RenderToleranceTest do
   defp gen_block do
     Enum.random([
       %{"type" => "paragraph", "content" => gen_content()},
-      %{"type" => "heading", "level" => Enum.random([1, 2, 3, 99, "2", nil]), "text" => gen_scalar()},
+      %{
+        "type" => "heading",
+        "level" => Enum.random([1, 2, 3, 99, "2", nil]),
+        "text" => gen_scalar()
+      },
       %{"type" => "list", "items" => Enum.random([gen_scalar(), gen_content()])},
       %{"type" => "callout", "content" => gen_content(), "tone" => Enum.random(["info", nil, 5])},
-      %{"type" => Enum.random(["future-widget", "text", "list", "unknownblock"]), "content" => gen_content()},
+      %{
+        "type" => Enum.random(["future-widget", "text", "list", "unknownblock"]),
+        "content" => gen_content()
+      },
       %{"value" => gen_scalar()},
-      %{"type" => "section", "title" => "Sec", "blocks" => [gen_scalar(), %{"nope" => true}, gen_block_leaf()]}
+      %{
+        "type" => "section",
+        "title" => "Sec",
+        "blocks" => [gen_scalar(), %{"nope" => true}, gen_block_leaf()]
+      }
     ])
   end
 

@@ -128,7 +128,9 @@ defmodule BarkparkWeb.Studio.StudioLiveSecondaryDocTest do
 
     # Non-vacuity (D192): the nav actually landed on the paper — the primary
     # document changed identity for real.
-    assert a.paper_doc, "nav must reach the paper (paper_doc set) or the clear was never exercised"
+    assert a.paper_doc,
+           "nav must reach the paper (paper_doc set) or the clear was never exercised"
+
     assert a.paper_doc.doc_id == @paper_slug
 
     # The identity change cleared the whole trio.

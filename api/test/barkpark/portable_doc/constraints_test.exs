@@ -24,9 +24,27 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
   # used by the backward-compat describe to prove byte-identity.
   defp paper_decls do
     [
-      %{kind: "title", presence: :required, count: {:exactly, 1}, position: [{:index, 0}], locked: true},
-      %{kind: "ingress", presence: :optional, count: {:max, 1}, position: [{:after, "title"}, {:before, "featured"}], locked: false},
-      %{kind: "featured", presence: :optional, count: {:max, 1}, position: [{:after, "title"}], locked: true}
+      %{
+        kind: "title",
+        presence: :required,
+        count: {:exactly, 1},
+        position: [{:index, 0}],
+        locked: true
+      },
+      %{
+        kind: "ingress",
+        presence: :optional,
+        count: {:max, 1},
+        position: [{:after, "title"}, {:before, "featured"}],
+        locked: false
+      },
+      %{
+        kind: "featured",
+        presence: :optional,
+        count: {:max, 1},
+        position: [{:after, "title"}],
+        locked: true
+      }
     ]
   end
 
@@ -45,13 +63,25 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
 
   describe "presence" do
     test "a required kind that is absent is an error" do
-      decls = [%{kind: "title", presence: :required, count: {:min, 0}, position: [:free], locked: true}]
+      decls = [
+        %{kind: "title", presence: :required, count: {:min, 0}, position: [:free], locked: true}
+      ]
+
       assert [msg] = Constraints.validate([block("body")], decls)
       assert msg =~ "required" and msg =~ "title" and msg =~ "missing"
     end
 
     test "an optional kind that is absent is fine" do
-      decls = [%{kind: "featured", presence: :optional, count: {:max, 1}, position: [:free], locked: true}]
+      decls = [
+        %{
+          kind: "featured",
+          presence: :optional,
+          count: {:max, 1},
+          position: [:free],
+          locked: true
+        }
+      ]
+
       assert Constraints.validate([block("body")], decls) == []
     end
   end
@@ -60,7 +90,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
 
   describe "cardinality" do
     test "{:exactly, 1} — one is fine, two is an error, zero is silent (presence owns missing)" do
-      decl = %{kind: "title", presence: :required, count: {:exactly, 1}, position: [:free], locked: true}
+      decl = %{
+        kind: "title",
+        presence: :required,
+        count: {:exactly, 1},
+        position: [:free],
+        locked: true
+      }
 
       assert Constraints.validate([block("title")], [decl]) == []
       assert Constraints.validate([block("title"), block("title")], [decl]) != []
@@ -70,7 +106,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     end
 
     test "{:max, 1} — zero or one pass, two fails" do
-      decl = %{kind: "featured", presence: :optional, count: {:max, 1}, position: [:free], locked: true}
+      decl = %{
+        kind: "featured",
+        presence: :optional,
+        count: {:max, 1},
+        position: [:free],
+        locked: true
+      }
 
       assert Constraints.validate([], [decl]) == []
       assert Constraints.validate([block("featured")], [decl]) == []
@@ -79,7 +121,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     end
 
     test "{:min, 2} — proves min-N: one fails, two passes" do
-      decl = %{kind: "bullet", presence: :optional, count: {:min, 2}, position: [:free], locked: false}
+      decl = %{
+        kind: "bullet",
+        presence: :optional,
+        count: {:min, 2},
+        position: [:free],
+        locked: false
+      }
 
       assert [msg] = Constraints.validate([block("bullet")], [decl])
       assert msg =~ "at least 2" and msg =~ "found 1"
@@ -91,7 +139,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
 
   describe "position — pinned index" do
     test "the block must sit at the declared index" do
-      decl = %{kind: "title", presence: :required, count: {:exactly, 1}, position: [{:index, 0}], locked: true}
+      decl = %{
+        kind: "title",
+        presence: :required,
+        count: {:exactly, 1},
+        position: [{:index, 0}],
+        locked: true
+      }
 
       assert Constraints.validate([block("title"), block("body")], [decl]) == []
 
@@ -100,7 +154,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     end
 
     test "with several occurrences the OFFENDING index is reported, not a compliant one" do
-      decl = %{kind: "title", presence: :required, count: {:max, 2}, position: [{:index, 0}], locked: true}
+      decl = %{
+        kind: "title",
+        presence: :required,
+        count: {:max, 2},
+        position: [{:index, 0}],
+        locked: true
+      }
 
       assert [msg] = Constraints.validate([block("title"), block("body"), block("title")], [decl])
       assert msg =~ "found at 2"
@@ -111,7 +171,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
 
   describe "position — relative order (before/after)" do
     test "{:after, anchor} holds only when the block sits after the anchor" do
-      decl = %{kind: "featured", presence: :optional, count: {:max, 1}, position: [{:after, "title"}], locked: true}
+      decl = %{
+        kind: "featured",
+        presence: :optional,
+        count: {:max, 1},
+        position: [{:after, "title"}],
+        locked: true
+      }
 
       assert Constraints.validate([block("title"), block("featured")], [decl]) == []
 
@@ -120,7 +186,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     end
 
     test "an ABSENT anchor never fails a present block" do
-      decl = %{kind: "featured", presence: :optional, count: {:max, 1}, position: [{:after, "title"}], locked: true}
+      decl = %{
+        kind: "featured",
+        presence: :optional,
+        count: {:max, 1},
+        position: [{:after, "title"}],
+        locked: true
+      }
 
       # no title at all → the after-relation is vacuously satisfied
       assert Constraints.validate([block("featured")], [decl]) == []
@@ -154,21 +226,39 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
 
   describe "position — top/bottom group and free" do
     test ":top_group requires a contiguous run at the top" do
-      decl = %{kind: "pin", presence: :optional, count: {:min, 0}, position: [:top_group], locked: false}
+      decl = %{
+        kind: "pin",
+        presence: :optional,
+        count: {:min, 0},
+        position: [:top_group],
+        locked: false
+      }
 
       assert Constraints.validate([block("pin"), block("pin"), block("body")], [decl]) == []
       assert Constraints.validate([block("body"), block("pin")], [decl]) != []
     end
 
     test ":bottom_group requires a contiguous run at the bottom" do
-      decl = %{kind: "foot", presence: :optional, count: {:min, 0}, position: [:bottom_group], locked: false}
+      decl = %{
+        kind: "foot",
+        presence: :optional,
+        count: {:min, 0},
+        position: [:bottom_group],
+        locked: false
+      }
 
       assert Constraints.validate([block("body"), block("foot"), block("foot")], [decl]) == []
       assert Constraints.validate([block("foot"), block("body")], [decl]) != []
     end
 
     test ":free imposes no position constraint" do
-      decl = %{kind: "note", presence: :optional, count: {:min, 0}, position: [:free], locked: false}
+      decl = %{
+        kind: "note",
+        presence: :optional,
+        count: {:min, 0},
+        position: [:free],
+        locked: false
+      }
 
       assert Constraints.validate([block("body"), block("note"), block("body")], [decl]) == []
     end
@@ -190,7 +280,10 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
       assert Constraints.validate([block("title"), block("featured")], [decl]) == []
 
       # index holds but the relation is broken → the relation still fires
-      assert [msg] = Constraints.validate([block("featured"), block("body"), block("title")], [decl]) |> Enum.filter(&(&1 =~ "before"))
+      assert [msg] =
+               Constraints.validate([block("featured"), block("body"), block("title")], [decl])
+               |> Enum.filter(&(&1 =~ "before"))
+
       assert msg =~ "title" and msg =~ "featured"
 
       # relation holds but the pin is broken → the pin still fires
@@ -204,8 +297,20 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
   describe "the whole vocabulary" do
     test "presence + cardinality + position compose; satisfied?/2 mirrors validate/2" do
       decls = [
-        %{kind: "title", presence: :required, count: {:exactly, 1}, position: [{:index, 0}], locked: true},
-        %{kind: "featured", presence: :optional, count: {:max, 1}, position: [{:after, "title"}], locked: true}
+        %{
+          kind: "title",
+          presence: :required,
+          count: {:exactly, 1},
+          position: [{:index, 0}],
+          locked: true
+        },
+        %{
+          kind: "featured",
+          presence: :optional,
+          count: {:max, 1},
+          position: [{:after, "title"}],
+          locked: true
+        }
       ]
 
       good = [block("title"), block("featured"), block("body")]
@@ -217,7 +322,16 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     end
 
     test "non-list inputs never raise" do
-      assert Constraints.validate(nil, [%{kind: "x", presence: :optional, count: {:max, 1}, position: [:free], locked: false}]) == []
+      assert Constraints.validate(nil, [
+               %{
+                 kind: "x",
+                 presence: :optional,
+                 count: {:max, 1},
+                 position: [:free],
+                 locked: false
+               }
+             ]) == []
+
       assert Constraints.validate([block("x")], nil) == []
     end
   end
@@ -227,8 +341,20 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
   describe "tier-aware declarations (composition doctrine, step 5)" do
     test "THE HEADLINE EXAMPLE — require a :section, forbid a :widget at index 0" do
       decls = [
-        %{kind: :section, presence: :required, count: {:min, 0}, position: [:free], locked: false},
-        %{kind: :widget, presence: :optional, count: {:min, 0}, position: [{:not_index, 0}], locked: false}
+        %{
+          kind: :section,
+          presence: :required,
+          count: {:min, 0},
+          position: [:free],
+          locked: false
+        },
+        %{
+          kind: :widget,
+          presence: :optional,
+          count: {:min, 0},
+          position: [{:not_index, 0}],
+          locked: false
+        }
       ]
 
       # callout (tier :widget) at index 0, paragraph (tier :element) — no section.
@@ -243,7 +369,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     end
 
     test "forbid a tier entirely — count {:max, 0} on :widget" do
-      decl = %{kind: :widget, count: {:max, 0}, presence: :optional, position: [:free], locked: false}
+      decl = %{
+        kind: :widget,
+        count: {:max, 0},
+        presence: :optional,
+        position: [:free],
+        locked: false
+      }
 
       assert [msg] = Constraints.validate([typed("callout")], [decl])
       assert msg =~ "at most 0" and msg =~ "widget" and msg =~ "found 1"
@@ -253,7 +385,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     end
 
     test "cardinality math runs over tier-classified counts — {:min, 2} on :element" do
-      decl = %{kind: :element, presence: :optional, count: {:min, 2}, position: [:free], locked: false}
+      decl = %{
+        kind: :element,
+        presence: :optional,
+        count: {:min, 2},
+        position: [:free],
+        locked: false
+      }
 
       assert [msg] = Constraints.validate([typed("paragraph")], [decl])
       assert msg =~ "at least 2" and msg =~ "found 1"
@@ -269,8 +407,21 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     test "a :section tier decl COUNTS a columns block; a \"section\" STRING decl does NOT" do
       columns = [typed("columns")]
 
-      tier_decl = %{kind: :section, presence: :required, count: {:min, 1}, position: [:free], locked: false}
-      string_decl = %{kind: "section", presence: :required, count: {:min, 1}, position: [:free], locked: false}
+      tier_decl = %{
+        kind: :section,
+        presence: :required,
+        count: {:min, 1},
+        position: [:free],
+        locked: false
+      }
+
+      string_decl = %{
+        kind: "section",
+        presence: :required,
+        count: {:min, 1},
+        position: [:free],
+        locked: false
+      }
 
       # columns is tier :section (type "columns" != "section") → the tier decl is
       # satisfied, proving the match went through Tiers.tier_of, not kind_of.
@@ -284,8 +435,20 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
 
     test "validate/2 is deterministic — the dual index appends in block order" do
       decls = [
-        %{kind: :section, presence: :optional, count: {:min, 0}, position: [:free], locked: false},
-        %{kind: :widget, presence: :optional, count: {:min, 0}, position: [{:not_index, 0}], locked: false}
+        %{
+          kind: :section,
+          presence: :optional,
+          count: {:min, 0},
+          position: [:free],
+          locked: false
+        },
+        %{
+          kind: :widget,
+          presence: :optional,
+          count: {:min, 0},
+          position: [{:not_index, 0}],
+          locked: false
+        }
       ]
 
       blocks = [typed("callout"), typed("columns"), typed("paragraph")]
@@ -293,7 +456,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
     end
 
     test "a relation can anchor on a whole tier — {:after, :element}" do
-      decl = %{kind: :widget, presence: :optional, count: {:min, 0}, position: [{:after, :element}], locked: false}
+      decl = %{
+        kind: :widget,
+        presence: :optional,
+        count: {:min, 0},
+        position: [{:after, :element}],
+        locked: false
+      }
 
       # paragraph (element) then callout (widget) → widget is after the element.
       assert Constraints.validate([typed("paragraph"), typed("callout")], [decl]) == []
@@ -308,7 +477,13 @@ defmodule Barkpark.PortableDoc.ConstraintsTest do
 
   describe "position — forbidden index ({:not_index, n})" do
     test "a plain role kind may not sit at the forbidden index" do
-      decl = %{kind: "banner", presence: :optional, count: {:min, 0}, position: [{:not_index, 0}], locked: false}
+      decl = %{
+        kind: "banner",
+        presence: :optional,
+        count: {:min, 0},
+        position: [{:not_index, 0}],
+        locked: false
+      }
 
       # banner at index 0 → error naming block 0.
       assert [msg] = Constraints.validate([block("banner"), block("body")], [decl])

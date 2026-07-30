@@ -191,7 +191,9 @@ defmodule BarkparkWeb.Studio.MeasureParityTest do
         String.to_integer(px)
 
       nil ->
-        flunk("`#{@reader_selector}` declares `--paper-gutter: #{value}`, which is not a px length")
+        flunk(
+          "`#{@reader_selector}` declares `--paper-gutter: #{value}`, which is not a px length"
+        )
     end
   end
 

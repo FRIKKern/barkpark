@@ -720,7 +720,8 @@ defmodule BarkparkWeb.Studio.EditorPanelContainmentTest do
 
   describe "the cross-engine carve-out" do
     test ".editor-panel.sheet-editor keeps container-type: normal" do
-      assert root_css() =~ ~r/\.editor-panel\.sheet-editor\s*\{\s*container-type:\s*normal;?\s*\}/,
+      assert root_css() =~
+               ~r/\.editor-panel\.sheet-editor\s*\{\s*container-type:\s*normal;?\s*\}/,
              """
              The Sheets containment carve-out is gone.
 

@@ -33,7 +33,12 @@ defmodule Barkpark.ContentGetDocumentTenantIsolationTest do
     scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
 
     {:ok, doc_b} =
-      Content.create_document("post", %{"doc_id" => "secret-b", "title" => "B secret"}, @ds, scope_b)
+      Content.create_document(
+        "post",
+        %{"doc_id" => "secret-b", "title" => "B secret"},
+        @ds,
+        scope_b
+      )
 
     # Sanity — B's own scope finds B's doc (the read actually surfaces it).
     assert {:ok, _} = Content.get_document(doc_b.doc_id, "post", @ds, scope_b)
@@ -54,7 +59,12 @@ defmodule Barkpark.ContentGetDocumentTenantIsolationTest do
     scope_b = [workspace_id: ws_b.id, project_id: proj_b.id]
 
     {:ok, doc_a} =
-      Content.create_document("post", %{"doc_id" => "secret-a", "title" => "A secret"}, @ds, scope_a)
+      Content.create_document(
+        "post",
+        %{"doc_id" => "secret-a", "title" => "A secret"},
+        @ds,
+        scope_a
+      )
 
     assert {:ok, _} = Content.get_document(doc_a.doc_id, "post", @ds, scope_a)
     assert {:error, :not_found} = Content.get_document(doc_a.doc_id, "post", @ds, scope_b)

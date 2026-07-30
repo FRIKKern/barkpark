@@ -203,7 +203,25 @@ defmodule BarkparkWeb.IconsTripwireTest do
 
     test "every emoji alias points at a glyph that exists" do
       # An alias to a missing name would fall back just as silently.
-      for emoji <- ["📄", "📑", "👤", "🏷", "💼", "⚙", "🧭", "🎨", "📁", "📂", "🖼", "✅", "📰", "📊", "🎫", "🧩", "🗂"] do
+      for emoji <- [
+            "📄",
+            "📑",
+            "👤",
+            "🏷",
+            "💼",
+            "⚙",
+            "🧭",
+            "🎨",
+            "📁",
+            "📂",
+            "🖼",
+            "✅",
+            "📰",
+            "📊",
+            "🎫",
+            "🧩",
+            "🗂"
+          ] do
         assert Icons.known_icon?(emoji), "emoji #{emoji} aliases a glyph that does not exist"
       end
     end

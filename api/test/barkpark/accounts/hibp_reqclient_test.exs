@@ -117,7 +117,11 @@ defmodule Barkpark.Accounts.HibpReqClientTest do
 
       Bypass.expect_once(bypass, "GET", "/range/#{prefix}", fn conn ->
         # A well-formed response that simply does NOT list this suffix.
-        Plug.Conn.resp(conn, 200, "0000000000000000000000000000000000A:3\r\nBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB:7\r\n")
+        Plug.Conn.resp(
+          conn,
+          200,
+          "0000000000000000000000000000000000A:3\r\nBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB:7\r\n"
+        )
       end)
 
       assert Hibp.breached?(pw) == false

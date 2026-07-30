@@ -163,6 +163,7 @@ defmodule Barkpark.Content.EdgesTest do
       # Each source doc actually had the reference field stripped.
       Enum.each(ids, fn id ->
         {:ok, doc} = Content.get_document(id, "pointer", @dataset)
+
         refute Map.has_key?(doc.content || %{}, "rel"),
                "#{id} should have had its scalar reference stripped by the drain"
       end)

@@ -179,7 +179,10 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
         "type" => "chart",
         "series" => [%{"label" => "s", "points" => [1, 2]}],
         "annotations" => %{
-          "regions" => [%{"from" => "x", "to" => 1, "label" => "dropped"}, %{"from" => 1, "to" => 0}],
+          "regions" => [
+            %{"from" => "x", "to" => 1, "label" => "dropped"},
+            %{"from" => 1, "to" => 0}
+          ],
           "refLines" => [%{"label" => "no y"}],
           "points" => [
             %{"index" => 99, "label" => "out of range"},

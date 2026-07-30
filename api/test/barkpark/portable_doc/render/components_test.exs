@@ -420,7 +420,10 @@ defmodule Barkpark.PortableDoc.Render.PageBlocksTest do
   describe "note widget — byte-align to a legacy notes row" do
     # A note in the flat wire form.
     defp note(extra \\ %{}) do
-      Map.merge(%{"type" => "note", "label" => "alive", "lead" => "Kept", "text" => "the body"}, extra)
+      Map.merge(
+        %{"type" => "note", "label" => "alive", "lead" => "Kept", "text" => "the body"},
+        extra
+      )
     end
 
     test "note_item_html/1 == the inner row of a single-item notes grid (grid MINUS wrapper)" do
@@ -442,8 +445,14 @@ defmodule Barkpark.PortableDoc.Render.PageBlocksTest do
       assert composed == %{"kind" => "_raw", "html" => Components.note_item_html(note())}
 
       # Byte-identical to a single-item notes grid MINUS the `bp-notes` wrapper.
-      grid = Components.notes_html(%{"items" => [%{"label" => "alive", "lead" => "Kept", "text" => "the body"}]})
-      assert composed["html"] == String.replace_prefix(grid, ~s(<div class="bp-notes">), "") |> String.replace_suffix("</div>", "")
+      grid =
+        Components.notes_html(%{
+          "items" => [%{"label" => "alive", "lead" => "Kept", "text" => "the body"}]
+        })
+
+      assert composed["html"] ==
+               String.replace_prefix(grid, ~s(<div class="bp-notes">), "")
+               |> String.replace_suffix("</div>", "")
     end
 
     test "compose_block(note, :article) byte-aligns for a lead-ABSENT note (no <b> run)" do
@@ -463,9 +472,15 @@ defmodule Barkpark.PortableDoc.Render.PageBlocksTest do
       slotted = %{
         "type" => "note",
         "slots" => %{
-          "label" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}],
-          "lead" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}],
-          "body" => [%{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}]
+          "label" => [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "alive"}]}
+          ],
+          "lead" => [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "Kept"}]}
+          ],
+          "body" => [
+            %{"type" => "paragraph", "content" => [%{"type" => "text", "value" => "the body"}]}
+          ]
         }
       }
 

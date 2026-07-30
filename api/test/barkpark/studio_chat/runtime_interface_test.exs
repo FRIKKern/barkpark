@@ -88,6 +88,7 @@ defmodule Barkpark.StudioChat.RuntimeInterfaceTest do
     assert {:resolve, 2} in Runtime.HostDirectory.behaviour_info(:callbacks)
     assert {:dispatch, 3} in Runtime.RemoteDispatch.behaviour_info(:callbacks)
   end
+
   test "provider routing preserves the complete managed lifecycle" do
     assert {:ok, :fake_runtime} = Runtime.open("claude", %{resume: false, marker: :fresh})
     assert_receive {:start, %{marker: :fresh}}

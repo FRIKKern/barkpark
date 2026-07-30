@@ -223,7 +223,8 @@ defmodule Barkpark.Search.IntelligenceSuggestionsBoundsTest do
       Application.put_env(:barkpark, :search_suggestions_source_cap, 1)
       on_exit(fn -> Application.delete_env(:barkpark, :search_suggestions_source_cap) end)
 
-      result = Intelligence.suggestions(@surface, @scope, "actor-crystal", nil, min_search_count: 1)
+      result =
+        Intelligence.suggestions(@surface, @scope, "actor-crystal", nil, min_search_count: 1)
 
       # popular_from_crystals: ORDER BY sum(success_count) DESC LIMIT 1 -> quartz.
       assert Enum.map(result.popular, & &1.query) == ["quartz"],

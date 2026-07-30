@@ -85,8 +85,7 @@ defmodule Barkpark.PortableDoc.HtmlSanitizerTest do
     for {name, html} <- [
           {"headings and links",
            "<h1>Title</h1><p>Some <strong>bold</strong> and <a href=\"https://x.com\">link</a>.</p>"},
-          {"code and table",
-           "<pre><code>x = 1</code></pre><table><tr><td>a</td></tr></table>"},
+          {"code and table", "<pre><code>x = 1</code></pre><table><tr><td>a</td></tr></table>"},
           {"remote image", "<img src=\"https://cdn/x.png\" alt=\"pic\">"},
           {"list", "<ul><li>one</li><li>two</li></ul>"},
           {"inline data:image", "<img src=\"data:image/png;base64,AAAA\" alt=\"i\">"}

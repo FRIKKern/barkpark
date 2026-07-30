@@ -132,7 +132,9 @@ defmodule BarkparkWeb.Studio.StudioLiveWorkspaceSwitcherTest do
 
       # The avatar carries the workspace (initial + full name in the button
       # tooltip); the visible chip shows project trail + dataset badge.
-      assert html =~ ~s{scope-avatar" aria-hidden="true">#{String.first(acme_ws.name) |> String.upcase()}</span>}
+      assert html =~
+               ~s{scope-avatar" aria-hidden="true">#{String.first(acme_ws.name) |> String.upcase()}</span>}
+
       assert html =~ ~s{title="Switch scope — #{acme_ws.name}}
       assert html =~ ~r{scope-title-trail">#{acme_blog.name}<}
       assert html =~ ~r{scope-dataset-badge">#{@dataset}<}

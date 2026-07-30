@@ -13,7 +13,10 @@ defmodule BarkparkWeb.StatusControllerTest do
   end
 
   defp admin(conn, raw),
-    do: conn |> put_req_header("authorization", "Bearer #{raw}") |> put_req_header("content-type", "application/json")
+    do:
+      conn
+      |> put_req_header("authorization", "Bearer #{raw}")
+      |> put_req_header("content-type", "application/json")
 
   test "GET /status.json reports real component health + SLA", %{conn: conn} do
     body = conn |> get("/status.json") |> json_response(200)
@@ -67,7 +70,15 @@ defmodule BarkparkWeb.StatusControllerTest do
   test "an open incident degrades overall status and shows on the page", %{admin: raw} do
     created =
       admin(build_conn(), raw)
-      |> post("/v1/status/incidents", Jason.encode!(%{title: "DB latency", component: "database", impact: "major", body: "elevated query times"}))
+      |> post(
+        "/v1/status/incidents",
+        Jason.encode!(%{
+          title: "DB latency",
+          component: "database",
+          impact: "major",
+          body: "elevated query times"
+        })
+      )
       |> json_response(201)
 
     id = created["incident"]["id"]
@@ -86,7 +97,8 @@ defmodule BarkparkWeb.StatusControllerTest do
            |> post("/v1/status/incidents/#{id}/resolve", "{}")
            |> json_response(200)
 
-    assert build_conn() |> get("/status.json") |> json_response(200) |> Map.fetch!("status") == "operational"
+    assert build_conn() |> get("/status.json") |> json_response(200) |> Map.fetch!("status") ==
+             "operational"
   end
 
   test "incident management requires admin", %{} do

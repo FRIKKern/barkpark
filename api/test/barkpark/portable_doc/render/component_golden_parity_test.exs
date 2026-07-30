@@ -206,7 +206,12 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     do: input["slots"]["title"] |> List.first() |> Map.get("text")
 
   defp card_slot_marker(input, "body"),
-    do: input["slots"]["body"] |> List.first() |> Map.get("content") |> List.first() |> Map.get("value")
+    do:
+      input["slots"]["body"]
+      |> List.first()
+      |> Map.get("content")
+      |> List.first()
+      |> Map.get("value")
 
   defp card_slot_marker(input, "action"),
     do: input["slots"]["action"] |> List.first() |> Map.get("label")
@@ -267,13 +272,16 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     for node <- fx["expected"]["nodes"] do
       assert html =~ ~s|<div class="bp-pnode__k">#{node["kind"]}</div>|, "kind #{node["kind"]}"
       assert html =~ ~s|<div class="bp-pnode__t">#{node["title"]}</div>|, "title #{node["title"]}"
-      assert html =~ ~s|<div class="bp-pnode__d">#{node["detail"]}</div>|, "detail #{node["detail"]}"
+
+      assert html =~ ~s|<div class="bp-pnode__d">#{node["detail"]}</div>|,
+             "detail #{node["detail"]}"
 
       # source_role realizes: origin → the accent-bordered pnode; provenance → the
       # provenance line carrying the text (a render tamper reds this leg).
       case node["source_role"] do
         "origin" ->
-          assert html =~ ~s|<div class="bp-pnode bp-pnode--src">|, "origin accent for #{node["title"]}"
+          assert html =~ ~s|<div class="bp-pnode bp-pnode--src">|,
+                 "origin accent for #{node["title"]}"
 
         "provenance" ->
           assert html =~ ~s|<div class="bp-pnode__src">#{node["source_text"]}</div>|,
@@ -325,11 +333,14 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     # cell per ordered segment, each keyed to its derived glyph-role.
     timeline = ex["timeline"]
     assert timeline != [], "projection floor: task-detail fixture carries no timeline"
+
     assert occurrences(html, ~s|class="bp-tl__seg"|) == length(timeline),
            "rendered timeline cell count diverged from the projection"
 
     for seg <- timeline do
-      assert html =~ ~s|bp-g--#{seg["glyph_role"]}|, "timeline glyph-role #{seg["glyph_role"]} missing"
+      assert html =~ ~s|bp-g--#{seg["glyph_role"]}|,
+             "timeline glyph-role #{seg["glyph_role"]} missing"
+
       assert html =~ ~s|<span>#{seg["label"]}</span>|, "timeline label #{seg["label"]} missing"
     end
   end
@@ -354,6 +365,7 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     cols = fx["expected"]["columns"]
 
     assert String.starts_with?(html, ~s|<div class="bp-cols"|)
+
     assert occurrences(html, ~s|class="bp-cols__c"|) == length(cols),
            "column count diverged from the projection"
 
@@ -407,7 +419,9 @@ defmodule Barkpark.PortableDoc.Render.ComponentGoldenParityTest do
     # Per-cell placement realizes UNCLAMPED on :article (authored == rendered at
     # span<=tracks). A cell carrying NEITHER key stays a bare wrapper (byte-stable).
     for cell <- cells do
-      if cell["span"], do: assert(html =~ ~s|grid-column:span #{cell["span"]}|, "span #{cell["span"]}")
+      if cell["span"],
+        do: assert(html =~ ~s|grid-column:span #{cell["span"]}|, "span #{cell["span"]}")
+
       if cell["order"], do: assert(html =~ ~s|order:#{cell["order"]}|, "order #{cell["order"]}")
     end
 

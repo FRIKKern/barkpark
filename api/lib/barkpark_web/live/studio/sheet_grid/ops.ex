@@ -209,7 +209,10 @@ defmodule BarkparkWeb.Studio.SheetGrid.Ops do
   # delete_rows/cols). Positions outside the rect and other-tab sorts are
   # untouched. Malformed/missing rect|perm (older peer, shape drift) falls
   # through to the catch-all → today's no-remap, never a crash.
-  defp remap_selection(socket, %{op: "sort_range", tab: tab, rect: {c1, r1, c2, r2}, perm: perm} = s)
+  defp remap_selection(
+         socket,
+         %{op: "sort_range", tab: tab, rect: {c1, r1, c2, r2}, perm: perm} = s
+       )
        when is_list(perm) do
     # SF-R×SF-W: the row-follow remap is for REMOTE peers only. The originator
     # of the sort (`by` == this viewer's user_id) keeps their cursor at its

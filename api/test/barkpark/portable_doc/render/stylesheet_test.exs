@@ -53,7 +53,11 @@ defmodule Barkpark.PortableDoc.Render.StylesheetTest do
       # HEEx). The template now embeds the css THROUGH that helper — assert both the
       # template's call and the helper's embed, so the sink is still gate-covered.
       assert String.contains?(File.read!(@root_heex), "paper_stylesheet()")
-      assert String.contains?(File.read!(@layouts_ex), "Barkpark.PortableDoc.Render.Stylesheet.css()")
+
+      assert String.contains?(
+               File.read!(@layouts_ex),
+               "Barkpark.PortableDoc.Render.Stylesheet.css()"
+             )
     end
 
     test "bulldocs.html.heex (/papers reader) embeds Stylesheet.css/0" do

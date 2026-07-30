@@ -77,11 +77,20 @@ defmodule BarkparkWeb.Layouts.ReaderFontFaceTest do
   end
 
   test "the committed font binaries + OFL license exist and the old TTFs are gone" do
-    for f <- ["SourceSerif4Variable-Roman.woff2", "SourceSerif4Variable-Italic.woff2", "SourceSerif4-OFL.txt"] do
+    for f <- [
+          "SourceSerif4Variable-Roman.woff2",
+          "SourceSerif4Variable-Italic.woff2",
+          "SourceSerif4-OFL.txt"
+        ] do
       assert File.exists?(Path.join(@fonts_dir, f)), "missing committed font asset: #{f}"
     end
 
-    for f <- ["SourceSerif4-Regular.ttf", "SourceSerif4-Italic.ttf", "SourceSerif4-Bold.ttf", "SourceSerif4-BoldItalic.ttf"] do
+    for f <- [
+          "SourceSerif4-Regular.ttf",
+          "SourceSerif4-Italic.ttf",
+          "SourceSerif4-Bold.ttf",
+          "SourceSerif4-BoldItalic.ttf"
+        ] do
       refute File.exists?(Path.join(@fonts_dir, f)),
              "the old static TTF #{f} should have been removed in the same commit as the woff2 swap"
     end

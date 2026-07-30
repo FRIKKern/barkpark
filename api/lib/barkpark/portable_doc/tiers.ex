@@ -171,7 +171,7 @@ defmodule Barkpark.PortableDoc.Tiers do
   @section ~w(section columns tabs)
 
   @by_tier %{element: @element, widget: @widget, section: @section}
-  @tier_of (for {tier, types} <- @by_tier, t <- types, into: %{}, do: {t, tier})
+  @tier_of for {tier, types} <- @by_tier, t <- types, into: %{}, do: {t, tier}
 
   @type tier :: :element | :widget | :section
 

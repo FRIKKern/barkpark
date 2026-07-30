@@ -215,7 +215,8 @@ defmodule Barkpark.AccessTest do
 
       # own desk → admit; sibling project's desk → deny; project-less (broader)
       # desk → deny (the desk omits the project the grant pins → escape).
-      assert Access.admits_desk?(grant, :read, %{workspace_id: ws.id, project_id: proj.id}) == true
+      assert Access.admits_desk?(grant, :read, %{workspace_id: ws.id, project_id: proj.id}) ==
+               true
 
       assert Access.admits_desk?(grant, :read, %{workspace_id: ws.id, project_id: other.id}) ==
                false
