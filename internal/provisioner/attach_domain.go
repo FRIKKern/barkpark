@@ -23,18 +23,64 @@ const attachEnvFile = "/opt/barkpark/.env"
 // provision-time block (and any prior attached host) is never clobbered.
 const attachCaddyfilePath = "/etc/caddy/Caddyfile"
 
-// attachCustomHostRe is the V1 custom-host shape: exactly ONE DNS label under
-// the platform zone (gyldendal.barkpark.cloud) — we own that DNS zone, so an
-// A-record upsert is safe. Arbitrary customer domains are a later wave. The
-// worker validates DEFENSIVELY against this even though the control plane
-// already did: the custom host is interpolated into a Caddyfile and a shell
-// script on the box, so a hostile value from a compromised/buggy control plane
-// must abort HERE, before any side effect.
+// attachCustomHostRe is the PLATFORM custom-host shape (V1): exactly ONE DNS
+// label under the platform zone (gyldendal.barkpark.cloud) — we own that DNS
+// zone, so an A-record upsert is safe. The worker validates DEFENSIVELY
+// against this even though the control plane already did: the custom host is
+// interpolated into a Caddyfile and a shell script on the box, so a hostile
+// value from a compromised/buggy control plane must abort HERE, before any
+// side effect. Arbitrary customer domains ride the SEPARATE external path
+// below (attachExternalHostRe + the resolution gate) — V2, this wave.
 var attachCustomHostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?\.barkpark\.cloud$`)
 
 // attachDNSLabelRe is a single well-formed DNS label (the custom host minus the
 // platform zone) — what the DNS seam upserts as the record Name.
 var attachDNSLabelRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$`)
+
+// attachExternalHostRe is the V2 EXTERNAL custom-host shape: an arbitrary
+// customer-owned FQDN (barkpark.jarl.no) — TWO OR MORE well-formed RFC labels,
+// lowercase. The same defensive posture as attachCustomHostRe: the value is
+// interpolated into a Caddyfile and a shell script, so the regex admits ONLY
+// dots, hyphens, and alphanumerics — every shell/Caddy metacharacter (space,
+// quote, `$`, backtick, `;`, newline, unicode, …) is excluded by construction.
+// Length caps ride separately: 63 per label (the regex) and 253 total
+// (maxAttachHostLen).
+var attachExternalHostRe = regexp.MustCompile(`^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$`)
+
+// maxAttachHostLen is the RFC 1035 cap on a full domain name.
+const maxAttachHostLen = 253
+
+// attachNumericTLDRe rejects an all-digit final label — no real TLD is
+// numeric, so anything matching is a bare-IP shape (203.0.113.9), which must
+// never become a Caddy vhost with on-demand ACME.
+var attachNumericTLDRe = regexp.MustCompile(`\.[0-9]+$`)
+
+// externalAttachHost reports whether host rides the V2 EXTERNAL path: anything
+// that is not under (or equal to) the platform zone. The platform apex itself
+// returns true here and is then explicitly rejected by
+// validateExternalAttachHost — it is never attachable either way.
+func externalAttachHost(host string) bool {
+	return !strings.HasSuffix(host, "."+Zone)
+}
+
+// validateExternalAttachHost is the fail-closed shape gate for a V2 external
+// custom host. Same contract as the platform checks: any miss aborts before
+// ANY side effect (no resolver call, no DNS write, no remote command).
+func validateExternalAttachHost(host string) error {
+	if host == Zone {
+		return fmt.Errorf("attach-domain: custom_host %q is the platform apex itself — refusing before any side effect", host)
+	}
+	if len(host) > maxAttachHostLen {
+		return fmt.Errorf("attach-domain: custom_host is %d chars, over the %d-char FQDN cap — refusing before any side effect", len(host), maxAttachHostLen)
+	}
+	if !attachExternalHostRe.MatchString(host) {
+		return fmt.Errorf("attach-domain: custom_host %q is not a well-formed lowercase FQDN — refusing before any side effect", host)
+	}
+	if attachNumericTLDRe.MatchString(host) {
+		return fmt.Errorf("attach-domain: custom_host %q has an all-numeric TLD (bare-IP shape) — refusing before any side effect", host)
+	}
+	return nil
+}
 
 // AttachDomainFunc points a custom host at one live box for a claimed
 // attach-domain job: DNS A record → BARKPARK_EXTRA_ORIGINS merge + Caddy vhost
@@ -47,20 +93,36 @@ type AttachDomainFunc func(ctx context.Context, spec AttachDomainSpec) error
 // validateAttachDomainSpec is the fail-closed gate every attach-domain job
 // passes BEFORE any side effect. The worker never trusts the control-plane
 // payload: custom_host/dns_label reach a Caddyfile and a remote shell script,
-// and ip reaches the SSH argv, so each is re-validated against the strict V1
+// and ip reaches the SSH argv, so each is re-validated against the strict
 // shapes here. Any miss aborts with NO DNS write and NO remote command.
+//
+// V2 split: a host under the platform zone keeps the V1 checks verbatim
+// (single label + consistent dns_label/dns_zone halves for the A-record
+// upsert). An EXTERNAL customer FQDN passes the well-formed-FQDN gate instead
+// and must carry EMPTY DNS halves — the customer owns that zone, so a claim
+// smuggling platform-DNS coordinates alongside an external host is
+// inconsistent and aborts.
 func validateAttachDomainSpec(spec AttachDomainSpec) error {
-	if !attachCustomHostRe.MatchString(spec.CustomHost) {
-		return fmt.Errorf("attach-domain: custom_host %q is not a single label under %s — refusing before any side effect", spec.CustomHost, Zone)
-	}
-	if !attachDNSLabelRe.MatchString(spec.DNSLabel) {
-		return fmt.Errorf("attach-domain: dns_label %q is not a valid DNS label — refusing before any side effect", spec.DNSLabel)
-	}
-	if spec.DNSZone != Zone {
-		return fmt.Errorf("attach-domain: dns_zone %q is not the platform zone %s (V1 attaches platform-zone hosts only)", spec.DNSZone, Zone)
-	}
-	if spec.CustomHost != spec.DNSLabel+"."+spec.DNSZone {
-		return fmt.Errorf("attach-domain: custom_host %q does not equal dns_label+dns_zone (%q.%q) — inconsistent claim", spec.CustomHost, spec.DNSLabel, spec.DNSZone)
+	if externalAttachHost(spec.CustomHost) {
+		if err := validateExternalAttachHost(spec.CustomHost); err != nil {
+			return err
+		}
+		if spec.DNSLabel != "" || spec.DNSZone != "" {
+			return fmt.Errorf("attach-domain: external custom_host %q carries platform DNS halves (%q/%q) — inconsistent claim", spec.CustomHost, spec.DNSLabel, spec.DNSZone)
+		}
+	} else {
+		if !attachCustomHostRe.MatchString(spec.CustomHost) {
+			return fmt.Errorf("attach-domain: custom_host %q is not a single label under %s — refusing before any side effect", spec.CustomHost, Zone)
+		}
+		if !attachDNSLabelRe.MatchString(spec.DNSLabel) {
+			return fmt.Errorf("attach-domain: dns_label %q is not a valid DNS label — refusing before any side effect", spec.DNSLabel)
+		}
+		if spec.DNSZone != Zone {
+			return fmt.Errorf("attach-domain: dns_zone %q is not the platform zone %s for platform host %q", spec.DNSZone, Zone, spec.CustomHost)
+		}
+		if spec.CustomHost != spec.DNSLabel+"."+spec.DNSZone {
+			return fmt.Errorf("attach-domain: custom_host %q does not equal dns_label+dns_zone (%q.%q) — inconsistent claim", spec.CustomHost, spec.DNSLabel, spec.DNSZone)
+		}
 	}
 	if net.ParseIP(spec.IP) == nil {
 		return fmt.Errorf("attach-domain: ip %q is not a valid IP address — refusing before any side effect", spec.IP)
@@ -183,30 +245,55 @@ func attachDomainSteps(spec AttachDomainSpec, envFile, caddyfilePath string) []c
 }
 
 // AttachDomainWith attaches spec.CustomHost to the box at spec.IP via the
-// seams' DNS + per-host runner:
+// seams' DNS/resolver + per-host runner:
 //
 //  1. DEFENSIVE validation (validateAttachDomainSpec) — a hostile/inconsistent
 //     claim payload aborts before ANY side effect.
-//  2. DNS: upsert the A record <dns_label>.<dns_zone> → ip (create-or-replace,
-//     idempotent).
-//  3. SSH: merge https://<custom_host> into BARKPARK_EXTRA_ORIGINS, append the
-//     on-demand-TLS Caddy vhost, validate + reload Caddy, restart the app —
-//     every remote command through the StepRunner seam, each step idempotent.
+//  2. DNS, split by host kind (V2):
+//     - PLATFORM host: upsert the A record <dns_label>.<dns_zone> → ip
+//     (create-or-replace, idempotent) — we own the zone, pointing it IS the
+//     attach.
+//     - EXTERNAL host: NO platform upsert (the customer owns DNS). Instead,
+//     re-verify via the system resolver that the FQDN ALREADY resolves to
+//     the box — the ownership moat, enforced worker-side too because the
+//     worker cannot trust the control plane's pre-check. Fail-closed: a
+//     resolver error or a mismatch aborts with no remote command.
+//  3. SSH (identical for both kinds): merge https://<custom_host> into
+//     BARKPARK_EXTRA_ORIGINS, append the on-demand-TLS Caddy vhost, validate +
+//     reload Caddy, restart the app — every remote command through the
+//     StepRunner seam, each step idempotent.
 //
-// A step failure aborts the remainder and fails the job. A DNS record already
-// upserted when a later step fails is ACCEPTABLE residue: it points the host at
-// the box the instance already lives on, and the retry's upsert is a no-op.
+// A step failure aborts the remainder and fails the job. A platform DNS record
+// already upserted when a later step fails is ACCEPTABLE residue: it points the
+// host at the box the instance already lives on, and the retry's upsert is a
+// no-op.
 func AttachDomainWith(ctx context.Context, seams Seams, spec AttachDomainSpec) error {
 	if err := validateAttachDomainSpec(spec); err != nil {
 		return err
 	}
-	if seams.DNS == nil {
-		return fmt.Errorf("provisioner: a DNSProvider must be set to attach a domain")
-	}
 
-	rec := cloud.Record{Zone: spec.DNSZone, Name: spec.DNSLabel, Type: "A", Value: spec.IP}
-	if err := seams.DNS.UpsertRecord(ctx, rec); err != nil {
-		return fmt.Errorf("attach-domain %s: dns upsert: %w", spec.CustomHost, err)
+	if externalAttachHost(spec.CustomHost) {
+		lookup := seams.LookupHost
+		if lookup == nil {
+			lookup = func(ctx context.Context, host string) ([]string, error) {
+				return net.DefaultResolver.LookupHost(ctx, host)
+			}
+		}
+		addrs, err := lookup(ctx, spec.CustomHost)
+		if err != nil {
+			return fmt.Errorf("attach-domain %s: resolve: %w — refusing before any side effect (fail closed)", spec.CustomHost, err)
+		}
+		if !containsAddr(addrs, spec.IP) {
+			return fmt.Errorf("attach-domain %s: the host does not resolve to the box %s (observed %v) — point the domain first", spec.CustomHost, spec.IP, addrs)
+		}
+	} else {
+		if seams.DNS == nil {
+			return fmt.Errorf("provisioner: a DNSProvider must be set to attach a platform-zone domain")
+		}
+		rec := cloud.Record{Zone: spec.DNSZone, Name: spec.DNSLabel, Type: "A", Value: spec.IP}
+		if err := seams.DNS.UpsertRecord(ctx, rec); err != nil {
+			return fmt.Errorf("attach-domain %s: dns upsert: %w", spec.CustomHost, err)
+		}
 	}
 
 	runnerFor := seams.RunnerFor
@@ -222,6 +309,22 @@ func AttachDomainWith(ctx context.Context, seams Seams, spec AttachDomainSpec) e
 		}
 	}
 	return nil
+}
+
+// containsAddr reports whether want is among the RESOLVED addresses, compared
+// as parsed IPs so textual variants of the same address ("::1" vs
+// "0:0:0:0:0:0:0:1") never cause a false mismatch.
+func containsAddr(addrs []string, want string) bool {
+	wantIP := net.ParseIP(want)
+	if wantIP == nil {
+		return false
+	}
+	for _, a := range addrs {
+		if ip := net.ParseIP(a); ip != nil && ip.Equal(wantIP) {
+			return true
+		}
+	}
+	return false
 }
 
 // DefaultAttachDomain returns an AttachDomainFunc bound to seams — the value the

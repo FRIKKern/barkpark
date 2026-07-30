@@ -81,7 +81,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/barkparks/:id/verify user  run the post-provision health verification
       POST    /v1/barkparks/:id/self-update admin  trigger an in-place self-update on the box
       POST    /v1/barkparks/:id/rollback admin  roll the box back to the previous release
-      POST    /v1/barkparks/:id/domain admin  attach a custom domain (enqueue DNS/TLS)
+      POST    /v1/barkparks/:id/domain admin  attach a custom domain — platform-zone or any customer FQDN already pointed at the box (V2 ownership proof)
       POST    /v1/barkparks/:id/vercel-deploy admin  wire a Vercel deploy for the instance's site
       GET     /v1/barkparks/:id/api/webhooks user  proxy → the instance's own webhooks list (admin token stays server-side)
       POST    /v1/barkparks/:id/api/webhooks user  proxy → create a webhook on the instance
@@ -223,6 +223,7 @@ defmodule BarkparkCloud.Web.Router do
     Billing,
     Cloudflare,
     DeviceAuth,
+    DomainOwnership,
     DomainStatus,
     Events,
     FailureCopy,
@@ -3303,12 +3304,23 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # POST /v1/barkparks/:id/domain {domain} → 202 {ok, custom_host, status:
-  # "attaching"} — attach a bare platform-zone host (instance custom domains,
-  # e.g. gyldendal.barkpark.cloud) to a managed instance. Persists the validated
-  # custom_host on the row (Registry.set_custom_host — v1: exactly one label
-  # under barkpark.cloud; anything else is 422) and enqueues an "attach_domain"
-  # job the Go worker drains (DNS A record + box wiring). 409 taken when the
-  # host is already claimed by a site domain / another instance's custom_host /
+  # "attaching"} — attach a custom domain to a managed instance: a platform-zone
+  # host (gyldendal.barkpark.cloud) or, since attach-domain V2, an ARBITRARY
+  # customer-owned FQDN (barkpark.jarl.no). Persists the validated custom_host
+  # on the row (Registry.set_custom_host; a malformed domain is 422
+  # invalid_domain) and enqueues an "attach_domain" job the Go worker drains
+  # (platform hosts: DNS A record + box wiring; external hosts: box wiring only
+  # — the customer owns DNS).
+  #
+  # V2 OWNERSHIP PROOF, fail-closed: an external FQDN must ALREADY resolve
+  # (A/AAAA, system resolver — injectable via :attach_domain_dns) to the
+  # instance's box IP before anything is persisted or enqueued; a miss is 422
+  # {error: domain_not_pointed, expected_ip, observed}. You can only attach a
+  # domain you already pointed at your own box. The Go worker re-verifies
+  # resolution box-side before touching the machine (defense in depth).
+  #
+  # 409 taken when the host is already claimed by a site domain / another
+  # instance's custom_host (exact, or nesting under a different team's host) /
   # a provisioning FQDN; 409 already_attaching while a previous attach is still
   # in flight (the one-active-job-per-kind partial index).
   #
@@ -3344,16 +3356,44 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # The persist + enqueue tail of POST /v1/barkparks/:id/domain, after the auth
-  # + team-scope + presence gates all passed.
-  #
+  # The validate → ownership-proof → persist/enqueue tail of POST
+  # /v1/barkparks/:id/domain, after the auth + team-scope + presence gates all
+  # passed. Shape validation runs FIRST (a malformed domain 422s before any
+  # resolver call); a platform-zone host then rides straight to persist (we own
+  # that DNS — pointing it IS the attach), while an external FQDN must pass the
+  # V2 ownership proof (DomainOwnership.pointed_at? against the box IP,
+  # fail-closed) before anything is written.
+  defp attach_custom_domain(conn, team, bp, domain) do
+    case Registry.validate_custom_host(bp, domain) do
+      {:ok, host} ->
+        if Barkpark.platform_custom_host?(host) do
+          persist_and_enqueue_domain(conn, team, bp, domain)
+        else
+          case DomainOwnership.pointed_at?(host, bp.host) do
+            :ok ->
+              persist_and_enqueue_domain(conn, team, bp, domain)
+
+            {:error, observed} ->
+              json(conn, 422, %{
+                error: "domain_not_pointed",
+                expected_ip: bp.host,
+                observed: observed
+              })
+          end
+        end
+
+      {:error, %Ecto.Changeset{}} ->
+        json(conn, 422, %{error: "invalid_domain"})
+    end
+  end
+
   # OC24 (transactional): the custom_host persist and its
   # barkpark.domain_attached row share one transaction — a rejected/taken host
   # writes NO row (the barkpark.deleted prior art). The audited fact is the
   # PERSISTED host (normalized by the changeset, never raw input); the enqueue
   # below is the async half and its 409/422 does not unwrite the host — the
   # audit honestly records the attach that DID land on the row.
-  defp attach_custom_domain(conn, team, bp, domain) do
+  defp persist_and_enqueue_domain(conn, team, bp, domain) do
     audit_attrs = %{
       team_id: team.id,
       actor_user_id: conn.assigns.current_user.id,
@@ -9714,9 +9754,11 @@ defmodule BarkparkCloud.Web.Router do
   # The claim payload the Go worker decodes into an attach-domain spec (instance
   # custom domains). Keys are EXACTLY the pinned cross-language contract:
   # {job_id, claim_token, ip, custom_host, dns_label, dns_zone, app_port}.
-  # `ip` is the instance box the worker SSHes to; `dns_label`/`dns_zone` split
-  # the custom host for the A-record upsert (`<label>.<zone>` == custom_host by
-  # construction — v1 hosts are one label under the platform zone).
+  # `ip` is the instance box the worker SSHes to. `dns_label`/`dns_zone` split
+  # a PLATFORM custom host for the A-record upsert (`<label>.<zone>` ==
+  # custom_host by construction); for an EXTERNAL customer FQDN (attach-domain
+  # V2) BOTH are null — the customer owns DNS, and the worker verifies the host
+  # already resolves to the box instead of upserting anything.
   defp attach_domain_claim_json(job, barkpark) do
     %{
       job_id: job.id,
@@ -9725,7 +9767,11 @@ defmodule BarkparkCloud.Web.Router do
       ip: barkpark.host,
       custom_host: barkpark.custom_host,
       dns_label: Barkpark.custom_host_label(barkpark),
-      dns_zone: Barkpark.base_domain(),
+      dns_zone:
+        if(Barkpark.platform_custom_host?(barkpark.custom_host),
+          do: Barkpark.base_domain(),
+          else: nil
+        ),
       # Every managed instance serves Phoenix on 4000 behind Caddy (the
       # provision-time `reverse_proxy localhost:4000`). A LITERAL on purpose —
       # the registry doesn't store a per-row port; make it a column the day a
