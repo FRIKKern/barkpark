@@ -650,6 +650,11 @@ defmodule BarkparkWeb.WorkspaceController do
 
   # Spill the raw tar body to a scratch directory, run `fun`, then always remove
   # the scratch. `fun` is `(conn, bundle_path, receipt_map) -> conn`.
+  #
+  # File.rm_rf removes exactly the directory `Archive.open_scratch_dir!/0` just
+  # created — `spill_dir/0` (operator config) plus System.unique_integer/1. No
+  # request input reaches the path, same basis as archive.ex:229-231.
+  # sobelow_skip ["Traversal.FileModule"]
   defp with_spilled_body(conn, fun) do
     scratch = Archive.open_scratch_dir!()
 
@@ -713,6 +718,12 @@ defmodule BarkparkWeb.WorkspaceController do
   # Stream the body to `path`, refusing past the derived ceiling. A POST body
   # arrives in multiple chunks, so loop on `:more` — but SUM them, which is the
   # bug this replaces.
+  #
+  # File.open's `path` is Path.join(scratch, "body.tar"), and `scratch` comes
+  # from `Archive.open_scratch_dir!/0` — `spill_dir/0` (operator config) plus
+  # System.unique_integer/1. No request input reaches the path, same basis as
+  # archive.ex:229-231.
+  # sobelow_skip ["Traversal.FileModule"]
   defp spill_body(conn, path) do
     case File.open(path, [:write, :raw, :binary]) do
       {:ok, io} ->
