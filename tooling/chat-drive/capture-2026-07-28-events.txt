@@ -1,0 +1,171 @@
+event: chat
+data: {"agents":["claude","Explore","felix","general-purpose","Plan","statusline-setup"],"analytics_disabled":false,"apiKeySource":"none","capabilities":["interrupt_receipt_v1","msg_lifecycle_v1"],"claude_code_version":"2.1.207","cwd":"/opt/barkpark/api","fast_mode_state":"off","mcp_servers":[{"name":"barkpark","status":"pending"}],"memory_paths":{"auto":"/root/.claude/projects/-opt-barkpark/memory/"},"model":"claude-haiku-4-5-20251001","output_style":"default","permissionMode":"plan","plugins":[],"product_feedback_disabled":false,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","skills":["codebase-quality","fleet-listener","fleet-orchestrator","scope","session","session-resume","deep-research","bp-epic-cycle","deep-investigation","hello-world","view-edit-parity","wild-bulk-cycle","design-sync","dataviz","update-config","verify","debug","code-review","simplify","batch","fewer-permission-prompts","doctor","loop","schedule","claude-api","run","run-skill-generator"],"slash_commands":["codebase-quality","fleet-listener","fleet-orchestrator","scope","session","session-resume","deep-research","bp-epic-cycle","deep-investigation","hello-world","view-edit-parity","wild-bulk-cycle","design-sync","dataviz","update-config","verify","debug","code-review","simplify","batch","fewer-permission-prompts","doctor","loop","schedule","claude-api","run","run-skill-generator","agents","clear","color","compact","config","context","effort","fast","heapdump","init","mcp","model","__remote-workflow","reload-skills","rename","review","security-review","usage-credits","extra-usage","usage","insights","recap","goal","design","design-consent","design-revoke","team-onboarding"],"subtype":"init","tools":["Task","AskUserQuestion","Bash","CronCreate","CronDelete","CronList","DesignSync","Edit","EnterPlanMode","EnterWorktree","ExitPlanMode","ExitWorktree","Monitor","NotebookEdit","PushNotification","Read","RemoteTrigger","ReportFindings","ScheduleWakeup","SendMessage","Skill","TaskCreate","TaskGet","TaskList","TaskOutput","TaskStop","TaskUpdate","ToolSearch","WebFetch","WebSearch","Write"],"type":"system","uuid":"ccfd4c90-2c71-4125-b3a2-6796ee048a30"}
+
+event: chat
+data: {"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","status":"requesting","subtype":"status","type":"system","uuid":"f1eded9e-6033-474a-86b5-b2fa2b9eb839"}
+
+event: chat
+data: {"rate_limit_info":{"isUsingOverage":false,"rateLimitType":"seven_day","resetsAt":1785420000,"status":"allowed_warning","surpassedThreshold":0.75,"utilization":0.97},"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"rate_limit_event","uuid":"cf3abdbf-b222-42e0-9ef4-bd886647d20c"}
+
+event: chat
+data: {"event":{"message":{"content":[],"diagnostics":null,"id":"msg_011CdVLf4WPsC37mEf3uR9k7","model":"claude-sonnet-5","role":"assistant","stop_details":null,"stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation":{"ephemeral_1h_input_tokens":13907,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":13907,"cache_read_input_tokens":23128,"inference_geo":"not_available","input_tokens":2,"output_tokens":2,"service_tier":"standard"}},"type":"message_start"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","ttft_ms":1501,"type":"stream_event","uuid":"f1d175e4-9b4d-41c2-999d-353171d5b60d"}
+
+event: chat
+data: {"event":{"content_block":{"signature":"","thinking":"","type":"thinking"},"index":0,"type":"content_block_start"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"d83f4dbf-49a1-4bb3-a367-b34685f9c284"}
+
+event: chat
+data: {"estimated_tokens":50,"estimated_tokens_delta":50,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","subtype":"thinking_tokens","type":"system","uuid":"ed1c8b30-7c6e-4d52-bf1d-716f666805d0"}
+
+event: chat
+data: {"event":{"delta":{"estimated_tokens":50,"thinking":"","type":"thinking_delta"},"index":0,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"916ba020-f473-42cc-b345-469a484c7825"}
+
+event: chat
+data: {"estimated_tokens":150,"estimated_tokens_delta":100,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","subtype":"thinking_tokens","type":"system","uuid":"f6dcc720-d1a1-4782-9b7f-a1e93c2dee1c"}
+
+event: chat
+data: {"event":{"delta":{"estimated_tokens":100,"thinking":"","type":"thinking_delta"},"index":0,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"4779e3f0-361e-4af0-88d4-6da71109cf85"}
+
+event: chat
+data: {"estimated_tokens":200,"estimated_tokens_delta":50,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","subtype":"thinking_tokens","type":"system","uuid":"5b1aa295-c77a-44e5-bde3-00655076980b"}
+
+event: chat
+data: {"event":{"delta":{"estimated_tokens":50,"thinking":"","type":"thinking_delta"},"index":0,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"b2f78527-930c-4647-b734-d8f5af0258b4"}
+
+event: chat
+data: {"estimated_tokens":314,"estimated_tokens_delta":114,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","subtype":"thinking_tokens","type":"system","uuid":"d70a4ae1-96ba-41d4-bdb9-042aa1ac4e63"}
+
+event: chat
+data: {"event":{"delta":{"signature":"EuAJCokBCBAYAipA4fxoG3RP2UB6AWXPibExrIXxLov9Wj5POCr4dUHLEdICAtO2Bl4i5DeChl8XEW8gHxy1P2bde6vhupO0bu2X4zIPY2xhdWRlLXNvbm5ldC01OABCCHRoaW5raW5nWiQ5ZmVkMTM3MC05NGFkLTRiZDQtOTY5NC02NTg4MzI5ZDU5ODISDLnYTEpuZnv8RGtt3xoMYBC98FvXWTFWvUj1IjA6TWE1zEHb9XbCxP0hr76P3rMf+HJxs5wbVp08tLnhoZXlLJipO7/dkQnM3M2RkEkqgwgp47gAv3IO5Q/qdmhMXMXbsI+KHgQZHjByAdq1dtBqWfUpKGvpZWTRarx9UOsdzZjag+S+eaRo7FA0O9Zjzx6wlL9WDhLiDV3+i1VGGZrQhUDH6YM9elqg7CxIYXYv1LfqkJhBQT9ojUYIlNsT+j0GVFfuSUxuhB9IqYgrnYwzhHSaVMVG2Oarg4vIC7Hs+HITjBaSJnCvKoJMoXQ1d3GIfHBwbDnay+XAPUmo7VsWgg6YrMxkhp1klix15k03L/qZWFib8yoQSn8oG60KJG0/A7Dbw2iBranhGbSThCP2s8JFzqrr1SiEK/OWMgIsphb2nc4P5Hz9J7J/GGoa9fExNekkgI3SFYOv9p9J2nHb7Hixvg2EhNy/o7fLiQld3vV7WprX+cjDWzWSHxmXssYKhtbm+29D4chpTruXjCgiDMdLqLvAh/exjSLWycw0b8RhvZxtSrvBdRBJ2YjOy38cu5m53RbV1fHpb7inom3fHTB4PpmytfZp9WreS8r5kh+b5zanQaly7ucNopNR9lyZPtMHceoV8Hk3JsdYW8kUKff9t87n9x7r0f3jCLDRG2aaf1I5wnD2IVHgAyFV0LsyCf7OjHd9lvznYb9DsDGuqcts8YeiIGuUwcdhGPDt2nU4fPdx5dagwo+BcO4pxHCt5QSAPUvkba0eeFshRdd0lAlJCOhpWLA7E/6WCDJnnCfjttNGUjw78zIMaMbUEAos1Fpa01TW4WQwPzHFf6QAXrnsrtl3ByTYON1+2W4yIJyCGCP8y7XtCfLsBMaIRi1s5DjxYQA2jec8OxUVNZ4zndkR9J0lVq831a79dy4XYV6+3XnmCXtHstZnL+8IIwl/BOMNQgTaA89jEDxVZN49BCXbSiR4XCJvD4ZRW/1aeeyW3zL/Nqdj7EviBM1OaNPyt3PhfOCGREy3y4AuOCvD/SISfwYhDQvij/fyjSdKwsH1B1gA5BCfPhXEVz8rFv2mdWsib9p7uiFQsur4t1HeTHkpwMxEBJ07xUG+q5v0RdytrNpKff1Ld3nVmbRIGkvn1vKjy7lASxaKzEUjY33c+dm+LFj+9WmI/fXnp54AJ74z7aMI/DHhTlnMm4IWkoXCGgr1oWu7VVKLwY4eHzs+MsCg/NJ5iTEJfDmdXVWyhbyeaoZUHCR1Y0qcz9BolQ4t2inPwYe6c9NSs+vooLxLXC6yswleqfRFYYUFGTMQU+WJFgkjWUQH1ymUtSxHZG3VvAvej1q0LXpsMVYgnNf+JfqXuSxxO36OwmLz1ZxWFIjmj/lz4ba7Uh8y/E0fvz+yTaLKlqMCc3TDrNrkekuZcHE8tAH5fVav5smThCkqcgio399/HDki4DKoCEPa6xqSDcjlGAE=","type":"signature_delta"},"index":0,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"47d77e4a-23a8-4e6d-a894-84e5c5b33319"}
+
+event: chat
+data: {"message":{"content":[{"signature":"EuAJCokBCBAYAipA4fxoG3RP2UB6AWXPibExrIXxLov9Wj5POCr4dUHLEdICAtO2Bl4i5DeChl8XEW8gHxy1P2bde6vhupO0bu2X4zIPY2xhdWRlLXNvbm5ldC01OABCCHRoaW5raW5nWiQ5ZmVkMTM3MC05NGFkLTRiZDQtOTY5NC02NTg4MzI5ZDU5ODISDLnYTEpuZnv8RGtt3xoMYBC98FvXWTFWvUj1IjA6TWE1zEHb9XbCxP0hr76P3rMf+HJxs5wbVp08tLnhoZXlLJipO7/dkQnM3M2RkEkqgwgp47gAv3IO5Q/qdmhMXMXbsI+KHgQZHjByAdq1dtBqWfUpKGvpZWTRarx9UOsdzZjag+S+eaRo7FA0O9Zjzx6wlL9WDhLiDV3+i1VGGZrQhUDH6YM9elqg7CxIYXYv1LfqkJhBQT9ojUYIlNsT+j0GVFfuSUxuhB9IqYgrnYwzhHSaVMVG2Oarg4vIC7Hs+HITjBaSJnCvKoJMoXQ1d3GIfHBwbDnay+XAPUmo7VsWgg6YrMxkhp1klix15k03L/qZWFib8yoQSn8oG60KJG0/A7Dbw2iBranhGbSThCP2s8JFzqrr1SiEK/OWMgIsphb2nc4P5Hz9J7J/GGoa9fExNekkgI3SFYOv9p9J2nHb7Hixvg2EhNy/o7fLiQld3vV7WprX+cjDWzWSHxmXssYKhtbm+29D4chpTruXjCgiDMdLqLvAh/exjSLWycw0b8RhvZxtSrvBdRBJ2YjOy38cu5m53RbV1fHpb7inom3fHTB4PpmytfZp9WreS8r5kh+b5zanQaly7ucNopNR9lyZPtMHceoV8Hk3JsdYW8kUKff9t87n9x7r0f3jCLDRG2aaf1I5wnD2IVHgAyFV0LsyCf7OjHd9lvznYb9DsDGuqcts8YeiIGuUwcdhGPDt2nU4fPdx5dagwo+BcO4pxHCt5QSAPUvkba0eeFshRdd0lAlJCOhpWLA7E/6WCDJnnCfjttNGUjw78zIMaMbUEAos1Fpa01TW4WQwPzHFf6QAXrnsrtl3ByTYON1+2W4yIJyCGCP8y7XtCfLsBMaIRi1s5DjxYQA2jec8OxUVNZ4zndkR9J0lVq831a79dy4XYV6+3XnmCXtHstZnL+8IIwl/BOMNQgTaA89jEDxVZN49BCXbSiR4XCJvD4ZRW/1aeeyW3zL/Nqdj7EviBM1OaNPyt3PhfOCGREy3y4AuOCvD/SISfwYhDQvij/fyjSdKwsH1B1gA5BCfPhXEVz8rFv2mdWsib9p7uiFQsur4t1HeTHkpwMxEBJ07xUG+q5v0RdytrNpKff1Ld3nVmbRIGkvn1vKjy7lASxaKzEUjY33c+dm+LFj+9WmI/fXnp54AJ74z7aMI/DHhTlnMm4IWkoXCGgr1oWu7VVKLwY4eHzs+MsCg/NJ5iTEJfDmdXVWyhbyeaoZUHCR1Y0qcz9BolQ4t2inPwYe6c9NSs+vooLxLXC6yswleqfRFYYUFGTMQU+WJFgkjWUQH1ymUtSxHZG3VvAvej1q0LXpsMVYgnNf+JfqXuSxxO36OwmLz1ZxWFIjmj/lz4ba7Uh8y/E0fvz+yTaLKlqMCc3TDrNrkekuZcHE8tAH5fVav5smThCkqcgio399/HDki4DKoCEPa6xqSDcjlGAE=","thinking":"","type":"thinking"}],"context_management":null,"diagnostics":null,"id":"msg_011CdVLf4WPsC37mEf3uR9k7","model":"claude-sonnet-5","role":"assistant","stop_details":null,"stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation":{"ephemeral_1h_input_tokens":13907,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":13907,"cache_read_input_tokens":23128,"inference_geo":"not_available","input_tokens":2,"output_tokens":2,"service_tier":"standard"}},"parent_tool_use_id":null,"request_id":"req_011CdVLf1yMM4UoC6oJUq4Qd","session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"assistant","uuid":"c6f69df3-6077-4e53-9367-a7ba85e7c108"}
+
+event: chat
+data: {"event":{"index":0,"type":"content_block_stop"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"85b47a8c-a70e-4b4f-ab12-a04e85e911b2"}
+
+event: chat
+data: {"event":{"content_block":{"text":"","type":"text"},"index":1,"type":"content_block_start"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"910e9777-d8c3-480f-8a6e-e62435ba4052"}
+
+event: chat
+data: {"event":{"delta":{"text":"A headless CMS separates content from presentation because it treats written material,","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"4635a7d2-170d-4a3e-87dc-af68214ecd09"}
+
+event: chat
+data: {"event":{"delta":{"text":" images, and structured data as pure information rather than as something tied to a particular scre","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"f0ba56c7-c318-4f1b-bbdc-8274760d2ab8"}
+
+event: chat
+data: {"event":{"delta":{"text":"en or layout. Instead of storing a paragraph alongside the HTML that","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"fe3c965c-dc05-4b20-8c28-974404ec06c6"}
+
+event: chat
+data: {"event":{"delta":{"text":" will wrap around it, the system stores the paragraph on its own, ready to be requested by","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"b77d02bd-4d40-4ebc-aa8f-b2116b7cb55f"}
+
+event: chat
+data: {"event":{"delta":{"text":" whatever application needs it. This separation means the content itself has no op","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"5489a367-5991-487d-b047-458ec366d00f"}
+
+event: chat
+data: {"event":{"delta":{"text":"inion about how it will eventually look, which is precisely the point. The system becomes a repository of meaning rather than a rep","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"61c10592-9d75-4237-8f11-d8f4cf56553e"}
+
+event: chat
+data: {"event":{"delta":{"text":"ository of pages.\n\nThis matters because a single piece of content today often needs to appear in many places at once. A product description might","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"3052d78d-318a-4172-9870-07caf07b8580"}
+
+event: stable
+data: {"blocks":[{"content":[{"type":"text","value":"A headless CMS separates content from presentation because it treats written material, images, and structured data as pure information rather than as something tied to a particular screen or layout. Instead of storing a paragraph alongside the HTML that will wrap around it, the system stores the paragraph on its own, ready to be requested by whatever application needs it. This separation means the content itself has no opinion about how it will eventually look, which is precisely the point. The system becomes a repository of meaning rather than a repository of pages."}],"type":"paragraph"}],"to":575,"from":0,"turn":1,"skeleton":null}
+
+event: chat
+data: {"event":{"delta":{"text":" show up on a website, inside a mobile app, on a smart display in a store, and","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"ed6ad24d-16b1-4db4-9e4a-493ac9f3868e"}
+
+event: chat
+data: {"event":{"delta":{"text":" through a voice assistant that reads it aloud. If that description were baked into a specific template, each new surface would require","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"71bb81ff-1c83-4f64-b83e-c1c3cb84ae73"}
+
+event: chat
+data: {"event":{"delta":{"text":" duplicating or rewriting the content to fit a different presentation layer. By keeping the content","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"a3816603-0093-4610-abcf-43262229c3ec"}
+
+event: chat
+data: {"event":{"delta":{"text":" raw and untemplated, a headless system lets every surface p","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"76daf7a2-f4e7-441b-aa71-7d19e8388769"}
+
+event: chat
+data: {"event":{"delta":{"text":"ull the same underlying material and shape it however that surface requires.\n\nThe word","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"81acad7f-547f-4fad-97eb-84caa869f6b9"}
+
+event: stable
+data: {"blocks":[{"content":[{"type":"text","value":"This matters because a single piece of content today often needs to appear in many places at once. A product description might show up on a website, inside a mobile app, on a smart display in a store, and through a voice assistant that reads it aloud. If that description were baked into a specific template, each new surface would require duplicating or rewriting the content to fit a different presentation layer. By keeping the content raw and untemplated, a headless system lets every surface pull the same underlying material and shape it however that surface requires."}],"type":"paragraph"}],"to":1151,"from":575,"turn":1,"skeleton":null}
+
+event: chat
+data: {"event":{"delta":{"text":" headless refers to the absence of a built in front end. A traditional CMS b","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"a667fba4-bc28-4482-b756-17e8c648d724"}
+
+event: chat
+data: {"event":{"delta":{"text":"undles the database, the editing tools, and the rendering engine into one package","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"83d214ec-2f5f-40eb-8833-03e7eeafecc9"}
+
+event: chat
+data: {"event":{"delta":{"text":", so the way a page looks is often inseparable from the way its content is stored. A headless system","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"b707cefc-c95f-438d-a94e-043c35d0ede7"}
+
+event: chat
+data: {"event":{"delta":{"text":" removes that rendering head entirely and instead exposes content through an API, leaving the actual vis","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"4261783e-441a-44d2-ac0c-c8ec73542d8f"}
+
+event: chat
+data: {"event":{"delta":{"text":"ual construction to whatever client application consumes it. This means developers on the presentation side can cho","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"df116270-c299-4057-b55b-0ba711a49160"}
+
+event: chat
+data: {"event":{"delta":{"text":"ose any framework or device target without being constrained by decisions made in","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"819e5e31-c92b-4e17-b57d-584c35b01089"}
+
+event: chat
+data: {"event":{"delta":{"text":"side the content system itself.\n\nThere is also a practical benefit for the people who man","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"287e9b3a-71ca-46e4-a98b-5ea85c4a0e08"}
+
+event: stable
+data: {"blocks":[{"content":[{"type":"text","value":"The word headless refers to the absence of a built in front end. A traditional CMS bundles the database, the editing tools, and the rendering engine into one package, so the way a page looks is often inseparable from the way its content is stored. A headless system removes that rendering head entirely and instead exposes content through an API, leaving the actual visual construction to whatever client application consumes it. This means developers on the presentation side can choose any framework or device target without being constrained by decisions made inside the content system itself."}],"type":"paragraph"}],"to":1749,"from":1151,"turn":1,"skeleton":null}
+
+event: chat
+data: {"event":{"delta":{"text":"age content day to day. Editors and writers can focus on structuring accurate, well organized information without needing to think about pixel wid","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"23a4a6b4-3fc0-457c-8127-8be2f9850e17"}
+
+event: chat
+data: {"event":{"delta":{"text":"ths, fonts, or page layout, because those concerns live entirely in a separate layer ma","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"283ca32f-30d2-44db-a71c-2ced078fa177"}
+
+event: chat
+data: {"event":{"delta":{"text":"intained by designers and developers. This division of labor reduces friction between teams, since a","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"d5d2a85f-0427-4254-a17f-ef98c07e25fe"}
+
+event: chat
+data: {"event":{"delta":{"text":" change to the visual design of a site does not require touching the underlying content, and a change to the wording of an","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"ab63f49a-4972-453c-9f6e-54235bea3c4d"}
+
+event: chat
+data: {"event":{"delta":{"text":" article does not require anyone to edit templates or stylesheets.\n\nFinally, this separation gives an","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"4ea43f7b-fa96-426a-8ad7-2da6e9596a31"}
+
+event: stable
+data: {"blocks":[{"content":[{"type":"text","value":"There is also a practical benefit for the people who manage content day to day. Editors and writers can focus on structuring accurate, well organized information without needing to think about pixel widths, fonts, or page layout, because those concerns live entirely in a separate layer maintained by designers and developers. This division of labor reduces friction between teams, since a change to the visual design of a site does not require touching the underlying content, and a change to the wording of an article does not require anyone to edit templates or stylesheets."}],"type":"paragraph"}],"to":2328,"from":1749,"turn":1,"skeleton":null}
+
+event: chat
+data: {"event":{"delta":{"text":" organization long term flexibility as technology changes. Presentation layers","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"79d0df6d-3505-4ef7-85e8-0062fd0c133a"}
+
+event: chat
+data: {"event":{"delta":{"text":" tend to be replaced far more often than the underlying content, since design trends sh","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"724de8cb-a56d-4ef5-b62a-0ff1bcf093e7"}
+
+event: chat
+data: {"event":{"delta":{"text":"ift and new devices emerge, while the actual words, images, and records a business","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"7a4ee1b2-5af2-4b80-989e-effd674699cc"}
+
+event: chat
+data: {"event":{"delta":{"text":" relies on tend to persist for years. By decoupling the two, a headless CMS ensures that a redesign or","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"2552668b-3c83-4aff-b361-c98363880636"}
+
+event: chat
+data: {"event":{"delta":{"text":" a platform migration does not force a costly re-entry of content, because the content was","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"4075e484-3fda-4b8b-adbc-2a56bdf935f4"}
+
+event: chat
+data: {"event":{"delta":{"text":" never tangled up with the presentation choices of any one moment in time.","type":"text_delta"},"index":1,"type":"content_block_delta"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"e30298a0-8af9-4a02-8181-9dbe83ef383c"}
+
+event: stable
+data: {"blocks":[{"content":[{"type":"text","value":"Finally, this separation gives an organization long term flexibility as technology changes. Presentation layers tend to be replaced far more often than the underlying content, since design trends shift and new devices emerge, while the actual words, images, and records a business relies on tend to persist for years. By decoupling the two, a headless CMS ensures that a redesign or a platform migration does not force a costly re-entry of content, because the content was never tangled up with the presentation choices of any one moment in time."}],"type":"paragraph"}],"to":2874,"from":2328,"turn":1,"skeleton":null}
+
+event: stable_end
+data: {"reason":"settled","from":2874,"turn":1}
+
+event: chat
+data: {"message":{"content":[{"text":"A headless CMS separates content from presentation because it treats written material, images, and structured data as pure information rather than as something tied to a particular screen or layout. Instead of storing a paragraph alongside the HTML that will wrap around it, the system stores the paragraph on its own, ready to be requested by whatever application needs it. This separation means the content itself has no opinion about how it will eventually look, which is precisely the point. The system becomes a repository of meaning rather than a repository of pages.\n\nThis matters because a single piece of content today often needs to appear in many places at once. A product description might show up on a website, inside a mobile app, on a smart display in a store, and through a voice assistant that reads it aloud. If that description were baked into a specific template, each new surface would require duplicating or rewriting the content to fit a different presentation layer. By keeping the content raw and untemplated, a headless system lets every surface pull the same underlying material and shape it however that surface requires.\n\nThe word headless refers to the absence of a built in front end. A traditional CMS bundles the database, the editing tools, and the rendering engine into one package, so the way a page looks is often inseparable from the way its content is stored. A headless system removes that rendering head entirely and instead exposes content through an API, leaving the actual visual construction to whatever client application consumes it. This means developers on the presentation side can choose any framework or device target without being constrained by decisions made inside the content system itself.\n\nThere is also a practical benefit for the people who manage content day to day. Editors and writers can focus on structuring accurate, well organized information without needing to think about pixel widths, fonts, or page layout, because those concerns live entirely in a separate layer maintained by designers and developers. This division of labor reduces friction between teams, since a change to the visual design of a site does not require touching the underlying content, and a change to the wording of an article does not require anyone to edit templates or stylesheets.\n\nFinally, this separation gives an organization long term flexibility as technology changes. Presentation layers tend to be replaced far more often than the underlying content, since design trends shift and new devices emerge, while the actual words, images, and records a business relies on tend to persist for years. By decoupling the two, a headless CMS ensures that a redesign or a platform migration does not force a costly re-entry of content, because the content was never tangled up with the presentation choices of any one moment in time.","type":"text"}],"context_management":null,"diagnostics":null,"id":"msg_011CdVLf4WPsC37mEf3uR9k7","model":"claude-sonnet-5","role":"assistant","stop_details":null,"stop_reason":null,"stop_sequence":null,"type":"message","usage":{"cache_creation":{"ephemeral_1h_input_tokens":13907,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":13907,"cache_read_input_tokens":23128,"inference_geo":"not_available","input_tokens":2,"output_tokens":2,"service_tier":"standard"}},"parent_tool_use_id":null,"request_id":"req_011CdVLf1yMM4UoC6oJUq4Qd","session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"assistant","uuid":"597f687a-ea05-4854-b3fd-28271ca97b2a"}
+
+event: chat
+data: {"event":{"index":1,"type":"content_block_stop"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"88ab8bd3-5623-410b-9bc7-9b0d199af846"}
+
+event: chat
+data: {"event":{"context_management":{"applied_edits":[]},"delta":{"stop_details":null,"stop_reason":"end_turn","stop_sequence":null},"type":"message_delta","usage":{"cache_creation_input_tokens":13907,"cache_read_input_tokens":23128,"input_tokens":2,"iterations":[{"cache_creation":{"ephemeral_1h_input_tokens":13907,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":13907,"cache_read_input_tokens":23128,"input_tokens":2,"output_tokens":1068,"type":"message"}],"output_tokens":1068,"output_tokens_details":{"thinking_tokens":308}}},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"88af3356-b586-43bd-bbec-55e300795612"}
+
+event: chat
+data: {"event":{"type":"message_stop"},"parent_tool_use_id":null,"session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","type":"stream_event","uuid":"34197bf9-ac98-4c5a-a99e-e7fe805e1fa0"}
+
+event: chat
+data: {"api_error_status":null,"duration_api_ms":18587,"duration_ms":18051,"fast_mode_state":"off","is_error":false,"modelUsage":{"claude-haiku-4-5-20251001":{"cacheCreationInputTokens":0,"cacheReadInputTokens":0,"contextWindow":200000,"costUSD":6.85e-4,"inputTokens":605,"maxOutputTokens":32000,"outputTokens":16,"webSearchRequests":0},"claude-sonnet-5":{"cacheCreationInputTokens":13907,"cacheReadInputTokens":23128,"contextWindow":1000000,"costUSD":0.10640639999999998,"inputTokens":2,"maxOutputTokens":64000,"outputTokens":1068,"webSearchRequests":0}},"num_turns":1,"permission_denials":[],"result":"A headless CMS separates content from presentation because it treats written material, images, and structured data as pure information rather than as something tied to a particular screen or layout. Instead of storing a paragraph alongside the HTML that will wrap around it, the system stores the paragraph on its own, ready to be requested by whatever application needs it. This separation means the content itself has no opinion about how it will eventually look, which is precisely the point. The system becomes a repository of meaning rather than a repository of pages.\n\nThis matters because a single piece of content today often needs to appear in many places at once. A product description might show up on a website, inside a mobile app, on a smart display in a store, and through a voice assistant that reads it aloud. If that description were baked into a specific template, each new surface would require duplicating or rewriting the content to fit a different presentation layer. By keeping the content raw and untemplated, a headless system lets every surface pull the same underlying material and shape it however that surface requires.\n\nThe word headless refers to the absence of a built in front end. A traditional CMS bundles the database, the editing tools, and the rendering engine into one package, so the way a page looks is often inseparable from the way its content is stored. A headless system removes that rendering head entirely and instead exposes content through an API, leaving the actual visual construction to whatever client application consumes it. This means developers on the presentation side can choose any framework or device target without being constrained by decisions made inside the content system itself.\n\nThere is also a practical benefit for the people who manage content day to day. Editors and writers can focus on structuring accurate, well organized information without needing to think about pixel widths, fonts, or page layout, because those concerns live entirely in a separate layer maintained by designers and developers. This division of labor reduces friction between teams, since a change to the visual design of a site does not require touching the underlying content, and a change to the wording of an article does not require anyone to edit templates or stylesheets.\n\nFinally, this separation gives an organization long term flexibility as technology changes. Presentation layers tend to be replaced far more often than the underlying content, since design trends shift and new devices emerge, while the actual words, images, and records a business relies on tend to persist for years. By decoupling the two, a headless CMS ensures that a redesign or a platform migration does not force a costly re-entry of content, because the content was never tangled up with the presentation choices of any one moment in time.","session_id":"34a0246f-4acd-4df2-8f8f-bd42fa9624f4","stop_reason":"end_turn","subtype":"success","terminal_reason":"completed","time_to_request_ms":1687,"total_cost_usd":0.10709139999999999,"ttft_ms":7206,"ttft_stream_ms":3188,"type":"result","usage":{"cache_creation":{"ephemeral_1h_input_tokens":13907,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":13907,"cache_read_input_tokens":23128,"inference_geo":"not_available","input_tokens":2,"iterations":[{"cache_creation":{"ephemeral_1h_input_tokens":13907,"ephemeral_5m_input_tokens":0},"cache_creation_input_tokens":13907,"cache_read_input_tokens":23128,"input_tokens":2,"output_tokens":1068,"type":"message"}],"output_tokens":1068,"server_tool_use":{"web_fetch_requests":0,"web_search_requests":0},"service_tier":"standard","speed":"standard"},"uuid":"4f26187b-2dcd-4dd9-8858-738219461b03"}
+

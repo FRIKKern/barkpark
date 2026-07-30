@@ -1,0 +1,134 @@
+{
+  "_comment": "A REAL capture, not a hand-authored fixture. These are the `event: stable` / `event: stable_end` frames a PRODUCTION Barkpark (guerrilla.barkpark.cloud) put on a socket during one live chat turn, lifted verbatim out of the raw SSE byte log. Its sibling chat_stable_frames.json is the hand-authored CONTRACT (what the wire must be); this file is the EVIDENCE (what the wire was). Captured by tooling/chat-drive/drive.sh (DRIVE_CAPTURE_ONLY=1) under the D41 safety law — plan mode, no plan card ever allowed, session archived on completion, minted token revoked by body — and re-checked over the raw events.log by tooling/chat-drive/assert-stable-capture.py. To regenerate: run the drive, then `assert-stable-capture.py <out>/events.log --emit -` and restore this `capture` block by hand. Consumer: apps/mobile/__tests__/chatStableFramesReal.test.ts, which replays these bytes through the shipped mobile reducer.",
+  "scope": "chat-stable-frame-wire-real-capture",
+  "capture": {
+    "server": "https://guerrilla.barkpark.cloud",
+    "session_id": "34a0246f-4acd-4df2-8f8f-bd42fa9624f4",
+    "raw_log": "tooling/chat-drive/capture-2026-07-28-events.txt (the unedited SSE byte log these frames were lifted from; re-assert with tooling/chat-drive/assert-stable-capture.py)",
+    "transcript": "tooling/chat-drive/capture-2026-07-28-transcript.txt (token-masked drive transcript, D41 evidence artifact)",
+    "captured_at": "2026-07-28T23:40:42Z/2026-07-28T23:41:10Z",
+    "provider": "claude",
+    "model": "haiku",
+    "mode": "plan",
+    "slot": "green (barkpark-slot@green.service, caddy -> localhost:4001)",
+    "slot_sha_before": "2c94b0ba7e9216f54a45972a53f7c2b3a583d771",
+    "slot_sha_after": "2c94b0ba7e9216f54a45972a53f7c2b3a583d771",
+    "slot_note": "Read immediately before (23:40:30Z) and immediately after (23:41:28Z) the capture, identical, with the same ExecMainStartTimestamp (Tue 2026-07-28 22:11:14 UTC): no redeploy severed the stream mid-capture. NOTE the live slot is GREEN — barkpark-slot@blue is FAILED and /opt/barkpark/.slots/blue.sha (cd346389d) is a stale shelf, so reading blue is a false DEAD.",
+    "total_cost_usd": 0.10709139999999999,
+    "hygiene": "session archived (0 rows in the default list, 1 under ?archived=true); minted token revoked BY BODY, then 401 on reuse",
+    "ceiling": "This capture proves the SERVER half only: real production bytes, in order, with content committed MID-turn. The CLIENT half is proven by replaying these bytes through the shipped reducer (apps/mobile/__tests__/chatStableFramesReal.test.ts). NOBODY has watched a phone paint one — that residual is a device gate and rides mob-hg-device-boot."
+  },
+  "captured_turn": 1,
+  "mid_turn_frames": 5,
+  "committed_bytes": 2874,
+  "frames": [
+    {
+      "event": "stable",
+      "data": {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "A headless CMS separates content from presentation because it treats written material, images, and structured data as pure information rather than as something tied to a particular screen or layout. Instead of storing a paragraph alongside the HTML that will wrap around it, the system stores the paragraph on its own, ready to be requested by whatever application needs it. This separation means the content itself has no opinion about how it will eventually look, which is precisely the point. The system becomes a repository of meaning rather than a repository of pages."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "to": 575,
+        "from": 0,
+        "turn": 1,
+        "skeleton": null
+      }
+    },
+    {
+      "event": "stable",
+      "data": {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "This matters because a single piece of content today often needs to appear in many places at once. A product description might show up on a website, inside a mobile app, on a smart display in a store, and through a voice assistant that reads it aloud. If that description were baked into a specific template, each new surface would require duplicating or rewriting the content to fit a different presentation layer. By keeping the content raw and untemplated, a headless system lets every surface pull the same underlying material and shape it however that surface requires."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "to": 1151,
+        "from": 575,
+        "turn": 1,
+        "skeleton": null
+      }
+    },
+    {
+      "event": "stable",
+      "data": {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "The word headless refers to the absence of a built in front end. A traditional CMS bundles the database, the editing tools, and the rendering engine into one package, so the way a page looks is often inseparable from the way its content is stored. A headless system removes that rendering head entirely and instead exposes content through an API, leaving the actual visual construction to whatever client application consumes it. This means developers on the presentation side can choose any framework or device target without being constrained by decisions made inside the content system itself."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "to": 1749,
+        "from": 1151,
+        "turn": 1,
+        "skeleton": null
+      }
+    },
+    {
+      "event": "stable",
+      "data": {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "There is also a practical benefit for the people who manage content day to day. Editors and writers can focus on structuring accurate, well organized information without needing to think about pixel widths, fonts, or page layout, because those concerns live entirely in a separate layer maintained by designers and developers. This division of labor reduces friction between teams, since a change to the visual design of a site does not require touching the underlying content, and a change to the wording of an article does not require anyone to edit templates or stylesheets."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "to": 2328,
+        "from": 1749,
+        "turn": 1,
+        "skeleton": null
+      }
+    },
+    {
+      "event": "stable",
+      "data": {
+        "blocks": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "Finally, this separation gives an organization long term flexibility as technology changes. Presentation layers tend to be replaced far more often than the underlying content, since design trends shift and new devices emerge, while the actual words, images, and records a business relies on tend to persist for years. By decoupling the two, a headless CMS ensures that a redesign or a platform migration does not force a costly re-entry of content, because the content was never tangled up with the presentation choices of any one moment in time."
+              }
+            ],
+            "type": "paragraph"
+          }
+        ],
+        "to": 2874,
+        "from": 2328,
+        "turn": 1,
+        "skeleton": null
+      }
+    },
+    {
+      "event": "stable_end",
+      "data": {
+        "reason": "settled",
+        "from": 2874,
+        "turn": 1
+      }
+    }
+  ]
+}
