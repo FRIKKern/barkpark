@@ -1020,10 +1020,22 @@ var hzServerPostConditions = map[string]hzPost{
 			return "the detach-ISO action completed but the server still reports an ISO attached"
 		},
 	},
-	// F — the flag verbs. Same shape E settling (one read, no poll: the field
-	// is decided once the action completes), but the predicate compares the
-	// server against WHAT WAS ASKED FOR, so it is bound at call time.
+	// F — the flag verbs. Like shape E the predicate is a settled field rather
+	// than a transient status, but it compares the server against WHAT WAS ASKED
+	// FOR, so it is bound at call time. enable-rescue and attach-iso settle
+	// instantly and take one read (attach-iso deliberately mirrors detach-iso);
+	// rebuild and resize poll — see the note on "rebuild" below.
+	// rebuild and resize POLL. The other three settle the instant their action
+	// completes, but these two are the longest-running server operations here and
+	// the field the receipt reads (Image / ServerType) is populated by the same
+	// backend that just finished the action. If that record lags the action by a
+	// beat, a ONE-SHOT read reports "the rebuild completed but the server runs a
+	// different image" on a rebuild that worked — the identical lie this file
+	// exists to kill, pointing the other way. Polling costs NOTHING on agreement:
+	// hzReadBack only re-reads while `holds` is false, so the agreeing path is
+	// still exactly one GET.
 	"rebuild": {
+		poll:    true,
 		observe: hzObserveImage,
 		unreadable: func(s *hcloud.Server) string {
 			if s.Image == nil {
@@ -1040,6 +1052,7 @@ var hzServerPostConditions = map[string]hzPost{
 		},
 	},
 	"resize": {
+		poll:    true,
 		observe: hzObserveServerType,
 		unreadable: func(s *hcloud.Server) string {
 			if s.ServerType == nil {
