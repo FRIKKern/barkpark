@@ -80,6 +80,42 @@
 # 127 distinct hashes (the 18-row boilerplate gap), 78 off-vocabulary
 # dispositions. Exit 1.
 #
+# CLAUSE 4 OF THE DONE-CONDITION — LIVE COVERAGE (wave 25, PDS-D346/D347).
+# Clauses 1-3 above are CLOSURE-scoped and they are correctly so: distinctness
+# and vocabulary are properties of everything ever written. But they are all
+# satisfiable by a board that says NOTHING. A live row with no disposition lands
+# in the `<unset>` bucket no clause reads; a blank reason is skipped before it is
+# hashed; an unset disposition is skipped before it is scored. So the predicate
+# that is supposed to certify "the round adjudicated the board" could go green
+# over a board where every LIVE row is silent — the exact vacuous green this
+# instrument exists to make impossible. Clause 4 is therefore the ONE
+# LIVE-scoped clause, with three sub-lines that each say no on their own:
+#
+#   (a) a LIVE row with no disposition at all — it says nothing;
+#   (b) a LIVE row that carries a disposition but no disposition_reason — it
+#       asserts a verdict it cannot prove;
+#   (c) a LIVE `parked` row with no STRUCTURED `reopen_trigger` — a park with
+#       no machine-evaluable way back out is a park nobody will ever revisit.
+#
+# (c) READS `reopen_trigger` AND NOTHING ELSE. It deliberately does NOT inherit
+# the REOPEN_TRIGGER_RE prose match used by the display counter below: prose
+# that says "REOPEN: when the cap lifts" inside a reason is DECORATION, not a
+# field a script can evaluate, and PDS-D336(b) condemns scoring it by name. The
+# two are reported side by side and NEVER summed — on the live board of
+# 2026-07-30 that is 0 structured against 40 prose-only, and a summed counter
+# would have read 40 and called it coverage.
+#
+# PDS-D336(a) is pinned in the other direction too: triggers are NOT required to
+# be distinct. One family trigger over several distinct reasons ("REOPEN when
+# the Hetzner rate cap lifts") is legitimate and is what the board's best rows
+# already do; only REASONS must be distinct.
+#
+# THE KEY PATH IS SETTLED: /v1/data/query FLATTENS content.* to the top level,
+# so reading `disposition` / `disposition_reason` / `reopen_trigger` off the row
+# is correct and an absence measured here is a REAL absence. Do not add a
+# content-unwrapping normaliser: 13 corpus rows carry a literal top-level
+# `content` key and one of them is null, so unwrapping would corrupt the read.
+#
 # CASE IS PART OF THE VALUE. Dispositions are counted CASE-EXACT, so `OPEN`
 # (67 rows on 2026-07-30) and `open` (44) are two different things and the
 # split is visible rather than averaged away. `open` is the canonical form and
@@ -161,8 +197,17 @@ DISPOSITION_VOCABULARY = (CANONICAL_OPEN, "closed", "parked")
 # counts as live.
 TERMINAL_LIFECYCLE = ("done", "cancelled", "canceled")
 
-# A disposition_reason carries a reopen trigger if it names one.
+# DISPLAY ONLY. A disposition_reason that MENTIONS a reopen trigger in prose.
+# This regex scores decoration, so it is quarantined here: it feeds the
+# `prose-only REOPEN mention` display counter and NOTHING else. The done
+# condition's clause 4(c) reads the structured `reopen_trigger` field alone --
+# see structured_trigger() -- because PDS-D336(b) condemns scoring prose.
 REOPEN_TRIGGER_RE = re.compile(r"\b(RE-?OPEN|REACTIVATE)\b\s*(TRIGGER)?\s*[:\-]", re.I)
+
+# The disposition value that means "parked", matched case-insensitively ONLY
+# here: counting is case-exact everywhere else (that split is the finding), but
+# a row must not be able to dodge the trigger requirement by shouting PARKED.
+PARKED_DISPOSITION = "parked"
 
 # The API's page cap. Asking for more is answered with a silently smaller page.
 DEFAULT_PAGE_LIMIT = 1000
@@ -427,6 +472,28 @@ def reason_hash(text):
     return hashlib.sha256(" ".join(text.split()).encode("utf-8")).hexdigest()[:16]
 
 
+def disposition_of(row):
+    """The row's disposition, trimmed. Case is PRESERVED -- the split is data."""
+    value = row.get("disposition")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def reason_of(row):
+    value = row.get("disposition_reason")
+    return value.strip() if isinstance(value, str) else ""
+
+
+def structured_trigger(row):
+    """CLAUSE 4(c)'s ONLY source of truth: the `reopen_trigger` FIELD.
+
+    Never REOPEN_TRIGGER_RE, never the reason text. A trigger a script cannot
+    read is not a trigger, and counting prose as one is the decoration PDS-D336(b)
+    condemns by name.
+    """
+    value = row.get("reopen_trigger")
+    return value.strip() if isinstance(value, str) else ""
+
+
 def parse_instant(value):
     if not isinstance(value, str):
         return None
@@ -450,14 +517,28 @@ def census(corpus, closure, depth_of, started, finished, duplicates):
         dispositions[value if isinstance(value, str) and value else "<unset>"] += 1
 
     reasons = []
-    triggers = 0
+    triggers_structured = 0
+    triggers_prose_only = 0
     for row in rows:
-        reason = row.get("disposition_reason")
-        if isinstance(reason, str) and reason.strip():
+        structured = structured_trigger(row)
+        if structured:
+            triggers_structured += 1
+        reason = reason_of(row)
+        if reason:
             reasons.append(reason)
-            if REOPEN_TRIGGER_RE.search(reason) or (row.get("reopen_trigger") or "").strip():
-                triggers += 1
+            # NEVER an `or` with the structured field, and never summed with it:
+            # this counts DECORATION, so it is reported beside the real number.
+            if not structured and REOPEN_TRIGGER_RE.search(reason):
+                triggers_prose_only += 1
     hashes = {reason_hash(r) for r in reasons}
+
+    # CLAUSE 4: live coverage. Row-ID LISTS, not counts -- a shard consumes the
+    # worklist, and a count nobody can turn back into rows is not a worklist.
+    live_bare = sorted(r["_id"] for r in live if not disposition_of(r))
+    live_adjudicated = [r for r in live if disposition_of(r)]
+    live_adjudicated_no_reason = sorted(r["_id"] for r in live_adjudicated if not reason_of(r))
+    live_parked = [r for r in live if disposition_of(r).lower() == PARKED_DISPOSITION]
+    live_park_no_trigger = sorted(r["_id"] for r in live_parked if not structured_trigger(r))
 
     off_vocab = Counter()
     off_vocab_samples = defaultdict(list)
@@ -497,13 +578,27 @@ def census(corpus, closure, depth_of, started, finished, duplicates):
         "dispositions": dict(dispositions),
         "reasons_non_empty": len(reasons),
         "reason_hashes_distinct": len(hashes),
-        "reopen_triggers": triggers,
+        "reopen_triggers_structured": triggers_structured,
+        "reopen_triggers_prose_only": triggers_prose_only,
+        "live_adjudicated": len(live_adjudicated),
+        "live_parked": len(live_parked),
+        "live_bare": live_bare,
+        "live_adjudicated_no_reason": live_adjudicated_no_reason,
+        "live_park_no_trigger": live_park_no_trigger,
         "off_vocabulary": dict(off_vocab),
         "off_vocabulary_samples": {k: v for k, v in off_vocab_samples.items()},
         "off_vocabulary_total": sum(off_vocab.values()),
         "drifted": drifted,
         "duplicates": sorted(set(duplicates)),
     }
+
+
+def _eg(ids, limit=3):
+    """A count nobody can turn back into rows is not a worklist."""
+    if not ids:
+        return ""
+    tail = ", ..." if len(ids) > limit else ""
+    return "   e.g. %s%s" % (", ".join(ids[:limit]), tail)
 
 
 def render(report, corpus_size, pages, page_limit, source, root, lens):
@@ -532,7 +627,21 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     out.append("disposition_reason")
     out.append("  non-empty                   %5d" % report["reasons_non_empty"])
     out.append("  distinct reason hashes      %5d" % report["reason_hashes_distinct"])
-    out.append("  carrying a reopen trigger   %5d" % report["reopen_triggers"])
+    out.append("  carrying a reopen trigger   %5d   (structured `reopen_trigger` field ONLY)"
+               % report["reopen_triggers_structured"])
+    out.append("  prose-only REOPEN mention   %5d   (DECORATION -- NEVER summed with the line above)"
+               % report["reopen_triggers_prose_only"])
+    out.append("")
+    out.append("live coverage (LIVE rows only -- the round's own worklist)")
+    out.append("  live rows                          %5d" % report["live"])
+    out.append("  live rows with NO disposition      %5d%s"
+               % (len(report["live_bare"]), _eg(report["live_bare"])))
+    out.append("  live adjudicated with NO reason    %5d   (of %d adjudicated)%s"
+               % (len(report["live_adjudicated_no_reason"]), report["live_adjudicated"],
+                  _eg(report["live_adjudicated_no_reason"])))
+    out.append("  live parked with NO reopen_trigger %5d   (of %d parked)%s"
+               % (len(report["live_park_no_trigger"]), report["live_parked"],
+                  _eg(report["live_park_no_trigger"])))
     out.append("")
     out.append("off-vocabulary disposition values (vocabulary: %s)"
                % ", ".join(DISPOSITION_VOCABULARY))
@@ -657,6 +766,36 @@ def main(argv):
             failures.append("%d row(s) carry a disposition outside {%s} (canonical OPEN "
                             "case is `%s`)" % (off_vocab, ", ".join(DISPOSITION_VOCABULARY),
                                                CANONICAL_OPEN))
+
+        # CLAUSE 4 -- the ONLY live-scoped clause. Clauses 1-3 above stay
+        # closure-scoped on purpose: distinctness and vocabulary are properties
+        # of everything ever written. Three sub-lines, each able to say no alone.
+        bare = report["live_bare"]
+        no_reason = report["live_adjudicated_no_reason"]
+        no_trigger = report["live_park_no_trigger"]
+        print("  live rows carrying a disposition               %d/%d    %s"
+              % (report["live"] - len(bare), report["live"], "PASS" if not bare else "FAIL"))
+        if bare:
+            failures.append("%d LIVE row(s) carry NO disposition -- a live row that says "
+                            "nothing is what clauses 1-3 cannot see: %s"
+                            % (len(bare), ", ".join(bare[:8]) + (", ..." if len(bare) > 8 else "")))
+        print("  live adjudicated rows carrying a reason        %d/%d    %s"
+              % (report["live_adjudicated"] - len(no_reason), report["live_adjudicated"],
+                 "PASS" if not no_reason else "FAIL"))
+        if no_reason:
+            failures.append("%d LIVE adjudicated row(s) carry NO disposition_reason -- a "
+                            "verdict with no reason is unprovable: %s"
+                            % (len(no_reason),
+                               ", ".join(no_reason[:8]) + (", ..." if len(no_reason) > 8 else "")))
+        print("  live parked rows carrying a reopen_trigger     %d/%d    %s   (STRUCTURED field, not prose)"
+              % (report["live_parked"] - len(no_trigger), report["live_parked"],
+                 "PASS" if not no_trigger else "FAIL"))
+        if no_trigger:
+            failures.append("%d LIVE parked row(s) carry NO structured reopen_trigger (prose "
+                            "that merely mentions REOPEN is decoration, PDS-D336(b)): %s"
+                            % (len(no_trigger),
+                               ", ".join(no_trigger[:8]) + (", ..." if len(no_trigger) > 8 else "")))
+
         if failures:
             print("")
             print("VERDICT: ROUND NOT DONE", file=sys.stderr)
