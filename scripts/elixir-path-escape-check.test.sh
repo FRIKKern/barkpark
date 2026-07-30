@@ -598,6 +598,9 @@ DR="$TMPROOT/dispatchrepo"
 mkdir -p "$DR/api/lib" "$DR/docs" "$DR/internal/taskboard" "$DR/scripts"
 cp "$SCRIPT" "$REAL_ROOT/scripts/elixir-path-escape-check.test.sh" "$DR/scripts/"
 : >"$DR/api/lib/a.ex"
+# NON-EMPTY on purpose: the rename cases below need git's rename detection to
+# actually fire, and an empty blob is not a rename source worth the name.
+printf 'moved-a\nmoved-b\nmoved-c\n' >"$DR/api/lib/moved.ex"
 : >"$DR/docs/guide.md"
 : >"$DR/internal/taskboard/components.go"
 git -C "$DR" init -q
@@ -657,13 +660,66 @@ dispatch "api/** PR" 0 true true pull_request "$BASE_SHA"
 # push to main never skips, regardless of what changed
 dispatch "push event" 0 true true push ""
 
-# THE FAILURE PATHS — the polarity that makes the shim safe
-dispatch "empty diff (base == HEAD)" 1 - - pull_request "$(git -C "$DR" rev-parse HEAD)"
-gate_says "changed-file set is EMPTY" "  …and says the diff is wrong, not the PR"
+# ── THE FIVE FALSE-GREEN CLASSES the plain `--name-only` producer let through ─
+# Every probe above this line is ASCII and rename-free, which is exactly why the
+# harness could never have caught either family — and `Elixir gate` is a
+# REGISTERED, enforced-today required context, so a false `compile=false
+# test=false` here skips the whole suite under a green check. `git diff
+# --name-only` QUOTES a path containing `"` (even under core.quotepath=false),
+# and rename detection prints only the DESTINATION. Both classify FALSE on the
+# pre-fix line.
+
+# (1) a DOUBLE-QUOTE path inside the declared set. Not merely a non-ASCII one:
+#     core.quotepath=false silences the octal escaping and leaves this class
+#     wide open, so a fix tested only against é would certify a hole.
+git -C "$DR" checkout -q -b dquote "$BASE_SHA"
+printf 'x\n' >"$DR/api/lib/we\"ird.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm dquote >/dev/null 2>&1
+dispatch 'a path containing a double quote' 0 true true pull_request "$BASE_SHA"
+
+# (2) a rename OUT of the declared set. Compiled code just left api/** — the
+#     suite MUST run — but rename detection names only docs/.
+git -C "$DR" checkout -q -b renameout "$BASE_SHA"
+git -C "$DR" mv api/lib/moved.ex docs/moved.ex >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renameout >/dev/null 2>&1
+dispatch "a rename OUT of the declared set" 0 true true pull_request "$BASE_SHA"
+
+# (3) …and a rename INTO the set still classifies true — `--no-renames` prints
+#     BOTH sides, so closing (2) must not have cost the obvious direction.
+git -C "$DR" checkout -q -b renamein "$BASE_SHA"
+git -C "$DR" mv docs/guide.md api/lib/guide.md >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm renamein >/dev/null 2>&1
+dispatch "a rename INTO the declared set" 0 true true pull_request "$BASE_SHA"
+
+# THE FAILURE PATHS — the polarity that makes the shim safe.
+# An empty diff is the ONE "cannot tell" that does not fail: a revert pair or a
+# branch-sync PR nets to nothing and is perfectly legal, and the old ::error::
+# left its author with a permanently red required context and no self-service
+# fix. It dispatches TRUE — the full suite, measured 9m31s-16m29s: expensive,
+# never wrong. Everything else still reds.
+git -C "$DR" checkout -q -b emptydiff "$BASE_SHA"
+dispatch "empty diff (base == HEAD)" 0 true true pull_request "$(git -C "$DR" rev-parse HEAD)"
+gate_says "changed-file set is EMPTY" "  …and names the shape"
+gate_says "::warning" "  …as a WARNING, not a brick"
+gate_says "9m31s-16m29s" "  …and names the cost it just chose to pay"
 dispatch "unresolvable base sha" 1 - - pull_request 0000000000000000000000000000000000000000
 gate_says "not resolvable in this checkout" "  …and refuses to guess a base"
 dispatch "missing base sha" 1 - - pull_request ""
 gate_says "carries no base sha" "  …and says why"
+
+# a base with NO common ancestor: `git diff base...HEAD` exits 128 with a bare
+# `fatal: … no merge base` and zero annotation. Named, not fatalled.
+git -C "$DR" checkout -q --orphan noancestor >/dev/null 2>&1
+git -C "$DR" rm -rq --cached . >/dev/null 2>&1 || true
+rm -rf "${DR:?}/api" "${DR:?}/docs" "${DR:?}/internal"
+mkdir -p "$DR/api/lib"
+printf 'z\n' >"$DR/api/lib/orphan.ex"
+git -C "$DR" add -A >/dev/null 2>&1
+git -C "$DR" -c user.email=t@t -c user.name=t commit -qm orphan >/dev/null 2>&1
+dispatch "a base with no common ancestor" 1 - - pull_request "$BASE_SHA"
+gate_says "share NO common ancestor" "  …and names the condition, not a raw git fatal"
+gate_says "refusing a two-dot fallback" "  …and refuses the fallback that sweeps in the whole base"
 echo
 
 echo "----"
