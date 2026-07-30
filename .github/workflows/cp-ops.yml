@@ -17,9 +17,13 @@ on:
         required: true
         options:
           - grant-forever
+          - guerrilla-logs-grep
       team:
-        description: "Team UUID (as shown by bp whoami / bp teams)"
-        required: true
+        description: "grant-forever: team UUID (as shown by bp whoami / bp teams)"
+        required: false
+      needle:
+        description: "guerrilla-logs-grep: request id or token to grep (90-min journal window)"
+        required: false
 
 jobs:
   run:
@@ -30,18 +34,31 @@ jobs:
         env:
           DEPLOY_SSH_KEY: ${{ secrets.DEPLOY_SSH_KEY }}
           CP_HOST: ${{ secrets.CP_HOST }}
+          GUERRILLA_HOST: ${{ secrets.GUERRILLA_HOST }}
           TEAM: ${{ inputs.team }}
+          NEEDLE: ${{ inputs.needle }}
           OP: ${{ inputs.operation }}
         run: |
           set -euo pipefail
-          # UUID only — the rpc string below is built from validated parts.
-          [[ "$TEAM" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
-            || { echo "team must be a UUID"; exit 1; }
           printf '%s\n' "$DEPLOY_SSH_KEY" > /tmp/deploy_key
           chmod 600 /tmp/deploy_key
           SSH="ssh -i /tmp/deploy_key -o StrictHostKeyChecking=accept-new -o UserKnownHostsFile=/tmp/known"
           case "$OP" in
+            guerrilla-logs-grep)
+              # Request ids / tokens only — the needle is interpolated into a
+              # remote grep, so the charset is the whole security boundary.
+              [[ "$NEEDLE" =~ ^[A-Za-z0-9_-]{4,64}$ ]] \
+                || { echo "needle must be 4-64 chars of [A-Za-z0-9_-]"; exit 1; }
+              $SSH "root@${GUERRILLA_HOST}" "
+                journalctl -u 'barkpark-slot@*' --since '-3 hours' --no-pager 2>/dev/null \
+                  | grep -F '$NEEDLE' -A 30 | head -200 \
+                  || echo 'no journal match for $NEEDLE in the last 3 hours'
+              "
+              ;;
             grant-forever)
+              # UUID only — the rpc string below is built from validated parts.
+              [[ "$TEAM" =~ ^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$ ]] \
+                || { echo "team must be a UUID"; exit 1; }
               # rpc into the LIVE release node (mix tasks don't exist in a prod
               # release). grant_forever is idempotent; the caveat about a
               # surviving Stripe-side subscription is the operator's to handle.
