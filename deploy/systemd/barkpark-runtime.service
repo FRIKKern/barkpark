@@ -1,0 +1,16 @@
+[Unit]
+Description=Barkpark site runtime (on-box deployment executor)
+After=network-online.target docker.service caddy.service
+
+[Service]
+ExecStart=/usr/local/bin/barkpark-runtime \
+  --control-url https://api.barkpark.cloud \
+  --token-file /etc/barkpark/agent.token \
+  --cache-dir /var/lib/barkpark-builder/images \
+  --caddyfile /etc/caddy/Caddyfile \
+  --studio localhost:4000
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
