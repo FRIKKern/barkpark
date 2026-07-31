@@ -2454,6 +2454,23 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
   transition: --p 0.9s linear;
 }
+/* …and a step whose budget was never MEASURED has nothing to sweep, so its dot
+   goes INDETERMINATE (markup drops data-ring and --p): the tree's shipped
+   `next` idiom — solid accent border + the same 1.4s pulse — which reads
+   "working, distance unknown". All four resets undo the ring rule above and
+   every one is load-bearing: it sets `border: 0` (without restoring the border
+   the row is 22px of nothing), its radial mask clips the element's whole
+   painted output INCLUDING the pulse's box-shadow, the conic falls back to a
+   flat --ring-soft disc once --p is gone, and the --p transition has nothing
+   left to tween. */
+.new-step.active .new-step-dot[data-ring-unpaced] {
+  border: 2px solid var(--primary);
+  background: none;
+  -webkit-mask: none;
+  mask: none;
+  transition: none;
+  animation: new-next-pulse 1.4s ease-in-out infinite;
+}
 /* dwb-14: a worker-reported failed step renders honest (red), not a stuck spinner. */
 .new-step.failed .new-step-dot { background: var(--danger); border-color: var(--danger); }
 /* GR18(4): steps behind a failure never ran and never will — dashed hollow,
@@ -2718,6 +2735,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    indicator is state, not decoration. */
 @media (prefers-reduced-motion: reduce) {
   .new-step.next .new-step-dot { animation: none; }
+  /* The indeterminate (unpaced) active dot keeps its solid accent border and
+     simply stops pulsing — static, visible, still not pretending to measure. */
+  .new-step.active .new-step-dot[data-ring-unpaced] { animation: none; }
   .new-step-dot, .new-step-label { transition: none; }
   .new-step.active .new-step-dot { transition: none; }
   .new-step-detail { animation: none; }
