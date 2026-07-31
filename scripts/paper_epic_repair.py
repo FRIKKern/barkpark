@@ -1180,6 +1180,7 @@ def repair_canonical_epic(
     _require_canonical_tag: bool = True,
     _curate_canonical_tags: bool = True,
     _move_h1_first: bool = True,
+    _derive_description: bool = False,
 ) -> dict[str, Any]:
     if _require_canonical_tag and not _canonical_tagged(document):
         raise ValueError("profile requires the exact {} tag".format(CANONICAL_EPIC_TAG))
@@ -1193,6 +1194,16 @@ def repair_canonical_epic(
         raise ValueError("Paper requires an id and revision")
     if not isinstance(blocks, list):
         raise ValueError("Paper requires a block array")
+    if not description and _derive_description:
+        description = next(
+            (
+                _normalize(_visible_text(block))
+                for block in blocks
+                if isinstance(block, dict) and block.get("type") == "ingress"
+                and _normalize(_visible_text(block))
+            ),
+            "",
+        )
     if not description:
         raise ValueError("canonical Epic Paper requires a meaningful description")
 
@@ -1313,6 +1324,8 @@ def repair_canonical_epic(
         )
 
     patch_set = {"blocks": repaired}
+    if _derive_description and not _normalize(str(document.get("description") or "")):
+        patch_set["description"] = description
     if _curate_canonical_tags:
         curated_tags, repaired_main_tag = _curate_epic_tags(document)
         if curated_tags != document.get("tags"):
@@ -1349,6 +1362,7 @@ def repair_strategic_paper(document: dict[str, Any]) -> dict[str, Any]:
         _require_canonical_tag=False,
         _curate_canonical_tags=False,
         _move_h1_first=False,
+        _derive_description=True,
     )
 
 
