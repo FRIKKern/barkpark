@@ -190,9 +190,21 @@ var hzResDispositions = map[string]hzResDisposition{
 	"firewall/create": {hzClassCreate, hzUnpaidMutation},
 	"zone/create":     {hzClassCreate, hzUnpaidMutation},
 	"record/create":   {hzClassCreate, hzUnpaidMutation},
-	"bucket/create":   {hzClassCreate, hzUnpaidMutation},
-	"backup/create":   {hzClassCreate, hzUnpaidMutation},
-	"backup/restore":  {hzClassCreate, hzUnpaidMutation},
+
+	// ---- PAID by pds-w29-pay-storage-backup: the S3 writes. ---------------
+	// These take the STRONGER basis of the two a create can have: an actual
+	// post-read, not the response object — because the S3 write calls return no
+	// object at all, and a bucket/key that is absent afterwards is exactly the
+	// silently-dropping endpoint this epic exists to catch.
+	"bucket/create": {hzClassCreate,
+		"paid: hzResObserved re-reads ListBuckets after the create; hzObserveBucketCreated reports the CREATED " +
+			"time the listing gave and marks `location` declared-unconfirmed"},
+	"backup/create": {hzClassCreate,
+		"paid: hzResObserved HEADs the key backup.Backup returned; hzObserveBackupStored reports the STORED length " +
+			"and marks `database` declared-unconfirmed"},
+	"backup/restore": {hzClassNoCheapPostRead,
+		"paid: hzRestoreNotConfirmed — DECLARED EXEMPTION: the post-condition lives in the target Postgres, " +
+			"outside this verb's S3 credential plane, so the receipt says not confirmed instead of fabricating it"},
 
 	// ---- PAID by pds-w29-pay-lb: the LB family's six request echoes. ------
 	// Every hcloud ACTION endpoint returns `{action}` and nothing else, so the
@@ -222,9 +234,20 @@ var hzResDispositions = map[string]hzResDisposition{
 	"zone/update":                {hzClassRequestEcho, hzUnpaidMutation},
 	"record/update":              {hzClassRequestEcho, hzUnpaidMutation},
 
-	// ---- Round 2: the object-storage pair that is neither. ----------------
-	"object/put": {hzClassMeasuredUncompared, hzUnpaidMutation},
-	"object/get": {hzClassNoCheapPostRead, hzUnpaidMutation},
+	// ---- PAID by pds-w29-pay-storage-backup: the pair that is neither. ----
+	// object/put is ONE line on TWO paths (PutObject with a source size,
+	// PutLarge without one), so its post-read is EXISTENCE-based and the length
+	// is compared only when there is a length to compare.
+	// object/get is a RECLASSIFICATION, not a new read: a GET already carries
+	// the server's declared length on the same response and refuses on a
+	// mismatch, so the honest payment is to name the symbol that does it — a
+	// HeadObject afterwards would confirm nothing and cost the whole payload.
+	"object/put": {hzClassMeasuredUncompared,
+		"paid: hzResObserved HEADs the key after the write; hzObserveObjectStored reports the STORED length and " +
+			"compares it only when the source declared one"},
+	"object/get": {hzClassNoCheapPostRead,
+		"paid: hzSizeVerdict compares the length the SAME response declared against the bytes written, and the " +
+			"copy is refused non-zero on a mismatch — a GET *is* the read"},
 }
 
 // PDS-D418 — THE THREE RULINGS THAT STOP A PAID ROW BEING A SENTENCE
@@ -266,10 +289,28 @@ func hzResPaidSymbol(note string) string {
 var hzResClassHelpers = map[hzResClass][]string{
 	hzClassDestroy:    {"hzResDestroyed", "hzResDestroyedDeclared"},
 	hzClassSubRemoval: {"hzResObserved"},
-	// A create observes FROM the response object (class A2) — it does not
-	// re-read, so hzResObserved is wrong here too, in the other direction.
-	hzClassCreate:      {"hzResObservedResponse"},
+	// A create takes ONE of two bases, and both REFUSE on the miss — which is
+	// the property this binding exists to enforce. hzResObservedResponse
+	// observes the create RESPONSE object (class A2: server truth, but the
+	// object handed back rather than the world re-read). hzResObserved is the
+	// STRONGER of the two: an actual post-read, which is the only basis
+	// available where the create call returns no object at all (every S3 write
+	// — CreateBucket and PutObject return an error and nothing else). What stays
+	// illegal for both is hzResDestroyed, whose (nil, nil) branch means the
+	// OPPOSITE thing and emits confirmed_gone:true on a create that never took.
+	hzClassCreate:      {"hzResObservedResponse", "hzResObserved"},
 	hzClassRequestEcho: {"hzResObserved"},
+	// A quantity that WAS measured is paid by re-reading it from the store —
+	// never by comparing the measurement to itself.
+	hzClassMeasuredUncompared: {"hzResObserved"},
+	// The class where a second read buys nothing. Its legal symbols are the two
+	// that DECLARE the gap in the receipt instead of papering over it:
+	// hzSizeVerdict (the length rode the same response the bytes did, so the
+	// GET is the read) and hzRestoreNotConfirmed (the post-condition lives in
+	// another system entirely, so the receipt says `not confirmed`). Both name
+	// what was NOT verified — a row here paid with an observe helper would be
+	// claiming a read this class says does not exist.
+	hzClassNoCheapPostRead: {"hzSizeVerdict", "hzRestoreNotConfirmed"},
 }
 
 // hzResLedgerKinds is every resource kind the ledger currently covers. Pinned

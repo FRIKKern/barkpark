@@ -224,6 +224,23 @@ func (f *fakeS3) RoundTrip(req *http.Request) (*http.Response, error) {
 		resp.ContentLength = *f.declaredLen
 		resp.Header.Set("Content-Length", strconv.FormatInt(*f.declaredLen, 10))
 	}
+	if req.Method == http.MethodHead {
+		// A REAL HEAD carries the entity headers and NO body. serve() hands the
+		// stored bytes back so the length can be derived here; the body is then
+		// dropped. Without this the response declared ContentLength:-1 and a
+		// length-comparing post-read was structurally unable to verify anything
+		// in test while being real in production — a green that proves nothing,
+		// which is the exact vacuity this harness exists to make impossible.
+		if status == 200 {
+			n := int64(len(respBody))
+			if f.declaredLen != nil {
+				n = *f.declaredLen
+			}
+			resp.ContentLength = n
+			resp.Header.Set("Content-Length", strconv.FormatInt(n, 10))
+		}
+		resp.Body = io.NopCloser(strings.NewReader(""))
+	}
 	return resp, nil
 }
 
@@ -358,12 +375,17 @@ func (f *fakeS3) serve(r s3Req) (int, string) {
 		return 200, string(o.body)
 
 	case r.Method == "HEAD":
-		if _, ok := f.objects[full]; !ok {
+		o, ok := f.objects[full]
+		if !ok {
 			// A HEAD carries no body; the SDK maps the bare 404 to
 			// *types.NotFound, which is what an absent object must look like.
 			return 404, ""
 		}
-		return 200, ""
+		// The STORED bytes are returned so RoundTrip can declare their length in
+		// the Content-Length header; it then sends the empty body a real HEAD
+		// has. The length must come from the store, not from a constant, or a
+		// post-read that compares it is comparing the fake to itself.
+		return 200, string(o.body)
 
 	case r.Method == "DELETE":
 		// Real S3 answers 204 whether or not the key existed — the fake keeps
@@ -638,12 +660,20 @@ func TestHetznerStorageBucketCreate(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("bucket create exited %d, stderr: %s", code, stderr)
 	}
-	if len(f.requests()) != 1 {
-		t.Fatalf("bucket create issued %d requests, want 1", len(f.requests()))
+	// TWO requests, not one, and the second is the POINT: bucket create now
+	// re-reads (the credentials' own ListBuckets) before it claims the bucket
+	// exists, because CreateBucket returning no error is the transport's opinion
+	// and not the world's. This tripwire fired the moment the post-read landed —
+	// it is updated here, in the same commit, with the count and the reason.
+	if len(f.requests()) != 2 {
+		t.Fatalf("bucket create issued %d requests, want 2 (the PUT plus the confirming ListBuckets)", len(f.requests()))
 	}
 	req := f.requests()[0]
 	if req.Method != "PUT" {
 		t.Errorf("method = %s, want PUT", req.Method)
+	}
+	if last := f.requests()[1]; last.Method != "GET" || last.Host != "nbg1.your-objectstorage.com" {
+		t.Errorf("confirming read = %s %s, want GET on the bare location endpoint (ListBuckets)", last.Method, last.Host)
 	}
 	if want := "barkpark-backups.nbg1.your-objectstorage.com"; req.Host != want {
 		t.Errorf("host = %q, want virtual-hosted %q (honouring --location)", req.Host, want)
@@ -658,6 +688,48 @@ func TestHetznerStorageBucketCreate(t *testing.T) {
 	bucket, _ := payload["bucket"].(map[string]any)
 	if payload["ok"] != true || payload["action"] != "create" || bucket["name"] != "barkpark-backups" || payload["location"] != "nbg1" {
 		t.Errorf("receipt = %v, want ok/create/barkpark-backups/nbg1", payload)
+	}
+	// The confirmation is NAMED, and `location` is honest about being declared:
+	// nothing in an S3 response says where a bucket lives, so the flag's value is
+	// printed with a flag beside it rather than beside the observed fields.
+	if payload["confirmed_present"] != true {
+		t.Errorf("receipt = %v, want confirmed_present true off the listing", payload)
+	}
+	if payload["location_confirmed"] != false {
+		t.Errorf("receipt = %v, want location_confirmed false — no S3 response reports a bucket's location", payload)
+	}
+	if reason, _ := payload["location_basis"].(string); !strings.Contains(reason, "DECLARED") {
+		t.Errorf("receipt = %v, want location_basis to say the value is declared", payload)
+	}
+}
+
+// TestHetznerStorageBucketCreateSilentDropRefuses is bucket create's fail-closed
+// proof. The endpoint answers the PUT 200 and keeps nothing — the shape a real
+// misconfigured or degraded object store takes. BEFORE this slice the verb
+// printed `✓ create — bucket … / location: nbg1` on exactly this endpoint,
+// because the receipt was built from the flag the operator typed and the exit
+// code of a write nobody read back. Now the listing is the claim, and a bucket
+// the listing does not carry refuses at a non-zero exit.
+func TestHetznerStorageBucketCreateSilentDropRefuses(t *testing.T) {
+	f := newFakeS3()
+	f.handler = func(r s3Req) (int, string) {
+		if r.Method == "PUT" {
+			return 200, "" // accepted, and persisted NOWHERE
+		}
+		return 0, "" // everything else: the (empty) store answers
+	}
+	withFakeS3(t, f)
+
+	stdout, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "storage", "bucket", "create", "--name", "ghost", "--location", "nbg1")...)
+	if code == exitOK {
+		t.Fatalf("a bucket that was never created exited 0\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	said := stdout + stderr
+	if !strings.Contains(said, "NOT READABLE") || !strings.Contains(said, "ghost") {
+		t.Errorf("the refusal must name the unreadable bucket:\n%s", said)
+	}
+	if f.hasBucket("ghost") {
+		t.Fatal("the fake persisted the bucket; this test would prove nothing")
 	}
 }
 
@@ -775,6 +847,100 @@ func TestHetznerStorageObjectPutFile(t *testing.T) {
 	}
 	if payload["ok"] != true || payload["action"] != "put" || payload["bytes"] != float64(len(content)) {
 		t.Errorf("receipt = %v, want ok/put/bytes=%d", payload, len(content))
+	}
+	// That number is now the length the STORE reported, checked against the
+	// source: the HEAD is in the request log and the receipt says it compared.
+	if _, ok := f.find("HEAD", "/dir/payload.txt"); !ok {
+		t.Errorf("no confirming HEAD was issued; requests = %+v", f.requests())
+	}
+	if payload["confirmed_present"] != true || payload["bytes_verified"] != true {
+		t.Errorf("receipt = %v, want confirmed_present and bytes_verified true", payload)
+	}
+}
+
+// TestHetznerStorageObjectPutReportsTheStoredLengthNotTheLocalOne is the
+// mutation that separates a read-back from an echo. The endpoint stores the file
+// and then DECLARES a different length for it — so a receipt built from the
+// pre-upload os.Stat would print a happy, self-agreeing number, and one built
+// from the post-read cannot: it disagrees, names the field, and refuses.
+func TestHetznerStorageObjectPutReportsTheStoredLengthNotTheLocalOne(t *testing.T) {
+	lying := int64(4096)
+	f := newFakeS3()
+	f.declaredLen = &lying
+	withFakeS3(t, f)
+	content := "nine bytes short of four thousand and ninety six\n"
+	path := filepath.Join(t.TempDir(), "payload.txt")
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "storage", "object", "put", "--bucket", "bkt", "--key", "dir/payload.txt", "--file", path)...)
+	if code == exitOK {
+		t.Fatalf("a stored length that contradicts the source exited 0\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	said := stdout + stderr
+	if !strings.Contains(said, "UNMET") || !strings.Contains(said, `"bytes"`) ||
+		!strings.Contains(said, "4096") || !strings.Contains(said, strconv.Itoa(len(content))) {
+		t.Errorf("the refusal must name the field and BOTH numbers (%d vs 4096):\n%s", len(content), said)
+	}
+}
+
+// TestHetznerStorageObjectPutSilentDropRefuses is the fail-closed proof, on the
+// endpoint shape this whole apparatus exists for: every write answered 200,
+// nothing persisted. The pre-slice behaviour on exactly this endpoint was
+// `✓ put — object dir/payload.txt / bytes: 24` — the size of a LOCAL file that
+// never arrived anywhere. The post-read makes that receipt impossible.
+func TestHetznerStorageObjectPutSilentDropRefuses(t *testing.T) {
+	f := newFakeS3()
+	f.dropWrites = true
+	withFakeS3(t, f)
+	path := filepath.Join(t.TempDir(), "payload.txt")
+	if err := os.WriteFile(path, []byte("the exact payload bytes\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	stdout, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "storage", "object", "put", "--bucket", "bkt", "--key", "dir/payload.txt", "--file", path)...)
+	if code == exitOK {
+		t.Fatalf("a silently dropped put exited 0\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	said := stdout + stderr
+	if !strings.Contains(said, "NOT READABLE") || !strings.Contains(said, "dir/payload.txt") {
+		t.Errorf("the refusal must name the object that is not there:\n%s", said)
+	}
+	if _, ok := f.stored("bkt", "dir/payload.txt"); ok {
+		t.Fatal("dropWrites persisted the object; this test would prove nothing")
+	}
+}
+
+// TestHetznerStorageObjectPutStdinStatesTheUnknownLength: the multipart path
+// never learns the source size, so `bytes` used to be silently ABSENT there —
+// two production paths, two different receipt shapes, and no way to tell an
+// unmeasured upload from a measured one. Now both paths confirm existence, the
+// stored length is reported, and the receipt SAYS it was compared against
+// nothing.
+func TestHetznerStorageObjectPutStdinStatesTheUnknownLength(t *testing.T) {
+	f, _ := multipartS3()
+	withFakeS3(t, f)
+	oldStdin := storageStdin
+	storageStdin = strings.NewReader("streamed via stdin")
+	t.Cleanup(func() { storageStdin = oldStdin })
+
+	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "storage", "object", "put", "--bucket", "bkt", "--key", "stream.bin", "-")...)
+	if code != exitOK {
+		t.Fatalf("stdin put exited %d, stderr: %s", code, stderr)
+	}
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("receipt is not JSON: %v\n%s", err, stdout)
+	}
+	if payload["confirmed_present"] != true || payload["bytes"] != float64(len("streamed via stdin")) {
+		t.Errorf("receipt = %v, want confirmed_present with the STORED byte count", payload)
+	}
+	if payload["bytes_verified"] != false {
+		t.Errorf("receipt = %v, want bytes_verified false — nothing measured the pipe", payload)
+	}
+	if reason, _ := payload["bytes_reason"].(string); !strings.Contains(reason, "never learns the source length") {
+		t.Errorf("receipt = %v, want a stated reason for the unverified byte count", payload)
 	}
 }
 
