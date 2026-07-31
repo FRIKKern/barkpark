@@ -176,7 +176,7 @@ JSON
 
 gen() { # args… -> ledger+notes on stdout, never dies the suite
   RC_DISABLE_RULES="${RC_DISABLE_RULES:-}" RC_NORMALIZE="${RC_NORMALIZE:-1}" \
-    bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --explain "$@" 2>&1 || true
+    bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --explain "$@" 2>&1 || true
 }
 
 verdict_for() { # name, ledger
@@ -289,7 +289,7 @@ if excluded_by "$SEL" "Matrixed gate (27.0, 1.18.1)" "S3 SUBSUMED"; then ok "S3 
 if kept_in "$SEL" "Aggregate gate"; then ok "the aggregator survives — selection keeps exactly one context"; else bad "the aggregator was not kept"; fi
 # Asserted against the EMITTED SPEC, not the ledger: the ledger legitimately
 # records "Only on B" as ACCEPTed on shaB — the intersection is what drops it.
-bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --sha shaA --sha shaB --out "$TMP/sel-spec.json" >/dev/null 2>&1 || true
+bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaA --sha shaB --out "$TMP/sel-spec.json" >/dev/null 2>&1 || true
 if jq -e '[.protection.required_status_checks.checks[].context] == ["Aggregate gate"]' "$TMP/sel-spec.json" >/dev/null 2>&1; then
   ok "the emitted spec is EXACTLY the aggregator — 'Only on B' (present on one sha only) and every stage's specimen are gone"
 else
@@ -320,7 +320,7 @@ fi
 
 section "3c. against the REAL workflow tree — literal-paren names still map"
 
-REAL_UNMAPPED="$(bash "$GEN" --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIX" \
+REAL_UNMAPPED="$(bash "$GEN" --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIX" --no-merge \
   --sha shaA --sha shaA --explain 2>&1 | grep -c "S0 UNMAPPED" || true)"
 # Every fixture name in the intersection is synthetic, so all of them are
 # unmapped against the real tree — the assertion that matters is the opposite
@@ -361,7 +361,7 @@ jobs:
 YAML
 # `poison.yml` sorts ahead of probe.yml and red.yml, exactly as cp-ops.yml sorted
 # ahead of the workflows it hijacked — so a first-match implementation loses.
-POISON_OUT="$(bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --sha shaA --sha shaB 2>&1)" && POISON_RC=0 || POISON_RC=$?
+POISON_OUT="$(bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaA --sha shaB 2>&1)" && POISON_RC=0 || POISON_RC=$?
 if [ "$POISON_RC" -ne 0 ] && grep -q "CATCH-ALL JOB NAME: poison.yml job 'run'" <<<"$POISON_OUT"; then
   ok "the generator REFUSES a catch-all job name and names the file and the job (exit $POISON_RC)"
 else
@@ -379,7 +379,7 @@ if ! grep -q 'GUARD REMOVED' "$NOGUARD"; then
 else
   ok "the mutation applies: the guard's call site is removed from a copy of the generator"
 fi
-NG_OUT="$(bash "$NOGUARD" --workflows "$WF" --fixture-dir "$FIX" --sha shaA --sha shaB --explain --out "$TMP/poison-spec.json" 2>&1)" && NG_RC=0 || NG_RC=$?
+NG_OUT="$(bash "$NOGUARD" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaA --sha shaB --explain --out "$TMP/poison-spec.json" 2>&1)" && NG_RC=0 || NG_RC=$?
 if [ "$NG_RC" -eq 0 ] && grep -q "keep     Advisory gate  (poison.yml job 'run')" <<<"$NG_OUT"; then
   ok "…and without the guard the run goes GREEN and misattributes 'Advisory gate' to poison.yml — S2 is erased, the promotion is live (mutation-proven able to fail)"
 else
@@ -404,7 +404,7 @@ jobs:
     name: Partial ${{ matrix.otp }} gate
     runs-on: ubuntu-latest
 YAML
-PART_OUT="$(bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --sha shaA --sha shaB 2>&1)" && PART_RC=0 || PART_RC=$?
+PART_OUT="$(bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaA --sha shaB 2>&1)" && PART_RC=0 || PART_RC=$?
 if [ "$PART_RC" -eq 0 ] && ! grep -q "CATCH-ALL" <<<"$PART_OUT"; then
   ok "a PARTIAL interpolation (\`Partial \${{ matrix.otp }} gate\`) is NOT refused — the guard bans catch-alls, not templates"
 else
@@ -415,7 +415,7 @@ rm -f "$WF/partial.yml"
 # THE REAL TREE. The hermetic specimen proves the guard fires; this proves the
 # repo it protects is actually clean — the assertion that would have caught
 # cp-ops.yml on the day it landed.
-REAL_OUT="$(bash "$GEN" --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIX" \
+REAL_OUT="$(bash "$GEN" --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIX" --no-merge \
   --sha shaA --sha shaA --allow-single-sha 2>&1)" || true
 if ! grep -q "CATCH-ALL JOB NAME" <<<"$REAL_OUT"; then
   ok "no job in .github/workflows/ carries a catch-all name — the real tree the generator reads in anger is clean"
@@ -444,7 +444,7 @@ jobs:
     name: ${{ inputs.operation }}
     runs-on: ubuntu-latest
 YAML
-PLANT_OUT="$(bash "$GEN" --workflows "$REALCOPY" --fixture-dir "$FIX" \
+PLANT_OUT="$(bash "$GEN" --workflows "$REALCOPY" --fixture-dir "$FIX" --no-merge \
   --sha shaA --sha shaA --allow-single-sha 2>&1)" && PLANT_RC=0 || PLANT_RC=$?
 if [ "$PLANT_RC" -ne 0 ] && grep -q "CATCH-ALL JOB NAME: aaa-planted-poison.yml job 'run'" <<<"$PLANT_OUT"; then
   ok "…and the identical invocation over a COPY of the real tree with one catch-all planted REFUSES — the clean verdict above is a read, not a silence"
@@ -500,7 +500,7 @@ cat > "$S5F/checkruns-s5MAINold.json" <<'JSON'
 ] }
 JSON
 
-S5_OUT="$(bash "$GEN" --workflows "$S5W" --fixture-dir "$S5F" --sha s5A --sha s5B --explain 2>&1 || true)"
+S5_OUT="$(bash "$GEN" --workflows "$S5W" --fixture-dir "$S5F" --no-merge --sha s5A --sha s5B --explain 2>&1 || true)"
 if kept_in "$S5_OUT" "Cloud gate"; then
   ok "S5 keeps a name whose NEWEST main head is green (the old failure is out of date, not disqualifying)"
 else
@@ -519,7 +519,7 @@ if ! grep -q 'END { print v }' "$S5REG"; then
 else
   ok "the S5 ordering mutation applies: a copy of the generator reads the OLDEST row again"
 fi
-S5_REG_OUT="$(bash "$S5REG" --workflows "$S5W" --fixture-dir "$S5F" --sha s5A --sha s5B --explain 2>&1 || true)"
+S5_REG_OUT="$(bash "$S5REG" --workflows "$S5W" --fixture-dir "$S5F" --no-merge --sha s5A --sha s5B --explain 2>&1 || true)"
 if excluded_by "$S5_REG_OUT" "Cloud gate" "S5 RED ON MAIN"; then
   ok "…and the OLDEST-row reading excludes it as 'S5 RED ON MAIN' — the ordering is load-bearing, and it is exactly the name wave 10 wants to register"
 else
@@ -531,17 +531,17 @@ fi
 section "4. the generator fails closed — an unreadable or empty feed is never an empty spec"
 
 echo '{ "check_runs": [] }' > "$FIX/checkruns-shaEMPTY.json"
-if bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --sha shaEMPTY --sha shaA >/dev/null 2>&1; then
+if bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaEMPTY --sha shaA >/dev/null 2>&1; then
   bad "an EMPTY check-run feed generated a spec"
 else
   ok "an EMPTY check-run feed is a hard failure"
 fi
-if bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --sha shaMISSING --sha shaA >/dev/null 2>&1; then
+if bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaMISSING --sha shaA >/dev/null 2>&1; then
   bad "an unreadable feed generated a spec"
 else
   ok "an unreadable feed is a hard failure"
 fi
-if bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --sha shaA >/dev/null 2>&1; then
+if bash "$GEN" --workflows "$WF" --fixture-dir "$FIX" --no-merge --sha shaA >/dev/null 2>&1; then
   bad "a single-sha sample was accepted without --allow-single-sha"
 else
   ok "a single-sha sample is refused: one path shape cannot tell a universal check from a filtered one"
@@ -1203,6 +1203,225 @@ live_stage() {
     ok "LIVE: probe branch and its protection removed"
   fi
 }
+
+# ═══ 14/15/16. wave 11: the flip's three new guards, each mutation-proven ════
+#
+# THESE RUN AGAINST A SAVED FIXTURE PAIR, NOT A LIVE WINDOW, and that is the
+# whole design (D130). Measured on this repo inside one hour, the generator's
+# emitted count over three sampling windows was 0, then 6, then 7: three of the
+# newest ten main heads carry ZERO check runs, `Elixir gate` renders on two of
+# them, and the newest pair intersects to nothing at all. A test that re-samples
+# live would go red on a Tuesday for reasons that have nothing to do with the
+# code. So the two heads are frozen on disk, exactly as GitHub reported them.
+
+FIXP="$REPO_ROOT/scripts/fixtures/registration-flip"
+# `--merge-base "$SPEC"` is the committed spec ON PURPOSE: these two guards are
+# statements ABOUT the committed spec, so a name removed from it should change
+# what they assert.
+FIXARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP"
+         --merge-base "$SPEC" --sha e34031104 --sha f69cfb1f6)
+ACK=(--expect-unrendered "Elixir gate" --expect-unrendered "PR references an active task")
+
+section "14. S1 LOSS — a committed name the sample did not render is refused BY NAME, before the merge can hide it"
+
+if jq -e '[.protection.required_status_checks.checks[].context]
+          | index("Elixir gate") and index("PR references an active task")' "$SPEC" >/dev/null; then
+  ok "the fixture premise holds: the committed spec requires both names the fixture pair fails to render"
+else
+  bad "the committed spec no longer requires both fixture names — section 14 is asserting about a spec that moved"
+fi
+
+L14_OUT="$(bash "$GEN" "${FIXARGS[@]}" 2>&1)" && L14_RC=0 || L14_RC=$?
+if [ "$L14_RC" -eq 1 ] \
+   && grep -q "^S1 LOSS" <<<"$L14_OUT" \
+   && grep -q "LOST  Elixir gate" <<<"$L14_OUT" \
+   && grep -q "LOST  PR references an active task" <<<"$L14_OUT"; then
+  ok "the unacknowledged run REFUSES (exit 1) and names BOTH lost contexts"
+else
+  bad "the loss was not refused (exit $L14_RC): $(grep -E 'LOST|S1 LOSS' <<<"$L14_OUT" | head -3)"
+fi
+# The two losses are not the same KIND of loss, and the refusal must say so —
+# otherwise the operator's only move is to acknowledge both and hope.
+if grep -q "PULL_REQUEST-ONLY" <<<"$L14_OUT" && grep -q "this window is the anomaly" <<<"$L14_OUT"; then
+  ok "…and it distinguishes 'no window can ever render this' from 'THIS window is the anomaly, re-sample'"
+else
+  bad "the refusal did not distinguish the two causes of absence"
+fi
+
+bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --out "$TMP/ack-spec.json" >/dev/null 2>&1 || true
+if jq -e '[.protection.required_status_checks.checks[].context]
+          == ["Cloud gate","Console gate","Elixir gate","PR references an active task"]' \
+     "$TMP/ack-spec.json" >/dev/null 2>&1; then
+  ok "…and per-NAME acknowledgement lets it through, emitting exactly the four contexts"
+else
+  bad "the acknowledged emit is $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/ack-spec.json" 2>&1)"
+fi
+
+# MUTATION (i): the REFUSAL is load-bearing. Neuter its condition — one line —
+# and the identical unacknowledged run must go through silently.
+NOLOSS="$TMP/gen-noloss.sh"
+sed 's/^    if \[ -n "\$lost_names" \]; then$/    if false; then # LOSS REFUSAL REMOVED/' "$GEN" > "$NOLOSS"
+if grep -q 'LOSS REFUSAL REMOVED' "$NOLOSS"; then
+  ok "the loss-refusal mutation applies: a copy of the generator no longer refuses"
+else
+  bad "the loss-refusal mutation did not apply — its condition moved, so the proof below is vacuous"
+fi
+NL_OUT="$(bash "$NOLOSS" "${FIXARGS[@]}" 2>&1)" && NL_RC=0 || NL_RC=$?
+if [ "$NL_RC" -eq 0 ] && ! grep -q "^S1 LOSS" <<<"$NL_OUT"; then
+  ok "…and without it the SAME sample is accepted in silence (mutation-proven able to fail)"
+else
+  bad "the unguarded run still refused (exit $NL_RC)"
+fi
+
+# MUTATION (ii): the MERGE is the other half, and it is separately load-bearing.
+# `--no-merge` IS the pre-wave-11 emit path — `jq -n` into a pure overwrite — and
+# on this very fixture pair it emits a spec that has DROPPED both committed
+# names. That is the de-registration this slice exists to make impossible.
+bash "$GEN" --workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$FIXP" --no-merge \
+  --sha e34031104 --sha f69cfb1f6 --out "$TMP/overwrite-spec.json" >/dev/null 2>&1 || true
+if jq -e '[.protection.required_status_checks.checks[].context]
+          | (index("Elixir gate") | not) and (index("PR references an active task") | not)' \
+     "$TMP/overwrite-spec.json" >/dev/null 2>&1; then
+  ok "the OVERWRITE path emits a spec MISSING both committed names — the merge, not the refusal, is what carries them"
+else
+  bad "the overwrite specimen did not drop the committed names: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/overwrite-spec.json" 2>&1)"
+fi
+
+section "15. S6 LEAF DEMOTION — an excluded aggregator takes its \`needs\` upstreams DOWN with it, never up"
+
+S6_OUT="$(bash "$GEN" "${FIXARGS[@]}" "${ACK[@]}" --explain 2>&1 || true)"
+if grep -q "exclude  Security gate  — S5 RED ON MAIN" <<<"$S6_OUT"; then
+  ok "the aggregator itself is excluded S5 RED ON MAIN (the precondition the demotion hangs off)"
+else
+  bad "'Security gate' was not excluded as S5 RED ON MAIN — section 15's premise is gone"
+fi
+for leaf in "Dispatch (security paths)" "Security gate shape ratchet" \
+            "Sobelow baseline does not swallow its own inline waivers (blocking)"; do
+  if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR (Security gate)" <<<"$S6_OUT"; then
+    ok "S6 demotes '$leaf', naming the aggregator that took it down"
+  else
+    bad "S6 did not demote '$leaf': $(grep -F "$leaf" <<<"$S6_OUT" | head -1)"
+  fi
+done
+
+# MUTATION: remove the demotion pass and the SAME fixture must promote all three
+# — S3 subsumption is computed against survivors, so with the aggregator gone its
+# leaves are subsumed by nothing and sail straight into the spec.
+NOS6="$TMP/gen-nos6.sh"
+sed 's/^  if \[ -n "\$demoted" \]; then$/  if false; then # S6 REMOVED/' "$GEN" > "$NOS6"
+if grep -q 'S6 REMOVED' "$NOS6"; then
+  ok "the S6 mutation applies: a copy of the generator skips the demotion pass"
+else
+  bad "the S6 mutation did not apply — the pass's guard moved, so the proof below is vacuous"
+fi
+bash "$NOS6" "${FIXARGS[@]}" "${ACK[@]}" --out "$TMP/nos6-spec.json" >/dev/null 2>&1 || true
+if jq -e '[.protection.required_status_checks.checks[].context] as $c
+          | ($c | index("Dispatch (security paths)"))
+            and ($c | index("Security gate shape ratchet"))
+            and ($c | index("Sobelow baseline does not swallow its own inline waivers (blocking)"))' \
+     "$TMP/nos6-spec.json" >/dev/null 2>&1; then
+  ok "…and without S6 the identical fixture PROMOTES all three security leaves into the spec (mutation-proven able to fail)"
+else
+  bad "the un-demoted spec did not promote the leaves: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos6-spec.json" 2>&1)"
+fi
+
+section "16. the deadlock sweep's predicate is TWO-SIDED — a PR that is already stuck is not a casualty of the flip"
+
+SWEEP="$REPO_ROOT/scripts/registration-deadlock-sweep.sh"
+SWF="$TMP/sweep-fixtures"
+mkdir -p "$SWF"
+# A candidate that adds ONE synthetic name over origin/main's spec. Synthetic on
+# purpose: the baseline is read from git, and no real registration can ever make
+# this name stop being new, so the section cannot rot the way a real name would.
+# Built from the BASELINE, not the worktree spec: the sweep's "newly proposed"
+# set is candidate minus origin/main, so a candidate derived from the worktree
+# would also carry whatever contexts THIS PR is adding, and the section would
+# assert about those instead of about its own probe.
+git -C "$REPO_ROOT" show "origin/main:.github/required-checks.json" \
+  | jq '.protection.required_status_checks.checks += [{context: "Probe gate", app_id: 15368}]' \
+  > "$TMP/sweep-candidate.json"
+cat > "$SWF/checkruns-sweepRENDERS.json" <<'JSON'
+{ "check_runs": [ { "name": "Probe gate", "conclusion": "success", "status": "completed", "started_at": "2026-07-30T01:00:00Z" } ] }
+JSON
+for s in sweepCLEANMISS sweepDIRTY sweepBLOCKED; do
+  cat > "$SWF/checkruns-$s.json" <<'JSON'
+{ "check_runs": [ { "name": "Some other check", "conclusion": "success", "status": "completed", "started_at": "2026-07-30T01:00:00Z" } ] }
+JSON
+done
+# #3 and #4 are the FALSE ALARMS a one-sided test produces: this repo carries
+# three of them today (#6086, #6057, #2907 — CONFLICTING/DIRTY, stale merge refs,
+# already deadlocked on the `Elixir gate` that has been required since 2026-07-28).
+cat > "$TMP/sweep-prs-safe.json" <<'JSON'
+[
+ {"number":1,"headRefOid":"sweepRENDERS","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false,"title":"renders it"},
+ {"number":3,"headRefOid":"sweepDIRTY","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","isDraft":false,"title":"already conflicting"},
+ {"number":4,"headRefOid":"sweepBLOCKED","mergeable":"MERGEABLE","mergeStateStatus":"BLOCKED","isDraft":false,"title":"already blocked"}
+]
+JSON
+cat > "$TMP/sweep-prs-casualty.json" <<'JSON'
+[
+ {"number":1,"headRefOid":"sweepRENDERS","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false,"title":"renders it"},
+ {"number":2,"headRefOid":"sweepCLEANMISS","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false,"title":"mergeable and does NOT render it"},
+ {"number":3,"headRefOid":"sweepDIRTY","mergeable":"CONFLICTING","mergeStateStatus":"DIRTY","isDraft":false,"title":"already conflicting"}
+]
+JSON
+
+sweep() { bash "$SWEEP" --spec "$TMP/sweep-candidate.json" --fixture-dir "$SWF" --prs "$1" 2>&1; }
+
+SW_SAFE="$(sweep "$TMP/sweep-prs-safe.json")" && SW_SAFE_RC=0 || SW_SAFE_RC=$?
+if [ "$SW_SAFE_RC" -eq 0 ] && grep -q "NO CASUALTY" <<<"$SW_SAFE"; then
+  ok "a CONFLICTING PR and an already-BLOCKED PR that do not render the new context are NOT casualties (exit 0)"
+else
+  bad "the sweep refused on PRs that are already stuck (exit $SW_SAFE_RC): $(grep REFUSE <<<"$SW_SAFE" | head -2)"
+fi
+if grep -q "^#3 .*skip" <<<"$SW_SAFE" && grep -q "^#4 .*skip" <<<"$SW_SAFE"; then
+  ok "…and it says so per PR, rather than omitting them from the table"
+else
+  bad "the classification table did not carry #3/#4 as skips"
+fi
+
+SW_CAS="$(sweep "$TMP/sweep-prs-casualty.json")" && SW_CAS_RC=0 || SW_CAS_RC=$?
+if [ "$SW_CAS_RC" -eq 1 ] && grep -q "^#2 .*REFUSE" <<<"$SW_CAS" && ! grep -q "^#3 .*REFUSE" <<<"$SW_CAS"; then
+  ok "a MERGEABLE+CLEAN PR that does NOT render the new context IS a casualty (exit 1), and only it"
+else
+  bad "the casualty was not caught cleanly (exit $SW_CAS_RC): $(grep -E '^#' <<<"$SW_CAS" | head -4)"
+fi
+
+# UNKNOWN IS NOT A SKIP. Measured, not imagined: the first live run of this
+# script came back `mergeable: UNKNOWN` on nine of nine open PRs — GitHub had
+# just invalidated every answer because a PR landed — and an earlier draft
+# classified all nine as `skip` and exited 0 having evaluated nothing.
+cat > "$TMP/sweep-prs-unknown.json" <<'JSON'
+[
+ {"number":1,"headRefOid":"sweepRENDERS","mergeable":"MERGEABLE","mergeStateStatus":"CLEAN","isDraft":false,"title":"renders it"},
+ {"number":9,"headRefOid":"sweepCLEANMISS","mergeable":"UNKNOWN","mergeStateStatus":"UNKNOWN","isDraft":false,"title":"not computed yet"}
+]
+JSON
+SW_UNK="$(sweep "$TMP/sweep-prs-unknown.json")" && SW_UNK_RC=0 || SW_UNK_RC=$?
+if [ "$SW_UNK_RC" -eq 2 ] && grep -q "mergeability is UNKNOWN for PR(s) 9" <<<"$SW_UNK"; then
+  ok "a PR whose mergeability GitHub has not computed yet exits 2 and names it — never a silent skip that greens the sweep"
+else
+  bad "the UNKNOWN specimen did not fail closed (exit $SW_UNK_RC): $(tail -2 <<<"$SW_UNK")"
+fi
+
+# MUTATION: drop side (A) and the sweep becomes the one-sided test — it must now
+# refuse on the specimens it correctly ignored, which is what would veto the flip
+# forever.
+ONESIDED="$TMP/sweep-onesided.sh"
+sed 's/^    if \[ "\$unblocked" -eq 0 \]; then$/    if false; then # SIDE A REMOVED/' "$SWEEP" > "$ONESIDED"
+if grep -q 'SIDE A REMOVED' "$ONESIDED"; then
+  ok "the two-sidedness mutation applies: a copy of the sweep no longer asks whether the PR is mergeable"
+else
+  bad "the two-sidedness mutation did not apply — the guard moved, so the proof below is vacuous"
+fi
+OS_OUT="$(RC_REPO_ROOT="$REPO_ROOT" bash "$ONESIDED" --spec "$TMP/sweep-candidate.json" \
+           --fixture-dir "$SWF" --prs "$TMP/sweep-prs-safe.json" 2>&1)" && OS_RC=0 || OS_RC=$?
+if [ "$OS_RC" -eq 1 ] && grep -q "^#3 .*REFUSE" <<<"$OS_OUT" && grep -q "^#4 .*REFUSE" <<<"$OS_OUT"; then
+  ok "…and the one-sided version REFUSES on both already-stuck PRs — the second side is load-bearing (mutation-proven able to fail)"
+else
+  bad "the one-sided version did not produce the false alarms (exit $OS_RC): $(grep -E '^#' <<<"$OS_OUT" | head -4)"
+fi
+
 
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
