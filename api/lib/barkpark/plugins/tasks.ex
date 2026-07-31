@@ -1325,6 +1325,78 @@ defmodule Barkpark.Plugins.Tasks do
 
   def hydrate_edges(doc), do: doc
 
+  @doc """
+  Batched `hydrate_edges/1` over a whole corpus — the EdgeProjector rebuild
+  path. Per-doc result identical, but the DB cost is FLAT instead of per-doc:
+  ONE outbound `task_edges` query over every task doc's PK (all kinds) plus
+  ONE `documents` id→doc_id map for the targets — was one `Tasks.edges/2`
+  query per task doc plus one `Repo.get/2` per edge row (the rebuild-path
+  N+1). Non-task docs, and task docs with no resolvable PK, pass through
+  UNCHANGED; input order is preserved.
+  """
+  @spec hydrate_edges_batch([map()]) :: [map()]
+  def hydrate_edges_batch(docs) when is_list(docs) do
+    pks =
+      docs
+      |> Enum.filter(&task_doc?/1)
+      |> Enum.map(&doc_pk/1)
+      |> Enum.filter(&is_binary/1)
+      |> Enum.uniq()
+
+    if pks == [] do
+      docs
+    else
+      payloads_by_pk = task_edge_payloads_by_pk(pks)
+
+      Enum.map(docs, fn doc ->
+        with true <- is_map(doc) and task_doc?(doc),
+             pk when is_binary(pk) <- doc_pk(doc) do
+          put_task_edges(doc, Map.get(payloads_by_pk, pk, []))
+        else
+          _ -> doc
+        end
+      end)
+    end
+  end
+
+  # ONE outbound task_edges query over all task PKs + ONE Document id→doc_id
+  # map for the targets; rows whose target row no longer exists are dropped
+  # (mirrors edge_row_to_payload/1). Grouped by from_id for the per-doc attach.
+  defp task_edge_payloads_by_pk(pks) do
+    import Ecto.Query, only: [from: 2]
+
+    edge_rows =
+      Barkpark.Repo.all(from(e in Barkpark.Tasks.Edge, where: e.from_id in ^pks))
+
+    doc_id_by_pk =
+      case edge_rows |> Enum.map(& &1.to_id) |> Enum.uniq() do
+        [] ->
+          %{}
+
+        to_pks ->
+          from(d in Barkpark.Content.Document,
+            where: d.id in ^to_pks,
+            select: {d.id, d.doc_id}
+          )
+          |> Barkpark.Repo.all()
+          |> Map.new()
+      end
+
+    edge_rows
+    |> Enum.group_by(& &1.from_id)
+    |> Map.new(fn {from_pk, rows} ->
+      payloads =
+        Enum.flat_map(rows, fn row ->
+          case Map.get(doc_id_by_pk, row.to_id) do
+            to_doc_id when is_binary(to_doc_id) -> [%{to_id: to_doc_id, kind: row.kind}]
+            _ -> []
+          end
+        end)
+
+      {from_pk, payloads}
+    end)
+  end
+
   # Map a `task_edges` row (PK-keyed) to the payload shape the pure callback
   # reads: `%{to_id: <doc_id>, kind: <kind>}`. Resolves the `to_id` PK back to
   # its `doc_id` string; drops the row if the target row no longer exists.
