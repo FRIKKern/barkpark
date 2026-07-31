@@ -689,6 +689,66 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-07-31 — wave 14 REVIEW — 6/6 round-1 slices shipped, grade A; ZERO reviewer fixes, all six PUSHED with PRs open
+
+**Wave Paper:** `cloud-console-hardening-wave-14-2026-07-31` (debrief appended, re-published).
+**Ratio held and beaten:** FIVE of six slices land on a row where a person looking at the screen is
+misinformed — nav wall, `#fleet` band, rail select, planned rail, preview freshness — against the
+wish's floor of four, with the scrub row refused BY NAME and proven rather than used to pad. The
+sixth is the continuous sweep. Nothing was registered, `.github/required-checks.json` is
+byte-identical to `origin/main`, nothing was re-parented, no seal predicate of any kind was run, and
+#8500 was neither merged nor re-implemented.
+
+| slice | final branch | PR | gate re-run by the reviewer |
+|---|---|---|---|
+| `cch-w14-s2-folded-shell-nav-wall` | `loop-epic/the-folded-shell-stops-opening-every-scr-0` | #8655 | 757/757, PARITY 1241 MISSES 0, 99 scenarios |
+| `cch-w14-s3-fleet-row-band-899-split` | `loop-epic/the-fleet-row-stops-scrolling-the-page-s-1` | #8656 | + overflow-guard **108/108, no exemptions** |
+| `cch-w14-s5-planned-rail-and-ticker` | `loop-epic/the-provisioning-rail-stops-painting-a-p-2` | #8657 | 754/754, PARITY 1245 MISSES 0 |
+| `cch-w14-s6-preview-freshness-production` | `loop-epic/the-fleet-freshness-badge-stops-quoting--3` | #8659 | `mix test` **2641/0** re-run + node legs |
+| `cch-w14-s4-rail-select-readable` | `loop-epic/the-site-detail-rail-says-which-theme-th-4` | #8658 | 754/754, PARITY 1243 MISSES 0 |
+| `cch-w14-s1-continuous-breakpoint-sweep` | `loop-epic/the-responsive-sweep-walks-the-styleshee-5` | #8660 | sweep exit 0, 28/28 unit tests |
+
+**NO SLICE NEEDED A FIX**, so every final branch is the branch its builder wrote — but the review was
+not a re-read. Each slice's central claim was RE-DRIVEN independently: contentTop 745.88 → **328**
+folded with the cue retracting to 0px at the end and `.nav-foot` reachable (S2); `docScrollW == 780`
+with the row stacked, 0 clipped text and `.topbar` still 20px (S3); fill **40%** beside "Step 3 of 5"
+with `data-ring-unpaced` + `new-next-pulse` and the clock advancing 1m 46s → 1m 51s with no "~35s"
+(S5); `cw 159 == sw 159` and — the builder's one UNPROVEN risk — the `:focus-visible` ring CLEARED on
+the `appearance:none` control (S4). S6 was MUTATION-PROVEN by the reviewer (deleting only the
+production predicate reds 3 of 4); so was S1's refusal (`+@media (max-width: 812px)` on a scratch
+export exits 2 naming 811/812/813).
+
+**THE ONE THING THE LEAD MUST DO BY HAND (D158).** Four slices move `cssom-heads.baseline` and each
+number is right on its own branch and wrong on the merge: 1241 / 1243 / 1243 / 1245. The reviewer
+merged all six locally — every merge clean except that one file, `app.css` auto-merged with no
+conflict — and gated the merged tree end to end (smoke 99/99, overflow-guard 108/108, sweep exit 0,
+28/28, driven at a folded width: contentTop 328, fleet stacked, no sideways scroll). **THE MEASURED
+MERGED COUNT IS 1243, MISSES 0.** Write 1243 in the same commit that lands the last `app.css` slice;
+do not add.
+
+**HIGH-FLIP-RISK (E2), re-derived not re-read:** S6's production-only ruling. The ladder is ALREADY
+production-filtered, so the disagreement IS the defect and unfiltering the ladder would let an
+ephemeral preview head production history. **Reviewer CONCURS.** A genuinely independent second
+reviewer is still owed before merge (`cch-w14-bl-independent-review-owed`) — a manual lead step.
+
+**Two honest MISSES left open, both correctly:** `cch-w14-s3` c2 (2.25 height ratio at 769 — but the
+shipping 768 stack is 2.25 and the UNSTACKED 900 control is already 2.15, so the bar cannot separate
+the fix from the shape GR65 accepted: the threshold is mis-set) and `cch-w14-s1` c6 (the render leg
+REFUTED the wave's own known set on three counts, all three FILED rather than absorbed).
+
+**Ledger fix:** `cch-w14-s3`, `-s4`, `-s5` and `-s6` had lapsed back to unheld — `-s3/-s4/-s6` all
+the way to lifecycle `open` with five-to-eight criteria met, i.e. offering finished work back to the
+ready queue. All four re-claimed (`epic-reviewer-w14`) and all six pulsed with PR + re-driven
+evidence. No criterion was flipped by the reviewer; every merge-gated row stays open for the lead.
+
+**Next wave:** merge round 1 (no round-2 deferrals exist). Then close the adjudication S2 left open
+(hamburger vs skip link vs the 34vh cap — nine of seventeen controls sit below the cut and that is
+the wave's own named residue); take the three rows the sweep found on first run
+(`cch-w14-bl-fleet-archives-band-721`, `-billing-tier-cta-901`, `-navwall-worse-on-operator-tokens`);
+widen the sweep's unmeasured axes, **dark theme first** — a continuous width axis over a theme axis of
+one is half an instrument; pay `cch-backlog-fleet-status-unbounded-lead-column`. The SPLIT ruling is
+written and needs a HUMAN, not another wave: do not re-derive, re-parent, or run a seal predicate.
+
 ### 2026-07-31 — wave 14 DECIDE (build in flight)
 
 **Wave Paper:** `cloud-console-hardening-wave-14-2026-07-31`. The wish asked to finish a 621-768
