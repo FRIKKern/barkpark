@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import copy
 import unittest
 
 from paper_epic_repair import (
@@ -752,6 +753,7 @@ class PaperEpicRepairTest(unittest.TestCase):
                         "type": "heading",
                         "level": 2,
                         "text": "Evidence {}".format(index),
+                        "content": text("Evidence {}".format(index)),
                     },
                     {
                         "type": "paragraph",
@@ -785,6 +787,10 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertGreaterEqual(len(appendices), 1)
         self.assertLessEqual(len(appendices), 4)
         self.assertIn("section-17", str(repaired))
+        self.assertNotIn(
+            "Evidence 2 Evidence 2",
+            " ".join(block["summary"] for block in appendices),
+        )
 
         second_document = {
             **document,
@@ -795,6 +801,28 @@ class PaperEpicRepairTest(unittest.TestCase):
             "patch"
         ]["set"]["blocks"]
         self.assertEqual(repaired_again, repaired)
+
+        duplicated = copy.deepcopy(repaired)
+        duplicated_appendix = next(
+            block
+            for block in duplicated
+            if str(block.get("id", "")).startswith("epb-evidence-appendix-")
+        )
+        duplicated_appendix["summary"] = (
+            "Evidence appendix 1 — Evidence 2 Evidence 2"
+        )
+        healed = repair_canonical_epic(
+            {**document, "_rev": "duplicated-rev", "blocks": duplicated}
+        )["mutations"][0]["patch"]["set"]["blocks"]
+        healed_appendix = next(
+            block
+            for block in healed
+            if str(block.get("id", "")).startswith("epb-evidence-appendix-")
+        )
+        self.assertEqual(
+            healed_appendix["summary"],
+            "Evidence appendix 1 — Evidence 2",
+        )
 
     def test_repair_heals_duplicate_appendix_artifact_and_exposes_next_wave(self):
         appendices = [
