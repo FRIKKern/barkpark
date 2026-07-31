@@ -2576,6 +2576,86 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 30 2026-07-31 — "Finish the round, and pay the first L1" — REVIEWED. Grade A (paper `pds-wave-30-2026-07-31`)
+
+**THE HEADLINE: the epic stopped being entirely fake-proven.** Twenty-nine waves of post-conditions,
+fences and receipts, every one of them driven by a fake, a fixture or a static read — wave 29 named
+that against itself and this wave paid it. `scripts/pds-live-hetzner-placement-group.sh` drove a real
+`bp` verb against the real `api.hetzner.cloud` (create id 1806023 → bp read-back → an INDEPENDENT
+`curl` oracle, HTTP 200/186 bytes, id/name/type EQUAL to bp's receipt → delete with
+`confirmed_gone=true` → a real 404, `application/json`, 100 bytes, `error.code=not_found`), and
+`scripts/pds-live-bp-write-receipt.sh` drove five real `bp` writes against guerrilla `production` with
+every `_id`/`_rev` corroborated by an independent `/v1/data/query` read under the perspective the verb
+should have moved the doc into. **PDS-D401's load-bearing production assumption — "production always
+returns a JSON 404" — is MEASURED for the first time**, and its bytes are committed as
+`internal/cli/testdata/pds_live_hetzner_*.json` with a per-kind manifest, so the perishable half of a
+live proof leaves something that rides CI forever. Two kinds were harvested precisely so no assertion
+can pin a universal byte count (placement-group 100, server 91).
+
+**THE PREAMBLE WAS THE SLICE, AND IT HELD.** Both runners gate on bp's OWN resolution — a cheap read
+verb's exit code AND its receipt SHAPE — never on an env-var name; `refuse()` exits 3 and the word
+SKIP appears in neither script. The builder caught a fail-open in his own preflight (guerrilla serves
+published reads anonymously, so Leg B's read probe returned a perfectly-shaped listing under a garbage
+token) and closed it by additionally requiring `bp whoami` to report a writing `auth_tier`. Review
+re-derived the refusal independently rather than re-reading the claim: a stub `bp` exiting 0 printing
+`{"ok":true}` is REFUSED at rc=3 with the reason naming the law.
+
+**WHAT LANDED — 4 of 4 round-1 slices green.**
+
+| slice | final branch | what it actually does |
+|---|---|---|
+| `pds-w29-pay-lb` | `…-print-what-th-0-r` | `hzResObserved[T]`/`hzResObservedResponse[T]` in a new `hetzner_respost_mutation.go`; all 16 non-destroy lb-family sites paid; a 799-line stateful post-mutation-aware test file; 21 census keys flipped |
+| `pds-w29-registry-postcondition-invariant` | `…-stops-accepti-1` | the three-arm relevance invariant + six row repairs; `TestSiteClaimsAreProbedWithResponseTypes` byte-identical |
+| `pds-w30-live-proof-runner` | `…-credential-gated-r-2-r` | the epic's first L1, twice, plus harvested fixtures and a manifest |
+| `pds-w30-board-envelope-poison-parity` | `…-gains-the-two-p-3-r` | the two transferring poisons per decoder; the four that cannot transfer declared with the measurement |
+
+**THE POLARITY IS THE WAVE'S RISKIEST JUDGMENT AND IT IS CORRECT.** Re-derived independently at
+review, not read: `hzResGoneRead[T]` yields `(nil, resp, nil)` on a JSON 404, so `fresh == nil` means
+"the API says it is not there" — EARNED for a destroy, UNMET for a mutation. All ten `hzResObserved`
+call sites are verbs the resource SURVIVES (add/delete-service, add/remove-target, change-algorithm,
+change-type, floating-ip and primary-ip assign/unassign), so the inverted refusal cannot fire on an
+honest verb. `TestHetznerMutationPolarityIsLoadBearing` pins BOTH directions on the SAME input and
+quotes all four receipts. **The `create` class needed a second entry point**: a create's response IS
+server truth, so `hzResObservedResponse` observes it and NAMES the weaker basis
+(`"the create response object"`) rather than dressing a non-read as a read — one more public symbol
+than the brief implied, and the right call.
+
+**THE HONEST LIMIT, STATED IN THE RUNS' OWN OUTPUT.** A live run against a CORRECT API proves exactly
+one direction — NO FALSE REFUSAL. It does NOT prove the refusal direction; a real Hetzner will not
+keep handing back a resource it deleted, so `hzResStillThere` stays fake-proven. Eight of the ten
+hcloud kinds have no harvested 404. A create CANNOT refuse (`hzResObservedResponse`'s observe hook can
+only agree), made visible on purpose in the lb-create fixture and filed as `task-37befa974015b2f2`.
+And `bp chat approve` exits rc=2, so the 204 carve-out is unreachable from the CLI by any live run.
+
+**ONE DECLARED DEVIATION the lead must weigh.** `pds-w29-pay-lb` edited
+`internal/cli/hetzner_net_cmd_test.go` (+13 lines, purely additive: one `GET /load_balancers/7` and one
+`GET /floating_ips/11` handler), which its brief forbade. Two shipped tests legitimately red without
+it — with a post-read in place and no single-resource GET registered, they land in the honest
+"not confirmed" arm — and the alternative was a red gate. No assertion weakened; both tests now
+exercise a real post-read. `pds-w29-pay-net-dns` owns that file and must rebase.
+
+**REVIEW FIXED IN PLACE, three things.** `gofmt` on the lb test tables and the census roster;
+`--selftest` state 4 was looking for `cli.toml` at `~/.config/hcloud/` while the oracle's own resolver
+branched on Darwin, so on macOS it reported the third credential rung UNPROVEN on a host that has it
+(one `default_hcloud_config()` now serves both); and the board test's doc comment now says its poison
+tables are a SUPERSET of the CLI's nine, not a mirror.
+
+**LEDGER.** All four builders claimed, pulsed and stamped as they worked; every merge-gated criterion
+left open for the lead; `pds-w29-pay-lb` criterion 12 an honest `--miss` with the deviation written
+into it. The wish's third weight is discharged: `pds-bl-board-tui-reader-honesty` was already AMENDED
+by Decide (PDS-D422) to the five/four measurement and the `snapshotErrorLabel` channel, and review paid
+rows 1 and 2 against the shipped branch after reproducing the fence mutation itself — 3/4, criterion 3
+merge-gated.
+
+**NEXT WAVE takes the two deferred round-2 slices in dependency order** — merge round 1 first
+(`pay-lb` FIRST of the payment family per PDS-D414), then `pds-w29-pay-storage-backup` (apparatus +
+the fail-closed fake, which is already on main), then `pds-w29-pay-net-dns` LAST, which also deletes
+the superseded `hzUnpaid*` constants. `pay-storage-backup` must NOT be reordered ahead of the fake.
+`pay-net-dns` must verify BY MUTATION that its change cannot make `OPAQUE_CALLERS` fail open. Beyond
+that: the SECOND live proof — the refusal direction has no live spelling, but eight unharvested 404
+kinds do, and a `--harvest-only` pass over them costs one credential and closes PDS-D401 for the whole
+family.
+
 ### Wave 29 2026-07-31 — "hzResDone, taken properly" — REVIEWED. Grade A (paper `pds-wave-29-2026-07-31`)
 
 **THE HEADLINE: the 50-site population was re-derived from source, BROKEN INTO CLASSES, and then
