@@ -52,10 +52,17 @@ name: security
 # DECIDE; it does not decide. Hence `security-gate` below, which enumerates
 # every upstream result and fails on anything outside an explicit allow-set.
 #
-# NOT REGISTERED YET, deliberately (wave 10). `mix-audit` is red on main today
-# (two live `req 0.5.17` advisories); registering `Security gate` would install a
-# permanently CORRECT red on protected main. The bump that clears it is open as
-# PR #8222. Registration is a later wave; the shape is ratcheted meanwhile by
+# NOT REGISTERED YET, deliberately — but NOT for the wave-10 reason, which has
+# expired. `mix-audit` is GREEN on main: `req` is 0.6.3 in api/mix.lock since
+# 95ace3150, and PR #8222 (the bump this block called "open") is CLOSED and was
+# NEVER merged — `gh pr view 8222 --json state,mergeCommit` returns CLOSED with
+# mergeCommit null. Both clauses above were an inherited red quoted long after
+# it went green. What DOES still hold: `mix deps.audit` is green ONLY with
+# `--ignore-advisory-ids GHSA-4g2h-vm7x-747c` (esaml 4.6.0, XXE, "First patched
+# versions:" EMPTY — drop the id the day upstream ships one), and the advisory
+# DB is fetched FRESH at run time, so a disclosure tomorrow reds this gate with
+# no repo change at all. Registering `Security gate` is a policy call about who
+# owns that red, held on its own ledger row; the shape is ratcheted meanwhile by
 # scripts/security-gate-shape.test.sh, which the unfiltered `gate-shape` job
 # below RUNS on every head (a harness nobody runs is not a ratchet — D26).
 
