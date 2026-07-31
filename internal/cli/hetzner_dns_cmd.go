@@ -320,7 +320,12 @@ func runHetznerDNSZoneDelete(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "delete dns zone "+zone.Name+": delete action failed", werr)
 	}
-	return hzResDone(out, "delete", "zone", zone.ID, zone.Name, nil)
+	// The zone is the one benign kind: hc.Zone.Get is a single GET /zones/{id}
+	// with no name-filtered fallback. The gone-check binds to zone.ID anyway —
+	// PDS-D400 is a rule about the SHAPE of a destroy confirmation, not a
+	// per-kind escape hatch.
+	return hzResDestroyed(out, ctx, "delete", "zone", zone.ID, zone.Name, nil,
+		func(c context.Context) (*hcloud.Zone, *hcloud.Response, error) { return hc.Zone.GetByID(c, zone.ID) })
 }
 
 // ---------------------------------------------------------------------------
@@ -652,9 +657,15 @@ func runHetznerDNSRecordDelete(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "delete dns record "+name+"/"+string(typ)+": action failed", werr)
 	}
-	return hzResDone(out, "delete", "record", name, name, map[string]any{
+	// A record resolves nothing, so there is no numeric id to bind to. It is
+	// read back by the (zone, name, type) key the verb ALREADY HOLDS — the same
+	// PDS-D400 discipline one level up: the confirming read cannot address a
+	// second rrset.
+	return hzResDestroyed(out, ctx, "delete", "record", name, name, map[string]any{
 		"type": string(typ),
 		"zone": strings.Trim(strings.TrimSpace(a.val("zone")), "."),
+	}, func(c context.Context) (*hcloud.ZoneRRSet, *hcloud.Response, error) {
+		return hc.Zone.GetRRSetByNameAndType(c, rrset.Zone, rrset.Name, rrset.Type)
 	})
 }
 

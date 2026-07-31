@@ -324,7 +324,10 @@ func runHetznerVolumeDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.Volume.Delete(ctx, vol); derr != nil {
 		return hzFail(out, "delete volume "+vol.Name, derr)
 	}
-	return hzResDone(out, "delete", "volume", vol.ID, vol.Name, nil)
+	// PDS-D400: the gone-check binds to vol.ID — the id ALREADY RESOLVED — and
+	// never re-runs `target`, which a volume merely NAMED "42" would hijack.
+	return hzResDestroyed(out, ctx, "delete", "volume", vol.ID, vol.Name, nil,
+		func(c context.Context) (*hcloud.Volume, *hcloud.Response, error) { return hc.Volume.GetByID(c, vol.ID) })
 }
 
 func runHetznerVolumeAttach(out *writer, g globals, args []string) int {
@@ -681,7 +684,10 @@ func runHetznerNetworkDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.Network.Delete(ctx, netw); derr != nil {
 		return hzFail(out, "delete network "+netw.Name, derr)
 	}
-	return hzResDone(out, "delete", "network", netw.ID, netw.Name, nil)
+	return hzResDestroyed(out, ctx, "delete", "network", netw.ID, netw.Name, nil,
+		func(c context.Context) (*hcloud.Network, *hcloud.Response, error) {
+			return hc.Network.GetByID(c, netw.ID)
+		})
 }
 
 func runHetznerNetworkAddSubnet(out *writer, g globals, args []string) int {
@@ -1128,7 +1134,10 @@ func runHetznerFirewallDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.Firewall.Delete(ctx, fw); derr != nil {
 		return hzFail(out, "delete firewall "+fw.Name, derr)
 	}
-	return hzResDone(out, "delete", "firewall", fw.ID, fw.Name, nil)
+	return hzResDestroyed(out, ctx, "delete", "firewall", fw.ID, fw.Name, nil,
+		func(c context.Context) (*hcloud.Firewall, *hcloud.Response, error) {
+			return hc.Firewall.GetByID(c, fw.ID)
+		})
 }
 
 func runHetznerFirewallSetRules(out *writer, g globals, args []string) int {

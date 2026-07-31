@@ -281,7 +281,23 @@ func runHetznerBucketDelete(out *writer, args []string) int {
 	if err := c.DeleteBucket(hetznerCtx(), name); err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
 	}
-	return hzResDone(out, "delete", "bucket", name, name, nil)
+	// DECLARED NON-BINDING (see hzResDestroyedDeclared): Hetzner's S3-compatible
+	// endpoint documents no consistency model, so a bucket still listed after a
+	// DELETE is reported, never treated as a failed verb. The read fails CLOSED
+	// — an error is confirmed_absent=false, never an optimistic true.
+	return hzResDestroyedDeclared(out, "delete", "bucket", name, name, nil,
+		"ListBuckets after the delete", func() (bool, error) {
+			buckets, lerr := c.ListBuckets(hetznerCtx())
+			if lerr != nil {
+				return false, lerr
+			}
+			for _, b := range buckets {
+				if b.Name == name {
+					return false, nil
+				}
+			}
+			return true, nil
+		})
 }
 
 // ---------------------------------------------------------------------------
@@ -540,7 +556,22 @@ func runHetznerObjectRm(out *writer, args []string) int {
 	if err := c.DeleteObject(hetznerCtx(), bucket, key); err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
 	}
-	return hzResDone(out, "rm", "object", key, key, map[string]any{"bucket": bucket})
+	// DECLARED NON-BINDING, same reasoning as bucket delete: the key is looked
+	// for under its own exact prefix, and anything but a clean absence is an
+	// honest ⚠ partial rather than a ✓.
+	return hzResDestroyedDeclared(out, "rm", "object", key, key, map[string]any{"bucket": bucket},
+		"ListObjects on the exact key prefix after the delete", func() (bool, error) {
+			objs, lerr := c.ListObjects(hetznerCtx(), bucket, key)
+			if lerr != nil {
+				return false, lerr
+			}
+			for _, o := range objs {
+				if o.Key == key {
+					return false, nil
+				}
+			}
+			return true, nil
+		})
 }
 
 func runHetznerObjectPresign(out *writer, args []string) int {

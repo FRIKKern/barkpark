@@ -300,7 +300,11 @@ func runHetznerLBDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.LoadBalancer.Delete(ctx, lb); derr != nil {
 		return hzFail(out, "delete load-balancer "+lb.Name, derr)
 	}
-	return hzResDone(out, "delete", "load-balancer", lb.ID, lb.Name, nil)
+	// PDS-D400: bound to lb.ID, the id already resolved — never the user's token.
+	return hzResDestroyed(out, ctx, "delete", "load-balancer", lb.ID, lb.Name, nil,
+		func(c context.Context) (*hcloud.LoadBalancer, *hcloud.Response, error) {
+			return hc.LoadBalancer.GetByID(c, lb.ID)
+		})
 }
 
 func runHetznerLBAddService(out *writer, g globals, args []string) int {
@@ -867,7 +871,10 @@ func runHetznerFloatingIPDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.FloatingIP.Delete(ctx, fip); derr != nil {
 		return hzFail(out, "delete floating-ip "+hzFloatingIPLabel(fip), derr)
 	}
-	return hzResDone(out, "delete", "floating-ip", fip.ID, hzFloatingIPLabel(fip), nil)
+	return hzResDestroyed(out, ctx, "delete", "floating-ip", fip.ID, hzFloatingIPLabel(fip), nil,
+		func(c context.Context) (*hcloud.FloatingIP, *hcloud.Response, error) {
+			return hc.FloatingIP.GetByID(c, fip.ID)
+		})
 }
 
 func runHetznerFloatingIPAssign(out *writer, g globals, args []string) int {
@@ -1158,7 +1165,10 @@ func runHetznerPrimaryIPDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.PrimaryIP.Delete(ctx, pip); derr != nil {
 		return hzFail(out, "delete primary-ip "+hzPrimaryIPLabel(pip), derr)
 	}
-	return hzResDone(out, "delete", "primary-ip", pip.ID, hzPrimaryIPLabel(pip), nil)
+	return hzResDestroyed(out, ctx, "delete", "primary-ip", pip.ID, hzPrimaryIPLabel(pip), nil,
+		func(c context.Context) (*hcloud.PrimaryIP, *hcloud.Response, error) {
+			return hc.PrimaryIP.GetByID(c, pip.ID)
+		})
 }
 
 func runHetznerPrimaryIPAssign(out *writer, g globals, args []string) int {
@@ -1401,7 +1411,10 @@ func runHetznerPlacementGroupDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.PlacementGroup.Delete(ctx, pg); derr != nil {
 		return hzFail(out, "delete placement-group "+pg.Name, derr)
 	}
-	return hzResDone(out, "delete", "placement-group", pg.ID, pg.Name, nil)
+	return hzResDestroyed(out, ctx, "delete", "placement-group", pg.ID, pg.Name, nil,
+		func(c context.Context) (*hcloud.PlacementGroup, *hcloud.Response, error) {
+			return hc.PlacementGroup.GetByID(c, pg.ID)
+		})
 }
 
 // ---------------------------------------------------------------------------
@@ -1651,7 +1664,10 @@ func runHetznerCertificateDelete(out *writer, g globals, args []string) int {
 	if _, derr := hc.Certificate.Delete(ctx, cert); derr != nil {
 		return hzFail(out, "delete certificate "+cert.Name, derr)
 	}
-	return hzResDone(out, "delete", "certificate", cert.ID, cert.Name, nil)
+	return hzResDestroyed(out, ctx, "delete", "certificate", cert.ID, cert.Name, nil,
+		func(c context.Context) (*hcloud.Certificate, *hcloud.Response, error) {
+			return hc.Certificate.GetByID(c, cert.ID)
+		})
 }
 
 // ---------------------------------------------------------------------------
