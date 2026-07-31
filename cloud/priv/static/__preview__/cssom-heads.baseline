@@ -27,4 +27,10 @@
 # Recorded here rather than left silent: a ratchet whose number does not move
 # on a real CSS change should say WHY in the same commit, or the next reader
 # cannot tell a considered no-op from a forgotten bump.
-1235
+# Re-measured 2026-07-31 (cch-w12-s3-sites-card-focus-perimeter): 1236 authored heads,
+# MISSES 0. The +1 is ONE rule — `.inst-sites-card .site-row[data-id]:focus-visible` —
+# giving a keyboard-focused row in the instance-detail Sites card a four-sided inset
+# outline. Before it, that card's flush list treatment (`border: none` + `border-top`)
+# zeroed the border the shared focus rule only re-COLOURS, so three of the four sides
+# painted nothing. MISSES 0 confirms this is an unrecorded ADD, not a parity defect.
+1236

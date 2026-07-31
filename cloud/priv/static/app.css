@@ -4407,6 +4407,28 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .inst-sites-head { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
 .inst-sites-head h2 { margin: 0; }
 .inst-sites-card .site-row { border: none; box-shadow: none; border-radius: 0; padding: 10px 0; border-top: 1px solid var(--border); }
+/* THE FOCUS PERIMETER THIS CARD OWES ITS KEYBOARD USERS.
+   The flush list treatment above zeroes the border that the shared rule
+   `.site-row[data-id]:focus-visible` (app.css ~1526) only ever RE-COLOURS — that
+   rule sets border-COLOR, never width or style. Driven in Chrome after the 0.15s
+   border-color transition settles, a focused row in THIS card computed
+   border-top 1px solid var(--ring) but right/bottom/left `0px none`: three of the
+   four sides had no indicator at all, leaving a keyboard user the translucent
+   --ring-soft halo plus a top hairline. Elsewhere (.fleet-list, the bare
+   .site-row) the row keeps its 1px border, so the shared rule is correct there —
+   this is a defect of THIS context only, and the fix stays scoped to it.
+   OUTLINE, not border: restoring a border here would add 1px on three sides and
+   shift the row's `10px 0` rhythm the moment focus lands. An inset outline costs
+   no layout, paints all four sides, and leaves the RESTING look byte-identical.
+   The top hairline is reset to --border so the list separator does not double as
+   half the indicator — the outline is the whole signal. Square, like the list.
+   --ring is opaque and clears SC 1.4.11's 3:1 floor in every driven theme state
+   (10 measured 2026-07-31; worst 3.85:1 ember light, best 9.30:1 fjord dark). */
+.inst-sites-card .site-row[data-id]:focus-visible {
+  border-top-color: var(--border);
+  outline: 2px solid var(--ring);
+  outline-offset: -2px;
+}
 .inst-sites-card .site-row + .site-row { margin-top: 0; }
 .inst-sites-card .empty-state { border: none; padding: 8px 0 4px; }
 
