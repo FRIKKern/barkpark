@@ -1,0 +1,88 @@
+{
+  "run_id": "grip-20260731T1400Z-asciicast-local-proof",
+  "subject_area": "Epic 9 / jarl-flagship wave 1, Movement 3 (first honest media)",
+  "harness": "/private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad/asciicast-proof/{run2,run3}.mjs — VOLATILE session tmp; copy into the repo before relying on it (prior art: the frick generator and shoot.mjs both vanished this way)",
+  "recipes": [
+    {
+      "subject": "asciinema-player accepts application/octet-stream — the mime is NOT a blocker",
+      "quantity": "browser:player-decodes-cast",
+      "rerun": "node /private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad/asciicast-proof/run2.mjs",
+      "derived_level": "L1",
+      "deps": ["playwright/chromium", "asciinema-player@3.17.0", "@barkpark/react@1.0.0-preview.1 client.mjs", "scratchpad/demo.cast (v3)"],
+      "observed_at": "2026-07-31T14:05:00Z",
+      "observed": "Trial A (same-origin, content-type application/octet-stream): hasBpDev=true, termLen=1908 — the v3 cast decoded and painted 'bp dev' into .ap-term. Trial D (cross-origin, CORRECT application/json mime, no ACAO): hasBpDev=false. Mime is irrelevant in both directions; ACAO is the only variable that moves the outcome."
+    },
+    {
+      "subject": "the exact live media-serve shape fails cross-origin purely on the missing ACAO header",
+      "quantity": "browser:cors-failure",
+      "rerun": "node /private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad/asciicast-proof/run3.mjs",
+      "derived_level": "L1",
+      "deps": ["playwright/chromium", "asciinema-player@3.17.0", "@barkpark/react client.mjs"],
+      "observed_at": "2026-07-31T14:12:00Z",
+      "observed": "Replicated live headers (content-type: application/octet-stream; x-content-type-options: nosniff; content-disposition: inline). WITHOUT ACAO: fetch THREW 'Failed to fetch', console 'blocked by CORS policy: No Access-Control-Allow-Origin header is present', playsRealContent=false. WITH access-control-allow-origin:* and byte-identical everything else: playsRealContent=true, termLen=445. nosniff and content-disposition:inline are harmless."
+    },
+    {
+      "subject": "div.ap-player is a FALSE-POSITIVE assertion — it mounts even on total load failure",
+      "quantity": "browser:assertion-validity",
+      "rerun": "node /private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad/asciicast-proof/run3.mjs",
+      "derived_level": "L1",
+      "deps": ["asciinema-player@3.17.0"],
+      "observed_at": "2026-07-31T14:12:00Z",
+      "observed": "ap-player=1 in BOTH the passing and the CORS-failing trial; .ap-control-bar present in both. asciinema-player mounts its shell synchronously and fetches the cast afterwards. hydratePortableDoc likewise returns {asciicast:1} on total failure — its return value counts MOUNTS, not successful loads. Any media gate must assert on .ap-term innerText (or absence of .ap-overlay-error), never on player presence or the hydrate count."
+    },
+    {
+      "subject": "reader-visible failure surface when the cast 404s/CORS-fails is a bare 💥 emoji",
+      "quantity": "browser:error-affordance",
+      "rerun": "node /private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad/asciicast-proof/run4.mjs",
+      "derived_level": "L1",
+      "deps": ["asciinema-player@3.17.0"],
+      "observed_at": "2026-07-31T14:20:00Z",
+      "observed": "div.ap-overlay-error innerText == '💥' — no message, no alt text, no kilde. A bordered box with an emoji and the figcaption below it. Bears directly on the komposisjon no-empty-box law for media fallbacks."
+    },
+    {
+      "subject": "the media blob route is on pipe_through(:api), which has no PublicCors — the defect is upstream, not in jarl",
+      "quantity": "code:route-pipeline",
+      "rerun": "git -C /Users/frikkjarl/Documents/GitHub/barkpark show origin/main:api/lib/barkpark_web/router.ex | awk 'NR>=2054 && NR<=2061' ; git -C /Users/frikkjarl/Documents/GitHub/barkpark show origin/main:api/lib/barkpark_web/router.ex | awk '/^  pipeline :api do/,/^  end/'",
+      "derived_level": "L3",
+      "deps": ["api/lib/barkpark_web/router.ex@origin/main (7dd27bc9)"],
+      "observed_at": "2026-07-31T13:58:00Z",
+      "observed": "router.ex:2054 scope \"/media\" -> pipe_through(:api); :2060 get(\"/files/*path\", MediaController, :serve). pipeline :api = AcceptBarkparkVendor, accepts json, ApiSecurityHeaders, ErrorEnvelopeNegotiation, RateLimit, OptionalToken, AssignDefaultScope, TenantLogMetadata — NO PublicCors. pipeline :public_api (:646) = accepts json + ApiSecurityHeaders + PublicCors. The plug already exists; the media serve route simply is not on it."
+    },
+    {
+      "subject": ".cast files are classified non-dangerous, so they serve inline as octet-stream",
+      "quantity": "code:mime-policy",
+      "rerun": "git -C /Users/frikkjarl/Documents/GitHub/barkpark show origin/main:api/lib/barkpark/media/storage/media_file.ex | sed -n '65,101p'",
+      "derived_level": "L3",
+      "deps": ["api/lib/barkpark/media/storage/media_file.ex@origin/main"],
+      "observed_at": "2026-07-31T14:00:00Z",
+      "observed": "@dangerous_mimes covers svg/html/xml/js only; serve_content_type/1 passes everything else through unchanged; disposition/1 returns \"inline\" for non-dangerous. MIME.from_path(\".cast\") yields application/octet-stream. So the live shape is octet-stream + inline + nosniff — proven harmless above. NO mime fix is needed on the upload path."
+    },
+    {
+      "subject": "the figure block DOES wrap an arbitrary child block with a caption — it is the kilde carrier",
+      "quantity": "code:block-emitter",
+      "rerun": "sed -n '1076,1082p' /Users/frikkjarl/Documents/GitHub/jarl-website/node_modules/@barkpark/react/dist/chunk-IKLDVSPO.mjs",
+      "derived_level": "L3",
+      "deps": ["@barkpark/react@1.0.0-preview.1 dist/chunk-IKLDVSPO.mjs (vendored 577f50bee/#8475)"],
+      "observed_at": "2026-07-31T13:45:00Z",
+      "observed": "var figure = (b) => { const child = b.child; const caption = str(b.caption); const childHtml = isMap(child) ? renderBlock2(child) : \"\"; return `<figure ...>${childHtml}${articleFigcaption(caption)}</figure>` }. Verified live: figure{child:image} rendered <figure><img ...><figcaption><b>Figure 2.</b> …</figcaption></figure>. The image block's missing caption field needs NO engine change — wrap it in figure. Bonus: figcaptionInner auto-bolds a leading 'Figure N.' token."
+    },
+    {
+      "subject": "the asciicast player theme is hardcoded dark-only in the vendored client",
+      "quantity": "code:hardcoded-theme",
+      "rerun": "sed -n '55,64p' /Users/frikkjarl/Documents/GitHub/jarl-website/node_modules/@barkpark/react/dist/client.mjs",
+      "derived_level": "L3",
+      "deps": ["@barkpark/react dist/client.mjs"],
+      "observed_at": "2026-07-31T13:45:00Z",
+      "observed": "player.create(src, el, { fit:'width', poster:'npt:0:1', idleTimeLimit:2, theme:'asciinema' }) — literal, no light/dark branch, unlike hydrateMermaid which calls activeMermaidTheme(). Confirms the digest claim. Rendered class on the mounted node: 'asciinema-player-theme-asciinema'. Engine change + one re-vendor."
+    },
+    {
+      "subject": "the asciicast block emitter hardcodes a light-mode border colour",
+      "quantity": "code:hardcoded-colour",
+      "rerun": "sed -n '1087,1091p' /Users/frikkjarl/Documents/GitHub/jarl-website/node_modules/@barkpark/react/dist/chunk-IKLDVSPO.mjs",
+      "derived_level": "L3",
+      "deps": ["@barkpark/react dist/chunk-IKLDVSPO.mjs"],
+      "observed_at": "2026-07-31T13:45:00Z",
+      "observed": "border:1px solid #dde7e2 — a literal, whereas the sibling diagram emitter uses var(--paper-rule, #dde7e2). asciicastFigcaption likewise hardcodes color:#55635e where articleFigcaption uses var(--paper-ink-soft, #55635e). Two dark-mode defects in the asciicast path that the other block types do not have; same re-vendor as the theme fix."
+    }
+  ]
+}

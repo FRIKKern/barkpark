@@ -1,201 +1,143 @@
-# Jarl Platform Follow-ups (epic-cycle charter slot)
+# jarl.no Flagship Aesthetics (epic-cycle charter slot)
 
 > NOTE ON THIS PATH: this filename is the rotating epic-cycle charter SLOT and has carried
-> earlier epics. Prior occupants are preserved in full at their dedicated paths — most recently
-> **jarl.no Historiene** at `.claude/workflows/bp-jarl-historiene-charter.md` (moved when this
-> PR merged after #8320, per slot convention); before it, **jarl.no Dogfood Publishing** at
-> `.claude/workflows/bp-jarl-dogfood-publishing-charter.md` and **CLI-Reliability** at
-> `.claude/workflows/bp-cli-reliability-charter.md`. Do NOT read this file for their history.
-> This slot is now the memory of the **Jarl Platform Follow-ups** epic.
+> earlier epics. The prior occupant on origin/main — **Jarl Platform Follow-ups** — is preserved
+> verbatim in this PR at `.claude/workflows/bp-jarl-platform-followups-charter.md` (slot
+> convention: whoever claims the slot moves the previous occupant to its named file). Before it:
+> **jarl.no Historiene** (`bp-jarl-historiene-charter.md`), **jarl.no Dogfood Publishing**
+> (`bp-jarl-dogfood-publishing-charter.md`), **CLI-Reliability** (`bp-cli-reliability-charter.md`).
+> Do NOT read this file for their history. This slot is now the memory of the
+> **jarl.no Flagship Aesthetics** epic (Epic 9).
 >
-> Epic anchor: bp task **`jarl-platform-followups-epic`** (guerrilla ledger).
-> Wave 1 paper: **`jarl-platform-followups-wave-2026-07-31`** (style=article).
+> Epic anchor: bp task **`jarl-flagship-epic`** (default ledger).
+> Wave 1 paper: **`jarl-flagship-wave-2026-07-31`** (style=article, jarl instance).
+> Wave 1 referent: **`jarl-flagship-epic-wave-1-log`**.
 > Decided 2026-07-31.
-> Baseline: origin/main `e3403110465e094d8ff06f4cc68c2c3ee342dfdd` (cited line numbers pin here).
+> Baselines: barkpark origin/main `0f28d541e2b8b1412c7f4ee373950443dca7f49c`;
+> jarl-website origin/main `9262f5238cf7673907693920253ad04fde8c0cad` (cited line numbers pin here).
 
 ## Vision
 
-One golden path, proven end-to-end: `git push` → webhook mints a BUILDABLE queued deployment →
-the box's own supervised builder shallow-clones the pushed sha → nixpacks → runtime → live, on a
-box that came out of `bp launch` already carrying the whole site plane, with the pipeline wearing
-its own watchdog. Definition of done is the epic's: a fresh `bp launch` box hosts a site from a
-git push with zero manual steps, and the board survives the load. The board lane (guerrilla task
-writes under saturation) rides in parallel and never gates the spine.
-
-Ground-truth corrections this epic carries (each proven in the 2026-07-31 verify round, recipe
-rows under `tooling/grip/ledger/`, committed on this branch):
-
-- The wish's "real fail-open recovery" phrasing is stale — the codebase deliberately chose
-  fail-LOUD (#8136); we extend that doctrine, we do not reverse it.
-- The builder is per-box and co-located BY CONSTRUCTION (filesystem tarball handoff), not a
-  central "muscle-1" host. The jarl incident root cause was sequential: site plane never
-  installed (docker absent until 17:32Z, 41 min after the mint), THEN a token mismatch
-  (agent.token vs require_worker — ~29 min of silent 401 polling, invisible in journalctl by
-  construction: `Run()` discards the claim error unlogged).
-- A dedup outage on the API mutate surface is 409 `halted` (deliberate, byte-budget-gated), and
-  a genuine 500 on the GitHub webhook surface. Not 503.
+Every reading surface on jarl.no shares one deliberate rhythm at any viewport, in both color
+schemes — and that rhythm is *checkable, not vibes*. The epic ships three things: (1) a width
+doctrine frozen as jarl-owned tokens and policed by a gate; (2) the visual eye — a one-command
+screenshot rig (31 routes × 1440/390 × light/dark), a written per-page review rubric, and a
+graded findings backlog replacing guesses; (3) honest media — real asciinema recordings and real
+product screenshots flowing through the Barkpark media path, every capture kilde-stamped
+(recorded-at + version), with the pipeline proven end to end before volume is authored.
+Flagship means: at least one soul story plays a provenance-stamped terminal recording, every
+route carries its own OG card, no page scrolls sideways at 390, and the instrument that keeps it
+that way survives the wave.
 
 ## Decisions
 
-- **D1 — Clone source rides the claim ENVELOPE, never `deployment_json`.** Claim 200 body
-  becomes `%{deployment, observed_epoch, source}` with `source = %{kind: "git", url:
-  "https://github.com/<github_repo>.git", ref: <full 40-char sha>}`, attached whenever the
-  deployment is artifact-less and the site has `github_repo`. Why: `deployment_json/1` has 17
-  call sites including tenant-facing reads — anything inside it leaks to the SPA; the envelope
-  is worker-gated by construction, and zero tests pin the claim body as an exact map (proven:
-  no `== %{`/`Map.keys` assert in `router_builder_test.exs`), so the key is free.
-- **D2 — Predicate flip and git-ref lane land as ONE integration (same wave, spine merges
-  together).** `github_build_available?/1` (router.ex:11657) flips from hardcoded `false` to
-  repo-present (`is_binary(site.github_repo)`). Why: the webhook mints artifact-less rows, so a
-  flip without the builder lane makes push-to-deploy fail LOUDER than today; repo visibility is
-  not persisted, so repo-present is the only honest predicate available — private repos get a
-  queued→failed cycle with a classified clone error instead of a pre-emptive apology. Previews
-  need no gating: they never consulted the predicate and become buildable for free.
-- **D3 — The clone sequence is sha-first, and there is no fallback.** `git init; git remote add
-  origin <url>; GIT_TERMINAL_PROMPT=0 git -c credential.helper= fetch --depth 1 origin
-  <full-sha>; git checkout FETCH_HEAD`. Why: proven live against GitHub — unadvertised and root
-  shas fetch at depth 1, while the guessed fallback (branch fetch then checkout sha) FAILS for
-  every non-tip sha (`reference is not a tree`). Short shas are refused (`couldn't find remote
-  ref`); `not our ref` = terminal source-gone; a credential prompt = terminal repo-inaccessible
-  (and without GIT_TERMINAL_PROMPT=0 the builder would hang on stdin forever).
-- **D4 — Builder identity: `require_agent` + barkpark scope on ALL FIVE `/v1/builder/*` routes,
-  reusing the box's existing `/etc/barkpark/agent.token`. No dedicated builder token.** Why:
-  the runtime half of the same pipeline is already agent-scoped (symmetry on a tested seam);
-  fleet-wide claim is correctness-broken at ≥2 boxes (wrong-box builds wedge `pushing` rows —
-  the tarball handoff is a local filesystem); WORKER_TOKEN on a customer box opens
-  `/v1/internal/*` (list/deprovision the fleet) and unscoped decrypted env reads; and
-  `verify_agent_token` ignores scope (registry.ex:4238), so reuse costs zero verify-side change
-  while a dedicated token would rebuild mint/rotate/deliver machinery that already exists.
-- **D5 — Box-scoped claim NEVER ships before the queue-age alarm.** Same release train, alarm
-  first (wave rounds encode it). Why: box-scoping strands queued rows on plane-less boxes and
-  the reaper never ages repo-backed queued rows — the alarm is that orphan class's ONLY surfacer.
-- **D6 — The alarm is a CP-side read-only query, not a reaper pass and not a builder report.**
-  New Registry aggregate (max queued container-deployment age per barkpark, one GROUP BY — no
-  N+1), surfaced as `queued_deploy_age_seconds` (number, nil when none) on `barkpark_json/3`;
-  Go + SPA own the 5-minute threshold. Why: the builder is structurally silent on failure, and
-  the 15-min reaper is a MUTATING builder-lease mechanism at 3× the alarm horizon — reusing
-  either would be wrong twice.
-- **D7 — The attention state is named `deploy_stalled`, warn tone, inserted after `degraded`,
-  before `behind` (attention bucket), tail renumbered in Go + SPA + attention_order.json.**
-  Why: the string `queued` is already mapped to the info/blue tone in semrole.go:93 (silent
-  wrong tone), and a degraded box's stuck queue is a symptom, so degraded outranks it. Same
-  slice makes the node harness read `attention_order.json` (today Go is the fixture's ONLY
-  asserter — the "three-speaker seam" was disproven; verify_probes.json at __app.test.mjs:4156
-  is the template).
-- **D8 — Provision lane is CHAIN-FIRST, not bake.** A conditional site-plane step lands in
-  `configureHost` between 7b (agent) and 8 (health), running `deploy/site-runtime-install.sh`
-  on the box; it narrates loudly and degrades to stderr like 7b (the alarm is the backstop)
-  rather than failing the go-live. Why: the bake is a `set -euo pipefail` silent-death pipeline
-  with 2-generation irreversibility (PDF-D103) and Azure never sees the warm image; the chain
-  reaches exactly the boxes that host sites, and ordering is safe — the verify gate runs
-  strictly AFTER configureHost (acquireHost:423 precedes runVerifyGate:497).
-- **D9 — Script preconditions first:** site-runtime-install.sh:41's hardcoded arm64 Go tarball
-  becomes arch-aware (it ABORTS a bare default cx23 x86 box), git is installed explicitly (the
-  clone lane makes git load-bearing at BUILD time), and builder/runtime systemd units are staged
-  in `deploy/systemd/` instead of heredocs. Why: every lane (chain, cp-ops, future bake) reuses
-  these steps; heredoc-only units are why supervision looked unowned.
-- **D10 — Board lane: do NOT rebuild dedup birth (#8136 landed bounded 5s fetch + fail-loud +
-  bypass); bound its unowned twin.** `Content.DedupWall` (the publish half of the same default
-  `bp task create`) gains the same discipline: 5s query budget, `catch :exit`, degraded →
-  `{:error, {:dedup_unavailable, …}}` (errors.ex:443 already maps it to 409). Why: the default
-  create pays TWO dedup scans across two requests; #8136 bounded the create door and left the
-  publish door open with a silent rescue-only fail-open — the literal failure mode its own
-  commit body warned about, still live on the same verb.
-- **D11 — EdgeProjector: error-not-snooze plus query-budget collapse; no pool-size change this
-  wave.** The three rescue `{:snooze, 60}` sites return `{:error, e}` (snooze increments
-  max_attempts — immortality proven in vendored Oban 2.21.1: basic.ex:266 `inc: [max_attempts:
-  1]` exactly refunds fetch's `inc: [attempt: 1]`; error discards at attempt 5 with backoff);
-  `add_edges` is batched (4 queries/edge × ~2850 edges ≈ 70% of a ~16k-query rebuild); the
-  per-doc `list_schemas` N+1 gets the `schemas:` prefetch `/v1/graph` already uses; the hydrate
-  N+1 is batched outside the transaction; the rebuild transaction gets an explicit chosen
-  timeout. Why: the loop is structurally unable to converge (20s of work in a default-15s
-  transaction) and raising POOL_SIZE just moves contention into Postgres — sizing waits for
-  guerrilla-db-probe evidence (backlog).
-- **D12 — The `e2.id == e1.id` upsert contract survives batching.** Batched inserts reload
-  surviving rows by triple; canonical-row semantics (edges.ex fetch_content_edge!) are a pinned
-  test contract (edge_extract_test.exs:298), not an accident.
-- **D13 — limit-1000 is NOT raised and is NOT the graph-starvation cause.** Papers are 86.6%
-  orphaned though never truncated; tasks 6.0% though truncated (measured on guerrilla
-  production). Raising the cap multiplies the dominant per-doc cost and fixes the wrong 6%.
-  Paper-orphan root cause is filed to backlog (`jpf-bl-paper-orphans-rootcause`).
-- **D14 — App-auth (private repos) is an ADDITIVE credential provider, later, and lands only
-  AFTER the identity flip.** gh-1 is an unfired human gate; the minting primitive exists but is
-  installation-WIDE (empty access_tokens body) and has zero production callers — down-scoping
-  via `repository_ids` plus a repo-visibility column belong to that follow-up
-  (`jpf-bl-app-auth-clone-provider`), never this wave. Under `require_worker` any token holder
-  receives any team's envelope; the flip must precede credentials riding the claim.
-- **D15 — The e2e acceptance harness is a NEW script (`deploy/site-push-live-proof.sh`),
-  assembled from pdf-mvp0's provision/teardown front half + the site-spawner judge dialect —
-  next wave, once the spine is on main.** Why: none of the four existing proofs provisions a
-  box or triggers via push, and the fresh-box framing dissolves the site-leak problem for free.
-- **Coverage note (recorded, not hidden):** the verify harness declared assignment
-  `builder-identity-decision` never-reported after four attempts; a full report with runnable
-  proofs was nonetheless present in Decide's input and its ruling (D4/D5) was adopted after
-  spot-checking its rerun anchors against origin/main. If the report's provenance is ever
-  doubted, its every claim carries a `git show origin/main:` rerun command.
+- **D1 — The 1.6x width jump is ALREADY FIXED; wave 1 tokenizes and gates it, never re-lands
+  it.** jarl-website `9262f52` ("one reading measure") shipped 2026-07-31 15:32 and is live in
+  production (browser-measured: prose 672px/59.3ch, figures 1072px/94.6ch, both flush at
+  left:184px). Planning from the pre-fix survey digest would re-land a shipped fix and conflict
+  with globals.css:302-346.
+- **D2 — Measure numbers are FROZEN this wave: `--measure: 42rem` (672px prose),
+  new `--measure-figure: 67rem` (1072px — the currently-emergent figure width declared as a
+  token), `--site-width: 70rem` (band).** 672px = 59.3ch sits inside Studio's proven 55–70ch
+  doctrine; the 32px delta vs the Bulldocs reader's 640px content column is a recorded, accepted
+  divergence between two different surfaces, both in range. Why frozen: the paper-measure-probe
+  verify assignment (empirical A/B/C candidate reflow with screenshots) NEVER REPORTED — an open
+  deficit — so no reflow ships on top of that hole; any future number change re-asks it first.
+- **D3 — The width gate measures the VISIBLE measure, not the declared cap.** Studio's hardest
+  lesson (spd wave 5/6: layout stamped 64.00ch while the reader saw 38ch) and jarl's own live
+  disease (home-page Prose at 39.2ch under a never-binding 42rem ceiling) both prove a
+  cap-only gate passes while the page is broken. Shape: `scripts/check-measure.mjs` (static:
+  token presence + values, max-width literal discipline with a printed mandatory-reason
+  allowlist for the ~12 deliberate ch caps, explicit `.shell`/`.storyShell` binding assertion)
+  PLUS the rig's audit.json measuring rendered widths per route. Honest language until branch
+  protection lands: gates are "checked in blocking CI", not "enforced at merge" — jarl-website
+  main is UNPROTECTED (protection 404, rulesets [], 11/12 CI runs are post-hoc direct pushes).
+  Protection is filed as a deliberate lead task, not flipped mid-wave.
+- **D4 — The rig is ADOPTED, not built: shoot-matrix2.mjs canonized as
+  `jarl-website/scripts/shoot.mjs`.** Routes derived from sitemap.xml (31, host-rewritten to
+  localhost), `waitUntil:'load'` + `document.fonts.ready` (networkidle times out on this site;
+  pre-fonts overflow data is proven noise in BOTH directions), one retry, per-capture overflow +
+  measured-width audit written to audit.json, `--routes` filter (fleet run 8m02s/124 captures;
+  the inner loop must be ~30s). Non-blocking: the rig serves review, not CI.
+- **D5 — Review unit is the QUAD (1440/390 × light/dark); rubric is canonized to
+  `docs/review-rubric.md`; frontend-design skill is generative-only and scoped to fix-time,
+  never review verdicts.** Every finding is filed as a graded bp task (P0 = width/contrast/
+  mobile hard gates, P1 = rhythm, P2 = figure/OG); the wave fixes only accepted top findings;
+  the rest is the graded backlog wave 2 inherits.
+- **D6 — Media CORS is fixed UPSTREAM (PublicCors on the barkpark media serve scope), never a
+  jarl proxy.** Proven: ACAO is the sole deciding variable (mime is a non-issue — the player
+  decodes octet-stream fine); the serve routes ride `pipe_through(:api)` which has no CORS plug
+  while `PublicCors` exists and is wired elsewhere (router.ex:649). Necessity is proven by
+  exact-shape replication; sufficiency is NOT (nobody executed the Elixir) — the slice carries
+  an integration test asserting ACAO on GET /media/files/*. HIGH-FLIP-RISK (security): ACAO:*
+  on tenant-scoped blobs — an independent second review is owed before merge. Note: missing
+  ACAO never blocked `<img>` (not CORS-gated); only fetch consumers (the cast player).
+- **D7 — Absolute-URL law + figure-as-kilde-carrier.** The upload 201 returns a RELATIVE url by
+  construction and the portable-doc `image` block emits `src` verbatim (no baseUrl seam), so:
+  blocks store the ABSOLUTE instance URL at authoring time; React components pass baseUrl.
+  Captions ride the `figure` block ({child, caption} — wraps any block, auto-bolds "Figure N.");
+  the kilde stamp for captures is the caption convention "opptak <date>, <tool> v<version>".
+  Screenshot sources must be ≥1920w (renditions are fixed-target and UPSCALE). Media gates
+  assert PLAYED CONTENT (`.ap-term` text / no `.ap-overlay-error`), never `div.ap-player` —
+  the player mounts identically on total failure and hydratePortableDoc returns {asciicast:1}
+  on failure; this chain fails green by default (proven twice in one session).
+- **D8 — Engine fixes land upstream in barkpark, then ONE re-vendor at wave end.** The vendored
+  tgz is AHEAD of stale local checkouts (renders lineage+duel that old worktrees lack; 5/7 live
+  papers use lineage) — builders branch from CURRENT origin/main (verified to contain them at
+  0f28d541). Canonical CSS is `api/assets/paper-surface/paper-surface.css`, byte-copied to dist
+  by tsup (tsup.config.ts:17,107). Re-vendor lane: pnpm build + `pnpm pack` (never npm — the
+  workspace:^ dep), replace vendor/*.tgz, delete+regenerate pnpm-lock.yaml, verify INSTALLED
+  bytes, extend vendored-renderer test, and CREATE vendor/VENDOR.md (it has never existed;
+  jdf-w2-revendor-upstream's criterion is unpassable without it).
+- **D9 — Auth posture: non-admin write mint EXISTS and is proven (POST /v1/auth/app-tokens
+  mints bpapp_ [read,write] that creates/patches/PUBLISHES and is 403'd by admin routes), but
+  wave 1 content writes still run under the admin token as a deliberate, recorded exception
+  (only lead/fable phases write content).** Any minted token MUST use the DEFAULT
+  `app:<email>` label — custom-labeled app tokens are unrevocable by any HTTP surface (upstream
+  fix filed). SECURITY: a verify lane exposed BOTH saved admin tokens (jarl + guerrilla) in its
+  session transcript — rotation filed P0 and named to the lead.
+- **D10 — OG: the four imageless routes (/om, /kontakt, /notater, /prosjekter) get their own
+  opengraph-image routes.** Live truth is worse than the digest claimed: they emit NO og:image
+  at all (not an inherited root card). og.tsx itself is untouched — it is already at the bar.
+  OG stays a light-only sibling scale with its own named constants (deliberate: 1200×630 is a
+  different medium; forcing --measure onto it would be worse).
+- **D11 — The "77 block types" number is a MYTH, corrected publicly.** 77 was the block-wishlist
+  charter's D14 census of broken "Unsupported block" placeholder INSTANCES in production (since
+  remediated), never a vocabulary size. Real numbers: 62 canonical (Elixir tiers.ex), 60
+  canonical + 10 aliases (JS registry, ≥72 in the shipped vendor), 12 in live use on jarl (a
+  stat/kilde monoculture — the enrichment axis for wave 2).
+- **D12 — Overflow truth at 390: exactly 2 of 31 routes scroll (the scaffy pair), culprit a
+  408px unbreakable path token in `.bp-lineage__body` (no wrap guard, while `.bp-heat__scroll`
+  ships one — inconsistency, not policy).** The duel table (no scroll wrapper, nowrap cells)
+  and the chart ~5px tick text are LATENT (duel live on 2 routes without overflow today;
+  bp-chart used nowhere). Both guarded in the engine slice anyway — the class of bug is
+  fleet-wide (10 routes render lineage).
+- **D13 — Verify coverage deficit, recorded:** `paper-measure-probe` never reported (see D2).
+  `nonadmin-write-mint` was listed as unreported by the dispatcher but a full proof-bearing
+  report EXISTS and is treated as authoritative — the deficit list is stale on that one point.
 
 ## Roadmap
 
-Wave 1 (this wave — 8 slices; ROUNDS ARE LAW: a round-N slice dispatches only after its `after:`
-deps MERGE):
+Wave 1 (this wave — 7 slices; rounds are law):
 
-| # | Task id | Round | Size | Model | What |
+| # | slice (task id) | round | model | size | one line |
 |---|---|---|---|---|---|
-| 1 | `jpf-w1-push-cp-lane` | 1 | large | fable | CP push lane: repo-present predicate, claim-envelope `source`, born-queued webhook, full test blast-radius rewrite (incl. the inverted same-sha test at webhook_test 478-508) |
-| 2 | `jpf-w1-builder-git-clone` | 1 | large | fable | Go builder git-ref source ladder: sha-first shallow clone, terminal error classification, env hygiene |
-| 3 | `jpf-w1-siteplane-script` | 1 | medium | opus | site-runtime-install.sh: arch-aware Go, explicit git install, staged systemd units in deploy/systemd/ |
-| 4 | `jpf-w1-edgeprojector-tame` | 1 | large | fable | EdgeProjector: error-not-snooze, contract-preserving add_edges batching, schemas prefetch, hydrate batching, explicit transaction timeout |
-| 5 | `jpf-w1-dedupwall-bound` | 1 | medium | opus | DedupWall: 5s budget, catch :exit, fail-loud dedup_unavailable, stale-comment fix |
-| 6 | `jpf-w1-queue-age-alarm` | 2 | large | fable | Watchdog: Registry queued-age aggregate, barkpark_json field, Go `deploy_stalled` state, SPA + fixtures, node harness reads attention_order.json. AFTER jpf-w1-push-cp-lane merges (router.ex) |
-| 7 | `jpf-w1-builder-identity` | 3 | large | fable | Five /v1/builder/* routes → require_agent + box scope; claim_queued_deployment_for_barkpark; worker.token preference removed. HIGH-FLIP-RISK (security/tenancy). AFTER jpf-w1-queue-age-alarm + jpf-w1-siteplane-script merge |
-| 8 | `jpf-w1-siteplane-chain` | 4 | medium | opus | configureHost step 7c: conditional site-plane install on go-live via the hardened script, agent.token, loud-degrade narration. AFTER jpf-w1-builder-identity + jpf-w1-siteplane-script merge |
+| 1 | jf-w1-width-tokens-gate-rig | 1 | fable | large | --measure-figure token + check-measure.mjs gate + shoot.mjs rig canonized (jarl-website) |
+| 2 | jf-w1-engine-narrow-dark-fixes | 1 | opus | medium | lineage wrap guard, duel scroll wrapper, asciicast theme-awareness + var()-ify (barkpark engine) |
+| 3 | jf-w1-media-cors-upstream | 1 | opus | small | PublicCors on media serve scope + ACAO integration test (barkpark api) — HIGH-FLIP-RISK security |
+| 4 | jf-w1-og-four-routes | 1 | fable | small | own OG cards for /om /kontakt /notater /prosjekter + OG render smoke test |
+| 5 | jf-w1-media-doctrine-paper | 1 | fable | medium | the media doctrine paper on jarl (absolute-URL law, kilde-for-captures, 77-myth correction) |
+| 6 | jf-w1-fleet-visual-review | 2 (after 1) | fable | large | full-matrix rig run, quad review of all 31 routes, rubric canonized, findings filed graded; fix home 39.2ch floor |
+| 7 | jf-w1-revendor-honest-media | 2 (after 2,3 + instance deploy) | fable | large | ONE re-vendor (VENDOR.md born), first honest cast + screenshot live in a soul story, media gate asserts played content |
 
-Wave 2 (sketch): `jpf-bl-e2e-push-proof` (the acceptance run — fresh box, real push, watchdog
-rung, teardown), `jpf-bl-siteplane-verify-probe` (needs a new HTTPS-visible surface first — no
-host-capability field exists anywhere today, and any probe also fires on the restore path),
-`jpf-bl-app-auth-clone-provider` (gh-1-gated), `jpf-bl-box-credential-hygiene` (WORKER_TOKEN
-rotation + token-file re-read). Full backlog: published `jpf-bl-*` children of the epic task.
+Wave 2+ candidates (filed as published backlog children of jarl-flagship-epic):
+admin-token rotation (P0, lead — transcript exposure), branch protection + required `ci` on
+jarl-website main (P1, lead), /papers index route, app-token revocation-gap upstream fix,
+media absolute-url upstream field, Artwork size-props + soul-story heroes + paper/note OG
+figures, block-vocabulary enrichment fed by the review backlog, asciicast 💥-overlay
+no-empty-box fallback, jarl anonymous-read mechanism explanation, media volume build-out,
+deep per-story block rewrites, OG dark variants.
 
 ## Wave log
 
-### Wave 2026-07-31 — founding wave, round 1 of 4 (grade A-)
-
-**Landed (5/5 round-1 slices, all gates re-run green at review, all PRs open):**
-
-- `jpf-w1-push-cp-lane` → PR #8400 (`loop-epic/cp-push-lane-repo-present-predicate-flip-0`).
-  Predicate flip + claim-envelope `source` %{kind,url,ref} + born-queued webhook rows with
-  same-sha dedup. Tenancy independently re-derived at review: `builder_claim_source/1` has ONE
-  call site (worker-gated claim 200) and none of the three deployment serializers carry a clone
-  recipe. 117-test gate green. No review fixes.
-- `jpf-w1-builder-git-clone` → PR #8401 (`loop-epic/builder-git-ref-source-ladder-sha-first--1`).
-  Source ladder (artifact wins → git sha-first shallow clone → honest empty-artifact error),
-  GIT_TERMINAL_PROMPT=0 + credential.helper= prompt kill, two proven-stderr TERMINAL
-  classifications. Bare-repo fixtures prove checkout at a NON-TIP sha. No review fixes; temp
-  workdir accumulation filed as `jpf-bl-builder-clone-hygiene`.
-- `jpf-w1-siteplane-script` → PR #8402 (`loop-epic/site-runtime-install-sh-hardened-arch-aw-2-r`).
-  Arch-aware Go tarball (the x86 abort fixed), explicit git ensure, staged units in
-  deploy/systemd/ with a behavioural offline parity test (drift tripwire proven red).
-  One review fix on the -r branch: expected tarball URLs derive from the script's GO_VERSION.
-- `jpf-w1-edgeprojector-tame` → PR #8405 (`loop-epic/edgeprojector-converges-error-not-snooze-3`).
-  Error-not-snooze (drain test: 4 failures + 1 discard, 0 snoozes — the immortal loop is dead),
-  contract-preserving add_edges batching (D12 e2.id==e1.id pinned), schemas prefetch, hydrate
-  batching, explicit 60s txn budget. 73-test gate green. No review fixes. CI note: the enqueue
-  test is sensitive to leftover committed oban_jobs rows in a dirty test DB.
-- `jpf-w1-dedupwall-bound` → PR #8406 (`loop-epic/dedupwall-gets-the-8136-discipline-bound-4`).
-  5s budget on all 3 Repo calls, rescue + catch :exit + rollback branch, fail-loud
-  `dedup_unavailable` forwarded through AuthoringWall, `content.dedup_bypass` escape, tags-only
-  JSONB projection. 35-test gate green x3. No review fixes. The wave itself reproduced the
-  incident live twice: filing tasks 500'd until `dedup_bypass` was set — including the review's
-  own backlog filing.
-
-**Stalled:** nothing. Charter PR #8317 open awaiting lead merge.
-
-**Next wave / lead dispatch order (rounds are law):** (1) merge the five round-1 PRs + charter
-PR #8317; on merge close each slice's merge-gated criterion. (2) Dispatch `jpf-w1-queue-age-alarm`
-(round 2) after #8400 merges. (3) Dispatch `jpf-w1-builder-identity` (round 3) after the alarm +
-#8402 merge — HIGH-FLIP-RISK: send a genuinely independent second reviewer for the identity/scoping
-judgment before merging it. (4) Dispatch `jpf-w1-siteplane-chain` (round 4) after identity + script
-merge. Then wave 2: `jpf-bl-e2e-push-proof` — the single end-to-end acceptance run on a fresh box.
-Watch on deploy of `jpf-w1-dedupwall-bound`: publishes now 409 under real dedup outages
-(fail-loud by design); the GitHub Intake 2xx-on-halted drop hazard now covers the publish side
-too (tracked with the 503 upgrade).
+(empty — Review appends per wave)
