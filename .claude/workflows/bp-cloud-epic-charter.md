@@ -216,3 +216,37 @@ Round 2 (AFTER S1 merges — schema + gate live):
 - `jh-bl-canon-figures` — retrofit stat bands + kilde onto remaining canon numbers.
 
 ## Wave log
+
+### Wave 2026-07-31 — round 1 built + reviewed, grade A-
+
+- **Landed (2/2 round-1 slices green; round 2 deferred by design, dispatches after S1
+  merges):**
+  - S1 `jh-w1-figure-family` — PR FRIKKern/jarl-website#1, final branch
+    `loop-epic/figurfamilien-statband-duel-lineage-seks-0-r` (REVIEWER FIX ed40daf:
+    a duel row carrying only `value2` slipped the normalizer's Layer-A provenance
+    drop and painted a sourceless number — value2 now counts like value in
+    itemHasContent/itemHasProvenance/the kilde footer, matching what check-sources
+    already enforced; and check-sources now counts NUMERIC stat values — `value: 75`
+    owes a source like `value: "75"` — both mutation-proven on a mock CMS). Schema
+    applied live to page+project (dataset hash ed7f5428f5b120b3 → bb00ae821fd2c525);
+    reviewer independently re-derived the HIGH-FLIP-RISK upsert against the PR #8320
+    backup: 47 schemas before/after, only page+project changed, only their sections
+    field, every other field byte-equal. Gate green on the final branch (typecheck,
+    check, live check-sources exit 0, statBand readback = 1). E2: an independent
+    second look at the schema splice is still warranted before merge. Deploy is the
+    lead's 3-step lane AFTER merge — content slices are blocked until it lands.
+  - S2 `jh-w1-voice-pass` — pure CMS, no branch/PR; all 11 texts live in production
+    (verified 02:13–02:14Z stamps): project-barkpark opens with intent, meta-story
+    single-homed in its quote section, jargon grep 0, Vipps 0, templates untouched,
+    Barkpark timeline months re-checked against real git history (April 2026 first
+    commit, June 2026 apiclient extraction). Residue for later: project-doey ¶3's
+    «1 350 endringer på ni dager» retained un-rederived (was out of the brief's
+    scope), page-om body still says «headless CMS» (only the intro was in scope).
+- **Stalled:** nothing. Brief-vs-live id drift absorbed by the builder correctly
+  (project-aquatiq / project-polyflor — the briefs' -synk/-ordre ids never existed).
+- **Next wave:** lead merges jarl-website#1 (after the E2 second look), runs the
+  3-step deploy, then dispatches round 2 in order: jh-w1-story-scaffy (flagship),
+  jh-w1-story-bulldocs, jh-w1-story-cloud, jh-w1-story-spreadsheet-wizard,
+  jh-w1-story-svgloop, jh-w1-dossier — every one gated on check-sources against the
+  now-live schema. Then the backlog children (jh-bl-canon-figures retrofits kilde
+  onto the standing canon numbers, incl. the doey re-derivation).
