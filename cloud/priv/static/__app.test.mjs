@@ -9115,6 +9115,76 @@ test("GR80 leg 2: the actor axis degrades to Everyone/Just me with no member lis
   assert.equal(odd.map((f) => f.label).join("|"), "Everyone|usr_zed");
 });
 
+// ── cch-w12-s1: the cold-boot Who axis ──────────────────────────────────────
+// The wiring these pin is BROWSER-DRIVEN in the slice's evidence (Chrome on
+// __preview__/serve.mjs, cold #activity vs a warm control, plus a one-shot 500
+// on /members). ensureActivityActors / loadMe are fetch-and-DOM bound, so what
+// a node harness can hold still is the SHAPE that made the lie possible:
+// where the latch is set relative to the guard, and which views loadMe repaints.
+// Region-scoped source assertions, the same instrument as the GR52b 2FA pins.
+
+function appRegion(src, from, to) {
+  const start = src.indexOf(from);
+  const end = src.indexOf(to, start + 1);
+  assert.ok(start > 0 && end > start, "region " + JSON.stringify(from) + " must be locatable");
+  return src.slice(start, end);
+}
+
+test("cch-w12-s1: the members latch means 'a fetch was ISSUED' — set BELOW the team-id guard, cleared on failure", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const region = appRegion(src, "function ensureActivityActors(", "function activityFiltered(");
+  const guard = region.indexOf("if (!tid) return");
+  const latch = region.indexOf("activityActorsTried = true");
+  const early = region.indexOf("if (activityActorsTried) return");
+  assert.ok(early >= 0 && guard > 0 && latch > 0, "the guard, the early-out and the latch must all be present");
+  // THE BUG, pinned: the latch used to be set before the guard, so a cold deep
+  // link into #activity (meCache still null — loadMe() is un-awaited and
+  // applyRoute() runs in the same synchronous turn) burned it without ever
+  // issuing the read, and the Who axis was dead for the whole page life.
+  assert.ok(guard < latch, "activityActorsTried must be set BELOW the team-id guard, never above it");
+  // And a failed read must not latch either: a transient 5xx retries.
+  assert.match(region, /if \(!r \|\| !r\.ok\) \{ activityActorsTried = false;/,
+    "a non-ok members read must clear the latch so the next Activity paint retries");
+  assert.match(region, /\.catch\(function \(\) \{ activityActorsTried = false; \}\)/,
+    "a rejected read must clear the latch too — there was no .catch at all");
+  // Silent degrade is unchanged: no error surface in this region.
+  for (const banned of ["toast(", "showError", "renderError"]) {
+    assert.ok(!region.includes(banned), "a failed members read must never paint over a feed that loaded fine");
+  }
+});
+
+test("cch-w12-s1: loadMe repaints Activity when /v1/me lands — the third twin of billing and operator", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const region = appRegion(src, "function loadMe(", "// =========================================================== SUBSCRIPTION");
+  for (const view of ["billing", "operator", "activity"]) {
+    assert.ok(region.includes('currentView() === "' + view + '"'),
+      "loadMe must re-render " + view + " once the real /v1/me is in");
+  }
+  assert.ok(region.includes("ensureActivityActors()") && region.includes("paintActivityFilters()"),
+    "the Activity seam must both repaint the axis (the 'Just me' chip needs me) and issue the roster read");
+});
+
+test("cch-w12-s1: an identity change WITHOUT a reload drops the cached actor axis", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // The logged-out branch of render() — it serves BOTH the sign-out click and
+  // the 401 auto-bounce, neither of which reloads. It already cleared meCache,
+  // the subscription trio and the overview snapshot; the actor axis was the
+  // one per-account cache left standing.
+  const loggedOut = appRegion(src, "    var s = session();\n    if (!s || !s.token) {", "hide($(\"#app-shell\"));");
+  assert.ok(loggedOut.includes("meCache = null"), "sanity: this is the logged-out branch");
+  assert.ok(loggedOut.includes("activityActors = null") && loggedOut.includes("activityActorsTried = false"),
+    "signing out (or being bounced by a 401) must drop the previous team's roster");
+  // Accepting an invite changes the roster under the same page life.
+  const invite = appRegion(src, "function submitInviteAccept(", "function showAuthInviteBanner(");
+  assert.ok(invite.includes("activityActors = null") && invite.includes("activityActorsTried = false"),
+    "an accepted invite changes the roster the Who axis is derived from");
+  // NOT at the team switcher: it does location.reload(), which kills every
+  // module variable — a reset there would be a fix for a non-bug.
+  const switcher = appRegion(src, 'sel.id = "team-switcher"', "host.textContent = \"\";");
+  assert.ok(switcher.includes("location.reload()"), "the switcher still reloads");
+  assert.ok(!switcher.includes("activityActors"), "no reset belongs at a seam that reloads the document");
+});
+
 // ── search-template W8: site theme-edit pure helpers ────────────────────────
 
 test("siteThemeOptionsHtml lists the four palettes + a template-default, current selected", () => {

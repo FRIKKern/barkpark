@@ -11014,6 +11014,11 @@
         clearParkedInvite();
         // The team roster (and possibly the account's team) changed.
         meCache = null;
+        // cch-w12-s1: the Who axis is derived from that roster, so the cached
+        // copy is stale the moment the accept lands — drop it and let the next
+        // Activity paint re-read.
+        activityActors = null;
+        activityActorsTried = false;
         loadMe();
         fleetCache = null;
         renderInviteState(box, "joined", token, preview, me);
@@ -12089,6 +12094,16 @@
         // real answer is in, either the console paints or the non-operator is
         // bounced — the decision is never made on an unloaded me.
         if (currentView() === "operator") loadOperator();
+        // cch-w12-s1, the third twin of the two seams above: Activity's "Who"
+        // axis is built from /v1/me (the "Just me" chip) plus the team roster,
+        // and a deep link into #activity paints it before either is known. Now
+        // that me is in, repaint the axis and issue the members read the cold
+        // path could not — without this the deep-linked axis reads "Everyone"
+        // alone until the user navigates away and back.
+        if (currentView() === "activity") {
+          paintActivityFilters();
+          ensureActivityActors();
+        }
       }
     });
   }
@@ -12317,17 +12332,27 @@
   // Read the member list once, then repaint the chip row in place. Failure is
   // SILENT by design: the actor axis already has a working degraded shape, so a
   // 403/404 here must not paint an error over a feed that loaded fine.
+  //
+  // cch-w12-s1: the latch means "a members fetch was ISSUED", never "this
+  // function was called". It used to be set ABOVE the team-id guard, so a cold
+  // deep link into #activity — where applyRoute() runs in the same synchronous
+  // turn as the un-awaited loadMe(), i.e. always with meCache === null — burned
+  // the latch without ever issuing the read, and the Who axis stayed "just you"
+  // for the whole page life while Members painted the full roster. It is now set
+  // below the guard and CLEARED when the read fails, so a transient 5xx retries
+  // on the next Activity paint instead of latching forever.
   function ensureActivityActors() {
     if (activityActorsTried) return;
-    activityActorsTried = true;
     var tid = meCache && meCache.team && meCache.team.id;
-    if (!tid) return;
+    if (!tid) return; // /v1/me hasn't landed yet — loadMe() calls back in
+    activityActorsTried = true;
     api("GET", "/v1/teams/" + encodeURIComponent(tid) + "/members").then(function (r) {
-      var list = (r && r.ok && r.data && r.data.members) || null;
+      if (!r || !r.ok) { activityActorsTried = false; return; } // retryable, still silent
+      var list = (r.data && r.data.members) || null;
       if (!list || !list.length) return;
       activityActors = list;
       paintActivityFilters();
-    });
+    }).catch(function () { activityActorsTried = false; });
   }
 
   // Is ANY axis narrowing the trail right now? Drives the empty-state sentence.
@@ -16758,6 +16783,13 @@
       overviewData.list = null;
       overviewData.usage = null;
       overviewData.onboarding = null;
+      // cch-w12-s1: the Activity actor axis is ALSO per-account, and this branch
+      // serves both the sign-out click and the 401 auto-bounce — neither of which
+      // reloads. Left standing, the next account's Who axis would name the
+      // previous team's members. (The team switcher is deliberately NOT patched:
+      // it does location.reload(), which kills every module variable anyway.)
+      activityActors = null;
+      activityActorsTried = false;
       hide($("#app-shell"));
       show($("#auth-screen"));
       // A partial 2FA challenge is abandoned by any fresh logged-out render
