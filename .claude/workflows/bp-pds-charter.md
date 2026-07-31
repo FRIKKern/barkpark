@@ -6140,3 +6140,281 @@ merge — this workflow spawns one reviewer, so that is a manual lead step. (4) 
 see a FALSE reason: clause 1 only checks md5-distinctness, so 45 verdicts now rest on committed
 re-derivation recipes rather than on anything an instrument can re-check. That asymmetry is
 structural, it is the round's largest remaining soft spot, and no wave has yet attacked it.
+
+---
+
+## Wave 28 2026-07-31 — "The reason must be able to be wrong" — DECIDED (paper `pds-wave-28-2026-07-31`)
+
+**THE ROUND IS DONE IN FORM. THIS WAVE ASKS WHETHER IT IS TRUE IN SUBSTANCE.** Re-derived at
+wave-28 start from an `origin/main` copy of the instrument, in an empty directory:
+`pds-ledger-census.sh --assert-round-done --anchor-from-paper pds-wave-27-2026-07-31` → `RC=0`,
+`VERDICT: ROUND DONE`, **zero stderr bytes**. live **190**, adjudicated 172, reasons **213 == 213**
+distinct, off-vocabulary **{}**, `live_bare == []`, residue **18** (the brief said 19; the board
+moved). Wave 27's own reviewer named the hole in the same breath: clause 1 asserts distinctness and
+nothing more, so a STALE, INVENTED or PARTIAL reason passes exactly as well as a re-derived one.
+That is this wave.
+
+### The decisions
+
+- **PDS-D386 — ADOPT `tooling/grip` READ-ONLY; NEVER COUPLE TO ITS SUITE OR ITS SEAL.** The
+  instrument this wave set out to build is ~90% built one epic over. A verifier ran grip's SHIPPED
+  `cli.mjs` over synthetic PDS rows with **zero grip changes** and got exactly the verdict line this
+  wave wants: ADMITTED (re-derived at L2, 54 ms) / DEMOTED (prose-only, L6, demoted-never-rejected) /
+  REJECTED:UNSAFE-RERUN. `disposition_reason` IS grip's `evidence` (L6 by construction — grip built a
+  prose scanner FIRST and refuted it at precision 0.67); `disposition_rerun` IS grip's `rerun`. The
+  adapter measured **11 lines**, not the ~30 budgeted.
+  **BUT the truth-grip epic is NOT SEALED** — `bp task get truth-grip-epic` returns 136 children,
+  **74 non-terminal** (34 open + 40 considering); its charter says in its own words "THE SEAL IS NOT
+  ATTEMPTED" (:2772); `node tooling/grip/seal.mjs` exits **rc=2 INFRA-FAULT** with every clause
+  UNKNOWN, twice, with two DIFFERENT faults; and three of its tests are RED at HEAD
+  (`inloop-gate.test.mjs:324/:334` pin literal workflow strings that were re-worded — a guard that
+  cannot fail for the right reason, this epic's own disease on another epic's gate).
+  **THE RULING:** PDS may IMPORT grip's pure grammar (`level.mjs`, `screen.mjs`, `record.mjs`,
+  `adjudicate.mjs`) read-only and MUST NOT modify `tooling/grip/**` — that keeps PDS-D-era fence
+  (`charter:4142`) intact and inherits truth-grip D3/D26/D32/D47/D58 cleanly. PDS may NOT gate its
+  round-done predicate on grip's suite or its seal. The foreign-adoption seam is UNRULED in BOTH
+  charters; this decision rules it from the PDS side only.
+
+- **PDS-D387 — THE FLOOR IS AN AUTHORED FIELD, NOT A SCRAPER. The direction's headline slice is
+  REFUTED BY MEASUREMENT.** Run over all 213 reasons: a naive typed floor REDS 14 rows of which
+  **1** is a real refutation (**precision 0.07**) and MISSES 2 of the 3 real defects
+  (**recall 0.33**) — worse than the 0.67 at which this repo already threw a prose scanner away.
+  All 6 MISSING-OBJECT hex tokens are non-git (a bp `_rev`, two md5 of `pg_get_functiondef`, a column
+  digest, two 14-digit migration timestamps); 3 blob hashes are **exactly TRUE** and
+  `merge-base --is-ancestor` reds all three; 13 of 16 PATH-GONE tokens are root-relative shorthand;
+  **41 of 41** path:line citations are IN RANGE, so a line-plausibility floor catches literally
+  nothing; and **0 of 73** hex tokens are COMMIT-NOT-ANCESTOR, so the direction's flagship ancestry
+  predicate has NO YIELD on this corpus. Four independent extractors gave four prose-only counts over
+  the same 172 strings — **64 / 69 / 76 / 118**. The class SIZE is not measurable by extraction.
+  And **PDS-D299 is already law**: "ADJUDICATE BY CONTENT; CITED LINE NUMBERS ARE UNTRUSTWORTHY"
+  (`charter:4349`). A scraped-line floor contradicts standing charter law and its loudest victims are
+  the ledger's best citizens — `pds-w11-router-export-comment-drift` self-corrects to `:2547` (which
+  is EXACT at HEAD) and a line floor would red it hardest.
+  **THE RULING:** the burden moves to the AUTHOR. `content.disposition_rerun` is a stored field
+  written by the `stage` verb. The scraper survives ONLY as a lead generator whose output a human
+  types — never as a verdict.
+
+- **PDS-D388 — THE RERUN IS A PREDICATE OR IT IS L6, AND THE SCREEN IS VARIANCE-SKIP, NOT
+  STRICT POLARITY.** Over 484 real rerun commands in this repo's own ledger only **8 (1.65%)** are
+  strictly-polarised predicates: a strict screen refuses **98.3%** of the repo's own honest reruns
+  and honest authors would route around it into prose — the exact failure this wave exists to kill.
+  The admissible rule is grip's LEVEL-SKIP rotated one axis: **the command's VARIANCE SET is a
+  CEILING on the reason's CLAIM CLASS.** Refuse only over-claims — `VARIANCE-SKIP` (the reason
+  claims CONTENT at `file:line` while `git show <ref>:<path>` varies only on EXISTENCE),
+  `PIPE-MASKED-RC` (a fetch/format tail discards the rc of the segment that touches the claim), and
+  `UNCOMPARED-COUNT` (`| wc -l` prints a quantity and asserts nothing). `UNKNOWN` is **DEMOTED,
+  NEVER REJECTED** (truth-grip D3, git-shown at :58 and read for coverage). Measured on the real
+  corpus: 283/484 = **58.5%** admitted for at least one claim class, **0** hard-blocked, **57**
+  pipe-masked rows mechanically repairable, 144 bounded at L6.
+
+- **PDS-D389 — ABSENCE CLAIMS ARE FIRST-CLASS, AND A NAIVE `rc == 0` SCREEN IS A FALSE-REFUTATION
+  ENGINE.** Of 24 real rows with hand-authored reruns, **4 of the 5 FAILED verdicts are TRUE reasons
+  whose rerun exits nonzero because the claim IS AN ABSENCE** (`git grep` matching nothing is the
+  assertion). The harness MUST consume grip's shipped `admitsAbsenceClaim` (`rerun.mjs:842`), never
+  `verdict == ADMITTED`. Measured: a naive `rc===0` screen answers **18/39**; grip's family dispatch
+  answers **35/39** — a 43-point gap, and the single strongest argument for adopting grip rather than
+  writing a predicate.
+
+- **PDS-D390 — THE FORBIDDEN AND LEGAL RERUN SPELLINGS, MEASURED THROUGH BOTH GATES.**
+  FORBIDDEN: `git merge-base --is-ancestor` (REFUSED — `screen.mjs:1299`'s `merge` alternation matches
+  the PREFIX of `merge-base` because `-` closes a `\b`; the carve-out is a TWO-file change inside
+  ANOTHER epic's shipped module and PDS will not make it); `test -f` (L6, refused, unknown head);
+  `$( )` command substitution (refused as a metacharacter, which kills the obvious polarity repair);
+  and **`git -C` in ANY spelling** — the same spelling is over-refused in one shape and is the vehicle
+  of a LIVE over-permission hole (`git -C log push origin main` is ADMITTED `ok:true` today).
+  LEGAL, all admitted and all PROVEN polarised: `git rev-list --count origin/main..<sha> | grep -qx 0`
+  (0 iff ancestor, 1 if not, 128 if bogus — L3), `git cat-file -e origin/main:<path>` (0/128 — L3),
+  `git grep -n <tok> origin/main -- <path>` (0/1 — L3, anchoring on TOKEN not line, which is what
+  D299 demands anyway). NOT predicates despite looking like them: `git branch --contains <sha>` and
+  `git rev-list --count <sha>..origin/main` BOTH exit 0 for ancestor and non-ancestor alike.
+  `git show <ref>:<path> | sed -n Np` earns L2 but **exits 0 on a DELETED path** — 11.8% of the
+  corpus is that shape and it is pipe-masked, not evidence.
+  A REMOTE-REF `git grep` earns **L3, not L2** — so the direction's projected "L2 74 / L3 34" INVERTS.
+
+- **PDS-D391 — CLAUSE 1 STAYS, NARROWED IN CLAIM AND NEVER IN SCOPE.** The feared near-duplicate
+  cluster DOES NOT EXIST: single-linkage over all 213×213 reason pairs yields **213 singleton
+  components at every threshold down to Jaccard ≥ 0.5**, corpus maximum pairwise Jaccard **0.487**,
+  median max-similarity 0.195. Distinctness survives stripping every row-identifying token (own id,
+  `pds-*` slugs, 7–40-hex, paths, integers): still **213/213**, collapse ZERO. Prefix boilerplate
+  decays to zero by 300 chars. So "213/213 distinct" is NOT vacuous. It is also one of the very few
+  predicate clauses PROVEN ABLE TO FAIL BY MUTATION (fixtures `BOILER` at `_test.sh:452` and
+  `TERMDUP` at :564 — note the assignment's "DUPES" naming is one fixture off; DUPES is the clause-5
+  served-twice/exit-4 case), and its one recorded catch was 19 rows sharing a boilerplate that
+  ASSERTS A FALSEHOOD ABOUT ITSELF on 19 of 19. Retiring it trades a proven detector for one that has
+  never run.
+  TWO NARROWINGS, both of claim rather than scope: (a) the verdict line must READ as what it
+  certifies — "no reason was MASS-APPLIED" — and must never be quoted as evidence that any reason is
+  TRUE; (b) distinctness applies to PROSE ONLY and MUST NEVER be extended to `disposition_rerun` —
+  a SHARED rerun over distinct rows is the honest shape, and PDS-D336(a) already ruled exactly this
+  for triggers and pinned it with the `SHAREDTRIG` fixture. Also for the record: the hash is
+  **sha256[:16]** over whitespace-normalised text (`census.sh:641`), not md5; stop propagating "md5".
+
+- **PDS-D392 — D364 BOUNDS THE RESIDUE; IT DOES NOT RETIRE IT — AND THE BIRTH GATE DOES NOT MAKE IT
+  ZERO. THE ANCHOR IS NOT RETIRED THIS WAVE.** D364's clauses are all true and its conclusion does
+  not follow: adjudicating files no rows, but a WAVE does, for reasons unrelated to adjudication.
+  Let f = rows filed during a round; D364 guarantees a ≥ residue_prev, so **residue_next = f**. The
+  fixed point is f, never 0. Empirically measured: **16 of the 18 residue rows were filed by wave 27
+  itself in a 79-minute window** while it adjudicated 45 — and TWO of them are wave-27 BUILD slices
+  left bare, so the denominator is inflated by unfinished work as well as by discovery.
+  The direction proposed retiring the anchor on the strength of a birth gate making residue 0 by
+  construction. **That is FALSE as stated**: a task born outside the closure carries no `parent_id`;
+  giving it one later is an UPDATE (`prev_doc` non-nil), so **adoption-by-reparent is invisible to
+  every birth-scoped gate**, and catching it needs a SECOND fence on the update path. Retirement is
+  otherwise cheap and is a STRICT TIGHTENING (priced by doing it: −181 lines in the instrument,
+  −140 in the selftest, exactly 22 of 106 assertions anchor-dependent, 84/84 green after; and
+  anchorless the census reds at clause 4(a) ONLY — 172/190 — with all six other clauses PASS). It
+  also has an unpriced cost: `pds-w27-round-bare-30` criterion 7 CITES `live_bare_residue`, so
+  retirement makes that criterion unevaluable rather than satisfiable.
+  **THE RULING:** build BOTH fences this wave; retire the anchor no earlier than wave 29, and only
+  after a round has run with both fences live. `pds-w27-round-bare-30` criterion 7 is
+  **unsatisfiable by construction** and the wave-27 builder was right to refuse to flip it.
+
+- **PDS-D393 — THE BIRTH FENCE'S SEAM IS A `Dedup.check_new_task/5` SIBLING, AND THE GITHUB BRIDGE IS
+  BORN ADJUDICATED RATHER THAN EXEMPTED.** Three placements are REFUTED. (a) `Tasks.Validation` is
+  pure, holds `content` only, has zero `disposition` awareness, and — decisively — `/v1/data/mutate`'s
+  patch clauses (`mutations.ex:288`/`:324`) build `merged` and hand it to `upsert_document`, which
+  calls `validate_task_kind` at `writer.ex:490`, so **merge happens BEFORE validation on every
+  update**: a content-only rule is RETROACTIVE and would 422 every future patch. (b)
+  `validate_task_kind/2` is arity 2 (never receives `opts`, so no `:source` carve-out) and runs at
+  `:114`/`:490` BEFORE `prev_doc` is resolved, so it cannot express "birth". (c) A DB CHECK is
+  stateless and can therefore require a disposition on ALL task rows or NONE, never "on births" —
+  defence-in-depth at the DB tier does not exist for this fence, and no migration is forced
+  (`20260528100000_w7a_task_schema.exs` constrains `lifecycle_status` VALUES only).
+  **THE SEAM** is `writer.ex:138-139`, beside `Barkpark.Tasks.Dedup.check_new_task(type, attrs,
+  dataset, prev_doc, opts)`: it already fires only when `prev_doc == nil`, already holds `opts` (so
+  the `Keyword.get(opts, :source, :api) != :api -> :ok` carve-out at `mutations.ex:702` transfers
+  verbatim), and already has the escape-hatch-rides-content-fields precedent. It also catches
+  `bp task create`, which sends a plain `create` op with no `_id` — refuting prefix scoping.
+  **THE BRIDGE IS NOT EXEMPTED**: an unmatched intake error becomes **HTTP 500**, not 422
+  (`intake.ex:236` → `github_webhook_controller.ex:163-176`), which would turn every outsider issue
+  into a permanent GitHub REDELIVERY STORM on a pipeline that carries NO token
+  (`router.ex:659-662`). So `Intake.build_attrs/4` supplies `disposition: "intake"` plus a reason
+  naming the issue — born adjudicated for real — and the `:source` carve-out is the fail-safe behind
+  it. RESIDUAL NAMED, NOT CLOSED: `do_upsert_document` (`writer.ex:548`) can take an INSERT branch
+  with NO `Dedup` call — a birth door with no birth gate. Filed.
+
+- **PDS-D394 — `upgrade.go:297` IS THE CURE, NOT THE SIN, AND ITS SHAPE IS PINNED. THE WISH'S
+  PREMISE IS REFUTED, AND THE COUNT HAS NOW BEEN WRONG FOUR TIMES.** `fetchToFile` has ONE non-test
+  call site whose `dst` is `.bp.new.<pid>`; `performUpgrade` already downloads to a same-directory
+  temp, re-opens it from disk, sha256s it against the release's published `checksums.txt`, refuses on
+  mismatch, and `os.Rename`s. Mutating `tmp := exePath` REDS **exactly one** test in the whole
+  package (`TestPerformUpgradeChecksumMismatch`) — a precise, on-invariant pin, and the opposite of
+  the hzResDone registry row's vacuity. `bp upgrade` never EXECUTES the new binary, which is real
+  optional hardening but NOT a law breach, because the sha256-vs-published-manifest comparison is a
+  post-read against a declared truth. **DO NOT file it as a law slice.**
+  The TRUE population is 3 real + 1 residual: `hetzner_storage_cmd.go:453` (the only sink where a
+  declared size genuinely exists and is thrown away — `objstore.GetObject` discards
+  `GetObjectOutput.ContentLength` and the client exposes no `Head*`); `cloud_workspace_cmd.go:747`
+  (verifies bytes and NAMES the mismatch, but the caller does `rep.fail(...); continue` with **no
+  `os.Remove(dest)`** — short bytes stay on disk under the FINAL name and the upload half then PUTs
+  them back; **no acceptance criterion on the owning row covers this**);
+  `hetzner_instance_transfer_cmd.go:229` (truncates a pre-existing `--out`, and its failure-path
+  `os.Remove` then DELETES a file it did not create). `context_render.go:177` is cosmetic (no external
+  declared truth). `export_cmd.go:180` is already cured. `openlog.go`/`setup/local.go` are logs.
+  **THE FIX SHAPE IS `GetObjectSized`, AN ADDITIVE SIBLING WITH ZERO EXTRA ROUND-TRIP** — the
+  declared length is already in the response this code makes today. Widening `GetObject`'s signature
+  is materially worse than the owning row's "5 call sites + a fake": it cascades through a SECOND
+  interface (`cloud.BundleStore.Get` → `FakeBundleStore` → `bundle.go`/`restore_driver.go` and ~20
+  test construction sites).
+
+- **PDS-D395 — `hzResDone` IS RULED, NOT BUILT; PDS-D367's SIZING HOLDS AND IS UNDERSTATED.** The
+  population re-derived today is **50** non-test call sites (lb 21, net 16, dns 6, storage 5,
+  backup 2); D367's 51 counts the DEFINITION line, and the file has not moved since 2026-07-03, so
+  the 51→50 correction is a MISCOUNT, not drift. Zero of `hzDone`'s apparatus transfers: every
+  `hzPost` field is typed on `*hcloud.Server`, `hzReadBack` hard-calls `hc.Server.GetByID`, the
+  population spans **13 resource kinds** across five SDK clients (one of which, S3, has no `Head*` at
+  all), and the existing anti-DISARM gate derives its verb list from `runHetznerServerAction` — a
+  shared EXECUTOR that `hzResDone` does not have, so there is no seam to widen onto.
+  **HONEST CORRECTION TO THE VACUITY CLAIM, RE-CONFIRMED BY MUTATION AT HEAD:** gutting the `extra`
+  payload spread leaves `TestSuccessClaimsChangeWhenTheResponseDoes/hzResDone` **PASSING** — but the
+  same mutation REDS **nine** ordinary per-verb tests. The true sentence is "it leaves the epic's own
+  anti-vacuity gate green", **never** "it leaves the suite green".
+
+- **PDS-D396 — THE READER'S DEFAULT SINGLE-PAGE PATH IS A BIGGER HOLE THAN THE ONE WAVE 27 CLOSED,
+  AND NO ROW OWNED IT.** Wave 27's `unreadable_list_page` refusal is reachable ONLY behind
+  `cmd.Paginated && g.all && !cmd.Writes` (`run.go:232-234`) — and `--all` is the RARE invocation.
+  Measured: all nine wave-27 poisons × three output shapes = **27 runs, exit 0 in 27/27**, and
+  **24 of 27 emit nothing on any channel**; `-o minimal` prints the literal word **`ok`** over a
+  `null`, an unknown envelope and an empty object, and `not ok` at rc=0 for an error envelope; the
+  `-o json` shape prints the ERROR ENVELOPE as a successful body. The sentinel is ALREADY COMPUTED
+  on that path and discarded — `warnIfDefaultPageMayBeTruncated` (`run.go:337`) does
+  `rows, _ := extractListRows(...)` and then returns silently because `0 < limit`.
+  **PLACEMENT IS LOAD-BEARING**: the fence goes in `runCommand` beside that call, gated on
+  `2xx && cmd.Paginated && !cmd.Writes`, and MUST NOT inherit the neighbour's `g.limitSet` skip. It
+  must NOT go in `renderMinimal` — `extractListRows` returns `key == ""` for **5 of 7 real write
+  receipts** (the mutate rev receipt, the `{ok,doc}` claim receipt, `{ok:false,reason}`, the
+  workspace-create slug receipt, the publish `{rev,id}`), so a fence there reds every write verb.
+  All seven paginated verbs were read LIVE and every honest key is in `listEnvelopeKeys` — measured
+  regression on honest reads: **ZERO**.
+
+- **PDS-D397 — THE MUST-RUN COMMAND SET CONTAINED THE VERY BUG THE WAVE IS HUNTING; A CERTIFYING RUN
+  MUST MATERIALIZE `origin/main` OUT OF TREE.** `pds-bl-dedup-unavailable-error-code`'s reason says,
+  verbatim, "BLOCKER, **re-measured today** rather than quoted: `docs/api-v1.md` is 13,998 bytes …
+  2 bytes of headroom". At true `origin/main` the file is **13,884 B — 116 B of headroom**; commit
+  `662697194` ("Keep API error guide within budget", ancestor of main) took 113 B out HOURS after the
+  reason was written. Running the assignment's own `bash scripts/check-doc-budgets.sh` in the primary
+  checkout prints `13997B` — the LOCAL tree, not main. And `git clone --shared` + `git checkout
+  origin/main -- .` reproduces the same lie, because `origin/main` resolves to the CLONE's origin.
+  **Only `git archive <sha> | tar -x` gave the true 13,884.** A reason that says "re-measured today"
+  and is wrong five hours later is precisely the class weight 1 must make falsifiable — and it IS
+  checkable, by one `git archive` plus one gate run. (The park SURVIVES in substance: 116 B < the
+  390 B the row needs.)
+
+- **PDS-D398 — AN ADJUDICATION NARRATIVE IS NOT AN ADJUDICATION. Three of the digest's four "false
+  free closes" were themselves FALSE.** PR **#8412 is MERGED** (2026-07-31T04:44:56Z, merge commit
+  `ac80af23e`, an ancestor of origin/main); `render_brief/2` DOES carry the disposition at
+  origin/main (`render_doc(%Document{}, :brief)` pipes `put_brief_disposition(content)` at
+  `params.ex:280`, defined at :370; the file has **7** `disposition` hits, not 0); and
+  `pds-w27-brief-card-disposition` is **10/10, lifecycle done** — it was never in the live set, so
+  there was never a close to fabricate. `pds-w27-certify-the-round` HOLDS (0/9, and its required
+  certification record is genuinely ABSENT from `tooling/grip/ledger/` while five sibling wave-27
+  recipes are present). `pds-w27-round-bare-30` holds in form at 8/10 with both artifacts committed,
+  and its remaining criterion 7 is the D392 trap. **Whatever process produced that list read
+  narrative rather than state.**
+
+- **PDS-D399 — THE INSTRUMENT MUST NOT EXECUTE CODE IT FOUND IN THE WORKING DIRECTORY, AND THE FIX
+  IS PROVEN BY MUTATION.** `pds-ledger-census.sh:291` is `exec python3 - "$@"`, so `sys.path[0]` is
+  the CWD. Measured matrix on the UNMODIFIED 106-check selftest: clean CWD unpatched **PASS 106**;
+  hostile CWD unpatched **FAILED 103 of 106 with 103 stray executions**; `exec python3 -I -` patched
+  → **PASS 106 from BOTH directories, 0 stray executions**. The shadowable surface is **49 names**,
+  not one — and **23 of the 49 execute the stray file's top-level code while still exiting 0**, so
+  the dangerous case leaves EVERY exit code correct (`--help` rc=0, a usage error rc=3) and only a
+  sentinel assertion can see it: this epic's own law, aimed at its own instrument. The selftest has
+  **ZERO** isolation coverage today (`grep -ic 'shadow|sys.path|isolat|PYTHONPATH'` = **0**), so
+  shipping `-I` alone would make this row's reason exactly the unfalsifiable claim wave 28 exists to
+  kill. `-P` is 3.11+ and REFUSED on this host's 3.9.6 — do not propose it. The encoding worry is not
+  merely absent but INVERTS: with `PYTHONIOENCODING` unset, `-I` changes stdout not at all
+  (md5-identical in every locale); with it set to `ascii`/`latin-1`, the NO-FLAG run CRASHES on an
+  em-dash and the `-I` run succeeds. The hazard is worse than the row states: the census is wired
+  into **NO** CI workflow, and the standing recipe recorded across five ledger files is
+  `cd /tmp && …` — the epic's own recipes prescribe running the certifying instrument from the most
+  polluted directory on the host. Reproduced by accident THREE times, once inside this wave.
+
+- **PDS-D400 — TWO NUMBERS THIS WAVE RETIRES FROM CIRCULATION.** The census hash is **sha256**, not
+  md5 (`census.sh:641`). And PDS-D383's "a stray `bisect.py` fails ALL 80 checks" is stale in
+  quantity — the selftest is **106 checks** today and the stray fails **103**; the same stale 80
+  appears in the row's own description and in `tooling/grip/ledger/pds-w27-census-json-honesty-2026-07-31.md:63`.
+  Three independent copies of one number that moved and no instrument noticed — a clean live specimen
+  for the authored-rerun regime this wave installs.
+
+### Wave 28 plan — 7 slices, all round 1
+
+| task | round | surface | gate |
+|---|---|---|---|
+| `pds-w28-census-isolation` | 1 | `exec python3 -I -` + the FIRST isolation fixture (106 → 107) | `bash scripts/pds-ledger-census_test.sh` from an EMPTY dir AND from a shadowed one |
+| `pds-w28-rerun-adjudicator` | 1 | `tooling/pds/` — grip read-only, variance-skip, absence claims, structured (never exit-code) verdict | `node tooling/pds/rerun-adjudicate.test.mjs` |
+| `pds-w28-disposition-rerun-field` | 1 | `stage` gains the fourth durable key + its screen | `CC=clang mix test test/barkpark/tasks/stage_test.exs` |
+| `pds-w28-reader-default-page-fence` | 1 | `runCommand` refuses `key == ""` on the DEFAULT read | `CC=/usr/bin/clang go test ./internal/cli/...` |
+| `pds-w28-birth-fence` | 1 | `Dedup` sibling + reparent guard + intake born adjudicated | `CC=clang mix test test/barkpark/content/ test/barkpark/tasks*` |
+| `pds-w28-oscreate-real-sinks` | 1 | `GetObjectSized` + the 3 real sinks | `CC=/usr/bin/clang go build ./... && go test ./internal/cli/... ./internal/hetzner/...` |
+| `pds-w28-residue-18` | 1 | adjudicate the 18 residue rows by CONTENT | census `--json`: `live_bare_residue` shrinks to the named lead-gated remainder |
+
+**HIGH-FLIP-RISK, a genuinely independent second reviewer owed before merge:**
+`pds-w28-birth-fence` (reachability + tenancy — the weakest caller is an UNAUTHENTICATED GitHub
+webhook, and a wrong verdict turns the inbound bridge into a 500 redelivery storm) and
+`pds-w28-oscreate-real-sinks` (blast radius — `GetObject` sits behind a second interface and the
+"5 call sites" estimate under-counts by the whole `BundleStore` chain).
+
+**NOT PLANNED AROUND.** `hzResDone` stays cut (D395). The anchor is NOT retired (D392). Clause 1 is
+NOT retired (D391). `upgrade.go` is NOT touched (D394). `tooling/grip/**` is NOT modified (D386).
+`.github/**` is fenced. `api/mix.exs`/`api/mix.lock` are untouched.

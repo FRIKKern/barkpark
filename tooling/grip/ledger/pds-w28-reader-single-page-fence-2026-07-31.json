@@ -1,0 +1,77 @@
+{
+  "run_id": "grip-20260731T-pds-w28-reader-single-page-fence",
+  "recipes": [
+    {
+      "subject": "internal/cli/run.go — the --all-only gate on runPaginatedAll",
+      "quantity": "source:predicate",
+      "rerun": "git show origin/main:internal/cli/run.go | sed -n '232,235p'",
+      "derived_level": "L2",
+      "deps": ["internal/cli/run.go"],
+      "observed_at": "2026-07-31T00:00:00Z"
+    },
+    {
+      "subject": "internal/cli/run.go — warnIfDefaultPageMayBeTruncated discards the envelope key",
+      "quantity": "source:line",
+      "rerun": "git show origin/main:internal/cli/run.go | sed -n '328,345p'",
+      "derived_level": "L2",
+      "deps": ["internal/cli/run.go"],
+      "observed_at": "2026-07-31T00:00:00Z"
+    },
+    {
+      "subject": "paginated command population (api source)",
+      "quantity": "grep:-c",
+      "rerun": "git grep -c 'paginated: true' origin/main -- api/lib",
+      "derived_level": "L2",
+      "deps": ["api/lib/barkpark/plugins/capabilities.ex", "api/lib/barkpark/plugins/tasks.ex", "api/lib/barkpark/plugins/tickets/cli.ex"],
+      "observed_at": "2026-07-31T00:00:00Z"
+    },
+    {
+      "subject": "listEnvelopeKeys (the fence's vocabulary)",
+      "quantity": "source:lines",
+      "rerun": "git show origin/main:internal/cli/table.go | sed -n '76,80p'",
+      "derived_level": "L2",
+      "deps": ["internal/cli/table.go"],
+      "observed_at": "2026-07-31T00:00:00Z"
+    },
+    {
+      "subject": "live envelope key of bp task ready (default single page)",
+      "quantity": "http:key",
+      "rerun": "bp task ready --limit 1 -o json | head -c 40",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-31T00:00:00Z"
+    },
+    {
+      "subject": "live envelope key of bp search query (default single page)",
+      "quantity": "http:key",
+      "rerun": "bp search query test --limit 1 -o json | head -c 60",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-31T00:00:00Z"
+    },
+    {
+      "subject": "live envelope key of bp media ls (default single page)",
+      "quantity": "http:key",
+      "rerun": "bp media ls --limit 1 -o json | head -c 20",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-31T00:00:00Z"
+    },
+    {
+      "subject": "live envelope key of bp ticket inbox (default single page)",
+      "quantity": "http:key",
+      "rerun": "bp ticket inbox --limit 1 -o json | head -c 30",
+      "derived_level": "L1",
+      "deps": [],
+      "observed_at": "2026-07-31T00:00:00Z"
+    },
+    {
+      "subject": "renderMinimal's write receipts carry NO listEnvelopeKeys key (blast radius of a renderMinimal-level fence)",
+      "quantity": "source:function",
+      "rerun": "git show origin/main:internal/cli/run.go | sed -n '1284,1352p'",
+      "derived_level": "L2",
+      "deps": ["internal/cli/run.go"],
+      "observed_at": "2026-07-31T00:00:00Z"
+    }
+  ]
+}
