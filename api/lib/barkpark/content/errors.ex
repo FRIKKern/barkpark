@@ -41,6 +41,8 @@ defmodule Barkpark.Content.Errors do
       "Give the document a non-trivial description and 1-12 weighted tags — [{tag, strength 1-100 (all distinct), rationale}] — then republish; details lists each field, the rule it broke, and the fix. Learn where the authoring standards live in the doctrine papers /papers/portabledoc-doctrine and /papers/composition-doctrine-plan.",
     "invalid_paper_structure" =>
       "Fix the listed block paths so every list item, table row/cell, and nested block has a reader-supported content shape, then republish.",
+    "invalid_epic_paper_quality" =>
+      "Repair the canonical Epic Paper's opening, outline, empty spacers, and any declared reader checks; details.failures names every hard gate that failed.",
     "rate_limited" =>
       "Back off and retry after the Retry-After header's value; reduce request rate.",
     "idempotency_key_in_use" =>
@@ -462,6 +464,14 @@ defmodule Barkpark.Content.Errors do
     do: %{
       code: "invalid_paper_structure",
       message: "paper contains block content that readers cannot render",
+      status: 422,
+      details: details
+    }
+
+  defp build({:error, {:invalid_epic_paper_quality, details}}),
+    do: %{
+      code: "invalid_epic_paper_quality",
+      message: "canonical Epic Paper failed the publish-quality floor",
       status: 422,
       details: details
     }

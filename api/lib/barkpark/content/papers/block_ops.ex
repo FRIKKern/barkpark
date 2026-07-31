@@ -393,6 +393,7 @@ defmodule Barkpark.Content.Papers.BlockOps do
       # without tags never strips a labeled paper).
       |> maybe_put_paper("tags", attrs["tags"])
       |> maybe_put_paper("description", attrs["description"])
+      |> maybe_put_paper("reader_checks", attrs["reader_checks"])
       # Session-handoff Task 2 ("generalized upsert"): the fixed known-key
       # allowlist above stays PAPER-ONLY (byte-identical behavior). Sessions
       # (and any future metadata-bearing blocks type) instead pass through

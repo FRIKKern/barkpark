@@ -103,6 +103,22 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
   end
 
+  describe "render_body/3 — PdParagraph reader boundary" do
+    test "an empty scaffold emits no public or email HTML" do
+      node = %{"kind" => "PdParagraph", "children" => []}
+
+      assert Walk.render_body(node, @width, @article) == ""
+      assert Walk.render_body(node, @width, @email) == ""
+    end
+
+    test "an authored paragraph remains byte-faithful" do
+      node = %{"kind" => "PdParagraph", "children" => ["Some prose"]}
+
+      assert Walk.render_body(node, @width, @article) == "<p>Some prose</p>"
+      assert Walk.render_body(node, @width, @email) == "<p>Some prose</p>"
+    end
+  end
+
   describe "render_body/3 — PdLink" do
     test "wraps children in anchor with safe href" do
       node = %{"kind" => "PdLink", "href" => "https://example.com", "children" => ["go"]}

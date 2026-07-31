@@ -24,6 +24,16 @@ def _text_present(value: Any) -> bool:
     return False
 
 
+def _empty_paragraph(block: Any) -> bool:
+    if not isinstance(block, dict) or block.get("type") != "paragraph":
+        return False
+    content = block.get("content")
+    text = block.get("text")
+    return content in (None, []) and not (
+        isinstance(text, str) and bool(text.strip())
+    )
+
+
 def _violation(
     document: dict[str, Any],
     path: str,
@@ -73,8 +83,49 @@ def audit_blocks(
             continue
 
         block_type = block.get("type")
+        if _empty_paragraph(block):
+            findings.append(
+                _violation(
+                    document,
+                    block_path,
+                    "empty_paragraph_spacer",
+                    safe=True,
+                    detail=(
+                        "Empty paragraphs are editor scaffolds, not published layout; "
+                        "readers own section rhythm."
+                    ),
+                )
+            )
+
         if block_type == "list":
             items = block.get("items", [])
+            content_items = block.get("content")
+            if (
+                "items" not in block
+                and isinstance(content_items, list)
+                and all(
+                    (
+                        isinstance(item, dict)
+                        and item.get("type") == "list_item"
+                        and isinstance(item.get("content"), list)
+                    )
+                    or isinstance(item, dict)
+                    and item.get("type") == "text"
+                    for item in content_items
+                )
+            ):
+                findings.append(
+                    _violation(
+                        document,
+                        f"{block_path}.content",
+                        "list_content_dialect",
+                        safe=True,
+                        detail=(
+                            "This populated list stores its items under content; "
+                            "terminal and export readers consume items."
+                        ),
+                    )
+                )
             if not isinstance(items, list):
                 findings.append(
                     _violation(
@@ -139,6 +190,35 @@ def audit_blocks(
 
         if block_type == "table":
             rows = block.get("rows", [])
+            content_rows = block.get("content")
+            if (
+                "rows" not in block
+                and isinstance(content_rows, list)
+                and all(
+                    isinstance(row, dict)
+                    and row.get("type") == "table_row"
+                    and isinstance(row.get("content"), list)
+                    and all(
+                        isinstance(cell, dict)
+                        and cell.get("type") == "table_cell"
+                        and isinstance(cell.get("content"), list)
+                        for cell in row["content"]
+                    )
+                    for row in content_rows
+                )
+            ):
+                findings.append(
+                    _violation(
+                        document,
+                        f"{block_path}.content",
+                        "table_content_dialect",
+                        safe=True,
+                        detail=(
+                            "This populated table stores rows/cells under content; "
+                            "terminal and export readers consume head/rows."
+                        ),
+                    )
+                )
             columns = block.get("columns")
             if isinstance(columns, list):
                 for column_index, column in enumerate(columns):
@@ -317,6 +397,10 @@ def _flatten_cell(content: list[Any]) -> list[Any]:
 
 
 def _canonical_cell(cell: Any, *, header: bool = False) -> Any:
+    if _record_scalar(cell):
+        return _text_node(cell)
+    if isinstance(cell, list):
+        return _flatten_cell(cell)
     if not isinstance(cell, dict):
         return cell
     allowed = {"content", "text", "header"} if header else {"content", "text"}
@@ -326,6 +410,37 @@ def _canonical_cell(cell: Any, *, header: bool = False) -> Any:
         if isinstance(cell.get("text"), str):
             return _text_node(cell["text"])
     return cell
+
+
+def _type_token(value: Any) -> str:
+    if not isinstance(value, dict):
+        return ""
+    return str(value.get("type") or "").replace("_", "").lower()
+
+
+def _canonical_inline(value: Any) -> Any:
+    if value is None:
+        return []
+    if _record_scalar(value):
+        return _text_node(value)
+    if isinstance(value, list):
+        return _flatten_cell(value)
+    if not isinstance(value, dict):
+        return value
+    if set(value).issubset({"content", "text"}):
+        if isinstance(value.get("content"), list):
+            return _flatten_cell(value["content"])
+        if isinstance(value.get("text"), str):
+            return _text_node(value["text"])
+    if isinstance(value.get("content"), list) and _type_token(value) in {
+        "listitem",
+        "paragraph",
+        "tablecell",
+    }:
+        return _flatten_cell(value["content"])
+    if isinstance(value.get("text"), str):
+        return _text_node(value["text"])
+    return value
 
 
 def canonicalize_blocks(blocks: Any) -> Any:
@@ -338,27 +453,106 @@ def canonicalize_blocks(blocks: Any) -> Any:
         if not isinstance(raw_block, dict):
             normalized.append(raw_block)
             continue
+        if _empty_paragraph(raw_block):
+            continue
         block = dict(raw_block)
         block_type = block.get("type")
+
+        if (
+            block_type == "list"
+            and "items" not in block
+            and isinstance(block.get("content"), list)
+        ):
+            content_items = block["content"]
+            canonical_items = []
+            content_dialect = True
+            for item in content_items:
+                if (
+                    isinstance(item, dict)
+                    and _type_token(item) == "listitem"
+                    and isinstance(item.get("content"), list)
+                ):
+                    canonical_items.append(_canonical_inline(item))
+                elif isinstance(item, dict) and _type_token(item) == "text":
+                    canonical_items.append([item])
+                else:
+                    content_dialect = False
+                    break
+            if content_dialect:
+                block["items"] = canonical_items
+                block.pop("content", None)
 
         if block_type == "list" and isinstance(block.get("items"), list):
             items = []
             for item in block["items"]:
-                if isinstance(item, dict) and set(item).issubset({"content", "text"}):
-                    if isinstance(item.get("content"), list):
-                        item = item["content"]
-                    elif isinstance(item.get("text"), str):
-                        item = _text_node(item["text"])
-                elif isinstance(item, str):
-                    item = _text_node(item)
-                elif item is None:
-                    item = []
-                elif isinstance(item, (int, float, bool)):
-                    item = _text_node(item)
-                items.append(item)
+                items.append(_canonical_inline(item))
             block["items"] = items
 
+        if (
+            block_type == "table"
+            and "rows" not in block
+            and isinstance(block.get("content"), list)
+        ):
+            content_rows = block["content"]
+            canonical_rows = []
+            content_dialect = True
+            header_flags = []
+            for row in content_rows:
+                if (
+                    not isinstance(row, dict)
+                    or _type_token(row) != "tablerow"
+                    or not isinstance(row.get("content"), list)
+                ):
+                    content_dialect = False
+                    break
+                canonical_row = []
+                row_headers = []
+                for cell in row["content"]:
+                    if (
+                        not isinstance(cell, dict)
+                        or _type_token(cell) != "tablecell"
+                        or not isinstance(cell.get("content"), list)
+                    ):
+                        content_dialect = False
+                        break
+                    canonical_row.append(_canonical_inline(cell))
+                    row_headers.append(cell.get("header") is True)
+                if not content_dialect:
+                    break
+                canonical_rows.append(canonical_row)
+                header_flags.append(bool(row_headers) and all(row_headers))
+
+            if content_dialect:
+                if canonical_rows and header_flags[0]:
+                    block["head"] = canonical_rows[0]
+                    canonical_rows = canonical_rows[1:]
+                block["rows"] = canonical_rows
+                block.pop("content", None)
+
         if block_type == "table" and isinstance(block.get("rows"), list):
+            headers = block.get("headers")
+            if (
+                not block.get("head")
+                and isinstance(headers, list)
+                and all(_record_scalar(cell) for cell in headers)
+            ):
+                block["head"] = [_canonical_inline(cell) for cell in headers]
+                block.pop("headers", None)
+
+            header = block.get("header")
+            if (
+                not block.get("head")
+                and isinstance(header, list)
+                and all(_record_scalar(cell) for cell in header)
+            ):
+                block["head"] = [_canonical_inline(cell) for cell in header]
+                block.pop("header", None)
+
+            if isinstance(block.get("head"), list):
+                block["head"] = [
+                    _canonical_inline(cell) for cell in block["head"]
+                ]
+
             columns = block.get("columns")
             legacy_columns = (
                 isinstance(columns, list)
@@ -447,7 +641,7 @@ def canonicalize_blocks(blocks: Any) -> Any:
                             _canonical_cell(cell) for cell in row.get("cells", [])
                         ]
                     elif isinstance(row, list):
-                        row = [_canonical_cell(cell) for cell in row]
+                        row = [_canonical_inline(cell) for cell in row]
                     normalized_rows.append(row)
                 block["rows"] = normalized_rows
 
@@ -480,12 +674,7 @@ def audit_documents(documents: Iterable[dict[str, Any]]) -> dict[str, Any]:
             findings.extend(audit_blocks(document, blocks))
         if isinstance(blocks, list):
             empty_paragraphs += sum(
-                1
-                for block in blocks
-                if isinstance(block, dict)
-                and block.get("type") == "paragraph"
-                and not _text_present(block.get("content"))
-                and not _text_present(block.get("text"))
+                1 for block in blocks if _empty_paragraph(block)
             )
 
     findings.sort(key=lambda item: (item["paper_id"], item["path"], item["kind"]))
