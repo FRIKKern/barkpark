@@ -7218,7 +7218,9 @@ rows across 17 sites minus the two dual-verb executors' doubling, and storage/ba
   `200, ""`), so a length-comparing post-read either nil-deref panics or is structurally
   always-unverified in test while being real in prod — the fake gains a HEAD length arm FIRST.
   (e) `internal/hetzner/objstore` has **no** `HeadObject` and `client.go:193` documents the omission as
-  deliberate, so slice 1 touches a second package. (f) `errors.As` targets are NOT interchangeable:
+  deliberate — but the package is NOT edited: `Client.S3()` is already exported at `client.go:115`, so
+  the post-read is `c.S3().HeadObject(...)` from `internal/cli` and `pds-w29-pay-storage-backup`
+  criterion 7 ("objstore is untouched") stands unchanged. (f) `errors.As` targets are NOT interchangeable:
   HEAD-404 → `*types.NotFound` (NoSuchKey false), GET-404 → `*types.NoSuchKey` (NotFound false); both
   surface as `*smithy.OperationError`, and `*awshttp.ResponseError` is true for a 404 AND for a
   connection refusal. (g) Criterion 4 stays paid at `storage:288` / `:562` and is not rebuilt; the
