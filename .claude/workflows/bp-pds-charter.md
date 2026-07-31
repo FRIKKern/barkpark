@@ -2576,6 +2576,49 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 31 2026-08-01 — "Close the round" — REVIEWED. Grade A− (paper `pds-wave-31-2026-07-31`)
+
+**FIVE ROUND-1 SLICES BUILT, FIVE GREEN, FIVE PUSHED WITH PRs OPEN.** Every branch is on origin and
+every gate was re-run by the reviewer on the final state, plus a five-way trial merge onto
+`origin/main` that resolved clean and passed the full `internal/cli` suite together (`TOTAL=50
+NON_LITERAL=2 KEYS=52 OPAQUE_CALLERS=0`, unchanged).
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w29-pay-storage-backup` | `…-s3-backup-receipt-0-r` | #8685 | 4 S3/backup post-reads + `object/get` reclassified; `fakeS3`'s HEAD now declares the stored length |
+| `pds-w31-census-shrinkage-ratchet` | `…-satisfied-by-a-shru-1` | #8686 | kind-set EQUALITY + an out-of-glob emitter scan — the census can no longer be satisfied by shrinking it |
+| `pds-w31-runner-cleanup-failclosed` | `…-printing-the-all-c-2-r` | #8687 | the L1 runner's three degraded read shapes stop printing the all-clear; cleanup gets a third answer |
+| `task-fef4da0cf3b9fa9c` | `…-narrations-so-t-3` | #8688 | the claim registry CALLS the support narrations instead of mirroring them; two unpinned holes closed |
+| `task-37befa974015b2f2` | `…-disagrees-with-the-4` | #8689 | PDS-D432: a create that disagrees with argv is REPORTED (`divergence`), never swallowed, never refused |
+
+**THE WAVE'S BEST WORK IS THE SHRINKAGE RATCHET, and it was demonstrated before it was built.**
+Deleting `"zone"` from `hzResLedgerKinds` on clean main — rows and sources untouched — left the whole
+census suite `ok`, logging `KINDS=12`. Ruling 3 was pinned-subset-of-live only. The reviewer
+re-derived that independently by mutation: the new arm reds `RATCHET/KIND-UNPINNED: kind "zone"
+emits receipts … but is ABSENT from hzResLedgerKinds`. Neither arm quotes a count, and growth is
+untaxed in both measured shapes.
+
+**THE BLAST-RADIUS REVIEW THE WISH DEMANDED WAS ANSWERED, AND ANSWERED BOTH WAYS.** The merged
+runner's hole is CLOSED (`shape_ok` on every read; the fence's valid-JSON-without-the-key fail-open
+now REFUSES at rc=3; an unverifiable cleanup forces a non-zero exit), and the residue that cannot be
+closed is MEASURED rather than hand-waved: SIGKILL leaks at most one free, inert placement group,
+and it cannot accumulate because the prefix fence refuses to start. Review added the row the
+selftest was missing — row 9's positive control passes even if the cleanup stops DELETING (the stub
+answers by read count), so row 10 pins the delete receipt itself; proven by mutation that row 10
+reds where row 9 stays green. **UNTIL #8687 MERGES THE MERGED CODE STILL HAS THE HOLE.**
+
+**WHAT IS HONESTLY NOT DONE.** The second credential spend (`pds-w31-harvest-only`) did NOT happen —
+it is round 2 behind #8687 by the sequenced-rounds law, so PDS-D401 is still open for eight of the
+ten hcloud kinds. `pds-w29-pay-net-dns` is likewise round 2, behind #8685 **and** #8689 (deleting
+`hzUnpaidMutation` while the five storage rows reference it is a COMPILE BREAK — verify on the merge
+result with `go test -c`, not on the branch). Three receipts now name a basis they did not use:
+`hzResObserved` hardcodes `confirmation_basis = "single-resource GET on the resolved id"` while
+bucket create's read is a `ListBuckets` scan — filed as `task-27246110ca95342a`, deliberately not
+fixed in-wave because the fix lives in a file another live slice owns.
+
+**CHARTER HYGIENE NOTE:** wave 30's review entry is absent from this log — the top entry before this
+one is wave 29. Wave 30's story survives only in its Paper.
+
 ### Wave 29 2026-07-31 — "hzResDone, taken properly" — REVIEWED. Grade A (paper `pds-wave-29-2026-07-31`)
 
 **THE HEADLINE: the 50-site population was re-derived from source, BROKEN INTO CLASSES, and then
