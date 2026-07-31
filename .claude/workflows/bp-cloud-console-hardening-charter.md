@@ -678,6 +678,76 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-07-31 — wave 13 REVIEW — 6/6 round-1 slices shipped, grade A−; four fixed in place, all six PUSHED with PRs open
+
+**Wave Paper:** `cloud-console-hardening-wave-13-2026-07-31`. **Ratio held and beaten:** five of six
+slices land on a row where a person looking at the screen is misinformed; the sixth is the ledger
+row. Nothing was registered, `.github/required-checks.json` was not touched, no seal predicate of any
+kind was run (not even `--ladder-only`), nothing was re-parented, and `cch-w12-s5` (#8500) was
+neither built nor re-implemented — the scope split stays the human's.
+
+| slice | final branch | verdict |
+|---|---|---|
+| S1 provision rail stops promising a precision | `…promising-a-pre-0` | clean, no fixes; residue filed |
+| S2 failure capture scrubbed at the boundary | `…scrubbed-at--1-r` | FIXED: five prose false positives |
+| S3 cancelled deploy stops reading as queued | `…painting-as-2-r` | FIXED: E13's citation resolved nowhere |
+| S4 five detail routes stop scrolling sideways | `…scrolling-sidewa-3-r` | FIXED: comment claimed a 0/286 it did not measure |
+| S5 the connection says WHICH cloud account | `…which-cloud-4-r` | FIXED: 6 emitted classes had NO CSS rule |
+| S6 four ledger rows close by content | `…content-and-on-5` | clean, no fixes; all four claims re-derived |
+
+**The four review fixes, because three of them are the same defect in different clothes.** S4's new
+899-block comment ended "After this block: 0/286" while its own driven sweep measured 8 — the builder
+said 8 everywhere else (commit body, guard leg, filed row) except in the file a future reader opens.
+S3's E13 boundary note cited `Barkpark.Cloud.Sites.Deployment` at
+`cloud/lib/barkpark/cloud/sites/deployment.ex`; neither resolves (it is
+`BarkparkCloud.Registry.Deployment` at `cloud/lib/barkpark_cloud/registry/deployment.ex:25`) — a
+hand-copied enum whose stated grep returns nothing cannot be re-verified, which is the only thing the
+comment exists for. S2's scrub was re-derived INDEPENDENTLY (the named high-flip-risk judgment) by
+driving 18 adversarial strings through `FailureCopy.scrub/1`: five ordinary failure strings were
+mauled — `"no bearer token found in the request"` → `"no bearer [redacted] found…"`, `"token:
+expired"`, `"missing Bearer credentials"`, `"no api_key: set in the config file"`, `"password:
+missing"`. A redaction where no secret was is the same class of lie the wave is paying off, so a
+`\b`-anchored `@prose_value` stop-list now guards the value position of both key-bearing clauses; it
+costs the scrub zero coverage (every positive still redacts, including `client_secret=timeout`), five
+negative rows were added, and removing the guard reds exactly two of them.
+
+**S5 is the one that would have broken main.** It shipped six `prov-identity*` classes in rendered
+markup with NO rule in `app.css`: `node cloud/priv/static/__css_check.mjs` reds with **12 E2 errors**
+on the builder's committed state. It went green because its DECIDE-authored gate is the only one of
+the six that does not run that checker — and three sibling gates DO. Review authored the rules (tokens
+only; the value in `--mono` at `--text`, "not known" dropping to `--dim` so an absence cannot read as
+an account id) and re-measured `cssom-heads.baseline` to 1242, MISSES 0. **The generator is filed as
+`cch-w13-rv-gate-must-run-css-check`.**
+
+**Cross-slice, MEASURED not derived.** S3 + S4 + S5 were merged locally and re-gated: `cssom-parity`
+measures **1243** authored heads, MISSES 0 — S3 records 1237 and S5 records 1242, both right alone and
+both wrong together, so the lead must RE-MEASURE on merge (D158), never resolve the sidecar by hand.
+On that same merged state plus S1: `__css_check` 0 errors (576 pairs), 754/754 node tests, smoke
+99/99, `overflow-guard` PASS. `app.css` auto-merges cleanly between S3/S4/S5; the ONLY conflict is the
+baseline sidecar.
+
+**HIGH-FLIP-RISK (E2) — an independent second reviewer is owed on S2 before merge.** The pattern set
+is the whole risk and enumeration demonstrably does not terminate: the builder found a SEVENTH leak
+channel (`site_deployment_json`'s `stages[].detail`, which recomputes from the RAW console) only by
+driving a payload, after a payload-wide `refute` had been VACUOUSLY green on a fixture whose stage
+name was filtered out upstream. S5's flip judgment was re-derived and CLEARS: `/v1/providers/:kind/
+overview` is `Auth.require_user` only AND team-scoped through `conn.assigns.current_team`, so a plain
+member reads only their own team's connection, and the echoed value is the subscription id the person
+typed.
+
+**Ledger: honest, no fixes needed.** All six tasks `in_progress`, published, claimed before work,
+criteria stamped as they were proven, only the MERGE-GATED row left open for the lead. S4 additionally
+left criterion 2 unmet with an honest `--miss` note rather than flipping it, because the brief's
+"21 cells → 0" premise did not reproduce (it re-derived 56 → 8). No task outside this wave was touched.
+
+**What the next wave must take.** (1) The two rails that still DRAW what S1 stopped SAYING —
+`cch-w13-s1-residue-planned-fill-and-ring`: a planned run still paints `width:78%` and a conic ring
+off invented constants while its ARIA and ETA are now honest. (2) `cch-w13-fleet-row-band-769-785` —
+`#fleet` still scrolls 21px on a 769–785px tablet; it is PINNED, not hidden. (3) The fail-closed
+oracle over the raw failure columns (`task-4f363dc65ac43203`), because seven hand-placed `scrub` calls
+is a number that was PROVEN, not a set that can be certified. (4) `cch-w13-rv-gate-must-run-css-check`.
+(5) `cch-w12-bl-session-touch-has-no-rescue`, still the confirmed unbuilt person-facing lie.
+
 ### 2026-07-31 — wave 13 DECIDE (build in flight) — 6 slices, all round 1, five of them a person's screen
 
 **Wave Paper:** `cloud-console-hardening-wave-13-2026-07-31`. **Charter PR:** docs-only, opened from a
