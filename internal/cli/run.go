@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -1474,6 +1475,27 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 			return ae.exit
 		}
 		docs, k := extractListRows(unwrapResult(respBody))
+		// PDS wave 27 — the reader half of the epic's law. extractListRows
+		// returns the "" sentinel for ANY body it cannot read as a list
+		// envelope, and an HTTP 200 is no proof the body came from Barkpark: a
+		// proxy 502 interstitial, a truncated write, `null`, `{}`, a bare array
+		// and plaintext all arrive at 200. This clause REVERSES the previous
+		// fallback (`if key == "" { key = "documents" }`), which laundered every
+		// one of those into a well-formed EMPTY SUCCESS envelope byte-identical
+		// to a genuinely empty queue — a reader lying to the worker who most
+		// needs the truth. Refuse PER PAGE (page 5 of a walk is as unreadable as
+		// page 1) with a named code, never a bare exit.
+		if k == "" {
+			msg := fmt.Sprintf(
+				"unreadable list page at offset %d: HTTP %d carried no known list envelope (%d bytes): %s",
+				offset, status, len(respBody), bodyPreview(respBody),
+			)
+			hint := "the transport, not the query: a proxy/gateway page, a truncated or non-Barkpark response. Retry, then check the server URL and that the API is up."
+			if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", hint) {
+				out.userErr("%s", msg)
+			}
+			return exitGeneric
+		}
 		if key == "" {
 			key = k
 		}
@@ -1495,11 +1517,9 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 		offset += pageSize
 	}
 
-	// Unknown envelope (no known key on page 1): fall back to the documents shape
-	// so nothing regresses.
-	if key == "" {
-		key = "documents"
-	}
+	// key is always set here: the loop runs at least once and refuses (above)
+	// any page it could not read a key from, so an unknown envelope can no
+	// longer reach the success renderer.
 	wrapped, _ := json.Marshal(map[string]any{key: json.RawMessage(mustArray(all))})
 	renderSuccess(out, cmd, mustResult(wrapped))
 	return exitOK
@@ -1546,6 +1566,37 @@ func extractListRows(payload []byte) ([]json.RawMessage, string) {
 		}
 	}
 	return nil, ""
+}
+
+// bodyPreview renders a short, single-line, printable excerpt of a response
+// body for the unreadable_list_page message — enough to tell a proxy HTML page
+// from `null` from empty bytes without dumping an arbitrary payload into the
+// error envelope.
+func bodyPreview(body []byte) string {
+	const max = 120
+	if len(body) == 0 {
+		return "<empty body>"
+	}
+	// Truncate on a RUNE boundary: a body cut mid-sequence would render as
+	// U+FFFD noise in the very message meant to help identify it.
+	s := string(body)
+	if len(s) > max {
+		cut := max
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "…"
+	}
+	s = strings.Map(func(r rune) rune {
+		if r == '\n' || r == '\r' || r == '\t' {
+			return ' '
+		}
+		if r < 0x20 || r == 0x7f {
+			return '.'
+		}
+		return r
+	}, s)
+	return strings.TrimSpace(s)
 }
 
 func mustArray(items []json.RawMessage) []byte {
