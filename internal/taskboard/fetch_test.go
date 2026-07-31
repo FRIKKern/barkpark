@@ -561,8 +561,16 @@ func TestCoercePriority(t *testing.T) {
 //     row asserting they error would be green both before and after the fix —
 //     a vacuous row, the exact failure this table exists to kill.
 //
+// PARITY MEANS "EVERY CLI POISON THAT CAN TRANSFER IS HERE", NOT "THE TWO TABLES
+// ARE EQUAL". These tables are a SUPERSET: `bare error envelope` is a body the
+// board carries and the CLI's nine do not. So the counts below describe the
+// CLI's nine as they land here, not the size of these tables.
+//
 // The four-way split is a property of the CURRENT envelope structs, measured at
-// origin/main 885ace84a. It is not a law: widening either envelope field to
+// origin/main 885ace84a (re-confirmed at review: that sha is an ancestor of
+// origin/main b77a7486f, and reverting the pointer fence reds exactly the seven
+// poison rows per decoder while every legitimate control stays green). It is not
+// a law: widening either envelope field to
 // json.RawMessage would make the bare array and the plaintext body decode, at
 // which point they become fence-class and belong in the tables below. Re-measure
 // before trusting this comment after any change to the structs in fetch.go.
