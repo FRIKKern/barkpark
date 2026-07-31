@@ -20,6 +20,8 @@ package cli
 // its client through the same seams in hetzner_backup_cmd.go.
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -28,6 +30,11 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/aws/aws-sdk-go-v2/aws"
+	"github.com/aws/aws-sdk-go-v2/service/s3"
+	"github.com/aws/aws-sdk-go-v2/service/s3/types"
+	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 
 	"github.com/FRIKKern/barkpark/internal/hetzner/objstore"
 )
@@ -85,6 +92,153 @@ var hzS3CredFlags = []string{"location", "s3-access-key", "s3-secret-key"}
 // hzS3Flags prepends the shared credential flags to a verb's own value flags.
 func hzS3Flags(own ...string) []string {
 	return append(append([]string{}, hzS3CredFlags...), own...)
+}
+
+// ---------------------------------------------------------------------------
+// THE S3 POST-READ — how an object-storage write earns its ✓
+// ---------------------------------------------------------------------------
+//
+// PDS-D427. Every verb below that WRITES used to report success on the exit
+// code of the write itself: `object put` printed the size os.Stat measured
+// BEFORE the upload, `bucket create` printed the --location flag, `backup
+// create` printed the key the library composed. None of the three had read
+// anything back, so a silently-dropping endpoint — 200 on every write,
+// persisting nothing — produced a receipt indistinguishable from a real one.
+//
+// The confirming read here is hzResObserved (hetzner_respost_mutation.go), NOT
+// hzResDestroyed: their (nil, nil) branches mean OPPOSITE things, and a create
+// paid with the destroy helper emits `confirmed_gone: true` for an object that
+// was never stored. hzResObserved inverts that miss into a refusal, which is the
+// only correct reading here — a write whose key is absent afterwards did not
+// take.
+
+// hzS3PostReadTimeout bounds every confirming read in this file. The operations
+// they confirm are UNBOUNDED — hetznerCtx is context.Background and a backup
+// upload runs for minutes — so the post-read deliberately runs under a SHORTER
+// context than the operation it confirms: a verb that already did its work must
+// not hang forever proving it, and a hung confirmation reads as "not confirmed"
+// rather than as a failed write.
+const hzS3PostReadTimeout = 30 * time.Second
+
+// hzS3Head is what ONE HeadObject SAW: the key it addressed and the length the
+// endpoint declared for the stored object — a POINTER, nil when it declared
+// none, because Hetzner is S3-COMPATIBLE and not S3, and a missing
+// Content-Length must never read as a confirmed zero.
+type hzS3Head struct {
+	key    string
+	length *int64
+}
+
+// hzS3HeadRead is the post-read every object-writing verb here takes, shaped as
+// hzResGoneRead so the shared apparatus owns the three-way branch.
+//
+// THE ERROR TYPES ARE NOT INTERCHANGEABLE, and this is measured, not assumed: a
+// HEAD 404 surfaces as *types.NotFound (never *types.NoSuchKey — that one is the
+// GET's), and both ride inside a *smithy.OperationError, so errors.As is
+// mandatory. *awshttp.ResponseError is FORBIDDEN as the discriminator: it is
+// true for a 404 AND for a connection refusal, which would turn "unreachable"
+// into "absent" — a refusal manufactured out of a network blip.
+//
+// The *hcloud.Response slot is always nil: it is the shared seam's triple, and
+// an S3 read has no hcloud response to put in it.
+func hzS3HeadRead(c *objstore.Client, bucket, key string) hzResGoneRead[hzS3Head] {
+	return func(ctx context.Context) (*hzS3Head, *hcloud.Response, error) {
+		rctx, cancel := context.WithTimeout(ctx, hzS3PostReadTimeout)
+		defer cancel()
+		head, err := c.S3().HeadObject(rctx, &s3.HeadObjectInput{
+			Bucket: aws.String(bucket), Key: aws.String(key),
+		})
+		if err != nil {
+			var missing *types.NotFound
+			if errors.As(err, &missing) {
+				// ABSENCE — and ONLY absence — is the (nil, nil) miss, which
+				// hzResObserved inverts into a refusal.
+				return nil, nil, nil
+			}
+			return nil, nil, err
+		}
+		return &hzS3Head{key: key, length: head.ContentLength}, nil, nil
+	}
+}
+
+// hzS3BucketRead is bucket create's confirming read. Hetzner Object Storage
+// exposes no single-bucket GET (see `bucket get`), so the credentials' own
+// ListBuckets is the authoritative existence source; a name it does not carry is
+// the (nil, nil) miss.
+func hzS3BucketRead(c *objstore.Client, name string) hzResGoneRead[objstore.Bucket] {
+	return func(ctx context.Context) (*objstore.Bucket, *hcloud.Response, error) {
+		rctx, cancel := context.WithTimeout(ctx, hzS3PostReadTimeout)
+		defer cancel()
+		buckets, err := c.ListBuckets(rctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		for i := range buckets {
+			if buckets[i].Name == name {
+				return &buckets[i], nil, nil
+			}
+		}
+		return nil, nil, nil
+	}
+}
+
+// hzObserveBucketCreated reports what the LISTING said about the new bucket —
+// and says out loud that `location` is not part of that.
+func hzObserveBucketCreated(location string) hzResObserveFn[objstore.Bucket] {
+	return func(b *objstore.Bucket) hzResObservation {
+		extra := map[string]any{
+			// DECLARED, NEVER CONFIRMED: `location` is the endpoint this client
+			// ADDRESSED. Hetzner's S3 API reports no location for a bucket, so
+			// printing it as a verified key would be the argument echo PDS-D366
+			// killed on the server surface.
+			"location":           location,
+			"location_confirmed": false,
+			"location_basis": "the endpoint this client addressed — Hetzner's S3 API reports no location " +
+				"for a bucket, so this value is DECLARED, never confirmed",
+		}
+		if !b.Created.IsZero() {
+			extra["created"] = b.Created.UTC().Format(time.RFC3339)
+		}
+		return hzResAgrees(extra)
+	}
+}
+
+// hzObserveObjectStored is `object put`'s observation, and it is EXISTENCE-based
+// on purpose: the same one line serves BOTH production paths — --file goes
+// through PutObject knowing the source size, stdin goes through PutLarge's
+// multipart conversation where that size is never learned. So the key's presence
+// is the claim, and the length is compared ONLY when the source declared one.
+//
+// uploaded is that source length, nil on the stdin path AND on a --file whose
+// os.Stat failed (the upload still runs; nothing measured it). Nothing here reports a
+// number the store did not hand back: when the endpoint declares no length the
+// receipt SAYS the byte count is unknown instead of quietly echoing os.Stat.
+func hzObserveObjectStored(bucket string, uploaded *int64) hzResObserveFn[hzS3Head] {
+	return func(h *hzS3Head) hzResObservation {
+		extra := map[string]any{"bucket": bucket}
+		switch {
+		case h.length == nil:
+			extra["bytes_verified"] = false
+			extra["bytes_reason"] = "the endpoint declared no length for the stored object, so the byte count is " +
+				"UNKNOWN — this receipt reports what it could not read rather than echoing what was sent"
+		case uploaded != nil && *h.length != *uploaded:
+			return hzResDisagrees("bytes", strconv.FormatInt(*h.length, 10), strconv.FormatInt(*uploaded, 10))
+		default:
+			extra["bytes"] = *h.length
+			extra["bytes_verified"] = uploaded != nil
+			if uploaded == nil {
+				// TWO paths reach here, not one: the stdin multipart path never
+				// learns the source length of a pipe, and a --file whose Stat
+				// FAILED yields none either. The wording names both rather than
+				// asserting a stdin upload that may not have happened — naming
+				// the wrong basis is the same defect as claiming an unread one.
+				extra["bytes_reason"] = "the source length was never learned — the stdin multipart path never " +
+					"learns the source length of a pipe, and a --file whose stat failed measures nothing — so " +
+					"this is the STORED length read back, compared against nothing"
+			}
+		}
+		return hzResAgrees(extra)
+	}
 }
 
 // hzDuration parses a human duration: everything time.ParseDuration accepts,
@@ -258,7 +412,12 @@ func runHetznerBucketCreate(out *writer, args []string) int {
 	if err := c.CreateBucket(hetznerCtx(), name); err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
 	}
-	return hzResDone(out, "create", "bucket", name, name, map[string]any{"location": hzS3Location(a)})
+	// The CreateBucket call returning no error is the transport's opinion. The
+	// LISTING is the credentials' own answer to "is it there?", so that is what
+	// the receipt is built from — and a bucket the listing does not carry
+	// afterwards refuses the claim instead of printing the name that was typed.
+	return hzResObserved(out, hetznerCtx(), "create", "bucket", name, name, nil,
+		hzS3BucketRead(c, name), hzObserveBucketCreated(hzS3Location(a)))
 }
 
 func runHetznerBucketDelete(out *writer, args []string) int {
@@ -420,7 +579,10 @@ func runHetznerObjectPut(out *writer, args []string) int {
 	}
 	ctx := hetznerCtx()
 
-	var size any
+	// size is the SOURCE length, and it exists on ONE of the two paths: os.Stat
+	// can measure a file, nothing can measure a pipe. It is never what the
+	// receipt reports — only what the stored length is compared AGAINST.
+	var size *int64
 	if fromStdin {
 		// Unbounded stream → the multipart path (no size known up front).
 		if err := c.PutLarge(ctx, bucket, key, storageStdin); err != nil {
@@ -433,17 +595,19 @@ func runHetznerObjectPut(out *writer, args []string) int {
 		}
 		defer f.Close()
 		if st, serr := f.Stat(); serr == nil {
-			size = st.Size()
+			n := st.Size()
+			size = &n
 		}
 		if err := c.PutObject(ctx, bucket, key, f); err != nil {
 			return useError(out, "failed", err.Error(), exitGeneric)
 		}
 	}
-	extra := map[string]any{"bucket": bucket}
-	if size != nil {
-		extra["bytes"] = size
-	}
-	return hzResDone(out, "put", "object", key, key, extra)
+	// THE POST-READ. Both paths leave byte-identical store state, so one
+	// existence-based HEAD serves both: an endpoint that answered 200 and
+	// persisted nothing now refuses instead of printing the size of a local file
+	// that never arrived.
+	return hzResObserved(out, ctx, "put", "object", key, key, nil,
+		hzS3HeadRead(c, bucket, key), hzObserveObjectStored(bucket, size))
 }
 
 func runHetznerObjectGet(out *writer, args []string) int {
@@ -520,7 +684,13 @@ func runHetznerObjectGet(out *writer, args []string) int {
 	return exitOK
 }
 
-// hzSizeVerdict turns a DECLARED object length into the receipt fields that say
+// hzSizeVerdict is `object get`'s PAYMENT, and the reason that verb takes no
+// HeadObject afterwards: a GET *is* the read. The length rides the SAME response
+// as the bytes, GetObjectSized hands both back, and the copy is refused at a
+// non-zero exit when they disagree — so a second round trip would confirm
+// nothing this receipt does not already hold, at the price of the whole payload.
+//
+// It turns that DECLARED object length into the receipt fields that say
 // whether the byte count was checked against anything. An absent (-1) or
 // non-positive declaration is reported as unverified with its own counter —
 // Hetzner is S3-compatible, not S3, so "no Content-Length came back" must never
