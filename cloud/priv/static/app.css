@@ -1837,6 +1837,30 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .prov-connect-form { display: flex; flex-direction: column; gap: var(--space-3); }
 .prov-seg-note { font-size: var(--text-xs); color: var(--dim); margin-left: 4px; }
 
+/* cch-w13-s5 — WHICH cloud account this connection points at, rendered inside
+   the ROTATION card above the credential fields so it is read BEFORE "Verify &
+   replace" is pressed. Authored at REVIEW: the slice shipped six emitted classes
+   with no rule at all, which __css_check E2 reds on (12 errors) — the slice's own
+   gate did not run that checker, so it went green while breaking a check three
+   sibling slices' gates do run.
+   Tokens only, no new fg/bg pairing: the VALUE is body copy on a card
+   (--text on --surface, already contrast-paired) and everything around it is the
+   muted/dim voices this section already uses. The value is set in --mono because
+   it is an identifier a person compares CHARACTER BY CHARACTER against their
+   cloud portal — the one thing on this card that is data rather than prose. */
+.prov-identity-slot { margin: 0; }
+.prov-identity { display: block; line-height: 1.5; }
+.prov-identity-label { color: var(--muted-text); font-weight: 600; }
+.prov-identity-value {
+  color: var(--text); font-family: var(--mono); font-weight: 600;
+  overflow-wrap: anywhere;
+}
+/* An absent identity is stated in words and must NOT read like a value: it steps
+   down to the tertiary voice and drops the mono, so "not known" cannot be
+   mistaken for an account id at a glance. */
+.prov-identity-unknown { color: var(--dim); font-family: inherit; font-weight: 400; }
+.prov-identity-note { font-weight: 400; }
+
 /* gr-p4 G-03 — the honest capability matrix: 9 verb rows × prod-provider
    columns. Tokens only. The affirmative mark reads --ok (an identity-invariant
    status green, already contrast-paired on --surface); the dash + server-owned
