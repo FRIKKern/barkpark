@@ -525,8 +525,12 @@ func hzShapesOf(sites []hzReceiptSite, verb string) string {
 // TestHetznerPostConditionsAreExecutedNotJustDeclared is the anti-DISARM gate,
 // and it is the half that makes the widening above worth shipping. The gate
 // over the maps certifies MAP MEMBERSHIP: a verb passes it by acquiring a table
-// entry, and hzServerPostConditions is consumed at exactly two sites —
-// runHetznerServerAction and hzFlagVerbDone. A verb whose only receipt is a
+// entry, and the table is reached through exactly two receipt SHAPES —
+// runHetznerServerAction and hzFlagVerbDone (three index expressions: those two
+// plus hzActionObserved, a helper both of them call and nothing else does; the
+// premise guard below counts the expressions, not the shapes, because an index
+// added anywhere is what would invalidate this classification). A verb whose
+// only receipt is a
 // bare hzDone reaches NEITHER, so four table entries added without touching a
 // single code path would turn the widened gate green while the four receipts
 // stayed exactly as unverified as before.

@@ -880,6 +880,17 @@ func runInstanceDecommission(out *writer, g globals, args []string) int {
 		}
 		report["archive_image_id"] = obs.image.ID
 		report["archive_quiesced"] = obs.quiesced
+		// decommission DESTROYS the box, so this archive is the only
+		// resurrection point there will be — and unlike adopt/eject, nothing
+		// downstream boots from it to prove it works. If instArchive could not
+		// settle the image read, the receipt must say so here too; carrying the
+		// id alone would assert a restorable archive nobody confirmed.
+		if obs.confirm != "" {
+			report["archive_confirmation"] = "unavailable"
+			report["archive_confirmation_error"] = obs.confirm
+		} else {
+			report["archive_image_status"] = obs.status
+		}
 	}
 
 	// 2. Registry row: prefer the control plane's own deprovision queue. When
