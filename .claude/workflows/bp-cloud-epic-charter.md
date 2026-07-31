@@ -158,4 +158,44 @@ rotation + token-file re-read). Full backlog: published `jpf-bl-*` children of t
 
 ## Wave log
 
-(empty — Review appends per wave)
+### Wave 2026-07-31 — founding wave, round 1 of 4 (grade A-)
+
+**Landed (5/5 round-1 slices, all gates re-run green at review, all PRs open):**
+
+- `jpf-w1-push-cp-lane` → PR #8400 (`loop-epic/cp-push-lane-repo-present-predicate-flip-0`).
+  Predicate flip + claim-envelope `source` %{kind,url,ref} + born-queued webhook rows with
+  same-sha dedup. Tenancy independently re-derived at review: `builder_claim_source/1` has ONE
+  call site (worker-gated claim 200) and none of the three deployment serializers carry a clone
+  recipe. 117-test gate green. No review fixes.
+- `jpf-w1-builder-git-clone` → PR #8401 (`loop-epic/builder-git-ref-source-ladder-sha-first--1`).
+  Source ladder (artifact wins → git sha-first shallow clone → honest empty-artifact error),
+  GIT_TERMINAL_PROMPT=0 + credential.helper= prompt kill, two proven-stderr TERMINAL
+  classifications. Bare-repo fixtures prove checkout at a NON-TIP sha. No review fixes; temp
+  workdir accumulation filed as `jpf-bl-builder-clone-hygiene`.
+- `jpf-w1-siteplane-script` → PR #8402 (`loop-epic/site-runtime-install-sh-hardened-arch-aw-2-r`).
+  Arch-aware Go tarball (the x86 abort fixed), explicit git ensure, staged units in
+  deploy/systemd/ with a behavioural offline parity test (drift tripwire proven red).
+  One review fix on the -r branch: expected tarball URLs derive from the script's GO_VERSION.
+- `jpf-w1-edgeprojector-tame` → PR #8405 (`loop-epic/edgeprojector-converges-error-not-snooze-3`).
+  Error-not-snooze (drain test: 4 failures + 1 discard, 0 snoozes — the immortal loop is dead),
+  contract-preserving add_edges batching (D12 e2.id==e1.id pinned), schemas prefetch, hydrate
+  batching, explicit 60s txn budget. 73-test gate green. No review fixes. CI note: the enqueue
+  test is sensitive to leftover committed oban_jobs rows in a dirty test DB.
+- `jpf-w1-dedupwall-bound` → PR #8406 (`loop-epic/dedupwall-gets-the-8136-discipline-bound-4`).
+  5s budget on all 3 Repo calls, rescue + catch :exit + rollback branch, fail-loud
+  `dedup_unavailable` forwarded through AuthoringWall, `content.dedup_bypass` escape, tags-only
+  JSONB projection. 35-test gate green x3. No review fixes. The wave itself reproduced the
+  incident live twice: filing tasks 500'd until `dedup_bypass` was set — including the review's
+  own backlog filing.
+
+**Stalled:** nothing. Charter PR #8317 open awaiting lead merge.
+
+**Next wave / lead dispatch order (rounds are law):** (1) merge the five round-1 PRs + charter
+PR #8317; on merge close each slice's merge-gated criterion. (2) Dispatch `jpf-w1-queue-age-alarm`
+(round 2) after #8400 merges. (3) Dispatch `jpf-w1-builder-identity` (round 3) after the alarm +
+#8402 merge — HIGH-FLIP-RISK: send a genuinely independent second reviewer for the identity/scoping
+judgment before merging it. (4) Dispatch `jpf-w1-siteplane-chain` (round 4) after identity + script
+merge. Then wave 2: `jpf-bl-e2e-push-proof` — the single end-to-end acceptance run on a fresh box.
+Watch on deploy of `jpf-w1-dedupwall-bound`: publishes now 409 under real dedup outages
+(fail-loud by design); the GitHub Intake 2xx-on-halted drop hazard now covers the publish side
+too (tracked with the 503 upgrade).
