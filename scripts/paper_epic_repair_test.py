@@ -787,9 +787,12 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertGreaterEqual(len(appendices), 1)
         self.assertLessEqual(len(appendices), 4)
         self.assertIn("section-17", str(repaired))
-        self.assertNotIn(
-            "Evidence 2 Evidence 2",
-            " ".join(block["summary"] for block in appendices),
+        self.assertEqual(
+            [block["summary"] for block in appendices],
+            [
+                "Evidence appendix {}".format(index)
+                for index in range(1, len(appendices) + 1)
+            ],
         )
 
         second_document = {
@@ -831,7 +834,7 @@ class PaperEpicRepairTest(unittest.TestCase):
         )
         self.assertEqual(
             healed_appendix["summary"],
-            "Evidence appendix 1 — Evidence 2",
+            "Evidence appendix 1",
         )
         healed_orientation = next(
             block
