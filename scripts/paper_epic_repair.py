@@ -784,6 +784,11 @@ def _collapse_evidence_appendices(blocks: list[Any]) -> list[Any]:
         return blocks
 
     primary_words = len(_visible_text(blocks).split())
+    top_level_heading_count = sum(
+        1
+        for block in blocks
+        if isinstance(block, dict) and block.get("type") == "heading"
+    )
     h2_indexes = [
         index
         for index, block in enumerate(blocks)
@@ -794,7 +799,7 @@ def _collapse_evidence_appendices(blocks: list[Any]) -> list[Any]:
     if (
         primary_words <= 5_000
         and len(blocks) <= 80
-        and len(h2_indexes) <= 16
+        and top_level_heading_count <= 16
     ):
         return blocks
     if len(h2_indexes) <= 2:

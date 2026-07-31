@@ -741,6 +741,63 @@ class PaperEpicRepairTest(unittest.TestCase):
             any(block.get("type") == "expandable" for block in repaired)
         )
 
+    def test_generic_repair_collapses_heading_dense_evidence_below_word_limit(self):
+        evidence = []
+        for index in range(1, 11):
+            evidence.extend(
+                [
+                    {
+                        "id": "section-{}".format(index),
+                        "type": "heading",
+                        "level": 2,
+                        "text": "Evidence section {}".format(index),
+                    },
+                    {
+                        "id": "finding-{}".format(index),
+                        "type": "heading",
+                        "level": 3,
+                        "text": "Finding {}".format(index),
+                    },
+                    {
+                        "id": "proof-{}".format(index),
+                        "type": "paragraph",
+                        "content": text("The proof remains exact."),
+                    },
+                ]
+            )
+        document = {
+            "_id": "heading-dense-repair",
+            "_rev": "source-rev",
+            "title": "Heading-dense repair",
+            "description": "This wave keeps the decision visible and its evidence bounded.",
+            "tags": [{"tag": "epic-cycle-wave-paper"}],
+            "blocks": [
+                {
+                    "id": "title",
+                    "type": "heading",
+                    "level": 1,
+                    "text": "Heading-dense repair",
+                },
+                *evidence,
+            ],
+        }
+
+        repaired = repair_canonical_epic(document)["mutations"][0]["patch"]["set"][
+            "blocks"
+        ]
+        report = audit_papers([{**document, "blocks": repaired}])["papers"][0]
+
+        self.assertTrue(report["pass"])
+        self.assertEqual(report["warnings"], [])
+        self.assertTrue(
+            any(block.get("type") == "expandable" for block in repaired)
+        )
+
+        repaired_again = repair_canonical_epic(
+            {**document, "_rev": "second-rev", "blocks": repaired}
+        )["mutations"][0]["patch"]["set"]["blocks"]
+        self.assertEqual(repaired_again, repaired)
+
     def test_generic_repair_keeps_four_relevant_tags_and_the_main_tag(self):
         document = {
             "_id": "tag-repair",
