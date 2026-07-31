@@ -6886,3 +6886,254 @@ prohibition. Clause 1 is NOT retired (D391). `.github/**` is fenced (the spec-vs
 `Cloud gate`/`Console gate` belongs to the concurrent Cloud Console wave). `api/mix.exs`/`api/mix.lock`
 are untouched. And for the record, per D391: the census hash is **sha256[:16]**, not md5 — the wish's
 weight-2 wording repeats a spelling D391 already retired, and it is not carried forward here.
+
+## Wave 30 — finish the round, and pay the epic's first L1
+
+Wave 29 landed in full (#8601 apparatus+destroy, #8602 fail-closed `fakeS3`, #8603 write-receipt
+fence, #8604 taskboard envelope fence, #8605 wave log). Wave 30 verified its four deferred round-2
+rows before dispatching them, and the verification changed the plan in three places. Every number
+below was re-derived against `origin/main` at `885ace84a`.
+
+- **PDS-D413 — THE ROSTER RULING: THE FILE-CUT SURVIVES, THE CLASS-CUT IS SUPERSEDED, AND NOTHING
+  MECHANICAL WOULD HAVE CAUGHT THE WRONG CHOICE.** Three open decompositions covered ONE population of
+  40 unpaid `(kind,action)` keys: the charter's file-cut `pds-w29-pay-{lb,net-dns,storage-backup}`
+  (filed 16:27–16:29Z by wave 29's DECIDE, named in this charter's wave-29 dispatch table), a class-cut
+  `pds-w29r2-{subresource-removals,mutation-receipts}` (filed 16:51Z by the round-1 BUILDER and
+  hard-coded into `hetzner_res_census_test.go:117-118`, named NOWHERE in this charter), and the
+  ancestor umbrella `pds-w25-backlog-hzresdone-receipt`. Both cuts are exact partitions of the same 40
+  keys (16+19+5 = 8+32 = 40), so the ruling turns on merit: every resource KIND lives in exactly one
+  source file, so the file-cut IS a kind-cut and yields three disjoint production-Go sets, while the
+  class-cut spans `lb_cmd.go`+`net_cmd.go` in one row and all five files in the other. **The file-cut
+  wins; the two `w29r2` rows and the `w25` umbrella are closed as SUPERSEDED-BY, naming their
+  successors.** The gate cannot backstop this: replacing the constant with
+  `"unpaid: pds-COMPLETELY-FICTIONAL-TASK-ID"` stays GREEN (only an EMPTY id after the prefix reds, 4
+  errors at :505) — the census checks `HasPrefix(note,"unpaid:")` and a non-empty remainder and
+  nothing else. A wrong roster pointer is invisible to CI forever. This is a human ruling with no
+  automated safety net, which is exactly how it went wrong the first time.
+
+- **PDS-D414 — "FILE SETS ARE DISJOINT BY CONSTRUCTION" IS FALSE IN TWO PLACES, AND BOTH ARE FIXED BY
+  RULING RATHER THAN BY SERIALISING BUILDS.** (a) All three payment slices must edit
+  `hzResDispositions` in `internal/cli/hetzner_res_census_test.go`. Measured with `git merge-file`
+  (exit code = conflict count): pay-lb+pay-net-dns **2**, pay-net-dns+pay-storage **1**,
+  pay-lb+pay-storage **0**. `pay-net-dns` is the hub because the map is ordered by CLASS, so lb rows
+  sit line-adjacent to net rows in every block. Landing `net-dns` last costs **1** conflict hunk;
+  landing `storage` last costs **3**. **MERGE ORDER IS LAW: pay-lb → pay-storage-backup → pay-net-dns**
+  (this is a lead merge instruction, not a round dependency — the three build in parallel). (b) The
+  TEST files collide too: all eight LB-family tests live in `hetzner_net_cmd_test.go`
+  (`TestHetznerLBCreate:277` … `TestHetznerCertificateCreateManaged:507`), which is also where
+  pay-net-dns's network/firewall/DNS tests live, and `internal/cli/hetzner_lb_cmd_test.go` DOES NOT
+  EXIST. **Ruling: pay-lb CREATES `internal/cli/hetzner_lb_cmd_test.go` and does not touch
+  `hetzner_net_cmd_test.go`.** Free, and collision-free by construction. (c) At wave end both
+  `hzUnpaid*` constants become unused; Go permits unused constants and `go vet` is silent, so
+  **pay-net-dns (merging last) deletes them** and leaves `grep -c hzUnpaid` at 0.
+
+- **PDS-D415 — THE DESTROY PREDICATE REUSED FOR A MUTATION IS AN INVERTED FAIL-OPEN, PROVEN AT THE
+  CLI ON WAVE 29's OWN FIXTURES.** `hcloud-go v2.44` swallows a 404 into `(nil, resp, nil)` in
+  `zone.go:151-157` (`getByIDOrName`, behind `Zone.Get`/`GetByID`/`GetByName`) and
+  `zone_rrset.go:96-99`. Applying the edit a builder who "just reuses the apparatus" would make —
+  swapping `hzResDone` at `hetzner_dns_cmd.go:295` for `hzResDestroyed(…, hc.Zone.GetByID(id))` —
+  leaves `TestHetznerDNSZoneCreate` **PASSING**, and the receipt on a zone the API says does not exist
+  reads `{"action":"create","confirmed_gone":true,"ok":true,…}`: a CREATE receipt, exit 0, `ok:true`,
+  `confirmed_gone:true`. The second arm is worse because a builder hits it first: with the wave-29
+  fixture set as it stands (no `GET /zones/1`), the post-read takes ServeMux's text/plain 404 → a
+  TRANSPORT error → the "not confirmed" arm → exit 0 with prose that says, on a create, *"the create
+  was accepted but the confirming read failed, so removal is not confirmed"* — a prose leak baked into
+  `hetzner_respost.go:112`. **RULING: `hzResDestroyed`'s three-way switch (`:106-120`) and
+  `hzResStillThere` are NOT reusable for mutation polarity. Wave 30 adds a sibling `hzResObserved[T]`
+  in a NEW file `internal/cli/hetzner_respost_mutation.go`** sharing `hzResGoneRead[T]`,
+  `hzResUnconfirmed`, `hzResDone`, `hzResPayloadKey` and `hzMergeExtra`, with (a) the nil branch
+  INVERTED to a hard refusal (non-zero exit, "the API accepted the <verb> but <kind> <name> is NOT
+  READABLE afterwards — the post-condition is UNMET"), (b) `confirmed_present` rather than
+  `confirmed_gone`, and (c) a disagreement hook that can name WHICH field or WHICH half of a
+  two-operation verb disagreed. A 12-line prototype was run and reds correctly (exit 1) on the same
+  input the destroy predicate greens.
+
+- **PDS-D416 — THE BY-NAME POST-READ IS VACUOUS IN EVERY FIXTURE, SO NO FIXTURE CAN RESCUE IT; THE
+  SPELLING IS THE BUG.** Against `TestHetznerLBAddTarget`'s exact fixture a post-read spelled
+  `resolveHzLB(ctx, hc, name)` reports `confirmed_present` while the object it just read carries
+  `targets: 0`, and the existing test still PASSES. Run across four fixture variants — including a
+  STATEFUL honest fake and a STATEFUL LYING fake that accepts `add_target` and never applies it — the
+  naive spelling returned `confirmed_present (targets seen: 0)` in **all four**. The mechanism is
+  mechanical: `resolveHzLB` → `hzResolve` → `LoadBalancer.Get` → for a non-numeric token hcloud-go
+  goes straight to the name-filtered LIST, which never touches `/load_balancers/7`. The same probe
+  showed the honest spelling working: with the post-condition written as "the target must be
+  OBSERVED", the honest stateful fixture PASSES at `present targets=1` and the lying one **FAILS** at
+  `present targets=0`. **RULING: every mutation post-read binds on the RESOLVED ID via a
+  single-resource GET, never by name; and each payment slice ships a NEGATIVE PIN — a test that would
+  go green if a builder re-resolved by name.** Also measured: `GetByID` against a production-shaped
+  JSON 404 returns `(nil,nil)` and reads as "gone", which is D415's polarity trap on the lb family.
+
+- **PDS-D417 — PDS-D399's DNS SENTENCE IS REFUTED FOUR WAYS, AND PDS-D399 IS A DUPLICATE NUMBER.**
+  This charter at :6605 says the DNS sites "ride the legacy `dns.hetzner.com/api/v1`,
+  `internal/cli/cloud/dns.go:163`". Refuted: (a) `internal/cli/hetzner_dns_cmd.go:3-13` says the
+  opposite in its own header — Hetzner's INTEGRATED Cloud DNS via hcloud-go v2.44 — and its only
+  non-stdlib import is `hcloud`; (b) D399 conflated two files: `internal/cli/cloud/dns.go:163` is real
+  (`const hetznerDNSBase = "https://dns.hetzner.com/api/v1"`) but belongs to the cloud-PROVISIONING
+  helper reading `HETZNER_DNS_TOKEN`, which pay-net-dns is fenced OUT of; (c) live,
+  `dns.hetzner.com/api/v1/zones` → **301 to console.hetzner.com, text/html** — the legacy host is gone;
+  (d) `cloud.spec.json` is not a repo file but IS an openable published document (HTTP 200,
+  3,453,181 bytes) and it DOES carry `/zones/{id_or_name}` and
+  `/zones/{id_or_name}/rrsets/{rr_name}/{rr_type}`. **Criterion 7 of `pds-w29-pay-net-dns` is REWRITTEN
+  accordingly** and is now answerable at L1 with the token already in the environment. Measured live:
+  `GET /v1/zones/999999999` → 404 `application/json` 114 bytes `not_found`; the rrset GET item declares
+  all eight properties required and is byte-identical to the LIST item; the zone GET item is a
+  **discriminated `oneOf`** over Primary/Secondary so the post-read must switch on `mode` before
+  reading arm-specific fields; and `GET /v1/zones?name=<nonexistent>` returns **200 with `zones: []`**,
+  so a list-shaped post-read is forbidden. Separately: **`PDS-D399` is a DUPLICATED IDENTIFIER**
+  (:6503 python3 `-I`; :6586 the post-read assumption). Any downstream citation of "D399" is ambiguous
+  by construction; cite by line, and do not reuse the number.
+
+- **PDS-D418 — `hzResDispositions` IS AN ENROLMENT GATE, NOT A PAYMENT GATE, AND THE `paid:` NOTE IS
+  UNFALSIFIABLE.** Flipping one row's note from `hzUnpaidMutation` to
+  `"paid: post-read re-observes the target set"` with **zero change to any production Go file** leaves
+  the census GREEN. The stale-row arm is real and bidirectional (a renamed row reds at :514; a renamed
+  site reds at :494) but it only fires when a KEY changes — and these slices change NOTES. Compounding
+  it: `hzClassCreate`/`hzClassDestroy` appear only as map data, so nothing binds a class to the helper
+  permitted to pay it, and a row reading `"zone/create": {hzClassCreate, "paid: hzResDestroyed re-reads
+  Zone.GetByID"}` would satisfy the census completely — the D415 fail-open is invisible to the
+  instrument built to see receipt debt. And the opaque arm fails open in one direction: de-globbing a
+  file makes `OPAQUE_CALLERS` read 0 VACUOUSLY (measured: `hetzner_dns_cmd.go` de-globbed → TOTAL=44,
+  OPAQUE=0, saved only by 6 stale-row errors; `hetzner_backup_cmd.go` de-globbed → TOTAL=48, saved by
+  2 — and deleting those 2 rows plus editing the two pinned constants is **FOUR LINES TO FULL GREEN**
+  with two receipt verbs silently outside the population; this recurs `pds-w27-hetzner-gate-file-
+  blindness`). **RULINGS, all landing in pay-lb's census edit so the file has one owner per merge:**
+  (1) a `paid:` note MUST name the symbol that pays it, and a companion assertion greps that the named
+  helper is actually called from that kind's file; (2) a class↔helper binding — a `create`/`request-echo`
+  class row paid with `hzResDestroyed` REDS; (3) a per-KIND presence assertion over the 13 kinds
+  already enumerated in the map, so deleting a kind costs an explicit reviewable edit rather than a
+  row cleanup that looks like tidying. **Do NOT raise the site floor to 48** — it is one row-delete and
+  one constant-edit from green anyway and makes every legitimate refactor a floor negotiation.
+
+- **PDS-D419 — THE EPIC'S FIRST L1 IS AFFORDABLE, IT WAS EXECUTED END TO END DURING VERIFICATION, AND
+  ITS LIMIT IS NAMED IN THE SAME BREATH.** The Hetzner token has FULL WRITE scope, measured rather than
+  inferred: `POST /v1/placement_groups` → **201** (id 1805958), independent `GET` → **200**, `DELETE`
+  → **204**, post-delete `GET` → **404 `application/json` 100 bytes `error.code:"not_found"`**, project
+  left at 0 placement groups. So the crown does NOT degrade to a read-only probe. Note the shape is
+  PER-KIND: the placement-group 404 is 100 bytes with "placement group not found" where the server 404
+  is 91 — no assertion may pin a universal byte count. The project is the **live production fleet**
+  (5 running servers incl. `barkpark-cms` 89.167.28.206 and `guerrilla` 157.180.90.121), so the fence
+  is placement groups ONLY — free, inert, attached to nothing, count is 0 today, refuse-to-start on a
+  reserved-prefix match, cleanup on every exit path. An invalid-body POST returns **422 invalid_input**,
+  so it is NOT a write-scope oracle; only a real create/delete settles scope. **THE LIMIT, stated up
+  front rather than discovered in review: a live run against a CORRECT API can only prove the
+  NO-FALSE-REFUSAL direction.** Real Hetzner will not keep returning a deleted resource, so the refusal
+  direction stays fake-proven and the run's own output vocabulary must say which direction it proved
+  and which it did not.
+
+- **PDS-D420 — THE LIVE RUNNER CAN REFUSE HONESTLY (THE STOP CONDITION IS NOT TRIPPED), BUT
+  `HCLOUD_TOKEN` IS NOT THE ORACLE AND THE INSTALLED `bp` IS NOT THE SUBJECT.** Measured, exit codes
+  taken WITHOUT a pipe: both tokens unset → bp exits **3** with `{"error":{"code":"auth",…}}`; only
+  `HETZNER_API_TOKEN` set → **3** as well (bp reads `HCLOUD_TOKEN`, never `HETZNER_API_TOKEN`);
+  `HCLOUD_TOKEN` correct → **0**. But `ResolveToken` (`internal/hetzner/client.go:98`) has a THIRD
+  rung — `TokenFromCLIContext()` reading `$HCLOUD_CONFIG` else `<UserConfigDir>/hcloud/cli.toml` — and
+  with both env vars unset and only `HCLOUD_CONFIG` exported, `bp cloud hetzner placement-group list`
+  **exits 0 against live Hetzner**. That rung is accidentally dead on macOS (`os.UserConfigDir()` is
+  `~/Library/Application Support`) and LIVE on Linux/CI. **RULING: the preamble gates on bp's OWN
+  resolution — a cheap read verb's exit code AND its receipt SHAPE — never on an env-var name, and it
+  NAMES which credential rung paid.** Two self-tests are mandatory because a preflight that cannot fail
+  is the instrument this epic exists to kill: a stub bp exiting 0 with `{"ok":true}` must be REFUSED
+  (measured: refused, "the live read exited 0 but its receipt is not the shape this proof compares
+  against"), and the pipe trap must be pinned (`bp … | head -1 && echo OK` printed OK with rc=0 on a
+  command that actually failed; without the pipe, rc=3). Also: the installed `/Users/pelle/.local/bin/bp`
+  is commit `f59aaf717`, which does not contain `internal/cli/hetzner_respost.go` or
+  `screenWriteReceipt` — **a live run through it would exercise pre-fence code and prove nothing**, so
+  the runner builds from the worktree (`go build ./cmd/barkpark` — `./cmd/bp` DOES NOT EXIST) and
+  refuses if the tree predates the apparatus (proven by mutation against a worktree pinned at
+  `f59aaf717`).
+
+- **PDS-D421 — THE BARKPARK HALF OF THE LIVE PROOF IS ALREADY PAID, AND THE 204 ARM IS UNREACHABLE,
+  NOT MERELY UNPROVEN.** A bp built from `origin/main` drove five real write verbs against
+  `guerrilla.barkpark.cloud` dataset `production` (`doc create` → `patch` → `publish` → `unpublish` →
+  `delete`), all rc=0 with JSON receipts, and an INDEPENDENT `curl` of `/v1/data/query` returned the
+  same `_id` and the same `_rev` the receipt claimed; after the delete the same read returned `count:0`
+  under all three perspectives. **#8603 does not red honest production traffic on the `doc` noun.** And
+  the pass is not vacuous: forcing `unreadableWriteReceipt` to return a constant and rebuilding reds
+  the same live create with `unreadable_write_receipt`, quoting the real 422-byte 200 body. Three
+  findings ride along. (a) `bp chat approve` exits **rc=2** — `cli.go:165` routes the whole `chat` noun
+  into the builtin `runChat`, so the only manifest write verb that answers 204 can never enter
+  `runCommand`; the 204 carve-out is UNREACHABLE from the CLI and stays fake-proven. The SERVER half is
+  L1 (a real `POST …/approval` → HTTP/2 **204**, `via: 1.1 Caddy`, 0 bytes, no content-type). (b)
+  `isProd` (`run.go:1829`) matches only a server NAMED prod/production or a URL containing
+  `api.barkpark.cloud`/`prod`; guerrilla's manifest identity is `{"name":"barkpark",
+  "base_url":"https://guerrilla.barkpark.cloud"}`, so **the prod write-guard never fires on the content
+  API** — a real `doc patch` landed with no `--yes` and non-TTY stdin. (c) The HTML-200 poison is
+  production-reachable, not a fixture invention: `curl -sL https://guerrilla.barkpark.cloud/` ends at a
+  **517,831-byte `text/html` 200**, and `doRequest` (`run.go:1221`) builds a bare `&http.Client{}` with
+  **no `CheckRedirect`**. (b) and (c) are filed as rows, not fixed here.
+
+- **PDS-D422 — THE BOARD ROW IS AMENDED, AND THE SPLIT IS FIVE / FOUR, NOT FOUR / FIVE.** Dropping
+  run.go's nine poison BODIES (`internal/cli/paginate_all_test.go:94-104`) into package `taskboard` and
+  calling the real unexported decoders directly: FIVE are refused by #8604's pointer fence (`null`,
+  `{}`, `{"result":null}`, `{"widgets":[…]}`, `{"ok":false,"error":{…}}`) and FOUR die in
+  `json.Unmarshal` before any fence runs (proxy-502 HTML, zero bytes, bare array, plaintext) —
+  identically on `decodeTaskListFull` and `decodePrime`, all nine labelled `"invalid snapshot"`.
+  Proven by mutation: reverting the pointer fence reds exactly the five and leaves the four green, so
+  importing the four would ship four vacuously-green rows per decoder. Two of the five
+  (`{"widgets":…}`, `{"result":null}`) are NOT in #8604's shipped table, so the amendment adds real
+  rows rather than relabelling. #8604's commit message names FOUR poisons while its test pins FIVE per
+  decoder — the message undercounts its own shipped test. **On vocabulary: `unreadable_list_page` is a
+  CONTRACT TOKEN on a machine-readable transport (`renderErrorEnvelope`, `run.go:381`/`:1688`, asserted
+  as `envelope.Error.Code`); a tea TUI has no such transport — its only error channel is
+  `snapshotErrorLabel` (`live.go:321`, which DOES exist, refuting the "zero hits repo-wide" claim)
+  feeding `ui.ConnProblem`. Importing the token would create a second name for one condition that
+  nothing can assert and nobody can read.** Criteria 2 and 3 are amended to the measurement; criterion
+  4 stays merge-gated, which is what keeps `pds-w29-taskboard-envelope-fence` at 7/8.
+
+- **PDS-D423 — TWO CHARTER SYMBOLS DO NOT RESOLVE AND ONE D-ENTRY'S ARITHMETIC IS UNREADABLE.** The
+  wave-29 plan table names `hzResPost[T]` (:6865) and `refuseEvidencelessWriteReceipt` (:6867);
+  `git grep -nw` on `origin/main` returns ZERO for both. What shipped is `hzResDestroyed[T]`
+  (`hetzner_respost.go:104`) over the function type `hzResGoneRead[T]` (:95), and `screenWriteReceipt`
+  (`run.go:425`). Bare `hzResGone` also has zero hits, so
+  `pds-w29-registry-postcondition-invariant` criterion 4 names a symbol that does not resolve and is
+  **re-spelled to `hzResDestroyed`**. And PDS-D405 (:6702) says *"all four named vacuous rows RED
+  (`hzResDone` ×3, `supportAddRun.done`, `supportRemoveRun.done`, `supportAddRun.success`,
+  `emitFrontierClaim`)"* — the word "four" introduces FIVE symbols, three lines later the entry says
+  **"THE POPULATION IS SIX ROWS, NOT ONE"**, and there is exactly **ONE** `hzResDone` registry row on
+  main (`success_claim_registry_test.go:233`). Three counts for one population. The registry slice is
+  scoped to the SIX NAMED ROWS, and "×3" is read as three redding ARMS on one row, stated as an
+  inference rather than a measurement.
+
+- **PDS-D424 — THE MUST-RUN CENSUS PATTERN IS A HALF-GATE, AND FOUR SHIPPED SLICES SAT STALE-OPEN.**
+  `-run TestHetznerResourceCensus` matches ONLY `TestHetznerResourceCensusMeasuresTheKnownPopulation`;
+  the enrolment gate is `TestHetznerResourceReceiptCensus` and that pattern never selects it. A builder
+  quoting the wave-29 MUST-RUN command would be quoting the pin, not the gate. **Every wave-30 gate
+  spells `-run 'TestHetznerResource'` or runs the full package.** Separately, ledger hygiene:
+  `pds-w29-respost-apparatus-destroy` (10/10), `pds-w29-s3-fake-fails-closed` (7/7) and
+  `pds-w29-write-receipt-fence` (9/9) were all `lifecycle_status: open` with every criterion met — a
+  stale-open shape that distorts sizing by making three merged deps read as unfinished. They are closed
+  in this wave. Two criteria were ALREADY PAID on main and are not rebuilt: `pds-w29-pay-storage-
+  backup` criterion 4 (`hzResDestroyedDeclared` at `hetzner_storage_cmd.go:288` and `:562`, both
+  fail-closed with stated bases), and `pds-w29-pay-storage-backup`'s ordering dependency (the
+  fail-closed `fakeS3` is on main with three 501 dead-ends and no 200 fallthrough). Population, twice
+  re-derived: **38 call sites**, not 39 — `git grep -c` counts the `func hzResDone` DEFINITION at
+  `hetzner_net_cmd.go:54`, so net has 13; the census's own floor comment spells the same arithmetic.
+
+### Wave 30 plan — 7 slices, 5 in round 1, 2 deferred to round 2
+
+Round 1 is dependency-free. `pay-net-dns` and `pay-storage-backup` are round 2 because they call
+`hzResObserved[T]`, which `pay-lb` introduces — a slice that needs another slice's CODE on main is
+never dispatched beside it. Merge order within the payment family is LAW (D414):
+**pay-lb → pay-storage-backup → pay-net-dns.**
+
+| task | round | after | surface | gate |
+|---|---|---|---|---|
+| `pds-w29-pay-lb` | 1 | — | `hzResObserved[T]` mutation apparatus (new file) + the 16 lb-family sites + a NEW `hetzner_lb_cmd_test.go` with stateful per-kind single-resource GETs + the three census rulings (D418) | `CC=/usr/bin/clang go build ./... && go vet ./internal/cli/... && go test ./internal/cli/ -count=1` |
+| `pds-w29-registry-postcondition-invariant` | 1 | — | the three-arm structural invariant + six row repairs, `hzResGone` re-spelled to `hzResDestroyed` | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'TestSuccessClaim\|TestSiteClaims\|TestLedgerRows\|TestClaimProbes'` |
+| `pds-w30-live-proof-runner` | 1 | — | `scripts/pds-live-*.sh` — a credential-gated RUNNER (not a transcript) driving a real placement-group create/observe/oracle/delete and a real `bp` write against guerrilla; harvested bodies become committed fixtures | `bash scripts/pds-live-hetzner-placement-group.sh --selftest` + `CC=/usr/bin/clang go test ./internal/cli/ -count=1` |
+| `pds-w30-board-envelope-poison-parity` | 1 | — | the two NEW poison bodies × both board decoders, the four-non-transferring measurement recorded | `CC=/usr/bin/clang go test ./internal/taskboard/ -count=1` |
+| `pds-w30-census-payment-is-falsifiable` | 1 | — | folded into pay-lb's census edit (single owner per merge); tracked as a criterion, not a separate branch | — |
+| `pds-w29-pay-net-dns` | 2 | `pds-w29-pay-lb` | `hetzner_net_cmd.go` + `hetzner_dns_cmd.go` incl. the two variable-verb executors and the rewritten criterion 7 | `CC=/usr/bin/clang go test ./internal/cli/ -count=1` |
+| `pds-w29-pay-storage-backup` | 2 | `pds-w29-pay-lb` | the 5 remaining S3/backup sites, `backup restore` DECLARED EXEMPT, criterion 4 already paid | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'Storage\|Backup'` |
+
+**HIGH-FLIP-RISK, a genuinely independent second reviewer owed before merge:** `pds-w29-pay-lb` (the
+nil-polarity judgment of D415 — the same nil means EARNED for a destroy and UNMET for a mutation, and
+getting it backwards ships a fail-open on 16 sites at once) and `pds-w30-live-proof-runner`
+(reachability + blast radius — it writes into a project holding five running production servers, and
+its whole value rests on a preflight that must be able to refuse).
+
+**NOT PLANNED AROUND.** `tooling/grip/**` stays unmodified (D386) — the eight rerun-screen holes remain
+handed-over rows. `internal/cli/cloud/dns.go` is NOT touched (it is the provisioning helper behind a
+different, now-dead credential). `internal/hetzner/objstore/**` is untouched. `.github/**` is fenced to
+the concurrent Cloud Console wave. The `isProd` heuristic, the MCP `execManifestCommand` fence gap, the
+unreachable `chat approve` verb and `FetchPaper`'s unfenced read path are FILED AS ROWS, not smuggled
+into a fence slice.
