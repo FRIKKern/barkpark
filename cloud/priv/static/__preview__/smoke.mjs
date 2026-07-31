@@ -1658,7 +1658,7 @@ const EXPECTATIONS = {
       const body = (reg.get("sites-body") || {}).innerHTML || "";
       assert.ok(body.length > 0, "#sites-body rendered empty");
       // Exactly one v4 global row per fixture site.
-      assert.equal(countMatches(body, 'class="site-row site-row--global"'), 4,
+      assert.equal(countMatches(body, 'class="site-row site-row--global"'), 5,
         "one v4 density row per fixture site");
       // The leading status pill, states-complete across the four rows.
       assert.ok(body.includes("status-pill--ok"), "the live site reads an ok pill");
@@ -1666,6 +1666,11 @@ const EXPECTATIONS = {
       assert.ok(body.includes("status-pill--danger"), "the deploy-failed site reads a danger pill");
       assert.ok(body.includes("status-pill--neutral"), "the never-deployed site reads a neutral pill");
       assert.ok(body.includes(">Not deployed<"), "a never-deployed site says so — no invented green");
+      // cch-w14-s6: the cancelled freshness label #8608 shipped, rendered by a
+      // harness for the first time — one spelling ("Cancelled", not "Canceled"),
+      // on a neutral pill (a cancel is neither a success nor a failure).
+      assert.ok(body.includes(">Cancelled<"), "a cancelled deploy says Cancelled — one spelling of the deploy noun");
+      assert.ok(!body.includes(">Canceled<"), "never the American spelling for the DEPLOY noun");
       // Real fields: the site's OWN name, its host, framework, the instance link,
       // and a recency segment.
       assert.ok(body.includes(">acme-web<"), "the site's real name renders");

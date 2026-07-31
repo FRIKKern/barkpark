@@ -2102,6 +2102,16 @@ defmodule BarkparkCloud.Registry do
   NEVER `console`, `build_log_url`, `content_rev`, or any build internal. Sites
   with no deployment are simply absent (nil-honest at the caller). Empty `ids` →
   empty map (no query).
+
+  PRODUCTION ONLY (cch-w14-s6). Branch previews are excluded — the badge names
+  the site's PRODUCTION state, which is the only thing the fleet row claims.
+  Without the predicate a torn-down preview outranked a live production deploy,
+  so `GET /v1/sites` said "cancelled" at the same instant
+  `GET /v1/sites/:id/deployments` (already `environment: "production"`) said
+  "live". The embed deliberately carries NO environment key — widening it would
+  break the HONESTY-LAW keyset above. One visible consequence: a site whose
+  ONLY deployments are previews is absent from the map, so the console paints
+  its neutral never-deployed pill.
   """
   @spec latest_deployment_status_map([binary()]) :: %{
           binary() => %{
@@ -2116,6 +2126,7 @@ defmodule BarkparkCloud.Registry do
   def latest_deployment_status_map(ids) when is_list(ids) do
     from(d in Deployment,
       where: d.site_id in ^ids,
+      where: d.environment == "production",
       order_by: [asc: d.site_id, desc: d.inserted_at, desc: d.id],
       distinct: d.site_id,
       select: {d.site_id, d.status, d.trigger, d.inserted_at, d.updated_at}
