@@ -32,9 +32,30 @@ defmodule Barkpark.Content.PaperStructurePublishGateTest do
   test "publish normalizes a lossless producer dialect before copying the draft" do
     insert_draft!("normalizes", [
       %{
-        "type" => "list",
-        "items" => [
-          %{"content" => [%{"type" => "text", "value" => "visible item"}]}
+        "type" => "expandable",
+        "children" => [
+          %{
+            "type" => "bulletList",
+            "items" => [
+              Jason.encode!([%{"type" => "text", "value" => "visible alias item"}])
+            ]
+          },
+          %{
+            "type" => "list",
+            "content" => [
+              %{
+                "type" => "listItem",
+                "content" => [%{"type" => "text", "value" => "visible content item"}]
+              }
+            ]
+          },
+          %{
+            "type" => "table",
+            "content" => %{
+              "header" => ["Surface"],
+              "rows" => [["visible content cell"]]
+            }
+          }
         ]
       },
       %{"type" => "callout", "text" => "visible callout"},
@@ -48,8 +69,28 @@ defmodule Barkpark.Content.PaperStructurePublishGateTest do
     assert {:ok, published} =
              Content.publish_document("normalizes", "paper", @dataset)
 
-    [list, callout, table] = published.content["blocks"]
-    assert list["items"] == [[%{"type" => "text", "value" => "visible item"}]]
+    [expandable, callout, table] = published.content["blocks"]
+    [alias_list, content_list, content_table] = expandable["children"]
+
+    assert alias_list == %{
+             "type" => "list",
+             "ordered" => false,
+             "items" => [[%{"type" => "text", "value" => "visible alias item"}]]
+           }
+
+    assert content_list == %{
+             "type" => "list",
+             "ordered" => false,
+             "items" => [[%{"type" => "text", "value" => "visible content item"}]]
+           }
+
+    assert content_table["head"] == [[%{"type" => "text", "value" => "Surface"}]]
+
+    assert content_table["rows"] == [
+             [[%{"type" => "text", "value" => "visible content cell"}]]
+           ]
+
+    refute Map.has_key?(content_table, "content")
     assert callout["content"] == [%{"type" => "text", "value" => "visible callout"}]
     refute Map.has_key?(callout, "text")
     assert table["head"] == [[%{"type" => "text", "value" => "Surface"}]]
