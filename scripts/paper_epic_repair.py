@@ -85,6 +85,12 @@ PAPER_AUTHORITY_BOUNDARIES = {
         "Wave 6 owns the distinct hardening proofs; Wave 7 owns the final "
         "parity-closure decision."
     ),
+    "site-spawner-wave-2026-07-13": (
+        "Authority boundary: This founding Paper remains authority for the "
+        "initial six-stage deploy spine, adapter-by-runtime architecture, and "
+        "static Astro scope. Later Site Spawner waves own current "
+        "implementation and live deployment evidence."
+    ),
 }
 PAPER_TITLE_OVERRIDES = {
     "cloud-gui-remake-wave-2026-07-21-r12": (
