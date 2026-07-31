@@ -183,15 +183,30 @@
             <svg class="nav-ico" width="15" height="15" viewBox="0 0 15 15" aria-hidden="true"><polyline points="1,8 4.5,8 6.5,3 9,12 10.8,8 14,8" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round" stroke-linecap="round"/></svg>
             <span>Activity</span>
           </a>
-          <div class="nav-group">
-            <span class="nav-eyebrow">Settings</span>
+          <!-- Settings is a native <details> DISCLOSURE (cch-w14-s2). Six always-
+               open sub-links were 225px of the 690px strip that the folded shell
+               (@media max-width:720px) stacks ABOVE the page, so on every phone
+               and every 621-720px viewport .content began at y=745.88 — below the
+               fold on an 800px-tall screen, entirely off-screen at 390x667.
+               <details> is deliberate over a button+div: the expanded state and
+               the keyboard are the platform's, not ours — the AX tree reports
+               role DisclosureTriangle, name SETTINGS, focusable true, expanded
+               false -> true (driven via CDP Accessibility, both states). It ships
+               `open`, and app.js's syncNavDisclosure() collapses it ONLY while the
+               shell is folded — and never while the route you are on lives inside
+               it, so the active Settings screen is never sealed behind a summary. -->
+          <details class="nav-group" id="nav-settings" open>
+            <summary class="nav-eyebrow nav-group-summary">
+              <span>Settings</span>
+              <svg class="nav-group-caret" width="9" height="6" viewBox="0 0 9 6" aria-hidden="true"><polyline points="1,1.6 4.5,4.8 8,1.6" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>
+            </summary>
             <a href="#settings/billing" class="nav-link nav-sub" data-view="billing">Billing</a>
             <a href="#settings/providers" class="nav-link nav-sub" data-view="providers">Providers</a>
             <a href="#settings/notifications" class="nav-link nav-sub" data-view="notifications">Notifications</a>
             <a href="#settings/tokens" class="nav-link nav-sub" data-view="tokens">API tokens</a>
             <a href="#settings/members" class="nav-link nav-sub" data-view="members">Members</a>
             <a href="#settings/env" class="nav-link nav-sub" data-view="env">Environment variables</a>
-          </div>
+          </details>
         </div>
 
         <!-- LAYER: instance morph — back row + ctx + the instance's sections

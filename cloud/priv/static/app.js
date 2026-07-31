@@ -4151,9 +4151,9 @@
     // onto the new chrome (null-guarded, so the pre-v4 DOM / test shims no-op).
     applyShellNav(r);
     // Collapse the Settings disclosure after every navigation so it never lingers
-    // open over the next page.
-    var menu = document.querySelector(".nav-menu");
-    if (menu) menu.removeAttribute("open");
+    // open over the next page. Folded-shell only, and never over the route you are
+    // actually on — see syncNavDisclosure.
+    syncNavDisclosure(true);
     var inst = document.getElementById("view-instance");
     if (inst) inst.hidden = r.view !== "instance";
     var site = document.getElementById("view-site");
@@ -4283,9 +4283,111 @@
     setScopeLabel(r, layer);
     applyOperatorGate();
     // A navigation closes an open scope dropdown so it never lingers over the
-    // next page (the .nav-menu disclosure gets the same treatment in applyRoute).
+    // next page (the .nav-group disclosure gets the same treatment in applyRoute).
     var sm = $("#scope-menu");
     if (sm) sm.hidden = true;
+  }
+
+  // ── the folded shell's Settings disclosure (cch-w14-s2) ────────────────────
+  // The sidebar's six Settings sub-links are 225px of a 690px strip. Above the
+  // fold that strip is a full-height column beside the page and costs nothing;
+  // BELOW it (@media max-width:720px) the strip stacks ON TOP of the page, and
+  // those 225px were a quarter of why `.content` started at y=745.88 on every
+  // phone. So the disclosure is open by default and stays open above the fold —
+  // this never takes a control away from anyone who had room for it — and is
+  // collapsed only while folded.
+  //
+  // THE ONE EXCEPTION IS THE POINT: it stays open when the route being painted
+  // lives inside it. Collapsing over #settings/billing would hide the very link
+  // carrying aria-current="page", which is the "clipped without a cue" defect in
+  // a different costume.
+  //
+  // This replaces a pre-v4 `.nav-menu` handler that ran here after every
+  // navigation against markup index.html has not carried since the v4 shell; its
+  // CSS is retired in the same commit (app.css SETTINGS MENU block).
+  var NAV_FOLD_MQ = "(max-width: 720px)";
+  var navFoldedLast = null;
+
+  function navShellFolded() {
+    return typeof window.matchMedia === "function" && !!window.matchMedia(NAV_FOLD_MQ).matches;
+  }
+
+  // `onRoute` true = a navigation just happened, so re-apply the rule outright.
+  // false = a geometry event (resize / observed box change), which re-applies ONLY
+  // when the FOLD ITSELF was crossed. That distinction is the whole reason this
+  // takes an argument: a person who taps Settings open below the fold must not
+  // have it snap shut again the moment their own tap changes a box the observer
+  // is watching. Their choice stands until they navigate or cross the fold.
+  function syncNavDisclosure(onRoute) {
+    var group = document.querySelector && document.querySelector(".nav-group");
+    if (!group || typeof group.setAttribute !== "function" || typeof group.removeAttribute !== "function") return;
+    var folded = navShellFolded();
+    var crossed = folded !== navFoldedLast;
+    navFoldedLast = folded;
+    if (!onRoute && !crossed) { navStripCue(); return; }
+    if (!folded) { group.setAttribute("open", ""); navStripCue(); return; }
+    var active = typeof group.querySelector === "function" ? group.querySelector(".nav-link.is-active") : null;
+    if (active) group.setAttribute("open", "");
+    else group.removeAttribute("open");
+    navStripCue();
+  }
+
+  // ── the folded strip's continuation cue ────────────────────────────────────
+  // Below the fold the sidebar is capped at 34vh and scrolls. A cap with NO cue is
+  // not a fix, it is a second defect wearing the first one's clothes: it hides up
+  // to 449px of navigation and says nothing about it. `is-nav-clipped` is the
+  // STATE — is there anything below the cut, right now — and app.css turns it into
+  // the bottom edge fade.
+  //
+  // MEASURED, NOT INFERRED, and that ruling cost a rebuild. The console's existing
+  // fade idiom (.set-matrix) infers the same state from a scroll timeline, which
+  // needs no JS at all; built that way, this cue was DEAD on 48 of 72 driven cells
+  // — the instance and site layers sat 238px and 96px clipped with the fade
+  // computing 0px — because both are painted HERE, after load, and the timeline
+  // had already attached to a scroller with nothing to scroll. Hence the triggers
+  // below: a route change, a scroll, a resize, a disclosure toggle, and nav-layer
+  // content growth. Drop any one of them and the cue goes quiet on exactly the
+  // screens that needed it.
+  function navStripCue() {
+    var sb = document.querySelector && document.querySelector(".sidebar");
+    if (!sb || !sb.classList || typeof sb.classList.toggle !== "function") return;
+    var below = sb.scrollHeight - sb.clientHeight - sb.scrollTop;
+    // 1px, not 0: sub-pixel layout leaves a fraction below the cut on a scroller
+    // that is visibly at its end, and a fade that never retracts is a promise of
+    // more that is not kept.
+    sb.classList.toggle("is-nav-clipped", below > 1);
+  }
+
+  function wireNavStripCue() {
+    var sb = document.querySelector && document.querySelector(".sidebar");
+    if (!sb || typeof sb.addEventListener !== "function") return;
+    sb.addEventListener("scroll", navStripCue, { passive: true });
+    if (typeof window.addEventListener === "function") {
+      window.addEventListener("resize", function () { syncNavDisclosure(false); });
+    }
+    var group = document.querySelector(".nav-group");
+    if (group && typeof group.addEventListener === "function") group.addEventListener("toggle", navStripCue);
+    // The drilled-in layers grow when their sections land, which is one paint AFTER
+    // the navigation that asked for them; observe the layers so the cue arrives
+    // with the content rather than a navigation late. The STRIP itself is observed
+    // too: 34vh means the cut moves with the viewport, so a strip that stops being
+    // clipped has to drop the cue as readily as one that starts.
+    // THREE TRIGGERS COVER THE FOLD CROSSING, DELIBERATELY, because under CDP
+    // viewport emulation neither the matchMedia `change` event nor this observer
+    // delivered one: driven at 900px the media query read false while the
+    // disclosure sat collapsed, and a synthetic `resize` on the same page flipped
+    // it open immediately — so the wiring is right and the emulator is what does
+    // not deliver. A real window resize fires `resize`; belt and braces is the
+    // correct posture when the thing at stake is a person finding Settings gone
+    // from a desktop-width sidebar. Guarded — an absent ResizeObserver costs these
+    // two observations, not the other three triggers.
+    if (typeof window.ResizeObserver === "function" && typeof document.querySelectorAll === "function") {
+      var ro = new window.ResizeObserver(function () { syncNavDisclosure(false); });
+      ro.observe(sb);
+      var layers = document.querySelectorAll(".nav-layer");
+      for (var i = 0; i < layers.length; i++) ro.observe(layers[i]);
+    }
+    navStripCue();
   }
 
   function fleetLookup(id) {
@@ -17446,7 +17548,7 @@
       e.stopPropagation();
       toggleScopeMenu();
     });
-    // Outside-click closes the scope dropdown (mirrors the .nav-menu handler).
+    // Outside-click closes the scope dropdown so it never lingers over a page.
     document.addEventListener("click", function (e) {
       var menu = $("#scope-menu");
       if (menu && !menu.hidden && !(e.target.closest && e.target.closest(".topbar-scope"))) {
@@ -17460,12 +17562,19 @@
     if (ovLaunch) ovLaunch.addEventListener("click", function () { openLaunchModal(); });
     var flLaunch = $("#fleet-launch");
     if (flLaunch) flLaunch.addEventListener("click", function () { openLaunchModal(); });
-    // Close the Settings disclosure when clicking outside it (native <details>
-    // only closes on its own summary; this makes it behave like a real menu).
-    document.addEventListener("click", function (e) {
-      var menu = document.querySelector(".nav-menu[open]");
-      if (menu && !(e.target.closest && e.target.closest(".nav-menu"))) menu.removeAttribute("open");
-    });
+    // The Settings disclosure follows the FOLD, not just the route: rotating a
+    // phone to landscape, or dragging a split-screen pane across 720px, crosses
+    // the boundary without a navigation. Above the fold it is re-opened (nobody
+    // loses a control they had room for); below it, it collapses unless the route
+    // is one of its own. Replaces the pre-v4 outside-click handler that swept for
+    // `.nav-menu`, a class index.html has not carried since the v4 shell.
+    if (typeof window.matchMedia === "function") {
+      var foldMq = window.matchMedia(NAV_FOLD_MQ);
+      var onFold = function () { syncNavDisclosure(false); };
+      if (foldMq.addEventListener) foldMq.addEventListener("change", onFold);
+      else if (foldMq.addListener) foldMq.addListener(onFold);
+    }
+    wireNavStripCue();
     $("#fleet-refresh").addEventListener("click", function () { loadFleet(parseHash().filter || null); });
     $("#sites-refresh").addEventListener("click", loadSites);
     $("#activity-refresh").addEventListener("click", loadActivity);

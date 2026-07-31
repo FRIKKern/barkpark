@@ -11744,3 +11744,73 @@ test("offloadFileErrorCopy: honest transport steers (0 / 401 / 403) else the fri
   assert.match(hooks.offloadFileErrorCopy(403, null), /token/);
   assert.equal(typeof hooks.offloadFileErrorCopy(500, { error: "boom" }), "string");
 });
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w14-s2 — THE FOLDED SHELL STOPS OPENING EVERY SCREEN ON 746px OF NAV.
+// The defect and the fix are both GEOMETRY, so the proof that matters is driven
+// in a real browser (72 cells, both themes, three route families: `.content` top
+// went 745.88 -> 328 at h=800 and -> 282.77 at h=667, while 721 and 768 stayed at
+// exactly 56). What these tests own is the smaller thing a node run CAN own —
+// the source-level invariants that, if any one silently reverted, would put the
+// wall back while every browser proof still read green in a paper.
+// ─────────────────────────────────────────────────────────────────────────────
+
+test("cch-w14-s2: the folded shell CAPS the nav strip and CUES the clip (never a bare cap)", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  // app.css carries several 720 blocks; the SHELL FOLD is the one that turns
+  // .app-shell into a column. Anchored on that declaration, never on ordinal.
+  const anchor = css.indexOf(".app-shell { flex-direction: column; }");
+  assert.ok(anchor > 0, "the shell-fold block must exist");
+  const at = css.lastIndexOf("@media (max-width: 720px)", anchor);
+  assert.ok(at > 0 && anchor - at < 200, "the fold must still be the 720px block");
+  const block = css.slice(at, css.indexOf("\n}\n", at) + 3);
+  assert.match(block, /max-height:\s*34vh/, "the folded strip must be capped (it stood 690px tall)");
+  assert.match(block, /overflow-y:\s*auto/, "a cap with no scroller strands the rest of the nav");
+  // A cap with no continuation cue is the W12 clipped-without-cue defect wearing
+  // a new hat, which is why these travel together and neither may ship alone.
+  assert.match(block, /mask-image:\s*linear-gradient\(to bottom/, "the clip must be CUED");
+  assert.match(block, /\.sidebar\.is-nav-clipped\s*\{\s*--nav-fade:\s*40px/, "the cue is live iff clipped");
+  assert.match(css, /@property --nav-fade/, "--nav-fade must be REGISTERED or the fade jumps");
+  // D153: the fold itself is NOT raised — raising it relocates the same cliff
+  // onto every tablet in portrait. The `anchor - at < 200` check above is that
+  // assertion: the column-stack lives inside the 720 block and nowhere else, and
+  // exactly one rule in the file stacks the shell.
+  assert.equal(css.split(".app-shell { flex-direction: column; }").length - 1, 1,
+    "exactly one rule may stack the shell, and it is the 720px fold");
+});
+
+test("cch-w14-s2: Settings is a real <details> disclosure, and the dead .nav-menu idiom is gone", () => {
+  const html = fs.readFileSync(new URL("./index.html", import.meta.url), "utf8");
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const js = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.match(html, /<details class="nav-group" id="nav-settings" open>/,
+    "a native disclosure — aria-expanded, Enter/Space and the open state come free");
+  assert.match(html, /<summary class="nav-eyebrow nav-group-summary">/);
+  assert.match(js, /function syncNavDisclosure\(onRoute\)/);
+  assert.match(js, /group\.querySelector\("\.nav-link\.is-active"\)/,
+    "the active Settings screen must never be sealed behind a closed summary");
+  // The pre-v4 topbar dropdown retires in the SAME commit, CSS and JS both —
+  // half a retirement is how it survived the whole v4 shell in the first place.
+  assert.ok(!/\bnav-menu\b/.test(html), "index.html must not carry the retired idiom");
+  assert.ok(!/^\s*\.nav-menu[\s{,[:]/m.test(css), "no live .nav-menu rule may remain");
+  assert.ok(!/querySelector\([^)]*nav-menu/.test(js), "no JS may still sweep for .nav-menu");
+});
+
+test("cch-w14-s2: the clip cue is driven from a MEASURED state, on every trigger that changes it", () => {
+  const js = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.match(js, /sb\.scrollHeight - sb\.clientHeight - sb\.scrollTop/,
+    "the cue reads live geometry — inferring it from a scroll timeline measured dead on 48 of 72 cells");
+  assert.match(js, /classList\.toggle\("is-nav-clipped", below > 1\)/);
+  // Five triggers. Lose any one and the cue goes silent on some route.
+  for (const trigger of [
+    /sb\.addEventListener\("scroll", navStripCue/,
+    /window\.addEventListener\("resize", function \(\) \{ syncNavDisclosure\(false\); \}\)/,
+    /group\.addEventListener\("toggle", navStripCue\)/,
+    /new window\.ResizeObserver\(function \(\) \{ syncNavDisclosure\(false\); \}\)/,
+    /syncNavDisclosure\(true\);/,
+  ]) assert.match(js, trigger, "missing a navStripCue trigger: " + trigger);
+  // A geometry event must NOT re-apply the collapse rule unless the fold itself
+  // was crossed — otherwise a person's own tap on Settings snaps it shut again.
+  assert.match(js, /if \(!onRoute && !crossed\) \{ navStripCue\(\); return; \}/,
+    "a resize that did not cross the fold must leave the person's disclosure choice alone");
+});
