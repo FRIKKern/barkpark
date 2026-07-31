@@ -1,0 +1,43 @@
+{
+  "_readme": [
+    "HARVESTED FROM THE REAL api.hetzner.cloud ON 2026-07-31 by scripts/pds-live-hetzner-placement-group.sh --run.",
+    "These are the PERMANENT RESIDUE of the PDS epic's first L1: the live credential is perishable, these bytes are not.",
+    "Every entry records the KIND it came from. The placement-group 404 is 100 bytes and the server 404 is 91 — the",
+    "message differs per resource kind, so NO ASSERTION MAY PIN A UNIVERSAL BYTE COUNT. bytes is per-entry for that reason.",
+    "Consumed by internal/cli/hetzner_live_fixtures_test.go. No credential value appears in any of these files."
+  ],
+  "harvested_at": "2026-07-31T20:11:35Z",
+  "harvested_by": "scripts/pds-live-hetzner-placement-group.sh --run",
+  "api": "https://api.hetzner.cloud/v1",
+  "fixtures": [
+    {
+      "file": "pds_live_hetzner_placement_group_200.json",
+      "kind": "placement-group",
+      "request": "GET /v1/placement_groups/1806023",
+      "http_status": 200,
+      "content_type": "application/json",
+      "bytes": 186,
+      "note": "the resource bp had just created through the real verb; its id/name/type were compared against bp's own create receipt and matched"
+    },
+    {
+      "file": "pds_live_hetzner_placement_group_404.json",
+      "kind": "placement-group",
+      "request": "GET /v1/placement_groups/1806023 (after DELETE)",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 100,
+      "error_code": "not_found",
+      "note": "THE GROUND TRUTH OF PDS-D401. hzResDestroyed's clean (nil,nil) arm depends on production answering a JSON 404 — hcloud-go's errorFromBody returns nil unless hasJSONBody(), so a text/plain 404 would land in the 'not confirmed' arm instead. Assumed for 29 waves; measured here."
+    },
+    {
+      "file": "pds_live_hetzner_server_404.json",
+      "kind": "server",
+      "request": "GET /v1/servers/999999999",
+      "http_status": 404,
+      "content_type": "application/json",
+      "bytes": 91,
+      "error_code": "not_found",
+      "note": "a SECOND kind, harvested to prove the 404 shape is uniform across kinds while its LENGTH is not: 91 bytes here against the placement group's 100"
+    }
+  ]
+}
