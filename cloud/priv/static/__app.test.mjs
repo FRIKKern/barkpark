@@ -3066,9 +3066,13 @@ test("provisionChip: active step gerund + total elapsed; failed; and the empty f
 // Re-pinned for the progress-polish slice: the active dot carries the ring
 // (data-ring + --p), every row a data-step, and the pace column (new-step-time).
 
-test("newStepsHtml: an active step carries the ring dot, the live pace column, the caption and the spinner", () => {
+// cch-w13-s1 re-pin: the pace column is now PROVENANCE-gated. A row whose
+// budget was measured (paceSource: "measured" — a server median absorbed by
+// absorbServerStepEstimates) still quotes it; a planned row narrates elapsed
+// only. Both bytes are locked so neither arm can drift silently.
+test("newStepsHtml: an active MEASURED step carries the ring dot, the live pace column, the caption and the spinner", () => {
   const html = hooks.newStepsHtml([
-    { step: "create", label: "Creating your server", role: "active", elapsedMs: 1000, caption: "Booting", probes: [] },
+    { step: "create", label: "Creating your server", role: "active", elapsedMs: 1000, caption: "Booting", probes: [], paceSource: "measured" },
   ]);
   // stepRingProgress(1000, 15000) = 0.9 * 1/15 → 6%; pace = "1s · ~15s".
   assert.equal(html,
@@ -3085,11 +3089,37 @@ test("newStepsHtml: an active step carries the ring dot, the live pace column, t
     "</ul>");
 });
 
-test("newStepsHtml: a done step is a check with the real elapsed, no spinner and no caption", () => {
+test("newStepsHtml: an active PLANNED step keeps the ring and the caption but quotes NO pace it cannot back", () => {
   const html = hooks.newStepsHtml([
+    { step: "create", label: "Creating your server", role: "active", elapsedMs: 1000, caption: "Booting", probes: [] },
+  ]);
+  // Same row, no provenance → the "· ~15s" half of the pace column is gone and
+  // the live elapsed stands alone. Nothing else about the row moves.
+  assert.equal(html,
+    '<ul class="new-steps">' +
+      '<li class="new-step active" data-step="create">' +
+        '<span class="new-step-dot" aria-hidden="true" data-ring="create" style="--p:6%"></span>' +
+        '<span class="new-step-body">' +
+          '<span class="new-step-label">Creating your server</span>' +
+          '<span class="new-step-detail" data-cap="Booting">Booting</span>' +
+        "</span>" +
+        '<span class="new-step-time" data-time="create">1s</span>' +
+        '<span class="new-step-spin" aria-hidden="true"></span>' +
+      "</li>" +
+    "</ul>");
+  // And provenance is carried on the ROW, never emitted as markup.
+  assert.doesNotMatch(html, /paceSource|data-pace/);
+});
+
+test("newStepsHtml: a done step is a check with the real elapsed, no spinner and no caption — identical under either provenance", () => {
+  const planned = hooks.newStepsHtml([
     { step: "create", label: "Creating your server", role: "ok", elapsedMs: 1000, caption: "", probes: [] },
   ]);
-  assert.equal(html,
+  const measured = hooks.newStepsHtml([
+    { step: "create", label: "Creating your server", role: "ok", elapsedMs: 1000, caption: "", probes: [], paceSource: "measured" },
+  ]);
+  // A finished step reports what HAPPENED, so provenance cannot change a byte.
+  const expected =
     '<ul class="new-steps">' +
       '<li class="new-step done" data-step="create">' +
         '<span class="new-step-dot" aria-hidden="true">&#10003;</span>' +
@@ -3098,17 +3128,38 @@ test("newStepsHtml: a done step is a check with the real elapsed, no spinner and
         "</span>" +
         '<span class="new-step-time">1s</span>' +
       "</li>" +
-    "</ul>");
+    "</ul>";
+  assert.equal(planned, expected);
+  assert.equal(measured, expected);
 });
 
-test("newStepsHtml: a pending step shows the plan hint (~expected); an unknown step shows none", () => {
+test("newStepsHtml: a pending MEASURED step shows the plan hint (~expected); an unknown step shows none", () => {
   const html = hooks.newStepsHtml([
-    { step: "secure", label: "Securing your domain", role: "pending", elapsedMs: null, caption: "", probes: [] },
-    { step: "mystery", label: "mystery", role: "pending", elapsedMs: null, caption: "", probes: [] },
+    { step: "secure", label: "Securing your domain", role: "pending", elapsedMs: null, caption: "", probes: [], paceSource: "measured" },
+    { step: "mystery", label: "mystery", role: "pending", elapsedMs: null, caption: "", probes: [], paceSource: "measured" },
   ]);
   assert.match(html, /<span class="new-step-time">~45s<\/span>/); // secure's estimate
   assert.doesNotMatch(html, /data-step="mystery"[\s\S]*new-step-time/); // no estimate → no hint
   assert.doesNotMatch(html, /new-step-spin[\s\S]*data-step="mystery"|data-step="mystery"[^]*new-step-spin/);
+});
+
+test("newStepsHtml: a pending PLANNED step shows NO plan hint — the whole time column is absent", () => {
+  const html = hooks.newStepsHtml([
+    { step: "secure", label: "Securing your domain", role: "pending", elapsedMs: null, caption: "", probes: [] },
+  ]);
+  // The full row, byte-locked: same dot, same label, and where the "~45s"
+  // promise used to sit there is now nothing at all (the .skipped drop-the-hint
+  // rule, applied to a step whose budget nobody measured).
+  assert.equal(html,
+    '<ul class="new-steps">' +
+      '<li class="new-step pending" data-step="secure">' +
+        '<span class="new-step-dot" aria-hidden="true"></span>' +
+        '<span class="new-step-body">' +
+          '<span class="new-step-label">Securing your domain</span>' +
+        "</span>" +
+      "</li>" +
+    "</ul>");
+  assert.doesNotMatch(html, /~45s/);
 });
 
 test("newStepsHtml: a `next` row pulses — pending class + next, Starting… caption, dimmable spinner", () => {
@@ -3354,6 +3405,143 @@ test("provisionOverallHtml: carries the progressbar, fill width, and Step N of M
   assert.match(html, /data-overall-fill style="width:\d+%"/);
   assert.match(html, /data-overall-summary>Step 2 of 3</);
   assert.match(html, /data-overall-eta>/);
+});
+
+// ── cch-w13-s1: the rail stops promising a precision it does not have ───────
+// Provenance rides the ROW OBJECT (paceSource: "measured" | "planned"), never
+// the markup. A planned row quotes no "~Ns" plan, and a run whose rows are
+// planned renders an INDETERMINATE bar with no ETA — the person is told what
+// step they are on (a count) and nothing that pretends to be a measurement.
+
+test("cch-w13-s1 paceSource rides the row: provision rows are always planned, a deploy stage only measured when the server published its median", () => {
+  // Every provision row, main OR support, is planned — both estimate tables are
+  // hand-written constants and the server publishes no provision key.
+  const prov = hooks.provisionSteps({ provision_steps: [{ step: "create", status: "started", at: T(0) }] }, NOW);
+  assert.ok(prov.length > 0);
+  assert.deepEqual([...new Set(prov.map((r) => r.paceSource))], ["planned"]);
+  const support = hooks.provisionSteps({ fleet_role: "support", provision_steps: [] }, NOW);
+  assert.deepEqual([...new Set(support.map((r) => r.paceSource))], ["planned"]);
+
+  // The deploy rail: per STAGE, not per table. BUILD carries a server median →
+  // "measured"; the five the server did not publish stay "planned".
+  hooks.absorbServerStepEstimates({ step_estimates: { deploy: { BUILD: 14835 } } });
+  const rows = hooks.deployRailRows({ PLAN: { status: "done" }, BUILD: { status: "running" } });
+  const by = Object.fromEntries(rows.map((r) => [r.step, r.paceSource]));
+  assert.deepEqual(by, {
+    PLAN: "planned", BUILD: "measured", STAGE: "planned",
+    HEALTH: "planned", SWITCH: "planned", RETIRE: "planned",
+  });
+  // The pacer copies rows through a whitelist — provenance must survive it, or
+  // the /new + rail screens would silently fall back to planned mid-run.
+  const paced = hooks.paceSteps(rows, {}, Date.now());
+  assert.equal(paced.find((r) => r.step === "BUILD").paceSource, "measured");
+
+  // A table the server later withdraws demotes the stage back to planned.
+  hooks.absorbServerStepEstimates({ step_estimates: { deploy: {} } });
+  assert.equal(hooks.deployRailRows({}).find((r) => r.step === "BUILD").paceSource, "planned");
+});
+
+test("cch-w13-s1 provenance is NEVER markup: the rendered rail carries no pace attribute, only different copy", () => {
+  const planned = hooks.newStepsHtml([
+    { step: "BUILD", label: "Build", role: "pending", elapsedMs: null, expectedMs: 120000, caption: "", probes: [] },
+  ]);
+  const measured = hooks.newStepsHtml([
+    { step: "BUILD", label: "Build", role: "pending", elapsedMs: null, expectedMs: 14835, caption: "", probes: [], paceSource: "measured" },
+  ]);
+  for (const html of [planned, measured]) {
+    assert.doesNotMatch(html, /paceSource|data-pace|data-source|measured|planned/);
+  }
+  // The ONLY difference between the two rows is the promise itself.
+  assert.ok(!planned.includes("new-step-time"), "a planned pending row has no time column at all");
+  assert.match(measured, /<span class="new-step-time">~14s<\/span>/); // the 14835ms median
+});
+
+test("cch-w13-s1 provisionOverallHtml: planned rows → an INDETERMINATE progressbar and an EMPTY eta", () => {
+  const rows = [
+    paceRow("create", "ok"),
+    { step: "secure", role: "active", label: "Securing your domain", elapsedMs: 10000, caption: "", probes: [] },
+    paceRow("ready", "pending"),
+  ];
+  const o = hooks.provisionOverall(rows);
+  assert.equal(o.planned, true);
+  assert.equal(hooks.overallEtaText(o), null, "no honest time-left exists → null, not 'almost there'");
+  const html = hooks.provisionOverallHtml(rows);
+  // The canonical indeterminate ARIA shape: role + min/max, NO aria-valuenow.
+  assert.match(html, /<div class="prov-overall-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">/);
+  assert.doesNotMatch(html, /aria-valuenow/);
+  // …and the ETA slot renders empty. The COUNT stays — it is not a prediction.
+  assert.match(html, /<span class="prov-overall-eta" data-overall-eta><\/span>/);
+  assert.match(html, /<span data-overall-summary>Step 2 of 3<\/span>/);
+  assert.doesNotMatch(html, /about .* left|almost there/);
+});
+
+test("cch-w13-s1 provisionOverallHtml: measured rows KEEP the announced percentage and the ETA", () => {
+  const measure = (step, role, extra) => Object.assign(
+    { step, role, label: step, elapsedMs: null, caption: "", probes: [], expectedMs: 10000, paceSource: "measured" }, extra);
+  const rows = [measure("PLAN", "ok", { elapsedMs: 2000 }), measure("BUILD", "active", { elapsedMs: 5000 }), measure("STAGE", "pending")];
+  const o = hooks.provisionOverall(rows);
+  assert.equal(o.planned, false);
+  assert.match(hooks.overallEtaText(o), /^about .* left$/);
+  const html = hooks.provisionOverallHtml(rows);
+  assert.match(html, /role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="\d+"/);
+  assert.match(html, /data-overall-eta>about /);
+});
+
+test("cch-w13-s1 a finished or failed run is still determinate — 100% and 'Setup failed' are facts, not predictions", () => {
+  const done = hooks.provisionOverall([paceRow("create", "ok"), paceRow("ready", "ok")]);
+  assert.equal(done.planned, false);
+  assert.equal(hooks.overallEtaText(done), "Ready");
+  assert.match(hooks.provisionOverallHtml([paceRow("create", "ok"), paceRow("ready", "ok")]), /aria-valuenow="100"/);
+  const failed = hooks.provisionOverall([paceRow("create", "ok"), paceRow("secure", "failed")]);
+  assert.equal(failed.planned, false);
+  assert.equal(hooks.overallEtaText(failed), "");
+});
+
+test("cch-w13-s1 BOTH mount sites: the instance timeline renders the indeterminate bar, and /new mounts the same builder", () => {
+  // Mount 2, driven end to end off a real fleet payload.
+  const tl = hooks.instanceTimelineHtml({
+    id: "bp-1", name: "Hugin", provision_status: "provisioning",
+    provision_steps: [
+      { step: "create", status: "started", at: "2026-07-03T12:00:00Z" },
+      { step: "create", status: "done", at: "2026-07-03T12:00:05Z" },
+      { step: "secure", status: "started", at: "2026-07-03T12:00:05Z" },
+    ],
+    provision_console: [],
+  }, {});
+  assert.match(tl, /<div class="prov-overall-track" role="progressbar" aria-valuemin="0" aria-valuemax="100">/);
+  assert.doesNotMatch(tl, /aria-valuenow/);
+  assert.match(tl, /<span class="prov-overall-eta" data-overall-eta><\/span>/);
+  assert.doesNotMatch(tl, /~\d+[sm]/, "no planned step quotes a pace hint in the timeline");
+
+  // Mount 1 (/new) feeds provisionOverallHtml the paced fold of the SAME rows,
+  // so the identical bar renders there…
+  const ledger = {};
+  const newRows = hooks.paceSteps(
+    hooks.provisionSteps({ provision_steps: [
+      { step: "create", status: "started", at: "2026-07-03T12:00:00Z" },
+      { step: "create", status: "done", at: "2026-07-03T12:00:05Z" },
+      { step: "secure", status: "started", at: "2026-07-03T12:00:05Z" },
+    ] }, NOW), ledger, NOW);
+  const newBar = hooks.provisionOverallHtml(newRows);
+  assert.doesNotMatch(newBar, /aria-valuenow/);
+  assert.match(newBar, /<span class="prov-overall-eta" data-overall-eta><\/span>/);
+  // …and the /new screen has exactly TWO provisionOverallHtml call sites (the
+  // initial mount + the late insert once the first real steps land). A third
+  // emitter of the bar would be a mount this lock never checked.
+  const newScreen = APP_SRC.slice(APP_SRC.indexOf("function newRenderProgress"));
+  const body = newScreen.slice(0, newScreen.indexOf("function newRenderFailed"));
+  assert.equal((body.match(/provisionOverallHtml\(/g) || []).length, 2,
+    "newRenderProgress mounts the bar and late-inserts it — both through the shared builder");
+  // The provision bar has exactly ONE aria-valuenow emitter, and it sits behind
+  // the determinate arm — so there is no second place a planned run could leak
+  // an announced percentage from. (The SPA's only other emitter is the usage
+  // quota bar, which counts real consumption and is rightly determinate.)
+  const barSrc = APP_SRC.slice(APP_SRC.indexOf("function provisionOverallHtml"),
+    APP_SRC.indexOf("function patchProvisionOverall"));
+  assert.equal((barSrc.match(/aria-valuenow="/g) || []).length, 1);
+  assert.match(barSrc, /o\.planned \? "" :/);
+  assert.equal((APP_SRC.match(/aria-valuenow="/g) || []).length, 2,
+    "only the provision bar and the usage quota bar announce a value at all");
 });
 
 test("newStepsHtml: a completing row carries the completing class and a visible sweep start", () => {
@@ -11144,6 +11332,24 @@ test("supportRowHtml per state: provisioning → the SUPPORT theater through new
   assert.match(html, /data-step="secure"/);
   assert.ok(!/data-step="freshen"/.test(html), "freshen stays main-only in the support theater");
   assert.match(html, /Configuring the runtime/); // support label, not "Configuring Barkpark"
+});
+
+test("cch-w13-s1 supportRowHtml: the support theater quotes NO constant-paced hint — the four ~Ns promises are gone", () => {
+  // The support theater renders through the same newStepsHtml, so it carried
+  // four unpinned "~Ns" hints off SUPPORT_STEP_EXPECTED_MS (secure 45s,
+  // content 25s, verify 45s, ready 5s — every one a hand-written constant).
+  // This is the coverage that gap never had: they are planned, so they render
+  // nothing, and the live step still narrates its real elapsed.
+  const html = hooks.supportRowHtml(FLEET_SUPPORT_PROV, Date.parse("2026-07-24T10:01:00Z"));
+  assert.doesNotMatch(html, /~\d+[sm]/, "no support step may quote a pace nobody measured");
+  for (const hint of ["~45s", "~25s", "~5s", "~20s", "~1m 0s"]) {
+    assert.ok(!html.includes(hint), "the support theater still quotes " + hint);
+  }
+  // The rows are all planned, and the elapsed narration survives untouched.
+  const rows = hooks.provisionSteps(FLEET_SUPPORT_PROV, Date.parse("2026-07-24T10:01:00Z"));
+  assert.ok(rows.every((r) => r.paceSource === "planned"));
+  assert.match(html, /<span class="new-step-time">20s<\/span>/);          // create, done
+  assert.match(html, /data-time="configure">40s<\/span>/);                 // configure, live
 });
 
 test("supportRowHtml per state: failed is HONEST (alert + verbatim error), live carries the key step", () => {

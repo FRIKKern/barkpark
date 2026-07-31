@@ -10241,6 +10241,15 @@
     return SERVER_STEP_EXPECTED_MS[name];
   }
 
+  // Where THIS stage's budget came from — the provenance the pace copy quotes.
+  // "measured" only when the server published a median for this exact stage
+  // (per STEP, not per table: a payload carrying only BUILD leaves the other
+  // five "planned"). Everything else — a refused stage, an absent table, a
+  // provision step — is "planned", a number somebody typed.
+  function deployPaceSource(name) {
+    return (serverDeployExpectedMs && serverDeployExpectedMs[name] != null) ? "measured" : "planned";
+  }
+
   // Pure: the engine's per-stage status word → a rail display role (the same
   // vocabulary newStepsHtml renders — ok/failed/active/pending, plus skipped).
   // Unknown/blank → pending, so a lean report never invents progress.
@@ -10315,6 +10324,10 @@
         // screen quoted "about 2m" for a build that half the time finishes in
         // fifteen seconds.
         expectedMs: deployExpectedMs(name),
+        // …and where that budget CAME from. A stage the server measured paces
+        // off a real median and may quote its "~15s" plan; a stage still on its
+        // constant is "planned" and quotes nothing (see newStepsHtml).
+        paceSource: deployPaceSource(name),
         caption: (e && e.detail) || "",
         probes: [],
       };
@@ -13544,13 +13557,22 @@
       etaMs += w * (1 - frac);
     }
     var pct = totalW ? (doneW / totalW) * 100 : 0;
+    // A run is only as measured as its weakest row: if ANY visible row is paced
+    // by a hand-written constant, the weighted percentage and the time-left
+    // proxy above are arithmetic over invented numbers. `planned` says so, and
+    // the presentations withhold the announced percentage and the ETA — a
+    // finished or failed run is exempt, because 100% and "Setup failed" are
+    // facts about what happened, not predictions about what will.
+    var planned = rows.length > 0 && !allDone && !failed &&
+      rows.some(function (r) { return !rowPaceIsMeasured(r); });
     return {
       pct: allDone ? 100 : Math.min(Math.round(pct), 99), // never 100 until truly done
       index: activeIdx >= 0 ? activeIdx + 1 : (allDone ? rows.length : Math.min(1, rows.length)),
       count: rows.length,
       etaMs: allDone ? 0 : etaMs,
       done: allDone,
-      failed: failed
+      failed: failed,
+      planned: planned
     };
   }
 
@@ -13560,9 +13582,13 @@
     if (!o.count) return "Starting…";
     return "Step " + o.index + " of " + o.count;
   }
+  // null (not "") when the rows are planned: there is no honest time-left to
+  // print, so the slot renders EMPTY rather than "almost there" — which is
+  // itself a prediction. The count ("Step 2 of 5") carries the whole headline.
   function overallEtaText(o) {
     if (o.failed) return "";
     if (o.done) return "Ready";
+    if (o.planned) return null;
     return (o.etaMs != null && o.etaMs >= 1000) ? "about " + fmtDur(o.etaMs) + " left" : "almost there";
   }
 
@@ -13571,13 +13597,18 @@
   function provisionOverallHtml(rows) {
     var o = provisionOverall(rows);
     var state = o.failed ? " is-failed" : o.done ? " is-done" : "";
+    // Planned rows → the canonical INDETERMINATE progressbar: role + min/max,
+    // NO aria-valuenow. A screen reader announcing "47 percent" of a duration
+    // nobody measured is the loudest form of this lie, and it is the one the
+    // person cannot see to discount.
+    var valueNow = o.planned ? "" : ' aria-valuenow="' + o.pct + '"';
     return '<div class="prov-overall' + state + '" data-overall>' +
-      '<div class="prov-overall-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="' + o.pct + '">' +
+      '<div class="prov-overall-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"' + valueNow + '>' +
         '<div class="prov-overall-fill" data-overall-fill style="width:' + o.pct + '%"></div>' +
       "</div>" +
       '<div class="prov-overall-meta">' +
         '<span data-overall-summary>' + esc(overallSummaryText(o)) + "</span>" +
-        '<span class="prov-overall-eta" data-overall-eta>' + esc(overallEtaText(o)) + "</span>" +
+        '<span class="prov-overall-eta" data-overall-eta>' + esc(overallEtaText(o) || "") + "</span>" +
       "</div>" +
     "</div>";
   }
@@ -13592,11 +13623,17 @@
     var fill = el.querySelector("[data-overall-fill]");
     if (fill) fill.style.width = o.pct + "%";
     var track = el.querySelector(".prov-overall-track");
-    if (track) track.setAttribute("aria-valuenow", String(o.pct));
+    // The tick must be able to REMOVE the announced value too: a run that
+    // starts measured and later shows a planned row must fall back to
+    // indeterminate in place, never keep a stale number.
+    if (track) {
+      if (o.planned) track.removeAttribute("aria-valuenow");
+      else track.setAttribute("aria-valuenow", String(o.pct));
+    }
     var sum = el.querySelector("[data-overall-summary]");
     if (sum) sum.textContent = overallSummaryText(o);
     var eta = el.querySelector("[data-overall-eta]");
-    if (eta) eta.textContent = overallEtaText(o);
+    if (eta) eta.textContent = overallEtaText(o) || "";
     el.className = "prov-overall" + (o.failed ? " is-failed" : o.done ? " is-done" : "");
   }
 
@@ -13680,9 +13717,21 @@
       role: role,
       elapsedMs: elapsedMs,
       expectedMs: expected[name],
+      // A provision step is ALWAYS "planned": both tables are hand-written
+      // constants and the server deliberately publishes no provision median
+      // (see pickTables — the live cohort is four jobs). The row says so out
+      // loud so the presentations can stop quoting a pace nobody measured.
+      paceSource: "planned",
       caption: caption,
       probes: probes
     };
+  }
+
+  // The ONE provenance predicate the presentations ask (ring pace column,
+  // master bar, ETA). Absent field → planned: a row that never declared where
+  // its budget came from has not earned a number on screen.
+  function rowPaceIsMeasured(row) {
+    return !!row && row.paceSource === "measured";
   }
 
   // Between two steps the worker reports nothing (e.g. the SSH boot wait right
@@ -13832,10 +13881,16 @@
             return '<li class="new-step-probe">' + esc(p) + "</li>";
           }).join("") + "</ul>"
         : "";
+      // The plan hint ("~30s") is a PROMISE, so only a row whose budget was
+      // measured is allowed to make it — the same rule the skipped row already
+      // obeys, applied to the other way a hint can be a lie. A planned active
+      // row narrates elapsed only; a planned pending row says nothing and lets
+      // the .next pulse carry "working, distance unknown".
+      var paced = rowPaceIsMeasured(row) && expected;
       var time = "";
-      if (row.role === "active") time = fmtDur(row.elapsedMs) + (expected ? " · ~" + fmtDur(expected) : "");
+      if (row.role === "active") time = fmtDur(row.elapsedMs) + (paced ? " · ~" + fmtDur(expected) : "");
       else if (skipped) time = ""; // no plan hint for a step that will not run
-      else if (row.role === "pending") time = expected ? "~" + fmtDur(expected) : "";
+      else if (row.role === "pending") time = paced ? "~" + fmtDur(expected) : "";
       else if (row.elapsedMs != null) time = fmtDur(row.elapsedMs);
       var timeHtml = time
         ? '<span class="new-step-time"' + (row.role === "active" ? ' data-time="' + esc(row.step) + '"' : "") + ">" + esc(time) + "</span>"
@@ -14654,7 +14709,7 @@
   function paceCopy(row) {
     return {
       step: row.step, label: row.label, role: row.role, elapsedMs: row.elapsedMs,
-      expectedMs: row.expectedMs,
+      expectedMs: row.expectedMs, paceSource: row.paceSource,
       caption: row.caption, probes: row.probes, next: row.next, completing: false
     };
   }
@@ -18309,6 +18364,9 @@
       newStepMinDwellMs: NEW_STEP_MIN_DWELL_MS,
       // Overall master bar (provisioning-ui upgrade): pure model + markup.
       provisionOverall: provisionOverall, provisionOverallHtml: provisionOverallHtml,
+      // cch-w13-s1: the ETA copy is its own seam — null (not "") when the rows
+      // are planned, so the honest-empty arm is pinnable without a DOM.
+      overallEtaText: overallEtaText,
       // Zero-paste Vercel handoff (task-4e4a53b101a97051): the claim-area builders.
       vercelClaimHtml: vercelClaimHtml, vercelClaimLinkHtml: vercelClaimLinkHtml,
       vercelCloneUrl: vercelCloneUrl,
