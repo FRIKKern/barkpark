@@ -1,155 +1,201 @@
-# CLI-Reliability (epic-cycle charter slot)
+# Jarl Platform Follow-ups (epic-cycle charter slot)
 
 > NOTE ON THIS PATH: this filename is the rotating epic-cycle charter SLOT and has carried
-> earlier epics. The prior occupant — **Studio Space-Priority Desk** — is preserved in full
-> (D1–D34 verbatim, plus later waves) at `.claude/workflows/bp-studio-space-priority-charter.md`;
-> do NOT read this file for SPD history. This slot is now the memory of the
-> **CLI-Reliability** throughput epic.
+> earlier epics. Prior occupants are preserved in full at their dedicated paths — most recently
+> **jarl.no Historiene** at `.claude/workflows/bp-jarl-historiene-charter.md` (moved when this
+> PR merged after #8320, per slot convention); before it, **jarl.no Dogfood Publishing** at
+> `.claude/workflows/bp-jarl-dogfood-publishing-charter.md` and **CLI-Reliability** at
+> `.claude/workflows/bp-cli-reliability-charter.md`. Do NOT read this file for their history.
+> This slot is now the memory of the **Jarl Platform Follow-ups** epic.
 >
-> Epic anchor: bp task **`task-09f4775e7ccc2cca`** (scoreboard-parent research epic).
-> Wave paper: **`cli-reliability-wave-2026-07-23`** (style=article).
-> Decided 2026-07-23.
+> Epic anchor: bp task **`jarl-platform-followups-epic`** (guerrilla ledger).
+> Wave 1 paper: **`jarl-platform-followups-wave-2026-07-31`** (style=article).
+> Decided 2026-07-31.
+> Baseline: origin/main `e3403110465e094d8ff06f4cc68c2c3ee342dfdd` (cited line numbers pin here).
 
 ## Vision
 
-The CLI dev-loop's health instruments must be UNABLE to lie. Two freshly-verified
-non-Elixir false-green classes get fixed as permanent instruments, not patches:
-(1) `make doctor` / scripts/doctor.sh false-greens a stale installed `bp` binary
-because it diffs the binary's build commit against LOCAL HEAD instead of
-origin/main — a binary built in a diverged worktree that misses merged CLI
-changes (#5786-class) reports healthy. (2) The served scaffy catalog can drift
-from main silently because nothing in CI ever runs `go run ./scaffy/seed --check`
-(it WAS red for days until a manual re-seed on 2026-07-23 13:56Z). Both fixes are
-mutation-proven (a behind binary MUST red; corpus drift MUST red) and land with
-permanent regression harnesses, merging on the Go/CI lane parallel to the Elixir
-queue. Improvement-only; honest 2-slice wave.
+One golden path, proven end-to-end: `git push` → webhook mints a BUILDABLE queued deployment →
+the box's own supervised builder shallow-clones the pushed sha → nixpacks → runtime → live, on a
+box that came out of `bp launch` already carrying the whole site plane, with the pipeline wearing
+its own watchdog. Definition of done is the epic's: a fresh `bp launch` box hosts a site from a
+git push with zero manual steps, and the board survives the load. The board lane (guerrilla task
+writes under saturation) rides in parallel and never gates the spine.
+
+Ground-truth corrections this epic carries (each proven in the 2026-07-31 verify round, recipe
+rows under `tooling/grip/ledger/`, committed on this branch):
+
+- The wish's "real fail-open recovery" phrasing is stale — the codebase deliberately chose
+  fail-LOUD (#8136); we extend that doctrine, we do not reverse it.
+- The builder is per-box and co-located BY CONSTRUCTION (filesystem tarball handoff), not a
+  central "muscle-1" host. The jarl incident root cause was sequential: site plane never
+  installed (docker absent until 17:32Z, 41 min after the mint), THEN a token mismatch
+  (agent.token vs require_worker — ~29 min of silent 401 polling, invisible in journalctl by
+  construction: `Run()` discards the claim error unlogged).
+- A dedup outage on the API mutate surface is 409 `halted` (deliberate, byte-budget-gated), and
+  a genuine 500 on the GitHub webhook surface. Not 503.
 
 ## Decisions
 
-- **D1 — merge-base semantics, not a bare origin/main swap.** Stale iff
-  `git diff --name-only $(git merge-base $BP_COMMIT origin/main) origin/main -- '*.go' go.mod go.sum internal cmd deploy.sh`
-  is non-empty. Why: proven on real fixture repos across the full verdict matrix —
-  a binary AHEAD with unpushed local Go commits has merge-base==tip and stays
-  green; a bare swap would false-red it (vm-doctor-matrix, 8/8 cells).
-- **D2 — guard order is load-bearing: cat-file → rev-parse → merge-base → diff.**
-  `git cat-file -e "$BP_COMMIT^{commit}"` (unknown commit → loud skip) FIRST,
-  then `git rev-parse --verify --quiet origin/main` (offline/no-ref → loud skip),
-  then non-empty merge-base, then the diff. Why: the bare one-liner FALSE-GREENS
-  offline — `$base` goes empty, the git error is swallowed, and an empty diff
-  reads ok (proof line: "BARE verdict: GREEN <-- FALSE-GREEN"). All new branches
-  route through bad()/skip()/ok() (SessionStart hook silence contract) and the
-  unconditional `exit 0   # advisory` tail stays (upgrade_test + hook contract).
-- **D3 — pathspec gains `deploy.sh`.** Why: root deploy.sh is a real binary input
-  (`make cli-assets-sync` vendors it into the embed); its root↔vendored identity
-  is enforced only by vendored-assets.yml — one word removes the dependency on
-  that external invariant (historic drift #757/#499).
-- **D4 — permanent harness `scripts/doctor.test.sh` (install-cli.test.sh
-  convention) wired via a NEW `.github/workflows/shell-harnesses.yml`.** Why:
-  doctor.sh false-greened twice in one week by two different routes (#5935 regex,
-  compare-target today) — patch-without-harness is how this file fails; and NO
-  existing CI lane runs any scripts/*.test.sh (zero `run:` hits repo-wide), so
-  "ride an existing job" was refuted — a lane must be authored. Rejected rival:
-  a `--selftest` flag inside doctor.sh (the checkout must audit the binary; keep
-  the advisory script lean).
-- **D5 — the harness's fake-git MUST stub `merge-base` (returning a plausible
-  SHA) and MUST place a fake `bp` on PATH.** Why: upgrade_test's fixture has
-  neither, so its PASS never exercises section 2 — copying it verbatim
-  reproduces the same blind spot one level down (vm-upgrade-test-interplay).
-- **D6 — autoseed tripwire = dedicated advisory workflow
-  `.github/workflows/scaffy-catalog-drift.yml` + `make seed-check`.** TOKENLESS
-  (seed --check reads the published perspective from guerrilla.barkpark.cloud by
-  design; NO guerrilla creds in CI) and ADVISORY (job-level
-  `continue-on-error: true`; remediation is a human re-seed, never a CI
-  mutation). Triggers: push-to-main with paths scaffy/commands/**,
-  scaffy/seed/**, internal/scaffy/**, its own yml; daily cron `17 6 * * *`;
-  workflow_dispatch. `concurrency.cancel-in-progress: false` — a literal `true`
-  reds never-cancel-main-check via doc-gates' `.github/workflows/**` glob
-  (mutation-proven both directions in preflight). The job summary distinguishes
-  UNREACHABLE (fetch failure — no table is even printed) from DRIFT (table rows)
-  from in-sync, so advisory reds aren't ambiguous noise. Why dedicated: bolting
-  an advisory network check onto a required gate's workflow muddies the gate
-  story.
-- **D7 — in-workflow self-test step.** Before the real check, mutate one .scaffy
-  in the RUNNER's ephemeral checkout, assert exit 1 + a DRIFT row naming that
-  command, restore via `git checkout --`. Why: the tripwire must re-prove it can
-  fail on every run, not once at merge time (astro-finder-drift precedent;
-  make-the-check-able-to-fail doctrine).
-- **D8 — claim the existing anchor tasks; file nothing new for the slices.**
-  Slice 1 = `scaffy-backlog-doctor-bp-freshness`, slice 2 =
-  `scaffy-backlog-seedcheck-ci-advisory`, both re-parented under
-  `task-09f4775e7ccc2cca`. Why: the wish's cited pdf-bl-doctor-bp-staleness-regex
-  is closed and covered a different bug (regex false-skip, #5935); these two open
-  tasks are the exact live ledger anchors — filing duplicates forks the ledger.
-  Slice 1 must diff against CURRENT doctor.sh (post-#5726): the no-stamp loud red
-  and `make cli-install` hint already exist and must be preserved.
-- **D9 — builders: Opus, both slices; slice 1 carries HIGH-FLIP-RISK.** The
-  flip-prone judgment is the doctor verdict matrix — legit up-to-date and
-  ahead-with-local-Go binaries MUST stay green. Reviewer re-derives that matrix
-  independently on fixtures (E2), and a genuinely independent second reviewer is
-  warranted before merge.
-- **D10 — post-merge obligations (lead):** one green `workflow_dispatch` run of
-  scaffy-catalog-drift.yml on main proving Actions-runner egress to
-  guerrilla.barkpark.cloud (unprovable pre-merge), and one live `make doctor` on
-  a deliberately-behind worktree confirming the RED fires in situ.
-- **D11 — premise corrections recorded honestly.** seed --check is GREEN today
-  (re-seeded 13:56Z by scaffy-dr-catalog-reseed) — slice 2 delivers the
-  tripwire, not a re-seed. The wish's task citation was stale. "Parallel to the
-  Elixir queue" is correctness-parallel only — elixir.yml runs on every PR
-  (~13-16 min wall) and main has ZERO branch protection; all gates are
-  discipline. No freshness path may ever consume `go version -m` vcs stamps
-  (unsound in nested worktrees — walk-up binds to the ancestor repo's HEAD;
-  the ldflags `commit` field is the only trustworthy signal).
+- **D1 — Clone source rides the claim ENVELOPE, never `deployment_json`.** Claim 200 body
+  becomes `%{deployment, observed_epoch, source}` with `source = %{kind: "git", url:
+  "https://github.com/<github_repo>.git", ref: <full 40-char sha>}`, attached whenever the
+  deployment is artifact-less and the site has `github_repo`. Why: `deployment_json/1` has 17
+  call sites including tenant-facing reads — anything inside it leaks to the SPA; the envelope
+  is worker-gated by construction, and zero tests pin the claim body as an exact map (proven:
+  no `== %{`/`Map.keys` assert in `router_builder_test.exs`), so the key is free.
+- **D2 — Predicate flip and git-ref lane land as ONE integration (same wave, spine merges
+  together).** `github_build_available?/1` (router.ex:11657) flips from hardcoded `false` to
+  repo-present (`is_binary(site.github_repo)`). Why: the webhook mints artifact-less rows, so a
+  flip without the builder lane makes push-to-deploy fail LOUDER than today; repo visibility is
+  not persisted, so repo-present is the only honest predicate available — private repos get a
+  queued→failed cycle with a classified clone error instead of a pre-emptive apology. Previews
+  need no gating: they never consulted the predicate and become buildable for free.
+- **D3 — The clone sequence is sha-first, and there is no fallback.** `git init; git remote add
+  origin <url>; GIT_TERMINAL_PROMPT=0 git -c credential.helper= fetch --depth 1 origin
+  <full-sha>; git checkout FETCH_HEAD`. Why: proven live against GitHub — unadvertised and root
+  shas fetch at depth 1, while the guessed fallback (branch fetch then checkout sha) FAILS for
+  every non-tip sha (`reference is not a tree`). Short shas are refused (`couldn't find remote
+  ref`); `not our ref` = terminal source-gone; a credential prompt = terminal repo-inaccessible
+  (and without GIT_TERMINAL_PROMPT=0 the builder would hang on stdin forever).
+- **D4 — Builder identity: `require_agent` + barkpark scope on ALL FIVE `/v1/builder/*` routes,
+  reusing the box's existing `/etc/barkpark/agent.token`. No dedicated builder token.** Why:
+  the runtime half of the same pipeline is already agent-scoped (symmetry on a tested seam);
+  fleet-wide claim is correctness-broken at ≥2 boxes (wrong-box builds wedge `pushing` rows —
+  the tarball handoff is a local filesystem); WORKER_TOKEN on a customer box opens
+  `/v1/internal/*` (list/deprovision the fleet) and unscoped decrypted env reads; and
+  `verify_agent_token` ignores scope (registry.ex:4238), so reuse costs zero verify-side change
+  while a dedicated token would rebuild mint/rotate/deliver machinery that already exists.
+- **D5 — Box-scoped claim NEVER ships before the queue-age alarm.** Same release train, alarm
+  first (wave rounds encode it). Why: box-scoping strands queued rows on plane-less boxes and
+  the reaper never ages repo-backed queued rows — the alarm is that orphan class's ONLY surfacer.
+- **D6 — The alarm is a CP-side read-only query, not a reaper pass and not a builder report.**
+  New Registry aggregate (max queued container-deployment age per barkpark, one GROUP BY — no
+  N+1), surfaced as `queued_deploy_age_seconds` (number, nil when none) on `barkpark_json/3`;
+  Go + SPA own the 5-minute threshold. Why: the builder is structurally silent on failure, and
+  the 15-min reaper is a MUTATING builder-lease mechanism at 3× the alarm horizon — reusing
+  either would be wrong twice.
+- **D7 — The attention state is named `deploy_stalled`, warn tone, inserted after `degraded`,
+  before `behind` (attention bucket), tail renumbered in Go + SPA + attention_order.json.**
+  Why: the string `queued` is already mapped to the info/blue tone in semrole.go:93 (silent
+  wrong tone), and a degraded box's stuck queue is a symptom, so degraded outranks it. Same
+  slice makes the node harness read `attention_order.json` (today Go is the fixture's ONLY
+  asserter — the "three-speaker seam" was disproven; verify_probes.json at __app.test.mjs:4156
+  is the template).
+- **D8 — Provision lane is CHAIN-FIRST, not bake.** A conditional site-plane step lands in
+  `configureHost` between 7b (agent) and 8 (health), running `deploy/site-runtime-install.sh`
+  on the box; it narrates loudly and degrades to stderr like 7b (the alarm is the backstop)
+  rather than failing the go-live. Why: the bake is a `set -euo pipefail` silent-death pipeline
+  with 2-generation irreversibility (PDF-D103) and Azure never sees the warm image; the chain
+  reaches exactly the boxes that host sites, and ordering is safe — the verify gate runs
+  strictly AFTER configureHost (acquireHost:423 precedes runVerifyGate:497).
+- **D9 — Script preconditions first:** site-runtime-install.sh:41's hardcoded arm64 Go tarball
+  becomes arch-aware (it ABORTS a bare default cx23 x86 box), git is installed explicitly (the
+  clone lane makes git load-bearing at BUILD time), and builder/runtime systemd units are staged
+  in `deploy/systemd/` instead of heredocs. Why: every lane (chain, cp-ops, future bake) reuses
+  these steps; heredoc-only units are why supervision looked unowned.
+- **D10 — Board lane: do NOT rebuild dedup birth (#8136 landed bounded 5s fetch + fail-loud +
+  bypass); bound its unowned twin.** `Content.DedupWall` (the publish half of the same default
+  `bp task create`) gains the same discipline: 5s query budget, `catch :exit`, degraded →
+  `{:error, {:dedup_unavailable, …}}` (errors.ex:443 already maps it to 409). Why: the default
+  create pays TWO dedup scans across two requests; #8136 bounded the create door and left the
+  publish door open with a silent rescue-only fail-open — the literal failure mode its own
+  commit body warned about, still live on the same verb.
+- **D11 — EdgeProjector: error-not-snooze plus query-budget collapse; no pool-size change this
+  wave.** The three rescue `{:snooze, 60}` sites return `{:error, e}` (snooze increments
+  max_attempts — immortality proven in vendored Oban 2.21.1: basic.ex:266 `inc: [max_attempts:
+  1]` exactly refunds fetch's `inc: [attempt: 1]`; error discards at attempt 5 with backoff);
+  `add_edges` is batched (4 queries/edge × ~2850 edges ≈ 70% of a ~16k-query rebuild); the
+  per-doc `list_schemas` N+1 gets the `schemas:` prefetch `/v1/graph` already uses; the hydrate
+  N+1 is batched outside the transaction; the rebuild transaction gets an explicit chosen
+  timeout. Why: the loop is structurally unable to converge (20s of work in a default-15s
+  transaction) and raising POOL_SIZE just moves contention into Postgres — sizing waits for
+  guerrilla-db-probe evidence (backlog).
+- **D12 — The `e2.id == e1.id` upsert contract survives batching.** Batched inserts reload
+  surviving rows by triple; canonical-row semantics (edges.ex fetch_content_edge!) are a pinned
+  test contract (edge_extract_test.exs:298), not an accident.
+- **D13 — limit-1000 is NOT raised and is NOT the graph-starvation cause.** Papers are 86.6%
+  orphaned though never truncated; tasks 6.0% though truncated (measured on guerrilla
+  production). Raising the cap multiplies the dominant per-doc cost and fixes the wrong 6%.
+  Paper-orphan root cause is filed to backlog (`jpf-bl-paper-orphans-rootcause`).
+- **D14 — App-auth (private repos) is an ADDITIVE credential provider, later, and lands only
+  AFTER the identity flip.** gh-1 is an unfired human gate; the minting primitive exists but is
+  installation-WIDE (empty access_tokens body) and has zero production callers — down-scoping
+  via `repository_ids` plus a repo-visibility column belong to that follow-up
+  (`jpf-bl-app-auth-clone-provider`), never this wave. Under `require_worker` any token holder
+  receives any team's envelope; the flip must precede credentials riding the claim.
+- **D15 — The e2e acceptance harness is a NEW script (`deploy/site-push-live-proof.sh`),
+  assembled from pdf-mvp0's provision/teardown front half + the site-spawner judge dialect —
+  next wave, once the spine is on main.** Why: none of the four existing proofs provisions a
+  box or triggers via push, and the fresh-box framing dissolves the site-leak problem for free.
+- **Coverage note (recorded, not hidden):** the verify harness declared assignment
+  `builder-identity-decision` never-reported after four attempts; a full report with runnable
+  proofs was nonetheless present in Decide's input and its ruling (D4/D5) was adopted after
+  spot-checking its rerun anchors against origin/main. If the report's provenance is ever
+  doubted, its every claim carries a `git show origin/main:` rerun command.
 
 ## Roadmap
 
-1. **Slice 1 (medium, round 1, Opus)** — doctor.sh merge-base staleness fix +
-   scripts/doctor.test.sh verdict-matrix harness + shell-harnesses.yml wiring.
-   Task `scaffy-backlog-doctor-bp-freshness`. Files: scripts/doctor.sh,
-   scripts/doctor.test.sh, .github/workflows/shell-harnesses.yml.
-2. **Slice 2 (small, round 1, Opus)** — scaffy-catalog-drift.yml advisory
-   tokenless tripwire + `make seed-check`. Task
-   `scaffy-backlog-seedcheck-ci-advisory`. Files:
-   .github/workflows/scaffy-catalog-drift.yml, Makefile.
-3. **Backlog (filed as published children, future waves):**
-   `clirel-bl-local-update-early-exit` — local-update.sh OLD==NEW early-exit
-   skips the bp rebuild (fixer-side residual; low severity since doctor's hint
-   is `make cli-install`, which rebuilds unconditionally);
-   `clirel-bl-go-tests-scaffy-paths` — go-tests.yml path filter misses
-   scaffy/commands/** so the corpus census test can go stale again (historic
-   7→12 incident, task-94df363c6ad6de68);
-   `clirel-bl-wire-orphan-shell-tests` — wire the four orphaned
-   scripts/*.test.sh into shell-harnesses.yml once slice 1 lands.
+Wave 1 (this wave — 8 slices; ROUNDS ARE LAW: a round-N slice dispatches only after its `after:`
+deps MERGE):
+
+| # | Task id | Round | Size | Model | What |
+|---|---|---|---|---|---|
+| 1 | `jpf-w1-push-cp-lane` | 1 | large | fable | CP push lane: repo-present predicate, claim-envelope `source`, born-queued webhook, full test blast-radius rewrite (incl. the inverted same-sha test at webhook_test 478-508) |
+| 2 | `jpf-w1-builder-git-clone` | 1 | large | fable | Go builder git-ref source ladder: sha-first shallow clone, terminal error classification, env hygiene |
+| 3 | `jpf-w1-siteplane-script` | 1 | medium | opus | site-runtime-install.sh: arch-aware Go, explicit git install, staged systemd units in deploy/systemd/ |
+| 4 | `jpf-w1-edgeprojector-tame` | 1 | large | fable | EdgeProjector: error-not-snooze, contract-preserving add_edges batching, schemas prefetch, hydrate batching, explicit transaction timeout |
+| 5 | `jpf-w1-dedupwall-bound` | 1 | medium | opus | DedupWall: 5s budget, catch :exit, fail-loud dedup_unavailable, stale-comment fix |
+| 6 | `jpf-w1-queue-age-alarm` | 2 | large | fable | Watchdog: Registry queued-age aggregate, barkpark_json field, Go `deploy_stalled` state, SPA + fixtures, node harness reads attention_order.json. AFTER jpf-w1-push-cp-lane merges (router.ex) |
+| 7 | `jpf-w1-builder-identity` | 3 | large | fable | Five /v1/builder/* routes → require_agent + box scope; claim_queued_deployment_for_barkpark; worker.token preference removed. HIGH-FLIP-RISK (security/tenancy). AFTER jpf-w1-queue-age-alarm + jpf-w1-siteplane-script merge |
+| 8 | `jpf-w1-siteplane-chain` | 4 | medium | opus | configureHost step 7c: conditional site-plane install on go-live via the hardened script, agent.token, loud-degrade narration. AFTER jpf-w1-builder-identity + jpf-w1-siteplane-script merge |
+
+Wave 2 (sketch): `jpf-bl-e2e-push-proof` (the acceptance run — fresh box, real push, watchdog
+rung, teardown), `jpf-bl-siteplane-verify-probe` (needs a new HTTPS-visible surface first — no
+host-capability field exists anywhere today, and any probe also fires on the restore path),
+`jpf-bl-app-auth-clone-provider` (gh-1-gated), `jpf-bl-box-credential-hygiene` (WORKER_TOKEN
+rotation + token-file re-read). Full backlog: published `jpf-bl-*` children of the epic task.
 
 ## Wave log
 
-### Wave 2026-07-23 — round 1 built + reviewed, grade A-
+### Wave 2026-07-31 — founding wave, round 1 of 4 (grade A-)
 
-- **Landed (2/2 slices green, both pushed + PR'd, lead merges):**
-  - Slice 1 `scaffy-backlog-doctor-bp-freshness` — PR #6023, branch
-    `loop-epic/doctor-sh-guarded-merge-base-staleness-f-0` (no reviewer fixes).
-    doctor.sh section 2 now reds iff Go inputs changed over
-    merge-base(BP_COMMIT, origin/main)..origin/main (D1-D3 exact); guarded
-    fail-loud ladder; 8-cell doctor.test.sh harness on real fixtures wired via
-    NEW shell-harnesses.yml. Reviewer independently re-derived the
-    HIGH-FLIP-RISK verdict matrix (8/8 green; origin/main's buggy doctor reds
-    6 cells incl. the diverged + offline FALSE-GREENS; never-cancel guard
-    mutation-proven). E2: an independent second review of the matrix is
-    warranted before merge.
-  - Slice 2 `scaffy-backlog-seedcheck-ci-advisory` — PR #6025, branch
-    `loop-epic/scaffy-catalog-drift-yml-advisory-tokenl-1-r` (REVIEWER FIX
-    cb88ac8c4): the builder's `out="$(cmd)"; code=$?` capture was
-    errexit-unsafe — Actions' default run shell is `bash -e {0}`, so the
-    self-test aborted before capturing the code exactly when the tripwire
-    correctly redded, and the audit step died before writing its DRIFT
-    summary; fixed to `code=0; out="$(cmd)" || code=$?`, proven end-to-end
-    under `bash -e` both directions; also added `permissions: contents: read`.
-    Advisory tokenless scaffy-catalog-drift.yml + `make seed-check` otherwise
-    as decided (D6-D7).
-- **Stalled:** nothing — honest 2-slice wave, both premises re-confirmed live
-  before building (D11's corrections held).
-- **Next wave:** lead merges #6023 + #6025 (slice 1 after the E2 second look),
-  then discharges D10 post-merge obligations (one workflow_dispatch of
-  scaffy-catalog-drift.yml proving Actions egress; one live `make doctor` RED
-  on a deliberately-behind worktree). Then the backlog children in order:
-  `clirel-bl-wire-orphan-shell-tests` (cheapest, unblocked once slice 1
-  merges), `clirel-bl-go-tests-scaffy-paths`, `clirel-bl-local-update-early-exit`.
+**Landed (5/5 round-1 slices, all gates re-run green at review, all PRs open):**
+
+- `jpf-w1-push-cp-lane` → PR #8400 (`loop-epic/cp-push-lane-repo-present-predicate-flip-0`).
+  Predicate flip + claim-envelope `source` %{kind,url,ref} + born-queued webhook rows with
+  same-sha dedup. Tenancy independently re-derived at review: `builder_claim_source/1` has ONE
+  call site (worker-gated claim 200) and none of the three deployment serializers carry a clone
+  recipe. 117-test gate green. No review fixes.
+- `jpf-w1-builder-git-clone` → PR #8401 (`loop-epic/builder-git-ref-source-ladder-sha-first--1`).
+  Source ladder (artifact wins → git sha-first shallow clone → honest empty-artifact error),
+  GIT_TERMINAL_PROMPT=0 + credential.helper= prompt kill, two proven-stderr TERMINAL
+  classifications. Bare-repo fixtures prove checkout at a NON-TIP sha. No review fixes; temp
+  workdir accumulation filed as `jpf-bl-builder-clone-hygiene`.
+- `jpf-w1-siteplane-script` → PR #8402 (`loop-epic/site-runtime-install-sh-hardened-arch-aw-2-r`).
+  Arch-aware Go tarball (the x86 abort fixed), explicit git ensure, staged units in
+  deploy/systemd/ with a behavioural offline parity test (drift tripwire proven red).
+  One review fix on the -r branch: expected tarball URLs derive from the script's GO_VERSION.
+- `jpf-w1-edgeprojector-tame` → PR #8405 (`loop-epic/edgeprojector-converges-error-not-snooze-3`).
+  Error-not-snooze (drain test: 4 failures + 1 discard, 0 snoozes — the immortal loop is dead),
+  contract-preserving add_edges batching (D12 e2.id==e1.id pinned), schemas prefetch, hydrate
+  batching, explicit 60s txn budget. 73-test gate green. No review fixes. CI note: the enqueue
+  test is sensitive to leftover committed oban_jobs rows in a dirty test DB.
+- `jpf-w1-dedupwall-bound` → PR #8406 (`loop-epic/dedupwall-gets-the-8136-discipline-bound-4`).
+  5s budget on all 3 Repo calls, rescue + catch :exit + rollback branch, fail-loud
+  `dedup_unavailable` forwarded through AuthoringWall, `content.dedup_bypass` escape, tags-only
+  JSONB projection. 35-test gate green x3. No review fixes. The wave itself reproduced the
+  incident live twice: filing tasks 500'd until `dedup_bypass` was set — including the review's
+  own backlog filing.
+
+**Stalled:** nothing. Charter PR #8317 open awaiting lead merge.
+
+**Next wave / lead dispatch order (rounds are law):** (1) merge the five round-1 PRs + charter
+PR #8317; on merge close each slice's merge-gated criterion. (2) Dispatch `jpf-w1-queue-age-alarm`
+(round 2) after #8400 merges. (3) Dispatch `jpf-w1-builder-identity` (round 3) after the alarm +
+#8402 merge — HIGH-FLIP-RISK: send a genuinely independent second reviewer for the identity/scoping
+judgment before merging it. (4) Dispatch `jpf-w1-siteplane-chain` (round 4) after identity + script
+merge. Then wave 2: `jpf-bl-e2e-push-proof` — the single end-to-end acceptance run on a fresh box.
+Watch on deploy of `jpf-w1-dedupwall-bound`: publishes now 409 under real dedup outages
+(fail-loud by design); the GitHub Intake 2xx-on-halted drop hazard now covers the publish side
+too (tracked with the 503 upgrade).

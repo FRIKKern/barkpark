@@ -1,25 +1,25 @@
 [
  {
-  "name": "PortableText (import { PortableText }) — shares the renderer chunk",
+  "name": "PortableText (import { PortableText }) \u2014 shares the renderer chunk",
   "path": "dist/index.mjs",
   "import": "{ PortableText }",
-  "limit": "18.75 KB",
+  "limit": "18.9 KB",
   "gzip": true
  },
  {
-  "name": "PortableDoc renderer — client entry (dist/index.mjs)",
+  "name": "PortableDoc renderer \u2014 client entry (dist/index.mjs)",
   "path": "dist/index.mjs",
-  "limit": "21.5 KB",
+  "limit": "21.65 KB",
   "gzip": true
  },
  {
-  "name": "RSC server entry (dist/server.mjs — PortableDoc + toPlainText closure)",
+  "name": "RSC server entry (dist/server.mjs \u2014 PortableDoc + toPlainText closure)",
   "path": "dist/server.mjs",
-  "limit": "20.6 KB",
+  "limit": "20.85 KB",
   "gzip": true
  },
  {
-  "name": "Media hydration client (dist/client.mjs — mermaid + asciinema, both external + dynamic)",
+  "name": "Media hydration client (dist/client.mjs \u2014 mermaid + asciinema, both external + dynamic)",
   "path": "dist/client.mjs",
   "limit": "2 KB",
   "gzip": true,

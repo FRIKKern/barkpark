@@ -1103,6 +1103,30 @@ var hzServerPostConditionExemptions = map[string]string{
 		"which the delete action completing already implies",
 	"create-image": "create-image changes no field on hcloud.Server — it returns an *hcloud.Image, so its honest post-condition " +
 		"is GET /images/<id>, a different resource (filed: pds-w26-create-image-image-postcondition)",
+
+	// The `instance` verbs (hetzner_instance_cmd.go). They are exempt from the
+	// SERVER post-condition table because none of them asserts a state of the
+	// server this table describes — each observes something else, and the
+	// reason below names WHAT and WHERE, so a reviewer can go read it and
+	// refuse the argument. An exemption whose stated reason is false is worse
+	// than no exemption at all.
+	"archive": "archive changes no field on hcloud.Server — it produces an IMAGE, so its post-condition is on that image and " +
+		"instArchive runs it: GET /images/<id> after the snapshot action, polling through `creating`, reported as " +
+		"image_status (and confirmation: unavailable when the read cannot settle). It rides the same ground as " +
+		"create-image (filed: pds-w26-create-image-image-postcondition). Its receipt also carries a non-optional " +
+		"`quiesced`, because a --stop archive whose SSH quiesce failed is a crash-consistent snapshot",
+	"resurrect": "the server in a resurrect receipt IS a post-action read-back: instCreateFromArchive polls " +
+		"hc.Server.GetByID until the box reports running WITH an IPv4 before returning, and the receipt's health key " +
+		"is an observed probe of https://<fqdn>/api/schemas. Residue filed separately: image_id is still a request " +
+		"echo and --no-health omits `health` rather than saying it was skipped (pds-w27-bl-hetzner-instance-verb-receipt-residue)",
+	"adopt": "the server in an adopt receipt is the CLONE instCloneSwap built and health-gated — created through the same " +
+		"running+IPv4 read-back poll, then confirmed against https://<fqdn>/api/schemas before the old box is destroyed. " +
+		"Residue filed separately: registry_id/team_id are cp.Adopt response echoes never re-read " +
+		"(pds-w27-bl-hetzner-instance-verb-receipt-residue)",
+	"eject": "the server in an eject receipt is the health-gated clone (same read-back as adopt); eject's OWN post-condition " +
+		"is on the control-plane registry, not on hcloud.Server, and runInstanceEject runs it — it asserts the status " +
+		"cp.Deprovision returns is \"removed\" AND re-reads cp.List() to confirm the row is gone, degrading to the " +
+		"hzPartial confirmation-unavailable shape when either observation fails",
 }
 
 // hzBoundPost resolves the post-condition a verb actually runs: the table entry

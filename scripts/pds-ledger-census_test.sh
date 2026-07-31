@@ -163,6 +163,93 @@ expect_output_contains() {
   printf '  ok    %-52s contains %q\n' "$label" "$needle"
 }
 
+expect_output_lacks() {
+  local label=$1 needle=$2
+  shift 2
+  CHECKS=$((CHECKS + 1))
+  local out
+  out=$("$@" 2>&1)
+  if [[ $out == *"$needle"* ]]; then
+    printf 'SELFTEST FAIL: %s — output contained %q and must not\n%s\n' "$label" "$needle" "$out" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  printf '  ok    %-52s lacks %q\n' "$label" "$needle"
+}
+
+# expect_stdout_only_contains is the MIRROR of expect_json_stdout: it keeps the
+# streams separate and asserts the needle is on STDOUT specifically. 2>&1 helpers
+# cannot tell the two apart, so without this one, moving a human line to stderr
+# looks identical to leaving it on stdout — the same blindness that let the JSON
+# stream stay poisoned for two waves, pointed the other way. The exit code is the
+# census's own, captured directly, never through a pipe.
+expect_stdout_only_contains() {
+  local label=$1 needle=$2 want=$3
+  shift 3
+  CHECKS=$((CHECKS + 1))
+  local got=0
+  local so="$TMP/sonly.$CHECKS" se="$TMP/senly.$CHECKS"
+  "$@" > "$so" 2> "$se" || got=$?
+  if [[ $got -ne $want ]]; then
+    printf 'SELFTEST FAIL: %s — expected exit %d, got %d\n%s\n%s\n' "$label" "$want" "$got" \
+      "$(cat "$so")" "$(cat "$se")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  if ! grep -qF -- "$needle" "$so"; then
+    printf 'SELFTEST FAIL: %s — %q is not on STDOUT (stderr: %s)\n%s\n' "$label" "$needle" \
+      "$(grep -cF -- "$needle" "$se" || true)" "$(cat "$so")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  printf '  ok    %-52s stdout contains %q\n' "$label" "$needle"
+}
+
+# STDOUT IS THE MACHINE CHANNEL, AND THIS IS THE ONLY HELPER THAT CAN PROVE IT.
+# Every other helper captures `2>&1`, which is exactly why the census could dump
+# a human predicate block onto the same stdout as its JSON for two waves without
+# a single fixture noticing. Here stdout and stderr go to SEPARATE files, the
+# census's OWN exit code is captured directly (never through a pipe -- `| tail`
+# reports the PIPELINE's status and will happily print RC=0 over a failing
+# census), stdout must be non-empty, and stdout must parse as ONE JSON document.
+# jq is the validator when it exists; python3 is the fallback, because python3 is
+# already a hard requirement of the census and jq is not.
+expect_json_stdout() {
+  local label=$1 want=$2
+  shift 2
+  CHECKS=$((CHECKS + 1))
+  local got=0 jrc=0 validator bytes
+  local so="$TMP/stdout.$CHECKS" se="$TMP/stderr.$CHECKS"
+  "$@" > "$so" 2> "$se" || got=$?
+  bytes=$(wc -c < "$so" | tr -d ' ')
+  if command -v jq >/dev/null 2>&1; then
+    validator=jq
+    jq -e . "$so" >/dev/null 2>&1 || jrc=$?
+  else
+    validator=python3
+    python3 -c 'import json,sys; json.load(open(sys.argv[1]))' "$so" >/dev/null 2>&1 || jrc=$?
+  fi
+  if [[ $got -ne $want ]]; then
+    printf 'SELFTEST FAIL: %s — expected exit %d, got %d\n%s\n%s\n' "$label" "$want" "$got" \
+      "$(cat "$so")" "$(cat "$se")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  if [[ $bytes -eq 0 ]]; then
+    printf 'SELFTEST FAIL: %s — exit %d was right but stdout was EMPTY; a failing run is when its payload matters most\n%s\n' \
+      "$label" "$got" "$(cat "$se")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  if [[ $jrc -ne 0 ]]; then
+    printf 'SELFTEST FAIL: %s — exit %d was right but stdout is NOT one JSON document (%s exit %d)\n%s\n' \
+      "$label" "$got" "$validator" "$jrc" "$(cat "$so")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  printf '  ok    %-52s exit %d  (%s ok, %s bytes on stdout)\n' "$label" "$got" "$validator" "$bytes"
+}
+
 run() {
   bash "$CENSUS" --root "$ROOT_SLUG" --pace 0 --retries 0 "$@"
 }
@@ -482,6 +569,97 @@ expect_status_matching "a duplicate reason on a TERMINAL row still reds (1-3 sta
 echo
 
 # =============================================================================
+# CLAUSE 6 — THE CLAIMABLE-AND-CLOSED CONTRADICTION (PDS-D372/D373).
+#
+# Every fixture in this section EXITS 0 against the census as it stood on
+# origin/main before the clause existed — verified by running each one against
+# the unmodified script first. That is the whole point of the section: clause 4
+# COUNTS these rows in its numerator as satisfied (they carry a disposition)
+# while `bp task ready` hands them to a worker, so the board is simultaneously
+# adjudicated shut and dispatched as work and nothing anywhere says so.
+#
+# Two reds and three greens. The reds prove the clause can say no on BOTH
+# claimable lifecycles. The greens are the load-bearing half: a TERMINAL closed
+# row must stay silent (a clause that reds there demands the round re-adjudicate
+# history), a LIVE PARK with a structured trigger must stay silent (this is the
+# fixture that refuses the parked-inclusive form on the record — it reds the
+# CONTROL and SHAREDTRIG, measured 7 of 80), and an OFF-VOCABULARY disposition on
+# a claimable row must be treated as LIVE and left to clause 3 (a rule phrased
+# `!= 'open'` would sweep 26 rows out of a neighbour epic's queue).
+# =============================================================================
+echo "clause 6 — a CLAIMABLE row the ledger calls closed must red the predicate"
+
+# (a) OPEN + closed. The plainest form: the queue will hand this row out.
+CONTRAOPEN="$TMP/live-closed-on-open"
+build_healthy "$CONTRAOPEN"
+page "$CONTRAOPEN" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open closed 'deep a reason four, adjudicated shut while still claimable. REOPEN: delta'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status_matching "a live+closed row on \`open\` reds the predicate" 1 "are CLAIMABLE and dispositioned \`closed\`" \
+  run --page-limit 4 --fixture-dir "$CONTRAOPEN" --assert-round-done
+expect_status_matching "and it NAMES the contradictory row" 1 "deep-a" \
+  run --page-limit 4 --fixture-dir "$CONTRAOPEN" --assert-round-done
+expect_output_contains "live_contradiction is a ROW-ID LIST in --json, never a count" \
+  "$(printf '"live_contradiction": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$CONTRAOPEN" --json
+
+# (b) BLOCKED + closed. `blocked` is claimable-in-principle and appears ONLY in
+# the closure, never at level 1 — a clause built from a `.children` vocabulary
+# would not even know the value is legal.
+CONTRABLOCKED="$TMP/live-closed-on-blocked"
+build_healthy "$CONTRABLOCKED"
+page "$CONTRABLOCKED" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' blocked closed 'deep a reason four, blocked and adjudicated shut. REOPEN: delta'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status_matching "a live+closed row on \`blocked\` reds the predicate too" 1 "are CLAIMABLE and dispositioned \`closed\`" \
+  run --page-limit 4 --fixture-dir "$CONTRABLOCKED" --assert-round-done
+
+# (c) TERMINAL + closed — the ordinary, correct shape. `done`/`closed` is what a
+# finished row is SUPPOSED to look like, and it must stay green or the clause is
+# just "always red".
+TERMCLOSED="$TMP/terminal-closed"
+build_healthy "$TERMCLOSED"
+page "$TERMCLOSED" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' done closed 'deep a reason four, finished and shut. REOPEN: delta'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status "a TERMINAL row dispositioned closed does NOT red" 0 \
+  run --page-limit 4 --fixture-dir "$TERMCLOSED" --assert-round-done
+expect_output_contains "and live_contradiction is empty for it" '"live_contradiction": []' \
+  run --page-limit 4 --fixture-dir "$TERMCLOSED" --json
+
+# (d) THE REFUSED FORM. A LIVE park carrying a STRUCTURED reopen_trigger. A park
+# awaiting its trigger is not a contradiction; it is a park, and clause 4(c)
+# already owns it. Extending clause 6 to `parked` was measured to fail 7 of 80
+# checks including the CONTROL (build_healthy's blocked+parked `kid-c`, inherited
+# by all 34 fixture dirs) and SHAREDTRIG, the PDS-D336(a) pin. This fixture is
+# the tripwire on that.
+LIVEPARKOK="$TMP/live-park-with-trigger"
+build_healthy "$LIVEPARKOK"
+page "$LIVEPARKOK" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open parked 'deep a reason four, parked with a real way back out' 'REOPEN when the Hetzner rate cap lifts'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status "a LIVE park with a structured trigger does NOT red (closed-only)" 0 \
+  run --page-limit 4 --fixture-dir "$LIVEPARKOK" --assert-round-done
+expect_output_contains "the two live parks are covered and uncontradicted" '"live_contradiction": []' \
+  run --page-limit 4 --fixture-dir "$LIVEPARKOK" --json
+
+# (e) THE VOCABULARY TRAP. A claimable row carrying an OFF-VOCABULARY PROSE
+# disposition — the literal value 26 `tgw*` rows of a NEIGHBOUR epic carry. It is
+# UNRECOGNISED, therefore LIVE, therefore clause 3's business and not clause 6's.
+# A rule phrased `disposition IS NOT NULL AND != 'open'` reds here and quietly
+# deletes another epic's queue.
+OFFVOCABLIVE="$TMP/live-off-vocabulary-prose"
+build_healthy "$OFFVOCABLIVE"
+page "$OFFVOCABLIVE" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open 'open - demoted child of truth-grip-epic (charter D117)' 'deep a reason four. REOPEN: delta'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_output_contains "an off-vocabulary prose disposition is NOT a contradiction" '"live_contradiction": []' \
+  run --page-limit 4 --fixture-dir "$OFFVOCABLIVE" --json
+expect_status_matching "it is clause 3's business, and clause 3 alone reds it" 1 "carry a disposition outside" \
+  run --page-limit 4 --fixture-dir "$OFFVOCABLIVE" --assert-round-done
+expect_output_lacks "and clause 6 stays silent about it" "are CLAIMABLE and dispositioned" \
+  run --page-limit 4 --fixture-dir "$OFFVOCABLIVE" --assert-round-done
+# CASE IS PART OF THE VALUE here too: `CLOSED` is off-vocabulary, so it is
+# unrecognised, so it is LIVE. Clause 3 reds it; clause 6 does not pretend to
+# know what it meant.
+UPPERCLOSED="$TMP/live-uppercase-closed"
+build_healthy "$UPPERCLOSED"
+page "$UPPERCLOSED" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open CLOSED 'deep a reason four. REOPEN: delta'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_output_contains "an uppercase CLOSED is off-vocabulary, not a contradiction" '"live_contradiction": []' \
+  run --page-limit 4 --fixture-dir "$UPPERCLOSED" --json
+echo
+
+# =============================================================================
 # CLAUSE 4(a) — THE ROUND ANCHOR (PDS-D364/D365). 4(a) unanchored is
 # structurally unreachable by any round that discovers work: a row is BORN bare,
 # so a round that files one row can never certify. The anchor says WHICH ROUND
@@ -610,6 +788,87 @@ expect_status_matching "an unreadable _updatedAt still fails closed under an anc
 echo
 
 # =============================================================================
+# --json IS THE MACHINE CHANNEL. Every other helper in this file captures
+# `2>&1`, which is precisely why the census could write its human ROUND-DONE
+# PREDICATE block onto the same stdout as its JSON payload for two waves without
+# one fixture noticing: `jq -e .` exited 5 with "Invalid numeric literal", and
+# the GREEN path was poisoned identically — a healthy fixture exited 0 and jq
+# still failed. The certificate was unpipeable exactly when it certified.
+#
+# expect_json_stdout is the only helper that separates the streams, and it takes
+# the census's OWN exit code rather than a pipeline's.
+# =============================================================================
+echo "--json — stdout is one JSON document, on the red path AND on the green one"
+expect_json_stdout "--json alone is pipeable" 0 \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --json
+expect_json_stdout "--json --assert-round-done is pipeable WHEN IT CERTIFIES" 0 \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --json --assert-round-done
+expect_json_stdout "--json --assert-round-done is pipeable when it REFUSES" 1 \
+  run --page-limit 4 --fixture-dir "$CONTRAOPEN" --json --assert-round-done
+# THE EXIT-4 PAYLOAD IS NOT REGRESSED. Clause 5's incoherence check runs AFTER
+# the emit, so a failing run still carries its report. Computing the predicate
+# after the emit instead of before it turns this into 0 bytes and jq exit 4 —
+# a fresh honesty regression inside the honesty fix, which is why the predicate
+# is a pure function called BEFORE the single emit site.
+expect_json_stdout "an INCOHERENT run still emits its full payload (exit 4)" 4 \
+  run --page-limit 4 --fixture-dir "$DUPES" --json
+# THE PAYLOAD CARRIES A MACHINE VERDICT, not just counts. A scripted consumer
+# that had to scrape "VERDICT: ROUND DONE" out of a text stream had no machine
+# path at all.
+expect_output_contains "round_done is false when the predicate refuses" '"round_done": false' \
+  run --page-limit 4 --fixture-dir "$CONTRAOPEN" --json
+expect_output_contains "and round_done_failures names the failing clause" "are CLAIMABLE and dispositioned" \
+  run --page-limit 4 --fixture-dir "$CONTRAOPEN" --json
+expect_output_contains "round_done is true on a healthy board" '"round_done": true' \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --json
+expect_output_contains "and round_done_failures is then empty" '"round_done_failures": []' \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --json
+# ...AND THE HUMAN MODE KEEPS ITS HUMAN STREAM. Routing the predicate to stderr
+# UNCONDITIONALLY would fix the --json stream by splitting the DEFAULT render
+# across two: the report on stdout, the verdict it exists to deliver on stderr,
+# so `census.sh --assert-round-done > report.txt` captures everything except the
+# answer. Without --json, stdout must still carry both.
+expect_stdout_only_contains "without --json the predicate rides stdout with its report" \
+  "ROUND-DONE PREDICATE" 0 run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done
+expect_stdout_only_contains "and so does the certifying verdict" \
+  "VERDICT: ROUND DONE" 0 run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done
+echo
+
+# =============================================================================
+# THE PAGED READ HAS A TOTAL ORDER. Without one, explicit offsets page the
+# server's default `desc: updated_at` — a MUTATING key. A concurrent write
+# teleports its row to index 0 and shifts every row between; the duplicate half
+# of that shift exits 4, but a concurrent DELETE shifts rows UP and is a SILENT
+# skip that nothing detects.
+#
+# ONLY ONE SPELLING IS CORRECT, and both traps are one keystroke away — probed
+# live against guerrilla on 2026-07-31:
+#   order=doc_id      -> HTTP 200, id sequence IDENTICAL to sending no order
+#                        (it fails the `<field>:(asc|desc)` regex and silently
+#                        falls back), while a no-order pair taken in the same
+#                        interleave was stable. A "fix" spelled this way is a
+#                        green diff with ZERO behaviour change.
+#   order=doc_id:asc  -> HTTP 200, sorts jsonb_extract_path(content,'doc_id'),
+#                        NULL for every task row: an unspecified order that can
+#                        skip and duplicate with no concurrent write at all.
+#   order=_createdAt:asc -> the real total order (3901 rows, zero ties).
+# =============================================================================
+echo "paging — the read is ordered by a stable key, and the spelling is pinned"
+expect_output_contains "the census reports the order it actually paged in" \
+  "order=_createdAt:asc" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and page_order is machine-readable in --json" \
+  '"page_order": "_createdAt:asc"' \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --json
+expect_output_lacks "TRAP (a): a directionless order= is never emitted" \
+  "order=doc_id" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --json
+expect_output_lacks "TRAP (b): an all-NULL content key is never sorted on" \
+  "doc_id:asc" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --json
+echo
+
+# =============================================================================
 # USAGE. Bad input is exit 3, never a quietly smaller board.
 # =============================================================================
 echo "usage — bad input is a usage error, never a board"
@@ -662,4 +921,30 @@ NAMED list, 4(a) still scores against the WHOLE live board, and it TERMINATES:
 the same row is deferred by round N and IN SCOPE for round N+1, and adjudicating
 it greens the round anchored or not, filing no new rows. Clause 5 stays
 orthogonal -- the racing corpus exits 4 identically with and without an anchor.
+
+CLAUSE 6 is the CLAIMABLE-AND-CLOSED contradiction (PDS-D372/D373), and it is
+CLOSED-ONLY and CASE-EXACT. It reds on a live+closed row on `open` and on
+`blocked`, naming the row; it stays SILENT on a terminal+closed row (the correct
+shape of a finished row), on a LIVE park carrying a structured reopen_trigger
+(the parked-inclusive form is refused on the record -- it reds the control and
+SHAREDTRIG), on an off-vocabulary PROSE disposition and on an uppercase `CLOSED`
+(both unrecognised, therefore LIVE, therefore clause 3's business alone). Every
+fixture in that section exits 0 against the census as it stood before the clause
+existed.
+
+STDOUT IS THE MACHINE CHANNEL. expect_json_stdout separates the streams -- every
+other helper captures 2>&1, which is why a human predicate block could sit on the
+same stdout as the JSON payload for two waves unnoticed -- and asserts the
+census's OWN exit code, never a pipeline's. `--json` is one parseable document
+when it certifies (exit 0), when it refuses (exit 1) and when the snapshot is
+INCOHERENT (exit 4, and the payload is still non-empty: the predicate is a pure
+function computed BEFORE the single emit site precisely so that stays true). The
+payload carries `round_done` and `round_done_failures`, so a consumer never has
+to scrape a text stream for a verdict.
+
+THE PAGED READ HAS A TOTAL ORDER: `order=_createdAt:asc`, reported back as
+`page_order` so the discipline can be read rather than believed. Both traps are
+pinned negatively -- a directionless `order=doc_id` (HTTP 200, silently ignored,
+byte-for-byte the no-order response) and `order=doc_id:asc` (an all-NULL content
+key, worse than no order at all) must never appear.
 SUMMARY

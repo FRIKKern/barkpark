@@ -284,12 +284,12 @@ defmodule BarkparkWeb.BulldocsIngestWallTest do
     assert Content.get_paper(slug, @dataset).status == "published"
   end
 
-  # ── spacing_norm (mechanical-spacing doctrine) ──────────────────────────────
+  # ── spacing_norm (reader-owned section rhythm) ──────────────────────────────
   #
-  # The pair below is the doctrine's mutation proof at the test layer: the SAME
-  # paper minus its spacer blocks trips the advisory, and restoring one spacer
-  # silences it. Sectioned = 2+ level-2 headings; spacer = an empty paragraph
-  # block ({"type":"paragraph","content":[]}). Advisory only — never blocks.
+  # The pair below is the mutation proof: the SAME sectioned article is clean
+  # without spacer content and trips the advisory when empty paragraph blocks
+  # are inserted. Stored editor scaffolds remain legal; published composition
+  # must not use them as layout. Advisory only — never blocks.
 
   defp sectioned_blocks(spacers?) do
     spacer = fn id -> %{"id" => id, "type" => "paragraph", "content" => []} end
@@ -316,7 +316,7 @@ defmodule BarkparkWeb.BulldocsIngestWallTest do
       ]
   end
 
-  test "an article ingest with 2+ level-2 headings and NO spacer blocks gets the non-blocking spacing_norm advisory",
+  test "an article ingest with 2+ level-2 headings and NO spacer blocks has no spacing_norm advisory",
        %{conn: conn} do
     slug = "ingest-wall-spacing-bare-#{System.unique_integer([:positive])}"
     %{"tags" => tags, "description" => description} = labels()
@@ -333,18 +333,11 @@ defmodule BarkparkWeb.BulldocsIngestWallTest do
     resp = json_response(conn, 200)
     assert resp["ok"] == true
 
-    warnings = resp["warnings"]
-    assert is_list(warnings)
-    spacing = Enum.find(warnings, &(&1["code"] == "spacing_norm"))
-    assert spacing, "expected a spacing_norm advisory, got: #{inspect(warnings)}"
-    # The advisory must point the producer at the law, not just scold.
-    assert spacing["message"] =~ "/papers/mechanical-spacing-doctrine"
-
-    # Advisory never blocks — the paper published.
+    refute Enum.any?(List.wrap(resp["warnings"]), &(&1["code"] == "spacing_norm"))
     assert Content.get_paper(slug, @dataset).status == "published"
   end
 
-  test "the SAME sectioned article WITH authored spacer blocks publishes with no spacing_norm advisory (mutation twin)",
+  test "the SAME sectioned article WITH authored spacer blocks gets the non-blocking spacing_norm advisory",
        %{conn: conn} do
     slug = "ingest-wall-spacing-spaced-#{System.unique_integer([:positive])}"
     %{"tags" => tags, "description" => description} = labels()
@@ -360,7 +353,10 @@ defmodule BarkparkWeb.BulldocsIngestWallTest do
 
     resp = json_response(conn, 200)
     assert resp["ok"] == true
-    refute Enum.any?(List.wrap(resp["warnings"]), &(&1["code"] == "spacing_norm"))
+    spacing = Enum.find(List.wrap(resp["warnings"]), &(&1["code"] == "spacing_norm"))
+    assert spacing, "expected a spacing_norm advisory, got: #{inspect(resp["warnings"])}"
+    assert spacing["message"] =~ "empty paragraph"
+    assert spacing["message"] =~ "remove"
     assert Content.get_paper(slug, @dataset).status == "published"
   end
 end

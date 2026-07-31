@@ -6966,15 +6966,54 @@ defmodule BarkparkCloud.Web.Router do
         true ->
           case Registry.claim_next_deployment(worker_id) do
             {:ok, deployment} ->
-              json(conn, 200, %{
-                deployment: deployment_json(deployment),
-                observed_epoch: deployment.claim_epoch
-              })
+              response =
+                Map.merge(
+                  %{
+                    deployment: deployment_json(deployment),
+                    observed_epoch: deployment.claim_epoch
+                  },
+                  builder_claim_source(deployment)
+                )
+
+              json(conn, 200, response)
 
             {:error, :no_queued} ->
               json(conn, 404, %{error: "no_queued"})
           end
       end
+    end
+  end
+
+  # git-ref clone lane: the clone source for an artifact-less repo-backed
+  # deployment — %{source: %{kind, url, ref}} merged as a SIBLING of
+  # `deployment` in the builder-claim 200 envelope, or %{} when the row has an
+  # artifact (nothing to clone) or the site has no linked repo.
+  #
+  # TENANCY: this map rides ONLY the builder-claim response, which is gated to
+  # the shared WORKER_TOKEN principal. It must NEVER enter deployment_json/1 —
+  # that serializer feeds tenant-facing reads (site deployments list/get, SSE)
+  # and the agent claim, none of which may carry a build-plane clone recipe.
+  # (deployment_json's own `source` field is the UNRELATED build-provenance
+  # string, "box-build" | "prebuilt".)
+  #
+  # Applies to every artifact-less row alike: webhook production pushes,
+  # branch previews, and `bp deploy --git-ref` rows.
+  defp builder_claim_source(deployment) do
+    artifactless? = deployment.artifact_url in [nil, ""]
+    site = if artifactless?, do: Registry.get_site(deployment.site_id)
+
+    case site do
+      %{github_repo: repo} when is_binary(repo) ->
+        %{
+          source: %{
+            kind: "git",
+            url: "https://github.com/#{repo}.git",
+            ref: deployment.git_ref
+          }
+        }
+
+      _ ->
+        %{}
     end
   end
 
@@ -11652,18 +11691,22 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
-  # dwb-webhook fail-fast interim: the RAW machine reason stamped on a born-failed
-  # push deployment. Human copy is applied at the serialization boundary
-  # (FailureCopy.humanize / app.js failureCopy) — this stays raw for logs+ops.
-  # When gh-1 (the GitHub App integration) lands, `github_build_available?/1`
-  # flips true and this reason is never written.
+  # git-ref clone lane: the RAW machine reason stamped on the born-failed
+  # fallback row when a push arrives for a site with NO linked repo. Human copy
+  # is applied at the serialization boundary (FailureCopy.humanize / app.js
+  # failureCopy) — this stays raw for logs+ops. The webhook route already 404s
+  # sites without github config, so this is a flip-safe defensive fallback, not
+  # a path a configured site ever takes.
   @github_push_build_reason "github push builds require the GitHub App integration (not yet available) — deploy an artifact via bp deploy"
 
-  # dwb-webhook fail-fast interim: whether a source build for a GitHub push is
-  # available yet. It is NOT — building from a bare commit needs the human-gated
-  # GitHub App (gh-1). gh-1 flips THIS ONE predicate back to true and the enqueue
-  # path (`create_deployment`) resumes; nothing else in the webhook path changes.
-  defp github_build_available?(_site), do: false
+  # git-ref clone lane: whether a source build for a GitHub push is available —
+  # a REAL repo-present predicate. Repo visibility is not persisted, so
+  # repo-present is the only honest gate: a push on a repo-backed site mints a
+  # queued artifact-less row the builder claims, and the builder-claim envelope
+  # (`builder_claim_source/1`) hands it the clone source; a private repo fails
+  # at clone with a classified reason, which is honest. False only when no repo
+  # is linked, where the born-failed fallback below keeps the delivery log true.
+  defp github_build_available?(site), do: is_binary(site.github_repo)
 
   # A push to the connected branch → production Deployment. dwb-18: two dedup
   # gates BEFORE minting a row — (1) this exact X-GitHub-Delivery already
@@ -11673,14 +11716,17 @@ defmodule BarkparkCloud.Web.Router do
   # backstopped by partial unique indexes; a lost race surfaces as a changeset
   # error that is recovered into a 200 duplicate below.
   #
-  # dwb-webhook fail-fast interim: a push we CAN'T build from source
-  # (`github_build_available?/1` is false until gh-1) is recorded as a born-`failed`
+  # git-ref clone lane: a push on a repo-backed site (`github_build_available?/1`)
+  # mints a QUEUED artifact-less deployment (git_ref = the pushed sha) the
+  # builder claims like any other row — the claim envelope carries the clone
+  # source. The queued row is ACTIVE, so gate (2) above dedups a same-sha
+  # redelivery against it. A push we CAN'T build from source (no linked repo —
+  # defensive; the webhook route 404s such sites) is recorded as a born-`failed`
   # deployment (Registry.create_failed_deployment/3) instead of a source-less
-  # `queued` zombie the builder never claims. The response is an honest 201 whose
-  # body carries the terminal status + humanized reason so the GitHub delivery log
-  # tells the truth; `find_active_deployment` ignores the failed row so a later
-  # REAL `bp deploy` at the same sha is unblocked, and the `delivery_id` still
-  # dedups redeliveries against it (gate 1).
+  # `queued` zombie the builder never claims; its honest 201 body carries the
+  # terminal status + humanized reason so the GitHub delivery log tells the
+  # truth, and `find_active_deployment` ignores the failed row so a later REAL
+  # `bp deploy` at the same sha is unblocked.
   defp handle_production_push(conn, site, sha, branch, delivery_id) do
     existing =
       Registry.find_deployment_by_delivery_id(delivery_id) ||
@@ -11696,8 +11742,8 @@ defmodule BarkparkCloud.Web.Router do
         })
 
       nil ->
-        # The artifact_url is left empty — a push only records that a commit
-        # happened at this sha. Until gh-1, the row is born terminal-`failed`.
+        # The artifact_url is left empty — the builder clones the repo at
+        # git_ref via the claim-envelope source instead of pulling an artifact.
         attrs = %{git_ref: sha, artifact_url: nil, delivery_id: delivery_id}
 
         result =

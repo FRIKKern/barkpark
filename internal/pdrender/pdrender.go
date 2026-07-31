@@ -247,10 +247,9 @@ func (r *Registry) RenderDoc(blocks []Block, ctx RenderCtx) string {
 		ctx.Theme = r.theme
 	}
 	parts := make([]string, 0, len(blocks)*2)
+	emitted := 0
 	for i := 0; i < len(blocks); {
-		if i > 0 {
-			parts = append(parts, "") // rhythm: a blank line between blocks
-		}
+		var lines []string
 		// Consecutive field blocks render as ONE aligned definition list — a dim
 		// label column + value column — instead of a stack of two-line pairs.
 		if isFieldGroupType(blocks[i].Type) {
@@ -258,12 +257,20 @@ func (r *Registry) RenderDoc(blocks []Block, ctx RenderCtx) string {
 			for j < len(blocks) && isFieldGroupType(blocks[j].Type) {
 				j++
 			}
-			parts = append(parts, renderFieldGroup(r, blocks[i:j], ctx)...)
+			lines = renderFieldGroup(r, blocks[i:j], ctx)
 			i = j
+		} else {
+			lines = r.Render(blocks[i], ctx)
+			i++
+		}
+		if len(lines) == 0 {
 			continue
 		}
-		parts = append(parts, r.Render(blocks[i], ctx)...)
-		i++
+		if emitted > 0 {
+			parts = append(parts, "") // rhythm: one blank line between visible blocks
+		}
+		parts = append(parts, lines...)
+		emitted++
 	}
 	joined := lipgloss.JoinVertical(lipgloss.Left, parts...)
 	return strings.Join(hardBoundDisplayLines(strings.Split(joined, "\n"), ctx.Width), "\n")

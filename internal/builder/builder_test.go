@@ -9,6 +9,8 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -42,6 +44,7 @@ type claimReply struct {
 	status     int
 	deployment Deployment
 	epoch      int
+	source     *BuildSource // sites-github-auto-build: the claim's `source` sibling; nil → key omitted
 }
 
 func newScriptedCP(t *testing.T) *scriptedCP { return &scriptedCP{t: t} }
@@ -73,10 +76,14 @@ func (s *scriptedCP) handler() http.Handler {
 
 		if reply.status == 0 || reply.status == http.StatusOK {
 			w.WriteHeader(http.StatusOK)
-			_ = json.NewEncoder(w).Encode(map[string]any{
+			payload := map[string]any{
 				"deployment":     reply.deployment,
 				"observed_epoch": reply.epoch,
-			})
+			}
+			if reply.source != nil {
+				payload["source"] = reply.source
+			}
+			_ = json.NewEncoder(w).Encode(payload)
 			return
 		}
 		w.WriteHeader(reply.status)
@@ -476,6 +483,327 @@ func TestResolveArtifact(t *testing.T) {
 		}
 		if got != c.want {
 			t.Errorf("resolveArtifact(%q) = %q, want %q", c.in, got, c.want)
+		}
+	}
+}
+
+// --- sites-github-auto-build: the git-ref source ladder ----------------------
+
+// makeBareRepoFixture builds a local bare repo with two commits (marker.txt is
+// "v1\n" at the parent, "v2\n" at the tip) and enables
+// uploadpack.allowReachableSHA1InWant — the file:// transport then serves
+// fetch-by-sha for reachable NON-advertised commits exactly like GitHub does.
+// Returns the file:// URL plus both full shas.
+func makeBareRepoFixture(t *testing.T) (url, tipSHA, parentSHA string) {
+	t.Helper()
+	root := t.TempDir()
+	work := filepath.Join(root, "work")
+	bare := filepath.Join(root, "origin.git")
+
+	run := func(dir string, args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir = dir
+		cmd.Env = append(os.Environ(),
+			"GIT_AUTHOR_NAME=fixture", "GIT_AUTHOR_EMAIL=fixture@test",
+			"GIT_COMMITTER_NAME=fixture", "GIT_COMMITTER_EMAIL=fixture@test",
+			"GIT_TERMINAL_PROMPT=0",
+		)
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("fixture git %v: %v\n%s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+
+	if err := os.MkdirAll(work, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	run(work, "init", "--quiet")
+	if err := os.WriteFile(filepath.Join(work, "marker.txt"), []byte("v1\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(work, "add", "marker.txt")
+	run(work, "commit", "--quiet", "-m", "c1")
+	parentSHA = run(work, "rev-parse", "HEAD")
+	if err := os.WriteFile(filepath.Join(work, "marker.txt"), []byte("v2\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
+	run(work, "commit", "--quiet", "-am", "c2")
+	tipSHA = run(work, "rev-parse", "HEAD")
+
+	run(root, "init", "--quiet", "--bare", bare)
+	run(work, "push", "--quiet", bare, "HEAD:refs/heads/main")
+	run(bare, "config", "uploadpack.allowReachableSHA1InWant", "true")
+
+	return "file://" + bare, tipSHA, parentSHA
+}
+
+// gitClaim mints a claim whose deployment has NO artifact_url — the source
+// envelope is the only lane.
+func gitClaim(src *BuildSource) claimReply {
+	return claimReply{
+		deployment: Deployment{
+			ID:     "d-git12345678",
+			SiteID: "s-git87654321",
+			Status: "building",
+			GitRef: src.Ref,
+		},
+		epoch:  1,
+		source: src,
+	}
+}
+
+// The happy path by sha: the claim mints source{kind:git}, the builder shallow-
+// fetches the PARENT sha (reachable but NOT advertised — the exact case a
+// depth-1 branch fetch cannot serve), checks out FETCH_HEAD, and hands the
+// checkout dir to nixpacks unchanged; the deployment lands pushing.
+func TestRunOnce_GitSource_ShaFirstCloneFeedsNixpacks(t *testing.T) {
+	url, _, parentSHA := makeBareRepoFixture(t)
+
+	cp := newScriptedCP(t)
+	cp.claims = []claimReply{gitClaim(&BuildSource{Kind: "git", URL: url, Ref: parentSHA})}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	_, restore := swapInMemoryLogs()
+	defer restore()
+
+	runner := &scriptedRunner{t: t}
+	b := &Builder{
+		ControlURL: srv.URL,
+		Token:      "test-token",
+		WorkerID:   "w-1",
+		CacheDir:   "/tmp/p2-cache",
+		LogDir:     "/tmp/p2-logs",
+		HTTPClient: srv.Client(),
+		Runner:     runner,
+	}
+
+	had, err := b.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce err: %v", err)
+	}
+	if !had {
+		t.Fatalf("expected had=true, got false")
+	}
+
+	if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "pushing" {
+		t.Fatalf("expected one pushing transition, got %+v", cp.transitions)
+	}
+
+	// The nixpacks invocation received the CHECKOUT DIR as its source arg —
+	// nice -n 10 nixpacks build <dir> --name <tag>.
+	if len(runner.calls) < 1 {
+		t.Fatal("no runner calls recorded")
+	}
+	args := runner.calls[0].args
+	if len(args) < 5 || args[2] != "nixpacks" || args[3] != "build" {
+		t.Fatalf("first call is not a nixpacks build: %v", args)
+	}
+	dir := args[4]
+	marker, err := os.ReadFile(filepath.Join(dir, "marker.txt"))
+	if err != nil {
+		t.Fatalf("checkout dir %s unreadable: %v", dir, err)
+	}
+	// "v1\n" proves the working tree is AT THE PARENT SHA, not the branch tip —
+	// the fetch really was by sha, not tip-then-hope.
+	if string(marker) != "v1\n" {
+		t.Errorf("marker.txt = %q, want %q (checkout must be at the requested sha, not the tip)", marker, "v1\n")
+	}
+
+	// The console narrates the clone lane honestly.
+	joined := cp.consoleJoined()
+	if !strings.Contains(joined, "source: cloning "+url) {
+		t.Errorf("console missing clone narration:\n%s", joined)
+	}
+	if !strings.Contains(joined, "source: ready at "+dir) {
+		t.Errorf("console missing 'source: ready at %s':\n%s", dir, joined)
+	}
+}
+
+// An UNREACHABLE sha (force-push / branch-delete between mint and claim) is a
+// TERMINAL failure with the honest source-gone reason — the deployment fails
+// once, it does not become a retry-forever zombie.
+func TestRunOnce_GitSource_UnreachableSha_TerminalSourceGone(t *testing.T) {
+	url, _, _ := makeBareRepoFixture(t)
+	const goneSHA = "0000000000000000000000000000000000000001"
+
+	cp := newScriptedCP(t)
+	cp.claims = []claimReply{gitClaim(&BuildSource{Kind: "git", URL: url, Ref: goneSHA})}
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	_, restore := swapInMemoryLogs()
+	defer restore()
+
+	b := &Builder{
+		ControlURL: srv.URL,
+		Token:      "test-token",
+		WorkerID:   "w-1",
+		LogDir:     "/tmp/p2-logs",
+		HTTPClient: srv.Client(),
+		Runner:     &scriptedRunner{t: t},
+	}
+
+	had, err := b.RunOnce(context.Background())
+	if err != nil {
+		t.Fatalf("RunOnce err: %v", err)
+	}
+	if !had {
+		t.Fatalf("expected had=true, got false")
+	}
+	if len(cp.transitions) != 1 || cp.transitions[0]["status"] != "failed" {
+		t.Fatalf("expected one failed transition, got %+v", cp.transitions)
+	}
+	reason, _ := cp.transitions[0]["failure_reason"].(string)
+	if !strings.Contains(reason, "no longer reachable") {
+		t.Errorf("failure_reason should name source-gone: %q", reason)
+	}
+	if !strings.Contains(reason, goneSHA) {
+		t.Errorf("failure_reason should carry the missing sha: %q", reason)
+	}
+}
+
+// classifyGitFailure maps the two PROVEN stderr shapes to their terminal
+// reasons, and everything else to a normal build failure carrying the git
+// output tail.
+func TestClassifyGitFailure(t *testing.T) {
+	src := &BuildSource{
+		Kind: "git",
+		URL:  "https://github.com/acme/site.git",
+		Ref:  "1405b8e1c46bbac81634ed6e57e2b3e68519b1fb",
+	}
+	fetchArgs := []string{"-c", "credential.helper=", "fetch", "--depth", "1", "origin", src.Ref}
+	base := errors.New("exit status 128")
+
+	cases := []struct {
+		name    string
+		stderr  string // the proven live-GitHub shapes, verbatim
+		want    []string
+		notWant string
+	}{
+		{
+			name:   "unreachable sha is terminal source-gone",
+			stderr: "fatal: remote error: upload-pack: not our ref 1405b8e1c46bbac81634ed6e57e2b3e68519b1fb",
+			want:   []string{"terminal:", "no longer reachable", src.Ref, "force-push"},
+		},
+		{
+			name:   "auth prompt is terminal repo-not-anonymously-accessible",
+			stderr: "fatal: could not read Username for 'https://github.com': terminal prompts disabled",
+			want:   []string{"terminal:", "not anonymously accessible", src.URL},
+		},
+		{
+			name:    "anything else is a normal failure with the output tail",
+			stderr:  "fatal: unable to access 'https://github.com/acme/site.git/': Could not resolve host: github.com",
+			want:    []string{"git -c credential.helper= fetch", "Could not resolve host"},
+			notWant: "terminal:",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got := classifyGitFailure(src, fetchArgs, c.stderr, base)
+			for _, w := range c.want {
+				if !strings.Contains(got.Error(), w) {
+					t.Errorf("classified error %q missing %q", got, w)
+				}
+			}
+			if c.notWant != "" && strings.Contains(got.Error(), c.notWant) {
+				t.Errorf("classified error %q must not contain %q", got, c.notWant)
+			}
+		})
+	}
+}
+
+// Every clone-lane git invocation carries GIT_TERMINAL_PROMPT=0 and runs in
+// the workdir — without the prompt kill, a private repo would hang the builder
+// on a username prompt forever.
+func TestGitCommand_PromptKillOnEnvAndWorkdirPinned(t *testing.T) {
+	dir := t.TempDir()
+	cmd := gitCommand(context.Background(), dir, "fetch", "--depth", "1", "origin", "deadbeef")
+	if cmd.Dir != dir {
+		t.Errorf("cmd.Dir = %q, want %q", cmd.Dir, dir)
+	}
+	found := false
+	for _, kv := range cmd.Env {
+		if kv == "GIT_TERMINAL_PROMPT=0" {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Errorf("cmd.Env missing GIT_TERMINAL_PROMPT=0: %v", cmd.Env)
+	}
+}
+
+// The ladder itself: an uploaded artifact ALWAYS wins over a source envelope;
+// a source of an unknown kind (or no source at all) falls through to today's
+// honest empty-artifact error.
+func TestResolveSource_Ladder(t *testing.T) {
+	cp := newScriptedCP(t)
+	srv := httptest.NewServer(cp.handler())
+	defer srv.Close()
+
+	b := &Builder{ControlURL: srv.URL, Token: "test-token", HTTPClient: srv.Client()}
+	con := b.newBuildConsole(context.Background(), "d-ladder")
+
+	cases := []struct {
+		name    string
+		d       *claimedDeployment
+		want    string
+		wantErr string
+	}{
+		{
+			name: "artifact wins even when a git source is present",
+			d: &claimedDeployment{
+				Deployment: Deployment{ArtifactURL: "file:///tmp/p2-fixture"},
+				Source:     &BuildSource{Kind: "git", URL: "file:///does/not/exist", Ref: "deadbeef"},
+			},
+			want: "/tmp/p2-fixture",
+		},
+		{
+			name:    "no artifact and no source is the honest empty-artifact error",
+			d:       &claimedDeployment{},
+			wantErr: "artifact_url is empty",
+		},
+		{
+			name: "no artifact and an unknown source kind falls through to the same honest error",
+			d: &claimedDeployment{
+				Source: &BuildSource{Kind: "svn", URL: "svn://nope", Ref: "r42"},
+			},
+			wantErr: "artifact_url is empty",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, err := b.resolveSource(context.Background(), c.d, con)
+			if c.wantErr != "" {
+				if err == nil || !strings.Contains(err.Error(), c.wantErr) {
+					t.Fatalf("resolveSource err = %v, want to contain %q", err, c.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("resolveSource err: %v", err)
+			}
+			if got != c.want {
+				t.Errorf("resolveSource = %q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// An incomplete source envelope (missing url or ref) fails fast with an honest
+// message instead of handing git an empty argument.
+func TestCloneGitSource_IncompleteEnvelope(t *testing.T) {
+	b := &Builder{}
+	for _, src := range []*BuildSource{
+		{Kind: "git", URL: "", Ref: "deadbeef"},
+		{Kind: "git", URL: "file:///somewhere", Ref: ""},
+	} {
+		if _, err := b.cloneGitSource(context.Background(), src); err == nil ||
+			!strings.Contains(err.Error(), "source envelope incomplete") {
+			t.Errorf("cloneGitSource(%+v) err = %v, want incomplete-envelope error", src, err)
 		}
 	}
 }

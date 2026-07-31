@@ -68,6 +68,36 @@ class PaperStructureAuditTest(unittest.TestCase):
         self.assertEqual(report["violations"], 0)
         self.assertEqual(report["papers_affected"], 0)
 
+    def test_empty_paragraph_spacers_are_path_addressed_and_removed_recursively(self):
+        blocks = [
+            {"type": "paragraph", "content": text("visible")},
+            {"type": "paragraph", "content": []},
+            {
+                "type": "section",
+                "blocks": [
+                    {"type": "paragraph", "content": []},
+                    {"type": "paragraph", "content": text("nested")},
+                ],
+            },
+        ]
+        document = {"_id": "spaced", "_rev": "rev-1", "blocks": blocks}
+
+        report = audit_documents([document])
+        normalized = canonicalize_blocks(blocks)
+
+        self.assertEqual(report["violations"], 2)
+        self.assertEqual(
+            report["violation_counts"], {"empty_paragraph_spacer": 2}
+        )
+        self.assertEqual(report["safe_repair_violations"], 2)
+        self.assertEqual(report["empty_top_level_paragraphs"], 1)
+        self.assertEqual(len(normalized), 2)
+        self.assertEqual(
+            normalized[1]["blocks"],
+            [{"type": "paragraph", "content": text("nested")}],
+        )
+        self.assertEqual(canonicalize_blocks(normalized), normalized)
+
     def test_ambiguous_wrappers_are_quarantined(self):
         document = {
             "_id": "ambiguous",
@@ -210,6 +240,134 @@ class PaperStructureAuditTest(unittest.TestCase):
         self.assertEqual(
             normalized[0]["items"],
             [text("one"), text("2"), []],
+        )
+
+    def test_populated_content_dialect_lists_and_tables_become_reader_visible(self):
+        blocks = [
+            {
+                "id": "list",
+                "type": "list",
+                "content": [
+                    {"type": "list_item", "content": text("Visible list fact")}
+                ],
+            },
+            {
+                "id": "table",
+                "type": "table",
+                "content": [
+                    {
+                        "type": "table_row",
+                        "content": [
+                            {
+                                "type": "table_cell",
+                                "header": True,
+                                "content": text("Claim"),
+                            }
+                        ],
+                    },
+                    {
+                        "type": "table_row",
+                        "content": [
+                            {
+                                "type": "table_cell",
+                                "header": False,
+                                "content": text("Visible table fact"),
+                            }
+                        ],
+                    },
+                ],
+            },
+        ]
+        document = {"_id": "content-dialect", "_rev": "rev-1", "blocks": blocks}
+
+        report = audit_documents([document])
+        normalized = canonicalize_blocks(blocks)
+
+        self.assertEqual(
+            report["violation_counts"],
+            {"list_content_dialect": 1, "table_content_dialect": 1},
+        )
+        self.assertEqual(report["safe_repair_violations"], 2)
+        self.assertNotIn("content", normalized[0])
+        self.assertEqual(normalized[0]["items"], [text("Visible list fact")])
+        self.assertNotIn("content", normalized[1])
+        self.assertEqual(normalized[1]["head"], [text("Claim")])
+        self.assertEqual(normalized[1]["rows"], [[text("Visible table fact")]])
+
+    def test_camelcase_content_dialect_and_scalar_tables_become_canonical(self):
+        blocks = [
+            {
+                "type": "list",
+                "content": [
+                    {
+                        "type": "listItem",
+                        "content": [
+                            {"type": "paragraph", "content": text("Nested item")}
+                        ],
+                    }
+                ],
+            },
+            {
+                "type": "table",
+                "content": [
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {
+                                "type": "tableCell",
+                                "header": True,
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": text("Nested head"),
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                    {
+                        "type": "tableRow",
+                        "content": [
+                            {
+                                "type": "tableCell",
+                                "header": False,
+                                "content": [
+                                    {
+                                        "type": "paragraph",
+                                        "content": text("Nested body"),
+                                    }
+                                ],
+                            }
+                        ],
+                    },
+                ],
+            },
+            {
+                "type": "table",
+                "headers": ["Surface", "Proof"],
+                "rows": [["CLI", "visible"]],
+            },
+            {
+                "type": "table",
+                "header": ["Surface", "Proof"],
+                "rows": [["TUI", "visible"]],
+            },
+        ]
+
+        normalized = canonicalize_blocks(blocks)
+
+        self.assertEqual(normalized[0]["items"], [text("Nested item")])
+        self.assertEqual(normalized[1]["head"], [text("Nested head")])
+        self.assertEqual(normalized[1]["rows"], [[text("Nested body")]])
+        self.assertEqual(normalized[2]["head"], [text("Surface"), text("Proof")])
+        self.assertEqual(
+            normalized[2]["rows"],
+            [[text("CLI"), text("visible")]],
+        )
+        self.assertEqual(normalized[3]["head"], [text("Surface"), text("Proof")])
+        self.assertEqual(
+            normalized[3]["rows"],
+            [[text("TUI"), text("visible")]],
         )
 
     def test_repair_plan_has_exact_backups_and_revision_fences(self):
