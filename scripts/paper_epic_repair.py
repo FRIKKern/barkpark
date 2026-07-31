@@ -73,13 +73,50 @@ def _split_lead(value: str) -> tuple[str, str]:
     return text[: match.start()].strip(), text[match.end() :].strip()
 
 
-def _split_compact_lead(value: str) -> tuple[str, str]:
-    lead, text = _split_lead(value)
-    if len(lead.split()) <= 16 and (text or len(lead.split()) <= 16):
+def _split_compact_lead(
+    value: str,
+    *,
+    force_boundary: bool = False,
+) -> tuple[str, str]:
+    normalized = _normalize(value)
+    lead, text = _split_lead(normalized)
+    if (
+        not force_boundary
+        and len(lead.split()) <= 16
+        and (text or len(lead.split()) <= 16)
+    ):
         return lead, text
 
-    words = _normalize(value).split()
-    return " ".join(words[:12]), " ".join(words[12:])
+    # Prefer authored clause boundaries over an arbitrary word budget. Keep the
+    # separator with the body so joining title + body reconstructs the original
+    # visible text byte-for-meaning while the title remains a complete action.
+    for match in re.finditer(r"\s+(?=(?:—|–|-)\s+)|(?<=[:,;])\s+", normalized):
+        title = normalized[: match.start()].strip()
+        body = normalized[match.end() :].strip()
+        if 3 <= len(title.split()) <= 16 and body:
+            return title, body
+
+    # Parenthetical evidence belongs in the body. This explicitly prevents the
+    # old "(shared router" / "(do_rollback" mid-phrase title cuts.
+    for match in re.finditer(r"\s+(?=\()", normalized):
+        title = normalized[: match.start()].strip()
+        body = normalized[match.end() :].strip()
+        if 3 <= len(title.split()) <= 16 and body:
+            return title, body
+
+    # Explanatory subordinators are the next safest semantic seam.
+    for match in re.finditer(
+        r"\s+(?=(?:because|so that|so|while|when|which|where|after|before|then)\b)",
+        normalized,
+        flags=re.IGNORECASE,
+    ):
+        title = normalized[: match.start()].strip()
+        body = normalized[match.end() :].strip()
+        if 3 <= len(title.split()) <= 16 and body:
+            return title, body
+
+    words = normalized.split()
+    return " ".join(words[:16]), " ".join(words[16:])
 
 
 def _is_empty_paragraph(block: Any) -> bool:
@@ -227,6 +264,57 @@ def _visible_text(value: Any) -> str:
             ),
         )
     )
+
+
+def _uniquify_block_ids(blocks: list[Any]) -> list[Any]:
+    """Keep the first authored id and deterministically rename later collisions."""
+    repaired = copy.deepcopy(blocks)
+    seen: set[str] = set()
+    next_copy: dict[str, int] = {}
+
+    def visit_block(block: Any) -> None:
+        if not isinstance(block, dict):
+            return
+
+        block_id = block.get("id")
+        if isinstance(block_id, str) and block_id:
+            if block_id in seen:
+                copy_index = next_copy.get(block_id, 2)
+                candidate = "{}-copy-{}".format(block_id, copy_index)
+                while candidate in seen:
+                    copy_index += 1
+                    candidate = "{}-copy-{}".format(block_id, copy_index)
+                block["id"] = candidate
+                next_copy[block_id] = copy_index + 1
+                seen.add(candidate)
+            else:
+                seen.add(block_id)
+                next_copy.setdefault(block_id, 2)
+
+        for key in ("children", "blocks"):
+            children = block.get(key)
+            if isinstance(children, list):
+                for child in children:
+                    visit_block(child)
+
+        child = block.get("child")
+        if isinstance(child, dict):
+            visit_block(child)
+
+        if block.get("type") == "steps":
+            steps = block.get("steps")
+            if isinstance(steps, list):
+                for step in steps:
+                    if not isinstance(step, dict):
+                        continue
+                    step_blocks = step.get("blocks")
+                    if isinstance(step_blocks, list):
+                        for step_block in step_blocks:
+                            visit_block(step_block)
+
+    for top_level in repaired:
+        visit_block(top_level)
+    return repaired
 
 
 def _visible_leaf_texts(value: Any) -> list[str]:
@@ -417,11 +505,35 @@ def _repair_steps(block: dict[str, Any]) -> dict[str, Any]:
 
         repaired_step = copy.deepcopy(step)
         original_title = _normalize(str(repaired_step.get("title") or ""))
-        if len(original_title.split()) > 16:
-            title, body = _split_compact_lead(original_title)
+        children = repaired_step.get("blocks")
+        children = copy.deepcopy(children) if isinstance(children, list) else []
+        split_source = original_title
+
+        # An older repair could move an arbitrary title suffix into a generated
+        # first paragraph. Heal that shape before choosing a better semantic
+        # boundary. A lowercase/non-letter continuation or unbalanced
+        # parenthesis is evidence that the first paragraph continues the title;
+        # a normal authored body starts a new sentence and remains untouched.
+        first_body = _normalize(_visible_text(children[0])) if children else ""
+        first_alpha = re.search(r"[A-Za-z]", first_body)
+        continues_title = bool(
+            first_body
+            and (
+                original_title.count("(") > original_title.count(")")
+                or first_alpha is None
+                or first_alpha.group(0).islower()
+            )
+        )
+        if continues_title:
+            split_source = _normalize("{} {}".format(original_title, first_body))
+            children = children[1:]
+
+        if len(split_source.split()) > 16 or continues_title:
+            title, body = _split_compact_lead(
+                split_source,
+                force_boundary=continues_title,
+            )
             repaired_step["title"] = title
-            children = repaired_step.get("blocks")
-            children = copy.deepcopy(children) if isinstance(children, list) else []
             if body:
                 children.insert(
                     0,
@@ -432,13 +544,21 @@ def _repair_steps(block: dict[str, Any]) -> dict[str, Any]:
                 )
             repaired_step["blocks"] = children
 
+            repaired_body = (
+                _visible_text(repaired_step["blocks"][0])
+                if repaired_step["blocks"]
+                else ""
+            )
             if _normalize(
                 "{} {}".format(
                     repaired_step["title"],
-                    _visible_text(repaired_step["blocks"][0]),
+                    repaired_body,
                 )
-            ) != original_title:
+            ) != split_source:
                 raise AssertionError("step repair changed title text")
+        elif continues_title:
+            repaired_step["title"] = split_source
+            repaired_step["blocks"] = children
 
         repaired_steps.append(repaired_step)
 
@@ -467,7 +587,7 @@ def _repair_nested_blocks(value: Any) -> Any:
 
     repaired = copy.deepcopy(value)
     for key, child in list(repaired.items()):
-        if key == "blocks" and isinstance(child, list):
+        if key in {"blocks", "children"} and isinstance(child, list):
             repaired[key] = _repair_block_sequence(child)
         elif isinstance(child, (dict, list)):
             repaired[key] = _repair_nested_blocks(child)
@@ -571,7 +691,79 @@ def _collapse_dense_primary_blocks(blocks: list[Any]) -> list[Any]:
     return repaired
 
 
+def _is_generated_appendix(block: Any) -> bool:
+    return (
+        isinstance(block, dict)
+        and block.get("type") == "expandable"
+        and (
+            str(block.get("id") or "").startswith("epb-evidence-appendix-")
+            or re.match(
+                r"^Evidence appendix \d+\b",
+                _normalize(str(block.get("summary") or "")),
+            )
+            is not None
+        )
+    )
+
+
+def _repair_existing_appendices(blocks: list[Any]) -> list[Any]:
+    """Heal repeat-pass appendix artifacts without hiding the primary tail."""
+    generated = [block for block in blocks if _is_generated_appendix(block)]
+    if not generated:
+        return blocks
+
+    ids = [str(block.get("id") or "") for block in generated]
+    summaries = [_normalize(str(block.get("summary") or "")) for block in generated]
+    numbers = []
+    for summary in summaries:
+        match = re.match(r"^Evidence appendix (\d+)\b", summary)
+        numbers.append(int(match.group(1)) if match else None)
+
+    duplicate_artifact = len(set(ids)) != len(ids) or (
+        len([number for number in numbers if number is not None])
+        != len(set(number for number in numbers if number is not None))
+    )
+    overflow_artifact = len(generated) > 4
+
+    repaired: list[Any] = []
+    appendix_index = 0
+    for block in blocks:
+        if not _is_generated_appendix(block):
+            repaired.append(block)
+            continue
+
+        appendix_index += 1
+        children = block.get("children")
+        if (
+            (duplicate_artifact or overflow_artifact)
+            and appendix_index > 4
+            and isinstance(children, list)
+            and _word_count(children) <= 700
+        ):
+            repaired.extend(copy.deepcopy(children))
+            continue
+
+        normalized = copy.deepcopy(block)
+        normalized["id"] = "epb-evidence-appendix-{}".format(appendix_index)
+        summary = _normalize(str(normalized.get("summary") or ""))
+        summary = re.sub(
+            r"^Evidence appendix \d+\b",
+            "Evidence appendix {}".format(appendix_index),
+            summary,
+        )
+        normalized["summary"] = summary
+        repaired.append(normalized)
+
+    return repaired
+
+
 def _collapse_evidence_appendices(blocks: list[Any]) -> list[Any]:
+    blocks = _repair_existing_appendices(blocks)
+    # A canonical repair has already established the appendix boundary. Never
+    # feed its collapsed children back through the top-level chunker.
+    if any(_is_generated_appendix(block) for block in blocks):
+        return blocks
+
     primary_words = len(_visible_text(blocks).split())
     h2_indexes = [
         index
@@ -635,8 +827,14 @@ def _collapse_evidence_appendices(blocks: list[Any]) -> list[Any]:
     )
 
 
-def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
-    if not _canonical_tagged(document):
+def repair_canonical_epic(
+    document: dict[str, Any],
+    *,
+    _require_canonical_tag: bool = True,
+    _curate_canonical_tags: bool = True,
+    _move_h1_first: bool = True,
+) -> dict[str, Any]:
+    if _require_canonical_tag and not _canonical_tagged(document):
         raise ValueError("profile requires the exact {} tag".format(CANONICAL_EPIC_TAG))
 
     paper_id = document.get("_id")
@@ -652,6 +850,18 @@ def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("canonical Epic Paper requires a meaningful description")
 
     source_leaves = _visible_leaf_texts(blocks)
+    # Generated appendix summaries are repair chrome, not authored evidence.
+    # A corrective pass may renumber or unwrap them while preserving every
+    # child leaf. Do not mistake removal of stale synthetic chrome for factual
+    # loss.
+    generated_summaries = {
+        _normalize(str(block.get("summary") or ""))
+        for block in blocks
+        if _is_generated_appendix(block)
+    }
+    source_leaves = [
+        leaf for leaf in source_leaves if leaf not in generated_summaries
+    ]
     source_words = len(_visible_text(blocks).split())
     source_sections = sum(
         1 for block in blocks if isinstance(block, dict) and block.get("type") == "heading"
@@ -687,7 +897,7 @@ def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
         h1_index = h1_indexes[0]
         for index in h1_indexes[1:]:
             repaired[index]["level"] = 2
-        if h1_index != 0:
+        if _move_h1_first and h1_index != 0:
             h1 = repaired.pop(h1_index)
             repaired.insert(0, h1)
             h1_index = 0
@@ -708,6 +918,17 @@ def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
             },
         )
         insert_at += 1
+    else:
+        ingress_index = next(
+            (
+                index
+                for index, block in enumerate(repaired[:8])
+                if isinstance(block, dict) and block.get("type") == "ingress"
+            ),
+            None,
+        )
+        if ingress_index is not None:
+            insert_at = ingress_index + 1
 
     opening_types = {
         block.get("type")
@@ -730,6 +951,7 @@ def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
 
     repaired = _collapse_evidence_appendices(repaired)
     repaired = _collapse_dense_primary_blocks(repaired)
+    repaired = _uniquify_block_ids(repaired)
 
     repaired_text = _normalize(_visible_text(repaired))
     missing_leaves = [
@@ -741,11 +963,12 @@ def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
         )
 
     patch_set = {"blocks": repaired}
-    curated_tags, repaired_main_tag = _curate_epic_tags(document)
-    if curated_tags != document.get("tags"):
-        patch_set["tags"] = curated_tags
-    if repaired_main_tag is not None:
-        patch_set["main_tag"] = repaired_main_tag
+    if _curate_canonical_tags:
+        curated_tags, repaired_main_tag = _curate_epic_tags(document)
+        if curated_tags != document.get("tags"):
+            patch_set["tags"] = curated_tags
+        if repaired_main_tag is not None:
+            patch_set["main_tag"] = repaired_main_tag
     if title == paper_id:
         repaired_title = _normalize(_visible_text(repaired[h1_index]))
         if repaired_title:
@@ -764,6 +987,16 @@ def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
             {"publish": {"id": paper_id, "type": "paper"}},
         ]
     }
+
+
+def repair_strategic_paper(document: dict[str, Any]) -> dict[str, Any]:
+    """Apply the lossless authored-reading repair without changing taxonomy."""
+    return repair_canonical_epic(
+        document,
+        _require_canonical_tag=False,
+        _curate_canonical_tags=False,
+        _move_h1_first=False,
+    )
 
 
 def curate_site_spawner_wave10(document: dict[str, Any]) -> dict[str, Any]:
@@ -1237,6 +1470,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "site-spawner-wave-10",
             "mechanical-spacing-doctrine",
             "canonical-epic",
+            "strategic-paper",
         ),
     )
     args = parser.parse_args(argv)
@@ -1246,6 +1480,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         mutation = curate_site_spawner_wave10(document)
     elif args.profile == "mechanical-spacing-doctrine":
         mutation = repair_spacing_doctrine(document)
+    elif args.profile == "strategic-paper":
+        mutation = repair_strategic_paper(document)
     else:
         mutation = repair_canonical_epic(document)
     json.dump(mutation, sys.stdout, indent=2, sort_keys=True)

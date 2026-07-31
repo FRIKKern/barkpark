@@ -4,8 +4,8 @@ package pdrender
 // Mirrors compose_block(expandable): a generic collapsible container — the
 // same native-<details> pattern `callout` ships (walk.ex:1415-1434), minus the
 // callout chrome. `summary` is a bold header line; the block's children
-// (`blocks`, auto-decoded into `Block.Children` by blockFromMap — the `figure`/
-// `section` precedent) recurse through the registry, indented two columns.
+// (`children`, falling back to `blocks`, auto-decoded into `Block.Children`)
+// recurse through the registry, indented two columns.
 // The terminal has no collapse affordance, so this ALWAYS renders
 // expanded — "TUI: expanded-by-default" (the `open`/`false` attr only matters
 // on surfaces that can actually fold). Empty (no summary, no children) renders

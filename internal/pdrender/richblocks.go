@@ -504,6 +504,9 @@ type eyebrowRenderer struct{}
 func (eyebrowRenderer) Render(b Block, ctx RenderCtx) []string {
 	text := strings.ToUpper(sanitizeText(attrStr(b.Attrs, "text")))
 	spaced := letterSpace(text)
+	if lipgloss.Width(spaced) > ctx.Width {
+		spaced = text
+	}
 	styled := ctx.Theme.Eyebrow.Render(spaced)
 	return wrapLines(styled, ctx.Width)
 }

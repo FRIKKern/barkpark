@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 )
 
-// maxBlockDepth caps how deep the decoder recurses into nested section `blocks`
-// and figure `child`. Portable-doc content is attacker-controllable (API-served),
+// maxBlockDepth caps how deep the decoder recurses into nested container
+// `children`/`blocks` and figure `child`. Portable-doc content is
+// attacker-controllable (API-served),
 // and Go grows a goroutine's stack to a 1GB hard limit before *fatally* aborting
 // the process — a crash that recover() cannot catch. A crafted document nested
 // tens of thousands deep would drive exactly that. Past the cap we keep the block
@@ -21,9 +22,9 @@ const maxBlockDepth = 64
 // this lives at the package edge and uses only encoding/json from the stdlib.
 //
 // Each block's type-specific fields land in Block.Attrs (the whole decoded map,
-// minus nothing — the renderers read what they need). `section.blocks` becomes
-// Block.Children and `figure.child` becomes Block.Child, recursively, so the
-// renderers never re-parse JSON.
+// minus nothing — the renderers read what they need). Container `children`
+// (preferred) or legacy `blocks` becomes Block.Children and `figure.child`
+// becomes Block.Child, recursively, so the renderers never re-parse JSON.
 func Decode(raw []byte) ([]Block, error) {
 	// Try the document envelope first.
 	var env struct {
@@ -75,11 +76,11 @@ func decodeBlock(raw json.RawMessage, depth int) (Block, error) {
 		return b, nil
 	}
 
-	// section carries child blocks under "blocks".
-	if rawBlocks, ok := m["blocks"]; ok {
-		if list, ok := rawBlocks.([]any); ok {
-			b.Children = decodeAnyBlocks(list, depth+1)
-		}
+	// The HTML contract uses children || blocks for recursive containers.
+	// Only renderers backed by Block.Children opt into that contract here;
+	// generic block-level "children" fields may contain inline nodes instead.
+	if list := containerBlockList(m, b.Type); list != nil {
+		b.Children = decodeAnyBlocks(list, depth+1)
 	}
 	// figure carries a single child under "child".
 	if rawChild, ok := m["child"]; ok {
@@ -103,7 +104,7 @@ func decodeAnyBlocks(list []any, depth int) []Block {
 }
 
 // blockFromMap builds a Block from an already-decoded map (recursing into
-// nested section/figure children).
+// nested container/figure children).
 func blockFromMap(m map[string]any, depth int) Block {
 	b := Block{
 		ID:    attrStr(m, "id"),
@@ -114,12 +115,28 @@ func blockFromMap(m map[string]any, depth int) Block {
 	if depth >= maxBlockDepth {
 		return b
 	}
-	if rawBlocks, ok := m["blocks"].([]any); ok {
-		b.Children = decodeAnyBlocks(rawBlocks, depth+1)
+	if list := containerBlockList(m, b.Type); list != nil {
+		b.Children = decodeAnyBlocks(list, depth+1)
 	}
 	if cm, ok := m["child"].(map[string]any); ok {
 		child := blockFromMap(cm, depth+1)
 		b.Child = &child
 	}
 	return b
+}
+
+// containerBlockList mirrors the web reader's container_children/1 contract
+// for the two TUI renderers that consume Block.Children. `children` is the
+// canonical expandable wire key; `blocks` remains the section/legacy fallback.
+func containerBlockList(m map[string]any, blockType string) []any {
+	if blockType != "section" && blockType != "expandable" {
+		return nil
+	}
+	if children, ok := m["children"].([]any); ok {
+		return children
+	}
+	if blocks, ok := m["blocks"].([]any); ok {
+		return blocks
+	}
+	return nil
 }

@@ -14,6 +14,7 @@ from paper_epic_repair import (
     curate_site_spawner_wave10,
     repair_canonical_epic,
     repair_spacing_doctrine,
+    repair_strategic_paper,
 )
 from paper_quality import audit_papers
 
@@ -23,6 +24,86 @@ def text(value):
 
 
 class PaperEpicRepairTest(unittest.TestCase):
+    def test_strategic_repair_preserves_taxonomy_and_is_idempotent(self):
+        tags = [
+            {
+                "tag": "jarl-website",
+                "strength": 90,
+                "rationale": "The record lands on jarl.no",
+            },
+            {
+                "tag": "epic-wave-strategy",
+                "strength": 75,
+                "rationale": "The charter guides an epic",
+            },
+        ]
+        document = {
+            "_id": "strategic-charter",
+            "_rev": "source-rev",
+            "title": "strategic-charter",
+            "description": "A decision charter whose authored claims must remain exact.",
+            "main_tag": "jarl-website",
+            "tags": tags,
+            "blocks": [
+                {"id": "eyebrow", "type": "eyebrow", "text": "LIVE CHARTER"},
+                {
+                    "id": "title",
+                    "type": "heading",
+                    "level": 1,
+                    "text": "The strategic charter",
+                },
+                {
+                    "id": "opening",
+                    "type": "ingress",
+                    "content": text("The existing authored opening remains exact."),
+                },
+                {"id": "gap-a", "type": "paragraph", "content": []},
+                {"id": "gap-b", "type": "paragraph", "content": []},
+                {
+                    "id": "decision",
+                    "type": "callout",
+                    "title": "Decision",
+                    "content": text("Keep the public record specific and useful."),
+                },
+            ],
+        }
+
+        mutation = repair_strategic_paper(document)
+        patch = mutation["mutations"][0]["patch"]
+        repaired = patch["set"]["blocks"]
+
+        self.assertEqual(patch["ifRevisionID"], "source-rev")
+        self.assertNotIn("tags", patch["set"])
+        self.assertNotIn("main_tag", patch["set"])
+        self.assertEqual(
+            [block["type"] for block in repaired[:4]],
+            ["eyebrow", "heading", "ingress", "stats"],
+        )
+        self.assertTrue(any(block.get("type") == "stats" for block in repaired[:8]))
+        self.assertFalse(
+            any(
+                block.get("type") == "paragraph"
+                and block.get("content") == []
+                for block in repaired
+            )
+        )
+        self.assertIn("The existing authored opening remains exact.", str(repaired))
+        self.assertIn("Keep the public record specific and useful.", str(repaired))
+
+        second_document = {
+            **document,
+            "_rev": "second-rev",
+            "title": patch["set"].get("title", document["title"]),
+            "blocks": repaired,
+        }
+        repaired_again = repair_strategic_paper(second_document)["mutations"][0][
+            "patch"
+        ]["set"]["blocks"]
+
+        self.assertEqual(repaired_again, repaired)
+        self.assertEqual(document["tags"], tags)
+        self.assertEqual(document["main_tag"], "jarl-website")
+
     def test_list_reframes_are_lossless_and_semantic(self):
         block = {
             "id": "findings",
@@ -258,6 +339,105 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertEqual(table["head"], [text("claim"), text("proof")])
         self.assertEqual(table["rows"], [[text("the lane works"), text("executed output")]])
 
+    def test_step_split_uses_a_clause_boundary_and_never_cuts_parentheses(self):
+        original = (
+            "THEN the wave-10 filed residue — #7863 + #7869 "
+            "(do_rollback promising a rebuild it does not perform; the window "
+            "remains false until the executed proof lands)."
+        )
+        document = {
+            "_id": "semantic-step-boundary",
+            "_rev": "source-rev",
+            "title": "Semantic step boundary",
+            "description": "This wave keeps action titles grammatical and evidence intact.",
+            "tags": [{"tag": "epic-cycle-wave-paper"}],
+            "blocks": [
+                {"type": "heading", "level": 1, "text": "Semantic step boundary"},
+                {
+                    "type": "steps",
+                    "steps": [{"title": original, "blocks": []}],
+                },
+            ],
+        }
+
+        repaired = repair_canonical_epic(document)["mutations"][0]["patch"]["set"][
+            "blocks"
+        ]
+        step = next(block for block in repaired if block.get("type") == "steps")[
+            "steps"
+        ][0]
+
+        self.assertEqual(step["title"], "THEN the wave-10 filed residue")
+        self.assertEqual(
+            step["blocks"][0]["content"][0]["value"],
+            (
+                "— #7863 + #7869 (do_rollback promising a rebuild it does not "
+                "perform; the window remains false until the executed proof lands)."
+            ),
+        )
+        self.assertNotIn("(", step["title"])
+
+    def test_step_repair_heals_an_earlier_mid_phrase_title_split(self):
+        document = {
+            "_id": "semantic-step-healing",
+            "_rev": "source-rev",
+            "title": "Semantic step healing",
+            "description": "This wave restores a grammatical action title from an older repair.",
+            "tags": [{"tag": "epic-cycle-wave-paper"}],
+            "blocks": [
+                {"type": "heading", "level": 1, "text": "Semantic step healing"},
+                {
+                    "type": "steps",
+                    "steps": [
+                        {
+                            "title": (
+                                "MERGE ROUND 1 in the order above: #7866 then #7867 "
+                                "(shared router"
+                            ),
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "content": text(
+                                        "file, different regions), #7869 and #7868."
+                                    ),
+                                }
+                            ],
+                        },
+                        {
+                            "title": (
+                                "FILE THE FOUR ROWS FIRST, ssw10-reindex-token-prod-read "
+                                "before anything else — it gates"
+                            ),
+                            "blocks": [
+                                {
+                                    "type": "paragraph",
+                                    "content": text("the first production merge."),
+                                }
+                            ],
+                        },
+                    ],
+                },
+            ],
+        }
+
+        repaired = repair_canonical_epic(document)["mutations"][0]["patch"]["set"][
+            "blocks"
+        ]
+        steps = next(block for block in repaired if block.get("type") == "steps")[
+            "steps"
+        ]
+
+        self.assertEqual(steps[0]["title"], "MERGE ROUND 1 in the order above:")
+        self.assertEqual(
+            steps[0]["blocks"][0]["content"][0]["value"],
+            "#7866 then #7867 (shared router file, different regions), #7869 and #7868.",
+        )
+        self.assertEqual(steps[1]["title"], "FILE THE FOUR ROWS FIRST,")
+        self.assertEqual(
+            steps[1]["blocks"][0]["content"][0]["value"],
+            "ssw10-reindex-token-prod-read before anything else — it gates the first production merge.",
+        )
+
     def test_generic_repair_collapses_evidence_wall_without_losing_source_text(self):
         sections = []
         for index in range(18):
@@ -300,6 +480,142 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertGreaterEqual(len(appendices), 1)
         self.assertLessEqual(len(appendices), 4)
         self.assertIn("section-17", str(repaired))
+
+        second_document = {
+            **document,
+            "_rev": "second-rev",
+            "blocks": repaired,
+        }
+        repaired_again = repair_canonical_epic(second_document)["mutations"][0][
+            "patch"
+        ]["set"]["blocks"]
+        self.assertEqual(repaired_again, repaired)
+
+    def test_repair_heals_duplicate_appendix_artifact_and_exposes_next_wave(self):
+        appendices = [
+            {
+                "id": "epb-evidence-appendix-{}".format(index),
+                "type": "expandable",
+                "summary": "Evidence appendix {} — proof".format(index),
+                "children": [
+                    {"type": "heading", "level": 2, "text": "Proof {}".format(index)},
+                    {"type": "paragraph", "content": text("Evidence {}".format(index))},
+                ],
+            }
+            for index in range(1, 5)
+        ]
+        appendices.append(
+            {
+                "id": "epb-evidence-appendix-1",
+                "type": "expandable",
+                "summary": "Evidence appendix 1 — Next wave",
+                "children": [
+                    {"type": "heading", "level": 2, "text": "Next wave"},
+                    {
+                        "type": "steps",
+                        "steps": [
+                            {
+                                "title": (
+                                    "MERGE ROUND 1 — #7870 first, then #7864 + "
+                                    "#7865 in either order (shared router file, "
+                                    "different regions), then #7868."
+                                ),
+                                "blocks": [],
+                            }
+                        ],
+                    },
+                ],
+            }
+        )
+        document = {
+            "_id": "duplicate-appendix-repair",
+            "_rev": "source-rev",
+            "title": "Duplicate appendix repair",
+            "description": "This wave restores the primary next action and unique proof rails.",
+            "tags": [{"tag": "epic-cycle-wave-paper"}],
+            "blocks": [
+                {"type": "heading", "level": 1, "text": "Duplicate appendix repair"},
+                {"type": "ingress", "content": text("The decision and its evidence.")},
+                {"type": "stats", "items": [{"value": "5", "label": "actions"}]},
+                *appendices,
+            ],
+        }
+
+        repaired = repair_canonical_epic(document)["mutations"][0]["patch"]["set"][
+            "blocks"
+        ]
+        generated = [
+            block
+            for block in repaired
+            if block.get("type") == "expandable"
+            and str(block.get("id", "")).startswith("epb-evidence-appendix-")
+        ]
+        self.assertEqual(
+            [block["id"] for block in generated],
+            ["epb-evidence-appendix-{}".format(index) for index in range(1, 5)],
+        )
+        self.assertTrue(
+            any(
+                block.get("type") == "heading"
+                and block.get("text") == "Next wave"
+                for block in repaired
+            )
+        )
+        steps = next(block for block in repaired if block.get("type") == "steps")
+        self.assertEqual(steps["steps"][0]["title"], "MERGE ROUND 1")
+
+    def test_generic_repair_makes_nested_block_ids_globally_unique(self):
+        document = {
+            "_id": "nested-duplicate-ids",
+            "_rev": "source-rev",
+            "title": "Nested duplicate ids",
+            "description": "This wave keeps every proof block addressable in every reader.",
+            "tags": [{"tag": "epic-cycle-wave-paper"}],
+            "blocks": [
+                {"id": "heading", "type": "heading", "level": 1, "text": "Proof"},
+                {
+                    "id": "appendix-a",
+                    "type": "expandable",
+                    "summary": "Evidence appendix 1 — first",
+                    "children": [
+                        {
+                            "id": "shared-proof",
+                            "type": "paragraph",
+                            "content": text("First proof"),
+                        }
+                    ],
+                },
+                {
+                    "id": "appendix-b",
+                    "type": "expandable",
+                    "summary": "Evidence appendix 2 — second",
+                    "children": [
+                        {
+                            "id": "shared-proof",
+                            "type": "paragraph",
+                            "content": text("Second proof"),
+                        }
+                    ],
+                },
+            ],
+        }
+
+        repaired = repair_canonical_epic(document)["mutations"][0]["patch"]["set"][
+            "blocks"
+        ]
+        child_ids = [
+            child["id"]
+            for block in repaired
+            if block.get("type") == "expandable"
+            for child in block.get("children", [])
+        ]
+        self.assertEqual(child_ids, ["shared-proof", "shared-proof-copy-2"])
+
+        repaired_again = repair_canonical_epic(
+            {**document, "_rev": "second-rev", "blocks": repaired}
+        )["mutations"][0]["patch"]["set"]["blocks"]
+        self.assertEqual(repaired_again, repaired)
+
 
     def test_generic_repair_hides_prose_heavy_detail_from_the_first_pass(self):
         document = {

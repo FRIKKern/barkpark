@@ -56,9 +56,45 @@
 # trailing `(…)` when the source says that job is matrixed AND its name
 # interpolates no matrix value — which is exactly when GitHub appends the tuple.
 #
+# THE EMIT IS A MERGE, NOT AN OVERWRITE (wave 11)
+#
+# This script used to build the spec with `jq -n` and `> $OUT`, i.e. a pure
+# overwrite by the S1 intersection. That silently DE-REGISTERS any committed
+# context the sample could not have rendered — `PR references an active task` is
+# the standing casualty, because `pr-task-gate.yml` is `on: pull_request` only
+# and therefore renders on NO main head, in any window, ever. No sample can save
+# it; only a merge can. So `--out` now JQ-MERGES onto the committed spec
+# (`--merge-base`, default `.github/required-checks.json`; `--no-merge` for a
+# greenfield emit and for the hermetic tests), and the union is taken on the
+# context string with the base's app_id winning.
+#
+# AND A LOSS IS REFUSED BEFORE IT CAN BE MERGED AWAY (wave 11)
+#
+# The merge alone is not the guard. A committed name that failed to render is a
+# FACT about the sample, and it is refused BY NAME — never by a count, because
+# the emitted count on this repo is 0, 6 and 7 across three windows inside one
+# hour (D130), so no count threshold can tell a healthy window from a dead one.
+# The check sits immediately after the S1 `comm -12`, because stage 2 iterates
+# the intersection and is therefore structurally incapable of noticing a name
+# that never entered it. A name that genuinely cannot render on the sampled
+# shapes is acknowledged ONE AT A TIME with `--expect-unrendered <name>`, which
+# is a decision somebody typed, not a threshold that drifted.
+#
+# AND AN EXCLUDED AGGREGATOR DEMOTES ITS LEAVES, NEVER PROMOTES THEM (wave 11)
+#
+# S3 subsumption is computed against the SURVIVORS. So when a stage excludes an
+# aggregator, its `needs` upstreams stop being subsumed by anything and get
+# PROMOTED instead — the exact inversion of the intent. `Security gate` is the
+# standing case (S5 red on main when this was written, S7 held-by-decision since
+# 95ace3150 cleared it — the demotion keys on the EXCLUSION, not on which stage
+# produced it); without S6 the flip would have required its three green leaves,
+# quietly re-implementing at leaf granularity, forever, the aggregator the run
+# just disqualified.
+#
 # USAGE
 #   scripts/required-checks-generate.sh --sha <sha> --sha <sha> [--out FILE]
 #   scripts/required-checks-generate.sh --sha <sha> --explain      # the ledger
+#   scripts/required-checks-generate.sh --sha … --enforced true --out FILE
 #
 # The spec is regenerated immediately before any protection flip; it has a shelf
 # life of about one merged workflow change.
@@ -79,6 +115,10 @@ ALLOW_SINGLE_SHA=0
 MAIN_WINDOW=10
 MAIN_SHAS=""
 SHAS=()
+ENFORCED="false"
+MERGE_BASE=""
+NO_MERGE=0
+EXPECT_UNRENDERED=()
 
 # Advisory BY INTENT: names that run green, are not paths-filtered, and are not
 # subsumed — but must still never gate a merge. Each needs one line of why.
@@ -87,6 +127,24 @@ ADVISORY_BY_INTENT_NAMES=(
 )
 ADVISORY_BY_INTENT_REASONS=(
   "the task gate's own harness — it proves the gate CAN fail; requiring it makes the tripwire's tripwire load-bearing"
+)
+
+# S7 EXCLUDED BY DECISION: names that pass every mechanical stage — green on
+# main, unfiltered, unsubsumed, blocking — and are still held OUT on purpose.
+# This list is hand-maintained ON PURPOSE and each entry carries a dated ground
+# and a re-evaluation trigger, so it reads as a hold rather than a permanent
+# verdict. Nothing else in this script can express "correct, but not yet".
+#
+# TREAT ANY GROWTH OF THIS LIST AS A RED FLAG (wave 11 review). It is the one
+# place a name can be parked without mechanical evidence. Every entry must say
+# what would retire it.
+EXCLUDED_BY_DECISION_NAMES=(
+  "Required-check spec gate"
+  "Security gate"
+)
+EXCLUDED_BY_DECISION_REASONS=(
+  "S7 EXCLUDED BY DECISION: structurally clean and green on main, but it does NOT render on #8222's merge ref — that PR's base is stale and predates #8253, which created the job, and #8222 is CONFLICTING/DIRTY as of 2026-07-31 so it must be rebased before it can land at all. Requiring this name today would add a second, independent deadlock to a PR that already has one. Re-evaluate once #8222 lands or is rebased."
+  "S7 EXCLUDED BY DECISION: green on main since 95ace3150 (2026-07-31) — the req bump that cleared both mix-audit advisories landed OUTSIDE this epic, so the S5 RED-ON-MAIN ground wave 11 built on has EVAPORATED and the mechanical stages would now PROMOTE this name. It is still held out, and the ground is now forward-looking rather than historical: its sole blocking upstream is \`mix-audit\`, which runs mix_audit against a LIVE advisory database, so a CVE published tomorrow reds it on every open PR with no change to this repo — a permanently correct red that no PR can clear, which is exactly what branch protection must never pin. Registering it is a decision that needs its own wave: a documented policy for who clears a fleet-wide advisory red, and a fresh deadlock sweep. Its three green leaves go down WITH it via S6. Re-evaluate when that policy exists."
 )
 
 die() { echo "FAIL: $*" >&2; exit 1; }
@@ -410,9 +468,43 @@ EOF
   true
 }
 
+# By SHAPE, not a line range: a range silently truncates the moment anyone adds
+# a paragraph to the header above it — which wave 11 did, three times.
 usage() {
-  sed -n '2,60p' "$0" | sed 's/^# \{0,1\}//'
+  awk 'NR==1 {next} /^#/ {sub(/^# ?/, ""); print; next} {exit}' "$0"
   exit "${1:-0}"
+}
+
+# Does this workflow have any trigger that fires on a BRANCH HEAD? A workflow
+# that is `on: pull_request` only publishes check runs against the PR's merge
+# ref and NEVER against a commit on main — so no sampling window, however wide,
+# will ever see its name, and widening the window in response is wasted motion.
+workflow_has_head_trigger() {
+  [ -f "$1" ] || return 1
+  awk '
+    /^on:/ { inon = 1; next }
+    inon && /^[a-z]/ { exit }
+    inon && /^  (push|schedule|workflow_dispatch|merge_group):/ { found = 1 }
+    END { exit(found ? 0 : 1) }
+  ' "$1"
+}
+
+# One line of provenance for a committed name the sample did not render, so the
+# operator can tell "this window is unlucky, re-sample" from "no window can ever
+# help, the merge is the only carrier".
+unrenderable_hint() {
+  local name="$1" idx="$2" hit file job
+  if hit="$(job_for_name "$name" "$idx")"; then
+    file="$(cut -f1 <<<"$hit")"
+    job="$(cut -f2 <<<"$hit")"
+    if workflow_has_head_trigger "$WORKFLOW_DIR/$file"; then
+      printf '  [%s job %s — it DOES trigger on a branch head, so this window is the anomaly: re-sample]' "$file" "$job"
+    else
+      printf '  [%s job %s — PULL_REQUEST-ONLY: it can never render on a branch head, so only the merge can carry it]' "$file" "$job"
+    fi
+  else
+    printf '  [no job in %s publishes this name any more — renamed or deleted?]' "$WORKFLOW_DIR"
+  fi
 }
 
 main() {
@@ -426,6 +518,15 @@ main() {
       --workflows) WORKFLOW_DIR="$2"; shift 2 ;;
       --fixture-dir) FIXTURE_DIR="$2"; shift 2 ;;
       --out) OUT="$2"; shift 2 ;;
+      --enforced)
+        case "$2" in
+          true|false) ENFORCED="$2" ;;
+          *) die "--enforced takes exactly 'true' or 'false' (got '$2') — protection is not a truthy string" ;;
+        esac
+        shift 2 ;;
+      --merge-base) MERGE_BASE="$2"; NO_MERGE=0; shift 2 ;;
+      --no-merge) NO_MERGE=1; shift ;;
+      --expect-unrendered) EXPECT_UNRENDERED+=("$2"); shift 2 ;;
       --explain) EXPLAIN=1; shift ;;
       --status-source) SOURCE_FEED="status"; shift ;;
       --allow-single-sha) ALLOW_SINGLE_SHA=1; shift ;;
@@ -437,6 +538,19 @@ main() {
   [ "${#SHAS[@]}" -gt 0 ] || die "at least one --sha is required"
   if [ "${#SHAS[@]}" -lt 2 ] && [ "$ALLOW_SINGLE_SHA" -eq 0 ]; then
     die "at least TWO --sha are required (different path shapes) — a single-sha sample cannot tell a universal check from a paths-filtered one; pass --allow-single-sha only in tests"
+  fi
+
+  # ── the merge base ──
+  # An unreadable base is a hard failure, never a silent fall-back to greenfield:
+  # a greenfield emit is exactly the overwrite this stage exists to prevent, and
+  # it would look identical in the diff.
+  local base_json='null' committed_required=""
+  if [ "$NO_MERGE" -eq 0 ]; then
+    local base_file="${MERGE_BASE:-$REPO_ROOT/.github/required-checks.json}"
+    [ -f "$base_file" ] || die "no merge base at $base_file — pass --no-merge for a deliberate greenfield emit; a missing base must never silently become one"
+    jq -e . "$base_file" >/dev/null 2>&1 || die "$base_file is not valid JSON — refusing to merge onto a file that cannot be read"
+    base_json="$(cat "$base_file")"
+    committed_required="$(jq -r '.protection.required_status_checks.checks[]?.context // empty' "$base_file" | sort -u)"
   fi
 
   local idx
@@ -485,11 +599,69 @@ EOF
     echo "── S1 intersection across ${#SHAS[@]} sha(s): $(printf '%s\n' "$intersection" | grep -c . || true) name(s) ──" >&2
   fi
 
+  # ── S1-LOSS: a committed name that failed to render, refused BY NAME ─────────
+  #
+  # THIS IS THE ONLY PLACE THE LOSS IS VISIBLE. Stage 2 below iterates the
+  # INTERSECTION; a name that never entered it is not excluded, it is absent, so
+  # `.exclusions` — the only ledger stage 2 writes — is structurally incapable of
+  # recording it. Hence the check sits here, between the `comm -12` and the
+  # selection, and not one line later.
+  #
+  # KEYED ON NAMES, NEVER ON A COUNT. Measured on this repo inside one hour, the
+  # emitted count over three sampling windows was 0, then 6, then 7 (D130): three
+  # of the newest ten main heads carry ZERO check runs at all, and `Elixir gate`
+  # renders on two of them. Any `>= N` threshold is therefore either satisfied by
+  # a window that lost the repo's only blocking gate, or unsatisfiable by a
+  # healthy one. The set difference against the committed spec is the only
+  # statement that means the same thing in every window.
+  #
+  # ACKNOWLEDGEMENT IS PER NAME AND IS TYPED BY A HUMAN. `--expect-unrendered
+  # <name>` says "this name provably cannot render on the shapes I sampled, and I
+  # am relying on the MERGE to carry it." `PR references an active task` is the
+  # standing case: `pr-task-gate.yml` is `on: pull_request` only, so it renders on
+  # no main head in any window ever, and no better sample exists.
+  if [ -n "$committed_required" ]; then
+    local lost_names="" cname acked ack
+    while IFS= read -r cname; do
+      [ -n "$cname" ] || continue
+      grep -qxF "$cname" <<<"$intersection" && continue
+      acked=0
+      for ack in ${EXPECT_UNRENDERED[@]+"${EXPECT_UNRENDERED[@]}"}; do
+        [ "$ack" = "$cname" ] && acked=1 && break
+      done
+      if [ "$acked" -eq 1 ]; then
+        note "  unrendered (ACKNOWLEDGED) $cname — carried by the merge, not by this sample"
+        continue
+      fi
+      lost_names="$lost_names  LOST  $cname$(unrenderable_hint "$cname" "$idx")
+"
+    done <<EOF
+$committed_required
+EOF
+    if [ -n "$lost_names" ]; then
+      {
+        echo "S1 LOSS — the sample did not render context(s) the COMMITTED spec already requires."
+        echo "Every line below is live branch protection today. Emitting from this sample and"
+        echo "committing the result is how a required gate stops being one, silently:"
+        printf '%s' "$lost_names"
+        echo
+        echo "Sampled shas: ${SHAS[*]}"
+        echo "This is NOT a count problem and no threshold can express it: the emitted count on"
+        echo "this repo was 0, 6 and 7 across three windows inside one hour (D130)."
+        echo "Either sample heads on which the name actually rendered, or — if it provably"
+        echo "cannot render on any head of this shape — acknowledge it ONE NAME AT A TIME with"
+        echo "  --expect-unrendered '<name>'"
+        echo "which relies on the merge to carry it and leaves your decision in the command line."
+      } >&2
+      exit 1
+    fi
+  fi
+
   # ── stage 2: selection ──
   local main_rows=""
   main_rows="$(main_conclusions)"
 
-  local selected="" exclusions_json="[]" n
+  local selected="" exclusions_json="[]" excluded_meta="" n
   while IFS= read -r n; do
     [ -n "$n" ] || continue
     local hit file job coe pf needs reason=""
@@ -535,9 +707,26 @@ EOF
       fi
     fi
 
+    # S7 excluded by decision — correct, green, and held out on purpose
+    if [ -z "$reason" ]; then
+      local d=0
+      while [ "$d" -lt "${#EXCLUDED_BY_DECISION_NAMES[@]}" ]; do
+        if [ "$n" = "${EXCLUDED_BY_DECISION_NAMES[$d]}" ]; then
+          reason="${EXCLUDED_BY_DECISION_REASONS[$d]}"
+          break
+        fi
+        d=$((d + 1))
+      done
+    fi
+
     if [ -n "$reason" ]; then
       exclusions_json="$(printf '%s' "$exclusions_json" | jq --arg c "$n" --arg r "$reason" '. + [{context: $c, reason: $r}]')"
       note "  exclude  $n  — $reason"
+      # Recorded so S6 can find the LEAVES of an excluded aggregator. Without
+      # this row the demotion has nothing to key on: `.exclusions` carries the
+      # name and the prose, and neither one resolves back to a job's `needs`.
+      excluded_meta="$excluded_meta$n	$file	$job	$needs
+"
     else
       selected="$selected$n
 $file	$job	$needs
@@ -547,6 +736,59 @@ $file	$job	$needs
   done <<EOF
 $intersection
 EOF
+
+  # ── S6: an EXCLUDED aggregator DEMOTES its leaves ───────────────────────────
+  #
+  # S3 (below) subsumes upstreams of the aggregators that SURVIVED. The mirror
+  # case is the one that bites: when S5 excludes `Security gate` for being red on
+  # main, its `needs` upstreams stop being subsumed by anything and fall through
+  # every remaining stage green — so the run PROMOTES `Dispatch (security paths)`,
+  # `Security gate shape ratchet` and `Sobelow baseline does not swallow its own
+  # inline waivers (blocking)`, re-implementing at leaf granularity, and forever,
+  # exactly the aggregator the sample just disqualified. That is the inversion of
+  # the intent: an aggregator was excluded because requiring it is wrong TODAY,
+  # not because its internals should each become a contract.
+  #
+  # Membership is by file+job id, never by rendered name — a matrixed upstream's
+  # rendered name carries a suffix its `name:` template does not.
+  local demoted="" ex_name ex_file ex_job ex_needs df dj
+  while IFS=$'\t' read -r ex_name ex_file ex_job ex_needs; do
+    [ -n "$ex_file" ] && [ -n "$ex_needs" ] || continue
+    while IFS=$'\t' read -r df dj; do
+      [ -n "$dj" ] || continue
+      demoted="$demoted$df	$dj	$ex_name
+"
+    done <<EOF
+$(subsumed_jobs "$ex_file" "$ex_needs" "$idx")
+EOF
+  done <<EOF
+$excluded_meta
+EOF
+
+  if [ -n "$demoted" ]; then
+    local kept="" dp dtotal dj_i=1 dnm dmeta dfj dagg
+    dp="$(printf '%s' "$selected")"
+    dtotal="$(grep -c . <<<"$dp" || true)"
+    while [ "$dj_i" -le "$dtotal" ]; do
+      dnm="$(sed -n "${dj_i}p" <<<"$dp")"
+      dmeta="$(sed -n "$((dj_i + 1))p" <<<"$dp")"
+      dj_i=$((dj_i + 2))
+      [ -n "$dnm" ] || continue
+      dfj="$(cut -f1,2 <<<"$dmeta")"
+      dagg="$(awk -F'\t' -v k="$dfj" '$1 "\t" $2 == k { print $3; exit }' <<<"$demoted")"
+      if [ -n "$dagg" ]; then
+        exclusions_json="$(jq --arg c "$dnm" \
+          --arg r "S6 LEAF OF AN EXCLUDED AGGREGATOR: an upstream \`needs\` of \`$dagg\`, which this run EXCLUDED — promoting the leaves of a disqualified aggregator re-implements it at leaf granularity and pins its internals as a contract" \
+          '. + [{context: $c, reason: $r}]' <<<"$exclusions_json")"
+        note "  exclude  $dnm  — S6 LEAF OF AN EXCLUDED AGGREGATOR ($dagg)"
+        continue
+      fi
+      kept="$kept$dnm
+$dmeta
+"
+    done
+    selected="$kept"
+  fi
 
   # S3 subsumed — computed last, against the survivors: a name that is a `needs`
   # upstream of a kept aggregator is already covered by it.
@@ -594,60 +836,95 @@ EOF
   local checks_json
   checks_json="$(printf '%s' "$final" | grep . | jq -R --argjson a "$ACTIONS_APP_ID" '{context: ., app_id: $a}' | jq -s '.')"
 
+  # ── the emit: a MERGE onto the committed base, never an overwrite ───────────
+  #
+  # WHAT THE GENERATOR OWNS AND WHAT THE BASE CARRIES. The generator owns every
+  # field it derives — `enforced`, `repo`, `branch`, `generated_from_shas`, the
+  # whole `protection` block bar the check LIST, and `exclusions` — plus exactly
+  # three `_readme` paragraphs: the GENERATED banner, the enforced/reversal
+  # paragraph (whose text is conditioned on the SAME variable that sets the
+  # `enforced` field, so the file cannot say "not applied yet" while claiming to
+  # be applied), and the sampling rule's sha trailer, TEMPLATED from $shas rather
+  # than left as the literal of whichever wave wrote it last. Everything else in
+  # `_readme` — the floor, the exclusions census, the merge protocol — is prose a
+  # human maintains, and the merge carries it through unchanged.
+  #
+  # The check list is a UNION on the context string, base first so a committed
+  # app_id pin wins over a freshly derived one, then sorted by context so the
+  # diff of a regeneration is a diff of DECISIONS and not of sampling order.
   local spec
   spec="$(jq -n \
     --arg repo "$REPO" \
     --arg branch "$BRANCH" \
+    --arg enforced "$ENFORCED" \
+    --argjson base "$base_json" \
     --argjson checks "$checks_json" \
     --argjson exclusions "$exclusions_json" \
     --argjson shas "$(printf '%s\n' "${SHAS[@]}" | jq -R . | jq -s '.')" \
-    '{
-      "_readme": [
-        "GENERATED by scripts/required-checks-generate.sh from check runs actually observed on the sampled shas. Never hand-edit a context string: GitHub validates neither the name nor the app_id, and a typo deadlocks the branch forever (honest-gates D21).",
-        "enforced=false means protection has NOT been applied yet; the CI guard still runs the deadlock detector against real heads, so it is never vacuous. hgw2-s7 regenerates this file and flips enforced to true in the same PR.",
-        "Every protection field is enumerated INCLUDING the falses: the PUT does not converge omitted state (allow_force_pushes resets, required_linear_history and required_conversation_resolution do NOT). See honest-gates D41.",
-        "No workflow carries a merge_group trigger and this repo is user-owned (no merge queue), so queue semantics are not a variable today. If the repo ever moves to an org and the merge queue is enabled, every required check would sit Pending-forever in the merge group on day one.",
-        "OPERATIONAL: a required context whose LATEST run on the head concluded `cancelled` blocks the merge with a third refusal shape (`... is cancelled.`, honest-gates D38) and clears only on a re-run or a push. elixir.yml sets cancel-in-progress on PR refs, so a superseded head can leave one behind. That is a correct red, not a deadlock — but the merge protocol must expect it, because the message is neither `is failing.` nor `is expected.`"
-      ],
-      enforced: false,
-      repo: $repo,
-      branch: $branch,
-      generated_from_shas: $shas,
-      protection: {
-        required_status_checks: {
-          strict: false,
-          checks: $checks
+    '
+    ($enforced == "true") as $on
+    | ($shas | map(.[0:9]) | join(" and ")) as $shortshas
+    | ($base | if type == "object" then . else {} end) as $b
+    | [
+        { k: "GENERATED by scripts/required-checks-generate.sh",
+          t: "GENERATED by scripts/required-checks-generate.sh from check runs actually observed on the sampled shas. Never hand-edit a context string: GitHub validates neither the name nor the app_id, and a typo deadlocks the branch forever (honest-gates D21). The emit is a MERGE onto this file, not an overwrite: a committed context the sample could not render survives, and one that should have rendered and did not is REFUSED by name before the merge can hide it." },
+        { k: "enforced=",
+          t: (if $on then
+                "enforced=true means protection IS applied to this branch. From this commit an unreadable or absent protection config is a HARD failure in scripts/required-checks-verify.sh — it is no longer a committed pre-flip state. THE REVERSAL IS TWO COMMANDS, and the first one WRITES A RECORD BEFORE it touches the API: `bash scripts/required-checks-apply.sh --disable --confirm --reason \"…\" --task <id>`, which execs `scripts/breakglass.sh --open --total`, refuses without both a reason and a task, and appends a row to docs/ops/break-glass-log.md before the DELETE; then `bash scripts/breakglass.sh --close --reason \"…\" --task <id>` to put the full object back. RUN BOTH FROM A CHECKOUT CUT FROM origin/main AT THAT MOMENT. A stale checkout carries the pre-#8253 apply.sh whose --disable block ends in a bare `gh api -X DELETE`: it removes protection, writes NO record, and a verifier who ran this runbook’s own documented string from a 131-commit-behind checkout took main’s protection down for ~74 seconds leaving ZERO rows in the log (D136)."
+              else
+                "enforced=false means protection has NOT been applied yet; the CI guard still runs the deadlock detector against real heads, so it is never vacuous. The PR that flips this to true is the PR that runs `scripts/required-checks-apply.sh --confirm --acknowledge-growth`, in the SAME sitting as the merge — from the instant a wider spec lands on main, scripts/bp-merge.sh reads the committed spec and refuses heads GitHub would still merge."
+              end) },
+        { k: "Every protection field is enumerated",
+          t: "Every protection field is enumerated INCLUDING the falses: the PUT does not converge omitted state (allow_force_pushes resets, required_linear_history and required_conversation_resolution do NOT). See honest-gates D41." },
+        { k: "No workflow carries a merge_group",
+          t: "No workflow carries a merge_group trigger and this repo is user-owned (no merge queue), so queue semantics are not a variable today. If the repo ever moves to an org and the merge queue is enabled, every required check would sit Pending-forever in the merge group on day one." },
+        { k: "OPERATIONAL:",
+          t: "OPERATIONAL: a required context whose LATEST run on the head concluded `cancelled` blocks the merge with a third refusal shape (`... is cancelled.`, honest-gates D38) and clears only on a re-run or a push. elixir.yml sets cancel-in-progress on PR refs, so a superseded head can leave one behind. That is a correct red, not a deadlock — but the merge protocol must expect it, because the message is neither `is failing.` nor `is expected.`" }
+      ] as $owned
+    | ($b._readme // [])
+    | reduce $owned[] as $o (.;
+        if (map(startswith($o.k)) | any)
+        then map(if startswith($o.k) then $o.t else . end)
+        else . + [$o.t] end)
+    # the sha trailer is TEMPLATED, never a literal: a regeneration that forgets
+    # to retype it is exactly how the file starts naming heads it did not sample.
+    | (if (map(startswith("THE SAMPLING RULE")) | any)
+       then map(if startswith("THE SAMPLING RULE")
+                then sub("This file was generated from .*$"; "This file was generated from " + $shortshas + ".")
+                else . end)
+       else . + ["THE SAMPLING RULE: the set below is the INTERSECTION over the sampled heads, so the sample decides what may be required. This file was generated from " + $shortshas + "."]
+       end) as $readme
+    | {
+        "_readme": $readme,
+        enforced: $on,
+        repo: $repo,
+        branch: $branch,
+        generated_from_shas: $shas,
+        protection: {
+          required_status_checks: {
+            strict: false,
+            checks: (((($b.protection.required_status_checks.checks) // []) + $checks)
+                     | unique_by(.context) | sort_by(.context))
+          },
+          enforce_admins: true,
+          required_pull_request_reviews: null,
+          restrictions: null,
+          required_linear_history: false,
+          allow_force_pushes: false,
+          allow_deletions: false,
+          block_creations: false,
+          required_conversation_resolution: false,
+          lock_branch: false,
+          allow_fork_syncing: false
         },
-        enforce_admins: true,
-        required_pull_request_reviews: null,
-        restrictions: null,
-        required_linear_history: false,
-        allow_force_pushes: false,
-        allow_deletions: false,
-        block_creations: false,
-        required_conversation_resolution: false,
-        lock_branch: false,
-        allow_fork_syncing: false
-      },
-      exclusions: $exclusions
-    }')"
+        exclusions: $exclusions
+      }')"
 
-  # THE EMIT PATH STILL OVERWRITES, AND THAT IS A KNOWN, UNPAID DEBT (D111).
-  # `--out` replaces the target file wholesale with the intersection this sample
-  # supports. `PR references an active task` is the standing casualty:
-  # `pr-task-gate.yml` is `on: pull_request` only, so its name never appears on a
-  # main head, and any sample that includes a main sha erases it from the strict
-  # S1 intersection. Nothing here notices — required-checks-verify.sh compares
-  # live protection to the spec, and the spec IS what shrank. Two brakes stand
-  # between that and a de-registration today, both installed rather than assumed:
-  # required-checks-floor.sh, which apply.sh now calls BEFORE any protection PUT
-  # (wave 10), and the review of the diff itself. The real fix is a JQ MERGE that
-  # preserves committed names the sample could not have rendered; it is
-  # deliberately NOT in this diff, which would otherwise be rewriting the emit
-  # path and the honesty of the harness in one change.
+  local emitted
+  emitted="$(jq '.protection.required_status_checks.checks | length' <<<"$spec")"
   if [ -n "$OUT" ]; then
     printf '%s\n' "$spec" > "$OUT"
-    echo "wrote $OUT ($(printf '%s' "$final" | grep -c . || true) required context(s))"
+    echo "wrote $OUT ($emitted required context(s); $(printf '%s' "$final" | grep -c . || true) from this sample, the rest carried by the merge)"
   else
     printf '%s\n' "$spec"
   fi

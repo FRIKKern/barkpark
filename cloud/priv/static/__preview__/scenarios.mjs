@@ -2062,6 +2062,33 @@ export const SCENARIOS = {
       ],
     },
   },
+  // cch-w11-s3-token-revoke-shrink-oracle. THE LAST LYING DESTROY VERB, given
+  // its own scenario rather than bolted onto `tokens-populated` — that one
+  // asserts `countMatches(html, 'class="token-row') === 4`, so a destroy driven
+  // inside it consumes a row BEFORE the assertion and reds it as a probe
+  // artifact rather than a defect. Modelled on `account-modal-revoke`: real
+  // clicks, a stateful route, and a list that must actually SHRINK.
+  // Deliberately NOT named `account-modal*` (shoot.sh's `?modal=account` case),
+  // and deliberately carrying its OWN token array — a shared fixture that a
+  // destroy mutates would make scenario ORDER decide truth for the readers.
+  "tokens-revoke": {
+    label: "API tokens — the revoke path, driven by real clicks: confirm sheet, one DELETE on the wire, and the list actually shrinks 4 → 3",
+    authed: true,
+    deepLink: "#settings/tokens",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      tokens: [
+        { id: "tok_rv_ci", name: "CI deploy key", abilities: ["deploy"], last_used_at: tMinus(3 * 3600), expires_at: tPlus(60 * 86400), revoked_at: null, inserted_at: tMinus(40 * 86400) },
+        { id: "tok_rv_read", name: "Read-only dashboard", abilities: ["read"], last_used_at: null, expires_at: null, revoked_at: null, inserted_at: tMinus(10 * 86400) },
+        { id: "tok_rv_root", name: "Break-glass root", abilities: ["root"], last_used_at: tMinus(2 * 86400), expires_at: tPlus(365 * 86400), revoked_at: null, inserted_at: tMinus(90 * 86400) },
+        // Already revoked ⇒ renders a row but NO Revoke button, so the row
+        // count (4) and the revokable count (3) differ and a check that
+        // confuses them cannot pass.
+        { id: "tok_rv_old", name: "Legacy writer", abilities: ["read", "write"], last_used_at: tMinus(50 * 86400), expires_at: tPlus(20 * 86400), revoked_at: tMinus(6 * 86400), inserted_at: tMinus(120 * 86400) },
+      ],
+    },
+  },
   "tokens-reveal": {
     label: "API tokens — the plaintext-once reveal: amber only-time banner + mono input-affix + copy",
     authed: true,
@@ -3023,8 +3050,14 @@ function destroyFrom(list, state, pred) {
 //   whether to 404 or pass through. Query strings are ignored (the SPA never
 //   depends on server-side filtering for these fixtures).
 //   `state` is an OPTIONAL per-boot mutable bag for routes that must actually
-//   change something (see sessionsOf). Omitting it keeps every route stateless,
-//   which is what the browser harness (mock.js) does.
+//   change something (see sessionsOf). Omitting it keeps every route stateless.
+//   CORRECTED (wave 11 review): this used to say stateless "is what the browser
+//   harness (mock.js) does". It has not been true since
+//   cch-bl-mockjs-revoke-stateless — mock.js:124 passes a `fixtureState` on
+//   every call, exactly as smoke.mjs does. NO CALLER OMITS IT TODAY, so the
+//   stateless arm of every `if (state)` is dead code that only a new caller can
+//   revive, and a route added on the assumption that the browser is stateless
+//   will be wrong in the browser first.
 export function route(name, method, path, state) {
   const scen = SCENARIOS[name] || SCENARIOS[DEFAULT_SCENARIO];
   const d = scen.data;
@@ -3272,8 +3305,11 @@ export function route(name, method, path, state) {
   // POST → mint (201 {token: <plaintext ONCE>, pat: pat_json}, overridable via
   // d.tokenMint); DELETE /v1/tokens/:id → revoke (200 {ok}). A member never mints
   // beyond read (the UI offers only read-scope), so no 403 branch is reachable here.
+  // cch-w11-s3: BOTH LEGS GO THROUGH THE STATE BAG, and neither is optional.
+  // The GET was a DIRECT `d.tokens || []` fixture read — nobody had recorded
+  // that half, so even a spliced DELETE would have refetched the pristine list.
   if (p === "/v1/tokens") {
-    if (method === "GET") return { status: 200, body: { tokens: d.tokens || [] } };
+    if (method === "GET") return { status: 200, body: { tokens: listOf(d, state, "tokens") } };
     if (method === "POST") {
       return d.tokenMint || {
         status: 201,
@@ -3284,7 +3320,28 @@ export function route(name, method, path, state) {
       };
     }
   }
-  if (/^\/v1\/tokens\/[^/]+$/.test(p) && method === "DELETE") return { status: 200, body: { ok: true } };
+  // DELETE /v1/tokens/:id — THE LAST LYING DESTROY VERB. It answered a flat
+  // {ok:true} while the list above answered the pristine fixture, so the console
+  // toasted "Token revoked" over a token list that never moved and no oracle
+  // could tell the revoke from a no-op. destroyFrom 404s on a miss (a wrong id
+  // must stay distinguishable from a right one) and splices only when a state
+  // bag was supplied.
+  //
+  // THIS DOES CHANGE THE BROWSER TWIN, and saying otherwise would be the same
+  // class of lie. mock.js:124 passes a per-boot `fixtureState` on EVERY call
+  // (cch-bl-mockjs-revoke-stateless), so the 4-arg stateful path is the only
+  // one either harness takes and the `if (state)` splice always fires. Two
+  // consequences, both in the honest direction: the browser preview's token
+  // list now SHRINKS on revoke instead of reporting success over a list that
+  // never moved, and a DELETE for an id absent from the bag now 404s where it
+  // used to 200 unconditionally. The only such id is the plaintext-once mint's
+  // `pat_…`, which the POST arm never appends to the bag and which therefore
+  // never reaches a rendered row (the list refetches), so no UI path can reach
+  // the new 404 — but it is a real behavioural change, not a no-op.
+  const tokOne = p.match(/^\/v1\/tokens\/([^/]+)$/);
+  if (tokOne && method === "DELETE") {
+    return destroyFrom(listOf(d, state, "tokens"), state, (t) => t.id === tokOne[1]);
+  }
 
   // /v1/audit is team-admin-only server-side; auditDenied models the member's
   // 403 (the Timeline must degrade to events-only, never error).
