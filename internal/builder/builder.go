@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"sort"
@@ -66,6 +67,19 @@ type Deployment struct {
 	ImageTag      string `json:"image_tag"`
 	BuildLogURL   string `json:"build_log_url"`
 	FailureReason string `json:"failure_reason"`
+}
+
+// BuildSource is the claim envelope's `source` sibling (sites-github-auto-build):
+// where the deployment's code comes from when no artifact tarball was uploaded.
+// Kind selects the lane — "git" is the only kind today. URL is an anonymously
+// fetchable remote; Ref is handed to git VERBATIM — the control plane mints the
+// full 40-char commit sha (ref names also work at the wire level, but
+// abbreviated shas are refused by the server with `couldn't find remote ref`,
+// so never abbreviate).
+type BuildSource struct {
+	Kind string `json:"kind"`
+	URL  string `json:"url"`
+	Ref  string `json:"ref"`
 }
 
 // CommandRunner runs a subprocess and writes its combined stdout+stderr to w.
@@ -225,13 +239,14 @@ func (b *Builder) claim(ctx context.Context) (*claimedDeployment, bool, error) {
 	switch resp.StatusCode {
 	case http.StatusOK:
 		var out struct {
-			Deployment    Deployment `json:"deployment"`
-			ObservedEpoch int        `json:"observed_epoch"`
+			Deployment    Deployment   `json:"deployment"`
+			ObservedEpoch int          `json:"observed_epoch"`
+			Source        *BuildSource `json:"source"`
 		}
 		if err := json.NewDecoder(resp.Body).Decode(&out); err != nil {
 			return nil, false, fmt.Errorf("decode claim: %w", err)
 		}
-		return &claimedDeployment{Deployment: out.Deployment, Epoch: out.ObservedEpoch}, true, nil
+		return &claimedDeployment{Deployment: out.Deployment, Epoch: out.ObservedEpoch, Source: out.Source}, true, nil
 
 	case http.StatusNotFound:
 		// The queue was empty — not an error.
@@ -278,10 +293,9 @@ func (b *Builder) transition(ctx context.Context, deploymentID string, body map[
 // systemd unit's job (CPUQuota=...).
 func (b *Builder) build(ctx context.Context, d *claimedDeployment, con *buildConsole) (imageTag string, logPath string, err error) {
 	con.caption("Fetching your source…")
-	con.logf("source: resolving artifact %s", d.ArtifactURL)
-	source, err := b.resolveArtifact(d.ArtifactURL)
+	source, err := b.resolveSource(ctx, d, con)
 	if err != nil {
-		return "", "", fmt.Errorf("artifact: %w", err)
+		return "", "", err
 	}
 	con.logf("source: ready at %s", source)
 
@@ -403,6 +417,122 @@ func (b *Builder) resolveArtifact(url string) (string, error) {
 	}
 }
 
+// resolveSource walks the source ladder for a claimed deployment and returns
+// the local directory to hand nixpacks:
+//  1. artifact_url non-empty → resolveArtifact, exactly as before the ladder;
+//  2. else a `source` of kind "git" → sha-first shallow clone (cloneGitSource);
+//  3. else → the honest empty-artifact error (nothing minted a source at all).
+func (b *Builder) resolveSource(ctx context.Context, d *claimedDeployment, con *buildConsole) (string, error) {
+	switch {
+	case d.ArtifactURL != "":
+		con.logf("source: resolving artifact %s", d.ArtifactURL)
+		dir, err := b.resolveArtifact(d.ArtifactURL)
+		if err != nil {
+			return "", fmt.Errorf("artifact: %w", err)
+		}
+		return dir, nil
+
+	case d.Source != nil && d.Source.Kind == "git":
+		con.logf("source: cloning %s @ %s (sha-first shallow fetch)", d.Source.URL, refOrNone(d.Source.Ref))
+		dir, err := b.cloneGitSource(ctx, d.Source)
+		if err != nil {
+			return "", fmt.Errorf("git source: %w", err)
+		}
+		return dir, nil
+
+	default:
+		_, err := b.resolveArtifact("")
+		return "", fmt.Errorf("artifact: %w", err)
+	}
+}
+
+// cloneGitSource materializes src.Ref from src.URL into a fresh temp workdir:
+//
+//	git init; git remote add origin <url>;
+//	git -c credential.helper= fetch --depth 1 origin <ref>; git checkout FETCH_HEAD
+//
+// The sequence is proven against live GitHub (see
+// tooling/grip/ledger/clone-sha-mechanics-2026-07-31.md) and has NO fallback —
+// a depth-1 BRANCH fetch does not carry non-tip shas (`reference is not a
+// tree`), so fetch-by-ref-then-checkout-sha is not a lane. The ref is passed
+// verbatim; the checkout dir feeds nixpacks unchanged.
+func (b *Builder) cloneGitSource(ctx context.Context, src *BuildSource) (string, error) {
+	if src.URL == "" || src.Ref == "" {
+		return "", fmt.Errorf("source envelope incomplete (url=%q ref=%q) — the control plane must mint both", src.URL, src.Ref)
+	}
+
+	dir, err := os.MkdirTemp("", "bp-builder-git-")
+	if err != nil {
+		return "", fmt.Errorf("workdir: %w", err)
+	}
+
+	steps := [][]string{
+		{"init", "--quiet"},
+		{"remote", "add", "origin", src.URL},
+		// credential.helper is cleared per-command so an OS keychain can't
+		// answer for a private repo either — combined with GIT_TERMINAL_PROMPT=0
+		// (on every git env, see gitCommand) the fetch FAILS FAST instead of
+		// hanging the builder on a username prompt it can never answer.
+		{"-c", "credential.helper=", "fetch", "--depth", "1", "origin", src.Ref},
+		{"checkout", "--quiet", "FETCH_HEAD"},
+	}
+	for _, args := range steps {
+		var out bytes.Buffer
+		cmd := gitCommand(ctx, dir, args...)
+		cmd.Stdout = &out
+		cmd.Stderr = &out
+		if err := cmd.Run(); err != nil {
+			return "", classifyGitFailure(src, args, out.String(), err)
+		}
+	}
+	return dir, nil
+}
+
+// gitCommand builds one clone-lane git invocation: cwd pinned to the workdir,
+// GIT_TERMINAL_PROMPT=0 on the environment. Without the prompt kill, a fetch
+// against a private (or deleted — GitHub answers both identically) repo blocks
+// forever reading a username from stdin, wedging the whole builder loop.
+func gitCommand(ctx context.Context, dir string, args ...string) *exec.Cmd {
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	cmd.Env = append(os.Environ(), "GIT_TERMINAL_PROMPT=0")
+	return cmd
+}
+
+// classifyGitFailure maps a failed clone-lane git step to an honest build
+// error. Two stderr shapes (both proven against live GitHub) are TERMINAL —
+// no retry can ever succeed, so the reason says so and the deployment fails
+// once instead of becoming a retry-forever zombie:
+//
+//   - `not our ref` — the requested commit is no longer reachable on the
+//     remote (force-push or branch delete between deployment mint and claim);
+//   - `could not read Username` — the repo is not anonymously accessible
+//     (private or nonexistent; authenticated GitHub App access is a later,
+//     additive provider).
+//
+// Anything else is a normal build failure carrying the git output tail.
+func classifyGitFailure(src *BuildSource, args []string, output string, err error) error {
+	switch {
+	case strings.Contains(output, "not our ref"):
+		return fmt.Errorf("terminal: commit %s is no longer reachable on %s (force-push or branch delete since the deployment was created) — a retry cannot succeed; push again to deploy", src.Ref, src.URL)
+	case strings.Contains(output, "could not read Username"):
+		return fmt.Errorf("terminal: repository %s is not anonymously accessible (private or nonexistent) — a retry cannot succeed; authenticated GitHub access is not yet supported", src.URL)
+	default:
+		return fmt.Errorf("git %s: %w — %s", strings.Join(args, " "), err, tailOf(output))
+	}
+}
+
+// tailOf trims git output for embedding in an error: whitespace-trimmed, last
+// 512 bytes at most (git puts the fatal: line last).
+func tailOf(s string) string {
+	s = strings.TrimSpace(s)
+	const max = 512
+	if len(s) > max {
+		s = "…" + s[len(s)-max:]
+	}
+	return s
+}
+
 // fetchSiteEnv GETs the site's decrypted env from the control plane. Returns:
 //   - (map, nil) on 200 — the KEY=VAL pairs to inject (`{}` when no blob set).
 //   - (nil, nil) on 404 — tolerated: a control plane predating the route (or a
@@ -476,10 +606,13 @@ func (b *Builder) attachAuth(req *http.Request) {
 }
 
 // claimedDeployment is the in-process pairing of the claimed Deployment with
-// its observed_epoch — both flow forward into the transition CAS.
+// its observed_epoch — both flow forward into the transition CAS — plus the
+// claim envelope's optional `source` sibling (nil when the deployment carries
+// an uploaded artifact instead).
 type claimedDeployment struct {
 	Deployment
-	Epoch int
+	Epoch  int
+	Source *BuildSource
 }
 
 func (b *Builder) claimEpoch(d *claimedDeployment) int { return d.Epoch }
