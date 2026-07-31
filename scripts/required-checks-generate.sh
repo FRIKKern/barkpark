@@ -82,12 +82,14 @@
 #
 # AND AN EXCLUDED AGGREGATOR DEMOTES ITS LEAVES, NEVER PROMOTES THEM (wave 11)
 #
-# S3 subsumption is computed against the SURVIVORS. So when S5 excludes an
-# aggregator for being red on main, its `needs` upstreams stop being subsumed
-# and get PROMOTED instead — the exact inversion of the intent. `Security gate`
-# is red on main today; without S6 the flip would have required its three green
-# leaves, quietly re-implementing the aggregator the sample just disqualified,
-# at leaf granularity, forever.
+# S3 subsumption is computed against the SURVIVORS. So when a stage excludes an
+# aggregator, its `needs` upstreams stop being subsumed by anything and get
+# PROMOTED instead — the exact inversion of the intent. `Security gate` is the
+# standing case (S5 red on main when this was written, S7 held-by-decision since
+# 95ace3150 cleared it — the demotion keys on the EXCLUSION, not on which stage
+# produced it); without S6 the flip would have required its three green leaves,
+# quietly re-implementing at leaf granularity, forever, the aggregator the run
+# just disqualified.
 #
 # USAGE
 #   scripts/required-checks-generate.sh --sha <sha> --sha <sha> [--out FILE]
@@ -128,16 +130,21 @@ ADVISORY_BY_INTENT_REASONS=(
 )
 
 # S7 EXCLUDED BY DECISION: names that pass every mechanical stage — green on
-# main, unfiltered, unsubsumed, blocking — and are still held OUT, because
-# requiring them would deadlock a PR that is already in flight. This list is
-# hand-maintained ON PURPOSE and each entry carries the PR it is waiting on, so
-# it reads as a dated hold rather than a permanent verdict. Nothing else in this
-# script can express "correct, but not yet".
+# main, unfiltered, unsubsumed, blocking — and are still held OUT on purpose.
+# This list is hand-maintained ON PURPOSE and each entry carries a dated ground
+# and a re-evaluation trigger, so it reads as a hold rather than a permanent
+# verdict. Nothing else in this script can express "correct, but not yet".
+#
+# TREAT ANY GROWTH OF THIS LIST AS A RED FLAG (wave 11 review). It is the one
+# place a name can be parked without mechanical evidence. Every entry must say
+# what would retire it.
 EXCLUDED_BY_DECISION_NAMES=(
   "Required-check spec gate"
+  "Security gate"
 )
 EXCLUDED_BY_DECISION_REASONS=(
-  "S7 EXCLUDED BY DECISION: structurally clean and green on main, but it does NOT render on #8222's merge ref — that PR's base is stale by 21 commits and predates #8253, which created the job. Requiring it would deadlock the one open PR whose merge clears \`Security gate\`. Re-evaluate once #8222 lands or is rebased."
+  "S7 EXCLUDED BY DECISION: structurally clean and green on main, but it does NOT render on #8222's merge ref — that PR's base is stale and predates #8253, which created the job, and #8222 is CONFLICTING/DIRTY as of 2026-07-31 so it must be rebased before it can land at all. Requiring this name today would add a second, independent deadlock to a PR that already has one. Re-evaluate once #8222 lands or is rebased."
+  "S7 EXCLUDED BY DECISION: green on main since 95ace3150 (2026-07-31) — the req bump that cleared both mix-audit advisories landed OUTSIDE this epic, so the S5 RED-ON-MAIN ground wave 11 built on has EVAPORATED and the mechanical stages would now PROMOTE this name. It is still held out, and the ground is now forward-looking rather than historical: its sole blocking upstream is \`mix-audit\`, which runs mix_audit against a LIVE advisory database, so a CVE published tomorrow reds it on every open PR with no change to this repo — a permanently correct red that no PR can clear, which is exactly what branch protection must never pin. Registering it is a decision that needs its own wave: a documented policy for who clears a fleet-wide advisory red, and a fresh deadlock sweep. Its three green leaves go down WITH it via S6. Re-evaluate when that policy exists."
 )
 
 die() { echo "FAIL: $*" >&2; exit 1; }

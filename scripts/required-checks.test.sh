@@ -1422,6 +1422,80 @@ else
   bad "the one-sided version did not produce the false alarms (exit $OS_RC): $(grep -E '^#' <<<"$OS_OUT" | head -4)"
 fi
 
+section "17. S7 holds \`Security gate\` OUT once it goes GREEN — the stage that held it is gone, the hold is not"
+
+# WHY THIS SECTION EXISTS, and it is not hypothetical (wave 11 REVIEW).
+# `Security gate` was held out of the flip by S5 RED ON MAIN. Between the build
+# and the review, 95ace3150 landed a req bump from OUTSIDE this epic and the
+# name went green on main — so the mechanical ground evaporated and re-running
+# the generator against the post-bump window KEPT it, i.e. the next person to
+# follow the file's own instruction ("regenerate immediately before any flip")
+# would have silently registered it. That is forbidden: its sole blocking
+# upstream is mix-audit, which reads a LIVE advisory database, so a CVE
+# published tomorrow reds it on every open PR with no change to this repo.
+#
+# The fixture is DERIVED, not committed: the frozen pair with `Security gate`'s
+# conclusion flipped to success everywhere. Deriving it means it cannot drift
+# out of agreement with the pair §15 asserts over, and it states the premise
+# (green on main) as data rather than as prose.
+S7F="$TMP/postbump-fixtures"
+mkdir -p "$S7F"
+cp "$FIXP/main-shas.txt" "$S7F/"
+for f in "$FIXP"/checkruns-*.json; do
+  jq '.check_runs |= map(if .name == "Security gate" then .conclusion = "success" else . end)' \
+    "$f" > "$S7F/$(basename "$f")"
+done
+S7ARGS=(--workflows "$REPO_ROOT/.github/workflows" --fixture-dir "$S7F"
+        --merge-base "$SPEC" --sha e34031104 --sha f69cfb1f6)
+
+S7_OUT="$(bash "$GEN" "${S7ARGS[@]}" "${ACK[@]}" --explain 2>&1 || true)"
+if ! grep -q "exclude  Security gate  — S5 RED ON MAIN" <<<"$S7_OUT"; then
+  ok "the derived fixture really is post-bump: S5 no longer fires on 'Security gate'"
+else
+  bad "the derived fixture still reads RED on main — the flip did not apply, so this section is vacuous"
+fi
+if grep -q "exclude  Security gate  — S7 EXCLUDED BY DECISION" <<<"$S7_OUT"; then
+  ok "…and S7 holds it out anyway, on a stated forward-looking ground"
+else
+  bad "'Security gate' was not held by S7 on a green fixture: $(grep -F 'Security gate  —' <<<"$S7_OUT" | head -1)"
+fi
+# S6 must key on the EXCLUSION, not on the stage that produced it: with the hold
+# moved from S5 to S7 the three leaves must still go down, not up.
+for leaf in "Dispatch (security paths)" "Security gate shape ratchet" \
+            "Sobelow baseline does not swallow its own inline waivers (blocking)"; do
+  if grep -qF "exclude  $leaf  — S6 LEAF OF AN EXCLUDED AGGREGATOR (Security gate)" <<<"$S7_OUT"; then
+    ok "S6 still demotes '$leaf' under an S7 hold — the demotion keys on the exclusion, not on S5"
+  else
+    bad "S6 did not demote '$leaf' under S7: $(grep -F "$leaf" <<<"$S7_OUT" | head -1)"
+  fi
+done
+
+# MUTATION: drop the S7 entry and the SAME green fixture must PROMOTE the name
+# into required protection — which is precisely what a live regeneration did
+# before this hold existed.
+NOS7="$TMP/gen-nos7.sh"
+sed 's/^  "Security gate"$//' "$GEN" > "$NOS7"
+if ! grep -q '^  "Security gate"$' "$NOS7"; then
+  ok "the S7 mutation applies: a copy of the generator no longer names 'Security gate' in its decision list"
+else
+  bad "the S7 mutation did not apply — the entry moved, so the proof below is vacuous"
+fi
+bash "$NOS7" "${S7ARGS[@]}" "${ACK[@]}" --out "$TMP/nos7-spec.json" >/dev/null 2>&1 || true
+if jq -e '[.protection.required_status_checks.checks[].context] | index("Security gate")' \
+     "$TMP/nos7-spec.json" >/dev/null 2>&1; then
+  ok "…and without it the identical green fixture REGISTERS 'Security gate' (mutation-proven able to fail)"
+else
+  bad "the un-held spec did not promote it: $(jq -c '[.protection.required_status_checks.checks[].context]' "$TMP/nos7-spec.json" 2>&1)"
+fi
+
+# The committed file must not still be teaching the evaporated ground.
+if ! jq -e '[.exclusions[] | select(.context == "Security gate") | .reason]
+            | any(startswith("S5 RED ON MAIN"))' "$SPEC" >/dev/null 2>&1; then
+  ok "the committed spec no longer grounds the 'Security gate' hold in S5 RED ON MAIN"
+else
+  bad "the committed spec still says 'Security gate' is red on main — it is green on main head 6e53d2782"
+fi
+
 
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
