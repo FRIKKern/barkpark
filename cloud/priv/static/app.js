@@ -9211,7 +9211,12 @@
     else if (inFlight) { label = "Deploying"; dot = "deploy"; }
     else if (d.status === "live") { label = "Live"; dot = "up"; }
     else if (d.status === "failed") { label = "Deploy failed"; dot = "down"; }
-    else if (d.status === "cancelled") { label = "Canceled"; dot = "unknown"; }
+    // cch-w13-s3: ONE spelling for the DEPLOY noun. cap(st) spells the ladder
+    // pill "Cancelled", and this freshness label sits ~200px away on the same
+    // site screen — "Canceled" here made one deployment carry two spellings in
+    // one DOM. (The Stripe SUBSCRIPTION status keeps its own American
+    // "Canceled" in billingStatusLabel — a different noun, Stripe's vocabulary.)
+    else if (d.status === "cancelled") { label = "Cancelled"; dot = "unknown"; }
     else { label = d.status.charAt(0).toUpperCase() + d.status.slice(1); dot = "unknown"; }
     return {
       rebuilding: rebuilding,

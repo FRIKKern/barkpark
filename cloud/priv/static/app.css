@@ -1639,6 +1639,28 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dep-failed  { color: var(--danger); background: hsl(var(--danger-hsl) / 0.10); border-color: hsl(var(--danger-hsl) / 0.30); }
 .dep-building, .dep-pushing { color: var(--warn-strong); background: hsl(var(--warn-hsl) / 0.12); border-color: hsl(var(--warn-hsl) / 0.35); }
 .dep-queued  { color: var(--muted-text); }
+/* cch-w13-s3: cancelled is a TERMINAL, deliberately-stopped deployment (the
+   server's own sixth status — auto_deploy_worker.refuse/1 mints one on an
+   ordinary content publish, Registry.cancel_preview/2 on a branch delete), and
+   until this rule existed it had NO rule at all: the class fell through to the
+   .dep-pill base, which is byte-identical to .dep-queued (whose only
+   declaration re-states the base colour) on colour AND background AND border,
+   in both themes. A finished abort read as "waiting to start".
+   ONE ADDITIVE RULE under the GR11/D24 dep-pill freeze (wave-13 charter D157):
+   an ADD, never a restyle — no other .dep-* rule and no .status-pill is touched.
+   The voice is HOLLOW, not coloured: --ok and --danger are both wrong for a
+   deliberate stop (and D143 measured them only 19° apart under the ember
+   identity), so cancelled steps DOWN a tone (--dim) and gives up its filled
+   chip for a dashed hairline — the row still occupies the ladder but no longer
+   claims a slot. The dash carries the meaning without colour, so the state
+   survives greyscale and colour-blind viewing. Contrast is gated: the
+   --dim-on---surface pair is declared in __css_check CONTRAST_PAIRS. */
+.dep-cancelled {
+  color: var(--dim);
+  background: transparent;
+  border-style: dashed;
+  border-color: rgba(var(--cc-line-rgb), 0.28);
+}
 
 /* gh-5: per-deployment live build console — the deploy-side twin of .new-console */
 .deploy-console { margin-top: 10px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }

@@ -992,8 +992,9 @@ const theaterFailedConsole = [
 // ── gr-p3-site-detail (E-02): the states-complete v4 ladder fixtures ─────────
 // One site whose history shows every settled deployment state at once — live
 // (current), crash-failed (red panel + console), born-failed github-push
-// (blocked amber panel), cancelled (neutral pill) and a prior live row
-// (rollback affordance) — plus branch previews (one live, one failed) and the
+// (blocked amber panel), cancelled (hollow dashed pill: terminal and
+// deliberately stopped, NOT the filled grey of a queued row) and a prior live
+// row (rollback affordance) — plus branch previews (one live, one failed) and the
 // domains rungs (a proxied custom apex + a www still waiting on TLS).
 // Triggers are ONLY the backend vocabulary (manual | content-auto — GR27).
 const stLive = deployment({
@@ -2456,7 +2457,8 @@ export const SCENARIOS = {
   // ── gr-p3-site-detail (E-02): the v4 site detail, states-complete ─────────
   // The whole ladder in one shot: live current (Redeploy + Now live), a crash
   // failure (red panel + console), a born-failed github push (blocked amber),
-  // a cancelled row (neutral pill), a prior live row (Roll back to this) —
+  // a cancelled row (hollow dashed pill — a terminal, deliberate stop, visibly
+  // NOT the filled grey a queued row wears), a prior live row (Roll back to this) —
   // plus branch previews (live + failed) and the domains rungs (proxied apex,
   // www waiting on TLS with the server's remediation verbatim).
   "site-states": {
