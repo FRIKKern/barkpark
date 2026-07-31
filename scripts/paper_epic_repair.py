@@ -90,6 +90,10 @@ PAPER_TITLE_OVERRIDES = {
     "cloud-gui-remake-wave-2026-07-21-r12": (
         "Cloud GUI Remake — round 12: the two mechanical acts, and the verdict"
     ),
+    "portabledoc-render-unification-w5-2026-07-16": (
+        "Render-Path Unification — Wave 5 (2026-07-16): "
+        "the FINALE — collapse the 5th renderer"
+    ),
 }
 SITE_SPAWNER_NOTE_LISTS = {
     "l-907": "verdict",
@@ -282,9 +286,6 @@ def _apply_authority_boundary(
         return copy.deepcopy(blocks)
 
     repaired = copy.deepcopy(blocks)
-    if any(boundary in _inline_text(block) for block in repaired):
-        return repaired
-
     editorial_index = next(
         (
             index
@@ -297,6 +298,25 @@ def _apply_authority_boundary(
         ),
         None,
     )
+    if (
+        paper_id == "portabledoc-render-unification-w5-2026-07-16"
+        and editorial_index is not None
+    ):
+        callout = repaired[editorial_index]
+        original = _normalize(_inline_text(callout.get("content")))
+        if "Authority boundary:" in original:
+            original = original.split("Authority boundary:", 1)[0].strip()
+        callout["content"] = [
+            {
+                "type": "text",
+                "value": "{} {}".format(original, boundary),
+            }
+        ]
+        return repaired
+
+    if any(boundary in _inline_text(block) for block in repaired):
+        return repaired
+
     if editorial_index is not None:
         callout = repaired[editorial_index]
         original = _normalize(_inline_text(callout.get("content")))
