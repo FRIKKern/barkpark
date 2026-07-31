@@ -90,10 +90,6 @@ PAPER_TITLE_OVERRIDES = {
     "cloud-gui-remake-wave-2026-07-21-r12": (
         "Cloud GUI Remake — round 12: the two mechanical acts, and the verdict"
     ),
-    "portabledoc-render-unification-w5-2026-07-16": (
-        "Render-Path Unification — Wave 5 (2026-07-16): "
-        "the FINALE — collapse the 5th renderer"
-    ),
 }
 SITE_SPAWNER_NOTE_LISTS = {
     "l-907": "verdict",
