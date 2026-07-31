@@ -96,6 +96,29 @@ const ATTR_RE = /([\w:.-]+)(?:="([^"]*)")?/g;
 const CLASS_SEL = /^\.[\w-]+$/;
 const ID_SEL_SUB = /^#[\w-]+$/;
 const ATTR_SEL = /^\[([\w:.-]+)(?:="([^"]*)")?\]$/;
+// cch-w11-s3 — THE COMPOUND `.class[attr]`, the last selector shape standing
+// between the shim and a destroy control. `.token-revoke[data-id]` (app.js:3221)
+// is the ONLY app.js destroy hook authored this way; every other one is a bare
+// attribute already covered by ATTR_SEL above.
+//
+// THE BLAST RADIUS IS MEASURED, NOT ASSUMED — instrumented census over all 99
+// scenarios, as calls/hits:
+//   .token-revoke[data-id]    5 / 12   ← the destroy control this exists for
+//   .seg-btn[data-kind]       1 /  2   ← THE SECOND SELECTOR THAT COMES ALIVE.
+//        Named, not smuggled: it is a real behavioural change in the same diff.
+//        Its call site only ATTACHES handlers (`.forEach(b => b.addEventListener)`),
+//        so coming alive cannot alter any rendered markup — and all 99 scenarios
+//        stayed green across the widening alone.
+//   .fleet-row[data-id]      29 /  0
+//   .site-row[data-id]        4 /  0
+//   .new-step-dot[data-ring]  5 /  0   ← all three DIVs; PARSED_TAGS is button|a.
+// `nav-link[data-view]` / `nav-sub[data-view]` never appear: they are
+// DOCUMENT-level queries (app.js:4050, :4185), a separate code path that hard-
+// returns [] — so the filed "a change here can alter boot paths" worry is
+// structurally impossible for this element-level widening.
+// `.choice[data-kind]:not([disabled])` (app.js:1845) carries a pseudo-class and
+// stays outside this grammar.
+const COMPOUND_SEL = /^\.([\w-]+)\[([\w:.-]+)(?:="([^"]*)")?\]$/;
 
 // Flat scan: every whitelisted OPEN tag in `html` becomes a sibling stub
 // carrying its double-quoted attributes (so getAttribute("data-id") answers a
@@ -238,6 +261,15 @@ function makeDom() {
           const name = at[1];
           const want = at[2];
           return kids.filter((k) =>
+            k.hasAttribute(name) && (want === undefined || k.getAttribute(name) === want));
+        }
+        const cm = COMPOUND_SEL.exec(sel);
+        if (cm) {
+          const cls = cm[1];
+          const name = cm[2];
+          const want = cm[3];
+          return kids.filter((k) =>
+            String(k.className || "").split(/\s+/).indexOf(cls) >= 0 &&
             k.hasAttribute(name) && (want === undefined || k.getAttribute(name) === want));
         }
         return [];
@@ -1991,6 +2023,96 @@ const EXPECTATIONS = {
         assert.ok(picker.includes('value="' + v + '"'), "owner can pick " + v);
       assert.ok(picker.includes("set-check-sub"), "each ability carries its consequence sub-line");
       assert.ok(picker.includes("exclusive"), "the deploy/root exclusivity consequence is stated");
+    },
+  },
+  // ── cch-w11-s3-token-revoke-shrink-oracle: THE LAST LYING DESTROY VERB ─────
+  // Every other tokens expectation reads markup. This one WATCHES THE APP DO
+  // SOMETHING: it clicks a row's Revoke, then the confirm sheet's Revoke, and
+  // reads whether the list the console refetches actually MOVED.
+  //
+  // WHAT WAS MEASURED BEFORE THE FIX (selector widened, route untouched):
+  //   DELETE-calls=1 GET-calls=2 rows-after=4 victim-still-listed=true
+  // A real DELETE on the wire, a real refetch — and a token list byte-identical
+  // to the one before it, while the console toasts "Token revoked". Both halves
+  // are load-bearing and NEITHER works alone (mutation-proven):
+  //   • revert COMPOUND_SEL ⇒ `.token-revoke[data-id]` resolves [], nothing is
+  //     wired, and the row's click dispatches 0 handlers — the button is dead;
+  //   • revert the route ⇒ every assertion up to and including the DELETE count
+  //     still passes and the list still reads 4 rows with the victim present.
+  //
+  // THE UNDOCUMENTED TRAP — CLICKS AND ASSERTIONS ANCHOR ON DIFFERENT OBJECTS.
+  // This file's header (D55) says to anchor ASSERTIONS on #modal-body's
+  // innerHTML, because the descendant registry node is immortal here. The
+  // INVERSE rule governs CLICKS and was written nowhere: the confirm button must
+  // be clicked through the #id REGISTRY (`reg.get("token-revoke-go")`), because
+  // app.js:3419 wires it with `$("#token-revoke-go")` → getElementById → the
+  // registry object, while the button parsed out of #modal-body's innerHTML is a
+  // DIFFERENT object carrying ZERO handlers. Click the parsed child and it
+  // returns 0 and reads as a dead button that is in fact perfectly wired.
+  //
+  // NO TYPED-CONFIRM DRIVER, deliberately: confirmRevokeToken (app.js:3410)
+  // opens a PLAIN openModal with a bare `<button id="token-revoke-go">` — not
+  // openConfirmModal, so there is no #cm-confirm, no #cm-typed and nothing to
+  // arm. armConfirmSheet/assertDestroySheetDisarmed do not apply to this leg.
+  "tokens-revoke": {
+    what: "THE TOKEN REVOKE ORACLE — a real click revokes: confirm sheet, exactly one DELETE on the wire, and the refetched list SHRINKS 4 → 3 with the victim gone",
+    async check(reg, hooks, ctx) {
+      // ─ 1. the list rendered through the REAL loadTokens ────────────────────
+      const box = reg.get("token-list");
+      const rendered = box.innerHTML || "";
+      assert.equal(countMatches(rendered, 'class="token-row'), 4, "the fixture's four tokens render");
+      assert.equal(ctx.countCalls("GET", "/v1/tokens"), 1, "the list was fetched once on view entry");
+
+      // ─ 2. the per-row Revoke is REACHABLE and WIRED ────────────────────────
+      // This is the compound-selector half: app.js wires the rows with
+      // `box.querySelectorAll(".token-revoke[data-id]")`, which answered [] for
+      // this shim's whole existence — so the loop wired nothing and a loop over
+      // nothing is a clean pass.
+      const revokes = box.querySelectorAll(".token-revoke[data-id]");
+      assert.equal(revokes.length, 3, "three revokable rows — the already-revoked token offers no Revoke");
+      const victim = revokes[0].getAttribute("data-id");
+      assert.equal(victim, "tok_rv_ci", "the first revokable row must carry its real data-id");
+      const fired = revokes[0].click();
+      assert.equal(fired, 1,
+        "the per-row Revoke dispatched " + fired + " click handlers — the button is DEAD. " +
+        "The markup can be present and correct while nothing is bound to \"click\".");
+
+      // ─ 3. the confirm sheet mounts and NOTHING has happened yet ────────────
+      const sheet = reg.get("modal-body").innerHTML || "";
+      assert.ok(sheet.includes('id="token-revoke-go"'),
+        "the revoke confirm sheet did not mount into #modal-body; got: " + JSON.stringify(sheet.slice(0, 200)));
+      assert.ok(sheet.includes("Revoke token?") && sheet.includes("CI deploy key"),
+        "the sheet must name what it is about to revoke");
+      assert.ok(sheet.includes("btn-danger"), "GR41: a destructive confirm wears the danger tier's weight");
+      assert.equal(ctx.countCalls("DELETE", "/v1/tokens/" + victim), 0,
+        "the row click fired the DELETE before the operator confirmed — the confirm gate is gone");
+
+      // ─ 4. CONFIRM VIA THE REGISTRY (see the trap in the header above) ──────
+      const go = reg.get("token-revoke-go");
+      assert.equal(go.click(), 1, "the sheet's Revoke must be wired for \"click\"");
+      assert.equal(go.disabled, true, "the confirm button must go disabled while its DELETE is in flight");
+      assert.equal(go.textContent, "Revoking…",
+        "the label must confess the in-flight state, got " + JSON.stringify(go.textContent));
+      await ctx.settle();
+
+      // ─ 5. THE WIRE ────────────────────────────────────────────────────────
+      assert.equal(ctx.countCalls("DELETE", "/v1/tokens/" + victim), 1,
+        "exactly one DELETE for that token's id must reach the wire");
+      const toasts = (reg.get("toast-stack") || {}).innerHTML || "";
+      assert.ok(toasts.includes("Token revoked"), "a successful revoke must SAY SO; toast stack: " + toasts);
+
+      // ─ 6. THE LIE, CLOSED: the refetched list must actually MOVE ───────────
+      // Against the old flat `{status:200, body:{ok:true}}` DELETE and the old
+      // direct `d.tokens` GET, every assertion above passed and this one did
+      // not — the console reported success over an unchanged list.
+      assert.equal(ctx.countCalls("GET", "/v1/tokens"), 2, "the success arm refetches the list");
+      const after = reg.get("token-list").innerHTML || "";
+      assert.equal(countMatches(after, 'class="token-row'), 3,
+        "the revoked token must be GONE on the re-render (4 → 3); an unchanged list means the DELETE did nothing");
+      assert.ok(!after.includes('data-id="' + victim + '"'),
+        "the revoked token's row came back — the console is reporting success over a list that never moved");
+      assert.ok(after.includes("Read-only dashboard") && after.includes("Legacy writer"),
+        "only the victim may disappear — the other rows must survive the refetch");
     },
   },
   "tokens-empty": {
