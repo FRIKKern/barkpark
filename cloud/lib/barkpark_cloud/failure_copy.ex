@@ -142,6 +142,14 @@ defmodule BarkparkCloud.FailureCopy do
 
   @redaction "[redacted]"
 
+  # STATUS PROSE in a value position — never a credential. A remote capture says
+  # "no bearer token found", "token: expired", "api_key: not set" far more often
+  # than it says "token: <a live token>", and redacting the word `expired` tells
+  # a person a secret leaked when none did. Every entry is an ordinary English
+  # word that no generated credential can be, so this guard costs the scrub no
+  # coverage; it is anchored with `\b` so it can only skip the WHOLE value.
+  @prose_value "(?:token|tokens|credential|credentials|value|header|auth|expired|missing|invalid|unset|unknown|empty|none|null|nil|set|required|absent|not)\\b"
+
   # The secret shapes a remote capture can carry, most specific first. Each entry
   # is `{pattern, replacement}` and every one carries POSITIVE and NEGATIVE rows
   # in `failure_copy_test.exs`'s table — a pattern without both is not shippable,
@@ -150,13 +158,23 @@ defmodule BarkparkCloud.FailureCopy do
   @secret_patterns [
     # `Authorization: Bearer sk-live-…`. The scheme word is kept so the line
     # still says what KIND of credential was refused; everything after it goes.
-    {~r/\b(bearer\s+)\S+/i, "\\1#{@redaction}"},
+    #
+    # The `@prose_value` guard is why this does not maul English: "no bearer
+    # token found in the request" is a COMMON failure string and an unguarded
+    # `bearer\s+\S+` rendered it "no bearer [redacted] found" — a redaction
+    # where no secret ever was, which is its own small lie on the person's
+    # screen. The guard is a stop-list of words no credential can be, so it
+    # weakens the redaction for nothing.
+    {~r/\b(bearer\s+)(?!#{@prose_value})\S+/i, "\\1#{@redaction}"},
 
     # `client_secret=…`, `token: …`, `api-key=…`. The KEY and its separator are
     # kept (they name what leaked); the value is redacted up to the next
     # delimiter. `authorization` is deliberately absent — the Bearer clause above
     # already owns that line and keeps the scheme word.
-    {~r/\b((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?[^\s"',;)]+/i,
+    #
+    # Same `@prose_value` guard, same reason: "token: expired" and
+    # "no api_key: set in the config file" are status prose, not credentials.
+    {~r/\b((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?!#{@prose_value})[^\s"',;)]+/i,
      "\\1#{@redaction}"},
 
     # Provider-prefixed credentials: Stripe/OpenAI `sk-`/`pk-`, GitHub `ghp_`/

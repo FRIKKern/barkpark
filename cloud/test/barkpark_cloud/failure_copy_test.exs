@@ -379,7 +379,16 @@ defmodule BarkparkCloud.FailureCopyTest do
       {"base64 digest", "integrity sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="},
       {"provider jargon (DESIGN.md §5 keeps the fold verbatim)",
        "SERVER_LIMIT_EXCEEDED: no server of type cax11 free in fsn1"},
-      {"reaper jargon", "exceeded max provision attempts (3)"}
+      {"reaper jargon", "exceeded max provision attempts (3)"},
+      # STATUS PROSE in a value position. These were live false positives before
+      # the `@prose_value` guard: an unguarded `bearer\s+\S+` rendered the first
+      # one "no bearer [redacted] found in the request" — a redaction where no
+      # secret ever was, which is the same class of lie this wave is paying off.
+      {"prose after Bearer", "no bearer token found in the request"},
+      {"prose after Bearer (capitalised)", "missing Bearer credentials"},
+      {"prose in a token value", "token: expired"},
+      {"prose in an api_key value", "no api_key: set in the config file"},
+      {"prose in a password value", "sftp refused: password: missing"}
     ]
 
     for {label, input, secret} <- @positives do
