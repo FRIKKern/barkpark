@@ -733,7 +733,30 @@ on the narrower true ground.
 the pre-flip answer with a comment telling a future human to hand-flip it once registration landed — *a
 case that must be hand-flipped on someone else's merge is a case that reds an integration nobody ran.*
 Both now DERIVE from the committed spec, with real assertions on both arms, so they are correct on either
-side of the flip and **merge order between #8394 and #8397 is free**. Merged tree after the fix: 49/0.
+side of the flip. Merged tree after the fix: 49/0.
+
+**AND THE MERGE ORDER IS *NOT* FREE — corrected against CI, after this entry first claimed it was.** The
+merged-tree run proves the FINAL state; it says nothing about the intermediate state where #8394 lands
+alone, and CI settled that on the PR's own head: **`Console gate` FAILED on #8394 — the very context it
+registers.** #8394 carries the four-context spec without #8397's test corrections, so the un-fixed
+`seal-predicate.test.mjs` runs against the new spec, fails 41/2 on the two cases that hard-quote the
+required set, reds `Console client unit harness`, and `Console gate` aggregates it. **ORDER: #8397 FIRST,
+then #8394 + the PUT in the same sitting, then #8395/#8396 (independent).** Merging the flip first would
+put a red `Console gate` on protected `main` at the precise moment the wave makes it required. This is the
+cheapest possible restatement of the wave's own lesson: a merged-tree run is necessary and NOT sufficient —
+the integration must also be checked in the ORDER it will actually land.
+
+**A SECOND CI-ONLY DEFECT, found the same way and fixed.** `Required-check spec gate` was also red on
+#8394: S1's new §16 did `git show origin/main:.github/required-checks.json`, and a GitHub runner has no
+`origin/main` remote-tracking ref (actions/checkout fetches the PR ref) — `fatal: invalid object name
+'origin/main'`, on a job that is green on main. §12 of that same file had already written the lesson down
+two hundred lines above and drove the floor through a literal `--reference` fixture for exactly this
+reason. §16 now does the same via a new `--ref-file` harness seam on the sweep, with a clause asserting the
+DEFAULT baseline is still `git show origin/main:` so the seam cannot become the norm, and a zero-context
+baseline is now an INFRA FAULT (exit 2) rather than an empty diff. **Proven by reproduction, not by hope:**
+cloned into a checkout with the origin remote removed (`origin/main resolvable? NO`) and ran the suite
+there — **111 passed / 0 failed**, matching the 111/0 where the ref does resolve. The generalisable rule:
+a local green is not a CI green, and the cheapest way to find out is to READ THE PR YOU JUST OPENED.
 
 **Everything green on the MERGED tree, not just on branches.** `required-checks.test.sh --hermetic`
 **109/0** (origin/main baseline 82/0); floor rc 2 with exactly `ADDED Cloud gate` + `ADDED Console gate`
@@ -767,7 +790,8 @@ directory right now, and a guard co-merged with the change it guards reds the fa
 guard+fix co-merge law). It is filed with mutation-proof criteria as
 `cch-w11-residue-floor-is-not-a-ci-gate-on-the-spec-diff` and should be wave 12's first slice.
 
-**WHAT THE LEAD MUST DO, IN ORDER.** (1) Merge #8394 and perform the PUT **in one sitting** — from the
+**WHAT THE LEAD MUST DO, IN ORDER.** (0) **Merge #8397 BEFORE #8394** — see the ordered-merge correction
+above; the reverse order reds `Console gate` on protected main. (1) Merge #8394 and perform the PUT **in one sitting** — from the
 instant the 4-context spec is on main, `bp-merge.sh` reads the committed spec and refuses heads GitHub
 would still merge, a partial freeze for the foreign trains. `git fetch origin` immediately before
 `apply.sh` (the floor reads `git show origin/main:` from the local clone and apply.sh does not fetch);
