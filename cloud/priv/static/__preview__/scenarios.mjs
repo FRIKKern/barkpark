@@ -1529,6 +1529,14 @@ export const SCENARIOS = {
       subscription: activeSub,
       sites: [],
       audit: activityFeed,
+      // cch-w12-s1: the Who axis is the TEAM ROSTER, read from
+      // GET /v1/teams/:id/members. Without a roster here this scenario answered
+      // `{members: []}` and the axis degraded to "Everyone / Just me" no matter
+      // what the code did — cold boot and warm navigation alike — so the epic's
+      // own default Activity fixture was structurally blind to its own Who axis
+      // (the cold-boot latch bug lived here undetected for eleven waves).
+      // ada is the me() user, so the axis reads Everyone / Just me / lin / rex.
+      members: teamMembers,
     },
   },
 
