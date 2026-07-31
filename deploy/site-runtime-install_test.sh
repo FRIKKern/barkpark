@@ -167,9 +167,9 @@ $curl_line" >/dev/null 2>&1
   cat "$TMP/url-$1/curl.url" 2>/dev/null
 }
 check "x86 box downloads the amd64 tarball" \
-  "[ \"\$(go_url_for x86_64)\" = 'https://go.dev/dl/go1.24.5.linux-amd64.tar.gz' ]"
+  "[ \"\$(go_url_for x86_64)\" = \"https://go.dev/dl/go${script_go_version}.linux-amd64.tar.gz\" ]"
 check "arm box downloads the arm64 tarball" \
-  "[ \"\$(go_url_for aarch64)\" = 'https://go.dev/dl/go1.24.5.linux-arm64.tar.gz' ]"
+  "[ \"\$(go_url_for aarch64)\" = \"https://go.dev/dl/go${script_go_version}.linux-arm64.tar.gz\" ]"
 
 echo "== git is installed, never assumed =="
 git_block="$(extract_block 'git ensure')"
