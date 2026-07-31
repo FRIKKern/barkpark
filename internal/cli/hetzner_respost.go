@@ -69,6 +69,7 @@ import (
 	"context"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
 )
@@ -170,6 +171,12 @@ func hzResUnconfirmed(out *writer, action, kind string, id any, name string, ext
 //
 // absent() reports (gone, err). A read that errors fails CLOSED: it reports
 // confirmed_absent=false with the error as the reason, never an optimistic true.
+//
+// READING THE RECEIPT: the ✓ shape mirrors `confirmed_gone` alongside
+// `confirmed_absent` so one script key works across all twelve destroys, and
+// `confirmation: "declared"` is the DISCRIMINATOR — its presence says this
+// confirmation is a declared non-binding listing, not the binding single-
+// resource re-read the ten hcloud kinds get.
 func hzResDestroyedDeclared(out *writer, action, kind string, id any, name string, extra map[string]any, basis string, absent func() (bool, error)) int {
 	gone, err := absent()
 	switch {
@@ -217,18 +224,11 @@ func hzResUnconfirmedAbsent(out *writer, action, kind string, id any, name strin
 	return exitOK
 }
 
-// hzResPayloadKey is hzResDone's payload-key rule, shared so the partial shapes
-// key their resource exactly as the ✓ shape does.
+// hzResPayloadKey is THE payload-key rule for every non-server receipt shape —
+// the ✓ (hzResDone) and both partials call it, so a kind cannot be spelled two
+// ways depending on which arm printed it.
 func hzResPayloadKey(kind string) string {
-	k := make([]byte, 0, len(kind))
-	for i := 0; i < len(kind); i++ {
-		if kind[i] == '-' {
-			k = append(k, '_')
-			continue
-		}
-		k = append(k, kind[i])
-	}
-	return string(k)
+	return strings.ReplaceAll(kind, "-", "_")
 }
 
 // hzResPrintExtra renders the table view's sorted extra lines — hzDone's tail,

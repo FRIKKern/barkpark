@@ -22,9 +22,7 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"sort"
 	"strconv"
-	"strings"
 	"time"
 
 	"github.com/hetznercloud/hcloud-go/v2/hcloud"
@@ -55,9 +53,9 @@ func hzResolve[T any](ctx context.Context, get func(context.Context, string) (*T
 // resource kind as the payload key so scripts can key on it.
 func hzResDone(out *writer, action, kind string, id any, name string, extra map[string]any) int {
 	payload := map[string]any{
-		"ok":                               true,
-		"action":                           action,
-		strings.ReplaceAll(kind, "-", "_"): map[string]any{"id": id, "name": name},
+		"ok":                  true,
+		"action":              action,
+		hzResPayloadKey(kind): map[string]any{"id": id, "name": name},
 	}
 	for k, v := range extra {
 		payload[k] = v
@@ -66,14 +64,7 @@ func hzResDone(out *writer, action, kind string, id any, name string, extra map[
 		return exitOK
 	}
 	out.outf("✓ %s — %s %s (id %v)", action, kind, name, id)
-	keys := make([]string, 0, len(extra))
-	for k := range extra {
-		keys = append(keys, k)
-	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		out.outf("  %s: %s", k, cellString(extra[k]))
-	}
+	hzResPrintExtra(out, extra)
 	return exitOK
 }
 
