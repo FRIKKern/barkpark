@@ -472,16 +472,21 @@ defmodule Barkpark.PortableDoc.Render.Compose do
   # Article mode: an inline, playable asciinema-player mount inside a figure.
   # Email/default mode: NO player runtime — degrade to a plain link, mirroring
   # how `diagram`'s default clause never triggers the Mermaid engine.
+  # `poster` (optional) names the resting frame the player shows before play —
+  # an npt timestamp (`"npt:1:23"`) or `"end"`. Unset → the client twins keep
+  # their `npt:0:1` default and the emitted mount stays byte-identical.
   def compose_block(%{"type" => "asciicast"} = b, :article) do
     src = stringish(Map.get(b, "src", ""))
     caption = stringish(Map.get(b, "caption", ""))
-    %{"kind" => "_raw", "html" => Figures.asciicast_html(src, caption, :article)}
+    poster = b |> Map.get("poster", "") |> stringish() |> String.trim()
+    %{"kind" => "_raw", "html" => Figures.asciicast_html(src, caption, poster, :article)}
   end
 
   def compose_block(%{"type" => "asciicast"} = b, style) do
     src = stringish(Map.get(b, "src", ""))
     caption = stringish(Map.get(b, "caption", ""))
-    %{"kind" => "_raw", "html" => Figures.asciicast_html(src, caption, style)}
+    poster = b |> Map.get("poster", "") |> stringish() |> String.trim()
+    %{"kind" => "_raw", "html" => Figures.asciicast_html(src, caption, poster, style)}
   end
 
   # generic `figure` — wraps a child block + caption. Cheap and clean: compose

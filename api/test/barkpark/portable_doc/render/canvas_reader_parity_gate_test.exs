@@ -152,7 +152,8 @@ defmodule Barkpark.PortableDoc.Render.CanvasReaderParityGateTest do
        }, &Forms.form_html(&1, :article), "bp-form"},
       {"asciicast",
        %{"type" => "asciicast", "src" => "https://example.com/c.cast", "caption" => "A cast"},
-       &Figures.asciicast_html(&1["src"], &1["caption"], :article), "bp-asciicast"},
+       &Figures.asciicast_html(&1["src"], &1["caption"], Map.get(&1, "poster", ""), :article),
+       "bp-asciicast"},
       {"diagram", %{"type" => "diagram", "source" => "graph TD; A-->B", "caption" => "A graph"},
        &Figures.diagram_html(&1["source"], &1["caption"], :article), "class=\"mermaid\""},
       # pd-ee-dataviz-editors (charter D3): the 5 DATA-VIZ kinds are server-painted

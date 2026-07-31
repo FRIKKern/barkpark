@@ -1335,9 +1335,13 @@
           let mountPlayer = (el) => {
             let src = el.dataset.castSrc;
             if (!src) return;
+            // `data-cast-poster` is the block's optional resting frame (an npt
+            // timestamp, or "end"), emitted by Figures.asciicast_html only when
+            // set — unset falls back to npt:0:1. Twin of client.ts's
+            // hydrateAsciicast; keep the two in step.
             window.AsciinemaPlayer.create(src, el, {
               fit: "width",
-              poster: "npt:0:1",
+              poster: el.dataset.castPoster || "npt:0:1",
               idleTimeLimit: 2,
               theme: "asciinema"
             });

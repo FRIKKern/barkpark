@@ -293,7 +293,12 @@ defmodule Mix.Tasks.Barkpark.PortableDoc.GenPdParity do
     "asciicast" => %{
       "type" => "asciicast",
       "src" => "https://example.com/casts/demo.cast",
-      "caption" => "A terminal walkthrough"
+      "caption" => "A terminal walkthrough",
+      # `poster` is the OPTIONAL resting frame (data-cast-poster). It rides the
+      # fixture so the Elixir ⇄ TS twins are proven byte-identical WITH the
+      # attribute — the unset leg (no attribute at all) is covered by the
+      # figures_test / PortableDoc.test unit pairs.
+      "poster" => "npt:0:12"
     },
     "figure" => %{
       "type" => "figure",
