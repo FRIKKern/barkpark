@@ -68,6 +68,7 @@ package cli
 import (
 	"context"
 	"fmt"
+	"strings"
 )
 
 // Mutation-side receipt keys. Deliberately DISTINCT spellings from the destroy
@@ -81,11 +82,23 @@ const (
 	// settled, not the object the create call handed back.
 	hzResBasisGet      = "single-resource GET on the resolved id"
 	hzResBasisResponse = "the create response object"
+
+	// hzKeyDivergence is the ADVISORY channel (PDS-D432): the receipt key a
+	// create uses to say "the API accepted this, and what came back is not what
+	// you asked for". It is deliberately NOT a refusal — see hzResObservation's
+	// `advisory` field.
+	hzKeyDivergence = "divergence"
 )
 
 // hzResObservation is what ONE post-read SAW: the fields to print, and — when
 // the world disagrees with what the verb asked for — WHICH field disagreed,
 // what the server reported, and what was wanted.
+//
+// THERE ARE THREE OUTCOMES, not two (PDS-D432):
+//
+//	field == "" && advisory == ""   ✓ receipt, exitOK
+//	field == "" && advisory != ""   ✓ receipt PLUS a divergence line, STILL exitOK
+//	field != ""                     REFUSAL at exitGeneric (hzResUnmet)
 //
 // `field` empty means agreement. It is the only signal that decides between a
 // ✓ and a refusal, so it is deliberately the zero value: an observe hook that
@@ -95,18 +108,76 @@ type hzResObservation struct {
 	// the object that was read, never from argv (PDS-D366). The one sanctioned
 	// exception is a human NAME the server does not carry (trap (a)), which the
 	// call site passes through `extra` instead.
+	//
+	// PDS-D432 — THE SECOND, NARROW CARVE-OUT FROM "NEVER FROM ARGV", AND IT IS
+	// THE `advisory` FIELD BELOW, NOTHING ELSE. An advisory necessarily prints
+	// argv: saying "you asked for X" requires X. It is authorised because it is
+	// the ONE value in the receipt whose whole job is to contrast argv WITH the
+	// observation, and it is required to be SELF-LABELLING in its own text —
+	// it names the asked value as asked ("you asked for least_connections, the
+	// server reports round_robin"), never as `<field>: <asked>`, which is the
+	// request echo this apparatus exists to kill and which the anti-echo pin at
+	// hetzner_lb_cmd_test.go:596/:606 reds on. Nothing else in `extra` may come
+	// from argv, and an advisory may never change the exit code.
 	extra map[string]any
 	// field is the name of the field that disagreed; "" when nothing did.
 	field string
 	// saw is what the server reported for `field`; want is what was asked for.
 	saw  string
 	want string
+	// advisory is the THIRD outcome: the create was accepted, the receipt is
+	// honest, and what came back is not what argv asked for. Reported, never
+	// challenged — it is folded into `extra` under hzKeyDivergence and the exit
+	// code stays exitOK. Deliberately a SEPARATE field from `field`: reusing
+	// `field` for an advisory would turn every divergence into a refusal, and a
+	// create the API ACCEPTED must never exit non-zero on one (the only create
+	// refusal stays obj == nil → hzResNotReadable).
+	advisory string
 }
 
 // hzResAgrees is the agreeing observation, spelled as a constructor so a call
 // site cannot accidentally leave `field` set from a previous branch.
 func hzResAgrees(extra map[string]any) hzResObservation {
 	return hzResObservation{extra: extra}
+}
+
+// hzResAgreesWith is the ADVISORY observation: a ✓ receipt that also carries a
+// divergence line. `advisory` empty degrades to exactly hzResAgrees, so a call
+// site whose comparison found nothing needs no branch of its own.
+func hzResAgreesWith(extra map[string]any, advisory string) hzResObservation {
+	return hzResObservation{extra: extra, advisory: advisory}
+}
+
+// hzResAsked is ONE argv value paired with what the response reports for it.
+// Both sides are compared TOKEN-IDENTICALLY, so only flags whose own validator
+// is an identity (or near-identity) may be enrolled — a flag the client
+// normalises before sending (an id-or-name ref, a datacenter that answers as a
+// location) would fire a FALSE advisory on a CORRECT create.
+type hzResAsked struct {
+	field    string
+	asked    string
+	observed string
+}
+
+// hzResDivergence compares each enrolled pair and renders the advisory text.
+//
+// A pair with an EMPTY `asked` is skipped: the flag was not given, or this
+// branch of the verb does not carry it. A pair with an empty `observed` is
+// skipped too — the response not carrying the field at all is silence, not
+// disagreement, and there is nothing honest to contrast.
+//
+// THE PHRASING IS LOAD-BEARING (PDS-D432): `<field> — you asked for <asked>,
+// the server reports <observed>`. It must never be spelled `<field>: <asked>`,
+// which is the request echo under a new name.
+func hzResDivergence(pairs ...hzResAsked) string {
+	var lines []string
+	for _, p := range pairs {
+		if p.asked == "" || p.observed == "" || p.asked == p.observed {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s — you asked for %s, the server reports %s", p.field, p.asked, p.observed))
+	}
+	return strings.Join(lines, "; ")
 }
 
 // hzResDisagrees is the refusing observation: the read succeeded and the world
@@ -176,10 +247,19 @@ func hzResReportObserved(out *writer, action, kind string, id any, name string, 
 	if obs.field != "" {
 		return hzResUnmet(out, action, kind, id, name, obs)
 	}
-	return hzResDone(out, action, kind, id, name, hzMergeExtra(extra, hzMergeExtra(obs.extra, map[string]any{
+	receipt := map[string]any{
 		hzKeyConfirmedPresent: true,
 		hzKeyConfirmBasis:     basis,
-	})))
+	}
+	// THE THIRD OUTCOME (PDS-D432). `extra` is the one channel that reaches BOTH
+	// surfaces for free — hzResDone spreads it into the JSON payload and
+	// hzResPrintExtra prints it as a sorted `  key: value` line — so the
+	// advisory rides it rather than growing a second reporting path that only
+	// one surface would learn about. The exit code is untouched on purpose.
+	if obs.advisory != "" {
+		receipt[hzKeyDivergence] = obs.advisory
+	}
+	return hzResDone(out, action, kind, id, name, hzMergeExtra(extra, hzMergeExtra(obs.extra, receipt)))
 }
 
 // hzResNotReadable is the INVERTED nil branch: the API accepted the verb and

@@ -255,41 +255,98 @@ func hzObserveLBType(token string) hzResObserveFn[hcloud.LoadBalancer] {
 	}
 }
 
+// THE SEVEN ENROLLED CREATE PAIRS (PDS-D432) — the complete list, in one place
+// because the enrolment rule is a JUDGEMENT and each row had to earn it. A pair
+// may be enrolled only when the flag's token and the response's value are
+// TOKEN-IDENTICAL after the flag's own normalisation; anything the client
+// rewrites before sending fires a FALSE advisory on a CORRECT create.
+//
+//	load-balancer create --type   → load_balancer_type  (NON-numeric token only)
+//	load-balancer create --location → location          (--location branch only)
+//	load-balancer create --algorithm → algorithm        (always; hzLBAlgorithm is an identity validator)
+//	floating-ip create --type     → type                (always; validated ipv4|ipv6, passed through)
+//	floating-ip create --home-location → home_location  (--home-location branch only)
+//	primary-ip create --type      → type                (always)
+//	primary-ip create --location  → location            (--location branch only)
+//
+// THE FOUR EXCLUSIONS, each with the false positive enrolling it would produce:
+//
+//	primary-ip --datacenter — the observer prints pip.Location.Name, and a
+//	  datacenter token is STRICTLY LONGER than its location (nbg1-dc3 vs nbg1),
+//	  so a CORRECT create fires a guaranteed false advisory. MEASURED against a
+//	  production-shaped response: enrolling it emitted `divergence: datacenter
+//	  — you asked for nbg1-dc3, the server reports nbg1` at exit 0 on a create
+//	  that did exactly what was asked. (The SDK's Datacenter field is also
+//	  deprecated past its removal date, so there is nothing to compare against
+//	  that will survive.) Pinned by TestHetznerCreateAdvisoryExclusions.
+//	placement-group --type — hetzner_lb_cmd.go rejects everything but "spread"
+//	  CLIENT-SIDE before the request leaves, so the only reachable comparison is
+//	  spread-vs-spread: the pair is degenerate, and an advisory that can never
+//	  fire is apparatus nobody can test. (This is the one exclusion whose false
+//	  positive is UNREACHABLE rather than measured — its guard is the
+//	  client-side rejection, not a divergence pin.)
+//	certificate --domain — the managed create asks for example.com and the API
+//	  legitimately answers [example.com www.example.com]: the response is a
+//	  SUPERSET, unordered, so token equality is the wrong predicate entirely and
+//	  every correct managed create would carry an advisory.
+//	load-balancer --type on the NUMERIC branch — hzLBTypeRef turns a numeric
+//	  token into an ID reference, and the response answers with the type's NAME,
+//	  so `--type 1` would advise `you asked for 1, the server reports lb11` on a
+//	  correct create.
+//
 // hzObserveLBCreated reads a create receipt off the create RESPONSE object,
 // which for a create IS server truth (the addresses and the settled algorithm
-// are things nobody typed).
-func hzObserveLBCreated(lb *hcloud.LoadBalancer) hzResObservation {
-	extra := map[string]any{}
-	if lb.PublicNet.IPv4.IP != nil {
-		extra["ipv4"] = lb.PublicNet.IPv4.IP.String()
+// are things nobody typed). It takes the asked values as constructor arguments
+// (the hzObserveFloatingIPAssigned idiom) so the comparison happens where the
+// response is read, not at the call site.
+func hzObserveLBCreated(askedType, askedLocation, askedAlgorithm string) hzResObserveFn[hcloud.LoadBalancer] {
+	return func(lb *hcloud.LoadBalancer) hzResObservation {
+		extra := map[string]any{}
+		if lb.PublicNet.IPv4.IP != nil {
+			extra["ipv4"] = lb.PublicNet.IPv4.IP.String()
+		}
+		if lb.PublicNet.IPv6.IP != nil {
+			extra["ipv6"] = lb.PublicNet.IPv6.IP.String()
+		}
+		typeName, locName := "", ""
+		if lb.LoadBalancerType != nil {
+			typeName = lb.LoadBalancerType.Name
+			extra["load_balancer_type"] = typeName
+		}
+		if lb.Location != nil {
+			locName = lb.Location.Name
+			extra["location"] = locName
+		}
+		if lb.Algorithm.Type != "" {
+			extra["algorithm"] = string(lb.Algorithm.Type)
+		}
+		return hzResAgreesWith(extra, hzResDivergence(
+			hzResAsked{"load_balancer_type", askedType, typeName},
+			hzResAsked{"location", askedLocation, locName},
+			hzResAsked{"algorithm", askedAlgorithm, string(lb.Algorithm.Type)},
+		))
 	}
-	if lb.PublicNet.IPv6.IP != nil {
-		extra["ipv6"] = lb.PublicNet.IPv6.IP.String()
-	}
-	if lb.LoadBalancerType != nil {
-		extra["load_balancer_type"] = lb.LoadBalancerType.Name
-	}
-	if lb.Location != nil {
-		extra["location"] = lb.Location.Name
-	}
-	if lb.Algorithm.Type != "" {
-		extra["algorithm"] = string(lb.Algorithm.Type)
-	}
-	return hzResAgrees(extra)
 }
 
 // hzObserveFloatingIPCreated / hzObserveFloatingIPAssigned / …Unassigned are the
 // floating-ip family's three observers. The `type` a create prints is now the
 // one the API reports back, not the one the flag carried.
-func hzObserveFloatingIPCreated(fip *hcloud.FloatingIP) hzResObservation {
-	extra := map[string]any{"type": string(fip.Type)}
-	if fip.IP != nil {
-		extra["ip"] = fip.IP.String()
+func hzObserveFloatingIPCreated(askedType, askedHomeLocation string) hzResObserveFn[hcloud.FloatingIP] {
+	return func(fip *hcloud.FloatingIP) hzResObservation {
+		extra := map[string]any{"type": string(fip.Type)}
+		if fip.IP != nil {
+			extra["ip"] = fip.IP.String()
+		}
+		homeLoc := ""
+		if fip.HomeLocation != nil {
+			homeLoc = fip.HomeLocation.Name
+			extra["home_location"] = homeLoc
+		}
+		return hzResAgreesWith(extra, hzResDivergence(
+			hzResAsked{"type", askedType, string(fip.Type)},
+			hzResAsked{"home_location", askedHomeLocation, homeLoc},
+		))
 	}
-	if fip.HomeLocation != nil {
-		extra["home_location"] = fip.HomeLocation.Name
-	}
-	return hzResAgrees(extra)
 }
 
 // hzObserveFloatingIPAssigned binds on the RESOLVED server id: a floating IP's
@@ -315,15 +372,25 @@ func hzObserveFloatingIPUnassigned(fip *hcloud.FloatingIP) hzResObservation {
 	return hzResAgrees(map[string]any{"assigned": false})
 }
 
-func hzObservePrimaryIPCreated(pip *hcloud.PrimaryIP) hzResObservation {
-	extra := map[string]any{"type": string(pip.Type)}
-	if pip.IP != nil {
-		extra["ip"] = pip.IP.String()
+// hzObservePrimaryIPCreated enrols --type and --location. --datacenter is NOT
+// enrolled: see the exclusion list above — pip.Location.Name answers a
+// datacenter token with its LOCATION, so the pair is not token-identical.
+func hzObservePrimaryIPCreated(askedType, askedLocation string) hzResObserveFn[hcloud.PrimaryIP] {
+	return func(pip *hcloud.PrimaryIP) hzResObservation {
+		extra := map[string]any{"type": string(pip.Type)}
+		if pip.IP != nil {
+			extra["ip"] = pip.IP.String()
+		}
+		locName := ""
+		if pip.Location != nil {
+			locName = pip.Location.Name
+			extra["location"] = locName
+		}
+		return hzResAgreesWith(extra, hzResDivergence(
+			hzResAsked{"type", askedType, string(pip.Type)},
+			hzResAsked{"location", askedLocation, locName},
+		))
 	}
-	if pip.Location != nil {
-		extra["location"] = pip.Location.Name
-	}
-	return hzResAgrees(extra)
 }
 
 // hzObservePrimaryIPAssigned checks the assignee PAIR: an id alone is not an
@@ -652,8 +719,16 @@ func runHetznerLBCreate(out *writer, g globals, args []string) int {
 	}
 	// CLASS A2: the create RESPONSE object is server truth, so the receipt is
 	// read off it and carries no request-only extra beside it.
+	// The advisory pairs (PDS-D432): --type only when the token is NON-numeric
+	// (a numeric one is an ID reference the API answers by name), --location
+	// only on the --location branch (a --network-zone create has no location to
+	// have asked for).
+	askedType := typ
+	if _, numeric := strconv.ParseInt(typ, 10, 64); numeric == nil {
+		askedType = ""
+	}
 	return hzResObservedResponse(out, "create", "load-balancer", result.LoadBalancer.ID, result.LoadBalancer.Name,
-		nil, result.LoadBalancer, hzObserveLBCreated)
+		nil, result.LoadBalancer, hzObserveLBCreated(askedType, a.val("location"), a.val("algorithm")))
 }
 
 func runHetznerLBDelete(out *writer, g globals, args []string) int {
@@ -1250,7 +1325,8 @@ func runHetznerFloatingIPCreate(out *writer, g globals, args []string) int {
 		return hzFail(out, "create floating-ip: create action failed", werr)
 	}
 	return hzResObservedResponse(out, "create", "floating-ip", result.FloatingIP.ID,
-		hzFloatingIPLabel(result.FloatingIP), nil, result.FloatingIP, hzObserveFloatingIPCreated)
+		hzFloatingIPLabel(result.FloatingIP), nil, result.FloatingIP,
+		hzObserveFloatingIPCreated(string(ipType), a.val("home-location")))
 }
 
 func runHetznerFloatingIPDelete(out *writer, g globals, args []string) int {
@@ -1548,7 +1624,8 @@ func runHetznerPrimaryIPCreate(out *writer, g globals, args []string) int {
 		return hzFail(out, "create primary-ip: create action failed", werr)
 	}
 	return hzResObservedResponse(out, "create", "primary-ip", result.PrimaryIP.ID,
-		hzPrimaryIPLabel(result.PrimaryIP), nil, result.PrimaryIP, hzObservePrimaryIPCreated)
+		hzPrimaryIPLabel(result.PrimaryIP), nil, result.PrimaryIP,
+		hzObservePrimaryIPCreated(string(ipType), a.val("location")))
 }
 
 func runHetznerPrimaryIPDelete(out *writer, g globals, args []string) int {
