@@ -250,6 +250,42 @@ jobs:
       - name: Seal predicate tests
         run: node --test cloud/priv/static/__preview__/seal-predicate.test.mjs
 
+      # THE RESPONSIVE SWEEP'S COVERAGE REFUSAL — the CHEAP leg only.
+      #
+      # breakpoint-sweep.mjs derives its width axis from app.css's own @media
+      # set and its screen axis from index.html's own section.view set, and
+      # compares both against the tables its render leg actually drives. Run
+      # browserless it is ~50ms of parsing and answers ONE question: has the
+      # artifact grown a breakpoint or a screen that no sweep covers? That is
+      # the hole wave 13 measured — 621-768 swept by nothing, seven screens
+      # never rendered at tablet width at all — and the only shape that keeps it
+      # closed is a check that fails the moment the axis moves.
+      #
+      # ONLY THIS LEG IS WIRED. `--render` drives 338 headless cells at roughly
+      # a second each: MINUTES, not seconds. It is a developer instrument and
+      # the wave's evidence engine, deliberately not a CI step.
+      #
+      # It belongs HERE, in the node-20 job, precisely because it needs no
+      # Chrome and no port — so it cannot join the class of instruments nothing
+      # runs (`grep -rn overflow-guard .github/` still exits 1).
+      #
+      # Its unit tests run alongside it: the refusal's parser is where a blind
+      # spot would hide (a width token the parser eats but cannot resolve
+      # DISAPPEARS, and the sweep exits 0 over a breakpoint nobody covers —
+      # measured, and pinned in breakpoint-sweep.test.mjs).
+      #
+      # HONEST SCOPE: `Console gate`, the aggregator this job reaches branch
+      # protection through, is ADVISORY today — the live required set is
+      # `Elixir gate` and `PR references an active task`. This step RUNS on
+      # every console-touching PR and its red is visible; it does not by itself
+      # block a merge. Nothing is registered here and
+      # .github/required-checks.json is untouched.
+      - name: Responsive sweep — breakpoint/screen coverage refusal
+        run: node cloud/priv/static/__preview__/breakpoint-sweep.mjs
+
+      - name: Responsive sweep unit tests
+        run: node --test cloud/priv/static/__preview__/breakpoint-sweep.test.mjs
+
       # The SPA's design contract, machine-checked (charter GR5): dead classes,
       # undefined tokens, WCAG contrast across every theme identity, offline-purity,
       # and the living styleguide's class/token drift. Exits non-zero on any E1-E8

@@ -1,0 +1,1008 @@
+#!/usr/bin/env node
+// breakpoint-sweep.mjs — the CONTINUOUS responsive sweep. Both of its axes are
+// a FUNCTION of the artifact (app.css's own @media set, index.html's own
+// section.view set) rather than a list somebody typed, and it REFUSES when the
+// artifact grows an axis the sweep does not cover.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  WHY THIS EXISTS (cch wave 14, slice S1)
+// ─────────────────────────────────────────────────────────────────────────────
+//  Every instrument this epic owns is wide on ONE axis and pinned on the other:
+//    · the 2026-07-20 audit — 84 scenarios, exactly TWO widths;
+//    · overflow-guard.mjs   — WIDTHS starts at 721, PHONE_WIDTHS ends at 620,
+//                             so 621-720 is swept by NOTHING;
+//    · all of them          — ask ONE question (does the page scroll sideways),
+//                             which is structurally blind to a control whose
+//                             text is cut with no cue and to a screen whose
+//                             content starts below the fold.
+//  A hand-written width list reopens a hole at the next breakpoint somebody
+//  adds; a hand-written route list reopens one at the next screen. Wave 13
+//  measured the consequence: 621-768 — every iPad in portrait, every half-
+//  screen laptop split — had never been rendered by any instrument in this
+//  epic, and seven whole screens had never been rendered at tablet width at
+//  all.
+//
+//  So: DERIVE BOTH AXES, AND REFUSE ON A GAP. A guard that starts at 721 and a
+//  guard that starts at 620 both leave a band. A sweep that WALKS the
+//  breakpoints is the only shape that does not.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  HONEST LIMIT — WHAT THIS PROTECTS TODAY
+// ─────────────────────────────────────────────────────────────────────────────
+//  Leg A (the coverage refusal) is wired into console-harness.yml's existing
+//  Node-20 `console-unit` job. `Console gate` — the aggregator that job reaches
+//  branch protection through — is ADVISORY on this repo today: the live
+//  required set is `Elixir gate` and `PR references an active task` only. So
+//  this leg RUNS on every console-touching PR and its red is VISIBLE, but it
+//  does not block a merge by itself. Say that plainly rather than implying
+//  otherwise. Leg B (--render) is wired to NOTHING and must not be: it costs
+//  MINUTES, not seconds (see COST below).
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  LEG A — THE COVERAGE REFUSAL (default mode; browserless; ~50ms)
+// ─────────────────────────────────────────────────────────────────────────────
+//  Parses app.css for width-bearing @media preludes and index.html for its
+//  registered `section.view` ids, and compares BOTH against the sweep's OWN
+//  tables — WIDTHS (the boundary walk Leg B actually drives) and CELLS (the
+//  scenario x route table Leg B actually renders). The tables are IMPORTED,
+//  never restated: a second literal would make the refusal protect a
+//  declaration instead of the sweep, and shrinking the real width loop would
+//  leave it green. Shrink WIDTHS and this leg exits 2 — that is the test.
+//
+//  COMMENT-STRIPPING IS LOAD-BEARING, NOT HYGIENE. app.css:2131 contains the
+//  string "`@media (max-width: 720px)` shell fold" INSIDE a CSS comment.
+//  `grep -c '@media' app.css` says 21; comment-stripped it is 20; the CSSOM
+//  reports 20 media rules. A naive regex invents a 21st block — and the day a
+//  comment mentions a width nobody covers, invents a phantom refusal.
+//
+//  RANGE SYNTAX AND min-width ARE HANDLED, AND THE UNPARSEABLE IS REFUSED.
+//  `@media (width <= 812px)` is the same breakpoint as `(max-width: 812px)` and
+//  must be seen as one. Any condition containing the token `width` that the
+//  parser cannot resolve to an integer px boundary exits 2 naming it — silent
+//  disappearance is the exact failure mode this leg exists to prevent. app.css
+//  today is all max-width and has ZERO min-width; that is a fact about today,
+//  not a licence.
+//
+//  `--cssom` asserts the parsed axis equals the axis walked from
+//  `document.styleSheets` in a real browser, and exits 2 on parity=DIVERGED.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  LEG B — THE RENDER SWEEP (`--render`)
+// ─────────────────────────────────────────────────────────────────────────────
+//  WIDTH AXIS = a boundary walk B-1 / B / B+1 over every derived breakpoint. On
+//  origin/main that is five breakpoints (620, 720, 768, 899, 900) giving 13
+//  widths. 899 and 900 are NOT de-duplicated: at exactly 900 the tier grid has
+//  folded and the detail grid has not.
+//
+//  SCREEN AXIS = SCENARIO x ROUTE, never section.view alone. Content is
+//  scenario-bound: on scen=mixed-fleet the notifications/tokens/env/sites/
+//  activity/members screens render EMPTY and #notif-matrix is ABSENT at every
+//  width. A view-keyed sweep leaves 79 of 338 cells RENDER-DEAD (78 showing
+//  view-overview while asking for operator/instance/site) and every one of them
+//  returns a plausible q1=0, q2=0 — for the wrong screen.
+//
+//  PER-CELL RENDER-LIVENESS REFUSAL, THREE CLAUSES, HARD exit 2 — never a
+//  warning: (1) the live section.view id is the one requested, (2) it is not
+//  hidden and has non-zero height, AND (3) the cell's SCENARIO-SPECIFIC
+//  SENTINEL is present. Clause 3 is not ceremony: a cell pointed at a
+//  non-populating scenario reports hidden:false, h:307, textLen:195 — clauses
+//  1+2 alone PASS it and then measure an empty-state box. The sentinel table is
+//  a MAINTAINED artifact, paired with Leg A so a new screen fails on the
+//  sentinel it lacks rather than passing empty.
+//
+//  THREE QUESTIONS PER CELL
+//   Q1 SIDEWAYS            documentElement.scrollWidth > clientWidth.
+//   Q2 CLIPPED WITHOUT CUE two corrections it cannot ship without:
+//      (a) NATIVE FORM CONTROLS ARE CLASSIFIED BY TAG. A <select> is UA-painted
+//          and computes overflow-x: visible no matter how badly its selected
+//          option is cut. Two independent CSSOM-keyed prototypes both reported
+//          CLIP_NO_CUE = 0 while a person was reading a truncated control.
+//          SELECT/INPUT/TEXTAREA/BUTTON compare scrollWidth vs clientWidth
+//          directly.
+//      (b) THE CUE TEST IS "reserved track > 0 OR an authored edge cue is live"
+//          — not "is overflow-x auto", and NOT "a scrollbar rendered". The
+//          reserved horizontal track measures 0px at every width under BOTH
+//          --hide-scrollbars and real classic scrollbars, so a track test alone
+//          would condemn every scroller in the console. An authored cue is a
+//          `--*fade*`/`--*cue*` custom property reading > 0 (.set-matrix's
+//          --set-matrix-fade is 48px while clipped, 0px when it fits) OR a
+//          computed `text-overflow: ellipsis`, which IS the affordance that
+//          tells a person the string continues — for NON-form elements only,
+//          since a UA-painted control computes an ellipsis it does not
+//          necessarily paint and that would silence correction (a).
+//          CUE_STUCK (a note, never a failure) reports the IFF half: a cue live
+//          on something that FITS. It is asked ONLY of scroll containers,
+//          because custom properties INHERIT — every descendant of a cued
+//          scroller otherwise reports a cue it does not own.
+//      SHIPPED GENERAL, WITH NO ALLOWLIST. The measured census over the
+//      data-bearing cells is one distinct selector — select#site-theme-select
+//      .rail-select, which slice S4 pays. Visually-hidden is handled by a NAMED
+//      list of hiding utilities, never a className regex.
+//      VISIBLE_SPILL is NOT the failing set. The failing sub-case is
+//      cutByViewport > 0, and it takes two qualifiers to mean anything:
+//        · CONTAINED elements are excluded. Anything inside a clipping or
+//          scrolling ancestor is scrolling, not spilling — .set-matrix's own
+//          descendants report 21 spills at 768 and every one of them is the
+//          cued matrix doing its job.
+//        · THE PAINTED RIGHT EDGE, not the box. A block-level row is clamped
+//          to its container's width, so `rect.right` reads "inside the
+//          viewport" while its min-content children push the page sideways.
+//          Non-clipping elements are measured at rect.left + scrollWidth;
+//          clipping ones (and form controls) at rect.right, since that is all
+//          they paint. Measured on origin/main at 769: #fleet-body +21,
+//          div.fleet-row +20 — the exact cells this sub-case exists for.
+//   Q3 BELOW THE FOLD      ONE number — the viewport y of `.content` — against
+//      a fraction of viewport height, not a general rule. It measures 745.88px
+//      at every width <= 720 and 56 above. Slice S2 fixes that; THIS slice must
+//      not wait for it, so Q3 ships with a NAMED PIN in the shape
+//      overflow-guard.mjs uses for FLEET_ROW_RESIDUAL: an explicit allowance
+//      citing cch-w13-bl-folded-shell-nav-wall that reds if the number GROWS.
+//      Pin removal is the follow-up row cch-w14-bl-sweep-navwall-pin-removal.
+//
+//  DO NOT RAISE app.css:4241. Wave 13 measured that raising the shell fold
+//  RELOCATES the cliff and exports a 746px nav wall to every tablet.
+//
+// ─────────────────────────────────────────────────────────────────────────────
+//  COST, HONESTLY
+// ─────────────────────────────────────────────────────────────────────────────
+//  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
+//  costs roughly a second per cell. The full render leg is 26 cells x 13 widths
+//  = 338 cells: budget MINUTES. Two traps proven the hard way: Page.navigate to
+//  a URL differing only in its hash is a SAME-DOCUMENT navigation, so injected
+//  rules and stale stylesheets survive into the next cell (hence a fresh target
+//  parked on about:blank per cell); and a double-requestAnimationFrame settle
+//  HANGS under headless=new — a plain 16ms sleep does not.
+//
+//  RUN
+//    node cloud/priv/static/__preview__/breakpoint-sweep.mjs            # Leg A
+//    node …/breakpoint-sweep.mjs --cssom                # + browser axis parity
+//    node …/breakpoint-sweep.mjs --render               # Leg B (minutes)
+//    node …/breakpoint-sweep.mjs --render --widths 900 --cell fleet     # slice
+//    BREAKPOINT_SWEEP_ROOT=<dir> …    # measure an exported tree (origin/main)
+//    BREAKPOINT_SWEEP_CSS=<file> …    # parse a DIFFERENT app.css than is served
+//    CHROME=/path/to/chrome …         # browser override
+//
+//  EXIT VOCABULARY (the epic's, unchanged): 0 = clean · 1 = a measured defect
+//  · 2 = REFUSED (environment, a coverage gap, an unparseable width, or a dead
+//  cell). 1 is a claim about the product; 2 is a claim about the instrument or
+//  its inputs, and the two must never be confused.
+//
+//  ZERO DEPENDENCIES — node builtins plus the Cdp class and findChrome() taken
+//  unchanged from cssom-parity.mjs / overflow-guard.mjs.
+// ─────────────────────────────────────────────────────────────────────────────
+
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { spawn } from "node:child_process";
+import { fileURLToPath } from "node:url";
+import { IDS } from "./scenarios.mjs";
+
+const HERE = path.dirname(fileURLToPath(import.meta.url));
+const ROOT = path.resolve(process.env.BREAKPOINT_SWEEP_ROOT || path.resolve(HERE, ".."));
+const CSS_PATH = process.env.BREAKPOINT_SWEEP_CSS || path.join(ROOT, "app.css");
+const HTML_PATH = path.join(ROOT, "index.html");
+const PORT = Number(process.env.BREAKPOINT_SWEEP_PORT || 4207);
+const BASE = `http://127.0.0.1:${PORT}`;
+const HEIGHT = 800;
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  THE SWEEP'S OWN TABLES — the ONLY declaration of either axis. Leg A imports
+//  these; it does not restate them.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The boundary walk. A breakpoint at B changes behaviour BETWEEN B and B+1, so
+// the only widths that can see the change are B-1 (safely below), B (the last
+// width on the low side) and B+1 (the first on the high side).
+export function boundaryWalk(breakpoints) {
+  const out = new Set();
+  for (const b of breakpoints) { out.add(b - 1); out.add(b); out.add(b + 1); }
+  return [...out].sort((a, b) => a - b);
+}
+
+// Derived from app.css on origin/main: 620, 720, 768, 899, 900. Declared here
+// as the sweep's committed axis so Leg A can refuse when the stylesheet grows a
+// breakpoint this list does not carry. 899 and 900 stay separate on purpose.
+export const BREAKPOINTS = [620, 720, 768, 899, 900];
+export const WIDTHS = boundaryWalk(BREAKPOINTS);
+
+const INST = IDS.liveInstance;
+const SITE = IDS.siteWeb;
+
+// The screen axis: SCENARIO x ROUTE. `view` is the section.view that MUST be
+// live, `ready` is what the driver polls for, and `sentinel` is clause 3 of the
+// liveness refusal — a selector that exists ONLY when this scenario actually
+// populated this screen. A sentinel that is merely "the screen's container"
+// would be satisfied by an empty state, which is the whole failure this table
+// exists to catch.
+export const CELLS = [
+  { name: "overview-fleet", scen: "mixed-fleet", hash: "#overview", view: "view-overview", sentinel: "#overview-body .ov-card, #overview-body .card, #overview-body section" },
+  { name: "overview-past-due", scen: "overview-past-due", hash: "#overview", view: "view-overview", sentinel: "#billing-chip:not([hidden])" },
+  { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet", sentinel: ".fleet-row" },
+  { name: "fleet-archives", scen: "fleet-archives-stored", hash: "#fleet", view: "view-fleet", sentinel: "#archives-body .archive-row" },
+  { name: "billing-trial", scen: "billing-trial", hash: "#settings/billing", view: "view-billing", sentinel: "#billing-tiers:not([hidden]) .tier" },
+  { name: "billing-past-due", scen: "billing-past-due", hash: "#settings/billing", view: "view-billing", sentinel: "#billing-manage-section:not([hidden])" },
+  { name: "providers-connected", scen: "providers-connected", hash: "#settings/providers", view: "view-providers", sentinel: "#provider-roster .prov-row" },
+  { name: "providers-connect", scen: "providers-empty", hash: "#settings/providers", view: "view-providers", sentinel: "#provider-connect .set-section" },
+  { name: "notifications", scen: "notif-configured", hash: "#settings/notifications", view: "view-notifications", sentinel: "#notif-matrix" },
+  { name: "notifications-error", scen: "notif-deliveries-error", hash: "#settings/notifications", view: "view-notifications", sentinel: "#notif-matrix" },
+  { name: "sites", scen: "sites", hash: "#sites", view: "view-sites", sentinel: "#sites-body .site-row, #sites-body .fleet-row" },
+  { name: "activity", scen: "activity", hash: "#activity", view: "view-activity", sentinel: "#activity-body .tlv-row" },
+  { name: "tokens", scen: "tokens-populated", hash: "#settings/tokens", view: "view-tokens", sentinel: "#token-list .token-row" },
+  { name: "tokens-member", scen: "tokens-member", hash: "#settings/tokens", view: "view-tokens", sentinel: "#token-list .token-row" },
+  { name: "members", scen: "members-populated", hash: "#settings/members", view: "view-members", sentinel: "#members-body .mem-row, #members-body .set-row" },
+  { name: "members-member", scen: "members-member", hash: "#settings/members", view: "view-members", sentinel: "#members-body .mem-row, #members-body .set-row" },
+  { name: "env", scen: "env-populated", hash: "#settings/env", view: "view-env", sentinel: "#env-body .set-row" },
+  { name: "env-editor", scen: "env-editor", hash: "#settings/env", view: "view-env", sentinel: "#env-body .set-section" },
+  { name: "operator", scen: "operator-console", hash: "#operator", view: "view-operator", sentinel: "#operator-body .set-section, #operator-body .op-row" },
+  { name: "operator-halted", scen: "operator-halted", hash: "#operator", view: "view-operator", sentinel: "#operator-body .set-section, #operator-body .op-row" },
+  { name: "instance-detail", scen: "panel-overview", hash: `#instance/${INST}`, view: "view-instance", sentinel: ".detail-grid--instance" },
+  { name: "inst-timeline", scen: "timeline", hash: `#instance/${INST}/timeline`, view: "view-instance", sentinel: "#instance-tabpanel .tlv-row" },
+  { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", sentinel: "#instance-tabpanel .metrics-grid" },
+  { name: "inst-webhooks", scen: "webhooks-panel", hash: `#instance/${INST}/webhooks`, view: "view-instance", sentinel: "#instance-tabpanel .wh-card" },
+  { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
+  { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", sentinel: ".detail-grid" },
+];
+
+// The view axis Leg B actually covers, derived from the cell table.
+export const COVERED_VIEWS = [...new Set(CELLS.map((c) => c.view))].sort();
+
+// Q3's NAMED PIN. `.content` starts 745.88px down the page at every width the
+// shell fold owns (<= 720) because the folded shell paints its whole nav above
+// the content instead of beside it. That is a REAL defect a person sees — slice
+// S2 pays it — and this sweep must not sit and wait for the fix. The pin is an
+// allowance that reds if the number GROWS.
+export const NAV_WALL_PIN = {
+  task: "cch-w13-bl-folded-shell-nav-wall",
+  maxWidth: 720,     // applies only where the shell fold is in force
+  maxTop: 745.88,    // measured on origin/main bytes
+  tol: 0.5,
+  removal: "cch-w14-bl-sweep-navwall-pin-removal",
+};
+// Everywhere else, `.content` must start inside the top FOLD_FRACTION of the
+// viewport. 0.4 of 800 = 320px; the measured value above 720 is 56.
+export const FOLD_FRACTION = 0.4;
+
+// Q2's named hiding utilities. A className regex would swallow any class with
+// "hidden" as a substring (`.is-hidden-until-hover` is not hidden), so the list
+// is enumerated.
+export const HIDING_UTILITIES = ["visually-hidden", "sr-only", "screen-reader-only", "u-hidden", "is-hidden"];
+// Authored edge cues are discovered by walking computed custom properties, but
+// a browser that does not enumerate them must not silently report "no cue on
+// anything" — these are checked by name as well.
+export const NAMED_CUE_PROPS = ["--set-matrix-fade", "--matrix-fade", "--scroll-fade"];
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  LEG A — parsing
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Strip /* … */ comments. CSS comments do not nest; a comment opened and never
+// closed swallows the rest of the file (which is exactly bug #4592's shape, and
+// __css_check.mjs E10 owns detecting it — here the safe reading is "everything
+// after an unterminated opener is a comment", i.e. contributes no breakpoints).
+export function stripCssComments(css) {
+  let out = "";
+  let i = 0;
+  while (i < css.length) {
+    const open = css.indexOf("/*", i);
+    if (open === -1) { out += css.slice(i); break; }
+    out += css.slice(i, open);
+    const close = css.indexOf("*/", open + 2);
+    if (close === -1) break; // unterminated — the rest is comment
+    i = close + 2;
+  }
+  return out;
+}
+
+const NUM = "(\\d+(?:\\.\\d+)?)";
+const UNIT = "([a-z%]*)";
+
+// Resolve one comparison to the BOUNDARY width — the largest width at which the
+// low side of the comparison still holds. max-width:N and (width <= N) are both
+// N; min-width:N and (width >= N) are both N-1, because the change happens
+// between N-1 and N. Returns null for a unit this parser will not guess at.
+export function boundaryOf(kind, value, unit) {
+  if (unit !== "px" && unit !== "") return null;
+  if (!Number.isInteger(value)) return null;
+  switch (kind) {
+    case "max": return value;      // (max-width: N) / (width <= N)
+    case "lt": return value - 1;   // (width < N)
+    case "min": return value - 1;  // (min-width: N) / (width >= N)
+    case "gt": return value;       // (width > N)
+    default: return null;
+  }
+}
+
+// Parse ONE media query (one comma-separated clause of a prelude). Returns
+// { boundaries: number[], unresolved: string[] }. A clause with no `width`
+// token at all (prefers-reduced-motion, print) contributes nothing and is not
+// unresolved — it is simply not width-bearing.
+export function parseWidthClause(clause) {
+  const boundaries = [];
+  if (!/\bwidth\b/.test(clause)) return { boundaries, unresolved: [] };
+  let rest = clause;
+  // CONSUME ONLY WHAT WE RESOLVED. `take` returns the boundaries it understood,
+  // or null. On null the matched text is left in `rest` ON PURPOSE, so the
+  // "still carries the token width" check below fires: an em-based or
+  // calc()-based width that the parser eats but cannot resolve would DISAPPEAR
+  // SILENTLY, which is precisely the failure this leg exists to prevent
+  // (measured: `(max-width: 50em)` originally exited 0 with the axis unchanged).
+  const eat = (re, take) => {
+    rest = rest.replace(re, (...m) => {
+      const b = take(m);
+      if (b == null) return m[0];
+      for (const x of [].concat(b)) boundaries.push(x);
+      return " ";
+    });
+  };
+  const both = (a, b) => (a == null || b == null ? null : [a, b]);
+  // (min-width: 700px) / (max-width: 720px)
+  eat(new RegExp(`\\(\\s*(min|max)-width\\s*:\\s*${NUM}${UNIT}\\s*\\)`, "gi"),
+    (m) => boundaryOf(m[1].toLowerCase(), Number(m[2]), m[3].toLowerCase()));
+  // (400px <= width <= 800px) — two-sided range, both edges are breakpoints
+  eat(new RegExp(`${NUM}${UNIT}\\s*(<=|<)\\s*width\\s*(<=|<)\\s*${NUM}${UNIT}`, "gi"),
+    (m) => both(
+      boundaryOf(m[3] === "<=" ? "min" : "gt", Number(m[1]), m[2].toLowerCase()),
+      boundaryOf(m[4] === "<=" ? "max" : "lt", Number(m[5]), m[6].toLowerCase()),
+    ));
+  // (width <= 812px) / (width > 900px)
+  eat(new RegExp(`width\\s*(<=|<|>=|>)\\s*${NUM}${UNIT}`, "gi"),
+    (m) => boundaryOf({ "<=": "max", "<": "lt", ">=": "min", ">": "gt" }[m[1]], Number(m[2]), m[3].toLowerCase()));
+  // (812px >= width) — the mirrored one-sided form
+  eat(new RegExp(`${NUM}${UNIT}\\s*(<=|<|>=|>)\\s*width`, "gi"),
+    (m) => boundaryOf({ "<=": "min", "<": "gt", ">=": "max", ">": "lt" }[m[3]], Number(m[1]), m[2].toLowerCase()));
+  // (width: 800px) — an exact-width query is a boundary on both sides of itself
+  eat(new RegExp(`\\(\\s*width\\s*:\\s*${NUM}${UNIT}\\s*\\)`, "gi"),
+    (m) => { const b = boundaryOf("max", Number(m[1]), m[2].toLowerCase()); return b == null ? null : [b - 1, b]; });
+
+  // Anything still carrying the token `width` was NOT understood. Refuse rather
+  // than drop it — a width this sweep cannot read is a width it cannot cover.
+  const unresolved = /\bwidth\b/.test(rest) ? [clause.trim()] : [];
+  return { boundaries, unresolved };
+}
+
+// Every width-bearing @media prelude in a stylesheet → its boundaries.
+export function parseMediaBreakpoints(css) {
+  const src = stripCssComments(css);
+  const preludes = [];
+  const re = /@media([^{]*)\{/g;
+  let m;
+  while ((m = re.exec(src)) !== null) preludes.push(m[1].trim());
+  const boundaries = new Set();
+  const unresolved = [];
+  for (const p of preludes) {
+    for (const clause of p.split(",")) {
+      const r = parseWidthClause(clause);
+      for (const b of r.boundaries) boundaries.add(b);
+      unresolved.push(...r.unresolved);
+    }
+  }
+  return { preludes, breakpoints: [...boundaries].sort((a, b) => a - b), unresolved };
+}
+
+// The registered screens: `<section class="view" id="view-…">`. Class-first so a
+// `<section class="archives-panel">` nested INSIDE a view is not counted.
+export function parseViewIds(html) {
+  const ids = [];
+  const re = /<section\b[^>]*\bclass="view"[^>]*\bid="([^"]+)"/g;
+  let m;
+  while ((m = re.exec(html)) !== null) ids.push(m[1]);
+  return ids;
+}
+
+// The whole of Leg A's judgement, as a pure function of the two artifacts and
+// the sweep's own tables. `widths` and `cells` are PASSED IN (the caller hands
+// it WIDTHS/CELLS) so the refusal is about what the sweep DRIVES.
+export function coverageReport({ css, html, widths = WIDTHS, cells = CELLS }) {
+  const { preludes, breakpoints, unresolved } = parseMediaBreakpoints(css);
+  const views = parseViewIds(html);
+  const w = new Set(widths);
+  const covered = new Set(cells.map((c) => c.view));
+
+  const uncoveredBreakpoints = breakpoints
+    .map((b) => ({ b, missing: [b - 1, b, b + 1].filter((x) => !w.has(x)) }))
+    .filter((r) => r.missing.length > 0);
+  const uncoveredViews = views.filter((v) => !covered.has(v));
+  const phantomViews = [...covered].filter((v) => !views.includes(v));
+
+  return {
+    preludes, breakpoints, views, unresolved,
+    widths: [...widths], cells: cells.length,
+    uncoveredBreakpoints, uncoveredViews, phantomViews,
+    ok: unresolved.length === 0 && uncoveredBreakpoints.length === 0 &&
+      uncoveredViews.length === 0 && phantomViews.length === 0,
+  };
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  browser plumbing (findChrome + Cdp taken from cssom-parity.mjs, unchanged)
+// ─────────────────────────────────────────────────────────────────────────────
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function findChrome() {
+  if (process.env.CHROME) {
+    try { fs.accessSync(process.env.CHROME, fs.constants.X_OK); return process.env.CHROME; }
+    catch { return null; }
+  }
+  const candidates = [
+    "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
+    "/Applications/Chromium.app/Contents/MacOS/Chromium",
+    "/usr/bin/google-chrome",
+    "/usr/bin/google-chrome-stable",
+    "/usr/bin/chromium",
+    "/usr/bin/chromium-browser",
+  ];
+  for (const c of candidates) {
+    try { fs.accessSync(c, fs.constants.X_OK); return c; } catch { /* next */ }
+  }
+  return null;
+}
+
+class Cdp {
+  constructor(ws) {
+    this.ws = ws;
+    this.seq = 0;
+    this.pending = new Map();
+    ws.addEventListener("message", (ev) => {
+      let msg;
+      try { msg = JSON.parse(ev.data); } catch { return; }
+      if (msg.id == null) return;
+      const p = this.pending.get(msg.id);
+      if (!p) return;
+      this.pending.delete(msg.id);
+      if (msg.error) p.reject(new Error(msg.method + ": " + JSON.stringify(msg.error)));
+      else p.resolve(msg.result);
+    });
+    ws.addEventListener("close", () => {
+      for (const [, p] of this.pending) p.reject(new Error("CDP socket closed"));
+      this.pending.clear();
+    });
+  }
+
+  static async connect(wsUrl) {
+    const ws = new WebSocket(wsUrl);
+    await new Promise((resolve, reject) => {
+      ws.addEventListener("open", resolve, { once: true });
+      ws.addEventListener("error", () => reject(new Error("CDP connect failed: " + wsUrl)), { once: true });
+    });
+    return new Cdp(ws);
+  }
+
+  send(method, params = {}, sessionId) {
+    const id = ++this.seq;
+    const frame = { id, method, params };
+    if (sessionId) frame.sessionId = sessionId;
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject: (e) => reject(Object.assign(e, { method })) });
+      try { this.ws.send(JSON.stringify(frame)); }
+      catch (e) { this.pending.delete(id); reject(e); }
+    });
+  }
+
+  close() { try { this.ws.close(); } catch { /* already gone */ } }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  the in-page probes
+// ─────────────────────────────────────────────────────────────────────────────
+
+// The axis the BROWSER sees: every media rule's conditionText, walked
+// recursively (a @media nested in @supports is still a media rule).
+const CSSOM_AXIS_JS = `(function(){
+  var out=[];
+  function walk(rules){
+    for (var i=0;i<rules.length;i++){
+      var r=rules[i];
+      if (r.media && r.conditionText!=null) out.push(r.conditionText);
+      if (r.cssRules) walk(r.cssRules);
+    }
+  }
+  for (var s=0;s<document.styleSheets.length;s++){
+    var sh=document.styleSheets[s];
+    try { walk(sh.cssRules); } catch(e) { /* cross-origin */ }
+  }
+  return out;
+})()`;
+
+function cellProbeJs(cell) {
+  const hiding = JSON.stringify(HIDING_UTILITIES);
+  const cueProps = JSON.stringify(NAMED_CUE_PROPS);
+  return `(function(){
+  var HIDING=${hiding}, CUEPROPS=${cueProps};
+  var FORM={SELECT:1,INPUT:1,TEXTAREA:1,BUTTON:1};
+  var CLIPPY={hidden:1,clip:1,auto:1,scroll:1};
+  var d=document.documentElement;
+  var vw=d.clientWidth;
+  function sel(el){
+    var s=el.tagName.toLowerCase();
+    if (el.id) s+='#'+el.id;
+    var cl=(el.getAttribute('class')||'').trim().split(/\\s+/).filter(Boolean).slice(0,2);
+    if (cl.length) s+='.'+cl.join('.');
+    return s;
+  }
+  // ── liveness, three clauses ────────────────────────────────────────────────
+  var live=null, views=document.querySelectorAll('section.view');
+  for (var i=0;i<views.length;i++){ if(!views[i].hidden){ live=views[i]; break; } }
+  var want=document.getElementById(${JSON.stringify(cell.view)});
+  var liveId = live ? live.id : null;
+  var wantBox = want ? want.getBoundingClientRect() : null;
+  var sentinel = document.querySelector(${JSON.stringify(cell.sentinel)});
+  var liveness = {
+    liveId: liveId,
+    hidden: want ? !!want.hidden : true,
+    h: wantBox ? Math.round(wantBox.height*100)/100 : 0,
+    textLen: want ? (want.textContent||'').trim().length : 0,
+    sentinel: !!sentinel,
+    // what IS present, so a stale sentinel is debuggable rather than opaque
+    present: live ? Array.prototype.slice.call(live.querySelectorAll('*'))
+        .map(function(e){return sel(e);}).slice(0,25) : [],
+  };
+  liveness.ok = (liveId===${JSON.stringify(cell.view)}) && !liveness.hidden && liveness.h>0 && liveness.sentinel;
+
+  // ── Q1 sideways ────────────────────────────────────────────────────────────
+  var q1={sw:d.scrollWidth, cw:d.clientWidth, over:d.scrollWidth>d.clientWidth};
+
+  // ── Q2 clipped without a cue ───────────────────────────────────────────────
+  var q2=[], hiddenSkipped=0;
+  var all=document.body.querySelectorAll('*');
+  for (var k=0;k<all.length;k++){
+    var el=all[k];
+    if (el.hasAttribute('hidden')) continue;
+    var cs=getComputedStyle(el);
+    if (cs.display==='none'||cs.visibility==='hidden') continue;
+    var cls=(el.getAttribute('class')||'').split(/\\s+/);
+    var hid=false;
+    for (var h=0;h<HIDING.length;h++) if (cls.indexOf(HIDING[h])!==-1) hid=true;
+    if (hid) { hiddenSkipped++; continue; }
+    var r=el.getBoundingClientRect();
+    if (r.width<1||r.height<1) continue;
+    var isForm=!!FORM[el.tagName];
+    // (a) native controls are UA-painted: ask the box directly, never the CSSOM
+    var clipped = isForm
+      ? (el.scrollWidth > el.clientWidth+1)
+      : (!!CLIPPY[cs.overflowX] && el.scrollWidth > el.clientWidth+1);
+    // VISIBLE_SPILL's failing sub-case. An element inside a scroller is not
+    // spilling — it is scrolling, which is what .set-matrix (correctly cued,
+    // gr-backlog-setmatrix-scroll-affordance is done) does with 21 of its own
+    // descendants at 768. Only an element with NO clipping ancestor between it
+    // and <html> can push the PAGE, and only then does a right edge past the
+    // viewport mean a person is looking at a cut-off box.
+    // The right edge of what this element actually PAINTS: its own box, or its
+    // content when the content is wider than the box. A block-level row is
+    // clamped to its container's width, so rect.right alone reads "inside the
+    // viewport" while its min-content children push the page 21px sideways —
+    // measured on #fleet-body at 769, the exact cell this sub-case exists for.
+    // An element that CLIPS its own overflow paints only up to its box (that is
+    // what .set-matrix does, correctly cued, with content 29px wider than the
+    // viewport at 768). Only a NON-clipping element paints its whole content.
+    var paintedRight = (CLIPPY[cs.overflowX] || isForm) ? r.right : Math.max(r.right, r.left + el.scrollWidth);
+    var cut = Math.round((paintedRight - vw)*100)/100;
+    if (cut > 0.5 && !contained(el)) q2.push({kind:'CUT_BY_VIEWPORT', sel:sel(el), cut:cut});
+    if (!clipped) {
+      // The IFF half: a cue live on something that FITS is a lie too. Asked
+      // ONLY of scroll containers — custom properties INHERIT, so every
+      // descendant of a cued scroller reads its parent's fade and would
+      // otherwise report a cue it does not own.
+      if (!isForm && CLIPPY[cs.overflowX]) {
+        var cf=cueOf(el);
+        if (cf.cue>0) q2.push({kind:'CUE_STUCK', sel:sel(el), cue:cf.cue});
+      }
+      continue;
+    }
+    var c=cueOf(el);
+    // text-overflow: ellipsis IS an authored cue — the "…" is the affordance
+    // that tells a person the string continues. It counts ONLY for non-form
+    // elements: a UA-painted <select> computes an ellipsis it does not
+    // necessarily paint, which would silence correction (a) — measured on
+    // select#site-theme-select.rail-select, the one selector this sweep is
+    // supposed to catch.
+    if (!isForm && cs.textOverflow==='ellipsis') c.cue=Math.max(c.cue,1);
+    if (c.track<=0 && c.cue<=0) {
+      q2.push({kind:'CLIP_NO_CUE', sel:sel(el), tag:el.tagName, sw:el.scrollWidth, cw:el.clientWidth,
+               overflowX:cs.overflowX, text:(el.tagName==='SELECT'&&el.selectedOptions&&el.selectedOptions[0]?el.selectedOptions[0].text:(el.textContent||'').trim().slice(0,40))});
+    }
+  }
+  // Does anything between el and <html> clip or scroll? If so el is CONTAINED:
+  // its overhang is the container's business, not the page's.
+  function contained(el){
+    for (var n=el.parentElement; n && n!==document.documentElement; n=n.parentElement){
+      var s=getComputedStyle(n);
+      if (CLIPPY[s.overflowX]) return true;
+    }
+    return false;
+  }
+  function cueOf(el){
+    // (b) the reserved horizontal track — 0px in this console under BOTH
+    //     --hide-scrollbars and classic scrollbars, which is exactly why it
+    //     cannot be the only cue test.
+    var cs=getComputedStyle(el);
+    var bl=parseFloat(cs.borderLeftWidth)||0, br=parseFloat(cs.borderRightWidth)||0;
+    var track=Math.round((el.offsetWidth - el.clientWidth - bl - br)*100)/100;
+    var cue=0;
+    for (var n=el; n && n!==document.documentElement; n=n.parentElement){
+      var s=getComputedStyle(n);
+      for (var i=0;i<s.length;i++){
+        var p=s[i];
+        if (p.slice(0,2)==='--' && /(fade|cue)/.test(p)){
+          var v=parseFloat(s.getPropertyValue(p));
+          if (v>0) cue=Math.max(cue,v);
+        }
+      }
+      for (var j=0;j<CUEPROPS.length;j++){
+        var v2=parseFloat(s.getPropertyValue(CUEPROPS[j]));
+        if (v2>0) cue=Math.max(cue,v2);
+      }
+      if (cue>0) break;
+    }
+    return {track:track, cue:cue};
+  }
+
+  // ── Q3 below the fold ──────────────────────────────────────────────────────
+  var content=document.querySelector('.content');
+  var q3={top: content ? Math.round(content.getBoundingClientRect().top*100)/100 : null,
+          vh: window.innerHeight};
+
+  return {liveness:liveness, q1:q1, q2:q2, q3:q3, hiddenSkipped:hiddenSkipped,
+          sentinelProp: getComputedStyle(d).getPropertyValue('--bpsweep-cell')};
+})()`;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+//  the run
+// ─────────────────────────────────────────────────────────────────────────────
+
+const argv = process.argv.slice(2);
+const has = (f) => argv.includes(f);
+const valOf = (f) => { const i = argv.indexOf(f); return i === -1 ? null : argv[i + 1]; };
+
+const out = (s) => process.stdout.write(s);
+// A path a human can act on: repo-relative when we are inside the tree, and the
+// absolute path when we are measuring an exported one (a ../../../.. chain is
+// not a location, it is a puzzle).
+const rel = (p) => { const r = path.relative(process.cwd(), p); return !r ? "." : (r.startsWith("..") ? p : r); };
+// SYNCHRONOUS stderr. `process.stderr.write` to a PIPE is asynchronous, so a
+// refusal that writes and then calls process.exit() loses most of its own
+// message the moment anyone runs this under `| tail` — measured: a 6-cell
+// dead-cell report printed ONE cell. A refusal nobody can read is a refusal
+// that did not happen.
+const shout = (msg) => {
+  // fs.writeSync to a PIPE can write PARTIALLY — measured: a multi-cell
+  // refusal truncated mid-word. Loop until every byte is out.
+  const buf = Buffer.from(msg, "utf8");
+  let off = 0;
+  while (off < buf.length) {
+    try { off += fs.writeSync(2, buf, off, buf.length - off); }
+    catch (e) { if (e.code === "EAGAIN") continue; process.stderr.write(buf.slice(off).toString("utf8")); return; }
+  }
+};
+const refuse = (msg) => { shout(`\n!! BREAKPOINT SWEEP (exit 2): ${msg}\n`); process.exit(2); };
+
+function readOr(p, what) {
+  try { return fs.readFileSync(p, "utf8"); }
+  catch { refuse(`cannot read ${what} at ${p}. Environment refusal — nothing has been measured.`); }
+}
+
+function legA() {
+  const css = readOr(CSS_PATH, "the stylesheet");
+  const html = readOr(HTML_PATH, "the shell");
+  const rep = coverageReport({ css, html });
+
+  out(`>> source     ${rel(CSS_PATH)} · ${rel(HTML_PATH)}\n`);
+  out(`>> @media     ${rep.preludes.length} preludes (comment-stripped; the raw grep counts more — app.css:2131 names a breakpoint INSIDE a comment)\n`);
+  out(`>> axis       ${rep.breakpoints.length} breakpoints [${rep.breakpoints.join(",")}] -> ${rep.widths.length} boundary widths [${rep.widths.join(",")}]\n`);
+  out(`>> screens    ${rep.views.length} registered views · ${rep.cells} scenario x route cells covering ${COVERED_VIEWS.length}\n`);
+
+  const problems = [];
+  for (const u of rep.unresolved) problems.push(`UNPARSEABLE width condition: "${u}" — the sweep will not guess at a width it cannot read.`);
+  for (const r of rep.uncoveredBreakpoints) problems.push(`UNCOVERED breakpoint ${r.b}px — the boundary walk is missing ${r.missing.join(", ")}. Add it to BREAKPOINTS.`);
+  for (const v of rep.uncoveredViews) problems.push(`UNCOVERED screen #${v} — no cell in CELLS renders it. Add a scenario x route cell (with a sentinel).`);
+  for (const v of rep.phantomViews) problems.push(`PHANTOM screen #${v} — CELLS drives it but index.html no longer registers it.`);
+
+  if (problems.length) {
+    shout(`\n!! BREAKPOINT SWEEP (exit 2): the sweep has no coverage for what the artifact now declares.\n` +
+      problems.map((p) => `   · ${p}\n`).join(""));
+    process.exit(2);
+  }
+  out(`   ✓ coverage — every declared breakpoint is boundary-walked and every registered screen has a cell\n`);
+  return rep;
+}
+
+// ── shared browser bring-up for --cssom / --render ───────────────────────────
+const SERVER_CAP = 8000, DEVTOOLS_CAP = 15000, SETTLE_CAP = 5000, BROWSER_CLOSE_CAP = 2000;
+const TERM_POLL_CAP = 3000, KILL_POLL_CAP = 2000;
+
+async function withBrowser(fn) {
+  const chromeBin = findChrome();
+  if (!chromeBin) {
+    refuse(process.env.CHROME
+      ? `CHROME=${process.env.CHROME} is not an executable file. Environment refusal, not a layout defect.`
+      : "no Chrome/Chromium found. Set CHROME=/path/to/chrome.");
+  }
+  // THE EXPORT'S OWN serve.mjs. serve.mjs roots itself at its own parent
+  // directory, so measuring an exported origin/main tree means running THAT
+  // tree's server — not this worktree's server pointed elsewhere.
+  const serveChild = spawn("node", [path.join(ROOT, "__preview__", "serve.mjs"), "--port", String(PORT)], { stdio: "ignore" });
+  let chrome = null, cdp = null, profile = null;
+  const alive = (p) => { if (!p || p.pid == null) return false; try { process.kill(p.pid, 0); return true; } catch { return false; } };
+  const reap = async (p) => {
+    if (!alive(p)) return;
+    try { p.kill("SIGTERM"); } catch { /* gone */ }
+    let waited = 0;
+    while (alive(p) && waited < TERM_POLL_CAP) { await sleep(50); waited += 50; }
+    if (alive(p)) {
+      try { p.kill("SIGKILL"); } catch { /* gone */ }
+      waited = 0;
+      while (alive(p) && waited < KILL_POLL_CAP) { await sleep(50); waited += 50; }
+      if (alive(p)) process.stderr.write(`!! TEARDOWN SHOUT: pid ${p.pid} SURVIVED SIGKILL. Reap it by hand: kill -9 ${p.pid}\n`);
+    }
+  };
+  const teardown = async () => {
+    if (cdp) { await Promise.race([cdp.send("Browser.close").catch(() => {}), sleep(BROWSER_CLOSE_CAP)]); cdp.close(); }
+    await reap(chrome);
+    await reap(serveChild);
+    if (profile) { try { fs.rmSync(profile, { recursive: true, force: true }); } catch { /* best effort */ } }
+  };
+  const die = async (msg, code = 2) => { await teardown(); process.stderr.write(`\n!! BREAKPOINT SWEEP (exit ${code}): ${msg}\n`); process.exit(code); };
+
+  let up = false;
+  for (let w = 0; w < SERVER_CAP; w += 100) {
+    try { const r = await fetch(`${BASE}/app.css`, { cache: "no-store" }); if (r.ok) { up = true; break; } } catch { /* not yet */ }
+    await sleep(100);
+  }
+  if (!up) return die(`no server answered on :${PORT} within ${SERVER_CAP}ms`);
+
+  // SERVED BYTES == DISK BYTES. 20 worktrees share this checkout and a foreign
+  // preview server has squatted this port class before, making a patched run
+  // print baseline numbers. Refuse rather than certify bytes we did not author.
+  for (const rel of ["/app.css", "/app.js", "/__preview__/mock.js", "/__preview__/scenarios.mjs"]) {
+    const served = Buffer.from(await (await fetch(`${BASE}${rel}`, { cache: "no-store" })).arrayBuffer());
+    const disk = fs.readFileSync(path.join(ROOT, rel.slice(1)));
+    if (!served.equals(disk)) {
+      return die(`STALE SERVER on :${PORT} — ${rel} served ${served.length} B, disk holds ${disk.length} B. A server rooted at a DIFFERENT tree is squatting this port; measuring against it would certify the wrong bytes.`);
+    }
+  }
+  out(`>> serve      :${PORT} — served bytes == disk bytes (${rel(ROOT)})\n`);
+
+  profile = fs.mkdtempSync(path.join(os.tmpdir(), "breakpoint-sweep-"));
+  chrome = spawn(chromeBin, [
+    "--headless=new", "--disable-gpu", "--no-sandbox", "--disable-dev-shm-usage",
+    "--no-first-run", "--no-default-browser-check", "--disable-extensions",
+    "--disable-background-networking", "--hide-scrollbars",
+    `--user-data-dir=${profile}`, "--remote-debugging-port=0", "about:blank",
+  ], { stdio: "ignore" });
+
+  const portFile = path.join(profile, "DevToolsActivePort");
+  let devPort = null;
+  for (let w = 0; w < DEVTOOLS_CAP; w += 100) {
+    try {
+      const raw = fs.readFileSync(portFile, "utf8").split("\n");
+      if (raw[0] && Number(raw[0])) { devPort = Number(raw[0]); break; }
+    } catch { /* not written yet */ }
+    await sleep(100);
+  }
+  if (!devPort) return die("Chrome never wrote DevToolsActivePort — it did not start");
+
+  let version;
+  try {
+    version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
+    out(`>> chrome     ${version.Browser} · node ${process.version}\n`);
+    cdp = await Cdp.connect(version.webSocketDebuggerUrl);
+  } catch (err) {
+    return die(`CDP bring-up failed: ${err.message}`);
+  }
+
+  // A FRESH TARGET PER CELL is what buys liveness: Page.navigate to a URL that
+  // differs only in its hash is a SAME-DOCUMENT navigation, so a previous
+  // cell's stylesheet state and injected rules survive into the next one.
+  const openCell = async () => {
+    const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
+    const { sessionId } = await cdp.send("Target.attachToTarget", { targetId, flatten: true });
+    await cdp.send("Runtime.enable", {}, sessionId);
+    await cdp.send("Page.enable", {}, sessionId);
+    await cdp.send("Network.enable", {}, sessionId);
+    await cdp.send("Network.setCacheDisabled", { cacheDisabled: true }, sessionId);
+    return { targetId, sessionId };
+  };
+  const closeCell = async (targetId) => { try { await cdp.send("Target.closeTarget", { targetId }); } catch { /* gone */ } };
+  // Navigate a cell's own target (always cross-document — the target was parked
+  // on about:blank) and poll until the screen has PAINTED. The 16ms settle is
+  // deliberate: a double-requestAnimationFrame settle HANGS under headless=new.
+  //
+  // WHAT IS POLLED IS THE CELL'S SENTINEL, NOT A SHELL CONTAINER. Measured the
+  // hard way: #token-list, #activity-body, #archives-body and #instance-tabpanel
+  // are all STATIC in index.html, so polling them returns true on the first
+  // tick — before the SPA has painted anything — and the cell then measures an
+  // empty shell. Six cells read DEAD for exactly that reason and passed the
+  // moment they were driven alone (a timing artefact, not a content one).
+  //
+  // A miss RETURNS FALSE rather than throwing: the three-clause liveness
+  // refusal below owns the verdict, and its message carries the `present:`
+  // diagnostic a bare timeout does not.
+  const navSettle = async (sessionId, url, readyExpr, cap = SETTLE_CAP) => {
+    await cdp.send("Page.navigate", { url }, sessionId);
+    for (let w = 0; w < cap; w += 50) {
+      try { if (await evalJs(sessionId, `!!(${readyExpr})`)) { await sleep(16); return true; } } catch { /* navigating */ }
+      await sleep(50);
+    }
+    await sleep(16);
+    return false;
+  };
+
+  const evalJs = async (sessionId, expression) => {
+    const r = await cdp.send("Runtime.evaluate", { expression, returnByValue: true, awaitPromise: false }, sessionId);
+    if (r.exceptionDetails) throw new Error("page eval threw: " + (r.exceptionDetails.exception?.description || r.exceptionDetails.text));
+    return r.result.value;
+  };
+
+  try {
+    return await fn({ cdp, evalJs, navSettle, openCell, closeCell, die, teardown });
+  } finally {
+    await teardown();
+  }
+}
+
+async function legCssom(rep) {
+  return withBrowser(async ({ evalJs, navSettle, openCell, closeCell, die }) => {
+    const { targetId, sessionId } = await openCell();
+    if (!await navSettle(sessionId, `${BASE}/?scen=empty&theme=light`, `document.styleSheets.length>0`)) {
+      return die(`the preview shell never loaded a stylesheet — nothing to compare the parsed axis against.`);
+    }
+    const conditions = await evalJs(sessionId, CSSOM_AXIS_JS);
+    await closeCell(targetId);
+
+    const browser = new Set();
+    const unresolved = [];
+    for (const c of conditions) {
+      const r = parseWidthClause(c);
+      for (const b of r.boundaries) browser.add(b);
+      unresolved.push(...r.unresolved);
+    }
+    const browserAxis = [...browser].sort((a, b) => a - b);
+    const sourceAxis = rep.breakpoints;
+    out(`>> cssom      ${conditions.length} media rules -> [${browserAxis.join(",")}]\n`);
+    out(`>> source     ${rep.preludes.length} preludes    -> [${sourceAxis.join(",")}]\n`);
+    const same = browserAxis.length === sourceAxis.length && browserAxis.every((b, i) => b === sourceAxis[i]);
+    if (!same || unresolved.length) {
+      out(`   parity=DIVERGED\n`);
+      const only = (a, b) => a.filter((x) => !b.includes(x));
+      if (only(sourceAxis, browserAxis).length) out(`   · source-only: ${only(sourceAxis, browserAxis).join(",")}\n`);
+      if (only(browserAxis, sourceAxis).length) out(`   · browser-only: ${only(browserAxis, sourceAxis).join(",")}\n`);
+      for (const u of unresolved) out(`   · UNPARSEABLE in the CSSOM: "${u}"\n`);
+      return die(`--cssom parity=DIVERGED — the axis this sweep parses is NOT the axis the browser builds. Nothing has been certified.`);
+    }
+    out(`   ✓ parity=IDENTICAL — the parsed axis is the axis the browser builds\n`);
+    return 0;
+  });
+}
+
+
+async function legRender(rep) {
+  const widthFilter = valOf("--widths");
+  const cellFilter = valOf("--cell");
+  const widths = widthFilter ? widthFilter.split(",").map(Number) : rep.widths;
+  const cells = cellFilter ? CELLS.filter((c) => c.name === cellFilter) : CELLS;
+  if (!cells.length) refuse(`--cell "${cellFilter}" matches no cell. Known: ${CELLS.map((c) => c.name).join(", ")}`);
+
+  return withBrowser(async ({ cdp, evalJs, navSettle, openCell, closeCell, die }) => {
+    const total = cells.length * widths.length;
+    out(`\n>> render     ${cells.length} cells x ${widths.length} widths = ${total} renders — MINUTES, not seconds\n`);
+    const dead = [], q1f = [], q2f = [], q3f = [], q3pin = [], notes = [];
+    const t0 = Date.now();
+    let done = 0;
+
+    for (const cell of cells) {
+      const row = [];
+      for (const width of widths) {
+        const { targetId, sessionId } = await openCell();
+        try {
+          await cdp.send("Emulation.setDeviceMetricsOverride", { width, height: HEIGHT, deviceScaleFactor: 1, mobile: false }, sessionId);
+          const url = `${BASE}/?scen=${cell.scen}&theme=light${cell.hash}`;
+          let m = null;
+          try {
+            await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`);
+            m = await evalJs(sessionId, cellProbeJs(cell));
+          } catch (err) {
+            dead.push({ cell: cell.name, width, why: err.message.slice(0, 160), present: [] });
+            row.push(`${width}:DEAD`);
+            continue;
+          }
+          // ── clause 1+2+3, hard ────────────────────────────────────────────
+          if (!m.liveness.ok) {
+            const L = m.liveness;
+            // THE COUNTER-EXAMPLE, stated in the report rather than left to be
+            // inferred: when the right screen is live and populated-LOOKING but
+            // the sentinel is absent, a two-clause check (right view + visible)
+            // would have PASSED this cell and measured an empty-state box.
+            const weakWouldPass = L.liveId === cell.view && !L.hidden && L.h > 0 && !L.sentinel;
+            dead.push({
+              cell: cell.name, width,
+              why: `live view #${L.liveId} (wanted #${cell.view}), hidden:${L.hidden}, h:${L.h}, textLen:${L.textLen}, sentinel(${cell.sentinel}):${L.sentinel}` +
+                (weakWouldPass ? `\n     CLAUSE 3 IS WHY THIS IS DEAD: clauses 1+2 alone (right view, hidden:${L.hidden}, h:${L.h}, textLen:${L.textLen}) would have PASSED this cell and measured an empty state.` : ""),
+              present: L.present,
+            });
+            row.push(`${width}:DEAD`);
+            continue;
+          }
+          if (m.q1.over) q1f.push({ cell: cell.name, width, sw: m.q1.sw, cw: m.q1.cw });
+          for (const f of m.q2) {
+            if (f.kind === "CUE_STUCK") notes.push({ cell: cell.name, width, ...f });
+            else q2f.push({ cell: cell.name, width, ...f });
+          }
+          const top = m.q3.top;
+          if (top != null) {
+            const pinned = width <= NAV_WALL_PIN.maxWidth;
+            if (top > FOLD_FRACTION * m.q3.vh) {
+              if (pinned && top <= NAV_WALL_PIN.maxTop + NAV_WALL_PIN.tol) q3pin.push({ cell: cell.name, width, top });
+              else q3f.push({ cell: cell.name, width, top, budget: Math.round(FOLD_FRACTION * m.q3.vh), pinned });
+            }
+          }
+          row.push(`${width}:${m.q1.sw}${m.q1.over ? "!" : ""}`);
+        } finally {
+          await closeCell(targetId);
+          done++;
+        }
+      }
+      out(`   ${cell.name.padEnd(20)} ${row.join(" ")}\n`);
+    }
+
+    const ms = Date.now() - t0;
+    out(`\n>> cost       ${total} cells in ${(ms / 1000).toFixed(1)}s (${(ms / total / 1000).toFixed(2)}s/cell)\n`);
+
+    if (dead.length) {
+      // One cell per DISTINCT (cell, reason) — a dead cell is dead at every
+      // width, and 13 copies of the same line buries the other five.
+      const seen = new Set();
+      let msg = `\n!! BREAKPOINT SWEEP (exit 2): ${dead.length}/${total} cells were RENDER-DEAD. A dead cell reports a plausible q1=0/q2=0 for the WRONG SCREEN — refusing to publish any of these numbers.\n`;
+      for (const d of dead) {
+        if (seen.has(d.cell)) continue;
+        seen.add(d.cell);
+        msg += `   · ${d.cell}@${d.width}: ${d.why}\n`;
+        if (d.present.length) msg += `     present: ${d.present.slice(0, 16).join(" ")}\n`;
+      }
+      shout(msg);
+      process.exit(2);
+    }
+    out(`   ✓ liveness — ${total}/${total} cells rendered the screen they asked for, populated (3-clause)\n`);
+
+    for (const f of q1f) out(`   ✗ Q1 SIDEWAYS  ${f.cell}@${f.width}: scrollWidth ${f.sw} > viewport ${f.cw}\n`);
+    for (const f of q2f) {
+      if (f.kind === "CLIP_NO_CUE") {
+        // Name the blind spot at the point of evidence: a UA-painted control
+        // whose computed overflow-x is not a clipping value is invisible to
+        // every CSSOM-keyed version of this question.
+        const uaBlind = ["SELECT", "INPUT", "TEXTAREA", "BUTTON"].includes(f.tag) && !["hidden", "clip", "auto", "scroll"].includes(f.overflowX);
+        out(`   ✗ Q2 CLIP_NO_CUE  ${f.cell}@${f.width}: ${f.sel} <${f.tag}> scrollWidth ${f.sw} > clientWidth ${f.cw} (overflow-x:${f.overflowX}) "${f.text}"` +
+          (uaBlind ? ` — CLASSIFIED BY TAG: a CSSOM-keyed rule (overflow-x in {hidden,clip}) reports 0 for this cell` : "") + `\n`);
+      }
+      else out(`   ✗ Q2 CUT_BY_VIEWPORT  ${f.cell}@${f.width}: ${f.sel} extends ${f.cut}px past the viewport\n`);
+    }
+    for (const f of q3f) out(`   ✗ Q3 BELOW THE FOLD  ${f.cell}@${f.width}: .content starts ${f.top}px down (budget ${f.budget}px)\n`);
+    for (const n of notes) out(`   · note CUE_STUCK  ${n.cell}@${n.width}: ${n.sel} shows a ${n.cue}px edge cue while it FITS\n`);
+    if (q3pin.length) {
+      const worst = Math.max(...q3pin.map((p) => p.top));
+      out(`   · Q3 PINNED    ${q3pin.length} cells at widths <= ${NAV_WALL_PIN.maxWidth} start at ${worst}px (allowance ${NAV_WALL_PIN.maxTop}px, ${NAV_WALL_PIN.task}). Reds if it GROWS. Removal: ${NAV_WALL_PIN.removal}\n`);
+    }
+
+    const failed = q1f.length + q2f.length + q3f.length;
+    if (failed) {
+      out(`\n>> verdict    ${failed} measured defects (Q1 ${q1f.length} · Q2 ${q2f.length} · Q3 ${q3f.length}) — exit 1\n`);
+      return 1;
+    }
+    out(`\n>> verdict    clean across ${total} cells — exit 0\n`);
+    return 0;
+  });
+}
+
+async function main() {
+  const rep = legA();
+  let code = 0;
+  if (has("--cssom")) code = (await legCssom(rep)) || code;
+  if (has("--render")) code = (await legRender(rep)) || code;
+  process.exit(code);
+}
+
+// Importable (the test file imports the pure half) — only run when executed.
+if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+  main().catch((err) => { process.stderr.write(`\n!! BREAKPOINT SWEEP (exit 2): unhandled — ${err && err.stack ? err.stack : err}\n`); process.exit(2); });
+}
