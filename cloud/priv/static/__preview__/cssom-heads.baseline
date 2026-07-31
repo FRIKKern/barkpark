@@ -82,4 +82,8 @@
 # reports authored rule heads 1243, CSSOM style rules 1243, MISSES 0 — so this is
 # an unrecorded ADD of exactly six heads, not a parity defect, and the count is
 # re-derived rather than carried forward.
+# together. RE-MEASURE after merging (charter D158 REGENERATE-ON-REBASE). Review DID
+# measure the combined state — S3 + S4 + S5 merged locally, cssom-parity run on the
+# result: 1243 authored heads, MISSES 0. That is the number the lead should write once
+# all three are on main; it was MEASURED on the merge, not derived by adding.
 1243
