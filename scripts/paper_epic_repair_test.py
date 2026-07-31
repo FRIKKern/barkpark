@@ -145,7 +145,17 @@ class PaperEpicRepairTest(unittest.TestCase):
                 "type": "heading",
                 "level": 1,
                 "text": "Wave 10",
-            }
+            },
+            {
+                "id": "c-003",
+                "type": "callout",
+                "title": "The wish, in the owner's own order",
+                "content": text(
+                    "ONE — review the extractor and ability model. "
+                    "TWO — walk the prebuilt deployment lane. "
+                    "Plus: finish the admission gate and reconcile the ledger."
+                ),
+            },
         ]
         blocks.extend(
             {"id": "gap-{}".format(index), "type": "paragraph", "content": []}
@@ -201,9 +211,34 @@ class PaperEpicRepairTest(unittest.TestCase):
             ["heading", "ingress", "byline", "stats"],
         )
         self.assertEqual(
+            repaired[3]["items"],
+            [
+                {"value": "4", "label": "ability tiers re-derived"},
+                {"value": "2", "label": "inherited premises disproved"},
+                {"value": "1", "label": "first-party archive refusal class"},
+            ],
+        )
+        wish = next(block for block in repaired if block.get("id") == "c-003")
+        self.assertEqual(wish["type"], "steps")
+        self.assertEqual(len(wish["steps"]), 3)
+        self.assertIn(
+            "ONE — review the extractor and ability model.",
+            str(wish),
+        )
+        self.assertEqual(
             mutation["mutations"][1],
             {"publish": {"id": SITE_SPAWNER_ID, "type": "paper"}},
         )
+
+        repeated_document = {
+            **document,
+            "_rev": "composed-rev",
+            "blocks": repaired,
+        }
+        repeated = curate_site_spawner_wave10(repeated_document)["mutations"][0][
+            "patch"
+        ]["set"]["blocks"]
+        self.assertEqual(repeated, repaired)
 
         document["blocks"].pop()
         with self.assertRaisesRegex(ValueError, "targets missing"):

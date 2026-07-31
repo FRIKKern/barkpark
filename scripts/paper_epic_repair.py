@@ -47,6 +47,12 @@ SITE_SPAWNER_NOTE_TABLES = {
     "t-d010": "two-column",
     "t-507": "first-row-header",
 }
+SITE_SPAWNER_OPENING_IDS = {
+    "epb-opening-ingress",
+    "epb-opening-byline",
+    "epb-opening-stats",
+}
+SITE_SPAWNER_WISH_HEADING_ID = "epb-owner-wish-heading"
 
 
 def _inline_text(value: Any) -> str:
@@ -999,6 +1005,140 @@ def repair_strategic_paper(document: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def _site_spawner_opening_blocks() -> list[dict[str, Any]]:
+    return [
+        {
+            "id": "epb-opening-ingress",
+            "type": "ingress",
+            "content": [
+                {
+                    "type": "text",
+                    "value": (
+                        "Wave 10 pays the review debt before it walks "
+                        "the prebuilt deployment lane: challenge the "
+                        "extractor and ability model, preserve only "
+                        "claims that survive execution, then turn the "
+                        "remaining evidence into merge order."
+                    ),
+                }
+            ],
+        },
+        {
+            "id": "epb-opening-byline",
+            "type": "byline",
+            "items": [
+                "Independent review",
+                "Executed evidence",
+                "Decision order",
+            ],
+        },
+        {
+            "id": "epb-opening-stats",
+            "type": "stats",
+            "items": [
+                {"value": "4", "label": "ability tiers re-derived"},
+                {"value": "2", "label": "inherited premises disproved"},
+                {"value": "1", "label": "first-party archive refusal class"},
+            ],
+        },
+    ]
+
+
+def _site_spawner_wish_as_steps(block: dict[str, Any]) -> dict[str, Any]:
+    if block.get("type") == "steps":
+        return copy.deepcopy(block)
+    if block.get("type") != "callout":
+        raise ValueError("c-003 is neither the source callout nor repaired steps")
+
+    original = _normalize(_inline_text(block.get("content")))
+    parts = [
+        _normalize(part)
+        for part in re.split(r"(?=TWO\s+—|Plus:)", original)
+        if _normalize(part)
+    ]
+    if len(parts) != 3 or _normalize(" ".join(parts)) != original:
+        raise ValueError("owner wish no longer has its frozen ONE/TWO/Plus shape")
+
+    titles = [
+        "Pay the independent review debt",
+        "Walk the live prebuilt lane",
+        "Finish the admission gate and ledger",
+    ]
+    return {
+        "id": block["id"],
+        "type": "steps",
+        "steps": [
+            {
+                "title": title,
+                "blocks": [
+                    {
+                        "type": "paragraph",
+                        "content": [{"type": "text", "value": part}],
+                    }
+                ],
+            }
+            for title, part in zip(titles, parts)
+        ],
+    }
+
+
+def _refine_site_spawner_opening(
+    blocks: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+    repaired = []
+    h1_index = None
+    for block in blocks:
+        if not isinstance(block, dict):
+            repaired.append(copy.deepcopy(block))
+            continue
+        block_id = block.get("id")
+        if block_id in SITE_SPAWNER_OPENING_IDS or (
+            block_id == SITE_SPAWNER_WISH_HEADING_ID
+        ):
+            continue
+        if block_id == "c-003":
+            repaired.extend(
+                [
+                    {
+                        "id": SITE_SPAWNER_WISH_HEADING_ID,
+                        "type": "heading",
+                        "level": 2,
+                        "text": "The wish, in the owner's own order",
+                    },
+                    _site_spawner_wish_as_steps(block),
+                ]
+            )
+            continue
+        repaired.append(copy.deepcopy(block))
+        if (
+            h1_index is None
+            and block.get("type") == "heading"
+            and block.get("level") == 1
+        ):
+            h1_index = len(repaired) - 1
+
+    if h1_index is None:
+        raise ValueError("Paper has no level-one heading")
+    repaired[h1_index + 1 : h1_index + 1] = _site_spawner_opening_blocks()
+    return repaired
+
+
+def _site_spawner_is_already_composed(blocks: list[Any]) -> bool:
+    top_level = [block for block in blocks if isinstance(block, dict)]
+    top_ids = {block.get("id") for block in top_level}
+    if not SITE_SPAWNER_OPENING_IDS.issubset(top_ids):
+        return False
+    if any(block.get("type") == "expandable" for block in top_level):
+        return True
+
+    expected = (
+        set(SITE_SPAWNER_NOTE_LISTS)
+        | SITE_SPAWNER_STEP_LISTS
+        | set(SITE_SPAWNER_NOTE_TABLES)
+    )
+    return expected.issubset(top_ids)
+
+
 def curate_site_spawner_wave10(document: dict[str, Any]) -> dict[str, Any]:
     if document.get("_id") != SITE_SPAWNER_ID:
         raise ValueError("profile requires {}".format(SITE_SPAWNER_ID))
@@ -1006,6 +1146,22 @@ def curate_site_spawner_wave10(document: dict[str, Any]) -> dict[str, Any]:
     blocks = document.get("blocks")
     if not isinstance(revision, str) or not isinstance(blocks, list):
         raise ValueError("Paper requires a revision and block array")
+
+    if _site_spawner_is_already_composed(blocks):
+        repaired = _refine_site_spawner_opening(blocks)
+        return {
+            "mutations": [
+                {
+                    "patch": {
+                        "id": SITE_SPAWNER_ID,
+                        "type": "paper",
+                        "set": {"blocks": repaired},
+                        "ifRevisionID": revision,
+                    }
+                },
+                {"publish": {"id": SITE_SPAWNER_ID, "type": "paper"}},
+            ]
+        }
 
     repaired = []
     h1_seen = False
@@ -1042,44 +1198,6 @@ def curate_site_spawner_wave10(document: dict[str, Any]) -> dict[str, Any]:
             and block.get("level") == 1
         ):
             h1_seen = True
-            repaired.extend(
-                [
-                    {
-                        "id": "epb-opening-ingress",
-                        "type": "ingress",
-                        "content": [
-                            {
-                                "type": "text",
-                                "value": (
-                                    "Wave 10 pays the review debt before it walks "
-                                    "the prebuilt deployment lane: challenge the "
-                                    "extractor and ability model, preserve only "
-                                    "claims that survive execution, then turn the "
-                                    "remaining evidence into merge order."
-                                ),
-                            }
-                        ],
-                    },
-                    {
-                        "id": "epb-opening-byline",
-                        "type": "byline",
-                        "items": [
-                            "Independent review",
-                            "Executed evidence",
-                            "Decision order",
-                        ],
-                    },
-                    {
-                        "id": "epb-opening-stats",
-                        "type": "stats",
-                        "items": [
-                            {"value": "127", "label": "blank scaffolds removed"},
-                            {"value": "14,130", "label": "source words preserved"},
-                            {"value": "17", "label": "source evidence tables"},
-                        ],
-                    },
-                ]
-            )
 
     expected_transforms = (
         set(SITE_SPAWNER_NOTE_LISTS)
@@ -1099,6 +1217,7 @@ def curate_site_spawner_wave10(document: dict[str, Any]) -> dict[str, Any]:
         raise ValueError("frozen editorial targets missing: {}".format(missing))
     if any(_is_empty_paragraph(block) for block in repaired):
         raise AssertionError("repair retained an empty paragraph")
+    repaired = _refine_site_spawner_opening(repaired)
 
     return {
         "mutations": [
