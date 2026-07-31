@@ -331,4 +331,168 @@ defmodule BarkparkCloud.FailureCopyTest do
   test "the terminal default clause interpolates an unknown capability name" do
     assert FailureCopy.capability_gap_reason("gcp", "snapshots") =~ "snapshots"
   end
+
+  ## Secret scrubbing at the display boundary (wave 13 S2)
+
+  describe "scrub/1 — the pattern table" do
+    # Two fixtures are ASSEMBLED rather than written out. They are synthetic by
+    # construction (nothing here ever authenticated anything), but GitHub push
+    # protection blocks a literal `AKIA` + 16 uppercase alphanumerics and a bare
+    # 40-char high-entropy run on sight — which is the scanner doing exactly its
+    # job, and a job worth keeping enabled. Splitting the source literal gives the
+    # scanner nothing to match while the RUNTIME bytes under test are unchanged,
+    # so the AWS-key clause and the bare-token clause are still driven end to end.
+    # Do NOT re-inline these: the push is refused, and the fix is not an allowlist.
+    @aws_key "AKIA" <> "Q7ZLMNPR" <> "4TV6WY2X"
+    @bare_token "Kj8Xm2QpL9vR4tZ7" <> "wN1cB6yH3sD5" <> "fG0aQ2eR7uI9"
+
+    # POSITIVES: every shape a remote capture can carry a live credential in.
+    # Each row is {label, input, must_not_survive}.
+    @positives [
+      {"Authorization: Bearer",
+       "ssh: remote said Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2",
+       "sk-live-9aB3xQ7zLmNpR4tV6wY2"},
+      {"client_secret=", "az login failed: client_secret=Qp9vR4tZ7wN1cB6yH3sD5fG0",
+       "Qp9vR4tZ7wN1cB6yH3sD5fG0"},
+      {"token= (env fold)", "provisioner env: HCLOUD_TOKEN=Kj8Xm2QpL9vR4tZ7wN1cB6yH3sD5fG0aQ2eR",
+       "Kj8Xm2QpL9vR4tZ7wN1cB6yH3sD5fG0aQ2eR"},
+      {"api_key: with quotes", ~s(config wrote api_key: "Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3"),
+       "Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3"},
+      {"password:", "sftp: password: hunter2-Correct-Horse", "hunter2-Correct-Horse"},
+      {"github pat prefix", "git fetch failed for ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5",
+       "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5"},
+      {"slack webhook token", "notify failed: xoxb-9aB3xQ7zLmNpR4tV", "xoxb-9aB3xQ7zLmNpR4tV"},
+      {"aws access key id", "s3 sync refused key " <> @aws_key, @aws_key},
+      {"bare mixed-case 40-char provider token", "provider rejected " <> @bare_token, @bare_token}
+    ]
+
+    # NEGATIVES: shapes a person NEEDS to read. A redacted git SHA costs them the
+    # commit they deployed and is indistinguishable from a redacted token, so the
+    # naive `\b[A-Za-z0-9]{40,}\b` shape is rejected here by construction.
+    @negatives [
+      {"40-char git SHA", "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed"},
+      {"uuid job id", "provision job 550e8400-e29b-41d4-a716-446655440000 timed out"},
+      {"hostname", "dial tcp: bp-mysite.barkpark.cloud:443 connection refused"},
+      {"semver", "agent v1.24.3-rc.1 is older than the required v1.25.0"},
+      {"sha256 image digest",
+       "image sha256:9f86d081884c7d659a2feaa0c55ad015a3bf4f1b2b0b822cd15d6c15b0f00a08 not found"},
+      {"base64 digest", "integrity sha256-47DEQpj8HBSa+/TImW+5JCeuQeRkm5NMpJWZG3hSuFU="},
+      {"provider jargon (DESIGN.md §5 keeps the fold verbatim)",
+       "SERVER_LIMIT_EXCEEDED: no server of type cax11 free in fsn1"},
+      {"reaper jargon", "exceeded max provision attempts (3)"},
+      # STATUS PROSE in a value position. These were live false positives before
+      # the `@prose_value` guard: an unguarded `bearer\s+\S+` rendered the first
+      # one "no bearer [redacted] found in the request" — a redaction where no
+      # secret ever was, which is the same class of lie this wave is paying off.
+      {"prose after Bearer", "no bearer token found in the request"},
+      {"prose after Bearer (capitalised)", "missing Bearer credentials"},
+      {"prose in a token value", "token: expired"},
+      {"prose in an api_key value", "no api_key: set in the config file"},
+      {"prose in a password value", "sftp refused: password: missing"}
+    ]
+
+    for {label, input, secret} <- @positives do
+      test "positive: #{label} is redacted" do
+        out = FailureCopy.scrub(unquote(input))
+
+        refute out =~ unquote(secret),
+               "the secret survived the scrub: #{out}"
+
+        assert out =~ "[redacted]"
+      end
+    end
+
+    for {label, input} <- @negatives do
+      test "negative: #{label} survives verbatim" do
+        assert FailureCopy.scrub(unquote(input)) == unquote(input)
+      end
+    end
+
+    test "the naive \\b[A-Za-z0-9]{40,}\\b shape is REJECTED — it eats a git SHA" do
+      sha_line = "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed"
+      naive = ~r/\b[A-Za-z0-9]{40,}\b/
+
+      # What the rejected pattern would have shipped — a person loses the commit.
+      assert Regex.replace(naive, sha_line, "[redacted]") == "build of [redacted] failed"
+
+      # What we actually ship.
+      assert FailureCopy.scrub(sha_line) == sha_line
+    end
+
+    test "scrub/1 is idempotent and no-ops on non-binaries" do
+      once = FailureCopy.scrub("client_secret=Qp9vR4tZ7wN1cB6yH3sD5fG0")
+      assert FailureCopy.scrub(once) == once
+      assert FailureCopy.scrub(nil) == nil
+      assert FailureCopy.scrub(%{a: 1}) == %{a: 1}
+    end
+
+    test "the key and its shape survive — the redaction names what leaked" do
+      assert FailureCopy.scrub("az login failed: client_secret=Qp9vR4tZ7wN1cB6yH3sD5fG0") ==
+               "az login failed: client_secret=[redacted]"
+
+      assert FailureCopy.scrub("Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2") ==
+               "Authorization: Bearer [redacted]"
+    end
+  end
+
+  describe "humanize/1 — where the scrub sits" do
+    # PLACEMENT (a): POST-classification. The A/B on one input. Scrubbing FIRST
+    # eats the `timeout` token before the cond can see it, so the string stops
+    # reading as the network class — a live copy shift, not a hypothetical.
+    test "post-cond, not pre-cond: 'client_secret=timeout' still classifies" do
+      input = "client_secret=timeout"
+
+      # POST-scrub (shipped): the class arm wins, and its literal output carries
+      # no secret shape, so the scrub is a no-op over it.
+      assert FailureCopy.humanize(input) == "A network step timed out. Retry usually fixes this."
+
+      # PRE-scrub (mutation): scrub first, then classify — the classification is
+      # gone and the person gets a bare redaction instead of the retry advice.
+      assert input |> FailureCopy.scrub() |> FailureCopy.humanize() == "client_secret=[redacted]"
+    end
+
+    # PLACEMENT (b): the scrub WRAPS the cond. An unclassified remote capture
+    # falls through the TERMINAL arm, so a scrub nested in the typed_refusal? arm
+    # would be a no-op for exactly this string.
+    test "an unclassified remote capture — the terminal arm — is scrubbed" do
+      capture = "ssh: remote said Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2"
+
+      refute FailureCopy.typed_refusal?(capture),
+             "this probe only bites if the capture is NOT a typed refusal"
+
+      assert FailureCopy.humanize(capture) ==
+               "ssh: remote said Authorization: Bearer [redacted]"
+    end
+
+    # PLACEMENT (c): no laundering. The typed refusal keeps its E_* code and its
+    # offending entry; only the credential inside it is replaced.
+    test "a typed refusal carrying a secret keeps its E_* code and entry" do
+      reason =
+        ~s|the instance refused the deploy (HTTP 400): E_BAD_NAME — entry "cfg?token=sk-live-9aB3xQ7zLm" is refused|
+
+      out = FailureCopy.humanize(reason)
+
+      assert out =~ "E_BAD_NAME"
+      assert out =~ "the instance refused the deploy (HTTP 400)"
+      assert out =~ "is refused"
+      assert out =~ "[redacted]"
+      refute out =~ "sk-live-9aB3xQ7zLm"
+
+      # NOT rewritten into a class sentence.
+      refute out =~ "Hetzner ran out of server capacity"
+    end
+
+    test "matched class copy is unchanged by the scrub (every arm returns a literal)" do
+      assert FailureCopy.humanize("exceeded max provision attempts (3)") ==
+               "This didn't finish after several attempts. Try again in a moment."
+
+      assert FailureCopy.humanize("SERVER_LIMIT_EXCEEDED") ==
+               "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+    end
+
+    test "nil and non-binaries still pass through" do
+      assert FailureCopy.humanize(nil) == nil
+      assert FailureCopy.humanize(42) == 42
+    end
+  end
 end

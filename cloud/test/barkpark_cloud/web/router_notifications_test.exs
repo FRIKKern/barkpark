@@ -10,6 +10,8 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
 
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Notifications.Delivery
+  alias BarkparkCloud.Notifications.EmailSettings
+  alias BarkparkCloud.Notifications.EventEmail
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Web.Router
 
@@ -374,6 +376,49 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
       conn = call(:get, "/v1/notifications/deliveries", nil, token)
       assert conn.status == 200
       assert body(conn)["deliveries"] == []
+    end
+  end
+
+  # wave 13 S2. `EventEmail.detail/1` is the SOLE reader of the event's free-text
+  # detail in the email channel, and for provision_failed / deployment_failed /
+  # agent_unreachable that string is the RAW failure reason. An email leaves our
+  # boundary for good, so it is scrubbed on the way out.
+  describe "EventEmail — the alert body is scrubbed before it leaves the boundary" do
+    @email_secret "sk-live-9aB3xQ7zLmNpR4tV6wY2"
+    @email_capture "ssh: remote said Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2"
+
+    for event <- [:provision_failed, :deployment_failed, :agent_unreachable] do
+      test "#{event}: the secret never reaches the inbox" do
+        email =
+          EventEmail.build(
+            %EmailSettings{},
+            unquote(event),
+            %{name: "My Barkpark", detail: @email_capture},
+            "owner@example.com"
+          )
+
+        refute email.text_body =~ @email_secret
+        assert email.text_body =~ "Authorization: Bearer [redacted]"
+
+        # The surrounding sentence is intact — a scrubbed alert is still an
+        # actionable alert.
+        assert email.text_body =~ "My Barkpark"
+      end
+    end
+
+    test "a git SHA in the alert body survives — the commit is still readable" do
+      email =
+        EventEmail.build(
+          %EmailSettings{},
+          :deployment_failed,
+          %{
+            name: "My Barkpark",
+            detail: "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed"
+          },
+          "owner@example.com"
+        )
+
+      assert email.text_body =~ "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed"
     end
   end
 end

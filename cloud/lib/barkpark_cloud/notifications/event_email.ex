@@ -10,6 +10,7 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   """
   import Swoosh.Email
 
+  alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Mailer
   alias BarkparkCloud.Notifications.EmailSettings
 
@@ -82,9 +83,17 @@ defmodule BarkparkCloud.Notifications.EventEmail do
 
   defp name(payload), do: Map.get(payload, :name) || Map.get(payload, "name") || "Your Barkpark"
 
+  # The event's free-text detail, appended as its own paragraph.
+  #
+  # wave 13 S2: SCRUBBED. For `provision_failed`, `deployment_failed` and
+  # `agent_unreachable` this string is the RAW failure reason — a remote ssh/
+  # provider capture that can carry a credential the control plane never chose to
+  # print — and an email leaves our boundary for good. This is the sole reader of
+  # `:detail` in the email channel; `Notifications.Render.render/2` never reads it,
+  # so chat is not a leak channel and is deliberately not touched here.
   defp detail(payload) do
     case Map.get(payload, :detail) || Map.get(payload, "detail") do
-      d when is_binary(d) and d != "" -> "\n\n#{d}"
+      d when is_binary(d) and d != "" -> "\n\n#{FailureCopy.scrub(d)}"
       _ -> ""
     end
   end

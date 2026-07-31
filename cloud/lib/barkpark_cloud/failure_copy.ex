@@ -82,6 +82,40 @@ defmodule BarkparkCloud.FailureCopy do
   word, so no producer-authored tar entry name can collide with one. That is the
   exact property this module's reaper/provider token list LACKS. If a short token
   is ever added to `app.js`, it needs this guard mirrored there.
+
+  ## Secret scrubbing at the display boundary (wave 13 S2)
+
+  A failure reason is frequently a REMOTE CAPTURE — an `ssh` stderr fold, a
+  provider HTTP body, a build log tail — so it can carry a credential that the
+  control plane never chose to print. `provision_error`, `deprovision_error`,
+  the provision step/console folds, the deploy console + detail, and the
+  `provision_failed` alert email all render that capture to a PERSON. There is no
+  server-side boundary between the capture and their eye, so `scrub/1` is applied
+  at every one of those serialization points.
+
+  Three properties, each of which is a test in `failure_copy_test.exs`:
+
+    * **Post-classification, never pre.** `humanize/1` is
+      `reason |> classify() |> scrub()`. Scrubbing FIRST would shift
+      classification — `"client_secret=timeout"` loses its `timeout` token to the
+      redaction and stops reading as the network class. Scrubbing LAST is also
+      free of risk over a matched class, because every class arm returns a
+      LITERAL and a literal has no secret shape.
+    * **The scrub WRAPS the `cond`, it never sits inside one arm.** Nesting it in
+      the `typed_refusal?/1` arm makes it a no-op for exactly the strings that
+      carry secrets most often — an unclassified remote capture like
+      `ssh: remote said Authorization: Bearer …` falls through the terminal arm.
+    * **It redacts SUBSTRINGS; it never replaces the string.** A typed refusal
+      keeps its `E_*` code and its entry name, with `[redacted]` only where the
+      token was — the box's precise sentence is never laundered into canned copy.
+
+  The pattern set is deliberately narrow on the bare-token clause: a naive
+  `\\b[A-Za-z0-9]{40,}\\b` eats a 40-char git SHA, costing a person the commit
+  they deployed. Every pattern carries POSITIVE and NEGATIVE rows in the
+  table-driven test (git SHA, UUID, hostname, semver, base64 digest).
+
+  The DB stays RAW by design: only the JSON/email boundary scrubs, so ops
+  recovery via `Repo.get(ProvisionJob, id).console` and the logs is unaffected.
   """
 
   # An extractor refusal code: `E_` followed by SCREAMING_SNAKE. Anchored on a
@@ -106,14 +140,106 @@ defmodule BarkparkCloud.FailureCopy do
 
   def typed_refusal?(_other), do: false
 
+  @redaction "[redacted]"
+
+  # STATUS PROSE in a value position — never a credential. A remote capture says
+  # "no bearer token found", "token: expired", "api_key: not set" far more often
+  # than it says "token: <a live token>", and redacting the word `expired` tells
+  # a person a secret leaked when none did. Every entry is an ordinary English
+  # word that no generated credential can be, so this guard costs the scrub no
+  # coverage; it is anchored with `\b` so it can only skip the WHOLE value.
+  @prose_value "(?:token|tokens|credential|credentials|value|header|auth|expired|missing|invalid|unset|unknown|empty|none|null|nil|set|required|absent|not)\\b"
+
+  # The secret shapes a remote capture can carry, most specific first. Each entry
+  # is `{pattern, replacement}` and every one carries POSITIVE and NEGATIVE rows
+  # in `failure_copy_test.exs`'s table — a pattern without both is not shippable,
+  # because the failure mode here is silent COPY LOSS (a redacted git SHA reads
+  # exactly like a redacted token) rather than a crash.
+  @secret_patterns [
+    # `Authorization: Bearer sk-live-…`. The scheme word is kept so the line
+    # still says what KIND of credential was refused; everything after it goes.
+    #
+    # The `@prose_value` guard is why this does not maul English: "no bearer
+    # token found in the request" is a COMMON failure string and an unguarded
+    # `bearer\s+\S+` rendered it "no bearer [redacted] found" — a redaction
+    # where no secret ever was, which is its own small lie on the person's
+    # screen. The guard is a stop-list of words no credential can be, so it
+    # weakens the redaction for nothing.
+    {~r/\b(bearer\s+)(?!#{@prose_value})\S+/i, "\\1#{@redaction}"},
+
+    # `client_secret=…`, `token: …`, `api-key=…`. The KEY and its separator are
+    # kept (they name what leaked); the value is redacted up to the next
+    # delimiter. `authorization` is deliberately absent — the Bearer clause above
+    # already owns that line and keeps the scheme word.
+    #
+    # Same `@prose_value` guard, same reason: "token: expired" and
+    # "no api_key: set in the config file" are status prose, not credentials.
+    {~r/\b((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?!#{@prose_value})[^\s"',;)]+/i,
+     "\\1#{@redaction}"},
+
+    # Provider-prefixed credentials: Stripe/OpenAI `sk-`/`pk-`, GitHub `ghp_`/
+    # `github_pat_`, Slack `xoxb-`, AWS `AKIA…`, Hetzner `hcloud_`. These carry
+    # hyphens and underscores, so the bare-token clause below (which is
+    # `[A-Za-z0-9]` only) cannot see them.
+    {~r/\b(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[baprs]|hcloud)[-_][A-Za-z0-9\-_]{8,}/,
+     @redaction},
+
+    # An AWS access key id: `AKIA` + 16 uppercase alphanumerics, no separator, so
+    # it needs its own clause (the prefixed clause above requires a `-`/`_`, and
+    # the bare-token clause below requires a lowercase letter).
+    {~r/\bAKIA[0-9A-Z]{16}\b/, @redaction},
+
+    # A bare high-entropy token. NARROW ON PURPOSE: 32+ alphanumerics that mix
+    # lower, upper AND digits, and never a 40-char lowercase-hex git SHA. The
+    # naive `\b[A-Za-z0-9]{40,}\b` passes the whole cloud suite while silently
+    # eating the commit a person deployed; the mixed-case requirement alone also
+    # spares a UUID segment, a lowercase `sha256:` digest, a hostname and a
+    # semver, all of which are negatives in the table.
+    {~r/\b(?![a-f0-9]{40}\b)(?=[A-Za-z0-9]*[a-z])(?=[A-Za-z0-9]*[A-Z])(?=[A-Za-z0-9]*[0-9])[A-Za-z0-9]{32,}\b/,
+     @redaction}
+  ]
+
   @doc """
-  Map a raw internal deploy/provision failure string to human-facing copy.
-  Passes `nil` and unrecognized/non-binary reasons through unchanged.
+  Redact secret-shaped SUBSTRINGS from a string bound for a person's screen or
+  inbox. Non-binaries pass through unchanged.
+
+  This never replaces the whole string: the surrounding sentence — a typed
+  refusal's `E_*` code, a provider's own words, the offending tar entry — is
+  what makes the failure actionable, and `#{@redaction}` sits only where the
+  credential was. Idempotent: `#{@redaction}` carries no secret shape of its own.
+
+  Applied at the display boundary only. The stored row keeps the raw bytes so
+  ops recovery from the DB and the logs is unaffected.
+  """
+  @spec scrub(term()) :: term()
+  def scrub(text) when is_binary(text) do
+    Enum.reduce(@secret_patterns, text, fn {pattern, replacement}, acc ->
+      Regex.replace(pattern, acc, replacement)
+    end)
+  end
+
+  def scrub(other), do: other
+
+  @doc """
+  Map a raw internal deploy/provision failure string to human-facing copy, with
+  secret-shaped substrings redacted.
+
+  The scrub runs AFTER classification and WRAPS the whole `cond` — see the
+  moduledoc for why either change is a live regression. Passes `nil` and
+  non-binary reasons through unchanged; unrecognized reasons pass through
+  scrubbed.
   """
   @spec humanize(term()) :: term()
   def humanize(nil), do: nil
 
-  def humanize(reason) when is_binary(reason) do
+  def humanize(reason) when is_binary(reason), do: reason |> classify() |> scrub()
+
+  def humanize(other), do: other
+
+  # The class fold: raw jargon → human copy, or the reason unchanged. Private —
+  # every caller goes through `humanize/1` so nothing can reach a surface having
+  # skipped the scrub.
+  defp classify(reason) when is_binary(reason) do
     # Provider casing is inconsistent (`SERVER_LIMIT_EXCEEDED` vs
     # `resource_unavailable`); the provider-class clauses match this lowered
     # copy. The internal-jargon clauses above keep matching the raw `reason`
@@ -224,8 +350,6 @@ defmodule BarkparkCloud.FailureCopy do
         reason
     end
   end
-
-  def humanize(other), do: other
 
   @doc """
   The per-kind remediation copy the connect endpoint returns when the
