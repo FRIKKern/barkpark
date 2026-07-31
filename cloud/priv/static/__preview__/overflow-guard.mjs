@@ -34,6 +34,17 @@
 //        compute align-items:flex-start with .attention-acts left-aligned to
 //        .attention-main (pre-fix: stacked but CENTRED, acts left 441.28).
 //        At 900 the row must still be a row (the stack stays scoped <=768).
+//    W12-narrow-viewport-truth      PHONE WIDTHS, which every other case here
+//        is blind to (WIDTHS starts at 721 — see the honest limit below). Two
+//        halves: (a) the page body must not scroll at 320-620 on #overview —
+//        pre-fix 496/390 at a 390px viewport, a 106px overhang on every phone
+//        in portrait, because a bare `1fr` mobile track floors at the CARD's
+//        min-content (480.203px); (b) the notifications channel matrix must
+//        TELL a person it continues past the edge — at 390 three of six
+//        channels are fully off-screen at scrollLeft 0, and the OS scrollbar
+//        is not the fallback (the reserved track measures 0px even in a
+//        CLASSIC-scrollbar run). The cue is asserted to appear ONLY while
+//        clipped: at 1440 the matrix fits and the fade must read 0px.
 //    GR115-bpconsole-dead-rule      at 700x800 .bp-console-body must compute
 //        the authored 40vh cap (320px) and the 13px legibility floor, same
 //        for .bp-console-toggle (pre-fix: 260px/12px/12px — the later base
@@ -58,10 +69,26 @@
 //      string replace patches the wrong twin.
 //
 //  RUN
-//    node cloud/priv/static/__preview__/overflow-guard.mjs                 # all three
+//    node cloud/priv/static/__preview__/overflow-guard.mjs                 # all four
 //    node cloud/priv/static/__preview__/overflow-guard.mjs --defect GR108-tablet-topbar-overflow
 //    OVERFLOW_GUARD_PORT=4321 node …                                      # port override
 //    CHROME=/path/to/chrome node …
+//    OVERFLOW_GUARD_CLASSIC_SCROLLBARS=1 node …                           # drop --hide-scrollbars
+//
+//  THE CLASSIC-SCROLLBAR SWITCH is a DIAGNOSTIC, not a mode to run the whole
+//  file in: with real scrollbars clientWidth no longer equals the emulated
+//  width, which is the parity GR108's sweep is written against. It exists so
+//  W12's "the OS scrollbar is not the affordance" claim can be measured in the
+//  condition it is about — a browser that reserves a classic track — instead of
+//  asserted from a run that hid scrollbars in the first place. W12's cue must
+//  read identically under both, and the run prints the reserved track width it
+//  measured either way.
+//
+//  HONEST LIMIT — THIS FILE IS RUN BY NO WORKFLOW (charter D109, re-confirmed
+//  this wave: `grep -rn overflow-guard .github/` returns nothing, exit 1). It
+//  is a developer tripwire and the seal predicate's shell-out, NOT a CI gate.
+//  That is exactly how a tree whose body scrolled 106px at 390px passed every
+//  required context: nothing measured below 700px, and nothing ran this file.
 //
 //  Exit codes: 0 = every requested defect measured fixed · 1 = a DEFECT WAS
 //  MEASURED and is still present · 2 = REFUSED to measure (no/unusable Chrome,
@@ -90,12 +117,18 @@ const DEFECTS = [
   "GR108-tablet-topbar-overflow",
   "GR109-attention-row-dead-rule",
   "GR115-bpconsole-dead-rule",
+  "W12-narrow-viewport-truth",
 ];
 
 // The sweep envelope. 769/775/780/785 are ABOVE the breakpoint on purpose —
 // see the header: a sweep capped at 768 cannot fail on this defect class.
 const WIDTHS = [721, 750, 768, 769, 775, 780, 785, 800, 900, 1024, 1440];
+// W12: the band NOTHING in this file used to look at. 495/496 straddle the
+// measured threshold (overflowed at <=495, clean at >=496 pre-fix), so a run
+// that goes green here has crossed the bisection point rather than missed it.
+const PHONE_WIDTHS = [320, 360, 375, 390, 412, 430, 480, 495, 496, 620];
 const HEIGHT = 800;
+const CLASSIC_SCROLLBARS = process.env.OVERFLOW_GUARD_CLASSIC_SCROLLBARS === "1";
 
 const SERVER_CAP = 8000;
 const DEVTOOLS_CAP = 15000;
@@ -314,7 +347,9 @@ async function main() {
       "--no-default-browser-check",
       "--disable-extensions",
       "--disable-background-networking",
-      "--hide-scrollbars", // classic-macOS overlay parity: clientWidth == emulated width
+      // classic-macOS overlay parity: clientWidth == emulated width. Dropped
+      // only under OVERFLOW_GUARD_CLASSIC_SCROLLBARS=1 (see the header).
+      ...(CLASSIC_SCROLLBARS ? [] : ["--hide-scrollbars"]),
       `--user-data-dir=${profile}`,
       "--remote-debugging-port=0",
       "about:blank",
@@ -498,6 +533,152 @@ async function main() {
       }
       if (!failures.some((f) => f.defect === "GR115-bpconsole-dead-rule")) {
         okLine(`bp-console body ${m.bpMax}/${m.bpFs}, toggle ${m.togFs}; twin ${m.newMax}/${m.newFs}; is-collapsed border ${m.togBorderStyle}, caret ${m.caretTransform}`);
+      }
+    }
+    // ── W12: phone widths — the body must not scroll, and the matrix must
+    //    say it continues ───────────────────────────────────────────────────
+    if (requested.includes("W12-narrow-viewport-truth")) {
+      const D = "W12-narrow-viewport-truth";
+      process.stdout.write(
+        `\n${D} — ${PHONE_WIDTHS.length} phone widths x 2 themes` +
+        ` (scrollbars: ${CLASSIC_SCROLLBARS ? "CLASSIC — reserved track measured" : "hidden"})\n`,
+      );
+
+      // (a) the page body itself. The fleet grid is the offender: a bare `1fr`
+      //     track cannot go below the CARD's min-content, so the track — not
+      //     the card's children — is what overhangs a 358px container.
+      for (const theme of ["light", "dark"]) {
+        await setViewport(390);
+        await nav(
+          `${BASE}/?scen=mixed-fleet&theme=${theme}#overview`,
+          `document.querySelector('.instances-grid .instance-card')`,
+        );
+        const row = [];
+        for (const width of PHONE_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){var d=document.documentElement;` +
+            `var g=document.querySelector('.instances-grid');var c=g&&g.querySelector('.instance-card');` +
+            `var r=Math.round((c?c.getBoundingClientRect().width:0)*1000)/1000;` +
+            `var gw=Math.round((g?g.getBoundingClientRect().width:0)*1000)/1000;` +
+            `return {sw:d.scrollWidth,cw:d.clientWidth,card:r,grid:gw,` +
+            ` tracks:g?getComputedStyle(g).gridTemplateColumns:''};})()`,
+          );
+          const over = m.sw > m.cw;
+          if (over) fail(D, `mixed-fleet/${theme}@${width}#overview: body scrollWidth ${m.sw} > clientWidth ${m.cw} (${m.sw - m.cw}px overhang) — track ${m.tracks} on a ${m.grid}px container`);
+          else if (m.card > m.grid + 1) fail(D, `mixed-fleet/${theme}@${width}#overview: .instance-card ${m.card}px overhangs its ${m.grid}px grid — the track is still floored at the card's min-content`);
+          row.push(`${width}:${m.sw}${over ? "!" : ""}`);
+        }
+        process.stdout.write(`   mixed-fleet/${theme}  ${row.join(" ")}\n`);
+      }
+
+      // (b) the notifications matrix must ADMIT it is clipped. Two independent
+      //     cues, both measured: a label column that stays put while the
+      //     channels scroll under it, and an edge fade that exists ONLY while
+      //     content is hidden. The fade is scroll-driven, so every read is
+      //     taken a frame after the scroll that provoked it — a same-tick read
+      //     returns the previous frame's value and manufactures a false red.
+      // A scroll-driven animation's computed value is produced by the ANIMATION
+      // FRAME that follows the scroll, not by the assignment — a same-tick (or
+      // even a fixed-sleep) read is a coin flip, and this measurement caught
+      // itself flipping: light@768 read 48px and dark@768 read 0px off the same
+      // stylesheet. Every read below is taken after two real rAFs have run.
+      // TWO FORCED FRAMES. requestAnimationFrame is NOT a frame source here: a
+      // headless target that has gone idle simply never calls back (measured —
+      // the light pass settled on rAF every time, the dark pass sat through
+      // 8000ms and eight re-arms without a single callback, off the same
+      // stylesheet). Page.captureScreenshot blocks on a real BeginFrame, so it
+      // produces one on demand; the value is read on the frame AFTER the scroll,
+      // hence two.
+      const settle = async () => {
+        for (let i = 0; i < 2; i++) {
+          await Promise.race([
+            cdp.send("Page.captureScreenshot", { format: "jpeg", quality: 1 }, sessionId).catch(() => {}),
+            sleep(EVAL_CAP),
+          ]);
+        }
+      };
+
+      const readMatrix = async () => {
+        // Bring the matrix into the viewport FIRST. elementFromPoint answers
+        // null for anything below the fold, and the matrix sits well down an
+        // 800px-tall #notifications page — measured: the header hit-test read
+        // "nothing" identically with the corner 1px tall and with it 55px
+        // tall, i.e. a red that fired on both sides of the fix and proved
+        // nothing. A hit-test that cannot tell the states apart is not a
+        // measurement.
+        await evalJs(`(function(){var s=document.querySelector('.set-matrix');if(s){s.scrollIntoView({block:'center'});s.scrollLeft=0;}})()`);
+        await settle();
+        const rest = await evalJs(
+          `(function(){var s=document.querySelector('.set-matrix');if(!s)return null;` +
+          `var ev=s.querySelector('.set-matrix-event');var sr=s.getBoundingClientRect();` +
+          `var cols=[].slice.call(s.querySelectorAll('.set-matrix-col'));` +
+          `return {sw:s.scrollWidth,cw:s.clientWidth,track:s.offsetHeight-s.clientHeight,` +
+          ` fade:getComputedStyle(s).getPropertyValue('--set-matrix-fade').trim(),` +
+          ` pos:getComputedStyle(ev).position,` +
+          ` evLeft:Math.round(ev.getBoundingClientRect().left*100)/100,` +
+          ` scLeft:Math.round(sr.left*100)/100,` +
+          ` hidden:cols.filter(function(c){return c.getBoundingClientRect().left>=sr.right-0.5;}).length,` +
+          ` cols:cols.length};})()`,
+        );
+        await evalJs(`(function(){var s=document.querySelector('.set-matrix');s.scrollLeft=120;})()`);
+        await settle();
+        // The hit-test at the HEADER row is not decoration. The grid is
+        // `align-items: center`, and the corner cell is EMPTY — left to its
+        // content it lays out 1px tall and centred, so the channel headings
+        // scroll straight THROUGH the pinned label column while every row
+        // below is covered correctly. A screenshot catches that; a position
+        // read does not. So: sample the middle of the label column at the
+        // middle of the header row and name whatever is actually on top.
+        const mid = await evalJs(
+          `(function(){var s=document.querySelector('.set-matrix');var ev=s.querySelector('.set-matrix-event');` +
+          `var co=s.querySelector('.set-matrix-corner');var cr=co.getBoundingClientRect();` +
+          `var hd=s.querySelector('.set-matrix-col').getBoundingClientRect();` +
+          `var hit=document.elementFromPoint(cr.left+cr.width/2,hd.top+hd.height/2);` +
+          `return {sl:s.scrollLeft,evLeft:Math.round(ev.getBoundingClientRect().left*100)/100,` +
+          ` cornerH:Math.round(cr.height*100)/100,headH:Math.round(hd.height*100)/100,` +
+          ` onTop:hit?(hit.className||hit.tagName):'nothing'};})()`,
+        );
+        await evalJs(`(function(){var s=document.querySelector('.set-matrix');s.scrollLeft=s.scrollWidth;})()`);
+        await settle();
+        const end = await evalJs(
+          `(function(){var s=document.querySelector('.set-matrix');` +
+          `return {sl:s.scrollLeft,fade:getComputedStyle(s).getPropertyValue('--set-matrix-fade').trim()};})()`,
+        );
+        return { rest, mid, end };
+      };
+      const px = (v) => Number(String(v || "0px").replace("px", ""));
+
+      for (const theme of ["light", "dark"]) {
+        await setViewport(768);
+        await nav(
+          `${BASE}/?scen=notif-configured&theme=${theme}#notifications`,
+          `document.querySelector('.set-matrix .set-matrix-grid .set-matrix-event')`,
+        );
+        for (const width of [768, 430, 390]) {
+          await setViewport(width);
+          const { rest, mid, end } = await readMatrix();
+          if (!rest) { fail(D, `notif-configured/${theme}@${width}: .set-matrix missing`); continue; }
+          const clipped = rest.sw > rest.cw;
+          if (!clipped) { fail(D, `notif-configured/${theme}@${width}: matrix NOT clipped (${rest.sw}/${rest.cw}) — the fixture no longer reproduces the condition`); continue; }
+          // Cue 1 — the label column holds its ground while the channels move.
+          if (rest.pos !== "sticky") fail(D, `notif-configured/${theme}@${width}: .set-matrix-event position is "${rest.pos}", expected "sticky" — the label column scrolls away with the channels`);
+          else if (Math.abs(mid.evLeft - rest.scLeft) > 1.5) fail(D, `notif-configured/${theme}@${width}: sticky label left ${mid.evLeft} != scroller left ${rest.scLeft} after scrolling to ${mid.sl} — sticky is declared but DEAD (an overflow:hidden ancestor is the scrollport)`);
+          else if (mid.cornerH < mid.headH - 0.5) fail(D, `notif-configured/${theme}@${width}: the sticky corner is ${mid.cornerH}px tall in a ${mid.headH}px header row — the channel headings scroll THROUGH the pinned label column at the top (align-items:center collapses an empty cell)`);
+          else if (!String(mid.onTop).includes("set-matrix-corner")) fail(D, `notif-configured/${theme}@${width}: at the header row the label column is covered by "${mid.onTop}", not .set-matrix-corner`);
+          else okLine(`notif-configured/${theme}@${width}: ${rest.hidden}/${rest.cols} channel columns off-screen at rest; label column sticks at ${mid.evLeft} through scrollLeft ${mid.sl}, corner covers the header row (${mid.cornerH}/${mid.headH}px); reserved scrollbar track ${rest.track}px`);
+          // Cue 2 — the fade exists while clipped and retracts at the end.
+          if (px(rest.fade) <= 0) fail(D, `notif-configured/${theme}@${width}: edge fade is ${rest.fade} while ${rest.sw - rest.cw}px of the matrix is hidden — nothing tells a person there is more`);
+          else if (px(end.fade) > 0.5) fail(D, `notif-configured/${theme}@${width}: edge fade still ${end.fade} at scrollLeft ${end.sl} (the end) — the cue lies in the other direction`);
+          else okLine(`notif-configured/${theme}@${width}: edge fade ${rest.fade} at rest -> ${end.fade} at the end`);
+        }
+        // The cue must be ABSENT when nothing is hidden — the control that
+        // makes "only while clipped" a measurement rather than a hope.
+        await setViewport(1440);
+        const wide = await readMatrix();
+        if (wide.rest.sw > wide.rest.cw) fail(D, `notif-configured/${theme}@1440: matrix still clipped (${wide.rest.sw}/${wide.rest.cw}) — control invalid`);
+        else if (px(wide.rest.fade) > 0.5) fail(D, `notif-configured/${theme}@1440: edge fade ${wide.rest.fade} with nothing hidden — the cue fires when it should not`);
+        else okLine(`notif-configured/${theme}@1440: nothing hidden, fade ${wide.rest.fade} — the cue is scoped to the clipped state`);
       }
     }
   } catch (err) {
