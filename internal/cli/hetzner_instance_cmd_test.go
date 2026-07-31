@@ -91,6 +91,13 @@ type fakeCP struct {
 	mu   sync.Mutex
 	rows []cpBarkpark
 	reqs []string // "METHOD path body"
+
+	// forceStatus/keepRow parameterise the deprovision answer, so a test can
+	// stand up the control plane that makes eject's old receipt a lie: one that
+	// IGNORES the detach key, answers 200 with "deprovisioning" (a worker
+	// teardown is queued) and keeps the row.
+	forceStatus string
+	keepRow     bool
 }
 
 func newFakeCP(t *testing.T, rows []cpBarkpark) *fakeCP {
@@ -130,8 +137,14 @@ func newFakeCP(t *testing.T, rows []cpBarkpark) *fakeCP {
 				} else {
 					status = "deprovisioning"
 				}
+				if f.keepRow {
+					kept = append(kept, row)
+				}
 			}
 			f.rows = kept
+			if status != "" && f.forceStatus != "" {
+				status = f.forceStatus
+			}
 			f.mu.Unlock()
 			if status == "" {
 				w.WriteHeader(http.StatusNotFound)
@@ -667,4 +680,298 @@ func TestInstanceResurrectRefusesLiveTwin(t *testing.T) {
 	if f.count("POST", "/servers") != 0 {
 		t.Error("resurrect created a second box for a fqdn that already has one")
 	}
+}
+
+// instJSONReceipt decodes a `-o json` receipt, so assertions read KEYS rather
+// than substrings — the difference between "the id appears somewhere in the
+// output" and "the receipt states this".
+func instJSONReceipt(t *testing.T, stdout string) map[string]any {
+	t.Helper()
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+		t.Fatalf("receipt is not json (%v): %s", err, stdout)
+	}
+	return payload
+}
+
+// instArchiveFake stands up the wire for one archive of bp-okey-1: the server
+// list, the create_image action, and the action poll. The caller adds the
+// GET /images/<id> read-back — which is the whole point: whether it is there,
+// and what it says, must change the receipt.
+func instArchiveFake(t *testing.T) *fakeHzAPI {
+	t.Helper()
+	f := newFakeHzAPI(t)
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("name") != "" {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		hzWriteJSON(w, 200, `{"servers":[`+instServerJSON(9, "bp-okey-1", "192.0.2.9", "okey.barkpark.cloud")+`]}`)
+	})
+	f.mux.HandleFunc("POST /servers/9/actions/create_image", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"image":{"id":777,"type":"snapshot"},"action":{"id":31,"status":"running","progress":0}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":31,"status":"success","progress":100}]}`)
+	})
+	return f
+}
+
+// TestInstanceArchiveObservesTheImageItCreated is the post-condition proof for
+// `instance archive`: the receipt's image_id used to be a straight echo of the
+// create-action response, and the action completing says the SNAPSHOT JOB
+// finished, not that a restorable image exists. The three sub-cases assert that
+// the receipt is built from the READ-BACK and that a disagreeing read-back
+// produces a DIFFERENT receipt — which is the only thing that makes the
+// confirming read worth issuing.
+func TestInstanceArchiveObservesTheImageItCreated(t *testing.T) {
+	confirmed := ""
+	t.Run("confirmed", func(t *testing.T) {
+		instTestTuning(t)
+		f := instArchiveFake(t)
+		f.mux.HandleFunc("GET /images/777", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 200, `{"image":{"id":777,"type":"snapshot","status":"available","description":"bp archive"}}`)
+		})
+		stdout, stderr, code := runHzCLI(t, "json", "hetzner", "instance", "archive", "okey.barkpark.cloud")
+		if code != exitOK {
+			t.Fatalf("archive exited %d, stderr: %s", code, stderr)
+		}
+		if f.count("GET", "/images/777") == 0 {
+			t.Fatal("archive never re-read the image it created — image_id is a create-response echo, " +
+				"and the action completing does not say a restorable image exists")
+		}
+		got := instJSONReceipt(t, stdout)
+		if got["image_status"] != "available" {
+			t.Errorf("receipt image_status = %v, want the OBSERVED \"available\"", got["image_status"])
+		}
+		if _, ok := got["confirmation"]; ok {
+			t.Errorf("a confirmed archive must not carry a confirmation key: %s", stdout)
+		}
+		confirmed = stdout
+	})
+
+	t.Run("unreadable image is confirmation-unavailable, not a failed verb", func(t *testing.T) {
+		instTestTuning(t)
+		f := instArchiveFake(t)
+		f.mux.HandleFunc("GET /images/777", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 404, `{"error":{"code":"not_found","message":"image not found"}}`)
+		})
+		stdout, stderr, code := runHzCLI(t, "json", "hetzner", "instance", "archive", "okey.barkpark.cloud")
+		if code != exitOK {
+			t.Fatalf("archive exited %d — a failed CONFIRMING read is not a failed snapshot, stderr: %s", code, stderr)
+		}
+		got := instJSONReceipt(t, stdout)
+		if got["confirmation"] != "unavailable" {
+			t.Errorf("receipt = %s, want confirmation: unavailable when the image cannot be re-read", stdout)
+		}
+		if _, ok := got["image_status"]; ok {
+			t.Errorf("an unconfirmed archive must not report an image_status it never observed: %s", stdout)
+		}
+		if stdout == confirmed {
+			t.Error("the unconfirmed receipt is byte-identical to the confirmed one — the read-back changes nothing")
+		}
+	})
+
+	t.Run("a non-available image is a failed archive", func(t *testing.T) {
+		instTestTuning(t)
+		f := instArchiveFake(t)
+		f.mux.HandleFunc("GET /images/777", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 200, `{"image":{"id":777,"type":"snapshot","status":"unavailable"}}`)
+		})
+		stdout, stderr, code := runHzCLI(t, "json", "hetzner", "instance", "archive", "okey.barkpark.cloud")
+		if code == exitOK {
+			t.Fatalf("archive exited 0 on an image reporting status \"unavailable\" — nothing can be restored "+
+				"from it, and resurrect/clone-swap boot from exactly this image: %s", stdout)
+		}
+		if !strings.Contains(stderr+stdout, "unavailable") {
+			t.Errorf("the refusal does not name the observed status: %s %s", stdout, stderr)
+		}
+	})
+}
+
+// TestInstanceArchiveStopReportsWhetherItQuiesced closes the receipt lie nobody
+// had named: `archive --stop` degrades to a crash-consistent snapshot when the
+// SSH quiesce fails, and it said so ONLY through out.info — which writer.info
+// writes to stderr only when verbose. So `archive --stop -o json` emitted a
+// byte-identical receipt for a cleanly-stopped Postgres and a live one.
+func TestInstanceArchiveStopReportsWhetherItQuiesced(t *testing.T) {
+	run := func(t *testing.T, sshErr error) (string, string, int) {
+		t.Helper()
+		instTestTuning(t)
+		if sshErr != nil {
+			instSSH = func(host, command string) error { return sshErr }
+		}
+		f := instArchiveFake(t)
+		f.mux.HandleFunc("GET /images/777", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 200, `{"image":{"id":777,"type":"snapshot","status":"available"}}`)
+		})
+		return runHzCLI(t, "json", "hetzner", "instance", "archive", "okey.barkpark.cloud", "--stop")
+	}
+
+	var clean, crashed string
+	t.Run("clean stop", func(t *testing.T) {
+		stdout, stderr, code := run(t, nil)
+		if code != exitOK {
+			t.Fatalf("archive --stop exited %d, stderr: %s", code, stderr)
+		}
+		if got := instJSONReceipt(t, stdout)["quiesced"]; got != true {
+			t.Errorf("receipt quiesced = %v, want true after a successful stop", got)
+		}
+		clean = stdout
+	})
+	t.Run("failed stop", func(t *testing.T) {
+		stdout, stderr, code := run(t, fmt.Errorf("dial tcp 192.0.2.9:22: i/o timeout"))
+		if code != exitOK {
+			t.Fatalf("archive --stop exited %d — an unreachable box degrades to an online snapshot, "+
+				"it does not fail the verb; stderr: %s", code, stderr)
+		}
+		got := instJSONReceipt(t, stdout)
+		if got["quiesced"] != false {
+			t.Errorf("receipt quiesced = %v, want false — the snapshot is crash-consistent", got["quiesced"])
+		}
+		if got["quiesce_error"] == nil {
+			t.Errorf("receipt does not say WHY the quiesce failed: %s", stdout)
+		}
+		crashed = stdout
+	})
+	if clean != "" && clean == crashed {
+		t.Error("a cleanly-quiesced snapshot and a crash-consistent snapshot of a LIVE database emit " +
+			"byte-identical receipts — the degradation is invisible to anyone not running -v")
+	}
+	if clean != "" && !strings.Contains(clean, `"quiesced"`) {
+		t.Errorf("quiesced is optional in the receipt, so its absence reads as \"fine\": %s", clean)
+	}
+}
+
+// instEjectFake stands up the compute wire for an eject of gyldendal: the
+// source box, the archive, the clone, DNS, and the old box's delete.
+func instEjectFake(t *testing.T) *fakeHzAPI {
+	t.Helper()
+	f := newFakeHzAPI(t)
+	instSSHKeyLookup(f)
+	f.mux.HandleFunc("GET /servers", func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Query().Get("name") != "" {
+			hzWriteJSON(w, 200, `{"servers":[]}`)
+			return
+		}
+		hzWriteJSON(w, 200, `{"servers":[`+instServerJSON(23, "bp-gyldendal-1", "192.0.2.23", "gyldendal.barkpark.cloud")+`]}`)
+	})
+	f.mux.HandleFunc("POST /servers/23/actions/create_image", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"image":{"id":800,"type":"snapshot"},"action":{"id":50,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("GET /images/800", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"image":{"id":800,"type":"snapshot","status":"available"}}`)
+	})
+	f.mux.HandleFunc("POST /servers", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{
+			"server":{"id":24,"name":"bp-gyldendal-r800","status":"running","public_net":{"ipv4":{"ip":"192.0.2.24"}}},
+			"action":{"id":51,"status":"success","progress":100},"next_actions":[]}`)
+	})
+	f.mux.HandleFunc("POST /zones/barkpark.cloud/rrsets/gyldendal/A/actions/set_records", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 201, `{"action":{"id":52,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("DELETE /servers/23", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"action":{"id":53,"status":"success","progress":100}}`)
+	})
+	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"actions":[{"id":50,"status":"success"},{"id":51,"status":"success"},{"id":52,"status":"success"},{"id":53,"status":"success"}]}`)
+	})
+	return f
+}
+
+// TestInstanceEjectDetachIsConfirmedNotAssumed is the sharpest of the four,
+// because eject is DESTRUCTIVE. cpFleet.Deprovision exists to return
+// "removed" | "deprovisioning"; eject threw that status away and asserted
+// "now standalone — the control plane no longer manages it" in PROSE on
+// err == nil. A control plane that ignores the detach key answers 200 with
+// "deprovisioning" and has a worker en route to delete the clone eject just
+// built — and the owner reads a ✓ saying the opposite.
+//
+// The ruling this test pins: an unconfirmed detach is not a failed verb (the
+// clone IS serving) and not a silent exit 0 either. It takes the SAME
+// hzPartial / confirmation-unavailable shape runHetznerServerAction takes when
+// only the confirming read fails — never a third shape.
+func TestInstanceEjectDetachIsConfirmedNotAssumed(t *testing.T) {
+	eject := func(t *testing.T, cp *fakeCP) (string, string, int) {
+		t.Helper()
+		instHealthOK(t)
+		instEjectFake(t)
+		return runHzCLI(t, "json", "hetzner", "instance", "eject", "gyldendal.barkpark.cloud",
+			"--control-url", cp.srv.URL, "--worker-token", "wtok")
+	}
+	row := func() []cpBarkpark {
+		return []cpBarkpark{{
+			ID: "row-gy", Slug: "gyldendal", Host: "192.0.2.23", DNSLabel: "gyldendal",
+			URL: "https://gyldendal.barkpark.cloud", Mode: "managed",
+		}}
+	}
+
+	var confirmed string
+	t.Run("confirmed detach", func(t *testing.T) {
+		instTestTuning(t)
+		cp := newFakeCP(t, row())
+		stdout, stderr, code := eject(t, cp)
+		if code != exitOK {
+			t.Fatalf("eject exited %d, stderr: %s stdout: %s", code, stderr, stdout)
+		}
+		got := instJSONReceipt(t, stdout)
+		if got["registry_detach"] != "removed" {
+			t.Errorf("receipt registry_detach = %v, want the status the control plane RETURNED", got["registry_detach"])
+		}
+		if got["registry_row"] != "gone" {
+			t.Errorf("receipt registry_row = %v — 'now standalone' is earned by re-reading cp.List(), "+
+				"not by err == nil", got["registry_row"])
+		}
+		if got["complete"] == false {
+			t.Errorf("a confirmed detach must be a ✓, not a partial: %s", stdout)
+		}
+		confirmed = stdout
+	})
+
+	t.Run("control plane queues a worker teardown instead of detaching", func(t *testing.T) {
+		instTestTuning(t)
+		cp := newFakeCP(t, row())
+		cp.forceStatus = "deprovisioning" // it ignored the detach key
+		cp.keepRow = true                 // …and the row survives
+		stdout, stderr, code := eject(t, cp)
+		if code != exitOK {
+			t.Fatalf("eject exited %d — the clone IS serving, so this is not a failed verb; stderr: %s", code, stderr)
+		}
+		got := instJSONReceipt(t, stdout)
+		if got["complete"] != false {
+			t.Fatalf("eject reported a completed verb while the control plane said %q — a worker is en route to "+
+				"delete the clone this eject just built: %s", "deprovisioning", stdout)
+		}
+		note, _ := got["note"].(string)
+		if !strings.Contains(note, "deprovisioning") {
+			t.Errorf("the partial does not name the status the control plane returned: %s", stdout)
+		}
+		if strings.Contains(note, "now standalone") {
+			t.Errorf("the receipt still claims the instance is standalone: %s", stdout)
+		}
+		if got["confirmation"] != "unavailable" {
+			t.Errorf("an unconfirmed detach must take the EXISTING confirmation-unavailable shape, not a third one: %s", stdout)
+		}
+		if stdout == confirmed {
+			t.Error("the unconfirmed eject receipt is byte-identical to the confirmed one")
+		}
+	})
+
+	t.Run("removed but the row is still there", func(t *testing.T) {
+		instTestTuning(t)
+		cp := newFakeCP(t, row())
+		cp.keepRow = true // says "removed", keeps the row
+		stdout, stderr, code := eject(t, cp)
+		if code != exitOK {
+			t.Fatalf("eject exited %d, stderr: %s", code, stderr)
+		}
+		got := instJSONReceipt(t, stdout)
+		if got["complete"] != false {
+			t.Fatalf("the detach reported \"removed\" but cp.List() still carries the row, and eject reported a "+
+				"completed verb anyway: %s", stdout)
+		}
+		if note, _ := got["note"].(string); !strings.Contains(note, "row-gy") {
+			t.Errorf("the partial does not name the surviving row: %s", stdout)
+		}
+	})
 }
