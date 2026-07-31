@@ -167,8 +167,19 @@ var claimDispositions = []claimDisposition{
 	},
 
 	// ── cloud_support_cmd.go ────────────────────────────────────────────────
+	// `capacity.max_class` is LOAD-BEARING and must not be tidied away to
+	// []string{"status"}: it is the tooth of the mutation proof for this row.
+	// Arm 3 synthesises the single-axis pair through probeVaryingOnly — status
+	// held at "idle" on BOTH halves, only the capacity moved — so dropping the
+	// capacity from supportOnlineNarration reds here. Shorten the list and that
+	// mutation goes green while the receipt quietly stops naming what it measured.
 	{Name: "supportAddRun.done/online-roster-row", Post: []string{"status", "capacity.max_class"}},
+	// @len straddles the clean-vs-swept branch: it proves the receipt switches
+	// branches with the zone's answer, and NOTHING about the swept branch's
+	// payload. The row below is the branch-internal half.
 	{Name: "supportRemoveRun.done/dns-swept", Post: []string{"@len"}},
+	{Name: "supportRemoveRun.done/dns-swept-names", Post: []string{"#0"}},
+	{Name: "supportAddRun.success/max-class", Post: []string{"capacity_stdout"}},
 	{
 		Name:     "supportAddRun.success",
 		Identity: []string{"ID", "Name"},
@@ -407,25 +418,12 @@ func TestClaimProbesAttributeEveryPostConditionPerSurface(t *testing.T) {
 	}
 }
 
-// TestClaimProbesMirrorTheProductionNarration pins the two step narrations this
-// file MIRRORS instead of calling. stepOnline and stepDNS drive ssh + network and
-// cannot be rendered, so their message composition is reproduced in the registry;
-// if production's format string moves and the mirror does not, the rows would be
-// probing a sentence the CLI no longer prints. That drift reds here.
-func TestClaimProbesMirrorTheProductionNarration(t *testing.T) {
-	src := readPackageSources(t)
-	for _, want := range []string{
-		supportOnlineNarration,
-		supportDNSSweptNarration,
-		supportDNSCleanNarration,
-	} {
-		if !strings.Contains(src, want) {
-			t.Errorf("internal/cli no longer contains the narration %q that a registry row mirrors — either the "+
-				"caller's format string changed (update the mirror, and re-check the row still varies on the "+
-				"server's answer) or the step is gone (drop the row in the same commit and say why)", want)
-		}
-	}
-}
+// PDS-D431: TestClaimProbesMirrorTheProductionNarration stood here. It pinned
+// three mirror consts against the production source because the two support rows
+// REPRODUCED stepOnline's and stepDNS's sentences rather than calling them. The
+// narrations are now pure composers in cloud_support_cmd.go and the rows call
+// them, so the drift this arm guarded against can no longer exist — a mirror
+// pinned against its original is strictly weaker than no mirror at all.
 
 // ── surfaces ────────────────────────────────────────────────────────────────
 
