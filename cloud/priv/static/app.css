@@ -2077,6 +2077,52 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 
 /* ---------------------------------------------------------- responsive */
+/* W13-S4 DETAIL BAND (899px): the detail routes' OWN threshold, split off from
+   the 768 block rather than raising it. GR65 moved `.detail-grid`'s
+   single-column remedy up to 768 on the strength of a 768px screenshot — but
+   the two-column grid does not stop clipping at 768, it stops at ~899: above
+   the breakpoint `.detail-grid--instance { 1fr 340px }` governs, and its
+   min-content is 581px against a 489-598px content box. Driven on origin/main
+   bytes (real OS scrollbars, --hide-scrollbars deliberately omitted), 11
+   fixtures x 13 widths x 2 themes = 286 cells: 56 cells scrolled the PAGE
+   sideways, every one of them at 769-899, on panel-overview (documentElement
+   .scrollWidth pinned 837 at 769-830), rollback (838), site-states (861) and
+   mixed-fleet#fleet (790 at 769-785). At 790px `window.scrollTo(99999, 0)`
+   yielded scrollX=47: 47px of the DETAILS rail sat off-screen at rest with no
+   cue. After this block: 8 of 286 — a 56 -> 8 drop, and the 8 that remain are
+   ALL mixed-fleet#fleet at 769-785 in both themes, which this block cannot
+   reach: that overhang is `.fleet-row`'s min-content (533 against a 487px
+   container), whose remedy lives in the 768 block below and is filed as
+   cch-w13-fleet-row-band-769-785. Every detail route is 0. Said plainly here
+   because a comment claiming 0/286 would be the same shape of lie the block
+   exists to remove; overflow-guard.mjs pins the residual at <=21px rather than
+   hiding it.
+   WHY A SEPARATE BLOCK AND NOT `max-width: 899` ON THE 768 ONE: the 768 block
+   also carries `.fleet-row`'s stack and GR116's topbar tighten — the past-due
+   chip's money message, measured at 154.61 of 169.78px. Raising it wholesale
+   would apply a phone-shaped topbar across the whole tablet band, unasserted.
+   The `.detail-head` stack comes UP from the 720 block for the same reason the
+   grid does: once the grid is one column the header's title/badges/actions row
+   is what is left overhanging.
+   NOT TOUCHED, DELIBERATELY: the `@media (max-width: 720px)` shell fold and the
+   sidebar's `flex: 0 0 232px`. Raising the fold to 900 also zeroes the
+   overflow, but it RELOCATES the identical 231px content cliff to 901 and
+   exports the folded shell — a 690px-tall nav strip with `.content` starting at
+   y=746 — to every tablet in portrait. An icon rail across 721-899 inverts
+   monotonicity (899 -> content 839, 900 -> content 668): one more pixel of
+   browser costs the person 171px. Both were driven and both were rejected. */
+@media (max-width: 899px) {
+  /* minmax(0, …), NOT a bare 1fr — see the measurement in the 768 note below:
+     a 1fr track's automatic minimum is min-content, so the "fix" clips exactly
+     as much as the two-column layout did. */
+  .detail-grid { grid-template-columns: minmax(0, 1fr); }
+  /* Stack the detail header (title above badges + Retry/Remove) so the actions
+     don't wrap awkwardly or clip. Was 720-only until W13-S4 measured the band. */
+  .detail-head { flex-direction: column; align-items: stretch; }
+  .detail-head .fleet-badges { justify-content: flex-start; }
+  .detail-actions { margin-left: 0; }
+}
+
 /* GR65 TABLET (768px): three layouts break BEFORE the 720px phone threshold,
    and 768 is exactly the second width __preview__/shoot.sh shoots — so every
    green screenshot pass was taken 48px above the break. Shot at 768 in both
@@ -2098,8 +2144,9 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      and code) blew the track back past the viewport and the "fix" clipped exactly
      as much as the two-column layout did. Measured at 768: bare 1fr → track
      572.5px, panel right edge 828.5 (viewport 768); minmax(0,1fr) → track 473px,
-     right edge 729. */
-  .detail-grid { grid-template-columns: minmax(0, 1fr); }
+     right edge 729. THE RULE ITSELF MOVED UP to the 899 block above (W13-S4):
+     the two-column grid clips all the way to 899, and this block cannot be
+     raised wholesale without dragging GR116's topbar tighten with it. */
   /* .attention-row's tablet stack lives NEXT TO ITS BASE in the attention-card
      section now (GR109): authored here, it sat ~700 lines BEFORE the base rule,
      whose later align-items:center silently killed the flex-start half at equal
@@ -2120,11 +2167,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .site-row--global { flex-direction: column; align-items: stretch; }
   .toast-stack { left: 12px; right: 12px; bottom: 12px; max-width: none; }
   .crumbs { display: none; }
-  /* Stack the detail header (title above badges + Retry/Remove) so the actions
-     don't wrap awkwardly or clip on phones. */
-  .detail-head { flex-direction: column; align-items: stretch; }
-  .detail-head .fleet-badges { justify-content: flex-start; }
-  .detail-actions { margin-left: 0; }
+  /* The .detail-head stack that lived here moved UP to the 899 block (W13-S4):
+     it is a detail-route rule, and the routes break at 899, not at 720. */
 }
 
 /* ---------- Activity (audit trail) ----------

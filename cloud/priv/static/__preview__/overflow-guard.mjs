@@ -45,6 +45,19 @@
 //        is not the fallback (the reserved track measures 0px even in a
 //        CLASSIC-scrollbar run). The cue is asserted to appear ONLY while
 //        clipped: at 1440 the matrix fits and the fade must read 0px.
+//    W13-detail-route-band          THE ROUTES, which every case above is
+//        blind to: GR108 sweeps the 721-1440 band but drives only
+//        billing-past-due / overview-past-due, and W12 only mixed-fleet
+//        #overview and notif-configured#notifications — so no instrument in
+//        this epic had ever driven a DETAIL route at any width. Driven on
+//        origin/main bytes, five detail routes plus #fleet scrolled the page
+//        sideways at 769-899 (panel-overview scrollWidth pinned 837 against a
+//        769 viewport, rollback 838, site-states 861): 56 of 286 cells. This
+//        leg drives instance-detail / inst-timeline / inst-metrics /
+//        site-rollback / site-states / #fleet across 721-1024 in both themes
+//        and asserts BOTH that the page does not scroll AND that the route
+//        asked for is the route that rendered — the second half is not
+//        ceremony, see the routing trap below.
 //    GR115-bpconsole-dead-rule      at 700x800 .bp-console-body must compute
 //        the authored 40vh cap (320px) and the 13px legibility floor, same
 //        for .bp-console-toggle (pre-fix: 260px/12px/12px — the later base
@@ -63,6 +76,13 @@
 //  (b) Network.setCacheDisabled — Chrome memory-caches app.css across
 //      same-URL navigations; without this a mutation phase measures the
 //      ORIGINAL stylesheet and reports a false "did not flip".
+//  (d) A ROUTE IS NOT A QUERY STRING (W13). `?scen=rollback` alone renders
+//      #overview: scenarios.mjs's deepLink is consumed by the CALLER
+//      (smoke.mjs:372, shoot.sh:118), never applied by mock.js. A sweep that
+//      omits the hash prints a full, plausible table in which every "detail
+//      route" is the overview screen. W13 appends the hash itself and asserts
+//      the visible section.view id (plus the active .inst-tab, because the
+//      three instance routes share one section) in EVERY cell.
 //  (c) The GR115 fixture is injected by SELECTOR-built DOM, and mutations to
 //      app.css (in the proofs) are selector-anchored — .new-console-body and
 //      .bp-console-body are byte-identical declaration blocks, so a plain
@@ -118,7 +138,43 @@ const DEFECTS = [
   "GR109-attention-row-dead-rule",
   "GR115-bpconsole-dead-rule",
   "W12-narrow-viewport-truth",
+  "W13-detail-route-band",
 ];
+
+// W13-S4: the tablet band NOTHING in this file had ever driven a DETAIL ROUTE
+// at. 769 and 899 are the two edges of the band; 900 and 1024 are the controls
+// above it; 721/768 are below it and prove the fix did not disturb the phone
+// and small-tablet shapes GR65/GR116 own.
+const BAND_WIDTHS = [721, 768, 769, 790, 830, 860, 899, 900, 1024];
+
+// The six routes. `view` is the section.view that MUST be visible: `?scen=` on
+// its own does NOT route (deepLink is applied by the CALLER — smoke.mjs:372,
+// shoot.sh:118 — never by mock.js), so a sweep without the hash renders
+// #overview six times and prints a plausible, entirely phantom table. The hash
+// is appended here AND the landed view is asserted per cell. `tab` additionally
+// pins WHICH instance sub-tab landed, because all three instance routes share
+// the single #view-instance section.
+const INST = "5b2c1e00-0000-4000-8000-0000000000a1";
+const SITE = "5b2c1e00-0000-4000-8000-0000000000c1";
+const BAND_ROUTES = [
+  { name: "instance-detail", scen: "panel-overview", hash: `#instance/${INST}`, view: "view-instance", tab: "Overview", ready: ".detail-grid--instance" },
+  { name: "inst-timeline", scen: "timeline", hash: `#instance/${INST}/timeline`, view: "view-instance", tab: "Timeline", ready: "#instance-tabpanel" },
+  { name: "inst-metrics", scen: "metrics", hash: `#instance/${INST}/metrics`, view: "view-instance", tab: "Metrics", ready: "#instance-tabpanel" },
+  { name: "site-rollback", scen: "rollback", hash: `#site/${SITE}`, view: "view-site", tab: null, ready: ".detail-grid" },
+  { name: "site-states", scen: "site-states", hash: `#site/${SITE}`, view: "view-site", tab: null, ready: ".detail-grid" },
+  { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet", tab: null, ready: ".fleet-row" },
+];
+
+// THE ONE CELL THIS LEG DOES NOT CLAIM, named out loud rather than skipped.
+// #fleet still scrolls at 769-785 and the detail-band split does not touch it:
+// the overhang is `.fleet-row`'s min-content (measured 533 against a 487px
+// container at 769), whose remedy — `flex-direction: column` — lives in the 768
+// block and is NOT this slice's to move (moving it would drag GR116's topbar
+// tighten's neighbourhood into the tablet band unasserted). Measured 21px on
+// mixed-fleet at 769 in both themes, pre- AND post-fix. Filed as
+// cch-w13-fleet-row-band-769-785. The assertion below is <=, so it reds if the
+// row ever gets WIDER, and stays green the day someone stacks it.
+const FLEET_ROW_RESIDUAL = { widths: [769], max: 21, task: "cch-w13-fleet-row-band-769-785" };
 
 // The sweep envelope. 769/775/780/785 are ABOVE the breakpoint on purpose —
 // see the header: a sweep capped at 768 cannot fail on this defect class.
@@ -679,6 +735,70 @@ async function main() {
         if (wide.rest.sw > wide.rest.cw) fail(D, `notif-configured/${theme}@1440: matrix still clipped (${wide.rest.sw}/${wide.rest.cw}) — control invalid`);
         else if (px(wide.rest.fade) > 0.5) fail(D, `notif-configured/${theme}@1440: edge fade ${wide.rest.fade} with nothing hidden — the cue fires when it should not`);
         else okLine(`notif-configured/${theme}@1440: nothing hidden, fade ${wide.rest.fade} — the cue is scoped to the clipped state`);
+      }
+    }
+    // ── W13: the detail routes stop scrolling sideways in the tablet band ──
+    //    Five detail routes plus #fleet, 9 widths x 2 themes = 108 cells. Every
+    //    cell asserts TWO things: the page does not scroll horizontally, and the
+    //    route that was asked for is the route that rendered.
+    if (requested.includes("W13-detail-route-band")) {
+      const D = "W13-detail-route-band";
+      process.stdout.write(
+        `\n${D} — ${BAND_ROUTES.length} routes x ${BAND_WIDTHS.length} widths x 2 themes` +
+        ` (${BAND_ROUTES.length * BAND_WIDTHS.length * 2} cells)\n`,
+      );
+      let cells = 0, offenders = 0, misrouted = 0;
+      for (const r of BAND_ROUTES) {
+        for (const theme of ["light", "dark"]) {
+          // Enter at 900 — ABOVE the band — so a route that only renders at one
+          // width cannot be mistaken for a route that renders everywhere.
+          await setViewport(900);
+          await nav(
+            `${BASE}/?scen=${r.scen}&theme=${theme}${r.hash}`,
+            `document.querySelector('${r.ready}') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='${r.view}';})()`,
+          );
+          const row = [];
+          for (const width of BAND_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){var d=document.documentElement;` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var t=document.querySelector('.inst-tab[aria-current="page"]');` +
+              `return {sw:d.scrollWidth, cw:d.clientWidth, view:v?v.id:'none',` +
+              ` tab:t?t.textContent:null, theme:d.getAttribute('data-theme')};})()`,
+            );
+            cells++;
+            // (1) THE ROUTE. Without this the whole table is phantom.
+            if (m.view !== r.view) {
+              misrouted++;
+              fail(D, `${r.name}/${theme}@${width}: rendered section.view "${m.view}", asked for "${r.view}" — the hash did not route, so nothing below this line measures ${r.name}`);
+            } else if (r.tab && m.tab !== r.tab) {
+              misrouted++;
+              fail(D, `${r.name}/${theme}@${width}: #view-instance is up but the active sub-tab is "${m.tab}", expected "${r.tab}" — a sibling instance route was measured`);
+            }
+            if (m.theme !== theme) fail(D, `${r.name}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // (2) THE PIXELS.
+            const over = m.sw - m.cw;
+            const residual =
+              r.name === "fleet" && FLEET_ROW_RESIDUAL.widths.includes(width);
+            if (over > 0 && !residual) {
+              offenders++;
+              fail(D, `${r.name}/${theme}@${width}: scrollWidth ${m.sw} > viewport ${m.cw} — ${over}px of the page is off-screen at rest, with no cue`);
+            } else if (residual && over > FLEET_ROW_RESIDUAL.max) {
+              offenders++;
+              fail(D, `${r.name}/${theme}@${width}: known .fleet-row residual GREW — ${over}px overhang, was ${FLEET_ROW_RESIDUAL.max}px (${FLEET_ROW_RESIDUAL.task})`);
+            }
+            row.push(`${width}:${m.sw}${over > 0 ? (residual ? "~" : "!") : ""}`);
+          }
+          process.stdout.write(`   ${r.name}/${theme}  ${row.join(" ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells - 2} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
+          ` (769/899 are the band edges, 900/1024 the controls above it); ${misrouted} misrouted;` +
+          ` the 2 marked ~ are #fleet@769's ${FLEET_ROW_RESIDUAL.max}px .fleet-row residual, NOT claimed by this slice (${FLEET_ROW_RESIDUAL.task})`,
+        );
       }
     }
   } catch (err) {
