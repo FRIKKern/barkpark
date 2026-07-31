@@ -188,6 +188,91 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
     end
   end
 
+  ## git-ref clone lane — the claim-envelope clone source.
+  ##
+  ## An artifact-less deployment on a repo-backed site (a webhook push, a branch
+  ## preview, a `bp deploy --git-ref`) carries `source` %{kind, url, ref} as a
+  ## SIBLING of `deployment` in the claim 200 — the builder's clone recipe.
+  ## TENANCY: that key rides ONLY this worker-gated envelope; deployment_json/1
+  ## feeds tenant-facing reads and must never carry it.
+
+  describe "POST /v1/builder/claim — git clone source envelope" do
+    test "repo-backed artifact-less claim carries source %{kind, url, ref} beside deployment" do
+      {_user, team} = user_team()
+      site = site_fixture(team)
+      {:ok, site} = Registry.set_site_github(site, "owner/repo", "main", "hook-secret")
+
+      sha = String.duplicate("ab", 20)
+      {:ok, dep} = Registry.create_deployment(site, %{git_ref: sha, artifact_url: nil})
+
+      conn = call(:post, "/v1/builder/claim", %{worker_id: "clone-w"}, @worker_token)
+      assert conn.status == 200
+
+      body = json_body(conn)
+      assert body["deployment"]["id"] == dep.id
+
+      # The clone source is a SIBLING of deployment, not a field inside it —
+      # deployment_json's own "source" stays the build-provenance string.
+      assert body["source"] == %{
+               "kind" => "git",
+               "url" => "https://github.com/owner/repo.git",
+               "ref" => sha
+             }
+    end
+
+    test "artifact-backed claim on a repo-backed site has NO clone source (nothing to clone)" do
+      {_user, team} = user_team()
+      site = site_fixture(team)
+      {:ok, site} = Registry.set_site_github(site, "owner/repo", "main", "hook-secret")
+
+      {:ok, _dep} =
+        Registry.create_deployment(site, %{
+          git_ref: "v1",
+          artifact_url: "https://artifacts.example.com/site.tar.gz"
+        })
+
+      conn = call(:post, "/v1/builder/claim", %{worker_id: "artifact-w"}, @worker_token)
+      assert conn.status == 200
+      refute Map.has_key?(json_body(conn), "source")
+    end
+
+    test "artifact-less claim on a site WITHOUT a linked repo has no clone source" do
+      {_user, team} = user_team()
+      site = site_fixture(team)
+      {:ok, _dep} = Registry.create_deployment(site, %{git_ref: "no-repo-ref"})
+
+      conn = call(:post, "/v1/builder/claim", %{worker_id: "norepo-w"}, @worker_token)
+      assert conn.status == 200
+      refute Map.has_key?(json_body(conn), "source")
+    end
+
+    test "TENANCY: tenant deployment reads never carry the clone source" do
+      {user, team} = user_team()
+      site = site_fixture(team)
+      {:ok, site} = Registry.set_site_github(site, "owner/repo", "main", "hook-secret")
+
+      sha = String.duplicate("cd", 20)
+      {:ok, dep} = Registry.create_deployment(site, %{git_ref: sha, artifact_url: nil})
+      token = login_token(user)
+
+      # The list read: no top-level source, and the deployment's own "source"
+      # field (build provenance) is not the clone map.
+      list = call(:get, "/v1/sites/#{site.id}/deployments", nil, token)
+      assert list.status == 200
+      refute Map.has_key?(json_body(list), "source")
+      [dep_json] = json_body(list)["deployments"]
+      assert dep_json["id"] == dep.id
+      refute is_map(dep_json["source"])
+      refute list.resp_body =~ "github.com/owner/repo.git"
+
+      # The single stage-aware read (site_deployment_json) is clean too.
+      get = call(:get, "/v1/sites/#{site.id}/deployments/#{dep.id}", nil, token)
+      assert get.status == 200
+      refute is_map(json_body(get)["deployment"]["source"])
+      refute get.resp_body =~ "github.com/owner/repo.git"
+    end
+  end
+
   ## Cross-tenant closure (dwb-builder-cross-tenant-auth) — the security fix.
   ##
   ## claim_next_deployment/1 selects the oldest queued row FLEET-WIDE with no
