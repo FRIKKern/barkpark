@@ -600,6 +600,53 @@ defmodule Barkpark.PortableDoc.Render.WalkTest do
     end
   end
 
+  describe "render_body/3 — PdParagraph (Reader-Owned Spacing Doctrine)" do
+    # /papers/mechanical-spacing-doctrine (flipped 2026-07-31): published
+    # readers emit only visible semantic groups — an empty PdParagraph scaffold
+    # (Enter, Enter) renders NOTHING, never `<p></p>`. Compose keeps the
+    # scaffold in the Pd-tree (invariant 1); the walker skips it (invariant 2).
+    test "an exact empty paragraph (children []) renders NOTHING — no element at all" do
+      assert Walk.render_body(%{"kind" => "PdParagraph", "children" => []}, @width, @article) ==
+               ""
+
+      assert Walk.render_body(%{"kind" => "PdParagraph"}, @width, @article) == ""
+    end
+
+    test "a whitespace-only paragraph is scaffold, not layout — renders NOTHING" do
+      node = %{"kind" => "PdParagraph", "children" => ["   ", " \n\t "]}
+      assert Walk.render_body(node, @width, @article) == ""
+    end
+
+    test "the skip is style-independent: email emits no empty <p> either" do
+      assert Walk.render_body(%{"kind" => "PdParagraph", "children" => []}, @width, @email) == ""
+    end
+
+    test "suppression is exact and narrow (invariant 4): any composed inline node keeps its <p>" do
+      # A PdText wrapper (a marked run) is authored content, even around blanks.
+      marked = %{
+        "kind" => "PdParagraph",
+        "children" => [%{"kind" => "PdText", "weight" => "bold", "children" => [" "]}]
+      }
+
+      assert Walk.render_body(marked, @width, @article) =~ "<p"
+
+      # Non-empty prose stays byte-faithful.
+      prose = %{"kind" => "PdParagraph", "children" => ["Store meaning; render rhythm."]}
+      assert Walk.render_body(prose, @width, @article) == "<p>Store meaning; render rhythm.</p>"
+    end
+
+    test "skipped scaffolds contribute nothing between the remaining blocks (invariant 3)" do
+      blocks = [
+        %{"kind" => "PdParagraph", "children" => ["One."]},
+        %{"kind" => "PdParagraph", "children" => []},
+        %{"kind" => "PdParagraph", "children" => ["Two."]}
+      ]
+
+      html = blocks |> Enum.map(&Walk.render_body(&1, @width, @article)) |> Enum.join("")
+      assert html == "<p>One.</p><p>Two.</p>"
+    end
+  end
+
   describe "render_body/3 — unhandled kind degrades" do
     # PROCESS RULE: this test used to assert the old `raise ArgumentError` crash
     # contract. A schemaless paper can persist a Pd-node kind the walker has no

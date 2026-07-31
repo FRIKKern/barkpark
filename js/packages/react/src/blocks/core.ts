@@ -467,7 +467,38 @@ const byline: Emit = (b) => {
 
 const ingress: Emit = (b) => `<p class="bp-role-ingress">${renderInlines(paragraphInline(b))}</p>`
 
-const paragraph: Emit = (b) => `<p>${renderInlines(paragraphInline(b))}</p>`
+// Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
+// 2026-07-31): published readers emit only visible semantic groups — an empty
+// paragraph scaffold (Enter, Enter) is editable authoring state, NEVER published
+// layout, so it renders NOTHING (no element at all), not an empty `<p>`.
+// Suppression is exact and narrow (doctrine invariant 4): only a paragraph whose
+// inline run is nothing but whitespace text vanishes — any authored non-text
+// inline (link/code/tag/valueref/…) or marked run keeps its `<p>` byte-faithful.
+// Cadence between the REMAINING blocks stays reader-owned CSS margins (invariant
+// 3 — `renderBlocks` joins emitted strings, never spacing by raw array index).
+// The Elixir twin is walk.ex `paragraph/3`; legacy cached `<p></p>` HTML is
+// belt-and-braces suppressed by `.bp-paper-surface p:empty` in paper-surface.css.
+function isBlankParagraphRun(nodes: unknown): boolean {
+  if (typeof nodes === 'string') return nodes.trim() === ''
+  if (!Array.isArray(nodes)) return false
+  return nodes.every(isBlankParagraphNode)
+}
+
+function isBlankParagraphNode(n: unknown): boolean {
+  if (typeof n === 'string') return n.trim() === ''
+  if (typeof n === 'number') return false // renders its digits
+  if (Array.isArray(n)) return isBlankParagraphRun(n) // shallow-flattened shape
+  if (!isMap(n)) return true // null/bool — renderInline emits '' for these
+  // Only an UNMARKED whitespace text leaf counts as scaffold; every other node
+  // type (and any marked run) is authored content and keeps the paragraph.
+  return str(n.type) === 'text' && asList(n.marks).length === 0 && str(n.value).trim() === ''
+}
+
+const paragraph: Emit = (b) => {
+  const inline = paragraphInline(b)
+  if (isBlankParagraphRun(inline)) return ''
+  return `<p>${renderInlines(inline)}</p>`
+}
 
 // Pullquote is a PdParagraph with _role pullquote + italic:true → the role class
 // plus the inline italic author mark (walk.ex paragraph/3).
