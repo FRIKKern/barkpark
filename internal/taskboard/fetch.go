@@ -138,16 +138,42 @@ func decodeTaskList(body []byte) ([]Task, error) {
 // decodeTaskListFull is the one-pass dual decode: each render_doc envelope
 // becomes both its board Task and its TaskDetail reading model, keyed by
 // doc_id. One json.Unmarshal of the body, one walk of the docs.
+//
+// ENVELOPE FENCE (epic law: no verb reports success on an exit code alone). A
+// VALUE-typed `Docs []taskWire` decodes `null`, `{}`, `{"error":…}` and
+// `{"ok":false,"error":{…}}` to zero rows with a NIL error — a plausible,
+// silent, EMPTY BOARD for a 200 that said nothing. The POINTER field below
+// distinguishes "key absent/null" from `{"docs":[]}` (a legitimate empty
+// board, which stays err=nil) inside the SAME single Unmarshal — no second
+// pass. `[]`, zero bytes and HTML already fail the Unmarshal itself, so this
+// fence covers strictly the well-formed-JSON-object-without-the-key class.
+//
+// This does NOT cross detail_data.go's 'Tolerance contract (frozen wave-5)':
+// that contract is FIELD-scoped (one odd task's content must never break the
+// whole list decode) and remains untouched — every per-doc field stays as
+// permissive as it was. What is fenced here is the ENVELOPE, one level above
+// it: whether the server answered with a task list at all.
+//
+// The error text carries "decode", which snapshotErrorLabel already maps to
+// "invalid snapshot" on the existing ConnOffline+ConnProblem channel
+// (live.go) — the refusal reuses the honest transport path, inventing nothing.
 func decodeTaskListFull(body []byte) ([]Task, DetailIndex, error) {
 	var env struct {
-		Docs []taskWire `json:"docs"`
+		Docs *[]taskWire `json:"docs"`
 	}
 	if err := json.Unmarshal(body, &env); err != nil {
 		return nil, nil, fmt.Errorf("decode tasks list: %w", err)
 	}
-	tasks := make([]Task, 0, len(env.Docs))
-	details := make(DetailIndex, len(env.Docs))
-	for _, w := range env.Docs {
+	// Nil check STRICTLY before any deref: a reordering here turns the silent
+	// lie into a nil-pointer panic, which is worse. TestDecodeEnvelopeFence
+	// covers every poison, so a reorder fails the suite rather than shipping.
+	if env.Docs == nil {
+		return nil, nil, fmt.Errorf("decode tasks list: response carried no %q key%s", "docs", bodyHint(body))
+	}
+	docs := *env.Docs
+	tasks := make([]Task, 0, len(docs))
+	details := make(DetailIndex, len(docs))
+	for _, w := range docs {
 		t := w.toTask()
 		tasks = append(tasks, t)
 		details[t.DocID] = w.toDetail(t)
@@ -171,10 +197,20 @@ type primeExtras struct {
 // decodePrime pulls the counts, recent events and ready-queue ids out of a
 // prime body. The ready entries are full render_docs on the wire; only their
 // doc_id matters here — the authoritative task rows come from the list fetch.
+//
+// ENVELOPE FENCE, same law as decodeTaskListFull. The prime predicate is
+// deliberately NOT "counts is present": the controller branches on view, and
+// counts is one key in one shape of the envelope, so keying on it alone would
+// red a future brief view that legitimately omits it. The predicate is
+// therefore `counts` present OR `ok` asserted TRUE — which still refuses all
+// four poisons, because `{"ok":false,"error":{…}}` asserts the opposite and
+// `null`/`{}`/`{"error":…}` assert nothing. `{"ok":true,"counts":{}}` and a
+// counts-bearing body both pass. Field-level tolerance below is unchanged.
 func decodePrime(body []byte) (primeExtras, error) {
 	var env struct {
-		Counts       map[string]int `json:"counts"`
-		RecentEvents []eventWire    `json:"recent_events"`
+		OK           *bool           `json:"ok"`
+		Counts       *map[string]int `json:"counts"`
+		RecentEvents []eventWire     `json:"recent_events"`
 		Ready        []struct {
 			DocID string `json:"doc_id"`
 		} `json:"ready"`
@@ -182,8 +218,16 @@ func decodePrime(body []byte) (primeExtras, error) {
 	if err := json.Unmarshal(body, &env); err != nil {
 		return primeExtras{}, fmt.Errorf("decode prime: %w", err)
 	}
+	// Nil check STRICTLY before the deref below — see decodeTaskListFull.
+	if env.Counts == nil && (env.OK == nil || !*env.OK) {
+		return primeExtras{}, fmt.Errorf("decode prime: response carried neither %q nor an affirmative %q%s", "counts", "ok", bodyHint(body))
+	}
+	counts := map[string]int(nil)
+	if env.Counts != nil {
+		counts = *env.Counts
+	}
 	extras := primeExtras{
-		counts:     env.Counts,
+		counts:     counts,
 		events:     make([]Event, 0, len(env.RecentEvents)),
 		readyIDs:   make(map[string]bool, len(env.Ready)),
 		readyCount: len(env.Ready),

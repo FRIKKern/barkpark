@@ -528,3 +528,87 @@ func TestCoercePriority(t *testing.T) {
 		}
 	}
 }
+
+// TestDecodeEnvelopeFence — the board must not render a plausible EMPTY BOARD
+// for a 200 that said nothing. A well-formed JSON object WITHOUT the envelope
+// key (or with `ok:false`) used to decode to zero rows with a nil error, which
+// is indistinguishable from a genuinely empty board; it must now be a named
+// decode error. The legitimate-empty cases are pinned in the SAME table so the
+// fence can never be tightened into refusing a real empty board.
+//
+// This is envelope-scoped and does NOT cross detail_data.go's field-scoped
+// 'Tolerance contract (frozen wave-5)' — see TestDecodeAcceptanceCriteria_
+// AbsentAndMalformed above, which still proves per-doc tolerance is intact.
+//
+// ORDERING HAZARD: this table is also the guard on nil-check-before-deref. If
+// the deref is hoisted above the nil check, every poison row panics here
+// instead of returning an error, so a reorder fails the suite.
+func TestDecodeEnvelopeFence(t *testing.T) {
+	cases := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{"null body", `null`, true},
+		{"empty object", `{}`, true},
+		{"bare error envelope", `{"error":"barkpark_not_found","detail":"no such dataset"}`, true},
+		{"ok false error envelope", `{"ok":false,"error":{"code":"forbidden"}}`, true},
+		{"docs null", `{"ok":true,"docs":null}`, true},
+		{"legitimate empty board", `{"docs":[]}`, false},
+		{"legitimate populated board", `{"ok":true,"docs":[{"doc_id":"x"}]}`, false},
+	}
+	for _, tc := range cases {
+		t.Run("list/"+tc.name, func(t *testing.T) {
+			tasks, details, err := decodeTaskListFull([]byte(tc.body))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("decodeTaskListFull(%s) = %d rows, nil error — a silent empty board", tc.body, len(tasks))
+				}
+				if got := snapshotErrorLabel(err); got != "invalid snapshot" {
+					t.Errorf("snapshotErrorLabel(%v) = %q, want %q — the refusal must ride the existing ConnProblem channel", err, got, "invalid snapshot")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodeTaskListFull(%s) errored on a legitimate body: %v", tc.body, err)
+			}
+			if tasks == nil || details == nil {
+				t.Fatalf("decodeTaskListFull(%s) = (%v, %v), want non-nil empties", tc.body, tasks, details)
+			}
+		})
+	}
+
+	primeCases := []struct {
+		name    string
+		body    string
+		wantErr bool
+	}{
+		{"null body", `null`, true},
+		{"empty object", `{}`, true},
+		{"bare error envelope", `{"error":"barkpark_not_found"}`, true},
+		{"ok false error envelope", `{"ok":false,"error":{"code":"forbidden"}}`, true},
+		{"counts null and no ok", `{"counts":null}`, true},
+		// A brief view may legitimately omit counts; an affirmative ok is
+		// enough of an envelope to trust.
+		{"ok true without counts", `{"ok":true,"recent_events":[]}`, false},
+		{"counts present empty", `{"counts":{}}`, false},
+		{"counts populated", `{"ok":true,"counts":{"open":2}}`, false},
+	}
+	for _, tc := range primeCases {
+		t.Run("prime/"+tc.name, func(t *testing.T) {
+			extras, err := decodePrime([]byte(tc.body))
+			if tc.wantErr {
+				if err == nil {
+					t.Fatalf("decodePrime(%s) = %+v, nil error — a silent empty prime", tc.body, extras)
+				}
+				if got := snapshotErrorLabel(err); got != "invalid snapshot" {
+					t.Errorf("snapshotErrorLabel(%v) = %q, want %q", err, got, "invalid snapshot")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("decodePrime(%s) errored on a legitimate body: %v", tc.body, err)
+			}
+		})
+	}
+}
