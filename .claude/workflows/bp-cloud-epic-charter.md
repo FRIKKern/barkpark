@@ -1,9 +1,10 @@
 # jarl.no Historiene (epic-cycle charter slot)
 
 > NOTE ON THIS PATH: this filename is the rotating epic-cycle charter SLOT and has carried
-> earlier epics. The prior occupant — **CLI-Reliability** — is preserved in full at
-> `.claude/workflows/bp-cli-reliability-charter.md`; do NOT read this file for CLI-Reliability
-> history. This slot is now the memory of the **jarl.no Historiene** epic (Epic 6).
+> earlier epics. The prior occupant — **jarl.no Dogfood Publishing** — is preserved in full
+> at `.claude/workflows/bp-jarl-dogfood-publishing-charter.md`; before it, **CLI-Reliability**
+> is preserved at `.claude/workflows/bp-cli-reliability-charter.md`; do NOT read this file
+> for their history. This slot is now the memory of the **jarl.no Historiene** epic (Epic 6).
 >
 > CONCURRENT-SLOT NOTICE (2026-07-31 01:23Z, measured in the shared checkout): a sibling
 > epic — **jarl.no Dogfood Publishing** (task `jarl-dogfood-publishing-epic`, paper
@@ -11,6 +12,9 @@
 > work while this wave's Decide ran, and will open its own PR. Whichever PR merges second
 > must, on conflict, preserve the earlier occupant verbatim at a dedicated
 > `bp-<epic>-charter.md` path per slot convention. Cross-epic seams are pinned in D16.
+> RESOLVED (2026-07-31, merge of origin/main into this PR): the Dogfood PR (#8313) merged
+> first and occupied this slot; per the rule above its charter is preserved verbatim at
+> `.claude/workflows/bp-jarl-dogfood-publishing-charter.md` and this slot carries Historiene.
 >
 > Epic anchor: bp task **`jarl-historiene-epic`** (guerrilla ledger).
 > Wave 1 paper: **`jarl-historiene-wave-2026-07-31`** (style=article).

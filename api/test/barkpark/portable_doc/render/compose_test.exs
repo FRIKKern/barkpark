@@ -409,6 +409,16 @@ defmodule Barkpark.PortableDoc.Render.ComposeTest do
       # View↔Edit / cross-form parity: the two authoring shapes render identically.
       assert text_html == content_html
     end
+
+    test "render_blocks: an empty scaffold stays authorable but emits no reader HTML" do
+      block = %{"id" => "tpl-body", "type" => "paragraph", "content" => []}
+
+      assert Compose.compose_block(block, :article) ==
+               %{"kind" => "PdParagraph", "children" => []}
+
+      assert Render.render_blocks([block], %{style: :article}) == ""
+      assert Render.render_blocks([block], %{style: :email}) == ""
+    end
   end
 
   # A schemaless paper can carry a block type this engine has no clause for, a

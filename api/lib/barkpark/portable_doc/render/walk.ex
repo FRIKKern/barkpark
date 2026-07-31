@@ -300,6 +300,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     "<span#{class_attr}#{style_attr}>#{inner}</span>"
   end
 
+  # Empty PdParagraph is an EDITOR scaffold, not reader content. Compose keeps
+  # the node byte-faithful so a fresh document remains authorable; every reader
+  # that reaches the walker emits zero markup for it. Section rhythm belongs to
+  # the shared reader stylesheet rather than stored `<p></p>` nodes.
+  defp paragraph(%{"children" => []}, _width, _pal), do: ""
+
   # Article-mode paragraph — same role-aware styling as PdText, but emits a
   # semantic `<p>` instead of `<span>`. The editor's
   # `.bp-paper-surface p { margin: 12pt 0 0; hyphens: auto }` rule
@@ -310,9 +316,39 @@ defmodule Barkpark.PortableDoc.Render.Walk do
   # body typography (font-size 18px, line-height 1.70, margin rhythm)
   # actually applies. Email/default mode keeps PdText (`<span>`) for
   # byte-stable export.
+  # Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
+  # 2026-07-31): published readers emit only visible semantic groups — an empty
+  # PdParagraph scaffold (Enter, Enter) stays editable in the Pd-tree (compose
+  # keeps it, doctrine invariant 1) but renders NOTHING here (no element at all),
+  # never an empty `<p>` (invariant 2). Suppression is exact and narrow
+  # (invariant 4): only a children list that is nothing but whitespace strings
+  # vanishes — any composed inline node (PdText/PdLink/PdInlineCode/…, i.e. any
+  # marked or non-text run) keeps its `<p>` byte-faithful. Cadence between the
+  # remaining blocks stays reader-owned CSS margins (invariant 3). The JS twin is
+  # blocks/core.ts `paragraph`; legacy cached `<p></p>` HTML is belt-and-braces
+  # suppressed by `.bp-paper-surface p:empty` in paper-surface.css.
   defp paragraph(n, width, pal) do
+    children = Map.get(n, "children", [])
+
+    if blank_paragraph_children?(children) do
+      ""
+    else
+      paragraph_html(n, children, width, pal)
+    end
+  end
+
+  defp blank_paragraph_children?(children) when is_list(children) do
+    Enum.all?(children, fn
+      k when is_binary(k) -> String.trim(k) == ""
+      _ -> false
+    end)
+  end
+
+  defp blank_paragraph_children?(_), do: false
+
+  defp paragraph_html(n, children, width, pal) do
     inner =
-      Map.get(n, "children", [])
+      children
       |> Enum.map(fn
         k when is_binary(k) -> escape_html(k)
         k -> walk(k, width, pal)

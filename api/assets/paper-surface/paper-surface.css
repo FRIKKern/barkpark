@@ -155,6 +155,14 @@ html[data-theme="dark"] .bp-paper-body {
 .bp-paper-surface h2 { font-size: var(--bp-h2-size); line-height: var(--bp-h2-lh);  margin: 1.9em 0 0; }
 .bp-paper-surface h3 { font-size: var(--bp-h3-size); line-height: var(--bp-h3-lh); margin: 1.5em 0 0; }
 .bp-paper-surface p  { margin: var(--bp-para-margin-top) 0 0; hyphens: auto; }
+/* Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
+   2026-07-31): an exact empty paragraph is never published layout. The engines
+   (walk.ex paragraph/3, blocks/core.ts paragraph) no longer emit `<p></p>` at
+   all; this rule is belt-and-braces for LEGACY CACHED HTML that still carries
+   the scaffold — it must not paint a blank paragraph-height row. View-only by
+   selector: `.bp-paper-editor-body` is untouched, so the editable scaffold
+   stays visible while composing (doctrine invariant 1). */
+.bp-paper-surface p:empty { display: none; }
 .bp-paper-surface a  {
   color: var(--paper-accent); text-decoration: none;
   border-bottom: 1px solid var(--paper-accent-soft);
