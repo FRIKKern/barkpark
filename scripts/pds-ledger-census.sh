@@ -97,6 +97,40 @@
 #   (c) a LIVE `parked` row with no STRUCTURED `reopen_trigger` — a park with
 #       no machine-evaluable way back out is a park nobody will ever revisit.
 #
+# CLAUSE 6 — THE CLAIMABLE-AND-CLOSED CONTRADICTION (wave 27, PDS-D372/D373).
+# Clause 4 asks whether a live row SAYS anything. It never asks whether what the
+# row says AGREES with what the queue does with it. Measured on the live board
+# 2026-07-31: THIRTEEN closure rows are simultaneously lifecycle-claimable and
+# disposition-`closed`. Clause 4(a) counts every one of them in its numerator as
+# SATISFIED — they carry a disposition — while `bp task ready` hands them to a
+# worker, because `queue.ex` does not read `disposition` at all
+# (`git show origin/main:api/lib/barkpark/tasks/queue.ex | grep -c disposition`
+# -> 0). No instrument anywhere looks at the pair, so the row is adjudicated
+# closed on one axis and dispatched as work on the other. That is not a missing
+# field; it is two organs of the same system reporting opposite truths, which is
+# exactly the lie class this epic exists to kill.
+#
+# CLOSED-ONLY, AND THAT IS RULED (PDS-D372). The clause fires on `closed` and on
+# nothing else. Extending it to `parked` was measured and is REFUSED ON THE
+# RECORD: it fails 7 of 80 selftest checks, and the FIRST failure is the CONTROL
+# — build_healthy's `kid-c` is `blocked parked`, inherited by all 34 fixture
+# dirs — and it reds SHAREDTRIG, the fixture that exists specifically so no
+# future wave can quietly tighten clause 4 (PDS-D336(a)). Live, all 29 parked
+# closure rows carry a STRUCTURED reopen_trigger. A live park awaiting its
+# trigger is not a contradiction; it is a park, and clause 4(c) already owns it.
+#
+# THE VOCABULARY IS THE GUARD (PDS-D373). The match is against the NORMALISED
+# vocabulary and is CASE-EXACT, exactly like every other disposition read here:
+# an unrecognised disposition is treated as LIVE and is clause 3's business, not
+# this clause's. Store-wide there are 41 off-vocabulary values, 26 of them `tgw*`
+# rows carrying the literal prose `open — demoted child of truth-grip-epic
+# (charter D117)`. A rule phrased `disposition IS NOT NULL AND != 'open'` would
+# silently sweep 26 rows out of a NEIGHBOUR EPIC's queue — the same undercount,
+# committed by the instrument that exists to catch it.
+#
+# IT REPORTS A WORKLIST, NEVER A COUNT. `live_contradiction` is a ROW-ID LIST:
+# a count nobody can turn back into rows is not a worklist.
+#
 # (c) READS `reopen_trigger` AND NOTHING ELSE. It deliberately does NOT inherit
 # the REOPEN_TRIGGER_RE prose match used by the display counter below: prose
 # that says "REOPEN: when the cap lifts" inside a reason is DECORATION, not a
@@ -170,6 +204,47 @@
 # split is visible rather than averaged away. `open` is the canonical form and
 # lives in one named constant (CANONICAL_OPEN) — change it there, nowhere else.
 #
+# STDOUT IS THE MACHINE CHANNEL AND NOTHING ELSE (wave 27). `--json` used to
+# dump the report and THEN write the human VERDICT / ROUND-DONE PREDICATE block
+# to the SAME stdout, so `jq -e .` exited 5 ("Invalid numeric literal") — and the
+# GREEN path was poisoned identically: on a healthy fixture the run exited 0 and
+# jq still failed. The certificate was unpipeable exactly when it certified. The
+# whole human block therefore goes to STDERR, beside the failure VERDICT that
+# already did, and the predicate is folded into the payload as `round_done`
+# (bool) + `round_done_failures` (list) so a scripted consumer has a machine
+# path rather than a stream to scrape.
+#
+# THE EMIT IS NEVER DEFERRED. The predicate is a PURE function of `report`
+# (round_done_predicate) computed BEFORE the single emit site, precisely so the
+# emit stays where it is. Computing it after the emit — the obvious refactor —
+# was measured and is a FRESH honesty regression inside the honesty fix: the
+# clause-5 incoherence path (exit 4) runs AFTER the emit and still prints a
+# valid 985-byte payload today, and a deferred emit turns that into rc=4, 0
+# bytes, jq rc=4. A run that fails is exactly when its payload matters most.
+#
+# THE PAGED READ HAS A TOTAL ORDER, AND ONLY ONE SPELLING IS CORRECT. Without an
+# `order` param the query falls through to `desc: d.updated_at` — a MUTATING sort
+# key paged by EXPLICIT offset. A concurrent write teleports its row to index 0
+# and shifts every row between; proven live in six requests (a probe row at index
+# 3 was NEVER SERVED, and offsets 0 and 1 both returned the same row). The
+# duplicate half of that shift exits 4, but the concurrent-DELETE half shifts
+# rows UP and produces no duplicate at all — a silent skip. So every page is
+# requested with `&order=_createdAt:asc` (PAGE_ORDER below): measured immune —
+# 3901 rows, zero `_createdAt` ties, globally sorted across four 1000-row pages,
+# and a probe row held index 3894 across a stage write that put it at index 0
+# under the default order. TWO TRAPS SIT ONE KEYSTROKE AWAY, and both are this
+# epic's own lie class living in a URL param:
+#   (a) `order=doc_id` (no direction) does NOT error. It fails
+#       query_controller.ex's `<field>:(asc|desc)` regex and SILENTLY falls back
+#       to updated_at DESC at HTTP 200. Probed live 2026-07-31: the id sequence
+#       is IDENTICAL to sending no order at all, while a no-order pair taken in
+#       the same interleave is stable — a "fix" spelled this way is a green diff
+#       with zero behaviour change.
+#   (b) `order=doc_id:asc` parses as a CONTENT field and sorts
+#       jsonb_extract_path(content,'doc_id'), which is NULL for every task row.
+#       An all-NULL sort key is an UNSPECIFIED order that can skip and duplicate
+#       with no concurrent write at all — strictly worse than the bug.
+#
 # READ-ONLY. This instrument never writes, never creates, never publishes.
 # Charter PDS-D334 (a bare patch writes the DRAFT and the published route
 # serves the PRE-WRITE value for a variable 5-40s) is therefore not in play,
@@ -242,7 +317,14 @@ DEFAULT_ROOT = "task-2ac1f95237c4a8e5"
 # 27 `parked` template exemplars (PDS-D332) and the `lifecycle_status` idiom,
 # so the round rewrites 67 rows rather than 71.
 CANONICAL_OPEN = "open"
-DISPOSITION_VOCABULARY = (CANONICAL_OPEN, "closed", "parked")
+
+# The disposition that means "adjudicated closed". CLAUSE 6 matches THIS value
+# CASE-EXACT and nothing else: `CLOSED` is off-vocabulary, so it is unrecognised,
+# so it is treated as LIVE and left to clause 3. Treating anything unrecognised
+# as closed is how a rule sweeps a neighbour epic's 26 prose-dispositioned rows
+# out of its own queue (PDS-D373).
+CLOSED_DISPOSITION = "closed"
+DISPOSITION_VOCABULARY = (CANONICAL_OPEN, CLOSED_DISPOSITION, "parked")
 
 # lifecycle_status values that mean the row is finished. Everything else --
 # including `blocked`, which appears only in the closure and never at level 1 --
@@ -263,6 +345,14 @@ PARKED_DISPOSITION = "parked"
 
 # The API's page cap. Asking for more is answered with a silently smaller page.
 DEFAULT_PAGE_LIMIT = 1000
+
+# THE TOTAL ORDER EVERY PAGE IS REQUESTED IN. `_createdAt:asc` is the only
+# correct spelling and it is pinned here, in one constant, so the two traps
+# documented in the header (`order=doc_id`, silently ignored at HTTP 200; and
+# `order=doc_id:asc`, an all-NULL content key) cannot be reached by a typo that
+# nothing would notice. It is reported in the census output and in `--json` as
+# `page_order`, because a paging discipline nobody can read back is a claim.
+PAGE_ORDER = "_createdAt:asc"
 DEFAULT_PACE_SECONDS = 0.15
 DEFAULT_RETRIES = 4
 MAX_PAGES = 200
@@ -384,7 +474,9 @@ class FixtureTransport(object):
 
 
 def fetch_page(transport, dataset, doctype, page_index, offset, limit, pace, retries):
-    query = "limit=%d&offset=%d" % (limit, offset)
+    # The order is NOT optional. Explicit offsets over the server's default
+    # `desc: updated_at` page a MUTATING key and can skip a row with no error.
+    query = "limit=%d&offset=%d&order=%s" % (limit, offset, PAGE_ORDER)
     path = "/v1/data/query/%s/%s" % (dataset, doctype)
     attempt = 0
     while True:
@@ -674,6 +766,15 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
     live_parked = [r for r in live if disposition_of(r).lower() == PARKED_DISPOSITION]
     live_park_no_trigger = sorted(r["_id"] for r in live_parked if not structured_trigger(r))
 
+    # CLAUSE 6 (PDS-D372/D373): the row is CLAIMABLE and it is adjudicated
+    # CLOSED. Clause 4(a) counts it as satisfied and `bp task ready` hands it to
+    # a worker; the two organs disagree and nothing looks. CLOSED-ONLY (a live
+    # park is a park, and clause 4(c) already owns it) and CASE-EXACT against the
+    # normalised vocabulary (an unrecognised disposition is LIVE, and clause 3's
+    # business). A ROW-ID LIST, because a shard consumes the worklist.
+    live_contradiction = sorted(
+        r["_id"] for r in live if disposition_of(r) == CLOSED_DISPOSITION)
+
     off_vocab = Counter()
     off_vocab_samples = defaultdict(list)
     for row in rows:
@@ -720,6 +821,7 @@ def census(corpus, closure, depth_of, started, finished, duplicates, anchor=None
         "live_bare_residue": live_bare_residue,
         "live_adjudicated_no_reason": live_adjudicated_no_reason,
         "live_park_no_trigger": live_park_no_trigger,
+        "live_contradiction": live_contradiction,
         "off_vocabulary": dict(off_vocab),
         "off_vocabulary_samples": {k: v for k, v in off_vocab_samples.items()},
         "off_vocabulary_total": sum(off_vocab.values()),
@@ -749,6 +851,8 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
                    % (report["round_anchor"], report["round_anchor_source"]))
     out.append("  paging      %d page(s) of limit %d -> corpus %d rows  (page sizes: %s)"
                % (len(pages), page_limit, corpus_size, ", ".join(str(p) for p in pages)))
+    out.append("  page order  order=%s   (explicit offsets over a MUTATING key can skip a row silently)"
+               % report["page_order"])
     out.append("  closure     %d descendants over parent_id (lens=%s, max depth %d)"
                % (report["closure_size"], lens, report["max_depth"]))
     out.append("  live        %d  (terminal: %s)" % (report["live"], ", ".join(TERMINAL_LIFECYCLE)))
@@ -783,6 +887,9 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     out.append("  live parked with NO reopen_trigger %5d   (of %d parked)%s"
                % (len(report["live_park_no_trigger"]), report["live_parked"],
                   _eg(report["live_park_no_trigger"])))
+    out.append("  live AND dispositioned `%s`    %5d   (CLAIMABLE and adjudicated shut)%s"
+               % (CLOSED_DISPOSITION, len(report["live_contradiction"]),
+                  _eg(report["live_contradiction"])))
     out.append("")
     out.append("off-vocabulary disposition values (vocabulary: %s)"
                % ", ".join(DISPOSITION_VOCABULARY))
@@ -793,6 +900,113 @@ def render(report, corpus_size, pages, page_limit, source, root, lens):
     else:
         out.append("  (none)")
     return "\n".join(out)
+
+
+def round_done_predicate(report):
+    """THE DONE-CONDITION, AS A PURE FUNCTION OF `report`.
+
+    It returns (human_lines, failures) and prints NOTHING. That is the whole
+    point: it can therefore be called BEFORE the single emit site, so
+    `round_done` / `round_done_failures` ride in the payload while the emit
+    stays exactly where it is.
+
+    DO NOT "simplify" this by computing the verdict after the emit. The
+    clause-5 incoherence path (exit 4) runs after the emit and still prints a
+    valid payload today; a deferred emit turns rc=4 / 985 bytes / jq 0 into
+    rc=4 / 0 bytes / jq 4 -- a fresh honesty regression inside the honesty fix.
+    """
+    lines = []
+    failures = []
+
+    distinct = report["reason_hashes_distinct"]
+    non_empty = report["reasons_non_empty"]
+    off_vocab = report["off_vocabulary_total"]
+    lines.append("")
+    lines.append("ROUND-DONE PREDICATE")
+    lines.append("  distinct reason hashes == non-empty reasons   %d == %d   %s"
+                 % (distinct, non_empty, "PASS" if distinct == non_empty else "FAIL"))
+    if distinct != non_empty:
+        failures.append("%d duplicate reason(s): %d non-empty reasons collapse to %d "
+                        "hashes -- boilerplate is not a reason"
+                        % (non_empty - distinct, non_empty, distinct))
+    lines.append("  non-empty reasons > 0                          %d        %s"
+                 % (non_empty, "PASS" if non_empty > 0 else "FAIL"))
+    if non_empty == 0:
+        failures.append("zero non-empty reasons -- an all-empty board trivially has "
+                        "all-distinct reasons; that is not done, it is unstarted")
+    lines.append("  off-vocabulary dispositions == 0               %d        %s"
+                 % (off_vocab, "PASS" if off_vocab == 0 else "FAIL"))
+    if off_vocab:
+        failures.append("%d row(s) carry a disposition outside {%s} (canonical OPEN "
+                        "case is `%s`)" % (off_vocab, ", ".join(DISPOSITION_VOCABULARY),
+                                           CANONICAL_OPEN))
+
+    # CLAUSE 4 -- the ONLY live-scoped clause. Clauses 1-3 above stay
+    # closure-scoped on purpose: distinctness and vocabulary are properties
+    # of everything ever written. Three sub-lines, each able to say no alone.
+    bare = report["live_bare"]
+    residue = report["live_bare_residue"]
+    no_reason = report["live_adjudicated_no_reason"]
+    no_trigger = report["live_park_no_trigger"]
+    contradiction = report["live_contradiction"]
+    if report["round_anchor"]:
+        lines.append("  round anchor                                  %s   (%s)"
+                     % (report["round_anchor"], report["round_anchor_source"]))
+    # THE NUMERATOR IS LITERAL. `bare` is the ANCHORED subset, so
+    # `live - len(bare)` would count every residue row as carrying a
+    # disposition and print "172/172 PASS" over a board where 15 rows carry
+    # nothing -- a success claim about rows nobody looked at, which is the
+    # exact defect class this epic exists to kill. The residue is subtracted
+    # out and reported on its own line below: the denominator still names the
+    # WHOLE live board, so deferring can never shrink what 4(a) covers.
+    lines.append("  live rows carrying a disposition               %d/%d    %s"
+                 % (report["live"] - len(bare) - len(residue), report["live"],
+                    "PASS" if not bare else "FAIL"))
+    if report["round_anchor"]:
+        # A NAMED WORKLIST, NEVER A BARE COUNT: these rows were born after the
+        # round started, so they are the NEXT round's inbox -- deferred by
+        # exactly one round, and in scope the moment it anchors on its own
+        # Paper.
+        lines.append("  ^ deferred to the next round (RESIDUE)        %d        %s"
+                     % (len(residue), "next-round inbox"))
+        for row_id in residue:
+            lines.append("      residue: %s" % row_id)
+    if bare:
+        failures.append("%d LIVE row(s) carry NO disposition -- a live row that says "
+                        "nothing is what clauses 1-3 cannot see: %s"
+                        % (len(bare), ", ".join(bare[:8]) + (", ..." if len(bare) > 8 else "")))
+    lines.append("  live adjudicated rows carrying a reason        %d/%d    %s"
+                 % (report["live_adjudicated"] - len(no_reason), report["live_adjudicated"],
+                    "PASS" if not no_reason else "FAIL"))
+    if no_reason:
+        failures.append("%d LIVE adjudicated row(s) carry NO disposition_reason -- a "
+                        "verdict with no reason is unprovable: %s"
+                        % (len(no_reason),
+                           ", ".join(no_reason[:8]) + (", ..." if len(no_reason) > 8 else "")))
+    lines.append("  live parked rows carrying a reopen_trigger     %d/%d    %s   (STRUCTURED field, not prose)"
+                 % (report["live_parked"] - len(no_trigger), report["live_parked"],
+                    "PASS" if not no_trigger else "FAIL"))
+    if no_trigger:
+        failures.append("%d LIVE parked row(s) carry NO structured reopen_trigger (prose "
+                        "that merely mentions REOPEN is decoration, PDS-D336(b)): %s"
+                        % (len(no_trigger),
+                           ", ".join(no_trigger[:8]) + (", ..." if len(no_trigger) > 8 else "")))
+
+    # CLAUSE 6 -- the contradiction (PDS-D372/D373). Beside clause 4, never
+    # inside it: 4 asks whether a live row SAYS anything, 6 asks whether what it
+    # says agrees with the queue that is handing it out.
+    lines.append("  live rows NOT dispositioned `%s`           %d/%d    %s   (CLAIMABLE and adjudicated shut)"
+                 % (CLOSED_DISPOSITION, report["live"] - len(contradiction),
+                    report["live"], "PASS" if not contradiction else "FAIL"))
+    if contradiction:
+        failures.append("%d LIVE row(s) are CLAIMABLE and dispositioned `%s` -- `bp task "
+                        "ready` hands out a row the ledger calls shut, and clause 4(a) "
+                        "counts it as adjudicated: %s"
+                        % (len(contradiction), CLOSED_DISPOSITION,
+                           ", ".join(contradiction[:8])
+                           + (", ..." if len(contradiction) > 8 else "")))
+
+    return lines, failures
 
 
 def main(argv):
@@ -901,7 +1115,19 @@ def main(argv):
     report["pages"] = pages
     report["page_limit"] = args.page_limit
     report["source"] = transport.describe()
+    report["page_order"] = PAGE_ORDER
 
+    # THE PREDICATE IS COMPUTED BEFORE THE EMIT, and it is PURE (it prints
+    # nothing). That is what lets `round_done` ride in the payload without
+    # moving the emit -- and the emit must not move: the clause-5 exit-4 path
+    # below runs after it and its payload is exactly the one a failing run needs.
+    predicate_lines, round_done_failures = round_done_predicate(report)
+    report["round_done"] = not round_done_failures
+    report["round_done_failures"] = round_done_failures
+
+    # STDOUT IS THE MACHINE CHANNEL. Under --json this is the ONLY thing written
+    # to it; every human line below goes to stderr, so `jq -e .` works on the
+    # green path and on the red one alike.
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
@@ -923,92 +1149,20 @@ def main(argv):
             ["%s updated %s" % (i, t) for i, t in report["drifted"][:8]])
 
     if args.assert_round_done:
-        distinct = report["reason_hashes_distinct"]
-        non_empty = report["reasons_non_empty"]
-        off_vocab = report["off_vocabulary_total"]
-        failures = []
-        print("")
-        print("ROUND-DONE PREDICATE")
-        print("  distinct reason hashes == non-empty reasons   %d == %d   %s"
-              % (distinct, non_empty, "PASS" if distinct == non_empty else "FAIL"))
-        if distinct != non_empty:
-            failures.append("%d duplicate reason(s): %d non-empty reasons collapse to %d "
-                            "hashes -- boilerplate is not a reason"
-                            % (non_empty - distinct, non_empty, distinct))
-        print("  non-empty reasons > 0                          %d        %s"
-              % (non_empty, "PASS" if non_empty > 0 else "FAIL"))
-        if non_empty == 0:
-            failures.append("zero non-empty reasons -- an all-empty board trivially has "
-                            "all-distinct reasons; that is not done, it is unstarted")
-        print("  off-vocabulary dispositions == 0               %d        %s"
-              % (off_vocab, "PASS" if off_vocab == 0 else "FAIL"))
-        if off_vocab:
-            failures.append("%d row(s) carry a disposition outside {%s} (canonical OPEN "
-                            "case is `%s`)" % (off_vocab, ", ".join(DISPOSITION_VOCABULARY),
-                                               CANONICAL_OPEN))
-
-        # CLAUSE 4 -- the ONLY live-scoped clause. Clauses 1-3 above stay
-        # closure-scoped on purpose: distinctness and vocabulary are properties
-        # of everything ever written. Three sub-lines, each able to say no alone.
-        bare = report["live_bare"]
-        residue = report["live_bare_residue"]
-        no_reason = report["live_adjudicated_no_reason"]
-        no_trigger = report["live_park_no_trigger"]
-        if report["round_anchor"]:
-            print("  round anchor                                  %s   (%s)"
-                  % (report["round_anchor"], report["round_anchor_source"]))
-        # THE NUMERATOR IS LITERAL. `bare` is the ANCHORED subset, so
-        # `live - len(bare)` would count every residue row as carrying a
-        # disposition and print "172/172 PASS" over a board where 15 rows carry
-        # nothing -- a success claim about rows nobody looked at, which is the
-        # exact defect class this epic exists to kill. The residue is subtracted
-        # out and reported on its own line below: the denominator still names the
-        # WHOLE live board, so deferring can never shrink what 4(a) covers.
-        print("  live rows carrying a disposition               %d/%d    %s"
-              % (report["live"] - len(bare) - len(residue), report["live"],
-                 "PASS" if not bare else "FAIL"))
-        if report["round_anchor"]:
-            # A NAMED WORKLIST, NEVER A BARE COUNT: these rows were born after the
-            # round started, so they are the NEXT round's inbox -- deferred by
-            # exactly one round, and in scope the moment it anchors on its own
-            # Paper.
-            print("  ^ deferred to the next round (RESIDUE)        %d        %s"
-                  % (len(residue), "next-round inbox"))
-            for row_id in residue:
-                print("      residue: %s" % row_id)
-        if bare:
-            failures.append("%d LIVE row(s) carry NO disposition -- a live row that says "
-                            "nothing is what clauses 1-3 cannot see: %s"
-                            % (len(bare), ", ".join(bare[:8]) + (", ..." if len(bare) > 8 else "")))
-        print("  live adjudicated rows carrying a reason        %d/%d    %s"
-              % (report["live_adjudicated"] - len(no_reason), report["live_adjudicated"],
-                 "PASS" if not no_reason else "FAIL"))
-        if no_reason:
-            failures.append("%d LIVE adjudicated row(s) carry NO disposition_reason -- a "
-                            "verdict with no reason is unprovable: %s"
-                            % (len(no_reason),
-                               ", ".join(no_reason[:8]) + (", ..." if len(no_reason) > 8 else "")))
-        print("  live parked rows carrying a reopen_trigger     %d/%d    %s   (STRUCTURED field, not prose)"
-              % (report["live_parked"] - len(no_trigger), report["live_parked"],
-                 "PASS" if not no_trigger else "FAIL"))
-        if no_trigger:
-            failures.append("%d LIVE parked row(s) carry NO structured reopen_trigger (prose "
-                            "that merely mentions REOPEN is decoration, PDS-D336(b)): %s"
-                            % (len(no_trigger),
-                               ", ".join(no_trigger[:8]) + (", ..." if len(no_trigger) > 8 else "")))
-
-        if failures:
-            print("")
+        for line in predicate_lines:
+            print(line, file=sys.stderr)
+        if round_done_failures:
+            print("", file=sys.stderr)
             print("VERDICT: ROUND NOT DONE", file=sys.stderr)
-            for failure in failures:
+            for failure in round_done_failures:
                 print("  - %s" % failure, file=sys.stderr)
             sys.exit(EXIT_ROUND_NOT_DONE)
-        print("")
-        print("VERDICT: ROUND DONE")
+        print("", file=sys.stderr)
+        print("VERDICT: ROUND DONE", file=sys.stderr)
         return EXIT_OK
 
-    print("")
-    print("VERDICT: census complete and coherent")
+    print("", file=sys.stderr)
+    print("VERDICT: census complete and coherent", file=sys.stderr)
     return EXIT_OK
 
 
