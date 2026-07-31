@@ -696,6 +696,89 @@ predating registration (the post-PUT `gh pr view 8222 --json mergeStateStatus` r
 and S1 must take it), and the live half of `required-checks.test.sh` (§10/§11, four GitHub-API clauses)
 was never run at four contexts — only the hermetic suite was.
 
+### 2026-07-31 — wave 11 REVIEW — 4/4 round-1 slices shipped, grade A−; the flip is STAGED and PR-ready, the PUT is the lead's
+
+**Wave Paper:** `cloud-console-hardening-wave-11-2026-07-31`. **Final branches (all pushed, all with PRs):**
+`…-requi-0-r` → #8394 (S1), `…-ships-co-1-r` → #8395 (S2), `…-revoking-a-t-2-r` → #8396 (S3),
+`…-clause-b-3-r` → #8397 (S4). Every one carries reviewer fix commits; integrate the `-r` branches.
+
+**STEP 0, RE-RUN BY REVIEW ITSELF** on the window as it stood at review time (`origin/main` =
+`6e53d2782`): `bash scripts/registration-sample.sh --since 5ddae0dc2` → **exit 0**, 10 heads walked,
+**5 qualifying, 5 NEITHER-shape**, 0 unsettled, 1 empty-diff excluded (the merge commit — wave 10's brick
+fix classifying it correctly), 0 shim defects. Neither Decide's 3 nor the lead's 3 was taken on trust.
+
+**THE FINDING THAT JUSTIFIES THE WHOLE DISCIPLINE — the Security-gate hold outlived its own ground.**
+Between the S1 build and this review, `95ace3150` ("Upgrade Req past security advisories") landed **from
+outside this epic** and cleared both `mix-audit` advisories. `Security gate` is **SUCCESS** on main head
+`6e53d2782`. The hold that kept it out of the flip was the *mechanical* S5 RED-ON-MAIN stage — so the
+ground evaporated, and re-running the wave's own generator against the post-bump window **KEEPS
+`Security gate` and emits a 5-context spec**. Measured by running it, not inferred. The file's own
+`_readme` instructs the next operator to "regenerate immediately before any protection flip", so the next
+person to obey it would have silently registered a name the wish forbade — whose sole blocking upstream is
+`mix-audit` against a **live advisory database**, i.e. a permanently correct red that no PR can clear.
+Review moved the hold into the generator's hand-maintained **S7 EXCLUDED_BY_DECISION** list on a
+forward-looking ground, corrected the three now-false statements in `.github/required-checks.json` with
+dated `CORRECTED IN REVIEW` markers rather than silent rewrites, and pinned it with **new §17** over a
+*derived* post-bump fixture: the hold holds, S6 still demotes all three leaves through it (the demotion
+keys on the exclusion, not on S5), and **deleting the S7 entry registers `Security gate`**. Whether it
+should EVER be registered is now a filed decision, not a side effect:
+`cch-w11-residue-security-gate-registration-policy`. The `Required-check spec gate` exclusion reason was
+corrected too — #8222 no longer clears anything and is itself `CONFLICTING/DIRTY`, so the hold now stands
+on the narrower true ground.
+
+**THE MERGED TREE CAUGHT WHAT NO PER-SLICE GATE COULD** — wave 10's lesson, reproduced and paid. On
+`origin/main` + all four branches, `seal-predicate.test.mjs` went **47/2** while every slice branch read
+49/0. Both failures were S4 test cases pinning a FOREIGN surface: one hard-quoted
+`required today: Elixir gate, PR references an active task`, which S1's flip rots; the other hard-asserted
+the pre-flip answer with a comment telling a future human to hand-flip it once registration landed — *a
+case that must be hand-flipped on someone else's merge is a case that reds an integration nobody ran.*
+Both now DERIVE from the committed spec, with real assertions on both arms, so they are correct on either
+side of the flip and **merge order between #8394 and #8397 is free**. Merged tree after the fix: 49/0.
+
+**Everything green on the MERGED tree, not just on branches.** `required-checks.test.sh --hermetic`
+**109/0** (origin/main baseline 82/0); floor rc 2 with exactly `ADDED Cloud gate` + `ADDED Console gate`
+and **ZERO LOST**; `registration-deadlock-sweep.sh` rc 0, 9 PRs, **0 casualties**; sampler exit 0;
+`cloud-static-gz-guard.sh` rc 0 and `--selftest` **10/0**; `cloud-path-escape-check.sh` rc 0;
+`smoke.mjs` **99/99**; `__app.test.mjs` **732/0**; cloud `router_test.exs` **168/0**; `mix format` clean.
+
+**Weight 2 — rows paid, not filed.** S3 closed the last lying destroy verb (the fail-first probe
+`rows-after=4 victim-still-listed=true` is in the record), and review re-mutation-proved BOTH halves
+independently — each mutation fails exactly one scenario, on the right assertion, which also bounds the
+selector widening's blast radius. S2 shipped the cold-boot compression, and review extended it to
+`index.html`, the SPA shell: the slice claimed to fix the cold boot while shipping the first request of
+every cold boot uncompressed (31,219 → 7,860). Two of four slices were instruments this wave (S1, S4) —
+better than wave 10's five-of-six, and both instruments were load-bearing for the flip itself.
+
+**Weight 3 — the seal, honestly.** On the committed 2-context spec clause (b) reads
+`rung1:2, rung2:0, rung3:4`. On the merged wave-11 tree it reads `rung1:2, rung2:4, rung3:0`, **b-clean
+6/6 — clause (b) is clean for the first time in this epic's life**. That is still **NO SEAL**: clause (a)
+and bucket (c) are UNREAD by any legal live invocation (the roster refutes `TERMINAL`; there is no
+resolvable successor, and D83 forbids manufacturing one), and rung 2 is over the COMMITTED record only —
+**the PUT has not landed**, so nothing enforces it yet. The defensible sentence is *"registering Cloud gate
+makes clause (b) evaluable and passing"*, never *"the flip advanced the seal"*.
+
+**THE FLOOR, and why review did not wire it in CI.** The wish's premise is retracted by measurement: the
+floor **is** wired on the write path — `required-checks-apply.sh:218` calls it and fails closed on rc 1/2 —
+so there was nothing to wire before the PUT. The real remaining hole is narrower and is stated rather than
+quietly closed: **no CI job floors the spec DIFF**, so a PR that lands a shrunk `required-checks.json` reds
+nothing until someone next runs `apply.sh`. Review did not build it, for three reasons that compound:
+`.github/workflows/**` is outside every slice's declared fence, a foreign `ops/*` train is live in that
+directory right now, and a guard co-merged with the change it guards reds the fail-before proof (the
+guard+fix co-merge law). It is filed with mutation-proof criteria as
+`cch-w11-residue-floor-is-not-a-ci-gate-on-the-spec-diff` and should be wave 12's first slice.
+
+**WHAT THE LEAD MUST DO, IN ORDER.** (1) Merge #8394 and perform the PUT **in one sitting** — from the
+instant the 4-context spec is on main, `bp-merge.sh` reads the committed spec and refuses heads GitHub
+would still merge, a partial freeze for the foreign trains. `git fetch origin` immediately before
+`apply.sh` (the floor reads `git show origin/main:` from the local clone and apply.sh does not fetch);
+**forbid `--floor-reference` on this path**; re-run the deadlock sweep immediately before the PUT, not
+minutes before. Expect `Required-check spec drift (advisory)` RED on main until the PUT — the window's
+honest indicator, not a defect. (2) Close the merge-gated criteria the builders correctly left open: S1
+9/10/11 (the PUT, the #8222 `mergeStateStatus` experiment, the two-way `bp-merge` mutation proof) and 12;
+S2 8; S3 9; S4 7. (3) **S1 is HIGH-FLIP-RISK and a genuinely independent second reviewer is warranted** —
+on whether four is the correct live set, and on whether the S7 decision list is a hold or a parking lot.
+Re-derive; do not re-read the reasoning.
+
 ### 2026-07-31 — wave 10 REVIEW — six round-1 slices shipped, grade A−; half one is LEGAL but NOT YET DONE
 
 **Landed, all six pushed with PRs open** (the lead merges; every task's last criterion is
