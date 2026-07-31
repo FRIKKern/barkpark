@@ -6072,3 +6072,71 @@ support?).
 **NOT PLANNED AROUND.** `hzResDone` stays cut (PDS-D367). The orphan-drafts fix stays with truth-grip
 (PDS-D382). `api/mix.exs` and `api/mix.lock` are untouched (#8222 holds them). `bp task ready`'s
 store-wide 16-row contradiction population is NOT this wave's — the closure 13 is.
+
+### Wave 27 2026-07-31 — "The Terminal Round, and the Reader" — REVIEWED. Grade A (paper `pds-wave-27-2026-07-31`)
+
+**THE HEADLINE: `--assert-round-done` EXITS 0.** Re-run by the reviewer against the live board with
+the wave's own census (clause 6 in the predicate): `REAL_RC=0`, `VERDICT: ROUND DONE`. Distinct reason
+hashes 213 == 213 non-empty; off-vocabulary dispositions **0**; live rows carrying a disposition
+**172/195 PASS** with 23 named post-anchor residue; live adjudicated carrying a reason 172/172; live
+parked carrying a structured trigger 29/29; live rows not contradicted 195/195. Zero stderr bytes.
+This is the first time in the epic's history the stated done-condition has been reachable, and it was
+reached by paying the round, not by moving the bar. It certifies **THE ROUND, never the epic** —
+`pds-w27-certify-the-round` (round 2) still owes the formal quiesced run against the MERGED census.
+
+**WHAT LANDED — 7 of 7 round-1 slices green, all pushed, all with PRs open (#8407–#8413).**
+
+| task | PR | verdict |
+|---|---|---|
+| `pds-w27-round-terminal-15` | #8407 | clause 3 15 → 0. Population COUNTED, not quoted — the census caps `off_vocabulary_samples` at 3/value, so its sample list was never evidence. The brief listed 8 in-flight rows; the true set is 7, and the extra belonged wholly to the contradiction slice, so the flagged coordination hazard never arose. |
+| `pds-w27-round-bare-30` | #8408 | clause 4(a) 30 → 0, clause 1 held (+30 reasons raised BOTH counts by exactly 30 — that arithmetic IS the collision proof). All 30 verdicts re-derived by content, not inherited. |
+| `pds-w27-round-contradiction-13` | #8409 | 14 rows (a 14th minted mid-run) lifted out of `@claimable_statuses`. Reviewer re-ran the gate twice AND with a reader-independent derivation over the paged 3993-row corpus: 0 both ways, store-wide. |
+| `pds-w27-reader-transport-honesty` | #8410 | nine HTTP-200 poisons flip rc=0 → rc=1 with the named code `unreadable_list_page`; the fallback is DELETED, not guarded. |
+| `pds-w27-census-self-honesty` | #8411 | clause 6 as a row-ID list, pipeable `--json`, `&order=_createdAt:asc`. Selftest 80 → 106 checks. |
+| `pds-w27-brief-card-disposition` | #8412 | the adjudication term rides the brief card, and the hostile tripwire MOVED (28640 → 29790 B) before the renderer line was written. |
+| `pds-w27-hetzner-gate-file-blindness` | #8413 | derivation globbed to 11 files / 20 sites; `archive` and `eject` now observe what they claim; the anti-DISARM gate refuses a keyed verb whose shape reads no table. |
+
+**THE WAVE'S OWN LESSON, learned independently by three builders: DERIVE AT HEAD, NEVER QUOTE.** Every
+slice that re-measured its brief found the brief wrong — `docs/api-v1.md` is **13884 B**, not the
+brief's 13998 (reviewer re-measured: 13884); the 376-line gate test is under `api/test/barkpark/content/`,
+not the path the brief gave; the `hzResDone` population is **50**, not the charter's 51; the Hetzner
+receipt population is **20 sites across 11 files**, not one file; `close-409-hint` was MIS-STATED and
+its criterion as written would have made the SERVER worse. This epic keeps re-discovering that quoted
+byte counts and paths decay — including inside instructions written to fix decayed byte counts.
+
+**WHAT THE REVIEWER FIXED IN PLACE.** Four follow-up commits, each mutation-proven: a rune-boundary cut
+in the `unreadable_list_page` body preview (a localised proxy page is exactly the body that message
+exists to identify, and a fixed byte cut rendered it as U+FFFD noise); the census human block routed
+to stderr UNCONDITIONALLY, which fixed `--json` by splitting the DEFAULT render across two streams so
+`census.sh --assert-round-done > report.txt` captured everything except the answer — plus a new
+`expect_stdout_only_contains` helper, because every other selftest helper captures `2>&1` and is
+structurally blind to which stream a line landed on; `decommission`'s receipt now states whether its
+archive was CONFIRMED (it destroys the box and, unlike adopt/eject, nothing downstream boots from the
+image to prove it works); and the anti-disarm gate's docstring, which claimed two consumer sites three
+lines above a guard counting three.
+
+**LEDGER.** `pds-w27-brief-card-disposition` was lifecycle `open` with 9/10 criteria stamped — finished
+work still being advertised as claimable, this epic's own subject pointed at itself. Claimed and
+pulsed by the reviewer; now `in_progress`. Every other slice left lifecycle truthful with merge-gated
+criteria open for the lead. `pds-w27-certify-the-round` sits untouched at 0/9, correctly.
+
+**TWO HONEST UNDER-REPORTS the lead must read, neither of them a failure of the work.**
+`pds-w27-round-bare-30` criterion 6 could not be stamped: `stampMergeGateBlocked` is a bare substring
+match over the whole criterion text, and the criterion merely QUOTES the marker. The reviewer verified
+its substance live — all four lead-gated rows are `open`, never closed, reasons 913–1069 B, each
+naming its outstanding lead act. The guard defect is filed. Its criterion 7 demands
+`live_bare_residue == []`, unsatisfiable by construction under PDS-D364; its own parenthetical is met
+and the builder refused to flip it. Refusing to move the bar is the correct act and the ledger now
+under-reports proven work — which is the same lie pointed the other way, and worth the lead's eye.
+
+**WHAT THE NEXT WAVE TAKES.** (1) Merge round 1 in the order the co-scoped rule demands, then dispatch
+`pds-w27-certify-the-round` against the MERGED census with a real quiesce — a green obtained here does
+not survive as evidence for a run that has not happened. (2) The READER half is one notch open, not
+closed: this wave fenced `--all`; the single-page read path, `bp task next`'s bare `ok` on a null body,
+`--all` corrupting the honest empty shape (`[]` → `null`), and the board/TUI surfaces are all
+untouched, and NOTHING has yet checked what any reader does with a draft twin. (3) `eject` is
+HIGH-FLIP-RISK and owes a genuinely independent second reviewer against the real control plane before
+merge — this workflow spawns one reviewer, so that is a manual lead step. (4) The census still cannot
+see a FALSE reason: clause 1 only checks md5-distinctness, so 45 verdicts now rest on committed
+re-derivation recipes rather than on anything an instrument can re-check. That asymmetry is
+structural, it is the round's largest remaining soft spot, and no wave has yet attacked it.
