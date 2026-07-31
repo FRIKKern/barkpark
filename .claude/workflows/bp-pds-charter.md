@@ -5736,3 +5736,339 @@ predicate green a round that has not adjudicated its own work?).
 **NOT PLANNED AROUND.** `pds-w25-round-terminal` is not dispatched, not worked around, not the spine —
 it needs #8218 DEPLOYED, which is an operator action on a live paid instance and the human's call.
 `api/mix.exs` and `api/mix.lock` are untouched (#8222 holds them).
+
+---
+
+## Wave 27 — the terminal round, and the reader (2026-07-31)
+
+**Spine: THE ROUND AND THE READER.** Wave 26 audited the ledger WRITER and found it honest, so the
+READER is the only half left. The round terminates something; the reader arm makes terminating it
+mean something. `hzResDone` stays cut (PDS-D367).
+
+- **PDS-D372 — A CLAIMABLE ROW CARRYING A TERMINAL ADJUDICATION IS A DEFECT, AND IT IS PDS-D298's
+  RECIPE LEFT HALF-EXECUTED. THE CHARTER IS NOT SILENT.** The wave's own digest asserted no decision
+  D1-D371 rules on adjudication-vs-lifecycle orthogonality. **REFUTED by reading D298 for coverage
+  rather than citing it:** the rewritten VOCABULARY block binds each disposition class to a LIFECYCLE
+  ACT — `closed` → `bp task close <id> <worker> <epoch> done "<reason>"`; `parked` →
+  `stage <id> considering … --disposition parked`; `open` → stage plus a named `disposition_owner`.
+  `validation.ex:19-31` holds `"OPEN MEANS READY" is held by construction — only open|blocked is
+  claimable`. So `disposition ∈ {closed}` on `lifecycle ∈ {open, blocked}` is the recipe with its
+  second half never run — a CONTRADICTION the round repairs, never an orthogonal axis.
+  **IT IS INVISIBLE TO BOTH INSTRUMENTS:** `queue.ex` contains the string `disposition` ZERO times
+  (it is not a readiness axis), and the census counts these rows in clause 4(a)'s numerator as
+  SATISFIED — the instrument reads the contradiction as compliance while `bp task ready` hands the
+  row to a worker.
+  **THREE POPULATIONS, NOT A DISAGREEMENT — DO NOT CONFLATE THEM.** Closure-scoped: **13** (all
+  `lifecycle=open`, `disposition=closed`, each read back individually). Store-wide `bp task ready`
+  join: **16** (13 closed + 3 parked, one of which — `task-32ce52edfd7af367` — is a NEIGHBOUR EPIC's
+  row and is out of bounds). The census can only ever see the closure, so a census clause reading 0
+  does NOT imply `bp task ready` is clean, and a reader gate is a DIFFERENT instrument with a
+  different number.
+  **REPAIR, NOT FILTER.** The 13 are genuinely finished by content per D299 — every reason opens
+  `CLOSED …` and all 8 distinct cited shas are ancestors of `origin/main`. They close via
+  claim-then-`bp task close … done` with `:criteria_override` (and `:holder_override` where no claim
+  ever existed), because all 13 carry `claim = null` and unmet criteria. **The override records are
+  the point, not a workaround** — budget ~2 recorded overrides per row, not a one-liner.
+  **A SILENT QUEUE FILTER IS REFUSED**, extending PDS-D348's "it reaches exit 0 by not looking" from
+  the census to the reader: with the census already blind to this population, a silent filter would
+  mean no instrument anywhere looks.
+  **ANY RULE MATCHES ONLY THE NORMALISED VOCABULARY `{open, closed, parked}` AND TREATS AN
+  UNRECOGNISED DISPOSITION AS LIVE.** Store-wide off-vocabulary is 41, of which 26 are `tgw*` rows
+  carrying the literal `'open — demoted child of truth-grip-epic (charter D117)'`; a gate phrased
+  `disposition IS NOT NULL AND != 'open'` would silently delete 26 rows from a neighbour's queue.
+
+- **PDS-D373 — THE PARKED HALF OF THE CONTRADICTION CLAUSE IS REFUSED ON THE RECORD, BY MEASUREMENT.**
+  A closed-only clause 6 costs NOTHING: implemented as ~12 lines beside clause 4, the UNMODIFIED
+  80-check selftest still passes **80/80** — including `TERMDUP` (which pins that clauses 1-3 stay
+  closure-scoped) and every anchor fixture — and on the live board every existing figure is
+  byte-identical, the only `--json` delta being one additive key. Extending it to `parked` **FAILS 7
+  of 80**, and the FIRST failure is the CONTROL: `build_healthy`'s `kid-c` is `blocked parked` and is
+  inherited by all 34 fixture dirs. It also reds `SHAREDTRIG`, the fixture that exists precisely so
+  "no future wave can tighten clause 4" (PDS-D336(a)). Live, all 29 parked closure rows carry a
+  STRUCTURED `reopen_trigger` — the epic's own exemplary shape. **A live park awaiting its trigger is
+  not a contradiction; it is a park.** Widening to parked is a doctrine reversal, not a clause, and
+  needs its own D-number that says so out loud.
+  The clause emits a ROW-ID LIST, never a bare count — a count nobody can turn back into rows is not
+  a worklist. `blocked` is NOT a valid park destination (`@claimable_statuses ~w(open blocked)` leaves
+  it in `bp task ready`); D298's `considering` is the only honest one.
+
+- **PDS-D374 — THE ROUND IS 45, NOT 15, AND IT NEEDS ZERO LEAD ACTS TO REACH EXIT 0.** Re-derived
+  live under a wave-27 anchor: clause 1 `183 == 183 PASS`, clause 3 `15 FAIL`, clause 4(a)
+  `156/186 FAIL`, **RESIDUE 0**, 4(b) `156/156 PASS`, 4(c) `29/29 PASS`. So 15 off-vocabulary + 30
+  bare = 45, and every one of the 30 is pre-anchor and IN SCOPE — D364's one-round deferral working
+  as designed, not a leak. The wish's premise 2 was incomplete; it is corrected here, not worked
+  around.
+  **THE UNBLOCKING NOBODY HAD:** the census requires a **disposition**; it requires NEITHER a
+  lifecycle move NOR a `met:true` criterion. No failure append in `--assert-round-done` reads
+  `acceptance_criteria` or `lifecycle_status`. Therefore `pds-w25-round-open` (7/8),
+  `pds-w25-round-parked` (7/8), `pds-w25-round-bare` and `pds-w25-independent-review-stage-widening`
+  all reach clause 4(a) by being adjudicated **`open`** with an honest reason naming the outstanding
+  `[MERGE-GATED]` lead act — which is TRUE, so it is a lie in neither direction. The lead acts gate
+  CLOSING those rows. **They do not gate exit 0.** Do not close them; adjudicating `open` is both
+  honest and sufficient.
+  Corollary: `pds-w25-round-bare` criterion 4 enshrines `pds-w12-crown-climb-preconditions` as a
+  "blocked, NON-STAGEABLE row". **That is now stale** — `transitions.ex:42` has `blocked` in
+  `@statuses`, `legal?/2` returns `from in @statuses` when `from == to`, and `stage.ex` admits
+  `(to in @stageable or from == to)`. `blocked → blocked` IS a legal adjudication door and pds-w12 is
+  stageable in place. #8218 dissolves the contradiction between that row's criteria 3 and 6.
+
+- **PDS-D375 — THE 30 BARE ROWS ARE NOT 30 TEMPLATE REASONS: FIVE STORED DEFECTS ARE STALE AND ONE IS
+  REFUTED OUTRIGHT.** The digest's "21 clean `open`" measures as **15**. Clause 1 only checks
+  md5-distinctness, so every stale row can be given a beautiful, unique, byte-distinct reason that is
+  FALSE and the census will pass — the precise failure wave 25 caught going the other way. Named:
+  (1) `pds-bl-cond-b-nonnumeric-floor-fail-direction` is **REFUTED BY EXPERIMENT** — the
+  `pds-pull-proof.sh:1304-1310` shape under `set -euo pipefail` with a non-numeric floor prints
+  `[: abc: integer expression expected` and lands `cond_b=FAILED ok=0`. **It fails CLOSED.** The row's
+  entire premise does not exist; it adjudicates `closed`, and leaving it `open` is the wave-25 defect
+  pointed the other way. (2) `pds-bl-github-linkput-auto-publish-erasure`'s headline defect was fixed
+  by wave 26 and `lifecycle.ex:292-312` says so verbatim — the GitHub publishers thread
+  `source: :github`, fall through to `gate_task_publish`, and only `:sync` is exempt. (3)
+  `pds-bl-task-stamp-silent-nonland`'s priority-1 framing is stale — the CLI read-back shipped
+  (`tasks_stamp_cmd.go:166-173`, `renderStampVerdict` returns `exitConflict`); the MCP bypass is
+  already its own row. (4) `pds-bl-close-409-hint-promises-absent-fields` is **MIS-STATED** — the
+  server 409 DOES carry `current_rev` and `changed_fields`, at the TOP LEVEL
+  (`tasks_controller.ex:519-533`); the defect is CLIENT-side (`errors.go:153-160`'s `canon` struct),
+  and the criterion as written would make the SERVER worse. (5)
+  `pds-bl-publish-refusal-drops-teaching-text` is TRUE but MIS-LOCATED and shares (4)'s root cause —
+  **these two rows are ONE CLI fix**. Four rows are runtime-only and get an honest thin reason naming
+  the probe rather than an invented thick one. Two DUPLICATE PAIRS sit inside the 30 (create-image ×2;
+  hzResDone ×2) — adjudicating both halves separately manufactures clause-1 variation without adding
+  information.
+
+- **PDS-D376 — ARM B IS A VIEW SELECTION, NOT A RENDERER GAP, AND THE TUI STRIP IS ALIVE.** The
+  wave's opening premise — "`tasks_controller/params.ex` is the SOLE renderer and the string
+  `disposition` does not occur in the file" — is true of the file and FALSE as a conclusion.
+  `render_doc(:full)` ends `content: Map.delete(content, "claim")`, a whole-content passthrough, so
+  the full view ALREADY carries the adjudication triple; `parse_view(_) → :full` is the server
+  default; and the drop is client-side (`resolveView`: machine output + a manifest `views`
+  declaration ⇒ brief; `bp task ready` has no `--view` flag). The TUI is NOT blind — it is the one
+  surface that hydrates AND renders the triple (`fetch.go:451-453` → `detail_render.go:200/:204`),
+  **mutation-proven**: deleting the disposition `emitStrip` line turns `TestDetailDispositionStrip`
+  from PASS to FAIL. **The SDK arm is EMPTY** (no JS reader of `/v1/tasks` exists) and is cut.
+  So the fix is a ~10-line conditional additive key copying `put_brief_engagement/2` line for line —
+  the additive-key precedent already in the file — with zero contract renegotiation and zero test
+  rewrites.
+  **`disposition` ONLY, AND THAT IS A MEASURED BUDGET DECISION, NOT TASTE.** Both tripwires ran:
+  realistic **11055 B / 15360** (4305 free), hostile **28640 B / 30720** (**2080 B free**). The
+  charter's recorded 11,005/28,594 are STALE. Steady-state `,"disposition":"parked"` = 23 B ⇒
+  50 × 23 = 1150 B, fits with 930 B to spare. **`reopen_trigger` CANNOT RIDE AT ANY GRAPHEME CAP:**
+  the key with a ZERO-LENGTH value is `,"reopen_trigger":""` = 20 B ⇒ 1000 B on top of 1150 = 2150 B,
+  overflowing 2080 B **before a single character of value** — the cap would have to be negative.
+  `disposition_reason` averages 753 B (max 1612). Both already ride `bp task get`, which is the
+  escape hatch AXI law 2 asks for.
+  **AND THE SLICE IS VACUOUS UNLESS THE FIXTURE MOVES FIRST:** NEITHER byte tripwire fixture sets a
+  `disposition` — nor an `engagement`. A conditional key leaves BOTH tests GREEN while measuring
+  NOTHING; a builder ships ten lines, sees 113/113, and reports headroom proven. That is this epic's
+  own law violated inside the test that enforces it. **The honest order is: add the field to the
+  hostile fixture FIRST, watch the printed byte number MOVE, and only then write the renderer line.**
+  The hostile fixture's value derives from the VOCABULARY (`parked`, the longest canonical term), never
+  from the live corpus — which still holds a 71-byte prose disposition the round is retiring.
+  Free consequence: `mcp_tasks.go` forces `view=brief` on both the list (:150) and prime (:561) reads,
+  so fixing brief fixes the MCP agent surface too.
+
+- **PDS-D377 — THE READER LIE IS BIGGER THAN A DROPPED FIELD: `--all` LAUNDERS EVERY HTTP-200 ANOMALY
+  INTO AN EMPTY LIST AT EXIT 0.** Nine poisoned-transport fixtures — a proxy 502 HTML interstitial,
+  `null`, `ok:false`, an unknown envelope key, zero bytes, `{"result":null}`, `{}`, a bare array,
+  plaintext — every one served with HTTP 200, all produce `rc=0`, `{"documents":null}`, EMPTY stderr.
+  **And the genuinely-empty control is BYTE-IDENTICAL**, proven by sha not by eye:
+  `html502 rc=0 sha=73595a255a6a12a6` / `genuinelyempty rc=0 sha=73595a255a6a12a6`. A worker cannot
+  distinguish "the queue is empty" from "the reverse proxy is down" by any means at the CLI surface.
+  This is PDS-D287 violated in the reader every builder uses.
+  **THE FALLBACK IS DELIBERATE AND HAS A COMMENT DEFENDING IT** (`run.go:1498-1502`: "Unknown envelope
+  … fall back to the documents shape so nothing regresses"), fed by `extractListRows` returning
+  `(nil, "")` silently on any unparseable body. It must be explicitly reversed, not quietly patched.
+  **THE FIX IS PROVEN BOTH DIRECTIONS:** a ~12-line per-page refusal on the `key == ""` sentinel flips
+  all nine to `rc=1` with a named `unreadable_list_page`; BOTH controls hold `rc=0` (empty stays
+  byte-identical); the full CLI suite stays green (`22.302s`) with ZERO test rewrites; and all 7
+  paginated verbs return `rc=0` against LIVE guerrilla. Safety is enumerated, not assumed:
+  `paginated: true` occurs exactly 7 times in the API source and every one returns a key already in
+  `listEnvelopeKeys`. One near-miss earns a companion guard — the LEGACY `media_controller.ex:46`
+  returns `files:`, absent from `listEnvelopeKeys`; it is not the route `bp media ls` uses, so there
+  is no live bug, but it is one rename from reddening an honest caller.
+  **THE EXISTING TEST IS THE STAMPED-EVIDENCE FAILURE MODE IN THE FLESH:** `paginate_all_test.go:89`
+  pins the `""` sentinel at the PURE level and its own comment DOCUMENTS THE LIE AS INTENDED. There is
+  zero end-to-end assertion. That is why `origin/main`'s suite is green while the bug is live.
+  Two residues are NAMED, not absorbed: `bp task next` prints `ok` at rc=0 on a null body
+  (`renderMinimal`, a different function), and `--all` corrupts even the honest empty shape
+  (`[]` → `null`, `count` silently dropped).
+
+- **PDS-D378 — THE CERTIFYING INSTRUMENT'S OWN `--json` IS NOT JSON, AND IT IS POISONED EXACTLY WHEN
+  IT CERTIFIES.** `--json --assert-round-done` writes the JSON object and then the human ROUND-DONE
+  PREDICATE block to the SAME stdout; `jq -e .` exits 5. The script is careful everywhere else —
+  `die()`, retry notices and the failure VERDICT all use `file=sys.stderr` — so this is ONE MISSED
+  GUARD. **The GREEN path is poisoned too:** on the healthy fixture the run exits 0 AND jq still fails
+  rc=5. And the payload carries **no verdict field at all**, so even a clean stream leaves a scripted
+  consumer without a machine path. Fix is BOTH: fold `round_done` + `round_done_failures` into the
+  report AND route the human block to stderr. No consumer blocks it — a repo-wide grep finds only the
+  census, its selftest, charter prose and two ledger recipes quoting exit codes, and every selftest
+  assertion captures `2>&1`, so the stderr move costs zero test rewrites (verified: 80/80 against a
+  patched copy).
+  **THE ANTI-PATTERN IS PROVEN AND MUST NOT BE SHIPPED:** do NOT defer the JSON emit until after the
+  predicate. On `origin/main` the clause-5 incoherence path (exit 4) runs AFTER the emit and therefore
+  STILL prints valid JSON (rc=4, 985 bytes, jq_rc=0); a deferred-emit draft turned that into rc=4,
+  **0 bytes**, jq_rc=4 — a fresh honesty regression inside the honesty fix. The predicate is a pure
+  function of `report`: hoist it, call it BEFORE the emit, stash `round_done`, print once.
+
+- **PDS-D379 — THE PAGED READ HAS NO STABLE ORDER, AND THE FIX HAS TWO TRAPS ONE KEYSTROKE AWAY.**
+  `census.sh:387` sends only `limit`+`offset`, so `query.ex:704`'s catch-all applies
+  `desc: d.updated_at` — a MUTATING sort key paged by explicit offset. A concurrent write teleports
+  its row to index 0; proven live in six requests (the probe row at index 3 was NEVER SERVED while
+  offsets 0 and 1 both returned the same row).
+  **THE "SILENT" HALF IS REFUTED FOR WRITES:** under `updated_at DESC` a write can only move a row
+  TOWARD offset 0, so a skip and a duplicate are produced 1:1 by the same shift, and the corpus-wide
+  duplicate detector kills the run with exit 4 (proven on a fixture: `SNAPSHOT INCOHERENT`). The
+  genuinely silent variant is a concurrent DELETE, which shifts rows UP and produces no duplicate —
+  argued, not run, and the residual hole a stable order also closes.
+  **THE FIX IS `&order=_createdAt:asc`, AND IT IS PROVEN IMMUNE:** 3901 rows with ZERO `_createdAt`
+  ties, globally sorted across four pages; the probe sat at index 3894 BEFORE and AFTER a stage write
+  with byte-identical `_createdAt` and zero rows gained or lost, while the same write under the
+  default order put that row at index 0.
+  **TRAP (a):** `order=doc_id` (no direction) does NOT error — it fails
+  `query_controller.ex:706`'s `<field>:(asc|desc)` regex and SILENTLY falls back to `updated_at DESC`
+  at HTTP 200, byte-identical to sending nothing. A "fix" spelled that way is a green diff with zero
+  behaviour change — this epic's own lie class, live in the order param.
+  **TRAP (b):** `order=doc_id:asc` parses as a CONTENT field and sorts
+  `jsonb_extract_path(content,'doc_id')`, NULL for every task row — an all-NULL sort key is an
+  UNSPECIFIED order that can skip and duplicate with no concurrent write at all. **Strictly worse than
+  the bug.** Only `_createdAt:asc` is correct; prove the spelling, never assume it.
+  Also recorded: the clause-5 drift detector is CLOSURE-scoped (`rows = [corpus[i] for i in closure]`)
+  and always was — it never examined the ~3570 rows outside the closure, which are exactly the rows
+  the shift arithmetic runs on.
+
+- **PDS-D380 — QUIESCE IS A CRITERION, ITS TAIL IS 43.90 s, AND ITS GATE IS CLOSURE-SCOPED.** The
+  write-back tail is not the operator's writes: a stage landed at `01:07:28.372157Z` and the GitHub
+  MirrorJob stamped the row back at `01:08:12.271620Z` with `github.synced_rev` pointing at that rev —
+  **43.90 s**, exactly once (the mirror's own write is `source="github"`, which the outbox excludes),
+  with 3900 of 3901 task rows carrying a synced link. 43.90 s **exceeds** clause 5's own read window
+  (17.9-30.8 s), so a certifying run started sooner will exit 4 on closure rows.
+  **THE GATE MUST BE CLOSURE-SCOPED, EXACTLY AS CLAUSE 5 IS.** A corpus-wide `moved == 0` gate is
+  hostage to unrelated fleet traffic — three foreign `jarl-*` rows moved inside one 60 s idle window
+  and the corpus grew twice in a single session — and would refuse runs clause 5 would pass.
+  Closure-scoped `moved == 0` held in both measured windows. Operational rule stands: **adjudicate →
+  quiesce → certify**, with certification the LAST act of the wave, `sleep 90` as a floor (2× the tail)
+  and `moved == 0` over two reads as the verdict.
+  **SECOND-ORDER TRAP:** clauses 1, 3, 4(b) and 4(c) are CLOSURE-scoped, not anchor-scoped — only
+  4(a) defers residue. A row FILED during the wave carrying a disposition with a duplicate reason, an
+  off-vocabulary value, no reason, or a park with no trigger will fail the certifying run even though
+  it is residue. **Wave 27's slice and backlog rows were therefore filed BARE, deliberately.**
+
+- **PDS-D381 — THE HETZNER RECEIPT GATE READS ONE FILE, AND WHAT IT CERTIFIES IS MAP MEMBERSHIP, NOT
+  EXECUTION.** `hetzner_cmd_test.go:306` is `os.ReadFile(filepath.Join(".", "hetzner_cmd.go"))` — a
+  single hard-coded filename — while `hetzner_instance_cmd.go` carries FOUR literal-verb receipts
+  (`archive`:671, `resurrect`:1057, `adopt`:1164, `eject`:1232) structurally invisible to it. This is
+  PDS-D366's failure reproduced one file over, at FILE granularity instead of CALL-SHAPE granularity.
+  Widening to a glob is SELF-PROVING — it reds on clean `origin/main` with exactly those four, deriving
+  20 verbs / 16 keyed-or-exempt / 4 bare, zero false positives.
+  **THE DECISIVE FINDING:** `hzServerPostConditions` is consumed at exactly two sites
+  (`runHetznerServerAction`, `hzFlagVerbDone`) and **the four instance verbs reach neither** — an awk
+  over `runInstanceArchive`/`runInstanceEject` greps ZERO references to `hzReadBack` /
+  `hzServerPostConditions` / `hzBoundPost`. **Proven by mutation:** four inert table entries turn the
+  widened gate GREEN while `hetzner_instance_cmd.go` is untouched. PDS-D366 already wrote "the gate is
+  the derivation and not the map"; the widening does not carry that obligation across the file
+  boundary. **The behavioural half ships with the widening, or the wave has built a tripwire a builder
+  disarms in four lines.**
+  Per-verb: `archive` is a REAL LIE (its `srv` is the PRE-action server resolved before `instArchive`,
+  which may STOP the machine; `image_id` is echoed off the create-action response and the image is
+  never re-read) — plus an unnamed one: with `--stop`, a failed quiesce degrades to a crash-consistent
+  snapshot via `out.info`, and `writer.info` writes to stderr ONLY WHEN VERBOSE, so a cleanly-quiesced
+  and a crash-consistent snapshot of a live Postgres emit BYTE-IDENTICAL receipts; remedy is a
+  non-optional `quiesced` key. `eject` is the sharpest: it discards the status `cpFleet.Deprovision`
+  exists to return and then asserts "now standalone" IN PROSE on `err == nil` — a control plane that
+  answers 200 with `deprovisioning` gets that sentence while a worker is en route to delete the clone
+  eject just built; the existing test asserts the detach REQUEST was sent, never that the row is gone.
+  **Decide's ruling:** eject is DESTRUCTIVE, so an unconfirmed detach takes the existing
+  `hzPartial` / "confirmation unavailable" shape — not a silent exit 0 and not a new third shape.
+  `resurrect` and `adopt` are exempt with TRUE stated reasons (their `srv` IS a post-action read-back),
+  their echo residues filed separately — **an exemption whose stated reason is false is this epic's own
+  sin.** Two refusal strings go stale under the widening and one becomes FALSE (`:383` claims "the
+  server resolved BEFORE the action fired", untrue for three of the four); PDS-D366 fixed that exact
+  class once, and the widening re-arms it.
+
+- **PDS-D382 — EXIT 0 CERTIFIES THE ROUND. IT NEVER CERTIFIES THE EPIC.** The wish framed
+  `--assert-round-done` as "the epic's own done-condition". It is not, and the charter says so
+  everywhere except one line of wave-25 review prose. Every census clause is satisfied by a PARKED row,
+  so a green is fully compatible with W2-W5 being entirely unbuilt — and they are: `bp dev` does not
+  exist as a CLI namespace at all. The epic row carries W1-W5 all `met:false` while `pds-w1-crown-proof`
+  sits `done` at 12/12 holding W1's proof.
+  **AND THE EPIC ROW IS OUTSIDE THE PREDICATE'S POPULATION** — `build_closure` seeds its frontier with
+  `kids[root]` and never appends root, so it is absent from `live_bare`. Exit 0 neither requires nor
+  tempts adjudicating it; adjudicating it `closed` to reach a green would have been the largest
+  instance of the lie this epic exists to prevent, and there is now not even a green-shaped excuse.
+  **THE CERTIFICATE IS ALSO SILENT ABOUT 316 ORPHAN DRAFTS.** The census reads the PUBLISHED
+  perspective (it sends no `?perspective`, and the default is published) while `bp task ready` serves
+  **28 `drafts.` rows with NO published twin**. The cause is an OMISSION in `queue.ex`'s candidate
+  filter — no publication predicate — and NOT a broken twin collapse, which is a CONDITIONAL
+  SUPPRESSION firing only when a distinct published twin EXISTS. **Wave 27 takes ZERO code here:** that
+  is `tgw10-bl-drafts-in-ready-pool`, an OPEN row at 0/5 on the TRUTH-GRIP epic, and building another
+  epic's open row without claiming it is the false-done this epic exists to prevent. Its criterion 1 is
+  DISCHARGED by wave 27's measurement and handed over. So: **exit 0 certifies the PUBLISHED round**, and
+  that limit is stated in the certificate itself.
+
+- **PDS-D383 — THE CERTIFYING COMMAND IS UNSAFE AS PEOPLE WRITE IT, AND THE INSTRUMENT EXECUTES
+  ARBITRARY CODE FROM ITS WORKING DIRECTORY.** `bash census.sh --assert-round-done … | tail -20;
+  echo RC=$?` prints the full FAIL block and then `RC=0` — tail's code. Measured this wave, over a
+  census whose real code was 1. **The epic's own law, violated by the epic's own certifying command.**
+  Every certifying invocation redirects to a file and captures `$?` directly.
+  Separately: the census execs `python3 -`, so `sys.path[0]` is the CWD and `bisect` is a transitive
+  stdlib import. A stray `bisect.py` in the working directory fails ALL 80 checks **and executes that
+  file's top-level code** — reproduced accidentally when a real leftover script in a shared scratchpad
+  issued live `bp` writes during a selftest run. That is arbitrary code execution inside a certifying
+  run; it is filed, and until it is fixed every gate runs from a clean directory.
+
+- **PDS-D384 — CORRECTIONS BY COUNTING, ON THIS CHARTER'S OWN NUMBERS.** Wave 26's lesson ("counting
+  beats quoting") applied to wave 26's own charter, and it is wrong three times.
+  (a) **`hzResDone` is 50 non-test call sites, not 51.** PDS-D367's headline says 51 and its OWN BODY
+  says "classifying 50 sites" five lines later; the 51 counts the definition line at
+  `hetzner_net_cmd.go:56`. The earlier ledger row `pds-w25-backlog-hzresdone-receipt` ("50 callers")
+  was right. hzResDone stays CUT regardless.
+  (b) **`os.Create` sinks under `internal/` are FIVE, not six.** PDS-D369's grep counted two comment
+  lines (`export_cmd.go:29`, `cloud_workspace_cmd.go:211`) as sinks.
+  (c) **And the sink POPULATION is the wrong population anyway:** three `os.OpenFile` writers are
+  uncounted, two of them `O_TRUNC` — including `upgrade.go:297`, the path that writes the **bp binary
+  itself**, truncating the destination before the body arrives and ignoring `resp.ContentLength`
+  entirely. File sinks are **EIGHT**, seven of which truncate.
+  (d) PDS-D348's fixture citations (`stage_test.exs:254/:269/:278`) and its `stage.ex:337` guard
+  pointer have DRIFTED to `:245/:263/:272` and `:375`. Its conclusion (the widening breaks nothing)
+  survives every mutation re-run; its causal story does not — widening `@stageable` to include `done`
+  reds ZERO tests, and bypassing the allowlist entirely reds only the `cancelled` fixture, so the
+  `done` and `in_progress` refusals are held by `Transitions.@legal_pairs`, not by the allowlist D348
+  credits.
+  (e) The AXI brief-card byte baselines (11,005 / 28,594 B, recorded 2026-07-19) are stale by 50 B and
+  46 B — the pages grew without anyone noticing. Re-derive, never quote.
+
+- **PDS-D385 — TWO OBLIGATIONS THIS WAVE FILED AS ROWS BECAUSE PROSE EVAPORATES.** Wave 26 wrote
+  verbatim: "If a debrief says a review is owed before merge, FILE IT AS A ROW. Wave 25 did and the
+  lead honoured it — because it was a row, not charter prose." Wave 26 then named a second reviewer
+  owed on TWO high-flip-risk slices and filed none; a full ledger scan returns 11 `pds-w26-*` ids, none
+  a review row. Wave 27 files it (`pds-w26-bl-independent-review-owed-on-two-slices`) — retrospectively,
+  since both PRs are merged, and one of them is the census anchor wave 27 certifies with.
+  Also filed: the anchor↔round binding (wave 26's own unpaid item 3 — nothing binds
+  `--anchor-from-paper` to the round being certified, so a caller can pass an older Paper and reach a
+  greener predicate by moving the boundary rather than by adjudicating).
+  And a refutation carried OUT rather than closed over: `apply_engagement/5`'s catch-all deletes
+  `content.engagement` for every non-thought target, so a same-state adjudication on a `blocked` or
+  `in_progress` row **DESTROYS a live engagement lease** — mutation-proven, reachable (`claim.ex` never
+  touches `engagement`), and constrained by NO shipped test.
+
+**WAVE 27 PLAN — 8 slices. Seven round 1; the certifying run is round 2 by construction.**
+
+| task | round | surface | gate |
+|---|---|---|---|
+| `pds-w27-round-terminal-15` | 1 | the 15 off-vocabulary terminal rows → canonical `closed` | census `--json`: `off_vocabulary_total == 0` |
+| `pds-w27-round-bare-30` | 1 | the 30 bare live rows, 5 stale reasons rewritten, 1 refuted | census `--json`: `live_bare == []` |
+| `pds-w27-round-contradiction-13` | 1 | 13 claimable-and-closed rows repaired with recorded overrides | post-repair `bp task ready` join == 0 |
+| `pds-w27-reader-transport-honesty` | 1 | `runPaginatedAll` refuses the `key == ""` sentinel | `CC=clang go test ./internal/cli/...` |
+| `pds-w27-census-self-honesty` | 1 | clause 6 + pipeable `--json` + `&order=_createdAt:asc` | `bash scripts/pds-ledger-census_test.sh` (clean dir) |
+| `pds-w27-brief-card-disposition` | 1 | conditional `disposition` key + fixture made able to fail | `CC=clang MIX_ENV=test mix test test/barkpark_web/controllers/tasks_controller_test.exs` |
+| `pds-w27-hetzner-gate-file-blindness` | 1 | glob the derivation + `archive`/`eject` + behavioural proof | `CC=clang go test ./internal/cli/...` |
+| `pds-w27-certify-the-round` | **2** | quiesce, then certify once with `$?` captured directly | the certifying run itself |
+
+**HIGH-FLIP-RISK, second independent reviewer owed:** `pds-w27-hetzner-gate-file-blindness` (the
+`eject` repair changes behaviour on a DESTRUCTIVE verb — can the deprovision-status assertion red an
+honest detach against the real control plane?) and `pds-w27-round-contradiction-13` (does closing 13
+rows with recorded `criteria_override` + `holder_override` write a verdict the content does not
+support?).
+
+**NOT PLANNED AROUND.** `hzResDone` stays cut (PDS-D367). The orphan-drafts fix stays with truth-grip
+(PDS-D382). `api/mix.exs` and `api/mix.lock` are untouched (#8222 holds them). `bp task ready`'s
+store-wide 16-row contradiction population is NOT this wave's — the closure 13 is.
