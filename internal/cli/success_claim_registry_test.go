@@ -72,7 +72,6 @@ package cli
 import (
 	"bytes"
 	"context"
-	"fmt"
 	"os"
 	"reflect"
 	"regexp"
@@ -332,19 +331,16 @@ func successClaimRegistry() []claimSite {
 			// from the MAIN'S ROSTER ROW — a decoded JSON body (supportRosterRow
 			// returns map[string]any), never from the local verb.
 			//
-			// The narration format is MIRRORED here rather than called, because the
-			// caller is a network+ssh step that cannot be rendered; the mirror is
-			// pinned against the production source by
-			// TestClaimProbesMirrorTheProductionNarration, so a drift reds instead
-			// of quietly re-vacuuming this row. Extracting the narration in
-			// cloud_support_cmd.go so the row can call it is filed as follow-up work.
+			// PDS-D431: the narration is now CALLED, not mirrored. The row hands
+			// supportOnlineNarration the roster row WHOLE — it does its own
+			// status/capacity extraction in cloud_support_cmd.go — so a production
+			// edit that stops printing the capacity reds this row instead of
+			// leaving it probing a sentence the CLI no longer composes. The three
+			// mirror consts and their pinning arm are gone with it.
 			Name: "supportAddRun.done/online-roster-row",
 			Render: func(out *writer, resp any) {
-				row := resp.(map[string]any)
-				st, _ := row["status"].(string)
-				capMap, _ := row["capacity"].(map[string]any)
 				(&supportAddRun{out: out}).done("online",
-					fmt.Sprintf(supportOnlineNarration, supportAddIdentity.name, st, supportCompactJSON(capMap)))
+					supportOnlineNarration(supportAddIdentity.name, resp.(map[string]any)))
 			},
 			Backed:       map[string]any{"status": "idle", "capacity": map[string]any{"max_class": "medium"}},
 			Contradicted: map[string]any{"status": "offline", "capacity": map[string]any{"max_class": "small"}},
@@ -356,23 +352,35 @@ func successClaimRegistry() []claimSite {
 			// VALUE (PDF-D101) — so the pair varies on the zone's answer and the
 			// receipt has to switch branches with it. The zone + IP are the identity
 			// and are held fixed outside the probe.
+			//
+			// PDS-D431: the row CALLS supportDNSNarration, which owns BOTH the
+			// len(deleted)==0 fork and the cloud.Fqdn mapping loop. The pre-repair
+			// row reimplemented both, and nothing pinned either — a second mirror,
+			// wholly unpinned, that could drift from production in silence.
 			Name: "supportRemoveRun.done/dns-swept",
 			Render: func(out *writer, resp any) {
-				deleted := resp.([]string)
-				if len(deleted) == 0 {
-					(&supportRemoveRun{out: out}).done("dns",
-						fmt.Sprintf(supportDNSCleanNarration, supportDNSZone, supportDNSIP))
-					return
-				}
-				fqdns := make([]string, 0, len(deleted))
-				for _, n := range deleted {
-					fqdns = append(fqdns, cloud.Fqdn(n, supportDNSZone))
-				}
 				(&supportRemoveRun{out: out}).done("dns",
-					fmt.Sprintf(supportDNSSweptNarration, len(deleted), strings.Join(fqdns, ", ")))
+					supportDNSNarration(supportDNSZone, supportDNSIP, resp.([]string)))
 			},
 			Backed:       []string{"sup-1"},
 			Contradicted: []string{},
+		},
+		{
+			// PDS-D431, THE UNFILED HALF. The row above declares `@len`, so its
+			// pair straddles the clean-vs-swept BRANCH and pins nothing INSIDE the
+			// swept one: measured, dropping the fqdn NAMES from the swept sentence
+			// left the entire claim family green (only the behavioural
+			// cloud_support_cmd_test.go arm redded). This pair holds len at 1 and
+			// moves only WHICH record the zone said it deleted, so the swept
+			// branch's payload — the names, qualified against the zone — is
+			// attributed on both surfaces in its own right.
+			Name: "supportRemoveRun.done/dns-swept-names",
+			Render: func(out *writer, resp any) {
+				(&supportRemoveRun{out: out}).done("dns",
+					supportDNSNarration(supportDNSZone, supportDNSIP, resp.([]string)))
+			},
+			Backed:       []string{"sup-1"},
+			Contradicted: []string{"sup-2"},
 		},
 		// ── cloud_site_cmd.go — the spawner's five receipts (site-spawner W8) ────
 		// Every Backed/Contradicted below is a type internal/cloudclient RETURNS;
@@ -479,13 +487,10 @@ func successClaimRegistry() []claimSite {
 			// the PROVIDER assigned (cloud.Server.IP, which the provider returns —
 			// unlike Name, which is what we asked for).
 			//
-			// HONEST LIMIT, and it is a real finding rather than a repair: the
-			// receipt's actual post-condition — the roster's status + capacity, and
-			// the measured max_class — is printed ONLY on the machine surface. The
-			// human sentence carries no measured fact at all, so no post-condition
-			// path exists that arm 3 can attribute on BOTH surfaces. Fixing that
-			// means editing cloud_support_cmd.go, which is outside this slice's file
-			// set; it is filed as follow-up work rather than smuggled in here.
+			// The pair varies the address the PROVIDER assigned; the human sentence
+			// prints it ("box: … at …") and so does the envelope, which is why this
+			// row attributes on both surfaces. The measured max_class gets its own
+			// row below — see supportAddRun.success/max-class.
 			Name: "supportAddRun.success",
 			Render: func(out *writer, resp any) {
 				r := supportAddIdentity
@@ -496,8 +501,35 @@ func successClaimRegistry() []claimSite {
 			Backed:       cloud.Server{ID: "srv-1", Name: "box-1", IP: "10.0.0.1"},
 			Contradicted: cloud.Server{ID: "srv-1", Name: "box-1", IP: "203.0.113.9"},
 		},
+		{
+			// PDS-D431 closes the limit the row above used to record: max_class rode
+			// the machine envelope ALONE, so the operator's summary carried no
+			// measured fact and arm 3 had nothing to attribute on both surfaces.
+			// success() now prints it through supportCapacityNarration.
+			//
+			// The probe is the BOX'S RAW ANSWER — the stdout of the same measurer
+			// the listener beats with (fleet-run.sh capacity, PDF-D36) — and
+			// production's own parser turns it into the class. Nothing here restates
+			// what production concluded; the pair moves what the box SAID.
+			Name: "supportAddRun.success/max-class",
+			Render: func(out *writer, resp any) {
+				r := supportAddIdentity
+				r.out = out
+				r.host = supportSuccessHost
+				stdout, _ := resp.(map[string]any)["capacity_stdout"].(string)
+				r.maxClass = supportParseSizeClass(stdout)
+				r.success()
+			},
+			Backed:       map[string]any{"capacity_stdout": `{"size_class":"standard"}`},
+			Contradicted: map[string]any{"capacity_stdout": `{"size_class":"heavy"}`},
+		},
 	}
 }
+
+// supportSuccessHost is the box the max-class row holds fixed: that row's axis is
+// what the box MEASURED, so the address the provider assigned must not move with
+// it (the row above is where the address is the axis).
+var supportSuccessHost = cloud.Server{ID: "srv-1", Name: "box-1", IP: "10.0.0.1"}
 
 // siteCreateReq is the REQUEST the site create rows hold fixed. It is deliberately
 // never a Backed/Contradicted value: the pair must vary on the response, or the
@@ -569,17 +601,11 @@ var (
 	supportDNSIP   = "10.0.0.1"
 )
 
-// The step narrations MIRRORED by the two support rows. They are consts here and
-// pinned against the production sources by
-// TestClaimProbesMirrorTheProductionNarration, because the callers that compose
-// them (stepOnline, stepDNS) drive ssh + network and cannot be rendered — so a
-// format-string drift in cloud_support_cmd.go must red this file rather than
-// leave the rows probing a sentence production no longer prints.
-const (
-	supportOnlineNarration   = "%s reads %s with capacity %s on the main's roster"
-	supportDNSSweptNarration = "%d A record(s) deleted: %s (the census re-reads the zone)"
-	supportDNSCleanNarration = "no A records in %s resolve to %s (already clean)"
-)
+// PDS-D431: the three mirror consts that used to live here — and
+// TestClaimProbesMirrorTheProductionNarration, which pinned them against the
+// production source — are GONE. The support rows call
+// supportOnlineNarration / supportDNSNarration in cloud_support_cmd.go
+// directly, so there is no second copy of the sentence left to drift.
 
 // requiredEnrollments is the FLOOR: deleting a row to make the gate green fails
 // here instead. Names are the registry Name minus any "/variant" suffix.
