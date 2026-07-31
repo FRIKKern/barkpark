@@ -1,0 +1,7 @@
+{
+ "error": {
+  "code": "not_found",
+  "message": "server not found",
+  "details": {}
+ }
+}

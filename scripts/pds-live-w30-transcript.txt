@@ -1,0 +1,76 @@
+PDS WAVE 30 — THE EPIC'S FIRST L1, LEG A: one real Hetzner verb, one real round trip.
+
+REPRODUCE:  HCLOUD_CONFIG=~/.config/hcloud/cli.toml \
+            PDS_LIVE_HARVEST=internal/cli/testdata \
+            scripts/pds-live-hetzner-placement-group.sh --run
+
+PREFLIGHT:  scripts/pds-live-hetzner-placement-group.sh --selftest   (no writes)
+
+This is a RECORD of a run, not the proof itself — the proof is the RUNNER, which
+re-runs. A transcript nobody can reproduce is a ceremony. No token value appears
+below; the runner never prints one.
+
+Harvested residue: internal/cli/testdata/pds_live_hetzner_*.json, pinned by
+internal/cli/hetzner_live_fixtures_test.go, which needs no credential and rides
+CI forever after this credential is gone.
+────────────────────────────────────────────────────────────────────────────────
+
+== 0 PREFLIGHT
+  PASS    bp resolved a credential of its own: rc=0 AND the receipt is a placement_groups list
+  CREDENTIAL RUNG THAT PAID: hcloud-cli-context ($HCLOUD_CONFIG else <UserConfigDir>/hcloud/cli.toml)
+  (the rung is derived by re-probing without HCLOUD_TOKEN, not by reading env-var names)
+  PASS    an independent oracle client is available (curl -> https://api.hetzner.cloud/v1), so bp will not be its own witness
+
+== 1 FENCE
+  PASS    zero placement groups match "pds-live-w30-"; project baseline = 0 group(s); cleanup trap armed on EXIT/INT/TERM
+  FENCE: placement groups ONLY. This project holds five running production servers; nothing this runner touches routes traffic or holds data.
+
+== 2 CREATE (the real verb, the real API)
+  PASS    bp receipt: ok=True action=create id=1806023 name=pds-live-w30-20260731T201135Z-84869 type=spread
+
+== 3 OBSERVE (bp's own read-back)
+  PASS    bp get id=1806023 name=pds-live-w30-20260731T201135Z-84869
+
+== 4 ORACLE — an INDEPENDENT client asks the same API the same question
+  PASS    HTTP 200 application/json 186 bytes; id/name/type match bp's receipt (1806023 / pds-live-w30-20260731T201135Z-84869 / spread)
+  THIS is the line that makes the run a proof: the receipt was checked against the server's own SECOND answer, taken by a different client, not against the fixture that generated it.
+  harvested: /Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_752df226-17e-29/internal/cli/testdata/pds_live_hetzner_placement_group_200.json (186 bytes)
+
+== 5 DELETE (hzResDestroyed's confirming read fires against the real API)
+  PASS    bp receipt: ok=True action=delete confirmed_gone=true — hzResDestroyed's (nil,nil) arm fired against a REAL 404, not a fixture
+
+== 6 THE GONE PREDICATE'S GROUND TRUTH — the real 404, measured
+  PASS    HTTP 404 application/json 100 bytes error.code=not_found — PDS-D401 confirmed at L1 for the placement-group kind
+  body: {
+ "error": {
+  "code": "not_found",
+  "message": "placement group not found",
+  "details": {}
+ }
+}
+  harvested: the placement-group 404 (100 bytes) and the SERVER 404 (91 bytes) — different kinds, different lengths, so no assertion may pin a universal byte count
+
+== 7 THE PROJECT IS LEFT AS IT WAS — observed, not claimed
+  PASS    independent list read: zero groups match "pds-live-w30-"; count back to the baseline (0)
+
+== 8 WHAT THIS RUN PROVED, AND WHAT IT DID NOT
+  PROVED (direction: NO FALSE REFUSAL). A real Barkpark verb made a real round
+  trip against api.hetzner.cloud; its receipt agreed with the same API's own
+  independent second answer; and hzResDestroyed's confirming read bound on REAL
+  404 bytes — clean JSON, error.code=not_found — and did not red an honest
+  destroy. Until this run, PDS-D401's "production always returns a JSON 404" was
+  an assumption the whole apparatus rested on.
+
+  NOT PROVED (direction: THE REFUSAL). This run did NOT show the receipt refusing
+  a lying API. A correct Hetzner will not keep handing back a resource it has
+  deleted, so the hzResStillThere arm cannot be staged live at all; it stays
+  proven only by the LYING-FAKE cases in internal/cli/hetzner_respost_test.go.
+  Nor is the object-storage "declared" arm touched here.
+
+  NOT REACHABLE AT ALL from the CLI: the 204 carve-out. `bp chat approve` exits
+  rc=2, so that path cannot be driven from this surface by any live run.
+
+  Anyone quoting this transcript as "the destroy apparatus is proven against
+  production" is over-reading it by exactly one direction.
+
+  PASS    LIVE PROOF COMPLETE — credential rung: hcloud-cli-context ($HCLOUD_CONFIG else <UserConfigDir>/hcloud/cli.toml)
