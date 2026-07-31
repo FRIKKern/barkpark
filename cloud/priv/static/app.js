@@ -4563,6 +4563,11 @@
   function ensureFleet() {
     if (fleetCache) return Promise.resolve(fleetCache);
     return api("GET", "/v1/barkparks").then(function (r) {
+      // The deploy rail's measured per-stage medians ride this same envelope.
+      // Absorbing here is what makes them reach the rail: site detail awaits
+      // ensureFleet() before it renders, so the table is in hand by the time
+      // the first row is paced.
+      if (r.ok) absorbServerStepEstimates(r.data);
       // Only cache on success — caching a transient 5xx/network failure as []
       // would make every consumer treat live instances as "not found" forever.
       if (r.ok && r.data && r.data.barkparks) {
@@ -4621,6 +4626,7 @@
           esc(friendly(r.data)) + "</p></div>";
         return;
       }
+      absorbServerStepEstimates(r.data); // measured deploy-rail medians ride along
       var list = (r.data && r.data.barkparks) || [];
       fleetCache = list;
       setHeaderLaunchHidden("fleet-launch", !list.length);
@@ -10198,6 +10204,43 @@
     HEALTH: "Health check", SWITCH: "Go live", RETIRE: "Retire old",
   };
 
+  // The SERVER-measured per-stage medians (GET /v1/barkparks →
+  // `step_estimates.deploy`, folded by Registry.deploy_stage_estimates/1 over a
+  // 30-day cohort of live deployments). Null until a fleet payload lands, and
+  // null again if the server publishes nothing — in BOTH cases every rail row
+  // falls back to SERVER_STEP_EXPECTED_MS, so the rail paces exactly as it did
+  // before this table existed. The constants stayed wrong for a long time
+  // precisely because nobody could see them: BUILD advertised 120000ms against
+  // a measured p50 of 14835ms.
+  var serverDeployExpectedMs = null;
+
+  // Absorb the table off any /v1/barkparks envelope. Deliberately strict: only
+  // finite positive numbers for stages the rail actually renders survive, so a
+  // garbled or hostile payload can never make a row pace off NaN, and a stage
+  // the server REFUSED (cadence-quantized — see the Elixir fold) is simply
+  // absent and keeps its constant. An empty/absent table resets to null rather
+  // than half-applying a stale one.
+  function absorbServerStepEstimates(data) {
+    var t = data && data.step_estimates && data.step_estimates.deploy;
+    if (!t || typeof t !== "object") return;
+    var out = {}, any = false;
+    DEPLOY_RAIL_STAGES.forEach(function (name) {
+      var v = t[name];
+      if (typeof v === "number" && isFinite(v) && v > 0) { out[name] = Math.round(v); any = true; }
+    });
+    serverDeployExpectedMs = any ? out : null;
+  }
+
+  // The expected duration for ONE deploy stage: the server's measured median
+  // when it published one, the constant otherwise. Per STEP, not per table — a
+  // payload carrying only BUILD leaves the other five on their constants.
+  function deployExpectedMs(name) {
+    if (serverDeployExpectedMs && serverDeployExpectedMs[name] != null) {
+      return serverDeployExpectedMs[name];
+    }
+    return SERVER_STEP_EXPECTED_MS[name];
+  }
+
   // Pure: the engine's per-stage status word → a rail display role (the same
   // vocabulary newStepsHtml renders — ok/failed/active/pending, plus skipped).
   // Unknown/blank → pending, so a lean report never invents progress.
@@ -10264,6 +10307,14 @@
         label: DEPLOY_RAIL_LABELS[name] || name,
         role: role,
         elapsedMs: elapsedMs,
+        // The row's OWN pacing budget — the seam buildProvisionRow already
+        // stamps and all three consumers (provisionOverall's ETA, the pending
+        // "~Ns" hint in newStepsHtml, the active ring) already prefer. Emitting
+        // it here is the whole fix: until now deploy rows carried no
+        // expectedMs, so every one of them fell through to the constant and the
+        // screen quoted "about 2m" for a build that half the time finishes in
+        // fifteen seconds.
+        expectedMs: deployExpectedMs(name),
         caption: (e && e.detail) || "",
         probes: [],
       };
@@ -13629,18 +13680,31 @@
   // The canonical fold: rows in SERVER_STEP_ORDER (planned steps ALWAYS
   // present, pending if unstarted; OPTIONAL fallback steps only once reported),
   // then any UNKNOWN steps appended in first-seen order.
+  // The label/estimate tables a PROVISION row folds over. PDF-D84: a support
+  // row folds over the SUPPORT tables — every one of its 6 steps is planned (no
+  // optional set; `secure` is a real, planned rung now that supports carry a
+  // full public identity).
+  //
+  // The server's measured table is deliberately NOT a source here. The deploy
+  // rail publishes medians because its cohort is thousands of paired attempts;
+  // the provision rail's live cohort is FOUR succeeded jobs with per-step pairs
+  // of 1-4 (one step at n=1), on a column that has only existed since migration
+  // 20260702140000. That is a sample, not a median — so provision steps keep
+  // their constants, and the server never emits a provision key to overlay.
+  function pickTables(bp) {
+    return isSupportBp(bp)
+      ? { labels: SUPPORT_STEP_LABELS, expectedMs: SUPPORT_STEP_EXPECTED_MS }
+      : { labels: SERVER_STEP_LABELS, expectedMs: SERVER_STEP_EXPECTED_MS };
+  }
+
   function provisionSteps(bp, now) {
     var raw = (bp && bp.provision_steps) || [];
     now = (typeof now === "number") ? now : Date.now();
-    // PDF-D84: a support row folds over the SUPPORT tables — every one of its
-    // 6 steps is planned (no optional set; `secure` is a real, planned rung
-    // now that supports carry a full public identity). The ONE main-only step
-    // left, freshen, is dropped even from a rogue payload: a support must
-    // NEVER render it, whatever the server reports.
+    // The ONE main-only step left, freshen, is dropped even from a rogue
+    // support payload: a support must NEVER render it, whatever the server
+    // reports.
     var support = isSupportBp(bp);
-    var tables = support
-      ? { labels: SUPPORT_STEP_LABELS, expectedMs: SUPPORT_STEP_EXPECTED_MS }
-      : { labels: SERVER_STEP_LABELS, expectedMs: SERVER_STEP_EXPECTED_MS };
+    var tables = pickTables(bp);
     var optional = support ? {} : SERVER_STEP_OPTIONAL;
     var order = (support ? SUPPORT_STEP_ORDER : SERVER_STEP_ORDER).slice();
     var known = {};
@@ -18363,6 +18427,11 @@
       // node-pinned; the EventSource wiring + DOM mount are browser-verified.
       deployStageRole: deployStageRole, deployRailLedgerFromConsole: deployRailLedgerFromConsole,
       deployRailRows: deployRailRows, deployRailSignature: deployRailSignature,
+      // The measured-estimate seam: absorb a /v1/barkparks envelope, then read
+      // one stage's budget. pickTables rides along so the provision-side fork
+      // can be pinned as UNAFFECTED by the server table.
+      absorbServerStepEstimates: absorbServerStepEstimates,
+      deployExpectedMs: deployExpectedMs, pickTables: pickTables,
       deployRailStatus: deployRailStatus, deployRailHtml: deployRailHtml,
       railDeployment: railDeployment, instanceCanDeploy: instanceCanDeploy,
       deployRailStages: DEPLOY_RAIL_STAGES.slice(),

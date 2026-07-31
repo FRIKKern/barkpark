@@ -5570,6 +5570,276 @@ defmodule BarkparkCloud.Registry do
 
   defp filter_environment(query, _), do: query
 
+  ## Deploy-rail step estimates — MEASURED, or refused.
+  ##
+  ## The console's deploy rail used to pace itself off hardcoded literals
+  ## (app.js `SERVER_STEP_EXPECTED_MS`), and they were wrong by an order of
+  ## magnitude: the screen told a person BUILD takes 120000ms when the live
+  ## control plane's 30-day cohort has a p50 of 14835ms over 8211 paired
+  ## attempts. HEALTH advertised 18000ms against a measured 2098ms. This fold
+  ## replaces the invented numbers with medians the rail can actually stand
+  ## behind — and REFUSES to publish a number for any stage whose distribution
+  ## turns out to be a sampling artifact rather than stage work.
+  ##
+  ## Four policy choices, each with the measurement that motivated it:
+  ##
+  ##   1. PER-ATTEMPT PAIRING (never min(running) → max(done) across a whole
+  ##      console array). A retried stage re-opens inside one array, and the
+  ##      naive fold produced a HEALTH minimum of -61637ms and a PLAN minimum of
+  ##      -10282ms on real prod rows — durations that cannot exist. Each
+  ##      `running` opens an attempt; the next `done` closes exactly that one; a
+  ##      `failed` discards it (a died attempt is not a healthy duration); a
+  ##      re-`running` supersedes an unclosed attempt. A pair that still comes
+  ##      out negative (re-ordered stamps) is DROPPED, never clamped to zero.
+  ##
+  ##   2. OUTLIER TRIMMING. The same cohort holds a BUILD attempt of
+  ##      111611410ms — 31 hours, a claim that outlived its build. The top and
+  ##      bottom @estimate_trim_fraction of the sorted samples come off before
+  ##      any percentile is read.
+  ##
+  ##   3. A MINIMUM SAMPLE COUNT of @estimate_min_samples. The stages we mean to
+  ##      publish clear it by orders of magnitude (BUILD 8211, HEALTH 1468, PLAN
+  ##      689 pairs); the floor exists so a quiet week never turns three
+  ##      deployments into a "median".
+  ##
+  ##   4. A CADENCE REFUSAL. RETIRE/STAGE/SWITCH bottom out at 2035/2036/2036ms
+  ##      with p50s of 2102/2099/2119 — three unrelated stages pinned to the
+  ##      same ~2s value, which is the deploy driver's POLL CADENCE, not their
+  ##      work. Publishing those would swap an invented number for a sampling
+  ##      artifact, so a stage whose whole distribution collapses into one
+  ##      sub-@estimate_cadence_ceiling_ms spike is refused and the client keeps
+  ##      its constant. The rule is measured, not stage-hardcoded: a stage that
+  ##      grows a real spread starts publishing, and one that collapses stops.
+  ##
+  ## SCOPE: the DEPLOY rail only. The provision rail keeps its constants — see
+  ## the note on `deploy_stage_estimates/1` below.
+  @deploy_estimate_stages ~w(PLAN BUILD STAGE HEALTH SWITCH RETIRE)
+  @estimate_window_days 30
+  # Newest-first cap on the cohort. 300 live deployments still yields hundreds
+  # of BUILD pairs (far above the sample floor) while keeping the fold's cost a
+  # bounded read instead of a 30-day table scan.
+  @estimate_cohort_limit 300
+  @estimate_min_samples 30
+  @estimate_trim_fraction 0.05
+  # Below this, a median is small enough to be a poll artifact and the spread
+  # test applies. Above it (BUILD at 14835ms) the number is stage work whatever
+  # its spread looks like.
+  @estimate_cadence_ceiling_ms 5_000
+  @estimate_cadence_spread_ratio 0.25
+  # Sanity rails: an estimate the console would render as nonsense is refused
+  # rather than shown.
+  @estimate_floor_ms 500
+  @estimate_ceiling_ms 1_800_000
+  @estimate_cache_key {__MODULE__, :deploy_stage_estimates}
+  @estimate_cache_ttl_ms 600_000
+
+  @doc """
+  The deploy rail's MEASURED per-stage estimates, shaped for the additive
+  `step_estimates` key on `GET /v1/barkparks`:
+
+      %{
+        deploy: %{"BUILD" => 14835, "HEALTH" => 2098, "PLAN" => 2046},
+        meta: %{
+          window_days: 30,
+          deployments: 300,
+          samples: %{"BUILD" => 812, …},
+          refused: %{"STAGE" => "cadence_quantized", …}
+        }
+      }
+
+  `deploy` carries ONLY the stages that survived the policy above; every other
+  stage is absent (and named in `meta.refused` with its reason), which the
+  client reads as "keep the constant". Counts and stage names only — no site,
+  team, user or deployment identity goes anywhere near this payload.
+
+  THE PROVISION RAIL IS DELIBERATELY NOT HERE. Its steps keep their hardcoded
+  constants because the evidence does not exist: the live control plane holds
+  FOUR succeeded provision jobs with per-step complete pairs of 1-4 (one step at
+  n=1), on a column that has only existed since migration 20260702140000. That
+  is a sample, not a median, and @estimate_min_samples would refuse every one of
+  them anyway.
+
+  Memoized in `:persistent_term` for `opts[:ttl_ms]` (default 10 minutes) so a
+  polling dashboard does not re-fold the cohort on every request. Pass
+  `ttl_ms: 0` to force a recompute (what the tests do, so a warm entry from a
+  neighbouring test can never answer for them).
+  """
+  @spec deploy_stage_estimates(keyword()) :: %{deploy: map(), meta: map()}
+  def deploy_stage_estimates(opts \\ []) do
+    ttl = Keyword.get(opts, :ttl_ms, @estimate_cache_ttl_ms)
+    now = System.monotonic_time(:millisecond)
+
+    case :persistent_term.get(@estimate_cache_key, nil) do
+      {computed_at, payload} when is_integer(computed_at) and now - computed_at < ttl ->
+        payload
+
+      _ ->
+        consoles = recent_live_deploy_consoles()
+        payload = deploy_stage_estimates_from_consoles(consoles)
+        :persistent_term.put(@estimate_cache_key, {now, payload})
+        payload
+    end
+  end
+
+  @doc """
+  The pure fold behind `deploy_stage_estimates/1`: a list of deployment console
+  arrays (`[%{"stage" =>, "status" =>, "at" =>}]`, exactly what
+  `BarkparkCloud.Sites.Deploy.console_entry/1` appends) in, the published table
+  out. Every policy decision documented above lives here, so the judgment is
+  unit-testable without a database.
+  """
+  @spec deploy_stage_estimates_from_consoles([list()]) :: %{deploy: map(), meta: map()}
+  def deploy_stage_estimates_from_consoles(consoles) when is_list(consoles) do
+    samples =
+      Enum.reduce(consoles, %{}, fn console, acc ->
+        console
+        |> paired_stage_durations()
+        |> Enum.reduce(acc, fn {stage, ms}, inner ->
+          Map.update(inner, stage, [ms], &[ms | &1])
+        end)
+      end)
+
+    verdicts =
+      Map.new(@deploy_estimate_stages, fn stage ->
+        {stage, stage_verdict(Map.get(samples, stage, []))}
+      end)
+
+    %{
+      deploy: for({stage, {:ok, ms}} <- verdicts, into: %{}, do: {stage, ms}),
+      meta: %{
+        window_days: @estimate_window_days,
+        deployments: length(consoles),
+        samples: Map.new(@deploy_estimate_stages, &{&1, length(Map.get(samples, &1, []))}),
+        refused:
+          for({stage, {:refused, why}} <- verdicts, into: %{}, do: {stage, Atom.to_string(why)})
+      }
+    }
+  end
+
+  # The cohort: the newest @estimate_cohort_limit deployments that actually
+  # reached `live` inside the window. Successful runs only — a failed deploy's
+  # stage durations describe how long it took to break, not how long the work
+  # takes.
+  defp recent_live_deploy_consoles do
+    cutoff = DateTime.add(DateTime.utc_now(), -@estimate_window_days * 86_400, :second)
+
+    from(d in Deployment,
+      where: d.status == "live" and d.inserted_at >= ^cutoff,
+      order_by: [desc: d.inserted_at],
+      limit: @estimate_cohort_limit,
+      select: d.console
+    )
+    |> Repo.all()
+    |> Enum.map(&(&1 || []))
+  end
+
+  # Policy 1 — per-attempt pairing over ONE console array, in append order.
+  # Returns `[{stage, duration_ms}]` for the attempts that opened and cleanly
+  # closed; everything else is dropped rather than guessed.
+  defp paired_stage_durations(console) when is_list(console) do
+    {_open, pairs} =
+      Enum.reduce(console, {%{}, []}, fn entry, {open, pairs} ->
+        stage = console_value(entry, "stage")
+        status = console_value(entry, "status")
+        at = console_ms(console_value(entry, "at"))
+
+        cond do
+          stage not in @deploy_estimate_stages or is_nil(at) ->
+            {open, pairs}
+
+          status in ["running", "started"] ->
+            # A re-open supersedes an unclosed attempt — that is the retry.
+            {Map.put(open, stage, at), pairs}
+
+          status == "done" ->
+            case Map.pop(open, stage) do
+              {nil, open} -> {open, pairs}
+              {start, open} when at - start >= 0 -> {open, [{stage, at - start} | pairs]}
+              {_start, open} -> {open, pairs}
+            end
+
+          status in ["failed", "skipped"] ->
+            {Map.delete(open, stage), pairs}
+
+          true ->
+            {open, pairs}
+        end
+      end)
+
+    pairs
+  end
+
+  defp paired_stage_durations(_), do: []
+
+  defp console_value(entry, key) when is_map(entry) do
+    case Map.fetch(entry, key) do
+      {:ok, v} -> v
+      :error -> Map.get(entry, safe_atom(key))
+    end
+  end
+
+  defp console_value(_, _), do: nil
+
+  defp safe_atom("stage"), do: :stage
+  defp safe_atom("status"), do: :status
+  defp safe_atom("at"), do: :at
+
+  defp console_ms(%DateTime{} = dt), do: DateTime.to_unix(dt, :millisecond)
+
+  defp console_ms(at) when is_binary(at) do
+    case DateTime.from_iso8601(at) do
+      {:ok, dt, _} -> DateTime.to_unix(dt, :millisecond)
+      _ -> nil
+    end
+  end
+
+  defp console_ms(_), do: nil
+
+  # Policies 2-4 — trim, floor the sample count, then decide whether the median
+  # is a duration or an artifact.
+  defp stage_verdict(durations) do
+    n = length(durations)
+
+    if n < @estimate_min_samples do
+      {:refused, :insufficient_samples}
+    else
+      trimmed = trim_outliers(Enum.sort(durations))
+      p50 = percentile(trimmed, 0.5)
+      p10 = percentile(trimmed, 0.10)
+      p90 = percentile(trimmed, 0.90)
+
+      cond do
+        p50 < @estimate_floor_ms ->
+          {:refused, :below_floor}
+
+        p50 > @estimate_ceiling_ms ->
+          {:refused, :above_ceiling}
+
+        p50 < @estimate_cadence_ceiling_ms and
+            p90 - p10 < @estimate_cadence_spread_ratio * p50 ->
+          {:refused, :cadence_quantized}
+
+        true ->
+          {:ok, p50}
+      end
+    end
+  end
+
+  defp trim_outliers(sorted) do
+    n = length(sorted)
+    cut = floor(n * @estimate_trim_fraction)
+
+    case Enum.slice(sorted, cut, max(n - 2 * cut, 1)) do
+      [] -> sorted
+      kept -> kept
+    end
+  end
+
+  defp percentile(sorted, p) do
+    n = length(sorted)
+    Enum.at(sorted, min(n - 1, max(trunc(p * n), 0)))
+  end
+
   @doc "Fetch a Deployment by id, or nil. A non-UUID id is nil (→ 404), never a 500."
   @spec get_deployment(binary()) :: Deployment.t() | nil
   def get_deployment(id) when is_binary(id) do

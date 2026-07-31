@@ -8779,6 +8779,106 @@ test("W4 deployRailRows: a FAILED stage marks the stages after it skipped, not p
   assert.deepEqual([...rows.map((r) => r.role)], ["ok", "ok", "ok", "failed", "skipped", "skipped"]);
 });
 
+// ── cch-w12-s4: the deploy rail paces off MEASURED medians, or refuses ──────
+// The constants lied by an order of magnitude (BUILD advertised 120000ms
+// against a live p50 of 14835ms). The server now publishes a measured table on
+// GET /v1/barkparks; these cases pin the three things that make that safe: the
+// rail prefers the table, falls back PER STAGE, and behaves byte-identically to
+// today when the server sends nothing.
+//
+// NOTE: absorbServerStepEstimates mutates one module-level variable, so every
+// case here resets it (absorbing an empty table clears it) before asserting.
+
+test("cch-w12-s4 deployExpectedMs: with NO server table every stage reads its constant", () => {
+  hooks.absorbServerStepEstimates({ step_estimates: { deploy: {} } }); // reset
+  assert.equal(hooks.deployExpectedMs("BUILD"), 120000);
+  assert.equal(hooks.deployExpectedMs("HEALTH"), 18000);
+  assert.equal(hooks.deployExpectedMs("PLAN"), 3000);
+  assert.equal(hooks.deployExpectedMs("STAGE"), 8000);
+  assert.equal(hooks.deployExpectedMs("SWITCH"), 3000);
+  assert.equal(hooks.deployExpectedMs("RETIRE"), 4000);
+});
+
+test("cch-w12-s4 deployRailRows: no server table → rows still carry the constants (today's pacing, unchanged)", () => {
+  hooks.absorbServerStepEstimates({ step_estimates: { deploy: {} } });
+  const rows = hooks.deployRailRows({});
+  assert.deepEqual([...rows.map((r) => r.expectedMs)], [3000, 120000, 8000, 18000, 3000, 4000]);
+  // A payload with no step_estimates at all (cold cache, older server) is a
+  // no-op, not a wipe of whatever was already in hand.
+  hooks.absorbServerStepEstimates({ step_estimates: { deploy: { BUILD: 14835 } } });
+  hooks.absorbServerStepEstimates({ barkparks: [] });
+  assert.equal(hooks.deployExpectedMs("BUILD"), 14835);
+});
+
+test("cch-w12-s4 absorbServerStepEstimates: the measured table wins, and REFUSED stages fall back per step", () => {
+  // Exactly the shape the Elixir fold publishes for the live cohort: the three
+  // stages that cleared the policy, and nothing for the three it refused as
+  // poll-cadence artifacts (RETIRE/STAGE/SWITCH, all pinned at ~2s).
+  hooks.absorbServerStepEstimates({
+    barkparks: [],
+    step_estimates: {
+      deploy: { BUILD: 14835, HEALTH: 2098, PLAN: 2046 },
+      meta: { window_days: 30, refused: { STAGE: "cadence_quantized" } },
+    },
+  });
+  const rows = hooks.deployRailRows({});
+  const by = Object.fromEntries(rows.map((r) => [r.step, r.expectedMs]));
+  assert.equal(by.BUILD, 14835);   // was 120000 — the headline lie
+  assert.equal(by.HEALTH, 2098);   // was 18000
+  assert.equal(by.PLAN, 2046);     // was 3000
+  assert.equal(by.STAGE, 8000);    // refused → constant
+  assert.equal(by.SWITCH, 3000);   // refused → constant
+  assert.equal(by.RETIRE, 4000);   // refused → constant
+  hooks.absorbServerStepEstimates({ step_estimates: { deploy: {} } });
+});
+
+test("cch-w12-s4 absorbServerStepEstimates: a garbled table can never pace a row off NaN", () => {
+  hooks.absorbServerStepEstimates({
+    step_estimates: { deploy: { BUILD: "soon", HEALTH: -5, PLAN: 0, STAGE: null, SWITCH: NaN, RETIRE: Infinity } },
+  });
+  const rows = hooks.deployRailRows({});
+  assert.deepEqual([...rows.map((r) => r.expectedMs)], [3000, 120000, 8000, 18000, 3000, 4000]);
+  assert.ok(rows.every((r) => Number.isFinite(r.expectedMs)));
+  // A non-object / absent table is inert too.
+  hooks.absorbServerStepEstimates({ step_estimates: { deploy: 7 } });
+  assert.equal(hooks.deployExpectedMs("BUILD"), 120000);
+  hooks.absorbServerStepEstimates(null);
+  assert.equal(hooks.deployExpectedMs("BUILD"), 120000);
+});
+
+test("cch-w12-s4 the measured median reaches the rendered rail (the pending hint + the ETA)", () => {
+  hooks.absorbServerStepEstimates({ step_estimates: { deploy: { BUILD: 14835 } } });
+  const rows = hooks.deployRailRows({ PLAN: { status: "done" }, BUILD: { status: "running" } });
+  // provisionOverall's ETA is weighted by each row's OWN budget — with BUILD at
+  // 14835ms instead of 120000ms the whole rail's remaining time collapses.
+  const measured = hooks.provisionOverall(rows).etaMs;
+  hooks.absorbServerStepEstimates({ step_estimates: { deploy: {} } });
+  const invented = hooks.provisionOverall(hooks.deployRailRows({
+    PLAN: { status: "done" }, BUILD: { status: "running" },
+  })).etaMs;
+  assert.ok(measured < invented, `measured ETA ${measured} should undercut the invented ${invented}`);
+  assert.ok(invented - measured > 100000, "the 120000→14835 correction should dominate the ETA");
+});
+
+test("cch-w12-s4 pickTables: the PROVISION fork is untouched by the server table (its cohort is four jobs)", () => {
+  hooks.absorbServerStepEstimates({
+    step_estimates: { deploy: { BUILD: 14835, PLAN: 2046 } },
+  });
+  const main = hooks.pickTables({});
+  const support = hooks.pickTables({ fleet_role: "support" });
+  assert.equal(main.expectedMs.create, 15000);
+  assert.equal(main.expectedMs.secure, 45000);
+  assert.equal(support.expectedMs.create, 20000);
+  assert.equal(support.expectedMs.configure, 60000);
+  // The deploy stages must not have leaked into a provision table.
+  assert.equal(main.expectedMs.BUILD, 120000); // the shared constants map, NOT the measured 14835
+  assert.equal(support.expectedMs.BUILD, undefined);
+  // And a provision row still folds off the constant end to end.
+  const rows = hooks.provisionSteps({ provision_steps: [] }, NOW);
+  assert.equal(rows[0].expectedMs, 15000);
+  hooks.absorbServerStepEstimates({ step_estimates: { deploy: {} } });
+});
+
 test("W4 deployRailSignature: stable across a no-op, moves when a role or caption changes", () => {
   const a = hooks.deployRailRows({ PLAN: { status: "done" } });
   const b = hooks.deployRailRows({ PLAN: { status: "done" } });
