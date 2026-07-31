@@ -60,6 +60,7 @@
 #   scripts/registration-deadlock-sweep.sh
 #   scripts/registration-deadlock-sweep.sh --spec <candidate.json>
 #   scripts/registration-deadlock-sweep.sh --ref-rev origin/main
+#   scripts/registration-deadlock-sweep.sh --ref-file <baseline.json>   # harness
 #   scripts/registration-deadlock-sweep.sh --prs <file.json> --fixture-dir <dir>
 
 set -euo pipefail
@@ -77,6 +78,14 @@ REPO="${RC_REPO:-FRIKKern/barkpark}"
 SPEC="$REPO_ROOT/.github/required-checks.json"
 SPEC_PATH=".github/required-checks.json"
 REF_REV="origin/main"
+# --ref-file is a HARNESS SEAM, exactly like the floor's --reference (which
+# scripts/required-checks.test.sh §12 uses for the same reason). The DEFAULT is
+# and stays `git show origin/main:` — a baseline read from the worktree is the
+# file the PR is rewriting, so it would make every proposed context look
+# already-required and the sweep would never refuse. §16 asserts that default by
+# reading this file, so pointing --ref-file at the worktree cannot become the
+# quiet norm.
+REF_FILE=""
 PR_LIMIT=100
 PRS_FILE=""
 FIXTURE_DIR=""
@@ -94,6 +103,7 @@ main() {
     case "$1" in
       --spec) SPEC="$2"; shift 2 ;;
       --ref-rev) REF_REV="$2"; shift 2 ;;
+      --ref-file) REF_FILE="$2"; shift 2 ;;
       --spec-path) SPEC_PATH="$2"; shift 2 ;;
       --repo) REPO="$2"; shift 2 ;;
       --limit) PR_LIMIT="$2"; shift 2 ;;
@@ -113,14 +123,23 @@ main() {
   proposed="$(contexts_of < "$SPEC")"
   [ -n "$proposed" ] || fail "the candidate spec proposes ZERO contexts — nothing to sweep, and that is a defect not a pass"
 
-  local ref_json
-  ref_json="$(git -C "$REPO_ROOT" show "$REF_REV:$SPEC_PATH" 2>&1)" \
-    || fail "cannot read $REF_REV:$SPEC_PATH — without the baseline every context looks new"
+  local ref_json ref_label
+  if [ -n "$REF_FILE" ]; then
+    [ -f "$REF_FILE" ] || fail "no baseline file at $REF_FILE"
+    ref_json="$(cat "$REF_FILE")"
+    ref_label="$REF_FILE"
+  else
+    ref_json="$(git -C "$REPO_ROOT" show "$REF_REV:$SPEC_PATH" 2>&1)" \
+      || fail "cannot read $REF_REV:$SPEC_PATH — without the baseline every context looks new. On a CI runner the remote-tracking ref often does not exist at all (actions/checkout fetches the PR ref, not origin/main); \`git fetch --no-tags --depth=1 origin main\` first, or pass --ref-file for a harness run."
+    ref_label="$REF_REV:$SPEC_PATH"
+  fi
+  jq -e . <<<"$ref_json" >/dev/null 2>&1 || fail "the baseline is not valid JSON — refusing to sweep against an unreadable reference"
   baseline="$(printf '%s' "$ref_json" | contexts_of)"
+  [ -n "$baseline" ] || fail "the baseline requires ZERO contexts — that is an unreadable reference, not an empty one, and it would make EVERY proposed context look new"
 
   new_ctx="$(comm -23 <(printf '%s\n' "$proposed") <(printf '%s\n' "$baseline") | grep . || true)"
 
-  echo "registration-deadlock-sweep: repo=$REPO candidate=$SPEC baseline=$REF_REV:$SPEC_PATH"
+  echo "registration-deadlock-sweep: repo=$REPO candidate=$SPEC baseline=$ref_label"
   if [ -z "$new_ctx" ]; then
     echo "the candidate proposes no context that $REF_REV does not already require — nothing can be NEWLY deadlocked."
     exit 0

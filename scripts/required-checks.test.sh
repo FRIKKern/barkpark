@@ -1330,16 +1330,39 @@ section "16. the deadlock sweep's predicate is TWO-SIDED — a PR that is alread
 SWEEP="$REPO_ROOT/scripts/registration-deadlock-sweep.sh"
 SWF="$TMP/sweep-fixtures"
 mkdir -p "$SWF"
-# A candidate that adds ONE synthetic name over origin/main's spec. Synthetic on
-# purpose: the baseline is read from git, and no real registration can ever make
-# this name stop being new, so the section cannot rot the way a real name would.
-# Built from the BASELINE, not the worktree spec: the sweep's "newly proposed"
-# set is candidate minus origin/main, so a candidate derived from the worktree
-# would also carry whatever contexts THIS PR is adding, and the section would
-# assert about those instead of about its own probe.
-git -C "$REPO_ROOT" show "origin/main:.github/required-checks.json" \
-  | jq '.protection.required_status_checks.checks += [{context: "Probe gate", app_id: 15368}]' \
-  > "$TMP/sweep-candidate.json"
+# HERMETIC BASELINE, for the reason §12 already wrote down two hundred lines
+# above and this section originally ignored: CI checks out at depth 1 and the
+# remote-tracking ref `origin/main` OFTEN DOES NOT EXIST on a runner at all —
+# actions/checkout fetches the PR ref. The first draft of this section did
+# `git show origin/main:…` and died with `fatal: invalid object name
+# 'origin/main'` on every PR, reding a job that is green on main. So the
+# baseline is a literal fixture and reaches the sweep through --ref-file, the
+# same harness seam the floor exposes as --reference.
+#
+# The candidate adds ONE SYNTHETIC name over that baseline. Synthetic on
+# purpose: no real registration can ever make this name stop being new, so the
+# section cannot rot the way a real name would. Built from the BASELINE, not
+# the worktree spec — the sweep's "newly proposed" set is candidate minus
+# baseline, so a candidate derived from the worktree would also carry whatever
+# contexts THIS PR is adding and the section would assert about those instead
+# of about its own probe.
+cat > "$TMP/sweep-ref.json" <<'JSON'
+{ "protection": { "required_status_checks": { "strict": false, "checks": [
+  { "context": "Elixir gate", "app_id": 15368 },
+  { "context": "PR references an active task", "app_id": 15368 }
+] } } }
+JSON
+jq '.protection.required_status_checks.checks += [{context: "Probe gate", app_id: 15368}]' \
+  "$TMP/sweep-ref.json" > "$TMP/sweep-candidate.json"
+# …and the DEFAULT reference — the one that matters in anger — is asserted by
+# reading the script, so --ref-file cannot quietly become the norm. Mirrors the
+# floor's own default assertion in §12.
+if grep -q 'REF_REV="origin/main"' "$SWEEP" \
+   && grep -q 'git -C "$REPO_ROOT" show "$REF_REV:$SPEC_PATH"' "$SWEEP"; then
+  ok "the sweep's DEFAULT baseline is still \`git show origin/main:\`, never the worktree copy the PR rewrites"
+else
+  bad "the sweep's default baseline moved — --ref-file must stay a harness seam, not the norm"
+fi
 cat > "$SWF/checkruns-sweepRENDERS.json" <<'JSON'
 { "check_runs": [ { "name": "Probe gate", "conclusion": "success", "status": "completed", "started_at": "2026-07-30T01:00:00Z" } ] }
 JSON
@@ -1366,7 +1389,21 @@ cat > "$TMP/sweep-prs-casualty.json" <<'JSON'
 ]
 JSON
 
-sweep() { bash "$SWEEP" --spec "$TMP/sweep-candidate.json" --fixture-dir "$SWF" --prs "$1" 2>&1; }
+sweep() { bash "$SWEEP" --spec "$TMP/sweep-candidate.json" --ref-file "$TMP/sweep-ref.json" \
+            --fixture-dir "$SWF" --prs "$1" 2>&1; }
+
+# An unreadable baseline must FAIL, never sweep against an empty set: with a
+# zero-context baseline EVERY proposed context looks new and the sweep would
+# refuse the world — an exit-1 that means "I could not see", the same shape the
+# builder already fixed for mergeable=UNKNOWN.
+echo '{ "protection": { "required_status_checks": { "checks": [] } } }' > "$TMP/sweep-ref-empty.json"
+EMPTY_OUT="$(bash "$SWEEP" --spec "$TMP/sweep-candidate.json" --ref-file "$TMP/sweep-ref-empty.json" \
+  --fixture-dir "$SWF" --prs "$TMP/sweep-prs-safe.json" 2>&1)" && EMPTY_RC=0 || EMPTY_RC=$?
+if [ "$EMPTY_RC" -eq 2 ] && grep -q "baseline requires ZERO contexts" <<<"$EMPTY_OUT"; then
+  ok "a baseline requiring ZERO contexts is an INFRA FAULT (exit 2), never an empty diff"
+else
+  bad "the sweep accepted an empty baseline (exit $EMPTY_RC): $(head -2 <<<"$EMPTY_OUT")"
+fi
 
 SW_SAFE="$(sweep "$TMP/sweep-prs-safe.json")" && SW_SAFE_RC=0 || SW_SAFE_RC=$?
 if [ "$SW_SAFE_RC" -eq 0 ] && grep -q "NO CASUALTY" <<<"$SW_SAFE"; then
@@ -1415,6 +1452,7 @@ else
   bad "the two-sidedness mutation did not apply — the guard moved, so the proof below is vacuous"
 fi
 OS_OUT="$(RC_REPO_ROOT="$REPO_ROOT" bash "$ONESIDED" --spec "$TMP/sweep-candidate.json" \
+           --ref-file "$TMP/sweep-ref.json" \
            --fixture-dir "$SWF" --prs "$TMP/sweep-prs-safe.json" 2>&1)" && OS_RC=0 || OS_RC=$?
 if [ "$OS_RC" -eq 1 ] && grep -q "^#3 .*REFUSE" <<<"$OS_OUT" && grep -q "^#4 .*REFUSE" <<<"$OS_OUT"; then
   ok "…and the one-sided version REFUSES on both already-stuck PRs — the second side is load-bearing (mutation-proven able to fail)"
