@@ -2576,6 +2576,75 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 28 2026-07-31 — "The reason must be able to be wrong" — REVIEWED. Grade A− (paper `pds-wave-28-2026-07-31`)
+
+**THE HEADLINE: the wave aimed the epic's own law at the epic's own evidence base, and mostly hit.**
+Wave 27 made `--assert-round-done` exit 0 for the first time in 27 waves, and its reviewer named the
+hole in the same breath: clause 1 asserts hash-distinctness and nothing more, so a STALE, INVENTED or
+PARTIAL reason passes exactly as well as a re-derived one. Wave 28 is the answer, and the answer is
+honest rather than flattering — **4 of 172 reasons are now re-derivable, 167 are not, and the
+instrument prints all 166 prose-only rows BY NAME rather than summarising them into a number.**
+
+**WHAT LANDED — 7 of 7 slices green, all round 1, all pushed with PRs open.**
+
+| slice | PR | what it actually does |
+|---|---|---|
+| `pds-w28-census-isolation` | #8515 | `exec python3 -I -`; selftest 106 → 107 with the FIRST isolation fixture |
+| `pds-w28-rerun-adjudicator` | #8516 | `tooling/pds/` — grip read-only, structured verdict, 166 prose rows named |
+| `pds-w28-disposition-rerun-field` | #8517 | `content.disposition_rerun` + write-seam screen + raw-door refusal |
+| `pds-w28-reader-default-page-fence` | #8518 | the DEFAULT paginated read stops reporting rc=0 on an unreadable 200 |
+| `pds-w28-birth-fence` | #8519 | birth adjudication parity + adoption-by-reparent guard + bridge born adjudicated |
+| `pds-w28-oscreate-real-sinks` | #8520 | `GetObjectSized` + temp-and-promote on all three real sinks |
+| `pds-w28-residue-18` | #8521 | 18 residue rows adjudicated by CONTENT at a `git archive origin/main` tree |
+
+**THE ONE THING A FUTURE READER MUST NOT MISREAD.** This wave did NOT close the false-reason hole. It
+built the instrument that can close it and then measured, out loud, how little of the board that
+instrument currently covers: **5 rows carry a rerun, 4 re-derive, 167 are prose-only.** The verdict
+line refuses to say "these reasons are true" — seven banned wordings are grepped over the rendered
+text by its own gate, and a RE-DERIVED row is described as having ONE BOUND SUB-CLAIM re-derived "and
+nothing else". Anyone quoting "the reasons are now checkable" off this wave is repeating exactly the
+over-read the wave exists to kill. `pds-w28-bl-rerun-backfill-19-prose-reasons` carries the debt.
+
+**D364 CONVERGENCE, ANSWERED WITH ARITHMETIC (the wish's weight 2).** `residue(N) = { r in B :
+born(r) > A_N }`, so `residue(N) = 0` requires a round that files nothing — and this epic's rounds
+file heavily (16 of the 18 residue rows were filed by wave 27 itself inside a 79-minute window).
+**It converges PER ROW (each row waits at most one round) and does NOT converge in aggregate.** This
+was watched happening live: the residue moved 15 → 19 → 20 during a single slice's run, and the
+review's own census re-run read 24 — including a row the REVIEWER filed minutes earlier. A
+done-condition written `residue == []` is therefore unsatisfiable by construction, which vindicates
+the wave-27 builder who refused to flip `pds-w27-round-bare-30`'s criterion 7. Filed as
+`pds-w28-bl-round-bare-30-criterion-7-unsatisfiable`.
+
+**TWO BRIEF PREMISES WERE REFUTED BY BUILDERS, AND BOTH HELD UNDER INDEPENDENT RE-DERIVATION.**
+`docs/api-v1.md` is **13,884 B against a 14,000 B cap — 116 B of headroom, not 2**
+(`git cat-file -s origin/main:docs/api-v1.md`), and `errors_doc_coverage_test.exs:56` requires only
+`String.contains?(section, "`<code>`")` — one assertion, so the minimum entry is the backticked code
+and not the brief's asserted 390 B. `pds-bl-dedup-unavailable-error-code`'s park has genuinely FIRED.
+A builder contradicting its brief with a measurement, and being right, is the healthiest thing in
+this wave.
+
+**WHAT REVIEW FOUND THAT NO BUILDER DID.** Wave 28 shipped **two independent implementations of one
+law**. The Elixir write-seam screen refuses `git -C`, `--git-dir` AND `--work-tree`; `spellings.mjs`'s
+`hasGitDashC` matches only `-C`. The Elixir `test`/`[` rule fires on a bare `test `; the JS one
+requires a following `-flag`. The drift is real and present on day one — but it runs
+**writer-stricter-than-reader on every measured difference, so it fails CLOSED** (a false refusal,
+never a false accept). Filed as `pds-w28-bl-two-rerun-screens-drift`; not a merge blocker, but "one
+law, two enforcers, and nothing re-derives that they agree" is a dedup target.
+
+**WHAT THE LEAD OWES ON MERGE.** Every slice's last criterion is the merge gate and stays open for the
+lead — seven of them. Two slices carry a standing HIGH-FLIP-RISK second-reviewer obligation
+(`birth-fence` for reachability/tenancy, `oscreate-real-sinks` for blast radius); the wave reviewer
+re-derived both judgments independently from source and AGREED with both, but that is one reviewer,
+not two. `oscreate-real-sinks` ships with a genuinely unpaid proof: **nobody smoked a real Hetzner
+bucket**, so `Content-Length` accuracy against an S3-COMPATIBLE endpoint is UNVERIFIED.
+
+**GATE EVIDENCE FROM REVIEW, NOT INHERITED.** All seven gates were re-run on the final branches.
+Notable: the census fixture was proven able to red by reverting `-I` (rc=1, and the message is the
+load-bearing one — the exit code was CORRECT and only the sentinel saw it); the reader fence was
+mutation-proven with 30 red test lines; the FULL API suite ran **13,227 tests, 1 failure**, and that
+failure (`ProjectorWorkerEnqueueTest`) was confirmed PRE-EXISTING by reproducing it with `api/lib`
+and `api/test` checked out to pristine `origin/main`.
+
 ### Wave 13 2026-07-21 — "Fire the Climb" — REVIEWED. THE CLIMB DID NOT FIRE. Grade C+ (paper `pds-wave-13-2026-07-21`)
 
 **THE HEADLINE IS THE FAILURE, AND IT IS THE FOURTH IN A ROW.** The wave's stated success condition was
