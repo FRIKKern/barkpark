@@ -971,13 +971,20 @@ def _collapse_evidence_appendices(blocks: list[Any]) -> list[Any]:
 
 
 def _opening_orientation_items(blocks: list[Any]) -> list[str]:
+    def headings(values: list[Any]) -> Iterator[dict[str, Any]]:
+        for value in values:
+            if not isinstance(value, dict):
+                continue
+            if value.get("type") == "heading":
+                yield value
+            for key in ("children", "blocks"):
+                nested = value.get(key)
+                if isinstance(nested, list):
+                    yield from headings(nested)
+
     items = []
-    for block in blocks:
-        if (
-            not isinstance(block, dict)
-            or block.get("type") != "heading"
-            or block.get("level") == 1
-        ):
+    for block in headings(blocks):
+        if block.get("level") == 1:
             continue
         heading = _heading_text(block)
         if heading and heading not in items:
@@ -1065,6 +1072,19 @@ def repair_canonical_epic(
             h1 = repaired.pop(h1_index)
             repaired.insert(0, h1)
             h1_index = 0
+
+    generated_orientation = next(
+        (
+            block
+            for block in repaired
+            if isinstance(block, dict)
+            and block.get("id") == "epb-cohort-orientation"
+            and block.get("type") == "byline"
+        ),
+        None,
+    )
+    if generated_orientation is not None:
+        generated_orientation["items"] = _opening_orientation_items(repaired)
 
     opening_types = {
         block.get("type")

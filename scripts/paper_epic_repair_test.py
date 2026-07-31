@@ -811,6 +811,16 @@ class PaperEpicRepairTest(unittest.TestCase):
         duplicated_appendix["summary"] = (
             "Evidence appendix 1 — Evidence 2 Evidence 2"
         )
+        duplicated_orientation = next(
+            block
+            for block in duplicated
+            if block.get("id") == "epb-cohort-orientation"
+        )
+        duplicated_orientation["items"] = [
+            "Evidence 0 Evidence 0",
+            "Evidence 1 Evidence 1",
+            "Evidence 2 Evidence 2",
+        ]
         healed = repair_canonical_epic(
             {**document, "_rev": "duplicated-rev", "blocks": duplicated}
         )["mutations"][0]["patch"]["set"]["blocks"]
@@ -822,6 +832,15 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertEqual(
             healed_appendix["summary"],
             "Evidence appendix 1 — Evidence 2",
+        )
+        healed_orientation = next(
+            block
+            for block in healed
+            if block.get("id") == "epb-cohort-orientation"
+        )
+        self.assertEqual(
+            healed_orientation["items"],
+            ["Evidence 0", "Evidence 1", "Evidence 2"],
         )
 
     def test_repair_heals_duplicate_appendix_artifact_and_exposes_next_wave(self):
