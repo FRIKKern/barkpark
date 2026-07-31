@@ -130,6 +130,16 @@
 //       which contains every live row by construction. Measured live before this was
 //       added: 83 live rows -> `forwarded: 79`, `orphans: 0`, `a=PASS`. A one-flag path
 //       to a false clause (a) is exactly the class this predicate exists to kill.
+//   R5  the named successor is a CORPSE         — DEAD-SUCCESSOR. Published, a task,
+//       and `lifecycle_status` done/cancelled. Nothing read lifecycle_status until
+//       wave 12, so the dead letterbox of D89 was wide open: `--successor
+//       gr-p5r5-successor-seal` RESOLVED against a row that is `done` — and that row
+//       was closed for PROMISING to file a successor.
+//   R6  the named successor is INSIDE the epic  — SUCCESSOR-INSIDE-EPIC. R4 catches
+//       only `SUCCESSOR === EPIC`; a CHILD of the epic is the same defect one hop
+//       down. `gr-p5r5-successor-seal` was BOTH: done, and `parent_id:
+//       cloud-console-hardening-epic`. Residue forwarded to a row inside the epic has
+//       not left the epic, so clause (a) would certify a move that moved nothing.
 //
 // And a FOURTH clause-(a) shape, TERMINAL, reached only AFTER the roster is read:
 // `--successor TERMINAL` claims the epic has no residue to forward. It is accepted ONLY
@@ -346,16 +356,68 @@ function q(params) {
 const fetchRoster = (parentId) => q([['filter[parent_id]', parentId], ['limit', '500']]).result.documents;
 const fetchById = (id) => q([['filter[_id]', id]]).result.documents[0] || null;
 
-// A task id is RESOLVED only by a document that exists, is a task, and is PUBLISHED.
+// A successor must be a row someone can still WORK. `done` and `cancelled` are
+// containers nobody opens again, so forwarding residue into one is filing it into a
+// dead letterbox — the address exists, and nothing behind it will ever be read.
+const SUCCESSOR_LIVE_STATUSES = ['open', 'in_progress'];
+// How far up a parent chain the ancestry fence will walk before it stops. A ledger
+// tree this deep is a data fault, not a legitimate successor, and the walk must
+// terminate whatever the ledger says.
+const ANCESTRY_MAX_HOPS = 16;
+
+// A task id is RESOLVED only by a document that exists, is a task, is PUBLISHED, is
+// LIVE, and sits OUTSIDE the epic it forwards out of.
 // Unpublished is unresolved: boards and gates read the published ledger only, so an
 // unpublished successor is a forwarding address no reader can follow.
-function resolveTask(id, fixture) {
-  const doc = fixture
-    ? ((fixture.tasks || {})[id] || (fixture.gates || {})[id] || null)
-    : fetchById(id);
-  if (!doc) return { ok: false, why: 'no published task with that id' };
-  if (doc._type && doc._type !== 'task') return { ok: false, why: `id resolves to _type=${doc._type}, not a task` };
-  if (doc.status && doc.status !== 'published') return { ok: false, why: `task exists but status=${doc.status}` };
+//
+// The last two fences were added in wave 12, and both were REACHABLE on the live
+// ledger the hour before: `--successor gr-p5r5-successor-seal` RESOLVED, and that row
+// is `lifecycle_status: done`, `status: published`, `parent_id:
+// cloud-console-hardening-epic` — a corpse AND a child of the epic it was offered as
+// the way out of. It was closed for PROMISING to file a successor. R4 refuses only
+// `SUCCESSOR === EPIC`, so a child of the epic slipped straight past it; nothing read
+// `lifecycle_status` at all. Each fence gets its OWN refusal code, because "this id is
+// unknown", "this id is a corpse" and "this id is inside the epic" are three different
+// facts about the ledger and a reader must be told which one fired.
+function resolveTask(id, fixture, opts = {}) {
+  const lookup = (x) => (fixture
+    ? ((fixture.tasks || {})[x] || (fixture.gates || {})[x] || null)
+    : fetchById(x));
+  const doc = lookup(id);
+  if (!doc) return { ok: false, code: 'UNRESOLVABLE-SUCCESSOR', why: 'no published task with that id' };
+  if (doc._type && doc._type !== 'task') return { ok: false, code: 'UNRESOLVABLE-SUCCESSOR', why: `id resolves to _type=${doc._type}, not a task` };
+  if (doc.status && doc.status !== 'published') return { ok: false, code: 'UNRESOLVABLE-SUCCESSOR', why: `task exists but status=${doc.status}` };
+
+  // R5 — THE DEAD LETTERBOX. A closed row accepts forwarding and works none of it.
+  const lifecycle = doc.lifecycle_status;
+  if (!SUCCESSOR_LIVE_STATUSES.includes(lifecycle))
+    return {
+      ok: false,
+      code: 'DEAD-SUCCESSOR',
+      why: `lifecycle_status=${lifecycle === undefined || lifecycle === null ? '(absent)' : lifecycle}, and a successor must be one of ${SUCCESSOR_LIVE_STATUSES.join('/')}. Forwarding residue into a closed row is filing it into a dead letterbox: the address resolves, and nothing behind it is ever worked again`,
+    };
+
+  // R6 — INSIDE THE EPIC IT FORWARDS OUT OF. R4 refuses only the epic itself; a CHILD
+  // of the epic is the same defect one hop down, and every hop below that too.
+  const epic = opts.epic;
+  if (epic) {
+    const trail = [id];
+    const seen = new Set([id]);
+    let cur = doc;
+    for (let hop = 1; cur && cur.parent_id && hop <= ANCESTRY_MAX_HOPS; hop += 1) {
+      trail.push(cur.parent_id);
+      if (cur.parent_id === epic)
+        return {
+          ok: false,
+          code: 'SUCCESSOR-INSIDE-EPIC',
+          why: `its parent chain reaches the epic under judgement after ${hop} hop(s): ${trail.join(' -> ')}. A row inside the epic is not OUT of it: residue forwarded there is still residue of ${epic}, so clause (a) would certify a move that moved nothing`,
+        };
+      if (seen.has(cur.parent_id)) break; // a cycle in the ledger, not a successor
+      seen.add(cur.parent_id);
+      cur = lookup(cur.parent_id);
+    }
+  }
+
   return { ok: true, doc };
 }
 
@@ -762,10 +824,19 @@ function main() {
   const terminal = SUCCESSOR === TERMINAL;
 
   if (!terminal) {
-    const resolution = resolveTask(SUCCESSOR, fixture);
-    if (!resolution.ok)
-      throw new Refusal('UNRESOLVABLE-SUCCESSOR',
-        `the id offered as successor does not resolve to a published task (${resolution.why}). Rejected id: ${SUCCESSOR}. It is NOT printed as a forwarding address, because it is not one.`);
+    // The epic is passed in so R6 can walk the successor's parent chain: a successor
+    // is legitimate only if it is OUTSIDE the epic it forwards out of.
+    const resolution = resolveTask(SUCCESSOR, fixture, { epic: EPIC });
+    if (!resolution.ok) {
+      const code = resolution.code || 'UNRESOLVABLE-SUCCESSOR';
+      const head = {
+        'UNRESOLVABLE-SUCCESSOR': 'does not resolve to a published task',
+        'DEAD-SUCCESSOR': 'resolves to a published task that is NOT LIVE',
+        'SUCCESSOR-INSIDE-EPIC': `resolves to a live published task that is INSIDE ${EPIC}`,
+      }[code];
+      throw new Refusal(code,
+        `the id offered as successor ${head} (${resolution.why}). Rejected id: ${SUCCESSOR}. It is NOT printed as a forwarding address, because it is not one.`);
+    }
   }
 
   // ── from here the successor is real (or TERMINAL), and may be named ─────────
