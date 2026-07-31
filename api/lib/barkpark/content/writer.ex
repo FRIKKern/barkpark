@@ -789,7 +789,9 @@ defmodule Barkpark.Content.Writer do
   # write. doc_type is the raw type; the media resolver is bound to the write's
   # tenancy scope. A paper (unusual on this generic path) also gets its reader
   # url; other doctypes leave manifest["url"] nil. Render.render_blocks ignores
-  # the extra key, so body_html is byte-unchanged.
+  # the extra key, so body_html is byte-unchanged. The row title is only the
+  # preview's final fallback; content["title"] and a role:title block remain
+  # stronger inside Preview.project/3.
   defp doc_render_opts(dataset, type, attrs) do
     scope = [
       workspace_id: Map.get(attrs, "workspace_id"),
