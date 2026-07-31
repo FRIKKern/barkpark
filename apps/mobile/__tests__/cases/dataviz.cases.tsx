@@ -32,6 +32,39 @@ export const datavizCases: BlockCase[] = [
       colLabels: ['x', 'y'],
     },
   },
+  {
+    type: 'duel',
+    block: {
+      type: 'duel',
+      legendA: 'Med katalogen',
+      legendB: 'Bare hendene',
+      rows: [
+        {
+          label: 'add-error-shape',
+          delta: '−30 %',
+          valueA: '1 478',
+          valueB: '2 121',
+          source: 'commit:591fdcd53',
+        },
+      ],
+    },
+  },
+  {
+    type: 'lineage',
+    block: {
+      type: 'lineage',
+      sourceDefault: 'paper:scaffy-benchmark',
+      nodes: [
+        {
+          overline: 'jan–sep 2025',
+          title: 'nextgen-go-cli',
+          value: '335',
+          unit: 'commits',
+          body: 'Et kveldsprosjekt med én forfatter.',
+        },
+      ],
+    },
+  },
   { type: 'gauge-list', block: { type: 'gauge-list', title: 'share', rows: [{ label: 'done', value: 3 }] } },
   { type: 'bar-chart', block: { type: 'bar-chart', bars: [{ label: 'open', value: 4 }], values: true } },
   {

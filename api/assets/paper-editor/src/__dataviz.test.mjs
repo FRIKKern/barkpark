@@ -1,14 +1,18 @@
 // __dataviz.test.mjs — pure-Node unit test for pd-ee-dataviz-editors (charter D3):
-// the 5 DATA-VIZ kinds (stat / stats / stat-grid / heatmap / chart — reader emitters
-// in render/data_viz.ex) ride the canvas as SERVER-PAINTED bpFleet atoms (the whole
-// block VERBATIM on bpBlock, display HTML pushed on bp:block-html — ONE producer,
-// D8) with their authored payload edited in the bpFleet JSON edit ISLAND:
-//   * stat            → config island (value / label / max / denom / spark)
+// the 7 DATA-VIZ kinds (stat / stats / stat-grid / heatmap / chart / duel /
+// lineage — reader emitters in render/data_viz.ex) ride the canvas as
+// SERVER-PAINTED bpFleet atoms (the whole block VERBATIM on bpBlock, display HTML
+// pushed on bp:block-html — ONE producer, D8) with their authored payload edited
+// in the bpFleet JSON edit ISLAND:
+//   * stat            → config island (value / label / max / denom / spark /
+//                       unit / body / source — jarl figure family)
 //   * stats/stat-grid → items array island (the cards/notes precedent)
 //   * heatmap         → config island (cells / rowLabels / colLabels / mode /
 //                       marginals / values — v1 JSON escape hatch; the structured
 //                       2D grid editor is pd-ee-dataviz-structured-editors)
 //   * chart           → config island (series / axes — v1)
+//   * duel            → config island (legendA / legendB / sourceDefault / rows)
+//   * lineage         → config island (sourceDefault / nodes)
 //
 // Pure by construction: imports ONLY the DOM-free projector/diff from
 // run-convert.js + the DOM-free island serialize/parse pair and helpers from
@@ -40,7 +44,7 @@ function check(name, fn) {
   }
 }
 
-const DATAVIZ_TYPES = ["stat", "stats", "stat-grid", "heatmap", "chart"];
+const DATAVIZ_TYPES = ["stat", "stats", "stat-grid", "heatmap", "chart", "duel", "lineage"];
 
 // Representative payloads shaped per data_viz.ex, so the verbatim-carry round-trip
 // is exercised with real authored data (never empty fixtures).
@@ -79,6 +83,23 @@ const DATAVIZ_FIXTURES = [
     series: [{ label: "velocity", points: [1, 4, 2, 8] }],
     axes: { min: 0, xLabels: ["w1", "w4"] },
     caption: "A chart",
+  },
+  {
+    id: "dv-f",
+    type: "duel",
+    legendA: "Med katalogen",
+    legendB: "Bare hendene",
+    sourceDefault: "commit:591fdcd53",
+    rows: [{ label: "add-error-shape", delta: "−30 %", valueA: "1 478", valueB: "2 121" }],
+  },
+  {
+    id: "dv-g",
+    type: "lineage",
+    sourceDefault: "paper:scaffy-benchmark",
+    nodes: [
+      { overline: "jan–sep 2025", title: "nextgen-go-cli", value: "335", unit: "commits" },
+      { overline: "2026", title: "Navnebyttet", body: "Født på nytt." },
+    ],
   },
 ];
 

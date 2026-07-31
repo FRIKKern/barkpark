@@ -727,4 +727,222 @@ defmodule Barkpark.PortableDoc.Render.DataVizTest do
     refute html =~ "<i>n</i>"
     assert html =~ "&lt;b&gt;x&lt;/b&gt;"
   end
+
+  # ── kilde law (jdf-bl-historiene-renderer-reconciliation) ────────────────────
+
+  test "parse_source_ref accepts the four ref kinds and rejects everything else" do
+    assert %{label: "commit:591fdcd", href: nil} =
+             DataViz.parse_source_ref("commit:591fdcd53")
+
+    assert %{label: "paper:scaffy-benchmark", href: nil} =
+             DataViz.parse_source_ref("paper:scaffy-benchmark")
+
+    assert %{label: "task:jdf-bl.historiene_1", href: nil} =
+             DataViz.parse_source_ref("task:jdf-bl.historiene_1")
+
+    assert %{label: "jarl.no/prosjekter", href: "https://jarl.no/prosjekter/"} =
+             DataViz.parse_source_ref("https://jarl.no/prosjekter/")
+
+    for bad <- ["", "commit:xyz", "commit:591fd", "paper:Nei", "http://insecure.no", "hunch"] do
+      assert DataViz.parse_source_ref(bad) == nil, "#{inspect(bad)} must not parse"
+    end
+  end
+
+  test "stat carries unit, body and the kilde stamp; absent fields change nothing" do
+    html =
+      DataViz.stat_html(%{
+        "type" => "stat",
+        "value" => "16,54",
+        "unit" => "USD",
+        "label" => "hele matrisen kostet",
+        "body" => "Matrix-summen for de 32 cellene.",
+        "source" => "commit:591fdcd53"
+      })
+
+    assert html =~ ~s|<span class="bp-stat__unit">USD</span>|
+    assert html =~ ~s|class="bp-stat__body"|
+    assert html =~ ~s|<span class="bp-kilde__word">Kilde</span>|
+    assert html =~ "commit:591fdcd"
+
+    bare = DataViz.stat_html(%{"type" => "stat", "value" => "42"})
+    refute bare =~ "bp-stat__unit"
+    refute bare =~ "bp-stat__body"
+    refute bare =~ "bp-kilde"
+  end
+
+  test "stat with an invalid source ref renders no kilde stamp — a bad ref is not evidence" do
+    html = DataViz.stat_html(%{"type" => "stat", "value" => "1", "source" => "trust me"})
+    refute html =~ "bp-kilde"
+  end
+
+  test "stats aggregates per-cell sources + sourceDefault into ONE deduped kilde footer" do
+    html =
+      DataViz.stats_html(%{
+        "type" => "stats",
+        "sourceDefault" => "paper:scaffy-benchmark",
+        "items" => [
+          %{"value" => "32/32", "label" => "grønne celler"},
+          %{"value" => "3 av 5", "source" => "commit:591fdcd53"},
+          %{"value" => "8–29", "unit" => "s"}
+        ]
+      })
+
+    # one footer, cells never stamp their own
+    assert 1 == html |> String.split(~s|class="bp-kilde"|) |> length() |> Kernel.-(1)
+    assert html =~ ~s|<span class="bp-kilde__word">Kilder</span>|
+    assert html =~ "paper:scaffy-benchmark"
+    assert html =~ "commit:591fdcd"
+    # default deduped: two default-backed cells → one ref
+    assert 1 == html |> String.split("paper:scaffy-benchmark") |> length() |> Kernel.-(1)
+  end
+
+  # ── duel ─────────────────────────────────────────────────────────────────────
+
+  test "duel renders legends (arm A accented), rows with delta under the label, and the kilde stamp" do
+    html =
+      DataViz.duel_html(%{
+        "type" => "duel",
+        "legendA" => "Med katalogen",
+        "legendB" => "Bare hendene",
+        "sourceDefault" => "commit:591fdcd53",
+        "rows" => [
+          %{
+            "label" => "add-error-shape",
+            "delta" => "−30 %",
+            "valueA" => "1 478",
+            "valueB" => "2 121"
+          },
+          %{"label" => "boundary", "valueA" => "3 226", "valueB" => "3 281", "unit" => "tok"}
+        ]
+      })
+
+    assert html =~ ~s|class="bp-duel"|
+    assert html =~ ~s|<th class="bp-duel__th bp-duel__th--a" scope="col">Med katalogen</th>|
+    assert html =~ ~s|<span class="bp-duel__delta">−30 %</span>|
+    assert html =~ ~s|<td class="bp-duel__val bp-duel__val--a">1 478</td>|
+    assert html =~ ~s|<span class="bp-duel__unit">tok</span>|
+    assert html =~ ~s|<span class="bp-kilde__word">Kilde</span>|
+    assert html =~ "commit:591fdcd"
+  end
+
+  test "duel without both legends or without rows is the honest empty box" do
+    rows = [%{"label" => "x", "valueA" => "1", "valueB" => "2"}]
+    assert DataViz.duel_html(%{"type" => "duel", "rows" => rows}) =~ "duel — no data"
+
+    assert DataViz.duel_html(%{"type" => "duel", "legendA" => "A", "rows" => rows}) =~
+             "bp-dataviz--empty"
+
+    assert DataViz.duel_html(%{
+             "type" => "duel",
+             "legendA" => "A",
+             "legendB" => "B",
+             "rows" => []
+           }) =~
+             "bp-dataviz--empty"
+  end
+
+  test "duel with only a valueB still counts as a datum (reviewer fix carried over)" do
+    html =
+      DataViz.duel_html(%{
+        "type" => "duel",
+        "legendA" => "A",
+        "legendB" => "B",
+        "rows" => [%{"label" => "x", "valueB" => "9", "source" => "task:t-1"}]
+      })
+
+    assert html =~ "task:t-1"
+  end
+
+  test "duel dispatches through compose for :article and email styles" do
+    b = %{
+      "type" => "duel",
+      "legendA" => "A",
+      "legendB" => "B",
+      "rows" => [%{"label" => "x", "valueA" => "1", "valueB" => "2"}]
+    }
+
+    %{"kind" => "_raw", "html" => article} = Compose.compose_block(b, :article)
+    assert article =~ ~s|class="bp-duel"|
+
+    %{"kind" => "_raw", "html" => email} = Compose.compose_block(b, :email)
+    refute email =~ ~s(class="bp-)
+    assert email =~ "border-collapse"
+  end
+
+  test "duel author strings are escaped" do
+    html =
+      DataViz.duel_html(%{
+        "type" => "duel",
+        "legendA" => "<b>A</b>",
+        "legendB" => "B",
+        "rows" => [%{"label" => "<script>", "valueA" => "1", "valueB" => "2"}]
+      })
+
+    refute html =~ "<script>"
+    refute html =~ "<b>A</b>"
+    assert html =~ "&lt;b&gt;A&lt;/b&gt;"
+  end
+
+  # ── lineage ──────────────────────────────────────────────────────────────────
+
+  test "lineage renders dated nodes in authored order with optional value+unit and the kilde stamp" do
+    html =
+      DataViz.lineage_html(%{
+        "type" => "lineage",
+        "sourceDefault" => "paper:scaffy-benchmark",
+        "nodes" => [
+          %{
+            "overline" => "jan–sep 2025",
+            "title" => "nextgen-go-cli",
+            "value" => "335",
+            "unit" => "commits"
+          },
+          %{"overline" => "2026", "title" => "Navnebyttet", "body" => "Født på nytt."},
+          %{
+            "overline" => "i dag",
+            "value" => "22",
+            "source" => "https://jarl.no/prosjekter/scaffy"
+          }
+        ]
+      })
+
+    assert html =~ ~s|<ol class="bp-lineage__nodes">|
+    assert html =~ ~s|<div class="bp-lineage__overline">jan–sep 2025</div>|
+
+    assert html =~
+             ~s|<div class="bp-lineage__value">335<span class="bp-lineage__unit">commits</span></div>|
+
+    assert html =~ ~s|<div class="bp-lineage__body">Født på nytt.</div>|
+    # nodes in authored order
+    assert :binary.match(html, "jan–sep 2025") < :binary.match(html, "i dag")
+    # kilde: default (datum node 1) + url ref (datum node 3); narrative node 2 owes nothing
+    assert html =~ ~s|<span class="bp-kilde__word">Kilder</span>|
+    assert html =~ "paper:scaffy-benchmark"
+    assert html =~ ~s|<a href="https://jarl.no/prosjekter/scaffy">jarl.no/prosjekter/scaffy</a>|
+  end
+
+  test "lineage: narrative nodes owe no provenance; empty node list is the honest empty box" do
+    html =
+      DataViz.lineage_html(%{
+        "type" => "lineage",
+        "sourceDefault" => "paper:x",
+        "nodes" => [%{"title" => "Bare fortelling"}]
+      })
+
+    refute html =~ "bp-kilde"
+
+    assert DataViz.lineage_html(%{"type" => "lineage", "nodes" => []}) =~ "lineage — no data"
+    assert DataViz.lineage_html(%{"type" => "lineage", "nodes" => [%{}]}) =~ "bp-dataviz--empty"
+  end
+
+  test "lineage dispatches through compose for :article and email styles" do
+    b = %{"type" => "lineage", "nodes" => [%{"overline" => "2026", "title" => "T"}]}
+
+    %{"kind" => "_raw", "html" => article} = Compose.compose_block(b, :article)
+    assert article =~ ~s|class="bp-lineage"|
+
+    %{"kind" => "_raw", "html" => email} = Compose.compose_block(b, :email)
+    refute email =~ ~s(class="bp-)
+    assert email =~ "border-top"
+  end
 end

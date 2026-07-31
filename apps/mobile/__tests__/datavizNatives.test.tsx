@@ -143,8 +143,18 @@ describe('the five natives are registered and render in BOTH registers', () => {
     // registers cannot diverge. Recorded HERE so the crown's D50 register
     // tripwire has the per-type ruling it needs for its REGISTER_BLIND
     // allowlist, rather than reading the sameness as a leak.
-    for (const { block } of datavizCases) {
-      expect(JSON.stringify(walk(block, chat).styles)).toBe(JSON.stringify(walk(block, paper).styles))
+    //
+    // The jarl figure family is the recorded EXCEPTION: a duel row label and a
+    // lineage title/body are DOCUMENT voice (the web inherits the paper serif
+    // face into `.bp-duel__label` / `.bp-lineage__title` / `.bp-lineage__body`),
+    // so both ride `bodyText(ctx)` and MUST diverge — they stay OFF the D50
+    // allowlist, and this pin asserts the partition in both directions rather
+    // than skipping them.
+    const SENSITIVE = new Set(['duel', 'lineage'])
+    for (const { type, block } of datavizCases) {
+      const same =
+        JSON.stringify(walk(block, chat).styles) === JSON.stringify(walk(block, paper).styles)
+      expect(`${type} blind=${same}`).toBe(`${type} blind=${!SENSITIVE.has(type)}`)
     }
   })
 

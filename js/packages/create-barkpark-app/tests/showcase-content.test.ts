@@ -69,7 +69,7 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
     // scaffy:add-block-type ApiEndpoint MARK:showcase-goldens-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:showcase-goldens-code-tabs
     // scaffy:add-block-type Tabs MARK:showcase-goldens-tabs
-    expect(goldens).toHaveLength(60)
+    expect(goldens).toHaveLength(62)
     const goldenTypes = goldens.map((g) => g.type).sort()
     const seedTypes = showcaseContent.map((b) => b.type).sort()
     expect(seedTypes).toEqual(goldenTypes)
@@ -84,7 +84,7 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
     // scaffy:add-block-type ApiEndpoint MARK:showcase-seedset-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:showcase-seedset-code-tabs
     // scaffy:add-block-type Tabs MARK:showcase-seedset-tabs
-    expect(new Set(seedTypes).size).toBe(60)
+    expect(new Set(seedTypes).size).toBe(62)
   })
 
   it('renders all 49 distinct types through renderPortableDocument, each with its golden class-markers', () => {
@@ -128,7 +128,7 @@ describe('blog-starter showcase seed (49-type PortableDocument grammar)', () => 
     // scaffy:add-block-type ApiEndpoint MARK:showcase-markers-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:showcase-markers-code-tabs
     // scaffy:add-block-type Tabs MARK:showcase-markers-tabs
-    expect(markersSeen.size).toBe(60)
+    expect(markersSeen.size).toBe(62)
   })
 
   it('exposes the 3 media families (mermaid diagram / asciicast player / static image)', () => {

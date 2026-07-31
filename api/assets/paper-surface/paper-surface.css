@@ -1001,6 +1001,39 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    container; the web never width-drops weeks the way the terminal must. */
 .bp-paper-surface .bp-stat__denom { font-size: 1.05rem; font-weight: 500; color: var(--paper-ink-soft); }
 
+/* ── jarl figure family: kilde stamp, stat unit/body, duel, lineage
+   (jdf-bl-historiene-renderer-reconciliation) ──
+   THE KILDE LAW: every figure datum carries a source ref, surfaced as the
+   small mono «kilde» stamp under the figure. Units are always their own span
+   beside the display-string number, never fused into it. */
+.bp-paper-surface .bp-stat__unit { font-family: var(--paper-font-mono); font-size: 0.72rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
+.bp-paper-surface .bp-stat__body { font-size: 0.72rem; color: var(--paper-ink-soft); line-height: 1.45; }
+
+.bp-paper-surface .bp-kilde { display: flex; flex-wrap: wrap; gap: 4px 14px; margin: 8px 0 0; font-family: var(--paper-font-mono); font-size: 0.64rem; letter-spacing: 0.04em; color: var(--paper-ink-faint); }
+.bp-paper-surface .bp-kilde__word { text-transform: uppercase; letter-spacing: 0.06em; }
+.bp-paper-surface .bp-kilde__ref { word-break: break-word; }
+.bp-paper-surface .bp-kilde__ref a { color: inherit; }
+.bp-paper-surface .bp-stats > .bp-kilde { grid-column: 1 / -1; margin-top: 0; }
+
+.bp-paper-surface .bp-duel { margin: 1.4rem 0; }
+.bp-paper-surface .bp-duel__table { width: 100%; border-collapse: collapse; }
+.bp-paper-surface .bp-duel__th { font-family: var(--paper-font-mono); font-size: 0.66rem; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); text-align: right; padding: 6px 10px; }
+.bp-paper-surface .bp-duel__th--a { color: var(--paper-accent); }
+.bp-paper-surface .bp-duel__label { font-size: 0.82rem; font-weight: 600; color: var(--paper-ink); text-align: left; padding: 8px 10px; border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-duel__delta { display: block; font-family: var(--paper-font-mono); font-size: 0.66rem; font-weight: 400; color: var(--paper-ink-soft); margin-top: 3px; }
+.bp-paper-surface .bp-duel__val { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 0.92rem; color: var(--paper-ink); text-align: right; white-space: nowrap; padding: 8px 10px; border-top: 1px solid var(--paper-rule); }
+.bp-paper-surface .bp-duel__val--a { color: var(--paper-accent); }
+.bp-paper-surface .bp-duel__unit { font-size: 0.66rem; color: var(--paper-ink-soft); margin-left: 0.35em; }
+
+.bp-paper-surface .bp-lineage { margin: 1.4rem 0; }
+.bp-paper-surface .bp-lineage__nodes { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 14px; }
+.bp-paper-surface .bp-lineage__node { border-top: 1px solid var(--paper-rule); padding-top: 8px; }
+.bp-paper-surface .bp-lineage__overline { font-family: var(--paper-font-mono); font-size: 0.64rem; text-transform: uppercase; letter-spacing: 0.06em; color: var(--paper-ink-soft); }
+.bp-paper-surface .bp-lineage__title { font-size: 0.88rem; font-weight: 600; color: var(--paper-ink); margin-top: 4px; }
+.bp-paper-surface .bp-lineage__value { font-family: var(--paper-font-mono); font-variant-numeric: tabular-nums; font-size: 1.15rem; font-weight: 650; color: var(--paper-accent); margin-top: 4px; }
+.bp-paper-surface .bp-lineage__unit { font-size: 0.66rem; font-weight: 500; color: var(--paper-ink-soft); margin-left: 0.35em; }
+.bp-paper-surface .bp-lineage__body { font-size: 0.76rem; color: var(--paper-ink-soft); line-height: 1.45; margin-top: 5px; }
+
 .bp-paper-surface .bp-heat--cal { display: block; max-width: 100%; }
 .bp-paper-surface .bp-heat__scroll { overflow-x: auto; padding-bottom: 2px; }
 .bp-paper-surface .bp-heat--cal .bp-heat__grid { gap: 3px; width: max-content; }

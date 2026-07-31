@@ -467,6 +467,15 @@ func DefaultRegistry(theme Theme) *Registry {
 	// only under a TrueColor profile; ANSI-plain braille otherwise, byte-stable).
 	// W3 of the slate — the capstone (see chart.go).
 	r.blocks["chart"] = chartRenderer{}
+	// ── jarl figure family (duel / lineage) ───────────────────────────────────
+	// duel: a two-arm comparison — legend header + `label  valueA vs valueB`
+	// rows with the authored dim delta under each label (duel.go). lineage:
+	// dated nodes in authored order — dim overline / bold title / value+unit /
+	// wrapped body (lineage.go). Both carry the kilde provenance law (kilde.go):
+	// datum-bearing entries stamp a dim "Kilde:" line; an invalid ref renders
+	// nothing. Terminal twins of dataviz.ts's duel/lineage emitters.
+	r.blocks["duel"] = duelRenderer{}
+	r.blocks["lineage"] = lineageRenderer{}
 	// dashboard: a tabbed CONTAINER that composes the slate leaf blocks (chart /
 	// heatmap / stat-grid / gauge-list) into a Claude-Code-/usage-style cockpit —
 	// authored tabs + a heavy ━ active rail, the active tab's children laid out as

@@ -342,7 +342,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   #
   # Keep aligned with run-convert.js CANVAS_DATAVIZ_TYPES and
   # paper_canvas.ex @canvas_dataviz_types.
-  @dataviz_render_types ~w(stat stats stat-grid heatmap chart)
+  @dataviz_render_types ~w(stat stats stat-grid heatmap chart duel lineage)
 
   @doc false
   # pdd-t8 — FLEET-IN-CANVAS server paint. For EVERY top-level non-prose fleet
