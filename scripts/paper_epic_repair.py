@@ -30,6 +30,33 @@ EPIC_TAG_SELECTIONS = {
         CANONICAL_EPIC_TAG,
     ],
 }
+SOURCE_TRUTH_AUTHORITY_BOUNDARIES = {
+    "source-of-truth-grip-wave-2026-07-20": (
+        "Authority boundary: This Paper remains authority for the Wave 1 "
+        "level-skip contract and its first structural gate. Wave 8 carries "
+        "the current epic state and finishing verdict."
+    ),
+    "source-of-truth-grip-wave-2-2026-07-20": (
+        "Editorial status (historical authority): Wave 2 is complete and "
+        "remains authority for the gate-directed fleet and recipe-ledger "
+        "decisions. Wave 8 carries the current epic state and finishing verdict."
+    ),
+    "source-of-truth-grip-wave-3-2026-07-21": (
+        "Authority boundary: This Paper remains authority for the Wave 3 CLI "
+        "seam design and evidence-recording discipline. Wave 8 carries the "
+        "current epic state and finishing verdict."
+    ),
+    "source-of-truth-grip-wave-4-2026-07-21": (
+        "Authority boundary: This Paper remains authority for the Wave 4 first "
+        "real ledger row and instrument contract. Wave 8 carries the current "
+        "epic state and finishing verdict."
+    ),
+    "source-of-truth-grip-wave-5-2026-07-21": (
+        "Authority boundary: This Paper remains authority for the Wave 5 "
+        "corpus-migration attempt and its recorded limits. Wave 8 carries the "
+        "current epic state and finishing verdict."
+    ),
+}
 SITE_SPAWNER_NOTE_LISTS = {
     "l-907": "verdict",
     "l-d022": "conflict",
@@ -69,6 +96,61 @@ def _inline_text(value: Any) -> str:
 
 def _normalize(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
+
+
+def _apply_source_truth_authority_boundary(
+    blocks: list[Any],
+    paper_id: str,
+) -> list[Any]:
+    boundary = SOURCE_TRUTH_AUTHORITY_BOUNDARIES.get(paper_id)
+    if boundary is None:
+        return copy.deepcopy(blocks)
+
+    repaired = copy.deepcopy(blocks)
+    if any(boundary in _inline_text(block) for block in repaired):
+        return repaired
+
+    editorial_index = next(
+        (
+            index
+            for index, block in enumerate(repaired)
+            if isinstance(block, dict)
+            and block.get("type") == "callout"
+            and _inline_text(block.get("content"))
+            .casefold()
+            .startswith("editorial status")
+        ),
+        None,
+    )
+    if editorial_index is not None:
+        callout = repaired[editorial_index]
+        original = _normalize(_inline_text(callout.get("content")))
+        callout["content"] = [
+            {
+                "type": "text",
+                "value": "{} {}".format(original, boundary),
+            }
+        ]
+        return repaired
+
+    authority_callout = {
+        "id": "epb-source-truth-authority",
+        "type": "callout",
+        "tone": "info",
+        "content": [{"type": "text", "value": boundary}],
+    }
+    h1_index = next(
+        (
+            index
+            for index, block in enumerate(repaired)
+            if isinstance(block, dict)
+            and block.get("type") == "heading"
+            and block.get("level") == 1
+        ),
+        0,
+    )
+    repaired.insert(h1_index, authority_callout)
+    return repaired
 
 
 def _split_lead(value: str) -> tuple[str, str]:
@@ -900,6 +982,7 @@ def repair_canonical_epic(
     if not description:
         raise ValueError("canonical Epic Paper requires a meaningful description")
 
+    blocks = _apply_source_truth_authority_boundary(blocks, paper_id)
     source_leaves = _visible_leaf_texts(blocks)
     # Generated appendix summaries are repair chrome, not authored evidence.
     # A corrective pass may renumber or unwrap them while preserving every

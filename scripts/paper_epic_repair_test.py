@@ -162,6 +162,94 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertNotIn("title", status)
         self.assertIn("WAVE STATUS: verification is in flight.", str(status))
 
+    def test_source_truth_wave_one_keeps_status_and_adds_current_authority_route(self):
+        original_status = (
+            "Editorial status (repair): foundational and candid, but the mixed "
+            "branch and round state makes current authority difficult to extract."
+        )
+        document = {
+            "_id": "source-of-truth-grip-wave-2026-07-20",
+            "_rev": "source-rev",
+            "title": "Source-of-Truth Grip — Wave 1",
+            "description": "The first wave makes level-skips structurally impossible.",
+            "blocks": [
+                {
+                    "id": "status",
+                    "type": "callout",
+                    "content": text(original_status),
+                },
+                {
+                    "id": "title",
+                    "type": "heading",
+                    "level": 1,
+                    "text": "Source-of-Truth Grip — Wave 1",
+                },
+                {
+                    "id": "proof",
+                    "type": "paragraph",
+                    "content": text("The structural gate proves the level-skip contract."),
+                },
+            ],
+        }
+
+        repaired = repair_strategic_paper(document)["mutations"][0]["patch"]["set"][
+            "blocks"
+        ]
+        status = next(block for block in repaired if block.get("id") == "status")
+        status_text = str(status.get("content"))
+
+        self.assertIn(original_status, status_text)
+        self.assertIn("Wave 8 carries the current epic state", status_text)
+        self.assertIn("level-skip contract", status_text)
+
+        second_document = {**document, "_rev": "second-rev", "blocks": repaired}
+        repaired_again = repair_strategic_paper(second_document)["mutations"][0][
+            "patch"
+        ]["set"]["blocks"]
+        self.assertEqual(repaired_again, repaired)
+
+    def test_source_truth_wave_two_gets_one_early_historical_authority_callout(self):
+        document = {
+            "_id": "source-of-truth-grip-wave-2-2026-07-20",
+            "_rev": "source-rev",
+            "title": "Source-of-Truth Grip — Wave 2",
+            "description": "The gate aims the fleet and the ledger stores recipes.",
+            "blocks": [
+                {
+                    "id": "title",
+                    "type": "heading",
+                    "level": 1,
+                    "text": "Source-of-Truth Grip — Wave 2",
+                },
+                {
+                    "id": "proof",
+                    "type": "paragraph",
+                    "content": text("The completed wave records the recipe-ledger decision."),
+                },
+            ],
+        }
+
+        repaired = repair_strategic_paper(document)["mutations"][0]["patch"]["set"][
+            "blocks"
+        ]
+        authority = [
+            block
+            for block in repaired
+            if block.get("id") == "epb-source-truth-authority"
+        ]
+
+        self.assertEqual(len(authority), 1)
+        self.assertLess(repaired.index(authority[0]), 4)
+        self.assertIn("historical authority", str(authority[0].get("content")))
+        self.assertIn("recipe-ledger decisions", str(authority[0].get("content")))
+        self.assertIn("Wave 8 carries the current epic state", str(authority[0]))
+
+        second_document = {**document, "_rev": "second-rev", "blocks": repaired}
+        repaired_again = repair_strategic_paper(second_document)["mutations"][0][
+            "patch"
+        ]["set"]["blocks"]
+        self.assertEqual(repaired_again, repaired)
+
     def test_list_reframes_are_lossless_and_semantic(self):
         block = {
             "id": "findings",
