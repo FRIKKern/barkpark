@@ -40,7 +40,8 @@ defmodule BarkparkCloud.Registry.DeployStageEstimatesTest do
     do: %{"stage" => stage, "status" => status, "at" => at(ms), "line" => "#{stage} #{status}"}
 
   # One deployment's console: one clean attempt at `stage` lasting `dur` ms.
-  defp console(stage, dur), do: [entry(stage, "running", @base), entry(stage, "done", @base + dur)]
+  defp console(stage, dur),
+    do: [entry(stage, "running", @base), entry(stage, "done", @base + dur)]
 
   defp consoles(stage, durations), do: Enum.map(durations, &console(stage, &1))
 
