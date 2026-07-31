@@ -71,6 +71,8 @@ package cli
 
 import (
 	"bytes"
+	"context"
+	"fmt"
 	"os"
 	"reflect"
 	"regexp"
@@ -230,13 +232,33 @@ func successClaimRegistry() []claimSite {
 			Contradicted: &hcloud.Server{ID: 42, Name: "web-1", Status: hcloud.ServerStatusOff},
 		},
 		{
-			Name: "hzResDone",
+			// PDS-D405/D423 REPAIR. The pre-repair row varied its pair on ID 9→10
+			// and Name data-1→data-2 — the two fields an attach CANNOT change — so
+			// it was an IDENTITY ECHO: two different volumes printed two different
+			// lines, which proves nothing about whether the attach took. hzResDone
+			// itself has no post-condition to read; the receipt that does is
+			// hzResDestroyed (hetzner_respost.go:104), whose gone-arm IS hzResDone.
+			// So the ROW is re-pointed at that receipt — the function keeps its name
+			// (requiredEnrollments still names hzResDone) and the pair now varies on
+			// GONE-ness with the resolved identity held fixed OUTSIDE the probe.
+			//
+			// THE STRUCTURAL WRINKLE, AND HOW IT IS RECONCILED: hzResDestroyed takes
+			// a read closure over a ctx, while Render is func(out *writer, resp any).
+			// The probe is therefore the CONFIRMING READ'S ANSWER — *hcloud.Volume,
+			// exactly what hzResGoneRead[hcloud.Volume] hands back — and the closure
+			// is a one-line adapter that returns it. That keeps the probe a decode
+			// target (arm 1) instead of a tuple the row invented, and it puts the
+			// post-condition where the SDK actually puts it: nil ⇒ the API says the
+			// volume is gone, non-nil ⇒ it survived and the claim is refused.
+			Name: "hzResDone/destroy-confirmed",
 			Render: func(out *writer, resp any) {
-				v := resp.(hcloud.Volume)
-				hzResDone(out, "attach", "volume", v.ID, v.Name, nil)
+				fresh, _ := resp.(*hcloud.Volume)
+				hzResDestroyed(out, context.Background(), "delete", "volume",
+					hzDestroyIdentity.ID, hzDestroyIdentity.Name, nil,
+					func(context.Context) (*hcloud.Volume, *hcloud.Response, error) { return fresh, nil, nil })
 			},
-			Backed:       hcloud.Volume{ID: 9, Name: "data-1"},
-			Contradicted: hcloud.Volume{ID: 10, Name: "data-2"},
+			Backed:       (*hcloud.Volume)(nil),
+			Contradicted: &hcloud.Volume{ID: 9, Name: "data-1"},
 		},
 
 		// ── hetzner_instance_transfer_cmd.go — the health sentinel it measured ───
@@ -251,50 +273,106 @@ func successClaimRegistry() []claimSite {
 
 		// ── login_device.go — the team the token exchange actually returned ──────
 		{
+			// PDS-D405 REPAIR. The pre-repair row probed with a hand-authored
+			// [2]string: a tuple the ROW invented, whose arity and meaning no decode
+			// produces. The behaviour was honest (mutating the emitter to ignore
+			// teamID reds four other tests) but the PROBE was not, so it is
+			// re-pointed — with no exemption — at cloudclient.LoginResp, the type
+			// the token exchange decodes into (client.go:172, DevicePollResult.Login).
+			// The session token is the identity and is held fixed; the pair varies
+			// only on the team the control plane says the token belongs to.
 			Name: "emitDeviceLoginSuccess",
 			Render: func(out *writer, resp any) {
-				v := resp.([2]string)
-				emitDeviceLoginSuccess(out, v[0], v[1])
+				emitDeviceLoginSuccess(out, deviceLoginBase, resp.(cloudclient.LoginResp).TeamID)
 			},
-			Backed:       [2]string{"https://cp.example", "team-a"},
-			Contradicted: [2]string{"https://cp.example", "team-b"},
+			Backed:       cloudclient.LoginResp{Token: "tok-1", TeamID: "team-a"},
+			Contradicted: cloudclient.LoginResp{Token: "tok-1", TeamID: "team-b"},
 		},
 
 		// ── tasks_next_cmd.go — the claim the LEDGER granted, epoch included ─────
 		{
+			// The WHICH-TASK half: the grant (worker + epoch) is held fixed in the
+			// shared frontierGrant* fixtures and the pair varies on the picked task,
+			// so id/title injectivity survives. Probed with taskboard.Pick — the
+			// snapshot-decoded type the production call site passes — rather than
+			// the old test-local frontierClaimResponse struct, which was a shape the
+			// row invented for itself.
 			Name: "emitFrontierClaim",
 			Render: func(out *writer, resp any) {
-				v := resp.(frontierClaimResponse)
-				emitFrontierClaim(out, v.pick, "worker-1", v.epoch, nil, nil, []apiclient.TaskNotice{})
+				emitFrontierClaim(out, resp.(taskboard.Pick), frontierGrantWorker, frontierGrantEpoch, nil, nil, []apiclient.TaskNotice{})
 			},
-			Backed: frontierClaimResponse{
-				pick:  taskboard.Pick{Task: taskboard.Task{DocID: "task-aaa", Title: "Ship the gate"}},
-				epoch: 7,
+			Backed:       taskboard.Pick{Task: taskboard.Task{DocID: "task-aaa", Title: "Ship the gate"}},
+			Contradicted: taskboard.Pick{Task: taskboard.Task{DocID: "task-bbb", Title: "Something else"}},
+		},
+		{
+			// PDS-D405 REPAIR, as a VARIANT and not an edit in place: the row above
+			// varies id AND title AND (before this) the epoch, so injectivity
+			// survived losing the epoch entirely — the fencing token nobody's bytes
+			// depended on. This row holds the pick fixed and varies ONLY the epoch,
+			// probed with apiclient.TaskClaimOutcome (client.go:1163), the type
+			// TaskClaimResources decodes the grant into. Delete the epoch from the
+			// receipt and THIS row reds while the one above stays green.
+			Name: "emitFrontierClaim/epoch",
+			Render: func(out *writer, resp any) {
+				o := resp.(apiclient.TaskClaimOutcome)
+				emitFrontierClaim(out, frontierPick, frontierGrantWorker, o.Epoch, nil, nil, o.Notices)
 			},
-			Contradicted: frontierClaimResponse{
-				pick:  taskboard.Pick{Task: taskboard.Task{DocID: "task-bbb", Title: "Something else"}},
-				epoch: 9,
-			},
+			Backed:       apiclient.TaskClaimOutcome{OK: true, Epoch: 7},
+			Contradicted: apiclient.TaskClaimOutcome{OK: true, Epoch: 9},
 		},
 
 		// ── cloud_support_cmd.go — the step narration + the ONLINE receipt ───────
 		{
-			Name: "supportAddRun.done",
+			// PDS-D405 REPAIR (charter class A3). The pre-repair row handed done()
+			// two hand-authored [2]string literals and asserted that the printed
+			// line changed — i.e. that `progressf` prints its arguments. The lie
+			// lives ONE FRAME UP, at the ~20 callers that compose the message, so
+			// the row is re-enrolled at the caller that has a real post-condition:
+			// stepOnline (cloud_support_cmd.go:799), whose narration is composed
+			// from the MAIN'S ROSTER ROW — a decoded JSON body (supportRosterRow
+			// returns map[string]any), never from the local verb.
+			//
+			// The narration format is MIRRORED here rather than called, because the
+			// caller is a network+ssh step that cannot be rendered; the mirror is
+			// pinned against the production source by
+			// TestClaimProbesMirrorTheProductionNarration, so a drift reds instead
+			// of quietly re-vacuuming this row. Extracting the narration in
+			// cloud_support_cmd.go so the row can call it is filed as follow-up work.
+			Name: "supportAddRun.done/online-roster-row",
 			Render: func(out *writer, resp any) {
-				v := resp.([2]string)
-				(&supportAddRun{out: out}).done(v[0], v[1])
+				row := resp.(map[string]any)
+				st, _ := row["status"].(string)
+				capMap, _ := row["capacity"].(map[string]any)
+				(&supportAddRun{out: out}).done("online",
+					fmt.Sprintf(supportOnlineNarration, supportAddIdentity.name, st, supportCompactJSON(capMap)))
 			},
-			Backed:       [2]string{"roster", "listener ONLINE with measured capacity"},
-			Contradicted: [2]string{"roster", "listener never phoned home"},
+			Backed:       map[string]any{"status": "idle", "capacity": map[string]any{"max_class": "medium"}},
+			Contradicted: map[string]any{"status": "offline", "capacity": map[string]any{"max_class": "small"}},
 		},
 		{
-			Name: "supportRemoveRun.done",
+			// PDS-D405 REPAIR, same shape on the teardown side. Re-enrolled at
+			// stepDNS (cloud_support_cmd.go:1229/:1236): the sweep names what the
+			// ZONE returned — every A rrset resolving to the box IP, deleted BY
+			// VALUE (PDF-D101) — so the pair varies on the zone's answer and the
+			// receipt has to switch branches with it. The zone + IP are the identity
+			// and are held fixed outside the probe.
+			Name: "supportRemoveRun.done/dns-swept",
 			Render: func(out *writer, resp any) {
-				v := resp.([2]string)
-				(&supportRemoveRun{out: out}).done(v[0], v[1])
+				deleted := resp.([]string)
+				if len(deleted) == 0 {
+					(&supportRemoveRun{out: out}).done("dns",
+						fmt.Sprintf(supportDNSCleanNarration, supportDNSZone, supportDNSIP))
+					return
+				}
+				fqdns := make([]string, 0, len(deleted))
+				for _, n := range deleted {
+					fqdns = append(fqdns, cloud.Fqdn(n, supportDNSZone))
+				}
+				(&supportRemoveRun{out: out}).done("dns",
+					fmt.Sprintf(supportDNSSweptNarration, len(deleted), strings.Join(fqdns, ", ")))
 			},
-			Backed:       [2]string{"token", "revoked"},
-			Contradicted: [2]string{"token", "still valid"},
+			Backed:       []string{"sup-1"},
+			Contradicted: []string{},
 		},
 		// ── cloud_site_cmd.go — the spawner's five receipts (site-spawner W8) ────
 		// Every Backed/Contradicted below is a type internal/cloudclient RETURNS;
@@ -327,9 +405,15 @@ func successClaimRegistry() []claimSite {
 			Render: func(out *writer, resp any) {
 				renderSiteDeployVerdict(out, "blog", resp.(cloudclient.SiteDeployment))
 			},
-			Backed: cloudclient.SiteDeployment{ID: "dep-1", Status: "live", URL: "https://acme.barkpark.cloud/sites/blog/"},
-			Contradicted: cloudclient.SiteDeployment{ID: "dep-1", Status: "failed", Stage: "HEALTH",
-				FailureReason: "health probe returned 502"},
+			// NARROWED by the disposition arms: the contradicting half used to
+			// carry Stage + FailureReason as well, and neither is attributable on
+			// its own — on a LIVE record the verdict prints neither, so they rode
+			// along on Status and would have gone on passing after being deleted
+			// from the render. The axis that IS load-bearing is status (and the
+			// URL the live sentence prints); the failed branch's stage/reason
+			// wording is pinned by cloud_site_cmd's own suite.
+			Backed:       cloudclient.SiteDeployment{ID: "dep-1", Status: "live", URL: "https://acme.barkpark.cloud/sites/blog/"},
+			Contradicted: cloudclient.SiteDeployment{ID: "dep-1", Status: "failed"},
 		},
 		{
 			// A live record with no URL must not fabricate one.
@@ -387,20 +471,30 @@ func successClaimRegistry() []claimSite {
 		},
 
 		{
+			// PDS-D405 REPAIR. The pre-repair pair varied host.Name AND host.IP —
+			// two different boxes — so "support sup-1 is ONLINE" was pinned by
+			// NOTHING: mutation-proven, deleting token_id / cp_row_id / max_class
+			// from the payload left the row PASSING. The run is now assembled from
+			// ONE shared identity fixture and the pair varies only on the address
+			// the PROVIDER assigned (cloud.Server.IP, which the provider returns —
+			// unlike Name, which is what we asked for).
+			//
+			// HONEST LIMIT, and it is a real finding rather than a repair: the
+			// receipt's actual post-condition — the roster's status + capacity, and
+			// the measured max_class — is printed ONLY on the machine surface. The
+			// human sentence carries no measured fact at all, so no post-condition
+			// path exists that arm 3 can attribute on BOTH surfaces. Fixing that
+			// means editing cloud_support_cmd.go, which is outside this slice's file
+			// set; it is filed as follow-up work rather than smuggled in here.
 			Name: "supportAddRun.success",
 			Render: func(out *writer, resp any) {
-				r := resp.(supportAddRun)
+				r := supportAddIdentity
 				r.out = out
+				r.host = resp.(cloud.Server)
 				r.success()
 			},
-			Backed: supportAddRun{
-				name: "sup-1", agent: "claude", ws: "main", dataset: "production",
-				base: "https://main.example", host: cloud.Server{Name: "box-1", IP: "10.0.0.1"},
-			},
-			Contradicted: supportAddRun{
-				name: "sup-1", agent: "claude", ws: "main", dataset: "production",
-				base: "https://main.example", host: cloud.Server{Name: "box-2", IP: "10.0.0.9"},
-			},
+			Backed:       cloud.Server{ID: "srv-1", Name: "box-1", IP: "10.0.0.1"},
+			Contradicted: cloud.Server{ID: "srv-1", Name: "box-1", IP: "203.0.113.9"},
 		},
 	}
 }
@@ -427,12 +521,65 @@ func spawnSiteRowFixture(mut func(*cloudclient.SpawnSite)) cloudclient.SpawnSite
 	return s
 }
 
-// frontierClaimResponse bundles the two halves of a granted claim the ledger
-// returns — the picked task and the epoch it was granted at.
-type frontierClaimResponse struct {
-	pick  taskboard.Pick
-	epoch int
+// ── THE HELD-FIXED HALVES (PDS-D355) ────────────────────────────────────────
+//
+// Every fixture below is the IDENTITY a repaired row holds constant while its
+// probe varies on the post-condition. They are package-level vars, not literals
+// inside a Render closure, for one reason: a shared fixture can be MUTATED, and
+// TestClaimProbesHoldIdentityFixed mutates each one and requires BOTH halves of
+// the row to move. A half that baked its own identity in place fails there —
+// which is what stops "identity held fixed" from being a claim about the
+// fixtures rather than a fact about the render.
+
+// hzDestroyIdentity is the RESOLVED identity a destroy receipt closes over.
+// PDS-D400: the gone-check binds to the id the verb ALREADY resolved, never to
+// the user's token, so the identity is not in the confirming read's answer at
+// all — it is here, and both halves render through it.
+var hzDestroyIdentity = struct {
+	ID   int64
+	Name string
+}{ID: 9, Name: "data-1"}
+
+// deviceLoginBase is the control plane the device login reports against. The
+// team the token belongs to is the probe; the host is not.
+var deviceLoginBase = "https://cp.example"
+
+// frontierGrant* is the grant the ledger returned — the worker it was granted
+// to and the fencing epoch. The WHICH-TASK row holds these fixed; the /epoch
+// row holds frontierPick fixed and varies the epoch instead.
+var (
+	frontierGrantWorker = "worker-1"
+	frontierGrantEpoch  = 7
+	frontierPick        = taskboard.Pick{Task: taskboard.Task{DocID: "task-aaa", Title: "Ship the gate"}}
+)
+
+// supportAddIdentity is the one `support add` run every support row renders
+// through: the name/agent/workspace/dataset the operator asked for. Everything
+// in it is a REQUEST echo by construction, which is exactly why it is the
+// identity and never the probe.
+var supportAddIdentity = supportAddRun{
+	name: "sup-1", agent: "claude", ws: "main", dataset: "production",
+	base: "https://main.example",
 }
+
+// supportDNS* is the teardown's identity: the zone swept and the box IP the
+// sweep matches A-record VALUES against. The probe is what the zone returned.
+var (
+	supportDNSZone = "fleet.example"
+	supportDNSIP   = "10.0.0.1"
+)
+
+// The step narrations MIRRORED by the two support rows. They are consts here and
+// pinned against the production sources by
+// TestClaimProbesMirrorTheProductionNarration, because the callers that compose
+// them (stepOnline, stepDNS) drive ssh + network and cannot be rendered — so a
+// format-string drift in cloud_support_cmd.go must red this file rather than
+// leave the rows probing a sentence production no longer prints.
+const (
+	supportOnlineNarration   = "%s reads %s with capacity %s on the main's roster"
+	supportDNSSweptNarration = "%d A record(s) deleted: %s (the census re-reads the zone)"
+	supportDNSCleanNarration = "no A records in %s resolve to %s (already clean)"
+)
 
 // requiredEnrollments is the FLOOR: deleting a row to make the gate green fails
 // here instead. Names are the registry Name minus any "/variant" suffix.
