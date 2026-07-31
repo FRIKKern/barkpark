@@ -591,8 +591,13 @@ func hzLBCreateCases() []hzLBCreateCase {
 				`"location":{"id":1,"name":"nbg1"},"public_net":{"enabled":true,"ipv4":{"ip":"192.0.2.7"},"ipv6":{}},` +
 				`"algorithm":{"type":"round_robin"},"services":[],"targets":[]},` +
 				`"action":{"id":401,"command":"create_load_balancer","status":"running","progress":0}}`,
-			actions:  true,
-			want:     []string{"confirmed_present: true", "ipv4: 192.0.2.7", "load_balancer_type: lb11", "algorithm: round_robin"},
+			actions: true,
+			want: []string{"confirmed_present: true", "ipv4: 192.0.2.7", "load_balancer_type: lb11", "algorithm: round_robin",
+				// THE THIRD OUTCOME (PDS-D432): the receipt says so out loud
+				// instead of leaving the operator to diff the flag against the
+				// output. Phrased as a contrast, never as `<field>: <asked>` —
+				// which is what keeps the anti-echo pin below honest.
+				"divergence: algorithm — you asked for least_connections, the server reports round_robin"},
 			unwanted: []string{"algorithm: least_connections"},
 		},
 		{
@@ -602,7 +607,8 @@ func hzLBCreateCases() []hzLBCreateCase {
 			postPath: "/floating_ips",
 			response: `{"floating_ip":{"id":11,"name":"web-vip","ip":"192.0.2.99","type":"ipv4",` +
 				`"home_location":{"id":2,"name":"fsn1"},"dns_ptr":[]}}`,
-			want:     []string{"confirmed_present: true", "ip: 192.0.2.99", "type: ipv4", "home_location: fsn1"},
+			want: []string{"confirmed_present: true", "ip: 192.0.2.99", "type: ipv4", "home_location: fsn1",
+				"divergence: home_location — you asked for nbg1, the server reports fsn1"},
 			unwanted: []string{"home_location: nbg1"},
 		},
 		{
@@ -612,6 +618,11 @@ func hzLBCreateCases() []hzLBCreateCase {
 			response: `{"primary_ip":{"id":19,"name":"web-ip","ip":"192.0.2.50","type":"ipv4","assignee_type":"server",` +
 				`"assignee_id":null,"datacenter":{"id":3,"name":"nbg1-dc3","location":{"id":1,"name":"nbg1"}},"dns_ptr":[]}}`,
 			want: []string{"confirmed_present: true", "ip: 192.0.2.50", "type: ipv4"},
+			// SILENT: --type agrees and --datacenter is DELIBERATELY NOT
+			// enrolled (the response answers a datacenter with its location, so
+			// enrolling it fires a false advisory on this very fixture — see
+			// TestHetznerCreateAdvisoryExclusions).
+			unwanted: []string{"divergence"},
 		},
 		{
 			name:     "placement-group",
@@ -620,6 +631,9 @@ func hzLBCreateCases() []hzLBCreateCase {
 			response: `{"placement_group":{"id":17,"name":"web-spread","type":"spread","servers":[41,42]}}`,
 			// `servers: 2` is a fact only the response carries.
 			want: []string{"confirmed_present: true", "type: spread", "servers: 2"},
+			// SILENT: placement-group --type is rejected client-side unless it
+			// is "spread", so the pair is degenerate and not enrolled.
+			unwanted: []string{"divergence"},
 		},
 		{
 			name:     "certificate-managed",
@@ -632,8 +646,11 @@ func hzLBCreateCases() []hzLBCreateCase {
 			// THE DECLARED-PENDING SHAPE: the action completing does not mean a
 			// certificate exists, so the receipt reports the issuance state it
 			// was handed and says the reading is DECLARED.
-			want:     []string{"issuance: pending", "declared", "domain_names: [example.com www.example.com]"},
-			unwanted: []string{"issuance: issued"},
+			want: []string{"issuance: pending", "declared", "domain_names: [example.com www.example.com]"},
+			// SILENT: certificate --domain is NOT enrolled — the response is a
+			// legitimate unordered SUPERSET of what was asked, so token
+			// equality would advise on every correct managed create.
+			unwanted: []string{"issuance: issued", "divergence"},
 		},
 	}
 }
@@ -704,6 +721,181 @@ func TestHetznerCertificateCreateUploadedObservesTheFingerprint(t *testing.T) {
 		if !strings.Contains(stdout, want) {
 			t.Errorf("create-uploaded receipt = %q, want %q read off the response", stdout, want)
 		}
+	}
+}
+
+// TestHetznerCreateAdvisoryIsExitNeutral is the PDS-D432 proof, and it runs in
+// BOTH directions because a one-directional version is satisfiable by an
+// apparatus that never advises at all — or by one that turns every advisory
+// into a refusal.
+//
+// DIRECTION 1: an observation carrying an ADVISORY (and no `field`) is a ✓ at
+// exitOK with the divergence in the payload. A create the API ACCEPTED must
+// never exit non-zero because the response disagreed with argv — the only
+// create refusal stays obj == nil.
+// DIRECTION 2: an observation carrying `field` STILL exits exitGeneric. The
+// advisory channel is additive; it did not soften the refusal arm.
+func TestHetznerCreateAdvisoryIsExitNeutral(t *testing.T) {
+	run := func(t *testing.T, label string, obs hzResObservation) (map[string]any, int) {
+		t.Helper()
+		out, buf := newJSONTestWriter()
+		code := hzResObservedResponse(out, "create", "load-balancer", int64(7), "web-lb", nil,
+			&hcloud.LoadBalancer{ID: 7, Name: "web-lb"}, func(*hcloud.LoadBalancer) hzResObservation { return obs })
+		var payload map[string]any
+		if err := json.Unmarshal([]byte(buf()), &payload); err != nil {
+			t.Fatalf("%s receipt is not JSON: %v\n%s", label, err, buf())
+		}
+		t.Logf("%s → exit %d  %s", label, code, buf())
+		return payload, code
+	}
+
+	advisory := "algorithm — you asked for least_connections, the server reports round_robin"
+	adv, advCode := run(t, "advisory [THE THIRD OUTCOME]",
+		hzResAgreesWith(map[string]any{"algorithm": "round_robin"}, advisory))
+	if advCode != exitOK {
+		t.Errorf("a create the API ACCEPTED exited %d because the response disagreed with argv — an advisory is "+
+			"REPORTED, never challenged. receipt: %v", advCode, adv)
+	}
+	if adv["ok"] != true || adv[hzKeyConfirmedPresent] != true {
+		t.Errorf("advisory receipt = %v, want a ✓ carrying %s", adv, hzKeyConfirmedPresent)
+	}
+	if adv[hzKeyDivergence] != advisory {
+		t.Errorf("advisory receipt %s = %v, want %q — the divergence must reach the JSON surface, not just the table",
+			hzKeyDivergence, adv[hzKeyDivergence], advisory)
+	}
+	if adv["algorithm"] != "round_robin" {
+		t.Errorf("advisory receipt lost the OBSERVED payload (%v) — the whole point of the third outcome is that "+
+			"the operator keeps the receipt AND learns about the divergence", adv)
+	}
+
+	// DIRECTION 2 — the refusal arm is untouched.
+	unmet, unmetCode := run(t, "field [THE REFUSAL, still]", hzResDisagrees("algorithm", "round_robin", "least_connections"))
+	if unmetCode == exitOK {
+		t.Errorf("an observation carrying `field` exited 0 — the advisory channel swallowed the refusal arm. "+
+			"receipt: %v", unmet)
+	}
+	if unmet["ok"] != false {
+		t.Errorf("refusal receipt ok = %v, want false", unmet["ok"])
+	}
+}
+
+// TestHetznerCreateAdvisoryReachesBothSurfaces proves the advisory rides ONE
+// value to both surfaces — the reason it is folded into `extra` rather than
+// given a print path of its own, which is how a table-only (or JSON-only)
+// receipt starts lying to half its readers.
+func TestHetznerCreateAdvisoryReachesBothSurfaces(t *testing.T) {
+	const wantLine = "divergence: algorithm — you asked for least_connections, the server reports round_robin"
+	lbCase := hzLBCreateCases()[0]
+
+	serve := func(t *testing.T) *fakeHzAPI {
+		t.Helper()
+		f := newFakeHzAPI(t)
+		f.mux.HandleFunc("POST /load_balancers", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 201, lbCase.response)
+		})
+		hzActionsAllSucceed(f)
+		return f
+	}
+
+	serve(t)
+	stdout, stderr, code := runHzCLI(t, "table", append([]string{"hetzner"}, lbCase.args...)...)
+	if code != exitOK || !strings.Contains(stdout, "  "+wantLine) {
+		t.Errorf("table receipt = %q (exit %d, stderr %q), want the sorted extra line %q", stdout, code, stderr, wantLine)
+	}
+
+	serve(t)
+	jsonOut, _, jsonCode := runHzCLI(t, "json", append([]string{"hetzner"}, lbCase.args...)...)
+	var payload map[string]any
+	if err := json.Unmarshal([]byte(jsonOut), &payload); err != nil {
+		t.Fatalf("receipt is not JSON: %v\n%s", err, jsonOut)
+	}
+	if jsonCode != exitOK || payload[hzKeyDivergence] != strings.TrimPrefix(wantLine, "divergence: ") {
+		t.Errorf("json receipt %s = %v (exit %d), want the SAME value the table printed", hzKeyDivergence,
+			payload[hzKeyDivergence], jsonCode)
+	}
+}
+
+// TestHetznerCreateAdvisoryExclusions pins the flags that are DELIBERATELY not
+// enrolled. Each row is a CORRECT create whose argv token differs from the
+// value the response reports for reasons that have nothing to do with the API
+// disagreeing — enrol any of them and this test reds with the false advisory it
+// would print.
+//
+// MEASURED, not assumed: enrolling primary-ip --datacenter (asked nbg1-dc3
+// against a response whose location is nbg1) emitted
+// `divergence: datacenter — you asked for nbg1-dc3, the server reports nbg1`
+// at exit 0 on a create that did exactly what it was told.
+func TestHetznerCreateAdvisoryExclusions(t *testing.T) {
+	cases := []struct {
+		name     string
+		args     []string
+		postPath string
+		response string
+		why      string
+	}{
+		{
+			name:     "primary-ip --datacenter answers as a LOCATION",
+			args:     []string{"primary-ip", "create", "--type", "ipv4", "--datacenter", "nbg1-dc3", "--name", "web-ip"},
+			postPath: "/primary_ips",
+			// PRODUCTION-SHAPED ON PURPOSE, and that is what makes this pin able
+			// to FAIL: the API sends `location` at the TOP level
+			// (hcloud-go schema/primary_ip.go:19) while the older fixture in
+			// hzLBCreateCases omits it — there the observed value is EMPTY and
+			// an enrolled --datacenter would be silently SKIPPED rather than
+			// caught, which is a pin that cannot red.
+			response: `{"primary_ip":{"id":19,"name":"web-ip","ip":"192.0.2.50","type":"ipv4","assignee_type":"server",` +
+				`"assignee_id":null,"location":{"id":1,"name":"nbg1"},` +
+				`"datacenter":{"id":3,"name":"nbg1-dc3","location":{"id":1,"name":"nbg1"}},"dns_ptr":[]}}`,
+			why: "nbg1-dc3 IS in nbg1 — the create is correct and an advisory here is a lie",
+		},
+		{
+			name:     "load-balancer --type on the NUMERIC branch becomes an ID",
+			args:     []string{"load-balancer", "create", "--name", "web-lb", "--type", "1", "--location", "nbg1"},
+			postPath: "/load_balancers",
+			response: `{"load_balancer":{"id":7,"name":"web-lb","load_balancer_type":{"id":1,"name":"lb11"},` +
+				`"location":{"id":1,"name":"nbg1"},"public_net":{"enabled":true,"ipv4":{"ip":"192.0.2.7"},"ipv6":{}},` +
+				`"algorithm":{"type":"round_robin"},"services":[],"targets":[]},` +
+				`"action":{"id":401,"command":"create_load_balancer","status":"running","progress":0}}`,
+			why: "--type 1 is an ID reference; the response answers with the type's NAME",
+		},
+		{
+			name:     "certificate --domain is a legitimate SUPERSET",
+			args:     []string{"certificate", "create-managed", "--name", "web-tls", "--domain", "example.com"},
+			postPath: "/certificates",
+			response: `{"certificate":{"id":13,"name":"web-tls","type":"managed","domain_names":["example.com","www.example.com"],` +
+				`"status":{"issuance":"pending","renewal":"unavailable"}},` +
+				`"action":{"id":402,"command":"issue_certificate","status":"running","progress":0}}`,
+			why: "the API adds www. on its own; the ask is a SUBSET, unordered",
+		},
+		{
+			// The one exclusion whose false positive is UNREACHABLE rather than
+			// measured: the client rejects every --type but spread before the
+			// request leaves, so spread-vs-spread is the only comparison there
+			// is. Pinned here for completeness of the four.
+			name:     "placement-group --type is client-side degenerate",
+			args:     []string{"placement-group", "create", "--name", "web-spread", "--type", "spread"},
+			postPath: "/placement_groups",
+			response: `{"placement_group":{"id":17,"name":"web-spread","type":"spread","servers":[41,42]}}`,
+			why:      "only `spread` can reach the API, so the pair can never disagree",
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			f := newFakeHzAPI(t)
+			f.mux.HandleFunc("POST "+tc.postPath, func(w http.ResponseWriter, r *http.Request) {
+				hzWriteJSON(w, 201, tc.response)
+			})
+			hzActionsAllSucceed(f)
+
+			stdout, stderr, code := runHzCLI(t, "table", append([]string{"hetzner"}, tc.args...)...)
+			if code != exitOK {
+				t.Fatalf("a CORRECT create exited %d, stderr: %s\nstdout: %s", code, stderr, stdout)
+			}
+			if strings.Contains(stdout, hzKeyDivergence) {
+				t.Errorf("a CORRECT create carries a FALSE advisory — %s was enrolled and must not be (%s)\nreceipt: %q",
+					tc.name, tc.why, stdout)
+			}
+		})
 	}
 }
 
