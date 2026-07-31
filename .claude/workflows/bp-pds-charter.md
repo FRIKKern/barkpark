@@ -2576,6 +2576,65 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 29 2026-07-31 — "hzResDone, taken properly" — REVIEWED. Grade A (paper `pds-wave-29-2026-07-31`)
+
+**THE HEADLINE: the 50-site population was re-derived from source, BROKEN INTO CLASSES, and then
+paid CLASS BY CLASS instead of swept.** Wave 28 refused to half-take `hzResDone` and named it wave
+29's spine. Wave 29 took it and did the thing that stops a 50-site sweep from becoming a rubber
+stamp: **12 destroys paid in full, 38 keys left explicitly unpaid with a task id attached to each**,
+and a `go/ast` census keyed on ARGUMENT POSITION that fails if any of those 38 loses its pointer.
+D367's headline of 51 is **refuted by counting** — the reviewer re-ran the pipeline independently:
+`TOTAL=50`, per-file lb 21 / net 16 / dns 6 / storage 5 / backup 2, class split destroy 12 /
+sub-resource-removal 8 / create 14 / request-echo 16 / measured-uncompared 1 / no-cheap-post-read 1.
+
+**WHAT LANDED — 4 of 4 round-1 slices green, all pushed with PRs open.**
+
+| slice | final branch | what it actually does |
+|---|---|---|
+| `pds-w29-respost-apparatus-destroy` | `…-either-sa-0-r` | generic `hzResDestroyed[T]` three-way predicate; all 12 full destroys re-read; the `(kind,action)` census |
+| `pds-w29-s3-fake-fails-closed` | `…-200-empty-to-ever-1-r` | `fakeS3` becomes a stateful in-memory S3 that fails closed on 501/404 instead of 200-empty |
+| `pds-w29-write-receipt-fence` | `…-ok-on-a-body-2` | `screenWriteReceipt` at `runCommand`'s post-2xx hook + the 204 declared carve-out + the `claimed.epoch` pin |
+| `pds-w29-taskboard-envelope-fence` | `…-a-plausib-3` | `decodeTaskListFull`/`decodePrime` demand their envelope key via a pointer field |
+
+**THE CENSUS IS NOT DECORATION, AND REVIEW PROVED IT RATHER THAN READING IT.** Making one call site
+pass a variable action reds four separate arms at once — the opaque-caller arm names
+`hetzner_net_cmd.go:330`, `KEYS` drops 52 → 51, `NON_LITERAL` goes 2 → 3, and the now-orphaned
+`volume/delete` disposition is reported as a stale row. Disarming the write fence reds **42**
+subtests; deleting `"epoch": epoch` from `emitFrontierClaim` reds the new pin with the receipt
+printed in the failure. Three independent mutations, three honest reds.
+
+**THE ONE THING A FUTURE READER MUST NOT MISREAD.** The two S3 destroys are **DECLARED NON-BINDING**:
+a still-listed bucket or key is an honest ⚠ partial at rc=0 with `confirmed_absent:false` and its
+basis named — never a ✓, never a refusal. Hetzner documents no consistency model, so refusing there
+would manufacture false reds on correct deletes. Ten kinds are binding, two are declared, and
+`confirmation: "declared"` is the discriminator in the receipt. Anyone quoting "all twelve destroys
+now refuse a lying API" off this wave is over-reading it by two.
+
+**THE INSTRUMENT'S FIRST REAL USER FILED A BUG AGAINST IT — AND REVIEW REPRODUCED IT (weight 2).**
+`bp task create --yes` returns `{"draft":"drafts.…","status":"draft"}` **at rc=0 with the row never
+published**. The wave-29 write-fence builder hit it and only caught it by reading the status back;
+the wave reviewer then hit the identical thing filing this wave's own backlog row. That is PDS-D382's
+draft-twin class from the CREATE side, and it is this epic's own law aimed at the ledger's intake:
+the verb is named "create the task", the exit code is 0, and only a field the human line never prints
+carries the truth. Filed as `pds-bl-task-create-draft-at-rc0`. The birth fence itself cost the author
+nothing conceptually, and `--criterion-text` earned its keep; the ledger's flakiness under wave load
+(two `bp task stamp` timeouts, six failed creates, one bare `unknown error`) is the real tax.
+
+**WHAT REVIEW FOUND THAT NO BUILDER DID.** All four branches were merged together into a throwaway
+integration branch: they merge **clean** and `go build ./... && go vet ./internal/cli/... && go test
+./internal/cli/ ./internal/taskboard/` is green on the combined tree. The single collision — slices
+A and B both editing `TestHetznerStorageBucketListAndDelete` — was reduced to nothing by carrying the
+identical by-shape hunk on both branches. Review also deduplicated three copies of two receipt rules
+(`hzResPayloadKey`, `hzResPrintExtra`) that `hzResDone` and the two partial shapes each kept privately.
+
+**WHAT THE LEAD OWES ON MERGE.** Four merge-gated criteria stay open for the lead — one per slice —
+plus `pds-bl-board-tui-reader-honesty` criterion 4, which the taskboard builder correctly refused to
+close. Both HIGH-FLIP-RISK judgments were re-derived independently by the wave reviewer and both
+AGREED: the destroy apparatus's `(nil,nil)` polarity against JSON-404 vs the mux's text/plain 404,
+and the write fence's reachability across every write endpoint in `api/lib/**` (zero `json(conn,
+%{})`, zero `json(conn, [])`, zero empty 200s — the only empty 2xx sends in the tree are three 204s,
+all inside the declared carve-out). That is one reviewer, not two; the second is still owed.
+
 ### Wave 28 2026-07-31 — "The reason must be able to be wrong" — REVIEWED. Grade A− (paper `pds-wave-28-2026-07-31`)
 
 **THE HEADLINE: the wave aimed the epic's own law at the epic's own evidence base, and mostly hit.**
