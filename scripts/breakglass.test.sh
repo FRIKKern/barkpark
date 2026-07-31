@@ -362,8 +362,16 @@ JSON
 }
 runs > "$GFX/checkruns-A.json"; runs > "$GFX/checkruns-B.json"; runs > "$GFX/checkruns-M.json"
 echo "M" > "$GFX/main-shas.txt"
+# `--no-merge` because 6.9/6.10 test SELECTION, not merge semantics. Without it
+# the generator's by-name S1-LOSS refusal (#8394) fires and emits nothing at all,
+# which fails both assertions for a reason that has nothing to do with what they
+# measure: this fixture's `$GWF` holds two synthetic workflows, so not one of the
+# four contexts the committed spec requires can render, and refusing that sample
+# is the guard behaving CORRECTLY. Isolating selection keeps both assertions
+# about the thing they name — that a break-glass name can never be sampled into
+# the required set, and that both are recorded as exclusions rather than dropped.
 genout="$(bash "$GEN" --repo FRIKKern/barkpark --branch main --workflows "$GWF" \
-  --fixture-dir "$GFX" --sha A --sha B 2>&1)"
+  --fixture-dir "$GFX" --sha A --sha B --no-merge 2>&1)"
 spec_only="$(printf '%s' "$genout" | sed -n '/^{/,$p')"
 ctxs="$(printf '%s' "$spec_only" | jq -r '.protection.required_status_checks.checks[].context' 2>/dev/null)"
 if [ -n "$ctxs" ] && ! grep -q "Break-glass" <<<"$ctxs"; then
