@@ -70,7 +70,9 @@ class PaperEpicRepairTest(unittest.TestCase):
                     "type": "callout",
                     "title": "Editorial status",
                     "content": text(
-                        "Editorial status (superseded): preserve the historical ledger."
+                        "Editorial status (superseded): preserve the historical "
+                        "ledger. Authority boundary: This stale sentence is "
+                        "replaced, not duplicated."
                     ),
                 },
                 {
@@ -99,7 +101,14 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertIn("Delete the fork only after", str(repaired))
         self.assertNotIn("two-block replacement", str(repaired))
         self.assertIn("Editorial status (superseded)", str(repaired))
+        self.assertNotIn("This stale sentence", str(repaired))
+        self.assertEqual(str(repaired).count("Authority boundary:"), 1)
         self.assertIn("Wave 6 owns the distinct hardening proofs", str(repaired))
+        self.assertEqual(
+            patch["set"]["title"],
+            "Render-Path Unification — Wave 5 (2026-07-16): "
+            "the FINALE — collapse the 5th renderer",
+        )
 
         second = {
             **document,
