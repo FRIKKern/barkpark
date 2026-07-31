@@ -26,6 +26,7 @@ import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import {
   mkdtempSync, mkdirSync, cpSync, copyFileSync, readFileSync, writeFileSync, realpathSync,
+  rmSync,
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { fileURLToPath } from "node:url";
@@ -56,6 +57,7 @@ function makeTree() {
   // fileURLToPath(import.meta.url) (which node realpaths). A raw /var path would
   // silently skip run() — the subprocess would exit 0 having done nothing.
   const root = realpathSync(mkdtempSync(join(tmpdir(), "emit-fence-")));
+  tempRoots.push(root);
   cpSync(join(repoRoot, "design"), join(root, "design"), { recursive: true });
   const files = new Set([...ARTIFACTS.map((a) => a.path), SURFACE_PATH, BUNDLE_PATH]);
   for (const rel of files) {
@@ -65,6 +67,23 @@ function makeTree() {
   }
   return root;
 }
+
+// Every makeTree() root is removed when the process exits. Without this the
+// suite leaked ~10 MB per test case into $TMPDIR, which macOS never cleans:
+// one evening of CI/wave runs minted 3,746 emit-fence-* dirs (37 GB) and
+// filled the machine's boot disk. The exit hook (not per-test teardown)
+// keeps the trees inspectable while the run is alive and costs one rm each.
+const tempRoots = [];
+process.on("exit", () => {
+  for (const root of tempRoots) {
+    try {
+      rmSync(root, { recursive: true, force: true });
+    } catch {
+      // exit handler: nothing sane to do, and the leak signature in noo-noo
+      // sweeps stragglers.
+    }
+  }
+});
 
 function emit(root, args) {
   const r = spawnSync(process.execPath, [join(root, "design", "emit.mjs"), ...args], {
