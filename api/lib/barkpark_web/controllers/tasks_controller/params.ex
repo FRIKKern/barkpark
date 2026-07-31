@@ -277,6 +277,7 @@ defmodule BarkparkWeb.TasksController.Params do
     |> put_unless(:lifecycle_status, Map.get(content, "lifecycle_status"), "open")
     |> put_brief_criteria(content)
     |> put_brief_engagement(content)
+    |> put_brief_disposition(content)
     |> Map.put(:claim, brief_claim(Map.get(content, "claim")))
     |> prune_nils()
   end
@@ -335,6 +336,40 @@ defmodule BarkparkWeb.TasksController.Params do
   defp put_brief_engagement(map, content) do
     case Map.get(content, "engagement") do
       %{} = engagement when map_size(engagement) > 0 -> Map.put(map, :engagement, engagement)
+      _ -> map
+    end
+  end
+
+  # pds-w27: the ADJUDICATION TERM rides the brief card, same additive law as
+  # put_brief_engagement/2 above — present only when the row carries a term,
+  # omitted (never "" and never null) when it does not, so the exact-key-set
+  # contract on a minimal open row is untouched.
+  #
+  # THE TERM ONLY, and that is MEASURED, not taste. The hostile 50-card
+  # tripwire below params' own tests had 2080 B of headroom under its 30,720 B
+  # ceiling. Marginal cost over 50 cards:
+  #
+  #   * `,"disposition":"parked"`   = 23 B × 50 = 1150 B — fits, ~930 B spare.
+  #   * `,"reopen_trigger":""`      = 20 B × 50 = 1000 B MORE, with a
+  #     ZERO-LENGTH value: 1150 + 1000 = 2150 B > 2080 B. The trigger overflows
+  #     the ceiling before a single character of content — no grapheme cap can
+  #     rescue it, the cap would have to be negative.
+  #   * `disposition_reason` averages 753 B (max 1612 B) per row — the worst-50
+  #     full triple is 72,232 B, 34.7× the headroom.
+  #
+  # Both omitted companions already ride the FULL view (render_doc(_, :full) is
+  # a whole-content passthrough): `bp task get <doc_id>` is the escape hatch
+  # AXI charter law 2 asks for.
+  #
+  # NOTE for whoever caps a future brief field: brief_truncated?/1 below
+  # inspects ONLY `title` and `claim.now.text`, and Tasks.Stage caps NEITHER
+  # `reopen_trigger` NOR `disposition_reason`. A capped field shipped without a
+  # third clause there truncates SILENTLY — charter law 2 violated by omission.
+  # (Free reach: internal/cli/mcp_tasks.go forces view=brief on both its list
+  # and prime reads, so the MCP agent surface gains this term with no change.)
+  defp put_brief_disposition(map, content) do
+    case Map.get(content, "disposition") do
+      term when is_binary(term) and term != "" -> Map.put(map, :disposition, term)
       _ -> map
     end
   end

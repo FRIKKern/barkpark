@@ -2386,6 +2386,52 @@ defmodule BarkparkWeb.TasksControllerTest do
       assert resting["lifecycle_status"] == "considering"
     end
 
+    # pds-w27: the adjudication TERM is an additive key on the brief card —
+    # `bp task ready -o json` auto-selects the brief view, so without this an
+    # adjudicated row reads as un-adjudicated to the reader that most needs it.
+    # Same omission law as engagement above; the exact-key-set test stays
+    # byte-identical. The reason companions (disposition_reason, reopen_trigger)
+    # stay OFF the card on measured bytes and ride `bp task get`.
+    test "disposition rides the brief card when present and is omitted when absent",
+         %{conn: conn, scope: scope} do
+      parked_id = uniq("brief-disp")
+      # Vocabulary-derived (Stage.dispositions/0 = ~w(open parked closed)),
+      # never corpus-sampled.
+      mk_task!(parked_id, scope, %{
+        "lifecycle_status" => "blocked",
+        "disposition" => "parked",
+        "disposition_reason" => "waiting on the terminal round",
+        "reopen_trigger" => "the round closes"
+      })
+
+      plain_id = uniq("brief-disp-none")
+      mk_task!(plain_id, scope, %{"lifecycle_status" => "blocked"})
+
+      payload =
+        conn
+        |> authed()
+        |> get("/v1/tasks?view=brief")
+        |> json_response(200)
+
+      parked = Enum.find(payload["docs"], &String.contains?(&1["doc_id"], parked_id))
+      assert parked, "parked task missing from brief index"
+      assert parked["disposition"] == "parked"
+      # The reasons are full-view detail — the card names the term only.
+      refute Map.has_key?(parked, "disposition_reason")
+      refute Map.has_key?(parked, "reopen_trigger")
+
+      plain = Enum.find(payload["docs"], &String.contains?(&1["doc_id"], plain_id))
+      assert plain, "undisposed task missing from brief index"
+      refute Map.has_key?(plain, "disposition")
+
+      # …and the full view still carries the whole triple (the escape hatch
+      # `bp task get` reads).
+      full = conn |> authed() |> get("/v1/tasks?view=full") |> json_response(200)
+      full_card = Enum.find(full["docs"], &String.contains?(&1["doc_id"], parked_id))
+      assert full_card["content"]["disposition"] == "parked"
+      assert full_card["content"]["reopen_trigger"] == "the round closes"
+    end
+
     test "full view keeps ONE claim copy: top-level intact, content echo drops it, storage untouched",
          %{conn: conn, scope: scope} do
       phase = uniq("phase-dedup")
@@ -2602,6 +2648,17 @@ defmodule BarkparkWeb.TasksControllerTest do
           "parent_id" => "phase-hostile",
           "distinct_from" => ids -- [id],
           "acceptance_criteria" => criteria,
+          # pds-w27: the adjudication term rides the hostile page, so this
+          # tripwire MEASURES the field instead of being blind to it (before
+          # this line the probe printed the same 28623B with or without the
+          # renderer key — a green that proved nothing). The value is derived
+          # from the VOCABULARY, not the live board: Stage.dispositions/0 is
+          # ~w(open parked closed), and "parked" is a longest term — the worst
+          # case a valid row can present. The corpus is NOT the source here;
+          # it still holds off-vocabulary prose in this slot (longest 71 B)
+          # that pds-w27-round-terminal-15 is retiring, and a fixture built
+          # on it would red on a value the round makes impossible.
+          "disposition" => "parked",
           # Worker-less claim residue (a live worker would exclude the row
           # from ready) — now-line + epoch survive as the hostile payload.
           "claim" => %{
