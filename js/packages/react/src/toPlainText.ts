@@ -125,11 +125,35 @@ function proseContent(b: Block): string {
   return str(b.text)
 }
 
-/** A table/list cell: an inline run, a nested block, or a bare scalar. */
+/** A table/list cell: an inline run, a nested block, an UNTYPED authored map
+ * (`{content:[…]}` / `{text}` — the dominant authored list-item shape, which the
+ * renderer reads via `itemInlines`/`cellContent` but this extractor silently
+ * dropped: `str(map)` is `''`), or a bare scalar. */
 function cellText(cell: unknown): string {
   if (Array.isArray(cell)) return inlineText(cell)
   if (isMap(cell) && typeof cell.type === 'string') return blockText(cell as Block)
+  if (isMap(cell)) return proseContent(cell as Block)
   return str(cell)
+}
+
+/** One list item, whatever authored shape it took — the extractor twin of the
+ * renderer's `normalizeListItem` + `itemInlines` (blocks/core.ts): a string that
+ * is a JSON-encoded inline array (the drifted `bullet_list` authoring shape) is
+ * decoded to that array's text; everything else routes through `cellText`. */
+function listItemText(item: unknown): string {
+  if (typeof item === 'string') {
+    const trimmed = item.trim()
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed: unknown = JSON.parse(trimmed)
+        if (Array.isArray(parsed) && parsed.length > 0 && isMap(parsed[0])) return inlineText(parsed)
+      } catch {
+        // not JSON — keep the plain string
+      }
+    }
+    return item
+  }
+  return cellText(item)
 }
 
 /** Recurse a slot / column / section child list to its joined prose. */
@@ -149,7 +173,7 @@ function noteText(m: unknown): string {
 
 function listText(b: Block): string {
   return asList(b.items)
-    .map((it) => cellText(it))
+    .map((it) => listItemText(it))
     .filter((s) => s !== '')
     .join('\n')
 }
@@ -197,9 +221,13 @@ function cardText(b: Block): string {
 function blockText(b: Block): string {
   switch (b.type) {
     // ── headings / roles ──────────────────────────────────────────────────
+    // heading/eyebrow read content[] OR text, mirroring the renderer's
+    // `paragraphInline` — reading `text` alone silently dropped the capstone
+    // headings persisted as `{content:[…]}` (the shape PR #6009 fixed on the
+    // render side).
     case 'heading':
     case 'eyebrow':
-      return str(b.text)
+      return proseContent(b)
     case 'byline':
       return Array.isArray(b.items) ? b.items.map((i) => str(i)).join(' · ') : str(b.text)
     // ── prose runs ────────────────────────────────────────────────────────
@@ -255,6 +283,11 @@ function blockText(b: Block): string {
       return joinBlocks(
         asList(b.steps).map((s) => (isMap(s) ? joinBlocks([str(s.title), childrenText(s.blocks)]) : '')),
       )
+    // Expandable: the summary line + its nested blocks' prose — collapsed
+    // content is still reading content (the `steps`/`tabs` precedent); it was
+    // previously an unexamined drop behind the "starter block" skip rationale.
+    case 'expandable':
+      return joinBlocks([str(b.summary), childrenText(b.blocks ?? b.children)])
     // Footnote: each note's text, in order.
     case 'footnote':
       return joinBlocks(asList(b.notes).map((n) => (isMap(n) ? str(n.text) : '')))
