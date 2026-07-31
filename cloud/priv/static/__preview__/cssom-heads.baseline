@@ -15,4 +15,16 @@
 # not-current chip rules. MISSES 0 is what makes this an unrecorded ADD rather
 # than a parity defect, which is the distinction the ratchet's own failure text
 # tells you to confirm before bumping.
+#
+# Re-measured 2026-07-31 (W12 narrow-viewport slice, cch-w12-s2): UNCHANGED at
+# 1235, MISSES 0 — deliberately NOT bumped. That slice edits app.css in two
+# regions but adds no rule HEAD: `.instances-grid`, `.set-matrix`,
+# `.set-matrix-corner` and `.set-matrix-event` all already existed and only
+# gained declarations, and the two at-rules it introduces (`@property
+# --set-matrix-fade`, `@keyframes set-matrix-edge-fade`) are OPAQUE at-rules —
+# cssom-parity skips them on BOTH sides (authoredHeads' GROUPING_AT branch and
+# the symmetric CSSOM walk), so they contribute zero to this count by design.
+# Recorded here rather than left silent: a ratchet whose number does not move
+# on a real CSS change should say WHY in the same commit, or the next reader
+# cannot tell a considered no-op from a forgotten bump.
 1235

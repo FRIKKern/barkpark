@@ -1882,9 +1882,56 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
 /* G-04 event×channel routing matrix (GR36): a live toggle grid — 1 label column +
    6 channel columns (email + 5 chat). Scrolls horizontally on narrow viewports so
-   the page body never does. Cells are `.set-toggle`-weight checkboxes; a dashed
-   cell marks a chat_default_on failure event still on its honest default. */
-.set-matrix { overflow-x: auto; margin-top: var(--space-2); }
+   the page body never does (measured true: BODY_OVERFLOWS=false on #notifications
+   at 768/430/390 — the fleet grid is what used to scroll the body, not this).
+   Cells are `.set-toggle`-weight checkboxes; a dashed cell marks a
+   chat_default_on failure event still on its honest default.
+
+   W12 — IT SCROLLED SILENTLY. The comment above was true about the PAGE and
+   false about the matrix itself: at 390px, 204px of 520px was hidden with
+   scrollLeft 0 — Telegram, Pushover and Webhook fully off-screen, Slack half —
+   and nothing said so. There is no OS scrollbar to lean on: the reserved track
+   (offsetHeight - clientHeight) measures 0px even in a CLASSIC-scrollbar run
+   (proven able to fail: injecting ::-webkit-scrollbar{height:12px} flips the
+   same read 0 -> 12). Two cues, the Kinsta/Vercel idiom for a wide table on a
+   phone:
+     1. the LABEL COLUMN sticks. Row identity is what you lose first when the
+        channels slide under your thumb, so `.set-matrix-corner` and
+        `.set-matrix-event` pin to the scroller's left edge with a hairline
+        divider. That is why the grid's `overflow:hidden` became a `clip-path` —
+        overflow:hidden makes the GRID the sticky scrollport, so the sticky
+        column would compute `sticky` and never move (a dead rule of exactly the
+        class GR109/GR115 were about). `clip-path` rounds the corners without
+        creating a scrollport.
+     2. the RIGHT EDGE FADES, and only while something is hidden. The fade is
+        scroll-driven (`animation-timeline: scroll(self inline)`), so with no
+        scrollable overflow the timeline is inactive, `--set-matrix-fade` keeps
+        its 0px initial value, and the mask is a no-op; at rest while clipped it
+        is 48px, and it retracts to 0 as you reach the end — the edge only
+        promises more when there IS more. It is a MASK on the element's own
+        paint, not a gradient in a theme colour: the card surface shows through,
+        so light and dark are correct by construction with no second token to
+        keep in sync. No left-edge fade on purpose — the sticky label column
+        already owns that edge, and two competing treatments there read as
+        damage rather than design. */
+.set-matrix {
+  overflow-x: auto;
+  margin-top: var(--space-2);
+  -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - var(--set-matrix-fade)), transparent);
+  mask-image: linear-gradient(to right, currentColor calc(100% - var(--set-matrix-fade)), transparent);
+  animation-name: set-matrix-edge-fade;
+  animation-duration: auto;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+  animation-timeline: scroll(self inline);
+}
+/* Registered so the length INTERPOLATES — an unregistered custom property is a
+   token stream and would jump 48px -> 0px at the end of the scroll. */
+@property --set-matrix-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes set-matrix-edge-fade {
+  from { --set-matrix-fade: 48px; }
+  to { --set-matrix-fade: 0px; }
+}
 .set-matrix-grid {
   display: grid;
   grid-template-columns: minmax(150px, 1.6fr) repeat(6, minmax(52px, 1fr));
@@ -1892,9 +1939,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   min-width: 520px;
   border: 1px solid var(--border);
   border-radius: var(--radius-lg);
-  overflow: hidden;
+  clip-path: inset(0 round var(--radius-lg));
 }
-.set-matrix-corner { border-bottom: 1px solid var(--border); }
+.set-matrix-corner {
+  position: sticky;
+  left: 0;
+  z-index: 2;
+  /* STRETCH, or the pin is a hairline. The grid is `align-items: center`, and
+     this cell is EMPTY — it laid out 1px tall (its own border-bottom) centred
+     in a 35px header row, so the channel headers scrolled straight THROUGH the
+     label column at the top while the rows below were correctly covered.
+     Measured: corner rect y 107.375 h 1 inside a header row 90.375-125.375. */
+  align-self: stretch;
+  background: var(--muted-surface);
+  border-right: 1px solid var(--border);
+  border-bottom: 1px solid var(--border);
+}
 .set-matrix-col {
   display: flex;
   flex-direction: column;
@@ -1910,9 +1970,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .set-matrix-off { font-size: var(--text-xs); font-weight: 500; color: var(--muted-text); }
 .set-matrix-event {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  /* Same reason as the corner: the opaque backdrop has to be the whole ROW, not
+     the height of the words. The flex box keeps the label optically centred, so
+     stretching changes the cover and not the type. */
+  align-self: stretch;
+  display: flex;
+  align-items: center;
   padding: var(--space-2) var(--space-3);
   font-size: var(--text-sm);
   color: var(--text);
+  /* Opaque, or the channel cells scroll visibly THROUGH the pinned label. The
+     matrix sits on a .set-section, which is --surface. */
+  background: var(--surface);
+  border-right: 1px solid var(--border);
   border-bottom: 1px solid var(--border);
 }
 .set-matrix-cell {
@@ -2862,7 +2935,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 
 @media (max-width: 620px) {
-  .instances-grid { grid-template-columns: 1fr; }
+  /* W12 — NOT a bare `1fr`. This rule matched all along (matchMedia true at
+     390px) and still let the PAGE BODY scroll 106px: a grid item at the default
+     `min-width:auto` floors its track at the item's MIN-CONTENT, measured
+     480.203px for .instance-card, inside a 358px container — so the one-column
+     mobile layout was a 480px column in a 358px page. `minmax(0, 1fr)` is the
+     same one-column intent with a floor the track can actually honour.
+     The child-level fix does NOT work and was measured: min-width:0 on
+     .instance-card-stats, -url and -head, individually AND all three together,
+     leaves the track at 480.203px. The floor belongs to the CARD, so the cure
+     has to be stated on the card's track (or on the card itself). */
+  .instances-grid { grid-template-columns: minmax(0, 1fr); }
   .overview-head { flex-direction: column; }
   .overview-head-right { justify-content: flex-start; }
   /* .attention-row already STACKS from 768px down — see the GR65 tablet block
