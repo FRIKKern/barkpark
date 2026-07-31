@@ -500,6 +500,320 @@ defmodule Barkpark.Tasks.StageTest do
     end
   end
 
+  # ─── The reason carries its own falsifier (PDS wave 28 / D387, D390, D391b) ──
+  #
+  # `content.disposition_rerun` is the fourth durable key: one command an
+  # auditor can run to try to prove the durable reason WRONG. These fixtures pin
+  # four separable properties, and each fails on a DIFFERENT edit:
+  #
+  #   * the key is written by this one verb, in the same CAS update (drop the
+  #     `apply_adjudication_key(@rerun_key, …)` line → the read-back reds);
+  #   * the screen REFUSES a rerun that cannot fail, and writes nothing (delete
+  #     a `@forbidden_rerun_shapes` row → that spelling's fixture reds);
+  #   * absence is a PASS, never a refusal (make the field mandatory → the
+  #     optional fixture reds);
+  #   * NO distinctness (add a cross-row uniqueness check → SHAREDRERUN reds).
+  describe "POST /v1/tasks/:doc_id/stage — the rerun that could prove the reason wrong" do
+    test "a legal rerun lands on the DURABLE content.disposition_rerun, in the same write",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-rerun-ok")
+      task = mk_task!(doc_id, scope)
+
+      rerun = "git cat-file -e origin/main:api/lib/barkpark/tasks/stage.ex"
+
+      resp =
+        stage(conn, doc_id, %{
+          state: "considering",
+          disposition: "parked",
+          note: "parked: the sanctioned writer already owns this key",
+          "reopen-trigger": "when wave 29 opens",
+          rerun: rerun
+        })
+
+      assert resp.status == 200
+
+      row = reload(task)
+      assert row.content["disposition_rerun"] == rerun
+      assert row.content[Tasks.Stage.disposition_rerun_key()] == rerun
+      # ONE CAS update or none: the rest of the adjudication landed with it.
+      assert row.content["disposition"] == "parked"
+      assert row.content["disposition_reason"] =~ "sanctioned writer"
+      assert row.content["reopen_trigger"] == "when wave 29 opens"
+
+      body = Jason.decode!(resp.resp_body)
+      assert body["doc"]["content"]["disposition_rerun"] == rerun
+    end
+
+    test "each of the three named legal substitutes is accepted verbatim",
+         %{conn: conn, scope: scope} do
+      # The refusal message NAMES these. A refusal that names an unwritable
+      # substitute is a lie about its own remedy — so the accepted set and the
+      # advertised set are asserted to be the same thing.
+      for template <- Tasks.Stage.legal_rerun_substitutes() do
+        rerun =
+          template
+          |> String.replace("<sha>", "12f108f87")
+          |> String.replace("<path>", "api/lib/barkpark/tasks/stage.ex")
+          |> String.replace("<token>", "disposition_rerun")
+
+        doc_id = uniq("stage-rerun-legal")
+        task = mk_task!(doc_id, scope)
+
+        resp = stage(conn, doc_id, %{state: "considering", note: "checkable", rerun: rerun})
+
+        assert resp.status == 200, "the advertised substitute #{inspect(rerun)} was REFUSED"
+        assert reload(task).content["disposition_rerun"] == rerun
+      end
+    end
+
+    test "the four forbidden spellings are REFUSED and the row stays BYTE-IDENTICAL",
+         %{conn: conn, scope: scope} do
+      forbidden = [
+        {"git -C log push origin main", "repo_redirect"},
+        {"test -f README.md", "filesystem_predicate"},
+        # Two defects at once (a `test` predicate AND a substitution); the
+        # screen's first-match order names the substitution, which is the one
+        # that actually swallows the probe's exit code.
+        {"test 0 -eq $(git grep -c x -- y)", "command_substitution"},
+        {"git merge-base --is-ancestor a b", "merge_base_ancestor"}
+      ]
+
+      for {rerun, shape} <- forbidden do
+        doc_id = uniq("stage-rerun-bad")
+        task = mk_task!(doc_id, scope)
+        before = reload(task)
+
+        resp =
+          stage(conn, doc_id, %{
+            state: "considering",
+            note: "a reason with an uncheckable check",
+            rerun: rerun
+          })
+
+        assert resp.status == 422, "#{inspect(rerun)} was ACCEPTED"
+        payload = Jason.decode!(resp.resp_body)
+        assert payload["ok"] == false
+        assert payload["reason"] == "unfalsifiable_rerun"
+        # It NAMES the field…
+        assert payload["field"] == "disposition_rerun"
+        assert payload["shape"] == shape
+        # …and a legal substitute the caller can actually write.
+        assert Enum.any?(
+                 Tasks.Stage.legal_rerun_substitutes(),
+                 &String.contains?(payload["message"], &1)
+               ),
+               "the refusal of #{inspect(rerun)} names no legal substitute"
+
+        # NOTHING WAS WRITTEN: same rev, same content, byte for byte. Not even
+        # the lifecycle transition or the note that rode along with it.
+        after_row = reload(task)
+        assert after_row.rev == before.rev
+        assert after_row.content == before.content
+        refute Map.has_key?(after_row.content, "disposition_rerun")
+        assert after_row.content["lifecycle_status"] == "open"
+      end
+    end
+
+    test "a pipe-masked formatting tail is refused — and the pipeline really does exit 0",
+         %{conn: conn, scope: scope} do
+      # THE UNDERLYING FACT FIRST, measured on this checkout rather than
+      # asserted: a pipeline reports its LAST stage's exit code, so a formatter
+      # launders a hard failure into a pass.
+      gone =
+        "origin/main:api/lib/barkpark/tasks/no_such_file_#{System.unique_integer([:positive])}.ex"
+
+      {_, bare_rc} = System.cmd("sh", ["-c", "git show #{gone}"], stderr_to_stdout: true)
+
+      {_, piped_rc} =
+        System.cmd("sh", ["-c", "git show #{gone} | head -1"], stderr_to_stdout: true)
+
+      assert bare_rc == 128, "expected the bare `git show` of a deleted path to fail"
+
+      assert piped_rc == 0,
+             "expected `| head -1` to launder the failure into a pass — if this ever reds, " <>
+               "the screen's justification changed and the message must change with it"
+
+      doc_id = uniq("stage-rerun-pipe")
+      task = mk_task!(doc_id, scope)
+      before = reload(task)
+
+      resp =
+        stage(conn, doc_id, %{
+          state: "considering",
+          note: "cited api/lib/barkpark/tasks/stage.ex",
+          rerun: "git show origin/main:api/lib/barkpark/tasks/stage.ex | head -1"
+        })
+
+      assert resp.status == 422
+      payload = Jason.decode!(resp.resp_body)
+      assert payload["reason"] == "unfalsifiable_rerun"
+      assert payload["shape"] == "pipe_masked"
+      # The refusal EXPLAINS the fact just measured above.
+      assert payload["message"] =~ "exit"
+      assert payload["message"] =~ "head"
+
+      assert reload(task).content == before.content
+    end
+
+    test "a comparing tail after a pipe is NOT pipe-masked", %{conn: conn, scope: scope} do
+      # The screen refuses formatters, not pipes. `| grep -qx 0` is the
+      # flagship legal shape and MUST survive the pipe rule.
+      doc_id = uniq("stage-rerun-grep")
+      task = mk_task!(doc_id, scope)
+
+      rerun = "git rev-list --count origin/main..12f108f87 | grep -qx 0"
+
+      assert stage(conn, doc_id, %{state: "considering", note: "ancestry", rerun: rerun}).status ==
+               200
+
+      assert reload(task).content["disposition_rerun"] == rerun
+    end
+
+    # SHAREDRERUN (PDS-D391b, mirroring D336(a)'s SHAREDTRIG). A single command
+    # can falsify a whole FAMILY of rows. If a later wave "tightens" this field
+    # with a distinctness clause — the mistake D336(a) already ruled out once
+    # under a different field name — this fixture reds.
+    test "SHAREDRERUN: two DISTINCT rows may carry the SAME rerun", %{conn: conn, scope: scope} do
+      shared = "git grep -n disposition_rerun origin/main -- api/lib/barkpark/tasks/stage.ex"
+
+      a = uniq("stage-rerun-shared-a")
+      b = uniq("stage-rerun-shared-b")
+      task_a = mk_task!(a, scope)
+      task_b = mk_task!(b, scope)
+
+      assert stage(conn, a, %{
+               state: "considering",
+               note: "row A: the key exists on the sanctioned writer",
+               rerun: shared
+             }).status == 200
+
+      assert stage(conn, b, %{
+               state: "considering",
+               note: "row B: a DIFFERENT reason, falsified by the SAME command",
+               rerun: shared
+             }).status == 200
+
+      row_a = reload(task_a)
+      row_b = reload(task_b)
+
+      # The reasons are distinct (the prose clause still bites)…
+      refute row_a.content["disposition_reason"] == row_b.content["disposition_reason"]
+      # …and the rerun is deliberately NOT.
+      assert row_a.content["disposition_rerun"] == shared
+      assert row_b.content["disposition_rerun"] == shared
+    end
+
+    test "the rerun is OPTIONAL: a reason may refuse to be checkable and still pass",
+         %{conn: conn, scope: scope} do
+      # Truth-grip D3: demoted, never rejected. An absent rerun lands at L6 —
+      # it must never be a refusal, or the field would force authors to invent
+      # a check, which is the exact defect this wave exists to close.
+      doc_id = uniq("stage-rerun-absent")
+      task = mk_task!(doc_id, scope)
+
+      resp =
+        stage(conn, doc_id, %{
+          state: "considering",
+          disposition: "parked",
+          note: "parked on a vendor licence nobody here can run a check against",
+          "reopen-trigger": "when the licence is granted"
+        })
+
+      assert resp.status == 200
+      row = reload(task)
+      assert row.content["disposition"] == "parked"
+      # ABSENT, not "" — an empty string would be a rerun that trivially passes.
+      refute Map.has_key?(row.content, "disposition_rerun")
+
+      # A blank rerun is no rerun either, and must not blank an existing one.
+      assert stage(conn, doc_id, %{state: "researching", rerun: "   "}).status == 200
+      refute Map.has_key?(reload(task).content, "disposition_rerun")
+    end
+
+    test "a stage WITHOUT a rerun never erases an existing one", %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-rerun-keep")
+
+      task =
+        mk_task!(doc_id, scope, %{
+          "disposition_rerun" => "git cat-file -e origin/main:api/mix.exs"
+        })
+
+      assert stage(conn, doc_id, %{state: "considering", note: "still parked"}).status == 200
+
+      assert reload(task).content["disposition_rerun"] ==
+               "git cat-file -e origin/main:api/mix.exs"
+    end
+
+    test "task.staged NAMES the key the rerun was routed to", %{conn: conn, scope: scope} do
+      doc_id = uniq("stage-rerun-event")
+      task = mk_task!(doc_id, scope)
+      rerun = "git cat-file -e origin/main:api/mix.exs"
+
+      assert stage(conn, doc_id, %{state: "considering", note: "why", rerun: rerun}).status == 200
+
+      [ev] =
+        Repo.all(
+          from(e in MutationEvent,
+            where: e.doc_id == ^task.doc_id and e.mutation == "task.staged"
+          )
+        )
+
+      assert ev.document["staged"]["disposition_rerun"] == rerun
+      assert ev.document["staged"]["disposition_rerun_key"] == "disposition_rerun"
+    end
+
+    test "the RAW /v1/data/mutate door refuses content.disposition_rerun and names the verb",
+         %{scope: scope} do
+      # The sanctioned-writer property is decoration unless the raw door is shut
+      # too: a screen at the verb's write seam is one a raw patch walks past.
+      doc_id = uniq("stage-rerun-raw")
+      _task = mk_task!(doc_id, scope, %{"disposition_reason" => "already reasoned"})
+
+      set = %{
+        "patch" => %{
+          "id" => doc_id,
+          "type" => "task",
+          "set" => %{"disposition_rerun" => "test -f README.md"}
+        }
+      }
+
+      assert {:error, {:invalid_task_content, errors}} =
+               Content.apply_mutations([set], @dataset, [source: :api] ++ scope)
+
+      [message] = errors["disposition_rerun"]
+      assert message =~ "/v1/data/mutate"
+      assert message =~ "bp task stage"
+      assert message =~ "--rerun"
+
+      {:ok, doc} = Content.get_document("drafts." <> doc_id, "task", @dataset, scope)
+      refute Map.has_key?(doc.content, "disposition_rerun")
+    end
+
+    test "the manifest flag NAMES the legal and the forbidden spellings" do
+      flag =
+        Barkpark.Plugins.Tasks.cli_commands()
+        |> Enum.find(&(&1.id == "task.stage"))
+        |> Map.fetch!(:flags)
+        |> Enum.find(&(&1.name == "rerun"))
+
+      assert flag, "task.stage advertises no --rerun flag — bp task stage --help would omit it"
+
+      for legal <- Tasks.Stage.legal_rerun_substitutes() do
+        assert flag.summary =~ legal,
+               "the --rerun help omits the legal substitute #{inspect(legal)}"
+      end
+
+      for forbidden <- ["git -C", "test", "$(", "merge-base --is-ancestor", "head"] do
+        assert flag.summary =~ forbidden,
+               "the --rerun help omits the forbidden spelling #{inspect(forbidden)}"
+      end
+
+      # …and it states the two properties a future wave is most likely to break.
+      assert flag.summary =~ "OPTIONAL"
+      assert flag.summary =~ "Distinctness is NOT applied"
+    end
+  end
+
   describe "POST /v1/tasks/:doc_id/stage — validation" do
     test "an invalid engagement object is a 400", %{conn: conn, scope: scope} do
       doc_id = uniq("stage-obj")

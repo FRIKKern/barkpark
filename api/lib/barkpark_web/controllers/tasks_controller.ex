@@ -640,6 +640,11 @@ defmodule BarkparkWeb.TasksController do
         # its own remedy, which is the exact class this wave exists to close.
         |> Params.put_opt(:disposition, params["disposition"])
         |> Params.put_opt(:reopen_trigger, params["reopen_trigger"] || params["reopen-trigger"])
+        # PDS wave 28: the fourth durable key — the command that could prove the
+        # reason wrong. Forwarded for the same reason the triple is: this verb is
+        # the only sanctioned writer, so a route that dropped the param would
+        # make the raw door's refusal unfixable. Optional by design.
+        |> Params.put_opt(:rerun, params["rerun"] || params["disposition_rerun"])
         |> Params.put_opt(:caller_token_id, caller_token_id(conn))
 
       case Tasks.stage(task.id, state, opts) do
@@ -703,6 +708,38 @@ defmodule BarkparkWeb.TasksController do
               "cannot stage a #{inspect(disposition)} disposition with no reopen trigger: " <>
                 "pass --reopen-trigger \"<what would make this worth reconsidering>\" " <>
                 "(or leave the row's existing trigger in place). Nothing was written."
+          })
+
+        # A rerun that cannot fail is not evidence. The refusal is a 422 naming
+        # the FIELD, the shape that was refused, WHY that shape cannot fail, and
+        # a legal substitute — and nothing was written, so the retry is the
+        # whole remedy. Absence is never refused: a reason is allowed to say it
+        # cannot be checked.
+        {:error, {:unfalsifiable_rerun, code, value}} ->
+          why =
+            Tasks.Stage.forbidden_rerun_shapes()
+            |> Enum.find_value(fn {c, why} -> if c == code, do: why end)
+            |> Kernel.||(
+              "a pipeline reports its LAST stage's exit code, so a formatting tail " <>
+                "(head/tail/wc/jq/…) reports ITS success as the check's — " <>
+                "`git show origin/main:<deleted-path> | head -1` exits 0 where the bare " <>
+                "`git show` exits 128"
+            )
+
+          conn
+          |> put_status(:unprocessable_entity)
+          |> json(%{
+            ok: false,
+            reason: "unfalsifiable_rerun",
+            field: Tasks.Stage.disposition_rerun_key(),
+            shape: to_string(code),
+            value: value,
+            message:
+              "disposition_rerun #{inspect(value)} cannot fail, so it cannot prove the " <>
+                "reason wrong: #{why}. Write one of these instead — " <>
+                Enum.map_join(Tasks.Stage.legal_rerun_substitutes(), " · ", &"`#{&1}`") <>
+                " — or omit --rerun entirely, which is an honest \"this reason cannot be " <>
+                "checked\" and is accepted. Nothing was written."
           })
 
         {:error, :not_found} ->

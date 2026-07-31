@@ -690,6 +690,15 @@ defmodule Barkpark.Content.Mutations do
   @reopen_trigger_key "reopen_trigger"
   @trigger_required_dispositions ~w(parked)
 
+  # PDS wave 28: the FOURTH durable key gets the SAME raw-door treatment as the
+  # term. `Tasks.Stage` screens a rerun that cannot fail (`git -C`, a `test`
+  # predicate, command substitution, `merge-base --is-ancestor`, a pipe-masked
+  # formatting tail) at the write seam — a screen a raw patch would walk
+  # straight past, leaving the sanctioned-writer property as decoration. Any
+  # CHANGE of the key through this door is refused and named to the verb;
+  # `now == was` is not a change, so bookkeeping passes untouched.
+  @disposition_rerun_key "disposition_rerun"
+
   defp ensure_disposition_via_verb("task", nil, _merged, _opts), do: :ok
 
   defp ensure_disposition_via_verb("task", existing, merged, opts) do
@@ -706,6 +715,11 @@ defmodule Barkpark.Content.Mutations do
       # The term CHANGED through the raw door. Route it to the verb.
       now_term != was_term ->
         {:error, {:invalid_task_content, disposition_bypass_error(was_term, now_term)}}
+
+      # The RERUN changed through the raw door — the same bypass one field
+      # over. Route it to the verb, which screens a rerun that cannot fail.
+      merged[@disposition_rerun_key] != was[@disposition_rerun_key] ->
+        {:error, {:invalid_task_content, rerun_bypass_error(merged[@disposition_rerun_key])}}
 
       # The term is unchanged, but the trigger that makes a park honest is
       # being erased underneath it.
@@ -747,6 +761,27 @@ defmodule Barkpark.Content.Mutations do
           "--note <why> --reopen-trigger <what would reconsider it>`, " <>
           "POST /v1/tasks/:id/stage), which normalises the term and writes term, reason and " <>
           "trigger in one atomic write — and refuses a park with no trigger."
+      ]
+    }
+  end
+
+  # Same `invalid_task_content` family, keyed on the field the caller wrote,
+  # and the message is the retry instruction. It states the property the raw
+  # door would destroy: the rerun is screened at the verb's write seam, so a
+  # rerun written raw is one nobody has checked can fail.
+  defp rerun_bypass_error(now) do
+    %{
+      @disposition_rerun_key => [
+        "cannot be set to #{inspect(now)} through /v1/data/mutate. The rerun is the one " <>
+          "thing that could prove a durable reason WRONG, and it is screened at the verb's " <>
+          "write seam — a rerun that cannot fail (`git -C`, a `test` predicate, `$( … )` " <>
+          "command substitution, `git merge-base --is-ancestor`, or a pipe-masked " <>
+          "formatting tail like `| head -1`) is refused there. Written raw it bypasses that " <>
+          "screen, which is a check nobody has checked. A revision precondition does NOT " <>
+          "unlock this. Write it through the sanctioned verb instead " <>
+          "(`bp task stage <id> <state> --rerun \"git cat-file -e origin/main:<path>\"`), " <>
+          "POST /v1/tasks/:id/stage — and omitting the rerun is always allowed: a reason " <>
+          "may honestly refuse to be checkable."
       ]
     }
   end
