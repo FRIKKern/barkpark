@@ -4148,10 +4148,28 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .deploys-rollback-note a:hover { text-decoration: underline; }
 /* search-template W8: the inline theme picker in the site-detail rail — a compact
    select that reuses the token palette; all colours resolve through var(--…). */
+/* cch-w14-s4: this control was authored OUTSIDE the .form-input select pattern —
+   no appearance reset, no chevron gutter, and a `max-width: 60%` cap nothing else
+   in the console has. Measured on origin/main it rendered clientWidth 96 against
+   scrollWidth 137 (+41px) — byte-identical at every width from 320 to 1440 in
+   both themes, because the cap is a percentage of a row that never changes. With
+   `text-overflow: clip` and `appearance: auto` the NATIVE chevron paints on top of
+   the cut glyph: "Template default" needed 124.80px of the 80px inner box, so the
+   rail read "Template d" with the arrow over the "d" — the one fact this row
+   exists to state was unreadable. Width-invariant and a form control, so neither
+   a breakpoint sweep nor documentElement.scrollWidth could ever see it.
+   The cap is lifted to 100% (cures the number) AND the .form-input treatment is
+   adopted — appearance:none + the same inline-SVG chevron + a reserved gutter
+   (cures the CLASS, so a longer future theme name cannot collide again).
+   Scale stays the rail's own: 13px, 3px/8px padding. */
 .rail-select {
-  font: inherit; font-size: 13px; padding: 3px 8px; border-radius: var(--radius-sm);
+  font: inherit; font-size: 13px; padding: 3px 26px 3px 8px; border-radius: var(--radius-sm);
   border: 1px solid var(--border); background: var(--surface); color: var(--text);
-  max-width: 60%; cursor: pointer;
+  max-width: 100%; cursor: pointer;
+  appearance: none;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%23999' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
 }
 .rail-select:hover { border-color: var(--ring); }
 .rail-select:disabled { opacity: 0.6; cursor: progress; }
