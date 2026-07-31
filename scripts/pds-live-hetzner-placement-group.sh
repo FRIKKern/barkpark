@@ -496,9 +496,10 @@ $SELF — MANUAL-RUN-ONLY live proof. No side effects in --plan.
   8  limit       print which direction this run proved and which it did NOT.
 
   --selftest runs 0 in four credential states, plus four mutation self-tests —
-  the last of which drives the fence and the cleanup through a stub bp in nine
-  states (three degraded read shapes x two paths, two refusing deletes, and one
-  HEALTHY positive control). It makes no writes and needs no network.
+  the last of which drives the fence and the cleanup through a stub bp in ten
+  states (three degraded read shapes x two paths, two refusing deletes, and two
+  HEALTHY positive controls — one on the verified re-read, one on the delete
+  receipt). It makes no writes and needs no network.
 PLAN
 }
 
@@ -714,6 +715,12 @@ selftest() {
   say "  script that simply refused everything, which is the same vacuity inverted:"
   dr_case "9. healthy: orphan deleted, re-read clean -> PASS at rc=0" cleanup 0 "cleanup verified by re-read" \
     "STUB_MODE=clean"   "STUB_HONEST_READS=1" "STUB_DELETE=confirm"
+  # …and row 9 alone does NOT prove the delete ran: this stub answers by READ
+  # COUNT, so the second read comes back clean whether or not anything was
+  # deleted. Row 10 is the same healthy state asserted on the DELETE receipt, so
+  # a cleanup that silently stopped deleting could not pass the control.
+  dr_case "10. healthy: the delete receipt CONFIRMED the group was gone" cleanup 0 "receipt: confirmed_gone=true" \
+    "STUB_MODE=clean"   "STUB_HONEST_READS=1" "STUB_DELETE=confirm"
 
   step "SELFTEST VERDICT"
   if [ "$ST_FAIL" = "0" ]; then
@@ -752,6 +759,9 @@ run() {
   say "  Deleting by NAME (not by id) is what makes that reap possible at all — a"
   say "  create whose receipt is unparseable never yields an id, so id-only deletion"
   say "  was REJECTED as a regression, not adopted as a tightening."
+  say "  THE ONE LIMIT OF THAT GUARANTEE, STATED: it holds while the prefix holds. A"
+  say "  run started with a DIFFERENT PDS_LIVE_PG_PREFIX cannot see an orphan left"
+  say "  under the old one, so overriding the prefix retires the reap for that name."
   say "  FENCE: placement groups ONLY. This project holds five running production servers; nothing this runner touches routes traffic or holds data."
 
   step "2 CREATE (the real verb, the real API)"
