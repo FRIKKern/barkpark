@@ -95,6 +95,24 @@ func TestPdCalloutRendersLegacyTextBody(t *testing.T) {
 	}
 }
 
+func TestPdEyebrowDropsLetterSpacingWhenItWouldWrap(t *testing.T) {
+	reg := testRegistry()
+	b := Block{
+		Type: "eyebrow",
+		Attrs: map[string]any{
+			"text": "Jarl website programme charter live — the board at the end is the real epic tree",
+		},
+	}
+
+	out := strings.Join(reg.Render(b, RenderCtx{Width: 80, Theme: DarkTheme(), Profile: NoColor}), "\n")
+	if strings.Contains(out, "J A R L") {
+		t.Fatalf("long eyebrow should drop decorative letter spacing at width 80, got:\n%s", out)
+	}
+	if !strings.Contains(out, "JARL WEBSITE PROGRAMME") {
+		t.Fatalf("long eyebrow should remain readable and uppercase, got:\n%s", out)
+	}
+}
+
 func TestPdTableRendersDeclaredRecordRows(t *testing.T) {
 	reg := testRegistry()
 	b := Block{
