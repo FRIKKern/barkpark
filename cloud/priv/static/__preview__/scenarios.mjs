@@ -356,6 +356,19 @@ const sitesListRows = [
     // Never deployed — no last_deployment, so the pill reads a neutral
     // "Not deployed" (no invented green).
   }),
+  // cch-w14-s6: the CANCELLED freshness label #8608 shipped had never been
+  // rendered by any harness — lastDeploy() covered live/building/failed/never
+  // only. A production deploy CAN end cancelled (the reaper, an operator
+  // cancel), and freshnessModel spells it "Cancelled" with a neutral pill:
+  // no invented green, no invented red. (After cch-w14-s6 the embed is
+  // production-only, so this row is a cancelled PRODUCTION deploy — a torn-down
+  // branch preview can no longer reach this slot.)
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000c7",
+    name: "acme-guides", slug: "acme-guides", domains: ["guides.acme.com"],
+    framework: "astro", github_webhook_configured: true,
+    last_deployment: lastDeploy("cancelled", "manual", 1800),
+  }),
 ];
 
 // ── deployments (deployment_json) ───────────────────────────────────────────
