@@ -42,6 +42,39 @@ COPY lib lib
 COPY priv priv
 
 RUN mix compile
+
+# Pre-compressed siblings for the two big static assets (965,342 + 198,954 =
+# 1,164,296 bytes cold, down to 338,917 — −70.9%). The router's `at: "/"`
+# Plug.Static carries `gzip: true`, which serves `<file>.gz` when the request
+# says `accept-encoding: gzip`; the edge in front of us compresses nothing
+# (measured: live responses have no `content-encoding` and no `vary`), so
+# without this the console ships the full 1.16 MB on every cold boot.
+#
+# WHY HERE, AND WHY THERE IS NO STALENESS GUARD ANYWHERE. A .gz that drifts
+# from its source is a silent lie: Plug.Static's etag comes from the file it
+# SERVES, so a stale sibling and a fresh source answer the same URL with
+# different bytes and different etags in the same second, and `no-cache` does
+# not help (revalidation is answered 304 off the stale etag). There is no sound
+# runtime check for this — so the shape removes the possibility instead of
+# detecting it. This RUN reads exactly the bytes `COPY priv priv` just laid
+# down, in the same build; Docker keys this layer on the one above it, so any
+# change to app.js/app.css invalidates COPY priv and re-runs this. Source and
+# sibling therefore cannot disagree. Keep it that way: do not move this before
+# `COPY priv priv`, and do not commit the .gz (cloud/.gitignore ignores `*.gz`,
+# and scripts/cloud-static-gz-guard.sh reds if one is ever tracked).
+#
+# It sits AFTER `mix compile` on purpose, to keep the compile layer cache-warm
+# when only the SPA bundle changes. `mix release` still picks the siblings up:
+# mix symlinks _build/prod/lib/barkpark_cloud/priv at the source `priv`, so
+# files created in priv after compile are inside the release tree.
+#
+# The two files are named EXPLICITLY. `gzip priv/static/*` would also compress
+# __app.test.mjs, __css_check.mjs and __fixtures__/ — none of which are in the
+# Plug.Static `only:` allowlist, so those .gz files would be pure image weight.
+# `-k` keeps the originals (identity requests still need them); `-9` is the
+# build-time-cost-is-free setting.
+RUN gzip -9 -k priv/static/app.js priv/static/app.css
+
 RUN mix release
 
 # ── Stage 2: slim runtime ─────────────────────────────────────────────────────
