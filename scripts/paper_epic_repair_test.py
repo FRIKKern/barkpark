@@ -235,7 +235,7 @@ class PaperEpicRepairTest(unittest.TestCase):
         authority = [
             block
             for block in repaired
-            if block.get("id") == "epb-source-truth-authority"
+            if block.get("id") == "epb-authority-boundary"
         ]
 
         self.assertEqual(len(authority), 1)
@@ -249,6 +249,126 @@ class PaperEpicRepairTest(unittest.TestCase):
             "patch"
         ]["set"]["blocks"]
         self.assertEqual(repaired_again, repaired)
+
+    def test_wsc_wave_two_routes_current_readers_to_the_cockpit_wave(self):
+        document = {
+            "_id": "wsc-wave-2026-07-17",
+            "_rev": "source-rev",
+            "title": "",
+            "description": "Wave 2 salvages the reviewed session-card implementation.",
+            "blocks": [
+                {
+                    "id": "title",
+                    "type": "heading",
+                    "level": 1,
+                    "text": "Wave Session Card — Wave 2: salvage the reviewed seam",
+                },
+                {
+                    "id": "proof",
+                    "type": "paragraph",
+                    "content": text("The reviewed salvage tree remains the implementation spec."),
+                },
+            ],
+        }
+
+        mutation = repair_strategic_paper(document)
+        patch_set = mutation["mutations"][0]["patch"]["set"]
+        authority = next(
+            block
+            for block in patch_set["blocks"]
+            if block.get("id") == "epb-authority-boundary"
+        )
+
+        self.assertEqual(
+            patch_set["title"],
+            "Wave Session Card — Wave 2: salvage the reviewed seam",
+        )
+        self.assertIn("historical authority", str(authority.get("content")))
+        self.assertIn("Wave 4 carries the current cockpit", str(authority))
+
+    def test_wsc_wave_four_keeps_cockpit_authority_but_routes_live_state(self):
+        original_status = (
+            "Editorial status (repair): run the cockpit work and preserve its "
+            "reviewed decision record."
+        )
+        document = {
+            "_id": "wsc-wave-2026-07-18",
+            "_rev": "source-rev",
+            "title": "Wave 4 — the cockpit wave",
+            "description": "Wave 4 records the cockpit results and steering decision.",
+            "blocks": [
+                {
+                    "id": "status",
+                    "type": "callout",
+                    "content": text(original_status),
+                },
+                {
+                    "id": "title",
+                    "type": "heading",
+                    "level": 1,
+                    "text": "Wave 4 — the cockpit wave",
+                },
+                {
+                    "id": "proof",
+                    "type": "paragraph",
+                    "content": text("The reviewed D46 steering decision is recorded here."),
+                },
+            ],
+        }
+
+        mutation = repair_strategic_paper(document)
+        patch_set = mutation["mutations"][0]["patch"]["set"]
+        status = next(
+            block for block in patch_set["blocks"] if block.get("id") == "status"
+        )
+
+        self.assertIn(original_status, str(status.get("content")))
+        self.assertIn("cockpit results", str(status.get("content")))
+        self.assertIn("Live task state remains authoritative", str(status.get("content")))
+
+    def test_cloud_gui_round_twelve_uses_its_terminal_verdict_title_and_boundary(self):
+        original_status = (
+            "Editorial status (repair): keep as canonical authority, but prepend "
+            "a corrected terminal summary."
+        )
+        document = {
+            "_id": "cloud-gui-remake-wave-2026-07-21-r12",
+            "_rev": "source-rev",
+            "title": "Round 12: the 59 re-parents nobody has yet spent two minutes making",
+            "description": "The terminal Cloud GUI seal wave.",
+            "blocks": [
+                {
+                    "id": "status",
+                    "type": "callout",
+                    "content": text(original_status),
+                },
+                {
+                    "id": "title",
+                    "type": "heading",
+                    "level": 1,
+                    "text": "Cloud GUI Remake — round 12: the two mechanical acts, and the verdict",
+                },
+                {
+                    "id": "proof",
+                    "type": "paragraph",
+                    "content": text("The terminal artifact records the code seal."),
+                },
+            ],
+        }
+
+        mutation = repair_strategic_paper(document)
+        patch_set = mutation["mutations"][0]["patch"]["set"]
+        status = next(
+            block for block in patch_set["blocks"] if block.get("id") == "status"
+        )
+
+        self.assertEqual(
+            patch_set["title"],
+            "Cloud GUI Remake — round 12: the two mechanical acts, and the verdict",
+        )
+        self.assertIn(original_status, str(status.get("content")))
+        self.assertIn("terminal code-seal authority", str(status.get("content")))
+        self.assertIn("Cloud Console Hardening", str(status.get("content")))
 
     def test_list_reframes_are_lossless_and_semantic(self):
         block = {
