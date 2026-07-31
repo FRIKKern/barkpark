@@ -698,15 +698,24 @@ test('wave 9 LEG B: a matrixed aggregator cannot render a requirable context', (
 // THE DEFECT THIS SLICE REMOVES, stated as a test. An aggregator that exists,
 // runs, and reds while the PR merges green is not a measurement; it is a display.
 test('wave 9 LEG C: an UNREGISTERED aggregator is rung 3, named, with the fix named too', () => {
+  // The survivor list is DERIVED from the spec this case builds, never quoted.
+  // A literal "Elixir gate, PR references an active task" was correct until the
+  // wave-11 flip added two contexts, and then it failed on the MERGED tree
+  // while every per-slice gate stayed green — the exact shape this epic exists
+  // to kill. Derive from the foreign surface; pin only what this case owns.
+  let survivors = [];
   const { status, out } = synthRun({ requiredChecks: (rc) => {
     rc.protection.required_status_checks.checks =
       rc.protection.required_status_checks.checks.filter((c) => c.context !== AGG);
+    survivors = rc.protection.required_status_checks.checks.map((c) => c.context);
     return rc;
   } });
+  assert.ok(survivors.length > 0 && !survivors.includes(AGG),
+    'the specimen must strip the aggregator and leave a non-empty required set, else the assertions below are vacuous');
   assert.equal(status, NO_SEAL, 'an unenforced aggregator must not be certified as a measurement');
   assert.match(out, /is aggregated by "Cloud gate", and "Cloud gate" is NOT a required status check on main/);
-  assert.match(out, /required today: Elixir gate, PR references an active task/,
-    'the required set that DOES exist is printed, so the gap is readable');
+  assert.ok(out.includes(`required today: ${survivors.join(', ')}`),
+    `the required set that DOES exist is printed, so the gap is readable — expected "required today: ${survivors.join(', ')}"`);
   assert.match(out, /The job can go red and the PR still merges/);
   assert.match(out, /cch-w9-register-console-and-cloud-gates/, 'the row that pays this is named');
   assert.match(out, /✗ CCH-D2-session-peer-ip-is-the-docker-bridge  \(rung 3\)/);
@@ -815,19 +824,43 @@ test('wave 9 LEG C: with two unregistered aggregators, the refusal names both', 
 
 // ── THE LIVE STATE, PINNED HONESTLY ─────────────────────────────────────────
 // No fixture override, no synthetic repo: the real cloud.yml and the real
-// required-checks.json. `Cloud gate` is NOT registered at this commit, so clause (b)
-// FAILS — deliberately, and this test says so out loud rather than papering over it.
-// When `cch-w9-register-console-and-cloud-gates` lands, THIS is the assertion that
-// must be flipped, and flipping it is the proof the registration took effect.
-test('wave 9 LIVE: until Cloud gate is registered, clause (b) reads FAIL on the real branch', () => {
-  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO, '--guard-cmd', 'true']);
-  assert.equal(status, NO_SEAL, 'the interim state is NO SEAL, and that is the honest answer');
-  assert.match(out, /"Cloud gate" is NOT a required status check on main/);
-  assert.match(token(out), /b=FAIL/);
+// required-checks.json.
+//
+// REWRITTEN IN WAVE 11 REVIEW, and the rewrite is the point. This case used to
+// hard-assert the PRE-flip answer ("Cloud gate is NOT required, therefore clause
+// (b) FAILS") with a comment telling a future human to flip it by hand once
+// registration landed. Registration landed in the same wave as this file's other
+// change, on a DIFFERENT branch — so every per-slice gate was green and the
+// MERGED tree failed. A case that must be hand-flipped on someone else's merge
+// is a case that reds the integration nobody ran.
+//
+// So it now asserts the INVARIANT instead of one side of it: the predicate's
+// clause-(b) reading must AGREE with the committed spec, whichever side of the
+// flip the branch is on. Both arms carry real assertions, and the arm that runs
+// is reported, so a reader can see which state the tree is in.
+test('LIVE: the clause-(b) reading agrees with the committed spec, on either side of the flip', () => {
   const rc = JSON.parse(readFileSync(REQUIRED_CHECKS, 'utf8'));
   assert.equal(rc.enforced, true, 'branch protection IS live — that is what makes this readable at all');
-  assert.ok(!rc.protection.required_status_checks.checks.some((c) => c.context === AGG),
-    'if Cloud gate has been registered, flip this test rather than deleting it');
+  const registered = rc.protection.required_status_checks.checks.some((c) => c.context === AGG);
+  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO, '--guard-cmd', 'true']);
+
+  if (registered) {
+    // POST-FLIP. `Cloud gate` carries the cloud.yml `test` job, so every entry
+    // measured there climbs from rung 3 to rung 2 and clause (b) stops failing
+    // for THIS reason. Nothing here claims a seal: clause (a) is fixtured.
+    assert.doesNotMatch(out, /"Cloud gate" is NOT a required status check on main/,
+      'Cloud gate is registered in the committed spec, so the predicate must stop reporting it as unregistered');
+    assert.match(out, /CCH-D2-session-peer-ip-is-the-docker-bridge/);
+    assert.doesNotMatch(token(out), /b=FAIL/,
+      'with the aggregator required, clause (b) must no longer fail on the unenforced-measurement leg');
+    assert.match(out, /rung 2 — MEASURED-ELSEWHERE/,
+      'the registered aggregator must move the cloud.yml-measured entries to rung 2');
+  } else {
+    // PRE-FLIP. The honest interim answer, unchanged.
+    assert.equal(status, NO_SEAL, 'the interim state is NO SEAL, and that is the honest answer');
+    assert.match(out, /"Cloud gate" is NOT a required status check on main/);
+    assert.match(token(out), /b=FAIL/);
+  }
 });
 
 // ═══ WAVE 11 — `--ladder-only` READS THE LADDER AND CLAIMS NOTHING ═══════════
