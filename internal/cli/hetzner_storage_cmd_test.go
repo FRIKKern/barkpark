@@ -723,7 +723,15 @@ func TestHetznerStorageBucketListAndDelete(t *testing.T) {
 	if code != exitOK {
 		t.Fatalf("bucket delete exited %d, stderr: %s", code, stderr)
 	}
-	del := f.requests()[len(f.requests())-1]
+	// The DELETE is no longer the LAST request: a destroy now re-reads (the
+	// declared non-binding ListBuckets) before it claims anything, so this looks
+	// the DELETE up by shape instead of by position.
+	var del s3Req
+	for _, r := range f.requests() {
+		if r.Method == "DELETE" {
+			del = r
+		}
+	}
 	if del.Method != "DELETE" || del.Host != "media.fsn1.your-objectstorage.com" {
 		t.Errorf("delete = %s %s, want DELETE on media.fsn1…", del.Method, del.Host)
 	}
