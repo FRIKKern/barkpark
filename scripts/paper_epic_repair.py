@@ -870,26 +870,9 @@ def _repair_existing_appendices(blocks: list[Any]) -> list[Any]:
 
         normalized = copy.deepcopy(block)
         normalized["id"] = "epb-evidence-appendix-{}".format(appendix_index)
-        first_heading = next(
-            (
-                child
-                for child in children or []
-                if isinstance(child, dict)
-                and child.get("type") == "heading"
-            ),
-            None,
-        )
-        if first_heading is not None:
-            first = " ".join(_heading_text(first_heading).split()[:14])
-            summary = "Evidence appendix {} — {}".format(appendix_index, first)
-        else:
-            summary = _normalize(str(normalized.get("summary") or ""))
-            summary = re.sub(
-                r"^Evidence appendix \d+\b",
-                "Evidence appendix {}".format(appendix_index),
-                summary,
-            )
-        normalized["summary"] = summary
+        # Standalone composes the first child heading into <summary>. Keep the
+        # persisted label neutral or the browser repeats that heading visibly.
+        normalized["summary"] = "Evidence appendix {}".format(appendix_index)
         repaired.append(normalized)
 
     return repaired
@@ -950,14 +933,11 @@ def _collapse_evidence_appendices(blocks: list[Any]) -> list[Any]:
     ):
         chunk = appendix_sections[offset : offset + chunk_size]
         children = [block for section in chunk for block in section]
-        first = _heading_text(chunk[0][0])
-        first = " ".join(first.split()[:14])
-        summary = "Evidence appendix {} — {}".format(index, first)
         appendices.append(
             {
                 "id": "epb-evidence-appendix-{}".format(index),
                 "type": "expandable",
-                "summary": summary,
+                "summary": "Evidence appendix {}".format(index),
                 "children": children,
             }
         )
