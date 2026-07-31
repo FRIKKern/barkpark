@@ -32,7 +32,10 @@ defmodule Barkpark.Content.Writer do
 
   alias Barkpark.PortableDoc.{HtmlSanitizer, Projection, Render, Synthesis}
   alias Barkpark.Preview
+  alias Barkpark.Tasks.Stage
   alias Barkpark.Tasks.Transitions
+
+  require Logger
 
   # W7a step 1 — task documents carry a tight `content` field contract
   # (`Barkpark.Tasks.validate_kind_content/2`) on top of the generic
@@ -136,6 +139,7 @@ defmodule Barkpark.Content.Writer do
     # only fires when prev_doc is nil (a genuine create — updates/autosaves/
     # publishes pass straight through) and fails open. See Barkpark.Tasks.Dedup.
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
+         :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
       create_after_dedup(type, attrs, dataset, ctx, prev_doc, opts)
     end
@@ -680,6 +684,135 @@ defmodule Barkpark.Content.Writer do
   end
 
   defp ensure_task_transition_legal(_type, _attrs, _dataset, _doc_id, _prev_doc, _opts), do: :ok
+
+  # ── THE BIRTH FENCE (PDS wave 28) ─────────────────────────────────────────
+  #
+  # `Mutations.ensure_disposition_via_verb/4` fences every CHANGE of
+  # `content.disposition` on a live row, and states its own residual harm:
+  # "`ensure_*("task", nil, …), do: :ok` is the head of every sibling guard, and
+  # the plain `create` clause calls no guard at all. So a `createOrReplace` on a
+  # BRAND-NEW id carrying `disposition: "parked"` and no trigger is STILL
+  # ACCEPTED". That is a row which SAYS it was adjudicated and adjudicated
+  # nothing — born hollow, and thereafter untouchable by the update-path fence
+  # precisely because the value never changes again.
+  #
+  # This is that fence, at the only place that can express "birth": beside
+  # `Tasks.Dedup.check_new_task/5` in `do_create_document`'s `with` chain, where
+  # `prev_doc` is already resolved and `opts` is already in hand. Three other
+  # placements were measured and REFUTED (PDS-D393):
+  #
+  #   * `Barkpark.Tasks.Validation` is pure and receives CONTENT only — and
+  #     `/v1/data/mutate`'s patch clauses (`mutations.ex:288`/`:324`) build
+  #     `merged` and hand it to `upsert_document`, which validates at `:490`.
+  #     Merge happens BEFORE validation on EVERY update, so a content-only rule
+  #     is RETROACTIVE: it would 422 every future patch to today's bare rows.
+  #   * `validate_task_kind/2` is arity 2 — it never receives `opts`, so it can
+  #     carry no `:source` carve-out — and it runs at `:114`/`:490` BEFORE
+  #     `prev_doc` is resolved, so it cannot tell a birth from an update.
+  #   * A DB CHECK is stateless: it sees the candidate row and never `prev_doc`,
+  #     so it can require a disposition on ALL task rows or on NONE. (No
+  #     migration is forced either — `20260528100000_w7a_task_schema` constrains
+  #     `lifecycle_status` VALUES only.)
+  #
+  # WHAT IS HARD, AND WHY EXACTLY THAT. The rule is PARITY WITH THE VERB: the
+  # birth door may not accept an adjudication that `Barkpark.Tasks.Stage` — the
+  # one sanctioned writer — would refuse. Stage refuses a term outside its
+  # vocabulary and refuses a park with no reopen trigger, so those two refusals
+  # transfer here verbatim, sourced from Stage's own accessors so the two doors
+  # can never drift. Case is exact for the same reason Stage normalises: the
+  # measured OPEN 57 / open 47 split is a raw-door artefact, and a birth that
+  # writes "OPEN" would re-open it under a fence that claims to have closed it.
+  #
+  # WHAT IS A WARN, AND WHY IT IS HONEST TO SAY SO. A birth carrying NO
+  # disposition at all is LOGGED (`pds birth fence: unadjudicated task birth`,
+  # greppable and countable) and allowed. Requiring one is not a fence, it is a
+  # protocol change for every existing producer — `bp task create`, every fleet
+  # file-order, every fixture — and landing it as a hard halt here would refuse
+  # writes that no client yet knows how to make. The promotion to hard is filed
+  # as its own row rather than implied; until it lands, "residue 0 by
+  # construction" is FALSE and this comment is where that is admitted.
+  #
+  # REPLICATION IS EXEMPT, checked FIRST, for the reason the sibling guard
+  # states: `Sync.Applier.apply_upsert` mirrors an upstream row verbatim inside
+  # one transaction, so a refusal would roll back the whole batch and wedge the
+  # replica. `:source` is server-set (every HTTP door prepends `source: :api`),
+  # so a request body can never reach a non-`:api` value. The inbound GitHub
+  # bridge rides `source: :github` and is therefore structurally exempt — but it
+  # is NOT exempted in practice: `Github.Intake.build_attrs/4` supplies the term
+  # AND a reason naming the issue, so the bridge is born adjudicated and the
+  # carve-out is only its fail-safe. That matters because an unmatched intake
+  # error becomes HTTP 500 (`intake.ex` fallthrough →
+  # `github_webhook_controller.ex`), and GitHub redelivers a 5xx forever.
+  defp ensure_task_born_adjudicated("task", attrs, doc_id, nil = _prev_doc, opts) do
+    content = Map.get(attrs, "content") || Map.get(attrs, :content) || %{}
+    term = Map.get(content, "disposition") || Map.get(content, :disposition)
+    trigger = Map.get(content, "reopen_trigger") || Map.get(content, :reopen_trigger)
+
+    cond do
+      Keyword.get(opts, :source, :api) != :api ->
+        :ok
+
+      blank?(term) ->
+        # ONE greppable line, deliberately: this warning fires on every bare
+        # birth, so its value is that it can be COUNTED
+        # (`grep -c "pds birth fence: unadjudicated"`) — a paragraph per row
+        # would drown the signal it exists to raise.
+        Logger.warning(
+          "pds birth fence: unadjudicated task birth #{inspect(doc_id)} — no " <>
+            "content.disposition (allowed; adjudicate with `bp task stage <id> <state> " <>
+            "--disposition <open|parked|closed> --note <why>`)"
+        )
+
+        :ok
+
+      term not in Stage.dispositions() ->
+        {:error, {:invalid_task_content, birth_disposition_term_error(term)}}
+
+      term in Stage.trigger_required_dispositions() and blank?(trigger) ->
+        {:error, {:invalid_task_content, birth_hollow_park_error(term)}}
+
+      true ->
+        :ok
+    end
+  end
+
+  defp ensure_task_born_adjudicated(_type, _attrs, _doc_id, _prev_doc, _opts), do: :ok
+
+  defp blank?(value) when is_binary(value), do: String.trim(value) == ""
+  defp blank?(nil), do: true
+  defp blank?(_), do: false
+
+  # Same `invalid_task_content` family as the transition and disposition
+  # siblings (422 `validation_failed` with a per-field details map) — no new
+  # error code, no new controller branch. The message is the retry instruction.
+  defp birth_disposition_term_error(term) do
+    %{
+      "disposition" => [
+        "cannot be born as #{inspect(term)}. A disposition is an adjudication drawn from a " <>
+          "fixed, lowercase-canonical vocabulary (#{Enum.map_join(Stage.dispositions(), ", ", &inspect/1)}) — " <>
+          "an off-vocabulary or differently-cased term is a row that claims to be decided in " <>
+          "a language nothing else reads, and it is exactly how the measured OPEN/open split " <>
+          "got in. File the task without a disposition and adjudicate it through the sanctioned " <>
+          "verb (`bp task stage <id> <state> --disposition <open|parked|closed> --note <why> " <>
+          "--reopen-trigger <what would reconsider it>`, POST /v1/tasks/:id/stage), which " <>
+          "normalises the term and writes term, reason and trigger in one atomic write."
+      ]
+    }
+  end
+
+  defp birth_hollow_park_error(term) do
+    %{
+      "reopen_trigger" => [
+        "is required when a task is BORN #{inspect(term)}. The reopen trigger is the only " <>
+          "thing that makes a park a deferral rather than a silent drop: without it nothing " <>
+          "states what would bring the row back, and because the term never changes again the " <>
+          "update-path fence will never see it either. Supply `reopen_trigger` at birth, or " <>
+          "file the task undecided and park it through the sanctioned verb (`bp task stage " <>
+          "<id> <state> --disposition parked --note <why> --reopen-trigger <what would " <>
+          "reconsider it>`, POST /v1/tasks/:id/stage)."
+      ]
+    }
+  end
 
   # The row's CURRENT lifecycle_status, resolved published-fallback: the
   # drafts-exact prev_doc the writer already loaded first, then the bare

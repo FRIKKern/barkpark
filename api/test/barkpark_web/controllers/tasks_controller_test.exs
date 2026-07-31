@@ -2659,6 +2659,15 @@ defmodule BarkparkWeb.TasksControllerTest do
           # that pds-w27-round-terminal-15 is retiring, and a fixture built
           # on it would red on a value the round makes impossible.
           "disposition" => "parked",
+          # pds-w28: a park BORN with no reopen trigger is now refused at the
+          # birth door (Writer.ensure_task_born_adjudicated/5) — a hollow park
+          # is a row that claims to be decided and can never say what would
+          # reconsider it. The fixture supplies one so it stays a legal row.
+          # It does NOT move the measured bytes: the reason companions
+          # (disposition_reason, reopen_trigger) are deliberately OFF the brief
+          # card and ride `bp task get` — pinned by "the reasons are full-view
+          # detail — the card names the term only" above.
+          "reopen_trigger" => "never — this row is a byte-ceiling fixture",
           # Worker-less claim residue (a live worker would exclude the row
           # from ready) — now-line + epoch survive as the hostile payload.
           "claim" => %{
