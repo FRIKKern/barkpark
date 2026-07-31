@@ -209,7 +209,8 @@ func hzObserveBucketCreated(location string) hzResObserveFn[objstore.Bucket] {
 // multipart conversation where that size is never learned. So the key's presence
 // is the claim, and the length is compared ONLY when the source declared one.
 //
-// uploaded is that source length, nil on the stdin path. Nothing here reports a
+// uploaded is that source length, nil on the stdin path AND on a --file whose
+// os.Stat failed (the upload still runs; nothing measured it). Nothing here reports a
 // number the store did not hand back: when the endpoint declares no length the
 // receipt SAYS the byte count is unknown instead of quietly echoing os.Stat.
 func hzObserveObjectStored(bucket string, uploaded *int64) hzResObserveFn[hzS3Head] {
@@ -226,8 +227,14 @@ func hzObserveObjectStored(bucket string, uploaded *int64) hzResObserveFn[hzS3He
 			extra["bytes"] = *h.length
 			extra["bytes_verified"] = uploaded != nil
 			if uploaded == nil {
-				extra["bytes_reason"] = "the stdin multipart path never learns the source length, so this is the " +
-					"STORED length read back — compared against nothing"
+				// TWO paths reach here, not one: the stdin multipart path never
+				// learns the source length of a pipe, and a --file whose Stat
+				// FAILED yields none either. The wording names both rather than
+				// asserting a stdin upload that may not have happened — naming
+				// the wrong basis is the same defect as claiming an unread one.
+				extra["bytes_reason"] = "the source length was never learned — the stdin multipart path never " +
+					"learns the source length of a pipe, and a --file whose stat failed measures nothing — so " +
+					"this is the STORED length read back, compared against nothing"
 			}
 		}
 		return hzResAgrees(extra)
