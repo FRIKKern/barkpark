@@ -30,8 +30,22 @@ class PaperEpicRepairTest(unittest.TestCase):
     def test_strategic_repair_derives_missing_description_from_authored_ingress(self):
         ingress = (
             "Barkpark stays reachable from every agent surface through the "
-            "mechanism that surface already speaks."
+            "mechanism that surface already speaks; no invented connector."
         )
+        ingress_content = [
+            {
+                "type": "text",
+                "value": (
+                    "Barkpark stays reachable from every agent surface through "
+                    "the mechanism that surface "
+                ),
+            },
+            {"type": "text", "marks": ["em"], "value": "already"},
+            {
+                "type": "text",
+                "value": " speaks ; no invented connector.",
+            },
+        ]
         document = {
             "_id": "viable-everywhere-strategy",
             "_rev": "source-rev",
@@ -46,7 +60,7 @@ class PaperEpicRepairTest(unittest.TestCase):
                 {
                     "id": "opening",
                     "type": "ingress",
-                    "content": text(ingress),
+                    "content": ingress_content,
                 },
                 {
                     "id": "doctrine",
@@ -61,7 +75,7 @@ class PaperEpicRepairTest(unittest.TestCase):
         patch_set = mutation["mutations"][0]["patch"]["set"]
 
         self.assertEqual(patch_set["description"], ingress)
-        self.assertEqual(patch_set["blocks"][1]["content"], text(ingress))
+        self.assertEqual(patch_set["blocks"][1]["content"], ingress_content)
 
     def test_legacy_html_recovery_preserves_semantic_reading_order(self):
         blocks = legacy_html_to_blocks(

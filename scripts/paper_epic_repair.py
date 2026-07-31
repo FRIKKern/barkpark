@@ -138,6 +138,10 @@ def _normalize(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
+def _normalize_prose(value: str) -> str:
+    return re.sub(r"\s+([,.;:!?])", r"\1", _normalize(value))
+
+
 class _LegacyHtmlBlockParser(HTMLParser):
     """Recover the semantic reading order of a legacy HTML-only Paper.
 
@@ -1197,10 +1201,10 @@ def repair_canonical_epic(
     if not description and _derive_description:
         description = next(
             (
-                _normalize(_visible_text(block))
+                _normalize_prose(_visible_text(block))
                 for block in blocks
                 if isinstance(block, dict) and block.get("type") == "ingress"
-                and _normalize(_visible_text(block))
+                and _normalize_prose(_visible_text(block))
             ),
             "",
         )
