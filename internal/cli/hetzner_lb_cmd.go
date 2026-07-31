@@ -26,6 +26,384 @@ import (
 )
 
 // ---------------------------------------------------------------------------
+// THE LB-FAMILY POST-READ OBSERVERS (PDS-D398/D399)
+//
+// One observer per obligation, all handed to hzResObserved / hzResObservedResponse
+// (hetzner_respost_mutation.go). Two rules hold across every one of them:
+//
+//	THE UNION SWITCH COMES FIRST. `targets` and `services` are oneOf unions that
+//	hcloud-go flattens into a single struct, so reading `.Server` on a
+//	label-selector target yields a ZERO VALUE rather than an error — a confident
+//	false "confirmed". Every target predicate switches on Type before it reads a
+//	field.
+//
+//	THE PREDICATE BINDS ON THE RESOLVED ID, THE RECEIPT PRINTS THE NAME. Nested
+//	server refs in a load balancer carry an id and an ip and NO name, so a
+//	"does the printed value appear in the payload" check fails on honest data.
+//	The call sites pass the human name through `extra`; the observer compares
+//	ids.
+// ---------------------------------------------------------------------------
+
+// hzLBServicePorts lists the listen ports a load balancer NOW reports, for the
+// receipt and for the refusal message — a bare "not found" makes an operator
+// re-read the whole resource.
+func hzLBServicePorts(lb *hcloud.LoadBalancer) []int {
+	ports := make([]int, 0, len(lb.Services))
+	for _, s := range lb.Services {
+		ports = append(ports, s.ListenPort)
+	}
+	return ports
+}
+
+// hzObserveLBServicePresent confirms add-service: the load balancer NOW carries
+// a service on this listen port, speaking this protocol. Everything printed is
+// read off that service — including the destination port, which the operator
+// may never have typed.
+func hzObserveLBServicePresent(listenPort int, protocol hcloud.LoadBalancerServiceProtocol) hzResObserveFn[hcloud.LoadBalancer] {
+	return func(lb *hcloud.LoadBalancer) hzResObservation {
+		for _, s := range lb.Services {
+			if s.ListenPort != listenPort {
+				continue
+			}
+			if s.Protocol != protocol {
+				return hzResDisagrees("protocol", fmt.Sprintf("%q on listen port %d", s.Protocol, listenPort),
+					fmt.Sprintf("%q", protocol))
+			}
+			return hzResAgrees(map[string]any{
+				"protocol":         string(s.Protocol),
+				"listen_port":      s.ListenPort,
+				"destination_port": s.DestinationPort,
+				"proxy_protocol":   s.Proxyprotocol,
+				"services":         len(lb.Services),
+			})
+		}
+		return hzResDisagrees("services", fmt.Sprintf("listen ports %v", hzLBServicePorts(lb)),
+			fmt.Sprintf("a service on listen port %d", listenPort))
+	}
+}
+
+// hzObserveLBServiceAbsent confirms delete-service: the sub-resource has no
+// identity of its own, so the post-read is a PARENT read plus a containment
+// predicate — and the receipt reports the ports that SURVIVED, which is the
+// fact an operator actually needs next.
+func hzObserveLBServiceAbsent(listenPort int) hzResObserveFn[hcloud.LoadBalancer] {
+	return func(lb *hcloud.LoadBalancer) hzResObservation {
+		for _, s := range lb.Services {
+			if s.ListenPort == listenPort {
+				return hzResDisagrees("services", fmt.Sprintf("listen port %d is STILL served", listenPort),
+					fmt.Sprintf("no service on listen port %d", listenPort))
+			}
+		}
+		return hzResAgrees(map[string]any{
+			"listen_port_absent":    listenPort,
+			"services":              len(lb.Services),
+			"services_listen_ports": hzLBServicePorts(lb),
+		})
+	}
+}
+
+// hzLBTargetPredicate identifies ONE load-balancer target across the
+// server|label_selector|ip union WITHOUT ever reading a field the target's Type
+// does not have.
+type hzLBTargetPredicate struct {
+	kind     hcloud.LoadBalancerTargetType
+	serverID int64  // server targets: the id resolveHzServer already returned
+	selector string // label-selector targets
+	ip       string // ip targets
+	describe string // how the wanted target reads in a receipt or a refusal
+}
+
+// hzLBServerTarget binds on the RESOLVED server id, never the name — the
+// target's nested server ref carries no name at all.
+func hzLBServerTarget(srv *hcloud.Server) hzLBTargetPredicate {
+	return hzLBTargetPredicate{
+		kind: hcloud.LoadBalancerTargetTypeServer, serverID: srv.ID,
+		describe: fmt.Sprintf("a server target for server id %d", srv.ID),
+	}
+}
+
+func hzLBLabelSelectorTarget(selector string) hzLBTargetPredicate {
+	return hzLBTargetPredicate{
+		kind: hcloud.LoadBalancerTargetTypeLabelSelector, selector: selector,
+		describe: fmt.Sprintf("a label-selector target for %q", selector),
+	}
+}
+
+func hzLBIPTarget(ip string) hzLBTargetPredicate {
+	return hzLBTargetPredicate{
+		kind: hcloud.LoadBalancerTargetTypeIP, ip: ip,
+		describe: fmt.Sprintf("an ip target for %s", ip),
+	}
+}
+
+// matches is THE union switch. A target of the wrong Type is rejected before
+// any pointer is dereferenced, so a label-selector target can never be read as
+// a zero-valued server target and confirmed by accident.
+func (p hzLBTargetPredicate) matches(t hcloud.LoadBalancerTarget) bool {
+	if t.Type != p.kind {
+		return false
+	}
+	switch p.kind {
+	case hcloud.LoadBalancerTargetTypeServer:
+		return t.Server != nil && t.Server.Server != nil && t.Server.Server.ID == p.serverID
+	case hcloud.LoadBalancerTargetTypeLabelSelector:
+		return t.LabelSelector != nil && t.LabelSelector.Selector == p.selector
+	case hcloud.LoadBalancerTargetTypeIP:
+		return t.IP != nil && t.IP.IP == p.ip
+	default:
+		return false
+	}
+}
+
+// hzLBTargetSummary describes what the load balancer NOW targets, by union arm,
+// so a refusal says what IS there instead of only what is not.
+func hzLBTargetSummary(lb *hcloud.LoadBalancer) []string {
+	seen := make([]string, 0, len(lb.Targets))
+	for _, t := range lb.Targets {
+		switch t.Type {
+		case hcloud.LoadBalancerTargetTypeServer:
+			if t.Server != nil && t.Server.Server != nil {
+				seen = append(seen, fmt.Sprintf("server id %d", t.Server.Server.ID))
+				continue
+			}
+			seen = append(seen, "server (unreadable)")
+		case hcloud.LoadBalancerTargetTypeLabelSelector:
+			if t.LabelSelector != nil {
+				seen = append(seen, fmt.Sprintf("label_selector %q", t.LabelSelector.Selector))
+				continue
+			}
+			seen = append(seen, "label_selector (unreadable)")
+		case hcloud.LoadBalancerTargetTypeIP:
+			if t.IP != nil {
+				seen = append(seen, "ip "+t.IP.IP)
+				continue
+			}
+			seen = append(seen, "ip (unreadable)")
+		default:
+			seen = append(seen, string(t.Type))
+		}
+	}
+	return seen
+}
+
+// hzObserveLBTargetPresent confirms add-target.
+func hzObserveLBTargetPresent(p hzLBTargetPredicate) hzResObserveFn[hcloud.LoadBalancer] {
+	return func(lb *hcloud.LoadBalancer) hzResObservation {
+		for _, t := range lb.Targets {
+			if !p.matches(t) {
+				continue
+			}
+			return hzResAgrees(map[string]any{
+				"target_observed": true,
+				"target_type":     string(t.Type),
+				"use_private_ip":  t.UsePrivateIP,
+				"targets":         len(lb.Targets),
+			})
+		}
+		return hzResDisagrees("targets", fmt.Sprintf("%v", hzLBTargetSummary(lb)), p.describe)
+	}
+}
+
+// hzObserveLBTargetAbsent confirms remove-target — the containment predicate,
+// inverted.
+func hzObserveLBTargetAbsent(p hzLBTargetPredicate) hzResObserveFn[hcloud.LoadBalancer] {
+	return func(lb *hcloud.LoadBalancer) hzResObservation {
+		for _, t := range lb.Targets {
+			if p.matches(t) {
+				return hzResDisagrees("targets", p.describe+" is STILL attached",
+					"no "+p.describe)
+			}
+		}
+		return hzResAgrees(map[string]any{
+			"target_absent": true,
+			"targets":       len(lb.Targets),
+		})
+	}
+}
+
+// hzObserveLBAlgorithm is THE POSTER CHILD's observer: `change-algorithm` used
+// to print back the string the operator typed. Now the receipt carries what the
+// load balancer reports, and a load balancer that reports something else makes
+// the verb say so at a non-zero exit.
+func hzObserveLBAlgorithm(want hcloud.LoadBalancerAlgorithmType) hzResObserveFn[hcloud.LoadBalancer] {
+	return func(lb *hcloud.LoadBalancer) hzResObservation {
+		if lb.Algorithm.Type != want {
+			return hzResDisagrees("algorithm", fmt.Sprintf("%q", lb.Algorithm.Type), fmt.Sprintf("%q", want))
+		}
+		return hzResAgrees(map[string]any{"algorithm": string(lb.Algorithm.Type)})
+	}
+}
+
+// hzObserveLBType confirms change-type, whose flag is an ID-OR-NAME reference
+// (hzLBTypeRef). So the comparison accepts either spelling of the token, and
+// the receipt prints the RESOLVED name and id the server reports — never the
+// raw flag string, which was the worst request echo in the set.
+func hzObserveLBType(token string) hzResObserveFn[hcloud.LoadBalancer] {
+	return func(lb *hcloud.LoadBalancer) hzResObservation {
+		if lb.LoadBalancerType == nil {
+			return hzResDisagrees("load_balancer_type", "no type at all", fmt.Sprintf("%q", token))
+		}
+		observed := lb.LoadBalancerType
+		if observed.Name != token && strconv.FormatInt(observed.ID, 10) != token {
+			return hzResDisagrees("load_balancer_type",
+				fmt.Sprintf("%q (id %d)", observed.Name, observed.ID), fmt.Sprintf("%q", token))
+		}
+		return hzResAgrees(map[string]any{
+			"load_balancer_type":    observed.Name,
+			"load_balancer_type_id": observed.ID,
+		})
+	}
+}
+
+// hzObserveLBCreated reads a create receipt off the create RESPONSE object,
+// which for a create IS server truth (the addresses and the settled algorithm
+// are things nobody typed).
+func hzObserveLBCreated(lb *hcloud.LoadBalancer) hzResObservation {
+	extra := map[string]any{}
+	if lb.PublicNet.IPv4.IP != nil {
+		extra["ipv4"] = lb.PublicNet.IPv4.IP.String()
+	}
+	if lb.PublicNet.IPv6.IP != nil {
+		extra["ipv6"] = lb.PublicNet.IPv6.IP.String()
+	}
+	if lb.LoadBalancerType != nil {
+		extra["load_balancer_type"] = lb.LoadBalancerType.Name
+	}
+	if lb.Location != nil {
+		extra["location"] = lb.Location.Name
+	}
+	if lb.Algorithm.Type != "" {
+		extra["algorithm"] = string(lb.Algorithm.Type)
+	}
+	return hzResAgrees(extra)
+}
+
+// hzObserveFloatingIPCreated / hzObserveFloatingIPAssigned / …Unassigned are the
+// floating-ip family's three observers. The `type` a create prints is now the
+// one the API reports back, not the one the flag carried.
+func hzObserveFloatingIPCreated(fip *hcloud.FloatingIP) hzResObservation {
+	extra := map[string]any{"type": string(fip.Type)}
+	if fip.IP != nil {
+		extra["ip"] = fip.IP.String()
+	}
+	if fip.HomeLocation != nil {
+		extra["home_location"] = fip.HomeLocation.Name
+	}
+	return hzResAgrees(extra)
+}
+
+// hzObserveFloatingIPAssigned binds on the RESOLVED server id: a floating IP's
+// nested server ref carries an id, and the call site prints the name.
+func hzObserveFloatingIPAssigned(serverID int64) hzResObserveFn[hcloud.FloatingIP] {
+	return func(fip *hcloud.FloatingIP) hzResObservation {
+		if fip.Server == nil {
+			return hzResDisagrees("server", "no server at all", fmt.Sprintf("server id %d", serverID))
+		}
+		if fip.Server.ID != serverID {
+			return hzResDisagrees("server", fmt.Sprintf("server id %d", fip.Server.ID),
+				fmt.Sprintf("server id %d", serverID))
+		}
+		return hzResAgrees(map[string]any{"assigned": true, "server_id": fip.Server.ID})
+	}
+}
+
+func hzObserveFloatingIPUnassigned(fip *hcloud.FloatingIP) hzResObservation {
+	if fip.Server != nil {
+		return hzResDisagrees("server", fmt.Sprintf("STILL assigned to server id %d", fip.Server.ID),
+			"no server")
+	}
+	return hzResAgrees(map[string]any{"assigned": false})
+}
+
+func hzObservePrimaryIPCreated(pip *hcloud.PrimaryIP) hzResObservation {
+	extra := map[string]any{"type": string(pip.Type)}
+	if pip.IP != nil {
+		extra["ip"] = pip.IP.String()
+	}
+	if pip.Location != nil {
+		extra["location"] = pip.Location.Name
+	}
+	return hzResAgrees(extra)
+}
+
+// hzObservePrimaryIPAssigned checks the assignee PAIR: an id alone is not an
+// assignment, because assignee_type decides what that id names.
+func hzObservePrimaryIPAssigned(serverID int64) hzResObserveFn[hcloud.PrimaryIP] {
+	return func(pip *hcloud.PrimaryIP) hzResObservation {
+		if pip.AssigneeID != serverID || pip.AssigneeType != "server" {
+			return hzResDisagrees("assignee", fmt.Sprintf("%s id %d", hzCell(pip.AssigneeType), pip.AssigneeID),
+				fmt.Sprintf("server id %d", serverID))
+		}
+		return hzResAgrees(map[string]any{
+			"assigned":      true,
+			"assignee_id":   pip.AssigneeID,
+			"assignee_type": pip.AssigneeType,
+		})
+	}
+}
+
+func hzObservePrimaryIPUnassigned(pip *hcloud.PrimaryIP) hzResObservation {
+	if pip.AssigneeID != 0 {
+		return hzResDisagrees("assignee", fmt.Sprintf("STILL assigned to %s id %d", hzCell(pip.AssigneeType), pip.AssigneeID),
+			"no assignee")
+	}
+	return hzResAgrees(map[string]any{"assigned": false})
+}
+
+// hzObservePlacementGroupCreated prints the type the API assigned, not the one
+// the flag defaulted to.
+func hzObservePlacementGroupCreated(pg *hcloud.PlacementGroup) hzResObservation {
+	return hzResAgrees(map[string]any{
+		"type":    string(pg.Type),
+		"servers": len(pg.Servers),
+	})
+}
+
+// hzObserveCertificateUploaded reads the fingerprint and the validity window off
+// the response — facts about the PEM that was uploaded, none of which the
+// operator could have typed.
+func hzObserveCertificateUploaded(cert *hcloud.Certificate) hzResObservation {
+	extra := map[string]any{"type": string(cert.Type)}
+	if cert.Fingerprint != "" {
+		extra["fingerprint"] = cert.Fingerprint
+	}
+	if len(cert.DomainNames) > 0 {
+		extra["domain_names"] = cert.DomainNames
+	}
+	if !cert.NotValidAfter.IsZero() {
+		extra["not_valid_after"] = cert.NotValidAfter.UTC().Format("2006-01-02")
+	}
+	return hzResAgrees(extra)
+}
+
+// hzObserveCertificateManaged is the DECLARED-PENDING shape, and it is the one
+// observer here that deliberately refuses to assert.
+//
+// Managed issuance is asynchronous (Let's Encrypt behind the scenes): the
+// create action completing means the request was accepted, NOT that a
+// certificate exists. `Status.Issuance` is legitimately `pending` right after
+// the wait. Asserting `issued` here would make the receipt FLAKY rather than
+// honest, so the issuance state is reported as the API reports it and flagged
+// as a DECLARED reading the operator must poll — grip's POLL level, not
+// OBSERVE.
+func hzObserveCertificateManaged(cert *hcloud.Certificate) hzResObservation {
+	issuance := "unknown"
+	if cert.Status != nil && cert.Status.Issuance != "" {
+		issuance = string(cert.Status.Issuance)
+	}
+	extra := map[string]any{
+		"type":     string(cert.Type),
+		"issuance": issuance,
+		hzKeyConfirmation: "declared — managed issuance is asynchronous, so this is the state the create " +
+			"response reported, not a confirmed certificate (poll `bp cloud hetzner certificate get`)",
+	}
+	if len(cert.DomainNames) > 0 {
+		extra["domain_names"] = cert.DomainNames
+	}
+	return hzResAgrees(extra)
+}
+
+// ---------------------------------------------------------------------------
 // load-balancer
 // ---------------------------------------------------------------------------
 
@@ -272,11 +650,10 @@ func runHetznerLBCreate(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "create load-balancer "+name+": create action failed", werr)
 	}
-	extra := map[string]any{}
-	if result.LoadBalancer.PublicNet.IPv4.IP != nil {
-		extra["ipv4"] = result.LoadBalancer.PublicNet.IPv4.IP.String()
-	}
-	return hzResDone(out, "create", "load-balancer", result.LoadBalancer.ID, result.LoadBalancer.Name, extra)
+	// CLASS A2: the create RESPONSE object is server truth, so the receipt is
+	// read off it and carries no request-only extra beside it.
+	return hzResObservedResponse(out, "create", "load-balancer", result.LoadBalancer.ID, result.LoadBalancer.Name,
+		nil, result.LoadBalancer, hzObserveLBCreated)
 }
 
 func runHetznerLBDelete(out *writer, g globals, args []string) int {
@@ -363,10 +740,12 @@ func runHetznerLBAddService(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "add-service on load-balancer "+lb.Name+": action failed", werr)
 	}
-	return hzResDone(out, "add-service", "load-balancer", lb.ID, lb.Name, map[string]any{
-		"protocol":    string(protocol),
-		"listen_port": listenPort,
-	})
+	// The action endpoint returns `{action}` and nothing else, so the
+	// single-resource GET on the RESOLVED id is the only server-side source.
+	return hzResObserved(out, ctx, "add-service", "load-balancer", lb.ID, lb.Name, nil,
+		func(c context.Context) (*hcloud.LoadBalancer, *hcloud.Response, error) {
+			return hc.LoadBalancer.GetByID(c, lb.ID)
+		}, hzObserveLBServicePresent(listenPort, protocol))
 }
 
 func runHetznerLBDeleteService(out *writer, g globals, args []string) int {
@@ -402,7 +781,10 @@ func runHetznerLBDeleteService(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "delete-service on load-balancer "+lb.Name+": action failed", werr)
 	}
-	return hzResDone(out, "delete-service", "load-balancer", lb.ID, lb.Name, map[string]any{"listen_port": listenPort})
+	return hzResObserved(out, ctx, "delete-service", "load-balancer", lb.ID, lb.Name, nil,
+		func(c context.Context) (*hcloud.LoadBalancer, *hcloud.Response, error) {
+			return hc.LoadBalancer.GetByID(c, lb.ID)
+		}, hzObserveLBServiceAbsent(listenPort))
 }
 
 // hzLBTargetFlags validates the one-of target flags shared by add-target and
@@ -444,6 +826,10 @@ func runHetznerLBAddTarget(out *writer, g globals, args []string) int {
 	}
 
 	var action *hcloud.Action
+	// `want` is the union-aware predicate the post-read will apply; `extra`
+	// carries the HUMAN name of what was targeted, which the load balancer's
+	// own target ref does not have.
+	var want hzLBTargetPredicate
 	extra := map[string]any{}
 	switch {
 	case a.val("server") != "":
@@ -457,6 +843,7 @@ func runHetznerLBAddTarget(out *writer, g globals, args []string) int {
 		}
 		action, _, err = hc.LoadBalancer.AddServerTarget(ctx, lb, opts)
 		extra["server"] = srv.Name
+		want = hzLBServerTarget(srv)
 	case a.val("label-selector") != "":
 		opts := hcloud.LoadBalancerAddLabelSelectorTargetOpts{Selector: a.val("label-selector")}
 		if a.bools["use-private-ip"] {
@@ -464,6 +851,7 @@ func runHetznerLBAddTarget(out *writer, g globals, args []string) int {
 		}
 		action, _, err = hc.LoadBalancer.AddLabelSelectorTarget(ctx, lb, opts)
 		extra["label_selector"] = a.val("label-selector")
+		want = hzLBLabelSelectorTarget(a.val("label-selector"))
 	default:
 		ip := net.ParseIP(a.val("ip"))
 		if ip == nil {
@@ -471,6 +859,7 @@ func runHetznerLBAddTarget(out *writer, g globals, args []string) int {
 		}
 		action, _, err = hc.LoadBalancer.AddIPTarget(ctx, lb, hcloud.LoadBalancerAddIPTargetOpts{IP: ip})
 		extra["ip"] = ip.String()
+		want = hzLBIPTarget(ip.String())
 	}
 	if err != nil {
 		return hzFail(out, "add-target on load-balancer "+lb.Name, err)
@@ -478,7 +867,10 @@ func runHetznerLBAddTarget(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "add-target on load-balancer "+lb.Name+": action failed", werr)
 	}
-	return hzResDone(out, "add-target", "load-balancer", lb.ID, lb.Name, extra)
+	return hzResObserved(out, ctx, "add-target", "load-balancer", lb.ID, lb.Name, extra,
+		func(c context.Context) (*hcloud.LoadBalancer, *hcloud.Response, error) {
+			return hc.LoadBalancer.GetByID(c, lb.ID)
+		}, hzObserveLBTargetPresent(want))
 }
 
 func runHetznerLBRemoveTarget(out *writer, g globals, args []string) int {
@@ -505,6 +897,7 @@ func runHetznerLBRemoveTarget(out *writer, g globals, args []string) int {
 	}
 
 	var action *hcloud.Action
+	var want hzLBTargetPredicate
 	extra := map[string]any{}
 	switch {
 	case a.val("server") != "":
@@ -514,9 +907,11 @@ func runHetznerLBRemoveTarget(out *writer, g globals, args []string) int {
 		}
 		action, _, err = hc.LoadBalancer.RemoveServerTarget(ctx, lb, srv)
 		extra["server"] = srv.Name
+		want = hzLBServerTarget(srv)
 	case a.val("label-selector") != "":
 		action, _, err = hc.LoadBalancer.RemoveLabelSelectorTarget(ctx, lb, a.val("label-selector"))
 		extra["label_selector"] = a.val("label-selector")
+		want = hzLBLabelSelectorTarget(a.val("label-selector"))
 	default:
 		ip := net.ParseIP(a.val("ip"))
 		if ip == nil {
@@ -524,6 +919,7 @@ func runHetznerLBRemoveTarget(out *writer, g globals, args []string) int {
 		}
 		action, _, err = hc.LoadBalancer.RemoveIPTarget(ctx, lb, ip)
 		extra["ip"] = ip.String()
+		want = hzLBIPTarget(ip.String())
 	}
 	if err != nil {
 		return hzFail(out, "remove-target on load-balancer "+lb.Name, err)
@@ -531,7 +927,10 @@ func runHetznerLBRemoveTarget(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "remove-target on load-balancer "+lb.Name+": action failed", werr)
 	}
-	return hzResDone(out, "remove-target", "load-balancer", lb.ID, lb.Name, extra)
+	return hzResObserved(out, ctx, "remove-target", "load-balancer", lb.ID, lb.Name, extra,
+		func(c context.Context) (*hcloud.LoadBalancer, *hcloud.Response, error) {
+			return hc.LoadBalancer.GetByID(c, lb.ID)
+		}, hzObserveLBTargetAbsent(want))
 }
 
 func runHetznerLBChangeAlgorithm(out *writer, g globals, args []string) int {
@@ -564,7 +963,11 @@ func runHetznerLBChangeAlgorithm(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "change-algorithm on load-balancer "+lb.Name+": action failed", werr)
 	}
-	return hzResDone(out, "change-algorithm", "load-balancer", lb.ID, lb.Name, map[string]any{"algorithm": string(alg)})
+	// THE POSTER CHILD: this used to print back the flag string.
+	return hzResObserved(out, ctx, "change-algorithm", "load-balancer", lb.ID, lb.Name, nil,
+		func(c context.Context) (*hcloud.LoadBalancer, *hcloud.Response, error) {
+			return hc.LoadBalancer.GetByID(c, lb.ID)
+		}, hzObserveLBAlgorithm(alg))
 }
 
 func runHetznerLBChangeType(out *writer, g globals, args []string) int {
@@ -593,7 +996,10 @@ func runHetznerLBChangeType(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "change-type on load-balancer "+lb.Name+": action failed", werr)
 	}
-	return hzResDone(out, "change-type", "load-balancer", lb.ID, lb.Name, map[string]any{"type": a.val("type")})
+	return hzResObserved(out, ctx, "change-type", "load-balancer", lb.ID, lb.Name, nil,
+		func(c context.Context) (*hcloud.LoadBalancer, *hcloud.Response, error) {
+			return hc.LoadBalancer.GetByID(c, lb.ID)
+		}, hzObserveLBType(a.val("type")))
 }
 
 // runHetznerLBTypes is the read-only lb-types discovery view (the server-types
@@ -843,11 +1249,8 @@ func runHetznerFloatingIPCreate(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "create floating-ip: create action failed", werr)
 	}
-	extra := map[string]any{"type": string(ipType)}
-	if result.FloatingIP.IP != nil {
-		extra["ip"] = result.FloatingIP.IP.String()
-	}
-	return hzResDone(out, "create", "floating-ip", result.FloatingIP.ID, hzFloatingIPLabel(result.FloatingIP), extra)
+	return hzResObservedResponse(out, "create", "floating-ip", result.FloatingIP.ID,
+		hzFloatingIPLabel(result.FloatingIP), nil, result.FloatingIP, hzObserveFloatingIPCreated)
 }
 
 func runHetznerFloatingIPDelete(out *writer, g globals, args []string) int {
@@ -907,7 +1310,11 @@ func runHetznerFloatingIPAssign(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "assign floating-ip "+hzFloatingIPLabel(fip)+": action failed", werr)
 	}
-	return hzResDone(out, "assign", "floating-ip", fip.ID, hzFloatingIPLabel(fip), map[string]any{"server": srv.Name})
+	return hzResObserved(out, ctx, "assign", "floating-ip", fip.ID, hzFloatingIPLabel(fip),
+		map[string]any{"server": srv.Name},
+		func(c context.Context) (*hcloud.FloatingIP, *hcloud.Response, error) {
+			return hc.FloatingIP.GetByID(c, fip.ID)
+		}, hzObserveFloatingIPAssigned(srv.ID))
 }
 
 func runHetznerFloatingIPUnassign(out *writer, g globals, args []string) int {
@@ -932,7 +1339,10 @@ func runHetznerFloatingIPUnassign(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "unassign floating-ip "+hzFloatingIPLabel(fip)+": action failed", werr)
 	}
-	return hzResDone(out, "unassign", "floating-ip", fip.ID, hzFloatingIPLabel(fip), nil)
+	return hzResObserved(out, ctx, "unassign", "floating-ip", fip.ID, hzFloatingIPLabel(fip), nil,
+		func(c context.Context) (*hcloud.FloatingIP, *hcloud.Response, error) {
+			return hc.FloatingIP.GetByID(c, fip.ID)
+		}, hzObserveFloatingIPUnassigned)
 }
 
 // ---------------------------------------------------------------------------
@@ -1137,11 +1547,8 @@ func runHetznerPrimaryIPCreate(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "create primary-ip: create action failed", werr)
 	}
-	extra := map[string]any{"type": string(ipType)}
-	if result.PrimaryIP.IP != nil {
-		extra["ip"] = result.PrimaryIP.IP.String()
-	}
-	return hzResDone(out, "create", "primary-ip", result.PrimaryIP.ID, hzPrimaryIPLabel(result.PrimaryIP), extra)
+	return hzResObservedResponse(out, "create", "primary-ip", result.PrimaryIP.ID,
+		hzPrimaryIPLabel(result.PrimaryIP), nil, result.PrimaryIP, hzObservePrimaryIPCreated)
 }
 
 func runHetznerPrimaryIPDelete(out *writer, g globals, args []string) int {
@@ -1205,7 +1612,11 @@ func runHetznerPrimaryIPAssign(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "assign primary-ip "+hzPrimaryIPLabel(pip)+": action failed", werr)
 	}
-	return hzResDone(out, "assign", "primary-ip", pip.ID, hzPrimaryIPLabel(pip), map[string]any{"server": srv.Name})
+	return hzResObserved(out, ctx, "assign", "primary-ip", pip.ID, hzPrimaryIPLabel(pip),
+		map[string]any{"server": srv.Name},
+		func(c context.Context) (*hcloud.PrimaryIP, *hcloud.Response, error) {
+			return hc.PrimaryIP.GetByID(c, pip.ID)
+		}, hzObservePrimaryIPAssigned(srv.ID))
 }
 
 func runHetznerPrimaryIPUnassign(out *writer, g globals, args []string) int {
@@ -1230,7 +1641,10 @@ func runHetznerPrimaryIPUnassign(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, action); werr != nil {
 		return hzFail(out, "unassign primary-ip "+hzPrimaryIPLabel(pip)+": action failed", werr)
 	}
-	return hzResDone(out, "unassign", "primary-ip", pip.ID, hzPrimaryIPLabel(pip), nil)
+	return hzResObserved(out, ctx, "unassign", "primary-ip", pip.ID, hzPrimaryIPLabel(pip), nil,
+		func(c context.Context) (*hcloud.PrimaryIP, *hcloud.Response, error) {
+			return hc.PrimaryIP.GetByID(c, pip.ID)
+		}, hzObservePrimaryIPUnassigned)
 }
 
 // ---------------------------------------------------------------------------
@@ -1387,7 +1801,8 @@ func runHetznerPlacementGroupCreate(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "create placement-group "+name+": create action failed", werr)
 	}
-	return hzResDone(out, "create", "placement-group", result.PlacementGroup.ID, result.PlacementGroup.Name, map[string]any{"type": pgType})
+	return hzResObservedResponse(out, "create", "placement-group", result.PlacementGroup.ID,
+		result.PlacementGroup.Name, nil, result.PlacementGroup, hzObservePlacementGroupCreated)
 }
 
 func runHetznerPlacementGroupDelete(out *writer, g globals, args []string) int {
@@ -1588,11 +2003,8 @@ func runHetznerCertificateCreateUploaded(out *writer, g globals, args []string) 
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "create-uploaded certificate "+name+": action failed", werr)
 	}
-	extra := map[string]any{"type": string(hcloud.CertificateTypeUploaded)}
-	if result.Certificate.Fingerprint != "" {
-		extra["fingerprint"] = result.Certificate.Fingerprint
-	}
-	return hzResDone(out, "create-uploaded", "certificate", result.Certificate.ID, result.Certificate.Name, extra)
+	return hzResObservedResponse(out, "create-uploaded", "certificate", result.Certificate.ID,
+		result.Certificate.Name, nil, result.Certificate, hzObserveCertificateUploaded)
 }
 
 func runHetznerCertificateCreateManaged(out *writer, g globals, args []string) int {
@@ -1632,15 +2044,17 @@ func runHetznerCertificateCreateManaged(out *writer, g globals, args []string) i
 		return useError(out, "failed", "create-managed certificate "+name+": the API returned no certificate", exitGeneric)
 	}
 	// Managed issuance runs as an action (Let's Encrypt behind the scenes) —
-	// wait it so "created" always means "issued", not "pending".
-	out.info("certificate %s accepted — waiting for issuance…", name)
+	// wait it, because a failed issuance action is a failed verb. But the
+	// action completing does NOT mean a certificate exists: issuance is
+	// asynchronous and `Status.Issuance` is legitimately `pending` right after
+	// the wait. The receipt therefore DECLARES the issuance state it was handed
+	// instead of asserting one (grip's POLL level, not OBSERVE).
+	out.info("certificate %s accepted — waiting for the issuance action…", name)
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "create-managed certificate "+name+": issuance failed", werr)
 	}
-	return hzResDone(out, "create-managed", "certificate", result.Certificate.ID, result.Certificate.Name, map[string]any{
-		"type":         string(hcloud.CertificateTypeManaged),
-		"domain_names": domains,
-	})
+	return hzResObservedResponse(out, "create-managed", "certificate", result.Certificate.ID,
+		result.Certificate.Name, nil, result.Certificate, hzObserveCertificateManaged)
 }
 
 func runHetznerCertificateDelete(out *writer, g globals, args []string) int {
