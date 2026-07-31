@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -246,9 +247,21 @@ def _composition_failures(blocks: list[Any]) -> tuple[list[str], dict[str, int]]
     empty_step_bodies = 0
     overloaded_step_titles = 0
     headerless_tables = 0
+    block_ids = []
+    appendix_numbers = []
 
     for block in _walk_dicts(blocks):
         block_type = block.get("type")
+        block_id = block.get("id")
+        if isinstance(block_type, str) and isinstance(block_id, str) and block_id:
+            block_ids.append(block_id)
+        if block_type == "expandable":
+            match = re.match(
+                r"^Evidence appendix (\d+)\b",
+                str(block.get("summary") or "").strip(),
+            )
+            if match:
+                appendix_numbers.append(int(match.group(1)))
         if block_type == "steps":
             steps = block.get("steps", [])
             if isinstance(steps, list):
@@ -292,6 +305,12 @@ def _composition_failures(blocks: list[Any]) -> tuple[list[str], dict[str, int]]
         failures.append("overloaded_step_title")
     if headerless_tables:
         failures.append("table_missing_header")
+    if len(block_ids) != len(set(block_ids)):
+        failures.append("duplicate_block_id")
+    if appendix_numbers and appendix_numbers != list(
+        range(1, len(appendix_numbers) + 1)
+    ):
+        failures.append("evidence_appendix_numbering")
 
     return failures, {
         "primary_visible_words": primary_words,
@@ -299,6 +318,8 @@ def _composition_failures(blocks: list[Any]) -> tuple[list[str], dict[str, int]]
         "empty_step_bodies": empty_step_bodies,
         "overloaded_step_titles": overloaded_step_titles,
         "headerless_tables": headerless_tables,
+        "duplicate_block_ids": len(block_ids) - len(set(block_ids)),
+        "evidence_appendices": len(appendix_numbers),
     }
 
 
@@ -306,6 +327,8 @@ def _reader_failures(
     paper_id: str,
     revision: Any,
     reader_evidence: Optional[dict[str, Any]],
+    *,
+    require_content_proof: bool,
 ) -> list[str]:
     evidence = (reader_evidence or {}).get(paper_id)
     if not isinstance(evidence, dict):
@@ -318,14 +341,38 @@ def _reader_failures(
         return ["reader_evidence_missing"]
 
     failures = []
+    expected_hash = evidence.get("semantic_text_sha256")
+    if require_content_proof and (
+        not isinstance(expected_hash, str)
+        or re.fullmatch(r"[0-9a-f]{64}", expected_hash) is None
+    ):
+        failures.append("reader_content_proof_missing")
+
     for reader in REQUIRED_READERS:
-        status = readers.get(reader)
+        reader_record = readers.get(reader)
+        status = (
+            reader_record.get("status")
+            if isinstance(reader_record, dict)
+            else reader_record
+        )
         if status not in ("pass", True):
             failures.append(
                 "reader_{}_{}".format(
                     reader, "missing" if status is None else "failed"
                 )
             )
+            continue
+        if require_content_proof:
+            if not isinstance(reader_record, dict) or not isinstance(
+                reader_record.get("semantic_text_sha256"), str
+            ):
+                failures.append(
+                    "reader_{}_content_proof_missing".format(reader)
+                )
+            elif reader_record["semantic_text_sha256"] != expected_hash:
+                failures.append(
+                    "reader_{}_content_proof_mismatch".format(reader)
+                )
     return failures
 
 
@@ -334,6 +381,7 @@ def _audit_one(
     *,
     reader_evidence: Optional[dict[str, Any]],
     require_reader_evidence: bool,
+    require_reader_content_proof: bool,
 ) -> dict[str, Any]:
     paper_id = str(document.get("_id") or document.get("id") or "")
     revision = document.get("_rev") or document.get("revision")
@@ -376,8 +424,13 @@ def _audit_one(
     for failure in composition_failures:
         _append_unique(hard_failures, failure)
 
-    if require_reader_evidence:
-        for failure in _reader_failures(paper_id, revision, reader_evidence):
+    if require_reader_evidence or require_reader_content_proof:
+        for failure in _reader_failures(
+            paper_id,
+            revision,
+            reader_evidence,
+            require_content_proof=require_reader_content_proof,
+        ):
             _append_unique(hard_failures, failure)
 
     warnings, density_metrics = _density_warnings(blocks)
@@ -414,6 +467,7 @@ def audit_papers(
     *,
     reader_evidence: Optional[dict[str, Any]] = None,
     require_reader_evidence: bool = False,
+    require_reader_content_proof: bool = False,
 ) -> dict[str, Any]:
     """Return a stable cohort report whose pass state is defined by hard gates."""
     papers = sorted(
@@ -422,6 +476,7 @@ def audit_papers(
                 document,
                 reader_evidence=reader_evidence,
                 require_reader_evidence=require_reader_evidence,
+                require_reader_content_proof=require_reader_content_proof,
             )
             for document in documents
             if isinstance(document, dict)
@@ -476,6 +531,14 @@ def main(argv: Optional[list[str]] = None) -> int:
     parser.add_argument("--input", required=True, help="Paper JSON path, or - for stdin")
     parser.add_argument("--reader-evidence", help="Revision-pinned reader evidence JSON")
     parser.add_argument("--require-reader-evidence", action="store_true")
+    parser.add_argument(
+        "--require-reader-content-proof",
+        action="store_true",
+        help=(
+            "Require each reader record to carry the revision-pinned canonical "
+            "semantic-text SHA-256, not only a pass status."
+        ),
+    )
     parser.add_argument("--require-tag", help="Audit only Papers carrying this exact tag")
     parser.add_argument("--summary-only", action="store_true")
     args = parser.parse_args(argv)
@@ -492,6 +555,7 @@ def main(argv: Optional[list[str]] = None) -> int:
         documents,
         reader_evidence=evidence,
         require_reader_evidence=args.require_reader_evidence,
+        require_reader_content_proof=args.require_reader_content_proof,
     )
     if args.summary_only:
         report = {key: value for key, value in report.items() if key != "papers"}
