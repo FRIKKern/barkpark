@@ -833,6 +833,33 @@ def _collapse_evidence_appendices(blocks: list[Any]) -> list[Any]:
     )
 
 
+def _opening_orientation_items(blocks: list[Any]) -> list[str]:
+    items = []
+    for block in blocks:
+        if (
+            not isinstance(block, dict)
+            or block.get("type") != "heading"
+            or block.get("level") == 1
+        ):
+            continue
+        heading = _heading_text(block)
+        if heading and heading not in items:
+            items.append(heading)
+        if len(items) == 3:
+            return items
+
+    for fallback in (
+        "Decision record",
+        "Evidence and implications",
+        "Next action",
+    ):
+        if fallback not in items:
+            items.append(fallback)
+        if len(items) == 3:
+            break
+    return items
+
+
 def repair_canonical_epic(
     document: dict[str, Any],
     *,
@@ -868,17 +895,6 @@ def repair_canonical_epic(
     source_leaves = [
         leaf for leaf in source_leaves if leaf not in generated_summaries
     ]
-    source_words = len(_visible_text(blocks).split())
-    source_sections = sum(
-        1 for block in blocks if isinstance(block, dict) and block.get("type") == "heading"
-    )
-    source_evidence = sum(
-        1
-        for block in blocks
-        if isinstance(block, dict)
-        and block.get("type") in {"callout", "code", "diff", "notes", "quote", "table"}
-    )
-
     repaired = _repair_block_sequence(canonicalize_blocks(blocks))
 
     h1_indexes = [
@@ -945,13 +961,9 @@ def repair_canonical_epic(
         repaired.insert(
             insert_at,
             {
-                "id": "epb-cohort-stats",
-                "type": "stats",
-                "items": [
-                    {"value": "{:,}".format(source_words), "label": "source words"},
-                    {"value": str(source_sections), "label": "source sections"},
-                    {"value": str(source_evidence), "label": "evidence blocks"},
-                ],
+                "id": "epb-cohort-orientation",
+                "type": "byline",
+                "items": _opening_orientation_items(repaired),
             },
         )
 
