@@ -742,7 +742,10 @@ def _repair_block_sequence(blocks: list[Any]) -> list[Any]:
 
 
 def _heading_text(block: dict[str, Any]) -> str:
-    return _normalize(_visible_text(block))
+    text = _normalize(str(block.get("text") or ""))
+    if text:
+        return text
+    return _normalize(_visible_text(block.get("content")))
 
 
 def _word_count(value: Any) -> int:
@@ -867,12 +870,25 @@ def _repair_existing_appendices(blocks: list[Any]) -> list[Any]:
 
         normalized = copy.deepcopy(block)
         normalized["id"] = "epb-evidence-appendix-{}".format(appendix_index)
-        summary = _normalize(str(normalized.get("summary") or ""))
-        summary = re.sub(
-            r"^Evidence appendix \d+\b",
-            "Evidence appendix {}".format(appendix_index),
-            summary,
+        first_heading = next(
+            (
+                child
+                for child in children or []
+                if isinstance(child, dict)
+                and child.get("type") == "heading"
+            ),
+            None,
         )
+        if first_heading is not None:
+            first = " ".join(_heading_text(first_heading).split()[:14])
+            summary = "Evidence appendix {} — {}".format(appendix_index, first)
+        else:
+            summary = _normalize(str(normalized.get("summary") or ""))
+            summary = re.sub(
+                r"^Evidence appendix \d+\b",
+                "Evidence appendix {}".format(appendix_index),
+                summary,
+            )
         normalized["summary"] = summary
         repaired.append(normalized)
 
