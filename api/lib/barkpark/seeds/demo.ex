@@ -184,6 +184,12 @@ defmodule Barkpark.Seeds.Demo do
         icon: "⚙",
         visibility: "private",
         dataset: dataset,
+        # explicit desk-placement opt-in (issue #8463): siteSettings is a real
+        # host config singleton (one canonical row), not generic content —
+        # `singleton: true` keeps it a `:document` Settings row instead of
+        # falling into the generic `:document_type_list` bucket every other
+        # private schema now gets by default.
+        singleton: true,
         # surface (t7): siteSettings is a config singleton — no article body, so
         # every field is settings → sidebar.
         fields: [
@@ -205,6 +211,8 @@ defmodule Barkpark.Seeds.Demo do
         icon: "🧭",
         visibility: "private",
         dataset: dataset,
+        # explicit desk-placement opt-in (issue #8463) — see siteSettings above.
+        singleton: true,
         # surface (t7): navigation is a config singleton — its menu-title label is
         # settings → sidebar.
         fields: [
@@ -217,6 +225,8 @@ defmodule Barkpark.Seeds.Demo do
         icon: "🎨",
         visibility: "private",
         dataset: dataset,
+        # explicit desk-placement opt-in (issue #8463) — see siteSettings above.
+        singleton: true,
         # surface (t7): colors is a config singleton — every swatch is settings →
         # sidebar.
         fields: [
