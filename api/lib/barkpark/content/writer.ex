@@ -797,7 +797,11 @@ defmodule Barkpark.Content.Writer do
     ]
 
     preview =
-      %{media_resolver: Preview.media_resolver(scope), doc_type: type}
+      %{
+        media_resolver: Preview.media_resolver(scope),
+        doc_type: type,
+        title: Map.get(attrs, "title")
+      }
       |> maybe_put_preview_url(type, attrs)
 
     Map.put(Labels.render_opts(dataset, scope), :preview, preview)
