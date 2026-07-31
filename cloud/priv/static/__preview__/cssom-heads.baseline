@@ -65,4 +65,21 @@
 # on the merged tree reports authored rule heads 1237, CSSOM style rules 1237,
 # MISSES 0, PARITY PASS — so this slice adds no rule HEAD on top of main, and the
 # number moves for its siblings reasons, not for this one.
-1237
+# Re-measured 2026-07-31 (cch-bl-provider-rotation-identity-echo, at REVIEW): 1242
+# authored heads, MISSES 0 — MEASURED by running cssom-parity.mjs on this branch, not
+# hand-incremented. The +6 are the SIX `.prov-identity*` rules the slice's rendered
+# markup already emitted with no rule at all: __css_check E2 red with 12 errors on the
+# builder's state, because this slice's gate is the only one in the wave that does not
+# run that checker. MISSES 0 confirms an unrecorded ADD, not a parity defect.
+# NOTE for the lead: sibling S3 (.dep-cancelled) also adds ONE head and records 1237.
+# These two merge CLEAN and WRONG — 1242 and 1237 are both right alone and both wrong
+# together. RE-MEASURE after merging (charter D158 REGENERATE-ON-REBASE).
+# Re-measured 2026-07-31 by the LEAD rebasing onto a moved main, and the number
+# is 1243 — NOT the 1242 this branch carried. The branch measured against a main
+# that read 1236 before its siblings landed, and 1242 also contradicts this
+# slices OWN commit message, which says the identity line gets the SIX CSS rules
+# it was rendering without: 1237 + 6 = 1243. A real Chrome on the merged tree
+# reports authored rule heads 1243, CSSOM style rules 1243, MISSES 0 — so this is
+# an unrecorded ADD of exactly six heads, not a parity defect, and the count is
+# re-derived rather than carried forward.
+1243
