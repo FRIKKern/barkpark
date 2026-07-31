@@ -68,6 +68,48 @@ class PaperStructureAuditTest(unittest.TestCase):
         self.assertEqual(report["violations"], 0)
         self.assertEqual(report["papers_affected"], 0)
 
+    def test_duplicate_ids_and_appendix_numbers_are_path_addressed_in_children(self):
+        document = {
+            "_id": "duplicate-outline",
+            "_rev": "rev-1",
+            "blocks": [
+                {
+                    "id": "epb-evidence-appendix-1",
+                    "type": "expandable",
+                    "summary": "Evidence appendix 1 — first",
+                    "children": [
+                        {"id": "proof", "type": "paragraph", "content": text("one")}
+                    ],
+                },
+                {
+                    "id": "epb-evidence-appendix-1",
+                    "type": "expandable",
+                    "summary": "Evidence appendix 1 — second",
+                    "children": [
+                        {"id": "proof", "type": "paragraph", "content": text("two")}
+                    ],
+                },
+            ],
+        }
+
+        report = audit_documents([document])
+
+        self.assertEqual(
+            report["violation_counts"],
+            {
+                "duplicate_block_id": 2,
+                "evidence_appendix_number_duplicate": 1,
+            },
+        )
+        self.assertEqual(
+            [finding["path"] for finding in report["findings"]],
+            [
+                "blocks[1]",
+                "blocks[1].children[0]",
+                "blocks[1].summary",
+            ],
+        )
+
     def test_empty_paragraph_spacers_are_path_addressed_and_removed_recursively(self):
         blocks = [
             {"type": "paragraph", "content": text("visible")},

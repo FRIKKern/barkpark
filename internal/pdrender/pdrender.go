@@ -21,14 +21,14 @@ import (
 // Block is the decoded wire block: a type discriminator plus raw fields.
 // pdrender owns this type so the package has no apiclient dependency. The
 // caller decodes the JSON map into Attrs; the renderers read type-specific
-// fields out of it. Only `section` populates Children; only `figure`
-// populates Child — mirroring Render.Compose.compose_block/2's recursion shape
-// (compose.ex).
+// fields out of it. Recursive section/expandable containers populate Children;
+// figure populates Child — mirroring Render.Compose.compose_block/2's recursion
+// shape (compose.ex).
 type Block struct {
 	ID       string
 	Type     string
 	Attrs    map[string]any
-	Children []Block // section.blocks
+	Children []Block // container children, falling back to legacy blocks
 	Child    *Block  // figure.child
 }
 

@@ -6,6 +6,7 @@ from __future__ import annotations
 import argparse
 import hashlib
 import json
+import re
 import subprocess
 import sys
 import time
@@ -53,9 +54,18 @@ def _violation(
 
 
 def audit_blocks(
-    document: dict[str, Any], blocks: Any, prefix: str = "blocks"
+    document: dict[str, Any],
+    blocks: Any,
+    prefix: str = "blocks",
+    *,
+    _seen_ids: dict[str, str] | None = None,
+    _seen_appendix_numbers: dict[int, str] | None = None,
 ) -> list[dict[str, Any]]:
     """Return deterministic, path-addressed structural violations."""
+    if _seen_ids is None:
+        _seen_ids = {}
+    if _seen_appendix_numbers is None:
+        _seen_appendix_numbers = {}
     if not isinstance(blocks, list):
         return [
             _violation(
@@ -83,6 +93,45 @@ def audit_blocks(
             continue
 
         block_type = block.get("type")
+        block_id = block.get("id")
+        if isinstance(block_id, str) and block_id:
+            if block_id in _seen_ids:
+                findings.append(
+                    _violation(
+                        document,
+                        block_path,
+                        "duplicate_block_id",
+                        safe=False,
+                        detail=(
+                            "Block ids must be unique across the complete Paper; "
+                            f"first seen at {_seen_ids[block_id]}."
+                        ),
+                    )
+                )
+            else:
+                _seen_ids[block_id] = block_path
+
+        if block_type == "expandable":
+            summary = str(block.get("summary") or "").strip()
+            match = re.match(r"^Evidence appendix (\d+)\b", summary)
+            if match:
+                number = int(match.group(1))
+                if number in _seen_appendix_numbers:
+                    findings.append(
+                        _violation(
+                            document,
+                            f"{block_path}.summary",
+                            "evidence_appendix_number_duplicate",
+                            safe=False,
+                            detail=(
+                                "Evidence appendix numbers must be unique; "
+                                f"first seen at {_seen_appendix_numbers[number]}."
+                            ),
+                        )
+                    )
+                else:
+                    _seen_appendix_numbers[number] = f"{block_path}.summary"
+
         if _empty_paragraph(block):
             findings.append(
                 _violation(
@@ -365,11 +414,18 @@ def audit_blocks(
                 )
             )
 
-        children = block.get("blocks")
-        if isinstance(children, list):
-            findings.extend(
-                audit_blocks(document, children, prefix=f"{block_path}.blocks")
-            )
+        for child_key in ("blocks", "children"):
+            children = block.get(child_key)
+            if isinstance(children, list):
+                findings.extend(
+                    audit_blocks(
+                        document,
+                        children,
+                        prefix=f"{block_path}.{child_key}",
+                        _seen_ids=_seen_ids,
+                        _seen_appendix_numbers=_seen_appendix_numbers,
+                    )
+                )
 
     return findings
 
@@ -656,6 +712,8 @@ def canonicalize_blocks(blocks: Any) -> Any:
 
         if isinstance(block.get("blocks"), list):
             block["blocks"] = canonicalize_blocks(block["blocks"])
+        if isinstance(block.get("children"), list):
+            block["children"] = canonicalize_blocks(block["children"])
 
         normalized.append(block)
     return normalized

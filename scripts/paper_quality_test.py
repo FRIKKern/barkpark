@@ -109,6 +109,84 @@ class PaperQualityAuditTest(unittest.TestCase):
         )["papers"][0]
         self.assertIn("reader_evidence_revision_mismatch", stale["hard_failures"])
 
+    def test_reader_content_proof_requires_matching_semantic_hashes(self):
+        paper = reference_shape()
+        semantic_hash = "a" * 64
+        evidence = {
+            "reference": {
+                "revision": "rev-1",
+                "semantic_text_sha256": semantic_hash,
+                "readers": {
+                    reader: {
+                        "status": "pass",
+                        "semantic_text_sha256": semantic_hash,
+                    }
+                    for reader in ("public", "studio", "tui80", "email", "cli_api")
+                },
+            }
+        }
+
+        passed = audit_papers(
+            [paper],
+            reader_evidence=evidence,
+            require_reader_evidence=True,
+            require_reader_content_proof=True,
+        )["papers"][0]
+        self.assertEqual(passed["hard_failures"], [])
+
+        evidence["reference"]["readers"]["tui80"] = "pass"
+        missing = audit_papers(
+            [paper],
+            reader_evidence=evidence,
+            require_reader_evidence=True,
+            require_reader_content_proof=True,
+        )["papers"][0]
+        self.assertIn(
+            "reader_tui80_content_proof_missing", missing["hard_failures"]
+        )
+
+        evidence["reference"]["readers"]["tui80"] = {
+            "status": "pass",
+            "semantic_text_sha256": "b" * 64,
+        }
+        mismatch = audit_papers(
+            [paper],
+            reader_evidence=evidence,
+            require_reader_evidence=True,
+            require_reader_content_proof=True,
+        )["papers"][0]
+        self.assertIn(
+            "reader_tui80_content_proof_mismatch", mismatch["hard_failures"]
+        )
+
+    def test_duplicate_ids_and_appendix_numbering_fail(self):
+        paper = reference_shape()
+        paper["blocks"].extend(
+            [
+                {
+                    "id": "epb-evidence-appendix-1",
+                    "type": "expandable",
+                    "summary": "Evidence appendix 1 — first",
+                    "children": [
+                        {"id": "proof", "type": "paragraph", "content": text("one")}
+                    ],
+                },
+                {
+                    "id": "epb-evidence-appendix-1",
+                    "type": "expandable",
+                    "summary": "Evidence appendix 1 — second",
+                    "children": [
+                        {"id": "proof", "type": "paragraph", "content": text("two")}
+                    ],
+                },
+            ]
+        )
+
+        result = audit_papers([paper])["papers"][0]
+
+        self.assertIn("duplicate_block_id", result["hard_failures"])
+        self.assertIn("evidence_appendix_numbering", result["hard_failures"])
+
     def test_dense_lists_and_tables_warn_but_do_not_fake_a_hard_semantic_verdict(self):
         paper = reference_shape()
         paper["blocks"].extend(
