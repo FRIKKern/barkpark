@@ -6487,3 +6487,343 @@ webhook, and a wrong verdict turns the inbound bridge into a 500 redelivery stor
 **NOT PLANNED AROUND.** `hzResDone` stays cut (D395). The anchor is NOT retired (D392). Clause 1 is
 NOT retired (D391). `upgrade.go` is NOT touched (D394). `tooling/grip/**` is NOT modified (D386).
 `.github/**` is fenced. `api/mix.exs`/`api/mix.lock` are untouched.
+
+## Wave 29 2026-07-31 — "A receipt names what it read" — DECIDED (paper `pds-wave-29-2026-07-31`)
+
+`hzResDone` is **UNCUT** and this wave takes it. Authorization is D367's own closing clause
+(`charter:5730`): *"Fixing it means BUILDING the apparatus and then classifying 50 sites … **a
+wave-sized slice, filed, not smuggled into a receipt cleanup**"*, plus wave 26's review, which filed
+it as the next wave's work (`charter:5613`). PDS-D395's headline "`hzResDone` IS RULED, NOT BUILT"
+carries no wave qualifier, but it sits inside `## Wave 28 … DECIDED` (`charter:6215`, the last
+section before this one) and its operative clause is wave 28's own plan line (`charter:6487`, "NOT
+PLANNED AROUND") — it cut `hzResDone` from **WAVE 28**, and this section supersedes it for wave 29.
+
+- **PDS-D397 — THE WISH'S AUTHORIZING CITATION WAS PHANTOM, AND THIS SECTION IS THE REPLACEMENT.**
+  The wish says "wave 28 explicitly named it as wave 29's spine." It did not. `grep -ni 'wave.29'`
+  over all 6,489 charter lines at `origin/main` returns **exactly one** hit — D392's anchor clause at
+  `:6337` — and wave 28's REVIEW entry (`:2579-2648`, 70 lines) does not contain the string
+  `hzResDone` at all. The phrase the wish inherited ("sized it as a wave on its own") is a LEDGER
+  ROW's paraphrase, in `pds-w27-hetzner-gate-file-blindness`'s description — faithful to D367:5730,
+  but a task body is not authorization. The cut ledger is FIVE places, not three: `:5721` (D367, "IS
+  CUT FROM WAVE 26"), `:5815`, `:6092` (D384(a), "stays CUT regardless"), `:6141`, `:6487` — and the
+  case-SENSITIVE `grep 'stays cut'` finds only three of them. Every one is a wave-scoped planning
+  decision. **RULED:** wave 29 builds it on D367:5730's authority, stated here in its own words, and
+  the phantom citation is not repeated.
+
+- **PDS-D398 — THE SIZING STANDS AT 50; THE CLASS SPLIT IS AN ARTEFACT AND IS RETIRED.** Re-derived
+  independently by eight surveyors, one `go/ast` walk (`TOTAL=50 NON_LITERAL=2`) and three verifiers:
+  **50** non-test call sites, **lb 21 / net 16 / dns 6 / storage 5 / backup 2**. D367's headline 51 is
+  the definition line at `hetzner_net_cmd.go:56` (D384(a), confirmed). But D367's
+  `13 destroy / 12 create / 23 request-echo / 1 / 1` is **not a semantic classification**: its "13" is
+  `grep ', nil)$'` — the count of sites passing `extra=nil` — which D355:5396 labels the same 13 as
+  "13 passing `extra=nil`". The charter used the two labels interchangeably; that is the artefact.
+  Hand-classified from source and reproduced twice: **destroy-full 12 / sub-resource removal 8 /
+  create 14 / request-echo 14 / measured-uncompared 1 / no-post-read 1 = 50**, and the 8 removals
+  split further into three predicates (parent-collection absence ×5, nil-of-a-FIELD ×3). Also for the
+  record: **50 sites, 48 literal actions, 52 real verbs** — `hetzner_net_cmd.go:811` and `:1224` are
+  shared executors passing a VARIABLE `verb`. **RULED:** D367's split is retired; slices are cut by
+  FILE (disjoint ownership) and paid by CLASS within the file.
+
+- **PDS-D399 — THE POST-READ ASSUMPTION HOLDS FOR 45 OF 50, AND WHERE IT FAILS IS NOT WHERE THE
+  DIRECTION GUESSED.** All 8 hcloud kinds share `getByIDOrName` and expose `GetByID`; Hetzner's
+  published OpenAPI (`docs.hetzner.cloud/cloud.spec.json`, 3,453,181 bytes, HTTP 200) marks
+  `applied_to`, `targets`, `services`, `subnets`, `routes` **present AND `required`** on the
+  single-resource GET, and the GET item subtree is **byte-identical** to the LIST item subtree for
+  firewall, load_balancer and network. Every ACTION endpoint returns only `{action}` — so the
+  post-read GET is the SOLE server-side source for a request-echo field, which is precisely why those
+  14 sites are the lie. The 5 gaps are all S3/backup-side and **only ONE is a true exemption**:
+  `backup restore` (`hetzner_backup_cmd.go:309`), whose post-condition lives inside the target
+  Postgres. `objstore` has no `Head*`, but `Client.S3()` is EXPORTED at `client.go:115`, so S3
+  post-reads are writable INSIDE the `internal/cli` fence with no `objstore` change — D395's "S3 has
+  no `Head*` at all" is true of the WRAPPER and overstates the constraint.
+  **THREE BUILDER CONSTRAINTS, EACH RUN-PROVEN:** (a) nested server refs carry an **ID, never a
+  name** (`applied_to[].server` props `['id']`; `lb.Targets[0].Server.Server.ID=42 Name=""`), while
+  five CLI sites claim `srv.Name` — the predicate binds on the RESOLVED ID, the receipt keeps
+  printing the name; (b) `targets`/`services` are oneOf unions — switch on `Type` first or a
+  label-selector target reads a zero value and confirms falsely; (c) `firewall set-rules` claims
+  `len(rules)` — a count compare is server-derived and legal but the WEAKEST observation in the set,
+  and the census records it as such rather than as "verified". The 6 DNS sites are NOT covered by
+  `cloud.spec.json` (they ride the legacy `dns.hetzner.com/api/v1`, `internal/cli/cloud/dns.go:163`)
+  and need their own check; nothing here is L1 — no proof read a live `api.hetzner.cloud`.
+
+- **PDS-D400 — THE GONE-CHECK BINDS TO THE RESOLVED NUMERIC ID. RE-RUNNING THE USER'S TOKEN IS
+  UNSOUND, AND PROVEN SO.** `hzResolve` delegates to the SDK's `getByIDOrName`, which on a numeric
+  token that 404s **falls through to a name-filtered LIST** ("to support resources that have a integer
+  as Name", `client_helper.go:67-84`). Measured: delete volume id 42 while a DIFFERENT volume is
+  NAMED `"42"` → `GetByID(42)` returns nil (correct: gone) but `hzResolve("42")` returns the impostor
+  `id=7 name="42"` → **the receipt would REFUSE a correct delete**. It is also more expensive and it
+  poisons `f.count` accounting: bind-to-resolved-id costs exactly +1 `GET /volumes/9` whether the user
+  addressed by name or by id, while re-resolving by name issues a LIST that a
+  `count("GET","/volumes/9") >= 1` assertion can never see. **RULED:** the destroy predicate is
+  three-way — `(nil, nil)` ⇒ **gone**; non-nil ⇒ **REFUSE the claim** (non-zero exit); error ⇒
+  **"not confirmed"**, never a failed verb (D366's declared-unconfirmed shape). `hzReadBack`'s nil
+  branch is POLARITY-INVERTED for destroy (`hetzner_cmd.go:1279`, nil ⇒ error ⇒ "confirmation
+  unavailable" at exit 0) and must NOT be widened; write a sibling. Zone is the benign exception (a
+  single `GET /zones/{idOrName}`, no fallback); `dns record delete` resolves nothing and reads by the
+  `(zone,name,type)` key it already holds via `GetRRSetByNameAndType`.
+
+- **PDS-D401 — THE hcloud FAKE FAILS CLOSED FOR THE WRONG REASON, AND THAT IS THE MOST LIKELY WAY
+  THIS WAVE MANUFACTURES ITS OWN VACUITY.** `http.ServeMux`'s default 404 is `text/plain`;
+  hcloud-go's `errorFromBody` returns nil unless `hasJSONBody()`, so `errorHandler` wraps
+  `ErrStatusCode` and `GetByID`'s `IsError(err, ErrorCodeNotFound)` never fires. Run-proven: an
+  unregistered read-back path yields `rc=1 "post-read: hcloud: server responded with status code
+  404"` (a TRANSPORT error), while an explicit JSON-404 fixture yields the clean `(nil, resp, nil)`
+  and `"not confirmed"`. **Production always returns JSON 404** — so a destroy proof written against
+  an unregistered path proves a code path production never takes, green for the wrong reason.
+  **RULED:** every destroy proof registers an explicit JSON-404 or a STATEFUL fixture, and every
+  destroy row carries a LYING-FAKE case (the GET keeps returning the resource after DELETE; the
+  receipt must refuse). Run-proven both directions already: honest fake ⇒ `confirmed:true` rc=0;
+  lying fake ⇒ `rc=1 "volume 9 is still readable after DELETE — the receipt refuses to claim it is
+  gone"`. Secondary: single-resource GET fixtures barely exist for non-server kinds (`/servers/42`
+  ×15, `/volumes/7` ×1, and **zero** for networks/firewalls/load_balancers/primary_ips/floating_ips/
+  placement_groups/certificates) — a post-read spelled `Get(idOrName)` lands on the registered LIST
+  and gets a **stale 200**, a silent wrong value that no red will announce.
+
+- **PDS-D402 — THE REGRESSION BUDGET IS 26 TEST FUNCTIONS, NOT ~15; THE SURVEY UNDERCOUNTED BY TEN.**
+  Derived, not estimated: `hzResDone` was instrumented with a hit recorder and — since **zero** tests
+  in `internal/cli` call `t.Parallel()` — every hit was attributed to its enclosing `=== RUN`.
+  **26 real test functions reach `hzResDone` across 24 distinct `(action, kind)` pairs**, plus the
+  registry subtest. So ~26 of the 50 sites have no test that reaches their receipt at all. Measured
+  cost of one patched site: exactly ONE red (`TestHetznerVolumeCreate`); of two: exactly two, no
+  cascade. 26 is a CEILING on visible reds and says nothing about the silent-stale-200 class D401
+  names.
+
+- **PDS-D403 — THE S3 FAKE FAILS **OPEN**, AND STORAGE/BACKUP IS A SUB-ROUND WITH ITS OWN HARNESS
+  WORK.** `hetzner_storage_cmd_test.go:98` is `status, respBody := 200, ""` with `if f.handler != nil`
+  as the only override — every unhandled request gets 200 + empty body + a fabricated
+  `Etag: "fake-etag"`, and every handler-driven variant falls through to `return 200, ""` /
+  `return 204, ""` as well (15 `fakeS3{}` constructions, 8 handler-driven, ZERO that reject).
+  Run-proven: a real `HeadObject` post-read on `object put` passes **100% vacuously** — 21/21 storage
+  tests green, and putting `never/stored.txt` against a fake that stores nothing emits
+  `{"confirmed":true,"ok":true}` at rc=0. A 107-line fail-closed stateful S3 makes the honest put pass
+  AND makes a silent-drop endpoint red with `api error NoSuchKey`. **RULED:** the fail-closed fake
+  lands BEFORE any S3 post-read; a builder copying the hcloud template onto the 7 S3 sites without it
+  ships exactly the vacuity this wave exists to kill. Also ruled: error shape keys on
+  `*types.NotFound`, never `*awshttp.ResponseError` (true for BOTH a 404 and a connection refusal);
+  a post-read against an unreachable endpoint costs **3 retries / 3.30 s**; and because Hetzner
+  documents NO consistency model, the two S3 DESTROY sites (`object rm`, `bucket delete`) take a
+  DECLARED NON-BINDING read (`confirmed_absent: true|false` + reason), not a hard refusal.
+
+- **PDS-D404 — THE CENSUS KEY IS `(kind, action)`, DERIVED BY `go/ast`, WITH A NON-OPTIONAL
+  PER-CALLER OPAQUE ARM. THE SHIPPED SCANNER'S KEY IS A BARE VERB AND CANNOT KEY THIS POPULATION.**
+  `hzReceiptVerbsFromSource` returns bare verbs and both post-condition maps are `map[string]…` on
+  that key; against `hzResDone`'s 52 verbs a bare verb yields **29 keys — `create` collides 11 ways,
+  `delete` collides 11 ways, 23 of 52 verbs invisible**, and one disposition on the key `delete` would
+  excuse eleven destroy verbs across ten kinds. `(kind, action)` yields **52 keys, 0 collisions**.
+  The shipped regex `\b(hzDone|hzFlagVerbDone)\(` cannot match inside `hzResDone` (the `\b` fails after
+  `s`), so the gate derives 20 sites and **zero** hzResDone — while already globbing all five files.
+  Minimally widening the alternation finds all 50 lines and then takes the FIRST quoted token as the
+  verb, deriving `verb="network"` and `verb="firewall"` at `:811`/`:1224` — two strings the dispatch
+  never accepts. The `case "…"` pending tracker does **not** rescue this (it is consumed only by lines
+  containing `runHetznerServerAction(`). A 190-line stdlib-only `go/ast` walk keyed on ARGUMENT
+  POSITION reproduces `TOTAL=50 NON_LITERAL=2` and resolves both variable sites to their four caller
+  literals. **THE OPAQUE-CALLER ARM IS LOAD-BEARING AND WAS PROVEN BY MUTATION:** making ONE dispatch
+  arm pass a variable silently dropped `add-route` (52→51) while a naive `UNRESOLVED_SITES` check
+  still read 0; only a per-CALLER assertion naming `file:line` catches it. **RULED:** REUSE the glob,
+  the floor, the BIDIRECTIONAL stale-entry arms, the exemption-with-a-reason discipline and the
+  anti-disarm arm; REPLACE the line regex (→ `go/ast`) and the bare-verb key (→ `(kind, action)`).
+  The post-condition TABLE cannot be reused at all (`hzPost` is typed on `*hcloud.Server`) — hzResDone
+  gets its own. The census lives as a Go TEST in `internal/cli` (the shipped precedent
+  `TestHetznerActionVerbsAllDeclareAPostCondition` is one, and only a test can walk package source and
+  ride the Go gate); the `scripts/pds-*` committed-script law governs LEDGER censuses, not code gates.
+  D395's "no seam to widen onto" is **true of the TABLE and refuted for the SCANNER** — `hzShapeLiteral`
+  already handles seven executor-less receipts today.
+
+- **PDS-D405 — MOVE 4 POINTED AT THE WRONG GUARD; THE REPLACEMENT IS A THREE-ARM STRUCTURAL
+  INVARIANT AND IT IS ALREADY PROTOTYPED AND RUN.** The direction said "extend
+  `TestSiteClaimsAreProbedWithResponseTypes`". D363 (`:5666`) already proved that widening unsound BY
+  MUTATION, and it would be a **no-op anyway**: the `hzResDone` row already probes `hcloud.Volume`, a
+  genuinely returned type. The violated property is **RELEVANCE, not provenance**. A ~280-line
+  prototype against unmodified production code implements D363's structural ruling plus D355's
+  vary-on-post-condition: **arm 1** the probe is a DECODE TARGET (a named type from outside
+  `internal/cli`, or an unnamed decoded map); **arm 2** the row's declared IDENTITY fields are
+  DeepEqual across `Backed`/`Contradicted` and ≥1 post-condition path is declared; **arm 3** per-field
+  attribution — a pair differing ONLY in that field must change the printed bytes in **table AND
+  json**; plus a completeness arm (every row carries a disposition, field paths not prose).
+  Measured: all four named vacuous rows RED (`hzResDone` ×3, `supportAddRun.done`,
+  `supportRemoveRun.done`, `supportAddRun.success`, `emitFrontierClaim`), every sound row stays green,
+  `instTransferDone`'s `map[string]any` correctly survives via the decoded-map carve-out, and both
+  directions of the make-it-able-to-fail test pass (renaming `hzDone`'s identity in BOTH halves leaves
+  the failure set byte-identical; varying it on identity reds arms 2 and 3 **while the shipped gate
+  stays green**). **THE POPULATION IS SIX ROWS, NOT ONE**, and the sixth is a false positive with a
+  real cost: `emitDeviceLoginSuccess` reds arm 1 for probing with a hand-built `[2]string`, but
+  mutating the emitter to ignore `teamID` reds four other tests — it is behaviorally honest and must
+  be **RE-PROBED with the token-exchange decode type, never exempted by name** (an exemption list is
+  the grandfather-by-enumeration shape the registry file's own header condemns). Sequencing matters:
+  ship the row repairs FIRST and the guard's `unsafe.NewAt` reach into unexported fields becomes
+  unnecessary.
+
+- **PDS-D406 — DELETING `"epoch": epoch` FROM `emitFrontierClaim` REDS **NOTHING** IN THE WHOLE REPO,
+  AND THAT IS A LIVE CAS HOLE.** Applied alone at `tasks_next_cmd.go:158`, `go test ./... -count=1`
+  exits rc=0, 29 `ok` packages, zero failures. No test anywhere asserts that `bp task next -o json`
+  carries an epoch: `tasks_next_cmd_test.go:96,124` pin the epoch only in the **human** line (which
+  the mutation does not touch), and the sole JSON test (`:238-262`) decodes `ok`/`help`/`notices` and
+  never `claimed`. The epic's own gate misses it because the registry row varies DocID **and** Title
+  **and** epoch, so injectivity survives losing the epoch — a fourth instance of the `hzResDone`
+  shape, in the row whose own comment reads "the claim the LEDGER granted, epoch included". Blast
+  radius is silent and EXTERNAL: `.claude/workflows/*.workflow.js` route around it (they read
+  `doc.claim.epoch` from `bp task claim`), but `.cursor/rules/barkpark-tasks.mdc:10` promises
+  `bp task next` "returns the brief and an epoch" with no test behind it. **RULED:** fix is two-part
+  and both parts are owed — a `/epoch` VARIANT registry row that varies ONLY the epoch (editing the
+  existing row in place would trade one vacuity for another by dropping id/title injectivity), and a
+  direct assertion in the existing JSON test that `claimed.epoch` equals the granted epoch.
+
+- **PDS-D407 — THE WRITE-RECEIPT FENCE GOES AT `runCommand`'s POST-2xx HOOK, GATED ON `cmd.Writes`,
+  KEYED ON THE BODY. `run.go:1410` IS THE SYMPTOM SITE AND FENCING THERE REDS THREE HONEST VERBS.**
+  Proven by instrumenting that exact branch on a clean `origin/main` build (`"ok"` → `"REACHED-1410"`)
+  and driving a 72-cell matrix: the branch is reached by 8 cells — **5 poison and 3 HONEST** write
+  receipts (`{"ok":true}` `auth_controller.ex:379`, the quickstart handoff card
+  `ticket_keys_controller.ex:44`, `{"deleted":true,…}` `workspace_controller.ex:112`) — and **only in
+  `-o minimal`**; `zero_bytes`, `html_502`, `error_envelope` and `plaintext` never arrive there, and
+  26 of 93 write verbs never render through `renderMinimal` at all. The fence mirrors wave 28's read
+  fence at `run.go:244-250`, ahead of the shape switch so all four output shapes get it. Measured:
+  **32 of 36 poison cells go rc=0 → rc=1; all 36 honest cells stay rc=0 with byte-identical stdout;
+  `internal/cli` stays green; the read path is byte-identical.** Refuse: non-JSON, `null`,
+  post-unwrap `{"result":null}`, `{}`, `[]`, and an error envelope on a 2xx (`ok:false` **plus** an
+  `error` object — which is what distinguishes it from the honest `{"ok":false,"reason":"no_ready"}`).
+  **PASS an object under keys the CLI does not know** — on a write that is a receipt the CLI cannot
+  summarise, not a lie, and an allowlist there is D396's careless fence (it would red `{"ok":true}`
+  and `{"deleted":true}` today). **THE 204 CARVE-OUT IS OWED:** `chat.approve` is a manifest write
+  verb whose real answer is `send_resp(conn, :no_content, "")`; a naive empty-body refusal REDS it, so
+  204/205 with an empty body is a DECLARED empty receipt printing "not confirmed: HTTP 204, no content
+  returned" at rc=0 — where main today prints a **bare empty line** at rc=0. **AND THE SLICE MUST SHIP
+  ITS OWN POISON TABLE OR IT IS BORN VACUOUS:** disarming the fence (`return ""` unconditionally) left
+  the entire `internal/cli` suite GREEN (24.667s) — which is exactly why this hole survived waves 27
+  and 28.
+
+- **PDS-D408 — `internal/taskboard/**` IS WIDENED INTO THE FENCE; THE BOARD LAUNDERS FOUR POISONS AND
+  THE FIX IS +18/-7 WITH ZERO REGRESSIONS.** `decodeTaskListFull` and `decodePrime` unmarshal into
+  VALUE-typed structs, so `null`, `{}`, `{"error":…}` and `{"ok":false,"error":{…}}` all decode to
+  zero rows with a **nil error** — a silent, plausible, empty board. The CLI reader's HTML-502 and
+  zero-byte poisons do NOT transfer (`encoding/json` rejects both), so this is strictly the
+  well-formed-JSON-object-without-the-key class — narrower than the wave-27/28 nine-poison population
+  and Decide should not size it as if it were the same. **Nothing pins the current behaviour**: all 12
+  `null`/`{}` hits in `fetch_test.go` are FIELD-level, all 7 `decodeTaskList` call sites pass
+  `{"docs":[…]}`, and both error tests force HTTP 500 (which `getJSON` already rejects) — so a fence
+  is a BUG FIX, not a behaviour change. The right predicate is a POINTER field (`Docs *[]taskWire`,
+  `Counts *map[string]int`) inside the EXISTING single `Unmarshal` — no second pass. Measured:
+  `+18/-7` in one file, `go test ./internal/taskboard/` **ok**, `go build ./...` rc=0, `{"docs":[]}`
+  still `err=nil`. `detail_data.go:12-19`'s "Tolerance contract (frozen wave-5)" is FIELD-scoped and
+  is NOT crossed; `LoadCachedSnapshot` is tolerant BY CONTRACT and stays out. Reachability is honest:
+  the API's own error envelopes ride non-200, so today's trigger is an intermediary returning 200 JSON
+  without the key — this is fail-closed hardening, and the row says so. It is claimed against the
+  already-open `pds-bl-board-tui-reader-honesty`, whose stated first job ("size it") this wave's
+  verifier completed. **NOT widened:** `LoadCachedSnapshot`, and the twin-policy split below.
+
+- **PDS-D409 — FOUR READERS HOLD THREE DIFFERENT DRAFT-TWIN POLICIES; THAT IS A WAVE, AND IT IS
+  RULED NOT BUILT.** `queue.ex`'s candidate filter reproduces exactly: no publication predicate, only
+  a CONDITIONAL twin collapse (`:146-166`) that an orphan draft passes. **D382's "28" is dead and the
+  number DRIFTS** — three live samples seconds apart gave 34/1344, 34/1345, 35/1345, and the wave-28
+  residue row's corrected 30 is also dead. Any Paper quoting a figure here must re-derive it and stamp
+  the sample time. Beyond that: the API board collapses published-wins (`board.ex:210-219`), the ready
+  queue collapses only conditionally, the TUI board **does not collapse at all** (every `drafts.`
+  reference strips the prefix to MATCH across twins, never to drop one), and `bp task next --frontier`
+  asks for the drafts perspective ON PURPOSE (`tasks_next_cmd.go:77`). No surface labels a row as a
+  draft. **RULED:** PDS takes zero code in `queue.ex` (D382 stands, `tgw10-bl-drafts-in-ready-pool`
+  owns it); the PDS-side act is the HANDOFF with the re-derived numbers, filed this wave. Twin-policy
+  unification is a charter ruling plus four code sites — a later wave, filed as backlog.
+
+- **PDS-D410 — WEIGHT 2, THE INSTRUMENT'S FIRST REAL USER: THE BIRTH FENCE DOES NOT 500, AND
+  `disposition` IS NOT THE DISCRIMINATOR. THE PREMISE IS INVERTED.** Both reproduced 500s were
+  `POST /v1/data/mutate/production` creates that spent >19 s and died in
+  `Barkpark.Tenancy.get_default_project/0` (`tenancy.ex:282`) via
+  `Content.WriteScope.read_default_project_id/1` — `** (DBConnection.ConnectionError) connection is
+  closed because of an error, disconnect or timeout`. In a 40-minute window on guerrilla: **62
+  ConnectionErrors, 15 `Sent 500`, and every one of the 15 was a mutate-door create** (13 on the
+  workspace-scoped door, 2 on the bare door). `POOL_SIZE` is unset so it defaults to `"10"`
+  (`runtime.exs:717`) on a **2-vCPU** box, with `EdgeProjector.ProjectorWorker` named in the
+  checked-out-too-long warnings. A controlled 8-request A/B **refutes the digest's direction**:
+  2 of 4 BARE births 500'd (24.5 s, 19.6 s); 0 of 4 disposition-carrying births did (6.6–13.6 s).
+  Every success was ≤14.7 s, every failure >19 s — the correlation is LATENCY, not disposition, and
+  the digest's 5/5 sample is confounded by a load spike. **The fence provably PASSED the request that
+  500'd** (same `request_id`, the "allowed" warning logged 24 s BEFORE the 500), and structurally it
+  cannot 500: a valid `(term, trigger)` pair falls straight through to `true -> :ok` with zero I/O.
+  All three refusal branches are LIVE-CORRECT in production (422 naming the vocabulary, 422 on
+  `reopen_trigger`, 422 on a mis-cased `"Parked"`) and the happy path returns **200 with both keys
+  persisted**. `task_birth_fence_test.exs` covers the happy path — the suspected vacuity is REFUTED by
+  reading; its one blind spot is that every case calls `Content.apply_mutations/3` in-process, so no
+  test crosses the HTTP door or the connection pool, which is exactly why nothing caught what is
+  actually failing. **THE SCHEMA DECLARES NEITHER `disposition` NOR `reopen_trigger`** (30 fields, and
+  both persist) — `Writer.ensure_task_born_adjudicated/5` is their only validator; the adjudication
+  triple is schema-invisible, filed as a row. **ORDERING VERDICT:** the stated blocker on
+  `pds-w28-bl-birth-warn-to-hard` DISSOLVES — the real constraint is that `bp task create` sends no
+  default disposition (`parseTaskCreateArgs` seeds only `kind` + `lifecycle_status`), a producer
+  change, exactly as that row already says. Root cause is already owned by
+  `jpf-bl-oban-pool-partition` (open, unclaimed); PDS hands over the measurement rather than filing a
+  duplicate. And a CONTRADICTION for the record: `pds-w27-bl-large-task-create-500-narrowed-to-create`
+  rules the ceiling is on SIZE; these 500s carried a ~150-byte description. The shared mechanism is
+  TIME-IN-POOL, not bytes — and patch-then-publish wins because it splits one long checkout into two
+  short ones. That narrowing must be re-derived before anything is built on it.
+
+- **PDS-D411 — WEIGHT 2, THE RERUN SCREEN: IT DOES NOT OVER-REFUSE, AND IT HAS FOUR HOLES IT DOES NOT
+  ADVERTISE.** Over 10 plausible wave-29 reruns, only 2 were refused (VARIANCE-SKIP on
+  `git show | grep`, UNBOUND-CLAIM on `git show | sed`) — both correct, both naming a one-keystroke
+  substitute. D388 holds: only over-claims are refused. The holes: **(a)** `git grep` is in NONE of
+  grip's family sets, so its nonzero exits take `classifySilence`'s default branch where ANY nonzero
+  exit is `absenceEligible` — the rc128 UNAVAILABLE rules live only in the `CONTENT_FETCH` case and
+  are unreachable for every absence recipe the epic ships. A typo'd path, a nonexistent directory and
+  a **nonexistent ref** (`rc 128`, `fatal: unable to resolve revision`) all come back
+  ABSENCE-ADMITTED. **(b)** `git grep -c` / `grep -vc` classify as `[EXISTENCE, CONTENT]` and pay in
+  full: a claim of **9999** and a claim of **21** over the byte-identical command both return
+  RE-DERIVED / PASS-ADMITTED, and a population claim of **4711** (real: 50) passes over the wish's own
+  chain — while the SAME population spelled `| wc -l` is REFUSED. `TERM_KEYS` has no place for a
+  quantity, so the number in a claim is structurally immune to the §6 mutation method. **THIS WAVE'S
+  SPINE CLAIM IS A COUNT.** **(c)** the STORED `disposition_rerun` is never read — `toFact()` sources
+  commands only from `tooling/pds/recipes.json`, and the live 172-row snapshot carries **zero** stored
+  reruns, so "a task is born adjudicated" and "the census adjudicates its rerun" are not yet
+  connected. **(d)** `go` is absent from grip's refused-runner list, so a toolchain fault
+  (`# runtime/cgo / error: unknown option '-E'`) is reported as **PASS-CONTRADICTED — "the command ran
+  and REFUTES the claim"**: an environment fault laundered into a refutation. Level grammar, for the
+  record: the whole adjudicated board is uniformly **L3** — D390 already derives L3 for all three
+  legal spellings, so the projected L2 does not materialise and the L2/L3 distinction does no work in
+  any verdict line. (a)–(d) are FILED AS ROWS, not accepted limits: `tooling/pds/README.md`'s stated
+  limit list names two things and none of them is any of these. `tooling/grip/**` stays unmodified
+  (D386), so the grip-side fixes are handed over.
+
+- **PDS-D412 — THE ELIXIR GATE RENDERS GREEN ON A GO-ONLY PR; THE DEADLOCK FEAR IS REFUTED AND THE
+  INVERTED HALF IS THE LIVE ONE.** Live protection requires exactly `["Elixir gate", "PR references an
+  active task"]`, `enforce_admins:true`, and `gh api …/rulesets` is EMPTY. Proven on three merged
+  `internal/cli`-only PRs (8520, 8518, 8413): `Elixir gate :: success` with every Elixir leaf
+  `skipped` — `elixir.yml` has no workflow-level `paths:` key, its dispatcher has no `if:`, and
+  `elixir-gate` is `if: always()` asserting on upstream results. **But `go vet + test` is NOT a
+  required context** and `go-tests.yml` is itself workflow-level paths-filtered (the topology
+  `.github/required-checks.json` classifies as structurally unrequireable), while `scripts/bp-merge.sh`
+  polls REQUIRED contexts only. **An `internal/cli`-only PR merges over a red Go suite.** Every wave-29
+  builder therefore runs its Go gate LOCALLY and quotes the run; CI will not stop them. Method trap
+  for anyone re-deriving: `gh api …/check-runs` without `--paginate` truncates at 30 with no signal
+  (PR 8520 has 34) and made `go vet + test` look absent — an unpaginated read is itself an
+  exit-code-shaped lie. Also recorded: `elixir.yml` sets `cancel-in-progress` on PR refs and its
+  aggregator has no `cancelled` arm, so a superseded stacked push shows `Elixir gate is failing.` on a
+  PR with zero Elixir changes — re-run before investigating.
+
+### Wave 29 plan — 8 slices, 4 in round 1, 4 deferred to round 2
+
+Slices are cut by FILE so round-1 file sets are disjoint; the apparatus lands first and the per-file
+payment follows it.
+
+| task | round | after | surface | gate |
+|---|---|---|---|---|
+| `pds-w29-respost-apparatus-destroy` | 1 | — | generic `hzResPost[T]` + `(kind,action)` `go/ast` census + all 12 full destroys + JSON-404/stateful hcloud fixtures | `CC=/usr/bin/clang go build ./... && go vet ./internal/cli/... && go test ./internal/cli/ -count=1` |
+| `pds-w29-s3-fake-fails-closed` | 1 | — | `fakeS3` stops answering 200-empty to everything; stateful store + a lying-fake case | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'Storage\|Backup'` |
+| `pds-w29-write-receipt-fence` | 1 | — | `refuseEvidencelessWriteReceipt` at `runCommand`'s post-2xx hook + the 204 carve-out + the `claimed.epoch` pin | `CC=/usr/bin/clang go test ./internal/cli/ -count=1` |
+| `pds-w29-taskboard-envelope-fence` | 1 | — | `decodeTaskListFull`/`decodePrime` key-presence via pointer fields | `CC=/usr/bin/clang go test ./internal/taskboard/ -count=1` |
+| `pds-w29-registry-postcondition-invariant` | 2 | apparatus, write-receipt | the three-arm structural invariant + SIX row repairs incl. the `emitDeviceLoginSuccess` re-probe and the `emitFrontierClaim/epoch` variant row | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'TestSuccessClaim\|TestSiteClaims\|TestLedgerRows\|TestClaimProbes'` |
+| `pds-w29-pay-lb` | 2 | apparatus | `hetzner_lb_cmd.go` — its 16 non-destroy sites | `CC=/usr/bin/clang go test ./internal/cli/ -count=1` |
+| `pds-w29-pay-net-dns` | 2 | apparatus | `hetzner_net_cmd.go` + `hetzner_dns_cmd.go` — their non-destroy sites incl. the two variable-verb executors | `CC=/usr/bin/clang go test ./internal/cli/ -count=1` |
+| `pds-w29-pay-storage-backup` | 2 | apparatus, s3-fake | the 7 S3/backup sites, `backup restore` DECLARED EXEMPT | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'Storage\|Backup'` |
+
+**HIGH-FLIP-RISK, a genuinely independent second reviewer owed before merge:**
+`pds-w29-respost-apparatus-destroy` (blast radius + a correctness judgment that can cost DATA — a
+false "deleted" is the only lie in this epic that destroys something, and D400/D401 are precisely the
+two ways a green proof can be green for the wrong reason) and `pds-w29-write-receipt-fence`
+(reachability — the fence sits on the generic path of all 93 write verbs, D407's own measurement shows
+a careless placement reds three HONEST receipts, and the 204 carve-out changes stdout on a live verb).
+
+**NOT PLANNED AROUND.** `queue.ex` is NOT touched (D382/D409). `tooling/grip/**` is NOT modified
+(D386) — the four rerun-screen holes are handed over as rows. `upgrade.go` is NOT touched (D394).
+The census anchor is NOT retired: D392 permits it "no earlier than wave 29, and only after a round has
+run with both fences live", and that round has not run — this is a deliberately forgone option, not a
+prohibition. Clause 1 is NOT retired (D391). `.github/**` is fenced (the spec-vs-live drift on
+`Cloud gate`/`Console gate` belongs to the concurrent Cloud Console wave). `api/mix.exs`/`api/mix.lock`
+are untouched. And for the record, per D391: the census hash is **sha256[:16]**, not md5 — the wish's
+weight-2 wording repeats a spelling D391 already retired, and it is not carried forward here.
