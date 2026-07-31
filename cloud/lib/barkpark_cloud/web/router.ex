@@ -349,14 +349,15 @@ defmodule BarkparkCloud.Web.Router do
   # handled by the dedicated immutable plug above, so they are NOT in this
   # allowlist.
   #
-  # `gzip: true` — the cold boot shipped 1,164,296 uncompressed bytes (app.js
-  # 965,342 + app.css 198,954) because the edge in front of us compresses
-  # nothing (measured: the live responses carry no `content-encoding` and no
-  # `vary`). With this flag Plug.Static serves the pre-built `<file>.gz` sibling
-  # whenever the request says `accept-encoding: gzip`, and adds
-  # `vary: Accept-Encoding` so caches key the two representations apart:
-  # 338,917 bytes on the wire, −70.9%. The siblings are NOT committed — they are
-  # produced by `RUN gzip -9 -k priv/static/app.js priv/static/app.css` in
+  # `gzip: true` — the cold boot shipped 1,195,515 uncompressed bytes
+  # (index.html 31,219 + app.js 965,342 + app.css 198,954) because the edge in
+  # front of us compresses nothing (measured: the live responses carry no
+  # `content-encoding` and no `vary`). With this flag Plug.Static serves the
+  # pre-built `<file>.gz` sibling whenever the request says
+  # `accept-encoding: gzip`, and adds `vary: Accept-Encoding` so caches key the
+  # two representations apart: 346,777 bytes on the wire, −71.0%. The siblings
+  # are NOT committed — they are produced by one
+  # `RUN gzip -9 -k priv/static/index.html priv/static/app.js priv/static/app.css` in
   # cloud/Dockerfile (see the comment there for why that placement is the whole
   # staleness story), and `cloud/.gitignore` + `scripts/cloud-static-gz-guard.sh`
   # keep one from ever being checked in. A missing sibling is not an error:

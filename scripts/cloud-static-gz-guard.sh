@@ -65,11 +65,19 @@ REPO_ROOT="${CLOUD_GZ_GUARD_ROOT:-$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.."
 STATIC_DIR='cloud/priv/static'
 ROUTER='cloud/lib/barkpark_cloud/web/router.ex'
 DOCKERFILE='cloud/Dockerfile'
-# The two files the Dockerfile must name explicitly. `gzip priv/static/*` would
-# also compress __app.test.mjs / __css_check.mjs / __fixtures__, none of which
-# are in the Plug.Static `only:` allowlist — pure image weight.
+# The files the Dockerfile must name explicitly. `gzip priv/static/*` would also
+# compress __app.test.mjs / __css_check.mjs / __fixtures__, none of which are in
+# the Plug.Static `only:` allowlist — pure image weight.
+#
+# index.html is here because it is the SPA SHELL: it is the FIRST request of
+# every cold boot, and compressing the assets it pulls while shipping the shell
+# itself uncompressed is the residual half of the same lie (31,219 -> 7,860,
+# -74.8%). styleguide.html is in the same allowlist and compresses as well, but
+# it is not on the cold-boot path — it stays on cch-cloud-static-gzip-html.
+# favicon.ico and button.svg are too small for the sibling to pay for itself.
 GZ_ASSETS='app.js
-app.css'
+app.css
+index.html'
 
 fail=0
 
@@ -273,15 +281,28 @@ selftest() {
   cp "$tmp/$DOCKERFILE" "$tmp/Dockerfile.bak"
   grep -v '^RUN gzip ' "$tmp/Dockerfile.bak" > "$tmp/$DOCKERFILE"
   run_case "deleted Dockerfile gzip step reds" 1
+  # 3b/3c specimens are DERIVED from the real RUN line, never re-typed. A typed
+  # literal silently stops matching the moment GZ_ASSETS gains a file (wave 11
+  # review added index.html), and a sed that matches nothing produces an
+  # UNMUTATED copy that the guard then passes — a green that means "the mutation
+  # did not apply", which is the exact vacuous shape this guard exists to catch.
+  local real_run
+  real_run="$(grep -m1 '^RUN gzip .*priv/static/' "$tmp/Dockerfile.bak")"
+  [ -n "$real_run" ] || { echo "  FAIL  selftest cannot find the real RUN line to mutate" >&2; failed=$((failed + 1)); }
   # 3b. the RUN moved ABOVE `COPY priv priv` — compresses the wrong bytes.
   {
-    echo 'RUN gzip -9 -k priv/static/app.js priv/static/app.css'
+    printf '%s\n' "$real_run"
     cat "$tmp/Dockerfile.bak"
   } > "$tmp/$DOCKERFILE"
   run_case "gzip step above \`COPY priv priv\` reds" 1
-  # 3c. a bare glob instead of the two named files.
-  sed 's|^RUN gzip -9 -k priv/static/app.js priv/static/app.css$|RUN gzip -9 -k priv/static/*|' \
+  # 3c. a bare glob instead of the explicitly named files.
+  awk -v real="$real_run" '$0 == real { print "RUN gzip -9 -k priv/static/*"; next } { print }' \
     "$tmp/Dockerfile.bak" > "$tmp/$DOCKERFILE"
+  if grep -q '^RUN gzip -9 -k priv/static/\*$' "$tmp/$DOCKERFILE"; then
+    passed=$((passed + 1)); echo "  PASS  the glob mutation applies (the specimen really is globbed)"
+  else
+    failed=$((failed + 1)); echo "  FAIL  the glob mutation did not apply — the case below would be vacuous"
+  fi
   run_case "\`gzip priv/static/*\` glob reds" 1
   cp "$tmp/Dockerfile.bak" "$tmp/$DOCKERFILE"
 
