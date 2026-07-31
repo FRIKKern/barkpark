@@ -43,6 +43,21 @@ defmodule Barkpark.PortableDoc.Render.StylesheetTest do
     test "contains NO [style*= de-inline hack selectors (theme-vs-data line)" do
       refute String.contains?(Stylesheet.css(), "[style*=")
     end
+
+    test "steps suppress the native ordered-list marker on each item" do
+      css = Stylesheet.css()
+
+      assert Regex.match?(
+               ~r/\.bp-paper-surface\s+\.bp-steps__step\s*\{[^}]*list-style:\s*none;/s,
+               css
+             ),
+             """
+             .bp-paper-surface ol li assigns decimal markers directly to every
+             ordered-list item. The steps component must therefore suppress the
+             native marker on .bp-steps__step itself, not only on its parent ol,
+             or Safari paints both "1." and the component's circled "1".
+             """
+    end
   end
 
   describe "sinks embed the source" do
