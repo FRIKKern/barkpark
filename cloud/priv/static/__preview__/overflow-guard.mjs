@@ -165,16 +165,13 @@ const BAND_ROUTES = [
   { name: "fleet", scen: "mixed-fleet", hash: "#fleet", view: "view-fleet", tab: null, ready: ".fleet-row" },
 ];
 
-// THE ONE CELL THIS LEG DOES NOT CLAIM, named out loud rather than skipped.
-// #fleet still scrolls at 769-785 and the detail-band split does not touch it:
-// the overhang is `.fleet-row`'s min-content (measured 533 against a 487px
-// container at 769), whose remedy — `flex-direction: column` — lives in the 768
-// block and is NOT this slice's to move (moving it would drag GR116's topbar
-// tighten's neighbourhood into the tablet band unasserted). Measured 21px on
-// mixed-fleet at 769 in both themes, pre- AND post-fix. Filed as
-// cch-w13-fleet-row-band-769-785. The assertion below is <=, so it reds if the
-// row ever gets WIDER, and stays green the day someone stacks it.
-const FLEET_ROW_RESIDUAL = { widths: [769], max: 21, task: "cch-w13-fleet-row-band-769-785" };
+// W14-S3 RETIRED THE ONE PIN THIS LEG USED TO CARRY. #fleet's 21px overhang at
+// 769 was the residual W13 named rather than skipped (FLEET_ROW_RESIDUAL, max
+// 21px, cch-w13-fleet-row-band-769-785); its remedy — `.fleet-row`'s stack —
+// moved from the 768 block into the 899 block, the band [769,789] measured 0
+// offending cells on mixed-fleet AND fleet-v4 in both themes, and the pin,
+// its skip branch and its summary sentence went with it. #fleet is now
+// asserted like every other route: no exemption, 108/108.
 
 // The sweep envelope. 769/775/780/785 are ABOVE the breakpoint on purpose —
 // see the header: a sweep capped at 768 cannot fail on this defect class.
@@ -779,25 +776,20 @@ async function main() {
             if (m.theme !== theme) fail(D, `${r.name}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
             // (2) THE PIXELS.
             const over = m.sw - m.cw;
-            const residual =
-              r.name === "fleet" && FLEET_ROW_RESIDUAL.widths.includes(width);
-            if (over > 0 && !residual) {
+            if (over > 0) {
               offenders++;
               fail(D, `${r.name}/${theme}@${width}: scrollWidth ${m.sw} > viewport ${m.cw} — ${over}px of the page is off-screen at rest, with no cue`);
-            } else if (residual && over > FLEET_ROW_RESIDUAL.max) {
-              offenders++;
-              fail(D, `${r.name}/${theme}@${width}: known .fleet-row residual GREW — ${over}px overhang, was ${FLEET_ROW_RESIDUAL.max}px (${FLEET_ROW_RESIDUAL.task})`);
             }
-            row.push(`${width}:${m.sw}${over > 0 ? (residual ? "~" : "!") : ""}`);
+            row.push(`${width}:${m.sw}${over > 0 ? "!" : ""}`);
           }
           process.stdout.write(`   ${r.name}/${theme}  ${row.join(" ")}\n`);
         }
       }
       if (!failures.some((f) => f.defect === D)) {
         okLine(
-          `${cells - 2} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
+          `${cells} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
           ` (769/899 are the band edges, 900/1024 the controls above it); ${misrouted} misrouted;` +
-          ` the 2 marked ~ are #fleet@769's ${FLEET_ROW_RESIDUAL.max}px .fleet-row residual, NOT claimed by this slice (${FLEET_ROW_RESIDUAL.task})`,
+          ` no exemptions — #fleet's W13 residual was paid by W14-S3 and its pin is gone`,
         );
       }
     }

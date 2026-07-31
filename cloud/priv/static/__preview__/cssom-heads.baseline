@@ -110,4 +110,24 @@
 # FOR THE LEAD: sibling slices in W14 also touch app.css. Re-measure on the merge
 # (charter D158 REGENERATE-ON-REBASE) — a down-bump and an up-bump merge clean and
 # wrong, and this one is the only entry here that can be mistaken for a swallow.
+# Re-measured 2026-07-31 (cch-w14-s3-fleet-row-band-899-split, at BUILD): 1243
+# authored heads, CSSOM style rules 1243, MISSES 0, PARITY PASS — MEASURED by running
+# cssom-parity.mjs on this branch's bytes (app.css 213560 B, sha256 4923f236f8bd…),
+# not carried forward. THE COUNT DID NOT MOVE AND THAT IS THE POINT: this slice is a
+# MOVE, not an add — `.fleet-row` and `.fleet-badges` left the `@media (max-width:
+# 768px)` block and landed in the existing `@media (max-width: 899px)` block, so two
+# rule heads changed WHICH block they live in and none was created or destroyed. The
+# W13-S4 entries above are the precedent for saying an unchanged number out loud
+# rather than staying silent and letting the next reader wonder whether it was
+# measured at all.
+# LEAD RESOLUTION 2026-07-31 (merge of cch-w14-s2 and cch-w14-s3): the two records
+# above collided in this file and BOTH ARE KEPT — s2's deliberate MINUS TWO and s3's
+# net-zero MOVE are separate facts about separate commits, and picking a side would
+# erase one of them. The number below was NOT derived by adding them. It was
+# RE-MEASURED on the merged tree by running cssom-parity.mjs here: Chrome
+# 150.0.7871.187, node v22.22.0, app.css 221362 B sha256 31d8444f729b…, authored rule
+# heads 1241 == CSSOM style rules 1241, flattened selectors 1209/1209, MISSES 0.
+# s2's own warning is why this was measured rather than reasoned: "a down-bump and an
+# up-bump merge clean and wrong". They did merge clean, and the answer is s2's number,
+# because s3 moved two heads between @media blocks without creating or destroying one.
 1241
