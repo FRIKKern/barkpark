@@ -242,6 +242,9 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		return exitGeneric
 	}
 	if status >= 200 && status < 300 {
+		if code, refused := refuseUnreadableDefaultPage(out, cmd, status, respBody); refused {
+			return code
+		}
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
 		emitHelpHints(out, respBody)
 	}
@@ -318,6 +321,64 @@ func topLevelHelpStrings(body []byte) []string {
 		}
 	}
 	return hs
+}
+
+// unreadableListPageHint is the one wording both list-page refusals share —
+// the --all walk (runPaginatedAll) and the DEFAULT single page
+// (refuseUnreadableDefaultPage). It names the transport, not the query,
+// because that is what an unreadable 200 always means.
+const unreadableListPageHint = "the transport, not the query: a proxy/gateway page, a truncated or non-Barkpark response. Retry, then check the server URL and that the API is up."
+
+// refuseUnreadableDefaultPage is the DEFAULT-read half of the PDS reader law
+// (wave 28): no bp verb may report success on an exit code alone. Wave 27
+// taught the --all walk to refuse an HTTP-200 body it cannot read as a list
+// envelope, but that refusal sits behind `cmd.Paginated && g.all && !cmd.Writes`
+// and --all is the RARE invocation. The DEFAULT single-page read — what every
+// `bp task ready` / `bp doc ls` actually runs — laundered all nine of wave 27's
+// poisons into rc=0: `-o minimal` printed the literal word "ok" over `null`, an
+// unknown envelope and `{}`; `-o json` printed an ERROR ENVELOPE as a
+// successful body; `-o table` printed nothing at all for `{}`. Twenty-four of
+// twenty-seven poison×shape runs said nothing on any channel.
+//
+// The sentinel was already computed one line below and thrown away:
+// warnIfDefaultPageMayBeTruncated does `rows, _ := extractListRows(…)` and then
+// goes quiet on exactly these bodies, because an unreadable body yields 0 rows
+// and 0 < limit.
+//
+// PLACEMENT IS LOAD-BEARING (PDS-D396). It lives HERE, at runCommand's post-2xx
+// hook — the one site proven to fire in all four output shapes — and NOT:
+//
+//   - in renderMinimal, where extractListRows returns the "" sentinel for five
+//     of seven REAL write receipts (the mutate transaction receipt, the
+//     {ok,doc} claim receipt, {ok:false,reason}, the workspace-create slug
+//     receipt, the publish {rev,id} receipt), so a fence there would red every
+//     write verb in the CLI — measured, not feared
+//     (TestExtractListRowsBlindToWriteReceipts);
+//   - behind the neighbour's `g.limitSet` skip, which would let
+//     `bp task ready --limit 5` against a proxy 502 stay silent — the same lie
+//     one flag away;
+//   - behind `g.all`, which already returned at the runPaginatedAll branch.
+//
+// Honest reads are untouched: every one of the seven `paginated: true` commands
+// emits a key listEnvelopeKeys knows (TestPaginatedCommandsUseKnownEnvelopeKeys
+// re-derives that population from the API source), and an EMPTY array still
+// matches its key — a genuinely empty queue is readable, and stays rc=0.
+func refuseUnreadableDefaultPage(out *writer, cmd manifest.Command, status int, respBody []byte) (int, bool) {
+	if !cmd.Paginated || cmd.Writes {
+		return 0, false
+	}
+	if _, key := extractListRows(unwrapResult(respBody)); key != "" {
+		return 0, false
+	}
+
+	msg := fmt.Sprintf(
+		"unreadable list page: HTTP %d carried no known list envelope (%d bytes): %s",
+		status, len(respBody), bodyPreview(respBody),
+	)
+	if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", unreadableListPageHint) {
+		out.userErr("%s", msg)
+	}
+	return exitGeneric, true
 }
 
 // warnIfDefaultPageMayBeTruncated keeps the normal single-page path honest: a
@@ -1490,8 +1551,7 @@ func runPaginatedAll(out *writer, cmd manifest.Command, baseURL string, headers 
 				"unreadable list page at offset %d: HTTP %d carried no known list envelope (%d bytes): %s",
 				offset, status, len(respBody), bodyPreview(respBody),
 			)
-			hint := "the transport, not the query: a proxy/gateway page, a truncated or non-Barkpark response. Retry, then check the server URL and that the API is up."
-			if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", hint) {
+			if !renderErrorEnvelope(out, "unreadable_list_page", msg, "", unreadableListPageHint) {
 				out.userErr("%s", msg)
 			}
 			return exitGeneric

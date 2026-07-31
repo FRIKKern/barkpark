@@ -603,3 +603,197 @@ func TestBodyPreviewTruncatesOnRuneBoundary(t *testing.T) {
 		t.Fatalf("empty body must be named, not rendered as an empty string")
 	}
 }
+
+// unreadableDefaultPagePoisons is wave 27's poison table, RE-POINTED at the
+// DEFAULT single-page read. Every body arrives at HTTP 200 — a status code has
+// never been proof the payload came from Barkpark.
+var unreadableDefaultPagePoisons = []struct{ name, body string }{
+	{"proxy_502_html", `<html><head><title>502 Bad Gateway</title></head><body>502</body></html>`},
+	{"json_null", `null`},
+	{"ok_false_error_envelope", `{"ok":false,"error":{"code":"upstream_down","message":"nope"}}`},
+	{"unknown_envelope_key", `{"widgets":[{"a":1},{"b":2}]}`},
+	{"zero_bytes", ``},
+	{"result_null", `{"result":null}`},
+	{"empty_object", `{}`},
+	{"bare_array", `[{"a":1}]`},
+	{"plaintext", `service temporarily unavailable`},
+}
+
+// TestRunCommandRefusesUnreadableDefaultPage is the PDS wave-28 lock, and it
+// closes a strictly BIGGER hole than the wave-27 one above it: that refusal is
+// reachable only behind `cmd.Paginated && g.all && !cmd.Writes`, and `--all` is
+// the RARE invocation. This is the DEFAULT read — what `bp task ready` and
+// `bp doc ls` actually run.
+//
+// MEASURED ON origin/main BEFORE THE FIX: all nine poisons across the three
+// output shapes = 27 runs, exit 0 in 27 of 27, and 24 of the 27 said NOTHING on
+// any channel. `-o minimal` — the agent shape — printed the literal word "ok"
+// over `null`, an unknown envelope, `{"result":null}` and `{}`, and "not ok" at
+// rc=0 over an error envelope; `-o json` printed that error envelope as a
+// successful body; `-o table` printed the empty string at rc=0 for `{}`.
+func TestRunCommandRefusesUnreadableDefaultPage(t *testing.T) {
+	for _, tc := range unreadableDefaultPagePoisons {
+		for _, shape := range []string{"json", "table", "minimal"} {
+			t.Run(tc.name+"/"+shape, func(t *testing.T) {
+				stdout, stderr, code := runPageResponse(t, shape, globals{}, paginatedReadCommand(100), tc.body)
+				if code != exitGeneric {
+					t.Fatalf("exit = %d, want %d — an HTTP-200 anomaly reported as success; stdout=%q stderr=%q",
+						code, exitGeneric, stdout, stderr)
+				}
+				if strings.Contains(stdout, `"ok":true`) || strings.TrimSpace(stdout) == "ok" {
+					t.Fatalf("refusal still rendered a success receipt: stdout=%q", stdout)
+				}
+				// json/yaml carry the MACHINE-READABLE named code on stdout;
+				// table/minimal get the same wording on stderr (renderErrorEnvelope
+				// declines the human shapes) — the wave-27 contract, unchanged.
+				if shape == "json" {
+					var envelope struct {
+						OK    bool `json:"ok"`
+						Error struct {
+							Code    string `json:"code"`
+							Message string `json:"message"`
+							Hint    string `json:"hint"`
+						} `json:"error"`
+					}
+					if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+						t.Fatalf("error output not JSON: %v\n%s", err, stdout)
+					}
+					if envelope.OK || envelope.Error.Code != "unreadable_list_page" {
+						t.Fatalf("want named refusal unreadable_list_page, got: %s", stdout)
+					}
+					if !strings.Contains(envelope.Error.Hint, "the transport, not the query") {
+						t.Fatalf("refusal must point at the transport: %q", envelope.Error.Hint)
+					}
+					if !strings.Contains(envelope.Error.Message, "HTTP 200") {
+						t.Fatalf("message must name the status that lied: %q", envelope.Error.Message)
+					}
+				} else if !strings.Contains(stderr, "unreadable list page") {
+					t.Fatalf("%s shape said nothing readable on stderr: %q", shape, stderr)
+				}
+			})
+		}
+	}
+
+	// CONTROLS — a fence that reds an honest read is a regression, not a fix.
+	// Both stay rc=0 with the SAME stdout the unfenced reader produced (these
+	// literals were captured from the before-run).
+	controls := []struct{ name, body, shape, wantStdout string }{
+		{"genuinely_empty_queue", `{"docs":[],"count":0}`, "json", `{"count":0,"docs":[]}`},
+		{"genuinely_empty_queue", `{"docs":[],"count":0}`, "table", "(no rows)\n\ncount: 0"},
+		{"genuinely_empty_queue", `{"docs":[],"count":0}`, "minimal", "ok"},
+		{"populated_queue", `{"docs":[{"_id":"task-1"}],"count":1}`, "json", `{"count":1,"docs":[{"_id":"task-1"}]}`},
+		{"populated_queue", `{"docs":[{"_id":"task-1"}],"count":1}`, "table", "_id\n------\ntask-1\n\ncount: 1"},
+		{"populated_queue", `{"docs":[{"_id":"task-1"}],"count":1}`, "minimal", "id: task-1"},
+	}
+	for _, tc := range controls {
+		t.Run("control/"+tc.name+"/"+tc.shape, func(t *testing.T) {
+			stdout, stderr, code := runPageResponse(t, tc.shape, globals{}, paginatedReadCommand(100), tc.body)
+			if code != exitOK {
+				t.Fatalf("exit = %d, want %d — the fence reddened an honest read; stderr=%q", code, exitOK, stderr)
+			}
+			if strings.TrimSpace(stdout) != tc.wantStdout {
+				t.Fatalf("stdout drifted from the pre-fence bytes:\n got %q\nwant %q", strings.TrimSpace(stdout), tc.wantStdout)
+			}
+		})
+	}
+}
+
+// TestRunCommandUnreadableDefaultPagePreviewIsRuneSafe carries the
+// bodyPreview rune-boundary guarantee THROUGH the default-read fence. A
+// localised proxy interstitial (Norwegian, Japanese, …) is exactly the body
+// this message exists to identify, and it is long and non-ASCII — a byte cut
+// would hand the operator U+FFFD noise as the one piece of evidence the
+// refusal carries.
+func TestRunCommandUnreadableDefaultPagePreviewIsRuneSafe(t *testing.T) {
+	body := `<html><head><title>502 Feil gateway</title></head><body>` +
+		strings.Repeat("Tjenesten er midlertidig utilgjengelig. Prøv igjen senere. ", 4) +
+		`</body></html>`
+
+	stdout, _, code := runPageResponse(t, "json", globals{}, paginatedReadCommand(100), body)
+	if code != exitGeneric {
+		t.Fatalf("exit = %d, want %d; stdout=%q", code, exitGeneric, stdout)
+	}
+	var envelope struct {
+		Error struct {
+			Code    string `json:"code"`
+			Message string `json:"message"`
+		} `json:"error"`
+	}
+	if err := json.Unmarshal([]byte(stdout), &envelope); err != nil {
+		t.Fatalf("error output not JSON: %v\n%s", err, stdout)
+	}
+	if envelope.Error.Code != "unreadable_list_page" {
+		t.Fatalf("want unreadable_list_page, got %q", envelope.Error.Code)
+	}
+	if !utf8.ValidString(envelope.Error.Message) || strings.ContainsRune(envelope.Error.Message, utf8.RuneError) {
+		t.Fatalf("preview spliced a rune: %q", envelope.Error.Message)
+	}
+	if !strings.Contains(envelope.Error.Message, "502 Feil gateway") {
+		t.Fatalf("preview dropped the identifying head of the page: %q", envelope.Error.Message)
+	}
+	if !strings.HasSuffix(envelope.Error.Message, "…") {
+		t.Fatalf("a 300-byte body must be truncated, not dumped whole: %q", envelope.Error.Message)
+	}
+}
+
+// TestRunCommandUnreadableDefaultPageIgnoresLimitFlag pins that the fence does
+// NOT inherit warnIfDefaultPageMayBeTruncated's `g.limitSet` skip. That skip is
+// right for a truncation NOTICE (the caller chose the page size, so a full page
+// is no surprise) and catastrophic for a refusal: `bp task ready --limit 5`
+// against a proxy 502 would go silent again — the same lie, one flag away.
+func TestRunCommandUnreadableDefaultPageIgnoresLimitFlag(t *testing.T) {
+	for _, g := range []globals{{}, {limit: 5, limitSet: true}, {limit: 0, limitSet: true}} {
+		stdout, stderr, code := runPageResponse(t, "json", g, paginatedReadCommand(100),
+			`<html><head><title>502 Bad Gateway</title></head><body>502</body></html>`)
+		if code != exitGeneric {
+			t.Fatalf("limitSet=%v: exit = %d, want %d; stdout=%q stderr=%q", g.limitSet, code, exitGeneric, stdout, stderr)
+		}
+		if !strings.Contains(stdout, "unreadable_list_page") {
+			t.Fatalf("limitSet=%v: want the named refusal, got %q", g.limitSet, stdout)
+		}
+	}
+}
+
+// TestRunCommandUnreadableFenceIsPaginatedReadsOnly pins the two gates the
+// fence carries. A NON-paginated read (`bp doc get`) legitimately returns a
+// single document with no list envelope, and a paginated WRITE receipt is not a
+// list at all — fencing either would red honest traffic.
+func TestRunCommandUnreadableFenceIsPaginatedReadsOnly(t *testing.T) {
+	body := `{"_id":"doc-1","title":"a document"}`
+
+	if _, stderr, code := runPageResponse(t, "json", globals{}, nonPaginatedReadCommand(), body); code != exitOK {
+		t.Fatalf("non-paginated read reddened: exit = %d, stderr=%q", code, stderr)
+	}
+	if _, stderr, code := runPageResponse(t, "json", globals{yes: true}, paginatedWriteCommand(100), `{"rev":"abc123","id":"doc-1"}`); code != exitOK {
+		t.Fatalf("write receipt reddened: exit = %d, stderr=%q", code, stderr)
+	}
+}
+
+// TestExtractListRowsBlindToWriteReceipts is the MEASUREMENT behind the
+// placement decision (PDS-D396): the fence must not live in renderMinimal.
+// extractListRows returns the "" sentinel — the exact signal the fence refuses
+// on — for five REAL write receipts, so a fence in the minimal renderer would
+// red every write verb in the CLI. Each receipt must still render.
+func TestExtractListRowsBlindToWriteReceipts(t *testing.T) {
+	receipts := []struct{ name, body string }{
+		{"mutate transaction receipt", `{"transactionId":"txn-1","results":[{"id":"doc-1","operation":"update"}]}`},
+		{"claim {ok,doc} receipt", `{"ok":true,"doc":{"doc_id":"task-1","claim":{"epoch":3}}}`},
+		{"empty-queue {ok:false,reason}", `{"ok":false,"reason":"no_ready"}`},
+		{"workspace-create slug receipt", `{"workspace":{"slug":"acme","name":"Acme"}}`},
+		{"publish {rev,id} receipt", `{"rev":"abc123","id":"doc-1"}`},
+	}
+	for _, tc := range receipts {
+		t.Run(tc.name, func(t *testing.T) {
+			if rows, key := extractListRows(unwrapResult([]byte(tc.body))); key != "" {
+				t.Fatalf("extractListRows read a list envelope %q (%d rows) out of a write receipt — the premise of the placement decision has changed; re-audit whether renderMinimal is now a safe fence site", key, len(rows))
+			}
+			var stdout, stderr bytes.Buffer
+			out := newWriter(&stdout, &stderr)
+			out.output = "minimal"
+			renderMinimal(out, unwrapResult([]byte(tc.body)))
+			if strings.TrimSpace(stdout.String()) == "" {
+				t.Fatalf("write receipt rendered nothing under -o minimal: stderr=%q", stderr.String())
+			}
+		})
+	}
+}
