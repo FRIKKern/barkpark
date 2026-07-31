@@ -3089,16 +3089,20 @@ test("newStepsHtml: an active MEASURED step carries the ring dot, the live pace 
     "</ul>");
 });
 
-test("newStepsHtml: an active PLANNED step keeps the ring and the caption but quotes NO pace it cannot back", () => {
+// cch-w14-s5 re-pin: the RING is provenance-gated too. A planned active row has
+// no measured budget to sweep against, so it drops data-ring and --p and marks
+// the DOT `data-ring-unpaced` — the stylesheet renders the indeterminate pulse.
+// The row's own class vocabulary (`new-step active`) is untouched.
+test("newStepsHtml: an active PLANNED step drops the determinate ring and quotes NO pace it cannot back", () => {
   const html = hooks.newStepsHtml([
     { step: "create", label: "Creating your server", role: "active", elapsedMs: 1000, caption: "Booting", probes: [] },
   ]);
   // Same row, no provenance → the "· ~15s" half of the pace column is gone and
-  // the live elapsed stands alone. Nothing else about the row moves.
+  // the live elapsed stands alone, and the ring is indeterminate.
   assert.equal(html,
     '<ul class="new-steps">' +
       '<li class="new-step active" data-step="create">' +
-        '<span class="new-step-dot" aria-hidden="true" data-ring="create" style="--p:6%"></span>' +
+        '<span class="new-step-dot" aria-hidden="true" data-ring-unpaced></span>' +
         '<span class="new-step-body">' +
           '<span class="new-step-label">Creating your server</span>' +
           '<span class="new-step-detail" data-cap="Booting">Booting</span>' +
@@ -3109,6 +3113,9 @@ test("newStepsHtml: an active PLANNED step keeps the ring and the caption but qu
     "</ul>");
   // And provenance is carried on the ROW, never emitted as markup.
   assert.doesNotMatch(html, /paceSource|data-pace/);
+  // No determinate sweep survives anywhere in the row — neither the hook the
+  // ticker patches nor the custom property it patches it with.
+  assert.doesNotMatch(html, /data-ring="|--p:/);
 });
 
 test("newStepsHtml: a done step is a check with the real elapsed, no spinner and no caption — identical under either provenance", () => {

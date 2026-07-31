@@ -130,4 +130,23 @@
 # s2's own warning is why this was measured rather than reasoned: "a down-bump and an
 # up-bump merge clean and wrong". They did merge clean, and the answer is s2's number,
 # because s3 moved two heads between @media blocks without creating or destroying one.
-1241
+# Re-measured 2026-07-31 (cch-w14-s5-planned-rail-and-ticker, at BUILD): 1245 authored
+# heads, MISSES 0 — MEASURED by running cssom-parity.mjs on this branch off origin/main
+# (which read 1243), not hand-incremented. The +2 are the indeterminate active dot:
+# `.new-step.active .new-step-dot[data-ring-unpaced]` plus its prefers-reduced-motion
+# twin, both new heads with no prior rule. MISSES 0 confirms an unrecorded ADD, not a
+# parity defect. Siblings in wave 14 that also touch app.css will collide on this
+# number exactly as S3/S4/S5 did last wave — RE-MEASURE on the merged tree (D158
+# REGENERATE-ON-REBASE); do not add 2 to whatever lands first.
+# LEAD RESOLUTION 2026-08-01 (merge of cch-w14-s5 onto the s2+s3 result): the third
+# collision in this file this wave, resolved the same way — BOTH prose records kept,
+# the number RE-MEASURED rather than reconciled. NEITHER SIDE'S NUMBER WAS RIGHT: the
+# merged-main record above said 1241 and this slice's own build record said 1245, and
+# the merged tree measures 1243. That is exactly the failure s2 warned about in
+# writing ("a down-bump and an up-bump merge clean and wrong"), reproduced a second
+# time, and it is why this file is never allowed to carry an arithmetic answer.
+# MEASURED here by running cssom-parity.mjs on the rebased tree: Chrome
+# 150.0.7871.187, node v22.22.0, app.css 222460 B sha256 480fe6ad1e7a…, authored rule
+# heads 1243 == CSSOM style rules 1243, flattened selectors 1210/1210, MISSES 0,
+# PARITY PASS. s5 is a net PLUS TWO over the 1241 that s2 and s3 left on main.
+1243

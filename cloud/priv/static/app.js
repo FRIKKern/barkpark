@@ -13763,6 +13763,16 @@
     // facts about what happened, not predictions about what will.
     var planned = rows.length > 0 && !allDone && !failed &&
       rows.some(function (r) { return !rowPaceIsMeasured(r); });
+    // …and the BAR ITSELF is a presentation. Withholding aria-valuenow while
+    // still painting a duration-weighted fill announces nothing to a screen
+    // reader and shows a determinate 78% to an eye reading "Step 3 of 5" — the
+    // lie the person cannot see to discount. A planned run therefore fills by
+    // COUNT (finished rows / rows), the same fact the headline already states.
+    if (planned) {
+      var doneCount = 0;
+      for (var d = 0; d < rows.length; d++) if (rows[d].role === "ok") doneCount++;
+      pct = (doneCount / rows.length) * 100;
+    }
     return {
       pct: allDone ? 100 : Math.min(Math.round(pct), 99), // never 100 until truly done
       index: activeIdx >= 0 ? activeIdx + 1 : (allDone ? rows.length : Math.min(1, rows.length)),
@@ -14066,9 +14076,21 @@
       var expected = row.expectedMs != null ? row.expectedMs : SERVER_STEP_EXPECTED_MS[row.step];
       var dotAttrs = ' aria-hidden="true"';
       if (row.role === "active") {
-        var pct = Math.round(stepRingProgress(row.elapsedMs, expected) * 100);
-        if (row.completing) pct = Math.max(pct, 34); // sweep starts visibly, never from empty
-        dotAttrs = ' aria-hidden="true" data-ring="' + esc(row.step) + '" style="--p:' + pct + '%"';
+        // The ring is a MEASUREMENT: a sweep against a budget nobody measured
+        // is a determinate picture of an invented constant. An unpaced active
+        // row therefore drops data-ring and --p entirely and marks the DOT
+        // (never the <li> — the row's classes are the state vocabulary) so the
+        // stylesheet can render the tree's shipped indeterminate idiom: solid
+        // accent border + the `next` pulse. A `completing` row keeps its ring —
+        // its sweep is a fact (the step finished, the dwell is running out),
+        // the same exemption allDone already earns.
+        if (!rowPaceIsMeasured(row) && !row.completing) {
+          dotAttrs = ' aria-hidden="true" data-ring-unpaced';
+        } else {
+          var pct = Math.round(stepRingProgress(row.elapsedMs, expected) * 100);
+          if (row.completing) pct = Math.max(pct, 34); // sweep starts visibly, never from empty
+          dotAttrs = ' aria-hidden="true" data-ring="' + esc(row.step) + '" style="--p:' + pct + '%"';
+        }
       }
       var cap = skipped ? "" : (row.caption || (row.next ? "Starting…" : ""));
       var capHtml = cap
@@ -14333,21 +14355,35 @@
   // against its estimate. Zero DOM rebuilds.
   function tickActiveRing(scope, truthRows) {
     if (!scope || !scope.querySelector) return;
+    truthRows = truthRows || [];
     var dot = scope.querySelector(".new-step-dot[data-ring]");
-    if (!dot) return;
-    var li = dot.parentNode;
-    if (li && li.className && li.className.indexOf("completing") !== -1) {
-      var cur = parseInt(dot.style.getPropertyValue("--p"), 10) || 0;
-      dot.style.setProperty("--p", Math.min(100, cur + 34) + "%");
-      return;
+    if (dot) {
+      var li = dot.parentNode;
+      if (li && li.className && li.className.indexOf("completing") !== -1) {
+        var cur = parseInt(dot.style.getPropertyValue("--p"), 10) || 0;
+        dot.style.setProperty("--p", Math.min(100, cur + 34) + "%");
+        return;
+      }
     }
-    var step = dot.getAttribute("data-ring");
+    // The LIVE ELAPSED column belongs to the ROW, not to the ring: an unpaced
+    // active step renders an indeterminate dot with no data-ring, and its clock
+    // must keep ticking anyway (behind the ring guard it froze at whatever the
+    // last rebuild painted, while every clock around it advanced).
+    var timeEl = scope.querySelector(".new-step-time[data-time]");
+    var step = dot ? dot.getAttribute("data-ring") : (timeEl && timeEl.getAttribute("data-time"));
+    if (!step) return;
+    var tEl = scope.querySelector('.new-step-time[data-time="' + step + '"]');
     for (var i = 0; i < truthRows.length; i++) {
       if (truthRows[i].step !== step || truthRows[i].role !== "active") continue;
       var expected = truthRows[i].expectedMs != null ? truthRows[i].expectedMs : SERVER_STEP_EXPECTED_MS[step];
-      dot.style.setProperty("--p", Math.round(stepRingProgress(truthRows[i].elapsedMs, expected) * 100) + "%");
-      var tEl = scope.querySelector('.new-step-time[data-time="' + step + '"]');
-      if (tEl) tEl.textContent = fmtDur(truthRows[i].elapsedMs) + (expected ? " · ~" + fmtDur(expected) : "");
+      if (dot) dot.style.setProperty("--p", Math.round(stepRingProgress(truthRows[i].elapsedMs, expected) * 100) + "%");
+      // The SAME provenance gate newStepsHtml applies: gating on `expected`
+      // alone let the ticker paint the planned "~35s" back one second after the
+      // honest render removed it.
+      if (tEl) {
+        var paced = rowPaceIsMeasured(truthRows[i]) && expected;
+        tEl.textContent = fmtDur(truthRows[i].elapsedMs) + (paced ? " · ~" + fmtDur(expected) : "");
+      }
       return;
     }
   }
