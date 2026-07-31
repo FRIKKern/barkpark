@@ -111,6 +111,28 @@ build_healthy() {
   page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
 }
 
+# THE HOSTILE WORKING DIRECTORY. `plant_stray <path> <module>` writes a stray
+# copy of a stdlib module that the census imports transitively. It is FAITHFUL
+# on purpose: it announces itself on stderr and then loads the REAL module off
+# the stdlib path and re-exports it, so the census keeps working and its exit
+# code stays correct. That is the dangerous shape -- 23 of the 49 names reachable
+# from this census's imports execute a stray's top level while the run still
+# exits 0 -- and it is why the isolation check cannot be an exit-code assertion.
+STRAY_SENTINEL='PDS-STRAY-EXECUTED'
+plant_stray() {
+  local path=$1 module=$2
+  cat > "$path" <<STRAYEOF
+import sys
+sys.stderr.write("$STRAY_SENTINEL $module\n")
+import importlib.util, os, os.path
+_real = os.path.join(os.path.dirname(os.__file__), "$module.py")
+_spec = importlib.util.spec_from_file_location("_pds_real_$module", _real)
+_mod = importlib.util.module_from_spec(_spec)
+_spec.loader.exec_module(_mod)
+globals().update({k: v for k, v in vars(_mod).items() if not k.startswith("__")})
+STRAYEOF
+}
+
 # --- assertion helpers --------------------------------------------------------
 
 expect_status() {
@@ -250,6 +272,43 @@ expect_json_stdout() {
   printf '  ok    %-52s exit %d  (%s ok, %s bytes on stdout)\n' "$label" "$got" "$validator" "$bytes"
 }
 
+# THE INTERPRETER LAUNCH IS PART OF THE CONTRACT, AND ONLY THIS HELPER CAN SEE
+# IT. The census feeds its program to python3 on STDIN, which puts the CURRENT
+# WORKING DIRECTORY on sys.path[0] unless the interpreter is started isolated --
+# so any *.py in the CWD whose name collides with a module the census imports
+# transitively is EXECUTED by the instrument that certifies this epic's round.
+# The exit code cannot see that: a faithful stray leaves every code path and
+# every status correct and merely runs first. So this check asserts BOTH halves,
+# the census's own exit code AND the absence of the stray's sentinel, and plants
+# TWO strays reached by two different import chains, so a green here is a
+# property of how the interpreter is launched and not of one module's name.
+expect_isolated() {
+  local label=$1 want=$2
+  shift 2
+  CHECKS=$((CHECKS + 1))
+  local got=0 hits
+  local hostile="$TMP/hostile.$CHECKS"
+  mkdir -p "$hostile"
+  plant_stray "$hostile/bisect.py" bisect
+  plant_stray "$hostile/random.py" random
+  local out="$TMP/hostile-out.$CHECKS"
+  ( cd "$hostile" && "$@" ) > "$out" 2>&1 || got=$?
+  hits=$(grep -cF -- "$STRAY_SENTINEL" "$out" || true)
+  if [[ $got -ne $want ]]; then
+    printf 'SELFTEST FAIL: %s — expected exit %d, got %d (from a CWD holding stray bisect.py/random.py)\n%s\n' \
+      "$label" "$want" "$got" "$(cat "$out")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  if [[ $hits -ne 0 ]]; then
+    printf 'SELFTEST FAIL: %s — exit %d was right but the census EXECUTED %d stray module(s) it found in the working directory; a correct exit code proves nothing when foreign code ran first\n%s\n' \
+      "$label" "$got" "$hits" "$(cat "$out")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  printf '  ok    %-52s exit %d  (0 strays executed)\n' "$label" "$got"
+}
+
 run() {
   bash "$CENSUS" --root "$ROOT_SLUG" --pace 0 --retries 0 "$@"
 }
@@ -285,6 +344,9 @@ expect_output_contains "no off-vocabulary dispositions" "(none)" \
 # The done-condition must be able to be GREEN too. A predicate that is red on
 # everything is not a predicate.
 expect_status "--assert-round-done PASSES on a clean board" 0 \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done
+# ...and it must green WITHOUT executing anything it happens to find next to it.
+expect_isolated "a shadowed CWD is neither read nor run" 0 \
   run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done
 echo
 

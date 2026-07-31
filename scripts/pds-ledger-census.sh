@@ -288,7 +288,7 @@ if ! command -v python3 >/dev/null 2>&1; then
   exit 3
 fi
 
-exec python3 - "$@" <<'PYEOF'
+exec python3 -I - "$@" <<'PYEOF'
 import argparse
 import hashlib
 import json
