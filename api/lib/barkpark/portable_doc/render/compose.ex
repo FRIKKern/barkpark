@@ -1252,6 +1252,26 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.chart_email_html(b)}
   end
 
+  # duel / lineage (jdf-bl-historiene-renderer-reconciliation): the jarl figure
+  # family — a two-arm comparison table and dated nodes on a line. Both carry
+  # THE KILDE LAW: every datum's source ref (commit:|paper:|task:|https://)
+  # surfaces as the «kilde» stamp, in :article and email alike.
+  def compose_block(%{"type" => "duel"} = b, :article) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.duel_html(b)}
+  end
+
+  def compose_block(%{"type" => "duel"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.duel_email_html(b)}
+  end
+
+  def compose_block(%{"type" => "lineage"} = b, :article) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.lineage_html(b)}
+  end
+
+  def compose_block(%{"type" => "lineage"} = b, _style) do
+    %{"kind" => "_raw", "html" => Barkpark.PortableDoc.Render.DataViz.lineage_email_html(b)}
+  end
+
   # scaffy:add-block-type Tabs MARK:ex-compose-tabs
   # tabs (B052): tabbed panels of child blocks, switched in the browser — I1
   # dual hydration (client.ts + the PaperMermaid-sibling hook in

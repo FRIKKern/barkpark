@@ -341,13 +341,15 @@ const CANVAS_FLEET_NODE_NAME = "bpFleet";
 // catch-all for these kinds). D4: deliberately ABSENT from slash-insert.js
 // CANVAS_SLASH_TYPES (data-bearing, API-authored).
 // KEEP LOCKSTEP with paper_canvas.ex @canvas_dataviz_types and
-// shared/paper.ex @dataviz_render_types (5 kinds in every one).
+// shared/paper.ex @dataviz_render_types (7 kinds in every one).
 const CANVAS_DATAVIZ_TYPES = new Set([
   "stat",
   "stats",
   "stat-grid",
   "heatmap",
   "chart",
+  "duel",
+  "lineage",
 ]);
 
 // editable-figure: the `figure` block the canvas handles as a SERVER-PAINTED

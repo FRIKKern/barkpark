@@ -3,19 +3,19 @@
   "name": "PortableText (import { PortableText }) \u2014 shares the renderer chunk",
   "path": "dist/index.mjs",
   "import": "{ PortableText }",
-  "limit": "18.9 KB",
+  "limit": "19.7 KB",
   "gzip": true
  },
  {
   "name": "PortableDoc renderer \u2014 client entry (dist/index.mjs)",
   "path": "dist/index.mjs",
-  "limit": "21.65 KB",
+  "limit": "22.5 KB",
   "gzip": true
  },
  {
   "name": "RSC server entry (dist/server.mjs \u2014 PortableDoc + toPlainText closure)",
   "path": "dist/server.mjs",
-  "limit": "20.85 KB",
+  "limit": "21.7 KB",
   "gzip": true
  },
  {

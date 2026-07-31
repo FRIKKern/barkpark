@@ -324,12 +324,14 @@ const FLEET_KIND_LABELS = {
   asciicast: "Terminal cast",
   form: "Form",
   questionnaire: "Questionnaire",
-  // pd-ee-dataviz-editors: the 5 data-viz kinds ride the same bpFleet paint.
+  // pd-ee-dataviz-editors: the 7 data-viz kinds ride the same bpFleet paint.
   stat: "Stat",
   stats: "Stats",
   "stat-grid": "Stat grid",
   heatmap: "Heatmap",
   chart: "Chart",
+  duel: "Duel",
+  lineage: "Lineage",
 };
 
 export function fleetChipLabel(block) {
@@ -469,9 +471,14 @@ const FLEET_QUERY_KINDS = new Set([
 // object; parse writes ONLY the enumerated keys (present → set, absent → delete),
 // so id/type/anything-else can never be clobbered from the island.
 const FLEET_CONFIG_EDITORS = {
-  stat: { keys: ["value", "label", "max", "denom", "spark"] },
+  stat: { keys: ["value", "label", "max", "denom", "spark", "unit", "body", "source"] },
   heatmap: { keys: ["cells", "rowLabels", "colLabels", "mode", "marginals", "values"] },
   chart: { keys: ["series", "axes"] },
+  // jdf-bl-historiene-renderer-reconciliation: the jarl figure family — the
+  // whole authored payload (legends + rows / nodes + sourceDefault) edits as
+  // ONE config island; data_viz.ex duel_html/lineage_html read exactly these.
+  duel: { keys: ["legendA", "legendB", "sourceDefault", "rows"] },
+  lineage: { keys: ["sourceDefault", "nodes"] },
 };
 
 // Is this fleet kind editable in-canvas? (status-legend has no authored data;

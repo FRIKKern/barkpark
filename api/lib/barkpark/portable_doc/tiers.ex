@@ -152,6 +152,8 @@ defmodule Barkpark.PortableDoc.Tiers do
     "stat-grid",
     "heatmap",
     "chart",
+    "duel",
+    "lineage",
     "gauge-list",
     "sheet",
     "embed",

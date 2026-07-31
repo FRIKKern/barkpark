@@ -282,10 +282,10 @@ defmodule BarkparkWeb.Studio.StudioLive.PaperCanvas do
   # alias of `stats` (compose.ex); both are enumerated.
   #
   # MUST stay in LOCKSTEP with run-convert.js CANVAS_DATAVIZ_TYPES and
-  # shared/paper.ex @dataviz_render_types (5 kinds in every one). D4: these kinds are
+  # shared/paper.ex @dataviz_render_types (7 kinds in every one). D4: these kinds are
   # deliberately ABSENT from slash-insert.js CANVAS_SLASH_TYPES (data-bearing,
   # API-authored — an empty slash insert is meaningless).
-  @canvas_dataviz_types ~w(stat stats stat-grid heatmap chart)
+  @canvas_dataviz_types ~w(stat stats stat-grid heatmap chart duel lineage)
 
   # The full set of CANVAS-ELIGIBLE block kinds: prose ∪ canvas atoms ∪ canvas
   # attr-atoms ∪ canvas content nodes ∪ canvas native field control-atoms ∪ canvas
