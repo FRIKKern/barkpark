@@ -30,7 +30,7 @@ EPIC_TAG_SELECTIONS = {
         CANONICAL_EPIC_TAG,
     ],
 }
-SOURCE_TRUTH_AUTHORITY_BOUNDARIES = {
+PAPER_AUTHORITY_BOUNDARIES = {
     "source-of-truth-grip-wave-2026-07-20": (
         "Authority boundary: This Paper remains authority for the Wave 1 "
         "level-skip contract and its first structural gate. Wave 8 carries "
@@ -55,6 +55,27 @@ SOURCE_TRUTH_AUTHORITY_BOUNDARIES = {
         "Authority boundary: This Paper remains authority for the Wave 5 "
         "corpus-migration attempt and its recorded limits. Wave 8 carries the "
         "current epic state and finishing verdict."
+    ),
+    "wsc-wave-2026-07-17": (
+        "Editorial status (historical authority): Wave 2 remains authority for "
+        "the reviewed s3 salvage and the D16 cross-surface seam. Wave 4 carries "
+        "the current cockpit results and D46 steering decision."
+    ),
+    "wsc-wave-2026-07-18": (
+        "Authority boundary: This Paper remains authority for the Wave 4 "
+        "cockpit results and D46 fleet-steering decision. Live task state "
+        "remains authoritative for subsequent implementation."
+    ),
+    "cloud-gui-remake-wave-2026-07-21-r12": (
+        "Authority boundary: This Paper is the terminal code-seal authority for "
+        "Cloud GUI Remake. Current follow-on work lives in Cloud Console "
+        "Hardening; the seal does not claim the crown is live or the inherited "
+        "backlog is solved."
+    ),
+}
+PAPER_TITLE_OVERRIDES = {
+    "cloud-gui-remake-wave-2026-07-21-r12": (
+        "Cloud GUI Remake — round 12: the two mechanical acts, and the verdict"
     ),
 }
 SITE_SPAWNER_NOTE_LISTS = {
@@ -98,11 +119,11 @@ def _normalize(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
 
 
-def _apply_source_truth_authority_boundary(
+def _apply_authority_boundary(
     blocks: list[Any],
     paper_id: str,
 ) -> list[Any]:
-    boundary = SOURCE_TRUTH_AUTHORITY_BOUNDARIES.get(paper_id)
+    boundary = PAPER_AUTHORITY_BOUNDARIES.get(paper_id)
     if boundary is None:
         return copy.deepcopy(blocks)
 
@@ -134,7 +155,7 @@ def _apply_source_truth_authority_boundary(
         return repaired
 
     authority_callout = {
-        "id": "epb-source-truth-authority",
+        "id": "epb-authority-boundary",
         "type": "callout",
         "tone": "info",
         "content": [{"type": "text", "value": boundary}],
@@ -982,7 +1003,7 @@ def repair_canonical_epic(
     if not description:
         raise ValueError("canonical Epic Paper requires a meaningful description")
 
-    blocks = _apply_source_truth_authority_boundary(blocks, paper_id)
+    blocks = _apply_authority_boundary(blocks, paper_id)
     source_leaves = _visible_leaf_texts(blocks)
     # Generated appendix summaries are repair chrome, not authored evidence.
     # A corrective pass may renumber or unwrap them while preserving every
@@ -1096,6 +1117,9 @@ def repair_canonical_epic(
         repaired_title = _normalize(_visible_text(repaired[h1_index]))
         if repaired_title:
             patch_set["title"] = repaired_title
+    title_override = PAPER_TITLE_OVERRIDES.get(paper_id)
+    if title_override is not None and title_override != document.get("title"):
+        patch_set["title"] = title_override
 
     return {
         "mutations": [
