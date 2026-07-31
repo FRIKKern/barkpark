@@ -30,11 +30,33 @@ defmodule Barkpark.Content.DedupWall do
   the combined token set), and the trgm `similarity()` idiom
   (search/documents_retriever.ex) fetches the candidate set cheaply.
 
-  ## Fail-open on the query, fail-closed on the verdict
+  ## When the gate cannot run: it SAYS SO (it does not silently pass)
 
-  Any error fetching candidates yields an EMPTY candidate set → `:ok`. A dedup
-  hiccup must NEVER take down publish — the gate is a guardrail, not a single
-  point of failure. Only a definitively-computed refusal blocks.
+  This used to fail OPEN and silently — the publish-side twin of the bug
+  `Barkpark.Tasks.Dedup` closed: any candidate-fetch error yielded an empty
+  candidate set, so publish answered `200 OK` having never checked for a
+  duplicate. Same lie, same ledger: a verb reporting success on a claim ("this
+  document is not a near-duplicate") it never computed.
+
+  It now fails LOUD, mirroring `Tasks.Dedup`:
+
+    * the candidate fetch carries an explicit `@query_timeout_ms` budget on BOTH
+      the transaction and the queries inside it, so it fails fast and named
+      instead of inheriting Ecto's 15 s default and eating the request's whole
+      DB-checkout budget;
+    * `catch :exit` sits beside the `rescue` — under pool-checkout death the
+      failure arrives as an exit, not an exception, and a rescue-only clause
+      lets it escape as a 500;
+    * a degraded fetch returns `{:error, {:dedup_unavailable, message}}` whose
+      message names what could not be done and how to proceed.
+
+  Escape hatches, both live: a document in the grandfather exemption ledger
+  never reaches E4 at all (`AuthoringWall.dedup_gate/5`), and
+  **`content.dedup_bypass: true`** publishes unchecked, deliberately, with the
+  flag persisting on the document as the trail (same shape as `Tasks.Dedup`).
+
+  Fail-CLOSED on the verdict is unchanged: only a definitively-computed refusal
+  blocks.
 
   ## Same-id republish never trips
 
@@ -69,6 +91,11 @@ defmodule Barkpark.Content.DedupWall do
   @candidate_trgm_floor 0.1
   @candidate_limit 500
 
+  # The candidate scan's own budget, on the transaction AND every query inside
+  # it. Without it the fetch inherits Ecto's 15 s default — the exact window the
+  # pool-saturation incident blew, with the publish INSERT still to pay for.
+  @query_timeout_ms 5_000
+
   # Compact function-word set — a subset of Tasks.Similarity's stopwords, enough
   # for title + tag-name text. Tokens of length <= 2 are also dropped.
   @stopwords MapSet.new(~w(a an the of to for and or in on at by with from is are be this that
@@ -93,9 +120,11 @@ defmodule Barkpark.Content.DedupWall do
   near-duplicate publish; advise-band matches pass (they surface as warnings via
   `check/4`, not by blocking).
 
-  Returns `:ok` or `{:error, {:duplicate_of, payload}}` (→ 409 via `Errors`).
+  Returns `:ok`, `{:error, {:duplicate_of, payload}}` (→ 409 via `Errors`), or
+  `{:error, {:dedup_unavailable, message}}` when the gate could not run.
   """
-  @spec guard(map(), String.t(), String.t(), keyword()) :: :ok | {:error, {:duplicate_of, map()}}
+  @spec guard(map(), String.t(), String.t(), keyword()) ::
+          :ok | {:error, {:duplicate_of, map()}} | {:error, {:dedup_unavailable, String.t()}}
   def guard(doc, type, dataset, opts \\ []) do
     case check(doc, type, dataset, opts) do
       {:error, _} = err -> err
@@ -112,44 +141,100 @@ defmodule Barkpark.Content.DedupWall do
       `[{code, severity, message}]`-shaped list for the mutate success channel.
     * `{:error, {:duplicate_of, payload}}` — a hard duplicate; `payload` carries
       the incumbent published id (`:duplicate_of`) plus the full `:similar` list.
+    * `{:error, {:dedup_unavailable, message}}` — the candidate scan could not
+      run (timeout / pool death); the publish is REFUSED rather than passed
+      unchecked. `content.dedup_bypass: true` is the deliberate escape.
 
-  Fail-open: a candidate-fetch error yields no candidates → `:ok`.
+  Fail-loud: a candidate-fetch error is never silently an empty candidate set.
   """
   @spec check(map(), String.t(), String.t(), keyword()) ::
-          :ok | {:ok, [map()]} | {:error, {:duplicate_of, map()}}
+          :ok
+          | {:ok, [map()]}
+          | {:error, {:duplicate_of, map()}}
+          | {:error, {:dedup_unavailable, String.t()}}
   def check(doc, type, dataset, opts \\ []) do
     ref = to_ref(doc)
 
-    # A document with no textual signal (empty title AND no tags) can't be
-    # judged — let it through rather than compare empty token sets.
-    if MapSet.size(doc_tokens(ref)) == 0 do
-      :ok
-    else
-      candidates = fetch_candidates(ref, type, dataset)
-      assessment = assess(ref, candidates, opts)
+    cond do
+      # A document with no textual signal (empty title AND no tags) can't be
+      # judged — let it through rather than compare empty token sets.
+      MapSet.size(doc_tokens(ref)) == 0 ->
+        :ok
 
-      cond do
-        assessment.refuse != [] ->
-          incumbent = hd(assessment.refuse)
+      # The owner's escape hatch, same shape as Tasks.Dedup: publish unchecked,
+      # deliberately, with the flag persisting on the document as the trail.
+      bypass?(doc) ->
+        :ok
 
-          {:error,
-           {:duplicate_of,
-            %{
-              message:
-                "this document near-duplicates an already-published one — extend it, " <>
-                  "or differentiate this one's title/tags before publishing",
-              duplicate_of: DraftId.published_id(incumbent.id),
-              similar: Enum.map(assessment.refuse, &present/1),
-              advise: Enum.map(assessment.advise, &present/1)
-            }}}
-
-        assessment.advise != [] ->
-          {:ok, Enum.map(assessment.advise, &warning/1)}
-
-        true ->
-          :ok
-      end
+      true ->
+        gate(ref, type, dataset, opts)
     end
+  end
+
+  defp gate(ref, type, dataset, opts) do
+    case fetch_candidates(ref, type, dataset, opts) do
+      {:degraded, reason} ->
+        {:error, {:dedup_unavailable, degraded_message(reason)}}
+
+      {:ok, candidates} ->
+        verdict(ref, candidates, opts)
+    end
+  end
+
+  defp verdict(ref, candidates, opts) do
+    assessment = assess(ref, candidates, opts)
+
+    cond do
+      assessment.refuse != [] ->
+        incumbent = hd(assessment.refuse)
+
+        {:error,
+         {:duplicate_of,
+          %{
+            message:
+              "this document near-duplicates an already-published one — extend it, " <>
+                "or differentiate this one's title/tags before publishing",
+            duplicate_of: DraftId.published_id(incumbent.id),
+            similar: Enum.map(assessment.refuse, &present/1),
+            advise: Enum.map(assessment.advise, &present/1)
+          }}}
+
+      assessment.advise != [] ->
+        {:ok, Enum.map(assessment.advise, &warning/1)}
+
+      true ->
+        :ok
+    end
+  end
+
+  # The escape hatch reads the doc AS SUBMITTED (a Document struct or an attrs
+  # map), so it works on both the publish and the birth path.
+  defp bypass?(%Document{content: content}), do: truthy_bypass?(content)
+
+  defp bypass?(%{} = doc) do
+    case field(doc, :content) do
+      %{} = content -> truthy_bypass?(content)
+      _ -> truthy_bypass?(doc)
+    end
+  end
+
+  defp bypass?(_), do: false
+
+  defp truthy_bypass?(%{} = content) do
+    case Map.get(content, "dedup_bypass") || Map.get(content, :dedup_bypass) do
+      true -> true
+      "true" -> true
+      _ -> false
+    end
+  end
+
+  defp truthy_bypass?(_), do: false
+
+  defp degraded_message(reason) do
+    "publish dedup wall could not complete: #{reason}. The publish was REFUSED " <>
+      "rather than passed unchecked — no duplicate check ran, so nothing here " <>
+      "claims this document is new. Retry, or resend with content.dedup_bypass: " <>
+      "true to publish it deliberately without the duplicate check."
   end
 
   @doc """
@@ -232,10 +317,19 @@ defmodule Barkpark.Content.DedupWall do
     end
   end
 
-  # ── candidate fetch (fail-open) ──────────────────────────────────────────────
+  # ── candidate fetch (bounded, fail-LOUD) ─────────────────────────────────────
 
-  defp fetch_candidates(ref, type, dataset) do
+  # `{:ok, candidates}` or `{:degraded, reason}` — NEVER a silently-empty list.
+  #
+  # The select projects ONLY the tag array out of `content` instead of hauling
+  # the whole JSONB for up to @candidate_limit rows. Detection is UNCHANGED:
+  # scoring reads title + tag NAMES and nothing else, so the rest of the blob
+  # (body, blocks, acceptance criteria …) was pure transfer cost. The trgm
+  # predicate and its ordering are untouched — both run on the `title` COLUMN,
+  # not on the projection, so the GIN index is still the one doing the work.
+  defp fetch_candidates(ref, type, dataset, opts) do
     title = field_str(ref, :title)
+    timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
     incumbent = DraftId.published_id(field_str(ref, :id))
 
     query =
@@ -253,7 +347,7 @@ defmodule Barkpark.Content.DedupWall do
         # cap, so a plan change can never reorder which 500 pass to the scorer. `%`
         # is `>=` (a safe superset of the old strict `>`) — re-scored downstream.
         order_by: [desc: fragment("similarity(?, ?)", d.title, ^title)],
-        select: %{doc_id: d.doc_id, title: d.title, content: d.content},
+        select: %{doc_id: d.doc_id, title: d.title, tags: fragment("?->'tags'", d.content)},
         limit: @candidate_limit
       )
       |> maybe_filter_dataset(dataset)
@@ -264,21 +358,62 @@ defmodule Barkpark.Content.DedupWall do
     # wrap the fetch in an explicit txn and set the threshold FIRST. The literal is
     # interpolated because SET takes no bind params; @candidate_trgm_floor stays the
     # single source of truth.
-    {:ok, rows} =
-      Repo.transaction(fn ->
-        Repo.query!("SET LOCAL pg_trgm.similarity_threshold = #{@candidate_trgm_floor}")
-        Repo.all(query)
-      end)
+    result =
+      Repo.transaction(
+        fn ->
+          Repo.query!(
+            "SET LOCAL pg_trgm.similarity_threshold = #{@candidate_trgm_floor}",
+            [],
+            timeout: timeout
+          )
 
-    Enum.map(rows, &row_to_ref/1)
+          Repo.all(query, timeout: timeout)
+        end,
+        timeout: timeout
+      )
+
+    case result do
+      {:ok, rows} ->
+        {:ok, Enum.map(rows, &row_to_ref/1)}
+
+      # A rolled-back txn is a degraded scan, not an empty corpus. Matching
+      # `{:ok, _}` alone would have shaped this as a MatchError — the right
+      # verdict by accident, with a message that names the wrong failure.
+      {:error, reason} ->
+        Logger.warning(
+          "Content.DedupWall degraded: candidate txn rolled back: #{inspect(reason)}"
+        )
+
+        {:degraded, rollback_phrase(reason, timeout)}
+    end
   rescue
-    # CLIFF B: the fail-open rescue wraps the WHOLE Repo.transaction — a
-    # DBConnection error (or the {:ok, _} match failing on a rollback) still yields
-    # an empty candidate set → `:ok`. A dedup hiccup must NEVER take down publish.
+    # CLIFF B, now fail-LOUD: this wraps the WHOLE Repo.transaction — a
+    # DBConnection error is reported, never disguised as "no duplicates found".
     e ->
-      Logger.warning("Content.DedupWall fail-open: candidate fetch failed: #{inspect(e)}")
-      []
+      Logger.warning("Content.DedupWall degraded: candidate fetch failed: #{inspect(e)}")
+      {:degraded, reason_phrase(e, Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms))}
+  catch
+    # Pool-checkout death arrives as an EXIT, not an exception — a rescue-only
+    # clause lets it through as a 500. This is the clause Tasks.Dedup needed.
+    :exit, reason ->
+      Logger.warning("Content.DedupWall degraded: candidate fetch exited: #{inspect(reason)}")
+      {:degraded, "the duplicate scan was cut off by the database"}
   end
+
+  # A rollback carries a caller-shaped reason (often a bare atom), so it gets its
+  # own phrasing — "failed" alone would say less than the transaction knows.
+  defp rollback_phrase(%{__struct__: _} = reason, timeout), do: reason_phrase(reason, timeout)
+
+  defp rollback_phrase(_reason, timeout),
+    do: "the duplicate scan was rolled back inside its #{timeout}ms budget"
+
+  defp reason_phrase(%DBConnection.ConnectionError{}, timeout),
+    do: "the duplicate scan did not finish inside its #{timeout}ms budget"
+
+  defp reason_phrase(%{__struct__: mod}, _timeout),
+    do: "the duplicate scan failed (#{inspect(mod)})"
+
+  defp reason_phrase(_, _timeout), do: "the duplicate scan failed"
 
   defp maybe_filter_dataset(query, nil), do: query
 
@@ -310,8 +445,10 @@ defmodule Barkpark.Content.DedupWall do
     }
   end
 
-  defp row_to_ref(%{doc_id: id, title: title, content: content}) do
-    %{id: to_string(id || ""), title: to_string(title || ""), tags: tags_from_content(content)}
+  # The projected row IS the scored shape — the only JSONB left is the `tags`
+  # array the select pulled out.
+  defp row_to_ref(%{doc_id: id, title: title, tags: tags}) do
+    %{id: to_string(id || ""), title: to_string(title || ""), tags: tag_names(tags)}
   end
 
   defp tags_from_content(content) when is_map(content),

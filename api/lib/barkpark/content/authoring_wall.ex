@@ -129,6 +129,15 @@ defmodule Barkpark.Content.AuthoringWall do
       {:error, {:duplicate_of, _}} = error ->
         emit_wall_rejection(:duplicate_of, type, dataset)
         error
+
+      # E4 could not RUN (its bounded scan timed out / the pool died). A
+      # DIFFERENT rejection code from :duplicate_of on purpose: this one is
+      # TRANSIENT and countable as an outage, not as a policy refusal — and it
+      # must reach the caller, because swallowing it here is exactly the silent
+      # fail-open the DedupWall rewrite killed.
+      {:error, {:dedup_unavailable, _}} = error ->
+        emit_wall_rejection(:dedup_unavailable, type, dataset)
+        error
     end
   end
 
@@ -136,7 +145,8 @@ defmodule Barkpark.Content.AuthoringWall do
   # + a Logger.warning at every publish-wall rejection, so a label_spine 422 is
   # attributable in prod logs and countable on a dashboard (BarkparkWeb.Telemetry
   # can subscribe a counter tagged by :code/:type/:dataset). `code` is the
-  # rejection atom (`:label_spine` | `:unknown_tag` | `:duplicate_of`).
+  # rejection atom (`:label_spine` | `:unknown_tag` | `:duplicate_of` |
+  # `:dedup_unavailable`).
   defp emit_wall_rejection(code, type, dataset) do
     :telemetry.execute(
       [:barkpark, :authoring, :wall_rejection],
@@ -198,6 +208,13 @@ defmodule Barkpark.Content.AuthoringWall do
         :ok
 
       {:error, {:duplicate_of, _payload}} = error ->
+        error
+
+      # The wall could not RUN (bounded scan timed out / pool death). Forward it
+      # — swallowing it here would restore the exact silent fail-open the
+      # DedupWall rewrite killed, with publish answering 200 on a duplicate
+      # check that never happened. `content.dedup_bypass: true` is the escape.
+      {:error, {:dedup_unavailable, _message}} = error ->
         error
     end
   end
