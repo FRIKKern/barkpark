@@ -2120,6 +2120,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    because a comment claiming 0/286 would be the same shape of lie the block
    exists to remove; overflow-guard.mjs pins the residual at <=21px rather than
    hiding it.
+   THAT RESIDUAL IS NOW PAID (W14-S3, see the .fleet-row note at the foot of
+   this block): the row's stack moved into this block too, the 8 cells went to
+   0, and overflow-guard.mjs's FLEET_ROW_RESIDUAL pin was deleted with them —
+   the W13 leg now asserts #fleet like every other route, 108/108.
    WHY A SEPARATE BLOCK AND NOT `max-width: 899` ON THE 768 ONE: the 768 block
    also carries `.fleet-row`'s stack and GR116's topbar tighten — the past-due
    chip's money message, measured at 154.61 of 169.78px. Raising it wholesale
@@ -2144,6 +2148,33 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .detail-head { flex-direction: column; align-items: stretch; }
   .detail-head .fleet-badges { justify-content: flex-start; }
   .detail-actions { margin-left: 0; }
+  /* W14-S3: the fleet row's stack came UP from the 768 block below, the same
+     move and for the same reason as `.detail-grid`: it does not stop clipping
+     at 768 either. Driven on origin/main bytes at every width 769-789 plus the
+     720/768/799/830/899/900/1024 controls, both themes, mixed-fleet AND
+     fleet-v4 (112 cells): 70 cells scrolled the PAGE sideways — mixed-fleet's
+     documentElement.scrollWidth pinned at 790 across the WHOLE 769-789 band
+     (21px off-screen at rest, no cue) and fleet-v4's at 783 across 769-782.
+     After this pair moved: 0 of 112, and the clipped-text count over the same
+     sweep went 786 -> 0. The row lands the already-accepted <=768 stack one
+     band earlier; nothing else changes.
+     WHY NOT `overflow-wrap: anywhere` ON .fleet-name/.fleet-url: it also
+     measures 0 offending cells AND SHREDS THE PERSON (charter D165) — dropping
+     the min-content contribution to one character lets flexbox squeeze
+     `.fleet-main` to 18.78px, so "Staging" renders St/ag/in/g down a 19px
+     column and the row grows 112 -> ~430px while scrollWidth prints CLEAN.
+     WHY NOT `.fleet-status { max-width }`: it ellipses the money message
+     ("Suspended — Payment fail…"), the exact sin GR116 exists to prevent, and
+     `.status-pill` is out of bounds by GR11/GR25.
+     The UNBOUNDED LEAD COLUMN is the root cause and is NOT fixed here:
+     `.fleet-status { flex: 0 0 auto; min-width: 116px }` has no max-width, so
+     the pill's detail text sizes it (134.80px Healthy … 348.02px Suspended on a
+     489px row), leaving `.fleet-main` 44.53px. Stacking removes the contest;
+     the column is recorded, not repaired. `.fleet-main { min-width: 0 }` (:953)
+     and `.fleet-badges { flex-wrap: wrap }` (:962) already ship — re-declaring
+     either here is a measured no-op. */
+  .fleet-row { flex-direction: column; align-items: stretch; }
+  .fleet-badges { justify-content: flex-start; }
 }
 
 /* GR65 TABLET (768px): three layouts break BEFORE the 720px phone threshold,
@@ -2160,8 +2191,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    at 768 and render cleanly, so they keep the 720px phone threshold rather
    than going phone-shaped on a tablet. */
 @media (max-width: 768px) {
-  .fleet-row { flex-direction: column; align-items: stretch; }
-  .fleet-badges { justify-content: flex-start; }
+  /* `.fleet-row`'s stack and `.fleet-badges`' flex-start MOVED UP to the 899
+     block above (W14-S3) — the row clips all the way to 789, not to 768. Only
+     those two rules moved; GR116's topbar tighten below stays at 768, which is
+     why this block was split rather than raised. */
   /* minmax(0, …), NOT a bare 1fr: a 1fr track's automatic minimum is min-content,
      so the stacked panels (whose min-content is ~572px of unbreakable host names
      and code) blew the track back past the viewport and the "fix" clipped exactly
