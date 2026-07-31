@@ -2089,7 +2089,14 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    .scrollWidth pinned 837 at 769-830), rollback (838), site-states (861) and
    mixed-fleet#fleet (790 at 769-785). At 790px `window.scrollTo(99999, 0)`
    yielded scrollX=47: 47px of the DETAILS rail sat off-screen at rest with no
-   cue. After this block: 0/286.
+   cue. After this block: 8 of 286 — a 56 -> 8 drop, and the 8 that remain are
+   ALL mixed-fleet#fleet at 769-785 in both themes, which this block cannot
+   reach: that overhang is `.fleet-row`'s min-content (533 against a 487px
+   container), whose remedy lives in the 768 block below and is filed as
+   cch-w13-fleet-row-band-769-785. Every detail route is 0. Said plainly here
+   because a comment claiming 0/286 would be the same shape of lie the block
+   exists to remove; overflow-guard.mjs pins the residual at <=21px rather than
+   hiding it.
    WHY A SEPARATE BLOCK AND NOT `max-width: 899` ON THE 768 ONE: the 768 block
    also carries `.fleet-row`'s stack and GR116's topbar tighten — the past-due
    chip's money message, measured at 154.61 of 169.78px. Raising it wholesale
