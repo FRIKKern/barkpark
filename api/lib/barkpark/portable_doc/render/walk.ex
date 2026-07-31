@@ -300,6 +300,12 @@ defmodule Barkpark.PortableDoc.Render.Walk do
     "<span#{class_attr}#{style_attr}>#{inner}</span>"
   end
 
+  # Empty PdParagraph is an EDITOR scaffold, not reader content. Compose keeps
+  # the node byte-faithful so a fresh document remains authorable; every reader
+  # that reaches the walker emits zero markup for it. Section rhythm belongs to
+  # the shared reader stylesheet rather than stored `<p></p>` nodes.
+  defp paragraph(%{"children" => []}, _width, _pal), do: ""
+
   # Article-mode paragraph — same role-aware styling as PdText, but emits a
   # semantic `<p>` instead of `<span>`. The editor's
   # `.bp-paper-surface p { margin: 12pt 0 0; hyphens: auto }` rule

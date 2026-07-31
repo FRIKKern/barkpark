@@ -75,7 +75,7 @@ type paragraphRenderer struct{ ir InlineRenderer }
 func (p paragraphRenderer) Render(b Block, ctx RenderCtx) []string {
 	inline := p.ir.Inline(attrSlice(b.Attrs, "content"), ctx)
 	if inline == "" {
-		return []string{""}
+		return nil
 	}
 	return wrapLines(inline, ctx.Width)
 }
@@ -315,14 +315,21 @@ func (sr sectionRenderer) Render(b Block, ctx RenderCtx) []string {
 		}
 	}
 
-	// Stack path (verbatim — the sub-grid fallback and every non-grid section).
-	for i, child := range b.Children {
-		if i > 0 {
+	// Stack path. Empty paragraph scaffolds emit no rows and therefore cannot
+	// create phantom rhythm inside a section.
+	emitted := 0
+	for _, child := range b.Children {
+		lines := sr.reg.Render(child, childCtx)
+		if len(lines) == 0 {
+			continue
+		}
+		if emitted > 0 {
 			out = append(out, "")
 		}
-		for _, line := range sr.reg.Render(child, childCtx) {
+		for _, line := range lines {
 			out = append(out, pad+line)
 		}
+		emitted++
 	}
 
 	out = append(out, rule)
@@ -359,8 +366,15 @@ func (sr sectionRenderer) gridBody(b Block, layout map[string]any, childCtx Rend
 
 	// Stable CSS-order reorder: the reader emits `order:`, i.e. it DOES reorder,
 	// so a terminal stable-sort by order is parity-correct.
-	items := make([]Block, len(b.Children))
-	copy(items, b.Children)
+	items := make([]Block, 0, len(b.Children))
+	for _, child := range b.Children {
+		if len(sr.reg.Render(child, childCtx)) > 0 {
+			items = append(items, child)
+		}
+	}
+	if len(items) == 0 {
+		return []string{}
+	}
 	sort.SliceStable(items, func(i, j int) bool { return cellOrder(items[i]) < cellOrder(items[j]) })
 
 	nodes := make([]Node, len(items))
