@@ -1,256 +1,201 @@
-# jarl.no Historiene (epic-cycle charter slot)
+# Jarl Platform Follow-ups (epic-cycle charter slot)
 
 > NOTE ON THIS PATH: this filename is the rotating epic-cycle charter SLOT and has carried
-> earlier epics. The prior occupant — **jarl.no Dogfood Publishing** — is preserved in full
-> at `.claude/workflows/bp-jarl-dogfood-publishing-charter.md`; before it, **CLI-Reliability**
-> is preserved at `.claude/workflows/bp-cli-reliability-charter.md`; do NOT read this file
-> for their history. This slot is now the memory of the **jarl.no Historiene** epic (Epic 6).
+> earlier epics. Prior occupants are preserved in full at their dedicated paths — most recently
+> **jarl.no Historiene** at `.claude/workflows/bp-jarl-historiene-charter.md` (moved when this
+> PR merged after #8320, per slot convention); before it, **jarl.no Dogfood Publishing** at
+> `.claude/workflows/bp-jarl-dogfood-publishing-charter.md` and **CLI-Reliability** at
+> `.claude/workflows/bp-cli-reliability-charter.md`. Do NOT read this file for their history.
+> This slot is now the memory of the **Jarl Platform Follow-ups** epic.
 >
-> CONCURRENT-SLOT NOTICE (2026-07-31 01:23Z, measured in the shared checkout): a sibling
-> epic — **jarl.no Dogfood Publishing** (task `jarl-dogfood-publishing-epic`, paper
-> `jarl-dogfood-wave-2026-07-31`) — wrote its own charter into this same slot as uncommitted
-> work while this wave's Decide ran, and will open its own PR. Whichever PR merges second
-> must, on conflict, preserve the earlier occupant verbatim at a dedicated
-> `bp-<epic>-charter.md` path per slot convention. Cross-epic seams are pinned in D16.
-> RESOLVED (2026-07-31, merge of origin/main into this PR): the Dogfood PR (#8313) merged
-> first and occupied this slot; per the rule above its charter is preserved verbatim at
-> `.claude/workflows/bp-jarl-dogfood-publishing-charter.md` and this slot carries Historiene.
->
-> Epic anchor: bp task **`jarl-historiene-epic`** (guerrilla ledger).
-> Wave 1 paper: **`jarl-historiene-wave-2026-07-31`** (style=article).
+> Epic anchor: bp task **`jarl-platform-followups-epic`** (guerrilla ledger).
+> Wave 1 paper: **`jarl-platform-followups-wave-2026-07-31`** (style=article).
 > Decided 2026-07-31.
+> Baseline: origin/main `e3403110465e094d8ff06f4cc68c2c3ee342dfdd` (cited line numbers pin here).
 
 ## Vision
 
-jarl.no captures its author's soul. Six stories — Scaffy (flagship), Bulldocs, Barkpark
-Cloud, SVGLoop, Spreadsheet Wizard, and the decade dossier — told in warm, simple
-Norwegian where a stranger understands the intention in one read: human intent in the
-first lines, technology as seasoning. The stories are carried by a small family of
-evidence figures native to the komposisjon design language: three new CMS section kinds
-(`statBand`, `duel`, `lineage`) rendered as token-bound inline SVG/markup, correct on
-paper/ink × light/dark by construction, every datum carrying a mandatory «kilde»
-provenance ref rendered in the site's `.rail` idiom. Numbers are content: figure data
-lives in the CMS (zero-hardcoded-content law), every headline number was re-derived from
-its named artifact by this wave's verify round before any figure is drawn, and the
-enforcement is layered so the site physically cannot paint a sourceless number. All
-renderer code lands in ONE early slice (the code lane is a manual 3-step deploy); the
-six stories then ship as pure CMS content on ISR-60s, which is free. The existing canon
-gets a voice pass so the whole site speaks one language, and the self-referential
-meta-story is told exactly once.
+One golden path, proven end-to-end: `git push` → webhook mints a BUILDABLE queued deployment →
+the box's own supervised builder shallow-clones the pushed sha → nixpacks → runtime → live, on a
+box that came out of `bp launch` already carrying the whole site plane, with the pipeline wearing
+its own watchdog. Definition of done is the epic's: a fresh `bp launch` box hosts a site from a
+git push with zero manual steps, and the board survives the load. The board lane (guerrilla task
+writes under saturation) rides in parallel and never gates the spine.
+
+Ground-truth corrections this epic carries (each proven in the 2026-07-31 verify round, recipe
+rows under `tooling/grip/ledger/`, committed on this branch):
+
+- The wish's "real fail-open recovery" phrasing is stale — the codebase deliberately chose
+  fail-LOUD (#8136); we extend that doctrine, we do not reverse it.
+- The builder is per-box and co-located BY CONSTRUCTION (filesystem tarball handoff), not a
+  central "muscle-1" host. The jarl incident root cause was sequential: site plane never
+  installed (docker absent until 17:32Z, 41 min after the mint), THEN a token mismatch
+  (agent.token vs require_worker — ~29 min of silent 401 polling, invisible in journalctl by
+  construction: `Run()` discards the claim error unlogged).
+- A dedup outage on the API mutate surface is 409 `halted` (deliberate, byte-budget-gated), and
+  a genuine 500 on the GitHub webhook surface. Not 503.
 
 ## Decisions
 
-- **D1 — Hybrid direction stands; Rival B (static SVG uploads) is dead.** The blocking
-  premise fell: an admin credential for jarl.barkpark.cloud is mintable in one command
-  (`bp instance credentials 9fb839d6-9a4a-4c2f-b837-672e2bb97e9c`), `bp setup --target
-  connect` persisted it as server `jarl` (tier admin), and `schema apply` was PROVEN by a
-  zero-residue probe (hash ed7f5428f5b120b3 → probe → restored ed7f5428f5b120b3, 47 schemas).
-- **D2 — One figure-data schema shape, applied once, GET→PATCH→APPLY, never from-scratch.**
-  `SectionItem` += `value`, `value2`, `unit`, `source` (all strings — value is a display
-  string on purpose, formatting is authorial); `Section` += `legendA`, `legendB`,
-  `sourceDefault`; `kind` options += `statBand`, `duel`, `lineage`. page and project each
-  own an independent copy of the sections composite, so the ONE shape costs exactly two
-  applies — and a shape revision costs two more, which is why the shape is settled here
-  and not iterated. `bp schema apply` is a whole-type upsert over 42 live documents:
-  fetch the live schema, splice ONLY the sections field, diff, apply. Full pre-wave
-  export backup: `tooling/jarl-schema-backup/` (42 docs, 49,251 bytes).
-- **D3 — Ref grammar: one flat string, four prefixes, enforced in four layers.**
-  Pattern `^(commit:[0-9a-f]{7,40}|paper:[a-z0-9][a-z0-9-]*|task:[A-Za-z0-9._-]+|https://.+)$`.
-  Layer 0: schema `validation.pattern` rejects malformed refs at write time. Layer A:
-  the normalizer drops any figure-kind datum whose resolved source (item.source ??
-  section.sourceDefault) is empty — the site cannot render a sourceless number. Layer B:
-  `scripts/check-sources.mjs` (node, matching the three existing gates) fetches live
-  page/project/paper docs and asserts every figure datum parses, with a MANDATORY
-  vacuity guard: exit nonzero when the token is missing or zero docs return (the
-  unauthenticated endpoint 200s and silently downgrades drafts→published — a gate
-  without the guard passes forever while proving nothing). Escape hatch: an authored
-  `ingen-kilde: <reason>` sentinel, printed on every run, never silent. Layer C (CI):
-  the check-sources step gets `BARKPARK_URL` + `secrets.BARKPARK_READ_TOKEN` env —
-  today only Build has env, which is exactly why the naive gate would be vacuous.
-- **D4 — Normalizer edits are surgical and guarded.** `itemHasContent` gains
-  `item.value` in its `hasText` list (strictly additive — no existing item carries
-  value, so every current keep/drop decision is bit-identical). `isRenderable` gains
-  `statBand`/`lineage` (items > 0) and `duel` (items > 0 && hasText(legendA, legendB)),
-  plus a `default: ((k: never) => false)(section.kind)` exhaustiveness guard — this
-  tsconfig has `noImplicitReturns` OFF, so without the guard a future kind silently
-  drops its section.
-- **D5 — og-parity for figure sections is out of scope v1 BY CONSTRUCTION.** og.tsx
-  renders only overline/title + a flat-string artwork data URI; page sections never
-  reach the og pipeline, so the satori-`<text>` question gates nothing this wave.
-  Future path (backlogged): figures export data-URI strings through the same
-  one-geometry-two-renderers module as `artwork.ts`.
-- **D6 — One early code slice; stories are pure content.** Content lands free (ISR 60s,
-  verified live: `x-nextjs-cache` + `s-maxage=60`); code lands through the manual
-  3-step lane (push → cp-ops `site-artifact-fetch` → `bp deploy --artifact-url`), a
-  human gate. So ALL renderer/gate/schema work is slice 1; the six stories are round-2
-  CMS writes with zero further deploys. The deploy itself is a LEAD step after merge.
-- **D7 — «Kilde» is the `.rail` idiom, per-datum model, footer presentation.** Data is
-  strict per-datum (with `sourceDefault` inheritance); the stamp renders as one deduped
-  footer line per figure (mono/xs/muted — already contrast-guaranteed on every surface),
-  `https://` refs link, `commit:`/`paper:`/`task:` refs render as text. `kilde` is not
-  a kind or block name anywhere — it is the rendering of a resolved ref.
-- **D8 — One accent per surface; no new tokens.** The duel scoreboard separates
-  contenders by weight/dash/fill/position — accent marks the emphasized side only.
-  SVG fills are attributes (never CSS backgrounds), colors only via `--color-*`
-  (flat renderers via `palette.ts token()`), motion only `--ease`/`--dur`. A new token
-  would cost 4 declarations + 3 bindings + palette mirror + a check-contrast PAIRS
-  entry and ships contrast-unverified by default — refused.
-- **D9 — Scaffy number canon (the flagship's honesty floor).** Figure data comes from
-  `tooling/scaffy-duels/results/scores.json` ONLY (never directory globs — results/
-  sums to $66.40 with off-matrix envelopes): $16.54 matrix, 32/32 gates green, pin
-  591fdcd53, byte-identity shas 17f6ffab2bd3 / f614a3d4b67b / 42ec6e0e63cc, engine
-  8–29s vs agents 51–300s. Meter verify today: 34/34 (METER.md's 24/24 is its frozen
-  scope — state scope in captions). The R-vs-S duel (−52% cost / −60% wall) is
-  **recipe-told vs catalog-told, BOTH scaffy-armed** (commit 354db3e9c) — captioning it
-  "Scaffy vs hand-built" would be false; it is a footnote with the n=1 caveat, kilde
-  `commit:354db3e9c`. The −84% wall figure is DROPPED (unarchived, differently-metered
-  baseline). The honest cross-chore win is OUTPUT TOKENS (arm A beats B on every chore,
-  −1.7%…−34.8%), not dollars. Banned forever: "$17.19" as machine-derived, "56–80k
-  tokens", "38/295/739", "73 blokktyper".
-- **D10 — Spreadsheet Wizard is the 2022→2026 arc, co-credited.** 2022:
-  `Guerrilla-Interactive/spreadsheet-wizard` / npm `sanity-plugin-spreadsheet-wizard`
-  v0.0.96, 2022-04-15→06-12, 41 commits (36 Suman Chapai / 5 Frikk — say "vi", credit
-  Suman by name; sole-credit dies to one public grep), "seven releases in eight weeks"
-  (never "96 versions"). 2026: the idea reborn as Barkpark **Sheets** (12,162 LOC
-  engine, 120 functions, ~10 days, spreadsheet-as-document-block) — Barkpark has
-  nothing named Spreadsheet Wizard; 2022 material is never captioned Barkpark. Two
-  public kilde URLs exist (github repo + npm page) — use them.
-- **D11 — SVGLoop = svg-animate-check, and the story is the honest one.** The app
-  self-titles at `app/layout.tsx:11` ("SVGLoop: SVG Animation Tool") — identity closed.
-  Frame: I wanted my drawings to move, so I built the tool that moves them; a four-week
-  burst (66 commits, 2024-05-22→06-18), abandoned mid-polish — same instinct that later
-  became Scaffy. The repo is PRIVATE: kilde = quoted title + `commit:e414f58`, never a
-  dead link. The live self-demo (a `loop` section kind with CMS keyframe JSON + SMIL
-  playback) is BACKLOGGED — it needs a schema revision and an author-drawn
-  structure-parity keyframe pair, and shipping the story does not wait for it.
-- **D12 — Cloud story: «én person + en flåte av agenter», dated receipts, honest crack.**
-  Bare "written by one person" is refuted by one grep (30 Claude + 131 agent co-author
-  trailers in public history). Spine: first `cloud/` commit 2026-06-26 → jarl.no live
-  over TLS 2026-07-30 18:24Z (35 days by authored date — name the boundary, don't
-  inherit "34"), charter-to-live in six hours. Fleet stat cites `bp cloud status`
-  specifically (5 managed Barkparks; `bp cloud instance list` is a DIFFERENT five —
-  never conflate). The honest crack is content: golive closed 4/5 with push-to-deploy
-  open (`task:sites-github-auto-build`), trigger "manual". The linking proof: jarl.no's
-  serving IP == the `jarl` instance host, 91.98.139.58. Never quote
-  jarl.barkpark.cloud/sites/… (404 live) or the deployment stage rows (all "pending"
-  while live). TLS/live claims carry their timestamp.
-- **D13 — Pelle is a machine; Full Blast's shape is silence → burst → human audit.**
-  `pelle@Pelles-Mac-mini.home` is Frikk's own AI grid runner on a Mac mini (repo
-  `pelle-jarl/pelle`, README line 3) — 1,157 of 1,535 commits in five days, then the
-  human's 275 zero-Claude-trailer cleanup commits. The Full Blast skyline figure
-  (12 → 481) is BACKLOGGED to a later wave; the "resten er meg" clause needs the
-  frikk@guerrilla.no human-leg check first (backlogged).
-- **D14 — Dossier is a Paper on jarl; stat blocks in canonical upstream shape; NO
-  PaperRenderer work this wave.** The sibling Dogfood epic deletes jarl's
-  PaperRenderer.tsx and vendors the canonical `@barkpark/react` engine, which already
-  renders `stat`/`stat-grid` natively — so this epic does NOT touch PaperRenderer
-  (collision avoided, work saved). The dossier authors stat blocks in the upstream
-  shape `{value, label, max?, spark?, denom?}` + optional `source` (superset; canonical
-  renderer ignores unknown attrs gracefully), and carries every headline number in
-  prose as well, so it degrades honestly if rendering lands later. Registry truth is
-  **75** block types (element 29 / widget 43 / section 3, gate-enforced) — 73, 69 and
-  70 are all measurement artifacts, banned. The dossier's duel-style table is a plain
-  `table` block (prior art: scaffy-loop-bench-status) — no new block kind.
-- **D15 — Corpus numbers and the dossier's content law.** 83 narrative survey records
-  + a separate 284-repo inventory (never "82"; wave-e is an inventory, not records).
-  All 18 B-lines, one sentence each; paperflow/portable-doc-mvp B-lines cross-link to
-  the Bulldocs story rather than re-narrating; nextgen sub-repos fold into the Nextgen
-  lineage. The census corrections ARE the soul hook and must survive: unge-venstre 0
-  Frikk commits, pwdr-horizon 82% bot sync, codehouseno/inligo-as colleagues' work,
-  aquatiq's hidden plugin work behind an 8% share, Lunnheim Stripe+Klarna not Vipps.
-  Sealed grade split from the epic close (9 A / 17 B / 27 C), source `task:jarl-corpus-epic`.
-- **D16 — Cross-epic seams with jarl-dogfood-publishing (pinned so builders don't
-  collide).** (a) This epic does not touch `PaperRenderer.tsx`, `layout.tsx`,
-  `globals.css`, `/notater` routes, or `vendor/` — those are Dogfood's. (b) This
-  epic owns `src/content/types.ts` (Section*), `src/content/sections.ts`,
-  `src/components/Sections.*`, `src/lib/figures/`, `scripts/check-sources.mjs`.
-  (c) Shared touch: `package.json` (Dogfood adds deps, we add one script — mergeable)
-  and `.github/workflows/ci.yml` (we add one step). (d) The dossier renders through
-  whichever paper engine is live; it never assumes a route (`/papers/` may 308 to
-  `/notater/`).
-- **D17 — Every bp write to jarl passes `-s jarl` explicitly.** The active server was
-  restored to Guerrilla; a bare `bp` in a neutral cwd hits Guerrilla, and inside
-  jarl-website hits jarl UNAUTHENTICATED (tier none — the survey's "no schema verb"
-  was exactly this trap, plus zsh non-splitting). Ledger reads (tasks/papers/search)
-  run from a neutral cwd. The `jarl` server entry has an empty instance_id — always
-  address it by name.
-- **D18 — Drafts are now checkable, and slice 1 checks them first.** The read-token
-  "perspective not allowed" clamp is deliberate; the admin credential is NOT clamped.
-  S1's first act: query drafts for the six story ids and stamp the result — a found
-  draft flips that story's brief from create to extend.
-- **D19 — Voice pass rewrites the 11 failing texts; the 7 passing ones are templates,
-  untouched.** Rewrite: project-barkpark, page-hjem, project-frick-design-system,
-  project-aquatiq-synk, project-polyflor-ordre, project-lunnheim, project-hundesteder,
-  page-om intro, project-doey ¶2, note-velkommen, paper velkommen-til-jarl-no. The
-  meta-story ("content lives in the CMS") is told ONCE — condensed into
-  project-barkpark; deleted everywhere else. Prose numbers get re-derived + a named
-  source in-text, or get cut. Templates: full-blast, ticket-realtime, galleryspace.
+- **D1 — Clone source rides the claim ENVELOPE, never `deployment_json`.** Claim 200 body
+  becomes `%{deployment, observed_epoch, source}` with `source = %{kind: "git", url:
+  "https://github.com/<github_repo>.git", ref: <full 40-char sha>}`, attached whenever the
+  deployment is artifact-less and the site has `github_repo`. Why: `deployment_json/1` has 17
+  call sites including tenant-facing reads — anything inside it leaks to the SPA; the envelope
+  is worker-gated by construction, and zero tests pin the claim body as an exact map (proven:
+  no `== %{`/`Map.keys` assert in `router_builder_test.exs`), so the key is free.
+- **D2 — Predicate flip and git-ref lane land as ONE integration (same wave, spine merges
+  together).** `github_build_available?/1` (router.ex:11657) flips from hardcoded `false` to
+  repo-present (`is_binary(site.github_repo)`). Why: the webhook mints artifact-less rows, so a
+  flip without the builder lane makes push-to-deploy fail LOUDER than today; repo visibility is
+  not persisted, so repo-present is the only honest predicate available — private repos get a
+  queued→failed cycle with a classified clone error instead of a pre-emptive apology. Previews
+  need no gating: they never consulted the predicate and become buildable for free.
+- **D3 — The clone sequence is sha-first, and there is no fallback.** `git init; git remote add
+  origin <url>; GIT_TERMINAL_PROMPT=0 git -c credential.helper= fetch --depth 1 origin
+  <full-sha>; git checkout FETCH_HEAD`. Why: proven live against GitHub — unadvertised and root
+  shas fetch at depth 1, while the guessed fallback (branch fetch then checkout sha) FAILS for
+  every non-tip sha (`reference is not a tree`). Short shas are refused (`couldn't find remote
+  ref`); `not our ref` = terminal source-gone; a credential prompt = terminal repo-inaccessible
+  (and without GIT_TERMINAL_PROMPT=0 the builder would hang on stdin forever).
+- **D4 — Builder identity: `require_agent` + barkpark scope on ALL FIVE `/v1/builder/*` routes,
+  reusing the box's existing `/etc/barkpark/agent.token`. No dedicated builder token.** Why:
+  the runtime half of the same pipeline is already agent-scoped (symmetry on a tested seam);
+  fleet-wide claim is correctness-broken at ≥2 boxes (wrong-box builds wedge `pushing` rows —
+  the tarball handoff is a local filesystem); WORKER_TOKEN on a customer box opens
+  `/v1/internal/*` (list/deprovision the fleet) and unscoped decrypted env reads; and
+  `verify_agent_token` ignores scope (registry.ex:4238), so reuse costs zero verify-side change
+  while a dedicated token would rebuild mint/rotate/deliver machinery that already exists.
+- **D5 — Box-scoped claim NEVER ships before the queue-age alarm.** Same release train, alarm
+  first (wave rounds encode it). Why: box-scoping strands queued rows on plane-less boxes and
+  the reaper never ages repo-backed queued rows — the alarm is that orphan class's ONLY surfacer.
+- **D6 — The alarm is a CP-side read-only query, not a reaper pass and not a builder report.**
+  New Registry aggregate (max queued container-deployment age per barkpark, one GROUP BY — no
+  N+1), surfaced as `queued_deploy_age_seconds` (number, nil when none) on `barkpark_json/3`;
+  Go + SPA own the 5-minute threshold. Why: the builder is structurally silent on failure, and
+  the 15-min reaper is a MUTATING builder-lease mechanism at 3× the alarm horizon — reusing
+  either would be wrong twice.
+- **D7 — The attention state is named `deploy_stalled`, warn tone, inserted after `degraded`,
+  before `behind` (attention bucket), tail renumbered in Go + SPA + attention_order.json.**
+  Why: the string `queued` is already mapped to the info/blue tone in semrole.go:93 (silent
+  wrong tone), and a degraded box's stuck queue is a symptom, so degraded outranks it. Same
+  slice makes the node harness read `attention_order.json` (today Go is the fixture's ONLY
+  asserter — the "three-speaker seam" was disproven; verify_probes.json at __app.test.mjs:4156
+  is the template).
+- **D8 — Provision lane is CHAIN-FIRST, not bake.** A conditional site-plane step lands in
+  `configureHost` between 7b (agent) and 8 (health), running `deploy/site-runtime-install.sh`
+  on the box; it narrates loudly and degrades to stderr like 7b (the alarm is the backstop)
+  rather than failing the go-live. Why: the bake is a `set -euo pipefail` silent-death pipeline
+  with 2-generation irreversibility (PDF-D103) and Azure never sees the warm image; the chain
+  reaches exactly the boxes that host sites, and ordering is safe — the verify gate runs
+  strictly AFTER configureHost (acquireHost:423 precedes runVerifyGate:497).
+- **D9 — Script preconditions first:** site-runtime-install.sh:41's hardcoded arm64 Go tarball
+  becomes arch-aware (it ABORTS a bare default cx23 x86 box), git is installed explicitly (the
+  clone lane makes git load-bearing at BUILD time), and builder/runtime systemd units are staged
+  in `deploy/systemd/` instead of heredocs. Why: every lane (chain, cp-ops, future bake) reuses
+  these steps; heredoc-only units are why supervision looked unowned.
+- **D10 — Board lane: do NOT rebuild dedup birth (#8136 landed bounded 5s fetch + fail-loud +
+  bypass); bound its unowned twin.** `Content.DedupWall` (the publish half of the same default
+  `bp task create`) gains the same discipline: 5s query budget, `catch :exit`, degraded →
+  `{:error, {:dedup_unavailable, …}}` (errors.ex:443 already maps it to 409). Why: the default
+  create pays TWO dedup scans across two requests; #8136 bounded the create door and left the
+  publish door open with a silent rescue-only fail-open — the literal failure mode its own
+  commit body warned about, still live on the same verb.
+- **D11 — EdgeProjector: error-not-snooze plus query-budget collapse; no pool-size change this
+  wave.** The three rescue `{:snooze, 60}` sites return `{:error, e}` (snooze increments
+  max_attempts — immortality proven in vendored Oban 2.21.1: basic.ex:266 `inc: [max_attempts:
+  1]` exactly refunds fetch's `inc: [attempt: 1]`; error discards at attempt 5 with backoff);
+  `add_edges` is batched (4 queries/edge × ~2850 edges ≈ 70% of a ~16k-query rebuild); the
+  per-doc `list_schemas` N+1 gets the `schemas:` prefetch `/v1/graph` already uses; the hydrate
+  N+1 is batched outside the transaction; the rebuild transaction gets an explicit chosen
+  timeout. Why: the loop is structurally unable to converge (20s of work in a default-15s
+  transaction) and raising POOL_SIZE just moves contention into Postgres — sizing waits for
+  guerrilla-db-probe evidence (backlog).
+- **D12 — The `e2.id == e1.id` upsert contract survives batching.** Batched inserts reload
+  surviving rows by triple; canonical-row semantics (edges.ex fetch_content_edge!) are a pinned
+  test contract (edge_extract_test.exs:298), not an accident.
+- **D13 — limit-1000 is NOT raised and is NOT the graph-starvation cause.** Papers are 86.6%
+  orphaned though never truncated; tasks 6.0% though truncated (measured on guerrilla
+  production). Raising the cap multiplies the dominant per-doc cost and fixes the wrong 6%.
+  Paper-orphan root cause is filed to backlog (`jpf-bl-paper-orphans-rootcause`).
+- **D14 — App-auth (private repos) is an ADDITIVE credential provider, later, and lands only
+  AFTER the identity flip.** gh-1 is an unfired human gate; the minting primitive exists but is
+  installation-WIDE (empty access_tokens body) and has zero production callers — down-scoping
+  via `repository_ids` plus a repo-visibility column belong to that follow-up
+  (`jpf-bl-app-auth-clone-provider`), never this wave. Under `require_worker` any token holder
+  receives any team's envelope; the flip must precede credentials riding the claim.
+- **D15 — The e2e acceptance harness is a NEW script (`deploy/site-push-live-proof.sh`),
+  assembled from pdf-mvp0's provision/teardown front half + the site-spawner judge dialect —
+  next wave, once the spine is on main.** Why: none of the four existing proofs provisions a
+  box or triggers via push, and the fresh-box framing dissolves the site-leak problem for free.
+- **Coverage note (recorded, not hidden):** the verify harness declared assignment
+  `builder-identity-decision` never-reported after four attempts; a full report with runnable
+  proofs was nonetheless present in Decide's input and its ruling (D4/D5) was adopted after
+  spot-checking its rerun anchors against origin/main. If the report's provenance is ever
+  doubted, its every claim carries a `git show origin/main:` rerun command.
 
 ## Roadmap
 
-### Wave 1 (this wave — 8 slices)
+Wave 1 (this wave — 8 slices; ROUNDS ARE LAW: a round-N slice dispatches only after its `after:`
+deps MERGE):
 
-Round 1 (dependency-free, builds this run):
-- **S1 `jh-w1-figure-family`** (fable, large) — schema apply (page+project) on jarl +
-  types/normalizer/sources parser + three figure renderers + kilde footer +
-  check-sources gate + CI env wiring. HIGH-FLIP-RISK: live schema upsert over 42 docs.
-- **S2 `jh-w1-voice-pass`** (fable, large) — the 11 failing texts rewritten to the
-  soul voice via `bp -s jarl`; meta-story deduped to one home; no figure sections.
+| # | Task id | Round | Size | Model | What |
+|---|---|---|---|---|---|
+| 1 | `jpf-w1-push-cp-lane` | 1 | large | fable | CP push lane: repo-present predicate, claim-envelope `source`, born-queued webhook, full test blast-radius rewrite (incl. the inverted same-sha test at webhook_test 478-508) |
+| 2 | `jpf-w1-builder-git-clone` | 1 | large | fable | Go builder git-ref source ladder: sha-first shallow clone, terminal error classification, env hygiene |
+| 3 | `jpf-w1-siteplane-script` | 1 | medium | opus | site-runtime-install.sh: arch-aware Go, explicit git install, staged systemd units in deploy/systemd/ |
+| 4 | `jpf-w1-edgeprojector-tame` | 1 | large | fable | EdgeProjector: error-not-snooze, contract-preserving add_edges batching, schemas prefetch, hydrate batching, explicit transaction timeout |
+| 5 | `jpf-w1-dedupwall-bound` | 1 | medium | opus | DedupWall: 5s budget, catch :exit, fail-loud dedup_unavailable, stale-comment fix |
+| 6 | `jpf-w1-queue-age-alarm` | 2 | large | fable | Watchdog: Registry queued-age aggregate, barkpark_json field, Go `deploy_stalled` state, SPA + fixtures, node harness reads attention_order.json. AFTER jpf-w1-push-cp-lane merges (router.ex) |
+| 7 | `jpf-w1-builder-identity` | 3 | large | fable | Five /v1/builder/* routes → require_agent + box scope; claim_queued_deployment_for_barkpark; worker.token preference removed. HIGH-FLIP-RISK (security/tenancy). AFTER jpf-w1-queue-age-alarm + jpf-w1-siteplane-script merge |
+| 8 | `jpf-w1-siteplane-chain` | 4 | medium | opus | configureHost step 7c: conditional site-plane install on go-live via the hardened script, agent.token, loud-degrade narration. AFTER jpf-w1-builder-identity + jpf-w1-siteplane-script merge |
 
-Round 2 (AFTER S1 merges — schema + gate live):
-- **S3 `jh-w1-story-scaffy`** (fable, large) — flagship story: lineage
-  (Nextgen→Scaffy), duel (A vs B from scores.json), stat band, recipe-duel footnote.
-- **S4 `jh-w1-story-bulldocs`** (opus, medium) — three-way-merge lineage with unequal
-  arrows; 10→75 in two months; «det aller mest imponerende».
-- **S5 `jh-w1-story-cloud`** (opus, medium) — dated rail + stat band + honest 4/5
-  callout; én person + en flåte.
-- **S6 `jh-w1-story-svgloop`** (opus, small) — the honest curiosity; quoted self-title.
-- **S7 `jh-w1-story-spreadsheet-wizard`** (opus, medium) — 2022→2026 arc, co-credited.
-- **S8 `jh-w1-dossier`** (fable, large) — frikk-tiaret-dossier as a Paper on jarl:
-  18 B-lines, corrections, stat blocks in canonical shape + prose fallback.
-
-### Later waves / backlog (filed as published children of the epic)
-- `jh-bl-svgloop-live-loop` — the self-demoing morph figure (loop kind, SMIL, reduced-motion).
-- `jh-bl-fullblast-skyline` — the 12→481 commit skyline + 270-agent audit figures.
-- `jh-bl-og-figures` — og-parity for figure sections via the data-URI route.
-- `jh-bl-sitemap-stale` — sitemap.xml lists 10 URLs, missing 10 of 13 live project pages.
-- `jh-bl-nextgen-root-and-kilde` — survey Guerrilla-Interactive/nextgen (2021); author
-  decision on publishing FRIKKern/nextgen-vscode for a public kilde.
-- `jh-bl-guerrilla-identity` — prove frikk@guerrilla.no is the human leg.
-- `jh-bl-canon-figures` — retrofit stat bands + kilde onto remaining canon numbers.
+Wave 2 (sketch): `jpf-bl-e2e-push-proof` (the acceptance run — fresh box, real push, watchdog
+rung, teardown), `jpf-bl-siteplane-verify-probe` (needs a new HTTPS-visible surface first — no
+host-capability field exists anywhere today, and any probe also fires on the restore path),
+`jpf-bl-app-auth-clone-provider` (gh-1-gated), `jpf-bl-box-credential-hygiene` (WORKER_TOKEN
+rotation + token-file re-read). Full backlog: published `jpf-bl-*` children of the epic task.
 
 ## Wave log
 
-### Wave 2026-07-31 — round 1 built + reviewed, grade A-
+### Wave 2026-07-31 — founding wave, round 1 of 4 (grade A-)
 
-- **Landed (2/2 round-1 slices green; round 2 deferred by design, dispatches after S1
-  merges):**
-  - S1 `jh-w1-figure-family` — PR FRIKKern/jarl-website#1, final branch
-    `loop-epic/figurfamilien-statband-duel-lineage-seks-0-r` (REVIEWER FIX ed40daf:
-    a duel row carrying only `value2` slipped the normalizer's Layer-A provenance
-    drop and painted a sourceless number — value2 now counts like value in
-    itemHasContent/itemHasProvenance/the kilde footer, matching what check-sources
-    already enforced; and check-sources now counts NUMERIC stat values — `value: 75`
-    owes a source like `value: "75"` — both mutation-proven on a mock CMS). Schema
-    applied live to page+project (dataset hash ed7f5428f5b120b3 → bb00ae821fd2c525);
-    reviewer independently re-derived the HIGH-FLIP-RISK upsert against the PR #8320
-    backup: 47 schemas before/after, only page+project changed, only their sections
-    field, every other field byte-equal. Gate green on the final branch (typecheck,
-    check, live check-sources exit 0, statBand readback = 1). E2: an independent
-    second look at the schema splice is still warranted before merge. Deploy is the
-    lead's 3-step lane AFTER merge — content slices are blocked until it lands.
-  - S2 `jh-w1-voice-pass` — pure CMS, no branch/PR; all 11 texts live in production
-    (verified 02:13–02:14Z stamps): project-barkpark opens with intent, meta-story
-    single-homed in its quote section, jargon grep 0, Vipps 0, templates untouched,
-    Barkpark timeline months re-checked against real git history (April 2026 first
-    commit, June 2026 apiclient extraction). Residue for later: project-doey ¶3's
-    «1 350 endringer på ni dager» retained un-rederived (was out of the brief's
-    scope), page-om body still says «headless CMS» (only the intro was in scope).
-- **Stalled:** nothing. Brief-vs-live id drift absorbed by the builder correctly
-  (project-aquatiq / project-polyflor — the briefs' -synk/-ordre ids never existed).
-- **Next wave:** lead merges jarl-website#1 (after the E2 second look), runs the
-  3-step deploy, then dispatches round 2 in order: jh-w1-story-scaffy (flagship),
-  jh-w1-story-bulldocs, jh-w1-story-cloud, jh-w1-story-spreadsheet-wizard,
-  jh-w1-story-svgloop, jh-w1-dossier — every one gated on check-sources against the
-  now-live schema. Then the backlog children (jh-bl-canon-figures retrofits kilde
-  onto the standing canon numbers, incl. the doey re-derivation).
+**Landed (5/5 round-1 slices, all gates re-run green at review, all PRs open):**
+
+- `jpf-w1-push-cp-lane` → PR #8400 (`loop-epic/cp-push-lane-repo-present-predicate-flip-0`).
+  Predicate flip + claim-envelope `source` %{kind,url,ref} + born-queued webhook rows with
+  same-sha dedup. Tenancy independently re-derived at review: `builder_claim_source/1` has ONE
+  call site (worker-gated claim 200) and none of the three deployment serializers carry a clone
+  recipe. 117-test gate green. No review fixes.
+- `jpf-w1-builder-git-clone` → PR #8401 (`loop-epic/builder-git-ref-source-ladder-sha-first--1`).
+  Source ladder (artifact wins → git sha-first shallow clone → honest empty-artifact error),
+  GIT_TERMINAL_PROMPT=0 + credential.helper= prompt kill, two proven-stderr TERMINAL
+  classifications. Bare-repo fixtures prove checkout at a NON-TIP sha. No review fixes; temp
+  workdir accumulation filed as `jpf-bl-builder-clone-hygiene`.
+- `jpf-w1-siteplane-script` → PR #8402 (`loop-epic/site-runtime-install-sh-hardened-arch-aw-2-r`).
+  Arch-aware Go tarball (the x86 abort fixed), explicit git ensure, staged units in
+  deploy/systemd/ with a behavioural offline parity test (drift tripwire proven red).
+  One review fix on the -r branch: expected tarball URLs derive from the script's GO_VERSION.
+- `jpf-w1-edgeprojector-tame` → PR #8405 (`loop-epic/edgeprojector-converges-error-not-snooze-3`).
+  Error-not-snooze (drain test: 4 failures + 1 discard, 0 snoozes — the immortal loop is dead),
+  contract-preserving add_edges batching (D12 e2.id==e1.id pinned), schemas prefetch, hydrate
+  batching, explicit 60s txn budget. 73-test gate green. No review fixes. CI note: the enqueue
+  test is sensitive to leftover committed oban_jobs rows in a dirty test DB.
+- `jpf-w1-dedupwall-bound` → PR #8406 (`loop-epic/dedupwall-gets-the-8136-discipline-bound-4`).
+  5s budget on all 3 Repo calls, rescue + catch :exit + rollback branch, fail-loud
+  `dedup_unavailable` forwarded through AuthoringWall, `content.dedup_bypass` escape, tags-only
+  JSONB projection. 35-test gate green x3. No review fixes. The wave itself reproduced the
+  incident live twice: filing tasks 500'd until `dedup_bypass` was set — including the review's
+  own backlog filing.
+
+**Stalled:** nothing. Charter PR #8317 open awaiting lead merge.
+
+**Next wave / lead dispatch order (rounds are law):** (1) merge the five round-1 PRs + charter
+PR #8317; on merge close each slice's merge-gated criterion. (2) Dispatch `jpf-w1-queue-age-alarm`
+(round 2) after #8400 merges. (3) Dispatch `jpf-w1-builder-identity` (round 3) after the alarm +
+#8402 merge — HIGH-FLIP-RISK: send a genuinely independent second reviewer for the identity/scoping
+judgment before merging it. (4) Dispatch `jpf-w1-siteplane-chain` (round 4) after identity + script
+merge. Then wave 2: `jpf-bl-e2e-push-proof` — the single end-to-end acceptance run on a fresh box.
+Watch on deploy of `jpf-w1-dedupwall-bound`: publishes now 409 under real dedup outages
+(fail-loud by design); the GitHub Intake 2xx-on-halted drop hazard now covers the publish side
+too (tracked with the 503 upgrade).
