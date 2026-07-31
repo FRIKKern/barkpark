@@ -14,6 +14,7 @@ from paper_epic_repair import (
     curate_site_spawner_wave10,
     repair_canonical_epic,
     repair_spacing_doctrine,
+    repair_strategic_paper,
 )
 from paper_quality import audit_papers
 
@@ -23,6 +24,86 @@ def text(value):
 
 
 class PaperEpicRepairTest(unittest.TestCase):
+    def test_strategic_repair_preserves_taxonomy_and_is_idempotent(self):
+        tags = [
+            {
+                "tag": "jarl-website",
+                "strength": 90,
+                "rationale": "The record lands on jarl.no",
+            },
+            {
+                "tag": "epic-wave-strategy",
+                "strength": 75,
+                "rationale": "The charter guides an epic",
+            },
+        ]
+        document = {
+            "_id": "strategic-charter",
+            "_rev": "source-rev",
+            "title": "strategic-charter",
+            "description": "A decision charter whose authored claims must remain exact.",
+            "main_tag": "jarl-website",
+            "tags": tags,
+            "blocks": [
+                {"id": "eyebrow", "type": "eyebrow", "text": "LIVE CHARTER"},
+                {
+                    "id": "title",
+                    "type": "heading",
+                    "level": 1,
+                    "text": "The strategic charter",
+                },
+                {
+                    "id": "opening",
+                    "type": "ingress",
+                    "content": text("The existing authored opening remains exact."),
+                },
+                {"id": "gap-a", "type": "paragraph", "content": []},
+                {"id": "gap-b", "type": "paragraph", "content": []},
+                {
+                    "id": "decision",
+                    "type": "callout",
+                    "title": "Decision",
+                    "content": text("Keep the public record specific and useful."),
+                },
+            ],
+        }
+
+        mutation = repair_strategic_paper(document)
+        patch = mutation["mutations"][0]["patch"]
+        repaired = patch["set"]["blocks"]
+
+        self.assertEqual(patch["ifRevisionID"], "source-rev")
+        self.assertNotIn("tags", patch["set"])
+        self.assertNotIn("main_tag", patch["set"])
+        self.assertEqual(
+            [block["type"] for block in repaired[:4]],
+            ["eyebrow", "heading", "ingress", "stats"],
+        )
+        self.assertTrue(any(block.get("type") == "stats" for block in repaired[:8]))
+        self.assertFalse(
+            any(
+                block.get("type") == "paragraph"
+                and block.get("content") == []
+                for block in repaired
+            )
+        )
+        self.assertIn("The existing authored opening remains exact.", str(repaired))
+        self.assertIn("Keep the public record specific and useful.", str(repaired))
+
+        second_document = {
+            **document,
+            "_rev": "second-rev",
+            "title": patch["set"].get("title", document["title"]),
+            "blocks": repaired,
+        }
+        repaired_again = repair_strategic_paper(second_document)["mutations"][0][
+            "patch"
+        ]["set"]["blocks"]
+
+        self.assertEqual(repaired_again, repaired)
+        self.assertEqual(document["tags"], tags)
+        self.assertEqual(document["main_tag"], "jarl-website")
+
     def test_list_reframes_are_lossless_and_semantic(self):
         block = {
             "id": "findings",

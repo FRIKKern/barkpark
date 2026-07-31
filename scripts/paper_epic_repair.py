@@ -827,8 +827,14 @@ def _collapse_evidence_appendices(blocks: list[Any]) -> list[Any]:
     )
 
 
-def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
-    if not _canonical_tagged(document):
+def repair_canonical_epic(
+    document: dict[str, Any],
+    *,
+    _require_canonical_tag: bool = True,
+    _curate_canonical_tags: bool = True,
+    _move_h1_first: bool = True,
+) -> dict[str, Any]:
+    if _require_canonical_tag and not _canonical_tagged(document):
         raise ValueError("profile requires the exact {} tag".format(CANONICAL_EPIC_TAG))
 
     paper_id = document.get("_id")
@@ -891,7 +897,7 @@ def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
         h1_index = h1_indexes[0]
         for index in h1_indexes[1:]:
             repaired[index]["level"] = 2
-        if h1_index != 0:
+        if _move_h1_first and h1_index != 0:
             h1 = repaired.pop(h1_index)
             repaired.insert(0, h1)
             h1_index = 0
@@ -912,6 +918,17 @@ def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
             },
         )
         insert_at += 1
+    else:
+        ingress_index = next(
+            (
+                index
+                for index, block in enumerate(repaired[:8])
+                if isinstance(block, dict) and block.get("type") == "ingress"
+            ),
+            None,
+        )
+        if ingress_index is not None:
+            insert_at = ingress_index + 1
 
     opening_types = {
         block.get("type")
@@ -946,11 +963,12 @@ def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
         )
 
     patch_set = {"blocks": repaired}
-    curated_tags, repaired_main_tag = _curate_epic_tags(document)
-    if curated_tags != document.get("tags"):
-        patch_set["tags"] = curated_tags
-    if repaired_main_tag is not None:
-        patch_set["main_tag"] = repaired_main_tag
+    if _curate_canonical_tags:
+        curated_tags, repaired_main_tag = _curate_epic_tags(document)
+        if curated_tags != document.get("tags"):
+            patch_set["tags"] = curated_tags
+        if repaired_main_tag is not None:
+            patch_set["main_tag"] = repaired_main_tag
     if title == paper_id:
         repaired_title = _normalize(_visible_text(repaired[h1_index]))
         if repaired_title:
@@ -969,6 +987,16 @@ def repair_canonical_epic(document: dict[str, Any]) -> dict[str, Any]:
             {"publish": {"id": paper_id, "type": "paper"}},
         ]
     }
+
+
+def repair_strategic_paper(document: dict[str, Any]) -> dict[str, Any]:
+    """Apply the lossless authored-reading repair without changing taxonomy."""
+    return repair_canonical_epic(
+        document,
+        _require_canonical_tag=False,
+        _curate_canonical_tags=False,
+        _move_h1_first=False,
+    )
 
 
 def curate_site_spawner_wave10(document: dict[str, Any]) -> dict[str, Any]:
@@ -1442,6 +1470,7 @@ def main(argv: Optional[list[str]] = None) -> int:
             "site-spawner-wave-10",
             "mechanical-spacing-doctrine",
             "canonical-epic",
+            "strategic-paper",
         ),
     )
     args = parser.parse_args(argv)
@@ -1451,6 +1480,8 @@ def main(argv: Optional[list[str]] = None) -> int:
         mutation = curate_site_spawner_wave10(document)
     elif args.profile == "mechanical-spacing-doctrine":
         mutation = repair_spacing_doctrine(document)
+    elif args.profile == "strategic-paper":
+        mutation = repair_strategic_paper(document)
     else:
         mutation = repair_canonical_epic(document)
     json.dump(mutation, sys.stdout, indent=2, sort_keys=True)
