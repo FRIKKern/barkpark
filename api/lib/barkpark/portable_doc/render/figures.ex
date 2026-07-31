@@ -116,7 +116,18 @@ defmodule Barkpark.PortableDoc.Render.Figures do
   # at runtime. The cast URL is carried in `data-cast-src` via `safe_url` (scheme
   # allowlist + attribute escape). The figcaption reuses diagram_html's article
   # styling. Email / default mode: no player runtime — degrade to a plain link.
-  def asciicast_html(src, caption, :article) do
+  #
+  # `poster` is the block's OPTIONAL resting frame — the asciinema-player
+  # `poster` option, an npt timestamp (`"npt:1:23"`) or `"end"`. A recording
+  # that opens on a banner and a reading pause posters as near-empty black at
+  # the hardcoded `npt:0:1` default, so a block may name a later, FULL frame.
+  # It rides `data-cast-poster` and is emitted ONLY when set — an unset poster
+  # leaves the mount byte-identical to before, so every existing paper (and the
+  # pd-golden/pd-parity fixtures) is untouched and the two client twins keep
+  # owning the `npt:0:1` fallback. The value is attribute-escaped and handed to
+  # the player verbatim (asciinema ignores a poster it cannot parse); it is NOT
+  # a URL, so `safe_url` (the `src`/video-poster helper) does not apply.
+  def asciicast_html(src, caption, poster, :article) do
     cap =
       if caption == "" do
         ""
@@ -124,13 +135,16 @@ defmodule Barkpark.PortableDoc.Render.Figures do
         ~s(<figcaption style="margin-top:0.8rem;color:#55635e;font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif">#{figcaption_inner(caption)}</figcaption>)
       end
 
+    poster_attr =
+      if poster == "", do: "", else: ~s( data-cast-poster="#{escape_html(poster)}")
+
     ~s(<figure style="margin:1.6rem 0">) <>
-      ~s(<div class="bp-asciicast" data-cast-src="#{safe_url(src)}" style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>) <>
+      ~s(<div class="bp-asciicast" data-cast-src="#{safe_url(src)}"#{poster_attr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>) <>
       cap <>
       "</figure>"
   end
 
-  def asciicast_html(src, caption, _style) do
+  def asciicast_html(src, caption, _poster, _style) do
     # Email / default: no asciinema runtime, so link to the recording instead of
     # mounting a player. The `bp-asciicast` mount point is intentionally ABSENT
     # here — the hook must not be triggered in email contexts.

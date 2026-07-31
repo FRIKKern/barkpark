@@ -3,7 +3,7 @@
   "name": "PortableText (import { PortableText }) \u2014 shares the renderer chunk",
   "path": "dist/index.mjs",
   "import": "{ PortableText }",
-  "limit": "19.7 KB",
+  "limit": "19.75 KB",
   "gzip": true
  },
  {

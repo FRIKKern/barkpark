@@ -173,6 +173,13 @@ func mermaidKind(source string) string {
 // link + action CTA use. A `.cast` is a time-indexed stream; a static render
 // makes ONE frame, so inline playback is the honest ceiling (mirrors render.ex's
 // email-mode "Terminal recording" plain link).
+//
+//	asciicast: {src, caption?, poster?}
+//
+//	- poster carries no TUI-visible effect. It is an asciinema-player option
+//	  (an npt timestamp naming the frame the WEB player rests on before play);
+//	  with no player here there is no resting frame to choose. Same ruling as
+//	  video.go's poster — a browser-only affordance, deliberately inert.
 type asciicastRenderer struct{}
 
 func (asciicastRenderer) Render(b Block, ctx RenderCtx) []string {

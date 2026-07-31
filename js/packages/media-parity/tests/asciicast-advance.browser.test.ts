@@ -61,6 +61,17 @@ interface Golden {
   input: Record<string, unknown>
 }
 
+// The golden's `input` now carries the per-block `poster` (`npt:0:12`) so the
+// pd-parity gate proves `data-cast-poster` byte-identical across the Elixir/TS
+// twins. That poster sits PAST the t=1.4s advance frame, which is exactly what
+// the third test below exercises — so the two DEFAULT-poster tests strip the
+// key first and pin the unset → `npt:0:1` fallback leg.
+const DEFAULT_POSTER_GOLDEN: Golden = (() => {
+  const input = { ...(asciicastGolden as Golden).input }
+  delete input.poster
+  return { ...(asciicastGolden as Golden), input }
+})()
+
 beforeAll(() => {
   // Serve the committed `advance.cast` bytes for every `.cast` request so no
   // request leaves the browser (the W4 vi.stubGlobal pattern).
@@ -88,10 +99,12 @@ afterEach(() => {
 })
 
 /** Mount the asciicast golden's block into an in-document `.bp-paper-surface`. */
-function mount(golden: Golden): HTMLElement {
+function mount(golden: Golden, overrides: Record<string, unknown> = {}): HTMLElement {
   const container = document.createElement('div')
   container.className = 'bp-paper-surface'
-  container.innerHTML = renderPortableDocument([golden.input as never])
+  container.innerHTML = renderPortableDocument([
+    { ...golden.input, ...overrides } as never,
+  ])
   document.body.appendChild(container)
   return container
 }
@@ -107,7 +120,7 @@ const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms))
 
 describe('W6 asciicast frame advance — real browser', () => {
   it('advances past the poster to render the post-poster frame on a play click', async () => {
-    const container = mount(asciicastGolden as Golden)
+    const container = mount(DEFAULT_POSTER_GOLDEN)
 
     // Pre-hydration: an inert mount point, no player (W4 baseline).
     expect(container.querySelector('.ap-player')).toBeNull()
@@ -165,7 +178,7 @@ describe('W6 asciicast frame advance — real browser', () => {
   })
 
   it('revert-red neuter: without the play click the advance frame never appears (held ≥6s)', async () => {
-    const container = mount(asciicastGolden as Golden)
+    const container = mount(DEFAULT_POSTER_GOLDEN)
 
     const result = await hydratePortableDoc(container)
     expect(result.asciicast).toBe(1)
@@ -198,4 +211,44 @@ describe('W6 asciicast frame advance — real browser', () => {
       )
     }
   }, 15000)
+
+  // ── the per-block `poster` option ─────────────────────────────────────────
+  // The mirror image of the two tests above. They pin the DEFAULT (`npt:0:1`):
+  // the t=1.4s frame is gated OUT of the resting state and only a play click
+  // reveals it. Here the block names `npt:0:2` instead — so the very same frame
+  // must be on screen AT REST, with no click at all. That is the whole feature:
+  // a recording whose first seconds are a banner + a reading pause no longer
+  // rests on near-empty black; it rests on real, legible terminal content.
+  it('a per-block poster renders a LATER frame at rest, with no play click', async () => {
+    const container = mount(DEFAULT_POSTER_GOLDEN, { poster: 'npt:0:2' })
+
+    // The poster reached the DOM as the data attribute the two client twins read.
+    const mountPoint = container.querySelector('div.bp-asciicast') as HTMLElement | null
+    expect(mountPoint!.dataset.castPoster, 'the block poster rides data-cast-poster').toBe(
+      'npt:0:2',
+    )
+
+    const result = await hydratePortableDoc(container)
+    expect(result.asciicast).toBe(1)
+
+    // NO click anywhere in this test — the frame appears because the poster
+    // snapshot is taken at t=2s, past the t=1.4s event.
+    await vi.waitFor(
+      () => {
+        expect(
+          terminalText(container),
+          'the npt:0:2 poster snapshot already contains the t=1.4s frame',
+        ).toContain(ADVANCE_FRAME)
+      },
+      { timeout: 5000, interval: 100 },
+    )
+    expect(terminalText(container)).toContain(POSTER_BASE)
+
+    // Still PAUSED: the start overlay is up, so the content above is the poster
+    // snapshot, not playback that somehow began on its own.
+    expect(
+      container.querySelector('.ap-overlay-start'),
+      'the player is still paused — this is the poster, not autoplay',
+    ).not.toBeNull()
+  })
 })

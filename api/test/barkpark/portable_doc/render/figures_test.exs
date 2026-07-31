@@ -89,22 +89,48 @@ defmodule Barkpark.PortableDoc.Render.FiguresTest do
     end
   end
 
-  describe "asciicast_html/3" do
+  describe "asciicast_html/4" do
     test "article mode emits bp-asciicast mount with safe_url" do
-      html = Figures.asciicast_html("https://example.com/cast.json", "", :article)
+      html = Figures.asciicast_html("https://example.com/cast.json", "", "", :article)
       assert html =~ ~s(class="bp-asciicast")
       assert html =~ ~s(data-cast-src="https://example.com/cast.json")
     end
 
     test "email mode renders a plain link and no mount point" do
-      html = Figures.asciicast_html("https://example.com/cast.json", "My cast", :email)
+      html = Figures.asciicast_html("https://example.com/cast.json", "My cast", "", :email)
       assert html =~ "Terminal recording"
       refute html =~ "bp-asciicast"
     end
 
     test "unsafe URL is stripped by safe_url in article mode" do
-      html = Figures.asciicast_html("javascript:alert(1)", "", :article)
+      html = Figures.asciicast_html("javascript:alert(1)", "", "", :article)
       refute html =~ "javascript:"
+    end
+
+    test "a set poster rides data-cast-poster on the article mount" do
+      html = Figures.asciicast_html("https://example.com/cast.json", "", "npt:0:12", :article)
+      assert html =~ ~s(data-cast-poster="npt:0:12")
+      # ORDER matters: the attribute sits between src and style, so the JS twin
+      # (blocks/core.ts) and the pd-golden bytes agree.
+      assert html =~
+               ~s(data-cast-src="https://example.com/cast.json" data-cast-poster="npt:0:12" style=)
+    end
+
+    test "an unset poster leaves the mount byte-identical (no attribute)" do
+      html = Figures.asciicast_html("https://example.com/cast.json", "", "", :article)
+      refute html =~ "data-cast-poster"
+    end
+
+    test "poster is attribute-escaped" do
+      html = Figures.asciicast_html("https://example.com/cast.json", "", ~s(a" onx="1), :article)
+      refute html =~ ~s(onx="1")
+      assert html =~ "&quot;"
+    end
+
+    test "email mode ignores poster entirely (no player runtime)" do
+      html = Figures.asciicast_html("https://example.com/cast.json", "", "npt:0:12", :email)
+      refute html =~ "data-cast-poster"
+      assert html =~ "Terminal recording"
     end
   end
 end

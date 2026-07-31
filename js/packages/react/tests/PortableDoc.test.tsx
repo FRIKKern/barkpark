@@ -842,6 +842,35 @@ describe('PortableDoc — the type-keyed renderer', () => {
         "color:var(--paper-ink-soft, #55635e);font-style:italic;font-size:0.9rem;font-family:system-ui,-apple-system,'SF Pro Text',sans-serif\">rec",
       )
     })
+
+    // `poster` — the block's optional resting frame. Twin of
+    // Figures.asciicast_html/4; the pd-golden fixture freezes the SET leg's
+    // bytes, these pin the UNSET leg and the escaping.
+    it('an asciicast poster rides data-cast-poster, between src and style', () => {
+      const html = renderPortableDocument([
+        { type: 'asciicast', src: 'https://ex.com/c.cast', caption: 'rec', poster: 'npt:0:12' },
+      ])
+      expect(html).toContain(
+        'data-cast-src="https://ex.com/c.cast" data-cast-poster="npt:0:12" style=',
+      )
+    })
+
+    it('an unset / blank poster emits NO attribute (client keeps npt:0:1)', () => {
+      const unset = renderPortableDocument([{ type: 'asciicast', src: 'https://ex.com/c.cast' }])
+      expect(unset).not.toContain('data-cast-poster')
+      const blank = renderPortableDocument([
+        { type: 'asciicast', src: 'https://ex.com/c.cast', poster: '   ' },
+      ])
+      expect(blank).not.toContain('data-cast-poster')
+    })
+
+    it('a poster is attribute-escaped, never a mount-point breakout', () => {
+      const html = renderPortableDocument([
+        { type: 'asciicast', src: 'https://ex.com/c.cast', poster: 'npt:0:1" onerror="x' },
+      ])
+      expect(html).not.toContain('onerror="x')
+      expect(html).toContain('&quot;')
+    })
   })
 
   // Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped

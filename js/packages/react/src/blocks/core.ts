@@ -690,12 +690,20 @@ const diagram: Emit = (b) => {
   )
 }
 
+// `poster` (optional) is the block's resting frame — the asciinema-player
+// `poster` option, an npt timestamp (`"npt:1:23"`) or `"end"`. It rides
+// `data-cast-poster` and is emitted ONLY when set, so an unset poster keeps
+// the mount byte-identical to Figures.asciicast_html's and leaves the
+// `npt:0:1` fallback with the hydrating clients (client.ts / the LiveView
+// hook). Attribute-escaped, NOT `safeUrl` — a poster is a timestamp, not a URL.
 const asciicast: Emit = (b) => {
   const src = str(b.src)
   const caption = str(b.caption)
+  const poster = str(b.poster).trim()
+  const posterAttr = poster === '' ? '' : ` data-cast-poster="${escapeAttr(poster)}"`
   return (
     `<figure style="margin:1.6rem 0">` +
-    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}" style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
+    `<div class="bp-asciicast" data-cast-src="${safeUrl(src)}"${posterAttr} style="border:1px solid #dde7e2;border-radius:6px;overflow:hidden"></div>` +
     asciicastFigcaption(caption) +
     `</figure>`
   )

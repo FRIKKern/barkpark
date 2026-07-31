@@ -1013,6 +1013,47 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ ~s(data-cast-src="#")
       refute html =~ "javascript:alert"
     end
+
+    # `poster` — the per-block resting frame. The two hydrating twins
+    # (client.ts / bulldocs.html.heex runAsciicast) default to `npt:0:1`, which
+    # is near-empty black for a cast that opens on a banner and a reading pause;
+    # a block may name a LATER, full frame instead.
+    test "a poster rides data-cast-poster on the article mount" do
+      block = Map.put(@asciicast, "poster", "npt:0:12")
+      html = Render.render_block(block, %{style: :article})
+      assert html =~ ~s(data-cast-poster="npt:0:12")
+    end
+
+    test "no poster → no attribute, so the client keeps its npt:0:1 default" do
+      html = Render.render_block(@asciicast, %{style: :article})
+      refute html =~ "data-cast-poster"
+    end
+
+    test "a blank / whitespace-only poster is treated as unset" do
+      html = Render.render_block(Map.put(@asciicast, "poster", "   "), %{style: :article})
+      refute html =~ "data-cast-poster"
+    end
+
+    test "a non-stringish poster is fail-soft (→ unset, never a crash)" do
+      html =
+        Render.render_block(Map.put(@asciicast, "poster", %{"npt" => 12}), %{style: :article})
+
+      assert html =~ ~s(class="bp-asciicast")
+      refute html =~ "data-cast-poster"
+    end
+
+    test "a poster is attribute-escaped, so it cannot break out of the mount" do
+      block = Map.put(@asciicast, "poster", ~s(npt:0:1" onerror="x))
+      html = Render.render_block(block, %{style: :article})
+      refute html =~ ~s(onerror="x)
+      assert html =~ "&quot;"
+    end
+
+    test "email mode ignores poster — no player runtime to poster" do
+      html = Render.render_block(Map.put(@asciicast, "poster", "npt:0:12"), %{style: :email})
+      refute html =~ "data-cast-poster"
+      assert html =~ "Terminal recording"
+    end
   end
 
   describe "figure block — generic child + caption" do
