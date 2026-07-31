@@ -138,12 +138,53 @@
 // the epic is architecturally required to spawn a child forever.
 //
 // ---------------------------------------------------------------------------
+// WHY `--ladder-only` READS THE CLAUSE-(b) LADDER AND NEVER CLAIMS A VERDICT
+//
+// Four waves running, the epic's own seal question was unanswerable for a reason
+// that has nothing to do with the epic: this instrument CONFLATED READING the
+// clause-(b) ladder with CLAIMING a verdict. Every legal live invocation refuses
+// UPSTREAM of the ladder — `--successor TERMINAL` throws TERMINAL-CLAIM-REFUTED and
+// `--successor <name>` throws UNRESOLVABLE-SUCCESSOR, both ~20 lines before the
+// ladder is even constructed — and the catch block prints a=UNEVALUATED
+// b=UNEVALUATED c=UNEVALUATED. The only way anyone has read the ladder is by passing
+// `--ledger <fixture>`, which substitutes the ROSTER but not the rung evidence (no
+// fixture supplies `requiredContexts`, so Legs A/B/C read the real committed spec
+// and the real cloud.yml and the guards really spawn). That accidental diagnostic is
+// what `--ladder-only` makes explicit.
+//
+//   THE D83 BOUNDARY, IN SO MANY WORDS. D83 forbids MANUFACTURING A SUCCESSOR TO
+//   FORCE A VERDICT — inventing a forwarding address so clause (a) passes and the
+//   run can print SEAL. It does not forbid READING the ladder without claiming one.
+//   `--ladder-only` manufactures nothing: it names no successor, reads no roster,
+//   and evaluates neither clause (a) nor bucket (c). Its token says so in its own
+//   letters — `LADDER-ONLY … a=NOT-READ c=NOT-READ` — so no reader can quote a
+//   `--ladder-only` run as "the seal". There is no SEAL/NO-SEAL token on this path
+//   and no `VERDICT:` line, by construction and by test.
+//
+//   WHY IT EXITS 0 ON A CLEAN READ EVEN WITH RUNG-3 ENTRIES. An instrument that
+//   reads and then exits 1 gets wired into CI as a gate, and a gate is a verdict:
+//   the conflation would grow straight back. The ONLY non-zero here is an INFRA
+//   FAULT — nothing was read, so nothing is reported. A rung-3 entry is a READING,
+//   printed by name, and reporting it is the whole job.
+//
+//   THE NEW LIE THE REGISTRATION FLIP CREATES, and this reading's own footer says it:
+//   rung 2 is Leg A + Leg B + Leg C over the COMMITTED RECORD ONLY — this program
+//   makes no network call BY DESIGN (see Leg A above). If the 4-context spec merges
+//   but the PUT never lands, or is reverted, the ladder still prints rung 2 while
+//   nothing enforces it. `scripts/required-checks-verify.sh` is the only instrument
+//   that catches that drift, and this one names it rather than pretending to cover it.
+//
+// ---------------------------------------------------------------------------
 //   --epic <id>        the epic under judgement (default: cloud-console-hardening-epic)
 //   --ledger <file>    inject a ledger fixture instead of live HTTP (mutation proofs only)
 //   --successor <id>   the successor epic's task id, or the literal TERMINAL
 //   --repo <path>      repo root
 //   --guard-cmd <cmd>  override the guard command (mutation proofs only — REFUSED
 //                      unless --ledger is also given; see R0)
+//   --ladder-only      READ the clause-(b) ladder and print it. No roster fetch, no
+//                      successor refusals, no clause (a), no bucket (c), and NO
+//                      VERDICT — never SEAL, never NO-SEAL. Exit 0 on a clean read;
+//                      non-zero ONLY on an INFRA FAULT.
 
 import { execFileSync, spawnSync } from 'node:child_process';
 import { existsSync, readFileSync } from 'node:fs';
@@ -156,6 +197,9 @@ const TERMINAL = 'TERMINAL';
 const SERVER = process.env.BP_SERVER || 'https://guerrilla.barkpark.cloud';
 const TOKEN = process.env.BP_TOKEN;
 const REPO = arg('--repo') || process.cwd();
+// A boolean flag, never `arg('--ladder-only')`: it takes no value, so reading one
+// would swallow the next flag and silently mode-shift a run nobody asked to shift.
+const LADDER_ONLY = argv.includes('--ladder-only');
 
 // Statuses. `considering` is NOT live work, but it is NOT closed either — leaving it
 // out of both buckets is how a roster with unfinished rows seals with them disclosed
@@ -456,100 +500,11 @@ function requiredContexts(fixture) {
 }
 
 // ---------------------------------------------------------------------------
-function main() {
-  const L = [];
-  const STAMP = new Date().toISOString();
-  const ledgerPath = arg('--ledger');
-  const guardOverride = arg('--guard-cmd');
-
-  let fixture = null;
-  if (ledgerPath) {
-    try { fixture = JSON.parse(readFileSync(ledgerPath, 'utf8')); }
-    catch (e) { throw new Infra(`--ledger ${ledgerPath}: ${String(e.message).slice(0, 90)}`); }
-  }
-
-  L.push(`=== SEAL PREDICATE — epic ${EPIC} ===`);
-  L.push(`read at ${STAMP}${fixture ? '  (LEDGER FIXTURE — not live)' : '  (live ledger)'}`);
-
-  // ── REFUSALS. Evaluated BEFORE the roster is read, so nothing downstream can
-  // print an unresolvable id as a forwarding address. ────────────────────────
-  if (!Array.isArray(KNOWN_DEFECTS) || KNOWN_DEFECTS.length === 0)
-    throw new Refusal('EMPTY-DEFECT-REGISTER',
-      'KNOWN_DEFECTS is empty — clause (b) would certify the word KNOWN over zero defects and spawn no guard at all. An unrun clause is not a passed clause.');
-
-  // R0 — `--guard-cmd` is a FIXTURE-ONLY affordance. It is applied verbatim once
-  // per registered defect and never receives the defect id, so a single
-  // `--guard-cmd true` marks every rung-1 entry measured-clean: the exact vacuous
-  // green clause (b) exists to prevent, reachable from the command line.
-  if (guardOverride !== null && !ledgerPath)
-    throw new Refusal('GUARD-OVERRIDE-WITHOUT-FIXTURE',
-      '--guard-cmd was given without --ledger. The override is applied once per registered defect and carries no defect id, so on a LIVE run it would certify clause (b) over a stub instead of the committed guard. Mutation proofs inject a ledger fixture; live runs use the committed guard.');
-
-  // Trimmed BEFORE R4 compares it: `--successor " cloud-console-hardening-epic"` must
-  // not slip past the self-successor refusal on a space.
-  const SUCCESSOR_RAW = arg('--successor') || (fixture ? fixture.successor : null) || null;
-  if (typeof SUCCESSOR_RAW !== 'string' || SUCCESSOR_RAW.trim() === '')
-    throw new Refusal('NO-SUCCESSOR',
-      `no successor named (--successor <id>, --successor ${TERMINAL}, or \`successor\` in the ledger fixture). Clause (a) certifies that residue has a forwarding address; with none there is nothing to forward TO, and with zero live rows the absence would otherwise cost nothing and seal.`);
-
-  const SUCCESSOR = SUCCESSOR_RAW.trim();
-
-  // R4 — forwarding to yourself is not forwarding. `forwarded` is the SUCCESSOR's own
-  // roster, so a successor equal to the epic makes clause (a) structurally unfailable.
-  if (SUCCESSOR === EPIC)
-    throw new Refusal('SELF-SUCCESSOR',
-      `the successor offered is the epic itself (${EPIC}). Forwarding to yourself is not forwarding: the forwarded set is fetchRoster(successor), which for the epic's own id contains every live row by construction, so clause (a) could never fail. Measured before this refusal existed: 83 live rows -> forwarded 79, orphans 0, a=PASS.`);
-
-  const terminal = SUCCESSOR === TERMINAL;
-
-  if (!terminal) {
-    const resolution = resolveTask(SUCCESSOR, fixture);
-    if (!resolution.ok)
-      throw new Refusal('UNRESOLVABLE-SUCCESSOR',
-        `the id offered as successor does not resolve to a published task (${resolution.why}). Rejected id: ${SUCCESSOR}. It is NOT printed as a forwarding address, because it is not one.`);
-  }
-
-  // ── from here the successor is real (or TERMINAL), and may be named ─────────
-  const children = fixture ? fixture.children : fetchRoster(EPIC);
-  if (!Array.isArray(children)) throw new Infra('roster is not an array of documents');
-
-  // The successor's own roster is the ONLY thing that makes a forwarding address "named".
-  // TERMINAL claims there is nothing to forward, so it consults no roster at all.
-  const forwarded = terminal
-    ? new Set()
-    : (fixture ? new Set(fixture.forwarded || []) : new Set(fetchRoster(SUCCESSOR).map((c) => c._id)));
-
-  const byStatus = {};
-  for (const c of children) byStatus[c.lifecycle_status] = (byStatus[c.lifecycle_status] || 0) + 1;
-  const live = children.filter((c) => LIVE_STATUSES.includes(c.lifecycle_status));
-  const considering = children.filter((c) => PENDING_STATUSES.includes(c.lifecycle_status));
-  const residue = [...live, ...considering];
-
-  // TERMINAL is a POST-CONDITION READ, not a flag. It is evaluated only after the
-  // roster has been fetched and counted, and it refuses on either bucket.
-  if (terminal && residue.length > 0)
-    throw new Refusal('TERMINAL-CLAIM-REFUTED',
-      `${TERMINAL} claims this epic has no residue to forward, and the roster read refutes it: ${live.length} live row(s) [${live.slice(0, 6).map((c) => c._id).join(', ')}${live.length > 6 ? ', …' : ''}] and ${considering.length} considering row(s) [${considering.slice(0, 6).map((c) => c._id).join(', ')}${considering.length > 6 ? ', …' : ''}]. A terminal epic is a roster fact, never a flag.`,
-      'after the post-condition roster read');
-
-  const orphans = [], gatedLive = [], fwd = [];
-  for (const c of residue) {
-    if (PERMANENT_HUMAN_GATES[c._id]) gatedLive.push(c._id);
-    else if (forwarded.has(c._id)) fwd.push(c._id);
-    else orphans.push(c._id);
-  }
-
-  // Bucket (c): every hardcoded gate must resolve. A gate that silently vanished is a
-  // gate that stopped being disclosed — that is NO SEAL, not a clean sheet.
-  const gateReport = Object.entries(PERMANENT_HUMAN_GATES).map(([id, why]) => {
-    const doc = fixture ? (fixture.gates || {})[id] : fetchById(id);
-    return { id, why, inRoster: children.some((c) => c._id === id), resolved: !!doc,
-             status: doc ? doc.lifecycle_status : null, parent: doc ? doc.parent_id : null };
-  });
-
-  // Clause (b): a landed commit verified by ancestry AND diff, plus a measurement on
-  // one of the three rungs. Rung 3 (neither) FAILS, by name.
-  const waivers = new Set(fixture ? (fixture.unmeasuredWaivers || []) : []);
+// THE CLAUSE-(b) LADDER, lifted out of `main` UNCHANGED so that exactly one
+// implementation serves both readers of it: the verdict path below, and
+// `--ladder-only`, which reads it and claims nothing. Two copies would be two
+// ladders, and the second would drift into a friendlier one.
+function evaluateLadder(fixture, guardOverride, waivers) {
   const ladder = [];
   for (const d of KNOWN_DEFECTS) {
     const commit = (fixture && fixture.defectCommits && fixture.defectCommits[d.id] !== undefined)
@@ -677,6 +632,184 @@ function main() {
 
     ladder.push({ id: d.id, rung, problems, notes, stubbed, waived });
   }
+  return ladder;
+}
+
+// The ladder's rendering, shared for the same reason the ladder is: a reading that
+// printed a DIFFERENT shape from the verdict path would be a second dialect of the
+// same fact, and the two would disagree the first time one of them was edited.
+const RUNG_MARK = { 1: '✓', 2: '◐', 3: '·' };
+function pushLadder(L, ladder) {
+  for (const e of ladder) {
+    const bad = e.problems.length > 0;
+    L.push(`  ${bad ? '✗' : RUNG_MARK[e.rung] || '·'} ${e.id}  (rung ${e.rung}${e.rung === 2 ? ' — MEASURED-ELSEWHERE' : ''})`);
+    e.notes.forEach((n) => L.push(`        ${n}`));
+    e.problems.forEach((p) => L.push(`        ${p}`));
+  }
+}
+
+// ---------------------------------------------------------------------------
+// `--ladder-only` — A READING. It evaluates clause (b)'s ladder and NOTHING else:
+// no roster fetch (clause a), no gate resolution (bucket c), no successor of any
+// kind. It therefore prints no `VERDICT:` line and emits neither SEAL nor NO-SEAL,
+// and its token spells out which letters were never read. See the D83 boundary in
+// the header: manufacturing a successor to force a verdict is forbidden; reading the
+// ladder without claiming one is exactly how you avoid having to.
+function ladderOnly(fixture, guardOverride, stamp) {
+  const L = [];
+  const waivers = new Set(fixture ? (fixture.unmeasuredWaivers || []) : []);
+  const ladder = evaluateLadder(fixture, guardOverride, waivers);
+
+  L.push(`=== SEAL PREDICATE — LADDER-ONLY READING, NO VERDICT — epic ${EPIC} ===`);
+  L.push(`read at ${stamp}  (repo ${REPO})`);
+  L.push('This run evaluates CLAUSE (b) ONLY. Clause (a) and bucket (c) were NOT READ:');
+  L.push('no roster was fetched, no successor was named, no gate was resolved. Nothing');
+  L.push('here is a seal verdict, and this output carries no token that could be quoted');
+  L.push('as one.');
+  L.push('');
+  L.push(`CLAUSE (b) known user-facing defects — ${KNOWN_DEFECTS.length} registered`);
+  pushLadder(L, ladder);
+  L.push('');
+
+  const byRung = { 1: 0, 2: 0, 3: 0 };
+  for (const e of ladder) byRung[e.rung] = (byRung[e.rung] || 0) + 1;
+  const clean = ladder.filter((e) => !e.problems.length).length;
+  const flagged = ladder.filter((e) => e.problems.length);
+
+  L.push(`READING: rung1=${byRung[1]} (measured HERE by a committed guard)  rung2=${byRung[2]} (MEASURED-ELSEWHERE)  rung3=${byRung[3]} (neither)`);
+  L.push(`         ${clean} of ${ladder.length} entr(ies) read clean; ${flagged.length} carr(y) a stated problem${flagged.length ? `: ${flagged.map((e) => e.id).join(', ')}` : ''}`);
+  L.push('');
+  L.push('WHAT THIS READING IS NOT:');
+  L.push('  1. NOT a verdict. A rung-3 entry above is a READING, not a failure of this');
+  L.push('     run — which is why this exits 0 with rung-3 entries present. An instrument');
+  L.push('     that reads and then exits 1 gets wired into CI as a gate, and a gate is a');
+  L.push('     verdict again. The only non-zero here is an INFRA FAULT: nothing read,');
+  L.push('     nothing reported.');
+  L.push('  2. NOT clause (a) and NOT bucket (c). Both are printed a=NOT-READ c=NOT-READ');
+  L.push('     below, in the token itself, so no reader can quote this run as the seal.');
+  L.push('     D83 forbids MANUFACTURING A SUCCESSOR TO FORCE A VERDICT; it does not');
+  L.push('     forbid reading the ladder without claiming one. This run manufactures');
+  L.push('     nothing — it names no successor at all.');
+  L.push('  3. NOT a read of the live branch. Rung 2 is Leg A + Leg B + Leg C over the');
+  L.push('     COMMITTED RECORD ONLY — .github/required-checks.json and the workflow file');
+  L.push('     under --repo. This program makes no network call BY DESIGN. So if a');
+  L.push('     4-context spec is committed but the PUT never landed, or was reverted,');
+  L.push('     every line above still says rung 2 while NOTHING enforces it.');
+  L.push('     `scripts/required-checks-verify.sh` is the only instrument that catches');
+  L.push('     that drift, and this one names it rather than covering for it.');
+  L.push('  4. NOT a statement about the Console gate. Every rung-2 entry in the register');
+  L.push('     names .github/workflows/cloud.yml job `test`; no entry references');
+  L.push('     console-harness.yml. Registering the Console gate moves no line above.');
+  L.push('     Clause (b) is blind to it, and this reading will not let anyone say');
+  L.push('     otherwise.');
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} repo=${REPO}`);
+  console.log(L.join('\n'));
+  return 0;
+}
+
+// ---------------------------------------------------------------------------
+function main() {
+  const L = [];
+  const STAMP = new Date().toISOString();
+  const ledgerPath = arg('--ledger');
+  const guardOverride = arg('--guard-cmd');
+
+  let fixture = null;
+  if (ledgerPath) {
+    try { fixture = JSON.parse(readFileSync(ledgerPath, 'utf8')); }
+    catch (e) { throw new Infra(`--ledger ${ledgerPath}: ${String(e.message).slice(0, 90)}`); }
+  }
+
+  L.push(`=== SEAL PREDICATE — epic ${EPIC} ===`);
+  L.push(`read at ${STAMP}${fixture ? '  (LEDGER FIXTURE — not live)' : '  (live ledger)'}`);
+
+  // ── REFUSALS. Evaluated BEFORE the roster is read, so nothing downstream can
+  // print an unresolvable id as a forwarding address. ────────────────────────
+  if (!Array.isArray(KNOWN_DEFECTS) || KNOWN_DEFECTS.length === 0)
+    throw new Refusal('EMPTY-DEFECT-REGISTER',
+      'KNOWN_DEFECTS is empty — clause (b) would certify the word KNOWN over zero defects and spawn no guard at all. An unrun clause is not a passed clause.');
+
+  // R0 — `--guard-cmd` is a FIXTURE-ONLY affordance. It is applied verbatim once
+  // per registered defect and never receives the defect id, so a single
+  // `--guard-cmd true` marks every rung-1 entry measured-clean: the exact vacuous
+  // green clause (b) exists to prevent, reachable from the command line.
+  if (guardOverride !== null && !ledgerPath)
+    throw new Refusal('GUARD-OVERRIDE-WITHOUT-FIXTURE',
+      '--guard-cmd was given without --ledger. The override is applied once per registered defect and carries no defect id, so on a LIVE run it would certify clause (b) over a stub instead of the committed guard. Mutation proofs inject a ledger fixture; live runs use the committed guard.');
+
+  // ── `--ladder-only` diverts HERE: after R1 and R0 (which protect clause (b)
+  // itself — an empty register certifies nothing, and a stubbed guard on a live run
+  // certifies a stub), and BEFORE every successor refusal below. Those four refusals
+  // exist to protect a VERDICT, and a reading claims none, so requiring a successor
+  // to read the ladder is what made the ladder unreadable for four waves.
+  if (LADDER_ONLY) return ladderOnly(fixture, guardOverride, STAMP);
+
+  // Trimmed BEFORE R4 compares it: `--successor " cloud-console-hardening-epic"` must
+  // not slip past the self-successor refusal on a space.
+  const SUCCESSOR_RAW = arg('--successor') || (fixture ? fixture.successor : null) || null;
+  if (typeof SUCCESSOR_RAW !== 'string' || SUCCESSOR_RAW.trim() === '')
+    throw new Refusal('NO-SUCCESSOR',
+      `no successor named (--successor <id>, --successor ${TERMINAL}, or \`successor\` in the ledger fixture). Clause (a) certifies that residue has a forwarding address; with none there is nothing to forward TO, and with zero live rows the absence would otherwise cost nothing and seal.`);
+
+  const SUCCESSOR = SUCCESSOR_RAW.trim();
+
+  // R4 — forwarding to yourself is not forwarding. `forwarded` is the SUCCESSOR's own
+  // roster, so a successor equal to the epic makes clause (a) structurally unfailable.
+  if (SUCCESSOR === EPIC)
+    throw new Refusal('SELF-SUCCESSOR',
+      `the successor offered is the epic itself (${EPIC}). Forwarding to yourself is not forwarding: the forwarded set is fetchRoster(successor), which for the epic's own id contains every live row by construction, so clause (a) could never fail. Measured before this refusal existed: 83 live rows -> forwarded 79, orphans 0, a=PASS.`);
+
+  const terminal = SUCCESSOR === TERMINAL;
+
+  if (!terminal) {
+    const resolution = resolveTask(SUCCESSOR, fixture);
+    if (!resolution.ok)
+      throw new Refusal('UNRESOLVABLE-SUCCESSOR',
+        `the id offered as successor does not resolve to a published task (${resolution.why}). Rejected id: ${SUCCESSOR}. It is NOT printed as a forwarding address, because it is not one.`);
+  }
+
+  // ── from here the successor is real (or TERMINAL), and may be named ─────────
+  const children = fixture ? fixture.children : fetchRoster(EPIC);
+  if (!Array.isArray(children)) throw new Infra('roster is not an array of documents');
+
+  // The successor's own roster is the ONLY thing that makes a forwarding address "named".
+  // TERMINAL claims there is nothing to forward, so it consults no roster at all.
+  const forwarded = terminal
+    ? new Set()
+    : (fixture ? new Set(fixture.forwarded || []) : new Set(fetchRoster(SUCCESSOR).map((c) => c._id)));
+
+  const byStatus = {};
+  for (const c of children) byStatus[c.lifecycle_status] = (byStatus[c.lifecycle_status] || 0) + 1;
+  const live = children.filter((c) => LIVE_STATUSES.includes(c.lifecycle_status));
+  const considering = children.filter((c) => PENDING_STATUSES.includes(c.lifecycle_status));
+  const residue = [...live, ...considering];
+
+  // TERMINAL is a POST-CONDITION READ, not a flag. It is evaluated only after the
+  // roster has been fetched and counted, and it refuses on either bucket.
+  if (terminal && residue.length > 0)
+    throw new Refusal('TERMINAL-CLAIM-REFUTED',
+      `${TERMINAL} claims this epic has no residue to forward, and the roster read refutes it: ${live.length} live row(s) [${live.slice(0, 6).map((c) => c._id).join(', ')}${live.length > 6 ? ', …' : ''}] and ${considering.length} considering row(s) [${considering.slice(0, 6).map((c) => c._id).join(', ')}${considering.length > 6 ? ', …' : ''}]. A terminal epic is a roster fact, never a flag.`,
+      'after the post-condition roster read');
+
+  const orphans = [], gatedLive = [], fwd = [];
+  for (const c of residue) {
+    if (PERMANENT_HUMAN_GATES[c._id]) gatedLive.push(c._id);
+    else if (forwarded.has(c._id)) fwd.push(c._id);
+    else orphans.push(c._id);
+  }
+
+  // Bucket (c): every hardcoded gate must resolve. A gate that silently vanished is a
+  // gate that stopped being disclosed — that is NO SEAL, not a clean sheet.
+  const gateReport = Object.entries(PERMANENT_HUMAN_GATES).map(([id, why]) => {
+    const doc = fixture ? (fixture.gates || {})[id] : fetchById(id);
+    return { id, why, inRoster: children.some((c) => c._id === id), resolved: !!doc,
+             status: doc ? doc.lifecycle_status : null, parent: doc ? doc.parent_id : null };
+  });
+
+  // Clause (b): a landed commit verified by ancestry AND diff, plus a measurement on
+  // one of the three rungs. Rung 3 (neither) FAILS, by name.
+  const waivers = new Set(fixture ? (fixture.unmeasuredWaivers || []) : []);
+  const ladder = evaluateLadder(fixture, guardOverride, waivers);
   const defectFails = ladder.filter((e) => e.problems.length);
 
   // ── output ─────────────────────────────────────────────────────────────────
@@ -696,13 +829,7 @@ function main() {
     L.push(`  ${g.resolved ? '✓' : '✗'} ${g.id}  status=${g.status} parent=${g.parent} in-epic-roster=${g.inRoster}`);
   L.push('');
   L.push(`CLAUSE (b) known user-facing defects — ${KNOWN_DEFECTS.length} registered`);
-  const RUNG_MARK = { 1: '✓', 2: '◐', 3: '·' };
-  for (const e of ladder) {
-    const bad = e.problems.length > 0;
-    L.push(`  ${bad ? '✗' : RUNG_MARK[e.rung] || '·'} ${e.id}  (rung ${e.rung}${e.rung === 2 ? ' — MEASURED-ELSEWHERE' : ''})`);
-    e.notes.forEach((n) => L.push(`        ${n}`));
-    e.problems.forEach((p) => L.push(`        ${p}`));
-  }
+  pushLadder(L, ladder);
   L.push('');
 
   const gateMissing = gateReport.filter((g) => !g.resolved);
