@@ -195,34 +195,19 @@ func TestHetznerBackupCreateNoPgDump(t *testing.T) {
 	}
 }
 
-// backupListingS3 fakes a bucket with three backups (manifests included) —
-// shared by the list and prune tests.
+// backupListingS3 SEEDS a bucket holding three backups and their manifests —
+// real stored objects, so the listing, the manifest GETs and the prune DELETEs
+// all read and write the same state. Shared by the list and prune tests.
 func backupListingS3() *fakeS3 {
 	manifest := func(db, stamp string) string {
 		return fmt.Sprintf(`{"database":%q,"bytes":100,"sha256":"abc","created_at":%q}`, db, stamp)
 	}
-	f := &fakeS3{}
-	f.handler = func(r s3Req) (int, string) {
-		switch {
-		case r.Method == "GET" && r.Query.Get("list-type") == "2":
-			return 200, `<?xml version="1.0"?><ListBucketResult><Name>bk</Name><KeyCount>6</KeyCount><IsTruncated>false</IsTruncated>
-				<Contents><Key>prod/20260601T000000Z.sql.gz</Key><Size>10</Size><LastModified>2026-06-01T00:00:01.000Z</LastModified></Contents>
-				<Contents><Key>prod/20260601T000000Z.sql.gz.manifest.json</Key><Size>80</Size><LastModified>2026-06-01T00:00:01.000Z</LastModified></Contents>
-				<Contents><Key>prod/20260615T000000Z.sql.gz</Key><Size>11</Size><LastModified>2026-06-15T00:00:01.000Z</LastModified></Contents>
-				<Contents><Key>prod/20260615T000000Z.sql.gz.manifest.json</Key><Size>80</Size><LastModified>2026-06-15T00:00:01.000Z</LastModified></Contents>
-				<Contents><Key>prod/20260701T000000Z.sql.gz</Key><Size>12</Size><LastModified>2026-07-01T00:00:01.000Z</LastModified></Contents>
-				<Contents><Key>prod/20260701T000000Z.sql.gz.manifest.json</Key><Size>80</Size><LastModified>2026-07-01T00:00:01.000Z</LastModified></Contents>
-			</ListBucketResult>`
-		case r.Method == "GET" && strings.HasSuffix(r.Path, "/20260601T000000Z.sql.gz.manifest.json"):
-			return 200, manifest("barkpark", "2026-06-01T00:00:00Z")
-		case r.Method == "GET" && strings.HasSuffix(r.Path, "/20260615T000000Z.sql.gz.manifest.json"):
-			return 200, manifest("barkpark", "2026-06-15T00:00:00Z")
-		case r.Method == "GET" && strings.HasSuffix(r.Path, "/20260701T000000Z.sql.gz.manifest.json"):
-			return 200, manifest("barkpark", "2026-07-01T00:00:00Z")
-		case r.Method == "DELETE":
-			return 204, ""
-		}
-		return 404, `<?xml version="1.0"?><Error><Code>NoSuchKey</Code></Error>`
+	f := newFakeS3()
+	for _, stamp := range []string{"20260601T000000Z", "20260615T000000Z", "20260701T000000Z"} {
+		created := stamp[:4] + "-" + stamp[4:6] + "-" + stamp[6:8] + "T00:00:00Z"
+		key := "prod/" + stamp + ".sql.gz"
+		f.seedObject("bkt", key, "gz-bytes", created)
+		f.seedObject("bkt", key+".manifest.json", manifest("barkpark", created), created)
 	}
 	return f
 }
@@ -327,12 +312,7 @@ func TestHetznerBackupRestore(t *testing.T) {
 	if err := gzw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	f := &fakeS3{handler: func(r s3Req) (int, string) {
-		if r.Method == "GET" {
-			return 200, gz.String()
-		}
-		return 200, ""
-	}}
+	f := newFakeS3().seedObject("bkt", "prod/20260701T000000Z.sql.gz", gz.String(), "")
 	withFakeS3(t, f)
 
 	var got []byte
