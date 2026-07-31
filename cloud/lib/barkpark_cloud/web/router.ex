@@ -1811,7 +1811,16 @@ defmodule BarkparkCloud.Web.Router do
             else
               row
             end
-          end)
+          end),
+        # The deploy rail's MEASURED per-stage medians ride ALONG on this
+        # envelope — additive key, no new route, and the SPA already fetches
+        # this payload before it can render a rail (site detail awaits
+        # `ensureFleet()`). Fleet-wide and identity-free: stage names, medians
+        # and counts only, nothing team- or site-shaped, so it is safe on a
+        # response every reader of every team already receives. Stages whose
+        # distribution the fold REFUSES are simply absent and the client keeps
+        # its constant — see `Registry.deploy_stage_estimates/1`.
+        step_estimates: Registry.deploy_stage_estimates()
       })
     end
   end
