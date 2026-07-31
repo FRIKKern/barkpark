@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 
+import json
 import unittest
 from pathlib import Path
 from tempfile import TemporaryDirectory
@@ -411,6 +412,106 @@ class PaperStructureAuditTest(unittest.TestCase):
             normalized[3]["rows"],
             [[text("TUI"), text("visible")]],
         )
+
+    def test_expanded_live_census_dialects_are_recursive_lossless_and_idempotent(self):
+        blocks = [
+            {
+                "type": "expandable",
+                "children": [
+                    {
+                        "type": "bulletList",
+                        "items": [json.dumps(text("camel alias"))],
+                    },
+                    {
+                        "type": "bullet_list",
+                        "items": [json.dumps(text("snake alias"))],
+                    },
+                    {
+                        "type": "ordered-list",
+                        "items": [json.dumps(text("ordered alias"))],
+                    },
+                    {
+                        "type": "list",
+                        "content": [
+                            {"type": "listItem", "content": text("content list")}
+                        ],
+                    },
+                    {
+                        "type": "table",
+                        "content": {
+                            "header": ["Surface", "Proof"],
+                            "rows": [["TUI", "visible"]],
+                        },
+                    },
+                    {
+                        "type": "table",
+                        "content": [
+                            {
+                                "type": "tableRow",
+                                "content": [
+                                    {
+                                        "type": "tableCell",
+                                        "header": True,
+                                        "content": text("Claim"),
+                                    }
+                                ],
+                            },
+                            {
+                                "type": "tableRow",
+                                "content": [
+                                    {
+                                        "type": "tableCell",
+                                        "content": text("proven"),
+                                    }
+                                ],
+                            },
+                        ],
+                    },
+                ],
+            }
+        ]
+        document = {"_id": "expanded-live-dialects", "_rev": "r1", "blocks": blocks}
+
+        report = audit_documents([document])
+        normalized = canonicalize_blocks(blocks)
+        children = normalized[0]["children"]
+
+        self.assertEqual(
+            report["violation_counts"],
+            {
+                "list_alias_dialect": 3,
+                "list_content_dialect": 1,
+                "table_content_dialect": 2,
+            },
+        )
+        self.assertEqual(report["safe_repair_violations"], 6)
+        self.assertEqual([child["type"] for child in children[:4]], ["list"] * 4)
+        self.assertEqual(children[0]["items"], [text("camel alias")])
+        self.assertEqual(children[1]["items"], [text("snake alias")])
+        self.assertEqual(children[2]["items"], [text("ordered alias")])
+        self.assertTrue(children[2]["ordered"])
+        self.assertEqual(children[3]["items"], [text("content list")])
+        self.assertEqual(children[4]["head"], [text("Surface"), text("Proof")])
+        self.assertEqual(children[4]["rows"], [[text("TUI"), text("visible")]])
+        self.assertEqual(children[5]["head"], [text("Claim")])
+        self.assertEqual(children[5]["rows"], [[text("proven")]])
+        self.assertEqual(canonicalize_blocks(normalized), normalized)
+
+    def test_ambiguous_expanded_dialect_is_quarantined_without_mutation(self):
+        blocks = [
+            {
+                "type": "bulletList",
+                "items": [{"payload": "unknown item contract"}],
+            }
+        ]
+        report = audit_documents(
+            [{"_id": "ambiguous-alias", "_rev": "r1", "blocks": blocks}]
+        )
+
+        self.assertEqual(report["violation_counts"], {"list_alias_dialect": 1})
+        self.assertEqual(report["safe_repair_violations"], 0)
+        self.assertEqual(report["quarantined_violations"], 1)
+        self.assertEqual(canonicalize_blocks(blocks), blocks)
 
     def test_repair_plan_has_exact_backups_and_revision_fences(self):
         document = {

@@ -4,6 +4,7 @@
 from __future__ import annotations
 
 import argparse
+import copy
 import hashlib
 import json
 import re
@@ -93,6 +94,7 @@ def audit_blocks(
             continue
 
         block_type = block.get("type")
+        block_token = _type_token(block)
         block_id = block.get("id")
         if isinstance(block_id, str) and block_id:
             if block_id in _seen_ids:
@@ -146,35 +148,36 @@ def audit_blocks(
                 )
             )
 
-        if block_type == "list":
-            items = block.get("items", [])
-            content_items = block.get("content")
-            if (
-                "items" not in block
-                and isinstance(content_items, list)
-                and all(
-                    (
-                        isinstance(item, dict)
-                        and item.get("type") == "list_item"
-                        and isinstance(item.get("content"), list)
-                    )
-                    or isinstance(item, dict)
-                    and item.get("type") == "text"
-                    for item in content_items
-                )
-            ):
+        if block_token in {"list", "bulletlist", "orderedlist"}:
+            list_dialect = block_type != "list" or not isinstance(
+                block.get("items"), list
+            )
+            if list_dialect:
+                try:
+                    _normalize_list_dialect(block)
+                    safe = True
+                except (TypeError, ValueError):
+                    safe = False
                 findings.append(
                     _violation(
                         document,
-                        f"{block_path}.content",
-                        "list_content_dialect",
-                        safe=True,
+                        block_path,
+                        (
+                            "list_alias_dialect"
+                            if block_type != "list"
+                            else "list_content_dialect"
+                        ),
+                        safe=safe,
                         detail=(
-                            "This populated list stores its items under content; "
-                            "terminal and export readers consume items."
+                            "This populated collection uses a legacy list type or item "
+                            "carrier; canonical readers consume type=list with items."
                         ),
                     )
                 )
+
+            items = block.get("items", [])
+            if list_dialect:
+                continue
             if not isinstance(items, list):
                 findings.append(
                     _violation(
@@ -237,37 +240,28 @@ def audit_blocks(
                             )
                         )
 
-        if block_type == "table":
+        if block_token == "table":
             rows = block.get("rows", [])
-            content_rows = block.get("content")
-            if (
-                "rows" not in block
-                and isinstance(content_rows, list)
-                and all(
-                    isinstance(row, dict)
-                    and row.get("type") == "table_row"
-                    and isinstance(row.get("content"), list)
-                    and all(
-                        isinstance(cell, dict)
-                        and cell.get("type") == "table_cell"
-                        and isinstance(cell.get("content"), list)
-                        for cell in row["content"]
-                    )
-                    for row in content_rows
-                )
-            ):
+            table_dialect = not isinstance(block.get("rows"), list)
+            if table_dialect:
+                try:
+                    _normalize_table_content_dialect(block)
+                    safe = True
+                except (TypeError, ValueError):
+                    safe = False
                 findings.append(
                     _violation(
                         document,
-                        f"{block_path}.content",
+                        block_path,
                         "table_content_dialect",
-                        safe=True,
+                        safe=safe,
                         detail=(
-                            "This populated table stores rows/cells under content; "
-                            "terminal and export readers consume head/rows."
+                            "This populated table stores headers/rows under a legacy "
+                            "content carrier; canonical readers consume head/rows."
                         ),
                     )
                 )
+                continue
             columns = block.get("columns")
             if isinstance(columns, list):
                 for column_index, column in enumerate(columns):
@@ -471,32 +465,167 @@ def _canonical_cell(cell: Any, *, header: bool = False) -> Any:
 def _type_token(value: Any) -> str:
     if not isinstance(value, dict):
         return ""
-    return str(value.get("type") or "").replace("_", "").lower()
+    return (
+        str(value.get("type") or "")
+        .replace("_", "")
+        .replace("-", "")
+        .lower()
+    )
 
 
 def _canonical_inline(value: Any) -> Any:
     if value is None:
         return []
+    if isinstance(value, str):
+        try:
+            decoded = json.loads(value)
+        except json.JSONDecodeError:
+            decoded = None
+        if isinstance(decoded, (dict, list)):
+            return _canonical_inline(decoded)
+        return _text_node(value)
     if _record_scalar(value):
         return _text_node(value)
     if isinstance(value, list):
-        return _flatten_cell(value)
+        flattened: list[Any] = []
+        for child in value:
+            canonical = _canonical_inline(child)
+            if not isinstance(canonical, list):
+                raise ValueError("inline child is not losslessly recognizable")
+            flattened.extend(canonical)
+        return flattened
     if not isinstance(value, dict):
         return value
+    value_type = _type_token(value)
+    if value_type == "text" and isinstance(value.get("value"), str):
+        node = copy.deepcopy(value)
+        node.pop("text", None)
+        return [node]
     if set(value).issubset({"content", "text"}):
         if isinstance(value.get("content"), list):
-            return _flatten_cell(value["content"])
+            return _canonical_inline(value["content"])
         if isinstance(value.get("text"), str):
             return _text_node(value["text"])
-    if isinstance(value.get("content"), list) and _type_token(value) in {
+    if isinstance(value.get("content"), list) and value_type in {
         "listitem",
         "paragraph",
         "tablecell",
+        "tableheader",
     }:
-        return _flatten_cell(value["content"])
+        return _canonical_inline(value["content"])
+    if isinstance(value.get("type"), str) and value["type"]:
+        return [copy.deepcopy(value)]
     if isinstance(value.get("text"), str):
         return _text_node(value["text"])
-    return value
+    return copy.deepcopy(value)
+
+
+def _list_source(block: dict[str, Any]) -> list[Any]:
+    for key in ("items", "content", "children"):
+        source = block.get(key)
+        if isinstance(source, list):
+            return source
+    raise ValueError("list block has no lossless item carrier")
+
+
+def _canonical_list_item(item: Any) -> Any:
+    if (
+        isinstance(item, dict)
+        and isinstance(item.get("id"), str)
+        and set(item).issubset({"id", "content", "text"})
+        and (
+            isinstance(item.get("content"), list)
+            or isinstance(item.get("text"), str)
+        )
+    ):
+        return copy.deepcopy(item)
+    return _canonical_inline(item)
+
+
+def _normalize_list_dialect(block: dict[str, Any]) -> dict[str, Any]:
+    source_type = _type_token(block)
+    items = [_canonical_list_item(item) for item in _list_source(block)]
+    if not all(
+        isinstance(item, list)
+        or (
+            isinstance(item, dict)
+            and isinstance(item.get("id"), str)
+            and set(item).issubset({"id", "content", "text"})
+        )
+        for item in items
+    ):
+        raise ValueError("list item is not losslessly canonicalizable")
+    style = str(block.get("style") or block.get("listStyle") or "").lower()
+    ordered = (
+        block.get("ordered") is True
+        or source_type == "orderedlist"
+        or style in {"ordered", "number", "numbered", "decimal"}
+    )
+    normalized = {
+        key: copy.deepcopy(value)
+        for key, value in block.items()
+        if key not in {"content", "children", "items", "style", "listStyle"}
+    }
+    normalized.update({"type": "list", "ordered": ordered, "items": items})
+    return normalized
+
+
+def _table_row_cells(row: Any) -> tuple[list[Any], bool]:
+    if isinstance(row, list):
+        return row, False
+    if not isinstance(row, dict):
+        raise ValueError("table row is not losslessly recognizable")
+    cells = row.get("content") if isinstance(row.get("content"), list) else row.get("cells")
+    if not isinstance(cells, list):
+        raise ValueError("table row has no lossless cell carrier")
+    header_flags = [
+        isinstance(cell, dict)
+        and (cell.get("header") is True or _type_token(cell) == "tableheader")
+        for cell in cells
+    ]
+    return cells, row.get("header") is True or (bool(cells) and all(header_flags))
+
+
+def _normalize_table_content_dialect(block: dict[str, Any]) -> dict[str, Any]:
+    source = block.get("content")
+    explicit_head = None
+    if isinstance(source, dict):
+        explicit_head = source.get("head") or source.get("header")
+        source_rows = source.get("rows")
+    elif isinstance(source, list):
+        source_rows = source
+    else:
+        raise ValueError("table block has no lossless row carrier")
+    if not isinstance(source_rows, list):
+        raise ValueError("table content rows are not an array")
+
+    rows: list[list[Any]] = []
+    row_headers: list[bool] = []
+    for row in source_rows:
+        cells, header = _table_row_cells(row)
+        canonical_cells = [_canonical_inline(cell) for cell in cells]
+        if not all(isinstance(cell, list) for cell in canonical_cells):
+            raise ValueError("table cell is not losslessly canonicalizable")
+        rows.append(canonical_cells)
+        row_headers.append(header)
+
+    head = None
+    if isinstance(explicit_head, list):
+        head = [_canonical_inline(cell) for cell in explicit_head]
+        if not all(isinstance(cell, list) for cell in head):
+            raise ValueError("table header is not losslessly canonicalizable")
+    elif rows and row_headers[0]:
+        head = rows.pop(0)
+
+    normalized = {
+        key: copy.deepcopy(value)
+        for key, value in block.items()
+        if key not in {"content", "head", "header", "rows"}
+    }
+    normalized.update({"type": "table", "rows": rows})
+    if head is not None:
+        normalized["head"] = head
+    return normalized
 
 
 def canonicalize_blocks(blocks: Any) -> Any:
@@ -513,6 +642,23 @@ def canonicalize_blocks(blocks: Any) -> Any:
             continue
         block = dict(raw_block)
         block_type = block.get("type")
+        block_token = _type_token(block)
+
+        if block_token in {"list", "bulletlist", "orderedlist"} and (
+            block_type != "list" or not isinstance(block.get("items"), list)
+        ):
+            try:
+                block = _normalize_list_dialect(block)
+            except (TypeError, ValueError):
+                pass
+            block_type = block.get("type")
+
+        if block_token == "table" and not isinstance(block.get("rows"), list):
+            try:
+                block = _normalize_table_content_dialect(block)
+            except (TypeError, ValueError):
+                pass
+            block_type = block.get("type")
 
         if (
             block_type == "list"
@@ -541,7 +687,7 @@ def canonicalize_blocks(blocks: Any) -> Any:
         if block_type == "list" and isinstance(block.get("items"), list):
             items = []
             for item in block["items"]:
-                items.append(_canonical_inline(item))
+                items.append(_canonical_list_item(item))
             block["items"] = items
 
         if (

@@ -1495,6 +1495,17 @@ defmodule Barkpark.Content.Papers.BlockOps do
     end
   end
 
+  defp render_block_errors(%{"type" => type}, path)
+       when type in [
+              "bulletList",
+              "bullet_list",
+              "bullet-list",
+              "orderedList",
+              "ordered_list",
+              "ordered-list"
+            ],
+       do: ["#{path}.type must be list before the block reaches readers"]
+
   defp render_block_errors(%{"type" => "table"} = block, path) do
     rows = Map.get(block, "rows")
 
@@ -1525,10 +1536,12 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp render_block_errors(block, path) do
-    case Map.get(block, "blocks") do
-      children when is_list(children) -> render_shape_errors(children, "#{path}.blocks")
-      _ -> []
-    end
+    Enum.flat_map(["blocks", "children"], fn key ->
+      case Map.get(block, key) do
+        children when is_list(children) -> render_shape_errors(children, "#{path}.#{key}")
+        _ -> []
+      end
+    end)
   end
 
   defp render_table_row_errors(%{"cells" => cells}, path) when is_list(cells),
@@ -1578,9 +1591,31 @@ defmodule Barkpark.Content.Papers.BlockOps do
 
   defp valid_record_table?(_block, _rows), do: false
 
+  defp normalize_render_block(%{"type" => type} = block)
+       when type in [
+              "bulletList",
+              "bullet_list",
+              "bullet-list",
+              "orderedList",
+              "ordered_list",
+              "ordered-list"
+            ] do
+    normalize_legacy_list_shape(block, type in ["orderedList", "ordered_list", "ordered-list"])
+  end
+
+  defp normalize_render_block(%{"type" => "list", "content" => content} = block)
+       when is_list(content) do
+    normalize_legacy_list_shape(block, Map.get(block, "ordered") == true)
+  end
+
   defp normalize_render_block(%{"type" => "list", "items" => items} = block)
        when is_list(items) do
     Map.put(block, "items", Enum.map(items, &normalize_wrapped_list_item/1))
+  end
+
+  defp normalize_render_block(%{"type" => "table", "content" => content} = block)
+       when is_list(content) or is_map(content) do
+    normalize_legacy_table_shape(block)
   end
 
   defp normalize_render_block(%{"type" => "table"} = block) do
@@ -1602,13 +1637,15 @@ defmodule Barkpark.Content.Papers.BlockOps do
   end
 
   defp normalize_render_block(block) when is_map(block) do
-    case Map.get(block, "blocks") do
-      children when is_list(children) ->
-        Map.put(block, "blocks", normalize_render_shapes(children))
+    Enum.reduce(["blocks", "children"], block, fn key, normalized ->
+      case Map.get(normalized, key) do
+        children when is_list(children) ->
+          Map.put(normalized, key, normalize_render_shapes(children))
 
-      _ ->
-        block
-    end
+        _ ->
+          normalized
+      end
+    end)
   end
 
   defp normalize_render_block(block), do: block
@@ -1622,6 +1659,220 @@ defmodule Barkpark.Content.Papers.BlockOps do
        do: [%{"type" => "text", "value" => text}]
 
   defp normalize_wrapped_list_item(item), do: item
+
+  defp normalize_legacy_list_shape(block, ordered_default) do
+    source =
+      Enum.find_value(["items", "content", "children"], fn key ->
+        case Map.get(block, key) do
+          items when is_list(items) -> items
+          _ -> nil
+        end
+      end)
+
+    with items when is_list(items) <- source,
+         {:ok, normalized_items} <- map_legacy_inline_items(items) do
+      style =
+        String.downcase(to_string(Map.get(block, "style") || Map.get(block, "listStyle") || ""))
+
+      ordered =
+        ordered_default or Map.get(block, "ordered") == true or
+          style in ~w(ordered number numbered decimal)
+
+      block
+      |> Map.drop(["content", "children", "items", "style", "listStyle"])
+      |> Map.put("type", "list")
+      |> Map.put("ordered", ordered)
+      |> Map.put("items", normalized_items)
+    else
+      _ -> block
+    end
+  end
+
+  defp map_legacy_inline_items(items) do
+    Enum.reduce_while(items, {:ok, []}, fn item, {:ok, acc} ->
+      case normalize_legacy_list_item(item) do
+        {:ok, normalized} -> {:cont, {:ok, [normalized | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      :error -> :error
+    end
+  end
+
+  defp normalize_legacy_list_item(%{"id" => id} = item) when is_binary(id) do
+    if Map.keys(item) -- ["id", "content", "text"] == [] and
+         (is_list(Map.get(item, "content")) or is_binary(Map.get(item, "text"))) do
+      {:ok, item}
+    else
+      normalize_legacy_inline(item)
+    end
+  end
+
+  defp normalize_legacy_list_item(item), do: normalize_legacy_inline(item)
+
+  defp normalize_legacy_inline(value) when is_binary(value) do
+    case Jason.decode(value) do
+      {:ok, decoded} when is_list(decoded) or is_map(decoded) ->
+        normalize_legacy_inline(decoded)
+
+      _ ->
+        {:ok, [%{"type" => "text", "value" => value}]}
+    end
+  end
+
+  defp normalize_legacy_inline(nil), do: {:ok, []}
+
+  defp normalize_legacy_inline(value) when is_number(value) or is_boolean(value),
+    do: {:ok, [%{"type" => "text", "value" => to_string(value)}]}
+
+  defp normalize_legacy_inline(values) when is_list(values) do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, acc} ->
+      case normalize_legacy_inline(value) do
+        {:ok, inline} -> {:cont, {:ok, acc ++ inline}}
+        :error -> {:halt, :error}
+      end
+    end)
+  end
+
+  defp normalize_legacy_inline(%{"type" => "text", "value" => value} = node)
+       when is_binary(value),
+       do: {:ok, [Map.delete(node, "text")]}
+
+  defp normalize_legacy_inline(%{"type" => type, "content" => content})
+       when type in [
+              "paragraph",
+              "listItem",
+              "list_item",
+              "tableCell",
+              "table_cell",
+              "tableHeader",
+              "table_header"
+            ] and is_list(content),
+       do: normalize_legacy_inline(content)
+
+  defp normalize_legacy_inline(%{"content" => content} = wrapper)
+       when is_list(content) and map_size(wrapper) == 1,
+       do: normalize_legacy_inline(content)
+
+  defp normalize_legacy_inline(%{"text" => text} = wrapper)
+       when is_binary(text) and map_size(wrapper) == 1,
+       do: {:ok, [%{"type" => "text", "value" => text}]}
+
+  defp normalize_legacy_inline(%{"type" => type} = inline) when is_binary(type) and type != "",
+    do: {:ok, [inline]}
+
+  defp normalize_legacy_inline(_value), do: :error
+
+  defp normalize_legacy_table_shape(%{"content" => content} = block) do
+    {head, rows} =
+      case content do
+        content when is_map(content) ->
+          {Map.get(content, "head") || Map.get(content, "header"), Map.get(content, "rows")}
+
+        content when is_list(content) ->
+          {nil, content}
+
+        _ ->
+          {nil, nil}
+      end
+
+    with rows when is_list(rows) <- rows,
+         {:ok, normalized_rows, header_flags} <- normalize_legacy_table_rows(rows),
+         {:ok, explicit_head} <- normalize_optional_legacy_head(head) do
+      {resolved_head, resolved_rows} =
+        cond do
+          is_list(explicit_head) -> {explicit_head, normalized_rows}
+          normalized_rows != [] and hd(header_flags) -> {hd(normalized_rows), tl(normalized_rows)}
+          true -> {nil, normalized_rows}
+        end
+
+      normalized =
+        block
+        |> Map.drop(["content", "head", "header", "rows"])
+        |> Map.put("type", "table")
+        |> Map.put("rows", resolved_rows)
+
+      if is_list(resolved_head), do: Map.put(normalized, "head", resolved_head), else: normalized
+    else
+      _ -> block
+    end
+  end
+
+  defp normalize_legacy_table_shape(block), do: block
+
+  defp normalize_legacy_table_rows(rows) do
+    Enum.reduce_while(rows, {:ok, [], []}, fn row, {:ok, row_acc, flag_acc} ->
+      case normalize_legacy_table_row(row) do
+        {:ok, cells, header?} ->
+          {:cont, {:ok, [cells | row_acc], [header? | flag_acc]}}
+
+        :error ->
+          {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, reversed_rows, reversed_flags} ->
+        {:ok, Enum.reverse(reversed_rows), Enum.reverse(reversed_flags)}
+
+      :error ->
+        :error
+    end
+  end
+
+  defp normalize_legacy_table_row(row) when is_list(row),
+    do: normalize_legacy_table_cells(row, false)
+
+  defp normalize_legacy_table_row(row) when is_map(row) do
+    cells =
+      if is_list(Map.get(row, "content")),
+        do: Map.get(row, "content"),
+        else: Map.get(row, "cells")
+
+    if is_list(cells) do
+      cell_headers =
+        Enum.map(cells, fn
+          %{"header" => true} -> true
+          %{"type" => type} when type in ["tableHeader", "table_header"] -> true
+          _ -> false
+        end)
+
+      header? = Map.get(row, "header") == true or (cells != [] and Enum.all?(cell_headers))
+      normalize_legacy_table_cells(cells, header?)
+    else
+      :error
+    end
+  end
+
+  defp normalize_legacy_table_row(_row), do: :error
+
+  defp normalize_legacy_table_cells(cells, header?) do
+    case map_legacy_inline_values(cells) do
+      {:ok, normalized} -> {:ok, normalized, header?}
+      :error -> :error
+    end
+  end
+
+  defp normalize_optional_legacy_head(nil), do: {:ok, nil}
+
+  defp normalize_optional_legacy_head(head) when is_list(head),
+    do: map_legacy_inline_values(head)
+
+  defp normalize_optional_legacy_head(_head), do: :error
+
+  defp map_legacy_inline_values(values) do
+    Enum.reduce_while(values, {:ok, []}, fn value, {:ok, acc} ->
+      case normalize_legacy_inline(value) do
+        {:ok, normalized} -> {:cont, {:ok, [normalized | acc]}}
+        :error -> {:halt, :error}
+      end
+    end)
+    |> case do
+      {:ok, reversed} -> {:ok, Enum.reverse(reversed)}
+      :error -> :error
+    end
+  end
 
   defp normalize_table_shape(%{"rows" => rows} = block) when is_list(rows) do
     case normalize_record_table(block, rows) do

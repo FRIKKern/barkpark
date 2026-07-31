@@ -273,6 +273,79 @@ defmodule Barkpark.Content.Papers.BackfillBlockIdsTest do
       assert BlockOps.normalize_render_shapes([list, table, callout]) == [list, table, callout]
     end
 
+    test "normalizes every expanded live list/table dialect recursively" do
+      text = fn value -> [%{"type" => "text", "value" => value}] end
+
+      blocks = [
+        %{
+          "type" => "expandable",
+          "children" => [
+            %{"type" => "bulletList", "items" => [Jason.encode!(text.("camel alias"))]},
+            %{"type" => "bullet_list", "items" => [Jason.encode!(text.("snake alias"))]},
+            %{"type" => "ordered-list", "items" => [Jason.encode!(text.("ordered alias"))]},
+            %{
+              "type" => "list",
+              "content" => [%{"type" => "listItem", "content" => text.("content list")}]
+            },
+            %{
+              "type" => "table",
+              "content" => %{
+                "header" => ["Surface", "Proof"],
+                "rows" => [["TUI", "visible"]]
+              }
+            },
+            %{
+              "type" => "table",
+              "content" => [
+                %{
+                  "type" => "tableRow",
+                  "content" => [
+                    %{"type" => "tableCell", "header" => true, "content" => text.("Claim")}
+                  ]
+                },
+                %{
+                  "type" => "tableRow",
+                  "content" => [
+                    %{"type" => "tableCell", "content" => text.("proven")}
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+
+      assert {:error, {:invalid_paper_structure, _}} = BlockOps.validate_render_shapes(blocks)
+      [expandable] = normalized = BlockOps.normalize_render_shapes(blocks)
+      [camel, snake, ordered, content_list, object_table, row_table] = expandable["children"]
+
+      assert camel == %{"type" => "list", "ordered" => false, "items" => [text.("camel alias")]}
+      assert snake == %{"type" => "list", "ordered" => false, "items" => [text.("snake alias")]}
+
+      assert ordered == %{
+               "type" => "list",
+               "ordered" => true,
+               "items" => [text.("ordered alias")]
+             }
+
+      assert content_list == %{
+               "type" => "list",
+               "ordered" => false,
+               "items" => [text.("content list")]
+             }
+
+      assert object_table["head"] == [text.("Surface"), text.("Proof")]
+      assert object_table["rows"] == [[text.("TUI"), text.("visible")]]
+      assert row_table["head"] == [text.("Claim")]
+      assert row_table["rows"] == [[text.("proven")]]
+      assert :ok = BlockOps.validate_render_shapes(normalized)
+      assert BlockOps.normalize_render_shapes(normalized) == normalized
+
+      ambiguous = [%{"type" => "bulletList", "items" => [%{"payload" => "keep"}]}]
+      assert BlockOps.normalize_render_shapes(ambiguous) == ambiguous
+      assert {:error, {:invalid_paper_structure, _}} = BlockOps.validate_render_shapes(ambiguous)
+    end
+
     test "preserves list item ids and promotes metadata-bearing table headers" do
       blocks = [
         %{
