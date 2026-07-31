@@ -8465,18 +8465,43 @@ defmodule BarkparkCloud.Web.Router do
   # dwb-14: surface the latest provision job's step narration so a freshly-loaded
   # /new page renders honest, refresh-durable progress. Always present (defaults
   # to []) so the SPA can branch on presence without an existence check.
+  #
+  # wave 13 S2: each step's "detail" is a REMOTE capture (an ssh stderr fold, a
+  # provider body) and reaches a person's screen verbatim, so it is scrubbed at
+  # this boundary. The stored row keeps the raw bytes for ops.
   defp merge_provision_steps(map, %{steps: steps}) when is_list(steps),
-    do: Map.put(map, :provision_steps, steps)
+    do: Map.put(map, :provision_steps, Enum.map(steps, &scrub_entry(&1, "detail")))
 
   defp merge_provision_steps(map, _), do: Map.put(map, :provision_steps, [])
 
   # dwb-16: surface the latest provision job's LIVE console so /new renders a live,
   # refresh-durable console. Always present (defaults to []) so the SPA can branch
   # on presence without an existence check.
+  #
+  # wave 13 S2: console lines are raw remote output — scrubbed here, raw in the DB.
   defp merge_provision_console(map, %{console: console}) when is_list(console),
-    do: Map.put(map, :provision_console, console)
+    do: Map.put(map, :provision_console, Enum.map(console, &scrub_entry(&1, "line")))
 
   defp merge_provision_console(map, _), do: Map.put(map, :provision_console, [])
+
+  # wave 13 S2: redact secret-shaped substrings in the string-valued keys of a
+  # step/console entry. No-ops on a non-map entry and on a non-binary value, so a
+  # shape the worker has not written yet passes through rather than crashing the
+  # list serializer.
+  # Keys are string-typed on a JSONB-loaded step/console entry and atom-typed on
+  # a map this module composed (the stage fold), so both are accepted.
+  defp scrub_entry(entry, key) when not is_list(key), do: scrub_entry(entry, [key])
+
+  defp scrub_entry(%{} = entry, keys) when is_list(keys) do
+    Enum.reduce(keys, entry, fn key, acc ->
+      case Map.fetch(acc, key) do
+        {:ok, value} when is_binary(value) -> Map.put(acc, key, FailureCopy.scrub(value))
+        _ -> acc
+      end
+    end)
+  end
+
+  defp scrub_entry(entry, _keys), do: entry
 
   ## Onboarding action dispatch + serializer
 
@@ -10128,10 +10153,18 @@ defmodule BarkparkCloud.Web.Router do
       artifact_sha256: d.artifact_sha256,
       # gh-5: the live build-console lines ride along so the site-detail deploy
       # row renders them and a refresh recovers mid-build console state.
-      console: d.console || [],
+      #
+      # wave 13 S2: build console lines are raw remote output, so they are
+      # scrubbed at this boundary alongside failure_reason above.
+      console: Enum.map(d.console || [], &scrub_entry(&1, ["line", "detail"])),
       # dwb-19: the live sub-caption under the status pill (nil when none). The
       # site-detail deploy row renders it while the deploy is active.
-      detail: d.detail,
+      #
+      # wave 13 S2: SCRUBBED, and not optionally. `Sites.Deploy.fail/2` writes the
+      # SAME string to `failure_reason` and to `detail`, so scrubbing only the
+      # former would ship a redacted field sitting beside its unredacted twin in
+      # one payload.
+      detail: FailureCopy.scrub(d.detail),
       # site-spawner D30: the static-build identity + which of the six stages is in
       # flight. Null on every container row, so the container view is unchanged.
       build_id: d.build_id,
@@ -10155,7 +10188,12 @@ defmodule BarkparkCloud.Web.Router do
   defp site_deployment_json(d, site, bp) do
     d
     |> deployment_json()
-    |> Map.put(:stages, Sites.Deploy.stages(d))
+    # wave 13 S2: `Sites.Deploy.stages/1` recomputes the fold from the RAW
+    # `d.console` rather than from `deployment_json/1`'s already-scrubbed copy, so
+    # it is its OWN display boundary and needs its own scrub — otherwise the
+    # stage detail ships the credential that the console entry it was derived
+    # from just redacted, in the same payload.
+    |> Map.put(:stages, Enum.map(Sites.Deploy.stages(d), &scrub_entry(&1, :detail)))
     |> Map.put(:url, deployment_url(d, site, bp))
   end
 

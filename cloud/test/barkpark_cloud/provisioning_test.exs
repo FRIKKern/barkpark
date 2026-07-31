@@ -2213,4 +2213,93 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert json_body(conn) == %{"error" => "stale_claim"}
     end
   end
+
+  # wave 13 S2. A provision failure is a REMOTE capture — ssh stderr, a provider
+  # body — so it can carry a credential the control plane never chose to print.
+  # Reading it takes nothing but team membership: GET /v1/barkparks is
+  # require_user_or_pat + require_ability("read"), no platform-admin gate on the
+  # path. These drive that exact read as a plain authenticated NON-admin user.
+  describe "GET /v1/barkparks — a remote failure capture is scrubbed before a person reads it" do
+    @secret "sk-live-9aB3xQ7zLmNpR4tV6wY2"
+    @capture "ssh: remote said Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2"
+
+    defp row_for(user, bp) do
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/barkparks", nil, user_token)
+      assert conn.status == 200
+      Enum.find(json_body(conn)["barkparks"], &(&1["id"] == bp.id))
+    end
+
+    test "provision_error is scrubbed, and the DB row keeps the raw bytes" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.fail_job(job.id, @capture)
+
+      row = row_for(user, bp)
+
+      refute row["provision_error"] =~ @secret
+      assert row["provision_error"] == "ssh: remote said Authorization: Bearer [redacted]"
+
+      # The boundary scrubs; the store does not. Ops recovery is via the DB and
+      # the logs, so the raw bytes must still be there.
+      assert Repo.get(ProvisionJob, job.id).error == @capture
+    end
+
+    test "provision_steps[].detail is scrubbed, and the DB row keeps the raw bytes" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      _ =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/step",
+          %{step: "create", status: "failed", detail: @capture},
+          @worker_token
+        )
+
+      row = row_for(user, bp)
+
+      assert [%{"detail" => detail}] = row["provision_steps"]
+      refute detail =~ @secret
+      assert detail == "ssh: remote said Authorization: Bearer [redacted]"
+
+      assert [%{"detail" => @capture}] = Repo.get(ProvisionJob, job.id).steps
+    end
+
+    test "provision_console[].line is scrubbed, and the DB row keeps the raw bytes" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      _ =
+        call(
+          :post,
+          "/v1/internal/provision-jobs/#{job.id}/console",
+          %{line: @capture},
+          @worker_token
+        )
+
+      row = row_for(user, bp)
+
+      assert [%{"line" => line}] = row["provision_console"]
+      refute line =~ @secret
+      assert line == "ssh: remote said Authorization: Bearer [redacted]"
+
+      assert [%{"line" => @capture}] = Repo.get(ProvisionJob, job.id).console
+    end
+
+    test "a git SHA in the same capture survives the round trip verbatim" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      {:ok, _} =
+        Registry.fail_job(job.id, "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed")
+
+      assert row_for(user, bp)["provision_error"] ==
+               "build of 0f28d541e9a1b2c3d4e5f60718293a4b5c6d7e8f failed"
+    end
+  end
 end
