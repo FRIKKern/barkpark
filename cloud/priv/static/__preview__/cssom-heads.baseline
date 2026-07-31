@@ -33,4 +33,15 @@
 # outline. Before it, that card's flush list treatment (`border: none` + `border-top`)
 # zeroed the border the shared focus rule only re-COLOURS, so three of the four sides
 # painted nothing. MISSES 0 confirms this is an unrecorded ADD, not a parity defect.
-1236
+#
+# Re-measured 2026-07-31 (cch-w13-s3-cancelled-deploy-not-queued): 1237 authored heads,
+# MISSES 0 — MEASURED by running cssom-parity.mjs on this branch (app.css @ sha256
+# e11bdbea41cf…, Chrome 150.0.7871.187, node v22.22.0), not hand-incremented. The +1 is
+# ONE rule — `.dep-cancelled` — the sixth Deployment status finally getting a paint of
+# its own; until it existed the class fell through to the .dep-pill base, which is
+# byte-identical to .dep-queued, so a terminal abort painted as one still waiting.
+# MISSES 0 confirms this is an unrecorded ADD, not a parity defect. NOTE for whoever
+# rebases onto sibling slice S4, which also adds heads: two identical bumps merge CLEAN
+# and WRONG — re-run cssom-parity.mjs and write what it MEASURES (D158), never resolve
+# this number by hand.
+1237

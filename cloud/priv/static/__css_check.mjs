@@ -94,6 +94,12 @@
 //       check 19 focus rules painted a 1.19–1.52:1 band while E5 was green. A
 //       rule carrying an opaque border-color is compliant (that border IS the
 //       indicator); full predicate on focusIndicatorErrors below.
+//   E13 an unpainted deployment status: a status in DEPLOY_STATUSES with no
+//       `.dep-<status>` rule in app.css. The `dep-pill dep-` E3 allowlist waives
+//       the whole dynamic head, so the emitted VALUE SPACE was unchecked and
+//       `cancelled` shipped ruleless — falling through to the .dep-pill base,
+//       which is byte-identical to .dep-queued, so an aborted deploy painted as
+//       one still waiting. Full boundary on DEPLOY_STATUSES below.
 //
 // REPORTS (printed, never exit-affecting):
 //   R2  tokens defined in app.css that nothing consumes yet.
@@ -190,7 +196,7 @@ const ALLOW_PREFIXES = [
   "choice-ico sm ",    // provider row mini-tile: + m.cls (same brand-* set)
   "token-row",         // token row (GR33 lean line item, no longer a .fleet-row): + (revoked ? " is-revoked" : "")
   "dot ",              // badge(): + esc(kind) (up | down | unknown | online | offline | warn)
-  "dep-pill dep-",     // deployment status pill: + esc(st) (live | failed | building | pushing | queued)
+  "dep-pill dep-",     // deployment status pill: + esc(st) — the value space is NOT this comment's; it is DEPLOY_STATUSES below, and E13 checks it
   "deploy-fail",       // deploy-fail row: + (failureTone === "blocked" ? " deploy-fail--blocked" : "")
   "deploy-console",    // + (open ? "" : " is-collapsed")
   "tier",              // + " tier-current" / " tier-free" conditionals
@@ -235,6 +241,35 @@ const ALLOW_PREFIXES = [
   "fresh-badge fresh-badge--",     // freshnessBadge(): + m.dot (up | down | deploy | rebuild) + optional " is-rebuilding"
   "usage-bar-quota",               // usageMeterHtml(): + (tone === "ok" ? " dim" : "") (.usage-bar-quota / .dim)
 ];
+
+// ── E13: the .dep-* VALUE SPACE, derived instead of described ───────────────
+// The `dep-pill dep-` entry above is an E3 allowlist: it waives the whole
+// dynamic head, so before this list existed NOTHING checked which suffixes the
+// head can actually take. The comment on that entry claimed five statuses and
+// the server has six — `cancelled` shipped with no rule at all and fell through
+// to the .dep-pill base, which is byte-identical to .dep-queued, so a terminal
+// abort painted as "still waiting". A comment cannot fail; this list can.
+//
+// THE SOURCE OF TRUTH is Ecto: BarkparkCloud.Registry.Deployment's @statuses
+// (grep: `grep -n '@statuses' cloud/lib/barkpark_cloud/registry/deployment.ex`
+// — verified at review; the module and path both resolve, which is the point of
+// citing them at all).
+// It is COMMITTED here rather than parsed out of the .ex file on purpose — this
+// checker is a zero-dependency static reader of three static assets and must not
+// grow a cross-language parser (E11's cross-language boundary, same reasoning).
+// The cost of the copy is that a SEVENTH server status lands here unnoticed; the
+// mitigation is that adding a status to the Ecto enum without adding it here is
+// the same review that must add the CSS rule anyway, and app.js emits
+// `dep-` + esc(st) for whatever the server sends, so the omission is visible the
+// first time that status renders.
+//
+// WHAT E13 OWNS: every status in this list has SOME rule in app.css whose
+// selector names `.dep-<status>` (grouped selectors count — `.dep-building,
+// .dep-pushing {…}` satisfies both). WHAT IT DOES NOT OWN: whether that rule
+// says anything DISTINCT. A rule that only re-states the base would pass here;
+// what stops that is CONTRAST_PAIRS plus the driven computed-style proof in the
+// slice's evidence, not this check.
+const DEPLOY_STATUSES = ["queued", "building", "pushing", "live", "failed", "cancelled"];
 
 // Classes that intentionally have no style rule: they are JS/structural hooks
 // (selector targets, event delegation markers), not visual classes. Each is
@@ -317,6 +352,7 @@ const CONTRAST_PAIRS = [
   { fg: "--muted-text", bg: "--surface", min: 4.5, why: "secondary copy on cards" },
   { fg: "--dim", bg: "--bg", min: 4.5, why: "tertiary copy (.dim)" },
   { fg: "--dim", bg: "--muted-surface", min: 4.5, why: "tertiary copy on muted" },
+  { fg: "--dim", bg: "--surface", min: 4.5, why: ".dep-cancelled pill text — the chip is hollow (background: transparent), so its label composites straight onto the .deploys card" },
   { fg: "--primary-fg", bg: "--primary", min: 4.5, why: "avatar label / step dots" },
   { fg: "--btn-fg", bg: "--btn-bg", min: 4.5, why: ".btn-primary label" },
   { fg: "--btn-danger-fg", bg: "--btn-danger-bg", min: 4.5, why: ".btn-danger label" },
@@ -1191,6 +1227,20 @@ for (const b of badTokens) {
   errors.push(
     `E4 ${b.file}:${b.line}  class token ${JSON.stringify(b.tok)} cannot be statically parsed — ` +
       `rewrite the site in the single-quoted concat style (with an ALLOW_PREFIXES entry if dynamic)`,
+  );
+}
+
+// E13 — every server-side deployment status is painted. Derived from
+// DEPLOY_STATUSES (the Ecto @statuses enum), never from the E3 allowlist's
+// prose. `css` is comment-stripped, so a selector that survives only inside a
+// comment does NOT count.
+for (const st of DEPLOY_STATUSES) {
+  if (cssClasses.has(`dep-${st}`)) continue;
+  errors.push(
+    `E13 app.css  deployment status "${st}" has no .dep-${st} rule — the ` +
+      `dep-pill dep- head emits it, so it falls through to the .dep-pill base ` +
+      `and paints as an untouched/queued deployment. Add a rule next to the ` +
+      `other .dep-* rules in the DEPLOYMENTS section.`,
   );
 }
 

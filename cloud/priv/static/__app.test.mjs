@@ -10475,6 +10475,20 @@ test("gr-p3: a cancelled row states its state through the pill, no invented copy
   assert.doesNotMatch(html, /deploy-fail/); // cancelled is not a failure panel
 });
 
+test("cch-w13-s3: the DEPLOY noun has ONE spelling — freshness label and ladder pill agree", () => {
+  // Both surfaces render on the SAME site screen ~200px apart: the sites-list /
+  // site-header freshness label from freshnessModel, and the ladder pill from
+  // cap(status). They disagreed ("Canceled" vs "Cancelled") until cch-w13-s3.
+  const d = { status: "cancelled", trigger: "manual", inserted_at: "2026-07-19T10:00:00Z", updated_at: "2026-07-19T10:01:00Z" };
+  const fresh = hooks.freshnessModel({ last_deployment: d });
+  assert.equal(fresh.label, "Cancelled");
+  const pill = hooks.deployRow({ id: "dc", ...d }, null);
+  assert.match(pill, new RegExp(">" + fresh.label + "<"));
+  // The Stripe SUBSCRIPTION noun is a DIFFERENT word and keeps its own American
+  // spelling — this test must not drag billing along with the deploy vocabulary.
+  assert.equal(hooks.billingStatusLabel({ status: "canceled" }), "Canceled");
+});
+
 test("gr-p3: domainStageRows — proxied is its own settled informational role", () => {
   const rows = hooks.domainStageRows([
     { stage: "dns_found", status: "ok", label: "DNS found" },
