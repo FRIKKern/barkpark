@@ -763,3 +763,176 @@ func TestHetznerResourceCensusMeasuresTheKnownPopulation(t *testing.T) {
 		}
 	}
 }
+
+// PDS-D426 — THE SHRUNKEN-POPULATION HOLE, AND THE TWO ARMS THAT CLOSE IT
+// ------------------------------------------------------------------------
+// PDS-D418's ruling 3 was written "so deleting a kind costs an explicit,
+// reviewable edit rather than a row cleanup that looks like tidying". As
+// IMPLEMENTED above it iterates hzResLedgerKinds and asserts each pinned kind is
+// LIVE — pinned-subset-of-live, and nothing more. So the ledger can be satisfied
+// by SHRINKING it. Measured on clean main before these arms existed: deleting
+// "zone" from hzResLedgerKinds, with the three zone rows and every zone source
+// UNTOUCHED, left the whole suite `ok` with zero errors, cheerfully logging
+// KINDS=12. One line, fully green. Every other arm here checks the ledger
+// against the code; none checked the ledger's own POPULATION against the code.
+//
+// ARM 1 (below) adds the missing direction — kind-set EQUALITY, so a kind that
+// still emits receipts but has left the pin is as loud as a pin with no
+// receipts. ARM 3 scans the sources the census does NOT glob, so relocating an
+// emitter out of hetzner_*.go cannot shrink the population either.
+//
+// A THIRD ARM WAS PROTOTYPED AND DELIBERATELY NOT BUILT: pinning the globbed
+// SOURCE SET by name. It was measured redundant — with it excluded, de-globbing
+// hetzner_storage_cmd.go is still caught twice over, by the shipped stale-row
+// arm (five named orphan rows) and by ARM 1 ("bucket" pinned, emitting nothing).
+// It is also the only candidate arm that reds on every NEW hetzner_*.go, i.e.
+// the only one that taxes growth, which is what PDS-D418 rules against.
+//
+// NEITHER ARM QUOTES A KIND COUNT. Set equality already implies the length, and
+// a bare len() pin is precisely the renegotiable number D418 forbids: it turns
+// every legitimate refactor into a floor negotiation. The exact pins that DO tax
+// growth today (TOTAL=50 / KEYS=52) are a separate, filed question —
+// pds-bl-census-exact-pins-tax-growth — and are untouched here.
+//
+// WHAT THIS IS WORTH, STATED HONESTLY SO NOBODY OVER-READS IT
+// ------------------------------------------------------------
+//   - THIS GATE IS ADVISORY (PDS-D425). go-tests.yml runs these tests on every
+//     **/*.go PR and really executes them, but live branch protection requires
+//     only ["Elixir gate", "PR references an active task"]. A red here is a
+//     signal a reviewer sees; it CANNOT refuse a merge. Registering the context
+//     is a separate repo-wide decision (the workflow is paths-filtered, and a
+//     required paths-filtered context deadlocks main) — filed as
+//     pds-bl-go-tests-not-required.
+//   - IT MAKES SHRINKAGE EXPLICIT AND REVIEWABLE, NOT IMPOSSIBLE. The honest
+//     two-step — delete the verb, delete its rows, delete the pin, in one
+//     coherent commit — still goes green, which is correct for a real removal.
+//     What it stops is the pin moving ALONE.
+//   - IT IS BLIND TO FUNC-VALUE EMITTERS. Both arms (like the shipped scanner)
+//     match *ast.Ident call targets, so an emitter reached through a variable, a
+//     method value, or a struct field is invisible to them. Filed as
+//     pds-bl-census-ast-scan-blind-to-func-values.
+
+// hzResNonGlobbedSources is the complement of the census population: every
+// non-test *.go in internal/cli that hzResSourceFiles does NOT scan. Test files
+// are excluded because they legitimately call the emitters directly to prove
+// their behaviour (hetzner_lb_cmd_test.go and success_claim_registry_test.go
+// both do); production code outside the glob has no such excuse.
+func hzResNonGlobbedSources(t *testing.T) []string {
+	t.Helper()
+	globbed := map[string]bool{}
+	for _, p := range hzResSourceFiles(t) {
+		globbed[filepath.Base(p)] = true
+	}
+	all, err := filepath.Glob(filepath.Join(".", "*.go"))
+	if err != nil {
+		t.Fatalf("glob *.go: %v", err)
+	}
+	var srcs []string
+	for _, p := range all {
+		if strings.HasSuffix(p, "_test.go") || globbed[filepath.Base(p)] {
+			continue
+		}
+		srcs = append(srcs, p)
+	}
+	sort.Strings(srcs)
+	return srcs
+}
+
+// TestHetznerResourceCensusKindSetIsExact is ARM 1: the ledger's kind population
+// must EQUAL the kinds the sources emit, in both directions. The shipped ruling-3
+// loop asserts only that a pinned kind is live; this asserts the converse too, so
+// a kind cannot leave the ledger while its receipts stay in the tree.
+func TestHetznerResourceCensusKindSetIsExact(t *testing.T) {
+	c := hzResBuildCensus(t)
+
+	live := map[string][]string{} // kind → the keys that prove it
+	for key := range c.keys {
+		kind, _, _ := strings.Cut(key, "/")
+		live[kind] = append(live[kind], key)
+	}
+	pinned := map[string]bool{}
+	for _, kind := range hzResLedgerKinds {
+		pinned[kind] = true
+	}
+
+	liveKinds := make([]string, 0, len(live))
+	for kind := range live {
+		liveKinds = append(liveKinds, kind)
+	}
+	sort.Strings(liveKinds)
+
+	for _, kind := range liveKinds {
+		if pinned[kind] {
+			continue
+		}
+		keys := slices.Clone(live[kind])
+		sort.Strings(keys)
+		t.Errorf("RATCHET/KIND-UNPINNED: kind %q emits receipts in the scanned sources (%v) but is ABSENT from "+
+			"hzResLedgerKinds — the ledger's population is smaller than the code's, so this kind's obligations "+
+			"are invisible to every per-kind arm of this census. Add %q to hzResLedgerKinds.", kind, keys, kind)
+	}
+
+	for _, kind := range hzResLedgerKinds {
+		if len(live[kind]) > 0 {
+			continue
+		}
+		t.Errorf("RATCHET/KIND-VANISHED: kind %q is pinned but emits NO receipt any more in %v. If the verb family "+
+			"really was removed, delete its dispositions AND this pin in the same commit — a kind that leaves "+
+			"silently takes its obligations with it.", kind, hzResSourceFiles(t))
+	}
+
+	t.Logf("KIND-SET live=%v pinned=%v", liveKinds, hzResLedgerKinds)
+}
+
+// TestHetznerResourceReceiptEmittersStayInsideTheCensusGlob is ARM 3: no
+// production source OUTSIDE hetzner_*.go may call a receipt emitter. Equality of
+// the kind set (ARM 1) is only as honest as the file set it is derived from — a
+// receipt-emitting file renamed or moved out of the glob shrinks the derived
+// population, and every arm that reasons from c.keys then reads a smaller world
+// without saying so. This arm is completely GROWTH-FREE: a new hetzner_*.go is
+// inside the glob, so it never speaks for legitimate growth.
+func TestHetznerResourceReceiptEmittersStayInsideTheCensusGlob(t *testing.T) {
+	sources := hzResNonGlobbedSources(t)
+
+	// A vacuity floor, not a census: if this scan stops finding sources the arm
+	// would pass by looking at nothing. It counts FILES OUTSIDE the census, a
+	// population that only grows, so it is not a tax on anything.
+	const nonGlobbedFloor = 40
+	if len(sources) < nonGlobbedFloor {
+		t.Fatalf("only %d non-globbed sources to scan (floor %d) — this arm is measuring nothing. internal/cli held "+
+			"86 when it was written; check the working directory and the glob before trusting a green here",
+			len(sources), nonGlobbedFloor)
+	}
+
+	fset := token.NewFileSet()
+	orphans := 0
+	for _, path := range sources {
+		f, err := parser.ParseFile(fset, path, nil, parser.SkipObjectResolution)
+		if err != nil {
+			t.Fatalf("parse %s: %v", path, err)
+		}
+		ast.Inspect(f, func(n ast.Node) bool {
+			call, ok := n.(*ast.CallExpr)
+			if !ok {
+				return true
+			}
+			fn, ok := call.Fun.(*ast.Ident)
+			if !ok {
+				return true
+			}
+			if _, emitter := hzResEmitters[fn.Name]; !emitter {
+				return true
+			}
+			orphans++
+			t.Errorf("RATCHET/EMITTER-OUTSIDE-GLOB: %s:%d calls %s, but %s is NOT one of the census sources %v. "+
+				"This receipt is emitted where the census cannot see it, so its (kind, action) carries no "+
+				"disposition and no per-kind arm speaks for it. Either move it back under hetzner_*.go or widen "+
+				"hzResSourceFiles in the same commit.",
+				path, fset.Position(call.Pos()).Line, fn.Name, path, hzResSourceFiles(t))
+			return true
+		})
+	}
+
+	t.Logf("OUT-OF-GLOB SCAN: %d non-globbed non-test sources in internal/cli, %d orphaned emitter calls",
+		len(sources), orphans)
+}
