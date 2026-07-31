@@ -65,6 +65,24 @@ class PaperEpicRepairTest(unittest.TestCase):
                     "title": "Decision",
                     "content": text("Keep the public record specific and useful."),
                 },
+                {
+                    "id": "why",
+                    "type": "heading",
+                    "level": 2,
+                    "text": "Why this decision exists",
+                },
+                {
+                    "id": "blocks",
+                    "type": "heading",
+                    "level": 2,
+                    "text": "What it blocks",
+                },
+                {
+                    "id": "endgame",
+                    "type": "heading",
+                    "level": 2,
+                    "text": "Endgame",
+                },
             ],
         }
 
@@ -77,9 +95,13 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertNotIn("main_tag", patch["set"])
         self.assertEqual(
             [block["type"] for block in repaired[:4]],
-            ["eyebrow", "heading", "ingress", "stats"],
+            ["eyebrow", "heading", "ingress", "byline"],
         )
-        self.assertTrue(any(block.get("type") == "stats" for block in repaired[:8]))
+        self.assertEqual(
+            repaired[3]["items"],
+            ["Why this decision exists", "What it blocks", "Endgame"],
+        )
+        self.assertNotIn("source words", str(repaired[:8]))
         self.assertFalse(
             any(
                 block.get("type") == "paragraph"
@@ -313,7 +335,11 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertEqual(repaired[0]["level"], 1)
         self.assertEqual(
             [block["type"] for block in repaired[:3]],
-            ["heading", "ingress", "stats"],
+            ["heading", "ingress", "byline"],
+        )
+        self.assertEqual(
+            repaired[2]["items"],
+            ["Decision record", "Evidence and implications", "Next action"],
         )
         self.assertFalse(
             any(
