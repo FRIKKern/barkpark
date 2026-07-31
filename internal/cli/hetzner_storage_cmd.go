@@ -24,6 +24,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -443,34 +444,80 @@ func runHetznerObjectGet(out *writer, args []string) int {
 	if !ok {
 		return exitAuth
 	}
-	rc, err := c.GetObject(hetznerCtx(), bucket, key)
+	// GetObjectSized, not GetObject: the length the endpoint declared rides the
+	// SAME response, and without it the receipt below could only echo its own
+	// io.Copy counter — a byte count nothing verified.
+	rc, declared, err := c.GetObjectSized(hetznerCtx(), bucket, key)
 	if err != nil {
 		return useError(out, "failed", err.Error(), exitGeneric)
 	}
 	defer rc.Close()
 
 	if outPath := a.val("out"); outPath != "" {
-		f, ferr := os.Create(outPath)
+		// Write beside the destination and rename only once the bytes check out:
+		// os.Create(outPath) truncated a pre-existing file BEFORE the first S3
+		// byte arrived, so a mid-stream drop destroyed the good copy the operator
+		// already had. Same directory = same filesystem = atomic rename.
+		destDir := filepath.Dir(outPath)
+		tmp, ferr := os.CreateTemp(destDir, "."+filepath.Base(outPath)+".part-*")
 		if ferr != nil {
-			return useError(out, "usage", ferr.Error(), exitUsage)
+			return useError(out, "usage", "create temp file in "+destDir+": "+ferr.Error(), exitUsage)
 		}
-		n, cerr := io.Copy(f, rc)
-		if cerr == nil {
-			cerr = f.Close()
-		} else {
-			_ = f.Close()
+		tmpName := tmp.Name()
+		n, cerr := io.Copy(tmp, rc)
+		if closeErr := tmp.Close(); closeErr != nil && cerr == nil {
+			cerr = closeErr
 		}
 		if cerr != nil {
+			_ = os.Remove(tmpName)
 			return useError(out, "failed", "write "+outPath+": "+cerr.Error(), exitGeneric)
 		}
-		return hzResDone(out, "get", "object", key, key, map[string]any{"bucket": bucket, "out": outPath, "bytes": n})
+		if declared > 0 && n != declared {
+			_ = os.Remove(tmpName)
+			return useError(out, "failed",
+				fmt.Sprintf("size mismatch: %s/%s declared %d bytes, wrote %d — %s left untouched", bucket, key, declared, n, outPath),
+				exitGeneric)
+		}
+		if rerr := os.Rename(tmpName, outPath); rerr != nil {
+			_ = os.Remove(tmpName)
+			return useError(out, "failed", "promote "+tmpName+" to "+outPath+": "+rerr.Error(), exitGeneric)
+		}
+		extra := map[string]any{"bucket": bucket, "out": outPath, "bytes": n}
+		for k, v := range hzSizeVerdict(declared) {
+			extra[k] = v
+		}
+		return hzResDone(out, "get", "object", key, key, extra)
 	}
 	// No --out: the object's bytes ARE the output — raw to stdout, no envelope,
-	// so `… object get … > file` and piping into tar Just Work.
-	if _, cerr := io.Copy(out.stdout, rc); cerr != nil {
+	// so `… object get … > file` and piping into tar Just Work. There is no
+	// receipt to carry a verdict here, so the only honest signal a truncated
+	// pipe has is the exit code.
+	n, cerr := io.Copy(out.stdout, rc)
+	if cerr != nil {
 		return useError(out, "failed", cerr.Error(), exitGeneric)
 	}
+	if declared > 0 && n != declared {
+		return useError(out, "failed",
+			fmt.Sprintf("size mismatch: %s/%s declared %d bytes, streamed %d", bucket, key, declared, n),
+			exitGeneric)
+	}
 	return exitOK
+}
+
+// hzSizeVerdict turns a DECLARED object length into the receipt fields that say
+// whether the byte count was checked against anything. An absent (-1) or
+// non-positive declaration is reported as unverified with its own counter —
+// Hetzner is S3-compatible, not S3, so "no Content-Length came back" must never
+// read as a pass.
+func hzSizeVerdict(declared int64) map[string]any {
+	if declared > 0 {
+		return map[string]any{"declared_bytes": declared, "size_verified": true, "unverified": 0}
+	}
+	return map[string]any{
+		"size_verified":     false,
+		"unverified":        1,
+		"unverified_reason": "the endpoint declared no object length; the byte count is what we wrote, not what was promised",
+	}
 }
 
 func runHetznerObjectRm(out *writer, args []string) int {

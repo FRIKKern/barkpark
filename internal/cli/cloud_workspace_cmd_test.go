@@ -1144,6 +1144,25 @@ func TestBlobFetchSizeMismatchIsANamedFailure(t *testing.T) {
 	if !strings.Contains(stdout, "0 fetched, 1 failed") {
 		t.Fatalf("report must own the failure:\n%s", stdout)
 	}
+
+	// A named failure that LEAVES the short bytes on disk is only half honest:
+	// they sit under the FINAL name in the sidecar directory, which is exactly
+	// what `import --with-blobs` walks and PUTs back.
+	blobDir := outFile + ".blobs"
+	dest := filepath.Join(blobDir, "2026", "07", "short-11112222.png")
+	if _, serr := os.Stat(dest); !os.IsNotExist(serr) {
+		body, _ := os.ReadFile(dest)
+		t.Fatalf("the truncated blob survived at %s (%q, stat err %v)", dest, body, serr)
+	}
+	// sidecarBlobPaths IS the upload half's input, so an empty answer is the
+	// upload half being unable to pick the truncated blob up.
+	paths, perr := sidecarBlobPaths(blobDir)
+	if perr != nil && !os.IsNotExist(perr) {
+		t.Fatalf("sidecarBlobPaths: %v", perr)
+	}
+	if len(paths) != 0 {
+		t.Fatalf("the upload half can still see %v, want nothing to re-upload", paths)
+	}
 }
 
 // TestBlobFetchAbsentDeclaredSizeIsNotAPass: media_files.size is NULLABLE (a

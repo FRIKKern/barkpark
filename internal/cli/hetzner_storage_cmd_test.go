@@ -6,12 +6,14 @@ package cli
 // faked, so every assertion reads the actual S3 request bp would send.
 
 import (
+	"crypto/sha256"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -64,10 +66,15 @@ type s3Req struct {
 // fakeS3 is the recording RoundTripper. handler (optional) picks the response
 // per request; the default is 200 with an empty body. Every response carries
 // an ETag so the multipart UploadPart path completes.
+// declaredLen (optional) makes the response DECLARE a Content-Length that is
+// decoupled from the body it actually sends — the only way to reproduce, in a
+// test, an endpoint that promises N bytes and hangs up early. Left nil, nothing
+// is declared, which is Hetzner's S3-compatible-not-S3 worst case.
 type fakeS3 struct {
-	mu      sync.Mutex
-	reqs    []s3Req
-	handler func(r s3Req) (int, string)
+	mu          sync.Mutex
+	reqs        []s3Req
+	handler     func(r s3Req) (int, string)
+	declaredLen *int64
 }
 
 func (f *fakeS3) RoundTrip(req *http.Request) (*http.Response, error) {
@@ -92,15 +99,21 @@ func (f *fakeS3) RoundTrip(req *http.Request) (*http.Response, error) {
 	if f.handler != nil {
 		status, respBody = f.handler(rec)
 	}
-	return &http.Response{
+	resp := &http.Response{
 		StatusCode: status,
 		Header: http.Header{
 			"Content-Type": []string{"application/xml"},
 			"Etag":         []string{`"fake-etag"`},
 		},
-		Body:    io.NopCloser(strings.NewReader(respBody)),
-		Request: req,
-	}, nil
+		Body:          io.NopCloser(strings.NewReader(respBody)),
+		Request:       req,
+		ContentLength: -1,
+	}
+	if f.declaredLen != nil && req.Method == http.MethodGet {
+		resp.ContentLength = *f.declaredLen
+		resp.Header.Set("Content-Length", strconv.FormatInt(*f.declaredLen, 10))
+	}
+	return resp, nil
 }
 
 func (f *fakeS3) requests() []s3Req {
@@ -361,6 +374,115 @@ func TestHetznerStorageObjectGetAndRm(t *testing.T) {
 	}
 	if req, ok := f.find("DELETE", "/a/b.txt"); !ok || req.Host != "bkt.fsn1.your-objectstorage.com" {
 		t.Errorf("rm request = %+v, want DELETE bk.fsn1…/a/b.txt", req)
+	}
+}
+
+// hzGetJSON runs `object get --out <path>` against f and returns the decoded
+// receipt, so the size verdict is read as data rather than scraped from prose.
+func hzGetJSON(t *testing.T, outPath string) (map[string]any, string, int) {
+	t.Helper()
+	stdout, stderr, code := runHzCLI(t, "json", storageArgs("hetzner", "storage", "object", "get", "--bucket", "bkt", "--key", "a/b.txt", "--out", outPath)...)
+	payload := map[string]any{}
+	if code == exitOK {
+		if err := json.Unmarshal([]byte(stdout), &payload); err != nil {
+			t.Fatalf("get receipt is not JSON: %v\n%s", err, stdout)
+		}
+	}
+	return payload, stderr, code
+}
+
+// TestHetznerStorageObjectGetVerifiesDeclaredLength: the receipt's byte count
+// is CHECKED against the length the endpoint declared in the same response, and
+// says so. Before this, `bytes` was io.Copy's own counter echoed back — a number
+// that agreed with itself no matter what arrived.
+func TestHetznerStorageObjectGetVerifiesDeclaredLength(t *testing.T) {
+	body := "exactly-these-bytes"
+	n := int64(len(body))
+	f := &fakeS3{
+		handler:     func(r s3Req) (int, string) { return 200, body },
+		declaredLen: &n,
+	}
+	withFakeS3(t, f)
+
+	outPath := filepath.Join(t.TempDir(), "obj.bin")
+	payload, stderr, code := hzGetJSON(t, outPath)
+	if code != exitOK {
+		t.Fatalf("get exited %d, stderr: %s", code, stderr)
+	}
+	if payload["bytes"] != float64(n) || payload["declared_bytes"] != float64(n) {
+		t.Errorf("receipt = %v, want bytes and declared_bytes both %d", payload, n)
+	}
+	if payload["size_verified"] != true || payload["unverified"] != float64(0) {
+		t.Errorf("receipt = %v, want size_verified true with a zero unverified counter", payload)
+	}
+	got, rerr := os.ReadFile(outPath)
+	if rerr != nil || string(got) != body {
+		t.Errorf("file = %q (%v), want the object's bytes", got, rerr)
+	}
+}
+
+// TestHetznerStorageObjectGetShortBodyIsNotSuccess is the mutation this whole
+// leg exists for: the endpoint DECLARES 4096 bytes and sends nine. The verb must
+// not exit 0, must NAME the mismatch — and must leave the operator's
+// pre-existing file byte-identical, because it now writes to a temp beside the
+// destination instead of truncating it before the first byte arrives.
+func TestHetznerStorageObjectGetShortBodyIsNotSuccess(t *testing.T) {
+	declared := int64(4096)
+	f := &fakeS3{
+		handler:     func(r s3Req) (int, string) { return 200, "TRUNCATED" },
+		declaredLen: &declared,
+	}
+	withFakeS3(t, f)
+
+	dir := t.TempDir()
+	outPath := filepath.Join(dir, "yesterdays-good-backup.tar.gz")
+	if err := os.WriteFile(outPath, []byte("THE OPERATOR'S GOOD COPY"), 0o644); err != nil {
+		t.Fatalf("seed pre-existing file: %v", err)
+	}
+	before := sha256.Sum256([]byte("THE OPERATOR'S GOOD COPY"))
+
+	stdout, stderr, code := runHzCLI(t, "table", storageArgs("hetzner", "storage", "object", "get", "--bucket", "bkt", "--key", "a/b.txt", "--out", outPath)...)
+	if code == exitOK {
+		t.Fatalf("a short body exited 0\nstdout: %s\nstderr: %s", stdout, stderr)
+	}
+	said := stdout + stderr
+	if !strings.Contains(said, "size mismatch") || !strings.Contains(said, "4096") || !strings.Contains(said, "wrote 9") {
+		t.Errorf("failure must name the mismatch and both numbers:\n%s", said)
+	}
+	after, rerr := os.ReadFile(outPath)
+	if rerr != nil {
+		t.Fatalf("the pre-existing file is gone: %v", rerr)
+	}
+	if sha256.Sum256(after) != before {
+		t.Errorf("the pre-existing file changed: %q", after)
+	}
+	entries, _ := os.ReadDir(dir)
+	if len(entries) != 1 {
+		t.Errorf("temp litter left behind: %v", entries)
+	}
+}
+
+// TestHetznerStorageObjectGetUndeclaredLengthIsUnverified: Hetzner is
+// S3-COMPATIBLE, not S3. When no length comes back there is nothing to check
+// against, and the receipt says exactly that — with its own counter — instead of
+// reporting a verification it never performed.
+func TestHetznerStorageObjectGetUndeclaredLengthIsUnverified(t *testing.T) {
+	f := &fakeS3{handler: func(r s3Req) (int, string) { return 200, "some bytes" }} // declaredLen nil
+	withFakeS3(t, f)
+
+	outPath := filepath.Join(t.TempDir(), "obj.bin")
+	payload, stderr, code := hzGetJSON(t, outPath)
+	if code != exitOK {
+		t.Fatalf("an undeclared length must still transfer, exited %d: %s", code, stderr)
+	}
+	if payload["size_verified"] != false || payload["unverified"] != float64(1) {
+		t.Errorf("receipt = %v, want size_verified false with unverified=1", payload)
+	}
+	if _, ok := payload["declared_bytes"]; ok {
+		t.Errorf("receipt = %v, must not invent a declared_bytes it never received", payload)
+	}
+	if reason, _ := payload["unverified_reason"].(string); !strings.Contains(reason, "declared no object length") {
+		t.Errorf("receipt = %v, want a stated reason", payload)
 	}
 }
 
