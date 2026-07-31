@@ -208,11 +208,15 @@
 # dump the report and THEN write the human VERDICT / ROUND-DONE PREDICATE block
 # to the SAME stdout, so `jq -e .` exited 5 ("Invalid numeric literal") — and the
 # GREEN path was poisoned identically: on a healthy fixture the run exited 0 and
-# jq still failed. The certificate was unpipeable exactly when it certified. The
-# whole human block therefore goes to STDERR, beside the failure VERDICT that
-# already did, and the predicate is folded into the payload as `round_done`
-# (bool) + `round_done_failures` (list) so a scripted consumer has a machine
-# path rather than a stream to scrape.
+# jq still failed. The certificate was unpipeable exactly when it certified.
+# UNDER `--json` the whole human block therefore goes to STDERR, beside the
+# failure VERDICT that already did. Under the DEFAULT render stdout is the human
+# channel already (the report is printed there), so the block stays with the
+# report it belongs to — otherwise `census.sh --assert-round-done > report.txt`
+# would silently lose the verdict it was run for. ONE `human` stream variable
+# decides, so the two modes cannot drift. The predicate is also folded into the
+# payload as `round_done` (bool) + `round_done_failures` (list) so a scripted
+# consumer has a machine path rather than a stream to scrape.
 #
 # THE EMIT IS NEVER DEFERRED. The predicate is a PURE function of `report`
 # (round_done_predicate) computed BEFORE the single emit site, precisely so the
@@ -1127,7 +1131,9 @@ def main(argv):
 
     # STDOUT IS THE MACHINE CHANNEL. Under --json this is the ONLY thing written
     # to it; every human line below goes to stderr, so `jq -e .` works on the
-    # green path and on the red one alike.
+    # green path and on the red one alike. Without --json stdout stays the HUMAN
+    # channel it has always been, and the predicate block goes there with the
+    # report it belongs to.
     if args.json:
         print(json.dumps(report, indent=2, sort_keys=True))
     else:
@@ -1148,21 +1154,33 @@ def main(argv):
                report["instant"]["finished"]),
             ["%s updated %s" % (i, t) for i, t in report["drifted"][:8]])
 
+    # THE HUMAN BLOCK FOLLOWS THE HUMAN STREAM. Under --json stdout is the
+    # machine channel and every human line goes to stderr, which is the whole
+    # point of the wave-27 fix. Under the DEFAULT render, stdout is ALREADY the
+    # human channel (the report above went there), so sending the predicate to
+    # stderr would split one human document across two streams and silently
+    # empty `census.sh --assert-round-done > report.txt` of the very verdict it
+    # was run for. One variable, resolved once, so the two modes cannot drift.
+    human = sys.stderr if args.json else sys.stdout
+
     if args.assert_round_done:
         for line in predicate_lines:
-            print(line, file=sys.stderr)
+            print(line, file=human)
         if round_done_failures:
-            print("", file=sys.stderr)
+            print("", file=human)
+            # The refusal itself stays on stderr in BOTH modes: it is a
+            # diagnostic, it predates this change, and a caller that redirects
+            # stdout to a report file must still see the refusal on its terminal.
             print("VERDICT: ROUND NOT DONE", file=sys.stderr)
             for failure in round_done_failures:
                 print("  - %s" % failure, file=sys.stderr)
             sys.exit(EXIT_ROUND_NOT_DONE)
-        print("", file=sys.stderr)
-        print("VERDICT: ROUND DONE", file=sys.stderr)
+        print("", file=human)
+        print("VERDICT: ROUND DONE", file=human)
         return EXIT_OK
 
-    print("", file=sys.stderr)
-    print("VERDICT: census complete and coherent", file=sys.stderr)
+    print("", file=human)
+    print("VERDICT: census complete and coherent", file=human)
     return EXIT_OK
 
 

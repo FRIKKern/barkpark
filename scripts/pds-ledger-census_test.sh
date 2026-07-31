@@ -177,6 +177,34 @@ expect_output_lacks() {
   printf '  ok    %-52s lacks %q\n' "$label" "$needle"
 }
 
+# expect_stdout_only_contains is the MIRROR of expect_json_stdout: it keeps the
+# streams separate and asserts the needle is on STDOUT specifically. 2>&1 helpers
+# cannot tell the two apart, so without this one, moving a human line to stderr
+# looks identical to leaving it on stdout — the same blindness that let the JSON
+# stream stay poisoned for two waves, pointed the other way. The exit code is the
+# census's own, captured directly, never through a pipe.
+expect_stdout_only_contains() {
+  local label=$1 needle=$2 want=$3
+  shift 3
+  CHECKS=$((CHECKS + 1))
+  local got=0
+  local so="$TMP/sonly.$CHECKS" se="$TMP/senly.$CHECKS"
+  "$@" > "$so" 2> "$se" || got=$?
+  if [[ $got -ne $want ]]; then
+    printf 'SELFTEST FAIL: %s — expected exit %d, got %d\n%s\n%s\n' "$label" "$want" "$got" \
+      "$(cat "$so")" "$(cat "$se")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  if ! grep -qF -- "$needle" "$so"; then
+    printf 'SELFTEST FAIL: %s — %q is not on STDOUT (stderr: %s)\n%s\n' "$label" "$needle" \
+      "$(grep -cF -- "$needle" "$se" || true)" "$(cat "$so")" >&2
+    FAILURES=$((FAILURES + 1))
+    return 1
+  fi
+  printf '  ok    %-52s stdout contains %q\n' "$label" "$needle"
+}
+
 # STDOUT IS THE MACHINE CHANNEL, AND THIS IS THE ONLY HELPER THAT CAN PROVE IT.
 # Every other helper captures `2>&1`, which is exactly why the census could dump
 # a human predicate block onto the same stdout as its JSON for two waves without
@@ -795,6 +823,15 @@ expect_output_contains "round_done is true on a healthy board" '"round_done": tr
   run --page-limit 4 --fixture-dir "$HEALTHY" --json
 expect_output_contains "and round_done_failures is then empty" '"round_done_failures": []' \
   run --page-limit 4 --fixture-dir "$HEALTHY" --json
+# ...AND THE HUMAN MODE KEEPS ITS HUMAN STREAM. Routing the predicate to stderr
+# UNCONDITIONALLY would fix the --json stream by splitting the DEFAULT render
+# across two: the report on stdout, the verdict it exists to deliver on stderr,
+# so `census.sh --assert-round-done > report.txt` captures everything except the
+# answer. Without --json, stdout must still carry both.
+expect_stdout_only_contains "without --json the predicate rides stdout with its report" \
+  "ROUND-DONE PREDICATE" 0 run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done
+expect_stdout_only_contains "and so does the certifying verdict" \
+  "VERDICT: ROUND DONE" 0 run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done
 echo
 
 # =============================================================================
