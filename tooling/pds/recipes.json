@@ -1,0 +1,47 @@
+{
+ "note": "PDS rerun recipes. ONE recipe per ledger row (two recipes sharing a subject and a null quantity are two rival claims on one conflict key, and grip would flag both CONFLICT). Every `terms` value must occur LITERALLY in both `command` and `claim` — that binding is what makes a claim falsifiable: mutate the claim, keep the command byte-identical, and the harness reds. A recipe re-derives ONE bound sub-claim of its row, never the row's whole reason; the verdict line says so, and says nothing stronger.",
+ "authored_at": "2026-07-31",
+ "authored_against": "origin/main 7dd27bc9bbec29652019f3c699bff86feaa21b9c",
+ "recipes": [
+  {
+   "doc_id": "pds-bl-harness-not-relocatable",
+   "claim_class": "existence",
+   "claim": "The PDS harness file the row's whole cost argument rests on — scripts/pds-pull-proof.sh — is still present in origin/main.",
+   "terms": { "ref": "origin/main", "path": "scripts/pds-pull-proof.sh" },
+   "command": "git cat-file -t origin/main:scripts/pds-pull-proof.sh",
+   "binds": "The row's reason cites pds-pull-proof.sh:2546. This recipe re-derives the FILE's existence at a named ref, which is all `git cat-file` moves its exit code on; the cited LINE is not re-derived here and must not be read as though it were. `-t` rather than `-e` on purpose: both are polarised (0 present / 128 absent) and grip's screen admits both, but `-e` prints nothing and grip's classifySilence rules a silent success NULL-READ, so the honest predicate arrives saying nothing. `-t` prints `blob` and survives."
+  },
+  {
+   "doc_id": "pds-bl-hzresdone-registry-row-vacuous",
+   "claim_class": "content-token",
+   "claim": "The token hzResDone still occurs under internal/cli in origin/main, so the row's subject has not been renamed or deleted out from under it.",
+   "terms": { "ref": "origin/main", "path": "internal/cli", "token": "hzResDone" },
+   "command": "git grep -n hzResDone origin/main -- internal/cli",
+   "binds": "The row asserts a 50-call-site population. This recipe re-derives only that the TOKEN is still there — the count is a separate claim and is deliberately NOT asserted here, because `git grep -n` moves its exit code on presence, not on cardinality."
+  },
+  {
+   "doc_id": "pds-bl-census-count-true-total-assertion",
+   "claim_class": "ancestry",
+   "claim": "The commit 6e53d27824206c5cbda4eb8916795921064165e9 that this row's reason re-derived itself against is an ancestor of origin/main, so the reason was written against history this branch still contains.",
+   "terms": { "sha": "6e53d27824206c5cbda4eb8916795921064165e9", "ref": "origin/main" },
+   "command": "git rev-list --count origin/main..6e53d27824206c5cbda4eb8916795921064165e9 | grep -x 0",
+   "binds": "`git branch --contains` and `git rev-list --count <sha>..origin/main` both exit 0 for an ancestor AND a non-ancestor, so neither can ever red; the direction here (origin/main..<sha>, graded by grep) was measured polarised on this host. `grep -x` rather than `grep -qx`: -q suppresses the match, and grip's classifySilence rules a matcher that exits 0 without printing a NULL-READ, so the -q spelling is polarised at the shell and mute at the verdict layer."
+  },
+  {
+   "doc_id": "pds-bl-export-close-delimited-silent-truncation",
+   "claim_class": "absence",
+   "claim": "internal/cli/export_cmd.go still carries no completeness signal in origin/main — the token completeness does not occur in it.",
+   "terms": { "ref": "origin/main", "path": "internal/cli/export_cmd.go", "token": "completeness" },
+   "command": "git grep -c completeness origin/main -- internal/cli/export_cmd.go",
+   "binds": "This command exits 1. That is the whole point of PDS-D389: the exit code is nonzero BECAUSE the claim is an absence and the absence holds. It is ruled through grip's shipped admitsAbsenceClaim, never through `verdict == ADMITTED`, which would call this true reason false."
+  },
+  {
+   "doc_id": "pds-bl-go-literal-selftest-false-red-macos",
+   "claim_class": "behaviour",
+   "claim": "scripts/go-literal-check.sh --selftest exits 1 on a healthy gate on macOS.",
+   "terms": { "path": "scripts/go-literal-check.sh", "predicate": "--selftest" },
+   "command": "bash scripts/go-literal-check.sh --selftest",
+   "binds": "SHIPPED AS A KNOWN REFUSAL, ON PURPOSE. grip's caller-boundary screen refuses every script runner (bash/sh/zsh/node) because they execute arbitrary programs, so this reason CANNOT be re-derived by this instrument today and is reported REFUSED with that named reason. It is here rather than absent because a class of reason that can only be checked by RUNNING something is exactly the class this wave was told to make visible and bounded rather than to pretend is checkable."
+  }
+ ]
+}
