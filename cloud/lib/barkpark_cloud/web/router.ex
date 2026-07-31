@@ -348,10 +348,41 @@ defmodule BarkparkCloud.Web.Router do
   # wave was invisible to a returning operator until a hard refresh). Fonts are
   # handled by the dedicated immutable plug above, so they are NOT in this
   # allowlist.
+  #
+  # `gzip: true` — the cold boot shipped 1,195,515 uncompressed bytes
+  # (index.html 31,219 + app.js 965,342 + app.css 198,954) because the edge in
+  # front of us compresses nothing (measured: the live responses carry no
+  # `content-encoding` and no `vary`). With this flag Plug.Static serves the
+  # pre-built `<file>.gz` sibling whenever the request says
+  # `accept-encoding: gzip`, and adds `vary: Accept-Encoding` so caches key the
+  # two representations apart: 346,777 bytes on the wire, −71.0%. The siblings
+  # are NOT committed — they are produced by one
+  # `RUN gzip -9 -k priv/static/index.html priv/static/app.js priv/static/app.css` in
+  # cloud/Dockerfile (see the comment there for why that placement is the whole
+  # staleness story), and `cloud/.gitignore` + `scripts/cloud-static-gz-guard.sh`
+  # keep one from ever being checked in. A missing sibling is not an error:
+  # Plug.Static falls back to the identity file.
+  #
+  # DO NOT ADD A RUNTIME FRESHNESS CHECK HERE. It cannot work, and the reason is
+  # structural: Plug.Static's etag is `phash2({size, mtime})` of THE FILE IT
+  # SERVES — in plug 1.20.1, `etag_for_path/3` (static.ex:404-413) hashes the
+  # `file_info` handed to it by `file_encoding/4` (:416-437), and that clause
+  # stats `path <> ext` (:423) — i.e. the .gz's OWN size and mtime, never the
+  # source's. Nothing on the path compares the two. Two consequences. Every
+  # build mints a fresh etag for byte-identical content (mtime moved), and a
+  # same-size same-mtime replacement collides on the old one. Mutation-proven:
+  # with a stale sibling on disk the SAME url answers gzip etag "1483F61" /
+  # 50,187 bytes of OLD css and identity etag "6BE30A" / 198,991 bytes of NEW
+  # css in the same second, and the `no-cache` above buys nothing because
+  # revalidation is answered 304 off the stale etag. An etag comparison is
+  # therefore not a sound staleness guard. Same-layer generation is: the
+  # Dockerfile builds the sibling from the very bytes it just COPYed, so a
+  # stale one cannot exist to be detected.
   plug(Plug.Static,
     at: "/",
     from: :barkpark_cloud,
     only: ~w(index.html app.css app.js favicon.ico button.svg styleguide.html),
+    gzip: true,
     headers: %{"cache-control" => "no-cache"},
     cache_control_for_etags: "no-cache"
   )

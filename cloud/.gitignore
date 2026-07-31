@@ -27,3 +27,16 @@ erl_crash.dump
 # Screenshots produced by the SPA preview harness (make cloud-shots) — a build
 # artifact, never committed. The fixtures + tooling in __preview__/ ARE tracked.
 priv/static/__preview__/__shots__/
+
+# Pre-compressed static siblings (priv/static/app.js.gz, app.css.gz). The
+# router's Plug.Static serves these when `gzip: true` finds them, but they are
+# BORN IN THE IMAGE — cloud/Dockerfile gzips them from the bytes `COPY priv
+# priv` just laid down, in the same build. A committed .gz is the one way that
+# invariant can break: it would ship whatever bytes it held on the day it was
+# committed, and Plug.Static would serve it in preference to the fresh source
+# with no way to notice. Before this line nothing ignored one
+# (`git check-ignore cloud/priv/static/app.css.gz` returned rc 1), so a local
+# `gzip -k` in the wrong directory was one `git add .` from prod.
+# scripts/cloud-static-gz-guard.sh is the tripwire for the `git add -f` path
+# this cannot stop.
+*.gz
