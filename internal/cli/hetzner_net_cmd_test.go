@@ -330,6 +330,14 @@ func TestHetznerLBAddTarget(t *testing.T) {
 	f.mux.HandleFunc("POST /load_balancers/7/actions/add_target", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 201, `{"action":{"id":37,"command":"add_target","status":"running","progress":0}}`)
 	})
+	// THE POST-READ (pds-w29-pay-lb): add-target now confirms on the RESOLVED
+	// id, so the single-resource GET must exist or the verb lands in the
+	// honest "not confirmed" arm. Note the LIST above still says `targets: []`
+	// — that stale collection body is exactly the trap a by-name post-read
+	// would fall into, and hetzner_lb_cmd_test.go pins it.
+	f.mux.HandleFunc("GET /load_balancers/7", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"load_balancer":{"id":7,"name":"web-lb","public_net":{"enabled":true,"ipv4":{},"ipv6":{}},"algorithm":{"type":"round_robin"},"services":[],"targets":[{"type":"server","server":{"id":42},"use_private_ip":true}]}}`)
+	})
 	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 200, `{"actions":[{"id":37,"status":"success","progress":100}]}`)
 	})
@@ -391,6 +399,11 @@ func TestHetznerFloatingIPAssign(t *testing.T) {
 	})
 	f.mux.HandleFunc("POST /floating_ips/11/actions/assign", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 201, `{"action":{"id":38,"command":"assign_floating_ip","status":"running","progress":0}}`)
+	})
+	// THE POST-READ (pds-w29-pay-lb): assign now confirms the assignment on the
+	// resolved floating-ip id. The nested server ref carries an ID and no name.
+	f.mux.HandleFunc("GET /floating_ips/11", func(w http.ResponseWriter, r *http.Request) {
+		hzWriteJSON(w, 200, `{"floating_ip":{"id":11,"name":"web-vip","ip":"192.0.2.99","type":"ipv4","dns_ptr":[],"server":42}}`)
 	})
 	f.mux.HandleFunc("GET /actions", func(w http.ResponseWriter, r *http.Request) {
 		hzWriteJSON(w, 200, `{"actions":[{"id":38,"status":"success","progress":100}]}`)

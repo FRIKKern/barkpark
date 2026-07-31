@@ -45,7 +45,9 @@ import (
 	"go/ast"
 	"go/parser"
 	"go/token"
+	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -62,6 +64,12 @@ var hzResEmitters = map[string]struct{ actionArg, kindArg int }{
 	"hzResDone":              {actionArg: 1, kindArg: 2},
 	"hzResDestroyed":         {actionArg: 2, kindArg: 3},
 	"hzResDestroyedDeclared": {actionArg: 1, kindArg: 2},
+	// The MUTATION half (PDS-D415). hzResObserved takes a ctx like
+	// hzResDestroyed and so shares its slots; hzResObservedResponse does not
+	// read, so it does not take one — which is exactly why this census keys on
+	// ARGUMENT POSITION rather than "the first quoted token".
+	"hzResObserved":         {actionArg: 2, kindArg: 3},
+	"hzResObservedResponse": {actionArg: 1, kindArg: 2},
 }
 
 // hzResApparatus are the generic emitters themselves. A call to hzResDone from
@@ -75,6 +83,9 @@ var hzResApparatus = map[string]bool{
 	"hzResDestroyedDeclared": true,
 	"hzResUnconfirmed":       true,
 	"hzResUnconfirmedAbsent": true,
+	"hzResObserved":          true,
+	"hzResObservedResponse":  true,
+	"hzResReportObserved":    true,
 }
 
 // hzResClass is what a receipt is BUILT FROM — the taxonomy the epic reasons
@@ -137,53 +148,136 @@ var hzResDispositions = map[string]hzResDisposition{
 	"bucket/delete":          {hzClassDestroy, "paid: hzResDestroyedDeclared — non-binding ListBuckets, fails closed"},
 	"object/rm":              {hzClassDestroy, "paid: hzResDestroyedDeclared — non-binding key-prefix list, fails closed"},
 
-	// ---- Round 2: the sub-resource removals. -----------------------------
-	"load-balancer/delete-service":  {hzClassSubRemoval, hzUnpaidSubRemoval},
-	"load-balancer/remove-target":   {hzClassSubRemoval, hzUnpaidSubRemoval},
+	// ---- PAID by pds-w29-pay-lb: the LB family's four sub-removals. -------
+	// A sub-resource has no identity of its own, so the post-read is a PARENT
+	// read on the RESOLVED id plus a containment predicate.
+	"load-balancer/delete-service": {hzClassSubRemoval,
+		"paid: hzResObserved re-reads LoadBalancer.GetByID(lb.ID); hzObserveLBServiceAbsent"},
+	"load-balancer/remove-target": {hzClassSubRemoval,
+		"paid: hzResObserved re-reads LoadBalancer.GetByID(lb.ID); hzObserveLBTargetAbsent switches on target Type first"},
+	"floating-ip/unassign": {hzClassSubRemoval,
+		"paid: hzResObserved re-reads FloatingIP.GetByID(fip.ID); hzObserveFloatingIPUnassigned"},
+	"primary-ip/unassign": {hzClassSubRemoval,
+		"paid: hzResObserved re-reads PrimaryIP.GetByID(pip.ID); hzObservePrimaryIPUnassigned"},
+
+	// ---- Round 2: the remaining sub-resource removals. --------------------
 	"network/delete-subnet":         {hzClassSubRemoval, hzUnpaidSubRemoval},
 	"network/delete-route":          {hzClassSubRemoval, hzUnpaidSubRemoval},
 	"firewall/remove-from-resource": {hzClassSubRemoval, hzUnpaidSubRemoval},
 	"volume/detach":                 {hzClassSubRemoval, hzUnpaidSubRemoval},
-	"floating-ip/unassign":          {hzClassSubRemoval, hzUnpaidSubRemoval},
-	"primary-ip/unassign":           {hzClassSubRemoval, hzUnpaidSubRemoval},
 
-	// ---- Round 2: the create receipts. -----------------------------------
-	"volume/create":               {hzClassCreate, hzUnpaidMutation},
-	"network/create":              {hzClassCreate, hzUnpaidMutation},
-	"firewall/create":             {hzClassCreate, hzUnpaidMutation},
-	"load-balancer/create":        {hzClassCreate, hzUnpaidMutation},
-	"floating-ip/create":          {hzClassCreate, hzUnpaidMutation},
-	"primary-ip/create":           {hzClassCreate, hzUnpaidMutation},
-	"placement-group/create":      {hzClassCreate, hzUnpaidMutation},
-	"certificate/create-uploaded": {hzClassCreate, hzUnpaidMutation},
-	"certificate/create-managed":  {hzClassCreate, hzUnpaidMutation},
-	"zone/create":                 {hzClassCreate, hzUnpaidMutation},
-	"record/create":               {hzClassCreate, hzUnpaidMutation},
-	"bucket/create":               {hzClassCreate, hzUnpaidMutation},
-	"backup/create":               {hzClassCreate, hzUnpaidMutation},
-	"backup/restore":              {hzClassCreate, hzUnpaidMutation},
+	// ---- PAID by pds-w29-pay-lb: the LB family's six creates. -------------
+	// CLASS A2: the create RESPONSE object is server truth, so these observe
+	// FROM it rather than paying a second round trip — and the receipt names
+	// that weaker basis ("the create response object") instead of implying the
+	// post-action GET the mutations take.
+	"load-balancer/create": {hzClassCreate,
+		"paid: hzResObservedResponse observes result.LoadBalancer; hzObserveLBCreated"},
+	"floating-ip/create": {hzClassCreate,
+		"paid: hzResObservedResponse observes result.FloatingIP; hzObserveFloatingIPCreated (type is the API's, not the flag's)"},
+	"primary-ip/create": {hzClassCreate,
+		"paid: hzResObservedResponse observes result.PrimaryIP; hzObservePrimaryIPCreated"},
+	"placement-group/create": {hzClassCreate,
+		"paid: hzResObservedResponse observes result.PlacementGroup; hzObservePlacementGroupCreated"},
+	"certificate/create-uploaded": {hzClassCreate,
+		"paid: hzResObservedResponse observes result.Certificate; hzObserveCertificateUploaded (fingerprint + validity window)"},
+	"certificate/create-managed": {hzClassCreate,
+		"paid: hzResObservedResponse observes result.Certificate; hzObserveCertificateManaged DECLARES the async issuance state rather than asserting `issued`"},
 
-	// ---- Round 2: the request echoes. ------------------------------------
-	"volume/attach":                  {hzClassRequestEcho, hzUnpaidMutation},
-	"volume/resize":                  {hzClassRequestEcho, hzUnpaidMutation},
-	"volume/change-protection":       {hzClassRequestEcho, hzUnpaidMutation},
-	"network/add-subnet":             {hzClassRequestEcho, hzUnpaidMutation},
-	"network/add-route":              {hzClassRequestEcho, hzUnpaidMutation},
-	"network/change-ip-range":        {hzClassRequestEcho, hzUnpaidMutation},
-	"firewall/set-rules":             {hzClassRequestEcho, hzUnpaidMutation},
-	"firewall/apply-to-resource":     {hzClassRequestEcho, hzUnpaidMutation},
-	"load-balancer/add-service":      {hzClassRequestEcho, hzUnpaidMutation},
-	"load-balancer/add-target":       {hzClassRequestEcho, hzUnpaidMutation},
-	"load-balancer/change-algorithm": {hzClassRequestEcho, hzUnpaidMutation},
-	"load-balancer/change-type":      {hzClassRequestEcho, hzUnpaidMutation},
-	"floating-ip/assign":             {hzClassRequestEcho, hzUnpaidMutation},
-	"primary-ip/assign":              {hzClassRequestEcho, hzUnpaidMutation},
-	"zone/update":                    {hzClassRequestEcho, hzUnpaidMutation},
-	"record/update":                  {hzClassRequestEcho, hzUnpaidMutation},
+	// ---- Round 2: the remaining create receipts. --------------------------
+	"volume/create":  {hzClassCreate, hzUnpaidMutation},
+	"network/create": {hzClassCreate, hzUnpaidMutation},
+	"firewall/create": {hzClassCreate, hzUnpaidMutation},
+	"zone/create":     {hzClassCreate, hzUnpaidMutation},
+	"record/create":   {hzClassCreate, hzUnpaidMutation},
+	"bucket/create":   {hzClassCreate, hzUnpaidMutation},
+	"backup/create":   {hzClassCreate, hzUnpaidMutation},
+	"backup/restore":  {hzClassCreate, hzUnpaidMutation},
+
+	// ---- PAID by pds-w29-pay-lb: the LB family's six request echoes. ------
+	// Every hcloud ACTION endpoint returns `{action}` and nothing else, so the
+	// single-resource GET on the RESOLVED id is the only server-side source.
+	"load-balancer/add-service": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads LoadBalancer.GetByID(lb.ID); hzObserveLBServicePresent reports the SERVED destination port"},
+	"load-balancer/add-target": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads LoadBalancer.GetByID(lb.ID); hzObserveLBTargetPresent binds on the resolved id across the server|label_selector|ip union"},
+	"load-balancer/change-algorithm": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads LoadBalancer.GetByID(lb.ID); hzObserveLBAlgorithm — the poster child, now printing what the LB reports"},
+	"load-balancer/change-type": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads LoadBalancer.GetByID(lb.ID); hzObserveLBType prints the resolved type name+id, never the raw flag"},
+	"floating-ip/assign": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads FloatingIP.GetByID(fip.ID); hzObserveFloatingIPAssigned compares server IDs, prints the name"},
+	"primary-ip/assign": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads PrimaryIP.GetByID(pip.ID); hzObservePrimaryIPAssigned checks the assignee PAIR"},
+
+	// ---- Round 2: the remaining request echoes. ---------------------------
+	"volume/attach":              {hzClassRequestEcho, hzUnpaidMutation},
+	"volume/resize":              {hzClassRequestEcho, hzUnpaidMutation},
+	"volume/change-protection":   {hzClassRequestEcho, hzUnpaidMutation},
+	"network/add-subnet":         {hzClassRequestEcho, hzUnpaidMutation},
+	"network/add-route":          {hzClassRequestEcho, hzUnpaidMutation},
+	"network/change-ip-range":    {hzClassRequestEcho, hzUnpaidMutation},
+	"firewall/set-rules":         {hzClassRequestEcho, hzUnpaidMutation},
+	"firewall/apply-to-resource": {hzClassRequestEcho, hzUnpaidMutation},
+	"zone/update":                {hzClassRequestEcho, hzUnpaidMutation},
+	"record/update":              {hzClassRequestEcho, hzUnpaidMutation},
 
 	// ---- Round 2: the object-storage pair that is neither. ----------------
 	"object/put": {hzClassMeasuredUncompared, hzUnpaidMutation},
 	"object/get": {hzClassNoCheapPostRead, hzUnpaidMutation},
+}
+
+// PDS-D418 — THE THREE RULINGS THAT STOP A PAID ROW BEING A SENTENCE
+// ------------------------------------------------------------------
+// A `paid:` note is prose, and prose is exactly what this census exists to
+// replace. Before this wave a row could read "paid: hzResObserved re-reads …"
+// while the source it names calls nothing of the sort — a paste from the row
+// above, and no gate would notice. So three things are now MECHANICAL:
+//
+//	1. A paid note must NAME its paying symbol as the first token after
+//	   `paid: `, and that symbol must actually be CALLED from the source file
+//	   that emits the key (hzResPaidSymbol + the companion assertion).
+//	2. The symbol must be legal FOR THAT CLASS. A `create` or `request-echo` row
+//	   paid with hzResDestroyed REDS, because the destroy helper's nil branch
+//	   means the opposite thing there — the measured fail-open this wave shipped
+//	   the mutation apparatus to stop.
+//	3. Every KIND currently in the ledger must still be emitted. The glob makes
+//	   a NEW file cheap to enrol; nothing made a kind LEAVING cost anything
+//	   louder than a tidy-looking row deletion.
+
+// hzResPaidSymbol extracts the symbol a `paid:` note names — the first token
+// after "paid: ". Returns "" for an unpaid row or a note that names nothing.
+func hzResPaidSymbol(note string) string {
+	rest, ok := strings.CutPrefix(strings.TrimSpace(note), "paid:")
+	if !ok {
+		return ""
+	}
+	fields := strings.Fields(rest)
+	if len(fields) == 0 {
+		return ""
+	}
+	return strings.Trim(fields[0], "`,;")
+}
+
+// hzResClassHelpers is THE CLASS-TO-HELPER BINDING: which paying symbols are
+// legal for which class. The point is not taxonomy — it is that hzResDestroyed
+// and hzResObserved read the SAME (nil, nil) and mean opposite things, so a row
+// paid with the wrong one is a fail-open wearing a green row.
+var hzResClassHelpers = map[hzResClass][]string{
+	hzClassDestroy:    {"hzResDestroyed", "hzResDestroyedDeclared"},
+	hzClassSubRemoval: {"hzResObserved"},
+	// A create observes FROM the response object (class A2) — it does not
+	// re-read, so hzResObserved is wrong here too, in the other direction.
+	hzClassCreate:      {"hzResObservedResponse"},
+	hzClassRequestEcho: {"hzResObserved"},
+}
+
+// hzResLedgerKinds is every resource kind the ledger currently covers. Pinned
+// by NAME so a kind vanishing from the sources costs an explicit edit here
+// rather than passing as a row cleanup.
+var hzResLedgerKinds = []string{
+	"backup", "bucket", "certificate", "firewall", "floating-ip", "load-balancer",
+	"network", "object", "placement-group", "primary-ip", "record", "volume", "zone",
 }
 
 // hzResCensusExemptions is the escape hatch for a (kind, action) that can never
@@ -521,6 +615,81 @@ func TestHetznerResourceReceiptCensus(t *testing.T) {
 				"nothing", key, hzResSourceFiles(t))
 		}
 	}
+}
+
+// TestHetznerResourceDispositionsAreBoundToRealCode is PDS-D418's gate: the
+// three rulings that turn a `paid:` note from a sentence into a claim something
+// can falsify.
+func TestHetznerResourceDispositionsAreBoundToRealCode(t *testing.T) {
+	c := hzResBuildCensus(t)
+
+	// Read each scanned source once; the companion assertion is a grep, and a
+	// grep per row would re-read the same nine files fifty times.
+	src := map[string]string{}
+	for _, path := range hzResSourceFiles(t) {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		src[path] = string(b)
+	}
+
+	for key, wheres := range c.keys {
+		disp, ok := hzResDispositions[key]
+		if !ok || strings.HasPrefix(strings.TrimSpace(disp.note), "unpaid:") {
+			continue // the enrolment gate above owns unenrolled and unpaid rows
+		}
+		symbol := hzResPaidSymbol(disp.note)
+		if symbol == "" {
+			t.Errorf("%q is paid but its note NAMES NO SYMBOL — write `paid: <helper> …` so the claim points at "+
+				"code instead of describing it (note: %q)", key, disp.note)
+			continue
+		}
+
+		// RULING 2 — the class-to-helper binding. Checked BEFORE the grep,
+		// because hzResDestroyed is genuinely called from most of these files:
+		// a create row paid with it would sail through the grep alone.
+		legal, known := hzResClassHelpers[disp.class]
+		if !known {
+			t.Errorf("%q is class %q, which no row in hzResClassHelpers binds to a helper — a class nothing "+
+				"binds cannot catch a receipt paid with the wrong polarity", key, disp.class)
+		} else if !slices.Contains(legal, symbol) {
+			t.Errorf("%q is class %q but is paid with %s, which is not one of %v. hzResDestroyed and "+
+				"hzResObserved read the SAME (nil, nil) and mean OPPOSITE things — a create or a mutation paid "+
+				"with the destroy helper emits confirmed_gone:true on a resource that 404s",
+				key, disp.class, symbol, legal)
+		}
+
+		// RULING 1 — the companion grep: the named symbol is actually CALLED
+		// from the source file that emits this key.
+		file, _, _ := strings.Cut(wheres[0], ":")
+		body, seen := src[file]
+		if !seen {
+			t.Errorf("%q is emitted from %q, which is not one of the scanned sources %v", key, file, hzResSourceFiles(t))
+			continue
+		}
+		if !strings.Contains(body, symbol+"(") {
+			t.Errorf("%q claims to be paid by %s, but %s never CALLS %s — the row describes code that is not "+
+				"there, which is the one failure a prose ledger cannot catch by itself", key, symbol, file, symbol)
+		}
+	}
+
+	// RULING 3 — the per-KIND presence assertion. The glob makes a new file
+	// cheap to enrol; nothing made a kind LEAVING cost anything.
+	live := map[string]bool{}
+	for key := range c.keys {
+		kind, _, _ := strings.Cut(key, "/")
+		live[kind] = true
+	}
+	for _, kind := range hzResLedgerKinds {
+		if !live[kind] {
+			t.Errorf("kind %q emits NO receipt in %v any more. If that verb family really was removed, delete its "+
+				"rows AND this pin in the same edit — a kind that leaves silently takes its obligations with it",
+				kind, hzResSourceFiles(t))
+		}
+	}
+	sort.Strings(hzResLedgerKinds)
+	t.Logf("KINDS=%d %v", len(hzResLedgerKinds), hzResLedgerKinds)
 }
 
 // TestHetznerResourceCensusMeasuresTheKnownPopulation pins the numbers the wave
