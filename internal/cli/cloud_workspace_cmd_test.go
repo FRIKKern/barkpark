@@ -11,6 +11,7 @@ package cli
 import (
 	"archive/tar"
 	"bytes"
+	"compress/gzip"
 	"fmt"
 	"io"
 	"net/http"
@@ -1201,4 +1202,194 @@ func seedBlobSidecar(t *testing.T, blobs map[string]string) string {
 		}
 	}
 	return tarFile
+}
+
+// shortBundleServer answers the export route with a Content-Length that LIES: it
+// declares declaredBytes and then sends `body` (shorter) before hanging up. It
+// has to hijack the connection because net/http's own writer truncates or errors
+// a handler that disagrees with its declared length — the only way to put a
+// genuinely over-declared response on the wire is to write the response
+// ourselves. This is the failure the export sink previously reported as a
+// success: `bytes: n` with nothing to compare n against.
+func shortBundleServer(t *testing.T, declaredBytes int, body string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		hj, ok := w.(http.Hijacker)
+		if !ok {
+			t.Errorf("test server does not support hijacking")
+			return
+		}
+		conn, buf, err := hj.Hijack()
+		if err != nil {
+			t.Errorf("hijack: %v", err)
+			return
+		}
+		defer conn.Close()
+		fmt.Fprintf(buf, "HTTP/1.1 200 OK\r\nContent-Type: application/x-tar\r\nContent-Length: %d\r\n\r\n", declaredBytes)
+		_, _ = buf.WriteString(body)
+		_ = buf.Flush()
+	}))
+}
+
+// TestCloudWorkspaceExportFailedTransferLeavesBackupIntact: the destination is a
+// PRE-EXISTING backup. `os.Create` truncated it before the first byte arrived,
+// so a transfer that then died destroyed the very artifact the verb exists to
+// protect. The bytes now land in a temp file beside the destination and only a
+// verified transfer renames over it — a failed export leaves the old bundle byte
+// for byte, and leaves no `.part` litter behind either.
+func TestCloudWorkspaceExportFailedTransferLeavesBackupIntact(t *testing.T) {
+	workspaceEnvIsolate(t)
+	srv := shortBundleServer(t, 4096, "SHORT")
+	t.Cleanup(srv.Close)
+
+	dir := t.TempDir()
+	outFile := filepath.Join(dir, "acme.tar")
+	const previous = "PREVIOUS-GOOD-BUNDLE-BYTES"
+	if err := os.WriteFile(outFile, []byte(previous), 0o644); err != nil {
+		t.Fatalf("seed previous backup: %v", err)
+	}
+
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "table", "export", "acme", "--file", outFile)
+	if code == exitOK {
+		t.Fatalf("a transfer that did not deliver the declared bytes MUST NOT exit 0\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	got, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("read destination after failed export: %v", err)
+	}
+	if string(got) != previous {
+		t.Fatalf("failed export clobbered the existing backup: file = %q, want %q", string(got), previous)
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		t.Fatalf("read dir: %v", err)
+	}
+	if len(entries) != 1 || entries[0].Name() != "acme.tar" {
+		names := make([]string, 0, len(entries))
+		for _, e := range entries {
+			names = append(names, e.Name())
+		}
+		t.Fatalf("failed export left litter in the destination dir: %v", names)
+	}
+}
+
+// TestCloudWorkspaceExportSizeMismatchIsANamedFailure: when the server DECLARES a
+// length, the receipt is checked against it. A short delivery is a named,
+// non-zero failure that says both numbers — never a `bytes: n` success claim
+// about a truncated bundle — and the partial never reaches the destination path.
+func TestCloudWorkspaceExportSizeMismatchIsANamedFailure(t *testing.T) {
+	workspaceEnvIsolate(t)
+	srv := shortBundleServer(t, 4096, "SHORT")
+	t.Cleanup(srv.Close)
+
+	outFile := filepath.Join(t.TempDir(), "acme.tar")
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "table", "export", "acme", "--file", outFile)
+	if code == exitOK {
+		t.Fatalf("size mismatch must exit non-zero\nstdout:%s\nstderr:%s", stdout, stderr)
+	}
+	if !strings.Contains(stderr, "size mismatch") || !strings.Contains(stderr, "4096") {
+		t.Fatalf("the failure must NAME the mismatch and the declared size:\n%s", stderr)
+	}
+	if _, err := os.Stat(outFile); !os.IsNotExist(err) {
+		t.Fatalf("the partial download must NOT be renamed into place (stat err = %v)", err)
+	}
+	if strings.Contains(stdout, "Exported workspace") {
+		t.Fatalf("a failed export must not print a success receipt:\n%s", stdout)
+	}
+}
+
+// TestCloudWorkspaceExportVerifiesDeclaredSize: the happy path carries an
+// EXPLICIT verified field, not a bare byte count. The receipt states what the
+// server declared alongside what arrived, so a reader can see the comparison was
+// actually made.
+func TestCloudWorkspaceExportVerifiesDeclaredSize(t *testing.T) {
+	workspaceEnvIsolate(t)
+	const tarBytes = "BUNDLE-TAR-BYTES-\x00\x01\x02-verified"
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/x-tar")
+		// net/http sets Content-Length itself for a body this small; state it
+		// anyway so the declared length is the mock's claim, not a side effect.
+		w.Header().Set("Content-Length", fmt.Sprintf("%d", len(tarBytes)))
+		_, _ = w.Write([]byte(tarBytes))
+	}))
+	t.Cleanup(srv.Close)
+
+	outFile := filepath.Join(t.TempDir(), "acme.tar")
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "json", "export", "acme", "--file", outFile)
+	if code != exitOK {
+		t.Fatalf("exit = %d, want 0\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	// The declared length is READ from the response, never pinned to a literal:
+	// the real bundle is not byte-reproducible (three consecutive live runs
+	// produced three different sizes), so the only honest assertion is that the
+	// receipt's numbers agree with the body this run actually carried.
+	if !strings.Contains(stdout, `"verified": true`) && !strings.Contains(stdout, `"verified":true`) {
+		t.Fatalf("receipt must carry verified:true, never a bare byte count:\n%s", stdout)
+	}
+	want := fmt.Sprintf("%d", len(tarBytes))
+	if !strings.Contains(stdout, want) {
+		t.Fatalf("receipt must state the byte count the response carried (%s):\n%s", want, stdout)
+	}
+	if !strings.Contains(stdout, "declared_bytes") {
+		t.Fatalf("receipt must state what the server declared:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "size-verified") {
+		t.Fatalf("the human line must say the size was verified:\n%s", stderr)
+	}
+}
+
+// TestCloudWorkspaceExportAbsentDeclaredSizeIsNotAFailure: Go's transport adds
+// `Accept-Encoding: gzip` itself, and when a response comes back gzipped it
+// decompresses transparently and STRIPS Content-Length to -1. Probed live on the
+// deployed stack: /api/schemas answers ContentLength=-1 Uncompressed=true. This
+// route ends in send_file/2 today so it keeps its length — but PDS-D204 already
+// moved this route once, and a naive `n != resp.ContentLength` would fail EVERY
+// successful export the moment it moves back. -1 means unverifiable, which is
+// reported honestly and is NEVER a failure.
+func TestCloudWorkspaceExportAbsentDeclaredSizeIsNotAFailure(t *testing.T) {
+	workspaceEnvIsolate(t)
+	const tarBytes = "BUNDLE-TAR-BYTES-gzipped-on-the-wire-so-the-length-is-stripped"
+	var gz bytes.Buffer
+	zw := gzip.NewWriter(&gz)
+	if _, err := zw.Write([]byte(tarBytes)); err != nil {
+		t.Fatalf("gzip write: %v", err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatalf("gzip close: %v", err)
+	}
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if !strings.Contains(r.Header.Get("Accept-Encoding"), "gzip") {
+			t.Errorf("Go's transport should have offered gzip itself; Accept-Encoding = %q", r.Header.Get("Accept-Encoding"))
+		}
+		w.Header().Set("Content-Type", "application/x-tar")
+		w.Header().Set("Content-Encoding", "gzip")
+		_, _ = w.Write(gz.Bytes())
+	}))
+	t.Cleanup(srv.Close)
+
+	outFile := filepath.Join(t.TempDir(), "acme.tar")
+	g := globals{server: srv.URL, token: "admin-tok"}
+	stdout, stderr, code := runWorkspace(t, g, "json", "export", "acme", "--file", outFile)
+	if code != exitOK {
+		t.Fatalf("an absent declared size is NOT a failure: exit = %d\nstdout:%s\nstderr:%s", code, stdout, stderr)
+	}
+	got, err := os.ReadFile(outFile)
+	if err != nil {
+		t.Fatalf("read export file: %v", err)
+	}
+	if string(got) != tarBytes {
+		t.Fatalf("export file bytes = %q, want the decompressed body verbatim", string(got))
+	}
+	if !strings.Contains(stdout, `"verified": false`) && !strings.Contains(stdout, `"verified":false`) {
+		t.Fatalf("an unverifiable transfer must report verified:false, never true:\n%s", stdout)
+	}
+	if strings.Contains(stdout, "declared_bytes") {
+		t.Fatalf("there was no declared size — the receipt must not invent one:\n%s", stdout)
+	}
+	if !strings.Contains(stderr, "declared size absent") {
+		t.Fatalf("the CLI must SAY the declared size was absent:\n%s", stderr)
+	}
 }

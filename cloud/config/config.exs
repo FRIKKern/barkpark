@@ -254,6 +254,15 @@ config :barkpark_cloud, Oban,
        # per-user limit would 429 a legitimate second tab. Pure hygiene, so it
        # rides :maintenance beside its twins above.
        {"* * * * *", BarkparkCloud.Workers.SseTicketReaper},
+       # cch-w10: the fourth of the same sweep, for burned/expired
+       # `"oauth_exchange"` codes — the one-time code the OAuth callback now puts
+       # on the `location` header in place of a live 30-day session token. Filed
+       # WITH the mint rather than after it: `oauth_states` and `"sse"` above were
+       # both discovered as accretion later, and this mint has the identical shape
+       # (bare Repo.insert, soft `revoked_at` burn, never a DELETE). Expiry is
+       # enforced in-band by consume_oauth_exchange_code/1 — pure hygiene, so it
+       # rides :maintenance beside its three twins.
+       {"* * * * *", BarkparkCloud.Workers.OAuthExchangeReaper},
        # deploy-queue twin of the reaper above: recover deployments wedged in
        # "building" (crashed builder) or "pushing" (crashed on-box agent) so one
        # crashed worker never strands a site's deploys behind an eternal spinner.

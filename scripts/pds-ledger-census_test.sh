@@ -56,14 +56,31 @@ page() {
 # JSON entirely when empty -- exactly how a row that never carried one is served.
 # Clause 4(c) reads this field and nothing else, so a fixture that could only
 # express a trigger as prose could not tell the two apart.
+# The SEVENTH field is `_createdAt`, and it is likewise omitted when empty --
+# the live `row()` shape has never carried one, and clause 4(a)'s anchor reads it
+# ONLY for rows that are already live-and-bare, so every pre-existing fixture is
+# untouched by its absence. An anchored fixture must supply it or fail closed.
 row() {
-  local id=$1 parent=$2 lifecycle=$3 disposition=$4 reason=$5 trigger=${6:-}
+  local id=$1 parent=$2 lifecycle=$3 disposition=$4 reason=$5 trigger=${6:-} created=${7:-}
   local extra=''
   if [[ -n $trigger ]]; then
     extra=$(printf ',"reopen_trigger":"%s"' "$trigger")
   fi
+  if [[ -n $created ]]; then
+    extra+=$(printf ',"_createdAt":"%s"' "$created")
+  fi
   printf '{"_id":"%s","_type":"task","_updatedAt":"2020-01-01T00:00:00.000000Z","parent_id":%s,"lifecycle_status":"%s","disposition":"%s","disposition_reason":"%s"%s}' \
     "$id" "$parent" "$lifecycle" "$disposition" "$reason" "$extra"
+}
+
+# `paper <dir> <slug> <status> <json>` cans the ANCHOR read --
+# GET /v1/data/doc/<dataset>/paper/<slug>. It runs through the same
+# status-first / shape-asserted resolver the live run uses, so a fixture here
+# proves something about the live anchor and not merely about the fixture.
+paper() {
+  local dir=$1 slug=$2 status=$3 body=$4
+  mkdir -p "$dir"
+  { printf 'HTTP %s\n' "$status"; printf '%s' "$body"; } > "$dir/paper-$slug.http"
 }
 
 # A well-formed page envelope.
@@ -465,6 +482,134 @@ expect_status_matching "a duplicate reason on a TERMINAL row still reds (1-3 sta
 echo
 
 # =============================================================================
+# CLAUSE 4(a) — THE ROUND ANCHOR (PDS-D364/D365). 4(a) unanchored is
+# structurally unreachable by any round that discovers work: a row is BORN bare,
+# so a round that files one row can never certify. The anchor says WHICH ROUND
+# the clause is asking about — and the danger it introduces is the opposite one,
+# that a round seals itself by moving the anchor. So the reds below are as
+# important as the greens: an argv anchor is REFUSED, an unresolvable Paper
+# FAILS CLOSED, and a row the predicate cannot place FAILS CLOSED.
+# =============================================================================
+echo "clause 4(a) — the round anchor is DERIVED, and it defers rather than excuses"
+WAVE_SLUG="pds-wave-26-fixture"
+ANCHOR_TS="2025-01-01T00:00:00.000000Z"
+
+# ANCHORED — `deep-a` is a LIVE BARE row BORN IN THE YEAR 2030: residue of any
+# round anchored before then, in scope for any round anchored after.
+ANCHORED="$TMP/anchored"
+build_healthy "$ANCHORED"
+page "$ANCHORED" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open '' 'deep a reason four. REOPEN: delta' '' '2030-01-01T00:00:00.000000Z'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+paper "$ANCHORED" "$WAVE_SLUG" 200 "$(printf '{"result":{"_id":"%s","_type":"paper","_createdAt":"%s"}}' "$WAVE_SLUG" "$ANCHOR_TS")"
+
+# UNANCHORED, the wave-25 behaviour, unchanged: the newborn row reds the round.
+expect_status_matching "unanchored, a newborn bare row still reds 4(a)" 1 "LIVE row(s) carry NO disposition" \
+  run --page-limit 4 --fixture-dir "$ANCHORED" --assert-round-done
+# ANCHORED ON THE WAVE PAPER: the same row is DEFERRED, and NAMED while it is.
+expect_status "--anchor-from-paper defers the newborn row and the round certifies" 0 \
+  run --page-limit 4 --fixture-dir "$ANCHORED" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+expect_output_contains "the residue is an ENUMERATED NAMED list, not a count" "residue: deep-a" \
+  run --page-limit 4 --fixture-dir "$ANCHORED" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+expect_output_contains "the derived anchor is printed with its provenance" "paper/$WAVE_SLUG _createdAt $ANCHOR_TS" \
+  run --page-limit 4 --fixture-dir "$ANCHORED" --anchor-from-paper "$WAVE_SLUG"
+expect_output_contains "live_bare_residue is a ROW-ID LIST in --json" "$(printf '"live_bare_residue": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$ANCHORED" --anchor-from-paper "$WAVE_SLUG" --json
+# ...and 4(a)'s DENOMINATOR is still the whole live board: deferring a row must
+# not quietly shrink what the clause claims to have covered. The NUMERATOR is
+# literal in the other direction (review, wave 26): a deferred row does NOT
+# carry a disposition, so it is not counted as one. 3 live rows, 1 deferred,
+# 2 actually dispositioned -> "2/3 PASS" plus the named residue line. Printing
+# "3/3" here would be a success claim about a row nobody looked at, which is the
+# defect class this whole epic exists to kill.
+expect_output_contains "4(a)'s denominator is the WHOLE live board and its numerator is literal" \
+  "live rows carrying a disposition               2/3" \
+  run --page-limit 4 --fixture-dir "$ANCHORED" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+expect_output_contains "the deferred row is NOT counted as dispositioned" \
+  "deferred to the next round (RESIDUE)        1" \
+  run --page-limit 4 --fixture-dir "$ANCHORED" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+
+# TERMINATION. The same row is IN SCOPE for the next round: anchor after its
+# birth and it reds again. Residue is deferred by exactly one round, never
+# forever — this is the fixture that would catch an anchor that hides rows.
+expect_status_matching "the residue is IN SCOPE for the NEXT round" 1 "LIVE row(s) carry NO disposition" \
+  run --page-limit 4 --fixture-dir "$ANCHORED" --assert-round-done --anchor 2031-01-01T00:00:00Z
+
+# TERMINATION, the other half: adjudicating the residue GREENS the round with or
+# without an anchor, and files no new rows (the closure is the same 5).
+ADJUDICATED="$TMP/anchored-adjudicated"
+build_healthy "$ADJUDICATED"
+page "$ADJUDICATED" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open open 'deep a reason four, now adjudicated. REOPEN: delta' '' '2030-01-01T00:00:00.000000Z'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+paper "$ADJUDICATED" "$WAVE_SLUG" 200 "$(printf '{"result":{"_createdAt":"%s"}}' "$ANCHOR_TS")"
+expect_status "adjudicated residue certifies UNANCHORED too" 0 \
+  run --page-limit 4 --fixture-dir "$ADJUDICATED" --assert-round-done
+expect_status "adjudicated residue certifies anchored, with zero residue" 0 \
+  run --page-limit 4 --fixture-dir "$ADJUDICATED" --assert-round-done --anchor 2031-01-01T00:00:00Z
+expect_output_contains "adjudicating filed no new rows (closure unchanged)" "closure     5 descendants" \
+  run --page-limit 4 --fixture-dir "$ADJUDICATED" --anchor-from-paper "$WAVE_SLUG"
+expect_output_contains "and the residue line reads 0" "deferred to the next round (RESIDUE)        0" \
+  run --page-limit 4 --fixture-dir "$ADJUDICATED" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+
+# FAIL CLOSED ON A ROW THE PREDICATE CANNOT PLACE — exactly as clause 5 does for
+# _updatedAt. A live bare row with no readable birth instant sits on neither side
+# of the anchor, and an unplaceable row is never excused into the residue.
+NOBIRTH="$TMP/anchored-no-createdat"
+build_healthy "$NOBIRTH"
+page "$NOBIRTH" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open '' 'deep a reason four. REOPEN: delta'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+paper "$NOBIRTH" "$WAVE_SLUG" 200 "$(printf '{"result":{"_createdAt":"%s"}}' "$ANCHOR_TS")"
+expect_status_matching "a bare live row with NO _createdAt fails closed under an anchor" 2 "cannot place it" \
+  run --page-limit 4 --fixture-dir "$NOBIRTH" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+# ...and the SAME fixture unanchored is exit 1, not 2: the birth read fires only
+# under an anchor, so no pre-existing fixture can be broken by it.
+expect_status_matching "the same fixture unanchored is a plain 4(a) red" 1 "LIVE row(s) carry NO disposition" \
+  run --page-limit 4 --fixture-dir "$NOBIRTH" --assert-round-done
+BADBIRTH="$TMP/anchored-bad-createdat"
+build_healthy "$BADBIRTH"
+page "$BADBIRTH" 1 200 "$(envelope 3 4 4 "$(row deep-a '"kid-a"' open '' 'deep a reason four. REOPEN: delta' '' 'last tuesday'),$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')")"
+expect_status_matching "an unreadable _createdAt fails closed under an anchor" 2 "cannot place it" \
+  run --page-limit 4 --fixture-dir "$BADBIRTH" --assert-round-done --anchor 2031-01-01T00:00:00Z
+
+# THE ANCHOR RESOLVER FAILS CLOSED IN EVERY DIRECTION. It NEVER falls back to
+# now(): an anchor at now() excuses every row the round just filed.
+echo
+echo "clause 4(a) — an anchor that cannot be resolved is never a default"
+ANCHOR404="$TMP/anchor-404"
+build_healthy "$ANCHOR404"
+paper "$ANCHOR404" "$WAVE_SLUG" 404 '{"ok":false,"error":{"code":"not_found"}}'
+expect_status_matching "a 404 wave Paper fails closed" 2 "refusing to fall back to now()" \
+  run --page-limit 4 --fixture-dir "$ANCHOR404" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+ANCHORBAD="$TMP/anchor-unreadable"
+build_healthy "$ANCHORBAD"
+paper "$ANCHORBAD" "$WAVE_SLUG" 200 '{"result":{"_createdAt":"last tuesday"}}'
+expect_status_matching "an unreadable Paper _createdAt fails closed" 2 "is not an anchor" \
+  run --page-limit 4 --fixture-dir "$ANCHORBAD" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+ANCHORNONE="$TMP/anchor-no-createdat"
+build_healthy "$ANCHORNONE"
+paper "$ANCHORNONE" "$WAVE_SLUG" 200 '{"result":{"_id":"pds-wave-26-fixture"}}'
+expect_status_matching "a Paper with no _createdAt at all fails closed" 2 "missing or unreadable _createdAt" \
+  run --page-limit 4 --fixture-dir "$ANCHORNONE" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+ANCHORENV="$TMP/anchor-foreign-envelope"
+build_healthy "$ANCHORENV"
+paper "$ANCHORENV" "$WAVE_SLUG" 200 '{"ok":false,"reason":"paper_not_found"}'
+expect_status_matching "a cleanly-parsing failure envelope is not an anchor" 2 "no \`result\` object resolving anchor Paper" \
+  run --page-limit 4 --fixture-dir "$ANCHORENV" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+expect_status_matching "a Paper the source does not serve at all fails closed" 2 "unresolvable anchor is never a default" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+
+# CLAUSE 5 IS ORTHOGONAL. The anchor is the ROUND window; clause 5 asserts the
+# census's own READ window. Widening clause 5 to the round window would trip on
+# every residue write and make a certifying run impossible — so the racing
+# fixture must exit 4 IDENTICALLY with and without an anchor.
+echo
+echo "clause 4(a) — the round window and clause 5's read window stay orthogonal"
+expect_status_matching "a racing corpus is exit 4 WITHOUT an anchor" 4 "shifted under pagination" \
+  run --page-limit 4 --fixture-dir "$DUPES"
+paper "$DUPES" "$WAVE_SLUG" 200 "$(printf '{"result":{"_createdAt":"%s"}}' "$ANCHOR_TS")"
+expect_status_matching "the SAME racing corpus is exit 4 WITH one" 4 "shifted under pagination" \
+  run --page-limit 4 --fixture-dir "$DUPES" --assert-round-done --anchor-from-paper "$WAVE_SLUG"
+expect_status_matching "an unreadable _updatedAt still fails closed under an anchor" 2 "unreadable _updatedAt" \
+  run --page-limit 4 --fixture-dir "$BADSTAMP" --anchor 2031-01-01T00:00:00Z
+echo
+
+# =============================================================================
 # USAGE. Bad input is exit 3, never a quietly smaller board.
 # =============================================================================
 echo "usage — bad input is a usage error, never a board"
@@ -474,6 +619,16 @@ expect_status "--fixture-dir that does not exist is a usage error" 3 \
   run --page-limit 4 --fixture-dir "$TMP/nope"
 expect_status "an unknown --lens is rejected by argparse" 2 \
   run --page-limit 4 --fixture-dir "$HEALTHY" --lens sideways
+# THE ARGV ANCHOR IS REFUSED IN A CERTIFYING RUN. On the live board
+# `--anchor 2020-01-01T00:00:00Z` flips 4(a) from 157/172 FAIL to 172/172 PASS,
+# so a raw anchor outside --fixture-dir would let a round seal itself by argv.
+# This check needs no server: the guard fires before any transport is built.
+expect_status_matching "--anchor outside --fixture-dir is REFUSED" 3 "seal itself by argv" \
+  run --page-limit 4 --anchor 2020-01-01T00:00:00Z --assert-round-done
+expect_status_matching "--anchor and --anchor-from-paper are mutually exclusive" 3 "mutually exclusive" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --anchor 2020-01-01T00:00:00Z --anchor-from-paper "$WAVE_SLUG"
+expect_status_matching "an --anchor that is not an instant is a usage error" 3 "not an ISO-8601 instant" \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --anchor "last tuesday"
 echo
 
 if [[ $FAILURES -ne 0 ]]; then
@@ -496,4 +651,15 @@ reopen_trigger -- prose that merely says "REOPEN: charlie" is decoration and
 reds). Clause 4 stays live-scoped: the same two mutations on TERMINAL rows do
 NOT red, a family trigger shared over distinct reasons does NOT red, and a
 duplicate reason on a terminal row STILL reds -- clauses 1-3 were not rescoped.
+
+Clause 4(a) is ROUND-ANCHORED and the anchor cannot be argued: a raw --anchor
+outside --fixture-dir is REFUSED (exit 3), and --anchor-from-paper fails closed
+on a 404, a foreign envelope, an unreadable _createdAt, an absent _createdAt and
+a Paper the source does not serve -- never falling back to now(). A live bare row
+the anchor cannot PLACE fails closed too, while the same fixture unanchored is a
+plain 4(a) red, so no pre-existing fixture is touched. Residue is an ENUMERATED
+NAMED list, 4(a) still scores against the WHOLE live board, and it TERMINATES:
+the same row is deferred by round N and IN SCOPE for round N+1, and adjudicating
+it greens the round anchored or not, filing no new rows. Clause 5 stays
+orthogonal -- the racing corpus exits 4 identically with and without an anchor.
 SUMMARY

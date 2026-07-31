@@ -374,6 +374,17 @@ EOF
 # it would red every PR from the moment protection lands. A name that never
 # appears on main (a pull_request-only check) is NOT disqualified — absence here
 # is expected, and the paths-filter stage is what catches genuine absence.
+#
+# THE ROW ORDER IS THE CONTRACT, AND S5 READS IT (wave 10). This function emits
+# one `name<TAB>conclusion` row per (sha, name) in the order the shas arrive,
+# and `GET /commits` returns them NEWEST FIRST — so for any given name the FIRST
+# row is the most recent head in the window and the LAST row is the oldest. S5
+# used to take `tail -1`, i.e. the OLDEST head, while its own comment and its own
+# exclusion string both said "latest". Mutation-proven on identical fixtures in
+# §3e of the test suite: the two orderings disagree, and the disagreement is
+# exactly the shape that excludes a freshly-green aggregator because it was red
+# ten commits ago. `--main-sha` and the fixture `main-shas.txt` MUST therefore be
+# supplied newest-first too.
 main_conclusions() {
   local shas
   if [ -n "$MAIN_SHAS" ]; then
@@ -514,7 +525,11 @@ EOF
     # S5 red on main
     if [ -z "$reason" ]; then
       local mc
-      mc="$(printf '%s\n' "$main_rows" | awk -F'\t' -v k="$n" '$1 == k && $2 != "null" && $2 != "" { print $2 }' | tail -1 || true)"
+      # The FIRST matching row, not the last: main_rows is newest-first (see
+      # main_conclusions). `exit` inside awk rather than `| head -1`, because a
+      # `head` that closes the pipe early takes awk out with SIGPIPE and this
+      # script runs under `set -o pipefail`.
+      mc="$(printf '%s\n' "$main_rows" | awk -F'\t' -v k="$n" '$1 == k && $2 != "null" && $2 != "" { print $2; exit }' || true)"
       if [ -n "$mc" ] && [ "$mc" != "success" ]; then
         reason="S5 RED ON MAIN: latest completed conclusion on $BRANCH is '$mc' — requiring it reds every PR from day one"
       fi
@@ -617,6 +632,19 @@ EOF
       exclusions: $exclusions
     }')"
 
+  # THE EMIT PATH STILL OVERWRITES, AND THAT IS A KNOWN, UNPAID DEBT (D111).
+  # `--out` replaces the target file wholesale with the intersection this sample
+  # supports. `PR references an active task` is the standing casualty:
+  # `pr-task-gate.yml` is `on: pull_request` only, so its name never appears on a
+  # main head, and any sample that includes a main sha erases it from the strict
+  # S1 intersection. Nothing here notices — required-checks-verify.sh compares
+  # live protection to the spec, and the spec IS what shrank. Two brakes stand
+  # between that and a de-registration today, both installed rather than assumed:
+  # required-checks-floor.sh, which apply.sh now calls BEFORE any protection PUT
+  # (wave 10), and the review of the diff itself. The real fix is a JQ MERGE that
+  # preserves committed names the sample could not have rendered; it is
+  # deliberately NOT in this diff, which would otherwise be rewriting the emit
+  # path and the honesty of the harness in one change.
   if [ -n "$OUT" ]; then
     printf '%s\n' "$spec" > "$OUT"
     echo "wrote $OUT ($(printf '%s' "$final" | grep -c . || true) required context(s))"

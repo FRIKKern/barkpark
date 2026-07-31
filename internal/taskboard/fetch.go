@@ -346,7 +346,8 @@ func decodeCriterion(raw json.RawMessage) CriterionItem {
 		return CriterionItem{}
 	}
 	crit, _ := m["criterion"].(string)
-	return CriterionItem{Criterion: crit, Met: m["met"] == true, Attempts: decodeAttempts(m["attempts"])}
+	ev, _ := m["evidence"].(string)
+	return CriterionItem{Criterion: crit, Met: m["met"] == true, Evidence: ev, Attempts: decodeAttempts(m["attempts"])}
 }
 
 // decodeAttempts reads a criterion's honest-miss trail — the D8 attempts[]

@@ -138,8 +138,18 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   #
   # `/v1/auth/oauth/providers` => false is LOAD-BEARING and must stay FIRST: it
   # shares the initiator's segment arity and would otherwise be 405'd (D14).
+  #
+  # `/v1/auth/oauth/exchange` => false (cch-w10) is the SAME shape and must
+  # likewise stay ahead of `_provider`. It is a POST-only path with no GET handler
+  # of its own; without the clause the fence would 405 it with `allow: GET`, which
+  # is a lie about a route that does not exist. It is not side-effecting under a
+  # GET either — `OAuth.authorize_url/1` resolves the provider BEFORE
+  # `mint_state/1`, so "exchange" falls through to a 404 `provider_not_enabled`
+  # having written nothing. Behavioural test: router_oauth_test.exs, "the exchange
+  # path has no GET handler".
   @deny_clauses [
     {~s(["v1", "auth", "oauth", "providers"]), "false"},
+    {~s(["v1", "auth", "oauth", "exchange"]), "false"},
     {~s(["v1", "auth", "oauth", _provider]), "true"},
     {~s(["v1", "auth", "oauth", _provider, "callback"]), "true"},
     {~s(["v1", "events"]), "true"}

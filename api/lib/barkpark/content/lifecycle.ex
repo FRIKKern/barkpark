@@ -266,6 +266,21 @@ defmodule Barkpark.Content.Lifecycle do
   #     (patch-then-publish: the met-flip republish flow, the reopen recipe,
   #     the github bookkeeping collapse) carries the claim byte-identical and
   #     passes untouched.
+  #   * a CLAIM-IDENTICAL draft can STILL erase evidence (PDS wave 26,
+  #     PDS-D360/D362, observed end-to-end): `bp task stamp` writes the
+  #     PUBLISHED row directly (`Tasks.Stamp`, `Repo.update_all`) and never
+  #     touches the draft twin, and a draft NEVER rebases. So a draft minted
+  #     DURING an active claim carries that claim verbatim, sails past
+  #     `stale_claim?/2`, and this door then replaces the published content
+  #     WHOLESALE — `met: true` becomes `met: false`, evidence becomes `""`,
+  #     rc=0, no warning. The second staleness signal is therefore the
+  #     ACCEPTANCE CRITERIA themselves: a publish that would clear a
+  #     `met: true` flag, blank a non-empty `evidence` string, or drop the row
+  #     holding one is refused. Keyed on `acceptance_criteria` ONLY — this is
+  #     deliberately NOT a general content diff, so every other field a draft
+  #     legitimately rewrites still publishes. Preserving or ADVANCING the
+  #     criteria passes; a reopen (`done → open`) that keeps its evidence
+  #     passes.
   #
   # Refusals use the `{:invalid_task_content, %{field => [msg]}}` family
   # (→ 422 validation_failed via Content.Errors), NEVER `{:halted, _}` (that
@@ -273,6 +288,24 @@ defmodule Barkpark.Content.Lifecycle do
   # `Writer.illegal_transition_error/2` + `Writer.sanctioned_verb/1` — a
   # contract-shape change must update BOTH seams (the error-emitters-duplicated
   # rule).
+  #
+  # THE EXACT COVERAGE, re-derived at review rather than assumed (wave 26):
+  #
+  #   * NOT COVERED — `source: :sync`. The exemption below is taken BEFORE any
+  #     gate runs, so a PULL-applied mirror write bypasses both the transition
+  #     check and the criteria fence. Filed as
+  #     `pds-bl-sync-source-bypasses-publish-door`.
+  #   * COVERED, and this is wider than the slice brief assumed — the GitHub
+  #     automatic publishers thread `source: :github`, NOT `:sync`
+  #     (`plugins/github/link.ex:193` via `mirror_job.ex:560` /
+  #     `inbound_events.ex:172`, and `plugins/github/adopt.ex:178`), so they
+  #     fall through to this gate and the criteria fence applies to them. That
+  #     is the intended direction: `Link.collapse_draft_twin/5` already handles
+  #     a rejected collapse without raising or looping — it logs the reason,
+  #     leaves the draft twin in place and still returns `{:ok, _}`, and the
+  #     next reconcile converges — so a fence refusal degrades to "bookkeeping
+  #     deferred", never to a broken mirror. `pds-bl-github-linkput-auto-publish-erasure`
+  #     stays open for the audit-trail half it does not answer.
   defp ensure_task_publish_transition_legal("task", %Document{} = draft, pid, dataset, opts) do
     if Keyword.get(opts, :source, :api) == :sync do
       :ok
@@ -303,7 +336,10 @@ defmodule Barkpark.Content.Lifecycle do
         {:error, {:invalid_task_content, stale_claim_error(pub_content)}}
 
       true ->
-        :ok
+        case criteria_regression(pub_content, draft_content) do
+          nil -> :ok
+          regression -> {:error, {:invalid_task_content, criteria_regression_error(regression)}}
+        end
     end
   end
 
@@ -311,6 +347,84 @@ defmodule Barkpark.Content.Lifecycle do
     pub_claim = pub_content["claim"]
     is_map(pub_claim) and map_size(pub_claim) > 0 and draft_content["claim"] != pub_claim
   end
+
+  # The criteria fence. Returns the FIRST regression as
+  # `%{index:, criterion:, kind: :dropped | :met | :evidence}`, or nil when the
+  # draft preserves (or advances) every proof the published row holds.
+  #
+  # Only PROOF-BEARING published rows are consulted — `met: true`, or a
+  # non-blank `evidence` string. An unmet, evidence-less criterion is free to
+  # be reworded, reordered, deleted or added by any draft: authoring a task's
+  # criteria list stays a plain content edit right up until a stamp lands on it.
+  defp criteria_regression(pub_content, draft_content) do
+    draft_list = criteria_list(draft_content)
+
+    pub_content
+    |> criteria_list()
+    |> Enum.with_index()
+    |> Enum.find_value(fn {pub_row, index} -> regression_at(pub_row, index, draft_list) end)
+  end
+
+  defp criteria_list(content) do
+    case content["acceptance_criteria"] do
+      list when is_list(list) -> list
+      _ -> []
+    end
+  end
+
+  defp regression_at(pub_row, index, draft_list) when is_map(pub_row) do
+    met? = pub_row["met"] == true
+    evidence = present_string(pub_row["evidence"])
+
+    if met? or evidence do
+      case criteria_counterpart(pub_row, index, draft_list) do
+        nil ->
+          regression(index, pub_row, :dropped)
+
+        draft_row ->
+          cond do
+            met? and draft_row["met"] != true ->
+              regression(index, pub_row, :met)
+
+            evidence && is_nil(present_string(draft_row["evidence"])) ->
+              regression(index, pub_row, :evidence)
+
+            true ->
+              nil
+          end
+      end
+    end
+  end
+
+  defp regression_at(_pub_row, _index, _draft_list), do: nil
+
+  defp regression(index, pub_row, kind),
+    do: %{index: index, criterion: present_string(pub_row["criterion"]), kind: kind}
+
+  # Match the draft's counterpart by criterion TEXT first so a legitimate
+  # REORDER carries its stamp along, and fall back to the positional slot (the
+  # index a stamp is addressed by) so a legitimate REWORD of an already-met
+  # criterion is not mistaken for a drop.
+  defp criteria_counterpart(pub_row, index, draft_list) do
+    text = present_string(pub_row["criterion"])
+
+    by_text =
+      text &&
+        Enum.find(draft_list, fn row ->
+          is_map(row) and present_string(row["criterion"]) == text
+        end)
+
+    case by_text || Enum.at(draft_list, index) do
+      row when is_map(row) -> row
+      _ -> nil
+    end
+  end
+
+  defp present_string(value) when is_binary(value) do
+    if String.trim(value) == "", do: nil, else: value
+  end
+
+  defp present_string(_value), do: nil
 
   defp publish_transition_error(was, now) do
     %{
@@ -335,6 +449,30 @@ defmodule Barkpark.Content.Lifecycle do
       ]
     }
   end
+
+  # Twin in shape and intent of `stale_claim_error/1`: name the exact row that
+  # would lose its proof, say WHY the draft cannot see it, and name the
+  # recovery. A refusal an operator cannot act on is a different bug.
+  defp criteria_regression_error(%{index: index, criterion: criterion, kind: kind}) do
+    %{
+      "acceptance_criteria" => [
+        "stale draft: publishing this draft would #{criteria_regression_verb(kind)} for " <>
+          "acceptance criterion #{index}#{criterion_label(criterion)} — the published row " <>
+          "holds that proof and this draft does not. A stamp is written DIRECTLY to the " <>
+          "published row (`bp task stamp`) and never rebases an open draft, so a draft " <>
+          "minted before the stamp still carries the pre-stamp criteria. Re-derive the " <>
+          "draft from the published row (discard it, patch again, then publish), or move " <>
+          "the criterion through the sanctioned verbs (`bp task stamp` / `bp task close`)."
+      ]
+    }
+  end
+
+  defp criteria_regression_verb(:dropped), do: "drop the proof-bearing row"
+  defp criteria_regression_verb(:met), do: "clear the `met: true` flag"
+  defp criteria_regression_verb(:evidence), do: "blank the recorded evidence"
+
+  defp criterion_label(nil), do: ""
+  defp criterion_label(criterion), do: " (#{inspect(String.slice(criterion, 0, 80))})"
 
   # Names the sanctioned verb per refused target — the refusal TEACHES (the
   # tasks_controller stage/close precedent). Twin of Writer.sanctioned_verb/1.

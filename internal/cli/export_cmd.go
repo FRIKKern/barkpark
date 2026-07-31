@@ -22,6 +22,14 @@ import (
 // backup.ndjson -> backup.ndjson.meta.
 const exportMetaSuffix = ".meta"
 
+// exportPartialSuffix names the file an `--out` export actually streams into:
+// backup.ndjson -> backup.ndjson.partial. It sits in the SAME directory as the
+// destination — same filesystem, so the promoting rename is atomic and can
+// never be a cross-device copy. Until that rename the backup already at
+// <file> is untouched, which is the whole point: `os.Create(<file>)` truncated
+// last night's good backup to zero bytes before the first new byte arrived.
+const exportPartialSuffix = ".partial"
+
 // exportMeta is the sidecar an `--out` export leaves BESIDE the NDJSON, and the
 // only artifact-local proof that a backup is whole. The count and the PARTIAL
 // warning ride stderr, which on a cron box goes nowhere: six months later a
@@ -60,10 +68,13 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 		out.outf("An interrupted or truncated stream exits NON-ZERO and names the output")
 		out.outf("as PARTIAL — a backup that exits 0 is a backup that streamed to the end.")
 		out.outf("")
-		out.outf("--out <file> writes the NDJSON to <file> AND, only after a clean")
-		out.outf("completion, a <file>.meta sidecar {documents,bytes,sha256,scope,")
-		out.outf("completed_at}. A missing sidecar IS the truncation signal, so an")
-		out.outf("unattended box never needs stderr, the exit code or a log line.")
+		out.outf("--out <file> streams into <file>.partial and renames it onto")
+		out.outf("<file> only after a clean completion, together with a <file>.meta")
+		out.outf("sidecar {documents,bytes,sha256,scope,completed_at}. A run that")
+		out.outf("dies leaves the stub at <file>.partial and does not touch the")
+		out.outf("backup already at <file> or its sidecar. A missing sidecar IS the")
+		out.outf("truncation signal, so an unattended box never needs stderr, the")
+		out.outf("exit code or a log line.")
 		out.outf("")
 		out.outf("--verify <file> re-derives the sha256 and document count from the")
 		out.outf("artifact itself and compares them to the sidecar. It FAILS CLOSED:")
@@ -154,15 +165,19 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 	// the last bytes were still in a buffer would attest a file that does not
 	// yet exist in the form it describes.
 	flush := func() error { return nil }
+	// closeArtifact releases the `--out` file handle before the rename, so the
+	// bytes are the OS's problem and not a buffer's. It is a no-op without --out.
+	closeArtifact := func() error { return nil }
+	partialPath := outPath + exportPartialSuffix
 	if outPath != "" {
-		// A sidecar left over from an EARLIER export would vouch for the file
-		// this run is about to overwrite. Remove it before the first byte lands,
-		// so the artifact is unattested for the whole time it is incomplete.
-		if err := os.Remove(outPath + exportMetaSuffix); err != nil && !os.IsNotExist(err) {
-			out.errf("export: cannot clear stale sidecar %s: %v", outPath+exportMetaSuffix, err)
-			return exitGeneric
-		}
-		f, err := os.Create(outPath)
+		// NOTHING at outPath is touched here — not the artifact, not its
+		// sidecar. The earlier export sitting there is a real backup until this
+		// run has a whole one to replace it with, and clearing its sidecar now
+		// would strip the attestation off a file that is still perfectly good:
+		// `--verify` fails closed, so the operator could not then prove the one
+		// copy they have. Both moves happen together in promoteExportOut, after
+		// the stream ran to the end.
+		f, err := os.Create(partialPath)
 		if err != nil {
 			out.errf("export: %v", err)
 			return exitGeneric
@@ -178,6 +193,7 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			}
 			return f.Sync()
 		}
+		closeArtifact = f.Close
 		sink := io.MultiWriter(buf, hash)
 		writeLine = func(line string) error {
 			n, err := io.WriteString(sink, line+"\n")
@@ -188,7 +204,7 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 			docs++
 			return nil
 		}
-		target = outPath
+		target = partialPath
 	}
 
 	err := client.Export(sigCtx, opts, writeLine)
@@ -214,16 +230,25 @@ func runExport(out *writer, g globals, ctx manifest.Context, args []string) int 
 
 	if outPath != "" {
 		if err := flush(); err != nil {
-			out.errf("export: cannot flush %s: %v — it is UNATTESTED, do not trust it", outPath, err)
+			out.errf("export: cannot flush %s: %v — it is UNATTESTED, do not trust it", partialPath, err)
 			return exitGeneric
 		}
-		if code := writeExportMeta(out, outPath, exportMeta{
+		// The sidecar is written BESIDE THE PARTIAL and travels with it, so the
+		// pair is complete before either name at the destination changes.
+		if code := writeExportMeta(out, partialPath, exportMeta{
 			Documents:   docs,
 			Bytes:       byteCount,
 			SHA256:      hex.EncodeToString(hash.Sum(nil)),
 			Scope:       exportScope(ctx),
 			CompletedAt: time.Now().UTC().Format(time.RFC3339),
 		}); code != exitOK {
+			return code
+		}
+		if err := closeArtifact(); err != nil {
+			out.errf("export: cannot close %s: %v — it is UNATTESTED, do not trust it", partialPath, err)
+			return exitGeneric
+		}
+		if code := promoteExportOut(out, outPath, partialPath); code != exitOK {
 			return code
 		}
 	}
@@ -249,6 +274,41 @@ func writeExportMeta(out *writer, outPath string, meta exportMeta) int {
 	if err := os.WriteFile(outPath+exportMetaSuffix, append(body, '\n'), 0o644); err != nil {
 		out.errf("export: cannot write sidecar %s: %v — %s is UNATTESTED, do not trust it",
 			outPath+exportMetaSuffix, err, outPath)
+		return exitGeneric
+	}
+	return exitOK
+}
+
+// promoteExportOut moves a finished export from <file>.partial to <file>, in the
+// one order that has no bad interleaving.
+//
+//  1. rename the ARTIFACT — atomic, so <file> is either last night's backup or
+//     this one, never a half-written mix and never the zero bytes os.Create used
+//     to leave there;
+//  2. remove the STALE sidecar, which until this instant still described the old
+//     <file> it was written for;
+//  3. rename the NEW sidecar LAST.
+//
+// Between 1 and 3 the artifact is present and unattested, and an unattested
+// artifact is exactly what `--verify` refuses — the safe direction. The reverse
+// order would leave a sidecar attesting a file that is not there yet, or worse,
+// attesting the wrong one. Every failure below stops with the artifact either
+// old-and-attested or new-and-unattested; none of them can produce a pass on a
+// file nobody proved.
+func promoteExportOut(out *writer, outPath, partialPath string) int {
+	if err := os.Rename(partialPath, outPath); err != nil {
+		out.errf("export: cannot move %s into place at %s: %v — the previous backup at %s is UNTOUCHED",
+			partialPath, outPath, err, outPath)
+		return exitGeneric
+	}
+	if err := os.Remove(outPath + exportMetaSuffix); err != nil && !os.IsNotExist(err) {
+		out.errf("export: cannot clear stale sidecar %s: %v — %s is UNATTESTED, do not trust it",
+			outPath+exportMetaSuffix, err, outPath)
+		return exitGeneric
+	}
+	if err := os.Rename(partialPath+exportMetaSuffix, outPath+exportMetaSuffix); err != nil {
+		out.errf("export: cannot move sidecar %s into place: %v — %s is UNATTESTED, do not trust it",
+			partialPath+exportMetaSuffix, err, outPath)
 		return exitGeneric
 	}
 	return exitOK
