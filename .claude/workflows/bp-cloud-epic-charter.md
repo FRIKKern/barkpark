@@ -1,155 +1,155 @@
-# CLI-Reliability (epic-cycle charter slot)
+# jarl.no Dogfood Publishing (epic-cycle charter slot)
 
 > NOTE ON THIS PATH: this filename is the rotating epic-cycle charter SLOT and has carried
-> earlier epics. The prior occupant — **Studio Space-Priority Desk** — is preserved in full
-> (D1–D34 verbatim, plus later waves) at `.claude/workflows/bp-studio-space-priority-charter.md`;
-> do NOT read this file for SPD history. This slot is now the memory of the
-> **CLI-Reliability** throughput epic.
+> earlier epics. The prior occupant — **CLI-Reliability** — is preserved in full at
+> `.claude/workflows/bp-cli-reliability-charter.md`; do NOT read this file for CLI-Reliability
+> history. This slot is now the memory of the **jarl.no Dogfood Publishing** epic.
 >
-> Epic anchor: bp task **`task-09f4775e7ccc2cca`** (scoreboard-parent research epic).
-> Wave paper: **`cli-reliability-wave-2026-07-23`** (style=article).
-> Decided 2026-07-23.
+> Epic anchor: bp task **`jarl-dogfood-publishing-epic`** (guerrilla ledger).
+> Wave 1 paper: **`jarl-dogfood-wave-2026-07-31`** (style=article).
+> Decided 2026-07-31.
 
 ## Vision
 
-The CLI dev-loop's health instruments must be UNABLE to lie. Two freshly-verified
-non-Elixir false-green classes get fixed as permanent instruments, not patches:
-(1) `make doctor` / scripts/doctor.sh false-greens a stale installed `bp` binary
-because it diffs the binary's build commit against LOCAL HEAD instead of
-origin/main — a binary built in a diverged worktree that misses merged CLI
-changes (#5786-class) reports healthy. (2) The served scaffy catalog can drift
-from main silently because nothing in CI ever runs `go run ./scaffy/seed --check`
-(it WAS red for days until a manual re-seed on 2026-07-23 13:56Z). Both fixes are
-mutation-proven (a behind binary MUST red; corpus drift MUST red) and land with
-permanent regression harnesses, merging on the Go/CI lane parallel to the Elixir
-queue. Improvement-only; honest 2-slice wave.
+jarl.no goes paper-first by SKINNING THE CANON: posts are authored as Papers on the
+jarl instance (jarl.barkpark.cloud) and rendered on jarl.no by the SAME canonical
+engine that renders them in Studio — `renderPortableDocument(blocks)` inside
+`.bp-paper-surface`, skinned by `paper-surface.css` with jarl token overrides in both
+light and dark, `hydratePortableDoc` as the client island for mermaid/asciicast, all
+inside jarl's Band composition. jarl's hand-rolled 8-of-70-type `PaperRenderer.tsx`
+(silent drops, dead spacing law) is deleted. `/notater` becomes the single public
+stream backed by papers; `/papers/:slug` 308-redirects into it; RSS/sitemap/OG/JSON-LD
+read one normalized loader. The spacing law is the REPAIRED Reader-Owned doctrine
+(readers skip empty paragraph groups; authored blank rows are never published layout),
+landed upstream in both canonical engines and honoured in every jarl document.
+Dogfood proof is content: three published pieces as papers on the jarl instance, one
+carrying a real table + chart + mermaid diagram, all publishing through the label-spine
+wall. jarl.no becomes the canonical renderer's first real external skin — the strongest
+portability proof Barkpark can publish.
 
 ## Decisions
 
-- **D1 — merge-base semantics, not a bare origin/main swap.** Stale iff
-  `git diff --name-only $(git merge-base $BP_COMMIT origin/main) origin/main -- '*.go' go.mod go.sum internal cmd deploy.sh`
-  is non-empty. Why: proven on real fixture repos across the full verdict matrix —
-  a binary AHEAD with unpushed local Go commits has merge-base==tip and stays
-  green; a bare swap would false-red it (vm-doctor-matrix, 8/8 cells).
-- **D2 — guard order is load-bearing: cat-file → rev-parse → merge-base → diff.**
-  `git cat-file -e "$BP_COMMIT^{commit}"` (unknown commit → loud skip) FIRST,
-  then `git rev-parse --verify --quiet origin/main` (offline/no-ref → loud skip),
-  then non-empty merge-base, then the diff. Why: the bare one-liner FALSE-GREENS
-  offline — `$base` goes empty, the git error is swallowed, and an empty diff
-  reads ok (proof line: "BARE verdict: GREEN <-- FALSE-GREEN"). All new branches
-  route through bad()/skip()/ok() (SessionStart hook silence contract) and the
-  unconditional `exit 0   # advisory` tail stays (upgrade_test + hook contract).
-- **D3 — pathspec gains `deploy.sh`.** Why: root deploy.sh is a real binary input
-  (`make cli-assets-sync` vendors it into the embed); its root↔vendored identity
-  is enforced only by vendored-assets.yml — one word removes the dependency on
-  that external invariant (historic drift #757/#499).
-- **D4 — permanent harness `scripts/doctor.test.sh` (install-cli.test.sh
-  convention) wired via a NEW `.github/workflows/shell-harnesses.yml`.** Why:
-  doctor.sh false-greened twice in one week by two different routes (#5935 regex,
-  compare-target today) — patch-without-harness is how this file fails; and NO
-  existing CI lane runs any scripts/*.test.sh (zero `run:` hits repo-wide), so
-  "ride an existing job" was refuted — a lane must be authored. Rejected rival:
-  a `--selftest` flag inside doctor.sh (the checkout must audit the binary; keep
-  the advisory script lean).
-- **D5 — the harness's fake-git MUST stub `merge-base` (returning a plausible
-  SHA) and MUST place a fake `bp` on PATH.** Why: upgrade_test's fixture has
-  neither, so its PASS never exercises section 2 — copying it verbatim
-  reproduces the same blind spot one level down (vm-upgrade-test-interplay).
-- **D6 — autoseed tripwire = dedicated advisory workflow
-  `.github/workflows/scaffy-catalog-drift.yml` + `make seed-check`.** TOKENLESS
-  (seed --check reads the published perspective from guerrilla.barkpark.cloud by
-  design; NO guerrilla creds in CI) and ADVISORY (job-level
-  `continue-on-error: true`; remediation is a human re-seed, never a CI
-  mutation). Triggers: push-to-main with paths scaffy/commands/**,
-  scaffy/seed/**, internal/scaffy/**, its own yml; daily cron `17 6 * * *`;
-  workflow_dispatch. `concurrency.cancel-in-progress: false` — a literal `true`
-  reds never-cancel-main-check via doc-gates' `.github/workflows/**` glob
-  (mutation-proven both directions in preflight). The job summary distinguishes
-  UNREACHABLE (fetch failure — no table is even printed) from DRIFT (table rows)
-  from in-sync, so advisory reds aren't ambiguous noise. Why dedicated: bolting
-  an advisory network check onto a required gate's workflow muddies the gate
-  story.
-- **D7 — in-workflow self-test step.** Before the real check, mutate one .scaffy
-  in the RUNNER's ephemeral checkout, assert exit 1 + a DRIFT row naming that
-  command, restore via `git checkout --`. Why: the tripwire must re-prove it can
-  fail on every run, not once at merge time (astro-finder-drift precedent;
-  make-the-check-able-to-fail doctrine).
-- **D8 — claim the existing anchor tasks; file nothing new for the slices.**
-  Slice 1 = `scaffy-backlog-doctor-bp-freshness`, slice 2 =
-  `scaffy-backlog-seedcheck-ci-advisory`, both re-parented under
-  `task-09f4775e7ccc2cca`. Why: the wish's cited pdf-bl-doctor-bp-staleness-regex
-  is closed and covered a different bug (regex false-skip, #5935); these two open
-  tasks are the exact live ledger anchors — filing duplicates forks the ledger.
-  Slice 1 must diff against CURRENT doctor.sh (post-#5726): the no-stamp loud red
-  and `make cli-install` hint already exist and must be preserved.
-- **D9 — builders: Opus, both slices; slice 1 carries HIGH-FLIP-RISK.** The
-  flip-prone judgment is the doctor verdict matrix — legit up-to-date and
-  ahead-with-local-Go binaries MUST stay green. Reviewer re-derives that matrix
-  independently on fixtures (E2), and a genuinely independent second reviewer is
-  warranted before merge.
-- **D10 — post-merge obligations (lead):** one green `workflow_dispatch` run of
-  scaffy-catalog-drift.yml on main proving Actions-runner egress to
-  guerrilla.barkpark.cloud (unprovable pre-merge), and one live `make doctor` on
-  a deliberately-behind worktree confirming the RED fires in situ.
-- **D11 — premise corrections recorded honestly.** seed --check is GREEN today
-  (re-seeded 13:56Z by scaffy-dr-catalog-reseed) — slice 2 delivers the
-  tripwire, not a re-seed. The wish's task citation was stale. "Parallel to the
-  Elixir queue" is correctness-parallel only — elixir.yml runs on every PR
-  (~13-16 min wall) and main has ZERO branch protection; all gates are
-  discipline. No freshness path may ever consume `go version -m` vcs stamps
-  (unsound in nested worktrees — walk-up binds to the ancestor repo's HEAD;
-  the ldflags `commit` field is the only trustworthy signal).
+- **D1 — Skin the canon; delete jarl's PaperRenderer.** "Vi burde bruke våre" means
+  consuming OUR renderer, not reimplementing its contract: jarl's 8-type renderer
+  silently drops 62 of 70 registered types and hard-codes the retired mechanical
+  spacing law; the canonical engine renders everything and degrades unknowns visibly
+  (`bp-unknown-block`), never silently.
+- **D2 — Distribution is the vendored tarball, not npm.** `@barkpark/react@1.0.0-preview.2`
+  does not exist on npm and the published preview.1 is the legacy PortableText shim
+  (no `renderPortableDocument`, no `./client`, no CSS — tarball unpacked, grep count 0).
+  jarl-website vendors `file:./vendor/barkpark-react.tgz` + `barkpark-core.tgz`, packed
+  with `pnpm pack` (NEVER `npm pack` — it emits `workspace:^`, uninstallable), lockfile
+  REGENERATED after every byte swap (warm-cache installs old bytes green — proven trap),
+  source commit recorded in `vendor/VENDOR.md`. Publishing preview.2 upstream is filed
+  backlog (`jdf-bl-publish-react-preview2`) — release.yml is operator-gated.
+- **D3 — jarl stamps `data-theme`; the package never will.** Zero `--paper-*`/`--bp-tone-*`
+  tokens live under `prefers-color-scheme` (measured: 158 decls, 0 under the media query),
+  so without the stamp an OS-dark reader gets a silent light paper. A pre-paint inline
+  script in `layout.tsx` stamps `document.documentElement.dataset.theme` from
+  `matchMedia('(prefers-color-scheme: dark)')` and re-stamps on `change` (a naive stamp
+  would regress live OS flips). Script-only — never rendered as a JSX attribute
+  (hydration-mismatch surface in Next 16).
+- **D4 — The skin scopes to `.bp-paper-surface`, never `:root`, and lives in `globals.css`.**
+  jarl owns a COLLIDING `--paper-*` namespace in oklch on `:root`; scoping keeps the
+  canonical values winning inside the surface and jarl's values everywhere else.
+  `check-tokens.mjs` bans colour literals outside `globals.css`, so the skin is authored
+  there. Fonts ride the token seam: `--paper-font-serif: var(--font-display)`,
+  `--paper-font-mono: var(--font-mono)` — never edit the canonical file's stacks
+  (human-gated by au-w5-reading-typography).
+- **D5 — The wire is `paper.blocks ?? paper.body?.blocks`; `body_html` is deliberately
+  ignored; `fields=` never touches the detail fetch.** Top-level `blocks` is proven
+  byte-equal to `body.blocks` on the live paper (both endpoints); `body_html` hardcodes
+  a light palette in inline styles (drakt-proof, dark-impossible). `?fields=` is honoured
+  and silently strips `blocks` with HTTP 200 — mandatory on LIST loaders (16MB unprojected
+  list measured), forbidden on the detail path.
+- **D6 — The spacing law is the Reader-Owned doctrine, repaired in three places.**
+  The doctrine flipped 2026-07-31 and NO renderer on main implements invariant 2
+  (`core.ts:470` and `walk.ex` emit `<p></p>` unconditionally; zero `:empty` CSS; zero
+  golden fixtures cover it either direction). The swap alone does not deliver the law,
+  so: (a) upstream suppression lands in BOTH engines with new golden coverage this wave;
+  (b) jarl's live paper is content-migrated (three `sp-00*` spacers removed); (c) no new
+  piece authors empty-paragraph layout. Wave paperwork follows the repaired law too.
+- **D7 — Publish acceptance is "Studio-edit + API-publish".** Studio renders no publish
+  control for papers (deliberate read-only sidebar; the affordance triple is filed as
+  `spd-bl-publish-affordance-triple`, another desk's P1). The API lifecycle is proven
+  end-to-end on jarl (create → label_spine 422s in charter order with machine-readable
+  fixes → publish 200 → delete verified gone). The write credential is MINTED PER RUN
+  from the Cloud CP (`GET /v1/barkparks/9fb839d6-…/credentials` with the team
+  cloud_token), never stored.
+- **D8 — Epic 6 boundary: the Korpuset/dossier piece is CEDED to Epic 6.** The corpus
+  table+chart piece IS `frikk-tiaret-dossier` (Epic 6 criterion 3) and Epic 6 owns the
+  dogfooding-content criterion verbatim. This epic's three pieces are Epic-6-neutral:
+  (1) `velkommen-til-jarl-no` repaired + spacer-stripped, (2) "Spacing-loven som snudde"
+  (carries table + dataviz chart + mermaid + callouts), (3) "Nettstedet skriver seg selv"
+  (migration of note-velkommen, keeps URL `/notater/velkommen`).
+- **D9 — The Historiene renderer conflict is resolved in favour of the canon, loudly.**
+  Historiene's wave (VERIFYING today) decided to EXTEND `PaperRenderer.tsx` — a decision
+  premised on the 8-type renderer this epic deletes. This epic proceeds; a P1 coordination
+  task (`jdf-bl-historiene-renderer-reconciliation`) tells that wave to target the
+  canonical engine, which dissolves its foreclosure rationale (charts/design blocks come
+  free from the 70-type grammar). The lead relays before either wave merges content.
+- **D10 — Deploy story is the manual `bp deploy` lane; no wording implies automation.**
+  Push-to-deploy is hard-false on main (`github_build_available?/1 → false`; builder is
+  `file://`-only) and is OWNED by the platform-followups wave (`sites-github-auto-build`).
+  The PAX tar repair is source-true but production-unproven (crown proof 0/12; serving
+  box BEAM may predate the fix) — every live acceptance fetch pairs a 200 with a control
+  fetch (static misses return 503, so a bare 200 proves nothing).
+- **D11 — Build honesty: published reads are public, so the build stops gating on the
+  token and starts failing loud.** The read token gates nothing (tokenless reads return
+  identical published content) yet its absence blanks the whole site with a green build.
+  `client.ts` fetches without requiring the token and THROWS on API failure during
+  production builds. Caveat recorded: the `vf-build-honesty` verifier never reported —
+  the slice reproduces the silent-empty first, then fixes against observed output.
+- **D12 — Counts derive from the registry, never a literal.** The grammar is 70 registered
+  types (test-pinned against `REGISTERED_TYPES`), the golden corpus is 60, "42" is a stale
+  floor surviving only in prose. Any smoke asserts against the registry or a readdir,
+  never a hand-counted number. jarl's vendored smoke asserts zero `bp-unknown-block` over
+  a vendored fixture plus empty-`<p>` suppression; the pinned-consumer parity harness is
+  backlog (`jdf-bl-pinned-consumer-parity`).
+- **D13 — Unified stream shape.** One normalized `getPosts()` loader (papers canonical,
+  legacy note mapped) feeds `/notater`, feed.xml, sitemap, OG and JSON-LD. Excerpts:
+  `description ?? preview.description ?? toPlainText(blocks filtered of eyebrow + empty
+  paragraphs)`. Dates: `publishedAt ?? _createdAt` (the content slice stamps `publishedAt`
+  on the papers). The migrated note-paper takes id `velkommen` so URL continuity costs
+  zero redirects; the source note doc is retired to kill feed dupes; `preview.url` is
+  never threaded into canonicals.
+
+## Open unknowns this wave decided around (named, honestly)
+
+- `vf-build-honesty` never reported (4 attempts): the silent-empty build was never RUN,
+  only code-read. D11's slice reproduces it before fixing.
+- The human Studio publish path for papers is unobserved on jarl (API path proven).
+  Acceptance is set at Studio-edit + API-publish (D7), not "press publish in Studio".
+- Whether jarl.no's site deploys through the prebuilt-artifact lane (vs on-box source
+  build) was not verified; the lead's deploy step verifies live rendering with control
+  fetches either way.
 
 ## Roadmap
 
-1. **Slice 1 (medium, round 1, Opus)** — doctor.sh merge-base staleness fix +
-   scripts/doctor.test.sh verdict-matrix harness + shell-harnesses.yml wiring.
-   Task `scaffy-backlog-doctor-bp-freshness`. Files: scripts/doctor.sh,
-   scripts/doctor.test.sh, .github/workflows/shell-harnesses.yml.
-2. **Slice 2 (small, round 1, Opus)** — scaffy-catalog-drift.yml advisory
-   tokenless tripwire + `make seed-check`. Task
-   `scaffy-backlog-seedcheck-ci-advisory`. Files:
-   .github/workflows/scaffy-catalog-drift.yml, Makefile.
-3. **Backlog (filed as published children, future waves):**
-   `clirel-bl-local-update-early-exit` — local-update.sh OLD==NEW early-exit
-   skips the bp rebuild (fixer-side residual; low severity since doctor's hint
-   is `make cli-install`, which rebuilds unconditionally);
-   `clirel-bl-go-tests-scaffy-paths` — go-tests.yml path filter misses
-   scaffy/commands/** so the corpus census test can go stale again (historic
-   7→12 incident, task-94df363c6ad6de68);
-   `clirel-bl-wire-orphan-shell-tests` — wire the four orphaned
-   scripts/*.test.sh into shell-harnesses.yml once slice 1 lands.
+Wave 1 (this wave — 8 slices, 3 rounds):
+
+1. `jdf-w1-upstream-reader-owned-spacing` — invariant 2 in core.ts + walk.ex + golden
+   coverage in both suites (barkpark, fable, M, round 1).
+2. `jdf-w1-toplaintext-dual-shape` — heading/eyebrow read content[] via proseContent +
+   content-shape golden case (barkpark, opus, S, round 1).
+3. `jdf-w1-mermaid-theme` — hydrate mermaid theme-aware from html[data-theme], re-render
+   on flip via data-bp-src (barkpark, opus, S, round 1).
+4. `jdf-w1-canonical-swap-drakt` — vendor tarballs, swap PaperRenderer → canonical
+   surface island, theme stamp, jarl drakt in globals.css (jarl-website, fable, L, round 1).
+5. `jdf-w1-build-honesty` — tokenless public reads + fail-loud build (jarl-website,
+   opus, S, round 1).
+6. `jdf-w2-unified-stream-feeds` — getPosts(), /notater identity, /papers 308, feeds/OG/
+   JSON-LD, fields= projection on lists (jarl-website, opus, M, round 2 after #4).
+7. `jdf-w2-revendor-upstream` — re-pack tarballs from merged main; vendored smoke proves
+   suppression + toPlainText fix (jarl-website, opus, S, round 2 after #1–#4).
+8. `jdf-w3-content-pieces` — migrate + author + publish the three pieces on jarl through
+   the wall; register tags; stamp publishedAt (content, fable, M, round 3 after #6, #7).
+
+Later waves: publish @barkpark/react preview.2 and retire the vendor lane; pinned-consumer
+parity harness; Studio publish affordance adoption for jarl authoring (after
+spd-bl-publish-affordance-triple); the Epic-6 dossier lands on the then-canonical stack;
+push-to-deploy adoption once sites-github-auto-build ships.
 
 ## Wave log
 
-### Wave 2026-07-23 — round 1 built + reviewed, grade A-
-
-- **Landed (2/2 slices green, both pushed + PR'd, lead merges):**
-  - Slice 1 `scaffy-backlog-doctor-bp-freshness` — PR #6023, branch
-    `loop-epic/doctor-sh-guarded-merge-base-staleness-f-0` (no reviewer fixes).
-    doctor.sh section 2 now reds iff Go inputs changed over
-    merge-base(BP_COMMIT, origin/main)..origin/main (D1-D3 exact); guarded
-    fail-loud ladder; 8-cell doctor.test.sh harness on real fixtures wired via
-    NEW shell-harnesses.yml. Reviewer independently re-derived the
-    HIGH-FLIP-RISK verdict matrix (8/8 green; origin/main's buggy doctor reds
-    6 cells incl. the diverged + offline FALSE-GREENS; never-cancel guard
-    mutation-proven). E2: an independent second review of the matrix is
-    warranted before merge.
-  - Slice 2 `scaffy-backlog-seedcheck-ci-advisory` — PR #6025, branch
-    `loop-epic/scaffy-catalog-drift-yml-advisory-tokenl-1-r` (REVIEWER FIX
-    cb88ac8c4): the builder's `out="$(cmd)"; code=$?` capture was
-    errexit-unsafe — Actions' default run shell is `bash -e {0}`, so the
-    self-test aborted before capturing the code exactly when the tripwire
-    correctly redded, and the audit step died before writing its DRIFT
-    summary; fixed to `code=0; out="$(cmd)" || code=$?`, proven end-to-end
-    under `bash -e` both directions; also added `permissions: contents: read`.
-    Advisory tokenless scaffy-catalog-drift.yml + `make seed-check` otherwise
-    as decided (D6-D7).
-- **Stalled:** nothing — honest 2-slice wave, both premises re-confirmed live
-  before building (D11's corrections held).
-- **Next wave:** lead merges #6023 + #6025 (slice 1 after the E2 second look),
-  then discharges D10 post-merge obligations (one workflow_dispatch of
-  scaffy-catalog-drift.yml proving Actions egress; one live `make doctor` RED
-  on a deliberately-behind worktree). Then the backlog children in order:
-  `clirel-bl-wire-orphan-shell-tests` (cheapest, unblocked once slice 1
-  merges), `clirel-bl-go-tests-scaffy-paths`, `clirel-bl-local-update-early-exit`.
+(empty — Review appends per wave)
