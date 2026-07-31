@@ -1162,7 +1162,7 @@ html[data-theme="dark"] .bp-paper-surface, html[data-theme="dark"] .bp-paper-bod
    (double numbering, seen live on the rev-7 essay). */
 .bp-paper-surface .bp-steps { margin: 1.4rem 0 1.4rem 0; padding: 0; list-style: none; counter-reset: bp-step; }
 .bp-paper-surface .bp-steps__step::marker { content: ""; }
-.bp-paper-surface .bp-steps__step { counter-increment: bp-step; position: relative; padding: 0 0 14px 2.6rem; }
+.bp-paper-surface .bp-steps__step { list-style: none; counter-increment: bp-step; position: relative; padding: 0 0 14px 2.6rem; }
 .bp-paper-surface .bp-steps__step::before { content: counter(bp-step); position: absolute; left: 0; top: 0; width: 1.7rem; height: 1.7rem; border-radius: 50%; background: var(--paper-bg-deep); border: 1px solid var(--paper-chrome-border); color: var(--paper-accent); font-family: var(--paper-font-mono); font-size: 0.78rem; font-weight: 700; display: flex; align-items: center; justify-content: center; }
 .bp-paper-surface .bp-steps__step:not(:last-child)::after { content: ""; position: absolute; left: 0.82rem; top: 1.9rem; bottom: 0; width: 1px; background: var(--paper-rule); }
 .bp-paper-surface .bp-steps__title { font-weight: 700; margin: 0.15rem 0 0.2rem; }
