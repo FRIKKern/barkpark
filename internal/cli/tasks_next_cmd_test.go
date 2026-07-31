@@ -251,9 +251,30 @@ func TestNextFrontierClaimJSONCarriesHelpAndNotices(t *testing.T) {
 		Notices []struct {
 			Type string `json:"type"`
 		} `json:"notices"`
+		Claimed struct {
+			ID     string `json:"id"`
+			Worker string `json:"worker"`
+			Epoch  *int   `json:"epoch"`
+		} `json:"claimed"`
 	}
 	if err := json.Unmarshal(so.Bytes(), &env); err != nil {
 		t.Fatalf("json stdout not parseable: %v\n%s", err, so.String())
+	}
+	// The claim receipt must carry the GRANTED epoch. It is the CAS token
+	// `bp task close <id> <worker> <epoch>` requires and the one the tasks rules
+	// promise `bp task next` returns — yet deleting `"epoch": epoch` from
+	// emitFrontierClaim reddened NOTHING repo-wide (go test ./... rc=0, 29 ok
+	// packages) before this assertion existed: the human line prints the epoch
+	// separately, and no JSON test decoded `claimed`. A pointer, not an int, so
+	// an ABSENT key fails here rather than reading as the zero epoch.
+	if env.Claimed.Epoch == nil {
+		t.Fatalf("claim receipt carried no claimed.epoch — the close CAS token is missing:\n%s", so.String())
+	}
+	if *env.Claimed.Epoch != 7 {
+		t.Errorf("claimed.epoch = %d, want 7 (the epoch the server granted):\n%s", *env.Claimed.Epoch, so.String())
+	}
+	if env.Claimed.ID != "task-a" || env.Claimed.Worker != "worker-1" {
+		t.Errorf("claimed id/worker drifted from the granted claim:\n%s", so.String())
 	}
 	if !env.OK || len(env.Help) != 1 || env.Help[0] != "do X next" {
 		t.Errorf("json payload missing help[]:\n%s", so.String())

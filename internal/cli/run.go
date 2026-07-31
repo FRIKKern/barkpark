@@ -245,6 +245,9 @@ func runCommand(out *writer, g globals, ctx manifest.Context, m *manifest.Manife
 		if code, refused := refuseUnreadableDefaultPage(out, cmd, status, respBody); refused {
 			return code
 		}
+		if code, handled := screenWriteReceipt(out, cmd, status, respBody); handled {
+			return code
+		}
 		warnIfDefaultPageMayBeTruncated(out, g, cmd, respBody)
 		emitHelpHints(out, respBody)
 	}
@@ -379,6 +382,137 @@ func refuseUnreadableDefaultPage(out *writer, cmd manifest.Command, status int, 
 		out.userErr("%s", msg)
 	}
 	return exitGeneric, true
+}
+
+// unreadableWriteReceiptHint is the one wording the write-receipt refusal
+// carries. It names the transport like its read-side sibling, but it must ALSO
+// say the thing a read never has to: an unconfirmable write is not a failed
+// write. The mutation may well have landed; the receipt is what did not arrive.
+const unreadableWriteReceiptHint = "the transport, not the write: a proxy/gateway page, a truncated or non-Barkpark response. The write may still have landed — re-read the target before retrying, then check the server URL and that the API is up."
+
+// screenWriteReceipt is the WRITE half of the PDS reader law (wave 29): no bp
+// verb may report success on an exit code alone. Waves 27 and 28 fenced the
+// --all walk and the DEFAULT single-page read, but BOTH are gated on
+// `cmd.Paginated && !cmd.Writes` — so every one of the 93 write verbs sat
+// outside them BY CONSTRUCTION. Measured on origin/main against a fake API:
+// `bp task next w1` printed `ok` at rc=0 over `null`, `{}`, `{"result":null}`
+// and `[]`; `-o table` over `{}` printed ZERO BYTES on both channels at rc=0;
+// an HTML 502 proxy page was echoed verbatim; and an ERROR envelope arriving on
+// a 2xx was printed as the SUCCESS body under `-o json`.
+//
+// PLACEMENT IS LOAD-BEARING (PDS-D407), and it is NOT where it looks. It lives
+// HERE, at runCommand's post-2xx hook — the one site proven to fire in all four
+// output shapes — and NOT inside renderMinimal, whose "ok" fallback was
+// instrumented on a clean build and found to be reached by three HONEST write
+// receipts as well as five poisons, ONLY in -o minimal: zero bytes, an HTML
+// page, an error envelope and plaintext never arrive there at all, and 26 of
+// the 93 write verbs never render through renderMinimal in the first place.
+//
+// THE DISCRIMINATOR IS "did the server say anything at all", NEVER "does the
+// body carry a key we recognise". An object under keys the CLI cannot summarise
+// PASSES by design (see TestWriteReceiptPassesUnknownKeys): on a write that is
+// a receipt the CLI cannot summarise, not a lie — and an allowlist there would
+// red `{"ok":true}` and `{"deleted":true,…}` TODAY.
+//
+// It returns (exit code, handled) and has TWO honest outcomes, not one:
+//
+//   - a refusal at exitGeneric for a body that said nothing;
+//   - a DECLARED empty receipt at exitOK for HTTP 204/205 with an empty body —
+//     `chat.approve` really does answer `send_resp(conn, :no_content, "")`, so a
+//     naive "empty body ⇒ refuse" would red an honest verb. That arm is not
+//     silence: main printed a BARE EMPTY LINE there, and it now names what
+//     happened. An UNDECLARED empty 200 still refuses.
+func screenWriteReceipt(out *writer, cmd manifest.Command, status int, respBody []byte) (int, bool) {
+	if !cmd.Writes {
+		return 0, false
+	}
+
+	if (status == http.StatusNoContent || status == http.StatusResetContent) &&
+		len(bytes.TrimSpace(respBody)) == 0 {
+		reason := fmt.Sprintf("HTTP %d, no content returned — the server declared no receipt for this write", status)
+		if !out.emitStructured(map[string]any{"ok": true, "confirmed": false, "reason": reason}) {
+			out.outf("not confirmed: %s", reason)
+		}
+		return exitOK, true
+	}
+
+	reason := unreadableWriteReceipt(respBody)
+	if reason == "" {
+		return 0, false
+	}
+
+	msg := fmt.Sprintf(
+		"unreadable write receipt: HTTP %d %s (%d bytes): %s",
+		status, reason, len(respBody), bodyPreview(respBody),
+	)
+	if !renderErrorEnvelope(out, "unreadable_write_receipt", msg, "", unreadableWriteReceiptHint) {
+		out.userErr("%s", msg)
+	}
+	return exitGeneric, true
+}
+
+// unreadableWriteReceipt names WHY a 2xx write body said nothing, or "" when
+// the body is a receipt worth rendering. The refusals are exactly the bodies
+// that carry no statement about the write: non-JSON bytes (a proxy page, an
+// interstitial, plaintext), an empty body with no 204/205 declaration, the JSON
+// literal `null`, a `{"result":null}` envelope, an empty object, an empty
+// array, and an error envelope that arrived on a 2xx. Everything else — every
+// scalar, every non-empty array, every object regardless of its keys — passes.
+func unreadableWriteReceipt(body []byte) string {
+	if len(bytes.TrimSpace(body)) == 0 {
+		return "returned an empty body without declaring one (no 204/205 no-content status)"
+	}
+	var raw any
+	if json.Unmarshal(body, &raw) != nil {
+		return "carried a body that is not JSON"
+	}
+	var payload any
+	if json.Unmarshal(unwrapResult(body), &payload) != nil {
+		return `carried a {"result": …} envelope whose payload is not JSON`
+	}
+	switch t := payload.(type) {
+	case nil:
+		if raw == nil {
+			return "carried the JSON literal null"
+		}
+		return `carried {"result":null} — the envelope was empty`
+	case map[string]any:
+		if len(t) == 0 {
+			return "carried an empty JSON object"
+		}
+		if code, isErr := errorEnvelopeOn2xx(t); isErr {
+			return fmt.Sprintf("carried an ERROR envelope (%s) on a success status", code)
+		}
+	case []any:
+		if len(t) == 0 {
+			return "carried an empty JSON array"
+		}
+	}
+	return ""
+}
+
+// errorEnvelopeOn2xx reports whether a 2xx payload is really the canonical
+// failure envelope — `ok:false` AND an `error` member. That CONJUNCTION is the
+// whole discriminator: `{"ok":false,"reason":"no_ready"}` is an HONEST 200 from
+// the task queue (an empty queue is an outcome, not an error) and must stay
+// rc=0, while `{"ok":false,"error":{…}}` on a 200 is a server contradicting
+// itself. The returned code names the error for the refusal message.
+func errorEnvelopeOn2xx(m map[string]any) (string, bool) {
+	if ok, present := m["ok"].(bool); !present || ok {
+		return "", false
+	}
+	switch e := m["error"].(type) {
+	case map[string]any:
+		if code, _ := e["code"].(string); code != "" {
+			return code, true
+		}
+		return "unnamed", true
+	case string:
+		if e != "" {
+			return e, true
+		}
+	}
+	return "", false
 }
 
 // warnIfDefaultPageMayBeTruncated keeps the normal single-page path honest: a
