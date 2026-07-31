@@ -506,8 +506,7 @@ a:hover { text-decoration: underline; }
    __css_check E12 refuses any focus rule whose sole band is a translucent
    token; --ring-soft stays for DECORATIVE fills (tints, tracks, pulses). */
 .nav-link:focus-visible,
-.nav-menu summary:focus-visible,
-.nav-menu-item:focus-visible,
+.nav-group-summary:focus-visible,
 .auth-tab:focus-visible,
 .inst-tab:focus-visible,
 .affix-btn:focus-visible,
@@ -2807,44 +2806,19 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 [data-theme="dark"] .status-pill--danger { background: hsl(var(--danger-hsl) / 0.22); }
 
 /* ============================================================ SETTINGS MENU
-   The Settings cluster is a native <details> disclosure (charter decision 6).
-   It sits outside .tabnav-primary so its dropdown escapes the primary scroller;
-   applyRoute() closes it after every navigation. */
-.nav-menu { position: relative; flex: 0 0 auto; display: flex; align-items: center; }
-.nav-menu-trigger { cursor: pointer; list-style: none; user-select: none; }
-.nav-menu-trigger::-webkit-details-marker { display: none; }
-.nav-caret {
-  display: inline-block;
-  margin-left: 6px;
-  border-left: 4px solid transparent;
-  border-right: 4px solid transparent;
-  border-top: 5px solid currentColor;
-  opacity: 0.6;
-  transition: transform var(--t);
-}
-.nav-menu[open] .nav-caret { transform: rotate(180deg); }
-.nav-menu-list {
-  position: absolute;
-  top: 100%;
-  right: 0;
-  min-width: 184px;
-  padding: 6px;
-  background: var(--surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  box-shadow: var(--shadow);
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-  z-index: var(--z-menu);
-}
-.nav-menu-item {
-  padding: 8px 10px;
-  border-radius: var(--radius-sm);
-  font-size: 13px;
-  color: var(--muted-text);
-}
-.nav-menu-item:hover { background: var(--muted-surface); color: var(--text); text-decoration: none; }
+   RETIRED (cch-w14-s2). This block styled a pre-v4 TOPBAR dropdown — `.nav-menu`
+   / `.nav-menu-trigger` / `.nav-caret` / `.nav-menu-list` / `.nav-menu-item`,
+   eight rule heads plus two selectors in the shared focus-ring group — and
+   `nav-menu` occurred ZERO times in index.html: the v4 shell moved Settings into
+   the sidebar and left the styling behind. Two app.js handlers still swept for it
+   after every navigation and on every document click, matching nothing.
+   Dead CSS is not free here: it is exactly the population cssom-parity and the
+   E2 dead-class checker exist to keep honest, and a reader looking for the live
+   Settings disclosure found this first.
+   The LIVE disclosure is `<details class="nav-group">` in the sidebar — its rules
+   are `.nav-group-summary` / `.nav-group-caret` below, and its close-on-navigate
+   behaviour (which this block's comment described and its markup no longer had)
+   now runs against the element that actually exists. */
 
 /* ============================================================ OVERVIEW (home)
    gr-p2 HOME TRIAGE (C-01/C-02, v4): a time-of-day greeting, page-header fleet
@@ -4255,6 +4229,24 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .nav-group { margin-top: 12px; padding-top: 10px; border-top: 1px solid rgba(var(--cc-line-rgb), 0.06); display: flex; flex-direction: column; gap: 2px; }
 
+/* The Settings group is a <details> (cch-w14-s2). `display: flex` on the details
+   box is what makes the 2px row gap survive the element swap — a details defaults
+   to `display: block`, and the eyebrow-then-links rhythm below it is the flex
+   column above. The summary keeps `.nav-eyebrow`'s type and padding and only adds
+   the row layout + the caret; the marker is suppressed on BOTH spellings because
+   Chrome still answers to the legacy pseudo-element. The caret is the ONLY paint
+   this adds above the fold — the group ships `open` and app.js never closes it
+   there — so a desktop sidebar reads exactly as it did, with one honest cue that
+   the cluster is now collapsible. */
+.nav-group-summary {
+  display: flex; align-items: center; gap: 6px;
+  list-style: none; cursor: pointer; user-select: none;
+}
+.nav-group-summary::-webkit-details-marker { display: none; }
+.nav-group-summary:hover { color: var(--muted-text); }
+.nav-group-caret { margin-left: auto; flex: 0 0 auto; opacity: 0.55; transition: transform var(--t); }
+.nav-group[open] > .nav-group-summary .nav-group-caret { transform: rotate(180deg); }
+
 /* sidebar nav items (the primary nav-links carry data-view; applyRoute lights them) */
 .sidebar .nav-link {
   display: flex; align-items: center; gap: 10px;
@@ -4327,12 +4319,90 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .scope-foot { color: var(--muted-text); border-top: 1px solid rgba(var(--cc-line-rgb), 0.07); margin-top: 4px; }
 
 /* Narrow viewports: the sidebar folds to a full-width strip above the content so
-   nothing is stranded (the nav stays reachable; content flows below). */
+   nothing is stranded (the nav stays reachable; content flows below).
+
+   cch-w14-s2 — "NOTHING IS STRANDED" WAS FALSE, AND MEASURABLY SO. `height: auto`
+   let the folded strip grow to its full 690px, so `.content` began at y=745.88 at
+   EVERY width 320-720, in both themes, on all ten top-level views (measured on
+   origin/main, app.css sha256 c8b3bd06a335…, Chrome 150.0.7871.187). On an
+   800px-tall phone that is 54px of page above the fold; at 390x667 the rendered
+   view is ENTIRELY below it. A nav click swapped the view with scrollY 0 and
+   contentTop unchanged — the strip is not an internal scroller, there is no skip
+   link, no hamburger, no toggle, and 17 of 34 focus stops precede the first
+   control in .content. THE FOLD ITSELF IS NOT RAISED (charter D153): raising it
+   relocates the identical cliff onto every tablet in portrait. The fix is inside.
+
+   THREE PARTS, AND ALL THREE ARE LOAD-BEARING — the first two alone each fail:
+     1. `max-height: 34vh` + the strip's own scroller. UNIFORM: it flattens the
+        root (690), instance (510) and site (368) layers to one number, so the
+        instance route is fixed too — a disclosure alone leaves it at 566.13,
+        because #nav-layer-instance has no Settings group to collapse. And
+        VIEWPORT-PROPORTIONAL: contentTop becomes 0.34H + 56, which clears the
+        45%-of-height bar for every H >= 509 rather than for one lucky phone.
+        34 was bisected, not guessed: 38vh misses at 667 (309.5 > 300.2) and 36vh
+        clears it by 4px, which is not a margin.
+     2. THE CONTINUATION CUE, live IFF clipped. A bare cap is a REGRESSION this
+        epic already owns: at 390x800 it hides 449px with nine of sixteen nav
+        controls below the cut and NOTHING saying so — the exact
+        clipped-without-cue shape W12 fixed on .set-matrix. This is that same
+        idiom turned 90 degrees: a registered `<length>` driving a mask on the
+        strip's OWN paint, so the card surface shows through and light and dark are
+        correct by construction with no second token to keep in sync. While
+        something is below the cut the bottom edge fades over 40px; it retracts the
+        moment the last row is reached. The edge only promises more when there IS
+        more. It fades the bottom hairline along with everything else while
+        clipped; that is deliberate, the fade IS the edge in that state.
+        ONE PART OF THAT IDIOM IS DELIBERATELY NOT REUSED, AND IT WAS MEASURED
+        BOTH WAYS BEFORE RULING. .set-matrix drives its length from
+        `animation-timeline: scroll(self inline)`. Built that way first, this cue
+        was live on the root layer and DEAD on the other two: across 72 driven
+        cells, 48 sat clipped — 238px hidden on the instance layer, 96px on the
+        site layer — while `--nav-fade` computed 0px, and one cell that DID paint
+        the fade still read 40px after scrolling to the end, promising more at the
+        bottom of the list. A narrower probe of the same two routes read 40px, so
+        it was not even consistently wrong. Both of those layers are painted by JS
+        after load (applyShellNav / paintInstanceSections); a scroll timeline whose
+        scroller had no scrollable overflow when the animation attached does not
+        reliably wake up when the content lands. A cue that is right about a third
+        of the time is not a cue. So the STATE is measured instead of inferred:
+        app.js's navStripCue() reads scrollHeight/clientHeight/scrollTop live and
+        sets `is-nav-clipped`; the paint stays here.
+        AND THE FADE FLIPS, IT DOES NOT EASE — also measured, not taste. A
+        `transition: --nav-fade 140ms linear` on this rule looked free and was not:
+        with the class correctly present and 96-238px genuinely clipped, the
+        transitioned custom property computed 0px and STAYED there through 2.5s on
+        two of four driven routes, so the mask went flat while the state underneath
+        it was right. Deleting the transition took the same four routes to 40px,
+        every one. A 140ms ease on a 40px fade is worth nothing; a cue that is
+        sometimes invisible costs everything.
+     3. The `.nav-group` disclosure (index.html + syncNavDisclosure in app.js),
+        which removes 225 of the 449px the cap would otherwise have to hide, so
+        the strip usually needs no scrolling at all.
+   `overscroll-behavior: contain` keeps a flick inside the strip from chaining
+   into the page behind it, which is what makes a 226px nested scroller usable on
+   a phone rather than a trap. */
 @media (max-width: 720px) {
   .app-shell { flex-direction: column; }
-  .sidebar { flex-basis: auto; width: 100%; height: auto; position: static; border-right: none; border-bottom: 1px solid rgba(var(--cc-line-rgb), 0.08); }
+  .sidebar {
+    flex-basis: auto; width: 100%; height: auto; position: static;
+    border-right: none; border-bottom: 1px solid rgba(var(--cc-line-rgb), 0.08);
+    max-height: 34vh;
+    overflow-y: auto;
+    overscroll-behavior: contain;
+    -webkit-mask-image: linear-gradient(to bottom, currentColor calc(100% - var(--nav-fade)), transparent);
+    mask-image: linear-gradient(to bottom, currentColor calc(100% - var(--nav-fade)), transparent);
+  }
+  .sidebar.is-nav-clipped { --nav-fade: 40px; }
   .nav-spacer { display: none; }
 }
+/* Registered for its TYPED INITIAL VALUE, which is what makes the mask a defined
+   no-op everywhere `is-nav-clipped` is absent — every width above the fold, where
+   navStripCue() never sets it, and every folded strip short enough to fit. Left
+   unregistered, `calc(100% - var(--nav-fade))` would be a guaranteed-invalid
+   substitution and the whole mask-image declaration would drop; that happens to
+   look the same and is a very different reason. `@property` is an OPAQUE at-rule:
+   cssom-parity skips it on both sides, so it adds no rule head. */
+@property --nav-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
 
 /* ---------------------------------------------------------- gr-p2 plan & dunning (C-03/C-04)
    Trial state (countdown chip + ratified CTA), the GR17 dunning banner, the
