@@ -1,12 +1,12 @@
 # Jarl Platform Follow-ups (epic-cycle charter slot)
 
 > NOTE ON THIS PATH: this filename is the rotating epic-cycle charter SLOT and has carried
-> earlier epics. The prior occupant on origin/main — **CLI-Reliability** — is preserved in full
-> at `.claude/workflows/bp-cli-reliability-charter.md`; do NOT read this file for CLI-Reliability
-> history. A CONCURRENT epic (**jarl.no Dogfood Publishing**, decided the same day) also claims
-> this slot in its own PR; whichever merges second must move the other occupant to its named
-> preservation file (`bp-jarl-dogfood-publishing-charter.md`) — the lead resolves the slot.
-> This branch's slot is the memory of the **Jarl Platform Follow-ups** epic.
+> earlier epics. Prior occupants are preserved in full at their dedicated paths — most recently
+> **jarl.no Historiene** at `.claude/workflows/bp-jarl-historiene-charter.md` (moved when this
+> PR merged after #8320, per slot convention); before it, **jarl.no Dogfood Publishing** at
+> `.claude/workflows/bp-jarl-dogfood-publishing-charter.md` and **CLI-Reliability** at
+> `.claude/workflows/bp-cli-reliability-charter.md`. Do NOT read this file for their history.
+> This slot is now the memory of the **Jarl Platform Follow-ups** epic.
 >
 > Epic anchor: bp task **`jarl-platform-followups-epic`** (guerrilla ledger).
 > Wave 1 paper: **`jarl-platform-followups-wave-2026-07-31`** (style=article).

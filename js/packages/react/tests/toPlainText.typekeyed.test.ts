@@ -82,10 +82,11 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     }
   })
 
-  it('the partition is 25 prose + 35 textless = 60', () => {
+  it('the partition is 26 prose + 34 textless = 60', () => {
     // grown (pbw-stier-equation): tex source is reading content, the `code` precedent
     // grown (pbw-stier-tabs): each tab's label + nested blocks' prose, the `steps` precedent
-    expect(Object.keys(PROSE_GOLDEN).length).toBe(25)
+    // grown (jarl-dogfood): expandable's summary + nested blocks are reading prose
+    expect(Object.keys(PROSE_GOLDEN).length).toBe(26)
     // scaffy:add-block-type Toc MARK:typekeyed-textless-toc
     // scaffy:add-block-type Steps MARK:typekeyed-textless-steps
     // scaffy:add-block-type Footnote MARK:typekeyed-textless-footnote
@@ -95,7 +96,7 @@ describe('toPlainText — type-keyed grammar coverage', () => {
     // scaffy:add-block-type Video MARK:typekeyed-textless-video
     // scaffy:add-block-type ApiEndpoint MARK:typekeyed-textless-api-endpoint
     // scaffy:add-block-type CodeTabs MARK:typekeyed-textless-code-tabs
-    expect(Object.keys(TEXTLESS_SKIP).length).toBe(35)
+    expect(Object.keys(TEXTLESS_SKIP).length).toBe(34)
     expect(Object.keys(PROSE_GOLDEN).length + Object.keys(TEXTLESS_SKIP).length).toBe(cases.length)
   })
 

@@ -38,11 +38,17 @@ func (tr tabsRenderer) Render(b Block, ctx RenderCtx) []string {
 // rhythm line between consecutive blocks (the columns.renderColumn cadence).
 func (tr tabsRenderer) renderPanel(blocks []Block, ctx RenderCtx) []string {
 	var lines []string
-	for i, blk := range blocks {
-		if i > 0 {
+	emitted := 0
+	for _, blk := range blocks {
+		group := tr.reg.Render(blk, ctx)
+		if len(group) == 0 {
+			continue
+		}
+		if emitted > 0 {
 			lines = append(lines, "")
 		}
-		lines = append(lines, tr.reg.Render(blk, ctx)...)
+		lines = append(lines, group...)
+		emitted++
 	}
 	return lines
 }

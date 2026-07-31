@@ -1,0 +1,71 @@
+{
+  "run_id": "grip-20260731T010541Z",
+  "recipes": [
+    {
+      "subject": "api/assets/paper-surface/paper-surface.css",
+      "quantity": "grep:-n:prefers-color-scheme",
+      "rerun": "grep -n 'prefers-color-scheme' api/assets/paper-surface/paper-surface.css",
+      "derived_level": "L3",
+      "deps": [
+        "api/assets/paper-surface/paper-surface.css"
+      ],
+      "observed_at": "2026-07-31T01:05:41Z"
+    },
+    {
+      "subject": "api/assets/paper-surface/paper-surface.css",
+      "quantity": "grep:-n:data-theme=\"dark\"",
+      "rerun": "grep -n 'data-theme=\"dark\"' api/assets/paper-surface/paper-surface.css",
+      "derived_level": "L3",
+      "deps": [
+        "api/assets/paper-surface/paper-surface.css"
+      ],
+      "observed_at": "2026-07-31T01:05:41Z"
+    },
+    {
+      "subject": "api/assets/paper-surface/paper-surface.css",
+      "quantity": "grep:-n:api/assets/paper-surface/paper-surface.c",
+      "rerun": "grep -n -- '--paper-bg:' api/assets/paper-surface/paper-surface.css",
+      "derived_level": "L3",
+      "deps": [
+        "api/assets/paper-surface/paper-surface.css"
+      ],
+      "observed_at": "2026-07-31T01:05:41Z"
+    },
+    {
+      "subject": "api/assets/paper-surface/paper-surface.css",
+      "quantity": "grep:-n:api/assets/paper-surface/paper-surface.c",
+      "rerun": "grep -n -- '--bp-tone-info-bg' api/assets/paper-surface/paper-surface.css",
+      "derived_level": "L3",
+      "deps": [
+        "api/assets/paper-surface/paper-surface.css"
+      ],
+      "observed_at": "2026-07-31T01:05:41Z"
+    },
+    {
+      "subject": "js/packages/react/dist",
+      "quantity": "git:ls-files",
+      "rerun": "git ls-files js/packages/react/dist",
+      "derived_level": "L3",
+      "deps": [
+        "js/packages/react/dist"
+      ],
+      "observed_at": "2026-07-31T01:05:41Z"
+    },
+    {
+      "subject": "cmd:grep",
+      "quantity": "grep:-rn:data-theme",
+      "rerun": "grep -rn 'data-theme' --exclude-dir=node_modules --exclude-dir=.next /Users/frikkjarl/Documents/GitHub/jarl-website",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-31T01:05:41Z"
+    },
+    {
+      "subject": "cmd:grep",
+      "quantity": "grep:-n:/Users/frikkjarl/Documents/GitHub/jarl-w",
+      "rerun": "grep -n -- '--paper-' /Users/frikkjarl/Documents/GitHub/jarl-website/src/app/globals.css",
+      "derived_level": "L3",
+      "deps": [],
+      "observed_at": "2026-07-31T01:05:41Z"
+    }
+  ]
+}

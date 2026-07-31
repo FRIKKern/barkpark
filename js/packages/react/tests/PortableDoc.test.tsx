@@ -824,4 +824,71 @@ describe('PortableDoc — the type-keyed renderer', () => {
       )
     })
   })
+
+  // Reader-Owned Spacing Doctrine (/papers/mechanical-spacing-doctrine, flipped
+  // 2026-07-31): a published reader emits only visible semantic groups — an
+  // empty paragraph scaffold renders NOTHING (no element), never `<p></p>`.
+  // Suppression is exact and narrow (invariant 4): authored text, marks, and
+  // non-text inlines stay byte-faithful.
+  describe('reader-owned spacing — empty paragraph scaffolds render nothing', () => {
+    it('an exact empty paragraph (no content, no text) emits NO element', () => {
+      expect(renderPortableDocument([{ type: 'paragraph' }])).toBe('')
+      expect(renderPortableDocument([{ type: 'paragraph', content: [] }])).toBe('')
+      expect(renderPortableDocument([{ type: 'paragraph', content: [], text: '' }])).toBe('')
+    })
+
+    it('a whitespace-only paragraph is scaffold, not layout — emits NO element', () => {
+      expect(renderPortableDocument([{ type: 'paragraph', text: '   ' }])).toBe('')
+      expect(
+        renderPortableDocument([{ type: 'paragraph', content: [{ type: 'text', value: ' \n\t ' }] }]),
+      ).toBe('')
+      expect(
+        renderPortableDocument([{ type: 'paragraph', content: ['  ', { type: 'text', value: ' ' }] }]),
+      ).toBe('')
+    })
+
+    it('skipped scaffolds add no gap between the remaining semantic blocks (invariant 3)', () => {
+      const withScaffolds = renderPortableDocument([
+        { type: 'paragraph', text: 'One.' },
+        { type: 'paragraph', content: [] },
+        { type: 'paragraph', content: [] },
+        { type: 'paragraph', text: 'Two.' },
+      ])
+      const withoutScaffolds = renderPortableDocument([
+        { type: 'paragraph', text: 'One.' },
+        { type: 'paragraph', text: 'Two.' },
+      ])
+      expect(withScaffolds).toBe(withoutScaffolds)
+      expect(withScaffolds).toBe('<p>One.</p><p>Two.</p>')
+    })
+
+    it('suppression is exact and narrow (invariant 4): non-text inlines and marked runs keep their <p>', () => {
+      // A non-text inline node is authored content even with no visible text.
+      expect(
+        renderPortableDocument([
+          { type: 'paragraph', content: [{ type: 'tag', name: 'doctrine' }] },
+        ]),
+      ).not.toBe('')
+      // A marked run is authored content — never second-guessed.
+      expect(
+        renderPortableDocument([
+          { type: 'paragraph', content: [{ type: 'text', value: ' ', marks: [{ type: 'bold' }] }] },
+        ]),
+      ).not.toBe('')
+      // Non-empty prose is byte-faithful — same output as before the doctrine flip.
+      expect(
+        renderPortableDocument([
+          { type: 'paragraph', content: [{ type: 'text', value: 'Store meaning; render rhythm.' }] },
+        ]),
+      ).toBe('<p>Store meaning; render rhythm.</p>')
+    })
+
+    it('role paragraphs (ingress/pullquote/eyebrow) are untouched by the sweep', () => {
+      // Narrow by design: only the plain `paragraph` scaffold shape is the
+      // Enter,Enter artifact; role blocks are deliberate authored structure.
+      expect(renderPortableDocument([{ type: 'ingress', content: [] }])).toBe(
+        '<p class="bp-role-ingress"></p>',
+      )
+    })
+  })
 })
