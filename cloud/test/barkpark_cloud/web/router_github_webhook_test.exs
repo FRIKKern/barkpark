@@ -249,7 +249,7 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
   ## POST /v1/webhooks/github/:site_id — verify HMAC
 
   describe "POST /v1/webhooks/github/:site_id — signature verification" do
-    test "valid HMAC over push payload on the right branch → born-FAILED Deployment (fail-fast interim)" do
+    test "valid HMAC over push payload on the right branch → QUEUED buildable Deployment (git-ref clone lane)" do
       {_user, team} = user_with_team()
       {site, secret} = site_with_github(team, %{branch: "main"})
 
@@ -261,43 +261,33 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
 
       conn = webhook_call(site.id, "push", push, secret)
 
-      # dwb-webhook fail-fast interim: a GitHub push can't be built from source
-      # yet (needs the human-gated GitHub App), so instead of a source-less
-      # "queued" zombie the builder never claims, the row is born terminal-FAILED.
-      # The 201 body carries the honest terminal status + humanized reason so the
-      # GitHub delivery log tells the truth.
+      # git-ref clone lane: the site is repo-backed (github_build_available?/1),
+      # so the push mints a QUEUED artifact-less deployment the builder claims —
+      # push-to-deploy is real. No failure, no reason.
       assert conn.status == 201
       body = json_body(conn)
       assert body["ok"] == true
       assert body["sha"] == "abc123abc123abc123abc123abc123abc123abcd"
       assert body["branch"] == "main"
       assert body["environment"] == "production"
-      assert body["status"] == "failed"
-
-      assert body["reason"] ==
-               "GitHub pushes are recorded but can't be built yet — deploy this commit with bp deploy. Automatic GitHub builds are coming."
+      assert body["status"] == "queued"
+      assert body["reason"] == nil
 
       assert is_binary(body["deployment_id"])
 
-      # A Deployment row exists, born terminal-FAILED, with git_ref = the sha and
-      # the RAW machine reason stored (human copy lives only at the JSON boundary).
+      # A Deployment row exists, born QUEUED, with git_ref = the pushed sha and
+      # no failure reason.
       [dep] = Registry.list_deployments(site)
       assert dep.git_ref == "abc123abc123abc123abc123abc123abc123abcd"
-      assert dep.status == "failed"
-      assert dep.failure_reason =~ "github push builds"
-      # No artifact — the row is the pure "this commit happened, can't build" signal.
+      assert dep.status == "queued"
+      assert dep.failure_reason == nil
+      # No artifact — the builder clones the repo at git_ref via the
+      # claim-envelope source instead of pulling an uploaded artifact.
       assert dep.artifact_url == nil
 
-      # The failed row must NOT sit claimable: find_active_deployment (queued/
-      # building/pushing only) ignores it, so a later REAL bp deploy at the same
-      # sha is unblocked.
-      assert Registry.find_active_deployment(site.id, dep.git_ref) == nil
-
-      # D5 (charter): born-failed-by-design is an EXPECTATION gap, not an incident.
-      # There is no `deployment_failed` emitter on the create/transition path today
-      # (only notifications/render.ex + event_email.ex RENDER the event), so this
-      # mint fires no failure email — nothing to assert, but nothing to add either.
-      # A future emitter must exclude the @github_push_build_reason class.
+      # The queued row IS active — claimable by the builder, and the dedup gate
+      # a same-sha redelivery lands on.
+      assert Registry.find_active_deployment(site.id, dep.git_ref).id == dep.id
     end
 
     test "BAD signature → 401, no Deployment" do
@@ -385,11 +375,8 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
 
       # A REAL GitHub redelivery carries the SAME X-GitHub-Delivery header, so it
       # dedups via gate 1 (find_deployment_by_delivery_id) — which is NOT
-      # status-scoped, so it points back at the born-failed row (see the
-      # dwb-webhook fail-fast interim). Without a delivery id there is no dedup for
-      # a terminal-failed same-sha push (find_active_deployment ignores failed
-      # rows so a real deploy at the same sha is never blocked); GitHub always
-      # sends the header, so this is the realistic redelivery.
+      # status-scoped, so it points back at the queued build regardless of where
+      # its state machine has moved since.
       delivery = "delivery-#{System.unique_integer([:positive])}"
       c1 = webhook_call(site.id, "push", push, secret, delivery: delivery)
       c2 = webhook_call(site.id, "push", push, secret, delivery: delivery)
@@ -398,7 +385,7 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       first_id = json_body(c1)["deployment_id"]
 
       # The redelivery 200s (so GitHub stops retrying) but does NOT mint a second
-      # row — it points back at the born-failed deployment for this delivery.
+      # row — it points back at the deployment minted for this delivery.
       assert c2.status == 200
       body2 = json_body(c2)
       assert body2["ignored"] == true
@@ -476,7 +463,7 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert length(Registry.list_deployments(site)) == 1
     end
 
-    test "dwb-webhook SAME-SHA DIFFERENT-DELIVERY: born-failed rows don't block a second delivery → two honest failed rows" do
+    test "git-ref clone lane SAME-SHA DIFFERENT-DELIVERY: the live queued build dedups the second delivery → one row" do
       {_user, team} = user_with_team()
       {site, secret} = site_with_github(team)
 
@@ -489,26 +476,24 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       assert c1.status == 201
       first_id = json_body(c1)["deployment_id"]
 
-      # A fresh delivery id for the same commit: because the first row was born
-      # terminal-FAILED, find_active_deployment ignores it (queued/building/
-      # pushing only), so the active site+ref gate does NOT dedup — the second
-      # delivery is recorded as its OWN honest born-failed row. This is exactly
-      # the property that keeps a later REAL bp deploy at the same sha unblocked.
+      # A fresh delivery id for the same commit: the first row was born QUEUED —
+      # an ACTIVE build — so gate 2 (find_active_deployment, the site+ref gate)
+      # dedups the second delivery against it. 200 (GitHub stops retrying),
+      # ONE row: one commit is never built twice.
       c2 = webhook_call(site.id, "push", push, secret, delivery: "delivery-B")
-      assert c2.status == 201
-      second_id = json_body(c2)["deployment_id"]
-      assert second_id != first_id
-      assert json_body(c2)["status"] == "failed"
+      assert c2.status == 200
+      body2 = json_body(c2)
+      assert body2["ignored"] == true
+      assert body2["reason"] == "duplicate_delivery"
+      assert body2["deployment_id"] == first_id
 
-      deps = Registry.list_deployments(site)
-      assert length(deps) == 2
-      assert Enum.all?(deps, &(&1.status == "failed"))
-      # Neither failed row is claimable — a real deploy at this sha is unblocked.
-      assert Registry.find_active_deployment(site.id, "2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b2b") ==
-               nil
+      # Exactly one row exists — still queued, still the builder's to claim.
+      [dep] = Registry.list_deployments(site)
+      assert dep.id == first_id
+      assert dep.status == "queued"
     end
 
-    test "dwb-webhook REDELIVER (same delivery id) still dedups against the born-failed row → one row" do
+    test "dwb-webhook REDELIVER (same delivery id) dedups via the delivery gate → one row" do
       {_user, team} = user_with_team()
       {site, secret} = site_with_github(team)
 
@@ -524,8 +509,9 @@ defmodule BarkparkCloud.Web.RouterGithubWebhookTest do
       first_id = json_body(c1)["deployment_id"]
 
       # gate 1 (find_deployment_by_delivery_id) is NOT status-scoped — the
-      # delivery_id partial unique index still points at the failed row, so a
-      # redelivery of the SAME delivery id 200s the existing row, no second row.
+      # delivery_id partial unique index points at the row whatever its status,
+      # so a redelivery of the SAME delivery id 200s the existing row, no
+      # second row.
       c2 = webhook_call(site.id, "push", push, secret, delivery: delivery)
       assert c2.status == 200
       body2 = json_body(c2)

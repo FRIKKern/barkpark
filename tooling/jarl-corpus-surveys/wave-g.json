@@ -1,0 +1,206 @@
+[
+  {
+    "subject": "SVGLoop (real project: svg-animate-check)",
+    "what_it_is": "A browser-based SVG keyframe-loop animator (Next.js, 66 commits May-June 2024, Guerrilla-Interactive/svg-animate-check locally). Paste an SVG, stack keyframes of its path states on a drag-sortable timeline (dnd-kit), morph between them (flubber + anime.js beta + GSAP in deps), then hit Export Loop: it code-generates a self-contained React component with the keyframes JSON baked in and an anime.js timeline set to loop:true. The GitHub repo FRIKKern-visible as Guerrilla-Interactive/svgloop-svelte is a red herring: one commit (2024-07-15), untouched create-svelte demo template (sverdle and all) - the Svelte rewrite that never began; only the name survived.",
+    "the_intent": "The itch: looping SVG animations for client sites are absurdly fiddly - you hand-tune keyframes in code, reload, squint, repeat. Frikk built the inspection loop as a product: see the morph live on a canvas, reorder keyframes by dragging, fix the viewBox with one button, then export working component code instead of a lossy GIF or a fragile CSS file. It is the same instinct that later becomes Scaffy: capture a repeated hand-chore as a tool that emits the finished artifact.",
+    "delight_details": [
+      "ExportSVG emits a ready-to-paste React component: keyframes serialized as JSON inside the file, anime.timeline({loop:true}) driving path morphs - the tool's output is code, not video",
+      "FitViewBoxButton computes the optimal viewBox across ALL keyframes and detects whether frames are already consistent (calculateOptimalViewBox, ViewBoxButton.tsx:58-99) - the classic 'my SVG is clipped mid-animation' pain, one click",
+      "A DummyPointButton exists to inject throwaway points - a tell that he fought path-point-count mismatch (morphing needs equal point counts) head-on",
+      "Commit log reads like a solo sprint diary: 'Giga Refactor - v3' (2024-06-04), 'Better History UX', 'Adding darkmode and stuff', ending 2024-06-18 'Better darkmode'",
+      "SVG Copy Export (2024-06-11): copy the animated SVG straight to clipboard"
+    ],
+    "numbers": {
+      "commits": 66,
+      "active_window": "2024-05/06 to 2024-06-18",
+      "svgloop_svelte_commits": 1,
+      "svgloop_svelte_date": "2024-07-15",
+      "runtime_deps": 37
+    },
+    "evidence": [
+      "/Users/frikkjarl/Documents/GitHub/svg-animate-check/app/exportSVG/exportSVG.ts",
+      "/Users/frikkjarl/Documents/GitHub/svg-animate-check/app/viewBoxFixer/ViewBoxButton.tsx",
+      "/Users/frikkjarl/Documents/GitHub/svg-animate-check/app/svgAnimation/KeyframeTimeline/KeyframeTimeline.tsx",
+      "git log: 66 commits, last 2024-06-18 'Better darkmode'",
+      "svgloop-svelte clone (deleted): package.json name 'sveltekit-2', single 'Initial commit' 2024-07-15, stock SvelteKit demo tree"
+    ],
+    "grade": "B - real working tool, abandoned mid-polish; the Svelte successor never left the template"
+  },
+  {
+    "subject": "Spreadsheet Wizard",
+    "what_it_is": "sanity-plugin-spreadsheet-wizard v0.0.96 (Guerrilla-Interactive, Apr-Jun 2022, JS, co-authored 'Frikk Jarl & Suman Chapai - Frikk@guerrilla.no'). A Sanity Studio plugin that is 'a fantastic bridge between Sanity & your spreadsheet software of choice (Google Sheets... Excel... Numbers etc.)': export Sanity documents to CSV/TSV field-by-field, edit in any spreadsheet app, import back - with a preview-while-import step, type handling (slugs, numbers, booleans, advanced types as JSON), unsetting fields when a value is missing, and batching large data 'in bundles to avoid sanity api limit error'. Sibling repos spreadsheet-test (empty) and spreadsheet-testo (427KB JS) were created the same day as the first plugin commits (2022-04-17) - scratch sandboxes for the same push.",
+    "the_intent": "Agency reality, 2022: clients live in spreadsheets, content lives in a headless CMS, and someone at Guerrilla was manually copy-pasting between them. The wizard turned bulk content ops - translate 200 titles, fix 500 slugs - into export, edit in Excel, import. The 'wizard' is both the walk-through UI (pick fields, preview data, confirm) and the self-aware branding: the README calls it 'a magnificient tool' with a straight face. It is Frikk's first recorded run at the idea that spreadsheets are the universal human editing surface for structured content - the same idea that returns four years later as Barkpark's Sheets plugin (multi-tab A1 cell maps, xlsx/csv/tsv import AND export, formula engine, snapshot embeds in papers), now server-side and first-party instead of bolted onto someone else's CMS.",
+    "delight_details": [
+      "The commit '1.0 SNEAK PREVIEW' (2022-04-18) - day two of the project, already staging a launch",
+      "README typo-and-all confidence: 'Spreadsheet Wizard is a magnificient tool'",
+      "Preview-before-import shipped on day 2 ('preview feature while import') - the safety rail came before most features",
+      "'handle large data in bundles to avoid sanity api limit error' (2022-05-23) - real production scars, batching around API limits",
+      "Commit 'spreaksheet wizard x add' - even the typos are in a hurry",
+      "Lineage rhyme: Barkpark's api/CLAUDE.md Sheets section describes import (xlsx/csv/tsv) / export .{xlsx,csv,tsv,md,html} - the 2022 wizard's export/import loop, reborn with a formula engine"
+    ],
+    "numbers": {
+      "final_version": "0.0.96",
+      "active_window": "2022-04-17 to 2022-06-12",
+      "sibling_repos_created": "spreadsheet-test + spreadsheet-testo, both 2022-04-17",
+      "src_files": 12
+    },
+    "evidence": [
+      "spreadsheet-wizard clone (deleted): package.json name sanity-plugin-spreadsheet-wizard, author 'Frikk Jarl & Suman Chapai'",
+      "git log 2022-04-17..2022-06-12 incl. '1.0 SNEAK PREVIEW', 'handle large data in bundles to avoid sanity api limit error'",
+      "gh api: spreadsheet-testo created 2022-04-17T20:36:50Z (427KB JS), spreadsheet-test 2022-04-17T20:35:56Z (size 0)",
+      "/Users/frikkjarl/Documents/GitHub/barkpark/api/CLAUDE.md section 'Sheets' (import/export formats, engine, snapshot pipeline)"
+    ],
+    "grade": "B+ - shipped, versioned, co-authored, real users at the agency; thematic ancestor of Barkpark Sheets"
+  },
+  {
+    "subject": "Full Blast (repo: frickin-real-time)",
+    "what_it_is": "A 3D action-roguelite swarm shooter (TypeScript + Three.js + Vite, local repo frickin-real-time; browser title still 'KAMIKAZE - Survive the Explosions'). You fight escalating waves of swarming enemies, TechnoBots and royal bosses; collect five weapons WITH DURABILITY (Battle Axe, Greatsword, Arcane Staff, Machine Gun, Twin Blades - they break mid-fight), grenades, missiles, XP crystals, hearts, and 20 bonus runes (Double Shot, Chain Lightning, Vampiric Bullets, Doomblaster, El Granados, Slideshow, Super Dash, Multimark...). The name: kill-chains climb a 20-tier announcement ladder - CHAIN REACTION (3 kills) through EXPLOSION FRENZY, MEGA BLAST, RAGNAROK, APOCALYPSE, up to tier 20, 600 kills / 3,000,000 damage: 'FULL BLAST ERADICATION' in white, filling the screen. The game is named after its own maximum moment. A full Godot 4.6.3 port lives in godot/ - 822 .gd files, gamepad-first, deterministic sim, and design verdicts that deliberately outgrow the web original.",
+    "the_intent": "This is the joy project - the game where every system exists to make the screen feel ALIVE at 600 kills per chain. The web version proved the fantasy; the Godot port is where Frikk applies everything he learned building Barkpark to game development: MAP.md routing docs per directory, pinned constants asserted against source-truth.json, a determinism gate, zero-alloc pools, an 'honest playtest' harness, and binding DESIGN_VERDICTS that overrule the port specs when feel wins ('Fortnite, not WoW'; 'web parity is a starting point, not a contract'). One repo, two eras of the same person.",
+    "delight_details": [
+      "The 20-tier chain ladder itself: CHAIN REACTION -> DETONATION SPREE -> CHAIN MASSACRE -> NUCLEAR -> HELLFIRE -> CATACLYSM -> RAGNAROK -> ARMAGEDDON -> DOOMSDAY -> APOCALYPSE -> WORLD ENDER -> EXTINCTION EVENT -> TOTAL ANNIHILATION -> FULL BLAST ERADICATION, colors sliding orange -> red -> magenta -> pure white (Game.ts:3120-3149)",
+      "triggerChainScreenEffect: radial flash whose color shifts orange/red/magenta by tier, plus dynamically generated CSS screen-shake keyframes from tier 4 up (shake intensity capped at 12px) - the DOM itself trembles (Game.ts:3238+)",
+      "index.html comment on the top tier: 'LEGENDARY - FULL BLAST ERADICATION - Maximum insanity'",
+      "Godot verdict 'The music is game data': the shipped track's beat grid is BAKED (measured 105.000 BPM, offset 0.526s) - missiles fly per-royal personalities (Prince weaves, Queen spirals+lobs, King stutter-drives on the kick grid) and TechnoBots cut diagonals across the pursuit line every 2 beats, in unison, deterministically - sim code never reads live audio",
+      "Everything bounces on underdamped springs (k=400/c=18 skull pump) - overshoot and wobble, never envelope breathing",
+      "Momentum verdict poetry: 'Passive = glide, deliberate = stop'; slide-jumps play a forward somersault because the slide's speed should visibly carry into the leap",
+      "Weapons have durability and BREAK (WEAPON_DURABILITY, onWeaponBreak callback) - your Greatsword is a consumable",
+      "hud.gd is 397KB and the README cheerfully routes you: 'first func ~line 1744; navigate by grep -n \"^func\"'"
+    ],
+    "numbers": {
+      "chain_tiers": 20,
+      "top_tier": "FULL BLAST ERADICATION: 600 kills / 3,000,000 damage",
+      "weapons": 5,
+      "bonus_runes": 20,
+      "godot_gd_files": 822,
+      "godot_active_port_specs": 12,
+      "hud_gd_bytes": 397454,
+      "baked_bpm": "105.000, offset 0.526s",
+      "sim_tick_steps": 13,
+      "autoloads": 6
+    },
+    "evidence": [
+      "/Users/frikkjarl/Documents/GitHub/frickin-real-time/src/core/Game.ts:3120-3149 (tier table), :3238 (triggerChainScreenEffect)",
+      "/Users/frikkjarl/Documents/GitHub/frickin-real-time/index.html ('LEGENDARY - FULL BLAST ERADICATION - Maximum insanity'; <title>KAMIKAZE - Survive the Explosions</title>)",
+      "/Users/frikkjarl/Documents/GitHub/frickin-real-time/src/character/Weapon.ts (5 weapon definitions), src/systems/BonusManager.ts (20 BonusId)",
+      "/Users/frikkjarl/Documents/GitHub/frickin-real-time/godot/README.md (13-step sim tick, MAP.md routing, determinism/perf gates)",
+      "/Users/frikkjarl/Documents/GitHub/frickin-real-time/godot/docs/DESIGN_VERDICTS.md (music-is-game-data, Fortnite-not-WoW, springs)"
+    ],
+    "grade": "A - a complete playable web game plus a disciplined, still-improving Godot port with the repo's best prose"
+  },
+  {
+    "subject": "Scaffy",
+    "what_it_is": "'Commands as content' inside Barkpark: a .scaffy file is a declarative, idempotent, REVERSIBLE scaffolding document. It doesn't just create files - it injects the wiring generators never reach (registries, routers, barrels, config maps), plants a named MARK at every injection site so re-runs are no-ops and removal is exact, and closes by running the repo's own gates so green means the slice compiles. Catalog of 22 commands (add-block-type flagship spanning Go+Elixir+JS surfaces; ensure-* zone planters for the repo's worst accretion files; add-site-template births a 13-file Astro site template plus 13 injections across 12 files) + 2 recipes, built over 7 waves, frequency-MINED from 12 months of git history so every command answers a proven repetition (router.ex: 175 commits/12mo; errors.ex: 38 clause-adds; sdk method chore: 34 commits).",
+    "the_intent": "The sinnsyk idea, in one stranger-sized paragraph: when an AI agent (or a human) needs to add a route, an error code, a worker, a whole site template, it should not hand-edit eight files from memory and hope - it should reach for a measured, versioned CATALOG of repeatable operations, the way you reach for a package manager instead of copying code off a forum. Each operation is a document you can read, validate, run, re-run harmlessly, and reverse exactly; and the catalog is not faith-based - Frikk pre-registered a benchmark, spent $17.19 of real agent money, and measured that the engine reproduces the agent's work byte-for-byte at $0 in seconds. 'Every fact has one owner; every derived surface is collected, generated, or applied by a command - never maintained by hand.' Lineage: Frikk says 'Nextgen er basically Scaffy' - Guerrilla's Nextgen generator (nextgen-vscode, nextgen-markers, Nextgen-UI repos) was the same reflex years earlier: markers planted in code so a tool, not a human, threads new features into existing files. Scaffy is that idea reborn with doctrine, grammar, an engine, receipts, and a benchmark.",
+    "delight_details": [
+      "The north-star demo: 'bp add block-type --var BlockName=timeline' -> a vertical slice across 3 languages with test parity, in 28 seconds - 'the fast path IS the standard path - standards become executable'",
+      "Wave 1 shipped the corpus deliberately WITHOUT an engine: full-text commands a human could hand-apply, which then became the parser's test fixtures - the spec written as examples",
+      "The ensure law (D57) was RUN-PROVEN: guarded on the MARK comment the engine duplicated a hand-planted import; guarded on the payload line it skipped clean - so the law is 'guard on what a hand-edit would also produce'",
+      "The mis-grep tripwire in scaffy-mine: errors.ex uses private 'defp build(' - grepping public 'def build(' returns 0 and would silently claim no accretion; the miner prints the wrong number BESIDE the right one so the trap stays visible",
+      "Honesty records everywhere: the charter's 739 router-partner figure was DROPPED when the reproducible miner couldn't reproduce it; the benchmark paper reports the ~$0.55 spawn floor, the partial-coverage tax and the boundary staging leak against its own predictions",
+      "The boundary duel (where Scaffy is DESIGNED to lose) got contaminated: 3 of 4 agents noticed the re-planted bug was an uncommitted revert of a committed fix and just restored HEAD with git - recorded in full, verdict 'not scoreable as registered'",
+      "add-plugin-bucket depends on ensure-router-zones BY LOUD REFUSAL: absent anchors exit 5, nothing written - run-proven that refusal + a 2-run recipe beats inventing a composition primitive",
+      "Doctrine reached the docs: docs/cards/cli.md tells every agent 'Scaffy catalog-first' with the measured numbers inline"
+    ],
+    "numbers": {
+      "catalog_commands": 22,
+      "recipes": 2,
+      "waves_shipped": "W1-W7 (corpus, parser/validator, engine, remote pull, ONEOF+7 mined commands, benchmark, zones)",
+      "benchmark_cells": "32/32 gates-green, pin 591fdcd53, measured 2026-07-17",
+      "matrix_spend_usd": 16.54,
+      "total_spend_usd": 17.19,
+      "engine_arm": "$0, 8-29s, variance 0 (distinct diff shas always 1)",
+      "agent_arms": "$0.37-$1.81, 51-300s",
+      "byte_identical_claim": "told agents (arm A) ran bp scaffy 3/3 on add-error-shape - byte-identical diff sha to the engine; untold agents (arm A') hand-edited 2/2 despite scaffy on disk; also A==C on add-oban-worker 2/2 and flagship 1/1",
+      "consistency_ordering": "C <= A <= B distinct-sha count on every expressible chore",
+      "mined_evidence": "router.ex 174-175 commits/12mo, 1280 co-change partners; errors.ex 38 added clauses in 19 commits; co-creation 236 strict / 304 loose pairs; miner runs whole repo in ~1.8s",
+      "largest_cell": "$1.806 (ensure-cli-noun--B--2); zero budget_exhausted cells"
+    },
+    "evidence": [
+      "/Users/frikkjarl/Documents/GitHub/barkpark/scaffy/README.md (doctrine, wave table, 22-command table, ensure law)",
+      "/Users/frikkjarl/Documents/GitHub/barkpark/scaffy/benchmark/scaffy-benchmark.json (paper payload; byline: 32/32, $16.54, C<=A<=B)",
+      "/Users/frikkjarl/Documents/GitHub/barkpark/tooling/scaffy-duels/results/SUMMARY.md (per-cell table, aggregates, boundary post-mortem)",
+      "/Users/frikkjarl/Documents/GitHub/barkpark/tooling/scaffy-mine/README.md (canonical miner, honesty record)",
+      "/Users/frikkjarl/Documents/GitHub/barkpark/docs/cards/cli.md:8 ('measured: told agents ran it 3/3, byte-identical to the engine; untold hand-edited 2/2')",
+      "bp paper view scaffy-benchmark (live on guerrilla)",
+      "GitHub repo names nextgen-vscode, nextgen-markers, Nextgen-UI under FRIKKern (lineage)"
+    ],
+    "grade": "A+ - a full idea arc: doctrine -> corpus -> grammar -> engine -> remote catalog -> pre-registered paid benchmark with honest negative results"
+  },
+  {
+    "subject": "Bulldocs origin (Portable Docs + Paperflow -> Bulldocs)",
+    "what_it_is": "Barkpark's Papers surface, born from two separate inventions merging. Invention 1, portable-doc-mvp: 'One semantic document -> deterministic, beautiful output across Web, Native, Email, TUI, and plain text' - a closed AST of 10 block types with an intersection-schema validator (if a property can't survive Email or an 80-col TUI it's rejected at edit time), one compose kernel, thin per-surface adapters, an MCP server, 445 specs (wave D). Invention 2, paperflow: 'Turn a one-line Goal into a planned, grilled, built, and reviewed change - with HTML you can read at every step' - the process engine that made agents produce beautiful readable papers as their working artifacts (retired as a standalone stack 2026-07-24). Bulldocs is the fusion inside Barkpark: PortableDoc contributed the document format and rendering discipline (core Barkpark.PortableDoc.{Render,Patch,Projection,Synthesis}); Paperflow contributed the culture and the pipeline - agents publishing every plan, benchmark, doctrine and survey as a paper. The lineage is literally in the router: /v1/paperflow/* still aliases /v1/plugins/bulldocs/* for legacy producers, gated 'do NOT drop'.",
+    "the_intent": "Why it might be 'det aller mest imponerende innenfor Barkpark': it changed what an AI-built system's paper trail IS. Instead of markdown files rotting in a repo, every piece of thinking - plans, benchmarks, doctrines, incident reports - is a structured, validated, multi-surface document served from the platform itself, readable in a browser, a terminal, an email. The corpus is now 603 published papers, and it is treated like production data: when several renderers showed empty shells (text nested one object layer deeper than readers expected), Frikk ran a full structural-integrity operation - census of 600 papers, 316 affected, 7,942 violations - and repaired ALL of them with exact JSON backups, pinned revisions, dry-run-default idempotent transforms, then sealed the write paths fail-closed and published the post-mortem as, of course, a paper.",
+    "delight_details": [
+      "The intersection-schema idea: the weakest surface (Email / 80-col TUI) vetoes properties at EDIT time - portability enforced by construction, not by per-surface hacks",
+      "bp paper view renders papers in the terminal with letterspaced display headings (S C A F F Y . T H E W 6 B E N C H M A R K...) - the TUI is a first-class reading surface, not a fallback",
+      "The composition-doctrine paper builds a recursive authoring vocabulary - Element -> Widget -> Section -> Layout -> Document - with 'Template is NOT a tier - it is the save-as-reusable capability any node has at any scale'",
+      "The mechanical-spacing doctrine: 'a gap exists because the author typed it' - vertical rhythm stored as real blocks (Enter/Shift+Enter), not CSS margins, so web, editor, TUI and clipboard share one shape; and the paper carries its own frozen editorial review on top",
+      "The repair wave's discipline: initial census 600 papers / 316 affected / 7,942 violations -> final census 603 / 0 / 0, with stable manifests and digests both runs, a zero-mutation second plan as proof of idempotence, sealed by PRs #8105 and #8137",
+      "Papers eat their own dogfood recursively: the integrity incident about papers is documented as a paper; the scaffy benchmark payload is checked into the repo and byte-matches what the server serves (D18 reproducibility)"
+    ],
+    "numbers": {
+      "papers_on_guerrilla": "603 (final census, /papers/paper-structural-integrity-2026-07-30; 600 at initial census)",
+      "repair_wave": "316 papers affected, 7,942 violations -> 0/0",
+      "portabledoc_block_types": 10,
+      "render_surfaces": 5,
+      "portabledoc_specs": 445,
+      "reader_surfaces_proven_in_repair": "Elixir, Go, React, mobile, CLI, email, Studio, standalone reader (8 fixtures/live checks)",
+      "paperflow_retired": "2026-07-24",
+      "prs": "#8105, #8137"
+    },
+    "evidence": [
+      "/Users/frikkjarl/Documents/GitHub/portable-doc-mvp/README.md (closed AST, 5 surfaces, MCP server)",
+      "/Users/frikkjarl/Documents/GitHub/paperflow/README.md (goal->plan->grill->build->review with HTML)",
+      "/Users/frikkjarl/Documents/GitHub/barkpark/api/CLAUDE.md section 'Bulldocs (the Papers surface)' incl. alias-drop gate /v1/paperflow/*",
+      "bp paper view paper-structural-integrity-2026-07-30 (census numbers, PRs, acceptance table)",
+      "bp paper view portabledoc-doctrine / mechanical-spacing-doctrine / composition-doctrine-plan"
+    ],
+    "grade": "A+ - two independent inventions fused into the platform's memory organ; 603 papers maintained to database-integrity standards"
+  },
+  {
+    "subject": "Barkpark Cloud",
+    "what_it_is": "One person's actual cloud platform: the control plane at barkpark.cloud (cloud/ - an Elixir app with accounts, billing, registry, sites, templates, provisioning workers, domain_ownership, device_auth, oauth, cloudflare/azure/vercel/github integrations) that provisions REAL Hetzner servers and runs hosted sites on them. Launch/go-live provisioning brings a box from nothing to serving; hosted sites ship with a builder + runtime; attach-domain V2 does DNS-ownership proof before binding a customer domain; grant_forever mints comp licences; cp-ops is a dedicated operator lane. Deployment of the platform itself is grown-up: path-filtered GitHub Actions, blue/green slots on BOTH the control plane (compose profiles :4100/:4101) and the content instance (systemd slots :4000/:4001), health-gated Caddy flips, zero-downtime either way, branded 503 maintenance pages baked into every provisioned box, and a 169-check offline test harness for the deploy script itself.",
+    "the_intent": "The point a stranger should get: this is not 'deployed a side project to a VPS'. It is the whole Heroku-shaped stack - signup, billing, provisioning, fleet dashboard, domains, templates, operator tooling - built solo so that Barkpark instances and customer sites are one command from existing. And it is self-hosting in the proudest sense: jarl.no, Frikk's own site, became the first real site on a fresh box - and that shakedown cruise surfaced 7 platform gaps which were found and fixed in ONE day. The UI blueprint shows the same maturity turned inward: 'the capability spine works, but the product feels like things were added randomly... the fix is fewer things, better placed, quieter - deletion and consolidation are first-class moves', with 'the novice is the persona; ease of mind first' as chartered law.",
+    "delight_details": [
+      "add-site-template (Scaffy) births a complete deployable cloud site template in one run: a 13-file Astro starter tree plus all 13 catalog-family injections across 12 files, closed by the repo's own drift gates - the platform's site catalog is itself a scaffolded surface",
+      "The deploy path filter diffs from the last SUCCESSFUL workflow run, not the previous push - burst merges coalesce and the surviving run deploys the UNION, while a docs-only stretch is still a no-op",
+      "Every Caddy site block ships a branded 'Back in a moment' 503 with Retry-After - no provisioned customer box can ever show a raw 502",
+      "The MCP route (/mcp -> :4010) holds NO token anywhere on the box - forward-through auth, the caller's own bearer is the only credential, bogus ones fail closed downstream",
+      "The cloud console SPA pair (app.js + its node test harness) carries 438+ tests running in ~250ms with zero deps - and Scaffy plants named zones in it",
+      "Design docs written to be RATIFIED: DESIGN.md marks two items 'RATIFY:' - they need a human yes before the CSS slices execute"
+    ],
+    "numbers": {
+      "first_site": "jarl.no on a fresh Hetzner box; 7 platform gaps found and fixed in one day (session facts)",
+      "deploy_test_checks": 169,
+      "console_tests": "438+ in ~250ms",
+      "blue_green_ports": "CP :4100/:4101, instance :4000/:4001, MCP :4010, connectors one port over",
+      "site_template_birth": "13-file Astro tree + 13 injections across 12 files",
+      "cloud_lib_domains": "~30 top-level modules/dirs (accounts, billing, registry, sites, templates, workers, domain_ownership, device_auth, oauth, cloudflare, azure, vercel, github, push, notifications, usage, metrics, health...)",
+      "cloud_router_size": "9,968-line Plug.Router (per scaffy corpus prose)"
+    },
+    "evidence": [
+      "/Users/frikkjarl/Documents/GitHub/barkpark/cloud/lib/barkpark_cloud/ (module inventory)",
+      "/Users/frikkjarl/Documents/GitHub/barkpark/deploy/README.md (blue/green, path filter, maintenance page, /mcp, 169-check harness)",
+      "/Users/frikkjarl/Documents/GitHub/barkpark/cloud/DESIGN.md (UI blueprint, screen inventory, RATIFY items, novice-is-the-persona)",
+      "/Users/frikkjarl/Documents/GitHub/barkpark/scaffy/README.md rows add-site-template / ensure-console-hook-zones (13-file template, 438+ console tests, 9968-line router)",
+      "Session facts (trusted per brief): launch/go-live Hetzner provisioning, builder+runtime hosted sites, attach-domain V2 DNS-ownership proof, grant_forever, cp-ops lane, jarl.no first site + 7 gaps/day"
+    ],
+    "grade": "A - a real multi-tenant platform with production deployment discipline, proven by hosting its maker's own site first"
+  },
+  {
+    "subject": "GitHub contribution graph (bonus number)",
+    "what_it_is": "FRIKKern's 2026 contribution volume, for the corpus graphs.",
+    "the_intent": "A single number that makes the corpus's scale legible.",
+    "delight_details": [
+      "9,576 contributions in 7 months of 2026 is ~45 per day, every day"
+    ],
+    "numbers": {
+      "contributions_2026_jan1_to_jul31": 9576,
+      "commit_contributions_same_window": 6531
+    },
+    "evidence": [
+      "gh api graphql user(login:FRIKKern).contributionsCollection(from 2026-01-01, to 2026-07-31): totalContributions 9576, totalCommitContributions 6531"
+    ],
+    "grade": "n/a - single verified metric"
+  }
+]

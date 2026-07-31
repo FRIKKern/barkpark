@@ -1,8 +1,6 @@
 KPI CELLS — DENOMINATOR                                                                                                 
 ───────────────────────                                                                                                 
                                                                                                                         
-                                                                                                                        
-                                                                                                                        
 71/118                        92%                           14/20                         1.2k                          
 tasks done                    coverage                      open PRs                      stars                         
                                                                                                                         

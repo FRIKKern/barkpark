@@ -16,11 +16,21 @@ set -euo pipefail
 echo "== probe: $(hostname) $(uname -m) =="
 
 if ! command -v docker >/dev/null; then
-  echo "== install docker =="
-  apt-get update -qq && apt-get install -y -qq docker.io
+  echo "== install docker + git =="
+  apt-get update -qq && apt-get install -y -qq docker.io git
   systemctl enable --now docker
 fi
 docker --version
+# git is load-bearing at BUILD time — the tools checkout below AND the builder's
+# git-ref clone lane both shell out to it — so it is never assumed present. A
+# box that already had docker skipped the apt run above, so probe it on its own.
+# git ensure (start)
+if ! command -v git >/dev/null; then
+  echo "== install git =="
+  apt-get update -qq && apt-get install -y -qq git
+fi
+git --version
+# git ensure (end)
 # nixpacks builds need BuildKit's buildx component (docker.io ships without it).
 if ! docker buildx version >/dev/null 2>&1; then
   echo "== install docker-buildx =="
@@ -36,9 +46,20 @@ nixpacks --version
 
 # Isolated Go toolchain — never touches the box's PATH or the live CMS.
 GO=/usr/local/go/bin/go
+GO_VERSION=1.24.5
+# The Go tarball is arch-specific. This used to hardcode linux-arm64, so a bare
+# DEFAULT cx23 (x86_64) box aborted here under `set -e` — jarl's box only
+# survived because Go was already installed. Same detection as PLATFORM below.
+# go-toolchain arch (start)
+case "$(uname -m)" in
+  x86_64) GO_ARCH=linux-amd64 ;;
+  aarch64) GO_ARCH=linux-arm64 ;;
+  *) echo "unsupported arch $(uname -m)"; exit 1 ;;
+esac
+# go-toolchain arch (end)
 if ! $GO version >/dev/null 2>&1; then
-  echo "== install go =="
-  curl -sL https://go.dev/dl/go1.24.5.linux-arm64.tar.gz | tar -xz -C /usr/local
+  echo "== install go ${GO_VERSION} (${GO_ARCH}) =="
+  curl -sL "https://go.dev/dl/go${GO_VERSION}.${GO_ARCH}.tar.gz" | tar -xz -C /usr/local
 fi
 $GO version
 
@@ -71,6 +92,14 @@ BUILDER_TOKEN=/etc/barkpark/agent.token
 [ -f /etc/barkpark/worker.token ] && BUILDER_TOKEN=/etc/barkpark/worker.token
 
 # Both services otherwise authenticate with the box's existing agent identity.
+#
+# The two heredocs below are BYTE-IDENTICAL copies of the staged canonical units
+# deploy/systemd/barkpark-builder.service and deploy/systemd/barkpark-runtime.service
+# (placeholders __PLATFORM__ / __BUILDER_TOKEN__ included). They are inlined and
+# not read from the repo on purpose: cp-ops scp's exactly ONE file to the box, so
+# this script must stay self-contained. deploy/site-runtime-install_test.sh
+# byte-diffs each heredoc against its staged file, so the copies cannot drift —
+# edit BOTH sides or the gate goes red.
 cat > /etc/systemd/system/barkpark-builder.service <<'UNIT'
 [Unit]
 Description=Barkpark site builder (build plane, co-located)

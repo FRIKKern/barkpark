@@ -1,0 +1,16 @@
+[Unit]
+Description=Barkpark site builder (build plane, co-located)
+After=network-online.target docker.service
+
+[Service]
+ExecStart=/usr/local/bin/barkpark-builder \
+  --control-url https://api.barkpark.cloud \
+  --token-file __BUILDER_TOKEN__ \
+  --cache-dir /var/lib/barkpark-builder/images \
+  --log-dir /var/log/barkpark-builder \
+  --platform __PLATFORM__
+Restart=always
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target
