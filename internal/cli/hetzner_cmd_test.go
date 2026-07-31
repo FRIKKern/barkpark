@@ -16,6 +16,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"sync"
 	"testing"
@@ -288,63 +289,161 @@ func hzServerStates(bodies ...string) http.HandlerFunc {
 	}
 }
 
-// hzReceiptVerbsFromSource DERIVES, at test time, every verb in hetzner_cmd.go
-// that reaches a completed-verb receipt for a server. Two shapes reach one:
+// hzReceiptSite is one derived completed-verb receipt: the verb it names, the
+// file and line that emits it, and — the part the gate turns on — the CALL
+// SHAPE, because the shape is what decides whether the verb's post-condition
+// is EXECUTED or merely DECLARED.
+type hzReceiptSite struct {
+	verb  string
+	file  string
+	line  int
+	shape hzReceiptShape
+}
+
+type hzReceiptShape string
+
+const (
+	// hzShapeExecutor — runHetznerServerAction, which READS
+	// hzServerPostConditions and re-reads the server through hzReadBack.
+	hzShapeExecutor hzReceiptShape = "runHetznerServerAction"
+	// hzShapeFlagVerb — hzFlagVerbDone, which reads the SAME table through
+	// hzBoundPost and re-reads through hzReadBack.
+	hzShapeFlagVerb hzReceiptShape = "hzFlagVerbDone"
+	// hzShapeLiteral — a bare hzDone("verb", …). This shape reaches NEITHER
+	// consumer of hzServerPostConditions, so a table entry for a verb whose
+	// only receipt is this shape is a declaration nothing runs.
+	hzShapeLiteral hzReceiptShape = "hzDone"
+)
+
+// hzReceiptSourceFiles is the population the derivation scans: every non-test
+// hetzner_*.go in this package. It is a GLOB, deliberately — the file list is
+// derived from the tree, so a tenth hetzner_*.go added tomorrow is scanned the
+// day it lands instead of the day someone remembers to add it here.
+func hzReceiptSourceFiles(t *testing.T) []string {
+	t.Helper()
+	all, err := filepath.Glob(filepath.Join(".", "hetzner_*.go"))
+	if err != nil {
+		t.Fatalf("glob hetzner_*.go: %v", err)
+	}
+	var srcs []string
+	for _, p := range all {
+		if strings.HasSuffix(p, "_test.go") {
+			continue
+		}
+		srcs = append(srcs, p)
+	}
+	sort.Strings(srcs)
+	if len(srcs) < 2 {
+		t.Fatalf("globbed %d hetzner sources (%v) — the scan is measuring itself, not the package", len(srcs), srcs)
+	}
+	return srcs
+}
+
+// hzReceiptSitesFromSource DERIVES, at test time, every verb in the package's
+// hetzner sources that reaches a completed-verb receipt for a server. Three
+// shapes reach one:
 //
 //  1. the runHetznerServerAction call sites — the verb is the enclosing `case`
-//  2. the LITERAL-verb receipts (the direct hzDone sites, and the flag verbs'
-//     hzFlagVerbDone sites) — the verb is the first quoted token on the line
+//  2. the flag verbs' hzFlagVerbDone sites — the verb is the first quoted token
+//  3. the LITERAL-verb receipts (bare hzDone with a quoted verb)
 //
-// Shape 2 is why this scan was widened (PDS-D366): the older read saw only
-// shape 1, so the five flag verbs — rebuild, resize, enable-rescue,
-// create-image, attach-iso — were structurally invisible to the gate that
-// exists to catch exactly them. It exists at all because a charter (PDS-D344)
-// said six and the source said nine: a list transcribed by hand is a claim, and
-// this file's whole subject is claims nobody re-read.
-func hzReceiptVerbsFromSource(t *testing.T) []string {
+// Shapes 2 and 3 are why this scan was widened once (PDS-D366): the older read
+// saw only shape 1, so the five flag verbs were structurally invisible to the
+// gate that exists to catch exactly them. It is widened AGAIN here (PDS wave
+// 27) across FILES: it read one hard-coded hetzner_cmd.go, so the four
+// `instance` verbs whose receipts live in hetzner_instance_cmd.go — archive,
+// resurrect, adopt, eject — were invisible for exactly the same reason one file
+// over. The gate exists at all because a charter (PDS-D344) said six and the
+// source said nine: a list transcribed by hand is a claim, and this file's
+// whole subject is claims nobody re-read. So the population is COUNTED —
+// glob + scan — and never quoted.
+func hzReceiptSitesFromSource(t *testing.T) []hzReceiptSite {
 	t.Helper()
-	src, err := os.ReadFile(filepath.Join(".", "hetzner_cmd.go"))
-	if err != nil {
-		t.Fatalf("read hetzner_cmd.go: %v", err)
-	}
 	quoted := regexp.MustCompile(`"([^"]+)"`)
 	literalReceipt := regexp.MustCompile(`\b(hzDone|hzFlagVerbDone)\([^)]*"`)
-	var verbs, pending []string
-	for _, raw := range strings.Split(string(src), "\n") {
-		line := strings.TrimSpace(raw)
-		switch {
-		case strings.HasPrefix(line, "//"):
-			// A comment quoting a call shape is prose, not a call site.
-		case strings.HasPrefix(line, `case "`):
-			pending = nil
-			for _, m := range quoted.FindAllStringSubmatch(line, -1) {
-				pending = append(pending, m[1])
-			}
-		case strings.Contains(line, "runHetznerServerAction(out") && !strings.HasPrefix(line, "func "):
-			verbs = append(verbs, pending...)
-			pending = nil
-		case literalReceipt.MatchString(line) && !strings.HasPrefix(line, "func "):
-			if m := quoted.FindStringSubmatch(line); m != nil {
-				verbs = append(verbs, m[1])
-			}
-			pending = nil
+	var sites []hzReceiptSite
+	for _, path := range hzReceiptSourceFiles(t) {
+		src, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
 		}
+		var pending []string
+		for i, raw := range strings.Split(string(src), "\n") {
+			line := strings.TrimSpace(raw)
+			switch {
+			case strings.HasPrefix(line, "//"):
+				// A comment quoting a call shape is prose, not a call site.
+			case strings.HasPrefix(line, `case "`):
+				pending = nil
+				for _, m := range quoted.FindAllStringSubmatch(line, -1) {
+					pending = append(pending, m[1])
+				}
+			case strings.Contains(line, "runHetznerServerAction(out") && !strings.HasPrefix(line, "func "):
+				for _, v := range pending {
+					sites = append(sites, hzReceiptSite{verb: v, file: path, line: i + 1, shape: hzShapeExecutor})
+				}
+				pending = nil
+			case literalReceipt.MatchString(line) && !strings.HasPrefix(line, "func "):
+				if m := quoted.FindStringSubmatch(line); m != nil {
+					shape := hzShapeLiteral
+					if strings.Contains(line, "hzFlagVerbDone(") {
+						shape = hzShapeFlagVerb
+					}
+					sites = append(sites, hzReceiptSite{verb: m[1], file: path, line: i + 1, shape: shape})
+				}
+				pending = nil
+			}
+		}
+	}
+	return sites
+}
+
+// hzReceiptVerbsFromSource is the verb list the anti-undercount gate reads —
+// the derived sites with their shapes dropped.
+func hzReceiptVerbsFromSource(t *testing.T) []string {
+	t.Helper()
+	var verbs []string
+	for _, s := range hzReceiptSitesFromSource(t) {
+		verbs = append(verbs, s.verb)
 	}
 	return verbs
 }
 
 // TestHetznerActionVerbsAllDeclareAPostCondition is the anti-undercount gate:
-// EVERY verb that reports a completed-verb receipt in hetzner_cmd.go must
-// declare what it re-reads — or declare, IN WORDS, why it has nothing to
-// re-read — and neither map may carry entries for verbs that no longer exist.
-// A tenth verb added tomorrow fails here instead of silently shipping a receipt
-// that asserts nothing.
+// EVERY verb that reports a completed-verb receipt in ANY of this package's
+// hetzner sources must declare what it re-reads — or declare, IN WORDS, why it
+// has nothing to re-read — and neither map may carry entries for verbs that no
+// longer exist. A verb added tomorrow, in any hetzner_*.go, fails here instead
+// of silently shipping a receipt that asserts nothing.
 func TestHetznerActionVerbsAllDeclareAPostCondition(t *testing.T) {
+	sites := hzReceiptSitesFromSource(t)
 	verbs := hzReceiptVerbsFromSource(t)
-	if len(verbs) < 16 {
-		t.Fatalf("derived %d receipt verbs (%v) — the scan found fewer call sites than the sixteen on record "+
-			"(nine through runHetznerServerAction, seven literal-verb receipts), so it is measuring itself, not the source",
-			len(verbs), verbs)
+	// The census, printed under -v: what was DERIVED, from which files, in
+	// which shape — the evidence that the population was counted and not
+	// transcribed from a charter.
+	t.Logf("derived %d receipt sites across %v:", len(sites), hzReceiptSourceFiles(t))
+	for _, s := range sites {
+		class := "BARE (neither keyed nor exempt)"
+		if _, keyed := hzServerPostConditions[s.verb]; keyed {
+			class = "keyed"
+		}
+		if _, exempt := hzServerPostConditionExemptions[s.verb]; exempt {
+			class = "exempt"
+		}
+		t.Logf("  %-14s %-22s %s:%d — %s", s.verb, s.shape, s.file, s.line, class)
+	}
+	// The floor is a self-measurement guard, not a census: it only has to be
+	// high enough that a scan which silently stopped finding call sites (a
+	// renamed helper, a moved file) fails loudly instead of passing vacuously.
+	// It is deliberately BELOW the measured count so adding a verb never has to
+	// touch it — the keyed/exempt requirement below is what covers new verbs.
+	const receiptFloor = 18
+	if len(verbs) < receiptFloor {
+		t.Fatalf("derived %d receipt verbs (%v) across %v — below the floor of %d. The scan measured 20 when it was "+
+			"widened (9 through runHetznerServerAction, 4 through hzFlagVerbDone, 7 bare hzDone), so a count this "+
+			"low means the SCAN stopped finding call sites — a renamed helper, a moved file, a changed call shape — "+
+			"not that verbs were deleted. Re-derive before trusting anything below",
+			len(verbs), verbs, hzReceiptSourceFiles(t), receiptFloor)
 	}
 	for _, verb := range verbs {
 		post, keyed := hzServerPostConditions[verb]
@@ -359,10 +458,14 @@ func TestHetznerActionVerbsAllDeclareAPostCondition(t *testing.T) {
 					"an exemption without an argument is just an omission wearing a map key", verb)
 			}
 		case !keyed:
-			// TRUTH IN REFUSAL: these verbs no longer all go through
-			// runHetznerServerAction, so the refusal may not say they do.
-			t.Errorf("`server %s` reports a completed-verb receipt but declares neither a post-condition nor an "+
-				"exemption — its receipt would report the server resolved BEFORE the action fired", verb)
+			// TRUTH IN REFUSAL. These verbs do not share one receipt shape, so
+			// the refusal may not claim they do: only the bare-hzDone sites
+			// necessarily report a PRE-action server, while a verb whose srv is
+			// itself a post-action read-back (resurrect, adopt) is guilty of
+			// something narrower — asserting state nobody named. Say which.
+			t.Errorf("`%s` reports a completed-verb receipt (%s) but declares neither a post-condition nor an "+
+				"exemption — nothing states what its receipt is built from, so nobody can tell whether it "+
+				"reports an OBSERVED state or the object resolved before the action fired", verb, hzShapesOf(sites, verb))
 		}
 		if !keyed {
 			continue
@@ -392,14 +495,91 @@ func TestHetznerActionVerbsAllDeclareAPostCondition(t *testing.T) {
 	}
 	for verb := range hzServerPostConditions {
 		if !declared[verb] {
-			t.Errorf("hzServerPostConditions declares %q, which reports no verb receipt in hetzner_cmd.go — "+
-				"a stale entry makes the map look more complete than it is", verb)
+			t.Errorf("hzServerPostConditions declares %q, which reports no verb receipt in any of %v — "+
+				"a stale entry makes the map look more complete than it is", verb, hzReceiptSourceFiles(t))
 		}
 	}
 	for verb := range hzServerPostConditionExemptions {
 		if !declared[verb] {
-			t.Errorf("hzServerPostConditionExemptions excuses %q, which reports no verb receipt in hetzner_cmd.go — "+
-				"a stale exemption excuses nothing and hides the next verb that needs one", verb)
+			t.Errorf("hzServerPostConditionExemptions excuses %q, which reports no verb receipt in any of %v — "+
+				"a stale exemption excuses nothing and hides the next verb that needs one", verb, hzReceiptSourceFiles(t))
+		}
+	}
+}
+
+// hzShapesOf names the receipt shapes one verb emits, for refusal messages that
+// have to be true about THAT verb rather than about the majority of verbs.
+func hzShapesOf(sites []hzReceiptSite, verb string) string {
+	seen := map[hzReceiptShape]bool{}
+	var shapes []string
+	for _, s := range sites {
+		if s.verb == verb && !seen[s.shape] {
+			seen[s.shape] = true
+			shapes = append(shapes, string(s.shape))
+		}
+	}
+	sort.Strings(shapes)
+	return strings.Join(shapes, "+")
+}
+
+// TestHetznerPostConditionsAreExecutedNotJustDeclared is the anti-DISARM gate,
+// and it is the half that makes the widening above worth shipping. The gate
+// over the maps certifies MAP MEMBERSHIP: a verb passes it by acquiring a table
+// entry, and hzServerPostConditions is consumed at exactly two sites —
+// runHetznerServerAction and hzFlagVerbDone. A verb whose only receipt is a
+// bare hzDone reaches NEITHER, so four table entries added without touching a
+// single code path would turn the widened gate green while the four receipts
+// stayed exactly as unverified as before.
+//
+// So: a keyed verb must emit its receipt through a shape that READS the table.
+// A verb that re-reads on its own terms (archive's image read-back, resurrect's
+// running+IPv4 poll) belongs in the exemptions map with that reason stated,
+// where a reviewer can refuse the argument — never in the table, which would
+// claim an execution path it does not take.
+func TestHetznerPostConditionsAreExecutedNotJustDeclared(t *testing.T) {
+	sites := hzReceiptSitesFromSource(t)
+	consumers := map[hzReceiptShape]bool{hzShapeExecutor: true, hzShapeFlagVerb: true}
+
+	// Guard the guard: the two consumers named above must still be the ONLY
+	// readers of the table, or this test's premise has quietly expired.
+	src, err := os.ReadFile(filepath.Join(".", "hetzner_cmd.go"))
+	if err != nil {
+		t.Fatalf("read hetzner_cmd.go: %v", err)
+	}
+	reads := 0
+	for _, raw := range strings.Split(string(src), "\n") {
+		line := strings.TrimSpace(raw)
+		if strings.HasPrefix(line, "//") || strings.HasPrefix(line, "var hzServerPostConditions") {
+			continue
+		}
+		if strings.Contains(line, "hzServerPostConditions[") {
+			reads++
+		}
+	}
+	if reads != 3 {
+		t.Errorf("hzServerPostConditions is indexed at %d sites, not the 3 this gate knows about "+
+			"(runHetznerServerAction, hzBoundPost via hzFlagVerbDone, hzActionObserved) — re-derive which shapes "+
+			"EXECUTE a post-condition before trusting the shape classification below", reads)
+	}
+
+	byVerb := map[string][]hzReceiptShape{}
+	for _, s := range sites {
+		byVerb[s.verb] = append(byVerb[s.verb], s.shape)
+	}
+	for verb := range hzServerPostConditions {
+		shapes, seen := byVerb[verb]
+		if !seen {
+			continue // the stale-entry arm of the gate above owns this case.
+		}
+		for _, shape := range shapes {
+			if consumers[shape] {
+				continue
+			}
+			t.Errorf("`%s` is keyed in hzServerPostConditions but reports its receipt through %s, which reads "+
+				"neither hzServerPostConditions nor hzBoundPost — the post-condition is DECLARED and never RUN, "+
+				"so the receipt asserts exactly what it asserted before the entry was added. Either route the verb "+
+				"through runHetznerServerAction/hzFlagVerbDone, or state its own read-back in "+
+				"hzServerPostConditionExemptions where the argument can be refused", verb, shape)
 		}
 	}
 }
