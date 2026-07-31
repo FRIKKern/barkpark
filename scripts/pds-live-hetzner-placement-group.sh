@@ -233,6 +233,19 @@ preflight() {
 # token, so it descends the SAME ladder bp does — and the value is never printed,
 # never written to an artifact, and never lands in a fixture.
 
+# default_hcloud_config — where Go's os.UserConfigDir() puts hcloud's cli.toml on
+# THIS platform. It is ONE function because two spellings of it drift: an earlier
+# draft hard-coded ~/.config here and Darwin's ~/Library/Application Support in
+# the oracle, so --selftest state 4 looked for the file in a place macOS never
+# writes it and reported the third rung UNPROVEN on a host that has it.
+default_hcloud_config() {
+  if [ "$(uname -s)" = "Darwin" ]; then
+    printf '%s\n' "$HOME/Library/Application Support/hcloud/cli.toml"
+  else
+    printf '%s\n' "${XDG_CONFIG_HOME:-$HOME/.config}/hcloud/cli.toml"
+  fi
+}
+
 ORACLE_TOKEN=""
 resolve_oracle_token() {
   if [ -n "${HCLOUD_TOKEN:-}" ]; then
@@ -240,13 +253,7 @@ resolve_oracle_token() {
     return 0
   fi
   local cfg="${HCLOUD_CONFIG:-}"
-  if [ -z "$cfg" ]; then
-    if [ "$(uname -s)" = "Darwin" ]; then
-      cfg="$HOME/Library/Application Support/hcloud/cli.toml"
-    else
-      cfg="${XDG_CONFIG_HOME:-$HOME/.config}/hcloud/cli.toml"
-    fi
-  fi
+  [ -n "$cfg" ] || cfg="$(default_hcloud_config)"
   [ -r "$cfg" ] || return 1
   ORACLE_TOKEN="$(CTX="${HCLOUD_CONTEXT:-}" python3 - "$cfg" <<'PY' || true
 import os, re, sys
@@ -401,7 +408,8 @@ selftest() {
     -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HETZNER_API_TOKEN=$ORACLE_TOKEN"
   st_case "3. HCLOUD_TOKEN correct" 0 \
     -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HCLOUD_TOKEN=$ORACLE_TOKEN"
-  local cfg="${HCLOUD_CONFIG:-$HOME/.config/hcloud/cli.toml}"
+  local cfg="${HCLOUD_CONFIG:-}"
+  [ -n "$cfg" ] || cfg="$(default_hcloud_config)"
   if [ -r "$cfg" ]; then
     st_case "4. HCLOUD_CONFIG -> real cli.toml, no env token" 0 \
       -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HCLOUD_CONFIG=$cfg"
