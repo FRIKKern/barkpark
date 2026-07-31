@@ -126,6 +126,42 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertEqual(document["tags"], tags)
         self.assertEqual(document["main_tag"], "jarl-website")
 
+    def test_strategic_repair_accepts_case_only_redundant_callout_title(self):
+        document = {
+            "_id": "case-only-callout-title",
+            "_rev": "source-rev",
+            "title": "Case-only callout title",
+            "description": "This wave keeps the status claim once without inventing loss.",
+            "blocks": [
+                {
+                    "id": "title",
+                    "type": "heading",
+                    "level": 1,
+                    "text": "Case-only callout title",
+                },
+                {
+                    "id": "status",
+                    "type": "callout",
+                    "title": "Wave status",
+                    "content": text("WAVE STATUS: verification is in flight."),
+                },
+                {
+                    "id": "direction",
+                    "type": "heading",
+                    "level": 2,
+                    "text": "Direction",
+                },
+            ],
+        }
+
+        repaired = repair_strategic_paper(document)["mutations"][0]["patch"]["set"][
+            "blocks"
+        ]
+        status = next(block for block in repaired if block.get("id") == "status")
+
+        self.assertNotIn("title", status)
+        self.assertIn("WAVE STATUS: verification is in flight.", str(status))
+
     def test_list_reframes_are_lossless_and_semantic(self):
         block = {
             "id": "findings",

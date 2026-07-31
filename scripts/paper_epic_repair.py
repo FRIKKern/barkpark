@@ -585,6 +585,19 @@ def _dedupe_callout_title(block: dict[str, Any]) -> dict[str, Any]:
     return repaired
 
 
+def _redundant_callout_titles(blocks: list[Any]) -> set[str]:
+    """Return titles whose callout body already opens with the same label."""
+    titles = set()
+    for block in blocks:
+        if not isinstance(block, dict) or block.get("type") != "callout":
+            continue
+        title = _normalize(str(block.get("title") or ""))
+        content = _normalize(_visible_text(block.get("content")))
+        if title and content.casefold().startswith(title.casefold()):
+            titles.add(title)
+    return titles
+
+
 def _repair_nested_blocks(value: Any) -> Any:
     if isinstance(value, list):
         return [_repair_nested_blocks(item) for item in value]
@@ -892,8 +905,12 @@ def repair_canonical_epic(
         for block in blocks
         if _is_generated_appendix(block)
     }
+    redundant_callout_titles = _redundant_callout_titles(blocks)
     source_leaves = [
-        leaf for leaf in source_leaves if leaf not in generated_summaries
+        leaf
+        for leaf in source_leaves
+        if leaf not in generated_summaries
+        and leaf not in redundant_callout_titles
     ]
     repaired = _repair_block_sequence(canonicalize_blocks(blocks))
 
