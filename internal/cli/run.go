@@ -18,6 +18,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/apiclient"
 	"github.com/FRIKKern/barkpark/internal/manifest"
@@ -1576,9 +1577,15 @@ func bodyPreview(body []byte) string {
 	if len(body) == 0 {
 		return "<empty body>"
 	}
+	// Truncate on a RUNE boundary: a body cut mid-sequence would render as
+	// U+FFFD noise in the very message meant to help identify it.
 	s := string(body)
 	if len(s) > max {
-		s = s[:max] + "…"
+		cut := max
+		for cut > 0 && !utf8.RuneStart(s[cut]) {
+			cut--
+		}
+		s = s[:cut] + "…"
 	}
 	s = strings.Map(func(r rune) rune {
 		if r == '\n' || r == '\r' || r == '\t' {

@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"unicode/utf8"
 
 	"github.com/FRIKKern/barkpark/internal/manifest"
 )
@@ -577,4 +578,28 @@ func keysOf(m map[string][]json.RawMessage) []string {
 		ks = append(ks, k)
 	}
 	return ks
+}
+
+// TestBodyPreviewTruncatesOnRuneBoundary pins that the excerpt carried in an
+// unreadable_list_page message stays valid UTF-8. A proxy interstitial is
+// frequently non-ASCII (a localised error page), and cutting the byte slice at
+// a fixed offset would splice a multi-byte sequence — turning the one piece of
+// evidence the refusal carries into U+FFFD noise.
+func TestBodyPreviewTruncatesOnRuneBoundary(t *testing.T) {
+	// One ASCII byte then 2-byte runes, so the 120-byte cut lands INSIDE a
+	// rune — a naive s[:120] splices it.
+	body := []byte("x" + strings.Repeat("æ", 200))
+	got := bodyPreview(body)
+	if !utf8.ValidString(got) {
+		t.Fatalf("preview is not valid UTF-8: %q", got)
+	}
+	if strings.ContainsRune(got, utf8.RuneError) {
+		t.Fatalf("preview spliced a rune: %q", got)
+	}
+	if !strings.HasSuffix(got, "…") {
+		t.Fatalf("preview of a 400-byte body was not truncated: %q", got)
+	}
+	if bodyPreview([]byte{}) != "<empty body>" {
+		t.Fatalf("empty body must be named, not rendered as an empty string")
+	}
 }
