@@ -726,6 +726,10 @@ func fetchWorkspaceBlobs(out *writer, base, token, bundlePath, dir string) blobR
 // blob that reported success is exactly the "success while wrong" this leg
 // exists to catch. A row with NO declared size (the column is nullable) returns
 // verified=false: the transfer stands, the verification does not.
+//
+// Any failure after the destination is opened REMOVES it: the sidecar directory
+// is the import half's input, so short bytes left under the final name come
+// back as an upload (PDS-D394).
 func fetchOneBlob(client *http.Client, base, token string, ref mediaBlobRef, dest string) (int64, bool, error, int) {
 	req, rerr := http.NewRequest(http.MethodGet, base+"/media/files/"+escapeBlobPath(ref.path), nil)
 	if rerr != nil {
@@ -753,12 +757,18 @@ func fetchOneBlob(client *http.Client, base, token string, ref mediaBlobRef, des
 		copyErr = closeErr
 	}
 	if copyErr != nil {
+		// The bytes on disk are short and they sit under the FINAL name: the
+		// import half walks this same sidecar directory and would PUT the
+		// truncated file straight back. A named failure that leaves the bad
+		// bytes in place is only half honest.
+		_ = os.Remove(dest)
 		return 0, false, copyErr, exitGeneric
 	}
 	if !ref.sizeKnown {
 		return n, false, nil, exitOK
 	}
 	if n != ref.size {
+		_ = os.Remove(dest)
 		return 0, false, fmt.Errorf("size mismatch: bundle declares %d bytes, fetched %d", ref.size, n), exitGeneric
 	}
 	return n, true, nil, exitOK

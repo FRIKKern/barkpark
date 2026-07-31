@@ -181,16 +181,40 @@ func (c *Client) PutObject(ctx context.Context, bucket, key string, body io.Read
 }
 
 // GetObject returns the object's content as a ReadCloser the caller must
-// close.
+// close. Callers that want to CHECK the bytes they wrote against what the
+// endpoint said it was sending use GetObjectSized instead.
 func (c *Client) GetObject(ctx context.Context, bucket, key string) (io.ReadCloser, error) {
+	body, _, err := c.GetObjectSized(ctx, bucket, key)
+	return body, err
+}
+
+// GetObjectSized is GetObject plus the length the endpoint DECLARED for this
+// object, taken from the very same response — zero extra round-trips, no
+// HeadObject, no Range probe. It exists so a verb that writes the stream to a
+// file can compare what it wrote against what it was promised instead of
+// echoing its own io.Copy counter back as if that proved something.
+//
+// size is -1 when NOTHING was declared. Hetzner Object Storage is S3-COMPATIBLE,
+// not S3, so an absent Content-Length is a real possibility and callers MUST
+// report it as unverified rather than as a pass. A declared 0 is returned
+// verbatim; the caller decides whether a zero-length claim is checkable.
+//
+// GetObjectSized is an ADDITIVE sibling on purpose: widening GetObject's
+// signature would cascade through cloud.BundleStore and every fake that
+// implements it.
+func (c *Client) GetObjectSized(ctx context.Context, bucket, key string) (io.ReadCloser, int64, error) {
 	out, err := c.s3.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(bucket),
 		Key:    aws.String(key),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("objstore: get %s/%s: %w", bucket, key, err)
+		return nil, -1, fmt.Errorf("objstore: get %s/%s: %w", bucket, key, err)
 	}
-	return out.Body, nil
+	size := int64(-1)
+	if out.ContentLength != nil {
+		size = *out.ContentLength
+	}
+	return out.Body, size, nil
 }
 
 // Object is one listed entry — key, byte size, last modification time.
