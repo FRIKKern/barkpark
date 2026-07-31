@@ -790,8 +790,15 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertEqual(
             [block["summary"] for block in appendices],
             [
-                "Evidence appendix {}".format(index)
-                for index in range(1, len(appendices) + 1)
+                "Evidence appendix {} — {}".format(
+                    index,
+                    next(
+                        child["text"]
+                        for child in block["children"]
+                        if child.get("type") == "heading"
+                    ),
+                )
+                for index, block in enumerate(appendices, start=1)
             ],
         )
 
@@ -834,7 +841,7 @@ class PaperEpicRepairTest(unittest.TestCase):
         )
         self.assertEqual(
             healed_appendix["summary"],
-            "Evidence appendix 1",
+            "Evidence appendix 1 — Evidence 2",
         )
         healed_orientation = next(
             block
