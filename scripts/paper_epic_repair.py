@@ -8,6 +8,7 @@ import copy
 import json
 import re
 import sys
+from html.parser import HTMLParser
 from pathlib import Path
 from typing import Any, Optional
 
@@ -72,6 +73,18 @@ PAPER_AUTHORITY_BOUNDARIES = {
         "Hardening; the seal does not claim the crown is live or the inherited "
         "backlog is solved."
     ),
+    "portabledoc-blog-wave-1-2026-07-15": (
+        "Authority boundary: This founding Paper remains authority for the "
+        "canonical JavaScript renderer foundation and its original parity "
+        "contract. Later render-unification waves own migration, hardening, "
+        "and final coverage."
+    ),
+    "portabledoc-render-unification-w5-2026-07-16": (
+        "Authority boundary: This historical Paper remains authority for the "
+        "Wave 5 web-fork retirement and blog-starter migration decisions. "
+        "Wave 6 owns the distinct hardening proofs; Wave 7 owns the final "
+        "parity-closure decision."
+    ),
 }
 PAPER_TITLE_OVERRIDES = {
     "cloud-gui-remake-wave-2026-07-21-r12": (
@@ -117,6 +130,147 @@ def _inline_text(value: Any) -> str:
 
 def _normalize(value: str) -> str:
     return re.sub(r"\s+", " ", value).strip()
+
+
+class _LegacyHtmlBlockParser(HTMLParser):
+    """Recover the semantic reading order of a legacy HTML-only Paper.
+
+    This is deliberately a small, lossless text bridge, not a general HTML
+    importer. It recognizes the authored block vocabulary used by the legacy
+    wave Papers: headings, paragraphs, ordered/unordered lists, quotes, code
+    panels, and dividers. Inline markup contributes text to its parent block.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(convert_charrefs=True)
+        self.blocks: list[dict[str, Any]] = []
+        self._buffer: list[str] = []
+        self._active_tag: Optional[str] = None
+        self._active_type: Optional[str] = None
+        self._active_level: Optional[int] = None
+        self._list_depth = 0
+        self._list_style: Optional[str] = None
+        self._list_items: list[list[dict[str, str]]] = []
+        self._in_list_item = False
+
+    def _next_id(self) -> str:
+        return f"legacy-html-{len(self.blocks) + 1:03d}"
+
+    def _start_text_block(
+        self,
+        tag: str,
+        block_type: str,
+        *,
+        level: Optional[int] = None,
+    ) -> None:
+        if self._active_tag is not None:
+            return
+        self._active_tag = tag
+        self._active_type = block_type
+        self._active_level = level
+        self._buffer = []
+
+    def _finish_text_block(self, tag: str) -> None:
+        if self._active_tag != tag:
+            return
+        value = _normalize("".join(self._buffer))
+        if value:
+            block: dict[str, Any] = {
+                "id": self._next_id(),
+                "type": self._active_type,
+            }
+            if self._active_type == "heading":
+                block["level"] = self._active_level
+                block["text"] = value
+            elif self._active_type == "code":
+                block["value"] = value
+            elif self._active_type == "quote":
+                block["text"] = value
+            else:
+                block["content"] = [{"type": "text", "value": value}]
+            self.blocks.append(block)
+        self._active_tag = None
+        self._active_type = None
+        self._active_level = None
+        self._buffer = []
+
+    def handle_starttag(
+        self,
+        tag: str,
+        attrs: list[tuple[str, Optional[str]]],
+    ) -> None:
+        del attrs
+        tag = tag.casefold()
+        if tag in {"ul", "ol"}:
+            if self._list_depth == 0:
+                self._list_style = "ordered" if tag == "ol" else "bullet"
+                self._list_items = []
+            self._list_depth += 1
+            return
+        if tag == "li" and self._list_depth:
+            self._in_list_item = True
+            self._buffer = []
+            return
+        if self._in_list_item:
+            if tag == "br":
+                self._buffer.append(" ")
+            return
+        if tag in {f"h{level}" for level in range(1, 7)}:
+            self._start_text_block(tag, "heading", level=int(tag[1]))
+        elif tag == "p":
+            self._start_text_block(tag, "paragraph")
+        elif tag == "blockquote":
+            self._start_text_block(tag, "quote")
+        elif tag == "pre":
+            self._start_text_block(tag, "code")
+        elif tag == "hr":
+            self.blocks.append({"id": self._next_id(), "type": "divider"})
+        elif tag == "br" and self._active_tag is not None:
+            self._buffer.append(" ")
+
+    def handle_endtag(self, tag: str) -> None:
+        tag = tag.casefold()
+        if tag == "li" and self._list_depth and self._in_list_item:
+            value = _normalize("".join(self._buffer))
+            if value:
+                self._list_items.append([{"type": "text", "value": value}])
+            self._buffer = []
+            self._in_list_item = False
+            return
+        if tag in {"ul", "ol"} and self._list_depth:
+            self._list_depth -= 1
+            if self._list_depth == 0 and self._list_items:
+                self.blocks.append(
+                    {
+                        "id": self._next_id(),
+                        "type": "list",
+                        "style": self._list_style,
+                        "items": copy.deepcopy(self._list_items),
+                    }
+                )
+                self._list_items = []
+                self._list_style = None
+            return
+        if tag == "pre":
+            self._finish_text_block(tag)
+            return
+        self._finish_text_block(tag)
+
+    def handle_data(self, data: str) -> None:
+        if self._in_list_item or self._active_tag is not None:
+            self._buffer.append(data)
+
+
+def legacy_html_to_blocks(source_html: str) -> list[dict[str, Any]]:
+    """Convert a legacy HTML-only Paper into deterministic semantic blocks."""
+    if not isinstance(source_html, str) or not _normalize(source_html):
+        raise ValueError("legacy source HTML must be non-empty")
+    parser = _LegacyHtmlBlockParser()
+    parser.feed(source_html)
+    parser.close()
+    if not parser.blocks:
+        raise ValueError("legacy source HTML produced no semantic blocks")
+    return parser.blocks
 
 
 def _apply_authority_boundary(
@@ -1176,6 +1330,34 @@ def repair_strategic_paper(document: dict[str, Any]) -> dict[str, Any]:
     )
 
 
+def repair_strategic_paper_from_html(
+    document: dict[str, Any],
+    source_html: str,
+) -> dict[str, Any]:
+    """Recover a legacy HTML-only source before applying strategic repair.
+
+    Some historical Papers were later replaced by two pieces of editorial
+    chrome. Recovery keeps the current editorial-status callout, reconstructs
+    the authored semantic blocks from an immutable history snapshot, and
+    applies the same revision fence and loss checks as every other repair.
+    """
+    recovered_blocks = legacy_html_to_blocks(source_html)
+    current_status = [
+        copy.deepcopy(block)
+        for block in document.get("blocks", [])
+        if isinstance(block, dict)
+        and block.get("type") == "callout"
+        and _inline_text(block.get("content"))
+        .casefold()
+        .startswith("editorial status")
+    ]
+    recovered = {
+        **copy.deepcopy(document),
+        "blocks": current_status + recovered_blocks,
+    }
+    return repair_strategic_paper(recovered)
+
+
 def _site_spawner_opening_blocks() -> list[dict[str, Any]]:
     return [
         {
@@ -1763,7 +1945,16 @@ def main(argv: Optional[list[str]] = None) -> int:
             "strategic-paper",
         ),
     )
+    parser.add_argument(
+        "--source-html",
+        help=(
+            "Immutable legacy HTML snapshot to recover before strategic repair; "
+            "valid only with --profile strategic-paper"
+        ),
+    )
     args = parser.parse_args(argv)
+    if args.source_html and args.profile != "strategic-paper":
+        parser.error("--source-html requires --profile strategic-paper")
 
     document = json.loads(Path(args.input).read_text(encoding="utf-8"))
     if args.profile == "site-spawner-wave-10":
@@ -1771,7 +1962,13 @@ def main(argv: Optional[list[str]] = None) -> int:
     elif args.profile == "mechanical-spacing-doctrine":
         mutation = repair_spacing_doctrine(document)
     elif args.profile == "strategic-paper":
-        mutation = repair_strategic_paper(document)
+        if args.source_html:
+            mutation = repair_strategic_paper_from_html(
+                document,
+                Path(args.source_html).read_text(encoding="utf-8"),
+            )
+        else:
+            mutation = repair_strategic_paper(document)
     else:
         mutation = repair_canonical_epic(document)
     json.dump(mutation, sys.stdout, indent=2, sort_keys=True)

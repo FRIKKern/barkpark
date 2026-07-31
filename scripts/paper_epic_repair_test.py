@@ -13,9 +13,11 @@ from paper_epic_repair import (
     _list_as_steps,
     _table_as_notes,
     curate_site_spawner_wave10,
+    legacy_html_to_blocks,
     repair_canonical_epic,
     repair_spacing_doctrine,
     repair_strategic_paper,
+    repair_strategic_paper_from_html,
 )
 from paper_quality import audit_papers
 
@@ -25,6 +27,90 @@ def text(value):
 
 
 class PaperEpicRepairTest(unittest.TestCase):
+    def test_legacy_html_recovery_preserves_semantic_reading_order(self):
+        blocks = legacy_html_to_blocks(
+            """
+            <h1>The legacy decision</h1>
+            <p><strong>Phase:</strong> Digest &amp; verify.</p>
+            <h2>Evidence</h2>
+            <ol>
+              <li><strong>First:</strong> keep the source claim.</li>
+              <li>Second: keep <code>inline_code()</code> readable.</li>
+            </ol>
+            <hr/>
+            <blockquote>The endgame stays explicit.</blockquote>
+            """
+        )
+
+        self.assertEqual(
+            [block["type"] for block in blocks],
+            ["heading", "paragraph", "heading", "list", "divider", "quote"],
+        )
+        self.assertEqual(blocks[0]["text"], "The legacy decision")
+        self.assertEqual(
+            blocks[3]["items"],
+            [
+                text("First: keep the source claim."),
+                text("Second: keep inline_code() readable."),
+            ],
+        )
+        self.assertIn("The endgame stays explicit.", str(blocks[-1]))
+
+    def test_strategic_html_recovery_restores_source_and_keeps_status(self):
+        document = {
+            "_id": "portabledoc-render-unification-w5-2026-07-16",
+            "_rev": "damaged-rev",
+            "title": "Wave 5 digest",
+            "description": "The Wave 5 evidence ledger and migration decision.",
+            "main_tag": "render-path-unification",
+            "tags": [{"tag": "wave-strategy", "strength": 70}],
+            "blocks": [
+                {
+                    "id": "status",
+                    "type": "callout",
+                    "title": "Editorial status",
+                    "content": text(
+                        "Editorial status (superseded): preserve the historical ledger."
+                    ),
+                },
+                {
+                    "id": "ingress-only",
+                    "type": "ingress",
+                    "text": "A two-block replacement that omitted the ledger.",
+                },
+            ],
+        }
+        source_html = """
+            <h1>Wave 5: collapse the fifth renderer</h1>
+            <p>Phase: Digest. Fifteen survey reports are folded here.</p>
+            <h2>What the survey established</h2>
+            <ul><li>The web fork has exactly three importers.</li></ul>
+            <h2>Decisions</h2>
+            <p>Delete the fork only after the canonical renderer reaches parity.</p>
+        """
+
+        mutation = repair_strategic_paper_from_html(document, source_html)
+        patch = mutation["mutations"][0]["patch"]
+        repaired = patch["set"]["blocks"]
+
+        self.assertEqual(patch["ifRevisionID"], "damaged-rev")
+        self.assertIn("Fifteen survey reports are folded here.", str(repaired))
+        self.assertIn("exactly three importers", str(repaired))
+        self.assertIn("Delete the fork only after", str(repaired))
+        self.assertNotIn("two-block replacement", str(repaired))
+        self.assertIn("Editorial status (superseded)", str(repaired))
+        self.assertIn("Wave 6 owns the distinct hardening proofs", str(repaired))
+
+        second = {
+            **document,
+            "_rev": "repaired-rev",
+            "blocks": repaired,
+        }
+        repaired_again = repair_strategic_paper_from_html(second, source_html)[
+            "mutations"
+        ][0]["patch"]["set"]["blocks"]
+        self.assertEqual(repaired_again, repaired)
+
     def test_strategic_repair_preserves_taxonomy_and_is_idempotent(self):
         tags = [
             {
