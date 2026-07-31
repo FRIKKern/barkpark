@@ -44,4 +44,25 @@
 # rebases onto sibling slice S4, which also adds heads: two identical bumps merge CLEAN
 # and WRONG — re-run cssom-parity.mjs and write what it MEASURES (D158), never resolve
 # this number by hand.
+# Re-measured 2026-07-31 (W13 detail-route band, cch-w13-s4-tablet-band-detail-routes):
+# UNCHANGED at 1236 authored heads == 1236 CSSOM rules, MISSES 0 — MEASURED by a real
+# cssom-parity.mjs run on this branch (app.css 207795 B, sha256 bf36a9936ef5…, Chrome
+# 150.0.7871.187, node v22.22.0), not reasoned about. That slice adds a new
+# `@media (max-width: 899px)` block with FOUR rule heads — `.detail-grid`,
+# `.detail-head`, `.detail-head .fleet-badges`, `.detail-actions` — and removes exactly
+# those four from the 768 and 720 blocks they were split out of, so the net is zero: a
+# MOVE, not an add. Recorded rather than left silent, for the same reason as the W12
+# entry above: a ratchet whose number does not move across a real CSS change has to say
+# why in the same commit, or the next reader cannot tell a considered no-op from a
+# forgotten bump. If you rebase this onto a sibling that DOES add a head, re-measure
+# (charter D158 REGENERATE-ON-REBASE) — two slices bumping to the same number merge
+# clean and wrong.
+# Re-measured 2026-07-31 by the LEAD while rebasing the tablet-width slice onto
+# a main that had moved: HEAD carried 1237, the branch carried 1236, and neither
+# was a considered claim about the merged tree — the branch measured before its
+# siblings landed. Both prose records above are kept because each explains a real
+# earlier measurement; the COUNT is re-derived rather than picked. A real Chrome
+# on the merged tree reports authored rule heads 1237, CSSOM style rules 1237,
+# MISSES 0, PARITY PASS — so this slice adds no rule HEAD on top of main, and the
+# number moves for its siblings reasons, not for this one.
 1237
