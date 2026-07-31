@@ -250,8 +250,10 @@ const ALLOW_PREFIXES = [
 // to the .dep-pill base, which is byte-identical to .dep-queued, so a terminal
 // abort painted as "still waiting". A comment cannot fail; this list can.
 //
-// THE SOURCE OF TRUTH is Ecto: Barkpark.Cloud.Sites.Deployment's @statuses
-// (grep: `grep -n '@statuses' cloud/lib/barkpark/cloud/sites/deployment.ex`).
+// THE SOURCE OF TRUTH is Ecto: BarkparkCloud.Registry.Deployment's @statuses
+// (grep: `grep -n '@statuses' cloud/lib/barkpark_cloud/registry/deployment.ex`
+// — verified at review; the module and path both resolve, which is the point of
+// citing them at all).
 // It is COMMITTED here rather than parsed out of the .ex file on purpose — this
 // checker is a zero-dependency static reader of three static assets and must not
 // grow a cross-language parser (E11's cross-language boundary, same reasoning).
