@@ -543,6 +543,35 @@ func TestCoercePriority(t *testing.T) {
 // ORDERING HAZARD: this table is also the guard on nil-check-before-deref. If
 // the deref is hoisted above the nil check, every poison row panics here
 // instead of returning an error, so a reorder fails the suite.
+//
+// POISON PARITY WITH THE CLI (measured, not assumed). The CLI's reader-honesty
+// lock — TestRunPaginatedAll_RefusesUnreadablePage, internal/cli/
+// paginate_all_test.go:94-104 — carries NINE poison bodies. Dropping all nine
+// into this package and calling decodeTaskListFull and decodePrime directly
+// splits them FIVE / FOUR, identically on both decoders:
+//
+//   - FENCE-class (5, pinned as rows below): `null`, `{}`, `{"result":null}`,
+//     `{"widgets":[…]}` and the ok:false error envelope. Each is valid JSON
+//     that decodes cleanly into the envelope struct and leaves the envelope
+//     key nil, so ONLY the pointer nil-check refuses them. These are exactly
+//     the bodies the fence exists for, and reverting the fence reds them.
+//   - UNMARSHAL-class (4, DECLARED here, deliberately NOT pinned as rows): the
+//     proxy-502 HTML page, zero bytes, the bare array `[{"a":1}]` and the
+//     plaintext body. All four fail json.Unmarshal BEFORE any fence runs, so a
+//     row asserting they error would be green both before and after the fix —
+//     a vacuous row, the exact failure this table exists to kill.
+//
+// The four-way split is a property of the CURRENT envelope structs, measured at
+// origin/main 885ace84a. It is not a law: widening either envelope field to
+// json.RawMessage would make the bare array and the plaintext body decode, at
+// which point they become fence-class and belong in the tables below. Re-measure
+// before trusting this comment after any change to the structs in fetch.go.
+//
+// The board's refusal channel is snapshotErrorLabel → ui.ConnProblem, NOT the
+// CLI's `unreadable_list_page` code: that token is a contract on the CLI's JSON
+// error envelope (renderErrorEnvelope), and a tea TUI has no such transport.
+// Every poison row therefore asserts the LABEL, so the classification is pinned
+// rather than incidental.
 func TestDecodeEnvelopeFence(t *testing.T) {
 	cases := []struct {
 		name    string
@@ -554,6 +583,9 @@ func TestDecodeEnvelopeFence(t *testing.T) {
 		{"bare error envelope", `{"error":"barkpark_not_found","detail":"no such dataset"}`, true},
 		{"ok false error envelope", `{"ok":false,"error":{"code":"forbidden"}}`, true},
 		{"docs null", `{"ok":true,"docs":null}`, true},
+		// Verbatim from the CLI's poison table (paginate_all_test.go:94-104).
+		{"unknown envelope key", `{"widgets":[{"a":1},{"b":2}]}`, true},
+		{"result null", `{"result":null}`, true},
 		{"legitimate empty board", `{"docs":[]}`, false},
 		{"legitimate populated board", `{"ok":true,"docs":[{"doc_id":"x"}]}`, false},
 	}
@@ -588,6 +620,9 @@ func TestDecodeEnvelopeFence(t *testing.T) {
 		{"bare error envelope", `{"error":"barkpark_not_found"}`, true},
 		{"ok false error envelope", `{"ok":false,"error":{"code":"forbidden"}}`, true},
 		{"counts null and no ok", `{"counts":null}`, true},
+		// Verbatim from the CLI's poison table (paginate_all_test.go:94-104).
+		{"unknown envelope key", `{"widgets":[{"a":1},{"b":2}]}`, true},
+		{"result null", `{"result":null}`, true},
 		// A brief view may legitimately omit counts; an affirmative ok is
 		// enough of an envelope to trust.
 		{"ok true without counts", `{"ok":true,"recent_events":[]}`, false},
