@@ -378,6 +378,75 @@ class PaperEpicRepairTest(unittest.TestCase):
         self.assertIn("historical authority", str(authority.get("content")))
         self.assertIn("Wave 4 carries the current cockpit", str(authority))
 
+    def test_site_spawner_wave_one_keeps_foundation_authority_without_claiming_current_state(
+        self,
+    ):
+        original_status = (
+            "Editorial status (repair): preserve the founding strategy while "
+            "making its historical limits explicit."
+        )
+        document = {
+            "_id": "site-spawner-wave-2026-07-13",
+            "_rev": "source-rev",
+            "title": "Site Spawner — Wave 1 Strategy (2026-07-13)",
+            "description": "Founding strategy for the Site Spawner epic.",
+            "main_tag": "site-spawner",
+            "tags": [{"tag": "site-spawner", "strength": 95}],
+            "blocks": [
+                {
+                    "id": "status",
+                    "type": "callout",
+                    "content": text(original_status),
+                },
+                {
+                    "id": "title",
+                    "type": "heading",
+                    "level": 1,
+                    "text": "Site Spawner — Wave 1 Strategy (2026-07-13)",
+                },
+                {
+                    "id": "spine",
+                    "type": "paragraph",
+                    "content": text(
+                        "PLAN, BUILD, STAGE, HEALTH, SWITCH, and RETIRE form "
+                        "the initial deploy spine."
+                    ),
+                },
+            ],
+        }
+
+        mutation = repair_strategic_paper(document)
+        patch = mutation["mutations"][0]["patch"]
+        repaired = patch["set"]["blocks"]
+        status = next(block for block in repaired if block.get("id") == "status")
+
+        self.assertEqual(patch["ifRevisionID"], "source-rev")
+        self.assertNotIn("tags", patch["set"])
+        self.assertNotIn("main_tag", patch["set"])
+        self.assertIn(original_status, str(status.get("content")))
+        self.assertIn("initial six-stage deploy spine", str(status.get("content")))
+        self.assertIn(
+            "Later Site Spawner waves own current implementation",
+            str(status.get("content")),
+        )
+        self.assertEqual(
+            sum(
+                "Authority boundary:" in str(block.get("content"))
+                for block in repaired
+            ),
+            1,
+        )
+
+        second_document = {
+            **document,
+            "_rev": "second-rev",
+            "blocks": repaired,
+        }
+        repaired_again = repair_strategic_paper(second_document)["mutations"][0][
+            "patch"
+        ]["set"]["blocks"]
+        self.assertEqual(repaired_again, repaired)
+
     def test_wsc_wave_four_keeps_cockpit_authority_but_routes_live_state(self):
         original_status = (
             "Editorial status (repair): run the cockpit work and preserve its "
