@@ -3809,9 +3809,12 @@ defmodule BarkparkCloud.Web.Router do
     if conn.halted, do: conn, else: providers_catalog(conn, conn.params["kind"])
   end
 
-  # GET /v1/providers/:kind/overview → 200 {provider:{kind,label}, regions,
-  # server_types} — the same normalized menu wrapped with the connected
+  # GET /v1/providers/:kind/overview → 200 {provider:{kind,label,identity},
+  # regions, server_types} — the same normalized menu wrapped with the connected
   # provider's header (a lightweight "what this connection offers" overview).
+  # `identity` names WHICH cloud account the connection points at, or says
+  # explicitly that it can't (see provider_identity/2). Auth.require_user only:
+  # any authenticated team member, including a plain member, reads it.
   get "/v1/providers/:kind/overview" do
     conn = Auth.require_user(conn, [])
     if conn.halted, do: conn, else: providers_overview(conn, conn.params["kind"])
@@ -9050,16 +9053,18 @@ defmodule BarkparkCloud.Web.Router do
 
   # GET /v1/providers/:kind/catalog handler.
   defp providers_catalog(conn, kind) do
-    with_provider_catalog(conn, kind, fn _provider, catalog ->
+    with_provider_catalog(conn, kind, fn _provider, catalog, _identity ->
       json(conn, 200, catalog)
     end)
   end
 
   # GET /v1/providers/:kind/overview handler — the catalog wrapped with the
-  # connected provider's header.
+  # connected provider's header, which now names WHICH cloud account the
+  # connection points at (or says out loud that it can't).
   defp providers_overview(conn, kind) do
-    with_provider_catalog(conn, kind, fn provider, catalog ->
-      json(conn, 200, Map.put(catalog, :provider, %{kind: provider.kind, label: provider.label}))
+    with_provider_catalog(conn, kind, fn provider, catalog, identity ->
+      header = %{kind: provider.kind, label: provider.label, identity: identity}
+      json(conn, 200, Map.put(catalog, :provider, header))
     end)
   end
 
@@ -9083,7 +9088,7 @@ defmodule BarkparkCloud.Web.Router do
 
           provider ->
             case build_provider_catalog(kind, provider) do
-              {:ok, catalog} -> on_ok.(provider, catalog)
+              {:ok, catalog, identity} -> on_ok.(provider, catalog, identity)
               {:error, _reason} -> json(conn, 502, %{error: "catalog_unavailable"})
             end
         end
@@ -9097,9 +9102,11 @@ defmodule BarkparkCloud.Web.Router do
     |> Enum.find(&(&1.kind == kind))
   end
 
-  # Build the normalized {regions, server_types} for a connected provider. Both
-  # branches decrypt the stored credential SERVER-SIDE, fetch the provider's raw
-  # regions/sizes over its seam, and normalize to the identical shape.
+  # Build the normalized {regions, server_types} for a connected provider, plus
+  # the connection's ACCOUNT IDENTITY, off the SAME already-decrypted credential
+  # (no second decrypt, no extra upstream call). Both branches decrypt the stored
+  # credential SERVER-SIDE, fetch the provider's raw regions/sizes over its seam,
+  # and normalize to the identical shape.
   defp build_provider_catalog("hetzner", provider) do
     # per_page=50 (hcloud's max, matching the proxy's @hetzner_per_page) so the
     # menu isn't silently truncated to hcloud's default first 25 — Hetzner lists
@@ -9109,7 +9116,8 @@ defmodule BarkparkCloud.Web.Router do
          {:ok, %{"server_types" => server_types}} <-
            hetzner_get_json("/v1/server_types?per_page=50", token),
          {:ok, %{"locations" => locations}} <- hetzner_get_json("/v1/locations", token) do
-      {:ok, HetznerCatalog.normalize(List.wrap(server_types), List.wrap(locations))}
+      {:ok, HetznerCatalog.normalize(List.wrap(server_types), List.wrap(locations)),
+       provider_identity("hetzner", token)}
     else
       _ -> {:error, :unavailable}
     end
@@ -9120,11 +9128,53 @@ defmodule BarkparkCloud.Web.Router do
          {:ok, creds} when is_map(creds) <- Jason.decode(credential),
          {:ok, %{locations: locations, vm_sizes: vm_sizes}} <- Azure.list_catalog(creds) do
       priced = enrich_azure_prices(List.wrap(vm_sizes))
-      {:ok, AzureCatalog.normalize(List.wrap(locations), priced)}
+
+      {:ok, AzureCatalog.normalize(List.wrap(locations), priced),
+       provider_identity("azure", creds)}
     else
       _ -> {:error, :unavailable}
     end
   end
+
+  # WHICH cloud account this connection points at — the fact a person needs
+  # BEFORE they press "Verify & replace" on a stored credential.
+  #
+  # `source: "stored"` is the whole honesty of this shape: the value is read back
+  # out of the credential blob the person themselves typed at connect time, and
+  # is NOT a server-confirmed identity. Nothing in this tree asks a provider
+  # "whose account is this?" — Azure.verify/1 echoes back the subscription_id it
+  # was handed, and no request builder fetches a subscription displayName — so
+  # the console must never call this "verified".
+  #
+  # The key is ALWAYS emitted. An identity we don't have is an EXPLICIT absence
+  # carrying its own reason (`value: nil`), never a silently omitted key the
+  # client would paint as a blank that looks known.
+  #
+  # Only the @neutral_kinds reach here (with_provider_catalog 404s anything
+  # else), so cloudflare — whose stored blob may carry an account_id — has no
+  # clause: it owns no catalog route, and the console's provider picker has no
+  # cloudflare entry at all, so a clause here would be unreachable code rather
+  # than a rendered fact.
+  defp provider_identity("azure", creds) do
+    case creds |> Map.get("subscription_id") |> to_string() |> String.trim() do
+      "" ->
+        identity_absent("Subscription", "This connection didn't store a subscription ID.")
+
+      subscription_id ->
+        %{label: "Subscription", value: subscription_id, source: "stored", reason: nil}
+    end
+  end
+
+  # Hetzner Cloud tokens are PROJECT-scoped and the API exposes no account or
+  # project identity resource: `hetzner_token_ok?/1` is a one-row
+  # `GET /v1/servers?per_page=1` matched on status class alone and returning a
+  # bare boolean, and nothing anywhere in this tree fetches a Hetzner account,
+  # project or organization identifier. So we say that, rather than guessing.
+  defp provider_identity("hetzner", _token),
+    do: identity_absent("Project", "Hetzner doesn't report which project this token belongs to.")
+
+  defp identity_absent(label, reason),
+    do: %{label: label, value: nil, source: "unavailable", reason: reason}
 
   # Stamp REAL retail monthly USD onto each vm size BEFORE AzureCatalog.normalize
   # (the normalizer already reads "monthlyPriceUsd"). Prices come from the global,

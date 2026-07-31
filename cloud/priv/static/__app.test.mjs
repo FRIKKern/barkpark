@@ -7079,6 +7079,81 @@ test("gr-p4/GR44: the roster shows a rotation — 'credential updated' ONLY when
   assert.ok(legacy.indexOf("credential updated") === -1);
 });
 
+// cch wave 13 — the rotation card names WHICH cloud account the stored
+// credential points at, BEFORE the person commits a replacement.
+const OVERVIEW_AZURE = {
+  regions: [], server_types: [], currency: "USD",
+  provider: { kind: "azure", label: "az",
+    identity: { label: "Subscription", value: "33333333-3333-3333-3333-333333333333",
+      source: "stored", reason: null } },
+};
+const OVERVIEW_HETZNER = {
+  regions: [], server_types: [], currency: "EUR",
+  provider: { kind: "hetzner", label: "main",
+    identity: { label: "Project", value: null, source: "unavailable",
+      reason: "Hetzner doesn't report which project this token belongs to." } },
+};
+
+test("cch-w13: provider identity — the stored value is echoed as STORED, never as 'verified'", () => {
+  for (const n of ["providerIdentityModel", "providerIdentityHtml"]) {
+    assert.equal(typeof hooks[n], "function", n + " must be exported");
+  }
+  const m = hooks.providerIdentityModel(OVERVIEW_AZURE);
+  assert.equal(m.state, "known");
+  assert.equal(m.label, "Subscription");
+  assert.equal(m.value, "33333333-3333-3333-3333-333333333333");
+  assert.equal(m.stored, true);
+  const html = hooks.providerIdentityHtml(m);
+  assert.match(html, /data-prov-identity="known"/);
+  assert.match(html, /33333333-3333-3333-3333-333333333333/);
+  assert.match(html, /the subscription you connected/); // provenance, in the person's words
+  assert.ok(!/verified/i.test(html), "the echo must never read as a verification");
+});
+
+test("cch-w13: provider identity — an unknown identity renders EXPLICITLY absent, never a blank that looks known", () => {
+  // Hetzner: the server states the gap, and the console renders that reason.
+  const hz = hooks.providerIdentityModel(OVERVIEW_HETZNER);
+  assert.equal(hz.state, "absent");
+  assert.equal(hz.label, "Project");
+  const hzHtml = hooks.providerIdentityHtml(hz);
+  assert.match(hzHtml, /data-prov-identity="absent"/);
+  assert.match(hzHtml, /not known/);
+  // the server's reason, verbatim (its apostrophe HTML-escaped by esc — the
+  // console never re-words a server-owned reason)
+  assert.match(hzHtml, /Hetzner doesn&#39;t report which project this token belongs to\./);
+  assert.ok(hzHtml.replace(/<[^>]*>/g, "").trim().length > 0, "an absent identity is never empty markup");
+
+  // A null value with NO server reason still says something honest.
+  const bare = hooks.providerIdentityModel({ provider: { identity: { label: "Subscription", value: null } } });
+  assert.equal(bare.state, "absent");
+  assert.match(hooks.providerIdentityHtml(bare), /doesn’t say which account/);
+
+  // An older control plane that omits the identity key entirely → absent with a
+  // reason of the console's own, NOT a silent blank.
+  const legacy = hooks.providerIdentityModel({ provider: { kind: "azure", label: "az" } });
+  assert.equal(legacy.state, "absent");
+  assert.match(hooks.providerIdentityHtml(legacy), /doesn’t report which account/);
+
+  // Loading and fetch-failure are their own stated states.
+  assert.equal(hooks.providerIdentityModel(undefined).state, "loading");
+  assert.match(hooks.providerIdentityHtml(hooks.providerIdentityModel(undefined)), /Checking which account/);
+  assert.equal(hooks.providerIdentityModel(null).state, "unavailable");
+  assert.match(hooks.providerIdentityHtml(hooks.providerIdentityModel(null)), /couldn’t read which account/);
+});
+
+test("cch-w13: the identity slot rides the ROTATION card only, and names the armed kind", () => {
+  const rotating = hooks.providerConnectCardHtml([{ kind: "hetzner" }], "hetzner");
+  assert.match(rotating, /data-prov-identity-kind="hetzner"/);
+  assert.match(rotating, /id="prov-identity"/);
+  assert.match(rotating, /data-prov-identity="loading"/); // honest loading, not a blank slot
+  // …and the slot sits ABOVE the credential fields, so it is read before the
+  // "Verify & replace" button is pressed.
+  assert.ok(rotating.indexOf("prov-identity") < rotating.indexOf("data-connect-submit"));
+  // A first connect has no stored credential to name — no slot, no empty box.
+  const fresh = hooks.providerConnectCardHtml([], "hetzner");
+  assert.ok(fresh.indexOf("data-prov-identity-kind") === -1);
+});
+
 test("gr-p4: capability matrix — 9 verbs, prod columns only, server-owned gaps, NO invented reason, NO padded cell", () => {
   const m = hooks.capabilityMatrixModel(PROV_CAP);
   assert.equal(m.ok, true);

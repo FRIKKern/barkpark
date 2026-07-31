@@ -2097,7 +2097,9 @@
       '<div class="prov-connect-form">' +
         (rotating
           ? '<p class="field-hint" data-connect-rotating>Replaces the stored ' + esc(p.name) +
-            " credential. We verify the new one first — the current one keeps working until it does.</p>"
+            " credential. We verify the new one first — the current one keeps working until it does.</p>" +
+            '<div class="prov-identity-slot" id="prov-identity" data-prov-identity-kind="' + esc(armed) + '">' +
+              providerIdentityHtml(providerIdentityModel(undefined)) + "</div>"
           : "") +
         '<div class="field"><label class="label" for="cred-label">Profile name <span class="dim">(optional)</span></label>' +
           '<input class="form-input" id="cred-label" type="text" placeholder="main" /></div>' +
@@ -2108,6 +2110,74 @@
         '<button class="btn btn-primary" id="cred-submit" type="button" data-connect-submit>' +
           (rotating ? "Verify &amp; replace" : "Verify &amp; connect") + "</button>" +
       "</div>";
+  }
+
+  // WHICH cloud account this connection points at — rendered INSIDE the rotation
+  // card, above the credential fields, so the person reads the account BEFORE
+  // they press "Verify & replace" (and again after, since the page repaints).
+  //
+  // The value is an ECHO of what they typed at connect time: the server marks it
+  // `source:"stored"` and nothing on the server ever asks a provider whose
+  // account a credential belongs to. So the copy says "the subscription you
+  // connected" and NEVER "verified account" — overclaiming here would be the
+  // exact lie class this page exists to kill.
+  //
+  // Four honest states, and never a blank that looks known:
+  //   undefined payload           → loading
+  //   null payload (fetch failed) → unavailable, said out loud
+  //   identity with a value       → known, marked as stored-not-rechecked
+  //   identity with a null value,
+  //   or no identity key at all   → EXPLICITLY absent, carrying the server's
+  //                                 own reason when it sent one (Hetzner reports
+  //                                 no project identity at all, so that is the
+  //                                 permanent shape of its row).
+  function providerIdentityModel(payload) {
+    if (payload === undefined) return { state: "loading" };
+    if (!payload || typeof payload !== "object") {
+      return { state: "unavailable", reason: "We couldn’t read which account this connection points at just now." };
+    }
+    var prov = payload.provider && typeof payload.provider === "object" ? payload.provider : null;
+    var id = prov && prov.identity && typeof prov.identity === "object" ? prov.identity : null;
+    if (!id) {
+      // An older control plane that predates the identity field: absent, with a
+      // reason of the console's own — never a silent blank.
+      return { state: "absent", label: "Account",
+        reason: "This control plane doesn’t report which account a connection points at." };
+    }
+    var label = typeof id.label === "string" && id.label.trim() ? id.label.trim() : "Account";
+    var value = typeof id.value === "string" ? id.value.trim() : "";
+    if (!value) {
+      var reason = typeof id.reason === "string" && id.reason.trim() ? id.reason.trim() : "";
+      return { state: "absent", label: label,
+        reason: reason || "This connection doesn’t say which account it points at." };
+    }
+    return { state: "known", label: label, value: value, stored: id.source === "stored" };
+  }
+
+  // Pure render of the identity line from its model. A known identity is the
+  // label + the value + the provenance sentence; every other state SAYS which
+  // state it is in words. No state renders empty.
+  function providerIdentityHtml(model) {
+    var m = model || {};
+    if (m.state === "loading") {
+      return '<p class="field-hint prov-identity" data-prov-identity="loading">' +
+        "Checking which account this connection points at&hellip;</p>";
+    }
+    if (m.state === "known") {
+      return '<p class="field-hint prov-identity" data-prov-identity="known">' +
+        '<span class="prov-identity-label">' + esc(m.label) + ": </span>" +
+        '<span class="prov-identity-value">' + esc(m.value) + "</span>" +
+        '<span class="dim prov-identity-note"> — the ' + esc(m.label.toLowerCase()) +
+          " you connected" + (m.stored ? ", as you typed it (we don’t re-check it with the provider)" : "") +
+        ".</span></p>";
+    }
+    if (m.state === "unavailable") {
+      return '<p class="field-hint prov-identity" data-prov-identity="unavailable">' + esc(m.reason) + "</p>";
+    }
+    return '<p class="field-hint prov-identity" data-prov-identity="absent">' +
+      '<span class="prov-identity-label">' + esc(m.label) + ": </span>" +
+      '<span class="prov-identity-value prov-identity-unknown">not known</span>' +
+      '<span class="dim prov-identity-note"> — ' + esc(m.reason) + "</span></p>";
   }
 
   // The 9 lifecycle capabilities the matrix rows, in operator order (provision
@@ -2226,6 +2296,27 @@
         "how to mint a fresh one.</p>" +
       providerConnectCardHtml(list, selected) + "</div>";
     wireConnectCard(list, selected);
+    // The card itself names the armed kind on the identity slot (only a ROTATION
+    // renders one), so the arming rule lives in exactly one place.
+    var slot = connect.querySelector("[data-prov-identity-kind]");
+    if (slot) loadProviderIdentity(slot, slot.getAttribute("data-prov-identity-kind"));
+  }
+
+  // Fill the identity slot from GET /v1/providers/:kind/overview — the same
+  // already-decrypted credential the catalog is built from, no extra decrypt and
+  // no new route. Auth.require_user only: a plain member reads it too. A failed
+  // or degraded read paints the honest "we couldn’t read it" state, never a
+  // blank and never a guess.
+  function loadProviderIdentity(slot, kind) {
+    if (!slot || !kind) return;
+    slot.innerHTML = providerIdentityHtml(providerIdentityModel(undefined));
+    api("GET", "/v1/providers/" + encodeURIComponent(kind) + "/overview").then(function (r) {
+      // The operator may have armed another kind (repainting the card) while
+      // this was in flight — only paint into a slot still mounted and still
+      // asking for THIS kind.
+      if (slot.isConnected === false || slot.getAttribute("data-prov-identity-kind") !== kind) return;
+      slot.innerHTML = providerIdentityHtml(providerIdentityModel(r.ok && r.data ? r.data : null));
+    });
   }
 
   function wireConnectCard(list, selected) {
@@ -18406,6 +18497,9 @@
       providerDisplayName: providerDisplayName, providerRosterHtml: providerRosterHtml,
       providerConnectModel: providerConnectModel, providerConnectCardHtml: providerConnectCardHtml,
       providerIsConnected: providerIsConnected,
+      // cch wave 13 — WHICH cloud account a connection points at, shown before a
+      // rotation is committed. Pure; loadProviderIdentity's fetch is the mount.
+      providerIdentityModel: providerIdentityModel, providerIdentityHtml: providerIdentityHtml,
       capabilityMatrixModel: capabilityMatrixModel, capabilityMatrixHtml: capabilityMatrixHtml,
       capabilityVerbs: CAPABILITY_VERBS.map(function (v) { return v.key; }),
       // S11b (azure-hetzner hosting): the console lifecycle action-row pure
