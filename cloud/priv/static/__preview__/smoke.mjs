@@ -97,8 +97,9 @@ const CLASS_SEL = /^\.[\w-]+$/;
 const ID_SEL_SUB = /^#[\w-]+$/;
 const ATTR_SEL = /^\[([\w:.-]+)(?:="([^"]*)")?\]$/;
 // cch-w11-s3 — THE COMPOUND `.class[attr]`, the last selector shape standing
-// between the shim and a destroy control. `.token-revoke[data-id]` (app.js:3221)
-// is the ONLY app.js destroy hook authored this way; every other one is a bare
+// between the shim and a destroy control. `.token-revoke[data-id]` — authored in
+// renderTokenList(), `grep -n 'function renderTokenList' cloud/priv/static/app.js`
+// — is the ONLY app.js destroy hook of this shape; every other one is a bare
 // attribute already covered by ATTR_SEL above.
 //
 // THE BLAST RADIUS IS MEASURED, NOT ASSUMED — instrumented census over all 99
@@ -113,11 +114,13 @@ const ATTR_SEL = /^\[([\w:.-]+)(?:="([^"]*)")?\]$/;
 //   .site-row[data-id]        4 /  0
 //   .new-step-dot[data-ring]  5 /  0   ← all three DIVs; PARSED_TAGS is button|a.
 // `nav-link[data-view]` / `nav-sub[data-view]` never appear: they are
-// DOCUMENT-level queries (app.js:4050, :4185), a separate code path that hard-
-// returns [] — so the filed "a change here can alter boot paths" worry is
-// structurally impossible for this element-level widening.
-// `.choice[data-kind]:not([disabled])` (app.js:1845) carries a pseudo-class and
-// stays outside this grammar.
+// DOCUMENT-level queries — applyRoute() and applyShellNav(), `grep -n 'function
+// applyRoute\|function applyShellNav' cloud/priv/static/app.js` — a separate code
+// path that hard-returns [], so the filed "a change here can alter boot paths"
+// worry is structurally impossible for this element-level widening.
+// `.choice[data-kind]:not([disabled])` in openProviderPicker() (`grep -n
+// 'function openProviderPicker' cloud/priv/static/app.js`) carries a pseudo-class
+// and stays outside this grammar.
 const COMPOUND_SEL = /^\.([\w-]+)\[([\w:.-]+)(?:="([^"]*)")?\]$/;
 
 // Flat scan: every whitelisted OPEN tag in `html` becomes a sibling stub
@@ -2045,13 +2048,14 @@ const EXPECTATIONS = {
   // innerHTML, because the descendant registry node is immortal here. The
   // INVERSE rule governs CLICKS and was written nowhere: the confirm button must
   // be clicked through the #id REGISTRY (`reg.get("token-revoke-go")`), because
-  // app.js:3419 wires it with `$("#token-revoke-go")` → getElementById → the
-  // registry object, while the button parsed out of #modal-body's innerHTML is a
-  // DIFFERENT object carrying ZERO handlers. Click the parsed child and it
+  // confirmRevokeToken() wires it with `$("#token-revoke-go")` → getElementById →
+  // the registry object, while the button parsed out of #modal-body's innerHTML
+  // is a DIFFERENT object carrying ZERO handlers. Click the parsed child and it
   // returns 0 and reads as a dead button that is in fact perfectly wired.
   //
-  // NO TYPED-CONFIRM DRIVER, deliberately: confirmRevokeToken (app.js:3410)
-  // opens a PLAIN openModal with a bare `<button id="token-revoke-go">` — not
+  // NO TYPED-CONFIRM DRIVER, deliberately: confirmRevokeToken() — `grep -n
+  // 'function confirmRevokeToken' cloud/priv/static/app.js` for both claims —
+  // opens a PLAIN openModal with a bare `<button id="token-revoke-go">`, not
   // openConfirmModal, so there is no #cm-confirm, no #cm-typed and nothing to
   // arm. armConfirmSheet/assertDestroySheetDisarmed do not apply to this leg.
   "tokens-revoke": {
