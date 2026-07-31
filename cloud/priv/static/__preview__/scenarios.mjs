@@ -3050,8 +3050,14 @@ function destroyFrom(list, state, pred) {
 //   whether to 404 or pass through. Query strings are ignored (the SPA never
 //   depends on server-side filtering for these fixtures).
 //   `state` is an OPTIONAL per-boot mutable bag for routes that must actually
-//   change something (see sessionsOf). Omitting it keeps every route stateless,
-//   which is what the browser harness (mock.js) does.
+//   change something (see sessionsOf). Omitting it keeps every route stateless.
+//   CORRECTED (wave 11 review): this used to say stateless "is what the browser
+//   harness (mock.js) does". It has not been true since
+//   cch-bl-mockjs-revoke-stateless — mock.js:124 passes a `fixtureState` on
+//   every call, exactly as smoke.mjs does. NO CALLER OMITS IT TODAY, so the
+//   stateless arm of every `if (state)` is dead code that only a new caller can
+//   revive, and a route added on the assumption that the browser is stateless
+//   will be wrong in the browser first.
 export function route(name, method, path, state) {
   const scen = SCENARIOS[name] || SCENARIOS[DEFAULT_SCENARIO];
   const d = scen.data;
@@ -3319,7 +3325,19 @@ export function route(name, method, path, state) {
   // toasted "Token revoked" over a token list that never moved and no oracle
   // could tell the revoke from a no-op. destroyFrom 404s on a miss (a wrong id
   // must stay distinguishable from a right one) and splices only when a state
-  // bag was supplied, so mock.js's 3-arg stateless call keeps its old 200.
+  // bag was supplied.
+  //
+  // THIS DOES CHANGE THE BROWSER TWIN, and saying otherwise would be the same
+  // class of lie. mock.js:124 passes a per-boot `fixtureState` on EVERY call
+  // (cch-bl-mockjs-revoke-stateless), so the 4-arg stateful path is the only
+  // one either harness takes and the `if (state)` splice always fires. Two
+  // consequences, both in the honest direction: the browser preview's token
+  // list now SHRINKS on revoke instead of reporting success over a list that
+  // never moved, and a DELETE for an id absent from the bag now 404s where it
+  // used to 200 unconditionally. The only such id is the plaintext-once mint's
+  // `pat_…`, which the POST arm never appends to the bag and which therefore
+  // never reaches a rendered row (the list refetches), so no UI path can reach
+  // the new 404 — but it is a real behavioural change, not a no-op.
   const tokOne = p.match(/^\/v1\/tokens\/([^/]+)$/);
   if (tokOne && method === "DELETE") {
     return destroyFrom(listOf(d, state, "tokens"), state, (t) => t.id === tokOne[1]);
