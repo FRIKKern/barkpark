@@ -167,11 +167,11 @@ func hzLBVerbCases() []hzLBVerbCase {
 	return []hzLBVerbCase{
 		{
 			name: "lb-add-service", kind: "load-balancer",
-			args:     []string{"load-balancer", "add-service", "7", "--protocol", "https", "--listen-port", "443"},
-			getPath:  "/load_balancers/7", envelope: "load_balancer",
+			args:    []string{"load-balancer", "add-service", "7", "--protocol", "https", "--listen-port", "443"},
+			getPath: "/load_balancers/7", envelope: "load_balancer",
 			postPath: "/load_balancers/7/actions/add_service", actionID: "101",
-			before:   hzLBEmpty, after: hzLBSvc443,
-			want:     []string{"confirmed_present: true", "protocol: https", "listen_port: 443", "destination_port: 8443", "services: 1"},
+			before: hzLBEmpty, after: hzLBSvc443,
+			want: []string{"confirmed_present: true", "protocol: https", "listen_port: 443", "destination_port: 8443", "services: 1"},
 			// A request echo would have printed the DESTINATION port it was
 			// never given — 8443 is a fact only the server knows.
 			unwanted: []string{"destination_port: 443"},
@@ -179,11 +179,11 @@ func hzLBVerbCases() []hzLBVerbCase {
 		},
 		{
 			name: "lb-delete-service", kind: "load-balancer",
-			args:     []string{"load-balancer", "delete-service", "7", "--listen-port", "443"},
-			getPath:  "/load_balancers/7", envelope: "load_balancer",
+			args:    []string{"load-balancer", "delete-service", "7", "--listen-port", "443"},
+			getPath: "/load_balancers/7", envelope: "load_balancer",
 			postPath: "/load_balancers/7/actions/delete_service", actionID: "102",
-			before:   hzLBSvcBoth, after: hzLBSvc80,
-			want:     []string{"confirmed_present: true", "listen_port_absent: 443", "services: 1", "services_listen_ports: [80]"},
+			before: hzLBSvcBoth, after: hzLBSvc80,
+			want: []string{"confirmed_present: true", "listen_port_absent: 443", "services: 1", "services_listen_ports: [80]"},
 			// The old receipt printed `listen_port: 443` — the argument, with
 			// nothing behind it.
 			unwanted: []string{"listen_port: 443"},
@@ -191,11 +191,11 @@ func hzLBVerbCases() []hzLBVerbCase {
 		},
 		{
 			name: "lb-add-target-server", kind: "load-balancer",
-			args:     []string{"load-balancer", "add-target", "7", "--server", "42"},
-			getPath:  "/load_balancers/7", envelope: "load_balancer",
+			args:    []string{"load-balancer", "add-target", "7", "--server", "42"},
+			getPath: "/load_balancers/7", envelope: "load_balancer",
 			postPath: "/load_balancers/7/actions/add_target", actionID: "103",
-			before:   hzLBEmpty, after: hzLBServerTargetBody,
-			setup:    hzServerLookup,
+			before: hzLBEmpty, after: hzLBServerTargetBody,
+			setup: hzServerLookup,
 			// `server: web-1` is the NAME (the target ref has none); the
 			// predicate bound on the resolved id 42.
 			want:  []string{"confirmed_present: true", "target_observed: true", "target_type: server", "targets: 1", "server: web-1"},
@@ -203,72 +203,72 @@ func hzLBVerbCases() []hzLBVerbCase {
 		},
 		{
 			name: "lb-remove-target-label-selector", kind: "load-balancer",
-			args:     []string{"load-balancer", "remove-target", "7", "--label-selector", "role=web"},
-			getPath:  "/load_balancers/7", envelope: "load_balancer",
+			args:    []string{"load-balancer", "remove-target", "7", "--label-selector", "role=web"},
+			getPath: "/load_balancers/7", envelope: "load_balancer",
 			postPath: "/load_balancers/7/actions/remove_target", actionID: "104",
-			before:   hzLBSelectorTargetBody, after: hzLBEmpty,
-			want:     []string{"confirmed_present: true", "target_absent: true", "targets: 0", "label_selector: role=web"},
-			unmet:    `label-selector target for "role=web" is STILL attached`,
+			before: hzLBSelectorTargetBody, after: hzLBEmpty,
+			want:  []string{"confirmed_present: true", "target_absent: true", "targets: 0", "label_selector: role=web"},
+			unmet: `label-selector target for "role=web" is STILL attached`,
 		},
 		{
 			name: "lb-change-algorithm", kind: "load-balancer",
-			args:     []string{"load-balancer", "change-algorithm", "7", "--algorithm", "least_connections"},
-			getPath:  "/load_balancers/7", envelope: "load_balancer",
+			args:    []string{"load-balancer", "change-algorithm", "7", "--algorithm", "least_connections"},
+			getPath: "/load_balancers/7", envelope: "load_balancer",
 			postPath: "/load_balancers/7/actions/change_algorithm", actionID: "105",
-			before:   hzLBEmpty, after: hzLBLeastConn,
-			want:     []string{"confirmed_present: true", "algorithm: least_connections"},
-			unmet:    `reports algorithm "round_robin", not "least_connections"`,
+			before: hzLBEmpty, after: hzLBLeastConn,
+			want:  []string{"confirmed_present: true", "algorithm: least_connections"},
+			unmet: `reports algorithm "round_robin", not "least_connections"`,
 		},
 		{
 			// THE WORST CASE IN THE SET: the flag is an id-or-name reference and
 			// the old receipt printed the raw string. `--type 2` now yields the
 			// RESOLVED name the server reports.
 			name: "lb-change-type", kind: "load-balancer",
-			args:     []string{"load-balancer", "change-type", "7", "--type", "2"},
-			getPath:  "/load_balancers/7", envelope: "load_balancer",
+			args:    []string{"load-balancer", "change-type", "7", "--type", "2"},
+			getPath: "/load_balancers/7", envelope: "load_balancer",
 			postPath: "/load_balancers/7/actions/change_type", actionID: "106",
-			before:   hzLBEmpty, after: hzLBType21,
+			before: hzLBEmpty, after: hzLBType21,
 			want:     []string{"confirmed_present: true", "load_balancer_type: lb21", "load_balancer_type_id: 2"},
 			unwanted: []string{"type: 2"},
 			unmet:    `reports load_balancer_type "lb11" (id 1), not "2"`,
 		},
 		{
 			name: "floating-ip-assign", kind: "floating-ip",
-			args:     []string{"floating-ip", "assign", "11", "--server", "42"},
-			getPath:  "/floating_ips/11", envelope: "floating_ip",
+			args:    []string{"floating-ip", "assign", "11", "--server", "42"},
+			getPath: "/floating_ips/11", envelope: "floating_ip",
 			postPath: "/floating_ips/11/actions/assign", actionID: "107",
-			before:   hzFIPFree, after: hzFIPAssigned,
-			setup:    hzServerLookup,
-			want:     []string{"confirmed_present: true", "assigned: true", "server_id: 42", "server: web-1"},
-			unmet:    "no server at all, not server id 42",
+			before: hzFIPFree, after: hzFIPAssigned,
+			setup: hzServerLookup,
+			want:  []string{"confirmed_present: true", "assigned: true", "server_id: 42", "server: web-1"},
+			unmet: "no server at all, not server id 42",
 		},
 		{
 			name: "floating-ip-unassign", kind: "floating-ip",
-			args:     []string{"floating-ip", "unassign", "11"},
-			getPath:  "/floating_ips/11", envelope: "floating_ip",
+			args:    []string{"floating-ip", "unassign", "11"},
+			getPath: "/floating_ips/11", envelope: "floating_ip",
 			postPath: "/floating_ips/11/actions/unassign", actionID: "108",
-			before:   hzFIPAssigned, after: hzFIPFree,
-			want:     []string{"confirmed_present: true", "assigned: false"},
-			unmet:    "STILL assigned to server id 42",
+			before: hzFIPAssigned, after: hzFIPFree,
+			want:  []string{"confirmed_present: true", "assigned: false"},
+			unmet: "STILL assigned to server id 42",
 		},
 		{
 			name: "primary-ip-assign", kind: "primary-ip",
-			args:     []string{"primary-ip", "assign", "9", "--server", "42"},
-			getPath:  "/primary_ips/9", envelope: "primary_ip",
+			args:    []string{"primary-ip", "assign", "9", "--server", "42"},
+			getPath: "/primary_ips/9", envelope: "primary_ip",
 			postPath: "/primary_ips/9/actions/assign", actionID: "109",
-			before:   hzPIPFree, after: hzPIPAssigned,
-			setup:    hzServerLookup,
-			want:     []string{"confirmed_present: true", "assigned: true", "assignee_id: 42", "assignee_type: server", "server: web-1"},
-			unmet:    "not server id 42",
+			before: hzPIPFree, after: hzPIPAssigned,
+			setup: hzServerLookup,
+			want:  []string{"confirmed_present: true", "assigned: true", "assignee_id: 42", "assignee_type: server", "server: web-1"},
+			unmet: "not server id 42",
 		},
 		{
 			name: "primary-ip-unassign", kind: "primary-ip",
-			args:     []string{"primary-ip", "unassign", "9"},
-			getPath:  "/primary_ips/9", envelope: "primary_ip",
+			args:    []string{"primary-ip", "unassign", "9"},
+			getPath: "/primary_ips/9", envelope: "primary_ip",
 			postPath: "/primary_ips/9/actions/unassign", actionID: "110",
-			before:   hzPIPAssigned, after: hzPIPFree,
-			want:     []string{"confirmed_present: true", "assigned: false"},
-			unmet:    "STILL assigned to",
+			before: hzPIPAssigned, after: hzPIPFree,
+			want:  []string{"confirmed_present: true", "assigned: false"},
+			unmet: "STILL assigned to",
 		},
 	}
 }
@@ -597,8 +597,8 @@ func hzLBCreateCases() []hzLBCreateCase {
 		},
 		{
 			// Asked to be homed in nbg1; the API placed it in fsn1.
-			name: "floating-ip",
-			args: []string{"floating-ip", "create", "--type", "ipv4", "--home-location", "nbg1", "--name", "web-vip"},
+			name:     "floating-ip",
+			args:     []string{"floating-ip", "create", "--type", "ipv4", "--home-location", "nbg1", "--name", "web-vip"},
 			postPath: "/floating_ips",
 			response: `{"floating_ip":{"id":11,"name":"web-vip","ip":"192.0.2.99","type":"ipv4",` +
 				`"home_location":{"id":2,"name":"fsn1"},"dns_ptr":[]}}`,
@@ -606,8 +606,8 @@ func hzLBCreateCases() []hzLBCreateCase {
 			unwanted: []string{"home_location: nbg1"},
 		},
 		{
-			name: "primary-ip",
-			args: []string{"primary-ip", "create", "--type", "ipv4", "--datacenter", "nbg1-dc3", "--name", "web-ip"},
+			name:     "primary-ip",
+			args:     []string{"primary-ip", "create", "--type", "ipv4", "--datacenter", "nbg1-dc3", "--name", "web-ip"},
 			postPath: "/primary_ips",
 			response: `{"primary_ip":{"id":19,"name":"web-ip","ip":"192.0.2.50","type":"ipv4","assignee_type":"server",` +
 				`"assignee_id":null,"datacenter":{"id":3,"name":"nbg1-dc3","location":{"id":1,"name":"nbg1"}},"dns_ptr":[]}}`,
@@ -622,8 +622,8 @@ func hzLBCreateCases() []hzLBCreateCase {
 			want: []string{"confirmed_present: true", "type: spread", "servers: 2"},
 		},
 		{
-			name: "certificate-managed",
-			args: []string{"certificate", "create-managed", "--name", "web-tls", "--domain", "example.com"},
+			name:     "certificate-managed",
+			args:     []string{"certificate", "create-managed", "--name", "web-tls", "--domain", "example.com"},
 			postPath: "/certificates",
 			response: `{"certificate":{"id":13,"name":"web-tls","type":"managed","domain_names":["example.com","www.example.com"],` +
 				`"status":{"issuance":"pending","renewal":"unavailable"}},` +

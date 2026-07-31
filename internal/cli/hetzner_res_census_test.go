@@ -185,8 +185,8 @@ var hzResDispositions = map[string]hzResDisposition{
 		"paid: hzResObservedResponse observes result.Certificate; hzObserveCertificateManaged DECLARES the async issuance state rather than asserting `issued`"},
 
 	// ---- Round 2: the remaining create receipts. --------------------------
-	"volume/create":  {hzClassCreate, hzUnpaidMutation},
-	"network/create": {hzClassCreate, hzUnpaidMutation},
+	"volume/create":   {hzClassCreate, hzUnpaidMutation},
+	"network/create":  {hzClassCreate, hzUnpaidMutation},
 	"firewall/create": {hzClassCreate, hzUnpaidMutation},
 	"zone/create":     {hzClassCreate, hzUnpaidMutation},
 	"record/create":   {hzClassCreate, hzUnpaidMutation},
