@@ -698,15 +698,24 @@ test('wave 9 LEG B: a matrixed aggregator cannot render a requirable context', (
 // THE DEFECT THIS SLICE REMOVES, stated as a test. An aggregator that exists,
 // runs, and reds while the PR merges green is not a measurement; it is a display.
 test('wave 9 LEG C: an UNREGISTERED aggregator is rung 3, named, with the fix named too', () => {
+  // The survivor list is DERIVED from the spec this case builds, never quoted.
+  // A literal "Elixir gate, PR references an active task" was correct until the
+  // wave-11 flip added two contexts, and then it failed on the MERGED tree
+  // while every per-slice gate stayed green — the exact shape this epic exists
+  // to kill. Derive from the foreign surface; pin only what this case owns.
+  let survivors = [];
   const { status, out } = synthRun({ requiredChecks: (rc) => {
     rc.protection.required_status_checks.checks =
       rc.protection.required_status_checks.checks.filter((c) => c.context !== AGG);
+    survivors = rc.protection.required_status_checks.checks.map((c) => c.context);
     return rc;
   } });
+  assert.ok(survivors.length > 0 && !survivors.includes(AGG),
+    'the specimen must strip the aggregator and leave a non-empty required set, else the assertions below are vacuous');
   assert.equal(status, NO_SEAL, 'an unenforced aggregator must not be certified as a measurement');
   assert.match(out, /is aggregated by "Cloud gate", and "Cloud gate" is NOT a required status check on main/);
-  assert.match(out, /required today: Elixir gate, PR references an active task/,
-    'the required set that DOES exist is printed, so the gap is readable');
+  assert.ok(out.includes(`required today: ${survivors.join(', ')}`),
+    `the required set that DOES exist is printed, so the gap is readable — expected "required today: ${survivors.join(', ')}"`);
   assert.match(out, /The job can go red and the PR still merges/);
   assert.match(out, /cch-w9-register-console-and-cloud-gates/, 'the row that pays this is named');
   assert.match(out, /✗ CCH-D2-session-peer-ip-is-the-docker-bridge  \(rung 3\)/);
@@ -815,17 +824,154 @@ test('wave 9 LEG C: with two unregistered aggregators, the refusal names both', 
 
 // ── THE LIVE STATE, PINNED HONESTLY ─────────────────────────────────────────
 // No fixture override, no synthetic repo: the real cloud.yml and the real
-// required-checks.json. `Cloud gate` is NOT registered at this commit, so clause (b)
-// FAILS — deliberately, and this test says so out loud rather than papering over it.
-// When `cch-w9-register-console-and-cloud-gates` lands, THIS is the assertion that
-// must be flipped, and flipping it is the proof the registration took effect.
-test('wave 9 LIVE: until Cloud gate is registered, clause (b) reads FAIL on the real branch', () => {
-  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO, '--guard-cmd', 'true']);
-  assert.equal(status, NO_SEAL, 'the interim state is NO SEAL, and that is the honest answer');
-  assert.match(out, /"Cloud gate" is NOT a required status check on main/);
-  assert.match(token(out), /b=FAIL/);
+// required-checks.json.
+//
+// REWRITTEN IN WAVE 11 REVIEW, and the rewrite is the point. This case used to
+// hard-assert the PRE-flip answer ("Cloud gate is NOT required, therefore clause
+// (b) FAILS") with a comment telling a future human to flip it by hand once
+// registration landed. Registration landed in the same wave as this file's other
+// change, on a DIFFERENT branch — so every per-slice gate was green and the
+// MERGED tree failed. A case that must be hand-flipped on someone else's merge
+// is a case that reds the integration nobody ran.
+//
+// So it now asserts the INVARIANT instead of one side of it: the predicate's
+// clause-(b) reading must AGREE with the committed spec, whichever side of the
+// flip the branch is on. Both arms carry real assertions, and the arm that runs
+// is reported, so a reader can see which state the tree is in.
+test('LIVE: the clause-(b) reading agrees with the committed spec, on either side of the flip', () => {
   const rc = JSON.parse(readFileSync(REQUIRED_CHECKS, 'utf8'));
   assert.equal(rc.enforced, true, 'branch protection IS live — that is what makes this readable at all');
-  assert.ok(!rc.protection.required_status_checks.checks.some((c) => c.context === AGG),
-    'if Cloud gate has been registered, flip this test rather than deleting it');
+  const registered = rc.protection.required_status_checks.checks.some((c) => c.context === AGG);
+  const { status, out } = run(['--ledger', FIX('ladder-no-waiver.json'), '--repo', REPO, '--guard-cmd', 'true']);
+
+  if (registered) {
+    // POST-FLIP. `Cloud gate` carries the cloud.yml `test` job, so every entry
+    // measured there climbs from rung 3 to rung 2 and clause (b) stops failing
+    // for THIS reason. Nothing here claims a seal: clause (a) is fixtured.
+    assert.doesNotMatch(out, /"Cloud gate" is NOT a required status check on main/,
+      'Cloud gate is registered in the committed spec, so the predicate must stop reporting it as unregistered');
+    assert.match(out, /CCH-D2-session-peer-ip-is-the-docker-bridge/);
+    assert.doesNotMatch(token(out), /b=FAIL/,
+      'with the aggregator required, clause (b) must no longer fail on the unenforced-measurement leg');
+    assert.match(out, /rung 2 — MEASURED-ELSEWHERE/,
+      'the registered aggregator must move the cloud.yml-measured entries to rung 2');
+  } else {
+    // PRE-FLIP. The honest interim answer, unchanged.
+    assert.equal(status, NO_SEAL, 'the interim state is NO SEAL, and that is the honest answer');
+    assert.match(out, /"Cloud gate" is NOT a required status check on main/);
+    assert.match(token(out), /b=FAIL/);
+  }
+});
+
+// ═══ WAVE 11 — `--ladder-only` READS THE LADDER AND CLAIMS NOTHING ═══════════
+//
+// Weight 3 of this epic ("where does the seal actually stand?") was unanswerable for
+// four waves because the instrument CONFLATED reading the clause-(b) ladder with
+// claiming a verdict: every legal live invocation refuses UPSTREAM of the ladder
+// (`--successor TERMINAL` -> TERMINAL-CLAIM-REFUTED, `--successor <name>` ->
+// UNRESOLVABLE-SUCCESSOR) and the catch prints a=b=c=UNEVALUATED. `--ladder-only`
+// separates the two acts: it reads, and it claims nothing.
+//
+// These tests FAIL IF THE FLAG LIES, in the two ways it could:
+//   1. by emitting a verdict anyway — then it is the seal under a new name, and the
+//      first CI job to wire it in re-creates the conflation; and
+//   2. by SWALLOWING an INFRA FAULT into a clean read — the regression that reads
+//      like PROGRESS, because a Leg-A refusal degrading to "read fine" turns an
+//      unenforced branch into a green ladder at exit 0.
+
+const ladderOnlyRun = (extra = []) => run(['--ladder-only', '--repo', REPO, ...extra]);
+
+test('wave 11: --ladder-only NEVER emits a verdict — no VERDICT: line, no SEAL/NO-SEAL token', () => {
+  const { status, out } = ladderOnlyRun();
+  assert.equal(status, SEAL, `a clean read exits 0 even with rung-3 entries present: ${token(out)}`);
+  // Every shape a verdict takes in this file, all absent.
+  assert.doesNotMatch(out, /^VERDICT:/m, 'a reading must print no VERDICT: line at all');
+  assert.doesNotMatch(out, /SEAL-PREDICATE (SEAL|NO-SEAL|REFUSED|INFRA-FAULT)\b/,
+    'the token must carry no verdict word — LADDER-ONLY is not a verdict');
+  assert.doesNotMatch(out, /\bNO[- ]SEAL\b/, 'nothing in a reading may read as NO SEAL');
+  assert.doesNotMatch(out, /REFUSED at /);
+  // ...and it says, in its own letters, which clauses it never read.
+  assert.match(token(out), /^VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:\d+,rung2:\d+,rung3:\d+ /);
+  assert.match(token(out), /a=NOT-READ c=NOT-READ/,
+    'the token string itself is what makes a --ladder-only run unquotable as "the seal"');
+  assert.match(out, /Clause \(a\) and bucket \(c\) were NOT READ/);
+  assert.match(out, /D83 forbids MANUFACTURING A SUCCESSOR TO FORCE A VERDICT; it does not/);
+  assert.match(out, /CLAUSE \(b\) known user-facing defects — 6 registered/);
+});
+
+test('wave 11: --ladder-only does NOT swallow an INFRA FAULT into a clean read', () => {
+  // Leg A throws on `enforced !== true`. If --ladder-only caught that and printed a
+  // ladder anyway, clause (b) would silently degrade from FAIL to UNEVALUATED behind
+  // an exit 0. exit 2, or nothing.
+  const root = synthRepo({ requiredChecks: (rc) => ({ ...rc, enforced: false }) });
+  const { status, out } = run(['--ladder-only', '--repo', root, '--guard-cmd', 'true',
+    '--ledger', FIX('ladder-no-waiver.json')]);
+  assert.equal(status, INFRA, 'an unenforced boundary must not be laundered into a 0-exit reading');
+  assert.match(out, /INFRA FAULT at /);
+  assert.match(out, /says enforced=false — branch protection is NOT applied to main/);
+  assert.doesNotMatch(out, /LADDER-ONLY/, 'no reading may be printed off a read that never happened');
+  assert.doesNotMatch(out, /MEASURED-ELSEWHERE/);
+});
+
+test('wave 11: --ladder-only reaches the ladder the live refusals never can', () => {
+  // The control. The SAME tree, minus the flag, refuses upstream of the ladder and
+  // reports every clause UNEVALUATED. That contrast IS this slice.
+  const refused = run(['--repo', REPO, '--successor', 'TERMINAL']);
+  assert.equal(refused.status, NO_SEAL);
+  assert.match(token(refused.out),
+    /REFUSED reason=TERMINAL-CLAIM-REFUTED a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
+  assert.doesNotMatch(refused.out, /CLAUSE \(b\)/,
+    'the refusal never reaches the ladder — that is the problem being solved');
+
+  const read = ladderOnlyRun();
+  assert.equal(read.status, SEAL);
+  assert.match(token(read.out), /rung1:2/, 'both committed guards actually SPAWNED and named their measurement');
+  assert.match(read.out, /MEASURED HERE by cloud\/priv\/static\/__app\.test\.mjs/);
+  assert.match(read.out, /MEASURED HERE by design\/emit-fence\.test\.mjs/);
+});
+
+test('wave 11: --ladder-only names the drift the committed record cannot see', () => {
+  // Rung 2 is a read of the COMMITTED record. A 4-context spec that merges while the
+  // PUT never lands — or is reverted — still prints rung 2 with nothing enforcing it.
+  // The reading discloses that itself rather than letting a reader infer live
+  // protection from it.
+  const { out } = ladderOnlyRun();
+  assert.match(out, /COMMITTED RECORD ONLY/);
+  assert.match(out, /This program makes no network call BY DESIGN/);
+  assert.match(out, /required-checks-verify\.sh` is the only instrument that catches/);
+});
+
+test('wave 11: --ladder-only refuses to let anyone credit the Console gate for clause (b)', () => {
+  // All four rung-2 entries name cloud.yml job `test`; NO register entry references
+  // console-harness.yml. A Cloud-gate-only spec therefore reads IDENTICALLY to one
+  // that also registers the Console gate — measured here, not asserted.
+  const args = (root) => ['--ladder-only', '--repo', root, '--guard-cmd', 'true',
+    '--ledger', FIX('ladder-no-waiver.json')];
+  const cloudOnly = run(args(synthRepo({})));
+  const bothGates = run(args(synthRepo({ requiredChecks: (rc) => {
+    rc.protection.required_status_checks.checks.push({ context: 'Console harness gate', app_id: 15368 });
+    return rc;
+  } })));
+  assert.equal(cloudOnly.status, SEAL);
+  assert.equal(bothGates.status, SEAL);
+  assert.match(token(cloudOnly.out), /b-rungs=rung1:2,rung2:4,rung3:0/);
+  assert.match(token(bothGates.out), /b-rungs=rung1:2,rung2:4,rung3:0/,
+    'registering the Console gate moves NOT ONE line of clause (b)');
+  assert.match(cloudOnly.out, /Registering the Console gate moves no line above/);
+});
+
+test('wave 11: --ladder-only is still bound by R0 and R1 — no stub, no empty register', () => {
+  // The four SUCCESSOR refusals are skipped by design: they protect a VERDICT, and a
+  // reading claims none. The two that protect clause (b) ITSELF are not skipped — a
+  // live --guard-cmd would read a stub as a measurement, and an empty register would
+  // read zero defects as a clean ladder.
+  const stub = run(['--ladder-only', '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(stub.status, NO_SEAL, 'R0 still refuses a live stub — a reading of a stub is not a reading');
+  assert.match(token(stub.out), /REFUSED reason=GUARD-OVERRIDE-WITHOUT-FIXTURE/);
+
+  const emptied = mutatedRun(
+    (s) => s.replace(/^const KNOWN_DEFECTS = \[[\s\S]*?^\];$/m, 'const KNOWN_DEFECTS = [];'),
+    ['--ladder-only', '--repo', REPO]);
+  assert.equal(emptied.status, NO_SEAL, 'R1 still refuses an empty register on the reading path too');
+  assert.match(token(emptied.out), /REFUSED reason=EMPTY-DEFECT-REGISTER/);
 });
