@@ -274,12 +274,17 @@ defmodule PDS.Census do
   # bulldocs_ingest_controller.ex:630 and :715, whose cited tests drive the route and never
   # read the paper back. Both now read UNJUDGED / unjudged_other with the refusal written
   # in the row. THAT IS THE LEDGER WORKING — a wave that could only ever ratify its own
-  # brief would be paperwork. Below the line,
-  # and NOT part of it: 6 rows carry `side_effect_existence_only`, which PDS-D499 maps to
-  # UNJUDGED — the cited Repo read asserts an audit row EXISTS, never that the printed
-  # field equals the stored one. Three of those six are the wave's own "weaker still"
-  # rows (tasks_controller.ex:1352, bulldocs_ingest_controller.ex:164 and
-  # auth_controller.ex:329, which proves session death through a SECOND ENDPOINT).
+  # brief would be paperwork. Below the line, and NOT part of it: the rows carrying
+  # `side_effect_existence_only`, which PDS-D499 maps to UNJUDGED — the cited Repo read
+  # asserts an audit row EXISTS, never that the printed field equals the stored one.
+  # THE COUNT IS NOT TRANSCRIBED HERE. It is derived at print time from @register (the
+  # BASIS DISTRIBUTION block, and the "Below the line" sentence the integrity report
+  # prints from `by_basis`) — a hand-typed integer in this comment went stale inside this
+  # very wave, because bulldocs_ingest_controller.ex:164 was demoted to `unjudged_other`
+  # on the advisory line AFTER the tally was written. The two that remain of the wave's
+  # own "weaker still" rows are tasks_controller.ex:1352 and auth_controller.ex:329
+  # (which proves session death through a SECOND ENDPOINT); :164's demotion is printed in
+  # full in the UNJUDGED-OTHER block.
   #
   # -- THE BASIS VOCABULARY IS CLOSED, AND EACH VALUE CARRIES ITS OWN CHECK. An essay in
   # a reason field is unfalsifiable paperwork; a vocabulary token is a claim a machine can
@@ -397,11 +402,21 @@ defmodule PDS.Census do
   # bottoms out in Repo.delete(_, stale_error_field: :id), Repo.update/1 on one fetched
   # row, or Repo.rollback — they are FALSE ACCUSATIONS, and a roster that carries them
   # would be the over-claiming this census exists to find, pointed the other way.
+  #
+  # TWO ROWS ARE STALE-ON-MERGE, AND SAYING SO IS THE POINT (wave 37 review, 2026-08-02).
+  # scim_groups_controller.ex and session_controller.ex are verdicted REFUTED **at
+  # 501fb9670**. `pds-w37-unread-callee-receipts` repairs BOTH, and both roster literals
+  # SURVIVE that repair as substrings — measured, not assumed: the census run over the
+  # three wave-37 branches merged together prints ROSTER-ANCHORS-EXIST PASS with these
+  # verdicts unchanged. So the ANCHOR arm cannot catch the staleness; nothing here can.
+  # Whoever merges that slice OWNS re-deriving these two rows in the same wave — the note
+  # below is the obligation, and a REFUTED that outlives its defect is exactly the
+  # over-claim this roster exists to name, pointed at the roster itself.
   @roster [
     %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
       literal: "Scim.delete_group(org, group)",
       verdict: "REFUTED", basis: :unjudged_other,
-      note: "the callee's return is DISCARDED ENTIRELY before a 204, and Scim.delete_group/2 returns {:ok, n} including {:ok, 0}. Repair in flight as pds-w37-unread-callee-receipts."},
+      note: "the callee's return is DISCARDED ENTIRELY before a 204, and Scim.delete_group/2 returns {:ok, n} including {:ok, 0}. STALE-ON-MERGE: pds-w37-unread-callee-receipts widens the callee to {:error, :not_found} and matches it at the caller; when that branch lands, RE-DERIVE this row — the literal survives, so no arm will red for you."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "Scim.deprovision_user(org, user, hard: true)",
       verdict: "PROVEN", basis: :end_to_end_unmutated,
@@ -409,7 +424,7 @@ defmodule PDS.Census do
     %{path: "api/lib/barkpark_web/controllers/session_controller.ex",
       literal: "Barkpark.Accounts.revoke_user_session_token(token)",
       verdict: "REFUTED", basis: :unjudged_other,
-      note: "revoke_user_session_token/1 hardcodes :ok over a Repo.update_all, so the flash and the redirect below it are true no matter how many rows moved. Repair in flight as pds-w37-unread-callee-receipts."},
+      note: "revoke_user_session_token/1 hardcodes :ok over a Repo.update_all, so the flash and the redirect below it are true no matter how many rows moved. STALE-ON-MERGE: pds-w37-unread-callee-receipts widens it to {:ok, revoked} and forks the flash on the count; when that branch lands, RE-DERIVE this row — the literal survives, so no arm will red for you."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "StudioChat.update_approval_status(id, request_id, status)",
       verdict: "UNJUDGED", basis: :unjudged_other,
@@ -703,7 +718,7 @@ defmodule PDS.Census do
             "BarkparkWeb.TasksController.task_list_response/3", "83021484", "1576835"},
       verdict: "UNJUDGED", basis: :unjudged_other,
       note:
-        "wave 36 measured this receipt divergent and pds-w36-help-seal-fix repaired it; no committed differential naming task_list_response/3 resolves in the tree at this sha, so the REPAIR is unjudged here rather than credited",
+        "wave 36 measured this receipt divergent and pds-w36-help-seal-fix repaired it; no committed differential naming task_list_response/3 resolves in the tree at this sha, so the REPAIR is unjudged here rather than credited. UPGRADE-ON-MERGE (wave 37 review, 2026-08-02): that slice lands api/test/barkpark_web/controllers/pds_w36_help_seal_probe_test.exs, whose PROBE A and PROBE D were re-verified RED by this reviewer against a faithful revert of the seal hoist. It cites the ROUTE, never the function name, so this note's wording stays literally true after the merge and no arm will red — re-derive the row to end_to_end by hand when the branch lands.",
     },
     # barkpark_web/controllers/tasks_controller.ex:170
     %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
