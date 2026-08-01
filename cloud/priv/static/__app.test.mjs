@@ -12125,6 +12125,11 @@ test("cch-w20-s3: displayUrl shaves the scheme, publicUrl keeps it — and a cus
   assert.equal(hooks.displayUrl({}), "");
   // a path is kept whole — the shave is the scheme, not a truncation
   assert.equal(hooks.displayUrl({ url: "https://acme.barkpark.cloud/sites/blog/" }), "acme.barkpark.cloud/sites/blog/");
+  // REVIEW (wave 20): an uppercased scheme is shaved too. Nothing normalises
+  // bp.url before render, and a case-SENSITIVE match would have painted the
+  // scheme back on for that one record while every driven cell stayed green.
+  assert.equal(hooks.displayUrl({ url: "HTTPS://production-5b2c1e.barkpark.cloud" }), "production-5b2c1e.barkpark.cloud");
+  assert.equal(hooks.displayUrl({ custom_host: "app.acme.no", url: "HtTp://box.internal" }), "app.acme.no");
 });
 
 test("cch-w20-s3: BOTH text sites shave the scheme together — the card and the fleet row never disagree", () => {

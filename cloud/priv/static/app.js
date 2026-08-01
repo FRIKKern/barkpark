@@ -5611,8 +5611,14 @@
   // still need the whole address. The shave alone cannot BOUND anything at
   // that length — `.instance-card-url`'s `overflow-wrap: break-word` does —
   // so the two ship together; see the app.css rule.
+  // REVIEW (wave 20): the scheme match is case-INSENSITIVE. Schemes are
+  // case-insensitive by RFC 3986 and nothing here normalises `bp.url` or
+  // `bp.custom_host` before it is rendered, so a stored "HTTPS://" would
+  // otherwise have painted the scheme back onto the line this helper exists to
+  // shave — a silent regression of the whole slice on one uppercased record.
   function displayUrl(bp) {
-    return String(publicUrl(bp) == null ? "" : publicUrl(bp)).replace(/^https?:\/\//, "");
+    var raw = publicUrl(bp);
+    return String(raw == null ? "" : raw).replace(/^https?:\/\//i, "");
   }
 
   function instanceHeaderHtml(bp) {
