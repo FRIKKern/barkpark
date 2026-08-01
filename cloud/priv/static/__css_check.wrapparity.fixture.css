@@ -26,6 +26,21 @@
    and app.js never loads it, and the harness asserts that unreachability rather
    than trusting this sentence. */
 
+/* Survivor 0 — W20-S6's attention-queue copy, pinned as required-present in the
+   same review commit that added it to WRAP_REQUIRED_HOSTS. It is reproduced
+   here for the same reason as the other three: so this fixture reds with
+   EXACTLY ONE error (the drifting `.op-gate`) instead of also tripping the
+   missing-pinned-host guard, which would mask the leg under test. */
+.attention-row .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  align-items: flex-start;
+}
+.attention-row .status-pill-detail { overflow: visible; text-overflow: clip; }
+
 /* Survivor 1 — the jacketLESS copy. No align-items, no -dot/-detail rules.
    Must green: E14 asserts the core, never the jacket (design choice 2). */
 .detail-rail .status-pill {
