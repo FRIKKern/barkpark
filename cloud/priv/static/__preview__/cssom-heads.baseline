@@ -252,4 +252,13 @@
 # MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 237759 B sha256 24505040b13e...,
 # authored rule heads 1252 == CSSOM style rules 1252, flattened selectors 1218/1218,
 # MISSES 0.
+# LEAD RE-MEASUREMENT 2026-08-01 (rebase of the w17 billing stack onto main 1253):
+# the branch recorded 1252 against an older base and the merged tree ALSO measures
+# 1252 — the first collision this session where the branch's number survived the
+# rebase. That is not luck and it is worth saying why: this stack's net is a DELETION
+# (the 900 tier rule) plus additions that land inside blocks that already have heads,
+# so main's 1253 minus the dropped rule is 1252 whichever order the hunks arrive in.
+# MEASURED anyway, per D158 — never inferred from that argument: Chrome
+# 150.0.7871.187, node v22.22.0, authored rule heads 1252 == CSSOM style rules 1252,
+# flattened selectors 1218/1218, MISSES 0, PARITY PASS.
 1252
