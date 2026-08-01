@@ -1047,6 +1047,17 @@ async function legRender(rep) {
 //  `.content` stops growing). 619 is the narrowest cell the sweep drives.
 const TIERS5_WIDTHS = [619, 901, 1040, 1200, 1700];
 
+// This leg's OWN render height, deliberately not the module-level one it used to
+// borrow. cch-w16-s2 lands in this same file and renames that bare `HEIGHT` const
+// to `RENDER_HEIGHT` as a member of a declared height axis — a rename git merges
+// CLEANLY against this leg, leaving `HEIGHT is not defined` at run time with no
+// conflict marker and no test to catch it (driven on a trial merge of the two
+// branches: `!! BREAKPOINT SWEEP (exit 2): unhandled — ReferenceError: HEIGHT is
+// not defined`). The height is not a shared axis question here: this leg asks
+// about the grid BOX, which is a width question, and 800 only has to be tall
+// enough that five cards are laid out rather than reflowed by a scrollbar.
+const TIERS5_HEIGHT = 800;
+
 // The two plans that do not exist. Shaped exactly like PLAN_CATALOG's entries
 // (`grep -n 'var PLAN_CATALOG' app.js`) so `tierCardHtml` renders them through
 // the real path; the copy
@@ -1143,7 +1154,7 @@ async function legTiers5() {
         // still invoked, and this leg gets its copy.
         await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, sessionId);
         await cdp.send("Emulation.setDeviceMetricsOverride",
-          { width, height: HEIGHT, deviceScaleFactor: 1, mobile: false }, sessionId);
+          { width, height: TIERS5_HEIGHT, deviceScaleFactor: 1, mobile: false }, sessionId);
         const url = `${BASE}/?scen=${cell.scen}&theme=light${cell.hash}`;
         if (!await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`)) {
           return die(`billing-trial@${width}: the tier grid never populated — refusing to publish a measurement of an empty screen.`);
