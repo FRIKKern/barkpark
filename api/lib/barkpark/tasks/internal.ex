@@ -5,6 +5,8 @@ defmodule Barkpark.Tasks.Internal do
   # (`Tasks.Mutations`, …) reuse one definition instead of each carrying its own
   # rev/event/broadcast helpers. Pure substrate — no public task API lives here.
 
+  import Ecto.Query, only: [from: 2]
+
   alias Barkpark.Content
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Repo
@@ -17,6 +19,48 @@ defmodule Barkpark.Tasks.Internal do
 
   def current_epoch(%Document{content: %{"claim" => %{"epoch" => e}}}) when is_integer(e), do: e
   def current_epoch(_), do: 0
+
+  # ─── The fenced content write (PDS-D451: the receipt is the STORED row) ───
+  #
+  # Every task CAS write path used to do the same two things: run a rev-fenced
+  # `Repo.update_all(set: [content:, rev:, updated_at:])`, which returns a ROW
+  # COUNT and never a row, and then RECONSTRUCT the receipt as
+  # `%{doc | content: new_content, rev: new_rev}`. That reconstruction is a
+  # statement of INTENT, not of storage: `updated_at` is deliberately written to
+  # the DB and deliberately absent from the struct, so every claim/stamp/close
+  # receipt carried the PREVIOUS write's timestamp — measured, byte-exact, on
+  # every verb. Worse as a CLASS: `documents` carries `slug_text`/`author_text`/
+  # `category_text` as `GENERATED ALWAYS AS (…) STORED` (`Content.Document`,
+  # `read_after_writes: true`), which a struct-merge cannot recompute at all.
+  #
+  # IMPLEMENTATION CHOSEN: `select: d` on the update query, so it compiles to
+  # `UPDATE … RETURNING` and the row Postgres actually holds — generated columns
+  # included — comes back in ONE statement. This is the idiom the document spine
+  # already uses (`content/writer.ex` fenced update, `auth.ex consume_login_ticket`).
+  # The alternative, `Repo.get!(Document, doc.id)` in the `{1, _}` branch, is
+  # equally correct under the per-task `pg_advisory_xact_lock` every caller holds,
+  # but costs a second round trip and reads a row the same txn just wrote.
+  # NEVER Ecto's `:returning` option — `update_all` SILENTLY IGNORES it and
+  # yields `{count, nil}` (documented in-repo at `auth.ex` consume_login_ticket).
+  #
+  # Returns `{:ok, stored_doc}` on a won fence and `:stale` on a lost one. The
+  # atom is deliberately NOT an `{:error, …}` tuple: callers map it to their own
+  # existing error (`:stale_claim` for the lifecycle/claim arms, `:stale_rev` for
+  # the merge reconcile), so no caller's return shape moves.
+  def fenced_content_write(%Document{} = doc, observed_rev, new_content, new_rev) do
+    query =
+      from(d in Document,
+        where: d.id == ^doc.id and d.rev == ^observed_rev,
+        select: d
+      )
+
+    case Repo.update_all(query,
+           set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
+         ) do
+      {1, [stored]} -> {:ok, stored}
+      {0, _} -> :stale
+    end
+  end
 
   # Holder check shared by the holder-gated write paths (release, stamp, pulse):
   # the caller must BE the lease holder — `claim.worker` must equal `worker_id`
