@@ -1058,7 +1058,13 @@ defmodule PDS.Census do
       {"CLASSIFICATION-TOTAL", classified_n + unclassified_n == length(emitted),
        "classified #{classified_n} + unclassified #{unclassified_n} == emitted #{length(emitted)}"},
       {"DELEGATE-REACHES-WRITE", delegate.close_write?,
-       "Barkpark.Tasks.close (defdelegate, #{delegate.delegates} on the facade) reaches a write verb at depth #{delegate.close_depth}"}
+       # On FAIL close_depth is nil, and "at depth " with nothing after it reads
+       # like a truncated line rather than a finding — say what actually happened.
+       if delegate.close_write? do
+         "Barkpark.Tasks.close (defdelegate, #{delegate.delegates} on the facade) reaches a write verb at depth #{delegate.close_depth}"
+       else
+         "Barkpark.Tasks.close (defdelegate, #{delegate.delegates} on the facade) reaches NO write verb within the route budget — the facade probe is blind"
+       end}
     ]
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
