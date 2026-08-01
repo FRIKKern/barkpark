@@ -337,4 +337,16 @@
 # the other screen slices abstain by hard criterion, so the INTEGRATED tree will still
 # be short and needs one corrective bump. D158 stands: re-run the tool on the MERGED
 # tree and take what it prints. Never merge-resolve this number, never add deltas.
-1260
+# LEAD CORRECTIVE BUMP 2026-08-02 (wave 20's parallel round, integrated tree). Wave 20
+# deliberately killed the baseline SEQUENCER: four screen slices built concurrently, ONE
+# named holder (cch-w19-s3, #8984) bumping this file and the other three FORBIDDEN from
+# touching it by a hard criterion. That is D202 kept — one hand still holds — with the
+# other three abstaining by machine rather than by politeness. #8984 landed 1259 -> 1260
+# measured on its own branch; the integrated tree with #8985, #8986 and #8988 on top
+# measures 1264. This is that single corrective bump, taken the D158 way: wrong sentinel
+# written, cssom-parity.mjs run, the value read out of the tool's OWN failure text, and
+# `grep -cE '^[0-9]+$'` confirmed to return exactly 1 afterwards. Chrome 150.0.7871.187,
+# authored rule heads 1264 == CSSOM style rules 1264, flattened selectors 1225/1225,
+# MISSES 0. NOT arithmetic over the four slices' deltas — the ninth collision this session
+# and the ninth time the tool was the only thing that knew the answer.
+1264
