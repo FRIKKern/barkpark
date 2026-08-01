@@ -215,6 +215,35 @@ const DEFECTS = [
 const CARD_WIDTHS = [320, 360, 390, 430, 620, 769, 800];
 const CARD_SCENS = ["overview-attention", "mixed-fleet"];
 
+// W20-S6: THE ATTENTION QUEUE'S OWN PILL — the fourth host, and the one the
+// leg below used to be structurally unable to see. GR109 asked its question
+// with `querySelector` (SINGULAR): pointed at `mixed-fleet` it would have
+// inspected row[0] only — 245/170, 30.6% hidden — and NEVER row[1], where
+// "Payment failed — subscription past due" reads 237/139 at 320, 41.4% of the
+// money message unrendered, in the SAME DOM at the SAME instant. A successor
+// that iterates is not a nicety; the worst cell was the invisible one.
+//
+// THE ROUTE IS LOAD-BEARING (charter D228). `mixed-fleet`'s own deepLink is
+// `#fleet`, where ZERO `.attention-row` render — which is where the filed
+// "renders ZERO at any width" universal came from. The hash is PINNED to
+// `#overview` below and the landed view id is asserted per cell, so a route
+// artifact can never again be read as a fixture fact.
+//
+// THREE SCENARIOS. `mixed-fleet` carries the worst phone cell (41.4%),
+// `overview-attention` the worst tablet cell (165/117 at 769, 29.1%) and
+// `overview-past-due` the 769 cell (237/210) the tablet row was filed on. One
+// fixture alone understates the band on either axis.
+//
+// THREE INVARIANTS PER CELL, and the two vertical ones are what make the
+// horizontal one mean anything. DRIVEN, not predicted: two negative controls —
+// `white-space: normal` alone, and a detail-only wrap — BOTH score a PERFECT
+// horizontal 117/117 at 769 while `pill.scrollHeight 29 > clientHeight 22` and
+// the detail's bottom edge paints 6px OUTSIDE the capsule. `height: auto` +
+// `min-height: 24px` are the declarations that carry it, and a horizontal-only
+// guard certifies both wrong fixes.
+const ATT_WIDTHS = [320, 360, 375, 390, 430, 620, 769, 800];
+const ATT_SCENS = ["mixed-fleet", "overview-attention", "overview-past-due"];
+
 // W15-S4: THE LEG THAT EXISTS BECAUSE THIS FILE WAS BLIND TO ITS OWN SUBJECT.
 // Every leg above asserts documentElement.scrollWidth — the PAGE. On the tree
 // this leg was written against, the W13 leg printed "108 / 108 cells clean"
@@ -730,6 +759,101 @@ async function main() {
       const wide = await evalJs(`getComputedStyle(document.querySelector('.attention-row')).flexDirection`);
       if (wide !== "row") fail("GR109-attention-row-dead-rule", `@900 flex-direction is "${wide}", expected "row" — the tablet stack leaked above its breakpoint`);
       else okLine(`@900 still a row — the stack is scoped to <=768`);
+
+      // ── W20-S6: the row's own status pill, on EVERY row, not the first ──
+      // See the note by ATT_WIDTHS. The stack assertions above answer where the
+      // BUTTONS land; they say nothing about whether the row still tells the
+      // operator WHY the box needs attention. This half does, on both axes.
+      const D109 = "GR109-attention-row-dead-rule";
+      const attCellCount = ATT_SCENS.length * ATT_WIDTHS.length * 2;
+      process.stdout.write(
+        `   attention-row pill — ${ATT_SCENS.length} scenarios x ${ATT_WIDTHS.length} widths x 2 themes` +
+        ` (${attCellCount} cells; EVERY .attention-row iterated — .status-pill-detail width, .status-pill height, detail bottom edge)\n`,
+      );
+      let attCells = 0, attPills = 0, attClipped = 0, attTall = 0, attOutside = 0, attPageOver = 0;
+      for (const scen of ATT_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter wide and assert the LANDED view — `?scen=` alone does not
+          // route, and `mixed-fleet` deep-links `#fleet`, where this queue does
+          // not exist at all. The hash is pinned; the view id is checked.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#overview`,
+            `document.querySelector('.attention-row .status-pill-detail') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+          );
+          const row = [];
+          for (const width of ATT_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var d=document.documentElement;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,pills:0,clips:[],tall:[],out:[],w:[]};` +
+              `[].slice.call(document.querySelectorAll('.attention-row')).forEach(function(r,i){` +
+              `  out.rows++;` +
+              `  var pill=r.querySelector('.status-pill'); if(!pill) return; out.pills++;` +
+              `  var pr=pill.getBoundingClientRect();` +
+              `  if(pill.scrollHeight>pill.clientHeight) out.tall.push({i:i,sh:pill.scrollHeight,ch:pill.clientHeight,t:(pill.textContent||'').slice(0,44)});` +
+              `  var det=r.querySelector('.status-pill-detail'); if(!det) return;` +
+              `  out.w.push(det.clientWidth+'/'+det.scrollWidth);` +
+              `  if(det.scrollWidth>det.clientWidth) out.clips.push({i:i,sw:det.scrollWidth,cw:det.clientWidth,t:(det.textContent||'').slice(0,48)});` +
+              `  var dr=det.getBoundingClientRect();` +
+              `  if(dr.bottom>pr.bottom+0.5) out.out.push({i:i,db:+dr.bottom.toFixed(2),pb:+pr.bottom.toFixed(2),t:(det.textContent||'').slice(0,48)});` +
+              `});` +
+              `return out;})()`,
+            );
+            attCells++;
+            if (m.view !== "view-overview") {
+              fail(D109, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-overview" — the hash did not route, so nothing below this line measures the attention queue`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D109, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty queue is not a clean queue. Measuring zero
+            // elements is the failure this leg's `querySelector` past would
+            // have reported as a pass — see the note by ATT_WIDTHS.
+            if (m.pills === 0) {
+              fail(D109, `${scen}/${theme}@${width}: zero .attention-row .status-pill measured (${m.rows} .attention-row present) — nothing was measured, this is not a pass`);
+              row.push(`${width}:0p`);
+              continue;
+            }
+            attPills += m.pills;
+            if (m.psw > m.pcw) {
+              attPageOver++;
+              fail(D109, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the front screen is off-screen sideways`);
+            }
+            for (const c of m.clips) {
+              attClipped++;
+              fail(D109, `${scen}/${theme}@${width} row${c.i} .attention-row .status-pill-detail: scrollWidth ${c.sw} > clientWidth ${c.cw} — ${Math.round((1 - c.cw / c.sw) * 100)}% of "${c.t}" is not rendered, so the attention queue does not say WHY this instance needs attention`);
+            }
+            for (const t of m.tall) {
+              attTall++;
+              fail(D109, `${scen}/${theme}@${width} row${t.i} .attention-row .status-pill: ${t.sh}px of text in a ${t.ch}px chip — "${t.t}" paints BELOW the capsule. A wrap without \`height: auto\` scores clean on every scrollWidth metric and still puts the words outside the box.`);
+            }
+            for (const o of m.out) {
+              attOutside++;
+              fail(D109, `${scen}/${theme}@${width} row${o.i} .attention-row .status-pill-detail: bottom ${o.db} is ${(o.db - o.pb).toFixed(2)}px BELOW the pill's bottom ${o.pb} — "${o.t}" is painted outside its own chip`);
+            }
+            const bad = m.clips.length + m.tall.length + m.out.length + (m.psw > m.pcw ? 1 : 0);
+            row.push(`${width}:${m.pills}p ${m.w.join(",")}${bad ? " !" + bad : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // AUDITED at the leg level too: a sweep that measured nothing across the
+      // whole matrix must exit 1, never print a green summary of zero work.
+      if (attPills === 0) {
+        fail(D109, `the attention-row sweep measured ZERO pills across all ${attCells} cells — the queue stopped rendering or the selector went stale; a vacuous green is refused`);
+      } else if (!failures.some((f) => f.defect === D109)) {
+        okLine(
+          `${attCells} / ${attCells} attention-row cells clean (${attPills} pills measured on BOTH axes, every row iterated) across ` +
+          `${ATT_WIDTHS.join("/")} on ${ATT_SCENS.join(" + ")}, both themes, route pinned #overview; ` +
+          `${attClipped} truncated reasons, ${attTall} chips shorter than their own text, ` +
+          `${attOutside} details painting below their pill, ${attPageOver} pages scrolling sideways. ` +
+          `Per-cell clientWidth/scrollWidth pairs are printed above; no pixel literal is pinned here — ` +
+          `the wrap boundary is a property of the fixture STRING`,
+        );
+      }
     }
 
     // ── GR115: the 720-block console declarations actually take effect ──────

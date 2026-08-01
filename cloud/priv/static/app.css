@@ -3044,6 +3044,75 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .attention-row .attention-main { align-self: stretch; }
 }
 
+/* ═════════════════ W20-S6 THE ATTENTION QUEUE SAYS WHY, ALL THE WAY DOWN
+   THE DEFECT, DRIVEN on merged-main bytes with the route pinned
+   `?scen=mixed-fleet#overview`: `.attention-row .status-pill-detail` rendered
+   139 of 237px of "Payment failed — subscription past due" at 320 — 41.4% of
+   the money message unrendered — while row[0] in the SAME DOM at the SAME
+   instant read 170/245 (30.6%). It clips at 320/360/375/390 and again at 769;
+   `overview-attention` clips at 320, at 769 (117/165, the worst single tablet
+   cell) and at 800 (148/165). Light and dark are byte-identical in every cell:
+   theme is not an axis for this row. Three of these rows ship on the landing
+   screen, and the row that hides the most was the one no instrument had ever
+   read — GR109 asked with `querySelector`, so it could only ever have seen
+   row[0].
+
+   THE ROUTE IS PART OF THE FACT (charter D228). `mixed-fleet`'s own deepLink is
+   `#fleet`, where this queue renders ZERO rows; a filed "renders ZERO at any
+   width" universal came from exactly that omission. The successor leg pins the
+   hash and asserts the landed view id per cell.
+
+   FOURTH COPY OF THE RECIPE, DELIBERATELY (D210). `.detail-rail`,
+   `.fleet-status`, `.instance-card-head` and now `.attention-row` each carry a
+   wrapper-scoped clone of the same five-declaration core. The shared
+   `.status-pill--wrap` variant was priced and refused three blocks below for
+   reasons that hold here unchanged — it saves ZERO rule heads, needs an app.js
+   change through the shared statusPill() factory, and authors a head INSIDE the
+   GR25-quarantined family. What was missing was not a refactor but a MEASURE of
+   divergence, and __css_check's E14 now pins all five declarations across every
+   copy: this block cannot drift from the other three without reddening.
+
+   GR11/GR25 CARVE-OUT BY CONSTRUCTION, NOT BY INSPECTION. `.attention-row` is a
+   WRAPPER in the vocabulary app.css:2270 uses; no quarantined pill family is
+   edited. Every line here is an ADD (D157 "an ADD, not a restyle"), so
+   `git diff -U0` shows this block as a hunk of OLD LENGTH ZERO and :2913-2957
+   is untouched without anyone having to check. It sits directly BELOW the
+   `.attention-row` 768 block on purpose (D236): a (0,0,2,0) wrapper selector
+   beats the (0,0,1,0) base from anywhere, so position is cascade-irrelevant
+   here — and the anchor that costs nothing keeps the file tail free for the
+   slices that need it.
+
+   THE VERTICAL HALF IS LOAD-BEARING, NOT CEREMONY (DRIVEN). `.status-pill`
+   pins `height: 24px` at :2923-2938 and computes `overflow: visible`. Two
+   negative controls — `white-space: normal` ALONE, and a detail-only wrap —
+   BOTH score a PERFECT horizontal 117/117 at 769 while `pill.scrollHeight 29 >
+   clientHeight 22` and the detail's bottom edge paints 6px OUTSIDE the capsule.
+   `height: auto` + `min-height: 24px` are the two declarations that carry it,
+   which is why the leg asserts pill height and the detail's bottom edge as well
+   as the width it was filed on.
+
+   THE 2px INSET IS DERIVED, as in the three blocks below: a 24px chip is 1px
+   border + 2px + an 18px line box + 2px + 1px, so `padding-top/bottom: 2px`
+   reproduces the existing optical inset exactly and a ONE-LINE pill measures
+   24px before and after — only a wrapped pill grows. `min-height: 24px` keeps
+   that floor. THE DOT OFFSET IS RE-DERIVED, NOT COPIED: this pill's own first
+   line box measures 18px (12px font, inherited line-height), so (18 - 7) / 2 =
+   5.5px puts the 7px dot on the centre of the FIRST line rather than the middle
+   of a two-line chip. `overflow: visible; text-overflow: clip` retires the
+   ellipsis machinery the wrap makes unreachable, so nothing can silently
+   re-truncate the reason. NO HEIGHT IS PINNED ANYWHERE (D206): the wrap
+   boundary is a property of the fixture STRING, not of this CSS. */
+.attention-row .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  align-items: flex-start;
+}
+.attention-row .status-pill-dot { margin-top: 5.5px; }
+.attention-row .status-pill-detail { overflow: visible; text-overflow: clip; }
+
 /* v4 instances grid — auto-fill cards. */
 .overview-instances { margin-top: 4px; }
 .instances-grid {

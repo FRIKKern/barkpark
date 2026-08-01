@@ -1820,11 +1820,14 @@ const wrapTmp = (name, css) => {
   fs.writeFileSync(f, css, "utf8");
   return f;
 };
-// The three PINNED survivors, byte-identical cores under three DIFFERENT
-// jackets. Every synthetic case below is built on top of these so the two
-// anti-vacuity guards (zero copies, missing pinned host) never mask the leg
-// under test.
+// The FOUR PINNED copies, byte-identical cores under four DIFFERENT jackets.
+// Every synthetic case below is built on top of these so the two anti-vacuity
+// guards (zero copies, missing pinned host) never mask the leg under test.
+// `.attention-row` joined the pin in W20-S6's review commit, in the same change
+// that added it to WRAP_REQUIRED_HOSTS — the fourth copy was counted but not
+// required, so a scan losing exactly that copy still read clean.
 const WRAP_SURVIVORS = [
+  ".attention-row .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
   ".detail-rail .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; }",
   ".fleet-status .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
   ".instance-card-head .status-pill { white-space: normal; height: auto; min-height: 24px; padding-top: 2px; padding-bottom: 2px; align-items: flex-start; }",
@@ -1857,7 +1860,7 @@ test("cch-w19-s4: E14 does NOT assert the jacket — a jacketless fourth host gr
   const f = wrapTmp("jacketless.css", WRAP_SURVIVORS + "\n.op-gate .status-pill { " + WRAP_CORE_TEXT + " }\n");
   const r = runCssCheck("--wrap-parity-check", f);
   assert.equal(r.status, 0, "a jacketless fourth host with the full core must GREEN:\n" + r.out);
-  assert.match(r.out, /4 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED as the fourth copy:\n" + r.out);
+  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, "and it must be COUNTED as the next copy:\n" + r.out);
   assert.match(r.out, /0 E14 error\(s\)/, r.out);
 });
 
@@ -1885,7 +1888,7 @@ test("cch-w19-s4: the trigger is the DECLARATION, not the selector", () => {
   const f = wrapTmp("outofscope.css", WRAP_SURVIVORS + "\n.some-rail .status-pill { margin-left: 4px; }\n");
   const r = runCssCheck("--wrap-parity-check", f);
   assert.equal(r.status, 0, "a wrapper-scoped rule declaring no core property must not red:\n" + r.out);
-  assert.match(r.out, /3 wrapper-scoped wrap copy\(ies\)/, "and must not even be COUNTED as a copy:\n" + r.out);
+  assert.match(r.out, /4 wrapper-scoped wrap copy\(ies\)/, "and must not even be COUNTED as a copy:\n" + r.out);
   assert.ok(!/some-rail/.test(r.out), "and must not be mentioned at all:\n" + r.out);
 });
 
@@ -1902,10 +1905,12 @@ test("cch-w19-s4: a vacuous green is refused — zero copies is an ERROR", () =>
 });
 
 test("cch-w19-s4: the three survivor selectors are pinned — losing one reds", () => {
-  // The zero-guard cannot see PARTIAL blindness: a scan degrading to 1 of 3
+  // The zero-guard cannot see PARTIAL blindness: a scan degrading to 1 of 4
   // still reports clean. These pins close that, and they are same-file pins of
-  // this repo's OWN selectors (pin-your-own, derive-foreign).
-  for (const host of [".detail-rail", ".fleet-status", ".instance-card-head"]) {
+  // this repo's OWN selectors (pin-your-own, derive-foreign). `.attention-row`
+  // joined the loop with W20-S6's fourth copy — a pin that is not driven here
+  // is a pin nobody has proven can bite.
+  for (const host of [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"]) {
     const kept = WRAP_SURVIVORS.split("\n").filter((l) => !l.startsWith(host + " ")).join("\n");
     const f = wrapTmp("missing.css", kept + "\n");
     const r = runCssCheck("--wrap-parity-check", f);
@@ -1914,14 +1919,22 @@ test("cch-w19-s4: the three survivor selectors are pinned — losing one reds", 
   }
 });
 
-test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all three copies there", () => {
+test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all four copies there", () => {
   // The shipped tree is the subject the check was written for. If it cannot
   // green there it will be deleted, and if it cannot SEE there it is decorative.
+  //
+  // W20-S6 BUMPED THIS PIN 3 -> 4 AND WIDENED THE LOOP, in the same commit that
+  // authored `.attention-row .status-pill`. That is the pin working, not the pin
+  // being in the way: a fourth wrapper-scoped copy is a CHANGE to the recipe's
+  // blast radius, and the epic's own count is the thing that notices. The count
+  // is a same-file pin of this repo's own stylesheet (pin-your-own,
+  // derive-foreign), so it is bumped deliberately, never derived from the file
+  // it is meant to measure.
   const appCss = fileURLToPath(new URL("./app.css", import.meta.url));
   const r = runCssCheck("--wrap-parity-check", appCss);
   assert.equal(r.status, 0, "app.css must be green under E14:\n" + r.out);
-  assert.match(r.out, /3 wrapper-scoped wrap copy\(ies\)/, r.out);
-  for (const host of [".detail-rail", ".fleet-status", ".instance-card-head"]) {
+  assert.match(r.out, /4 wrapper-scoped wrap copy\(ies\)/, r.out);
+  for (const host of [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"]) {
     assert.match(r.out, new RegExp("\\" + host + " \\.status-pill:\\d+"), host + " must be seen with a line number:\n" + r.out);
   }
 });

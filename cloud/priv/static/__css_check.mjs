@@ -638,7 +638,12 @@ const WRAP_CORE = [
 // same-file pin is the correct form here (pin-your-own, derive-foreign): it
 // closes the PARTIAL-blindness case the zero-copies guard cannot see — a scan
 // that degrades to finding 1 of 3 still reports "clean" without this.
-const WRAP_REQUIRED_HOSTS = [".detail-rail", ".fleet-status", ".instance-card-head"];
+// W20-S6 added `.attention-row` as the FOURTH copy and it is pinned here in the
+// same commit. Without this line the fourth copy was COUNTED but not
+// REQUIRED — a scan degrading to 3-of-4 that lost exactly the attention
+// queue's copy would still have reported clean, which is the partial
+// blindness these pins exist to close.
+const WRAP_REQUIRED_HOSTS = [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"];
 // WRAPPER-SCOPED: one or more descendant/child steps, then `.status-pill`, and
 // NOTHING after it. The trailing anchor keeps `.detail-rail .status-pill-label`
 // and `.status-pill--ok .status-pill-dot` out; requiring a leading step keeps
