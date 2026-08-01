@@ -368,9 +368,69 @@ defmodule PDS.Census do
       {"UNJUDGED", "the @declared row's basis span no longer carries its token (DECLARED-BASIS-INTACT)", :advisory},
     unexamined:
       {"UNJUDGED", "a committed test cites this site's route AND reads Repo back", :advisory},
+    not_a_receipt:
+      {"UNJUDGED", "the site renders a body or a status that makes a claim about work done", :advisory},
     unjudged_other:
       {"UNJUDGED", "PROSE REQUIRED; counted and PRINTED in the integrity block; NEVER reds", :advisory}
   }
+
+  # ---------------------------------------------------------- population roster
+  #
+  # THE BLIND-SPOT BLOCK USED TO BE THREE SUBSTRING TOTALS (PDS-D524). A total names
+  # nobody; this names EIGHT sites outside the `ok: true` lens that report success without
+  # a read, each with a verdict from the SAME vocabulary the register uses. It is DISJOINT
+  # from the 91 BY SITE, and the distinction matters: zero register keys live in
+  # scim_groups / scim_users / session_controller / chat_controller / chat_host_controller,
+  # and the ONE shared FILE is pulse_controller.ex, where the register holds create/2 (:58)
+  # and this roster names preflight/2 (:93) — a different function. Re-derived here rather
+  # than asserted: `cut -f1 keys.tsv | sort -u | grep -E 'scim|session|chat|pulse'` returns
+  # pulse_controller.ex and nothing else.
+  #
+  # EVERY ROW IS ANCHORED ON A LITERAL, NEVER A LINE NUMBER, and the arm asserts
+  # EXISTENCE, NEVER A COUNT. Measured over 80 api/lib commits across 9 days the three
+  # substring totals moved 7 times (~once per 11 commits, twice on ONE day) and the movers
+  # were a papers fence, a credential-scope security fix and a chat-wire feature — a count
+  # arm would have redded on unrelated work every week. The roster literals had ZERO drift
+  # across all 80.
+  #
+  # THE TEN "CLASS D" DELETE/REVOKE ECHO SITES ARE NOT ROSTERED (PDS-D523). Every one
+  # bottoms out in Repo.delete(_, stale_error_field: :id), Repo.update/1 on one fetched
+  # row, or Repo.rollback — they are FALSE ACCUSATIONS, and a roster that carries them
+  # would be the over-claiming this census exists to find, pointed the other way.
+  @roster [
+    %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
+      literal: "Scim.delete_group(org, group)",
+      verdict: "REFUTED", basis: :unjudged_other,
+      note: "the callee's return is DISCARDED ENTIRELY before a 204, and Scim.delete_group/2 returns {:ok, n} including {:ok, 0}. Repair in flight as pds-w37-unread-callee-receipts."},
+    %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
+      literal: "Scim.deprovision_user(org, user, hard: true)",
+      verdict: "PROVEN", basis: :end_to_end_unmutated,
+      note: "the match is `{:ok, _} =` over a raising Repo.delete! inside a transaction, so a failed deprovision cannot reach the 204."},
+    %{path: "api/lib/barkpark_web/controllers/session_controller.ex",
+      literal: "Barkpark.Accounts.revoke_user_session_token(token)",
+      verdict: "REFUTED", basis: :unjudged_other,
+      note: "revoke_user_session_token/1 hardcodes :ok over a Repo.update_all, so the flash and the redirect below it are true no matter how many rows moved. Repair in flight as pds-w37-unread-callee-receipts."},
+    %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
+      literal: "StudioChat.update_approval_status(id, request_id, status)",
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note: "both arms of update_approval_status fold to :ok, and answer_approval's result is discarded with `_ =`."},
+    %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
+      literal: "persist_user_turn(id, content)",
+      verdict: "UNJUDGED", basis: :declared_basis,
+      note: "a fail-soft persist, declared in the clause comment above it — the send is already on its way, so a persist miss must not turn a live send into an error."},
+    %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
+      literal: "json(%{request_id: request_id})",
+      verdict: "UNJUDGED", basis: :declared_basis,
+      note: "the request_id: nil no-op, declared in the @doc."},
+    %{path: "api/lib/barkpark_web/controllers/chat_host_controller.ex",
+      literal: "{:ok, :accepted} -> conn |> put_status(:accepted) |> json(",
+      verdict: "UNJUDGED", basis: :stub_mapping_only,
+      note: "re-renders the callee's :accepted tag faithfully; the tag's truth against any stored row is a separate question this row does not answer."},
+    %{path: "api/lib/barkpark_web/controllers/pulse_controller.ex",
+      literal: "def preflight(conn, _params), do: send_resp(conn, 204,",
+      verdict: "UNJUDGED", basis: :not_a_receipt,
+      note: "a CORS preflight 204 claims nothing about work done. CARRIED ON PURPOSE, so the roster's own completeness is checkable: a roster of only the guilty is indistinguishable from a roster nobody finished."}
+  ]
 
   @register [
     # barkpark/plugins/sheets/web/import_controller.ex:64
@@ -2512,6 +2572,58 @@ defmodule PDS.Census do
     p("    git grep -c 'json(conn,' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
     p("    git grep -c 'send_resp(conn, 2' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
     p("")
+    report_roster(parsed)
+  end
+
+  # THE ROSTER, PRINTED WITH ITS ANCHORS RESOLVED LIVE. The line beside each row is
+  # DERIVED from the literal on every run, never transcribed — that is the whole point of
+  # anchoring on a literal.
+  defp report_roster(parsed) do
+    src = Map.new(parsed, &{&1.path, &1.src})
+
+    p("  THE POPULATION ROSTER — #{length(@roster)} NAMED sites outside this lens that report success")
+    p("  without a read. A total names nobody; these are named, each with a verdict from")
+    p("  the SAME vocabulary the register uses, and each anchored on a LITERAL.")
+
+    Enum.each(@roster, fn r ->
+      case roster_anchor(src, r) do
+        {:ok, line} ->
+          p("      #{String.pad_trailing(r.verdict, 9)} #{short(r.path)}:#{line}  [#{r.basis}]")
+          wrap(r.note, "               ")
+
+        :missing ->
+          p("      #{String.pad_trailing(r.verdict, 9)} #{short(r.path)}  ANCHOR MISSING — see ROSTER-ANCHORS-EXIST")
+      end
+    end)
+
+    p("")
+  end
+
+  # EXISTENCE, NEVER A COUNT. The three totals above moved 7 times in 9 days on unrelated
+  # work; an arm over them would have been switched off inside a fortnight. A literal that
+  # has left its file is a real, actionable fact — the roster row now describes nothing.
+  defp roster_anchor(src, r) do
+    lines = src |> Map.get(r.path, "") |> String.split("\n")
+
+    case Enum.find_index(lines, &String.contains?(&1, r.literal)) do
+      nil -> :missing
+      i -> {:ok, i + 1}
+    end
+  end
+
+  defp roster_check(parsed) do
+    src = Map.new(parsed, &{&1.path, &1.src})
+    missing = Enum.filter(@roster, &(roster_anchor(src, &1) == :missing))
+
+    why =
+      if missing == [] do
+        "all #{length(@roster)} roster literal(s) still occur in their named file (EXISTENCE, never a count)"
+      else
+        "#{length(missing)} roster literal(s) have LEFT their file — the row now describes nothing: " <>
+          Enum.map_join(missing, " · ", &"#{short(&1.path)} #{inspect(&1.literal)}")
+      end
+
+    {"ROSTER-ANCHORS-EXIST", missing == [], why}
   end
 
   defp sum_occ(parsed, needle), do: Enum.sum(Enum.map(parsed, &count(&1.src, needle)))
@@ -3316,7 +3428,13 @@ defmodule PDS.Census do
   defp register_checks(classified, parsed) do
     case register_scope(classified) do
       :scoped_out -> []
-      :real -> [register_complete(classified), declared_rows_resolve(classified), declared_basis_intact(parsed)]
+      :real ->
+        [
+          register_complete(classified),
+          declared_rows_resolve(classified),
+          declared_basis_intact(parsed),
+          roster_check(parsed)
+        ]
     end
   end
 
