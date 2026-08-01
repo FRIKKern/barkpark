@@ -409,6 +409,68 @@ type hzResSite struct {
 	// parameter that supplies the action, when the action is that parameter.
 	// -1 otherwise.
 	actionParam int
+
+	// ---- PDS wave 34, leg 1: the CONFIRMATION BASIS, derived. ------------
+	// basisForm says HOW this site names the read its receipt claims, and it is
+	// the discriminator every basis arm below keys on:
+	//
+	//	hzBasisConst      the site passed a named hzResBasis* constant
+	//	hzBasisInherited  the site passed nothing; hzResBasisOf supplies the GET
+	//	                  default (21 of the 25 hzResObserved sites today)
+	//	hzBasisResponse   hzResObservedResponse, which takes no basis argument
+	//	                  at all — it hardcodes hzResBasisResponse
+	//	hzBasisLiteral    a BARE STRING passed where a constant belongs. Legal
+	//	                  today ONLY on hzResDestroyedDeclared, whose `basis
+	//	                  string` parameter is mandatory and non-variadic; an
+	//	                  hzResObserved site that does this is REJECTED, because
+	//	                  a literal cannot be bound to a class.
+	basisForm hzBasisForm
+	// basisIdent is the constant's identifier, "" unless basisForm is
+	// hzBasisConst or hzBasisResponse. A SYMBOL, not a string compare — the same
+	// discrimination the scanner already makes for the action.
+	basisIdent string
+	// basisText is the WORDING the receipt will actually print: the constant's
+	// value, the literal's value, or hzResBasisGet for an inherited site.
+	basisText string
+	// readText is the source of the confirming-read argument, whitespace
+	// collapsed. This is leg 2's whole evidence: what the site claims (basis)
+	// judged against what it actually calls (read).
+	readText string
+}
+
+// hzBasisForm is how a site names its confirmation basis. See hzResSite.
+type hzBasisForm string
+
+const (
+	hzBasisNone      hzBasisForm = ""          // the emitter carries no basis at all
+	hzBasisConst     hzBasisForm = "const"     // a named hzResBasis* identifier
+	hzBasisInherited hzBasisForm = "inherited" // omitted; hzResBasisOf's GET default
+	hzBasisResponse  hzBasisForm = "response"  // hzResObservedResponse's hardcoded basis
+	hzBasisLiteral   hzBasisForm = "literal"   // a bare string at the call site
+)
+
+// hzResBasisArgs is the BASIS argument slot per emitter, and the two shapes are
+// deliberately different so nothing can average them:
+//
+//	hzResObserved          index 9, TRAILING VARIADIC — absent means inherited.
+//	hzResDestroyedDeclared index 6, MANDATORY and non-variadic — the object-store
+//	                       destroys must always say what listing they scanned.
+//
+// hzResObservedResponse is ABSENT ON PURPOSE: it takes no basis argument, so
+// there is no slot to read. Its basis is asserted structurally instead, by
+// TestHetznerResourceBasisResponseEmitterHardcodesItsBasis.
+var hzResBasisArgs = map[string]int{
+	"hzResObserved":          9,
+	"hzResDestroyedDeclared": 6,
+}
+
+// hzResReadArgs is the CONFIRMING-READ argument slot per emitter — the closure
+// or read helper whose source text leg 2 judges the basis against. Both shapes
+// present today are covered: an *ast.CallExpr helper (hzS3HeadRead(c, …)) and an
+// *ast.FuncLit whose body names its primitive (… hc.Volume.GetByID(c, vol.ID)).
+var hzResReadArgs = map[string]int{
+	"hzResObserved":          7,
+	"hzResDestroyedDeclared": 7,
 }
 
 // hzResSourceFiles is the population: every non-test hetzner_*.go. A GLOB, so a
@@ -488,6 +550,8 @@ func hzResParamIndex(decl *ast.FuncDecl, name string) int {
 func hzResSitesFromSource(t *testing.T) []hzResSite {
 	t.Helper()
 	fset, files := hzResParseSources(t)
+	text := hzResSourceText(t)
+	consts := hzResBasisConstants(t)
 	var sites []hzResSite
 	for path, file := range files {
 		for _, d := range file.Decls {
@@ -524,6 +588,7 @@ func hzResSitesFromSource(t *testing.T) []hzResSite {
 				} else if id, ok := call.Args[pos.actionArg].(*ast.Ident); ok {
 					site.actionParam = hzResParamIndex(decl, id.Name)
 				}
+				hzResCaptureBasis(t, &site, call, fset, text[path], consts)
 				sites = append(sites, site)
 				return true
 			})
@@ -1045,4 +1110,550 @@ func TestHetznerResourceReceiptEmittersStayInsideTheCensusGlob(t *testing.T) {
 
 	t.Logf("OUT-OF-GLOB SCAN: %d non-globbed non-test sources in internal/cli, %d orphaned emitter calls",
 		len(sources), orphans)
+}
+
+// ============================================================================
+// PDS wave 34 — THE CENSUS LEARNS EACH RECEIPT'S CONFIRMATION BASIS
+// ============================================================================
+//
+// WHAT WAS UNDEFENDED, MEASURED RATHER THAN ASSERTED. Before this block the word
+// `basis` appeared in this file only inside comments. The scanner read
+// call.Args[actionArg] and call.Args[kindArg] and nothing else, so the trailing
+// variadic that names the read a receipt claims was never looked at. Three
+// things followed:
+//
+//	(a) 21 of the 25 hzResObserved sites INHERIT hzResBasisGet by omission, and
+//	    nothing checked that the read they perform is a GET. Giving one of them
+//	    an explicit contradicting basis was GREEN on the pre-change tree
+//	    (ok 29.593s, full package, no selector).
+//	(b) The 4 explicit sites were pinned only BEHAVIOURALLY, by
+//	    TestHzResObservedBasisIsVisibleToAnOperator, which drives four verbs
+//	    through fakes. That arm is real — swapping backup create's
+//	    hzResBasisHead for hzResBasisListScan REDS it, measured — but it speaks
+//	    for four sites out of twenty-five, and it compares the printed value
+//	    against the CONSTANT, so it cannot see the constant itself change.
+//	(c) The two hzResDestroyedDeclared sites pass BARE STRING LITERALS into a
+//	    mandatory `basis string` parameter. No constant, no const block, no
+//	    test. THE BASIS SURFACE IS SIX, NOT FOUR: five hzResBasis* constants —
+//	    four in hetzner_respost_mutation.go and hzResBasisRRSetKey deliberately
+//	    outside that block, in hetzner_dns_cmd.go — plus these two literals.
+//	    Anything scoped to one file, or to the hzResBasis* identifiers, misses
+//	    three of the six.
+//
+// A CORRECTION TO THIS PACKAGE'S OWN PROSE. hetzner_respost_basis_test.go says
+// "thirteen" / "the ten hcloud callers" / "the three object-store call sites".
+// DERIVED FROM SOURCE the population is 25 hzResObserved sites: 4 explicit
+// (hetzner_backup_cmd.go:225, hetzner_dns_cmd.go:767, hetzner_storage_cmd.go:423
+// and :615 — CALL lines, one or two above the argument lines usually quoted) and
+// 21 inherited, of which hetzner_lb_cmd.go carries 10 and hetzner_net_cmd.go
+// another 10 that no comment in the package mentions. A binding table written
+// off that prose would have been half empty.
+
+// hzResSourceText reads the globbed sources once so an argument's SOURCE TEXT
+// can be sliced by offset. Leg 2 needs the text, not the tree: the confirming
+// read appears in two AST shapes (a helper *ast.CallExpr and an *ast.FuncLit
+// whose body names its primitive), and matching the text is the one rule that
+// covers both without a per-shape special case a third shape would escape.
+func hzResSourceText(t *testing.T) map[string]string {
+	t.Helper()
+	text := map[string]string{}
+	for _, path := range hzResSourceFiles(t) {
+		b, err := os.ReadFile(path)
+		if err != nil {
+			t.Fatalf("read %s: %v", path, err)
+		}
+		text[path] = string(b)
+	}
+	return text
+}
+
+// hzResExprText returns e's source, whitespace collapsed to single spaces.
+func hzResExprText(fset *token.FileSet, src string, e ast.Expr) string {
+	lo, hi := fset.Position(e.Pos()).Offset, fset.Position(e.End()).Offset
+	if lo < 0 || hi > len(src) || lo >= hi {
+		return ""
+	}
+	return strings.Join(strings.Fields(src[lo:hi]), " ")
+}
+
+// hzResBasisConstants DERIVES every basis constant in the scanned sources —
+// identifier → wording — by walking the AST for `const hzResBasis… = "…"`.
+//
+// DERIVED, NEVER HAND-ENUMERATED (HG-D31). A hand list is the vacuous-coverage
+// shape this epic keeps finding: it looks like an index and defends only the
+// members somebody remembered. hzResBasisRRSetKey already proved a basis
+// constant can be declared in another file entirely, so nothing about the const
+// block's contents bounds the population. A SIXTH constant added anywhere under
+// hetzner_*.go enters this map the day it lands, and reds the coverage arms
+// below because it has no row.
+func hzResBasisConstants(t *testing.T) map[string]string {
+	t.Helper()
+	_, files := hzResParseSources(t)
+	consts := map[string]string{}
+	for _, file := range files {
+		for _, d := range file.Decls {
+			gen, ok := d.(*ast.GenDecl)
+			if !ok || gen.Tok != token.CONST {
+				continue
+			}
+			for _, s := range gen.Specs {
+				vs, ok := s.(*ast.ValueSpec)
+				if !ok {
+					continue
+				}
+				for i, name := range vs.Names {
+					if !strings.HasPrefix(name.Name, "hzResBasis") || i >= len(vs.Values) {
+						continue
+					}
+					if v, ok := hzResStringLit(vs.Values[i]); ok {
+						consts[name.Name] = v
+					}
+				}
+			}
+		}
+	}
+	if len(consts) < 2 {
+		t.Fatalf("derived %d basis constants from %v — the scan is finding nothing, not measuring an empty surface",
+			len(consts), hzResSourceFiles(t))
+	}
+	return consts
+}
+
+// hzResCaptureBasis fills the basis and read fields of one derived site.
+//
+// THE NAMED-CONSTANT RULE LIVES HERE, and it is the same discrimination the
+// scanner already makes for the action: an *ast.Ident is a SYMBOL the census can
+// bind to a class, an *ast.BasicLit is a sentence nothing can bind. A string at
+// an hzResObserved call site is REJECTED by name — not because literals are
+// ugly, but because the per-key table, the read binding and the wording gate all
+// key on the symbol, so a literal opts a site out of all three at once while
+// still printing a confirmation_basis an operator will trust.
+func hzResCaptureBasis(t *testing.T, site *hzResSite, call *ast.CallExpr, fset *token.FileSet, src string, consts map[string]string) {
+	t.Helper()
+	where := fmt.Sprintf("%s:%d", site.file, site.line)
+
+	if ra, ok := hzResReadArgs[site.emitter]; ok && len(call.Args) > ra {
+		site.readText = hzResExprText(fset, src, call.Args[ra])
+	}
+
+	if site.emitter == "hzResObservedResponse" {
+		// No basis argument exists to read: this emitter hardcodes its basis,
+		// which is asserted structurally rather than positionally.
+		site.basisForm, site.basisIdent, site.basisText = hzBasisResponse, "hzResBasisResponse", consts["hzResBasisResponse"]
+		return
+	}
+
+	ba, carries := hzResBasisArgs[site.emitter]
+	if !carries {
+		site.basisForm = hzBasisNone
+		return
+	}
+	if len(call.Args) <= ba {
+		if site.emitter != "hzResObserved" {
+			t.Errorf("%s: %s takes a MANDATORY basis at argument %d and this call has %d — the census cannot "+
+				"judge a receipt that names no read", where, site.emitter, ba, len(call.Args))
+			return
+		}
+		// The trailing variadic omitted: hzResBasisOf supplies the GET default.
+		site.basisForm, site.basisIdent, site.basisText = hzBasisInherited, "hzResBasisGet", consts["hzResBasisGet"]
+		return
+	}
+
+	switch arg := call.Args[ba].(type) {
+	case *ast.Ident:
+		site.basisForm, site.basisIdent = hzBasisConst, arg.Name
+		text, known := consts[arg.Name]
+		if !known {
+			t.Errorf("%s: %s passes basis %s, which is not a basis constant this census can derive from %v — "+
+				"the receipt names a read nothing in the scanned sources defines",
+				where, site.emitter, arg.Name, hzResSourceFiles(t))
+			return
+		}
+		site.basisText = text
+	case *ast.BasicLit:
+		lit, ok := hzResStringLit(arg)
+		if !ok {
+			t.Errorf("%s: %s passes a non-string basis literal", where, site.emitter)
+			return
+		}
+		if site.emitter == "hzResObserved" {
+			t.Errorf("%s: %s passes the STRING LITERAL %q as its confirmation basis. A LITERAL CANNOT BE BOUND TO "+
+				"A CLASS: the per-key pin, the read binding and the wording gate all key on the SYMBOL, so a "+
+				"literal opts this receipt out of all three at once. Declare an hzResBasis* constant and pass that.",
+				where, site.emitter, lit)
+			return
+		}
+		site.basisForm, site.basisText = hzBasisLiteral, lit
+	default:
+		t.Errorf("%s: %s passes a basis this census cannot resolve (%T) — neither a named constant nor a literal",
+			where, site.emitter, call.Args[ba])
+	}
+}
+
+// hzResBasisKeyed is one census key's basis expectation. `symbol` is the basis
+// identifier for a const/inherited/response site; `literal` is the wording for
+// the two declared object-store destroys, which pass a bare string into a
+// mandatory parameter. Exactly one is set.
+type hzResBasisKeyed struct {
+	symbol  string
+	literal string
+}
+
+// hzResBases is LEG 1: every receipt key that carries a confirmation basis, and
+// WHICH basis it carries. Checked BIDIRECTIONALLY, exactly like
+// hzResDispositions — a new receipt site with no row here reds BY NAME, and a
+// row naming a key nothing emits reds just as hard.
+//
+// WHY THIS REPAIRS SOMETHING ARM A GAVE UP (pds-w32-census-pin-simplify). Arm A
+// deleted the KEYS != 52 and NON_LITERAL != 2 pins as measured-redundant, which
+// was right on the evidence — but KEYS was the last arm that noticed a NEW KEY
+// appear at all, and nothing replaced that direction. This table restores it as
+// a NAMED row: a receipt site that joins the population without declaring what
+// read it confirms fails here with its own key in the message, not as a count
+// that moved by one.
+//
+// IT IS A SEPARATE STRUCTURE ON PURPOSE, and the usual reason given for that is
+// half wrong. hzResDispositions IS a map keyed on "kind/action"; it is its ROWS
+// that are unkeyed positional struct literals ({class, note}), which is why
+// adding a third field to hzResDisposition is a compile error on all of them at
+// once. The constraint stands; "the rows are unkeyed" is right about the rows
+// and wrong about the map.
+// THE POPULATION, DERIVED (not transcribed): 38 basis-carrying sites — 4
+// explicit constants, 21 inherited defaults, 11 response-emitter creates and 2
+// declared literals. 36 carry a literal (kind, action) key and are pinned below;
+// the other 2 are the DISPATCH-SHARED sites (hetzner_net_cmd.go:1115 and :1693),
+// whose keys come from their callers and whose every arm inherits the SAME basis
+// argument, so there is nothing per-key to pin for them.
+var hzResBases = map[string]hzResBasisKeyed{
+	// ---- The object-store reads: the three sites whose basis is NOT a GET. ---
+	"backup/create": {symbol: "hzResBasisHead"},
+	"object/put":    {symbol: "hzResBasisHead"},
+	"bucket/create": {symbol: "hzResBasisListScan"},
+
+	// ---- The composite-key read, declared outside the const block. ----------
+	"record/update": {symbol: "hzResBasisRRSetKey"},
+
+	// ---- The eleven creates that observe the RESPONSE object. ---------------
+	// Every one of these goes through hzResObservedResponse, which takes no
+	// basis argument at all — so this column is really pinning WHICH EMITTER
+	// each create uses. A create that switched to hzResObserved without paying
+	// for a real post-read would arrive here carrying hzResBasisGet.
+	"zone/create":                 {symbol: "hzResBasisResponse"},
+	"record/create":               {symbol: "hzResBasisResponse"},
+	"load-balancer/create":        {symbol: "hzResBasisResponse"},
+	"floating-ip/create":          {symbol: "hzResBasisResponse"},
+	"primary-ip/create":           {symbol: "hzResBasisResponse"},
+	"placement-group/create":      {symbol: "hzResBasisResponse"},
+	"certificate/create-uploaded": {symbol: "hzResBasisResponse"},
+	"certificate/create-managed":  {symbol: "hzResBasisResponse"},
+	"volume/create":               {symbol: "hzResBasisResponse"},
+	"network/create":              {symbol: "hzResBasisResponse"},
+	"firewall/create":             {symbol: "hzResBasisResponse"},
+
+	// ---- The nineteen keyed sites that INHERIT the GET default. -------------
+	// These are the ones nothing spoke for before: the basis is supplied by
+	// OMISSION, so no call site names it and no fake drives it. Pinned here so
+	// that handing one of them a contradicting explicit basis costs an edit in
+	// this table rather than passing green.
+	"zone/update":                    {symbol: "hzResBasisGet"},
+	"load-balancer/add-service":      {symbol: "hzResBasisGet"},
+	"load-balancer/delete-service":   {symbol: "hzResBasisGet"},
+	"load-balancer/add-target":       {symbol: "hzResBasisGet"},
+	"load-balancer/remove-target":    {symbol: "hzResBasisGet"},
+	"load-balancer/change-algorithm": {symbol: "hzResBasisGet"},
+	"load-balancer/change-type":      {symbol: "hzResBasisGet"},
+	"floating-ip/assign":             {symbol: "hzResBasisGet"},
+	"floating-ip/unassign":           {symbol: "hzResBasisGet"},
+	"primary-ip/assign":              {symbol: "hzResBasisGet"},
+	"primary-ip/unassign":            {symbol: "hzResBasisGet"},
+	"volume/attach":                  {symbol: "hzResBasisGet"},
+	"volume/detach":                  {symbol: "hzResBasisGet"},
+	"volume/resize":                  {symbol: "hzResBasisGet"},
+	"volume/change-protection":       {symbol: "hzResBasisGet"},
+	"network/add-subnet":             {symbol: "hzResBasisGet"},
+	"network/delete-subnet":          {symbol: "hzResBasisGet"},
+	"network/change-ip-range":        {symbol: "hzResBasisGet"},
+	"firewall/set-rules":             {symbol: "hzResBasisGet"},
+
+	// ---- The two DECLARED destroys, pinned by their literal wording. --------
+	// No symbol exists to pin: these pass a bare string into a mandatory
+	// parameter. That is itself the defect — filed as
+	// pds-w34-declared-basis-literals-need-constants — and until it is paid, the
+	// wording IS the pin.
+	"bucket/delete": {literal: "ListBuckets after the delete"},
+	"object/rm":     {literal: "ListObjects on the exact key prefix after the delete"},
+}
+
+// hzResBasisReads is LEG 2: basis SYMBOL → the token the confirming read's
+// source must contain. Keyed on the symbol rather than the wording so that
+// rewording a constant cannot quietly move a site onto a different read rule —
+// that evasion is leg 3's, and it must not be able to hide here.
+//
+// HIGH-FLIP-RISK, SO IT IS DERIVED AND NOT REMEMBERED. This table decides which
+// read 25 call sites are judged against, and a wrong row reds an HONEST wording
+// — at which point somebody deletes the gate. Every row below was read off the
+// tree (all 21 inherited sites resolve to `…GetByID(c, x.ID)`; the four explicit
+// ones to hzS3HeadRead, hzS3BucketRead and GetRRSetByNameAndType), never
+// inferred from the constants' prose.
+var hzResBasisReads = map[string][]string{
+	// The default. Twenty-one sites, every one an hcloud single-resource GET.
+	"hzResBasisGet": {"GetByID("},
+	// The object-store pair, both through the S3 read helpers — which is the
+	// whole reason these two constants exist.
+	"hzResBasisHead":     {"hzS3HeadRead("},
+	"hzResBasisListScan": {"hzS3BucketRead("},
+	// The composite-key read. NOT a GetByID, which is exactly why record update
+	// needed its own constant rather than riding the GET default.
+	"hzResBasisRRSetKey": {"GetRRSetByNameAndType("},
+	// hzResObservedResponse performs NO post-read; there is no read argument to
+	// bind. Its honesty is structural — the emitter cannot name another basis —
+	// and is asserted by its own arm below.
+	"hzResBasisResponse": nil,
+}
+
+// hzResDeclaredBasisReads is LEG 2 for the two DECLARED destroys, keyed on the
+// census key because their basis is a bare literal with no symbol to key on.
+// They are the half of the basis surface a hzResBasis*-shaped scan misses.
+var hzResDeclaredBasisReads = map[string][]string{
+	"bucket/delete": {"ListBuckets("},
+	"object/rm":     {"ListObjects("},
+}
+
+// hzResBasisSites returns the derived sites that carry a basis at all.
+func hzResBasisSites(t *testing.T) []hzResSite {
+	t.Helper()
+	var out []hzResSite
+	for _, s := range hzResSitesFromSource(t) {
+		if s.basisForm != hzBasisNone {
+			out = append(out, s)
+		}
+	}
+	return out
+}
+
+// hzResSiteKey is the (kind, action) key a site emits, or "" when its action is
+// not a literal (the dispatch-shared sites).
+func hzResSiteKey(s hzResSite) string {
+	if s.kind == "" || s.action == "" {
+		return ""
+	}
+	return s.kind + "/" + s.action
+}
+
+// TestHetznerResourceBasisIsBoundPerKey is LEG 1's gate.
+func TestHetznerResourceBasisIsBoundPerKey(t *testing.T) {
+	sites := hzResBasisSites(t)
+
+	byForm := map[hzBasisForm]int{}
+	for _, s := range sites {
+		byForm[s.basisForm]++
+	}
+	t.Logf("BASIS SITES=%d  const=%d inherited=%d response=%d literal=%d",
+		len(sites), byForm[hzBasisConst], byForm[hzBasisInherited], byForm[hzBasisResponse], byForm[hzBasisLiteral])
+
+	live := map[string]hzResSite{}
+	for _, s := range sites {
+		key := hzResSiteKey(s)
+		if key == "" {
+			// A dispatch-shared site: its keys come from its callers, and every
+			// arm of it inherits the SAME basis argument, so there is nothing
+			// per-key to pin here. The enrolment gate above owns those keys.
+			continue
+		}
+		live[key] = s
+		want, pinned := hzResBases[key]
+		if !pinned {
+			t.Errorf("RATCHET/BASIS-UNPINNED: %q emits a receipt at %s:%d that prints confirmation_basis %q, but "+
+				"hzResBases carries NO row for it. A receipt that names a read while nothing records WHICH read it "+
+				"is supposed to name is back where this epic started. Add a row.",
+				key, s.file, s.line, s.basisText)
+			continue
+		}
+		switch {
+		case s.basisForm == hzBasisLiteral:
+			if want.literal != s.basisText {
+				t.Errorf("%q passes the declared basis %q at %s:%d, but hzResBases pins %q — a declared destroy "+
+					"changed what listing it says it scanned", key, s.basisText, s.file, s.line, want.literal)
+			}
+		default:
+			if want.symbol != s.basisIdent {
+				t.Errorf("%q is emitted at %s:%d with basis %s, but hzResBases pins %s. THIS IS THE CALL-SITE "+
+					"MUTATION: a verb that swaps the read it CLAIMS while performing the same read as before "+
+					"prints a receipt an operator cannot tell from an honest one.",
+					key, s.file, s.line, s.basisIdent, want.symbol)
+			}
+		}
+	}
+
+	for key := range hzResBases {
+		if _, ok := live[key]; !ok {
+			t.Errorf("hzResBases pins a basis for %q, which emits no basis-carrying receipt in %v — a stale row "+
+				"makes this ledger look like it speaks for more of the surface than it does", key, hzResSourceFiles(t))
+		}
+	}
+}
+
+// TestHetznerResourceBasisMayNotClaimTheResponseWithoutBeingTheResponseEmitter
+// closes the WIDENED-HELPER HOLE. hzResClassHelpers licenses BOTH
+// hzResObservedResponse and hzResObserved for hzClassCreate, and it binds
+// SYMBOLS, never BASES — so a create could take the stronger helper (which
+// really does re-read) and hand it any basis at all, including the create
+// response basis, which names a read hzResObserved by construction does not
+// perform. hzResObserved re-reads; "the create response object" says it did not.
+func TestHetznerResourceBasisMayNotClaimTheResponseWithoutBeingTheResponseEmitter(t *testing.T) {
+	checked := 0
+	for _, s := range hzResBasisSites(t) {
+		if s.emitter == "hzResObservedResponse" {
+			continue
+		}
+		checked++
+		if s.basisIdent == "hzResBasisResponse" || s.basisText == hzResBasisResponse {
+			t.Errorf("%s:%d calls %s — which PERFORMS a confirming read — while claiming the basis %q. That is a "+
+				"receipt naming a read it did not do, in the direction that flatters it: the response object is "+
+				"what a create was HANDED, not what the world said afterwards. Either drop to "+
+				"hzResObservedResponse or name the read this site actually performs (%s).",
+				s.file, s.line, s.emitter, s.basisText, s.readText)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no reading emitters were examined — this arm is measuring nothing")
+	}
+	t.Logf("READING SITES CHECKED=%d", checked)
+}
+
+// TestHetznerResourceBasisResponseEmitterHardcodesItsBasis is the structural
+// half of the same rule, from the other end: hzResObservedResponse takes no
+// basis argument, so its honesty cannot be checked at a call site. It is checked
+// at the DECLARATION — the function must name hzResBasisResponse and nothing
+// else. Widening it to accept a basis (exactly how hzResObserved got one) reds
+// here rather than silently opening the surface.
+func TestHetznerResourceBasisResponseEmitterHardcodesItsBasis(t *testing.T) {
+	_, files := hzResParseSources(t)
+	found := false
+	for path, file := range files {
+		for _, d := range file.Decls {
+			decl, ok := d.(*ast.FuncDecl)
+			if !ok || decl.Name.Name != "hzResObservedResponse" || decl.Body == nil {
+				continue
+			}
+			found = true
+			if _, takes := hzResBasisArgs["hzResObservedResponse"]; takes {
+				t.Errorf("%s: hzResObservedResponse now carries a basis argument slot — it must be censused "+
+					"positionally like the others, not asserted structurally here", path)
+			}
+			var named []string
+			ast.Inspect(decl.Body, func(n ast.Node) bool {
+				if id, ok := n.(*ast.Ident); ok && strings.HasPrefix(id.Name, "hzResBasis") {
+					named = append(named, id.Name)
+				}
+				return true
+			})
+			if len(named) != 1 || named[0] != "hzResBasisResponse" {
+				t.Errorf("%s: hzResObservedResponse names %v as its basis. It performs no read at all, so exactly "+
+					"one basis is truthful there — hzResBasisResponse. Anything else is this emitter claiming a "+
+					"round trip it does not make.", path, named)
+			}
+		}
+	}
+	if !found {
+		t.Fatal("hzResObservedResponse was not found in the scanned sources — this arm is measuring nothing")
+	}
+}
+
+// TestHetznerResourceBasisMatchesTheReadTheSitePerforms is LEG 2, and it is what
+// turns "the receipt names a read" into "the receipt names THE read".
+//
+// WHAT IT CAN AND CANNOT SEE, stated so nobody over-reads a green. It matches
+// the SOURCE TEXT of the confirming-read argument against a token the basis
+// requires. That proves the site CALLS the primitive its basis names. It does
+// NOT prove the primitive was called on the right resource, and it cannot: which
+// id an argument carries is not knowable from a token match. This binds a claim
+// to a CALL, not a claim to a round trip.
+func TestHetznerResourceBasisMatchesTheReadTheSitePerforms(t *testing.T) {
+	sites := hzResBasisSites(t)
+	judged := 0
+	for _, s := range sites {
+		var want []string
+		var rule string
+		switch {
+		case s.basisForm == hzBasisResponse:
+			continue // no read exists to bind
+		case s.basisForm == hzBasisLiteral:
+			key := hzResSiteKey(s)
+			w, ok := hzResDeclaredBasisReads[key]
+			if !ok {
+				t.Errorf("RATCHET/DECLARED-BASIS-UNBOUND: %s:%d declares the basis %q for key %q, and no row in "+
+					"hzResDeclaredBasisReads says which listing that is. These are the two sites a "+
+					"hzResBasis*-shaped scan misses entirely — they pass a BARE LITERAL into a mandatory "+
+					"parameter — so an unbound one is unjudged, not exempt.", s.file, s.line, s.basisText, key)
+				continue
+			}
+			want, rule = w, fmt.Sprintf("the declared basis %q", s.basisText)
+		default:
+			w, ok := hzResBasisReads[s.basisIdent]
+			if !ok {
+				t.Errorf("RATCHET/BASIS-READ-UNBOUND: %s:%d claims basis %s, which no row in hzResBasisReads binds "+
+					"to a read. A basis constant nothing binds is a sentence again.", s.file, s.line, s.basisIdent)
+				continue
+			}
+			want, rule = w, fmt.Sprintf("basis %s", s.basisIdent)
+		}
+		if len(want) == 0 {
+			continue
+		}
+		if strings.TrimSpace(s.readText) == "" {
+			t.Errorf("%s:%d claims %s but this census could not read its confirming-read argument — an unreadable "+
+				"read cannot be judged, and an unjudged read is what this arm exists to stop", s.file, s.line, rule)
+			continue
+		}
+		judged++
+		for _, tok := range want {
+			if !strings.Contains(s.readText, tok) {
+				t.Errorf("%s:%d prints confirmation_basis %q (%s) but its confirming read is `%s`, which never "+
+					"calls %s. THE RECEIPT NAMES A READ THE CODE DOES NOT PERFORM — this epic's law, at a call "+
+					"site, in the shape an operator would believe.", s.file, s.line, s.basisText, rule, s.readText, tok)
+			}
+		}
+	}
+	// A vacuity floor. The whole arm passes by looking at nothing if the read
+	// slots stop resolving, and a silent zero is how this family failed before.
+	const judgedFloor = 20
+	if judged < judgedFloor {
+		t.Fatalf("only %d sites were judged against their read (floor %d) — the scan lost the read argument, so "+
+			"this green means nothing. 27 were judged when it was written (25 hzResObserved plus the 2 declared "+
+			"destroys; the response emitter performs no read).", judged, judgedFloor)
+	}
+	t.Logf("READ-BOUND SITES=%d of %d basis-carrying sites", judged, len(sites))
+
+	consts := hzResBasisConstants(t)
+	for sym := range hzResBasisReads {
+		if _, ok := consts[sym]; !ok {
+			t.Errorf("hzResBasisReads binds %s to a read, but no such basis constant exists in %v — a stale "+
+				"binding row makes the table look like it covers a constant that is gone", sym, hzResSourceFiles(t))
+		}
+	}
+}
+
+// TestHetznerResourceBasisEveryConstantIsBoundToARead is the OTHER direction of
+// leg 2, and it is what stops a SIXTH constant riding in unjudged: every basis
+// constant DERIVED from the sources must carry a read binding. Derivation is the
+// point — a hand list defends only what somebody remembered, and
+// hzResBasisRRSetKey already proved a constant can be declared anywhere.
+func TestHetznerResourceBasisEveryConstantIsBoundToARead(t *testing.T) {
+	consts := hzResBasisConstants(t)
+	names := make([]string, 0, len(consts))
+	for name := range consts {
+		names = append(names, name)
+	}
+	sort.Strings(names)
+	t.Logf("BASIS CONSTANTS DERIVED=%d %v", len(names), names)
+
+	for _, name := range names {
+		if _, bound := hzResBasisReads[name]; !bound {
+			t.Errorf("RATCHET/BASIS-CONSTANT-UNJUDGED: the basis constant %s = %q exists in the scanned sources "+
+				"but no row in hzResBasisReads says which read it names. It will print on a receipt while nothing "+
+				"in this package can tell whether that read happened. Add a row (nil if the emitter performs no "+
+				"read at all, as hzResObservedResponse does).", name, consts[name])
+		}
+	}
 }
