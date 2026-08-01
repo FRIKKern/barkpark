@@ -4404,14 +4404,25 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    relocates the identical cliff onto every tablet in portrait. The fix is inside.
 
    THREE PARTS, AND ALL THREE ARE LOAD-BEARING — the first two alone each fail:
-     1. `max-height: 34vh` + the strip's own scroller. UNIFORM: it flattens the
-        root (690), instance (510) and site (368) layers to one number, so the
-        instance route is fixed too — a disclosure alone leaves it at 566.13,
-        because #nav-layer-instance has no Settings group to collapse. And
-        VIEWPORT-PROPORTIONAL: contentTop becomes 0.34H + 56, which clears the
-        45%-of-height bar for every H >= 509 rather than for one lucky phone.
-        34 was bisected, not guessed: 38vh misses at 667 (309.5 > 300.2) and 36vh
-        clears it by 4px, which is not a margin.
+     1. `max-height: calc(40vh - 60px)` + the strip's own scroller. UNIFORM: it
+        flattens the root (690), instance (510) and site (368) layers to one
+        number, so the instance route is fixed too — a disclosure alone leaves it
+        at 566.13, because #nav-layer-instance has no Settings group to collapse.
+        AND IT MAKES THE BAR AN IDENTITY RATHER THAN A LUCKY NUMBER (cch-w15-s1).
+        The topbar above the strip is an invariant 56px, so a bare `Nvh` cap puts
+        `.content` at `cap*H + 56` — a FRACTION of `cap + 56/H`, which is worst at
+        the SMALLEST height. That is why the previous `34vh` (0.34H + 56) read
+        0.4100 at H=800, 0.4239 at 667 and 0.4836 at landscape 390 against the
+        sweep's own FOLD_FRACTION = 0.4 budget: OVER at every height, and the
+        sweep only reported green because a 745.88px pin swallowed it. Subtracting
+        the topbar inside the cap cancels it: contentTop = 0.40H - 60 + 56 =
+        0.4H - 4 at EVERY height — a constant 4px of margin under the bar.
+        Driven (Chrome, --render): 316 @800 (budget 320), 262.8 @667 (266.8) and
+        152 @390 (156). Landscape 720x390 is the BINDING height and the only one
+        that refuted the alternatives: a plain `31vh` reads 176.89 there against
+        the same 156 budget, and buys ZERO additional reachable controls at 800 or
+        667 because the reach curve is FLAT between 304 and 328 (the 5th control
+        needs contentTop <= 274, i.e. ~27vh).
      2. THE CONTINUATION CUE, live IFF clipped. A bare cap is a REGRESSION this
         epic already owns: at 390x800 it hides 449px with nine of sixteen nav
         controls below the cut and NOTHING saying so — the exact
@@ -4457,7 +4468,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .sidebar {
     flex-basis: auto; width: 100%; height: auto; position: static;
     border-right: none; border-bottom: 1px solid rgba(var(--cc-line-rgb), 0.08);
-    max-height: 34vh;
+    max-height: calc(40vh - 60px);
     overflow-y: auto;
     overscroll-behavior: contain;
     -webkit-mask-image: linear-gradient(to bottom, currentColor calc(100% - var(--nav-fade)), transparent);
