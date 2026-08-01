@@ -2576,6 +2576,75 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 33 2026-08-01 — "The Elixir surface gets counted, and the ledger stops lying about itself" — REVIEWED. Grade A− (paper `pds-wave-33-2026-08-01`)
+
+**SIX ROUND-1 SLICES BUILT, SIX GREEN, SIX PUSHED WITH PRs OPEN.** Every gate was re-run by the
+reviewer on the final state. The three `internal/cli` slices were additionally merged into ONE
+integration tree (`origin/main` + slices 2 + 3 + 4) and the whole package run there
+(`go test ./internal/cli/ -count=1` ok 24.5–31.4s across runs), because two of this wave's
+obligations are only meaningful on the FINAL tree, never on a branch.
+
+| slice | final branch | what it actually does |
+|---|---|---|
+| `pds-w33-ledger-postread-core` | `…-reporting-what-it--0` | one shared `Tasks.Internal.fenced_content_write/4` (`select: d` → `UPDATE … RETURNING`); six arms converted; `receipt_honesty_test.exs` diffs receipt vs `Repo.get!` through the wire's own `render_doc/1` |
+| `pds-w33-elixir-receipt-census` | `…-success-surface-gets-its-firs-1-r` | the first census of `api/lib`'s success surface: 103 textual → 95 AST → 91 EMITTED, build-free in 5.1s, five integrity checks that can go red |
+| `pds-bl-record-update-basis-overclaims` | `…-dns-record-update--2` | the shipped receipt lie: `hzResBasisRRSetKey` replaces the false "GET on the resolved id" |
+| `pds-w32-census-pin-simplify` | `…-total-delete-the-two-ce-3` | Arm A: `KEYS`/`NON_LITERAL` deleted, `TOTAL` kept and re-messaged around mutation I2, opaque arm renamed `OPAQUE_ACTION_CALLERS` |
+| `pds-w33-cli-renders-error-details` | `…-the-server-s-details-pay-4` | `bp` stops discarding the server's `details`; one undeclared struct key that blinded seven error codes and cost a public issue filed at the wrong layer |
+| `pds-w33-bulldocs-batch-id-honesty` | `…-the-nil-id-collision--5` | the hoist: `ensure_block_ids` per op inside `fold_paper_ops`; the withheld `block_ids` receipt, the phantom `duplicate_id`, and `move-block` refused at a door that called it unknown |
+
+**THE FRONTIER WAS SURVEYED HONESTLY AND THE NUMBER WAS DERIVED, NOT INHERITED.** The wish's 102 is
+not what the corpus holds: 103 textual occurrences resolve to 95 AST-literal pairs (a bare
+`{:ok, true}` tuple and a keyword `ok: true` QUOTE IDENTICALLY — separating them needs the key
+literal's metadata, and without that check ~100 ordinary result tuples enter the census), minus 8
+phantoms and 4 consumers, leaving **91 EMITTED claims**. The census refused to reproduce PDS-D448's
+64/17/10 split, printing a depth sweep and an explicit DRIFT line instead: at depth 3 it derives
+write 33 / read 12 / unrouted 46, and it labels 33 a FLOOR because the write count is a function of
+the route budget rather than a property of the code. **The sharp residual is that 35 emitted claims
+reach no `Repo` verb at all within six hops** (`pds-bl-elixir-claims-reach-no-repo-verb`).
+
+**THE CATEGORY-ERROR RULING WAS ANSWERED BY TRYING IT, AS THE WISH DEMANDED.** The Go apparatus does
+NOT port: `internal/cli`'s census keys on `(kind, action)` string literals at a fixed emitter arity,
+and Elixir has no such spine — the lens that works is a build-free AST walk with call-graph routing
+that follows `defdelegate` at ZERO depth cost (charge a delegate a hop and the 21-entry
+`Barkpark.Tasks` facade makes a naive detector report false). What DOES port is the doctrine:
+derive the denominator, state the lens, name the blind spots, and make the instrument able to go red.
+**PDS-D454 stands — no Elixir gate this wave**; the script's INTEGRITY can red, its NUMBERS never do.
+
+**TWO MUTATION REHEARSALS RE-RUN ON THE FINAL TREE BY THE REVIEWER, INDEPENDENTLY.** (i) Coherent I2
+(`runHetznerVolumeResize` → `return exitOK`, its `volume/resize` disposition row deleted in the same
+edit): `TOTAL = 49, want 50` is the **SOLE** red — the collision, enrolment, stale-row, kind-unpinned,
+siteFloor and `OPAQUE_ACTION_CALLERS` arms all stay green. (ii) Wave 32's exact non-literal-KIND
+mutation (`opaqueKind := "volume"` at `volume/detach`) run AFTER Arm A deletes `KEYS`: still four
+reds, every one naming `hetzner_net_cmd.go:480` at the kind guard, log line
+`NON_LITERAL=2  KEYS=51  OPAQUE_ACTION_CALLERS=0`. **Deleting `KEYS` does not open the hole**, and
+`pds-bl-opaque-arm-blind-to-nonliteral-kind` is stamped on that evidence.
+
+**THE GROWTH RATCHET IS ONLY HALF BUILT, AND THAT IS THE WAVE'S HONEST SHORTFALL.** Arm A reduced the
+growth tax from three integer edits to one; it did not remove it, and a NEW unpaid site is still
+caught by `TOTAL` — a number-shaped guard. Arm B (`pds-w32-census-binds-the-basis`), the ONLY leg that
+can catch a lying basis CONSTANT, is round 2 and unbuilt by the sequenced-rounds law. Until it lands,
+`hzResBasisRRSetKey` is asserted SYMBOLICALLY: rewording that constant to something false leaves the
+entire package green. Slice 2 moved the site from "names the wrong read" to "names the right read";
+it did not make the claim self-defending, and the receipt's basis is still true only because a human
+read two lines.
+
+**THE TWO TOOLING ROWS BIT EXACTLY AS PREDICTED, AND ONE OF THEM WAS MISFILED AT THE WRONG LAYER.**
+`bp-publish-wall-label-spine-rejects-3-tags` CLAIM A was never a server defect: the server has always
+sent `details`, and `bp`'s canon struct in `classifyError` never declared the key, so `encoding/json`
+discarded it silently — public issue #4938 was filed against the wrong layer and its own quoted body's
+ALPHABETICAL key order proves it was observing `bp`. CLAIM B (a third registered tag reds
+`label_spine`) is untouched and stays open. `bp-bulldocs-patch-batch-ops-fail-on-nil`'s filed error
+code was also wrong — the live code is `duplicate_id`, not `malformed_op`, and a builder handed
+`malformed_op` would have patched the allowlist and never touched the real guard.
+
+**WHAT THE NEXT WAVE TAKES.** Merge round 1 in dependency order, then dispatch the two deferred
+slices as their deps land: `pds-w33-ledger-postread-remainder` after `pds-w33-ledger-postread-core`,
+and `pds-w32-census-binds-the-basis` after BOTH `pds-w32-census-pin-simplify` and
+`pds-bl-record-update-basis-overclaims`. Then bucket the 91 by hand — the census's own UNCLASSIFIED
+47 and its POST-READ 17 (a CEILING: its evidence is line order inside the writing function, which
+cannot prove the read is OF THE ROW WRITTEN) are where wave 34's judgment is owed.
+
 ### Wave 32 2026-08-01 — "The debt reaches zero" — REVIEWED. Grade A (paper `pds-wave-32-2026-08-01`)
 
 **FOUR ROUND-1 SLICES BUILT, FOUR GREEN, FOUR PUSHED WITH PRs OPEN.** Every gate was re-run by the
