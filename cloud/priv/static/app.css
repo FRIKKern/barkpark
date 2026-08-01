@@ -1038,7 +1038,14 @@ select.form-input {
 /* ---------------------------------------------------------- tiers */
 .tier-grid {
   display: grid;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  /* auto-fit + a 230px floor: minmax(0, 1fr) let a track shrink below its own
+     content without limit, and repeat(5, ...) held five tracks open even when
+     the catalog renders three — so the CTA label was cut at EVERY width, not
+     just at 901 (.content caps at 1040px, so the grid box measures 950px and
+     five tracks were pinned at 180.4px — button 147 wide in a 136 box).
+     TRAP: a minimum at or below ~180px admits five tracks again and silently
+     un-fixes this with every gate still green. Do not tidy it downward. */
+  grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 12px;
 }
 @media (max-width: 900px) { .tier-grid { grid-template-columns: 1fr 1fr; } }
