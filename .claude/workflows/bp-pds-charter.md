@@ -2586,10 +2586,10 @@ result: `TOTAL=50 NON_LITERAL=2 KEYS=52 OPAQUE_CALLERS=0 KINDS=13`.
 
 | slice | final branch | PR | what it actually does |
 |---|---|---|---|
-| `pds-w31-harvest-only` | `…-hcloud-404-b-0-r` | #8739 | eight real api.hetzner.cloud 404 bodies; `--selftest-offline` is a genuinely credential-free gate; `kind_coverage.pending` empty |
-| `pds-w29-pay-net-dns` | `…-net-dns-receipts--1-r` | #8740 | 19 keys / 17 sites paid; both `hzUnpaid*` consts deleted; `git grep -c hzUnpaid` = NO MATCHES |
-| `task-27246110ca95342a` | `…-a-call-site-p-2-r` | #8741 | `confirmation_basis` becomes a trailing-variadic call-site parameter; three lying receipts corrected |
-| `pds-bl-support-capacity-degraded-unpinned` | `…-narration-the--3-r` | #8742 | the degraded capacity narration is pinned through production's own `success()` |
+| `pds-w31-harvest-only` | `…-hcloud-404-b-0-r` | #8749 | eight real api.hetzner.cloud 404 bodies; `--selftest-offline` is a genuinely credential-free gate; `kind_coverage.pending` empty |
+| `pds-w29-pay-net-dns` | `…-net-dns-receipts--1-r` | #8750 | 19 keys / 17 sites paid; both `hzUnpaid*` consts deleted; `git grep -c hzUnpaid` = NO MATCHES |
+| `task-27246110ca95342a` | `…-a-call-site-p-2-r` | #8751 | `confirmation_basis` becomes a trailing-variadic call-site parameter; three lying receipts corrected |
+| `pds-bl-support-capacity-degraded-unpinned` | `…-narration-the--3-r` | #8752 | the degraded capacity narration is pinned through production's own `success()` |
 
 **THE DEBT IS ZERO, AND THE BOUNDARY IS IN THE CODE, NOT ONLY THE PAPER.** The census header now
 states what zero does and does not mean: one resource family, one provider, one direction; the
