@@ -58,6 +58,22 @@
 //        and asserts BOTH that the page does not scroll AND that the route
 //        asked for is the route that rendered — the second half is not
 //        ceremony, see the routing trap below.
+//    W15-fleet-row-text-bounded     THE CELLS, which every case above is blind
+//        to because every case above asserts the PAGE. The W13 leg printed
+//        "108 / 108 cells clean" on a tree where, at its own 900 control,
+//        eight fleet cells clipped — .fleet-url scrollWidth 144 against
+//        clientWidth 60 — and spilled the hostname through the badge chips
+//        without moving documentElement.scrollWidth at all. This leg drives
+//        mixed-fleet + fleet-v4 + fleet-support-failed at 721/769/899/900/
+//        940/983/1000 in both themes and asks FOUR questions per cell: is the
+//        text whole, is the money message whole, is the badge column still its
+//        own width, and does the PAGE still fit. The second and third exist
+//        because the two cheapest "fixes" for the first each score perfectly
+//        on it while costing the person something else. The fourth, with 721/
+//        769 and the support scenario, is the tripwire for the fix's own
+//        scope: the same two declarations unscoped were driven at an 846px
+//        page scrollWidth against a 721px viewport, because `flex-wrap: wrap`
+//        on the stacked (column) .fleet-row wraps into COLUMNS.
 //    GR115-bpconsole-dead-rule      at 700x800 .bp-console-body must compute
 //        the authored 40vh cap (320px) and the 13px legibility floor, same
 //        for .bp-console-toggle (pre-fix: 260px/12px/12px — the later base
@@ -139,7 +155,74 @@ const DEFECTS = [
   "GR115-bpconsole-dead-rule",
   "W12-narrow-viewport-truth",
   "W13-detail-route-band",
+  "W15-fleet-row-text-bounded",
 ];
+
+// W15-S4: THE LEG THAT EXISTS BECAUSE THIS FILE WAS BLIND TO ITS OWN SUBJECT.
+// Every leg above asserts documentElement.scrollWidth — the PAGE. On the tree
+// this leg was written against, the W13 leg printed "108 / 108 cells clean"
+// while, at its OWN 900 control, eight fleet cells were clipping: fleet-v4
+// row 1's `.fleet-url` measured scrollWidth 144 against clientWidth 60, 58% of
+// the hostname unrendered, and because `.fleet-url` computes `overflow:
+// visible` the remainder was PAINTED THROUGH the badge chips (box ended
+// 482.75, text reached 566.80, badges began 498.75). None of that moves the
+// page's scrollWidth by one pixel. A page-level assertion cannot see a cell
+// that spills INSIDE the page, so leaning on it certifies the regression.
+//
+// THREE QUESTIONS PER CELL, each the shape of a thing a person loses:
+//   (a) IS THE TEXT WHOLE — no `.fleet-name`/`.fleet-url`/`.fleet-meta`
+//       scrollWidth beyond its clientWidth. This is the defect itself.
+//   (b) IS THE MONEY MESSAGE WHOLE — no `.status-pill-detail` ellipsed. The
+//       cheapest "fix" for (a) is `.fleet-status { max-width }`, which buys
+//       the hostname by truncating "Suspended · Payment failed …". GR116
+//       exists to stop exactly that, so (a) may never be bought with (b).
+//   (c) IS THE BADGE COLUMN STILL ITSELF — `.fleet-badges` is never squeezed
+//       narrower than its own content. The other cheap "fix",
+//       `.fleet-badges { min-width: 0 }`, scores 0 on every TEXT metric while
+//       collapsing the badge box to 29.83px around an unshrinkable 66.33px
+//       chip: the mirror image of the shred, and invisible to a clip-only
+//       scorer. Asserted as a RELATION (width >= scrollWidth), never as pinned
+//       pixels — pinned px would red on any runner with different font metrics
+//       and say nothing about the person.
+//
+// WIDTHS: 900 is the control the defect lived at; 940 and 983 are the two
+// other widths that clipped pre-fix; 1000 is above them; 899 is the stacked
+// band immediately below.
+//
+// 721 AND 769 ARE THE TRIPWIRE FOR THE FIX'S OWN SCOPE (review addition,
+// cch-w15-s4-r). `flex-wrap: wrap` on the `flex-direction: column` `.fleet-row`
+// the `@media (max-width: 899px)` block ships wraps into additional COLUMNS: the
+// SAME two declarations UNSCOPED were driven at an 846px page scrollWidth on
+// `fleet-support-failed#fleet` at 721 and 769 in both themes — 125px off-screen
+// at 721. The slice PROVED that and then guarded it with a comment. A comment is
+// not a check, so those two widths and that scenario are in the axis, and the
+// per-cell measurement below also reads documentElement.scrollWidth: dropping
+// the media query, or raising the 899 stack threshold above 900, now REDS here
+// instead of shipping. Filed residue this narrows: cch-bl-w15-fleet-leg-scenario-axis-of-two.
+const FLEET_WIDTHS = [721, 769, 899, 900, 940, 983, 1000];
+const FLEET_SCENS = ["mixed-fleet", "fleet-v4", "fleet-support-failed"];
+const FLEET_TEXT_SELS = [".fleet-name", ".fleet-url", ".fleet-meta"];
+
+// ITEMISED, ROW-BEARING, AND UNABLE TO ROT (review addition). Widening the axis
+// above turned up ONE pre-existing hit this slice's `@media (min-width: 900px)`
+// fix cannot reach, in the STACKED band below 899. It is not swept under a
+// blanket skip and it is not allowed to hide a new defect: an entry matches one
+// scenario + one selector + an explicit width list, every other cell is still
+// judged, and an entry that matches NOTHING is itself a FAILURE — so the day the
+// row is paid, this guard tells you to delete the entry instead of quietly
+// carrying it forever. Measured identically on origin/main and on this branch,
+// so the slice introduced none of it.
+const FLEET_KNOWN = [
+  {
+    scen: "fleet-support-failed",
+    sel: ".status-pill-detail",
+    widths: [721, 769],
+    row: "cch-w15-bl-fleet-support-detail-truncated-stacked-band",
+    why: "the stacked row truncates 'verify: no heartbeat within the provisioning window' to 295/343px of 463 — the operator cannot read WHY the instance failed. Pre-existing on origin/main at the identical numbers; below this slice's 900px scope.",
+  },
+];
+const knownHit = (scen, sel, width) =>
+  FLEET_KNOWN.find((k) => k.scen === scen && k.sel === sel && k.widths.includes(width));
 
 // W13-S4: the tablet band NOTHING in this file had ever driven a DETAIL ROUTE
 // at. 769 and 899 are the two edges of the band; 900 and 1024 are the controls
@@ -790,6 +873,109 @@ async function main() {
           `${cells} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
           ` (769/899 are the band edges, 900/1024 the controls above it); ${misrouted} misrouted;` +
           ` no exemptions — #fleet's W13 residual was paid by W14-S3 and its pin is gone`,
+        );
+      }
+    }
+
+    // ── W15: the fleet row's CELLS, which every leg above is blind to ───────
+    //    Element-level geometry, not page-level. See the note by FLEET_WIDTHS.
+    if (requested.includes("W15-fleet-row-text-bounded")) {
+      const D = "W15-fleet-row-text-bounded";
+      const cellCount = FLEET_SCENS.length * FLEET_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${FLEET_SCENS.length} scenarios x ${FLEET_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges)\n`,
+      );
+      let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, pageOver = 0, rowsSeen = 0;
+      const knownSeen = new Set();
+      for (const scen of FLEET_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter ABOVE the band, like the W13 leg, and assert the landed view —
+          // `?scen=` alone renders #overview and the whole table goes phantom.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#fleet`,
+            `document.querySelector('.fleet-row') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-fleet';})()`,
+          );
+          const row = [];
+          for (const width of FLEET_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var sels=${JSON.stringify(FLEET_TEXT_SELS)};` +
+              `var d=document.documentElement;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,clips:[],ell:[],sq:[]};` +
+              `[].slice.call(document.querySelectorAll('.fleet-row')).forEach(function(r,i){out.rows++;` +
+              `  sels.forEach(function(s){var e=r.querySelector(s); if(!e) return;` +
+              `    if(e.scrollWidth>e.clientWidth) out.clips.push({i:i,s:s,sw:e.scrollWidth,cw:e.clientWidth,t:(e.textContent||'').slice(0,32)});});` +
+              `  var p=r.querySelector('.status-pill-detail');` +
+              `  if(p&&p.scrollWidth>p.clientWidth) out.ell.push({i:i,sw:p.scrollWidth,cw:p.clientWidth,t:(p.textContent||'').slice(0,40)});` +
+              `  var b=r.querySelector('.fleet-badges');` +
+              `  if(b&&b.scrollWidth>0&&b.getBoundingClientRect().width+0.5<b.scrollWidth)` +
+              `    out.sq.push({i:i,w:+b.getBoundingClientRect().width.toFixed(2),sw:b.scrollWidth});});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-fleet") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-fleet" — the hash did not route, so nothing below this line measures the fleet row`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty list is not a clean list. A scenario that
+            // renders zero rows would score 0 clips and read as a pass.
+            if (m.rows === 0) fail(D, `${scen}/${theme}@${width}: zero .fleet-row rendered — nothing was measured, this is not a pass`);
+            rowsSeen += m.rows;
+            // THE SCOPE TRIPWIRE (review addition). Element-level questions are
+            // this leg's point, but the fix's own failure mode is PAGE-level and
+            // lives BELOW its media query: unscoped, these declarations were
+            // driven at 846px against a 721px viewport. Reading the page here
+            // costs one property and turns the slice's proof into a check.
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the page is off-screen sideways. Below 900 this is the signature of the fix leaking out of its \`@media (min-width: 900px)\` scope: \`flex-wrap: wrap\` on the stacked (column) .fleet-row wraps into COLUMNS`);
+            }
+            for (const c of m.clips) {
+              clipped++;
+              fail(D, `${scen}/${theme}@${width} row${c.i} ${c.s}: scrollWidth ${c.sw} > clientWidth ${c.cw} — ${Math.round((1 - c.cw / c.sw) * 100)}% of "${c.t}" is not rendered, and the box computes overflow:visible so the remainder is painted THROUGH the badge column`);
+            }
+            for (const e of m.ell) {
+              const k = knownHit(scen, ".status-pill-detail", width);
+              if (k) {
+                knownSeen.add(`${k.row}|${scen}|${width}`);
+                process.stdout.write(`   · known  ${k.row}  ${scen}/${theme}@${width} row${e.i} .status-pill-detail ${e.sw}>${e.cw}: ${k.why}\n`);
+                continue;
+              }
+              ellipsed++;
+              fail(D, `${scen}/${theme}@${width} row${e.i} .status-pill-detail: scrollWidth ${e.sw} > clientWidth ${e.cw} — the money message "${e.t}" is truncated (GR116)`);
+            }
+            for (const s of m.sq) {
+              squeezed++;
+              fail(D, `${scen}/${theme}@${width} row${s.i} .fleet-badges: box ${s.w}px around ${s.sw}px of content — the badge column was collapsed to buy the text room`);
+            }
+            const bad = m.clips.length + m.sq.length + (m.psw > m.pcw ? 1 : 0) +
+              m.ell.filter(() => !knownHit(scen, ".status-pill-detail", width)).length;
+            row.push(`${width}:${m.rows}r${bad ? "!" + bad : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join(" ")}\n`);
+        }
+      }
+      // A KNOWN ENTRY THAT NO LONGER MATCHES IS A FAILURE, not a tidy-up. Without
+      // this the allowlist is write-only: the row gets paid, nobody deletes the
+      // entry, and the next real defect at those cells is silently forgiven.
+      for (const k of FLEET_KNOWN) {
+        const hit = [...knownSeen].some((s) => s.startsWith(`${k.row}|`));
+        if (!hit) {
+          fail(D, `known-hit entry ${k.row} (${k.scen} ${k.sel} @ ${k.widths.join("/")}) matched NOTHING — either the row was paid and this entry must be DELETED, or the cell stopped rendering. An allowlist that cannot go stale is an allowlist that forgives the next defect.`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${rowsSeen} fleet rows measured, ${knownSeen.size} known-row cells itemised: ${FLEET_KNOWN.map((k) => k.row).join(", ") || "none"}) across ` +
+          `${FLEET_WIDTHS.join("/")}; ${clipped} clipped text cells, ${ellipsed} ellipsed money ` +
+          `messages, ${squeezed} squeezed badge columns, ${pageOver} pages scrolling sideways; ` +
+          `${FLEET_KNOWN.length} itemised known row(s), every other cell judged`,
         );
       }
     }

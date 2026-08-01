@@ -166,4 +166,28 @@
 # FOR THE LEAD: three wave-15 slices touch app.css. This number and theirs merge
 # CLEAN and WRONG — re-measure on the merged tree (charter D158 REGENERATE-ON-REBASE);
 # do not add 2 to whatever lands first.
-1245
+# Re-measured 2026-08-01 (cch-w15-s4-fleet-lead-column-bounded, at BUILD): 1245
+# authored rule heads == 1245 CSSOM style rules, flattened selectors 1210/1210,
+# MISSES 0 — MEASURED by running cssom-parity.mjs on this branch off origin/main
+# (which reads 1243), Chrome 150.0.7871.187, node v22.22.0, app.css 226942 B sha256
+# 2cef44395396…. Not hand-incremented and not arithmetic: the run's own output line
+# is "authored rule heads 1245 (baseline 1243 ← ABOVE)". The +2 are the two heads of
+# the new `@media (min-width: 900px)` block that stops the fleet row painting the
+# hostname through the badge chips — `.fleet-row` (flex-wrap) and `.fleet-main`
+# (flex: 1 1 auto; min-width: 200px). Both selectors already exist at :952 and inside
+# the `@media (max-width: 899px)` complement, but a head is per BLOCK, so a scoped
+# re-declaration is two new heads, not zero. MISSES 0 confirms an unrecorded ADD, not
+# a parity defect. FOR THE LEAD: three of the last four entries in this file are
+# collision resolutions, and wave 15 has siblings touching app.css too — RE-MEASURE
+# on the merged tree (D158 REGENERATE-ON-REBASE). Do not add 2 to whatever lands
+# first; that is the exact mistake recorded twice above.
+# LEAD RESOLUTION 2026-08-01 (merge of cch-w15-s4 onto main already carrying s5): the
+# fourth collision in this file, and the slice's own warning above was exactly right -
+# 1245 was measured off a main reading 1243, main now reads 1245 after #8740, and the
+# merged tree measures 1247. Adding 2 to whatever landed first would have produced 1247
+# by luck this time and been wrong the next; the number below was MEASURED, not derived.
+# Chrome 150.0.7871.187, node v22.22.0, app.css 232062 B sha256 b5b8ac065608...,
+# authored rule heads 1247 == CSSOM style rules 1247, flattened selectors 1212/1212,
+# MISSES 0, PARITY PASS. Both prose records above are kept: s5's +2 and s4's +2 are
+# separate facts about separate blocks and neither may be collapsed into the other.
+1247
