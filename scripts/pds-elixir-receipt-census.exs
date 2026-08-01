@@ -125,8 +125,10 @@ defmodule PDS.Census do
   # can retract a false route bracket. A site whose route bracket is wrong says so here.
   @declared [
     %{
-      path: "api/lib/barkpark_web/controllers/auth_controller.ex",
-      line: 399,
+      key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
+      basis_spans: [{393, 393}],
+      basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
       basis: "inline comment :393 — \"Always 200 — never reveal whether the email is registered.\"",
@@ -136,8 +138,10 @@ defmodule PDS.Census do
           "does write a reset token when the address resolves.)"
     },
     %{
-      path: "api/lib/barkpark_web/controllers/auth_controller.ex",
-      line: 417,
+      key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
+      basis_spans: [{402, 407}],
+      basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
       basis:
@@ -152,8 +156,10 @@ defmodule PDS.Census do
           "wrongly accused for two waves."
     },
     %{
-      path: "api/lib/barkpark_web/controllers/github_webhook_controller.ex",
-      line: 86,
+      key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "17468236"},
+      basis_spans: [{74, 78}],
+      basis_token: "always answers 2xx unless intake genuinely",
       class: "NO-OP-ACK",
       confirmation: "declared",
       basis: "@doc :74-78 — \"always answers 2xx unless intake genuinely fails\"",
@@ -162,8 +168,10 @@ defmodule PDS.Census do
           "never fires here. A ping ack claims nothing beyond having been reached."
     },
     %{
-      path: "api/lib/barkpark_web/controllers/github_webhook_controller.ex",
-      line: 87,
+      key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "105570378"},
+      basis_spans: [{74, 78}, {87, 87}],
+      basis_token: "ignored:",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
       basis: "the response body itself — `ignored: \"event\"` on :87, plus @doc :74-78",
@@ -174,8 +182,10 @@ defmodule PDS.Census do
           "ignored, so the receipt does not pass an unhandled event off as handled work."
     },
     %{
-      path: "api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
-      line: 54,
+      key: {"api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
+            "BarkparkWeb.BulldocsFormController.submit/2", "123699679", "17468236"},
+      basis_spans: [{22, 24}, {53, 53}],
+      basis_token: "the trap stays invisible",
       class: "HONEYPOT",
       confirmation: "declared",
       route_claim: "ROUTE-MISCREDIT",
@@ -191,6 +201,658 @@ defmodule PDS.Census do
           "retracted from the shape vocabulary: route_tag/1 and evidence/3 read write?/depth only."
     }
   ]
+
+  # ------------------------------------------------------------- judgment register
+  #
+  # THE JUDGMENT LEDGER (PDS wave 37, task pds-w34-hand-bucket-register). One row per
+  # EMITTED success claim, keyed on {path, module.name/arity, head_hash, expr_fp} — CLASS
+  # AND LINE BOTH EXCLUDED. It is NOT a bucketing exercise and it asserts NO distribution:
+  # REGISTER-COMPLETE checks completeness and integrity, never how the verdicts fall, so
+  # no reclassification can red the build.
+  #
+  # DERIVED AT 501fb9670, off this script's OWN `--keys` emission (91 rows / 91 distinct).
+  # Every key here was READ from that TSV, never transcribed by hand.
+  #
+  # THE KEY LADDER, MEASURED AT THAT SHA — so nobody "simplifies" the key to three fields:
+  #     {path, mfa} = 75 distinct · +head_hash = 76 · +expr_fp = 91 · expr_fp ALONE = 67
+  # `expr_fp` IS THE LOAD-BEARING FIELD. One fingerprint (17468236, the bare success map
+  # with no discriminating key) covers 12 rows across 7 files; inside
+  # github_webhook_controller.ex, path+expr_fp alone collapses 14 rows to 12. `head_hash`
+  # buys exactly ONE row (75 -> 76) and is CARRIED FOR STABILITY, NOT UNIQUENESS: it
+  # survives an edit inside a clause body that re-fingerprints the expression, so a row
+  # demoted by basis-stale can still be found. gh:86 and gh:87 share {path, mfa,
+  # head_hash} and are separated by expr_fp ALONE.
+  #
+  # WHAT head_hash CANNOT DISCRIMINATE (scope stated, or a reader believes it is near
+  # unique on its own — it is not, and it does not need to be): across all 17,620 defs it
+  # collides in exactly 3 buckets WITHIN a {path, module.name/arity} group, and 0 times
+  # within the 75 site-owning groups. Only ONE of the three is a benign bodiless
+  # declaration head; the other TWO are DISTINCT functions inside two `defimpl Inspect,
+  # for: ...` blocks (plugins/github/errors.ex :94/:138, plugins/indx/errors.ex :118/:137)
+  # that this walker cannot tell apart. Corpus-wide — ignoring path and mfa — it is 912
+  # groups over 2,543 defs under this normaliser (the wave brief recorded 913/2,544 under
+  # another spelling; that figure does not survive a spelling change and is not quotable
+  # across one).
+  #
+  # CHURN, MEASURED across the three merges that landed into this sha: 5 orphaned / 5
+  # arrived / 86 common, and it was a PURE RE-KEY — the {path, mfa} multiset was
+  # byte-identical and only expr_fp moved. Expect ~5.5% of rows to re-key per code slice
+  # touching two controllers. `--keys` is C-locale sorted by {path, line}; a consumer that
+  # pipes it through `sort` without LC_ALL=C reorders it.
+  #
+  # THE SENTINEL PREDICATE, NAMED: sentinel-ok@repo-write,def+defp,tail-disjoint /
+  # total-meta-drop/phash2-term/v1 / 501fb9670. The 21 function-tail / 11 clause-local
+  # figures reproduce ONLY under that four-knob predicate (def+defp clauses with a
+  # do-block, a Repo-WRITE verb list, tail = last expression of a __block__, clause-local
+  # DISJOINT from function-tail). Dropping the write predicate gives 257/247; public def
+  # only gives 15/4; any Repo.* gives 23/18; non-disjoint gives 13.
+  #
+  # CAS IS A STRICT SUBSET OF POST-READ AT THIS LENS AND THIS SHA — the difference
+  # CAS-minus-POST-READ is EMPTY, and POST-READ-minus-CAS is the single site
+  # oidc_controller.ex:82. All 14 CAS sites reach POST-READ via ARM 1 (`select:`), zero
+  # via ARM 2, and the same function supplies both halves (Internal.fenced_content_write/4
+  # x13, BlockOps.fenced_paper_update/4 x1). RECORDED WITH ITS LENS AND SHA, NEVER AS A
+  # STANDING INVARIANT: a CAS spelling with no `select:` is describable
+  # (pds-bl-cas-int-tuple-spelling-blind) and would break it.
+  #
+  # -- THE THREE VERDICTS. There are exactly three, and nothing else is admitted.
+  #   PROVEN    a committed differential asserts `receipt == stored row`
+  #   REFUTED   measured divergent
+  #   UNJUDGED  named, WITH THE REASON — thirty honest UNJUDGED beat seventy-four
+  #             confident guesses, which is what dissolves the shadowed-bucket problem
+  #             instead of trading one shadowed bucket for another.
+  #
+  # -- THE OPENING BALANCE, STATED SO IT CANNOT BE ROUNDED UP (PDS-D526/D527).
+  #   8 rows  PROVEN / end-to-end            mutation-attested; the row carries the line
+  #   7 rows  PROVEN / end-to-end-unmutated  ALREADY CONJUNCTIVE in the committed suite,
+  #                                          BUT ITS FALSIFIER WAS NEVER EXERCISED — the
+  #                                          conjunction was READ, not made to fail
+  #   1 tag   PROVEN inside an UNJUDGED row  github_webhook_controller.ex:194's
+  #                                          `:already_stamped` tag only (see below)
+  # PDS-D526 opened this at 18 (9 + 9). IT CLOSED AT 16, AND THE TWO MISSING ROWS WERE
+  # TAKEN BY THIS WAVE'S OWN FALSIFIER, NOT BY AN ARGUMENT: BASIS-FALSIFIERS refused
+  # bulldocs_ingest_controller.ex:630 and :715, whose cited tests drive the route and never
+  # read the paper back. Both now read UNJUDGED / unjudged_other with the refusal written
+  # in the row. THAT IS THE LEDGER WORKING — a wave that could only ever ratify its own
+  # brief would be paperwork. Below the line, and NOT part of it: the rows carrying
+  # `side_effect_existence_only`, which PDS-D499 maps to UNJUDGED — the cited Repo read
+  # asserts an audit row EXISTS, never that the printed field equals the stored one.
+  # THE COUNT IS NOT TRANSCRIBED HERE. It is derived at print time from @register (the
+  # BASIS DISTRIBUTION block, and the "Below the line" sentence the integrity report
+  # prints from `by_basis`) — a hand-typed integer in this comment went stale inside this
+  # very wave, because bulldocs_ingest_controller.ex:164 was demoted to `unjudged_other`
+  # on the advisory line AFTER the tally was written. The two that remain of the wave's
+  # own "weaker still" rows are tasks_controller.ex:1352 and auth_controller.ex:329
+  # (which proves session death through a SECOND ENDPOINT); :164's demotion is printed in
+  # full in the UNJUDGED-OTHER block.
+  #
+  # -- THE BASIS VOCABULARY IS CLOSED, AND EACH VALUE CARRIES ITS OWN CHECK. An essay in
+  # a reason field is unfalsifiable paperwork; a vocabulary token is a claim a machine can
+  # refuse. PROSE IS PERMITTED ON EXACTLY ONE VALUE — `unjudged_other`, where it is
+  # REQUIRED, counted, printed, and never reds. @basis_vocab below is the authority.
+  # THIS WAVE ADDS FOUR VALUES to PDS-D499's eleven, each mechanically falsifiable:
+  #   end_to_end_unmutated   — the distinct token for a conjunction read but not exercised
+  #   declared_basis         — the five @declared rows; DECLARED-BASIS-INTACT is its check
+  #   partial_tag_coverage   — one emitted site, several rendered receipts (below)
+  #   unexamined             — no differential has been READ for this row. It is not a
+  #                            euphemism for "probably fine": it is the honest floor, and
+  #                            it is what 33 of these 91 rows say.
+  #
+  # -- MULTI-TAG SITES (PDS-D527). github_webhook_controller.ex:194's clause head is
+  # `{:ok, tag, doc_id} when tag in [...]` — ONE emitted site, THREE rendered receipts,
+  # and only `:already_stamped` is proven end-to-end. Such a row carries a `tags:`
+  # sub-list and THE ROW'S OWN VERDICT IS THE WEAKEST OF THEM. IT IS NOT SPLIT INTO THREE
+  # ROWS: three rows would name one emitted site three times and RED REGISTER-COMPLETE's
+  # row->site direction, the arm this wave is judged on.
+  #
+  # -- WHAT THE KEY MIGRATION KILLED, AND WHAT IT DELIBERATELY DID NOT. With one blank
+  # line inserted above github_webhook_controller.ex:87 (`perl -i -pe 'print "\n" if
+  # $. == 80'` — NOT `sed -i '' '398i\'`, which is a macOS no-op and proves nothing), the
+  # {path,line}-keyed spelling prints `1 undeclared of 1 fired` — A FALSE ACCUSATION
+  # against a committed basis, at exit 0 — while this one still prints `0 undeclared of 1
+  # fired` with only the printed anchor tracking to :88. REGISTER-COMPLETE and
+  # DECLARED-ROWS-RESOLVE both stay green through it, because neither joins on a line.
+  # DECLARED-BASIS-INTACT correctly REDS, and that is not a residual line dependency worth
+  # engineering away: a basis span NAMES PROSE IN A FILE, so it is line-anchored by
+  # nature, and the FAIL line carries the row and its recorded span so the fix is one edit.
+  #
+  # -- NO SCRIPT EVER WRITES A VERDICT. Arms check; they never assign. The one apparent
+  # exception is `basis_stale`, and it is not one: a row whose recorded head_hash/expr_fp
+  # no longer match is REPORTED as demoted at print time, and the committed row is left
+  # exactly as its author wrote it, so the demotion is visible as a diff-free fact rather
+  # than an edit nobody reviewed.
+  #
+  # -- WHAT THE MODULE-LINKAGE CHECK WOULD HAVE COST (PDS-D525). "The cited test
+  # references the site's MODULE" reads like the obvious falsifier and it is a FALSE one:
+  # `pds_group_c_receipt_differential_test.exs` contains the string `Controller` ZERO
+  # times, because conn-driven tests name a URL, not a module — the predicate refuses ALL
+  # of this wave's committed PROVEN differentials. Route linkage replaces it and is
+  # ADVISORY, never redding, because it is UNCHECKABLE for the 14 github_webhook rows
+  # (`GithubWebhookController` appears zero times in router.ex; the routes are
+  # macro-generated) and reading the literal alone manufactured three FALSE contradictions
+  # against genuine PROVEN rows whose route lives in an enclosing `scope`.
+  #
+  # -- HOME. In-file, beside @declared, at COMPACT row density (~4.4 lines/row). The
+  # 19-lines-per-row @declared shape would have added ~1,730 lines and doubled this
+  # script. PROSE LIVES IN THE WAVE PAPER, not here — except `unjudged_other`, where it is
+  # required. `.sobelow-skips` is FORBIDDEN as a home: PDS-D141 forbids PDS PRs from
+  # editing it, it is this repo's own worked example of a line-keyed register rotting
+  # silently, and a judgment register whose rows silence the instrument inverts this
+  # epic's law.
+
+  # THE VOCABULARY IS THE AUTHORITY, AND IT IS DATA. {verdict class, falsifier, tier} —
+  # `:reds` values are checked by the L2 basis falsifiers and go RED; `:advisory` values
+  # print a counted CONTRADICTION line at exit 0, because their falsifier is either
+  # undecidable as written or measured to manufacture false accusations.
+  @basis_vocab %{
+    end_to_end:
+      {"PROVEN", "the cited test drives the site's route AND reads the stored row back", :reds},
+    end_to_end_unmutated:
+      {"PROVEN", "the cited test drives the site's route AND reads the stored row back (mutation NEVER exercised)", :reds},
+    two_hop_composed:
+      {"UNJUDGED", "a single test spanning BOTH hops exists", :advisory},
+    stub_mapping_only:
+      {"UNJUDGED", "the cited test has no injection seam, or DOES read Repo", :reds},
+    context_differential_only:
+      {"UNJUDGED", "the cited test builds a conn", :reds},
+    side_effect_existence_only:
+      {"UNJUDGED", "the Repo read compares a printed field, not existence", :advisory},
+    shape_assertion_only:
+      {"UNJUDGED", "the assertion can fail on a wrong payload (implementable ONLY as a denylist of weak predicates — is_list/is_map/is_binary/bare truthiness — so it is advisory, and this name promises more than its code delivers)", :advisory},
+    payload_is_the_postcondition:
+      {"UNJUDGED", "any emitted value traces to params[...] or a fn head", :advisory},
+    request_param_echo:
+      {"UNJUDGED", "no emitted value traces to a request parameter", :advisory},
+    no_observer:
+      {"UNJUDGED", "any test references the site's module OR its route path", :reds},
+    basis_stale:
+      {"UNJUDGED", "the current head_hash+expr_fp equal the recorded pair", :reds},
+    partial_tag_coverage:
+      {"UNJUDGED", "every tag in the sub-list carries the same verdict as the row", :advisory},
+    declared_basis:
+      {"UNJUDGED", "the @declared row's basis span no longer carries its token (DECLARED-BASIS-INTACT)", :advisory},
+    unexamined:
+      {"UNJUDGED", "a committed test cites this site's route AND reads Repo back", :advisory},
+    not_a_receipt:
+      {"UNJUDGED", "the site renders a body or a status that makes a claim about work done", :advisory},
+    unjudged_other:
+      {"UNJUDGED", "PROSE REQUIRED; counted and PRINTED in the integrity block; NEVER reds", :advisory}
+  }
+
+  # ---------------------------------------------------------- population roster
+  #
+  # THE BLIND-SPOT BLOCK USED TO BE THREE SUBSTRING TOTALS (PDS-D524). A total names
+  # nobody; this names EIGHT sites outside the `ok: true` lens that report success without
+  # a read, each with a verdict from the SAME vocabulary the register uses. It is DISJOINT
+  # from the 91 BY SITE, and the distinction matters: zero register keys live in
+  # scim_groups / scim_users / session_controller / chat_controller / chat_host_controller,
+  # and the ONE shared FILE is pulse_controller.ex, where the register holds create/2 (:58)
+  # and this roster names preflight/2 (:93) — a different function. Re-derived here rather
+  # than asserted: `cut -f1 keys.tsv | sort -u | grep -E 'scim|session|chat|pulse'` returns
+  # pulse_controller.ex and nothing else.
+  #
+  # EVERY ROW IS ANCHORED ON A LITERAL, NEVER A LINE NUMBER, and the arm asserts
+  # EXISTENCE, NEVER A COUNT. Measured over 80 api/lib commits across 9 days the three
+  # substring totals moved 7 times (~once per 11 commits, twice on ONE day) and the movers
+  # were a papers fence, a credential-scope security fix and a chat-wire feature — a count
+  # arm would have redded on unrelated work every week. The roster literals had ZERO drift
+  # across all 80.
+  #
+  # THE TEN "CLASS D" DELETE/REVOKE ECHO SITES ARE NOT ROSTERED (PDS-D523). Every one
+  # bottoms out in Repo.delete(_, stale_error_field: :id), Repo.update/1 on one fetched
+  # row, or Repo.rollback — they are FALSE ACCUSATIONS, and a roster that carries them
+  # would be the over-claiming this census exists to find, pointed the other way.
+  #
+  # TWO ROWS ARE STALE-ON-MERGE, AND SAYING SO IS THE POINT (wave 37 review, 2026-08-02).
+  # scim_groups_controller.ex and session_controller.ex are verdicted REFUTED **at
+  # 501fb9670**. `pds-w37-unread-callee-receipts` repairs BOTH, and both roster literals
+  # SURVIVE that repair as substrings — measured, not assumed: the census run over the
+  # three wave-37 branches merged together prints ROSTER-ANCHORS-EXIST PASS with these
+  # verdicts unchanged. So the ANCHOR arm cannot catch the staleness; nothing here can.
+  # Whoever merges that slice OWNS re-deriving these two rows in the same wave — the note
+  # below is the obligation, and a REFUTED that outlives its defect is exactly the
+  # over-claim this roster exists to name, pointed at the roster itself.
+  @roster [
+    %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
+      literal: "Scim.delete_group(org, group)",
+      verdict: "REFUTED", basis: :unjudged_other,
+      note: "the callee's return is DISCARDED ENTIRELY before a 204, and Scim.delete_group/2 returns {:ok, n} including {:ok, 0}. STALE-ON-MERGE: pds-w37-unread-callee-receipts widens the callee to {:error, :not_found} and matches it at the caller; when that branch lands, RE-DERIVE this row — the literal survives, so no arm will red for you."},
+    %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
+      literal: "Scim.deprovision_user(org, user, hard: true)",
+      verdict: "PROVEN", basis: :end_to_end_unmutated,
+      note: "the match is `{:ok, _} =` over a raising Repo.delete! inside a transaction, so a failed deprovision cannot reach the 204."},
+    %{path: "api/lib/barkpark_web/controllers/session_controller.ex",
+      literal: "Barkpark.Accounts.revoke_user_session_token(token)",
+      verdict: "REFUTED", basis: :unjudged_other,
+      note: "revoke_user_session_token/1 hardcodes :ok over a Repo.update_all, so the flash and the redirect below it are true no matter how many rows moved. STALE-ON-MERGE: pds-w37-unread-callee-receipts widens it to {:ok, revoked} and forks the flash on the count; when that branch lands, RE-DERIVE this row — the literal survives, so no arm will red for you."},
+    %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
+      literal: "StudioChat.update_approval_status(id, request_id, status)",
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note: "both arms of update_approval_status fold to :ok, and answer_approval's result is discarded with `_ =`."},
+    %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
+      literal: "persist_user_turn(id, content)",
+      verdict: "UNJUDGED", basis: :declared_basis,
+      note: "a fail-soft persist, declared in the clause comment above it — the send is already on its way, so a persist miss must not turn a live send into an error."},
+    %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
+      literal: "json(%{request_id: request_id})",
+      verdict: "UNJUDGED", basis: :declared_basis,
+      note: "the request_id: nil no-op, declared in the @doc."},
+    %{path: "api/lib/barkpark_web/controllers/chat_host_controller.ex",
+      literal: "{:ok, :accepted} -> conn |> put_status(:accepted) |> json(",
+      verdict: "UNJUDGED", basis: :stub_mapping_only,
+      note: "re-renders the callee's :accepted tag faithfully; the tag's truth against any stored row is a separate question this row does not answer."},
+    %{path: "api/lib/barkpark_web/controllers/pulse_controller.ex",
+      literal: "def preflight(conn, _params), do: send_resp(conn, 204,",
+      verdict: "UNJUDGED", basis: :not_a_receipt,
+      note: "a CORS preflight 204 claims nothing about work done. CARRIED ON PURPOSE, so the roster's own completeness is checkable: a roster of only the guilty is indistinguishable from a roster nobody finished."}
+  ]
+
+  @register [
+    # barkpark/plugins/sheets/web/import_controller.ex:64
+    %{key: {"api/lib/barkpark/plugins/sheets/web/import_controller.ex",
+            "Barkpark.Plugins.Sheets.Web.ImportController.create/2", "51320322", "13286890"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark/plugins/sheets/web/ops_controller.ex:71
+    %{key: {"api/lib/barkpark/plugins/sheets/web/ops_controller.ex",
+            "Barkpark.Plugins.Sheets.Web.OpsController.apply_ops/2", "36006285", "87176703"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:177
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.erase/2", "14672314", "70062513"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:329
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.revoke_session/2", "14482306", "17656195"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:369"},
+    # barkpark_web/controllers/auth_controller.ex:351
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.logout/2", "893943", "17468236"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:351
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.logout/2", "893943", "101485070"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:379
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.verify_email/2", "13273957", "17468236"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:399
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
+      verdict: "UNJUDGED", basis: :declared_basis},
+    # barkpark_web/controllers/auth_controller.ex:417
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
+      verdict: "UNJUDGED", basis: :declared_basis},
+    # barkpark_web/controllers/auth_controller.ex:463
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.reset/2", "117976982", "93237454"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/pds_w36_revoke_all_receipt_test.exs:64",
+      attestation:
+        "mutation: hardcode sessionsRevoked — `mix test api/test/barkpark_web/controllers/pds_w36_revoke_all_receipt_test.exs:64` reds on Repo.aggregate",
+    },
+    # barkpark_web/controllers/auth_controller.ex:528
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.mfa_verify/2", "16615157", "38279071"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:463"},
+    # barkpark_web/controllers/auth_controller.ex:567
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.mfa_disable/2", "103479204", "17468236"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:463"},
+    # barkpark_web/controllers/auth_controller.ex:600
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.mfa_step_up/2", "85508749", "111398976"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:463"},
+    # barkpark_web/controllers/bulldocs_form_controller.ex:50
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
+            "BarkparkWeb.BulldocsFormController.submit/2", "123699679", "127244318"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_form_controller.ex:54
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
+            "BarkparkWeb.BulldocsFormController.submit/2", "123699679", "17468236"},
+      verdict: "UNJUDGED", basis: :declared_basis},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:164
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "1989150", "124223564"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs:319) reads nothing back at all, so it cannot even assert that."},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:244
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.ingest_html/4", "19560303", "124223564"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs:97"},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:321
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.ingest_session/2", "11366553", "107043790"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:431
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.apply_session_op/2", "38576492", "88664755"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:502
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.append_session_event/2", "51520286", "61088078"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:551
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.touch_session_conversation/2", "104647366", "61088078"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:630
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.apply_op/2", "133005745", "10224315"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. The brief ruled it end_to_end_unmutated; the arm refused the citation (bulldocs_ingest_controller_test.exs:595 drives the batch route but never reads the paper back), so the receipt-vs-stored-row question is unjudged."},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:715
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.apply_op/2", "85655901", "15024779"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. Same shape as its batch sibling: bulldocs_ingest_controller_test.exs:397 drives the single-op route and asserts the returned fragment, and nothing reads the stored paper back."},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:814
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.propose/2", "78347098", "122622379"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_intents_controller.ex:50
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_intents_controller.ex",
+            "BarkparkWeb.BulldocsIntentsController.mark_processed/2", "120960553", "126280052"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/github_adopt_controller.ex:66
+    %{key: {"api/lib/barkpark_web/controllers/github_adopt_controller.ex",
+            "BarkparkWeb.GithubAdoptController.adopt/2", "109355155", "85172196"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/github_adopt_controller.ex:69
+    %{key: {"api/lib/barkpark_web/controllers/github_adopt_controller.ex",
+            "BarkparkWeb.GithubAdoptController.adopt/2", "109355155", "81072"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/github_status_controller.ex:65
+    %{key: {"api/lib/barkpark_web/controllers/github_status_controller.ex",
+            "BarkparkWeb.GithubStatusController.status/2", "63059312", "64996178"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/github_webhook_controller.ex:86
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "17468236"},
+      verdict: "UNJUDGED", basis: :declared_basis},
+    # barkpark_web/controllers/github_webhook_controller.ex:87
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "105570378"},
+      verdict: "UNJUDGED", basis: :declared_basis},
+    # barkpark_web/controllers/github_webhook_controller.ex:111
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "124460091"},
+      verdict: "UNJUDGED", basis: :two_hop_composed, evidence: "api/test/barkpark/plugins/github/inbound_events_test.exs:201"},
+    # barkpark_web/controllers/github_webhook_controller.ex:115
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "96836141"},
+      verdict: "UNJUDGED", basis: :two_hop_composed, evidence: "api/test/barkpark/plugins/github/inbound_events_test.exs:201"},
+    # barkpark_web/controllers/github_webhook_controller.ex:120
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "39153928"},
+      verdict: "UNJUDGED", basis: :two_hop_composed, evidence: "api/test/barkpark/plugins/github/inbound_events_test.exs:235"},
+    # barkpark_web/controllers/github_webhook_controller.ex:145
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "38180227"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:165"},
+    # barkpark_web/controllers/github_webhook_controller.ex:150
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "96836141"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:112"},
+    # barkpark_web/controllers/github_webhook_controller.ex:154
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "39153928"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:122"},
+    # barkpark_web/controllers/github_webhook_controller.ex:161
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "109773520"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+    # barkpark_web/controllers/github_webhook_controller.ex:189
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "46526763"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:209",
+      attestation:
+        "mutation: render stamped: without the merge write — `mix test api/test/barkpark_web/controllers/github_webhook_integration_test.exs:209` reds on Repo.get!",
+    },
+    # barkpark_web/controllers/github_webhook_controller.ex:194
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "107251666"},
+      verdict: "UNJUDGED", basis: :partial_tag_coverage, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:244",
+      tags: [
+        %{tag: :already_stamped, verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:244"},
+        %{tag: :no_marker, verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+        %{tag: :no_guardable_marker, verdict: "UNJUDGED", basis: :no_observer, evidence: ""},
+      ],
+    },
+    # barkpark_web/controllers/github_webhook_controller.ex:200
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "28623217"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+    # barkpark_web/controllers/github_webhook_controller.ex:205
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "62383269"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+    # barkpark_web/controllers/github_webhook_controller.ex:209
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "1432007"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+    # barkpark_web/controllers/oidc_controller.ex:82
+    %{key: {"api/lib/barkpark_web/controllers/oidc_controller.ex",
+            "BarkparkWeb.OidcController.callback/2", "55913437", "73996638"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/plugin_settings_controller.ex:53
+    %{key: {"api/lib/barkpark_web/controllers/plugin_settings_controller.ex",
+            "BarkparkWeb.PluginSettingsController.update/2", "52263610", "17468236"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:251",
+      attestation:
+        "mutation: drop one key from the stored settings map — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:251` reds",
+    },
+    # barkpark_web/controllers/plugin_settings_controller.ex:65
+    %{key: {"api/lib/barkpark_web/controllers/plugin_settings_controller.ex",
+            "BarkparkWeb.PluginSettingsController.delete/2", "52373358", "17468236"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:272",
+      attestation:
+        "mutation: 200 without deleting the row — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:272` reds",
+    },
+    # barkpark_web/controllers/pulse_controller.ex:58
+    %{key: {"api/lib/barkpark_web/controllers/pulse_controller.ex",
+            "BarkparkWeb.PulseController.create/2", "89312836", "32961015"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/query_controller.ex:199
+    %{key: {"api/lib/barkpark_web/controllers/query_controller.ex",
+            "BarkparkWeb.QueryController.counts/2", "9322375", "98818316"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/saml_controller.ex:66
+    %{key: {"api/lib/barkpark_web/controllers/saml_controller.ex",
+            "BarkparkWeb.SamlController.acs/2", "32993266", "73996638"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/saml_controller_test.exs:117"},
+    # barkpark_web/controllers/search_controller.ex:190
+    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.reindex/2", "43259676", "54848977"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/search_controller.ex:316
+    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.delete_search_synonym/2", "57054890", "120063507"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:67",
+      attestation:
+        "mutation: flip `Synonyms.delete/4` to return {:ok, 0} without deleting — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:67` reds on the Repo read",
+    },
+    # barkpark_web/controllers/search_controller.ex:337
+    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.search_interaction/2", "79721084", "115364326"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/integration/v1_data_search_suggestions_test.exs:84"},
+    # barkpark_web/controllers/search_controller.ex:340
+    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.search_interaction/2", "79721084", "95315838"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/search_controller.ex:363
+    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.correction/2", "57827587", "73264487"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/secret_controller.ex:67
+    %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
+            "BarkparkWeb.SecretController.update/2", "4060754", "17468236"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:195",
+      attestation:
+        "mutation: store the PREVIOUS ciphertext — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:195` reds on the decode-back",
+    },
+    # barkpark_web/controllers/secret_controller.ex:80
+    %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
+            "BarkparkWeb.SecretController.delete/2", "115609568", "17468236"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:145",
+      attestation:
+        "mutation: skip the audit insert — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:145` reds on the audit row",
+    },
+    # barkpark_web/controllers/self_update_controller.ex:24
+    %{key: {"api/lib/barkpark_web/controllers/self_update_controller.ex",
+            "BarkparkWeb.SelfUpdateController.trigger/2", "84801527", "68291924"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/site_deploy_controller.ex:81
+    %{key: {"api/lib/barkpark_web/controllers/site_deploy_controller.ex",
+            "BarkparkWeb.SiteDeployController.start/2", "126876520", "52242951"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/social_controller.ex:66
+    %{key: {"api/lib/barkpark_web/controllers/social_controller.ex",
+            "BarkparkWeb.SocialController.callback/2", "9871709", "73996638"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/tasks_controller.ex:83
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.task_list_response/3", "83021484", "1576835"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "wave 36 measured this receipt divergent and pds-w36-help-seal-fix repaired it; no committed differential naming task_list_response/3 resolves in the tree at this sha, so the REPAIR is unjudged here rather than credited. UPGRADE-ON-MERGE (wave 37 review, 2026-08-02): that slice lands api/test/barkpark_web/controllers/pds_w36_help_seal_probe_test.exs, whose PROBE A and PROBE D were re-verified RED by this reviewer against a faithful revert of the seal hoist. It cites the ROUTE, never the function name, so this note's wording stays literally true after the merge and no arm will red — re-derive the row to end_to_end by hand when the branch lands.",
+    },
+    # barkpark_web/controllers/tasks_controller.ex:170
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.prime/2", "40556915", "123654328"},
+      verdict: "UNJUDGED", basis: :request_param_echo},
+    # barkpark_web/controllers/tasks_controller.ex:224
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.events/2", "114887844", "12538138"},
+      verdict: "UNJUDGED", basis: :request_param_echo},
+    # barkpark_web/controllers/tasks_controller.ex:316
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.claim/2", "130674472", "21159066"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2435"},
+    # barkpark_web/controllers/tasks_controller.ex:371
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.show/2", "107047617", "14030995"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:435
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.claim_by_id/2", "59151065", "67476"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:105"},
+    # barkpark_web/controllers/tasks_controller.ex:558
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.release/2", "64399052", "86587931"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:741"},
+    # barkpark_web/controllers/tasks_controller.ex:587
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.close_response/3", "102889179", "17778956"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:149"},
+    # barkpark_web/controllers/tasks_controller.ex:652
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.stage/2", "86501420", "84462998"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3147"},
+    # barkpark_web/controllers/tasks_controller.ex:788
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.stamp/2", "53080965", "119279425"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:126"},
+    # barkpark_web/controllers/tasks_controller.ex:861
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.pulse/2", "62712851", "71420310"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:169"},
+    # barkpark_web/controllers/tasks_controller.ex:922
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.edges/2", "29434876", "113319186"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:952
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.graph_show/2", "68876245", "14314567"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:984
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.graph_tasks/2", "6484558", "37641606"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:1008
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.graph_orphans/2", "87006539", "21591304"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:1015
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.graph_dangling/2", "113055363", "33214619"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:1142
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.graph_corpus/2", "84484341", "94052887"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:1289
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.add_edge/2", "32780970", "67314930"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:165"},
+    # barkpark_web/controllers/tasks_controller.ex:1327
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.relabel/2", "7475620", "84462998"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:209"},
+    # barkpark_web/controllers/tasks_controller.ex:1352
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.papers/2", "102968637", "84462998"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:1724"},
+    # barkpark_web/controllers/tasks_controller.ex:1379
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.sessions/2", "36243778", "84462998"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:234"},
+    # barkpark_web/controllers/tasks_controller.ex:1422
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.move/2", "90153949", "84462998"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:194"},
+    # barkpark_web/controllers/tasks_controller.ex:1655
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.fleet_beat/2", "8622444", "8757049"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:266"},
+    # barkpark_web/controllers/tasks_controller.ex:1696
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.fleet_roster/2", "116314994", "118018566"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tickets_controller.ex:93
+    %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
+            "BarkparkWeb.TicketsController.index_own/2", "13011616", "113191402"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/tickets_controller.ex:169
+    %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
+            "BarkparkWeb.TicketsController.inbox/2", "102026838", "113191402"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/tickets_controller.ex:263
+    %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
+            "BarkparkWeb.TicketsController.render_ticket/3", "77961612", "114383917"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/v1/media_controller.ex:188
+    %{key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
+            "BarkparkWeb.V1.MediaController.delete_search_synonym/2", "57054890", "20252134"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:82",
+      attestation:
+        "mutation: return the media surface's receipt without the delete — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:82` reds",
+    },
+    # barkpark_web/controllers/v1/media_controller.ex:228
+    %{key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
+            "BarkparkWeb.V1.MediaController.search_interaction/2", "79721084", "115364326"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/v1/media_controller.ex:231
+    %{key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
+            "BarkparkWeb.V1.MediaController.search_interaction/2", "79721084", "95315838"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/webauthn_controller.ex:64
+    %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
+            "BarkparkWeb.WebauthnController.register/2", "48289311", "78521592"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/webauthn_controller.ex:170
+    %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
+            "BarkparkWeb.WebauthnController.step_up/2", "118230159", "123849466"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/webauthn_controller.ex:212
+    %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
+            "BarkparkWeb.WebauthnController.delete/2", "99456611", "17468236"},
+      verdict: "UNJUDGED", basis: :unexamined}
+  ]
+
 
   # ---------------------------------------------------------------- entrypoint
 
@@ -259,12 +921,16 @@ defmodule PDS.Census do
     report_depth_sweep(emitted, index)
     report_shapes(classified)
     report_declared_register(classified)
+    report_judgment_register(classified)
+    falsifiers = if register_scope(classified) == :real, do: report_basis_falsifiers(classified), else: :skipped
     if show_sites?, do: report_each_site(classified)
     report_blind_spots(parsed)
     delegate = report_delegate_probe(index)
 
     ms = System.monotonic_time(:millisecond) - t0
-    integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms)
+
+    integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms,
+      parsed, falsifiers)
   end
 
   # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
@@ -1196,9 +1862,17 @@ defmodule PDS.Census do
   end
 
   # ------------------------------------------------------- declared register lookup
-
-  defp declared_for(%{path: path, line: line}),
-    do: Enum.find(@declared, &(&1.path == path and &1.line == line))
+  #
+  # KEYED ON THE FOUR-FIELD SITE KEY, NEVER {path, line} (PDS-D521). The line-keyed
+  # spelling SILENTLY RESURRECTED A FINDING: one blank line inserted seven lines above
+  # github_webhook_controller.ex:87 took `0 undeclared of 1 fired` -> `1 undeclared of 1
+  # fired` — a false accusation against a committed basis — and flipped this register's
+  # own status line to a FALSE sentence, at exit 0 in both runs. The line is now printed
+  # (tracked live off the resolved site) and never matched on.
+  defp declared_for(%{path: _} = site) do
+    key = site_key(site)
+    Enum.find(@declared, &(&1.key == key))
+  end
 
   defp declared_for(_), do: nil
 
@@ -1254,9 +1928,18 @@ defmodule PDS.Census do
   defp head_hash(_), do: "-"
 
   defp expr_fp(%{expr: expr}), do: fp(expr)
+  # THE `_` FALLBACK MATCHES head_hash/1 AND key_mfa/1 (PDS-D521). Without it, site_key/1
+  # raises FunctionClauseError on any map that is not a collected site — which is exactly
+  # what a register lookup does when a caller hands it a def record by mistake.
+  defp expr_fp(_), do: "-"
 
   defp key_mfa(%{owner: owner}) when not is_nil(owner), do: label(owner)
   defp key_mfa(_), do: "?"
+
+  # THE ONE SPELLING OF THE KEY. Every register — @declared and @register — joins on this
+  # and on nothing else. Line and CLASS are both excluded: a class in the key means every
+  # honest lens correction re-keys and orphans rows, which is the ratchet eating itself.
+  defp site_key(s), do: {s.path, key_mfa(s), head_hash(s), expr_fp(s)}
 
   # STDOUT IS TSV AND NOTHING ELSE — one line per emitted site, so a consumer can read it
   # with `cut` and a `wc -l` against it means what it says. The one-line summary goes to
@@ -1275,7 +1958,8 @@ defmodule PDS.Census do
     routed
     |> Enum.sort_by(&{&1.path, &1.line})
     |> Enum.each(fn s ->
-      IO.puts(Enum.join([s.path, key_mfa(s), head_hash(s), expr_fp(s)], "\t"))
+      {path, mfa, hh, fp} = site_key(s)
+      IO.puts(Enum.join([path, mfa, hh, fp], "\t"))
     end)
 
     IO.puts(
@@ -1591,18 +2275,30 @@ defmodule PDS.Census do
     p("shipping in internal/cli/hetzner_respost.go:197, never a new spelling)")
     p(String.duplicate("-", 78))
 
+    by_key = Map.new(classified, &{site_key(&1), &1})
+
     Enum.each(@declared, fn d ->
+      site = Map.get(by_key, d.key)
+
       # THE STATUS LINE SAYS WHAT IS ACTUALLY WITHHELD. A declared row never suppresses
       # the SHAPE — the arm still fires and the site still prints CATCH-ALL-TO-SUCCESS in
       # the roll. What it withholds is the FINDING. Writing "suppresses a fired shape"
       # would be this epic's own offence: a printed sentence that overstates what the
       # machine did.
       status =
-        if MapSet.member?(fired, {d.path, d.line}),
-          do: "WITHHOLDS A FINDING — an arm fires here; the shape still prints, the finding does not",
-          else: "documents only — no arm fires here"
+        cond do
+          site == nil ->
+            "ORPHAN — this row's four-field key matches NO emitted site in this corpus (DECLARED-ROWS-RESOLVE says so above)"
 
-      p("  #{short(d.path)}:#{d.line}  #{d.class} / #{d.confirmation}#{route_claim_tag(d)}")
+          MapSet.member?(fired, {site.path, site.line}) ->
+            "WITHHOLDS A FINDING — an arm fires here; the shape still prints, the finding does not"
+
+          true ->
+            "documents only — no arm fires here"
+        end
+
+      anchor = if site, do: ":#{site.line}", else: " (unresolved)"
+      p("  #{short(declared_path(d))}#{anchor}  #{d.class} / #{d.confirmation}#{route_claim_tag(d)}")
       wrap("basis:  " <> d.basis, "      ", "        ")
       wrap("status: " <> status, "      ", "        ")
       wrap(d.why, "      ")
@@ -1612,6 +2308,8 @@ defmodule PDS.Census do
 
   defp route_claim_tag(%{route_claim: claim}), do: "  ·  route_claim #{claim}"
   defp route_claim_tag(_), do: ""
+
+  defp declared_path(%{key: {path, _, _, _}}), do: path
 
   defp wrap(text, indent, hang \\ "") do
     width = 74 - String.length(indent)
@@ -1632,6 +2330,162 @@ defmodule PDS.Census do
     |> then(fn {lines, cur} -> Enum.reverse([cur | lines]) end)
     |> Enum.with_index()
     |> Enum.each(fn {line, i} -> p(indent <> if(i == 0, do: "", else: hang) <> line) end)
+  end
+
+  # ------------------------------------------------------- judgment register report
+  #
+  # THE DISTRIBUTION IS PRINTED AND NEVER ASSERTED. Nothing below can red the build; the
+  # arms that can live in integrity/10, and they check COMPLETENESS and INTEGRITY only.
+  # THE THREE RESOLUTION STATES, AND WHY `:stale` IS NOT AN ORPHAN. Churn is measured at
+  # ~5.5% of rows per code slice touching two controllers, and it is a PURE RE-KEY — the
+  # {path, mfa} multiset holds and only expr_fp moves. A row whose four-field key no
+  # longer matches but whose {path, mfa} still names exactly ONE unclaimed emitted site is
+  # DEMOTED to UNJUDGED / basis-stale and REPORTED; it does not red the build, because a
+  # ratchet that reds on every honest edit gets switched off. A row with no {path, mfa}
+  # match, or an ambiguous one inside a multi-site group, is an ORPHAN and REDS: the
+  # register would otherwise silently re-point a bought judgment at a different receipt.
+  #
+  # THE COMMITTED ROW IS NEVER EDITED BY THIS. The demotion is a print-time report, so a
+  # reader sees the stale basis and the author's original judgment side by side.
+  defp resolve_register(classified) do
+    live = Map.new(classified, &{site_key(&1), &1})
+    exact = MapSet.new(for r <- @register, Map.has_key?(live, r.key), do: r.key)
+    by_mfa = Enum.group_by(classified, &{&1.path, key_mfa(&1)})
+
+    {rows, _taken} =
+      Enum.map_reduce(@register, MapSet.new(), fn r, taken ->
+        case Map.get(live, r.key) do
+          nil ->
+            {path, mfa, _, _} = r.key
+
+            cands =
+              by_mfa
+              |> Map.get({path, mfa}, [])
+              |> Enum.reject(
+                &(MapSet.member?(exact, site_key(&1)) or MapSet.member?(taken, site_key(&1)))
+              )
+
+            case cands do
+              [s] -> {{r, :stale, s}, MapSet.put(taken, site_key(s))}
+              _ -> {{r, :orphan, nil}, taken}
+            end
+
+          s ->
+            {{r, :live, s}, taken}
+        end
+      end)
+
+    rows
+  end
+
+  defp report_judgment_register(classified) do
+    resolved = resolve_register(classified)
+
+    rows =
+      Enum.map(resolved, fn {r, status, site} ->
+        r |> Map.put(:resolved, site) |> Map.put(:status, status)
+      end)
+
+    scope = register_scope(classified)
+
+    p("JUDGMENT REGISTER (committed data — one row per emitted site, keyed on")
+    p("{path, module.name/arity, head_hash, expr_fp}; CLASS and LINE both EXCLUDED)")
+    p(String.duplicate("-", 78))
+
+    if scope == :scoped_out do
+      p("  SCOPED OUT — this corpus holds none of the #{length(@register)} registered paths, so the")
+      p("  register is neither checked nor reported here. This is NOT a pass: the synthetic")
+      p("  selftest fixture resolves zero rows by construction.")
+      p("")
+    else
+      # A DEMOTED ROW COUNTS AS UNJUDGED / basis_stale IN THE DISTRIBUTION, not as the
+      # verdict its author committed — otherwise the register would keep reporting a
+      # PROVEN it can no longer stand behind.
+      effective =
+        Enum.map(rows, fn r ->
+          if r.status == :stale, do: %{r | verdict: "UNJUDGED", basis: :basis_stale}, else: r
+        end)
+
+      by_verdict = Enum.frequencies(Enum.map(effective, & &1.verdict))
+      by_basis = Enum.frequencies(Enum.map(effective, & &1.basis))
+      other = Map.get(by_basis, :unjudged_other, 0)
+      stale = Enum.filter(rows, &(&1.status == :stale))
+
+      p("  rows #{length(@register)} · resolved to a live site #{Enum.count(rows, & &1.resolved)} · derived at 501fb9670")
+      p("  VERDICTS   #{Enum.map_join(["PROVEN", "REFUTED", "UNJUDGED"], " · ", &"#{&1} #{Map.get(by_verdict, &1, 0)}")}")
+      p("  PROVEN IS NOT ONE TIER: #{Map.get(by_basis, :end_to_end, 0)} end_to_end (mutation-attested) + #{Map.get(by_basis, :end_to_end_unmutated, 0)} end_to_end_unmutated")
+      p("  (the conjunction was READ, its falsifier NEVER exercised). Below the line and NOT")
+      p("  part of it: #{Map.get(by_basis, :side_effect_existence_only, 0)} side_effect_existence_only, which PDS-D499 maps to UNJUDGED.")
+      p("  unjudged_other (PROSE REQUIRED, counted, NEVER reds): #{other}")
+      p("")
+      p("  BASIS DISTRIBUTION (printed, never asserted — a reclassification cannot red this)")
+
+      by_basis
+      |> Enum.sort_by(fn {b, n} -> {-n, b} end)
+      |> Enum.each(fn {b, n} ->
+        {cls, _falsifier, tier} = Map.get(@basis_vocab, b, {"?", "?", :advisory})
+        p("      #{String.pad_trailing(to_string(b), 30)} #{String.pad_leading(to_string(n), 3)}  #{cls} · #{tier}")
+      end)
+
+      p("")
+      report_register_stale(stale)
+      report_register_tags(rows)
+      report_register_prose(rows)
+    end
+  end
+
+  defp report_register_stale([]), do: :ok
+
+  defp report_register_stale(stale) do
+    p("  BASIS-STALE DEMOTIONS (#{length(stale)}) — reported, NOT written back, and NOT a red build")
+
+    Enum.each(stale, fn r ->
+      {path, mfa, hh, fp} = r.key
+      now = site_key(r.resolved)
+
+      p("      #{short(path)}:#{r.resolved.line}  #{mfa}")
+      p("        recorded #{hh}/#{fp} · current #{elem(now, 2)}/#{elem(now, 3)}")
+      p("        #{r.verdict} / #{r.basis}  ->  UNJUDGED / basis_stale (the basis it was judged on has moved)")
+    end)
+
+    p("")
+  end
+
+  defp report_register_tags(rows) do
+    tagged = Enum.filter(rows, &Map.has_key?(&1, :tags))
+
+    Enum.each(tagged, fn r ->
+      anchor = if r.resolved, do: ":#{r.resolved.line}", else: " (unresolved)"
+      proven = Enum.count(r.tags, &(&1.verdict == "PROVEN"))
+
+      p("  MULTI-TAG  #{short(elem(r.key, 0))}#{anchor}  ONE emitted site, #{length(r.tags)} rendered receipts")
+      p("             row verdict #{r.verdict} / #{r.basis} — the WEAKEST of its tags (#{proven} of #{length(r.tags)} proven)")
+
+      Enum.each(r.tags, fn t ->
+        p("               #{String.pad_trailing(inspect(t.tag), 24)} #{String.pad_trailing(t.verdict, 9)} #{t.basis}")
+      end)
+
+      p("")
+    end)
+  end
+
+  defp report_register_prose(rows) do
+    prose = Enum.filter(rows, &(&1.basis == :unjudged_other))
+
+    Enum.each(prose, fn r ->
+      anchor = if r.resolved, do: ":#{r.resolved.line}", else: " (unresolved)"
+      p("  UNJUDGED-OTHER  #{short(elem(r.key, 0))}#{anchor}")
+      wrap(r.note, "      ", "  ")
+      p("")
+    end)
+  end
+
+  # THE SCOPE PREDICATE. The selftest's synthetic fixture holds none of these paths, so an
+  # unconditional arm would red the selftest on its own commit. A corpus holding SOME of
+  # them is the real corpus with a file missing — that is an orphan, and it reds.
+  defp register_scope(classified) do
+    live = MapSet.new(classified, & &1.path)
+    if Enum.any?(@register, &MapSet.member?(live, elem(&1.key, 0))), do: :real, else: :scoped_out
   end
 
   # The POST-READ survivors, named with the arm that admitted them. A count alone lets a
@@ -1733,6 +2587,58 @@ defmodule PDS.Census do
     p("    git grep -c 'json(conn,' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
     p("    git grep -c 'send_resp(conn, 2' -- 'api/lib/**/*.ex' | awk -F: '{s+=$2} END{print s}'")
     p("")
+    report_roster(parsed)
+  end
+
+  # THE ROSTER, PRINTED WITH ITS ANCHORS RESOLVED LIVE. The line beside each row is
+  # DERIVED from the literal on every run, never transcribed — that is the whole point of
+  # anchoring on a literal.
+  defp report_roster(parsed) do
+    src = Map.new(parsed, &{&1.path, &1.src})
+
+    p("  THE POPULATION ROSTER — #{length(@roster)} NAMED sites outside this lens that report success")
+    p("  without a read. A total names nobody; these are named, each with a verdict from")
+    p("  the SAME vocabulary the register uses, and each anchored on a LITERAL.")
+
+    Enum.each(@roster, fn r ->
+      case roster_anchor(src, r) do
+        {:ok, line} ->
+          p("      #{String.pad_trailing(r.verdict, 9)} #{short(r.path)}:#{line}  [#{r.basis}]")
+          wrap(r.note, "               ")
+
+        :missing ->
+          p("      #{String.pad_trailing(r.verdict, 9)} #{short(r.path)}  ANCHOR MISSING — see ROSTER-ANCHORS-EXIST")
+      end
+    end)
+
+    p("")
+  end
+
+  # EXISTENCE, NEVER A COUNT. The three totals above moved 7 times in 9 days on unrelated
+  # work; an arm over them would have been switched off inside a fortnight. A literal that
+  # has left its file is a real, actionable fact — the roster row now describes nothing.
+  defp roster_anchor(src, r) do
+    lines = src |> Map.get(r.path, "") |> String.split("\n")
+
+    case Enum.find_index(lines, &String.contains?(&1, r.literal)) do
+      nil -> :missing
+      i -> {:ok, i + 1}
+    end
+  end
+
+  defp roster_check(parsed) do
+    src = Map.new(parsed, &{&1.path, &1.src})
+    missing = Enum.filter(@roster, &(roster_anchor(src, &1) == :missing))
+
+    why =
+      if missing == [] do
+        "all #{length(@roster)} roster literal(s) still occur in their named file (EXISTENCE, never a count)"
+      else
+        "#{length(missing)} roster literal(s) have LEFT their file — the row now describes nothing: " <>
+          Enum.map_join(missing, " · ", &"#{short(&1.path)} #{inspect(&1.literal)}")
+      end
+
+    {"ROSTER-ANCHORS-EXIST", missing == [], why}
   end
 
   defp sum_occ(parsed, needle), do: Enum.sum(Enum.map(parsed, &count(&1.src, needle)))
@@ -1797,6 +2703,12 @@ defmodule PDS.Census do
   # seam does NOT work for fixtures: guard_corpus!/1 runs before parse_file/1 and ORs the
   # corpus floor with the sentinel check on ONE cond arm, so no fixture list is both small
   # enough to mutate and large enough to pass.
+  #
+  # PDS-D511, RESTATED HONESTLY (PDS wave 37). It is often quoted as "the selftest was
+  # disarmed". It was not: it disarmed EMITTERS-PARTITION, ONE ARM OF NINE, and the other
+  # eight kept going red on their own mutants throughout. The wave-37 finding is a
+  # different and larger one — KEYS-ONE-LINE-PER-SITE was never armed AT ALL, because the
+  # relation it asserted is true by construction (see judge_selftest_case/5 below).
   #
   # IT ASSERTS NO BUCKET COUNT — not one. Exit codes, arm names, refusal prose, and one
   # RELATION (keys lines == emitted, both read off the same invocation). A selftest that
@@ -1894,8 +2806,44 @@ defmodule PDS.Census do
       argv: ["--keys"],
       mut: nil,
       exit: 0,
-      expect: :keys_relation,
-      proves: "--keys prints one TSV line per emitted site — the relation, never an integer"
+      expect: {:keys, :holds},
+      proves: "--keys prints one DISTINCT TSV line per emitted site, and the count survives an independent re-derivation"
+    },
+    # THE THREE MUTANTS THAT PROVE THE FLOOR IS NOT VACUOUS (PDS-D519). Each kills the
+    # keys emission a DIFFERENT way, and each names the sub-check that must catch it —
+    # a mutant caught by the WRONG sub-check is a FAIL here, not a pass.
+    %{
+      name: "KEYS-FLOOR-NOT-VACUOUS",
+      corpus: :full,
+      argv: ["--keys"],
+      mut:
+        {"{_consumers, emitted} = Enum.split_with(ast_sites" <> ", & &1.pattern?)",
+         "{_consumers, emitted} = {ast_sites, []}"},
+      exit: 0,
+      expect: {:keys, {:reds, "VACUOUS"}},
+      proves: "an emission zeroed inside keys_run/1 reds, instead of certifying 0 == 0 == 0"
+    },
+    %{
+      name: "KEYS-PARTIAL-DROP",
+      corpus: :full,
+      argv: ["--keys"],
+      mut:
+        {"{_consumers, emitted} = Enum.split_with(ast_sites" <> ", & &1.pattern?)",
+         "{_consumers, emitted} = (fn {c, e} -> {c, Enum.drop(e, 1)} end).(Enum.split_with(ast_sites, & &1.pattern?))"},
+      exit: 0,
+      expect: {:keys, {:reds, "independently derived emitted"}},
+      proves: "a ONE-ROW drop reds — measured to slip past a `tsv > 0` floor, which agrees with itself at the reduced number"
+    },
+    %{
+      name: "KEY-DISCRIMINATES",
+      corpus: :full,
+      argv: ["--keys"],
+      mut:
+        {"IO.puts(Enum.join([path, mfa, hh" <> ", fp], \"\\t\"))",
+         "IO.puts(Enum.join([path, mfa, hh], \"\\t\"))"},
+      exit: 0,
+      expect: {:keys, {:reds, "does not DISCRIMINATE"}},
+      proves: "dropping expr_fp from the key collapses two sites in one clause to one row — the register would silently lose a site"
     }
   ]
 
@@ -1940,52 +2888,59 @@ defmodule PDS.Census do
     with {:ok, mutated} <- apply_mutation(src, c.mut) do
       script = Path.join(root, "case-#{:erlang.phash2(c.name)}.exs")
       File.write!(script, mutated)
+      dir = Map.fetch!(dirs, c.corpus)
 
       # NEVER PIPED: System.cmd hands back the child's own status, which is the whole
       # point — `cmd | tail` reports tail's status and once logged an exit-2 refusal as 0.
-      {out, code} =
-        System.cmd("elixir", [script | c.argv],
-          cd: Map.fetch!(dirs, c.corpus),
-          stderr_to_stdout: true
-        )
+      {out, code} = System.cmd("elixir", [script | c.argv], cd: dir, stderr_to_stdout: true)
 
-      judge_selftest_case(base, c, out, code)
+      judge_selftest_case(base, c, out, code, {script, dir})
     else
       {:error, why} -> Map.merge(base, %{ok?: false, why: why})
     end
   end
 
-  defp judge_selftest_case(base, %{expect: :keys_relation} = c, out, code) do
-    lines = String.split(out, "\n", trim: true)
-    tsv = Enum.count(lines, &String.contains?(&1, "\t"))
-
-    summary =
-      Enum.find_value(lines, fn l ->
-        case Regex.run(~r/^keys (\d+) · emitted (\d+)/, l) do
-          [_, k, e] -> {String.to_integer(k), String.to_integer(e)}
-          _ -> nil
-        end
-      end)
-
-    cond do
-      code != c.exit ->
-        Map.merge(base, %{ok?: false, why: "exit #{code}, expected #{c.exit}"})
-
-      summary == nil ->
-        Map.merge(base, %{ok?: false, why: "--keys printed no summary line to stderr"})
-
-      elem(summary, 0) != tsv or elem(summary, 1) != tsv ->
+  # ------------------------------------------------------------- the keys floor
+  #
+  # WHY THIS IS FOUR CHECKS AND NOT ONE RELATION (PDS-D519). The shipped arm asserted
+  # `length(routed) == length(emitted)`, which keys_run/1 makes TRUE BY CONSTRUCTION —
+  # it maps over `emitted`. Forcing the emission to [] made `--keys` print zero lines
+  # over the real 804-file corpus while `--selftest` still printed SELFTEST OK at RC 0.
+  # A `tsv > 0` floor alone does not repair it either: a one-row drop passes, because
+  # keys, emitted and tsv all agree at the reduced number. The four checks below are
+  # ordered so the FAIL sentence names WHICH ONE fired, and the last one is the only
+  # genuinely independent path — a SECOND invocation of the same binary over the same
+  # corpus, deriving `emitted` through the census's own reporting instead of keys_run/1.
+  defp judge_selftest_case(base, %{expect: {:keys, mode}} = c, out, code, ctx) do
+    case {mode, keys_floor_verdict(out, code, c.exit, ctx)} do
+      {:holds, :ok} ->
         Map.merge(base, %{
-          ok?: false,
-          why: "TSV lines #{tsv} != keys #{elem(summary, 0)} / emitted #{elem(summary, 1)}"
+          ok?: true,
+          why: "exit 0 · TSV == keys == emitted == the census's OWN derived emitted · every key distinct · floor non-vacuous"
         })
 
-      true ->
-        Map.merge(base, %{ok?: true, why: "exit 0 · TSV lines == keys == emitted, all off one run"})
+      {:holds, {:red, why}} ->
+        Map.merge(base, %{ok?: false, why: why})
+
+      {{:reds, frag}, {:red, why}} ->
+        if String.contains?(why, frag) do
+          Map.merge(base, %{ok?: true, why: "went RED as required — #{why}"})
+        else
+          Map.merge(base, %{
+            ok?: false,
+            why: "went red on the WRONG sub-check (#{why}) — expected one naming #{inspect(frag)}"
+          })
+        end
+
+      {{:reds, frag}, :ok} ->
+        Map.merge(base, %{
+          ok?: false,
+          why: "THE MUTANT PASSED THE KEYS FLOOR — nothing here would catch it; expected a red naming #{inspect(frag)}"
+        })
     end
   end
 
-  defp judge_selftest_case(base, c, out, code) do
+  defp judge_selftest_case(base, c, out, code, _ctx) do
     missing = Enum.reject(c.expect, &String.contains?(out, &1))
 
     cond do
@@ -2000,6 +2955,69 @@ defmodule PDS.Census do
 
       true ->
         Map.merge(base, %{ok?: true, why: "exit #{c.exit} · printed #{inspect(hd(c.expect))}"})
+    end
+  end
+
+  defp keys_floor_verdict(out, code, want_exit, {script, dir}) do
+    lines = String.split(out, "\n", trim: true)
+    tsv = Enum.filter(lines, &String.contains?(&1, "\t"))
+    n = length(tsv)
+    distinct = length(Enum.uniq(tsv))
+
+    summary =
+      Enum.find_value(lines, fn l ->
+        case Regex.run(~r/^keys (\d+) · emitted (\d+)/, l) do
+          [_, k, e] -> {String.to_integer(k), String.to_integer(e)}
+          _ -> nil
+        end
+      end)
+
+    cond do
+      code != want_exit ->
+        {:red, "exit #{code}, expected #{want_exit}"}
+
+      summary == nil ->
+        {:red, "--keys printed no summary line to stderr"}
+
+      n == 0 ->
+        {:red,
+         "ZERO-FLOOR: --keys printed 0 TSV line(s). The one-line-per-site relation is VACUOUS at zero — 0 == 0 == 0 certifies nothing, and the register reads its rows off this emission"}
+
+      elem(summary, 0) != n or elem(summary, 1) != n ->
+        {:red,
+         "ONE-LINE-PER-SITE: TSV lines #{n} != keys #{elem(summary, 0)} / emitted #{elem(summary, 1)}"}
+
+      distinct != n ->
+        {:red,
+         "KEY-DISCRIMINATES: the key does not DISCRIMINATE: #{n} site(s) collapsed to #{distinct} distinct key(s)"}
+
+      true ->
+        independent_rederivation(n, script, dir)
+    end
+  end
+
+  # THE SECOND PATH. Runs the SAME (possibly mutated) script with `argv []` in the SAME
+  # fixture and reads `emitted` off the ordinary census report — a figure keys_run/1 does
+  # not produce and cannot influence. FAILS CLOSED: an unparsable figure is a red, never
+  # a shrug, because "the re-derivation could not read a number" and "the numbers agree"
+  # must never print the same verdict.
+  defp independent_rederivation(n, script, dir) do
+    {out, _code} = System.cmd("elixir", [script], cd: dir, stderr_to_stdout: true)
+
+    case Regex.run(~r/EMITTED success claims\s+(\d+)/, out) do
+      [_, e] ->
+        e = String.to_integer(e)
+
+        if e == n do
+          :ok
+        else
+          {:red,
+           "INDEPENDENT-REDERIVATION: --keys printed #{n} TSV line(s) but the census run over the SAME corpus independently derived emitted #{e}"}
+        end
+
+      _ ->
+        {:red,
+         "INDEPENDENT-REDERIVATION: the census run over the same corpus printed no parsable `EMITTED success claims` figure — failing CLOSED rather than passing on an unread number"}
     end
   end
 
@@ -2045,8 +3063,17 @@ defmodule PDS.Census do
 
       def reopen(id), do: Repo.update(id)
 
+      # TWO EMITTED SITES IN ONE CLAUSE (PDS-D519). Identical {path, module.name/arity,
+      # head_hash} — one clause, one head — and DIFFERENT expr_fp, because the two `%{}`
+      # nodes differ. Without this the fixture holds one emitted site, every key is
+      # trivially distinct, and KEY-DISCRIMINATES cannot fail on a fixture that never
+      # asks the key to discriminate anything.
       def receipt(id, n) do
-        %{#{@pair_atom}, id: id, moved: n}
+        if n > 0 do
+          %{#{@pair_atom}, id: id, moved: n}
+        else
+          %{#{@pair_atom}, id: id}
+        end
       end
 
       def consume(resp) do
@@ -2074,7 +3101,7 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- integrity
 
-  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms) do
+  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
@@ -2116,7 +3143,7 @@ defmodule PDS.Census do
        else
          "Barkpark.Tasks.close (defdelegate, #{delegate.delegates} on the facade) reaches NO write verb within the route budget — the facade probe is blind"
        end}
-    ]
+    ] ++ register_checks(classified, parsed) ++ falsifier_check(falsifiers)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -2146,6 +3173,380 @@ defmodule PDS.Census do
       p("CENSUS FAILED — an integrity check went red. Read the FAIL line above.")
       System.halt(1)
     end
+  end
+
+  # ----------------------------------------------------------- basis falsifiers
+  #
+  # THE VOCABULARY IS ONLY WORTH ANYTHING IF A SCRIPT CAN REFUSE A TOKEN (PDS-D525). Each
+  # value in @basis_vocab names a falsifier; this reads the committed test tree and fires
+  # the ones it can DECIDE. It is TIERED AS MEASURED, not as hoped:
+  #
+  #   REDS (5)      end_to_end (and end_to_end_unmutated, the same predicate minus the
+  #                 mutation) · stub_mapping_only, THE "DOES read Repo" HALF ONLY ·
+  #                 context_differential_only · basis_stale (a direct --keys join, built
+  #                 FIRST because this wave's own slices re-key rows) · no_observer, the
+  #                 MODULE-SUBSTRING half only, which needs no test-tree index.
+  #   ADVISORY      everything else, printed as a counted CONTRADICTION line at exit 0 —
+  #                 the DRIFT pattern this census already uses.
+  #
+  # A CITED PATH THAT DOES NOT EXIST REDS. It is never silently skipped: a citation to a
+  # file nobody can open is the paperwork this ledger exists to refuse.
+  #
+  # THE PREDICATE THE WISH ASKED FOR IS A FALSE FALSIFIER AND IS NOT BUILT. "The cited
+  # test references the site's MODULE" refuses ALL of this wave's committed PROVEN
+  # differentials, because pds_group_c_receipt_differential_test.exs contains the string
+  # `Controller` ZERO times — conn-driven tests name a URL, not a module — and it GREENS a
+  # cross-wired citation. Route linkage replaces it and is ADVISORY, never redding:
+  # PluginSettings/Secret route literals are all-dynamic (the URL lives in the enclosing
+  # `scope`, and reading the literal alone manufactured 3 FALSE contradictions on genuine
+  # PROVEN rows) and `GithubWebhookController` appears ZERO times in router.ex because the
+  # routes are macro-generated, so linkage is UNCHECKABLE for all 14 webhook rows.
+  #
+  # `shape_assertion_only`'s falsifier is UNDECIDABLE as written and is implementable only
+  # as a denylist of weak predicates (is_list/is_map/is_binary/bare truthiness). It is
+  # advisory, and @basis_vocab says so in the falsifier text rather than shipping an arm
+  # whose name promises more than its code delivers.
+  #
+  # HELPER RESOLUTION IS MANDATORY, AND THE HELPER-NAME REGEX IS [\w!?]+ (both cost the
+  # prototype an iteration). The decisive `Repo.` / `build_conn` token routinely lives in
+  # a helper — `stored/1`, `deliver/3`, `stub_intake/1`, `assert_receipt_is_stored!/2` —
+  # never in the cited block; and `\w+` truncates `assert_receipt_is_stored!` at the `!`
+  # and FALSELY REFUSES four genuine rows.
+  # THE PROBE IS THE SUBSTRING `Repo.`, AND ITS LIMIT IS MEASURED. A test that reads
+  # Postgres through a CONTEXT MODULE carries no such token — inbound_events_test.exs's
+  # `link_state/2` goes through `Content.get_document/4` and `detached_conflicts/1` through
+  # `Conflicts.list/1`. That is exactly why `two_hop_composed` is ADVISORY: on this probe
+  # its falsifier is not decidable, so it prints a counted CONTRADICTION and never a red.
+  # The redding values are the ones the probe CAN decide, and nothing else was promoted to
+  # redding on the grounds that it would usually be right.
+  @test_root "api/test"
+  @conn_tokens ["build_conn", "json_response", "conn |>", "|> post(", "|> get(",
+                "|> put(", "|> delete(", "%{conn:", "conn: conn", "authed("]
+  @repo_token "Repo."
+
+  defp basis_falsifiers(classified) do
+    if File.dir?(@test_root) do
+      cache = %{}
+
+      {findings, _cache} =
+        classified
+        |> resolve_register()
+        |> Enum.reduce({[], cache}, fn {r, status, _site}, {acc, c} ->
+          case status do
+            :live -> {f, c} = check_row_basis(r, c)
+              {acc ++ f, c}
+
+            _ ->
+              {acc, c}
+          end
+        end)
+
+      {:ran, findings}
+    else
+      :no_test_tree
+    end
+  end
+
+  defp check_row_basis(r, cache) do
+    ev = Map.get(r, :evidence, "")
+    tier_of_basis = elem(Map.get(@basis_vocab, r.basis, {"?", "?", :advisory}), 2)
+
+    cond do
+      r.basis == :no_observer ->
+        {no_observer_findings(r), cache}
+
+      r.basis in [:end_to_end, :end_to_end_unmutated, :stub_mapping_only,
+                  :context_differential_only, :side_effect_existence_only, :two_hop_composed] ->
+        cited_findings(r, ev, tier_of_basis, cache)
+
+      true ->
+        {[], cache}
+    end
+  end
+
+  defp cited_findings(r, "", tier, cache),
+    do: {[finding(r, tier, "carries no citation, and its falsifier needs one")], cache}
+
+  defp cited_findings(r, ev, tier, cache) do
+    case String.split(ev, ":") do
+      [path, line] ->
+        if File.exists?(path) do
+          {text, cache} = cited_text(path, String.to_integer(line), cache)
+          {judge_citation(r, ev, tier, text), cache}
+        else
+          # ALWAYS A RED, whatever the basis's tier: an unopenable citation is not a weak
+          # judgment, it is no judgment at all.
+          {[finding(r, :reds, "cites #{ev}, and that PATH DOES NOT EXIST")], cache}
+        end
+
+      _ ->
+        {[finding(r, :reds, "cites #{inspect(ev)}, which is not a `path:line`")], cache}
+    end
+  end
+
+  defp judge_citation(r, ev, tier, text) do
+    conn? = Enum.any?(@conn_tokens, &String.contains?(text, &1))
+    repo? = String.contains?(text, @repo_token)
+
+    case r.basis do
+      b when b in [:end_to_end, :end_to_end_unmutated] ->
+        cond do
+          not conn? -> [finding(r, tier, "#{ev} drives no route (no conn token in the cited block or its helpers)")]
+          not repo? -> [finding(r, tier, "#{ev} never reads the stored row back (no `Repo.` in the cited block or its helpers)")]
+          true -> []
+        end
+
+      :stub_mapping_only ->
+        # ONLY THE REPO HALF REDS. The seam half ("has no injection seam") is advisory:
+        # a seam can be a put_env, a Mox, a passed fun or a config key, and a denylist of
+        # spellings would refuse honest rows.
+        if repo?,
+          do: [finding(r, tier, "#{ev} DOES read Repo — `stub_mapping_only` understates what the suite proves")],
+          else: []
+
+      :context_differential_only ->
+        if conn?,
+          do: [finding(r, tier, "#{ev} BUILDS A CONN — the controller->wire hop is covered, so this is not context-differential-only")],
+          else: []
+
+      :side_effect_existence_only ->
+        if not repo?,
+          do: [finding(r, :advisory, "#{ev} reads no Repo at all, so it cannot even assert existence")],
+          else: []
+
+      :two_hop_composed ->
+        if not repo?,
+          do: [finding(r, :advisory, "#{ev} reads no Repo — the second hop is not visible in the cited block")],
+          else: []
+
+      _ ->
+        []
+    end
+  end
+
+  # THE MODULE HALF ONLY. `no_observer` claims NOTHING in the test tree names this site;
+  # one substring hit refutes it, and that needs no index and no route.
+  defp no_observer_findings(r) do
+    mod = r.key |> elem(1) |> String.split(".") |> Enum.drop(-1) |> Enum.join(".")
+
+    hit =
+      Path.wildcard(@test_root <> "/**/*.exs")
+      |> Enum.find(&String.contains?(File.read!(&1), mod))
+
+    if hit,
+      do: [finding(r, :reds, "`no_observer` is refuted — #{mod} is named in #{hit}")],
+      else: []
+  end
+
+  defp finding(r, tier, why), do: %{key: r.key, basis: r.basis, tier: tier, why: why}
+
+  # THE CITED BLOCK PLUS ITS HELPERS, ONE LEVEL DEEP. The block runs from the cited line to
+  # the `end` at its own indentation (capped, because a runaway scan would swallow the file
+  # and green everything).
+  defp cited_text(path, line, cache) do
+    lines = Map.get_lazy(cache, path, fn -> path |> File.read!() |> String.split("\n") end)
+    cache = Map.put(cache, path, lines)
+    block = block_at(lines, line)
+
+    helpers =
+      ~r/([\w!?]+)\(/
+      |> Regex.scan(block)
+      |> Enum.map(&List.last/1)
+      |> Enum.uniq()
+      |> Enum.flat_map(&helper_body(lines, &1))
+      |> Enum.join("\n")
+
+    {block <> "\n" <> helpers, cache}
+  end
+
+  defp block_at(lines, line) do
+    start = max(line - 1, 0)
+    head = Enum.at(lines, start, "")
+    indent = String.length(head) - String.length(String.trim_leading(head))
+
+    lines
+    |> Enum.drop(start)
+    |> Enum.take(200)
+    |> Enum.reduce_while([], fn l, acc ->
+      closed? =
+        acc != [] and String.trim(l) == "end" and
+          String.length(l) - String.length(String.trim_leading(l)) == indent
+
+      if closed?, do: {:halt, [l | acc]}, else: {:cont, [l | acc]}
+    end)
+    |> Enum.reverse()
+    |> Enum.join("\n")
+  end
+
+  # `[\w!?]+`, NEVER `\w+`: `\w+` truncates assert_receipt_is_stored! at the bang and the
+  # def is then never found, which falsely refuses four genuine rows.
+  defp helper_body(lines, name) do
+    lines
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {l, _n} -> Regex.match?(~r/^\s*defp?\s+#{Regex.escape(name)}\(/, l) end)
+    |> Enum.map(fn {_l, n} -> block_at(lines, n) end)
+  end
+
+  defp report_basis_falsifiers(classified) do
+    p("BASIS FALSIFIERS (PDS-D525 — a vocabulary token is only a claim if a script can")
+    p("refuse it; tiered AS MEASURED, so an undecidable falsifier is advisory, not a lie)")
+    p(String.duplicate("-", 78))
+
+    case basis_falsifiers(classified) do
+      :no_test_tree ->
+        p("  SKIPPED — this corpus carries no #{@test_root}/ tree, so no citation can be opened.")
+        p("  THIS IS NOT A PASS. The census is normally run over `git archive HEAD api/lib")
+        p("  scripts`, which excludes the tests on purpose; run it from a full checkout to")
+        p("  arm these arms. Within a present test tree, a citation that cannot be opened REDS.")
+        p("")
+        :skipped
+
+      {:ran, findings} ->
+        {red, advisory} = Enum.split_with(findings, &(&1.tier == :reds))
+        p("  checked #{Enum.count(@register)} row(s) against #{length(Enum.filter(@basis_vocab, fn {_k, {_c, _f, t}} -> t == :reds end))} redding value(s) · #{length(red)} refusal(s) · #{length(advisory)} advisory contradiction(s)")
+
+        Enum.each(red, fn f ->
+          p("      REFUSED  #{short(elem(f.key, 0))} #{elem(f.key, 1)}  [#{f.basis}]")
+          wrap(f.why, "               ")
+        end)
+
+        Enum.each(advisory, fn f ->
+          p("      CONTRADICTION  #{short(elem(f.key, 0))} #{elem(f.key, 1)}  [#{f.basis}] #{f.why}")
+        end)
+
+        if findings == [], do: p("      none — every decidable falsifier holds")
+        p("")
+        {:ran, red}
+    end
+  end
+
+  # ---------------------------------------------------------- register integrity
+  #
+  # THREE ARMS, ALL SCOPED TO THE REAL CORPUS. They assert COMPLETENESS and INTEGRITY and
+  # never a verdict distribution — a reclassification cannot red this build, which is the
+  # whole reason the ratchet is safe to leave armed.
+  # A SKIPPED SCOPE CONTRIBUTES NO ARM AT ALL, rather than a PASS nobody earned.
+  defp falsifier_check(:skipped), do: []
+
+  defp falsifier_check({:ran, red}) do
+    why =
+      if red == [] do
+        "every decidable falsifier holds across the register's cited basis tokens"
+      else
+        "#{length(red)} basis token(s) REFUSED by their own falsifier: " <>
+          Enum.map_join(Enum.take(red, 4), " · ", &"#{short(elem(&1.key, 0))} [#{&1.basis}] #{&1.why}")
+      end
+
+    [{"BASIS-FALSIFIERS", red == [], why}]
+  end
+
+  defp register_checks(classified, parsed) do
+    case register_scope(classified) do
+      :scoped_out -> []
+      :real ->
+        [
+          register_complete(classified),
+          declared_rows_resolve(classified),
+          declared_basis_intact(parsed),
+          roster_check(parsed)
+        ]
+    end
+  end
+
+  # BOTH DIRECTIONS, AND THE FAIL SENTENCE NAMES THE OFFENDER. site->row catches an
+  # emitted claim nobody has judged; row->site catches a row judging nothing (the shape a
+  # split multi-tag row would take). One direction alone is half a register.
+  defp register_complete(classified) do
+    resolved = resolve_register(classified)
+    site_keys = Enum.map(classified, &site_key/1)
+    row_keys = Enum.map(@register, & &1.key)
+    row_freq = Enum.frequencies(row_keys)
+
+    covered = MapSet.new(for {_r, st, s} <- resolved, st in [:live, :stale], do: site_key(s))
+    demoted = Enum.count(resolved, fn {_r, st, _s} -> st == :stale end)
+
+    unjudged = Enum.reject(site_keys, &MapSet.member?(covered, &1))
+    orphaned = for {r, :orphan, _s} <- resolved, do: r.key
+    dupes = for {k, n} <- row_freq, n > 1, do: k
+
+    ok? = unjudged == [] and orphaned == [] and dupes == []
+
+    why =
+      if ok? do
+        "#{length(row_keys)} row(s) <-> #{length(site_keys)} emitted site(s), both directions, no duplicate key" <>
+          if(demoted > 0, do: " (#{demoted} demoted to basis_stale — reported, never a red)", else: "")
+      else
+        Enum.join(
+          [
+            "#{length(unjudged)} emitted site(s) carry NO register row",
+            "#{length(orphaned)} register row(s) name NO emitted site",
+            "#{length(dupes)} key(s) carry more than one row"
+          ] ++
+            Enum.map(Enum.take(unjudged, 4), &"UNJUDGED SITE #{short(elem(&1, 0))} #{elem(&1, 1)} #{elem(&1, 2)}/#{elem(&1, 3)}") ++
+            Enum.map(Enum.take(orphaned, 4), &"ORPHANED ROW #{short(elem(&1, 0))} #{elem(&1, 1)} #{elem(&1, 2)}/#{elem(&1, 3)}") ++
+            Enum.map(Enum.take(dupes, 4), &"DUPLICATE ROW #{short(elem(&1, 0))} #{elem(&1, 1)}"),
+          " · "
+        )
+      end
+
+    {"REGISTER-COMPLETE", ok?, why}
+  end
+
+  # NOT "the row's line still carries a success pair" (PDS-D521): the pair occurs on 11
+  # lines of auth_controller.ex, so a line shift can land a row on a DIFFERENT site and
+  # pass silently, and the FAIL line becomes an eleven-candidate re-derivation instead of
+  # a one-edit fix. The row must match an EMITTED AST SITE.
+  defp declared_rows_resolve(classified) do
+    live = MapSet.new(classified, &site_key/1)
+    orphans = Enum.reject(@declared, &MapSet.member?(live, &1.key))
+
+    why =
+      if orphans == [] do
+        "all #{length(@declared)} declared row(s) resolve to an emitted site"
+      else
+        "#{length(orphans)} declared row(s) resolve to NO emitted site — a declared basis is suppressing nothing and nobody would know: " <>
+          Enum.map_join(orphans, " · ", fn d ->
+            {path, mfa, hh, fp} = d.key
+            "ORPHAN #{short(path)} #{mfa} #{hh}/#{fp} [#{d.class}]"
+          end)
+      end
+
+    {"DECLARED-ROWS-RESOLVE", orphans == [], why}
+  end
+
+  # THE BASIS ITSELF MUST STILL BE THERE. Each declared row records the SPAN(S) its prose
+  # lives in and one TOKEN that must occur inside one of them. Comparison is DOWNCASED on
+  # both sides: bulldocs_form's basis is written "so the trap stays invisible" at :24 and
+  # "# The trap stays invisible:" at :53, and a case-sensitive test silently loses one.
+  # THE FAIL LINE NAMES THE ROW AND ITS RECORDED SPAN, so the fix is one edit and not a
+  # re-derivation of where the sentence went.
+  defp declared_basis_intact(parsed) do
+    src = Map.new(parsed, &{&1.path, String.split(&1.src, "\n")})
+
+    drifted =
+      Enum.reject(@declared, fn d ->
+        lines = Map.get(src, declared_path(d), [])
+        token = String.downcase(d.basis_token)
+
+        Enum.any?(d.basis_spans, fn {lo, hi} ->
+          lines
+          |> Enum.slice((lo - 1)..(hi - 1)//1)
+          |> Enum.any?(&String.contains?(String.downcase(&1), token))
+        end)
+      end)
+
+    why =
+      if drifted == [] do
+        "all #{length(@declared)} basis token(s) still occur inside their recorded span(s)"
+      else
+        "#{length(drifted)} declared basis has DRIFTED off its recorded span: " <>
+          Enum.map_join(drifted, " · ", fn d ->
+            spans = Enum.map_join(d.basis_spans, ",", fn {lo, hi} -> ":#{lo}-#{hi}" end)
+            "#{short(declared_path(d))} #{elem(d.key, 1)} [#{d.class}] recorded span #{spans} no longer carries #{inspect(d.basis_token)}"
+          end)
+      end
+
+    {"DECLARED-BASIS-INTACT", drifted == [], why}
   end
 
   defp drift(label, got, key) do
