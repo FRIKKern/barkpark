@@ -100,6 +100,71 @@
 //       `cancelled` shipped ruleless — falling through to the .dep-pill base,
 //       which is byte-identical to .dep-queued, so an aborted deploy painted as
 //       one still waiting. Full boundary on DEPLOY_STATUSES below.
+//   E14 wrap-recipe DIVERGENCE (charter D220). THE INVARIANT, verbatim:
+//
+//         A rule whose selector is WRAPPER-SCOPED onto the pill
+//         (`<wrapper> .status-pill` — one or more descendant/child steps then
+//         `.status-pill`, and nothing after it) AND which declares AT LEAST ONE
+//         of the five CORE properties must declare ALL FIVE, at the canonical
+//         value: white-space: normal | height: auto | min-height: 24px |
+//         padding-top: 2px | padding-bottom: 2px.
+//
+//       WHY AN INSTRUMENT AND NOT AN EXTRACTION. This epic hand-built the same
+//       five-declaration wrap three times (`.detail-rail`, `.fleet-status`,
+//       `.instance-card-head`). D210 ruled the third copy deliberate and made
+//       THE FOURTH HOST the extraction trigger. Wave 19 reached the fourth host
+//       and REFUSED the trigger, because driving it showed the axis was wrong:
+//       the five-declaration recipe applied to `.op-gate` does NOT fix it (every
+//       clipped cell stays clipped — it hides the symptom and leaves the label
+//       unreadable), while ONE declaration, `.op-gate .status-pill { flex: 0 0
+//       auto }`, is 64/64 at every width. Host COUNT is not the sin. DIVERGENCE
+//       between the copies is, and nothing measured it. E14 measures it, so a
+//       fourth copy that drifts from the shared core stops being possible.
+//       THREE DESIGN CHOICES ARE LOAD-BEARING — each proven by a driven leg in
+//       __app.test.mjs; do not "simplify" any of them:
+//         1. TRIGGER ON DECLARATION, NOT ON SELECTOR. "every wrapper-scoped
+//            `.status-pill` rule must carry the core" would false-red a future
+//            `.foo .status-pill { margin-left: 4px }`. Triggering on
+//            declares-any-core-property makes the rule SELF-SCOPING: start the
+//            recipe and you must finish it; don't start it and E14 is silent.
+//         2. DO NOT ASSERT THE JACKET. `align-items: flex-start` (2 of 3
+//            copies), the `-dot`/`-detail`/`-label` sibling rules and the
+//            wrapper's own `flex-wrap` are per-HOST. `.detail-rail` carries no
+//            `align-items` and no `-dot`/`-detail` rules and must GREEN; a
+//            jacketless synthetic fourth host must GREEN.
+//         3. PIN THE CORE AS A LITERAL (WRAP_CORE below), never derive it as
+//            the intersection of what the copies happen to declare — that is
+//            self-fulfilling: a fourth copy dropping `min-height` would shrink
+//            the intersection and pass.
+//       THE BASE `.status-pill` IS EXCLUDED BY SELECTOR SHAPE, NOT BY AN
+//       ALLOWLIST: it declares `height: 24px` and `white-space: nowrap` — core
+//       PROPERTIES at non-core VALUES, by design. Requiring at least one
+//       descendant/child combinator excludes it structurally, so the exclusion
+//       cannot go stale when the base rule is renamed or moved.
+//       TWO ANTI-VACUITY GUARDS, because a scan that stops seeing the copies
+//       would otherwise report clean: zero wrapper-scoped copies is itself an
+//       error, and the three known survivor selectors are PINNED as
+//       required-present (same-file pins under pin-your-own/derive-foreign),
+//       which closes the PARTIAL blindness the zero-guard misses.
+//       COVERAGE BOUNDARY (charter D40 — a check states what it does NOT own):
+//       E14 is STATIC and owns the DECLARATION-PARITY class ONLY.
+//         • It cannot see whether a copy actually WRAPS when rendered. The host
+//           needs `flex-wrap: wrap` on the WRAPPER; a copy with all five core
+//           declarations inside a non-wrapping host is GREEN here and broken on
+//           screen. The complement is overflow-guard.mjs's rendered legs — a
+//           DELIBERATE SPLIT, not a duplicate.
+//         • It cannot see a host that SHOULD have copied the recipe and did
+//           not. Nothing static knows which wrappers hold a long-labelled pill.
+//         • It asserts nothing about the base `.status-pill`, and nothing about
+//           the jacket (see choice 2).
+//         • It reads LONGHAND declarations only: a `padding: 2px 11px`
+//           shorthand neither triggers E14 nor satisfies `padding-top`. The
+//           three live copies are longhand and the canonical recipe is stated
+//           in longhand; a shorthand copy is a shape this check does not see.
+//       Fixture: __css_check.wrapparity.fixture.css; targeted run:
+//       `node __css_check.mjs --wrap-parity-check
+//       __css_check.wrapparity.fixture.css` (exit 1). Executed, both
+//       directions, by __app.test.mjs.
 //
 // REPORTS (printed, never exit-affecting):
 //   R2  tokens defined in app.css that nothing consumes yet.
@@ -555,6 +620,95 @@ export function orphanCommentErrors(cssRawText, file = "app.css") {
   return errs;
 }
 
+// ── E14: wrap-recipe declaration parity (charter D220) ───────────────────────
+// The full ruling, the three load-bearing design choices and the coverage
+// boundary are stated in the E14 entry of this file's header. What follows is
+// the executable form of that invariant — the durable artifact.
+//
+// THE CORE, PINNED AS A LITERAL (design choice 3). Deriving it from the copies
+// would let a fourth copy dropping a property redefine the contract.
+const WRAP_CORE = [
+  ["white-space", "normal"],
+  ["height", "auto"],
+  ["min-height", "24px"],
+  ["padding-top", "2px"],
+  ["padding-bottom", "2px"],
+];
+// The three copies that survived wave 18, pinned as REQUIRED-PRESENT. A
+// same-file pin is the correct form here (pin-your-own, derive-foreign): it
+// closes the PARTIAL-blindness case the zero-copies guard cannot see — a scan
+// that degrades to finding 1 of 3 still reports "clean" without this.
+const WRAP_REQUIRED_HOSTS = [".detail-rail", ".fleet-status", ".instance-card-head"];
+// WRAPPER-SCOPED: one or more descendant/child steps, then `.status-pill`, and
+// NOTHING after it. The trailing anchor keeps `.detail-rail .status-pill-label`
+// and `.status-pill--ok .status-pill-dot` out; requiring a leading step keeps
+// the BASE `.status-pill` out structurally rather than by allowlist.
+const WRAPPER_SCOPED_PILL = /^\s*(\S[^{}]*?)[\s>]+\.status-pill\s*$/;
+
+export function wrapParityErrors(cssRawText, file = "app.css") {
+  const stripped = stripCssComments(cssRawText);
+  const errs = [];
+  const copies = []; // { selector, host, line, declared: Map }
+  // Innermost `{…}` blocks only: a prelude cannot contain a brace, so an
+  // `@media` wrapper never matches as a selector and its inner rules do.
+  for (const m of stripped.matchAll(/([^{}]+)\{([^{}]*)\}/g)) {
+    const prelude = m[1];
+    const body = m[2];
+    const declared = new Map();
+    for (const seg of body.split(";")) {
+      const c = seg.indexOf(":");
+      if (c === -1) continue;
+      const prop = seg.slice(0, c).trim().toLowerCase();
+      if (!/^[a-z-]+$/.test(prop)) continue;
+      declared.set(prop, seg.slice(c + 1).trim().replace(/\s*!important$/, ""));
+    }
+    // DESIGN CHOICE 1 — the trigger is the DECLARATION, not the selector. A
+    // wrapper-scoped rule that touches none of the five is not a wrap copy and
+    // is not even counted.
+    if (!WRAP_CORE.some(([p]) => declared.has(p))) continue;
+    for (const part of prelude.split(",")) {
+      const hit = part.match(WRAPPER_SCOPED_PILL);
+      if (!hit) continue;
+      const selector = part.trim().replace(/\s+/g, " ");
+      const line = lineOf(stripped, m.index + prelude.indexOf(part.replace(/^\s+/, "")));
+      copies.push({ selector, host: hit[1].trim().replace(/\s+/g, " "), line, declared });
+      const missing = WRAP_CORE.filter(([p, v]) => declared.get(p) !== v).map(
+        ([p, v]) => `${p}: ${v} (${declared.has(p) ? `declared "${declared.get(p)}"` : "not declared"})`,
+      );
+      if (missing.length) {
+        errs.push(
+          `E14 ${file}:${line}  ${selector} declares ${WRAP_CORE.filter(([p]) => declared.has(p))
+            .map(([p]) => p)
+            .join(", ")} — starting the wrap recipe — but DIVERGES from the shared core: ` +
+            `${missing.join("; ")}. A wrapper-scoped .status-pill rule that declares ANY of the five ` +
+            `must declare ALL five at the canonical value (white-space: normal; height: auto; ` +
+            `min-height: 24px; padding-top: 2px; padding-bottom: 2px) — charter D220. The jacket ` +
+            `(align-items, the -dot/-detail rules, the wrapper's flex-wrap) is per-host and is NOT asserted.`,
+        );
+      }
+    }
+  }
+  // ANTI-VACUITY 1 — zero copies is a broken scan, not a clean stylesheet.
+  if (!copies.length) {
+    errs.push(
+      `E14 ${file}  ZERO wrapper-scoped .status-pill wrap copies found — a vacuous green. ` +
+        `This check exists because three such copies ship; seeing none means the scan stopped ` +
+        `seeing them (a selector shape changed, a parse broke), not that they agree.`,
+    );
+  }
+  // ANTI-VACUITY 2 — a scan degrading to 1-of-3 also reports clean without this.
+  for (const host of WRAP_REQUIRED_HOSTS) {
+    if (!copies.some((c) => c.host === host)) {
+      errs.push(
+        `E14 ${file}  the pinned wrap copy \`${host} .status-pill\` is MISSING — either the copy ` +
+          `was deleted (a shipped wrap regression) or the scan can no longer see it (partial ` +
+          `blindness). Re-derive by grep before editing this pin.`,
+      );
+    }
+  }
+  return { errors: errs, copies };
+}
+
 // ── E11: banned source line-number citation (charter D41; bp-honest-gates D5) ─
 // THE RULING — a BAN, not a resolver. Argued from maintenance cost and from the
 // three measured occurrences, not taste: (a) every live `app.js:<line>` was
@@ -645,6 +799,27 @@ function citationScanFiles() {
     const errs = orphanCommentErrors(fs.readFileSync(f, "utf8"), path.basename(f));
     for (const e of errs) console.error("FAIL  " + e);
     console.log(`__css_check --orphan-check ${f}: ${errs.length} E10 error(s)`);
+    process.exit(errs.length ? 1 : 0);
+  }
+}
+
+// Targeted fixture mode: `node __css_check.mjs --wrap-parity-check <file.css>`
+// runs ONLY the E14 wrap-recipe parity scan against one file and exits non-zero
+// if it fires — the committed D220 proof (see __css_check.wrapparity.fixture.css).
+// Symmetric with --swallow-check and --orphan-check above, and added for the
+// same reason they were: an instrument with no way to be run against a known-bad
+// input is an instrument that cannot fail. Per E9's own lesson, every diagnostic
+// below cites the file it ACTUALLY read, never a hard-coded app.css.
+{
+  const i = process.argv.indexOf("--wrap-parity-check");
+  if (i !== -1) {
+    const f = process.argv[i + 1];
+    const { errors: errs, copies } = wrapParityErrors(fs.readFileSync(f, "utf8"), path.basename(f));
+    for (const e of errs) console.error("FAIL  " + e);
+    console.log(
+      `__css_check --wrap-parity-check ${f}: ${copies.length} wrapper-scoped wrap copy(ies) ` +
+        `[${copies.map((c) => `${c.selector}:${c.line}`).join(", ")}], ${errs.length} E14 error(s)`,
+    );
     process.exit(errs.length ? 1 : 0);
   }
 }
@@ -1259,6 +1434,13 @@ for (const e of swallowedTokenErrors(cssRaw)) errors.push(e);
 // (#4592 — the modal root). Runs alongside E9, which sees only token blocks.
 for (const e of orphanCommentErrors(cssRaw)) errors.push(e);
 
+// E14 — wrap-recipe declaration parity (charter D220): the three hand-built
+// copies share a byte-identical five-declaration core wearing three different
+// jackets, and nothing asserted that the core still agrees. The copy inventory
+// is printed below so the count is the SCAN's claim, never a comment's.
+const wrapParity = wrapParityErrors(cssRaw);
+for (const e of wrapParity.errors) errors.push(e);
+
 // E11 — banned source line-number citation (charter D41 / bp-honest-gates D5):
 // `app.js:<line>` in a comment of any scanned SPA / harness file. The shape is
 // banned outright; router.ex cross-language cites are OUT (see the boundary on
@@ -1391,6 +1573,14 @@ if (process.env.CSS_CHECK_VERBOSE) {
     );
   }
 }
+
+// E14 inventory: the copies the scan actually SAW, with their true line
+// numbers. Printed unconditionally so a scan degrading to fewer copies is
+// visible in the log even before the pins turn it red.
+console.log(
+  `\nE14 ${wrapParity.copies.length} wrapper-scoped .status-pill wrap copy(ies): ` +
+    `${wrapParity.copies.map((c) => `${c.selector} (app.css:${c.line})`).join(", ")}`,
+);
 
 if (unconsumed.length) {
   console.log(`\nR2  defined but not yet consumed: ${unconsumed.join(", ")}`);

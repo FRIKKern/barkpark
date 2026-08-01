@@ -1,0 +1,82 @@
+/* __css_check.wrapparity.fixture.css — regression fixture for the E14 wrap-
+   recipe parity guard (wrapParityErrors in __css_check.mjs, charter D220).
+
+   WHAT IT REPRODUCES: the fourth copy that DRIFTS. This epic hand-built the
+   same five-declaration wrap three times; the shape that E14 exists to catch is
+   a fourth host that starts the recipe and stops short — here `.op-gate
+   .status-pill` copies four of the five and drops `min-height: 24px`, so the
+   chip loses its 24px floor and a short label paints a chip shorter than every
+   other pill on the screen. Nothing in this repo could see that before E14: the
+   bytes are all present and every one of them is a legal declaration.
+
+   The three PINNED survivor copies are reproduced above it — byte-identical
+   cores wearing three DIFFERENT jackets (`.detail-rail` carries no jacket at
+   all) — because they are what proves the check greens jacket variation and
+   reds only DIVERGENCE. They also satisfy E14's two anti-vacuity guards, which
+   is why this file reds with EXACTLY ONE error rather than five.
+
+   `.some-rail .status-pill` at the bottom is the OUT-OF-SCOPE leg: wrapper-
+   scoped but declaring none of the five core properties, so it is not a wrap
+   copy and is not even counted. The trigger is the DECLARATION, not the
+   selector (design choice 1).
+
+   Proof: `node __css_check.mjs --wrap-parity-check
+   __css_check.wrapparity.fixture.css` MUST print exactly one E14 error and exit
+   1. This file is a FIXTURE, never served — it is not linked from index.html
+   and app.js never loads it, and the harness asserts that unreachability rather
+   than trusting this sentence. */
+
+/* Survivor 1 — the jacketLESS copy. No align-items, no -dot/-detail rules.
+   Must green: E14 asserts the core, never the jacket (design choice 2). */
+.detail-rail .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+.detail-rail .status-pill-label { flex: 0 1 auto; min-width: 0; }
+
+/* Survivor 2 — same core, flex-start jacket. */
+.fleet-status .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  align-items: flex-start;
+}
+.fleet-status .status-pill-dot { margin-top: 5.5px; }
+
+/* Survivor 3 — same core, flex-start jacket plus a wrapping host. */
+.instance-card-head { flex-wrap: wrap; }
+.instance-card-head .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  align-items: flex-start;
+}
+
+/* THE DEFECT — the fourth copy that drifts. Four of the five; `min-height`
+   never made it. This is the ONE error this fixture must produce. */
+.op-gate .status-pill {
+  white-space: normal;
+  height: auto;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+
+/* OUT OF SCOPE — wrapper-scoped onto the pill but declaring no core property.
+   Must NOT be counted and must NOT red: starting the recipe is what binds you
+   to finishing it. */
+.some-rail .status-pill { margin-left: 4px; }
+
+/* Also out of scope by SELECTOR SHAPE, not by allowlist: the base rule declares
+   core PROPERTIES at non-core VALUES by design, and no combinator precedes
+   `.status-pill`, so it is structurally invisible to E14. */
+.status-pill {
+  height: 24px;
+  white-space: nowrap;
+}
