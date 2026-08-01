@@ -2576,6 +2576,74 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 32 2026-08-01 — "The debt reaches zero" — REVIEWED. Grade A (paper `pds-wave-32-2026-08-01`)
+
+**FOUR ROUND-1 SLICES BUILT, FOUR GREEN, FOUR PUSHED WITH PRs OPEN.** Every gate was re-run by the
+reviewer on the final state, plus a FOUR-WAY TRIAL MERGE onto `origin/main` fcd3a5899 that resolved
+clean, compiled (`go test -c -o /dev/null ./internal/cli/` exit 0, `go build ./...` exit 0) and
+passed the full `internal/cli` suite together (`ok 28.250s`). Census invariants unmoved on the merge
+result: `TOTAL=50 NON_LITERAL=2 KEYS=52 OPAQUE_CALLERS=0 KINDS=13`.
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w31-harvest-only` | `…-hcloud-404-b-0-r` | #8749 | eight real api.hetzner.cloud 404 bodies; `--selftest-offline` is a genuinely credential-free gate; `kind_coverage.pending` empty |
+| `pds-w29-pay-net-dns` | `…-net-dns-receipts--1-r` | #8750 | 19 keys / 17 sites paid; both `hzUnpaid*` consts deleted; `git grep -c hzUnpaid` = NO MATCHES |
+| `task-27246110ca95342a` | `…-a-call-site-p-2-r` | #8751 | `confirmation_basis` becomes a trailing-variadic call-site parameter; three lying receipts corrected |
+| `pds-bl-support-capacity-degraded-unpinned` | `…-narration-the--3-r` | #8752 | the degraded capacity narration is pinned through production's own `success()` |
+
+**THE DEBT IS ZERO, AND THE BOUNDARY IS IN THE CODE, NOT ONLY THE PAPER.** The census header now
+states what zero does and does not mean: one resource family, one provider, one direction; the
+refusal direction across the whole hetzner family is still proven ONLY by fakes; and the two numbers
+that do NOT go to zero (`grep -c 'unpaid:'` floors at 4, `grep -c 'hzResDone('` stays at 6) are named
+so nobody quotes them as if they had. That sentence, not the number, was this wave's deliverable.
+
+**THREE SLICES REFUTED A PREMISE WITH THEIR OWN INSTRUMENT RATHER THAN FLATTERING IT.** The harvest
+measured `firewall` and `primary-ip` at exactly 138 bytes each, killing wave 30's pairwise-length
+property outright, and replaced it in the SAME commit with the property that survives plus a
+manifest-shaped demo corpus that separates the filtered build from the greenwashing unfiltered one.
+The basis slice re-measured its own doc comment's limit statement after building and corrected the
+SHIPPED comment rather than transcribing a refuted number. The pay slice found the obvious paint on
+`record/create` and `network/create` would have emitted `confirmed_present:true` over EMPTY fields —
+worse than the argv echo it replaced — and collapsed the id to make the refusal reachable.
+
+**BOTH HIGH-FLIP-RISK JUDGMENTS WERE RE-DERIVED INDEPENDENTLY, and one produced a NEW finding.** The
+harvest gate was re-run with a hostile environment (this host's live `HETZNER_API_TOKEN` PLUS a
+planted `HCLOUD_TOKEN`) and still reported 0 surviving variables — stronger than claimed. The
+wrong-direction payment was mutated at the delete-route arm and `TestHetznerNetworkRouteBothDirections`
+reds by name. But binding `volume/detach`'s KIND through a local variable left `OPAQUE_CALLERS = 0`:
+that arm only ever collected non-literal ACTIONS. The mutation is still caught (four other arms red,
+two of which round 2 does NOT delete), so the gate is fail-closed — but the arm does not measure what
+its name implies. Filed as `pds-bl-opaque-arm-blind-to-nonliteral-kind`.
+
+**THE ONE DEFECT THIS WAVE SHIPPED, and it could not be fixed in-wave.** `record/update` inherits
+`hzResBasisGet` — "single-resource GET on the resolved id" — while its read is
+`GetRRSetByNameAndType(zone, name, type)` and its own comment says it "resolves no numeric id". A
+receipt naming a read it did not perform, in the exact class `task-27246110ca95342a` closed, on the
+same day. Unfixable on either branch alone (the basis parameter and the call site ship on DIFFERENT
+branches), so it is a post-merge follow-up: `pds-bl-record-update-basis-overclaims`. **The lead owes
+it the moment both PRs land.**
+
+**THE CHARTER-HYGIENE GAP IS REPAIRED, AND ITS MIRROR RECURRED ONE LAYER OVER.** Wave 30's entry is
+back in this log (the charter PR #8718 landed it; this log now descends 32→31→30→29→28). But the same
+disease reappeared in the ledger: Decide concluded the publish wall rejected EVERY new task and the
+wave filed NO backlog rows, so seven findings lived only in prose. That was over-general — the
+reviewer created and published FIVE task rows on the same server. The wall's `label_spine` verdict
+depends on the tag SET in ways it never discloses, and its `-o json` response carries no `details`
+key despite its own hint promising one. Filed as `bp-publish-wall-label-spine-rejects-3-tags`.
+**The lesson generalises: a blanket "the tool is broken" conclusion is a measurement, and one more
+bisection is cheaper than a wave's lost ledger hygiene.**
+
+**WHAT STALLED: nothing.** `pds-bl-census-exact-pins-tax-growth` is round 2 by the sequenced-rounds
+law, behind BOTH `pds-w29-pay-net-dns` and `task-27246110ca95342a` — not a stall.
+
+**WHAT THE NEXT WAVE TAKES.** Merge round 1, then `pds-bl-census-exact-pins-tax-growth` (Arm A first;
+re-run both mutation rehearsals on the FINAL tree, not the branch). Then the three review findings:
+`pds-bl-record-update-basis-overclaims`, `pds-bl-opaque-arm-blind-to-nonliteral-kind`, and the two
+tooling rows (`bp-publish-wall-label-spine-rejects-3-tags`, `bp-bulldocs-patch-batch-ops-fail-on-nil`).
+Beyond the debt, the two untouched frontiers are the REFUSAL direction against a live credential
+(every refusal proof in this family is a fake) and the **102 `ok: true` bodies in `api/lib` that no
+census has ever looked at** — where the epic's law is most likely violated at scale.
+
 ### Wave 31 2026-08-01 — "Close the round" — REVIEWED. Grade A− (paper `pds-wave-31-2026-07-31`)
 
 **FIVE ROUND-1 SLICES BUILT, FIVE GREEN, FIVE PUSHED WITH PRs OPEN.** Every branch is on origin and
