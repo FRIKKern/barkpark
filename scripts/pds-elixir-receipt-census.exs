@@ -25,12 +25,18 @@
 # MEASURING ENGINE (printed again at runtime from the live VM):
 #   Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · darwin arm64 · git 2.39.5 (Apple)
 #
-# USAGE
+# USAGE — ARGV IS STRICT. An argument this list does not name exits 2 without measuring
+# anything, because a census that silently swallows a flag reports a number for a lens
+# nobody asked for (PDS-D493: `--selftest` used to run the ordinary census and exit 0).
 #   elixir scripts/pds-elixir-receipt-census.exs            # full corpus census
 #   elixir scripts/pds-elixir-receipt-census.exs --sites    # + every emitted site, one per line
 #   elixir scripts/pds-elixir-receipt-census.exs --files-from FILE   # corpus-refusal rehearsal
+#   elixir scripts/pds-elixir-receipt-census.exs --keys     # STDOUT: the register key, TSV, one line per emitted site
+#   elixir scripts/pds-elixir-receipt-census.exs --selftest # mutate this file over a synthetic corpus; prove the arms can go RED
 #
-# EXIT: 0 all integrity checks pass · 1 an integrity check failed · 2 corpus refused.
+# EXIT: 0 all integrity checks pass · 1 an integrity check failed · 2 corpus refused OR
+#       an unknown argument. NEVER PIPE THIS SCRIPT WHEN READING ITS EXIT CODE — `cmd |
+#       tail` reports tail's status, which is how the exit-2 refusal was once logged RC 0.
 
 defmodule PDS.Census do
   # ---------------------------------------------------------------- constants
@@ -189,9 +195,49 @@ defmodule PDS.Census do
   # ---------------------------------------------------------------- entrypoint
 
   def main(argv) do
+    case parse_args(argv) do
+      {:error, msgs} -> refuse_args(msgs)
+      %{selftest?: true} -> selftest()
+      %{keys?: true} = opts -> keys_run(opts)
+      opts -> census(opts)
+    end
+  end
+
+  # ARGV-STRICT. Every accepted spelling is named here and everything else is an error —
+  # not a warning, not a shrug. `--files-from` is the one flag that takes a value, so its
+  # value is consumed here and never re-read as a flag.
+  defp parse_args(argv),
+    do: parse_args(argv, %{sites?: false, keys?: false, selftest?: false, files_from: nil}, [])
+
+  defp parse_args([], opts, []), do: opts
+  defp parse_args([], _opts, bad), do: {:error, Enum.reverse(bad)}
+  defp parse_args(["--sites" | rest], o, bad), do: parse_args(rest, %{o | sites?: true}, bad)
+  defp parse_args(["--keys" | rest], o, bad), do: parse_args(rest, %{o | keys?: true}, bad)
+  defp parse_args(["--selftest" | rest], o, bad), do: parse_args(rest, %{o | selftest?: true}, bad)
+
+  defp parse_args(["--files-from", path | rest], o, bad),
+    do: parse_args(rest, %{o | files_from: path}, bad)
+
+  defp parse_args(["--files-from"], _o, bad),
+    do: {:error, Enum.reverse(["--files-from needs a FILE path and was given none" | bad])}
+
+  defp parse_args([other | rest], o, bad),
+    do: parse_args(rest, o, ["unknown argument #{inspect(other)}" | bad])
+
+  defp refuse_args(msgs) do
+    p("")
+    p("REFUSED: UNKNOWN ARGUMENT")
+    Enum.each(msgs, &p("  " <> &1))
+    p("")
+    p("  accepted: --sites · --files-from FILE · --keys · --selftest")
+    p("  A swallowed flag is a census measuring a lens nobody asked for. Exit 2.")
+    System.halt(2)
+  end
+
+  defp census(opts) do
     t0 = System.monotonic_time(:millisecond)
-    show_sites? = "--sites" in argv
-    files = corpus(argv)
+    show_sites? = opts.sites?
+    files = corpus(opts)
 
     banner()
     guard_corpus!(files)
@@ -221,18 +267,16 @@ defmodule PDS.Census do
     integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms)
   end
 
-  defp corpus(argv) do
-    case argv do
-      ["--files-from", path | _] ->
-        path |> File.read!() |> String.split("\n", trim: true)
+  # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
+  # running this same file with `cd:` set to a tmp dir — the sentinels at the top of this
+  # module are relative literals for the same reason. (The `--files-from` seam does NOT
+  # work for fixtures: guard_corpus!/1 runs before parse_file/1 and ORs the corpus floor
+  # with the sentinel check on one cond arm, so no fixture list is both small enough to
+  # mutate and large enough to pass.)
+  defp corpus(%{files_from: nil}), do: Path.wildcard("api/lib/**/*.ex") |> Enum.sort()
 
-      _ ->
-        case Enum.find_index(argv, &(&1 == "--files-from")) do
-          nil -> Path.wildcard("api/lib/**/*.ex") |> Enum.sort()
-          i -> Enum.at(argv, i + 1) |> File.read!() |> String.split("\n", trim: true)
-        end
-    end
-  end
+  defp corpus(%{files_from: path}),
+    do: path |> File.read!() |> String.split("\n", trim: true)
 
   defp banner do
     {otp, erts} = {System.otp_release(), :erlang.system_info(:version)}
@@ -250,7 +294,9 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- corpus guard
 
-  defp guard_corpus!(files) do
+  # `announce?` is false for --keys ONLY, whose stdout is machine-read TSV and must carry
+  # nothing else. The REFUSAL is never quiet: a truncated corpus still exits 2 and says so.
+  defp guard_corpus!(files, announce? \\ true) do
     set = MapSet.new(files)
     missing = Enum.reject(@sentinels, &MapSet.member?(set, &1))
 
@@ -271,9 +317,12 @@ defmodule PDS.Census do
             ]
         )
 
-      true ->
+      announce? ->
         p("corpus      #{length(files)} .ex files under api/lib · sentinels present: #{Enum.join(@sentinels, ", ")}")
         p("")
+
+      true ->
+        :ok
     end
   end
 
@@ -336,53 +385,58 @@ defmodule PDS.Census do
 
   # -- site collection (pairs, with pattern context) --------------------------
 
+  # THE CONTAINER IS RETAINED (PDS-D498). Wave 35's walker recorded {path, line, pattern?,
+  # key} and threw the enclosing node away, so `expr_fp` — the half of the register key
+  # that survives a line shift — was not computable at all. `expr` is the innermost
+  # enclosing AST node that is NOT the pair itself: for `json(conn, %{ok: true, id: id})`
+  # it is the `%{}` node, which is what distinguishes two receipts in one function.
   defp collect_sites(ast, path) do
-    {_, acc} = pairs(ast, false, [])
+    {_, acc} = pairs(ast, false, [], nil)
 
     acc
-    |> Enum.map(fn {line, pat?, kind} ->
-      %{path: path, line: line, pattern?: pat?, key: kind, def: nil}
+    |> Enum.map(fn {line, pat?, kind, expr} ->
+      %{path: path, line: line, pattern?: pat?, key: kind, def: nil, expr: expr}
     end)
     |> Enum.sort_by(& &1.line)
   end
 
-  defp pairs(node, pat?, acc) do
+  defp pairs(node, pat?, acc, box) do
     case node do
       {:=, _, [lhs, rhs]} ->
-        acc = pairs(lhs, true, acc) |> elem(1)
-        pairs(rhs, pat?, acc)
+        acc = pairs(lhs, true, acc, node) |> elem(1)
+        pairs(rhs, pat?, acc, node)
 
       {:<-, _, [lhs, rhs]} ->
-        acc = pairs(lhs, true, acc) |> elem(1)
-        pairs(rhs, pat?, acc)
+        acc = pairs(lhs, true, acc, node) |> elem(1)
+        pairs(rhs, pat?, acc, node)
 
       {:->, _, [heads, body]} ->
-        acc = pairs(heads, true, acc) |> elem(1)
-        pairs(body, false, acc)
+        acc = pairs(heads, true, acc, node) |> elem(1)
+        pairs(body, false, acc, node)
 
       {op, _, [head, body]} when op in [:def, :defp, :defmacro, :defmacrop] ->
-        acc = pairs(head, true, acc) |> elem(1)
-        pairs(body, false, acc)
+        acc = pairs(head, true, acc, node) |> elem(1)
+        pairs(body, false, acc, node)
 
       {op, _, [head]} when op in [:def, :defp, :defmacro, :defmacrop] ->
-        pairs(head, true, acc)
+        pairs(head, true, acc, node)
 
       {left, right} ->
         acc =
           case pair_site(left, right) do
             nil -> acc
-            {line, kind} -> [{line, pat?, kind} | acc]
+            {line, kind} -> [{line, pat?, kind, box} | acc]
           end
 
-        acc = pairs(left, pat?, acc) |> elem(1)
-        pairs(right, pat?, acc)
+        acc = pairs(left, pat?, acc, box) |> elem(1)
+        pairs(right, pat?, acc, box)
 
       list when is_list(list) ->
-        {node, Enum.reduce(list, acc, fn el, a -> pairs(el, pat?, a) |> elem(1) end)}
+        {node, Enum.reduce(list, acc, fn el, a -> pairs(el, pat?, a, box) |> elem(1) end)}
 
       {f, _, args} ->
-        acc = pairs(f, pat?, acc) |> elem(1)
-        {node, if(is_list(args), do: pairs(args, pat?, acc) |> elem(1), else: acc)}
+        acc = pairs(f, pat?, acc, node) |> elem(1)
+        {node, if(is_list(args), do: pairs(args, pat?, acc, node) |> elem(1), else: acc)}
 
       _ ->
         {node, acc}
@@ -424,13 +478,14 @@ defmodule PDS.Census do
         defs(body, mod ++ segs, path, acc)
 
       {op, meta, [head | rest]} when op in [:def, :defp, :defmacro, :defmacrop] ->
-        {name, arity, hmeta} = head_sig(head)
+        {name, req, arity, hmeta} = head_sig(head)
         body = List.first(rest)
 
         rec = %{
           module: mod,
           name: name,
           arity: arity,
+          req: req,
           path: path,
           line: meta[:line] || hmeta[:line] || 0,
           last: max_line(node, meta[:line] || 0),
@@ -442,7 +497,7 @@ defmodule PDS.Census do
         [rec | acc]
 
       {:defdelegate, meta, [head, opts]} ->
-        {name, arity, _} = head_sig(head)
+        {name, req, arity, _} = head_sig(head)
         target = kw(opts, :to)
         as = kw(opts, :as)
 
@@ -450,6 +505,7 @@ defmodule PDS.Census do
           module: mod,
           name: name,
           arity: arity,
+          req: req,
           path: path,
           line: meta[:line] || 0,
           last: meta[:line] || 0,
@@ -545,10 +601,24 @@ defmodule PDS.Census do
     Enum.uniq(names)
   end
 
+  # THE ARITY KEY IS A RANGE, NOT A SCALAR (PDS-D491). `def f(a, b \\ nil)` is callable
+  # at 1 AND at 2, so a head declares `required..total`, not one number. The scalar
+  # spelling was measured and is a REGRESSION — it drops every edge into a defaulted
+  # head and routes 50/13/28 where the range spelling routes what this file prints.
   defp head_sig({:when, _, [h | _]}), do: head_sig(h)
-  defp head_sig({name, meta, args}) when is_atom(name) and is_list(args), do: {name, length(args), meta}
-  defp head_sig({name, meta, _}) when is_atom(name), do: {name, 0, meta}
-  defp head_sig(_), do: {:__unknown__, 0, []}
+
+  defp head_sig({name, meta, args}) when is_atom(name) and is_list(args),
+    do: {name, required_arity(args), length(args), meta}
+
+  defp head_sig({name, meta, _}) when is_atom(name), do: {name, 0, 0, meta}
+  defp head_sig(_), do: {:__unknown__, 0, 0, []}
+
+  defp required_arity(args) do
+    Enum.count(args, fn
+      {:\\, _, [_, _]} -> false
+      _ -> true
+    end)
+  end
 
   defp kw(opts, key) do
     opts = if is_list(opts), do: opts, else: []
@@ -612,6 +682,7 @@ defmodule PDS.Census do
     all =
       parsed
       |> Enum.flat_map(& &1.defs)
+      |> propagate_defaults()
       |> Enum.map(&Map.put(&1, :calls, raw_calls(&1)))
 
     by_key = Enum.group_by(all, fn d -> {d.module, d.name} end)
@@ -624,8 +695,8 @@ defmodule PDS.Census do
       |> Enum.flat_map(fn d ->
         d.calls
         |> Enum.map(fn
-          {:local, f} -> {f, d}
-          {:remote, _segs, f} -> {f, d}
+          {:local, f, _a} -> {f, d}
+          {:remote, _segs, f, _a} -> {f, d}
         end)
       end)
       |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
@@ -646,15 +717,34 @@ defmodule PDS.Census do
     }
   end
 
-  defp resolve(index, mod_segs, name) do
-    Map.get(index.by_key, {mod_segs, name}) ||
-      (index.modules
-       |> Enum.filter(&suffix?(&1, mod_segs))
-       |> Enum.flat_map(&Map.get(index.by_key, {&1, name}, [])))
-      |> case do
-        [] -> []
-        list -> list
-      end
+  # A BODILESS HEADER DECLARES DEFAULTS ITS SIBLING CLAUSE DOES NOT. `def f(a, b \\ nil)`
+  # with no body, followed by `def f(a, b) do ... end`, is ONE function callable at 1..2 —
+  # but only the header carries the `\\`, so per-clause `required` reads 1 and 2. The
+  # minimum over every clause sharing {module, name, total_arity} is the function's real
+  # required arity; without this propagation the body-carrying clause refuses the 1-arg
+  # call and the edge is silently lost.
+  defp propagate_defaults(defs) do
+    mins =
+      defs
+      |> Enum.group_by(&{&1.module, &1.name, &1.arity}, & &1.req)
+      |> Map.new(fn {k, reqs} -> {k, Enum.min(reqs)} end)
+
+    Enum.map(defs, &%{&1 | req: Map.get(mins, {&1.module, &1.name, &1.arity}, &1.req)})
+  end
+
+  # THE KEY IS {module, fun, required..total}. `arity == nil` means "any" — the only
+  # callers that pass nil are the ones with no call site to read an arity off.
+  defp accepts?(_d, nil), do: true
+  defp accepts?(d, arity), do: arity >= d.req and arity <= d.arity
+
+  defp at_arity(cands, arity), do: Enum.filter(cands, &accepts?(&1, arity))
+
+  defp resolve(index, mod_segs, name, arity) do
+    (Map.get(index.by_key, {mod_segs, name}) ||
+       (index.modules
+        |> Enum.filter(&suffix?(&1, mod_segs))
+        |> Enum.flat_map(&Map.get(index.by_key, {&1, name}, []))))
+    |> at_arity(arity)
   end
 
   defp suffix?(full, segs) do
@@ -713,19 +803,25 @@ defmodule PDS.Census do
     |> Map.get(d.name, [])
     |> Enum.filter(fn c ->
       Enum.any?(c.calls, fn
-        {:local, f} -> f == d.name and c.module == d.module
-        {:remote, segs, f} -> f == d.name and suffix?(d.module, segs)
+        {:local, f, a} -> f == d.name and c.module == d.module and accepts?(d, a)
+        {:remote, segs, f, a} -> f == d.name and suffix?(d.module, segs) and accepts?(d, a)
       end)
     end)
     |> Enum.reject(&(&1.module == d.module and &1.name == d.name))
     |> Enum.take(12)
   end
 
+  # ARITY FIRST, THEN THE LINE PIN. The key is {module, fun, required..total}; within the
+  # clauses that accept this arity the LINE picks the exact clause, because a
+  # {module, name, arity} triple names a FUNCTION and a receipt lives in ONE CLAUSE of it
+  # (wave 33 threw the line away here and mis-owned 15 of 91 sites — see CLAUSE-COLLAPSE).
   defp resolve_exact(index, {mod, name, arity, line}) do
     cands = Map.get(index.by_key, {mod, name}) || []
+    at = at_arity(cands, arity)
 
-    Enum.find(cands, &(&1.line == line)) ||
-      Enum.find(cands, &(&1.arity == arity)) ||
+    Enum.find(at, &(&1.line == line)) ||
+      List.first(at) ||
+      Enum.find(cands, &(&1.line == line)) ||
       List.first(cands)
   end
 
@@ -807,8 +903,8 @@ defmodule PDS.Census do
   end
 
   # callees: defdelegate target, or every local/remote call resolvable in the corpus
-  defp callees(%{delegate: {target, as}}, index) when is_list(target),
-    do: resolve(index, target, as)
+  defp callees(%{delegate: {target, as}} = d, index) when is_list(target),
+    do: resolve(index, target, as, d.arity)
 
   defp callees(%{delegate: {_, _}}, _index), do: []
 
@@ -817,40 +913,42 @@ defmodule PDS.Census do
   defp callees(%{module: mod} = d, index) do
     (d[:calls] || raw_calls(d))
     |> Enum.flat_map(fn
-      # A {:local, f} with no def of that name in the calling module is either
-      # undefined or IMPORTED — and an imported call is a real edge, so follow it.
-      {:local, f} ->
-        case Map.get(index.by_key, {mod, f}, []) do
-          [] -> imported_defs(index, mod, f)
+      # A {:local, f, a} with no def of that name AND ARITY in the calling module is
+      # either undefined or IMPORTED — and an imported call is a real edge, so follow it.
+      {:local, f, a} ->
+        case at_arity(Map.get(index.by_key, {mod, f}, []), a) do
+          [] -> imported_defs(index, mod, f, a)
           defs -> defs
         end
 
-      {:remote, segs, f} ->
-        resolve(index, segs, f)
+      {:remote, segs, f, a} ->
+        resolve(index, segs, f, a)
     end)
     |> Enum.uniq_by(&{&1.module, &1.name, &1.arity})
   end
 
-  defp imported_defs(index, mod, f) do
+  defp imported_defs(index, mod, f, arity) do
     index.imports
     |> Map.get({mod, f}, [])
-    |> Enum.flat_map(&resolve(index, &1, f))
+    |> Enum.flat_map(&resolve(index, &1, f, arity))
   end
 
   defp raw_calls(%{body: nil}), do: []
 
   defp raw_calls(%{body: body}) do
     {_, calls} =
-      Macro.prewalk(body, [], fn
+      body
+      |> expand_pipes()
+      |> Macro.prewalk([], fn
         {{:., _, [{:__aliases__, _, segs}, f]}, _, args} = n, acc
         when is_atom(f) and is_list(args) ->
-          {n, [{:remote, segs, f} | acc]}
+          {n, [{:remote, segs, f, length(args)} | acc]}
 
         {f, _, args} = n, acc when is_atom(f) and is_list(args) ->
           if Macro.special_form?(f, length(args)) or Macro.operator?(f, length(args)) do
             {n, acc}
           else
-            {n, [{:local, f} | acc]}
+            {n, [{:local, f, length(args)} | acc]}
           end
 
         n, acc ->
@@ -858,6 +956,23 @@ defmodule PDS.Census do
       end)
 
     Enum.uniq(calls)
+  end
+
+  # PIPE EXPANSION IS PART OF THE ARITY KEY (PDS-D491). `conn |> json(body)` quotes as
+  # json/1 and calls json/2; reading the arity straight off the node would refuse the
+  # real callee at exactly the places this corpus pipes most (controllers, contexts).
+  # prewalk re-enters the rewritten node, so `a |> b() |> c()` unwinds fully.
+  defp expand_pipes(body) do
+    Macro.prewalk(body, fn
+      {:|>, _, [lhs, {{:., _, _} = dot, meta, args}]} when is_list(args) ->
+        {dot, meta, [lhs | args]}
+
+      {:|>, _, [lhs, {f, meta, args}]} when is_atom(f) and is_list(args) ->
+        {f, meta, [lhs | args]}
+
+      n ->
+        n
+    end)
   end
 
   # ---------------------------------------------------------------- classify
@@ -1087,6 +1202,90 @@ defmodule PDS.Census do
 
   defp declared_for(_), do: nil
 
+  # ---------------------------------------------------------------- register key
+  #
+  # WHAT --keys IS FOR. The hand-bucket register names sites; a register keyed on
+  # `path:line` orphans every row the moment somebody inserts a line above one. The key
+  # printed here is {path, module.name/arity, head_hash, expr_fp} — NO LINE NUMBER — so a
+  # clause inserted above a registered site produces neither an orphan nor an arrival.
+  #
+  # THE NORMALISER IS THE TOTAL METADATA DROP (PDS-D498): `{f, _meta, a} -> {f, [], a}` on
+  # every node, then `:erlang.phash2` OF THE TERM. It is NOT PDS-D477's partial drop of 11
+  # known metadata keys followed by a phash2 of an `inspect` STRING. The two are
+  # partition-identical inside every one of this corpus's {path, mfa} groups, so nothing is
+  # lost — but the total drop is immune to an Elixir minor emitting a NEW metadata key,
+  # which under a partial drop silently re-keys every row. THE TWO SPELLINGS PRODUCE
+  # DIFFERENT INTEGERS FOR THE SAME SITE (capabilities.ex visible?/2 is 83655895 under the
+  # partial drop and 52289869 under this one) — never transcribe a hash across normalisers.
+  #
+  # EDITING drop_meta/1, head_hash/1 OR expr_fp/1 IS A RE-KEY MIGRATION, not a refactor:
+  # every register row keyed under the old spelling orphans at once. Bump @key_normaliser
+  # in the same commit so the register can see which spelling produced its integers.
+  #
+  # WHAT head_hash CANNOT DISCRIMINATE — DERIVED UNDER THIS NORMALISER, not transcribed.
+  # Across all 17,620 defs it collides in exactly 3 buckets (6 defs) WITHIN a
+  # {path, module.name/arity} group, and 0 times within the 75 site-owning groups. Only
+  # ONE of the three is the benign bodiless header (plugins/capabilities.ex visible?/2
+  # :144/:155, where :144 is the header and :155 the last clause); the other TWO are two
+  # DISTINCT functions inside two `defimpl Inspect, for: ...` blocks
+  # (plugins/github/errors.ex :94/:138, plugins/indx/errors.ex :118/:137) that this walker
+  # cannot tell apart, because it reads the head and defimpl reuses it verbatim.
+  #
+  # CORPUS-WIDE — ignoring path and mfa — it is 912 groups over 2,543 defs (`def all()` is
+  # byte-identical in 7 modules; the widest groups are init/1 at 53 defs and call/2 at 39).
+  # THE PATH AND THE MFA ARE CARRYING THAT LOAD, which is why the key is a 4-tuple and not
+  # a hash. NOTE: the wave brief recorded 913 over 2,544 for this figure — re-derived here
+  # it is 912 over 2,543. The corpus-wide partition is NOT covered by the two normalisers'
+  # within-group partition identity, so that number does not survive a spelling change and
+  # is not quotable across one. capabilities.ex visible?/2 hashes 52289869 here.
+  @key_normaliser "total-meta-drop/phash2-term/v1"
+
+  defp drop_meta(ast) do
+    Macro.prewalk(ast, fn
+      {f, meta, a} when is_list(meta) -> {f, [], a}
+      n -> n
+    end)
+  end
+
+  defp fp(nil), do: "-"
+  defp fp(node), do: node |> drop_meta() |> :erlang.phash2() |> to_string()
+
+  defp head_hash(%{owner: %{head: head}}), do: fp(head)
+  defp head_hash(_), do: "-"
+
+  defp expr_fp(%{expr: expr}), do: fp(expr)
+
+  defp key_mfa(%{owner: owner}) when not is_nil(owner), do: label(owner)
+  defp key_mfa(_), do: "?"
+
+  # STDOUT IS TSV AND NOTHING ELSE — one line per emitted site, so a consumer can read it
+  # with `cut` and a `wc -l` against it means what it says. The one-line summary goes to
+  # STDERR for the same reason.
+  defp keys_run(opts) do
+    files = corpus(opts)
+    guard_corpus!(files, false)
+
+    parsed = Enum.map(files, &parse_file/1)
+    index = build_index(parsed)
+    sites = Enum.flat_map(parsed, & &1.sites)
+    {ast_sites, _phantoms} = split_phantoms(parsed, sites)
+    {_consumers, emitted} = Enum.split_with(ast_sites, & &1.pattern?)
+    routed = Enum.map(emitted, &route(&1, index))
+
+    routed
+    |> Enum.sort_by(&{&1.path, &1.line})
+    |> Enum.each(fn s ->
+      IO.puts(Enum.join([s.path, key_mfa(s), head_hash(s), expr_fp(s)], "\t"))
+    end)
+
+    IO.puts(
+      :stderr,
+      "keys #{length(routed)} · emitted #{length(emitted)} · normaliser #{@key_normaliser}"
+    )
+
+    System.halt(0)
+  end
+
   # ---------------------------------------------------------------- reporting
 
   defp split_phantoms(parsed, sites) do
@@ -1203,18 +1402,30 @@ defmodule PDS.Census do
   # (bulldocs_ingest_controller.ex:630, inside the batch clause of apply_op/2 at :604,
   # came back owned by the single-op clause at :693). A site owned by a clause that does
   # not contain it makes every downstream evidence claim about the wrong code.
+  # THE FAIL-OPEN IS CLOSED (PDS wave 36). This function used to filter `& &1.owner` FIRST
+  # and only then reject the sites whose owner does not contain them — so a site the
+  # resolver could not own AT ALL (owner == nil) was neither collapsed nor counted, and the
+  # number printed here read 0 while attribution had failed outright. An unowned site is
+  # the WORST attribution failure available, not the absence of one; it is counted here.
   defp report_clause_collapse(classified) do
-    owned = Enum.filter(classified, & &1.owner)
-    collapsed = Enum.reject(owned, &(&1.owner.line <= &1.line and &1.line <= &1.owner.last))
+    {owned, unowned} = Enum.split_with(classified, & &1.owner)
+    mis_owned = Enum.reject(owned, &(&1.owner.line <= &1.line and &1.line <= &1.owner.last))
+    n = length(mis_owned) + length(unowned)
 
-    p("  CLAUSE-COLLAPSE  #{length(collapsed)} of #{length(classified)} sites attributed to a def clause that does")
-    p("  NOT contain their line (0 is correct; wave 33's shipped lens read 15).")
+    p("  CLAUSE-COLLAPSE  #{n} of #{length(classified)} sites NOT attributed to a def clause that")
+    p("  contains their line — #{length(mis_owned)} owned by a clause that does not contain them, #{length(unowned)} owned")
+    p("  by no clause at all (0 is correct; wave 33's shipped lens read 15).")
 
-    Enum.each(Enum.sort_by(collapsed, &{&1.path, &1.line}), fn s ->
+    Enum.each(Enum.sort_by(mis_owned, &{&1.path, &1.line}), fn s ->
       p("      #{short(s.path)}:#{s.line} — owned by #{label(s.owner)} at :#{s.owner.line}-#{s.owner.last}")
     end)
 
+    Enum.each(Enum.sort_by(unowned, &{&1.path, &1.line}), fn s ->
+      p("      #{short(s.path)}:#{s.line} — NO OWNING CLAUSE RESOLVED; every evidence line about this site is about nothing")
+    end)
+
     p("")
+    n
   end
 
   # WHY THE FLOOR IS A FLOOR, shown rather than asserted. The write count is a function
@@ -1572,21 +1783,331 @@ defmodule PDS.Census do
     %{delegates: length(delegates), close_write?: write?, close_depth: depth}
   end
 
+  # ---------------------------------------------------------------- selftest
+  #
+  # A SELFTEST THAT HAS NEVER BEEN OBSERVED RED IS NOT A SELFTEST. This one mutates THIS
+  # FILE, one anchored edit at a time, and requires the mutant to go red on the arm the
+  # mutation kills. Every case that carries a mutation also requires its anchor to occur
+  # EXACTLY ONCE — an anchor a refactor moved would otherwise leave a case that runs the
+  # unmutated script and passes vacuously.
+  #
+  # THE SEAM IS CWD INJECTION. corpus/1 globs `api/lib/**/*.ex` relative to the working
+  # directory and @sentinels are relative literals, so a synthetic tree in a tmp dir is
+  # censused verbatim by running this same file with `cd:` set to it. The `--files-from`
+  # seam does NOT work for fixtures: guard_corpus!/1 runs before parse_file/1 and ORs the
+  # corpus floor with the sentinel check on ONE cond arm, so no fixture list is both small
+  # enough to mutate and large enough to pass.
+  #
+  # IT ASSERTS NO BUCKET COUNT — not one. Exit codes, arm names, refusal prose, and one
+  # RELATION (keys lines == emitted, both read off the same invocation). A selftest that
+  # pinned POST-READ or the unclassified denominator would red the build on every honest
+  # lens correction, which is the defect this epic keeps filing, not the guard. PDS-D467b:
+  # CORPUS-INTACT is structurally unreachable in normal operation — guard_corpus!/1 exits 2
+  # on exactly the condition that arm tests — so it is proven by BYPASSING the guard.
+  @self_source Path.expand(__ENV__.file)
+  @pair_atom "ok:" <> " true"
+  @selftest_filler 620
+
+  @selftest_cases [
+    %{
+      name: "BASELINE-GREEN",
+      corpus: :full,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: ["CENSUS OK"],
+      proves: "the synthetic corpus censuses clean, so every red below is the mutation"
+    },
+    %{
+      name: "ARGV-STRICT",
+      corpus: :full,
+      argv: ["--nonsense-flag"],
+      mut: nil,
+      exit: 2,
+      expect: ["REFUSED: UNKNOWN ARGUMENT", "unknown argument"],
+      proves: "an unnamed flag refuses instead of running an unrequested lens (PDS-D493)"
+    },
+    %{
+      name: "CORPUS-REFUSAL",
+      corpus: :tiny,
+      argv: [],
+      mut: nil,
+      exit: 2,
+      expect: ["REFUSED: TRUNCATED CORPUS"],
+      proves: "a corpus under the floor exits 2 rather than reporting zeros it cannot stand behind"
+    },
+    %{
+      name: "CORPUS-INTACT (guard bypassed)",
+      corpus: :tiny,
+      argv: [],
+      # EVERY ANCHOR IS SPELLED IN TWO FRAGMENTS JOINED AT COMPILE TIME. Written whole, the
+      # anchor would occur twice in this file — here and at the line it targets — and the
+      # exactly-once check in apply_mutation/2 would reject its own case list.
+      mut: {"stand behind. Exit 2.\")\n    System." <> "halt(2)", "stand behind. Exit 2.\")\n    :bypassed_by_selftest"},
+      exit: 1,
+      expect: ["FAIL  CORPUS-INTACT", "is BELOW the"],
+      proves: "the arm itself can go red once the guard that shadows it is removed"
+    },
+    %{
+      name: "LENS-LOSES-NOTHING",
+      corpus: :full,
+      argv: [],
+      mut: {"if extra" <> " > 0 do", "if false do"},
+      exit: 1,
+      expect: ["FAIL  LENS-LOSES-NOTHING", "the lens LOSES"],
+      proves: "a textual occurrence the lens can neither parse nor explain reds the run"
+    },
+    %{
+      name: "EMITTERS-PARTITION",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"{consumers, emitted} = Enum.split_with(ast_sites" <> ", & &1.pattern?)",
+         "{consumers, emitted} = Enum.split_with(tl(ast_sites), & &1.pattern?)"},
+      exit: 1,
+      expect: ["FAIL  EMITTERS-PARTITION", "is NOT the AST population"],
+      proves: "an emitted site dropped between the AST and the split reds the run"
+    },
+    %{
+      name: "CLASSIFICATION-TOTAL",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"classified = Enum.map(routed" <> ", &classify(&1, index))",
+         "classified = tl(Enum.map(routed, &classify(&1, index)))"},
+      exit: 1,
+      expect: ["FAIL  CLASSIFICATION-TOTAL", "fell out of the taxonomy entirely"],
+      proves: "a site that leaves the taxonomy reds the run instead of shrinking a denominator"
+    },
+    %{
+      name: "DELEGATE-REACHES-WRITE",
+      corpus: :full,
+      argv: [],
+      mut: {"do: resolve(index, target, as" <> ", d.arity)", "do: []"},
+      exit: 1,
+      expect: ["FAIL  DELEGATE-REACHES-WRITE", "reaches NO write verb"],
+      proves: "a route that can no longer follow a defdelegate reds the run (PDS-D449a trap 2)"
+    },
+    %{
+      name: "KEYS-ONE-LINE-PER-SITE",
+      corpus: :full,
+      argv: ["--keys"],
+      mut: nil,
+      exit: 0,
+      expect: :keys_relation,
+      proves: "--keys prints one TSV line per emitted site — the relation, never an integer"
+    }
+  ]
+
+  defp selftest do
+    p("PDS CENSUS SELFTEST — can this instrument be made to go RED?")
+    p(String.duplicate("=", 78))
+    p("  Mutates this file over a synthetic corpus (CWD injection) and requires each")
+    p("  mutant to red on the arm it kills. Asserts exit codes, arm names and refusal")
+    p("  prose — NEVER a bucket count, so an honest lens correction can never red it.")
+    p("")
+
+    src = File.read!(@self_source)
+    root = Path.join(System.tmp_dir!(), "pds-census-selftest-#{System.unique_integer([:positive])}")
+    dirs = %{full: Path.join(root, "full"), tiny: Path.join(root, "tiny")}
+
+    write_corpus!(dirs.full, @selftest_filler)
+    write_corpus!(dirs.tiny, 0)
+
+    results = Enum.map(@selftest_cases, &run_selftest_case(&1, src, dirs, root))
+    File.rm_rf!(root)
+
+    Enum.each(results, fn r ->
+      p("  #{if r.ok?, do: "PASS", else: "FAIL"}  #{String.pad_trailing(r.name, 32)} #{r.why}")
+      unless r.ok?, do: p("        proves: #{r.proves}")
+    end)
+
+    p("")
+    failed = Enum.reject(results, & &1.ok?)
+
+    if failed == [] do
+      p("SELFTEST OK — #{length(results)} cases, #{Enum.count(@selftest_cases, & &1.mut)} of them mutants that went red as required.")
+      System.halt(0)
+    else
+      p("SELFTEST FAILED — #{length(failed)} case(s) did not behave as required. Read the FAIL lines.")
+      System.halt(1)
+    end
+  end
+
+  defp run_selftest_case(c, src, dirs, root) do
+    base = %{name: c.name, proves: c.proves}
+
+    with {:ok, mutated} <- apply_mutation(src, c.mut) do
+      script = Path.join(root, "case-#{:erlang.phash2(c.name)}.exs")
+      File.write!(script, mutated)
+
+      # NEVER PIPED: System.cmd hands back the child's own status, which is the whole
+      # point — `cmd | tail` reports tail's status and once logged an exit-2 refusal as 0.
+      {out, code} =
+        System.cmd("elixir", [script | c.argv],
+          cd: Map.fetch!(dirs, c.corpus),
+          stderr_to_stdout: true
+        )
+
+      judge_selftest_case(base, c, out, code)
+    else
+      {:error, why} -> Map.merge(base, %{ok?: false, why: why})
+    end
+  end
+
+  defp judge_selftest_case(base, %{expect: :keys_relation} = c, out, code) do
+    lines = String.split(out, "\n", trim: true)
+    tsv = Enum.count(lines, &String.contains?(&1, "\t"))
+
+    summary =
+      Enum.find_value(lines, fn l ->
+        case Regex.run(~r/^keys (\d+) · emitted (\d+)/, l) do
+          [_, k, e] -> {String.to_integer(k), String.to_integer(e)}
+          _ -> nil
+        end
+      end)
+
+    cond do
+      code != c.exit ->
+        Map.merge(base, %{ok?: false, why: "exit #{code}, expected #{c.exit}"})
+
+      summary == nil ->
+        Map.merge(base, %{ok?: false, why: "--keys printed no summary line to stderr"})
+
+      elem(summary, 0) != tsv or elem(summary, 1) != tsv ->
+        Map.merge(base, %{
+          ok?: false,
+          why: "TSV lines #{tsv} != keys #{elem(summary, 0)} / emitted #{elem(summary, 1)}"
+        })
+
+      true ->
+        Map.merge(base, %{ok?: true, why: "exit 0 · TSV lines == keys == emitted, all off one run"})
+    end
+  end
+
+  defp judge_selftest_case(base, c, out, code) do
+    missing = Enum.reject(c.expect, &String.contains?(out, &1))
+
+    cond do
+      code != c.exit ->
+        Map.merge(base, %{ok?: false, why: "exit #{code}, expected #{c.exit}"})
+
+      missing != [] ->
+        Map.merge(base, %{
+          ok?: false,
+          why: "exit #{code} as required but never printed #{inspect(missing)}"
+        })
+
+      true ->
+        Map.merge(base, %{ok?: true, why: "exit #{c.exit} · printed #{inspect(hd(c.expect))}"})
+    end
+  end
+
+  # AN ANCHOR THAT DOES NOT OCCUR EXACTLY ONCE IS A DEAD CASE, NOT A PASS. A refactor that
+  # moves the mutated line must break the selftest loudly rather than leave it running the
+  # unmutated script and reporting green.
+  defp apply_mutation(src, nil), do: {:ok, src}
+
+  defp apply_mutation(src, {from, to}) do
+    case length(:binary.matches(src, from)) do
+      1 -> {:ok, String.replace(src, from, to)}
+      0 -> {:error, "MUTATION ANCHOR GONE — #{inspect(String.slice(from, 0, 48))} no longer occurs"}
+      n -> {:error, "MUTATION ANCHOR AMBIGUOUS — #{inspect(String.slice(from, 0, 48))} occurs #{n} times"}
+    end
+  end
+
+  # THE SYNTHETIC CORPUS. Small on purpose: it carries one emitter, one consumer, one
+  # phantom, one defdelegate facade that reaches a write verb, and enough filler to clear
+  # the corpus floor. The receipt text is assembled from fragments so that no literal
+  # success pair appears in THIS file's own source.
+  defp write_corpus!(dir, filler) do
+    w = fn rel, body ->
+      path = Path.join(dir, rel)
+      File.mkdir_p!(Path.dirname(path))
+      File.write!(path, body)
+    end
+
+    w.("api/lib/barkpark/tasks.ex", """
+    defmodule Barkpark.Tasks do
+      @moduledoc "the defdelegate facade that makes naive write detectors lie"
+      defdelegate close(id, worker, epoch), to: Barkpark.Tasks.Close
+      defdelegate reopen(id), to: Barkpark.Tasks.Close
+    end
+    """)
+
+    w.("api/lib/barkpark/tasks/close.ex", """
+    defmodule Barkpark.Tasks.Close do
+      # a phantom: the words #{@pair_atom} in prose, which the AST does not carry as a pair
+      def close(id, worker, epoch) do
+        {n, _} = Repo.update_all(id, set: [worker: worker, epoch: epoch])
+        receipt(id, n)
+      end
+
+      def reopen(id), do: Repo.update(id)
+
+      def receipt(id, n) do
+        %{#{@pair_atom}, id: id, moved: n}
+      end
+
+      def consume(resp) do
+        %{#{@pair_atom}} = resp
+        :ok
+      end
+    end
+    """)
+
+    w.("api/lib/barkpark/repo.ex", """
+    defmodule Barkpark.Repo do
+      def update_all(q, opts), do: {0, [q | opts]}
+      def update(q), do: {:ok, q}
+    end
+    """)
+
+    Enum.each(1..filler//1, fn i ->
+      w.("api/lib/barkpark/filler/m#{i}.ex", """
+      defmodule Barkpark.Filler.M#{i} do
+        def noop(x), do: x
+      end
+      """)
+    end)
+  end
+
   # ---------------------------------------------------------------- integrity
 
   defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
+    # EVERY ARM RENDERS ITS OWN FAIL SENTENCE. One `why` for both branches is how a RED
+    # line prints a true-reading sentence — the shipped form printed `FAIL CORPUS-INTACT 3
+    # files >= 600`, which is a lie wearing the word FAIL. DELEGATE-REACHES-WRITE already
+    # carried the false-branch shape; it is now the rule, not the exception. The relation
+    # in the PASS prose is the one the arm asserts; the FAIL prose says what happened.
     checks = [
       {"CORPUS-INTACT", length(files) >= @corpus_floor,
-       "#{length(files)} files >= #{@corpus_floor}"},
+       if length(files) >= @corpus_floor do
+         "#{length(files)} files >= #{@corpus_floor}"
+       else
+         "#{length(files)} files is BELOW the #{@corpus_floor} floor — the corpus is truncated and every zero below it is unearned (normally unreachable: guard_corpus!/1 exits 2 on this same condition first)"
+       end},
       {"LENS-LOSES-NOTHING", textual == length(ast_sites) + length(phantoms),
-       "textual #{textual} == ast #{length(ast_sites)} + phantom #{length(phantoms)}"},
+       if textual == length(ast_sites) + length(phantoms) do
+         "textual #{textual} == ast #{length(ast_sites)} + phantom #{length(phantoms)}"
+       else
+         "textual #{textual} != ast #{length(ast_sites)} + phantom #{length(phantoms)} — the lens LOSES #{textual - length(ast_sites) - length(phantoms)} occurrence(s) it can neither parse nor explain"
+       end},
       {"EMITTERS-PARTITION", length(ast_sites) == length(consumers) + length(emitted),
-       "ast #{length(ast_sites)} == consumer #{length(consumers)} + emitted #{length(emitted)}"},
+       if length(ast_sites) == length(consumers) + length(emitted) do
+         "ast #{length(ast_sites)} == consumer #{length(consumers)} + emitted #{length(emitted)}"
+       else
+         "ast #{length(ast_sites)} != consumer #{length(consumers)} + emitted #{length(emitted)} — the emitter/consumer split drops #{length(ast_sites) - length(consumers) - length(emitted)} site(s); the emitted population is NOT the AST population"
+       end},
       {"CLASSIFICATION-TOTAL", classified_n + unclassified_n == length(emitted),
-       "classified #{classified_n} + unclassified #{unclassified_n} == emitted #{length(emitted)}"},
+       if classified_n + unclassified_n == length(emitted) do
+         "classified #{classified_n} + unclassified #{unclassified_n} == emitted #{length(emitted)}"
+       else
+         "classified #{classified_n} + unclassified #{unclassified_n} != emitted #{length(emitted)} — #{length(emitted) - classified_n - unclassified_n} emitted site(s) fell out of the taxonomy entirely; every shape count below is over the wrong denominator"
+       end},
       {"DELEGATE-REACHES-WRITE", delegate.close_write?,
        # On FAIL close_depth is nil, and "at depth " with nothing after it reads
        # like a truncated line rather than a finding — say what actually happened.
