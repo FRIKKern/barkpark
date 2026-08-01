@@ -15,8 +15,9 @@
 //             as a FRESH ?theme= LOAD (never an attribute flip — see legRender),
 //             so the day a dark rule changes a box, the sweep is already there.
 //             ACCENT IDENTITY (data-bp-theme: charple/ember/evergreen/fjord/
-//             iris, five values generated from BP_THEMES at app.js:25) is a
-//             DIFFERENT axis and this sweep does not claim it — its owner is
+//             iris, five values generated from BP_THEMES — re-derive with
+//             `grep -n 'var BP_THEMES' app.js`) is a DIFFERENT axis and this
+//             sweep does not claim it — its owner is
 //             gr-blk-accent-scenario-sweep. Scoping the derivation to
 //             `data-theme` exactly is load-bearing: "any data-*theme* selector"
 //             derives SEVEN members and reds on an untouched tree.
@@ -661,8 +662,9 @@ export function parseViewIds(html) {
 // SCOPED TO `data-theme` EXPLICITLY, AND THAT SCOPE IS LOAD-BEARING. The console
 // carries a SECOND, ORTHOGONAL switch: `data-bp-theme` accent IDENTITY, five
 // values in app.css (charple, ember, evergreen, fjord, iris) generated from
-// BP_THEMES at app.js:25, and index.html:2 carries one of them. A derivation
-// written as "any data-*theme* selector" derives SEVEN members, not two, and
+// BP_THEMES (`grep -n 'var BP_THEMES' app.js`), and the shell's root element
+// carries one of them. A derivation written as "any data-*theme* selector"
+// derives SEVEN members, not two, and
 // reds on an unmutated tree the day it lands. Identity is a SEPARATE AXIS with
 // its own owner — gr-blk-accent-scenario-sweep — and this sweep does not claim
 // it.
@@ -1345,8 +1347,9 @@ async function legRender(rep) {
           // A flip leaves the console lying about itself — a verifier measured
           // the body background UNCHANGED at rgb(244,245,247) after flipping
           // data-theme=dark, and #theme-label reads the opposite string under a
-          // flip than under a load (themeLabelText, app.js:3530), so a flipped
-          // run would measure the wrong control text and could not see a
+          // flip than under a load (`themeLabelText` — re-derive with
+          // `grep -n 'function themeLabelText' app.js`), so a flipped run
+          // would measure the wrong control text and could not see a
           // theme-differentiated defect at all. mock.js seeds ?theme= into
           // localStorage before first paint, which is why the load is honest.
           const url = `${BASE}/?scen=${cell.scen}&theme=${theme}${cell.hash}`;
