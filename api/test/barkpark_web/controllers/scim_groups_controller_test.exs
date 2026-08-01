@@ -4,6 +4,7 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
 
   alias Barkpark.{Accounts, Repo, Scim, Tenancy}
   alias Barkpark.Audit.Event
+  alias Barkpark.Scim.Group
   alias Barkpark.Tenancy.{Auth, Role, RolePermission}
   import Ecto.Query
 
@@ -180,11 +181,61 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
       assert scim(token_b) |> delete("/scim/v2/Groups/#{gid}") |> json_response(404)
       assert scim(token_a) |> get("/scim/v2/Groups/#{gid}") |> json_response(200)
 
-      # The context is tenancy-scoped: a delete on org B's behalf removes nothing.
+      # The context is tenancy-scoped: a delete on org B's behalf removes
+      # nothing, and PDS-D523 makes that outcome legible to the caller — the
+      # old `{:ok, 0}` was indistinguishable from a real delete under any
+      # `{:ok, _}` match. The stored row is read back to certify it.
       group_a = Scim.get_org_group(org_a, gid)
-      assert {:ok, 0} = Scim.delete_group(org_b, group_a)
+      assert {:error, :not_found} = Scim.delete_group(org_b, group_a)
+      assert Repo.get(Group, gid)
       assert Scim.get_org_group(org_a, gid)
     end
+
+    # The controller's own guard, driven for real. Over HTTP the cross-org id is
+    # already stopped by the org-scoped read above, so the ONLY way the delete
+    # itself can match zero rows is a row that disappears between that read and
+    # the write. Nothing is stubbed: a :telemetry handler on the repo's query
+    # event (the request runs synchronously in this process, on this test's
+    # sandbox connection) issues a real delete the instant the read completes.
+    test "the group vanishes between the read and the delete → 404, never 204" do
+      %{token: token} = org_with_ws("g-del-race")
+
+      gid =
+        scim(token)
+        |> post("/scim/v2/Groups", Jason.encode!(%{"displayName" => "Racy", "role" => "member"}))
+        |> json_response(201)
+        |> Map.fetch!("id")
+
+      delete_on_next_group_read(gid)
+
+      assert scim(token) |> delete("/scim/v2/Groups/#{gid}") |> json_response(404)
+      refute Repo.get(Group, gid)
+    end
+  end
+
+  # Attach a one-shot repo-query observer that deletes `gid` the moment a SELECT
+  # against scim_groups completes — i.e. immediately after the controller's
+  # `get_org_group/2` and before its `Scim.delete_group/2`.
+  defp delete_on_next_group_read(gid) do
+    ref = make_ref()
+    handler_id = {__MODULE__, :vanish, ref}
+
+    :telemetry.attach(
+      handler_id,
+      [:barkpark, :repo, :query],
+      fn _event, _measurements, meta, _config ->
+        query = to_string(meta[:query] || "")
+
+        if String.starts_with?(query, "SELECT") and query =~ "scim_groups" and
+             Process.get(handler_id) == nil do
+          Process.put(handler_id, :fired)
+          Repo.delete_all(from g in Group, where: g.id == ^gid)
+        end
+      end,
+      nil
+    )
+
+    on_exit(fn -> :telemetry.detach(handler_id) end)
   end
 
   # A raw path `:id` binds to Group's `:binary_id` PK. Before the guard a

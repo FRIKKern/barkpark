@@ -321,16 +321,28 @@ defmodule Barkpark.Accounts do
     end
   end
 
-  @doc "Revoke a single session by plaintext (idempotent)."
-  @spec revoke_user_session_token(binary()) :: :ok
+  @doc """
+  Revoke a single session by plaintext (idempotent). Returns `{:ok, revoked}` —
+  the NUMBER OF ROWS the revoke actually stamped: 1 for a live session, 0 when
+  there was nothing left to revoke (an already-revoked, expired or unknown
+  token).
+
+  The count is the post-condition the caller's receipt implies, so it is
+  returned rather than swallowed here — a hardcoded `:ok` discarded the outcome
+  AT THE SOURCE, leaving every caller's "signed out" claim unreadable in
+  principle (PDS-D523, same widening as `revoke_all_user_sessions/1` in
+  PDS-D503). Idempotence is preserved: 0 is a normal answer, not an error.
+  """
+  @spec revoke_user_session_token(binary()) :: {:ok, non_neg_integer()}
   def revoke_user_session_token(plaintext) when is_binary(plaintext) do
     hash = UserSession.hash_token(plaintext)
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
-    from(t in UserSession, where: t.token_hash == ^hash and is_nil(t.revoked_at))
-    |> Repo.update_all(set: [revoked_at: now])
+    {revoked, _} =
+      from(t in UserSession, where: t.token_hash == ^hash and is_nil(t.revoked_at))
+      |> Repo.update_all(set: [revoked_at: now])
 
-    :ok
+    {:ok, revoked}
   end
 
   @doc """

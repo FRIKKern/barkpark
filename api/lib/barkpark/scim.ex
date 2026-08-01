@@ -461,18 +461,31 @@ defmodule Barkpark.Scim do
   @doc """
   Delete `group` from `org`. Tenancy-scoped: the delete is filtered by
   `organization_id`, so a token for org A can never remove a group in org B.
-  Returns `{:ok, deleted_count}` (0 when the group is not in this org).
+
+  Returns `{:ok, deleted_count}` only when the write actually removed this org's
+  own row, and `{:error, :not_found}` when it matched nothing — a cross-org id,
+  or a row that vanished between a caller's read and this write.
+
+  The previous unconditional `{:ok, n}` could not be matched honestly by any
+  caller: `{:ok, 0}` satisfies a bare `{:ok, _} =`, so "removed the group" and
+  "removed nothing" reached the receipt as the same value (PDS-D523). The
+  outcome now lives in the tag, so a caller cannot answer success over a count
+  it never read.
   """
-  @spec delete_group(Organization.t(), Group.t()) :: {:ok, non_neg_integer()}
+  @spec delete_group(Organization.t(), Group.t()) :: {:ok, pos_integer()} | {:error, :not_found}
   def delete_group(%Organization{id: oid} = org, %Group{} = group) do
     {n, _} =
       Repo.delete_all(from g in Group, where: g.id == ^group.id and g.organization_id == ^oid)
 
-    # Only audit a delete that actually removed the org's own group (n > 0) — a
-    # cross-org delete attempt matches nothing and is a no-op, not a lifecycle event.
-    if n > 0, do: audit_group_lifecycle(org, group, "scim_group_deleted")
-
-    {:ok, n}
+    if n > 0 do
+      # Only audit a delete that actually removed the org's own group — a
+      # cross-org delete attempt matches nothing and is a no-op, not a
+      # lifecycle event.
+      audit_group_lifecycle(org, group, "scim_group_deleted")
+      {:ok, n}
+    else
+      {:error, :not_found}
+    end
   end
 
   @doc """

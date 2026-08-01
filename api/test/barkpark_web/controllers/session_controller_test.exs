@@ -11,7 +11,10 @@ defmodule BarkparkWeb.SessionControllerTest do
 
   use BarkparkWeb.ConnCase, async: false
 
-  alias Barkpark.Auth
+  import Ecto.Query
+
+  alias Barkpark.{Accounts, Auth, Repo}
+  alias Barkpark.Accounts.UserSession
 
   @valid_token "test-session-valid-token-12345"
   @invalid_token "this-token-does-not-exist"
@@ -116,6 +119,49 @@ defmodule BarkparkWeb.SessionControllerTest do
       # so a fresh request after recycle() should see an empty session.
       next = recycle(logged_out) |> get("/login")
       assert get_session(next, "api_token") == nil
+    end
+
+    # PDS-D523: the sign-out receipt used to say "Signed out." over a revoke
+    # whose count died inside `Accounts.revoke_user_session_token/1`. The flash
+    # is now answered over the rows the revoke actually stamped, and the STORED
+    # UserSession row — read back through Repo, never a second HTTP endpoint —
+    # is what certifies it.
+    test "the sign-out receipt is backed by the revoked row, and a second sign-out still succeeds",
+         %{conn: conn} do
+      {:ok, user} =
+        Accounts.register_user(%{
+          email: "logout-receipt@example.com",
+          password: "correct-horse-battery"
+        })
+
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      first =
+        conn
+        |> init_test_session(%{"user_session" => token})
+        |> post("/logout")
+
+      assert redirected_to(first, 302) == "/studio"
+      assert Phoenix.Flash.get(first.assigns.flash, :info) == "Signed out."
+
+      # The claim, read off the stored row rather than off the response.
+      row = Repo.one(from s in UserSession, where: s.user_id == ^user.id)
+      refute is_nil(row.revoked_at)
+      revoked_at = row.revoked_at
+
+      # A benign double logout: still a success (302 to /studio, cookie dropped),
+      # but the receipt no longer claims a session was killed, and the already
+      # revoked row is untouched.
+      second =
+        build_conn()
+        |> init_test_session(%{"user_session" => token})
+        |> post("/logout")
+
+      assert redirected_to(second, 302) == "/studio"
+      assert Phoenix.Flash.get(second.assigns.flash, :info) == "You were already signed out."
+
+      assert Repo.one(from s in UserSession, where: s.user_id == ^user.id).revoked_at ==
+               revoked_at
     end
   end
 end
