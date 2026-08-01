@@ -158,6 +158,7 @@
 //    node …/breakpoint-sweep.mjs --cssom                # + browser axis parity
 //    node …/breakpoint-sweep.mjs --render               # Leg B (minutes)
 //    node …/breakpoint-sweep.mjs --render --widths 900 --cell fleet     # slice
+//    node …/breakpoint-sweep.mjs --tiers5               # Leg T (5-plan fixture)
 //    BREAKPOINT_SWEEP_ROOT=<dir> …    # measure an exported tree (origin/main)
 //    BREAKPOINT_SWEEP_CSS=<file> …    # parse a DIFFERENT app.css than is served
 //    CHROME=/path/to/chrome …         # browser override
@@ -757,7 +758,22 @@ async function withBrowser(fn) {
     const served = Buffer.from(await (await fetch(`${BASE}${rel}`, { cache: "no-store" })).arrayBuffer());
     const disk = fs.readFileSync(path.join(ROOT, rel.slice(1)));
     if (!served.equals(disk)) {
-      return die(`STALE SERVER on :${PORT} — ${rel} served ${served.length} B, disk holds ${disk.length} B. A server rooted at a DIFFERENT tree is squatting this port; measuring against it would certify the wrong bytes.`);
+      // NAME THE DIFFERENCE, NOT THE SIZES. This compares CONTENT, so a
+      // length-preserving edit — a digit changed in a width, a token renamed to
+      // the same length — used to print "served 233681 B, disk holds 233681 B"
+      // and offer two EQUAL numbers as its evidence of inequality. The first
+      // differing byte offset (with both bytes) says what actually differs; the
+      // lengths follow only when they differ too.
+      let at = 0;
+      const min = Math.min(served.length, disk.length);
+      while (at < min && served[at] === disk[at]) at++;
+      const where = at < min
+        ? `first differs at byte ${at}: served 0x${served[at].toString(16).padStart(2, "0")}, disk 0x${disk[at].toString(16).padStart(2, "0")}`
+        : `identical through ${min} B, then TRUNCATED/EXTENDED`;
+      const sizes = served.length === disk.length
+        ? `both ${served.length} B`
+        : `served ${served.length} B, disk holds ${disk.length} B`;
+      return die(`STALE SERVER on :${PORT} — ${rel} differs from disk (${sizes}; ${where}). A server rooted at a DIFFERENT tree is squatting this port; measuring against it would certify the wrong bytes.`);
     }
   }
   out(`>> serve      :${PORT} — served bytes == disk bytes (${rel(ROOT)})\n`);
@@ -986,11 +1002,184 @@ async function legRender(rep) {
   });
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+//  LEG T — THE FIVE-TIER SEAM (--tiers5)
+// ─────────────────────────────────────────────────────────────────────────────
+//  WHY A FIXTURE AT ALL. The shipped catalog has THREE plans, and at wide
+//  viewports a three-plan corpus is BLIND to the `.tier-grid` track floor:
+//  `auto-fit` collapses the surplus tracks to a literal `0px`, so floors 230
+//  and 180 render byte-identically (three cards at 308.664px at 1700). Driven,
+//  not reasoned: the 230 value is unguarded across roughly 186-230 at 901 and
+//  at EVERY width above it. Adding a fourth plan is a business decision that
+//  would today ship a cut CTA at 1700 with every gate green.
+//
+//  THE GEOMETRY, CORRECTED (D178's arithmetic was off). `.content` caps at
+//  1040px and `#billing-plan-section.set-section` adds 20px of padding each
+//  side, so the grid box measures 950px — not 992 — at every viewport at or
+//  above ~1040. With a 12px gap, n tracks need 242n - 12 px: four 230px tracks
+//  need 956px and are UNREACHABLE at any viewport; three fit at 308.664px and
+//  five cards wrap 3+2. The real five-track threshold is a floor <= 180.4px
+//  (not 188.8): 5 tracks need 5f + 48 <= 950.
+//
+//  ZERO PRODUCTION CHANGE, AND THE LIMIT THAT BUYS. `tierCardHtml` and
+//  `planCatalog` are ALREADY exported on `__bpTestHook`; this leg installs the
+//  hook receiver with `Page.addScriptToEvaluateOnNewDocument` BEFORE app.js
+//  runs, then splices five hook-rendered cards into the REAL `#billing-tiers`
+//  under the REAL app.css. app.js gains no branch on test state (it has zero
+//  today and must keep zero), and there is no `GET` plans route to fixture
+//  through instead.
+//    THE LIMIT, STATED WHERE IT IS INCURRED: splicing bypasses `renderTiers()`,
+//  which is what wires `data-plan` / `data-portal-plan` click handlers. This
+//  leg therefore proves LAYOUT — that five real tier cards fit without cutting
+//  a control — and NEVER behaviour. A five-plan catalog whose cards render but
+//  whose Subscribe buttons do nothing would pass this leg.
+//
+//  WHAT THIS LEG STILL DOES NOT GUARD, DRIVEN: it is a GEOMETRIC guard like
+//  the render leg, so it reds where the geometry actually breaks — a 180px
+//  floor reds twice (`3trk@185px` at 901, `5trk@180.391px` at 1700, both
+//  cutting Free's "Yours when the trial ends") but a 186px floor passes all
+//  five widths. Nothing in a browser refuses 186; only the byte-pin in
+//  __app.test.mjs refuses the 230 VALUE itself. That is the whole reason the
+//  guard ships as a pair plus this seam, and none of the three is redundant.
+//
+//  Widths are absolute, not boundary-walked: this is a question about the grid
+//  box, which only changes at 900 (the two-column @media) and at ~1040 (where
+//  `.content` stops growing). 619 is the narrowest cell the sweep drives.
+const TIERS5_WIDTHS = [619, 901, 1040, 1200, 1700];
+
+// The two plans that do not exist. Shaped exactly like PLAN_CATALOG's entries
+// (`grep -n 'var PLAN_CATALOG' app.js`) so `tierCardHtml` renders them through
+// the real path; the copy
+// is deliberately plausible-length rather than adversarially long — the point
+// is the TRACK WIDTH, not a pathological string.
+const TIERS5_EXTRA = [
+  { plan: "team", name: "Team", price: "$1,499", per: "/mo", note: "Shared ownership and audit trails.", instances: 25 },
+  { plan: "scale", name: "Scale", price: "$3,999", per: "/mo", note: "Dedicated capacity and a support SLA.", instances: 100 },
+];
+
+// Runs at document start, before mock.js and before app.js. See the call site
+// for why this is an accessor rather than an assignment.
+const TIERS5_HOOK_TAP = `(function () {
+  var downstream = null;
+  Object.defineProperty(globalThis, '__bpTestHook', {
+    configurable: true,
+    get: function () {
+      return function (h) {
+        globalThis.__bpHooks = h;
+        if (typeof downstream === 'function') downstream(h);
+      };
+    },
+    set: function (fn) { downstream = fn; },
+  });
+})()`;
+
+function tiers5ProbeJs() {
+  return `(function(){
+  var hooks = globalThis.__bpHooks;
+  if (!hooks || typeof hooks.tierCardHtml !== 'function' || !Array.isArray(hooks.planCatalog))
+    return { refused: '__bpTestHook delivered no tierCardHtml/planCatalog — app.js\\'s export tail changed shape, so this fixture is measuring nothing'
+      + ' (receiver typeof=' + (typeof globalThis.__bpTestHook) + ', hooks typeof=' + (typeof globalThis.__bpHooks)
+      + ', keys=' + (globalThis.__bpHooks ? Object.keys(globalThis.__bpHooks).length : 0) + ')' };
+  var grid = document.querySelector('#billing-tiers');
+  if (!grid || grid.hidden) return { refused: '#billing-tiers is absent or hidden — the billing screen never populated' };
+  var catalog = hooks.planCatalog;
+  if (catalog.length !== 3) return { refused: 'the shipped catalog now has ' + catalog.length + ' plans; this fixture adds 2 to reach FIVE and its arithmetic assumes 3' };
+  var five = catalog.concat(${JSON.stringify(TIERS5_EXTRA)});
+  // 'trial' is the active plan: that is the ONE state in which a person sees
+  // the Free tier's "Yours when the trial ends" — the widest CTA in the deck
+  // and the exact control D178 measured cut.
+  grid.innerHTML = five.map(function (t) { return hooks.tierCardHtml(t, 'trial', false); }).join('');
+  var cards = grid.querySelectorAll('.tier');
+  var btns = grid.querySelectorAll('.tier .btn');
+  if (cards.length !== 5 || btns.length !== 5)
+    return { refused: 'the fixture rendered ' + cards.length + ' cards / ' + btns.length + ' buttons, not 5/5 — a card with no control makes this assertion vacuous' };
+  var cs = getComputedStyle(grid);
+  var tracks = cs.gridTemplateColumns.split(' ').filter(function (s) { return s; });
+  var round = function (n) { return Math.round(n * 1000) / 1000; };
+  var clipped = [];
+  Array.prototype.forEach.call(btns, function (b) {
+    if (b.scrollWidth > b.clientWidth) {
+      var tier = b.closest('.tier');
+      clipped.push({
+        plan: tier ? (tier.querySelector('.tier-name') || {}).textContent : '?',
+        sw: b.scrollWidth, cw: b.clientWidth, text: (b.textContent || '').trim(),
+      });
+    }
+  });
+  return {
+    gridW: round(grid.getBoundingClientRect().width),
+    tracks: tracks,
+    trackW: round(cards[0].getBoundingClientRect().width),
+    rows: new Set(Array.prototype.map.call(cards, function (c) { return Math.round(c.getBoundingClientRect().top); })).size,
+    clipped: clipped,
+  };
+})()`;
+}
+
+async function legTiers5() {
+  return withBrowser(async ({ cdp, evalJs, navSettle, openCell, closeCell, die }) => {
+    const cell = CELLS.filter((c) => c.name === "billing-trial")[0];
+    if (!cell) return die(`the billing-trial cell is gone from CELLS — this leg has nothing to splice into.`);
+    out(`\n>> tiers5     the 3-plan catalog + 2 fixture plans, spliced through __bpTestHook.tierCardHtml\n`);
+    out(`              LAYOUT ONLY — splicing bypasses renderTiers(), so data-plan/data-portal-plan wiring is NOT proven here\n`);
+
+    const bad = [];
+    for (const width of TIERS5_WIDTHS) {
+      const { targetId, sessionId } = await openCell();
+      try {
+        // Install the hook receiver BEFORE app.js parses. app.js calls
+        // globalThis.__bpTestHook(...) at the tail of its IIFE if it is a
+        // function; nothing else about its behaviour changes.
+        //
+        // AN ACCESSOR, NOT AN ASSIGNMENT — measured, not defensive. mock.js
+        // installs its OWN `globalThis.__bpTestHook = …` — re-derive it with
+        // `grep -n '__bpTestHook' __preview__/mock.js` — keeping the hooks in a
+        // module-private `appHooks` to drive the account modal, and it loads
+        // AFTER this document-start script, so a plain assignment here is
+        // silently overwritten: the first attempt reported
+        // `receiver typeof=function, hooks typeof=undefined` — a receiver that
+        // was installed, replaced, and never called. The accessor lets both
+        // observers win: mock.js's function is remembered by the setter and
+        // still invoked, and this leg gets its copy.
+        await cdp.send("Page.addScriptToEvaluateOnNewDocument", { source: TIERS5_HOOK_TAP }, sessionId);
+        await cdp.send("Emulation.setDeviceMetricsOverride",
+          { width, height: HEIGHT, deviceScaleFactor: 1, mobile: false }, sessionId);
+        const url = `${BASE}/?scen=${cell.scen}&theme=light${cell.hash}`;
+        if (!await navSettle(sessionId, url, `document.querySelector(${JSON.stringify(cell.sentinel)})`)) {
+          return die(`billing-trial@${width}: the tier grid never populated — refusing to publish a measurement of an empty screen.`);
+        }
+        const m = await evalJs(sessionId, tiers5ProbeJs());
+        if (m.refused) return die(`billing-trial@${width}: ${m.refused}`);
+        const line = `   ${String(width).padEnd(5)} grid ${String(m.gridW).padEnd(9)} ${m.tracks.length}trk@${m.trackW}px  ${m.rows} row(s)`;
+        if (m.clipped.length) {
+          out(`${line}  ✗ ${m.clipped.length} clipped\n`);
+          for (const c of m.clipped) {
+            out(`         ✗ CLIPPED CTA  ${String(c.plan).trim()} "${c.text}" ${c.sw}>${c.cw}\n`);
+            bad.push({ width, ...c, tracks: m.tracks.length, trackW: m.trackW });
+          }
+        } else {
+          out(`${line}  ✓\n`);
+        }
+      } finally {
+        await closeCell(targetId);
+      }
+    }
+
+    if (bad.length) {
+      out(`\n>> verdict    ${bad.length} clipped control(s) across ${TIERS5_WIDTHS.length} widths — a FIVE-plan catalog would ship a cut CTA today. exit 1\n`);
+      return 1;
+    }
+    out(`\n>> verdict    five tier cards fit at every width in [${TIERS5_WIDTHS.join(",")}] — exit 0\n`);
+    return 0;
+  });
+}
+
 async function main() {
   const rep = legA();
   let code = 0;
   if (has("--cssom")) code = (await legCssom(rep)) || code;
   if (has("--render")) code = (await legRender(rep)) || code;
+  if (has("--tiers5")) code = (await legTiers5()) || code;
   process.exit(code);
 }
 

@@ -1562,6 +1562,47 @@ test("gr-p5-2fa: the width override is :has()-SCOPED — the shared 420px modal 
   assert.ok(html.includes('class="am-modal"'), "the body must carry the :has() hook class");
 });
 
+// ── cch-w16-s1 · the billing tier floor, pinned as a DECLARATION ────────────
+// #8741 repaired the billing-tier grid in ONE line: `repeat(auto-fit,
+// minmax(230px, 1fr))`. `minmax(230` occurs in exactly two places repo-wide —
+// the charter's prose and app.css itself — and lowering it re-admits five
+// tracks at 180.4px inside the 950px grid box, cutting the Free tier's CTA
+// ("Yours when the trial ends", 147px wide in a 136px box). Every command CI
+// invoked before this wave exited 0 on that mutant: the whole person-facing
+// fix shipped with no guard at all.
+//
+// THE LIMIT OF THIS TEST, STATED HERE SO NOBODY OVERREADS ITS GREEN: it pins
+// the DECLARATION, not the LAYOUT. node cannot lay out CSS. It refuses only a
+// textual tidy-down of this one value, and is BLIND to a re-cut originating
+// anywhere else — a `.content` max-width change that shrinks the grid box, a
+// later competing `.tier-grid` rule or `@media` override, a token change that
+// widens the button's text, or a markup change in tierCardHtml. The geometric
+// half of the guard is the render leg
+// (`breakpoint-sweep.mjs --render --widths 901 --cell billing-trial`, wired as
+// its own node-22 job in console-harness.yml); the five-tier seam
+// (`--tiers5`) covers the widths where a three-tier corpus is blind entirely.
+// Neither half subsumes the other: measured, a 200px floor passes the FULL
+// 13-width render leg exit 0, and this test refuses it.
+test("cch-w16-s1: the .tier-grid floor is >= 230px — a tidy-down re-cuts the Free CTA", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  // The FIRST rule whose selector list is exactly `.tier-grid` — the base
+  // declaration, never a `@media` override or a comment that names the token.
+  const rule = css.match(/(^|\})\s*\.tier-grid\s*\{([^}]*)\}/m);
+  assert.ok(rule, "app.css must carry a `.tier-grid` rule");
+  const decls = rule[2].replace(/\/\*[\s\S]*?\*\//g, "");
+  const m = decls.match(/grid-template-columns:\s*repeat\(\s*auto-fit\s*,\s*minmax\(\s*(\d+(?:\.\d+)?)px/);
+  assert.ok(m,
+    "the .tier-grid base must declare `repeat(auto-fit, minmax(<N>px, 1fr))` — " +
+    "a different shape is not necessarily wrong, but it is no longer pinned by " +
+    "this test, so re-derive the floor before changing it: " + decls.trim());
+  const floor = Number(m[1]);
+  assert.ok(floor >= 230,
+    "the .tier-grid track floor measured " + floor + "px, below the 230px minimum #8741 shipped. " +
+    "A minimum at or below ~180px re-admits five auto-fit tracks in the 950px grid box " +
+    "(180.4px each) and cuts the Free tier's CTA label; 230px holds three tracks at 308.7px. " +
+    "Do not tidy it downward.");
+});
+
 // ── GR63 · the modal root must be able to SCROLL ───────────────────────────
 // The blocker this slice exists for: on live barkpark.cloud an account with 19
 // sessions rendered a 1655.5px .modal-card inside a 900px viewport, and NOTHING
