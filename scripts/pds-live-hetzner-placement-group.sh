@@ -7,10 +7,22 @@
 #   token-free and network-free. This one is neither: it spends a real Hetzner
 #   Cloud credential and makes real writes against api.hetzner.cloud.
 #
-#   scripts/pds-live-hetzner-placement-group.sh --plan       print the ladder, no side effects
-#   scripts/pds-live-hetzner-placement-group.sh --preflight  resolve-or-die; name the rung
-#   scripts/pds-live-hetzner-placement-group.sh --selftest   prove the preflight can REFUSE
-#   scripts/pds-live-hetzner-placement-group.sh --run        the live round trip
+#   scripts/pds-live-hetzner-placement-group.sh --plan             print the ladder, no side effects
+#   scripts/pds-live-hetzner-placement-group.sh --preflight        resolve-or-die; name the rung
+#   scripts/pds-live-hetzner-placement-group.sh --selftest         prove the preflight can REFUSE (NEEDS A CREDENTIAL)
+#   scripts/pds-live-hetzner-placement-group.sh --selftest-offline the CREDENTIAL-FREE arm; this is the CI-able gate
+#   scripts/pds-live-hetzner-placement-group.sh --harvest-only     read-only 404 harvest + manifest (NEEDS A CREDENTIAL)
+#   scripts/pds-live-hetzner-placement-group.sh --run              the live round trip
+#
+# THE GATE SPLITS IN TWO — PDS-D439. `--selftest` HARD-REFUSES at exit 3 with no
+# credential, so a slice gated on it has a credential-gated green and an exit 3
+# is visually indistinguishable from a broken apparatus. `--selftest-offline`
+# runs the same MUTATION blocks plus the harvest validators with EVERY
+# HCLOUD_*/HETZNER_* variable stripped from its own environment (it re-execs
+# itself scrubbed and then COUNTS what is left), and must exit 0. `--harvest-only`
+# KEEPS its credential fence on purpose: an unauthenticated GET /v1/servers/…
+# returns a 401 JSON envelope, which is exactly the raw material of the
+# historical mutation this slice exists to make impossible.
 #
 # WHY THIS EXISTS
 # ---------------
@@ -301,13 +313,327 @@ PY
   [ -n "$ORACLE_TOKEN" ]
 }
 
-# oracle GET-PATH OUTFILE -> prints "<http_code> <content_type> <bytes>"
+# oracle GET-PATH OUTFILE -> prints the TAB-delimited machine record
+#   <http_code> TAB <content_type> TAB <size_download>
+#
+# THE SEPARATOR IS A TAB, NOT A SPACE, and that is a bug fix rather than a style
+# choice: `%{content_type}` is a parameterised header value, so on any response
+# carrying `application/json; charset=utf-8` a space-delimited record shifts every
+# field right and `awk '{print $3}'` yields the literal string "charset=utf-8"
+# where a byte count belongs. That is not hypothetical — PDS-D429 measured the
+# wave-30 harvest narration printing "the SERVER 404 (charset=utf-8 bytes)".
+# Content types cannot contain a TAB, so this record is unambiguous, and it is
+# the SAME text that lands verbatim in the manifest's `record` field: the
+# manifest's http_status/content_type/bytes are then DERIVED from a machine
+# record instead of typed by whoever wrote the JSON.
 oracle() {
   local path="$1" body="$2" meta
   meta="$(curl -sS --max-time 60 -o "$body" \
-            -w '%{http_code} %{content_type} %{size_download}' \
+            -w '%{http_code}\t%{content_type}\t%{size_download}' \
             -H "Authorization: Bearer $ORACLE_TOKEN" "$HZ_API$path")"
   printf '%s\n' "$meta"
+}
+
+# hz_field N RECORD — the Nth TAB field of a machine record, cut never awk.
+hz_field() { printf '%s\n' "$2" | cut -f"$1"; }
+
+# ── THE HARVEST — READ-ONLY, and the deposit is the part that can lie ────────
+#
+# `--harvest-only` issues ONE authenticated GET per flat hcloud kind against an
+# id that cannot exist. It creates nothing, deletes nothing, attaches nothing to
+# anything, arms no cleanup trap and needs no reserved-prefix fence: there is no
+# blast radius to fence. It DOES keep the credential fence (PDS-D429/D439) —
+# without one, every GET returns a 401 JSON envelope of exactly the shape a 404
+# fixture has, and the run would commit nine 401 bodies as 404 fixtures.
+#
+# THE KIND -> SEGMENT TABLE IS DERIVED AND PINNED — PDS-D443. The flat shape is
+# NOT `/v1/<kind>/<id>`: four of the nine kinds need hyphen -> underscore. The
+# rule `replace("-","_") + "s"` reproduces all nine of hcloud-go v2.44's opPath
+# segments with no irregulars, so the rule is what the runner USES — and the
+# table below is the PIN, so a future kind where the rule breaks reds loudly
+# instead of harvesting a wrong path and filing it under the right kind name.
+
+HZ_FLAT_KINDS="certificate firewall floating-ip load-balancer network placement-group primary-ip volume zone"
+HZ_FLAT_SEGMENTS="certificates firewalls floating_ips load_balancers networks placement_groups primary_ips volumes zones"
+HZ_MISSING_ID="${PDS_LIVE_MISSING_ID:-999999999}"
+
+# THE ONE REFUSED KIND, REFUSED BY NAME AND ON A STRUCTURAL GROUND — PDS-D443.
+HZ_REFUSED_KIND="record"
+HZ_REFUSED_GROUND="hcloud-go v2.44 has NO /records collection at all; records exist only under /zones/<zone>/rrsets/<name>/<type>. A flat probe would therefore 404 on a MISSING ZONE and be filed under kind=record — a fabricated fixture. A genuine rrset 404 needs a real zone, which routes data and is outside this runner's fence. NOT TO BE CONFLATED: record is still PAYABLE by a post-read (get_rrset_by_name_and_type / get_rrset_by_id both 404-swallow into the gone-read shape); this refusal is about HARVESTING a body, never about paying a receipt."
+
+# hz_segment KIND — the derivation, one place.
+hz_segment() { printf '%s\n' "$(printf '%s' "$1" | tr '-' '_')s"; }
+
+# hz_segment_table_ok — the PIN. Every pinned segment must equal the derivation,
+# and the two lists must be the same length. This is what turns a future
+# irregular kind into a red instead of a silent wrong-path harvest.
+hz_segment_table_ok() {
+  local kinds segs k s derived bad=0 n=0 m=0
+  # shellcheck disable=SC2086
+  set -- $HZ_FLAT_SEGMENTS
+  segs="$*"
+  for k in $HZ_FLAT_KINDS; do n=$((n + 1)); done
+  for s in $segs; do m=$((m + 1)); done
+  if [ "$n" != "$m" ]; then
+    printf '  the pinned kind list (%s) and segment list (%s) are different lengths\n' "$n" "$m" >&2
+    return 1
+  fi
+  local i=0
+  for k in $HZ_FLAT_KINDS; do
+    i=$((i + 1))
+    s="$(printf '%s\n' "$segs" | tr ' ' '\n' | sed -n "${i}p")"
+    derived="$(hz_segment "$k")"
+    if [ "$s" != "$derived" ]; then
+      printf '  %s: pinned segment %s but the rule derives %s\n' "$k" "$s" "$derived" >&2
+      bad=1
+    fi
+  done
+  [ "$bad" = "0" ]
+}
+
+# hz_error_code FILE — the body's top-level error.code, or rc 1 if the body is
+# not JSON or carries none. Used by the deposit guard; never by the harvest,
+# which records what came and lets the test judge.
+hz_error_code() {
+  python3 -c '
+import sys, json
+try:
+    d = json.load(open(sys.argv[1]))
+except Exception:
+    sys.exit(1)
+e = d.get("error") if isinstance(d, dict) else None
+c = e.get("code") if isinstance(e, dict) else None
+if not c:
+    sys.exit(1)
+print(c)
+' "$1"
+}
+
+# deposit_or_refuse LABEL RECORD BODY DEST — THE FIXED DEPOSIT.
+#
+# Until wave 32 the SERVER-404 leg of --run was a bare `cp` with no check at all:
+# driven against a stub answering 200 text/html it deposited an HTML page as
+# pds_live_hetzner_server_404.json AT EXIT 0. That is one of three deposits, not
+# three of three — the placement-group 200 and 404 legs already sit behind real
+# assertions on status, content-type and error.code — but one unguarded deposit
+# is enough to commit whatever arrived. --selftest-offline DEMONSTRATES the
+# fail-open on the old code path FIRST and then drives this function through the
+# same three lies, each of which must refuse with its own sentence and write
+# nothing.
+#
+# This guard belongs to the legs that ASSERT a 404. The --harvest-only mode does
+# NOT use it: there the disposition is data (see harvest_issue).
+deposit_or_refuse() {
+  local label="$1" rec="$2" body="$3" dest="$4" st ct code
+  st="$(hz_field 1 "$rec")"
+  ct="$(hz_field 2 "$rec")"
+  if [ "$st" != "404" ]; then
+    printf '  DEPOSIT REFUSED (%s): the response was HTTP %s, not 404. NOTHING WRITTEN — a body this leg asserts is a 404 may not be banked as one on the strength of having arrived.\n' "$label" "$st" >&2
+    return 1
+  fi
+  case "$ct" in
+    application/json*) : ;;
+    *)
+      printf '  DEPOSIT REFUSED (%s): content-type is "%s", not application/json. NOTHING WRITTEN — PDS-D401 is precisely the claim that the 404 is a JSON body; depositing a text/plain or text/html one would make the fixture assert its own premise away.\n' "$label" "$ct" >&2
+      return 1
+      ;;
+  esac
+  code="$(hz_error_code "$body" 2>/dev/null || true)"
+  if [ -z "$code" ]; then
+    printf '  DEPOSIT REFUSED (%s): the body carries no top-level error.code. NOTHING WRITTEN — error.code is the exact field hcloud-go errorFromBody reads, so a body without one cannot evidence the gone arm.\n' "$label" >&2
+    return 1
+  fi
+  cp "$body" "$dest"
+  printf '  deposited %s (HTTP %s %s, error.code=%s)\n' "$(basename "$dest")" "$st" "$ct" "$code" >&2
+  return 0
+}
+
+# harvest_issue KIND DEST_DIR RECORDS — ISSUE, RECORD WHAT CAME, DEPOSIT
+# UNCONDITIONALLY, JUDGE AFTERWARDS.
+#
+# PDS-D443: `zone` is the one kind whose failure mode is unknowable offline —
+# ZoneClient.GetByID strconv's the int into an id-OR-NAME lookup and 999999999 is
+# not a valid DNS name, and D417 already measured a 114-byte zone 404 whose
+# message is 39 characters where "zone not found" is 14. An assert-404-then-write
+# harvest would either fabricate or lose that. So this function never asserts:
+# it writes the REAL status, content-type and byte count into the machine record
+# and lets the Go arms judge. A non-404 disposition is EVIDENCE, not failure.
+harvest_issue() {
+  local kind="$1" dir="$2" records="$3" seg path body rec st ct by file
+  seg="$(hz_segment "$kind")"
+  path="/$seg/$HZ_MISSING_ID"
+  file="pds_live_hetzner_$(printf '%s' "$kind" | tr '-' '_')_404.json"
+  body="$dir/$file"
+  rec="$(oracle "$path" "$body")"
+  st="$(hz_field 1 "$rec")"
+  ct="$(hz_field 2 "$rec")"
+  by="$(hz_field 3 "$rec")"
+  printf '%s\t%s\tGET /v1%s\t%s\t%s\t%s\t%s\n' "$kind" "$seg" "$path" "$file" "$st" "$ct" "$by" >>"$records"
+  printf '  %-16s %-18s HTTP %-4s %-28s %s bytes\n' "$kind" "$seg" "$st" "$ct" "$by" >&2
+}
+
+# emit_manifest OUT RECORDS FIXTURE_DIR — THE MANIFEST IS SCRIPT-WRITTEN.
+#
+# Every number in it is DERIVED: http_status, content_type and bytes come from
+# the verbatim TAB-delimited `curl -w` record this run captured, and each body's
+# sha256 is computed from the bytes on disk. That is NON-ACCIDENTABILITY, NOT
+# UNFORGEABILITY — PDS-D440 measured a real 401 body committed as
+# http_status:200 with a fully-verifying marker passing every digest arm, because
+# status and content-type are TRANSPORT facts absent from the committed bytes.
+# What catches that is the COHERENCE arm in the Go test, not this marker. The
+# marker's job is that nobody TYPES a number into the manifest.
+#
+# DIGESTS ARE HYPHEN-CHUNKED IN 8-CHARACTER GROUPS — PDS-D441. The credential
+# scanner globs the manifest itself and reds any 32+ character unbroken
+# alphanumeric run, so a bare sha256 REDS an honest manifest. The regex is NOT
+# widened and NO field whitelist is added: a fake 64-character token parked in a
+# whitelisted sha256 slot would pass a whitelist while the unchanged byte scanner
+# reds it.
+#
+# It is DETERMINISTIC: run it twice over the same fixtures and records and the
+# bytes are identical. --selftest-offline relies on that to prove the COMMITTED
+# manifest is what this emitter produces, rather than something hand-typed.
+emit_manifest() {
+  HZ_FLAT_KINDS="$HZ_FLAT_KINDS" HZ_REFUSED_KIND="$HZ_REFUSED_KIND" \
+  HZ_REFUSED_GROUND="$HZ_REFUSED_GROUND" HZ_API_URL="$HZ_API" HZ_SELF="$SELF" \
+  python3 - "$1" "$2" "$3" <<'PY'
+import hashlib, json, os, re, sys
+
+out_path, records_path, fixture_dir = sys.argv[1], sys.argv[2], sys.argv[3]
+
+def chunk(h):
+    # 8-character groups, hyphen-separated: never a 32+ unbroken run.
+    return "-".join(h[i:i + 8] for i in range(0, len(h), 8))
+
+prev = {}
+prev_top = {}
+if os.path.exists(out_path):
+    try:
+        prev_top = json.load(open(out_path))
+        prev = {f["file"]: f for f in prev_top.get("fixtures", [])}
+    except Exception:
+        prev, prev_top = {}, {}
+
+harvested = {}
+if os.path.exists(records_path):
+    for line in open(records_path):
+        line = line.rstrip("\n")
+        if not line:
+            continue
+        kind, seg, request, fname, status, ctype, nbytes = line.split("\t")
+        harvested[fname] = {
+            "kind": kind, "segment": seg, "request": request, "file": fname,
+            "status": status, "ctype": ctype, "bytes": nbytes,
+        }
+
+rows = []
+for fname in sorted(os.listdir(fixture_dir)):
+    if not (fname.startswith("pds_live_hetzner_") and fname.endswith(".json")):
+        continue
+    # The manifest is not one of its own fixtures. Without this the emitter is
+    # not even deterministic — the row would digest the file being written.
+    if fname == os.path.basename(out_path):
+        continue
+    raw = open(os.path.join(fixture_dir, fname), "rb").read()
+    sha = chunk(hashlib.sha256(raw).hexdigest())
+    h = harvested.get(fname)
+    old = prev.get(fname, {})
+    if h:
+        row = {
+            "file": fname,
+            "kind": h["kind"],
+            "segment": h["segment"],
+            "request": h["request"],
+            "http_status": int(h["status"]),
+            "content_type": h["ctype"],
+            "bytes": int(h["bytes"]),
+            "record": "\t".join([h["status"], h["ctype"], h["bytes"]]),
+            "provenance": "harvest-only",
+            "sha256_chunked": sha,
+        }
+    else:
+        # A pre-machine-record row. Its bytes and sha256 are still DERIVED (from
+        # disk); its status and content-type are the wave-30 run's transcription,
+        # and `provenance` says so rather than letting them pass as machine facts.
+        seg = old.get("segment", "")
+        if not seg:
+            m2 = re.search(r"/v1/([a-z_]+)/", old.get("request", ""))
+            seg = m2.group(1) if m2 else ""
+        row = {
+            "file": fname,
+            "kind": old.get("kind", ""),
+            "segment": seg,
+            "request": old.get("request", ""),
+            "http_status": old.get("http_status", 0),
+            "content_type": old.get("content_type", ""),
+            "bytes": len(raw),
+            "record": old.get("record", ""),
+            "provenance": old.get("provenance", "wave-30-run"),
+            "sha256_chunked": sha,
+        }
+    try:
+        body = json.loads(raw)
+        code = ((body.get("error") or {}).get("code") or "") if isinstance(body, dict) else ""
+    except Exception:
+        code = ""
+    if code:
+        row["error_code"] = code
+    note = old.get("note", "")
+    if note:
+        row["note"] = note
+    if old.get("message_token_override"):
+        row["message_token_override"] = old["message_token_override"]
+        row["message_token_reason"] = old.get("message_token_reason", "")
+    rows.append(row)
+
+chain_src = "\n".join(
+    "|".join([r["file"], str(r["http_status"]), r["content_type"], str(r["bytes"]), r["sha256_chunked"]])
+    for r in rows
+)
+chain = chunk(hashlib.sha256(chain_src.encode()).hexdigest())
+
+flat = os.environ["HZ_FLAT_KINDS"].split()
+covered = sorted({r["kind"] for r in rows if r["kind"] in flat})
+pending = sorted(k for k in flat if k not in covered)
+
+doc = {
+    "_readme": [
+        "SCRIPT-EMITTED. Do not hand-edit: regenerate with %s --manifest-emit." % os.environ["HZ_SELF"],
+        "Every http_status/content_type/bytes below is DERIVED from the verbatim TAB-delimited curl -w",
+        "record captured when the body was fetched; every sha256 is computed from the bytes on disk and",
+        "is hyphen-chunked in 8-character groups so the committed-credential scanner (which reds any 32+",
+        "character unbroken alphanumeric run, this manifest included) stays UNWIDENED.",
+        "THE MARKER IS NON-ACCIDENTABILITY, NOT UNFORGEABILITY: status and content-type are TRANSPORT",
+        "facts absent from the committed bytes, so an honestly-computed digest over a MISLABELLED row",
+        "still verifies. What catches a mislabelled row is the coherence arm in",
+        "internal/cli/hetzner_live_fixtures_test.go, not anything in this file.",
+        "Rows with provenance wave-30-run predate the machine record: their bytes and sha256 are derived",
+        "from disk, their status and content-type are the wave-30 run's human transcription.",
+    ],
+    "emitted_by": "scripts/%s --manifest-emit" % os.environ["HZ_SELF"],
+    "harvested_at": prev_top.get("harvested_at", ""),
+    "harvested_by": prev_top.get("harvested_by", ""),
+    "api": prev_top.get("api", os.environ["HZ_API_URL"]),
+    "kind_coverage": {
+        "flat_kinds": flat,
+        "harvested": covered,
+        "pending": pending,
+        "note": "flat_kinds is the hcloud subset of the receipt ledger whose 404 lives at a flat collection path. The segment is derived as replace(kind,'-','_')+'s' and pinned in the runner.",
+    },
+    "refusals": [
+        {
+            "kind": os.environ["HZ_REFUSED_KIND"],
+            "refused_by": "scripts/%s --harvest-only" % os.environ["HZ_SELF"],
+            "ground": os.environ["HZ_REFUSED_GROUND"],
+        }
+    ],
+    "chain": chain,
+    "fixtures": rows,
+}
+with open(out_path, "w") as fh:
+    json.dump(doc, fh, indent=2, ensure_ascii=False)
+    fh.write("\n")
+PY
 }
 
 # ── the two project reads: SHAPE-CHECKED, and a failed read is not an answer ──
@@ -467,6 +793,137 @@ cleanup() {
   exit $rc
 }
 
+# ── the census: THE TARGET COUNT IS DERIVED, NEVER QUOTED ────────────────────
+#
+# Two different "nines" are in circulation and a builder who quotes either files
+# a wrong count. PDS-D429's nine is the UNHARVESTED set — it INCLUDES `record`
+# and EXCLUDES placement-group. The flat-shape nine EXCLUDES `record` and
+# INCLUDES placement-group. They overlap in eight kinds, and eight is the target.
+# So this function derives every step from the tree instead of restating it:
+# the ledger's kinds from the census test's own pinned list, the S3 kinds from
+# which files carry their receipts, and the harvested set from the manifest.
+harvest_census() {
+  MANIFEST="${1:-$REPO_ROOT/internal/cli/testdata/pds_live_hetzner_fixtures.json}" \
+  FLAT="$HZ_FLAT_KINDS" REFUSED="$HZ_REFUSED_KIND" ROOT="$REPO_ROOT" \
+  python3 -c '
+import json, os, re, glob
+
+root = os.environ["ROOT"]
+flat = os.environ["FLAT"].split()
+refused = os.environ["REFUSED"]
+
+# 1. THE LEDGER KINDS — parsed from the census test s own pinned list, so this
+#    number moves when the ledger does.
+src = open(os.path.join(root, "internal/cli/hetzner_res_census_test.go")).read()
+m = re.search(r"var hzResLedgerKinds = \[\]string\{(.*?)\}", src, re.S)
+ledger = sorted(set(re.findall(r"\"([a-z0-9-]+)\"", m.group(1))))
+
+# 2. THE S3 KINDS — derived from co-location, not from a memorised list: a kind
+#    is S3 when every file emitting a receipt for it is a file that talks to the
+#    S3 client. backup is S3 (its receipt id is an object key), not an hcloud
+#    snapshot, and that is the trap this derivation exists to avoid.
+s3_files, kind_files = set(), {}
+for path in glob.glob(os.path.join(root, "internal/cli/hetzner_*.go")):
+    if path.endswith("_test.go"):
+        continue
+    text = open(path).read()
+    if "hzS3Client" in text:
+        s3_files.add(path)
+    for line in text.splitlines():
+        if not re.search(r"hz(ResDone|ResObserved|ClassCreate)\(", line):
+            continue
+        for k in ledger:
+            if "\"%s\"" % k in line:
+                kind_files.setdefault(k, set()).add(path)
+s3 = sorted(k for k in ledger if kind_files.get(k) and kind_files[k] <= s3_files)
+hcloud = [k for k in ledger if k not in s3]
+
+# 3. THE HARVESTED SET — read from the manifest, not asserted.
+covered = []
+try:
+    doc = json.load(open(os.environ["MANIFEST"]))
+    covered = sorted({f.get("kind") for f in doc.get("fixtures", []) if f.get("kind") in flat})
+except Exception:
+    covered = []
+target = [k for k in flat if k not in covered]
+
+print("  ledger kinds (parsed from the census pin) : %d  %s" % (len(ledger), " ".join(ledger)))
+print("  minus S3 kinds (derived by co-location)   : %d  %s" % (len(s3), " ".join(s3)))
+print("  = hcloud kinds                            : %d  %s" % (len(hcloud), " ".join(hcloud)))
+print("  minus %-36s: %d  %s" % ("the refused kind (%s)" % refused, len([k for k in hcloud if k != refused]), " ".join(k for k in hcloud if k != refused)))
+print("  = FLAT-SHAPE kinds (pinned in the runner) : %d  %s" % (len(flat), " ".join(flat)))
+print("  already committed as a fixture            : %d  %s" % (len(covered), " ".join(covered) or "-"))
+print("  => HARVEST TARGET                         : %d  %s" % (len(target), " ".join(target)))
+print("")
+print("  THE TWO NINES, RECONCILED: PDS-D429 s nine is the UNHARVESTED set (it includes %s and excludes" % refused)
+print("  %s); the flat-shape nine excludes %s and includes %s. They overlap in %d kinds, and %d is the target." % (
+    " ".join(covered) or "the harvested kinds", refused, " ".join(covered) or "the harvested kinds", len(target), len(target)))
+if len(hcloud) != len(flat) + 1:
+    raise SystemExit("DERIVATION BROKE: %d hcloud kinds but %d pinned flat kinds + 1 refused" % (len(hcloud), len(flat)))
+'
+}
+
+# ── --harvest-only: the cheapest L1 this epic will ever buy ──────────────────
+#
+# READ-ONLY. One GET per flat kind at an id that cannot exist. No create, no
+# delete, nothing attached to anything — so no reserved-prefix fence and no
+# cleanup trap, because there is no blast radius to fence. The CREDENTIAL fence
+# stays (PDS-D429/D439): an unauthenticated GET returns a 401 JSON envelope, and
+# banking eight of those as 404 fixtures is exactly the historical mutation.
+harvest_only() {
+  step "HARVEST-ONLY — read-only: GET /v1/<segment>/$HZ_MISSING_ID per flat hcloud kind"
+  hz_segment_table_ok || failed "the pinned kind->segment table disagrees with the derivation replace(kind,'-','_')+'s'. A wrong path 404s exactly like a right one, so the harvest stops rather than file a body under a kind it did not come from."
+  ok "kind->segment: the derivation replace(kind,'-','_')+'s' reproduces every pinned segment"
+
+  step "THE TARGET COUNT, DERIVED FROM THE TREE"
+  harvest_census
+
+  step "RECORDED REFUSAL"
+  say "  REFUSED BY NAME: $HZ_REFUSED_KIND"
+  say "  GROUND: $HZ_REFUSED_GROUND"
+  say "  This refusal is written into the manifest's refusals[] — a skipped kind that"
+  say "  leaves no trace is indistinguishable from a kind nobody thought of."
+
+  step "CREDENTIAL FENCE"
+  resolve_oracle_token || refuse "--harvest-only needs the raw token. This mode makes NO WRITES, so the fence is not about blast radius: an UNAUTHENTICATED GET /v1/servers/$HZ_MISSING_ID answers 401 with a JSON envelope carrying error.code — the same shape a 404 fixture has — and a harvest without a credential would commit eight 401 bodies as 404 evidence. Set HCLOUD_TOKEN or HCLOUD_CONFIG."
+  local pbody="$ART/harvest-probe.json" prec pst
+  prec="$(oracle "/$(hz_segment placement-group)?per_page=1" "$pbody")"
+  pst="$(hz_field 1 "$prec")"
+  [ "$pst" = "200" ] || refuse "the credential resolved but does not AUTHENTICATE: a collection read answered HTTP $pst, not 200. A token that is merely PRESENT would make every kind below answer 401, and every one of those bodies would look like a 404 fixture. Refusing before the first deposit."
+  ok "the token authenticates: a collection read answered HTTP 200 (the token itself is never printed)"
+
+  local dir="${PDS_LIVE_HARVEST:-$REPO_ROOT/internal/cli/testdata}"
+  local records="$ART/harvest-records.tsv"
+  : >"$records"
+  mkdir -p "$dir"
+
+  step "ISSUE, RECORD WHAT CAME, DEPOSIT UNCONDITIONALLY — the judging happens in the Go arms"
+  say "  Nothing below asserts a 404 before writing. A non-404 disposition is RECORDED,"
+  say "  which is evidence; \`zone\` in particular is an id-OR-NAME lookup and its answer"
+  say "  to a numeric miss is not knowable offline."
+  local kind skipped=""
+  for kind in $HZ_FLAT_KINDS; do
+    local existing="$dir/pds_live_hetzner_$(printf '%s' "$kind" | tr '-' '_')_404.json"
+    if [ -e "$existing" ] && [ -z "${PDS_LIVE_REHARVEST:-}" ]; then
+      skipped="$skipped $kind"
+      continue
+    fi
+    harvest_issue "$kind" "$dir" "$records"
+  done
+  [ -z "$skipped" ] || say "  NOT RE-ISSUED (a fixture is already committed):$skipped — the committed placement-group 404 came from a resource this apparatus itself created and deleted, which is a STRONGER provenance than a never-existed id. Set PDS_LIVE_REHARVEST=1 to overwrite."
+
+  step "MANIFEST"
+  emit_manifest "$dir/pds_live_hetzner_fixtures.json" "$records" "$dir"
+  ok "manifest emitted by this script from the machine records: $dir/pds_live_hetzner_fixtures.json"
+  say "  Every http_status/content_type/bytes in it is DERIVED from a verbatim curl -w"
+  say "  record. That is non-accidentability, NOT unforgeability — the coherence arm in"
+  say "  internal/cli/hetzner_live_fixtures_test.go is what catches a mislabelled row."
+  say ""
+  say "  WHAT THIS MODE DID NOT DO: it created nothing and deleted nothing, so it says"
+  say "  nothing about any verb's receipt. It harvests the BYTES the gone-predicate"
+  say "  reasons about, for kinds nobody had measured."
+}
+
 # ── --plan ───────────────────────────────────────────────────────────────────
 
 plan() {
@@ -499,7 +956,23 @@ $SELF — MANUAL-RUN-ONLY live proof. No side effects in --plan.
   the last of which drives the fence and the cleanup through a stub bp in ten
   states (three degraded read shapes x two paths, two refusing deletes, and two
   HEALTHY positive controls — one on the verified re-read, one on the delete
-  receipt). It makes no writes and needs no network.
+  receipt). IT MAKES NO WRITES, BUT IT DOES NEED A CREDENTIAL: two of its four
+  credential states are PROCEED states and would pass vacuously with none, so it
+  refuses at exit 3 without one. An earlier version of this paragraph claimed it
+  "needs no network"; that was measured false and PDS-D439 retired the claim.
+
+  --selftest-offline is the CREDENTIAL-FREE arm and the CI-able gate. It scrubs
+  every HCLOUD_*/HETZNER_* variable out of its own environment, re-execs, COUNTS
+  what survived (must be zero), and then runs the four mutation blocks plus the
+  harvest validators: the deposit fail-open reproduced on the OLD code path
+  first, the fixed deposit refusing three separate lies, the kind->segment
+  derivation against its pin, and a proof that the committed manifest is
+  byte-identical to what this script's emitter produces.
+
+  --harvest-only is READ-ONLY: one GET per flat hcloud kind at an id that cannot
+  exist. It creates nothing, arms no cleanup trap, needs no reserved-prefix
+  fence — and KEEPS the credential fence, because an unauthenticated GET answers
+  401 with a JSON envelope shaped exactly like a 404 fixture.
 PLAN
 }
 
@@ -593,34 +1066,13 @@ st_case() { # label expect-rc env… -- (runs $0 --preflight)
   return 0
 }
 
-selftest() {
-  build_bp
-  local empty="$ART/empty-home"
-  mkdir -p "$empty"
-
-  # A correct token for states 2 and 3, taken from whichever rung this host has.
-  # Never printed, never written to an artifact.
-  resolve_oracle_token || refuse "--selftest needs one WORKING credential to prove the PROCEED states (2 states of 4 are refusals and would pass with none, which is exactly the vacuous green this epic exists to kill). Set HCLOUD_TOKEN or HCLOUD_CONFIG."
-
-  step "FOUR CREDENTIAL STATES — exit codes taken without a pipe (3 = REFUSE, 0 = proceed)"
-  st_case "1. no HCLOUD_TOKEN, no HETZNER_API_TOKEN, empty HOME" 3 \
-    -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART"
-  st_case "2. HETZNER_API_TOKEN set to a CORRECT token (bp never reads it)" 3 \
-    -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HETZNER_API_TOKEN=$ORACLE_TOKEN"
-  st_case "3. HCLOUD_TOKEN correct" 0 \
-    -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HCLOUD_TOKEN=$ORACLE_TOKEN"
-  local cfg="${HCLOUD_CONFIG:-}"
-  [ -n "$cfg" ] || cfg="$(default_hcloud_config)"
-  if [ -r "$cfg" ]; then
-    st_case "4. HCLOUD_CONFIG -> real cli.toml, no env token" 0 \
-      -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HCLOUD_CONFIG=$cfg"
-    grep -q 'hcloud-cli-context' "$ST_LAST_OUT" \
-      || { printf '  FAIL   state 4 proceeded but did not NAME the cli-context rung\n'; ST_FAIL=1; }
-  else
-    printf '  FAIL   state 4 needs an hcloud cli.toml at %s (this host has none, so the third rung is UNPROVEN here — that is a gap, not a pass)\n' "$cfg"
-    ST_FAIL=1
-  fi
-
+# the four mutation blocks - SHARED by --selftest and --selftest-offline.
+#
+# They need no credential and no network, which is exactly why PDS-D439 could
+# split the gate: --selftest-offline runs THESE, not a restatement of them, so
+# the credential-free arm can never drift away from the credentialed one.
+mutation_blocks() {
+  local empty="$1"
   step "MUTATION 1 — a stub bp that exits 0 printing {\"ok\":true} must be REFUSED"
   local stub="$ART/stub-bp"
   printf '#!/bin/sh\necho %s\nexit 0\n' "'{\"ok\":true}'" >"$stub"
@@ -722,6 +1174,38 @@ selftest() {
   dr_case "10. healthy: the delete receipt CONFIRMED the group was gone" cleanup 0 "receipt: confirmed_gone=true" \
     "STUB_MODE=clean"   "STUB_HONEST_READS=1" "STUB_DELETE=confirm"
 
+}
+
+selftest() {
+  build_bp
+  local empty="$ART/empty-home"
+  mkdir -p "$empty"
+
+  # A correct token for states 2 and 3, taken from whichever rung this host has.
+  # Never printed, never written to an artifact.
+  resolve_oracle_token || refuse "--selftest needs one WORKING credential to prove the PROCEED states (2 states of 4 are refusals and would pass with none, which is exactly the vacuous green this epic exists to kill). Set HCLOUD_TOKEN or HCLOUD_CONFIG."
+
+  step "FOUR CREDENTIAL STATES — exit codes taken without a pipe (3 = REFUSE, 0 = proceed)"
+  st_case "1. no HCLOUD_TOKEN, no HETZNER_API_TOKEN, empty HOME" 3 \
+    -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART"
+  st_case "2. HETZNER_API_TOKEN set to a CORRECT token (bp never reads it)" 3 \
+    -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HETZNER_API_TOKEN=$ORACLE_TOKEN"
+  st_case "3. HCLOUD_TOKEN correct" 0 \
+    -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HCLOUD_TOKEN=$ORACLE_TOKEN"
+  local cfg="${HCLOUD_CONFIG:-}"
+  [ -n "$cfg" ] || cfg="$(default_hcloud_config)"
+  if [ -r "$cfg" ]; then
+    st_case "4. HCLOUD_CONFIG -> real cli.toml, no env token" 0 \
+      -i "PATH=$PATH" "HOME=$empty" "PDS_LIVE_BP=$BP" "PDS_LIVE_ART=$ART" "HCLOUD_CONFIG=$cfg"
+    grep -q 'hcloud-cli-context' "$ST_LAST_OUT" \
+      || { printf '  FAIL   state 4 proceeded but did not NAME the cli-context rung\n'; ST_FAIL=1; }
+  else
+    printf '  FAIL   state 4 needs an hcloud cli.toml at %s (this host has none, so the third rung is UNPROVEN here — that is a gap, not a pass)\n' "$cfg"
+    ST_FAIL=1
+  fi
+
+  mutation_blocks "$empty"
+
   step "SELFTEST VERDICT"
   if [ "$ST_FAIL" = "0" ]; then
     ok "the preflight refuses when it should and proceeds when it should, and names the rung that paid"
@@ -731,6 +1215,287 @@ selftest() {
     return 0
   fi
   failed "one or more preflight self-tests did not hold — do not run --run against a live project with a preflight that cannot refuse"
+}
+
+# ── --selftest-offline: THE CREDENTIAL-FREE GATE ─────────────────────────────
+#
+# PDS-D439. --selftest hard-refuses at exit 3 with no credential, so a slice
+# gated on it has a credential-gated green — and exit 3 looks exactly like a
+# broken apparatus. This arm is the CI-able one: it scrubs every
+# HCLOUD_*/HETZNER_* variable out of its own environment, re-execs itself, and
+# COUNTS what survived. A run with a token in the ambient environment therefore
+# proves the same thing as a run without one, which is the only way the claim
+# "this work is credential-free" can be checked rather than asserted.
+
+OFF_FAIL=0
+off_ok()   { printf '  PASS    %s\n' "$*"; }
+off_fail() { printf '  FAIL    %s\n' "$*"; OFF_FAIL=1; }
+
+# STUB_PORT / STUB_SPEC — a localhost HTTP server the deposit paths are driven
+# against. No credential, no network beyond 127.0.0.1.
+STUB_PORT=""
+STUB_SPEC=""
+STUB_PID=""
+
+start_stub_server() {
+  local py="$ART/stub-server.py" portfile="$ART/stub-port"
+  STUB_SPEC="$ART/stub-spec"
+  cat >"$py" <<'PY'
+import http.server, sys
+spec, portfile = sys.argv[1], sys.argv[2]
+
+class H(http.server.BaseHTTPRequestHandler):
+    def do_GET(self):
+        status, ctype, bodyfile = open(spec).read().split("\n")[:3]
+        body = open(bodyfile, "rb").read()
+        self.send_response(int(status))
+        self.send_header("Content-Type", ctype)
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
+    def log_message(self, *a):
+        pass
+
+srv = http.server.HTTPServer(("127.0.0.1", 0), H)
+with open(portfile, "w") as fh:
+    fh.write(str(srv.server_address[1]))
+srv.serve_forever()
+PY
+  printf '404\napplication/json\n/dev/null\n' >"$STUB_SPEC"
+  rm -f "$portfile"
+  python3 "$py" "$STUB_SPEC" "$portfile" &
+  STUB_PID=$!
+  local i=0
+  while [ ! -s "$portfile" ] && [ "$i" -lt 100 ]; do i=$((i + 1)); sleep 0.05; done
+  STUB_PORT="$(cat "$portfile" 2>/dev/null || true)"
+  [ -n "$STUB_PORT" ] || failed "the localhost stub server did not come up"
+  trap 'kill "$STUB_PID" 2>/dev/null || true' EXIT
+}
+
+# stub_says STATUS CONTENT-TYPE BODY-TEXT — what the next request gets back.
+stub_says() {
+  local bodyfile="$ART/stub-body"
+  printf '%s' "$3" >"$bodyfile"
+  printf '%s\n%s\n%s\n' "$1" "$2" "$bodyfile" >"$STUB_SPEC"
+}
+
+selftest_offline() {
+  # ── the scrub, and then the COUNT ──────────────────────────────────────────
+  if [ -z "${PDS_LIVE_OFFLINE_SCRUBBED:-}" ]; then
+    # grep + cut, NOT `sed -n 's/\(A\|B\)/…/p'`: BSD sed (macOS, which is where
+    # this runner lives) has no BRE alternation, so that spelling silently
+    # matched nothing for HETZNER_API_TOKEN and the count arm below caught it.
+    local v unsets=""
+    for v in $(env | grep -E '^(HCLOUD|HETZNER)[A-Z0-9_]*=' | cut -d= -f1); do
+      unsets="$unsets -u $v"
+    done
+    # shellcheck disable=SC2086
+    exec env $unsets PDS_LIVE_OFFLINE_SCRUBBED=1 "$0" --selftest-offline
+  fi
+
+  step "CREDENTIAL-FREE BY CONSTRUCTION, AND THEN COUNTED"
+  local leaked
+  leaked="$(env | grep -cE '^(HCLOUD|HETZNER)[A-Z0-9_]*=' || true)"
+  say "  hetzner/hcloud variables in this process environment: $leaked"
+  if [ "$leaked" = "0" ]; then
+    off_ok "every HCLOUD_*/HETZNER_* variable was stripped before this arm ran — the green below cannot be a credentialed green"
+  else
+    off_fail "$leaked hetzner/hcloud variable(s) survived the scrub"
+  fi
+  say "  (this arm re-execs itself scrubbed, so it proves the same thing whether or"
+  say "   not the invoking shell holds a token. \`env -u HCLOUD_TOKEN -u HCLOUD_CONFIG"
+  say "   -u HCLOUD_CONTEXT -u HETZNER_API_TOKEN $SELF --selftest-offline\` is the"
+  say "   same run with the scrub done twice.)"
+
+  local empty="$ART/empty-home"
+  mkdir -p "$empty"
+  mutation_blocks "$empty"
+  [ "$ST_FAIL" = "0" ] || off_fail "one or more of the four mutation blocks did not hold"
+
+  # ── the deposit ────────────────────────────────────────────────────────────
+  start_stub_server
+  HZ_API="http://127.0.0.1:$STUB_PORT/v1"
+  # A placeholder that never leaves 127.0.0.1. It is not a credential and this
+  # arm would fail if it were: the scrub above counted zero.
+  ORACLE_TOKEN="offline-stub-not-a-credential"
+  local dep="$ART/deposit"
+  mkdir -p "$dep"
+
+  step "DEPOSIT, STATE 0 — THE FAIL-OPEN AS IT SHIPPED, REPRODUCED BEFORE ANYTHING RELIES ON THE FIX"
+  say "  The wave-30 server-404 leg was exactly two lines:"
+  say "      smeta=\"\$(oracle \"/servers/999999999\" \"\$sbody\")\""
+  say "      cp \"\$sbody\" \"\$PDS_LIVE_HARVEST/pds_live_hetzner_server_404.json\""
+  say "  — no status check, no content-type check, no error.code check. Below is that"
+  say "  path verbatim, against a stub answering 200 text/html."
+  say "  SCOPE, STATED HONESTLY: this is ONE of the three deposits in --run, not three"
+  say "  of three. The placement-group 200 and 404 legs already sit behind real"
+  say "  assertions on status, content-type and error.code. One unguarded deposit is"
+  say "  enough to bank whatever arrived, which is why it is worth a demonstration."
+  stub_says 200 "text/html; charset=utf-8" '<html><body>504 Gateway Time-out</body></html>'
+  local sbody="$ART/stub-fetch.body" old_dest="$dep/pds_live_hetzner_server_404.json" oldrec
+  rm -f "$old_dest"
+  oldrec="$(oracle "/servers/$HZ_MISSING_ID" "$sbody")"
+  cp "$sbody" "$old_dest"
+  local orc=$?
+  if [ "$orc" = "0" ] && [ -s "$old_dest" ] && grep -q '<html' "$old_dest"; then
+    off_ok "REPRODUCED: HTTP $(hz_field 1 "$oldrec") $(hz_field 2 "$oldrec") — an HTML page is now sitting at $(basename "$old_dest") at exit 0. That is the hole, measured, not argued."
+  else
+    off_fail "the fail-open did not reproduce (rc=$orc) — if the old path no longer deposits, this demonstration is stale and the fix's premise is unproven"
+  fi
+
+  step "DEPOSIT, FIXED — THREE LIES, THREE DISTINCT REFUSALS, NOTHING WRITTEN"
+  local dest="$dep/fixed_404.json" rec rc
+  dep_case() { # LABEL STATUS CTYPE BODY NEEDLE
+    local label="$1" st="$2" ct="$3" body="$4" needle="$5"
+    rm -f "$dest"
+    stub_says "$st" "$ct" "$body"
+    rec="$(oracle "/servers/$HZ_MISSING_ID" "$sbody")"
+    set +e
+    deposit_or_refuse "$label" "$rec" "$sbody" "$dest" 2>"$ART/dep.$label.err"
+    rc=$?
+    set -e
+    if [ "$rc" = "0" ]; then
+      off_fail "$label: the deposit ACCEPTED a $st $ct body"
+      return 0
+    fi
+    if [ -e "$dest" ]; then
+      off_fail "$label: the deposit refused but a file was written anyway"
+      return 0
+    fi
+    if ! grep -q "$needle" "$ART/dep.$label.err"; then
+      off_fail "$label: refused, but not for the stated reason (wanted a message naming: $needle)"
+      return 0
+    fi
+    off_ok "$label: REFUSED, nothing written — $(sed 's/^ *//' "$ART/dep.$label.err" | head -1 | cut -c1-120)"
+  }
+  dep_case "not-404"        200 "text/html; charset=utf-8" '<html>hi</html>'                 "not 404"
+  dep_case "not-json"       404 "text/plain; charset=utf-8" 'server not found'               "not application/json"
+  dep_case "no-error-code"  404 "application/json"          '{"ok":true,"message":"gone"}'   "no top-level error.code"
+
+  say "  and the positive control — WITHOUT IT the three rows above would pass on a"
+  say "  deposit that simply refused everything, which is the same vacuity inverted:"
+  rm -f "$dest"
+  stub_says 404 "application/json" '{"error":{"code":"not_found","message":"volume not found","details":{}}}'
+  rec="$(oracle "/volumes/$HZ_MISSING_ID" "$sbody")"
+  set +e
+  deposit_or_refuse "healthy" "$rec" "$sbody" "$dest" 2>"$ART/dep.healthy.err"
+  rc=$?
+  set -e
+  if [ "$rc" = "0" ] && [ -s "$dest" ]; then
+    off_ok "healthy: a real-shaped 404 IS deposited (the guard refuses lies, not everything)"
+  else
+    off_fail "healthy: an honest 404 was refused (rc=$rc) — the guard is too tight to harvest with"
+  fi
+
+  # ── the kind -> segment table ──────────────────────────────────────────────
+  step "THE KIND->SEGMENT TABLE — DERIVED, AND THE PIN CAN RED"
+  if hz_segment_table_ok; then
+    off_ok "replace(kind,'-','_')+'s' reproduces every pinned segment: $HZ_FLAT_SEGMENTS"
+  else
+    off_fail "the pinned segments disagree with the derivation"
+  fi
+  set +e
+  ( HZ_FLAT_SEGMENTS="certificates firewalls floating-ips load_balancers networks placement_groups primary_ips volumes zones" hz_segment_table_ok ) 2>/dev/null
+  rc=$?
+  set -e
+  if [ "$rc" != "0" ]; then
+    off_ok "MUTATION: a pin of floating-ips (the pre-underscore spelling, which is what a hand-written table gets wrong) REDS"
+  else
+    off_fail "MUTATION: a wrong pinned segment did NOT red — the pin is decorative"
+  fi
+
+  # ── the census ─────────────────────────────────────────────────────────────
+  step "THE HARVEST TARGET — DERIVED FROM THE TREE, NOT QUOTED"
+  local census="$ART/census.out"
+  set +e
+  harvest_census >"$census" 2>&1
+  rc=$?
+  set -e
+  cat "$census"
+  if [ "$rc" = "0" ] && grep -q 'HARVEST TARGET' "$census"; then
+    off_ok "the count is derived (ledger kinds parsed from the census pin, S3 kinds derived by co-location, harvested set read from the manifest)"
+  else
+    off_fail "the census derivation did not complete (rc=$rc)"
+  fi
+
+  step "THE RECORDED REFUSAL"
+  local mani="$REPO_ROOT/internal/cli/testdata/pds_live_hetzner_fixtures.json"
+  set +e
+  MANI="$mani" REFUSED="$HZ_REFUSED_KIND" FLAT="$HZ_FLAT_KINDS" python3 -c '
+import json, os, sys
+d = json.load(open(os.environ["MANI"]))
+k = os.environ["REFUSED"]
+if k in os.environ["FLAT"].split():
+    sys.exit("the refused kind is still in the flat harvest list")
+rs = [r for r in d.get("refusals", []) if r.get("kind") == k]
+if not rs:
+    sys.exit("%s is not recorded as a refusal in the manifest — a silent omission" % k)
+if len(rs[0].get("ground", "")) < 80:
+    sys.exit("%s is refused without a stated ground" % k)
+print("  refusals[]: %s — %s" % (k, rs[0]["ground"][:110] + "..."))
+'
+  rc=$?
+  set -e
+  [ "$rc" = "0" ] && off_ok "$HZ_REFUSED_KIND is refused BY NAME with its structural ground recorded in the manifest" \
+                  || off_fail "the refusal of $HZ_REFUSED_KIND is not recorded in the manifest"
+
+  # ── the manifest emitter ───────────────────────────────────────────────────
+  step "THE COMMITTED MANIFEST IS WHAT THIS SCRIPT EMITS — reproduced, not asserted"
+  local repro="$ART/repro"
+  rm -rf "$repro"; mkdir -p "$repro"
+  cp "$REPO_ROOT"/internal/cli/testdata/pds_live_hetzner_*.json "$repro/"
+  emit_manifest "$repro/pds_live_hetzner_fixtures.json" "/dev/null" "$repro"
+  if diff -u "$mani" "$repro/pds_live_hetzner_fixtures.json" >"$ART/manifest.diff" 2>&1; then
+    off_ok "re-emitting the manifest over the committed fixtures reproduces it byte for byte — it was written by this script, not typed"
+  else
+    off_fail "the committed manifest is NOT what the emitter produces (see $ART/manifest.diff): $(head -5 "$ART/manifest.diff" | tr '\n' ' ')"
+  fi
+
+  step "THE EMITTER'S NUMBERS ARE DERIVED — proven end to end against the stub"
+  local hdir="$ART/harvest" hrec="$ART/harvest.tsv"
+  rm -rf "$hdir"; mkdir -p "$hdir"; : >"$hrec"
+  stub_says 404 "application/json; charset=utf-8" '{"error":{"code":"not_found","message":"volume not found"}}'
+  harvest_issue volume "$hdir" "$hrec" 2>/dev/null
+  stub_says 451 "text/html" '<html>nope</html>'
+  harvest_issue zone "$hdir" "$hrec" 2>/dev/null
+  emit_manifest "$hdir/pds_live_hetzner_fixtures.json" "$hrec" "$hdir"
+  set +e
+  M="$hdir/pds_live_hetzner_fixtures.json" python3 -c '
+import json, os, re, sys
+d = json.load(open(os.environ["M"]))
+rows = {f["kind"]: f for f in d["fixtures"]}
+v, z = rows["volume"], rows["zone"]
+assert v["http_status"] == 404 and v["content_type"].startswith("application/json"), v
+assert v["record"].split("\t") == ["404", v["content_type"], str(v["bytes"])], v["record"]
+assert v["request"] == "GET /v1/volumes/999999999", v["request"]
+# THE ZONE ROW IS THE POINT: a non-404 disposition is RECORDED, not asserted away.
+assert z["http_status"] == 451 and z["content_type"].startswith("text/html"), z
+assert "error_code" not in z, z
+raw = open(os.path.join(os.path.dirname(os.environ["M"]), z["file"]), "rb").read()
+assert z["bytes"] == len(raw), (z["bytes"], len(raw))
+blob = open(os.environ["M"]).read()
+runs = [m for m in re.findall(r"[A-Za-z0-9]{32,}", blob)]
+assert not runs, runs[:1]
+assert re.fullmatch(r"([0-9a-f]{8}-){7}[0-9a-f]{8}", v["sha256_chunked"]), v["sha256_chunked"]
+print("  volume: %s %s %s bytes, record=%r" % (v["http_status"], v["content_type"], v["bytes"], v["record"]))
+print("  zone  : %s %s %s bytes — RECORDED, not judged" % (z["http_status"], z["content_type"], z["bytes"]))
+'
+  rc=$?
+  set -e
+  [ "$rc" = "0" ] && off_ok "http_status/content_type/bytes are derived from the verbatim curl record; digests are hyphen-chunked in 8-char groups; a non-404 disposition is recorded rather than dropped" \
+                  || off_fail "the emitter's derivation did not hold"
+
+  step "OFFLINE VERDICT"
+  if [ "$OFF_FAIL" = "0" ] && [ "$ST_FAIL" = "0" ]; then
+    ok "the credential-free arm holds: 0 hetzner/hcloud variables, 4 mutation blocks, the deposit fail-open reproduced and closed, the segment pin able to red, the target count derived, and the committed manifest reproduced by its own emitter"
+    say ""
+    say "  WHAT THIS ARM DOES NOT PROVE. It touches no real API, so it says nothing"
+    say "  about what api.hetzner.cloud actually answers for the eight unharvested"
+    say "  kinds. That is --harvest-only's job and it needs a credential."
+    return 0
+  fi
+  failed "the credential-free arm did not hold — see the FAIL rows above"
 }
 
 # ── --run: the live round trip ───────────────────────────────────────────────
@@ -791,9 +1556,9 @@ run() {
   step "4 ORACLE — an INDEPENDENT client asks the same API the same question"
   local obody="$ART/oracle-200.json" ometa ocode octype obytes
   ometa="$(oracle "/placement_groups/$id" "$obody")"
-  ocode="$(printf '%s' "$ometa" | awk '{print $1}')"
-  octype="$(printf '%s' "$ometa" | awk '{print $2}')"
-  obytes="$(printf '%s' "$ometa" | awk '{print $3}')"
+  ocode="$(hz_field 1 "$ometa")"
+  octype="$(hz_field 2 "$ometa")"
+  obytes="$(hz_field 3 "$ometa")"
   [ "$ocode" = "200" ] || { cat "$obody" >&2; failed "the oracle read of placement group $id answered HTTP $ocode, not 200"; }
   local oid oname otype
   oid="$(jsonq "$obody" 'd["placement_group"]["id"]')"
@@ -824,9 +1589,9 @@ run() {
   step "6 THE GONE PREDICATE'S GROUND TRUTH — the real 404, measured"
   local gbody="$ART/oracle-404.json" gmeta gcode gtype gbytes
   gmeta="$(oracle "/placement_groups/$id" "$gbody")"
-  gcode="$(printf '%s' "$gmeta" | awk '{print $1}')"
-  gtype="$(printf '%s' "$gmeta" | awk '{print $2}')"
-  gbytes="$(printf '%s' "$gmeta" | awk '{print $3}')"
+  gcode="$(hz_field 1 "$gmeta")"
+  gtype="$(hz_field 2 "$gmeta")"
+  gbytes="$(hz_field 3 "$gmeta")"
   [ "$gcode" = "404" ] || failed "the deleted group answered HTTP $gcode, not 404"
   case "$gtype" in
     application/json*) : ;;
@@ -839,10 +1604,18 @@ run() {
   say "  body: $(cat "$gbody")"
   if [ -n "${PDS_LIVE_HARVEST:-}" ]; then
     cp "$gbody" "$PDS_LIVE_HARVEST/pds_live_hetzner_placement_group_404.json"
+    # THE SERVER LEG WAS THE ONE UNGUARDED DEPOSIT IN THIS RUNNER — a bare `cp`
+    # of whatever arrived, with neither the status nor the content-type checked.
+    # It now goes through deposit_or_refuse, which --selftest-offline drives
+    # through three separate lies. A refused deposit is not fatal to the run: the
+    # placement-group proof above stands on its own, and this leg is a bonus.
     local sbody="$ART/oracle-404-server.json" smeta
-    smeta="$(oracle "/servers/999999999" "$sbody")"
-    cp "$sbody" "$PDS_LIVE_HARVEST/pds_live_hetzner_server_404.json"
-    say "  harvested: the placement-group 404 ($gbytes bytes) and the SERVER 404 ($(printf '%s' "$smeta" | awk '{print $3}') bytes) — different kinds, different lengths, so no assertion may pin a universal byte count"
+    smeta="$(oracle "/servers/$HZ_MISSING_ID" "$sbody")"
+    if deposit_or_refuse "server-404" "$smeta" "$sbody" "$PDS_LIVE_HARVEST/pds_live_hetzner_server_404.json"; then
+      say "  harvested: the placement-group 404 ($gbytes bytes) and the SERVER 404 ($(hz_field 3 "$smeta") bytes) — different kinds, different lengths, so no assertion may pin a universal byte count"
+    else
+      say "  the SERVER 404 leg deposited NOTHING (see the refusal above). The placement-group residue is unaffected."
+    fi
   fi
 
   step "7 THE PROJECT IS LEFT AS IT WAS — observed, not claimed"
@@ -907,11 +1680,21 @@ selftest_probe() {
 }
 
 case "${1:---run}" in
-  --plan)           plan ;;
-  --preflight)      preflight ;;
-  --selftest)       selftest ;;
-  --selftest-probe) selftest_probe "${2:-}" ;;
-  --run)            run ;;
-  -h|--help)        plan ;;
-  *)                usage "unknown argument '$1' (want --plan | --preflight | --selftest | --run)" ;;
+  --plan)             plan ;;
+  --preflight)        preflight ;;
+  --selftest)         selftest ;;
+  --selftest-offline) selftest_offline ;;
+  --selftest-probe)   selftest_probe "${2:-}" ;;
+  --harvest-only)     harvest_only ;;
+  # --manifest-emit [DIR] — regenerate the manifest from the fixtures on disk.
+  # It is how the committed manifest is produced, and --selftest-offline proves
+  # the committed bytes are exactly what it emits.
+  --manifest-emit)
+    HZ_MANIFEST_DIR="${2:-$REPO_ROOT/internal/cli/testdata}"
+    emit_manifest "$HZ_MANIFEST_DIR/pds_live_hetzner_fixtures.json" "${3:-/dev/null}" "$HZ_MANIFEST_DIR"
+    say "emitted $HZ_MANIFEST_DIR/pds_live_hetzner_fixtures.json"
+    ;;
+  --run)              run ;;
+  -h|--help)          plan ;;
+  *)                  usage "unknown argument '$1' (want --plan | --preflight | --selftest | --selftest-offline | --harvest-only | --manifest-emit | --run)" ;;
 esac
