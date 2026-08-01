@@ -27,7 +27,8 @@ defmodule BarkparkWeb.PdsW36HelpSealProbeTest do
       than written as `(a != nil) == b` only because the formatter restyles the
       parenthesised form; the assertion is the same biconditional.
     * PROBE E — the same law on `GET /v1/tasks/prime`; reverting the :180 hunk
-      reds this test.
+      reds this test. It carries the MIXED case too, so prime's honest positive
+      direction is pinned on prime's own route rather than borrowed from C/D.
   """
   use BarkparkWeb.ConnCase, async: false
 
@@ -248,5 +249,39 @@ defmodule BarkparkWeb.PdsW36HelpSealProbeTest do
 
     assert help_present? == cards_truncated?,
            "prime help[]=#{inspect(body["help"])} disagrees with the cards it shipped — cards=#{all_json}"
+
+    # Case 2 — MIXED prime corpus (wave-37 review): the same sealed-claim card
+    # PLUS one genuinely truncated card (long title, also in_progress so it
+    # reaches the prime lens). Without this, PROBE E only ever pinned the
+    # negative direction on this route and prime's honest POSITIVE — help[]
+    # firing when a card the caller received really is abridged — rode on the
+    # list route's C/D. The biconditional now reds in both directions here too.
+    long_id = uniq("probe-prime-long")
+
+    _t2 =
+      mk!(long_id, @long_title, scope, %{
+        "lifecycle_status" => "in_progress",
+        "public_field" => "VISIBLE"
+      })
+
+    mixed =
+      conn
+      |> hdr(@nonadmin_token)
+      |> get("/v1/tasks/prime?view=brief&limit=100")
+      |> json_response(200)
+
+    mixed_cards = (mixed["in_progress"] || []) ++ (mixed["ready"] || [])
+    mixed_json = Jason.encode!(mixed_cards)
+
+    assert find_card(mixed_cards, id), "mixed prime corpus lost the sealed-claim card"
+    assert find_card(mixed_cards, long_id), "mixed prime corpus lost the truncated card"
+
+    mixed_help_present? = mixed["help"] != nil
+    mixed_truncated? = String.contains?(mixed_json, "…")
+
+    assert mixed_help_present? == mixed_truncated?,
+           "prime help[]=#{inspect(mixed["help"])} disagrees with the cards it shipped — cards=#{mixed_json}"
+
+    assert mixed["help"], "the mixed prime corpus DOES truncate a title — help[] must fire"
   end
 end
