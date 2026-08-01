@@ -7820,7 +7820,7 @@ misattribution (D435) was caught.
   (both-direction tests per pair), which is the only instrument that can catch a wrong-direction
   payment, because **no census arm reads the direction branch** at `net:797`/`net:1215`.
 
-### Wave 32 plan — six slices, four in round 1
+### Wave 32 plan — five slices, four in round 1
 
 | slice | round | after | what it does | gate |
 |---|---|---|---|---|
@@ -7828,8 +7828,7 @@ misattribution (D435) was caught.
 | `pds-w29-pay-net-dns` | 1 | — | the 19 net/dns census rows across 17 sites incl. both dual-verb executors; deletes both `hzUnpaid*` consts to reach `grep -c hzUnpaid` = 0 | `CC=/usr/bin/clang go test -c -o /dev/null ./internal/cli/ && CC=/usr/bin/clang go test ./internal/cli/ -count=1` |
 | `task-27246110ca95342a` | 1 | — | `confirmation_basis` as a trailing variadic; the three lying S3/backup call sites name their real read | `CC=/usr/bin/clang go test ./internal/cli/ -count=1` + a zero-churn diff |
 | `pds-bl-support-capacity-degraded-unpinned` | 1 | — | pins the degraded capacity narration the registry never exercises | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'TestSuccessClaim\|TestSupport'` |
-| `pds-w32-census-pin-simplify` | 2 | pay-net-dns | D444: keep+relabel TOTAL, delete KEYS and NON_LITERAL, with the I2 mutation rehearsed | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'TestHetznerResource'` |
-| `pds-w32-census-binds-the-basis` | 2 | pay-net-dns, task-27246110ca95342a | D438: the census learns each row's BASIS, proven by the lying-basis mutation that is green today | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'TestHetznerResource'` |
+| `pds-bl-census-exact-pins-tax-growth` | 2 | pay-net-dns, task-27246110ca95342a | TWO ARMS, ONE MERGE — D444: keep+relabel TOTAL, delete KEYS and NON_LITERAL, I2 rehearsed; D438: the census learns each row's BASIS, proven by the lying-basis mutation that is green today | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'TestHetznerResource'` |
 
 **HIGH-FLIP-RISK, an independent second reviewer owed BEFORE MERGE, as a ROW not as prose:**
 `pds-w31-harvest-only` (its credential-free premise was REFUTED as filed and re-cut here — the whole
@@ -7837,6 +7836,33 @@ question of whether the load-bearing work is genuinely offline turns on a gate t
 yet; and eight new committed fixtures rest on a validation path that is fail-open TODAY) and
 `pds-w29-pay-net-dns` (the merge-result compile check, the wrong-direction payment that no census arm
 can see, and the explicit-instantiation grep that keeps the population honest).
+
+**PDS-D447 — THE TWO ROUND-2 CENSUS ARMS SHARE ONE ROW, AND THE REASON IS PARTLY A LIVE SERVER
+DEFECT THAT MUST BE RECORDED.** Both arms edit `internal/cli/hetzner_res_census_test.go`, so merging
+them is the correct cut on its own terms — two slices that must touch the same region of one file are
+merged or sequenced, and one owner / one merge / one census edit is strictly cheaper than two. They
+land on `pds-bl-census-exact-pins-tax-growth`, which is the row that FILED the pins question and whose
+premise this wave's eleven mutations answer. **But the honest second reason is that Decide could not
+file new rows at all: the Barkpark publish wall REJECTED EVERY NEWLY CREATED `type:task` DOCUMENT on
+guerrilla during this run — 422 `label_spine`, reproduced on a MINIMAL probe carrying only a title, a
+250-character description and two registered weighted tags with distinct strengths, and again with no
+tags and no parent.** Patching and republishing EXISTING published rows worked throughout (four wave
+slices were re-briefed that way), so the defect is scoped to document CREATION, not to authoring, and
+it is not the intermittent 500 the lead notes describe. **CONSEQUENCE, STATED RATHER THAN HIDDEN: this
+wave filed NO backlog rows.** Seven real findings surfaced by verification therefore live in this
+charter and in the wave Paper and NOWHERE in the ledger — the exact disease the wave-30 log repair
+above exists to cure, recurring one layer over. They are, so the next wave can file them the moment
+the wall lifts: (1) the explicit-generic-instantiation census blind spot and its two-line
+`*ast.IndexExpr` fix (D446a); (2) ruling 1's whole-file `paid:` grep, which lets a destroy lose its
+confirming read while its paid row stays green (D446b); (3) `hzResNotReadable`'s remediation hint
+renders `bp cloud hetzner record get …`, which is not a real verb for kind `record`/`zone`; (4)
+firewall/create's second unreachable nil guard and its argv-derived rule count; (5) the wave-log
+routing defect at `bp-epic-cycle.workflow.js:841` plus `wave_log_appended`'s zero readers; (6) the
+SECOND credential spend — a live mutation post-read REFUSING against the real API, which is the only
+thing that converts the epic's weakest claim into L1; (7) the Elixir HTTP receipt census (102
+`ok: true` bodies across 27 files, never censused by anything). **AND THE WALL ITSELF IS FINDING (8)**
+— a create path that refuses every document is a `bp task create` outage, and this epic's own law
+says an outage nobody recorded is indistinguishable from one that did not happen.
 
 **WHAT THIS WAVE DOES NOT DO, DELIBERATELY.** The `.github/**` fence holds for the concurrent Cloud
 Console wave, so `internal/cli/testdata/**` is NOT added to `go-tests.yml` — which means a
