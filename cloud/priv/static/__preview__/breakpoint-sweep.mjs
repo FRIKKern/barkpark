@@ -353,7 +353,7 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 74
 // name-keyed entries below, which is what makes a 100th scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 20 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
+  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 21 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 9 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity — over a grid already walked at all 15 widths.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 8 vary binding/verify content inside the same .detail-grid.",
   "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 7 are member-role and empty-state variants of those same panels.",
@@ -378,7 +378,7 @@ export const RESIDUE_FAMILY_REASONS = {
 // scenario has nowhere to hide.
 // WHY NAME-KEYED AND NOT FAMILY-KEYED. A 13-entry family list fails 3 of 4
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
-// the 20-member `hash:#instance` family, and goes green while its entry rots
+// the 21-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
 // THE CENSUS THIS RECONCILES AGAINST: 99 scenarios · 26 cells over 25 DISTINCT
 // scenarios (mixed-fleet is used twice) · residue exactly 74 · 13 families.
@@ -387,7 +387,8 @@ export const RESIDUE_FAMILY_REASONS = {
 // STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
 // longer exists, or one that has since gained a cell, exits 2.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 20
+  // hash:#instance — 21
+  "sites-on-instance": "hash:#instance",
   "provisioning": "hash:#instance",
   "usage-quota": "hash:#instance",
   "failed": "hash:#instance",
