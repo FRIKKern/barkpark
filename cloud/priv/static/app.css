@@ -5320,7 +5320,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .detail-rail .status-pill-label { flex: 0 1 auto; min-width: 0; }
 
 /* The fleet row's money message: "verify: no heartbeat within the provisioning
-   window" measured scrollWidth 463 against clientWidth 142 at 320 (69% of the
+   budget (listener never came online)" measured scrollWidth 463 against clientWidth 142 at 320 (69% of the
    sentence unrendered) and 295/343 at 721/769 — the operator could not read WHY
    the instance failed. The filed row's title says "721 and 769"; the driven band
    is 320/360/390/430/620/721/769/800/830/860, clean at >= 899.
@@ -5339,3 +5339,82 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .fleet-status .status-pill-dot { margin-top: 5.5px; }
 .fleet-status .status-pill-detail { overflow: visible; text-overflow: clip; }
+
+/* ═════════════════ W18-S1 THE FRONT SCREEN SAYS WHY A BOX IS DEGRADED
+   Pays `cch-w16-bl-attention-pill-detail-truncated-front-screen`. On merged-main
+   bytes the LANDING route hid the reason: `.instance-card-head
+   .status-pill-detail` rendered 56 of 165px of "Health down · Agent offline" at
+   320 (66.1% unreadable), 96/165 at 360, 126/165 at 390 — and on `mixed-fleet`
+   45 of 237px of "Payment failed — subscription past due" (81.0%), still cut at
+   430 where the attention fixture is already clean. Light and dark are
+   byte-identical in every cell: theme is not an axis for this row.
+
+   WHY THE PILL ABSORBS ALL OF IT. Inside `.instance-card-head` the pill shares
+   the line with `.instance-card-name`, which carries `margin-right: auto` and no
+   `min-width: 0` — the name holds its min-content width and the pill takes 100%
+   of the deficit. `.attention-row`'s pill sits beside `.attention-main`
+   (`flex: 1; min-width: 0`), which shrinks instead. Two hosts, disjoint bands,
+   opposite shapes; one wrapper-scoped fix cannot pay both, and the tablet host
+   is a separate filed row (task-802585b77fc136b1), untouched here.
+
+   GR11/GR25 CARVE-OUT, BY CONSTRUCTION RATHER THAN BY INSPECTION. GR25 forbids
+   EDITING the four quarantined pill families, not CONSUMING them.
+   `.instance-card-head` is a WRAPPER in exactly the vocabulary app.css:2270
+   uses for `.fleet-status`/`.fleet-main`: it is not one of the four families and
+   no pill rule block is touched. Every line below is an ADD (D157 "an ADD, not a
+   restyle"), so `git diff -U0` on this file shows this block as a hunk of OLD
+   LENGTH ZERO and :2913-2957 is untouched without anyone having to check.
+   THE FOURTH HEAD IS THAT PROOF'S PRICE: `flex-wrap` could have been folded
+   into the existing `.instance-card-head` at app.css:3064 for +3 heads instead
+   of +4, and D198 refused that — it edits an existing declaration line and
+   forfeits the old-length-zero construction. +4 and the carve-out proof are the
+   same decision.
+
+   THE THIRD COPY OF THIS RECIPE IS DELIBERATE (D210). `.detail-rail`,
+   `.fleet-status` and now `.instance-card-head` each carry a wrapper-scoped
+   clone of the same five-declaration wrap. A shared `.status-pill--wrap`
+   variant was PRICED AND REFUSED: it saves ZERO rule heads (the variant is
+   itself a head), forfeits the old-length-zero proof this block rests on, needs
+   an app.js change through the shared statusPill() factory to emit the class on
+   three call sites, and authors a new head INSIDE the GR25-quarantined family —
+   which is the exact ground on which D198 refused the cheaper +3 variant above.
+   THE EXTRACTION TRIGGER IS THE FOURTH HOST, not this one.
+
+   THE NUMBERS BELOW ARE PILL HEIGHTS, NEVER CARD HEIGHTS (D205). Driven on this
+   fixture: the pill is 42px at 320 (the head row wraps, the pill takes the full
+   width and runs to two lines) and back to exactly 24px from 620 up. As CARD
+   height the same change costs +52 at 320 — a real design change to the
+   most-seen screen, ratified by D197; the candidate without `flex-wrap` costs
+   +54 at 320 and is 16px TALLER at 360/390, which is why `flex-wrap` is
+   load-bearing and not decoration.
+
+   THE BOUNDARY IS A PROPERTY OF THE STRING (D206). 42px-at-320 / 24px-from-620
+   holds for the fixture "Health down · Agent offline". The production-dominant
+   "Health unknown · Agent offline" is three characters longer, is 42px at 360
+   too, and moves the wrap boundary from 425/430 to 450/460. overflow-guard's
+   W18-overview-card-pill leg therefore asserts INVARIANTS at every width
+   (detail.scrollWidth == clientWidth, pill.scrollHeight <= pill.clientHeight,
+   detail.bottom <= pill.bottom) and pins no height at all.
+
+   THE 2px INSET IS DERIVED, as in the two blocks above: 24px chip = 1px border
+   + 2px + an 18px line box + 2px + 1px, so `padding-top/bottom: 2px` reproduces
+   the existing optical inset exactly and a one-line pill measures 24px before
+   and after. THE DOT OFFSET IS RE-DERIVED, NOT COPIED: `.fleet-status`'s 5.5px
+   came from an 18px line box at 13px font; this pill's own first line box was
+   MEASURED at 18px (12px font, inherited line-height), so (18 - 7) / 2 = 5.5px
+   is the same number for a different reason — and it is the measurement, not
+   the precedent, that puts the dot on the centre of the FIRST line.
+
+   `overflow: visible; text-overflow: clip` retires the ellipsis machinery the
+   wrap makes unreachable, so nothing can silently re-truncate the reason. */
+.instance-card-head { flex-wrap: wrap; }
+.instance-card-head .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  align-items: flex-start;
+}
+.instance-card-head .status-pill-dot { margin-top: 5.5px; }
+.instance-card-head .status-pill-detail { overflow: visible; text-overflow: clip; }
