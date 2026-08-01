@@ -143,6 +143,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
   alias Barkpark.Content.{Document, MutationEvent}
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Internal
 
   # The mutation_events.mutation kind for a TTL-expired claim. Routed
   # through the existing `mutation` text column — same channel as
@@ -400,16 +401,13 @@ defmodule Barkpark.Tasks.TtlSweeper do
     # the same worker's re-claim lands back on its own task and the
     # board keeps showing who is on it.
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 ->
-        updated = %{doc | content: new_content, rev: new_rev}
-
+    # PDS-D451 — the receipt is the STORED row. `updated` is broadcast by
+    # `reap_one/2` post-commit, and `Content.Broadcast` copies `doc.updated_at`
+    # into BOTH `doc.updated_at` AND `document._updatedAt` of the same message;
+    # a `%{doc | …}` merge omitted `updated_at` and leaked the PREVIOUS write's
+    # timestamp twice.
+    case Internal.fenced_content_write(doc, observed_rev, new_content, new_rev) do
+      {:ok, updated} ->
         ev =
           insert_lease_expired_event!(
             updated,
@@ -423,7 +421,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
         # is required by the SSE listen controller's forward gate.
         {:swept, updated, ev.id, observed_rev}
 
-      0 ->
+      :stale ->
         # CAS failed — extremely rare under the advisory lock (we held
         # the lock through the read + the write), but covered: another
         # caller updated the row through a non-task-lifecycle path
@@ -559,16 +557,11 @@ defmodule Barkpark.Tasks.TtlSweeper do
       |> Map.put("lifecycle_status", to_status)
       |> Map.delete("engagement")
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 ->
-        updated = %{doc | content: new_content, rev: new_rev}
-
+    # PDS-D451 — the receipt is the STORED row (see the reap arm above): the
+    # lapse broadcast leaks the pre-write timestamp in BOTH `doc.updated_at`
+    # and `document._updatedAt` when the struct is reconstructed.
+    case Internal.fenced_content_write(doc, observed_rev, new_content, new_rev) do
+      {:ok, updated} ->
         ev =
           insert_engagement_lapsed_event!(
             updated,
@@ -581,7 +574,7 @@ defmodule Barkpark.Tasks.TtlSweeper do
 
         {:swept, updated, ev.id, observed_rev}
 
-      0 ->
+      :stale ->
         # CAS failed under the lock — a non-task-lifecycle writer moved the
         # row. Skip; next minute's sweep re-evaluates.
         :skipped

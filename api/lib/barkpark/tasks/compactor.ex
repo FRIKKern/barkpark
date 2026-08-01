@@ -120,6 +120,7 @@ defmodule Barkpark.Tasks.Compactor do
 
   alias Barkpark.Content.{Document, MutationEvent, Revision}
   alias Barkpark.Repo
+  alias Barkpark.Tasks.Internal
 
   @event_task_compacted "task.compacted"
   @event_task_compaction_restored "task.compaction_restored"
@@ -300,16 +301,14 @@ defmodule Barkpark.Tasks.Compactor do
       |> Map.put("compacted_at", ts_iso)
       |> Map.put("compaction_snapshot_revision_id", snapshot.id)
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 ->
-        updated = %{doc | content: new_content, rev: new_rev}
-
+    # PDS-D451 — the receipt is the STORED row. `compact_one/2` broadcasts
+    # `updated`, and `Content.Broadcast` copies `doc.updated_at` into BOTH
+    # `doc.updated_at` AND `document._updatedAt` of that one message. This arm
+    # ALSO fires the `barkpark_bind_document_revision` AFTER INSERT trigger on
+    # the snapshot revision, so `RETURNING` is the only way the receipt carries
+    # what Postgres actually holds.
+    case Internal.fenced_content_write(doc, observed_rev, new_content, new_rev) do
+      {:ok, updated} ->
         ev =
           insert_compacted_event!(
             updated,
@@ -321,7 +320,7 @@ defmodule Barkpark.Tasks.Compactor do
         # Bundle for the post-commit broadcast in compact_one/2.
         {:compacted, updated, ev.id, observed_rev}
 
-      0 ->
+      :stale ->
         # CAS failed under the lock — extremely rare (we held it through
         # the read + write), but covered. The snapshot row remains, with
         # no live content pointing at it; the next compaction cycle will
@@ -542,19 +541,15 @@ defmodule Barkpark.Tasks.Compactor do
       |> Map.delete("history_summary")
       |> Map.delete("compaction_snapshot_revision_id")
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 ->
-        updated = %{doc | content: new_content, rev: new_rev}
+    # PDS-D451 — the receipt is the STORED row: `restore/2` both RETURNS this
+    # doc and broadcasts it, so a reconstruction leaked the pre-write timestamp
+    # in `doc.updated_at`, `document._updatedAt` and the returned struct alike.
+    case Internal.fenced_content_write(doc, observed_rev, new_content, new_rev) do
+      {:ok, updated} ->
         ev = insert_restored_event!(updated, observed_rev, rev.id)
         {:ok, updated, ev.id, observed_rev}
 
-      0 ->
+      :stale ->
         {:error, :stale_claim}
     end
   end
