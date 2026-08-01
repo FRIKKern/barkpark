@@ -37,8 +37,16 @@ package cli
 // arm passes a variable — because the SITE resolved fine, it just resolved to
 // fewer keys. Measured: making one arm of the add-route/delete-route dispatch
 // pass a variable silently dropped a key (52 → 51) while UNRESOLVED_SITES still
-// read 0. So the gate asserts OPAQUE_CALLERS == 0 and names the file:line of any
-// dispatch arm that passes a non-literal.
+// read 0. So the gate asserts OPAQUE_ACTION_CALLERS == 0 and names the file:line
+// of any dispatch arm that passes a non-literal ACTION.
+//
+// THE NAME IS EXACT AND DELIBERATE (PDS-D456). This counter can only ever hold
+// an unresolvable ACTION, never an unresolvable KIND: hzResBuildCensus's kind
+// branch t.Errorf's and `continue`s BEFORE the caller pass that fills it runs,
+// so a non-literal kind can never reach it. It was called OPAQUE_CALLERS, which
+// invited "extend it to cover kinds too" — that extension is impossible without
+// merging an unkeyable SITE into a counter whose message says ACTION. A
+// non-literal kind is already caught, by name, at that guard.
 
 import (
 	"fmt"
@@ -585,6 +593,14 @@ func hzResBuildCensus(t *testing.T) hzResCensus {
 	c := hzResCensus{sites: hzResSitesFromSource(t), keys: map[string][]string{}}
 	for _, s := range c.sites {
 		where := fmt.Sprintf("%s:%d", s.file, s.line)
+		// THE SINGLE LOAD-BEARING DETECTOR FOR A NON-LITERAL KIND, and the one
+		// place it is caught. Four tests appear to red on that mutation; they are
+		// NOT four arms — they are THIS t.Errorf, reached through every test that
+		// calls hzResBuildCensus, plus the one genuinely independent stale-row
+		// arm. True redundancy is 2x, not 4x. So a tidy-looking refactor of
+		// hzResBuildCensus to RETURN errors instead of calling t.Errorf would
+		// delete four apparent arms in one edit: any such change must move this
+		// assertion, not just relocate its text.
 		if s.kind == "" {
 			t.Errorf("%s: the KIND argument of %s is not a string literal — the census cannot key a receipt "+
 				"whose resource kind is computed", where, s.emitter)
@@ -628,7 +644,7 @@ func TestHetznerResourceReceiptCensus(t *testing.T) {
 	// which class — the evidence that the population was COUNTED and not
 	// transcribed from a charter that said 51.
 	t.Logf("TOTAL=%d sites across %v", len(c.sites), hzResSourceFiles(t))
-	t.Logf("NON_LITERAL=%d  KEYS=%d  OPAQUE_CALLERS=%d", len(c.nonLiteral), len(c.keys), len(c.opaque))
+	t.Logf("NON_LITERAL=%d  KEYS=%d  OPAQUE_ACTION_CALLERS=%d", len(c.nonLiteral), len(c.keys), len(c.opaque))
 	byClass := map[hzResClass][]string{}
 	for key := range c.keys {
 		byClass[hzResDispositions[key].class] = append(byClass[hzResDispositions[key].class], key)
@@ -651,7 +667,7 @@ func TestHetznerResourceReceiptCensus(t *testing.T) {
 			"trusting anything below", len(c.sites), hzResSourceFiles(t), siteFloor)
 	}
 
-	// THE OPAQUE-CALLER ARM, and it is NOT optional. A per-SITE "nothing
+	// THE OPAQUE-ACTION-CALLER ARM, and it is NOT optional. A per-SITE "nothing
 	// unresolved" check reads 0 even when a dispatch arm passes a variable: the
 	// SITE resolved, it just resolved to FEWER KEYS. Measured by mutation —
 	// turning one add-route/delete-route arm into a variable dropped the key
@@ -792,26 +808,57 @@ func TestHetznerResourceDispositionsAreBoundToRealCode(t *testing.T) {
 	t.Logf("KINDS=%d %v", len(hzResLedgerKinds), hzResLedgerKinds)
 }
 
-// TestHetznerResourceCensusMeasuresTheKnownPopulation pins the numbers the wave
-// derived, so a change to the population is a DECISION somebody makes rather
-// than a drift nobody notices. These are exact, not floors: they are what the
-// census measured on the day it shipped, and any movement should re-run the
-// derivation before editing them.
+// TestHetznerResourceCensusMeasuresTheKnownPopulation holds the ONE population
+// pin that mutation testing could not remove, plus two invariants that are not
+// population counts at all.
+//
+// PDS-D444/D455 — WHY TOTAL SURVIVED AND ITS TWO NEIGHBOURS DID NOT. Eleven
+// mutations against a clean tree, re-run on the merged tree, found exactly one
+// shape that no other arm of this file notices: mutation I2 — take a real,
+// paid, dispositioned verb, delete its hzResDone call so it returns exitOK with
+// NO receipt at all, and delete its disposition row in the SAME coherent
+// commit. The stale-row arm is escaped (the row left with the site), the
+// kind-presence arm is escaped (the kind still emits other receipts), the site
+// floor is escaped (49 > 40). That is a Barkpark verb reporting success on an
+// exit code alone — this epic's founding law — repealable in one silent commit.
+// TOTAL is the only thing that reds on it, so TOTAL stays.
+//
+//   - KEYS != 52 was DELETED: it fired in lockstep with TOTAL on I2 and on
+//     population collapse, and was blind to the one shape it might have owned
+//     (a duplicate key leaves KEYS at 52; the collision arm catches that).
+//   - NON_LITERAL != 2 was DELETED: it reddened in ZERO of the eleven mutations.
+//     Both numbers are still LOGGED by the census test above — they just no
+//     longer tax an honest growth commit.
+//
+// TWO THINGS TO KNOW BEFORE YOU TOUCH TOTAL:
+//   - Only the COHERENT I2 is TOTAL's alone. The incoherent version (emitter
+//     deleted, disposition row kept) is caught a second time by the genuinely
+//     independent stale-row arm.
+//   - TOTAL's uniqueness is about COHERENCE, not ARITY. No single-key kind
+//     exists on main (the minima are backup/bucket/placement-group at 2 keys
+//     each), so an I2 never incidentally empties a kind; constructed, a
+//     single-key I2 reds THREE arms, while a fully coherent one reds TOTAL alone.
+//
+// DO NOT convert TOTAL to a floor. Measured: `< 50` keeps the I2 catch and
+// removes the growth tax, but shrinkage MASKED BY PRIOR GROWTH (population
+// grows to 51, then a real receipt and its row are deleted back to 50) then
+// passes fully green. A floor is only as strong as an exact pin if every growth
+// commit bumps it — which restores the tax it was meant to remove.
 func TestHetznerResourceCensusMeasuresTheKnownPopulation(t *testing.T) {
 	c := hzResBuildCensus(t)
 	if got := len(c.sites); got != 50 {
-		t.Errorf("TOTAL = %d, want 50 — re-derive with `git grep -n 'hzResDone(' -- internal/cli | grep -v _test.go` "+
-			"plus the hzResDestroyed/hzResDestroyedDeclared sites before changing this number", got)
+		t.Errorf("TOTAL = %d, want 50 — a receipt site left (or joined) the population. Retiring a verb "+
+			"COHERENTLY (its hzResDone/hzResDestroyed call AND its disposition row deleted in ONE commit) "+
+			"reds HERE AND NOWHERE ELSE — that is mutation I2, and it is this epic's law ('no Barkpark verb "+
+			"may report success on an exit code alone') repealable in a single silent edit. A real removal "+
+			"is still allowed; it just has to be made HERE, deliberately. Re-derive with "+
+			"`git grep -n 'hzResDone(' -- internal/cli | grep -v _test.go` plus the hzResDestroyed/"+
+			"hzResDestroyedDeclared sites before changing this number", got)
 	}
-	if got := len(c.nonLiteral); got != 2 {
-		t.Errorf("NON_LITERAL = %d, want 2 (hetzner_net_cmd.go's add-route/delete-route and "+
-			"apply-to-resource/remove-from-resource dispatchers)", got)
-	}
-	if got := len(c.keys); got != 52 {
-		t.Errorf("KEYS = %d, want 52 (48 literal sites + the 4 caller literals behind the 2 dispatchers)", got)
-	}
+	// NOT a population count: an unresolvable dispatch ACTION means a receipt
+	// key is invisible to the whole census, so the number is 0 forever.
 	if got := len(c.opaque); got != 0 {
-		t.Errorf("OPAQUE_CALLERS = %d, want 0 — %v", got, c.opaque)
+		t.Errorf("OPAQUE_ACTION_CALLERS = %d, want 0 — %v", got, c.opaque)
 	}
 	// The two dispatchers must resolve to their FOUR caller literals, by name.
 	for _, want := range []string{"network/add-route", "network/delete-route",
@@ -849,9 +896,13 @@ func TestHetznerResourceCensusMeasuresTheKnownPopulation(t *testing.T) {
 //
 // NEITHER ARM QUOTES A KIND COUNT. Set equality already implies the length, and
 // a bare len() pin is precisely the renegotiable number D418 forbids: it turns
-// every legitimate refactor into a floor negotiation. The exact pins that DO tax
-// growth today (TOTAL=50 / KEYS=52) are a separate, filed question —
-// pds-bl-census-exact-pins-tax-growth — and are untouched here.
+// every legitimate refactor into a floor negotiation. The exact pins that used
+// to tax growth here (TOTAL=50 / KEYS=52 / NON_LITERAL=2) were the filed
+// question pds-bl-census-exact-pins-tax-growth, and it has since been SETTLED by
+// mutation (PDS-D444/D455): KEYS and NON_LITERAL are deleted as measured
+// redundant, and TOTAL is kept — see the comment on
+// TestHetznerResourceCensusMeasuresTheKnownPopulation for why it is the only arm
+// that notices a receipt retired coherently with its disposition row.
 //
 // WHAT THIS IS WORTH, STATED HONESTLY SO NOBODY OVER-READS IT
 // ------------------------------------------------------------
