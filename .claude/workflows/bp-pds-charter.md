@@ -2576,6 +2576,90 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 35 2026-08-01 — "Finish the lens, then spend the judgment" — REVIEWED. Grade A− (paper `pds-wave-35-2026-08-01`)
+
+**THREE ROUND-1 SLICES BUILT, THREE GREEN, THREE PUSHED WITH PRs OPEN.** Four round-≥2 slices were
+deferred BY DESIGN under the sequenced-rounds law — `scripts/pds-elixir-receipt-census.exs` is the
+serial spine and four slices want it — and are untouched and open on the ledger. Every gate was
+re-run by the reviewer on the final state.
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w34-unreachable-error-positive-arm` | `…-unreachable-erro-0-r` | #8884 | UNREACHABLE-ERROR, a guardless fall-through reading 26, becomes a positive CATCH-ALL-TO-SUCCESS arm firing on exactly 3; a five-row `declared` register ships as committed data; three stale-prose sites now DERIVE |
+| `pds-w34-declared-basis-literals-need-constants` | `…-hetzner-destroy-bases-b-1` | #8885 | the two declared Hetzner destroy bases become named constants beside their verbs; the literal rejection extends to EVERY emitter; leg 1 stops self-comparing |
+| `pds-w34-ledger-background-write-arms` | `…-background-write-arms-broadcast-2` | #8886 | the five background write arms broadcast the STORED row; the leak was TWO fields of one message, and the new differential asserts both |
+
+**PDS-D493 — THE LENS NO LONGER ACCUSES ITS OWN CONTROL, AND UNCLASSIFIED IS 74 @ WIDE HEAD,
+CONTAINMENT, DEPTH 6, `b266a1a5e`.** The shipped arm fires on exactly `search_controller.ex:334`,
+`v1/media_controller.ex:225` and `github_webhook_controller.ex:87`; the honest siblings `:333` and
+`:224` print UNCLASSIFIED; `classified 17 + unclassified 74 == emitted 91`, CENSUS OK, exit 0. The
+denominator the register must spend is **74**, not the wish's 59 and not the owning doc's 47.
+`auth_controller.ex:417` is exonerated by construction, exactly as PDS-D476c predicted.
+
+**PDS-D493a — TWO OF THE BRIEF'S MUTATION INTEGERS DO NOT REPRODUCE, AND THE BUILDER STAMPED THEM
+AS MISSES RATHER THAN FLIPPING THEM.** Relaxing containment to `List.first()` takes the arm 3→**6**,
+not 3→5: it adds `search:333` and `media:224` as predicted, PLUS `github_webhook:86`, which lives in
+the same `receive/2` body as the `_other` clause and is reachable by ANY containment-free variant.
+Dropping BOTH `renders_ok_true?` and containment fires on **13**, not 11 — and DOES re-accuse
+`auth_controller.ex:417`, so the load-bearing claim stands while the integer does not. Both criteria
+remain open with `--miss` notes carrying the refuting rolls. **This is the behaviour the epic wants:
+a builder whose own measurement refutes the brief does not flip the lock.**
+
+**PDS-D493b — THE CARRIER COUNT IS 25 AST / 28 TEXTUAL, AND PDS-D488'S "26-or-28" IS ALSO WRONG.**
+The census now prints both readings live and types neither. The strict reading is one LOWER than the
+charter's own correction of the doc's error — a number corrected twice and still wrong until it was
+derived. The round-2 owning-doc amendment inherits this: it may not type 26.
+
+**PDS-D494 — THE REVIEWER RULES ON THE GATE: PDS-D482 STANDS, THE GATE IS IN, AND IT STILL LANDS
+LAST.** Wave 34's stated objection was "a gate over a lens with two measurably wrong buckets ratchets
+the wrongness into CI." Half of that objection is now DEAD at the lens, not by argument: the
+accusatory bucket is corrected and mutation-proven, and a register exists to except from it. The
+objection's remaining force is entirely about `--selftest`, which today performs a full census and
+exits 0 having asserted nothing — a required-context green that asserts nothing while doubling a
+docs-only PR's cost is this epic's own offence wearing the gate's badge. **The gate is ruled IN and
+sequenced LAST, after `--selftest` is real and the register exists.** Its assertions stay exactly
+three (integrity arms PASS, `--selftest` passes, register complete in BOTH directions) and never a
+bucket count.
+
+**PDS-D494a — AND THE CHEAP FLOOR IS REFUSED.** The slice-1 builder observed that "no new undeclared
+CATCH-ALL-TO-SUCCESS site" is now cheap and would fail loudly on a real regression. It is refused as
+a standalone gate: it is a BUCKET-ADJACENT pin, and a bucket pin that reds on an honest lens
+correction is precisely what PDS-D482 narrowed the gate to avoid. The same protection arrives
+non-arbitrarily as a consequence of register completeness — a new undeclared catch-all is a register
+gap, and the register direction is already one of the gate's three assertions.
+
+**PDS-D495 — THE CHARTER'S `:2657` ARM LINE NUMBERS ARE STALE BY EXACTLY +6 AND ARE AMENDED HERE.**
+The five background write arms are `fence.ex:118`, `ttl_sweeper.ex:411`, `ttl_sweeper.ex:570`,
+`compactor.ex:311`, `compactor.ex:553`. The wish and the original task brief carry the same +6 drift.
+
+**WHAT THE REVIEWER CHANGED.** Slice 1's declared register printed `status: SUPPRESSES a fired
+shape` for `github_webhook:87`. It does not suppress the shape — the shape still prints in the roll
+and in the counts; what is withheld is the FINDING. On an epic whose only admissible test is "would
+the printed sentence change if the response said the opposite," a status line that overstates what
+the machine did is the offence itself. It now reads `WITHHOLDS A FINDING`. The register's `basis`
+and `status` lines also ran to ~200 columns inside a report that draws 78-column rules; they wrap
+now. Slices 2 and 3 needed no changes.
+
+**WHAT THE REVIEWER PROVED INDEPENDENTLY.** (1) All five register basis citations were verified
+line-by-line at source: `auth:393`, `@doc :402-407` with the sentence at `:403-406` and the token on
+`:405`, `:417` sitting after the case closes at `:415`, `gh_webhook @doc :74-78`, `:86` ping, `:87`
+`_other`, `bulldocs_form @moduledoc :22-24` plus the one-line inline comment at `:53`, honest insert
+at `:50`. **Every one is accurate** — which matters because PDS-D479 was filed precisely because the
+previous basis citation was a phantom in four published places. (2) Slice 2's literal rejection was
+re-mutated: reverting `object rm`'s call site to a bare literal REDS at capture, by name. (3) Slice
+3's builder mutation-proved ARM 1 only; the reviewer reverted **ARM 5** (`Compactor.restore/2`)
+independently and the differential red on BOTH fields and on ARM 5 ONLY. Arms 2–4 are now covered by
+a helper whose failure mode is demonstrated on two different arms.
+
+**WHAT THE NEXT WAVE TAKES — THE DISPATCH ORDER IS THE HANDOFF.** Merge round 1 (#8884, #8885,
+#8886) first; #8884 must merge before anything else touches the census. THEN, as deps merge:
+round 2 = `pds-w34-census-import-arity` (ARGV-STRICT, a real `--selftest`, CLAUSE-COLLAPSE as the
+sixth arm, the per-arm FAIL render, the arity key) and `pds-w34-owning-doc-amendment` (which may run
+BESIDE it — disjoint files — and which must now also rename UNREACHABLE-ERROR to
+CATCH-ALL-TO-SUCCESS, quote 3 not 26/27, and take 25/28 for the carriers, never 26). Round 3 =
+`pds-w34-hand-bucket-register` against a denominator of **74**. Round 4 = `pds-w35-elixir-census-gate`,
+the cuttable slice, never the register.
+
 ### Wave 34 2026-08-01 — "The instrument is the first suspect" — REVIEWED. Grade A− (paper `pds-wave-34-2026-08-01`)
 
 **FOUR ROUND-1 SLICES BUILT, FOUR GREEN, FOUR PUSHED WITH PRs OPEN.** Three round-≥2 slices were
@@ -8686,3 +8770,449 @@ or `fleet`'s registration arm. It does not measure the SENTINEL-`:ok`-RETURNER p
 the 331 orphan task drafts, both filed. The `.github/**` and `cloud/**` fence holds for the concurrent
 Cloud Console wave; this wave's fence is `api/**`, `internal/**`, `deploy/**`, `scripts/pds-*` and the
 `pds-*` namespace.
+
+---
+
+## Wave 35 — FINISH THE LENS, THEN SPEND THE JUDGMENT
+
+Baseline re-derived by the lead on a clean `git archive origin/main` extraction at
+**`b266a1a5e`**: `EMITTED 91`, `POST-READ 14`, `CAS-CONFIRMED-ECHO 0`, `UNREACHABLE-ERROR 26`,
+`UNCLASSIFIED 51`, `classified 40 + unclassified 51 == 91`, route `54 / 14 / 23` at depth 6,
+`CLAUSE-COLLAPSE 0 of 91`, `CENSUS OK`, exit 0. **The wish's 59 and 27 are refuted; the owning
+doc's 47 is refuted; PDS-D464's own FROM number (27) is stale by one.** Every number below carries
+its lens because wave 34 proved the denominator is a tunable.
+
+- **PDS-D476 — THE ARM SHIPS THE WIDE HEAD WITH NO WRITE GUARD, AND THE ROUND-2 DENOMINATOR IS 74.**
+  A verifier implemented the positive CATCH-ALL-TO-SUCCESS arm independently (not the surveyor's
+  probe) with the predicates as env toggles, and measured four configurations on `b266a1a5e`:
+  narrow bare-`_` head + containment fires **2** and prints `classified 16 + unclassified 75 == 91`;
+  the WIDE `_`-prefixed head + containment fires **3** and prints `classified 17 + unclassified
+  74 == 91`; containment relaxed to D464a's `List.first()` fires **4**. **The digest's "3-fired …
+  16 + 75 == 91" is arithmetically impossible — 16+75 is the 2-fired arithmetic mislabelled.**
+  D464 ships wide, so the shipped configuration is **3 fired / 1 registered (`github_webhook:87`) /
+  2 FINDINGS**, and round 2's denominator is **74 @ wide head, containment, depth 6, `b266a1a5e`** —
+  a 45% growth over 51 before a single builder flies. D464a reproduces verbatim under a second
+  independent implementation: relaxing containment takes the arm 2→4 and the two additions are
+  exactly `search_controller.ex:333` and `v1/media_controller.ex:224`, the HONEST arms of the same
+  two `case` statements. Containment is the single load-bearing predicate, mutation-proven twice.
+- **PDS-D476a — THE WIDE HEAD AND A WRITE GUARD ANNIHILATE EACH OTHER; FENCE THIS IN THE BRIEF.**
+  A mutation nobody had run: adding a `site.write?` guard is inert under the narrow head (2→2) but
+  collapses the SHIPPED wide head **3 → 2**, deleting exactly `github_webhook_controller.ex:87`
+  (`write?=false`) — the one site widening added. **Wide-head-plus-write-guard IS narrow-head.** A
+  builder adding a write guard "for safety" silently moves the denominator 74→75, and the declared
+  register's CATCH-ALL row stops corresponding to anything the arm suppresses, with no diff that
+  looks like a bucket change. The slice-1 brief forbids the guard by name.
+- **PDS-D476b — `renders_ok_true?` IS A TAUTOLOGY UNDER CONTAINMENT, AND THE PAIR IS STILL
+  LOAD-BEARING.** Dropping the conjunct moves nothing (2→2 narrow, 3→3 wide) — D464 confirmed — and
+  the reason is worse than inert: the site line IS an `ok: true` pair line by construction of
+  `collect_sites/2`, so if it is inside the clause span the body contains an `ok: true` pair. It
+  cannot fail while containment holds. **Do not delete it.** With BOTH containment and
+  `renders_ok_true?` dropped the arm fires on **11** and `auth_controller.ex:417` — the charter's own
+  declared-honest control — **is accused again**. Each is inert only GIVEN the other. Pin the pair
+  with a SYNTHETIC fixture in `--selftest`, never with the corpus: a selftest that only runs the
+  corpus certifies a predicate it never exercised.
+- **PDS-D476c — `auth_controller.ex:417` CANNOT FIRE UNDER ANY SHIPPING CONFIGURATION.** Its
+  `json(conn, %{ok: true})` sits at `:417`, after the `case` closes at `:415`, outside every clause
+  span; its `_ -> :ok` arm has no `ok: true` body either. Two independent reasons. **Registering it
+  is DOCUMENTATION, not suppression** — D465 was right and the wish's framing of it as "the register's
+  first entry needed to stop an accusation" is wrong. It is accused TODAY (`[UNROUTED]
+  UNREACHABLE-ERROR`, confirmed at the lens); the narrowed arm exonerates it by construction.
+- **PDS-D477 — THE REGISTER KEY IS `{path, module.name/arity, head_hash, expr_fp}`, AND ALL FOUR
+  PRIOR PROPOSALS ARE REFUTED BY MUTATION.** This overrides **PDS-D469a**'s `module + function/arity
+  + verb`, the wish's `file:line:verb`, wave 35's own strategize key `{file, function/arity, class}`,
+  and the survey's `{file, fn/arity, clause_ord, site_ord}`. Measured, not argued:
+  - `auth_controller.ex:351` (`body = if slo_url, do: %{ok: true, slo_url: slo_url}, else: %{ok:
+    true}`) is the ONLY duplicated `file:line` in the corpus and emits TWICE, byte-identically in
+    every printed field, from a SINGLE-clause `logout/2`. `handle_pull_request/2` alone emits 5 rows
+    under one `{file, fn/arity, class}`. `bulldocs_form submit/2` holds an honest insert at `:50` and
+    a declared honeypot at `:54`. Three collisions, three keys dead.
+  - `clause_ord` SURVIVES an unrelated-name clause insertion (0 orphans, where `file:line` orphans 3)
+    but **BREAKS on a same-`{module,name,arity}` insertion: 1 orphan + 1 arrival + 1 SILENT
+    MIS-ATTACHMENT** — key `apply_op/2|1|0` survives the bidirectional completeness check while
+    changing meaning from line 715 UNCLASSIFIED to line 635 POST-READ. That is `.sobelow-skips` rot
+    one abstraction level up, and a set-equality check is blind to it.
+  - `site_ord` is deterministic but is **reverse source order** (an accident of `pairs/3`'s prepend
+    accumulator surviving a stable sort). Swapping `auth:351`'s two branches to a semantically
+    identical `if is_nil(slo_url)` re-attaches site_ord 0 from bare `%{ok: true}` to `%{ok: true,
+    slo_url: slo_url}` **with no change in any printed field**. A reason written against site_ord 0
+    silently moves to the other expression.
+  - The REPAIR is measured: `head_hash` (phash2 of the meta-normalised clause head AST, guards
+    included) collides **3 times in 17,620 defs corpus-wide** — all benign bodiless declaration heads —
+    and **0 times within the 75 site-owning `{path,mfa}` groups**. Re-running the same-arity insertion
+    under it: **0 orphaned, 0 arrivals, class-attachment diff empty**. `expr_fp` (phash2 of the
+    meta-normalised `%{}` container holding the `ok:` pair) is **unique 91/91** and INVARIANT under
+    the branch swap, travelling with its content. Per-key site count is 1 by construction, which
+    subsumes the arrival-completeness blindness the survey measured at ~5%.
+  - **CLASS STAYS OUT OF THE KEY.** Class in the key means every lens correction re-keys and orphans
+    rows — re-importing wave 34's stated objection through the back door after the gate was narrowed
+    specifically to avoid it.
+  Three caveats the builder carries: (1) **the normaliser IS part of the key** — widening its
+  meta-drop list re-keyed 59 of 91 rows in untouched files, so pin it beside the register and treat
+  editing it as a re-key migration; (2) `head_hash` is variable-name sensitive (a `_params`→`_p`
+  rename re-keys that clause) but fails LOUD as orphan+arrival, which is the correct trade; (3) **no
+  site key can discriminate D469b's two-producer case** (`bulldocs_ingest_controller.ex:630`, one
+  emitted site fed by two callee arms) — that is an UNJUDGED reason, not a key defect, and must not
+  be used to argue for a wider key.
+- **PDS-D478 — THE REGISTER NEEDS A SECOND, ORTHOGONAL AXIS: `route_claim`. A CLASS VOCABULARY
+  CANNOT COVER `bulldocs_form_controller.ex:54`.** Verified at source: `route_tag/1` (`:1154-1157`)
+  prints `WRITE d#{s.depth}` from `s.write?` ALONE and never reads the shape; `evidence/3`
+  (`:820-824`) composes the UNCLASSIFIED reason from `site.write?`/`site.depth` alone. So **no value
+  in any SHAPE vocabulary can contradict a false route bracket.** Ship a shape-only `class` and `:54`
+  — the honeypot arm that by design writes nothing, comment-declared twice (`@moduledoc :22-24`,
+  inline `:53`) — still prints `[WRITE d5] UNCLASSIFIED — write-routed at depth 5`, a write credited
+  to the one arm that provably makes none, with the register standing silently beside it. The
+  register therefore carries TWO fields: `class` (what the receipt claims) and `route_claim` (what the
+  printed bracket asserts about THIS clause), with `ROUTE-MISCREDIT` as a value. This is a second,
+  independent reason class stays out of the key. `tickets_controller.ex:263` is a THIRD instance —
+  `write?=true` with an EMPTY `d=`, which is the machine-readable tell for caller-credit
+  (`census.exs:580-589`) — in a file that appears in NEITHER the charter NOR the owning doc.
+- **PDS-D479 — THE DECLARED REGISTER IS FIVE ROWS, AND D465'S OWN BASIS CITATION IS A PHANTOM.**
+  `bulldocs_form_controller.ex:54` joins the four; D469b already ruled it a `declared` row and it is
+  mis-bucketed on ROUTE, not shape (D478). **And the `:417` basis span is wrong in FOUR published
+  places.** Measured: the `@doc` block is **`:402-407`**, the anti-enumeration sentence **`:403-406`**,
+  the literal token `anti-enumeration` on **`:405`**. PDS-D465 cites "`@doc` :406-410" — `:406` is
+  the sentence's TAIL fragment, `:407` the closing `"""`, `:408` the `def` — **that span contains no
+  occurrence of "anti-enumeration", "never reveals", or "ALWAYS returns a generic"**. PDS-D453b's
+  ":410-417" is pure code. Wave 35's strategize brief said ":401-406" (`:401` is blank). And the
+  phantom is **already committed to the ledger**: `pds-w33-bl-catchall-success-clauses` acceptance
+  criterion #2 reads "auth_controller.ex:410-417 is left UNCHANGED and pinned as the declared-honest
+  control". A false citation inside the decision that DEFINES the register, propagated into an open
+  task's acceptance criteria — the epic's own defect at the paperwork layer. All four are amended
+  here; the correct citation is **`:402-407`, sentence `:403-406`**. `:399`'s basis (inline comment
+  at `:393`) is the only one of the five that was right.
+- **PDS-D480 — THE ROUTE-LENS FIX IS EXPLICITLY DEFERRED, AND THE REASON IS THAT ONE KNOB SERVES TWO
+  PURPOSES.** Two verifiers independently implemented the DI resolutions (capture edges +
+  `Module.concat` with literal aliases) and both measured the decisive fact: **11 route labels move,
+  ZERO shape labels move.** `UNCLASSIFIED` stays exactly 51 and `classified 40 + unclassified 51 ==
+  91` is byte-identical in all five probe configurations. Only 5 of the 14 `github_webhook` rows move,
+  and they move to READ, not WRITE — **repairing the route does NOT make them `write?`, so it opens no
+  `site.write?` arm for them.** The direction's fear is REFUTED: the 14-site ruling can be authored
+  today, at depth 6, against the shipped lens, and no route correction can invalidate it. But the fix
+  is not free: with the resolutions on, the route relation **no longer closes at 6 — it closes at 10**,
+  where write reads **73** (the shipped floor of 54 understates by 35%) while **POST-READ TRIPLES to
+  43**, the exact cross-row laundering depth 6 was tuned to suppress. Route completeness wants 10;
+  evidence admissibility wants ≤6. Today they coincide at 6 ONLY BECAUSE THE LENS IS BLIND. Repairing
+  the blindness SEPARATES them and forces a depth SPLIT — two numbers, not one knob. That is a bigger,
+  sharper task than "fix the resolver" and it is filed, not built. Nobody may quote 73 without quoting
+  POST-READ 43 beside it.
+- **PDS-D480a — CLAUSE COLLAPSE IS SOLVED IN THE ATTRIBUTION DIRECTION AND BROKEN IN THE CALLEE
+  DIRECTION, 68 TIMES.** `callees/2` ends in `Enum.uniq_by(&{&1.module, &1.name, &1.arity})`
+  (`census.exs:730`) and `bfs/7`'s seen key repeats the collapse (`:634`), so a verb-free fallback
+  clause shadows the real one — `def confirm_user(_), do: :error` at `accounts.ex:500` wins over the
+  writing clause at `:483`. Patching BOTH keys flips `auth_controller.ex:379` UNROUTED→**[WRITE d1]**
+  and `:417` UNROUTED→**[WRITE d2]**, moving write-routed 54→**56**; either patch alone changes
+  nothing. A corpus audit finds **68** `{module,name}` groups where the resolver picks a verb-free
+  clause over a verb-carrying one. **And the printed sentence `CLAUSE-COLLAPSE 0 of 91` would not
+  change if callee-side collapse were total** — the arm audits attribution only. A reader finishes
+  that line believing clause collapse is solved; it is half-solved, and the broken half silently
+  deletes write evidence. **The sixth integrity arm therefore ships WITH a non-gating
+  `CALLEE-COLLAPSE` FINDING line carrying the 68**, or it certifies a census that is losing edges.
+  The 2-line fix is filed as its own round-2 row because it moves the write denominator.
+- **PDS-D481 — THE SIXTH ARM IS PROMOTED, IT MUST ASSERT `unowned == 0` TOO, AND EVERY ARM'S FAIL
+  LINE IS CURRENTLY A FALSE SENTENCE.** The arm is mutation-provable and it is the only bucket-adjacent
+  number in the census that needs no lens caveat: deleting the line pin at `census.exs:626` drives
+  `CLAUSE-COLLAPSE 0 → 15 of 91` **while the census still prints `CENSUS OK` and exits 0**, and it
+  silently moves the buckets 40/51 → 39/52. It is depth-INVARIANT (0 at every depth 1-6, structurally,
+  because `owner` is resolved before the bfs) and survives an ordinary corpus edit. **Two corrections
+  to the filed shape.** (1) The assignment's proposed second mutation — perturbing `max_line/2` — is a
+  measured NO-OP in both forms tried, because understating `last` can only REMOVE a candidate owner,
+  never produce a surviving owner that fails containment; the working second mutation is DEMOTING the
+  line pin below the arity pin (the realistic refactor defect: the pin still present, only reordered),
+  which also drives 0→15. Record `max_line` as MEASURED-DEAD so no later wave re-proposes it.
+  (2) `report_clause_collapse/1` filters `& &1.owner` BEFORE the containment reject (`:1019-1020`), so
+  an `owner == nil` site is neither collapsed nor counted — a fail-open. It is latent today (owned =
+  91 of 91) but **constructible**: a module-body `@probe %{ok: true}` produces `fn ? — no enclosing
+  function resolved`, `EMITTED 91→92`, and the arm prints `0 of 92` having tested 91. The arm asserts
+  `collapsed == 0 AND unowned == 0`. **PDS-D467b is confirmed at the shell and it is worse than
+  "identical interpolation":** forcing CLASSIFICATION-TOTAL red prints `FAIL CLASSIFICATION-TOTAL
+  classified 39 + unclassified 51 == emitted 91` — 39+51=90, **a FALSE EQUATION asserted with `==` on
+  the deciding line**, exit 1; and it fires on LENS-LOSES-NOTHING too (`textual 104 == ast 95 + phantom
+  101`). The fix is neither of the two options as posed: **generalise the in-repo precedent at
+  `:1255-1262`** (DELEGATE-REACHES-WRITE already carries per-arm false-branch prose with a committed
+  rationale) — one renderer shape, per-arm CONTENT, equations as `got X / want Y`. This is a
+  strictly-required co-slice, not a follow-up: promoting the sixth arm without it means the new arm
+  prints `CLAUSE-COLLAPSE 15 == 0` on its own red line.
+- **PDS-D481a — THE HONEST ARM COUNT IS FIVE REACHABLE PLUS ONE UNREACHABLE PLUS AN EXIT-2 REFUSAL,
+  AND THE OWNING DOC IS WRONG ABOUT IT TWICE.** CORPUS-INTACT is structurally unreachable, PROVEN not
+  argued: `guard_corpus!/1` refuses on the IDENTICAL predicate and halts 2 at `:185` long before
+  `integrity/9`; a 20-file `--files-from` run exits 2 with `REFUSED: TRUNCATED CORPUS` and never
+  prints a CORPUS-INTACT line. Post-promotion the count is **five reachable** (LENS-LOSES-NOTHING,
+  EMITTERS-PARTITION, CLASSIFICATION-TOTAL, DELEGATE-REACHES-WRITE, CLAUSE-COLLAPSE-AND-UNOWNED) —
+  never "six arms" flat. `docs/decisions/success-claim-census.md:166` says "(corpus, partition,
+  delegate reach)" and `:182` says "the three integrity checks that can go red": both wrong, and the
+  first names the one that can never go red.
+- **PDS-D482 — THE GATE IS RULED IN, IT ASSERTS NOTHING ABOUT BUCKETS, AND IT LANDS LAST.** PDS-D467
+  deferred on a stated condition — "a gate over a lens with two measurably wrong buckets ratchets the
+  wrongness into CI and makes every later correction a red build." **That objection is answered BY
+  CONSTRUCTION and the answer is measured, not asserted:** the census prints three DRIFT lines today
+  (`write-routed recorded 64 derived 54 DRIFT`, `read-routed 17/14`, `unrouted 10/23`) and still exits
+  0 with `CENSUS OK`. A bucket correction can never red the build because no bucket verdict is gated.
+  The gate asserts exactly three things: integrity arms PASS, `--selftest` passes, the register is
+  complete in BOTH directions. Supporting measurements: the fence is CLEAR (**0 of 9 open PRs touch
+  `.github/workflows/**`**; the one live branch modifying `elixir.yml` is already merged as #8251 —
+  and it moved **1.6 days** ago, not the brief's three). **S3-SUBSUMED is COMPUTED** from the
+  workflow's own `needs` graph (`required-checks-generate.sh:409`, `:790-824`), so a census job in
+  `elixir-gate.needs` can NEVER be promoted to a required context and adds **zero deadlock surface**
+  under `enforce_admins`. The hermetic suite is GREEN with the patch applied and byte-identical to
+  baseline — and that green is a READ: renaming the job to `${{ github.event_name }}` gives **94
+  passed, 17 failed, EXIT=1** naming `pds-receipt-census`. **And the one thing nobody had proven is
+  now proven: the census runs under CI's EXACT pin (Elixir 1.18.1 / OTP 27) in a container holding
+  only `scripts/` and `api/lib` — no mix.exs, no deps, no `.git` — and produces BYTE-IDENTICAL
+  numbers** (textual 104, ast 95, phantom 9, emitted 91, `40 + 51 == 91`, route 54/14/23, five arms
+  PASS, exit 0). The parser-portability risk is REFUTED. **No `needs:` and no `if:`** — precedent is
+  path-escape's own comment in the same file, and `needs: changes` is actively harmful (a dispatcher
+  failure reports the census `skipped`, and the decide arm's gate is the literal `NEVER`, so the
+  aggregator reds twice for one cause). **THE ORDERING IS LOAD-BEARING: the job block lands LAST**,
+  after `--selftest` exists, because `--selftest` today performs a full census and exits 0 having
+  asserted nothing — a required-context green that asserts nothing while doubling the job cost is the
+  epic's own offence wearing the gate's badge. **Cost, corrected:** the SKIP path is **35-83s measured
+  across 13 PR runs**, not D467's 32-36s, so +40s roughly DOUBLES a docs-only PR; and the magnitude is
+  decided by slice 4's selftest design (~33-45s with today's no-op, 60-90s with a real harness), not
+  by the job block. **The escape hatch did NOT fire** — its stated trigger was an unstable key, and
+  D477 proves the key stable once repaired. It remains armed: if rounds 2-3 do not land clean, the
+  GATE is the slice that gets cut, never the register.
+- **PDS-D483 — THE `--selftest` HARNESS IS BUILDABLE, BUT THE OBVIOUS SEAM IS REFUTED.** A
+  `--files-from` fixture list **cannot reach any arm**: `guard_corpus!/1` runs at `census.exs:98`,
+  before parse and before classify, and the floor and sentinel arms are **OR'd** (`:160`) — a corpus
+  of 803 real files, 203 OVER the floor, minus one sentinel still exits 2. There is no fixture list
+  small enough to mutate and large enough to pass. **The working seam is a FULL-SIZE TEMP CORPUS +
+  CWD INJECTION** and it needs no code change: `corpus/1` falls through to a CWD-relative
+  `Path.wildcard("api/lib/**/*.ex")` and the sentinels are relative literals, so copying `api/lib` to
+  `$TMP/api/lib` and running with an absolute script path from `cwd=$TMP` reproduces the live census
+  byte-for-byte. **Both legs proven:** severing the facade delegate in the temp corpus prints `FAIL
+  DELEGATE-REACHES-WRITE … the facade probe is blind` and exits **1** (and moves the delegate count
+  21→20, so the fixture is self-evidently applied); the refusal leg is proven TWICE — 1-file list and
+  803-files-minus-a-sentinel — pinning the floor arm and the sentinel arm SEPARATELY rather than
+  conflating them. This mirrors every mutation harness in the repo: `sobelow-baseline-staleness-check.sh`
+  injects `--api-dir`, `pds-ledger-census_test.sh` injects `--fixture-dir` and `cd "$hostile"`. **None
+  of them hands the tool a file list.** Cost note: a fixture needs its own corpus copy and a full
+  census, so copy ONCE and re-mutate in place (the ancestor's shape) or an 8-fixture selftest is
+  minutes, not seconds.
+- **PDS-D483a — THE "ANCHORS AS TWO CONCATENATED FRAGMENTS" CONVENTION DOES NOT EXIST. I INVENTED
+  IT.** Four independent greps return zero hits as a convention; the only tree-wide match is
+  `internal/manifest/manifest_test.go:98`, two concatenated *manifests*, unrelated. The shape with a
+  survival record is `cloud-static-gz-guard.sh:291` — **FAIL-CLOSED when the anchor is not found** —
+  and it carries a SECOND invariant nobody named: `:299-305` asserts the mutation ACTUALLY APPLIED
+  (`FAIL the glob mutation did not apply — the case below would be vacuous`), with `:284-288` stating
+  the doctrine ("a sed that matches nothing produces an UNMUTATED copy that the guard then passes").
+  **Both shapes go in the selftest.** Related correction: `pds-ledger-census_test.sh:17-18` says its
+  ancestor has "8 fixtures, each pinned to a SPECIFIC exit code" — accurate as written; any
+  restatement as "each pinned to a DISTINCT exit code" is false (the pattern is 0/1/1/1/2/2/2/2).
+- **PDS-D484 — `has_select_in_update?` IS UNSOUND BY CONSTRUCTION, BUT POST-READ 14 IS NOT INFLATED
+  AND THE CAS SHADOW IS 13 SITES, NOT 1.** Wave 34's one-paid-helper disease is NOT recurring inside
+  the instrument built after learning it — but the reason is layout, not measurement, so it is one
+  refactor from being true. Mutation-proven: deleting `select: d` from `Internal.fenced_content_write/4`
+  moves POST-READ 14→2 and CAS 0→12, and the twelve rows that leave are EXACTLY the twelve
+  `tasks_controller` rows; deleting it from `BlockOps.fenced_paper_update/4` (**note the path: it is a
+  `defp` at `api/lib/barkpark/content/papers/block_ops.ex:956`, NOT `api/lib/barkpark/bulldocs/`, which
+  does not exist**) moves 14→13 and the one row that leaves is `bulldocs_ingest_controller.ex:630`. The
+  fourteenth, `oidc_controller.ex:82`, is certified by `Auth.consume_login_ticket/1`. **All three
+  certifiers place their `select:` on their OWN updated query.** The unsoundness is nonetheless
+  demonstrated: with `select:` removed and a DEAD, never-executed `from(... select: d.rev)` added to the
+  same body, the census prints POST-READ **14** again, byte-identical to baseline. Already filed as
+  `pds-bl-has-select-in-update-unsound` (#8839) — **reference it, do not re-file.** Consequence:
+  **PDS-D474's shadow is 13 sites, measured at full population for the first time, not the one
+  hand-traced example.**
+- **PDS-D485 — THE SET LENS DISSOLVES `pds-w34-census-cas-shadow` RATHER THAN RELABELLING IT.**
+  Measured under a SET lens (every arm evaluated independently, no `cond` precedence): 13 of 91 sites
+  carry >1 shape, ALL of them `POST-READ + CAS-CONFIRMED-ECHO`, and in **all 13 the SAME function
+  supplies both** halves of the evidence — the compound never welds two different rows. Per-shape:
+  POST-READ **14 → 14 unchanged**, CAS **0 → 13**, UNCLASSIFIED **51 → 51 unchanged**, sites with 0
+  shapes = 51, bit-identical to today. **Exactly one bucket moves and nothing is taken from any other**
+  — the task's own warning ("do NOT simply reorder the arms — that trades one shadowed bucket for
+  another") is satisfied because no reordering happens. Once a site can carry `{POST-READ,
+  CAS-CONFIRMED-ECHO}`, "shadowed" stops being a category. The task is CLOSED as dissolved-by-set.
+  Residual, filed separately: `int_tuple_match?/1` demands an integer LITERAL in the tuple's first
+  position, so `Content.Sessions`'s `{rows, _} = ... ; if rows == 1` spelling (`sessions.ex:84-94`,
+  `:173-183`) is invisible — **0 live emitted sites today**, so a latent under-count, not a live wrong
+  number. Quote CAS as "13 under the literal-tuple lens".
+- **PDS-D486 — THE FIVE BACKGROUND ARMS DIVERGE IN TWO FIELDS, NOT ONE, AND THE EXISTING TEST PATTERN
+  STRUCTURALLY CANNOT CATCH HALF OF IT.** L4 is now L1: each arm driven one at a time through its real
+  public entry with a subscription on `documents:production`. Divergent field set is
+  `["doc.updated_at", "document._updatedAt"]` on **all five**, identical; `msg.rev`, `document._rev`
+  and `doc.content` are byte-equal everywhere — the CAS really does prove exactly one row took exactly
+  this content (D451a). **Both leaks ride ONE broadcast**: `broadcast.ex:75` puts `doc.updated_at` in
+  the `doc:` map and `:69` renders `Envelope.render(doc, nil, :internal)`, whose `envelope.ex:65`
+  emits `"_updatedAt"` from the same stale struct field. **A repo-wide grep finds `_updatedAt` in
+  SEVEN test files and NOT ONE asserts a broadcast's `_updatedAt` against a stored row** — a builder
+  copying `receipt_honesty_test.exs:203-250` ships a differential that structurally cannot catch half
+  the defect. The `select: d` repair closes BOTH at once (mutation-proven: ARM 1's divergent set goes
+  `[...] → []`, and `fence_test.exs` stays 7/0). **Three corrections.** (1) Line numbers are stale by
+  exactly +6 in the wish, the task brief AND the charter (`:2657`): the arms are `fence.ex:118`,
+  `ttl_sweeper.ex:411`, `ttl_sweeper.ex:570`, `compactor.ex:311`, `compactor.ex:553`. (2) The 0-row
+  shapes are **THREE distinct values across five arms, not four**: `nil` (fence, a bundle-absent
+  sentinel that is not an error atom at all), `:skipped` (×3), `{:error, :stale_claim}` (restore). A
+  builder sizing this as "four assertions" is writing against a miscount. (3) `Compactor.restore/2`
+  takes the document **UUID**, not the `doc_id` string — `cast_uuid` folds a `doc_id` into a silent
+  `{:error, :not_found}`. The static escape is refuted at **L1**, not by reading migrations: the live
+  test DB has ZERO non-internal triggers on `documents` and `updated_at`'s `column_default` is NULL;
+  the one trigger that writes `documents` is `AFTER INSERT ON revisions` and never touches
+  `updated_at` — and it genuinely FIRES during the compaction arm, which still diverges.
+- **PDS-D487 — THE GO SLICE IS DONE-SHAPED, ITS FILED CRITERION 2 REDS THE BUILD AS WRITTEN, AND ITS
+  HEADLINE JUSTIFICATION IS HALF WRONG.** A verifier BUILT the transform: 3 files, ~90 lines, full
+  package green (`ok … 26.395s`), `go build` clean, `go vet` clean, `gofmt -l` empty. **The literals
+  are at `hetzner_storage_cmd.go:452` and `:739`** (argument lines); the census reports those sites at
+  `:451`/`:738` (its `site.line` is the CALL line) — **neither citation is stale, they measure
+  different things**, and the charter's `:7472` carries a genuinely stale pair (`:288`/`:562`).
+  **RULING ON PLACEMENT: beside their verbs, in `hetzner_storage_cmd.go`**, following
+  `hzResBasisRRSetKey`'s deliberate precedent at `hetzner_dns_cmd.go:718` — each basis belongs to
+  exactly one verb and needs a per-verb reason. Safe because `hzResSourceFiles` globs every non-test
+  `hetzner_*.go`, proven by both new names appearing in `BASIS CONSTANTS DERIVED`. **The filed
+  criterion 2 ("DELETE `hzResDeclaredBasisReads` and the two key-shaped rows in `hzBasisShapes`")
+  produces FOUR RATCHET REDS as written** — dropping the `hzResBasisReads` rows reds
+  `BASIS-READ-UNBOUND` ×2 AND `BASIS-CONSTANT-UNJUDGED` ×2; leaving the shape rows key-keyed reds
+  `SHAPE-ROW-STALE` ×2 AND `BASIS-UNJUDGED` ×2. **The shape rows are RE-KEYED `key:`→`konst:`, never
+  deleted.** Safe ordering: constants → `hzResBasisReads` rows → shape rows re-keyed → extend the
+  literal rejection to EVERY emitter → **only then** delete `hzResDeclaredBasisReads`, which is what
+  makes that deletion safe rather than a silent hole. `go vet` is a hidden gate: the obvious spelling
+  leaves `unreachable code` and fails the build. **The claim "restores the second independent lock" is
+  HALF WRONG and the commit message must say so:** the identical shape-compatible lie ("ListBuckets
+  after the delete, with every object in it re-checked" — a per-object re-check that never happens) is
+  GREEN before the transform AND green after, because leg 3 judges VOCABULARY, not truth. What the
+  slice actually buys, measured: `BASIS SITES` goes `const=4 … literal=2` → `const=6 … literal=0`, and
+  `BASIS CONSTANTS DERIVED` 5 → 7, entering the two bases into an arm they were previously OUTSIDE
+  ENTIRELY. `READ-BOUND 27/38`, `SHAPE COVERAGE 7/7` and `DISTINCT WORDINGS 7/7` are all UNCHANGED —
+  **membership swaps beneath an unchanged number, so reporting those three as the proof is a vacuous
+  green by this epic's own standard.**
+- **PDS-D488 — THE OWNING DOC IS WRONG IN 21 PLACES, AND ITS DECLARED BYTE BUDGET IS ENFORCED BY
+  NOTHING.** Not the direction's six and not its revised sixteen: every integer in the file was
+  re-derived. **21 false assertions** — 13 Elixir (textual 103→104, "102 lines"→103, phantoms 8→9,
+  depth-3 33/12/46→34/20/37, depth-6 42/…/35→54/…/23, "35 reach no Repo verb"→23, `44+47==91`→`40+51`,
+  UNCLASSIFIED 47→51 at two sites, POST-READ 17→14, UNREACHABLE 27→26), 4 shell (23→24 glyphs, 12→13
+  proof harnesses, "4 each"→4/5/4, 20→21 plumbing), plus "97"→98, "27 carrier files"→26-or-28 (false
+  under BOTH readings) and "~5 s". **One of the direction's six was OVER-charged**: the read count 14
+  in the depth-6 triple is CORRECT. **The shell section had drifted and nobody had noticed** — the sole
+  cause is `deploy/site-spawner-live-proof.sh` going 4→5 glyphs in #7871. **And the direction's claim
+  that "the only still-TRUE numbers are the three the doc publishes a re-derive command for" is
+  REFUTED**: fourteen assertions are still true. The real shape is that **every number touched by the
+  route/shape lens rotted at once when the lens changed, and the untouched substrate counts held** —
+  so the amendment annotates LENS-DERIVED numbers with their lens and gives substrate counts a
+  re-derive command. **THE FINDING NOBODY ASKED FOR: `scripts/check-doc-budgets.sh` does not gate this
+  file at all** — it checks 33 named paths and `grep 'success-claim\|decisions/'` returns nothing, so
+  the `budget: 3200tok` declared on line 1 is decorative. **A declared constraint with no read behind
+  it, on line 1 of the doc the amendment is cleaning** — the epic's own defect, at the top of its own
+  paperwork. The amendment ENROLLS it at 12800B (the repo's 4-bytes-per-token convention; the file is
+  11982B, 818B headroom). **A 22nd defect that is not a number:** the doc's mutation record at
+  `:159-161` ("removing all five write verbs from `close.ex` flips DELEGATE-REACHES-WRITE to FAIL") NO
+  LONGER REPRODUCES — `close.ex` holds **zero** Repo write verbs today, and neutralising every
+  remaining `Repo.*` in it leaves the arm PASS; the write lives in `internal.ex` (`Repo.insert!` :386,
+  `Repo.update_all` :57), and neutralising THOSE does red it. **A receipt without a read, in the one
+  paragraph that exists to prove a check can fail.** The census's OWN prose is stale in the same way
+  and is slice 1's fence, not the doc's: `census.exs:1051` hardcodes "Write-routed climbs
+  23/29/39/43/53/54" while its own table three lines above computes **23/27/34/43/53/54**;
+  `:1057` says "POST-READ reads 6 here" against a printed 14; `:51` comments "27 carrier files".
+- **PDS-D489 — THE REGISTER'S HEADER MUST NAME ITS BLIND SPOT, AND `auth_controller.ex:351` IS NOT
+  UNJUDGED-BY-CONSTRUCTION.** The census seeds sites only from `ok: true` literals and reasons only
+  within the emitting frame. An independent AST probe measures **21 function-tail SENTINEL-`:ok`-
+  RETURNERS** in `api/lib` (a Repo write whose function returns a hard-coded `:ok`) — reproducing the
+  surveyor's number with a second lens and NAMING the members for the first time, against a population
+  D465a declares unmeasured. **21 is a FLOOR**: a clause-local scan finds 11 more (+52%), but 5 of 5
+  inspected are NOT lossy (they branch on the write result), so **the ENUMERATION ceiling is real and
+  the SOUNDNESS ceiling is not** — clause-locality correlates NEGATIVELY with lossiness, and neither
+  21 nor 32 may be quoted as a count of unsound sites. **The indictment is sharper than "an unseen
+  population":** `Accounts.revoke_user_session_token/1` (`accounts.ex:321`, in the 21, `@spec :: :ok`,
+  discards `update_all`'s row count) is called at `auth_controller.ex:347`, one frame below the
+  EMITTED site `:351`. **Whatever bucket the census gives `:351`, the only value that could have
+  contradicted it was destroyed one frame down.** Zero of the nine group-C callees are in the 21, so
+  the hole is specific, not diffuse. **RULING ON `:351`: it SPLITS into two rows with DIFFERENT
+  verdicts.** The `{ok: true, slo_url}` expression additionally asserts the SLO URL is a usable IdP
+  LogoutRequest → **UNJUDGED**, reason "no differential exercises the SAML-born branch". The bare
+  `%{ok: true}` → **PROVEN-ELIGIBLE**: a committed controller-boundary differential already exists at
+  `auth_controller_test.exs:164-170` (200 on logout, then **401** on the same bearer) which never
+  touches the destroyed return value. The general rule the register adopts: **a sentinel one frame
+  down destroys the RETURN channel, not the POST-CONDITION channel; a site is UNJUDGED-by-construction
+  only when the claimed fact has no observer at ANY boundary.** Ruling `:351` UNJUDGED would be
+  over-humble in the same way the fall-through was over-accusatory — a verdict issued from the shape
+  of the code rather than from a measurement. **A FOURTH INVISIBLE CLASS, which the census does not
+  declare:** `grep 'redirect\|put_flash'` over the census returns **zero**, yet
+  `session_controller.ex:404-419` discards the same sentinel and reports success with `put_flash(:info,
+  "Signed out.")` + a 302. **A Studio sign-out can say "Signed out." having revoked nothing**, and it
+  is outside all three of the census's declared blind spots (218 `json`, 66 `put_status`, 3
+  `send_resp`).
+- **PDS-D490 — G3 BECOMES AN ARM, FILED NOT BUILT, AND AN ARM MAY NEVER WRITE A VERDICT.** Seven of
+  the 24 sites the narrowed arm exonerates share one mechanically-detectable shape — `json(conn,
+  %{ok: true, <key>: <read_call>(...)})`, where the read is a DIRECT SIBLING of the `ok: true` pair in
+  the same map literal (`tasks_controller` 83/224/1008/1015/1696, `tickets_controller` 93/169). It
+  needs no dataflow, and it is FALSIFIABLE: `github_status_controller.ex:65` is the same shape but
+  dispatches through `status_fun().(...)`, a runtime capture the route lens cannot resolve, so the arm
+  correctly refuses it — **that refusal is the arm's own tripwire.** But Rival B lost for a reason and
+  this wave's load-bearing rule stands: **an arm may write the HYPOTHESIS column and may NEVER write a
+  verdict.** The number that matters — UNJUDGED — cannot be reduced by an arm, only by a ruling with a
+  reason attached. So RESPONSE-CARRIES-THE-READ is filed as its own row with its 7-site pre-registered
+  expected fire set and its named refusal; it does NOT ship in slice 1 (blast radius) and it does NOT
+  pre-empt the register (those seven still get rows; the arm supplies a hypothesis).
+- **PDS-D490a — GROUP C IS NINE PROVEN-ABLE ROWS, NOT NINE UNJUDGED ONES, AND THE PREMISE THAT THE
+  CONTROLLER CARRIES NO INFORMATION IS HALF WRONG.** All nine callees were read: **0 REFUTED, 0
+  UNJUDGED, 9 PROVEN-able** — not one is a sentinel; every one preserves a divergent failure value on
+  a sibling clause or converts failure to a raise. `Synonyms.delete/4` serves both `search:316` and
+  `v1/media:188`, so it is **eight distinct callees, nine register rows, ONE differential test file**
+  — the CHEAPEST third of the register, the opposite of what "nine per-site reads" implies. Reserve
+  the UNJUDGED budget for the `github_webhook` 14 and the `bulldocs_ingest` 9, where the lens is
+  genuinely blind. Two flags: `webauthn.ex:208` (`Repo.delete(cred) |> then(fn {:ok,_} -> :ok end)`)
+  reads as a bare `:ok` with no error path and will be mis-registered as a sentinel by a skim — it
+  RAISES, converting failure to a 500 rather than fabricating success; and `auth_controller.ex:460`
+  transitively reaches `revoke_all_user_sessions/1`, which IS one of the 21 — but what it discards is
+  `update_all`'s COUNT, not a failure value, so it is **not REFUTED**. **The body carries no
+  information; the CLAUSE HEAD carries a great deal** — eight of nine emit inside a head that already
+  discriminates. What the callee read supplies is whether that head is meaningful or decorative; in
+  all nine cases, meaningful. A register that records only "callee read required" loses that.
+- **PDS-D491 — ARITY-KEYING THE RESOLVER IS `{module, fun, required..total}` WITH PIPE EXPANSION, AND
+  THE FILED SCALAR SPELLING IS A REGRESSION.** Measured across five variants against the shipped
+  baseline: scalar `{mod,fun,arity}` gives route `50/13/28` (−4 WRITE), scalar+depipe `50/15/26`
+  (reproducing the surveyor's number exactly and pinning the whole regression on **default arguments**),
+  ranges alone `54/12/25` (WRITE recovered, −2 READ), and **ranges + pipe expansion is BYTE-IDENTICAL
+  to the shipped census.** All four lost WRITE edges are `bulldocs_ingest` breaking at the `Content`
+  facade on a default arg (`upsert_paper(attrs, opts \\ [])` etc.), none via captures, `apply/3` or
+  macros. **THE FINDING NOBODY NAMED: an arity key read off UNEXPANDED quoted source undercounts every
+  piped call by exactly one** — `key |> Thread.list_for_key()` quotes with `args == []`, and **9,434
+  piped call nodes exist in `api/lib`** against 25,092 remote calls. A second sub-mechanism: a bodiless
+  header `def f(a, b \\ 1)` declares defaults its sibling clause does not, so `min(req)` must propagate
+  across all recs sharing `{module,name,total_arity}`. **The byte-identical diff IS the acceptance
+  criterion** — an arity key that moves a printed number in this corpus is wrong, and it is
+  self-mutating (drop depipe → 2 rows move; drop ranges → 4 rows move). The key is NOT a no-op: it
+  drops **1,513 of 30,342 candidate edges (5.0%)** with zero change to any printed number, which is
+  exactly what a soundness hardening should look like. **On the IMPORT resolver specifically — the
+  filed task's own subject — the superset it names is EMPTY today**: zero cases corpus-wide where an
+  `only: [f: a]` declared arity failed to match the call arity. Exact-keying imports is a no-op AND a
+  latent trap (the moment an `only:` target gains a default it silently drops the edge). **Look the
+  import up by NAME and let `resolve/4`'s `req..total` filter reject impossible calls** — the guard
+  belongs on the DEF, not on `only:`. Also measured and NOT fixed by any arity key: `resolve/4`'s
+  module-SUFFIX fallback fires **5,826 times, 83 spanning more than one module** — print both meters
+  so the commit CANNOT claim "the graph is now exact". And `tickets_controller.ex:263`'s single-caller
+  attribution is a scalar-only artefact, not a correctness fix: `render_ticket/3` has SIX call sites
+  and both `create/2` and `close/2` genuinely call and genuinely write — the census prints one
+  arbitrary member of a six-caller set as if it were THE caller, which **no arity key fixes**. Filed
+  separately.
+- **PDS-D492 — WHAT THIS WAVE REFUSES.** It does NOT fix the route lens (D480 — deferred with its
+  depth-split measurement attached, because it moves every downstream number). It does NOT fix the
+  callee-side clause collapse (D480a — filed, 2 lines, mutation-proven, moves the write denominator).
+  It does NOT ship the RESPONSE-CARRIES-THE-READ arm (D490 — filed with its expected fire set). It
+  does NOT pay `has_select_in_update?`'s unsoundness (D484 — already filed as #8839). It does NOT
+  measure the SENTINEL ceiling (D489 — floor 21 recorded, ceiling filed). It does not touch the
+  `.sobelow-skips` residue, which is **PAID DOWN, NOT CURED**: the ratchet passes today at 0 stale of
+  50 checkable, but 7 of 57 rows (12%) are structurally outside their own checker and the key still
+  carries a line number — the honest argument against copying it is the two hand-repair waves eight
+  days apart, not a current STALE count. **Fable is unavailable, so the two slices that genuinely
+  warrant it (slice 1's lens correction and slice 5's register) run on Opus, and that is recorded here
+  rather than mislabelled** (D472's precedent). The `cloud/**` and `.github/workflows/**` fence belongs
+  to the concurrent Cloud Console wave — the census gate's three lines in `elixir.yml` are declared,
+  coordinated, and land LAST.
+
+### Wave 35 plan — 7 slices, 4 rounds
+
+`scripts/pds-elixir-receipt-census.exs` is the SERIAL SPINE: four slices touch it and they are
+strictly sequenced. Round 1 builds three slices in parallel.
+
+| # | round | slice | task | surface | model |
+|---|---|---|---|---|---|
+| 1 | 1 | The lens stops accusing | `pds-w35-lens-stops-accusing` | `scripts/pds-elixir-receipt-census.exs` | opus (warrants fable) |
+| 2 | 1 | Go basis literals become constants | `pds-w35-go-basis-constants` | `internal/cli/` | opus |
+| 3 | 1 | Five background write arms | `pds-w35-background-write-arms` | `api/lib/barkpark/tasks/` | opus |
+| 4 | 2 | The census can be made to fail | `pds-w35-census-selftest-argv-strict` | `scripts/pds-elixir-receipt-census.exs` | opus |
+| 5 | 2 | The owning doc tells the truth | `pds-w35-owning-doc-amendment` | `docs/decisions/`, `scripts/check-doc-budgets.sh` | opus |
+| 6 | 3 | The ledger starts accounting | `pds-w35-judgment-register` | census + register data | opus (warrants fable) |
+| 7 | 4 | The arrival tripwire | `pds-w35-elixir-census-gate` | `.github/workflows/elixir.yml` | opus |
+
+HIGH-FLIP-RISK slices, flagged for independent re-derivation before merge: **slice 1** (the arm's
+fired set — the wide/narrow/write-guard interaction annihilates, D476a) and **slice 6** (the register
+key's stability under a same-arity clause insertion, D477 — the escape hatch's stated trigger).
