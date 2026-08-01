@@ -247,20 +247,18 @@ export const CELLS = [
 // The view axis Leg B actually covers, derived from the cell table.
 export const COVERED_VIEWS = [...new Set(CELLS.map((c) => c.view))].sort();
 
-// Q3's NAMED PIN. `.content` starts 745.88px down the page at every width the
-// shell fold owns (<= 720) because the folded shell paints its whole nav above
-// the content instead of beside it. That is a REAL defect a person sees — slice
-// S2 pays it — and this sweep must not sit and wait for the fix. The pin is an
-// allowance that reds if the number GROWS.
-export const NAV_WALL_PIN = {
-  task: "cch-w13-bl-folded-shell-nav-wall",
-  maxWidth: 720,     // applies only where the shell fold is in force
-  maxTop: 745.88,    // measured on origin/main bytes
-  tol: 0.5,
-  removal: "cch-w14-bl-sweep-navwall-pin-removal",
-};
-// Everywhere else, `.content` must start inside the top FOLD_FRACTION of the
-// viewport. 0.4 of 800 = 320px; the measured value above 720 is 56.
+// `.content` must start inside the top FOLD_FRACTION of the viewport, at EVERY
+// width — there is no longer an exemption for the widths the shell fold owns.
+// 0.4 of 800 = 320px; the measured value above 720 is 56.
+//
+// THE PIN THAT USED TO LIVE HERE IS GONE (cch-w15-s1, removal row
+// cch-w14-bl-sweep-navwall-pin-removal). It allowed `.content` to start 745.88px
+// down at every width <= 720 — 2.27x this budget — so the folded shell was the
+// one region of the width axis this sweep was not actually measuring, and the
+// shipped `34vh` cap (0.34H + 56 = 0.4100 of H at 800, 0.4239 at 667, 0.4836 at
+// landscape 390) sat OVER the budget under it, reported green. The fold now
+// clears the bar on its own: `max-height: calc(40vh - 60px)` cancels the 56px
+// topbar and makes contentTop = 0.4H - 4 an identity at every height.
 export const FOLD_FRACTION = 0.4;
 
 // Q2's named hiding utilities. A className regex would swallow any class with
@@ -887,7 +885,7 @@ async function legRender(rep) {
   return withBrowser(async ({ cdp, evalJs, navSettle, openCell, closeCell, die }) => {
     const total = cells.length * widths.length;
     out(`\n>> render     ${cells.length} cells x ${widths.length} widths = ${total} renders — MINUTES, not seconds\n`);
-    const dead = [], q1f = [], q2f = [], q3f = [], q3pin = [], notes = [];
+    const dead = [], q1f = [], q2f = [], q3f = [], notes = [];
     const t0 = Date.now();
     let done = 0;
 
@@ -931,10 +929,8 @@ async function legRender(rep) {
           }
           const top = m.q3.top;
           if (top != null) {
-            const pinned = width <= NAV_WALL_PIN.maxWidth;
             if (top > FOLD_FRACTION * m.q3.vh) {
-              if (pinned && top <= NAV_WALL_PIN.maxTop + NAV_WALL_PIN.tol) q3pin.push({ cell: cell.name, width, top });
-              else q3f.push({ cell: cell.name, width, top, budget: Math.round(FOLD_FRACTION * m.q3.vh), pinned });
+              q3f.push({ cell: cell.name, width, top, budget: Math.round(FOLD_FRACTION * m.q3.vh) });
             }
           }
           row.push(`${width}:${m.q1.sw}${m.q1.over ? "!" : ""}`);
@@ -979,10 +975,6 @@ async function legRender(rep) {
     }
     for (const f of q3f) out(`   ✗ Q3 BELOW THE FOLD  ${f.cell}@${f.width}: .content starts ${f.top}px down (budget ${f.budget}px)\n`);
     for (const n of notes) out(`   · note CUE_STUCK  ${n.cell}@${n.width}: ${n.sel} shows a ${n.cue}px edge cue while it FITS\n`);
-    if (q3pin.length) {
-      const worst = Math.max(...q3pin.map((p) => p.top));
-      out(`   · Q3 PINNED    ${q3pin.length} cells at widths <= ${NAV_WALL_PIN.maxWidth} start at ${worst}px (allowance ${NAV_WALL_PIN.maxTop}px, ${NAV_WALL_PIN.task}). Reds if it GROWS. Removal: ${NAV_WALL_PIN.removal}\n`);
-    }
 
     const failed = q1f.length + q2f.length + q3f.length;
     if (failed) {

@@ -11771,7 +11771,11 @@ test("cch-w14-s2: the folded shell CAPS the nav strip and CUES the clip (never a
   const at = css.lastIndexOf("@media (max-width: 720px)", anchor);
   assert.ok(at > 0 && anchor - at < 200, "the fold must still be the 720px block");
   const block = css.slice(at, css.indexOf("\n}\n", at) + 3);
-  assert.match(block, /max-height:\s*34vh/, "the folded strip must be capped (it stood 690px tall)");
+  // cch-w15-s1: the cap subtracts the invariant 56px topbar so contentTop is
+  // 0.4H - 4 at EVERY height. A bare `Nvh` cap is `N + 56/H` and is worst at the
+  // smallest height, which is how 34vh sat over the sweep's own 0.4 bar at all of
+  // 800/667/390 while a 745.88px pin reported it green.
+  assert.match(block, /max-height:\s*calc\(40vh - 60px\)/, "the folded strip must be capped by a topbar-cancelling calc (it stood 690px tall; a bare vh cap drifts with height)");
   assert.match(block, /overflow-y:\s*auto/, "a cap with no scroller strands the rest of the nav");
   // A cap with no continuation cue is the W12 clipped-without-cue defect wearing
   // a new hat, which is why these travel together and neither may ship alone.

@@ -22,7 +22,7 @@ import { fileURLToPath } from "node:url";
 import {
   stripCssComments, boundaryOf, parseWidthClause, parseMediaBreakpoints,
   parseViewIds, boundaryWalk, coverageReport,
-  BREAKPOINTS, WIDTHS, CELLS, COVERED_VIEWS, NAV_WALL_PIN, FOLD_FRACTION,
+  BREAKPOINTS, WIDTHS, CELLS, COVERED_VIEWS, FOLD_FRACTION,
   HIDING_UTILITIES,
 } from "./breakpoint-sweep.mjs";
 
@@ -218,20 +218,65 @@ test("no sentinel is merely the screen's own container", () => {
   }
 });
 
-// ── Q3's pin ─────────────────────────────────────────────────────────────────
+// ── Q3's bar, and the shape that clears it ───────────────────────────────────
+//
+// THE PIN THAT USED TO LIVE HERE IS DELETED (cch-w15-s1). It allowed 745.88px —
+// 2.27x this budget — at every width the shell fold owns, so Q3 was inert
+// exactly where the defect was. Deleting it alone would have left FOLD_FRACTION
+// referenced by NOTHING but the import: mutation-proven on the pre-deletion
+// tree, `FOLD_FRACTION = 0.99` was green in this suite, green in Leg A, and it
+// SILENCES the folded-shell reds. These two tests are the replacement, and both
+// red under that mutation.
 
-test("the nav-wall allowance is a NAMED pin with a removal row, scoped to the fold", () => {
-  assert.equal(NAV_WALL_PIN.task, "cch-w13-bl-folded-shell-nav-wall");
-  assert.equal(NAV_WALL_PIN.removal, "cch-w14-bl-sweep-navwall-pin-removal");
-  assert.equal(NAV_WALL_PIN.maxWidth, 720, "the pin must not cover widths above the shell fold");
-  assert.ok(NAV_WALL_PIN.maxTop > FOLD_FRACTION * 800,
-    "a pin below the budget would be inert — it exists precisely because the measured value exceeds the budget");
+// The shell fold's cap, read from the shipped bytes rather than restated. The
+// fold is the 720px block that stacks .app-shell into a column (charter D153:
+// there is exactly one such rule, and the fold is never raised).
+function foldCap() {
+  const anchor = APP_CSS.indexOf(".app-shell { flex-direction: column; }");
+  assert.ok(anchor > 0, "the shell-fold block must exist");
+  const at = APP_CSS.lastIndexOf("@media (max-width: 720px)", anchor);
+  const block = APP_CSS.slice(at, APP_CSS.indexOf("\n}\n", at) + 3);
+  const m = block.match(/max-height:\s*calc\(\s*(\d+(?:\.\d+)?)vh\s*-\s*(\d+(?:\.\d+)?)px\s*\)/);
+  assert.ok(m, "the folded strip must be capped by a vh-minus-topbar calc — a bare Nvh cap cannot be an identity");
+  return { vh: Number(m[1]) / 100, minus: Number(m[2]) };
+}
+
+test("the folded shell clears the fold bar at EVERY height, as an identity — not at one lucky phone", () => {
+  const { vh, minus } = foldCap();
+  // Driven in Chrome (--render, both themes): contentTop = cap + TOPBAR exactly,
+  // with the topbar an invariant 56px. That makes a bare `Nvh` cap a FRACTION of
+  // `N + 56/H`, worst at the SMALLEST height — which is why the shipped 34vh read
+  // 0.4836 of H at landscape 390 while passing casual inspection at 800.
+  const TOPBAR = 56;
+  const contentTop = (H) => vh * H - minus + TOPBAR;
+  // 390 is the BINDING height (landscape 720x390), not 800.
+  for (const H of [800, 667, 390]) {
+    assert.ok(contentTop(H) <= FOLD_FRACTION * H,
+      `contentTop ${contentTop(H)} exceeds the ${FOLD_FRACTION} bar (${FOLD_FRACTION * H}) at H=${H}`);
+  }
+  // Measured on the shipped shape: 316/320 @800, 262.8/266.8 @667, 152/156 @390 —
+  // a CONSTANT 4px of margin, which only holds because the calc cancels the
+  // topbar. Restate that as the identity, so a cap that merely happens to fit
+  // one height cannot satisfy this test.
+  assert.equal(minus - TOPBAR, 4, "the cap must cancel the topbar (calc(Nvh - 60px) over a 56px bar), leaving a height-independent 4px margin");
+  assert.equal(vh, FOLD_FRACTION, "the cap's fraction IS the bar — any other value makes the margin drift with height");
 });
 
-test("the pin is an upper bound: today's measurement passes, one pixel more does not", () => {
-  const allowed = (top) => top <= NAV_WALL_PIN.maxTop + NAV_WALL_PIN.tol;
-  assert.equal(allowed(745.88), true);
-  assert.equal(allowed(746.88), false, "the pin must RED if the nav wall grows");
+test("the fold bar is a real bar: it still REFUSES the 34vh shape this slice replaced", () => {
+  // Anti-vacuity. A bar loose enough to pass everything is not a bar, and the
+  // deletion above removed the only other thing that referenced FOLD_FRACTION.
+  // The pre-fix shipped shape put .content at 0.34H + 56; at the binding height
+  // that is 188.6px against a 156px budget. If FOLD_FRACTION ever loosens to
+  // where that passes, Q3 has stopped measuring the defect it was built for.
+  const oldShape = (H) => 0.34 * H + 56;
+  for (const H of [800, 667, 390]) {
+    assert.ok(oldShape(H) > FOLD_FRACTION * H,
+      `FOLD_FRACTION ${FOLD_FRACTION} would ACCEPT the 34vh nav wall at H=${H} (${oldShape(H)} <= ${FOLD_FRACTION * H}) — the bar has gone inert`);
+  }
+  // And the pin's own number must never be acceptable again: 745.88 was the
+  // measured wall, and it is 2.27x the budget at H=800.
+  assert.ok(745.88 > FOLD_FRACTION * 800,
+    "the nav wall the deleted pin allowed must still be a Q3 defect");
 });
 
 // ── Q2's named lists ─────────────────────────────────────────────────────────
