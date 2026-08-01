@@ -48,9 +48,15 @@ defmodule PDS.Census do
     unrouted: 10
   }
 
-  # Route-bearing sentinels. A carriers-only corpus (the 27 files that literally hold an
+  # Route-bearing sentinels. A carriers-only corpus (the files that literally hold an
   # `ok: true`) parses fine and reports write=0 with no error — PDS-D449a. These files
   # carry no `ok: true` themselves, so their absence PROVES the corpus is truncated.
+  #
+  # THE CARRIER COUNT IS DERIVED, NEVER TYPED (PDS wave 35). This comment said "the 27
+  # files"; the measured value is 26 files carrying an AST-literal pair and 28 carrying a
+  # textual occurrence — false under BOTH readings, and a hardcoded population inside the
+  # instrument that measures the population is the exact defect this epic keeps filing.
+  # report_lens/5 now prints both, live.
   @sentinels [
     "api/lib/barkpark/tasks.ex",
     "api/lib/barkpark/tasks/close.ex",
@@ -84,8 +90,101 @@ defmodule PDS.Census do
   @max_depth 6
   @sweep [1, 2, 3, 4, 5, 6]
 
-  @shapes ~w(POST-READ CAS-CONFIRMED-ECHO PURE-ECHO UNREACHABLE-ERROR WRONG-ROW
+  # DEPTHS PAST THE CENSUS DEPTH, MEASURED RATHER THAN ASSERTED. The claim "the route
+  # closes at 6 but the shape relation does not" is only worth printing if the run can
+  # still see it fail, so the sweep keeps going past @max_depth and the prose reads its
+  # sentences off these rows. 12 is where wave 34 found the shape relation flat.
+  @beyond [7, 8, 9, 10, 12]
+
+  @shapes ~w(POST-READ CAS-CONFIRMED-ECHO PURE-ECHO CATCH-ALL-TO-SUCCESS WRONG-ROW
              DISCARDED-POST-READ)
+
+  # ------------------------------------------------------------- declared register
+  #
+  # COMMITTED DATA, NOT A SUPPRESSION SWITCH (PDS wave 35). A site lands here only with a
+  # BASIS the reader can open — a line span in the source that says, in prose, that the
+  # receipt deliberately does not track an outcome. The field value is `declared`, the
+  # spelling already shipping in `internal/cli/hetzner_respost.go:197`
+  # (`hzKeyConfirmation: "declared"` beside `hzKeyConfirmBasis`), because a confirmation
+  # level that exists in one surface must not be re-invented with a new name in another.
+  #
+  # WHAT THE REGISTER IS FOR. Exactly one row suppresses anything today
+  # (github_webhook_controller.ex:87, the one site the CATCH-ALL-TO-SUCCESS arm fires on
+  # whose body NAMES its outcome). The other four are DOCUMENTATION: they record that a
+  # human read the code and found the receipt honest, so the next lens that starts firing
+  # on them meets a written basis instead of an argument.
+  #
+  # `route_claim` IS ORTHOGONAL TO `class`, DELIBERATELY. route_tag/1 and evidence/3 read
+  # `site.write?` / `site.depth` and NEVER the shape, so no value in the shape vocabulary
+  # can retract a false route bracket. A site whose route bracket is wrong says so here.
+  @declared [
+    %{
+      path: "api/lib/barkpark_web/controllers/auth_controller.ex",
+      line: 399,
+      class: "NO-OP-ACK",
+      confirmation: "declared",
+      basis: "inline comment :393 — \"Always 200 — never reveal whether the email is registered.\"",
+      why:
+        "anti-enumeration. Route WRITE d1 — and the receipt asserts nothing ABOUT that write, " <>
+          "which is precisely why it is honest. (It is NOT a \"no write\" site: request_reset " <>
+          "does write a reset token when the address resolves.)"
+    },
+    %{
+      path: "api/lib/barkpark_web/controllers/auth_controller.ex",
+      line: 417,
+      class: "NO-OP-ACK",
+      confirmation: "declared",
+      basis:
+        "@doc :402-407, the anti-enumeration sentence at :403-406 (the token `anti-enumeration` on :405)",
+      why:
+        "anti-enumeration, request_magic_link/2. THE SPAN IS THE FIX: charter PDS-D465 cites " <>
+          ":406-410, which is the sentence's tail fragment, the closing triple-quote and the def " <>
+          "line — no anti-enumeration text in it; PDS-D453b cites :410-417, which is pure code. " <>
+          "Both are phantom bases. This row SUPPRESSES NOTHING — the site's ok:true sits at :417, " <>
+          "after the case closes at :415, so no clause contains it and no shipping configuration " <>
+          "of the arm can fire on it. It is registered as documentation of a control the lens " <>
+          "wrongly accused for two waves."
+    },
+    %{
+      path: "api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+      line: 86,
+      class: "NO-OP-ACK",
+      confirmation: "declared",
+      basis: "@doc :74-78 — \"always answers 2xx unless intake genuinely fails\"",
+      why:
+        "the `\"ping\"` clause head is a literal match, not a failure-discarding head, so the arm " <>
+          "never fires here. A ping ack claims nothing beyond having been reached."
+    },
+    %{
+      path: "api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+      line: 87,
+      class: "CATCH-ALL-TO-SUCCESS",
+      confirmation: "declared",
+      basis: "the response body itself — `ignored: \"event\"` on :87, plus @doc :74-78",
+      why:
+        "THE ONE ROW THAT ACTUALLY SUPPRESSES. The arm fires here (head `_other`, body renders " <>
+          "ok: true, site contained), and it is right to: this IS a catch-all routed to success. " <>
+          "It is declared because the body NAMES the outcome — the caller is told the event was " <>
+          "ignored, so the receipt does not pass an unhandled event off as handled work."
+    },
+    %{
+      path: "api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
+      line: 54,
+      class: "HONEYPOT",
+      confirmation: "declared",
+      route_claim: "ROUTE-MISCREDIT",
+      basis:
+        "@moduledoc :22-24 (\"bots that fill it get a vacuous 201 (no write) so the trap stays " <>
+          "invisible\") and the ONE-LINE inline comment at :53 — not the :52-54 arm span",
+      why:
+        "declared TWICE, and the only site in the corpus whose honesty depends on the receipt " <>
+          "being indistinguishable from the happy one. The `{:honeypot}` head is a literal match, " <>
+          "so the arm does not fire. ROUTE-MISCREDIT: the census brackets this `[WRITE d5]` " <>
+          "because submit/2 routes to a write on its SUCCESS path — crediting a write to the one " <>
+          "arm that provably makes none. The bracket is disputed here because it cannot be " <>
+          "retracted from the shape vocabulary: route_tag/1 and evidence/3 read write?/depth only."
+    }
+  ]
 
   # ---------------------------------------------------------------- entrypoint
 
@@ -109,9 +208,11 @@ defmodule PDS.Census do
     classified = Enum.map(routed, &classify(&1, index))
 
     report_lens(textual, ast_sites, phantoms, consumers, emitted)
+    report_carriers(parsed, ast_sites)
     report_split(classified)
     report_depth_sweep(emitted, index)
     report_shapes(classified)
+    report_declared_register(classified)
     if show_sites?, do: report_each_site(classified)
     report_blind_spots(parsed)
     delegate = report_delegate_probe(index)
@@ -800,9 +901,9 @@ defmodule PDS.Census do
         {"CAS-CONFIRMED-ECHO",
          "#{label(cas)} matches its update_all result against a literal row count — the claim dies if 0 rows moved"}
 
-      not error_arm?(owner.body) ->
-        {"UNREACHABLE-ERROR",
-         "the emitting function carries no :error arm, no rescue and no raise — the failure this receipt implies cannot be expressed in it"}
+      span = catch_all_span(site, owner) ->
+        {"CATCH-ALL-TO-SUCCESS",
+         "the receipt is emitted INSIDE a failure-discarding clause at :#{elem(span, 0)}-#{elem(span, 1)} (head `#{elem(span, 2)}`) whose body renders `ok: true` — every outcome the earlier clauses did not name, including every failure, is answered with success"}
 
       true ->
         {"UNCLASSIFIED", evidence(site, local_writes, local_reads)}
@@ -901,18 +1002,90 @@ defmodule PDS.Census do
     end
   end
 
-  defp error_arm?(nil), do: false
+  # ------------------------------------------------------- CATCH-ALL-TO-SUCCESS
+  #
+  # THIS ARM REPLACED A FALL-THROUGH (PDS wave 35). Its predecessor, UNREACHABLE-ERROR,
+  # tested `not error_arm?(owner.body)` — no write guard, no positive evidence, and it sat
+  # directly above the UNCLASSIFIED default, so it absorbed every site the earlier arms had
+  # not claimed and read 26. Hand measurement says 3. Among the 23 it invented was
+  # auth_controller.ex:417, the charter's OWN declared-honest anti-enumeration control: a
+  # lens that accuses its own control is not measuring, it is asserting.
+  #
+  # THE TEST IS NOW POSITIVE, and it is a CONJUNCTION OF THREE, none of which may be
+  # dropped on the grounds that it is individually inert:
+  #
+  #   1. A FAILURE-DISCARDING CLAUSE HEAD — one head argument, a variable whose name starts
+  #      with `_`. WIDE on purpose: bare `_` AND `_other`, `_err`, `_reason`. A literal or
+  #      structural head (`{:ok, id}`, `{:honeypot}`, `"ping"`) NAMES what it matched and is
+  #      therefore not discarding.
+  #   2. THE CLAUSE BODY RENDERS AN `ok: true` LITERAL PAIR.
+  #   3. CONTAINMENT — the receipt's own line falls inside that clause's span.
+  #
+  # WHY NO `site.write?` GUARD (PDS-D476a, measured, not argued). Under a NARROW head (bare
+  # `_` only) a write guard is inert, 2 -> 2. Under the SHIPPED wide head it collapses the
+  # arm 3 -> 2 and deletes exactly github_webhook_controller.ex:87, whose route is unrouted —
+  # the one site widening the head buys. Wide-head-plus-write-guard IS narrow-head, the
+  # UNCLASSIFIED denominator silently moves 74 -> 75, and the declared register's CATCH-ALL
+  # row stops corresponding to anything the arm suppresses, with no diff that looks like a
+  # bucket change. A shape test that reads the route is not a shape test.
+  #
+  # WHY renders_ok_true?/1 SURVIVES BEING A TAUTOLOGY (PDS-D476b). Given containment it can
+  # never be false: collect_sites/2 only emits a site ON an `ok: true` pair line, so a
+  # contained site IS the pair. It stays because the two are inert only GIVEN EACH OTHER —
+  # drop both and the arm fires on 11 and re-accuses auth_controller.ex:417. Deleting a
+  # conjunct because it is currently redundant is how a fall-through grows back.
+  defp catch_all_span(_site, %{body: nil}), do: nil
 
-  defp error_arm?(body) do
+  defp catch_all_span(site, %{body: body}) do
+    body
+    |> discarding_success_clauses()
+    |> Enum.find(fn {lo, hi, _head} -> lo <= site.line and site.line <= hi end)
+  end
+
+  defp discarding_success_clauses(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {:->, meta, [heads, clause_body]} = n, acc ->
+          with {:discarding, name} <- discarding_head(heads),
+               true <- renders_ok_true?(clause_body) do
+            lo = meta[:line] || 0
+            {n, [{lo, max_line(clause_body, lo), name} | acc]}
+          else
+            _ -> {n, acc}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    Enum.sort(acc)
+  end
+
+  # ONE head argument, and it is a variable named `_...`. A guarded head (`_x when ...`)
+  # narrows what it matches, so it is not a catch-all and is not unwrapped here.
+  defp discarding_head([{name, _meta, ctx}]) when is_atom(name) and is_atom(ctx) do
+    str = Atom.to_string(name)
+    if String.starts_with?(str, "_"), do: {:discarding, str}, else: :no
+  end
+
+  defp discarding_head(_), do: :no
+
+  defp renders_ok_true?(body) do
     {_, found} =
       Macro.prewalk(body, false, fn
-        {:__block__, _, [:error]} = n, _acc -> {n, true}
-        {op, _, _} = n, _acc when op in [:rescue, :raise, :try] -> {n, true}
+        {left, right} = n, acc -> {n, acc or pair_site(left, right) != nil}
         n, acc -> {n, acc}
       end)
 
     found
   end
+
+  # ------------------------------------------------------- declared register lookup
+
+  defp declared_for(%{path: path, line: line}),
+    do: Enum.find(@declared, &(&1.path == path and &1.line == line))
+
+  defp declared_for(_), do: nil
 
   # ---------------------------------------------------------------- reporting
 
@@ -990,6 +1163,21 @@ defmodule PDS.Census do
     p("")
   end
 
+  # CARRIER FILES, DERIVED — the number the @sentinels comment used to hardcode as 27.
+  # BOTH readings are printed because they differ and neither is the obvious one: a file
+  # can carry a textual occurrence that is pure prose (the phantom set) and so hold no AST
+  # pair at all. A single integer here would be a lens with its lens filed off.
+  defp report_carriers(parsed, ast_sites) do
+    textual_files = Enum.count(parsed, &(&1.textual_count > 0))
+    ast_files = ast_sites |> Enum.map(& &1.path) |> Enum.uniq() |> length()
+
+    p("  carrier files          #{ast_files} hold an AST-literal pair · #{textual_files} hold a textual occurrence")
+    p("  A CARRIERS-ONLY CORPUS IS THE TRAP (PDS-D449a): those #{ast_files} files parse cleanly and")
+    p("  report write=0 for every site, with no error and no warning. The write verbs live in")
+    p("  the #{length(parsed) - textual_files} files that carry no receipt at all.")
+    p("")
+  end
+
   defp report_split(classified) do
     w = Enum.count(classified, & &1.write?)
     r = Enum.count(classified, &(not &1.write? and &1.read?))
@@ -1036,40 +1224,80 @@ defmodule PDS.Census do
     p("THE FLOOR MOVES WITH THE LENS (depth sensitivity — the drift vs PDS-D448 explained)")
     p(String.duplicate("-", 78))
 
-    Enum.each(@sweep, fn d ->
-      routed = Enum.map(emitted, &route(&1, index, d))
-      w = Enum.count(routed, & &1.write?)
-      r = Enum.count(routed, &(not &1.write? and &1.read?))
-      u = Enum.count(routed, &(not &1.write? and not &1.read?))
-      mark = if d == @max_depth, do: "  <- the census depth", else: ""
+    rows = Enum.map(@sweep ++ @beyond, &sweep_row(emitted, index, &1))
+    {inside, beyond} = Enum.split_with(rows, &(&1.depth <= @max_depth))
 
-      p("  depth #{d}   write #{String.pad_leading(to_string(w), 3)}   read #{String.pad_leading(to_string(r), 3)}   unrouted #{String.pad_leading(to_string(u), 3)}#{mark}")
+    Enum.each(inside, fn r ->
+      mark = if r.depth == @max_depth, do: "  <- the census depth", else: ""
+
+      p("  depth #{r.depth}   write #{pad(r.write)}   read #{pad(r.read)}   unrouted #{pad(r.unrouted)}   POST-READ #{pad(r.post_read)}#{mark}")
+    end)
+
+    Enum.each(beyond, fn r ->
+      p("  depth #{String.pad_trailing(to_string(r.depth), 2)}  write #{pad(r.write)}   read #{pad(r.read)}   unrouted #{pad(r.unrouted)}   POST-READ #{pad(r.post_read)}   (past the census depth)")
     end)
 
     p("")
-    p("  WHY #{@max_depth} AND NOT MORE (PDS wave 34 — a depth without its reason reads as taste).")
-    p("  THE ROUTE RELATION CLOSES AT 6. Write-routed climbs 23/29/39/43/53/54 across depths")
-    p("  1..6 and then write 54 / read 14 / unrouted 23 is IDENTICAL at 7, 8, 9, 10, 12, 15,")
-    p("  20 and 30 — the bfs seen-set makes the reachable set a finite closure, and the route")
-    p("  set is MONOTONE in the budget by construction (a larger budget explores a superset),")
-    p("  so nothing is lost by stopping at the closure.")
-    p("  THE SHAPE RELATION DOES NOT CLOSE UNTIL 12, and every unit past 6 buys POST-READ")
-    p("  inflation from CROSS-ROW certifiers: POST-READ reads 6 here and 15/21/23/23/24 at")
-    p("  depths 7/8/9/10/12, flat from 12 on. NINE SITES LAUNDER IN AT DEPTH 7 ALONE, six of")
-    p("  them certified by Barkpark.Webhooks.record_endpoint_failure/2 — a real `select:` on")
-    p("  a WEBHOOK FAILURE COUNTER vouching for a session-revoke receipt (auth_controller.ex")
-    p("  :329) and for WebAuthn registration. A read of an unrelated row is not a post-read.")
-    p("  ABOVE 6 THIS KNOB IS A COMPLIANCE DIAL, NOT A LENS. 6 is where the route stops")
+    p("  WHY #{@max_depth} AND NOT MORE. EVERY NUMBER IN THIS PARAGRAPH IS READ OFF THE TABLE ABOVE")
+    p("  (PDS wave 35 — this paragraph used to hardcode a write sweep that its own table")
+    p("  refuted at depths 2 and 3, and a POST-READ figure less than half the one printed")
+    p("  above it. A lens whose commentary disagrees with its own measurement is the defect")
+    p("  this epic keeps filing; the false numbers are not reprinted here, only replaced.)")
+    p("")
+    at_max = Enum.find(rows, &(&1.depth == @max_depth))
+    p("  THE ROUTE RELATION CLOSES AT #{@max_depth}. Write-routed climbs #{Enum.map_join(inside, "/", &to_string(&1.write))} across depths")
+    p("  #{List.first(@sweep)}..#{@max_depth}, and then write #{at_max.write} / read #{at_max.read} / unrouted #{at_max.unrouted} is #{closure_word(rows, at_max)} at depths")
+    p("  #{Enum.map_join(@beyond, ", ", &to_string/1)} — the bfs seen-set makes the reachable set a finite closure, and the")
+    p("  route set is MONOTONE in the budget by construction (a larger budget explores a")
+    p("  superset), so nothing is lost by stopping at the closure.")
+    p("  THE SHAPE RELATION DOES NOT CLOSE THERE. POST-READ reads #{at_max.post_read} at depth #{@max_depth} and")
+    p("  #{Enum.map_join(beyond, "/", &to_string(&1.post_read))} at depths #{Enum.map_join(@beyond, "/", &to_string/1)} — #{launder_phrase(rows, at_max)}. Those extra")
+    p("  certifications are CROSS-ROW: at depth 7, six of them come from")
+    p("  Barkpark.Webhooks.record_endpoint_failure/2 — a real `select:` on a WEBHOOK FAILURE")
+    p("  COUNTER vouching for a session-revoke receipt (auth_controller.ex:329) and for")
+    p("  WebAuthn registration. A read of an unrelated row is not a post-read.")
+    p("  ABOVE #{@max_depth} THIS KNOB IS A COMPLIANCE DIAL, NOT A LENS. #{@max_depth} is where the route stops")
     p("  growing and the evidence has not yet started lying.")
-    p("  (Wave 34's brief recorded 42/14/35 for the closure. That was the A+B+C lens WITHOUT")
-    p("  the clause-collapse fix; re-owning 15 sites to the clause that contains them moves")
-    p("  it to 54/14/23. Corrected here, at the lens that measures it.)")
     p("")
     p("  PDS-D448 recorded write=#{@recorded.write} read=#{@recorded.read} unrouted=#{@recorded.unrouted}. That is NOT this lens at")
     p("  depth #{@max_depth}; it is what a deeper (or hand-followed) route sees. Both are honest and")
     p("  neither is a ceiling — which is the point. A success-claim census reports the")
     p("  budget it measured with, or its integer means nothing.")
     p("")
+  end
+
+  defp sweep_row(emitted, index, d) do
+    routed = Enum.map(emitted, &route(&1, index, d))
+    shaped = Enum.map(routed, &classify(&1, index))
+
+    %{
+      depth: d,
+      write: Enum.count(routed, & &1.write?),
+      read: Enum.count(routed, &(not &1.write? and &1.read?)),
+      unrouted: Enum.count(routed, &(not &1.write? and not &1.read?)),
+      post_read: Enum.count(shaped, fn s -> elem(s.shape, 0) == "POST-READ" end)
+    }
+  end
+
+  defp pad(n), do: String.pad_leading(to_string(n), 3)
+
+  defp closure_word(rows, at_max) do
+    beyond = Enum.filter(rows, &(&1.depth > @max_depth))
+
+    if Enum.all?(beyond, &(&1.write == at_max.write and &1.read == at_max.read)),
+      do: "IDENTICAL",
+      else: "NOT identical (the closure claim no longer holds — read the table)"
+  end
+
+  defp launder_phrase(rows, at_max) do
+    next = Enum.find(rows, &(&1.depth == List.first(@beyond)))
+
+    case next && next.post_read - at_max.post_read do
+      nil -> "the extra depth is not measured here"
+      n when n > 0 -> "#{n} SITES LAUNDER IN AT DEPTH #{next.depth} ALONE"
+      0 -> "depth #{next.depth} launders nothing in"
+      n -> "depth #{next.depth} LOSES #{abs(n)} — read the table, not this sentence"
+    end
   end
 
   defp report_shapes(classified) do
@@ -1101,6 +1329,83 @@ defmodule PDS.Census do
         "  the lens holds evidence but no verdict — wave 34 buckets these by hand")
     p("")
     post_read_roll(classified)
+    catch_all_findings(classified)
+  end
+
+  # THE FINDINGS BLOCK. A shape count is not a finding — a NAMED site with no written basis
+  # is. Every CATCH-ALL-TO-SUCCESS site that is not in the declared register is printed
+  # here; a declared one is listed below it as SUPPRESSED, with its basis, so the reader can
+  # see what was withheld and go read the same lines the register cites.
+  defp catch_all_findings(classified) do
+    all =
+      classified
+      |> Enum.filter(fn s -> elem(s.shape, 0) == "CATCH-ALL-TO-SUCCESS" end)
+      |> Enum.sort_by(&{&1.path, &1.line})
+
+    {declared, findings} = Enum.split_with(all, &declared_for/1)
+
+    p("  CATCH-ALL-TO-SUCCESS FINDINGS  #{length(findings)} undeclared of #{length(all)} fired")
+
+    if findings == [] do
+      p("      none — every catch-all-to-success site carries a written basis")
+    else
+      Enum.each(findings, fn s ->
+        p("      FINDING  #{short(s.path)}:#{s.line}  fn #{label(s.owner)}")
+        p("               #{elem(s.shape, 1)}")
+        p("               NO DECLARED BASIS. The caller cannot tell this receipt from the one")
+        p("               the named clause above it emits, and nothing in the body says so.")
+      end)
+    end
+
+    Enum.each(declared, fn s ->
+      d = declared_for(s)
+      p("      SUPPRESSED  #{short(s.path)}:#{s.line}  [#{d.class}, #{d.confirmation}]")
+      p("                  basis: #{d.basis}")
+    end)
+
+    p("")
+  end
+
+  # THE REGISTER, PRINTED IN FULL — including the rows that suppress nothing. A register
+  # that only shows up when it fires is indistinguishable from a mute list; this one is
+  # readable on every run, so a row whose site the lens no longer reaches is visible as
+  # documentation rather than quietly doing nothing.
+  defp report_declared_register(classified) do
+    fired =
+      classified
+      |> Enum.filter(fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
+      |> MapSet.new(&{&1.path, &1.line})
+
+    p("DECLARED REGISTER (committed data — `declared`, the confirmation level already")
+    p("shipping in internal/cli/hetzner_respost.go:197, never a new spelling)")
+    p(String.duplicate("-", 78))
+
+    Enum.each(@declared, fn d ->
+      status =
+        if MapSet.member?(fired, {d.path, d.line}),
+          do: "SUPPRESSES a fired shape",
+          else: "documents only — no arm fires here"
+
+      p("  #{short(d.path)}:#{d.line}  #{d.class} / #{d.confirmation}#{route_claim_tag(d)}")
+      p("      basis:  #{d.basis}")
+      p("      status: #{status}")
+      wrap(d.why, "      ")
+      p("")
+    end)
+  end
+
+  defp route_claim_tag(%{route_claim: claim}), do: "  ·  route_claim #{claim}"
+  defp route_claim_tag(_), do: ""
+
+  defp wrap(text, indent) do
+    text
+    |> String.split(" ")
+    |> Enum.reduce({[], ""}, fn word, {lines, cur} ->
+      cand = if cur == "", do: word, else: cur <> " " <> word
+      if String.length(cand) > 74 - String.length(indent), do: {[cur | lines], word}, else: {lines, cand}
+    end)
+    |> then(fn {lines, cur} -> Enum.reverse([cur | lines]) end)
+    |> Enum.each(&p(indent <> &1))
   end
 
   # The POST-READ survivors, named with the arm that admitted them. A count alone lets a
@@ -1144,19 +1449,33 @@ defmodule PDS.Census do
     |> Enum.each(fn s ->
       {shape, why} = s.shape
 
-      p("#{short(s.path)}:#{s.line}  [#{route_tag(s)}] #{shape}")
+      declared = if declared_for(s), do: " DECLARED", else: ""
+
+      p("#{short(s.path)}:#{s.line}  [#{route_tag(s)}] #{shape}#{declared}")
       p("    fn #{s.owner && label(s.owner) || "?"} — #{why}")
     end)
 
     p("")
   end
 
+  # THE ROUTE BRACKET IS DISPUTABLE, AND ONLY HERE (PDS wave 35). This function reads
+  # `write?`/`depth` and NEVER the shape, so no class value can retract a route it got
+  # wrong — bulldocs_form_controller.ex:54, the honeypot arm that by design writes nothing,
+  # printed a bare `[WRITE d5]` because its ENCLOSING function routes to a write on the
+  # success path. A declared row carrying `route_claim` marks the bracket disputed at the
+  # one place that prints it.
   defp route_tag(s) do
-    cond do
-      s.write? and s.via_caller -> "WRITE via caller #{s.via_caller}"
-      s.write? -> "WRITE d#{s.depth}"
-      s.read? -> "READ"
-      true -> "UNROUTED"
+    base =
+      cond do
+        s.write? and s.via_caller -> "WRITE via caller #{s.via_caller}"
+        s.write? -> "WRITE d#{s.depth}"
+        s.read? -> "READ"
+        true -> "UNROUTED"
+      end
+
+    case declared_for(s) do
+      %{route_claim: claim} -> "#{base} DISPUTED — #{claim}"
+      _ -> base
     end
   end
 
