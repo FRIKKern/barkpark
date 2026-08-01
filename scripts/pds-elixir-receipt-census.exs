@@ -1381,14 +1381,19 @@ defmodule PDS.Census do
     p(String.duplicate("-", 78))
 
     Enum.each(@declared, fn d ->
+      # THE STATUS LINE SAYS WHAT IS ACTUALLY WITHHELD. A declared row never suppresses
+      # the SHAPE — the arm still fires and the site still prints CATCH-ALL-TO-SUCCESS in
+      # the roll. What it withholds is the FINDING. Writing "suppresses a fired shape"
+      # would be this epic's own offence: a printed sentence that overstates what the
+      # machine did.
       status =
         if MapSet.member?(fired, {d.path, d.line}),
-          do: "SUPPRESSES a fired shape",
+          do: "WITHHOLDS A FINDING — an arm fires here; the shape still prints, the finding does not",
           else: "documents only — no arm fires here"
 
       p("  #{short(d.path)}:#{d.line}  #{d.class} / #{d.confirmation}#{route_claim_tag(d)}")
-      p("      basis:  #{d.basis}")
-      p("      status: #{status}")
+      wrap("basis:  " <> d.basis, "      ", "        ")
+      wrap("status: " <> status, "      ", "        ")
       wrap(d.why, "      ")
       p("")
     end)
@@ -1397,15 +1402,25 @@ defmodule PDS.Census do
   defp route_claim_tag(%{route_claim: claim}), do: "  ·  route_claim #{claim}"
   defp route_claim_tag(_), do: ""
 
-  defp wrap(text, indent) do
+  defp wrap(text, indent, hang \\ "") do
+    width = 74 - String.length(indent)
+
     text
     |> String.split(" ")
     |> Enum.reduce({[], ""}, fn word, {lines, cur} ->
       cand = if cur == "", do: word, else: cur <> " " <> word
-      if String.length(cand) > 74 - String.length(indent), do: {[cur | lines], word}, else: {lines, cand}
+
+      cond do
+        # A single word longer than the column cannot be broken — emit it long rather
+        # than pushing an EMPTY line, which is what the naive form did.
+        cur == "" -> {lines, cand}
+        String.length(cand) > width -> {[cur | lines], word}
+        true -> {lines, cand}
+      end
     end)
     |> then(fn {lines, cur} -> Enum.reverse([cur | lines]) end)
-    |> Enum.each(&p(indent <> &1))
+    |> Enum.with_index()
+    |> Enum.each(fn {line, i} -> p(indent <> if(i == 0, do: "", else: hang) <> line) end)
   end
 
   # The POST-READ survivors, named with the arm that admitted them. A count alone lets a
