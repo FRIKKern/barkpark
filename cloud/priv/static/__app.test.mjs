@@ -1914,14 +1914,22 @@ test("cch-w19-s4: the three survivor selectors are pinned — losing one reds", 
   }
 });
 
-test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all three copies there", () => {
+test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all four copies there", () => {
   // The shipped tree is the subject the check was written for. If it cannot
   // green there it will be deleted, and if it cannot SEE there it is decorative.
+  //
+  // W20-S6 BUMPED THIS PIN 3 -> 4 AND WIDENED THE LOOP, in the same commit that
+  // authored `.attention-row .status-pill`. That is the pin working, not the pin
+  // being in the way: a fourth wrapper-scoped copy is a CHANGE to the recipe's
+  // blast radius, and the epic's own count is the thing that notices. The count
+  // is a same-file pin of this repo's own stylesheet (pin-your-own,
+  // derive-foreign), so it is bumped deliberately, never derived from the file
+  // it is meant to measure.
   const appCss = fileURLToPath(new URL("./app.css", import.meta.url));
   const r = runCssCheck("--wrap-parity-check", appCss);
   assert.equal(r.status, 0, "app.css must be green under E14:\n" + r.out);
-  assert.match(r.out, /3 wrapper-scoped wrap copy\(ies\)/, r.out);
-  for (const host of [".detail-rail", ".fleet-status", ".instance-card-head"]) {
+  assert.match(r.out, /4 wrapper-scoped wrap copy\(ies\)/, r.out);
+  for (const host of [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"]) {
     assert.match(r.out, new RegExp("\\" + host + " \\.status-pill:\\d+"), host + " must be seen with a line number:\n" + r.out);
   }
 });
