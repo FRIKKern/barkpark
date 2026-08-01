@@ -2576,6 +2576,99 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 34 2026-08-01 — "The instrument is the first suspect" — REVIEWED. Grade A− (paper `pds-wave-34-2026-08-01`)
+
+**FOUR ROUND-1 SLICES BUILT, FOUR GREEN, FOUR PUSHED WITH PRs OPEN.** Three round-≥2 slices were
+deferred BY DESIGN under the sequenced-rounds law and are untouched and open on the ledger. Every
+gate was re-run by the reviewer on the final state, and the wave's one genuinely cross-slice
+obligation — the census round trip — was proven on a MERGED tree, because neither builder could
+make that proof from inside their own file set.
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w34-census-lens-correction` | `…-scoring-a-transaction-o-0` | #8854 | five interlocking corrections to the census: `transaction` leaves `@write_verbs`, the `Repo.query`→`:read` clause dies, `callees/2` learns `import Mod, only: [f: a]`, clause collapse is fixed and PRINTED, `@max_depth` 3→6 with its reason |
+| `pds-w33-ledger-postread-remainder` | `…-unpaid-ledger-write-arms-thr-1` | #8855 | the remaining SEVEN ledger write arms return the stored row through `fenced_content_write/4`; twelve tests, seven of them fail-before-measured, one per arm |
+| `pds-w32-census-binds-the-basis` | `…-basis-to-the-read-it-2` | #8856 | the Go receipt basis becomes self-defending: site→symbol, symbol→read, symbol→its own wording; 36 per-key rows, 27 read-bound sites, 7 shape rows for 7 derived bases |
+| `pds-w34-status-only-lens` | `…-status-only-residue-classif-3-r` | #8857 | the status-only classifier lands in `scripts/`: the 218 was 26 false positives AND 268 false negatives on a real 460; honest residue 19 of 463 = 4.1% |
+
+**PDS-D473 — `transaction` IN `@write_verbs` WAS WORTH 17 OF 17 POST-READS, AND THE CENSUS'S OWN
+CEILING WAS THE ARTEFACT.** Wave 33 shipped POST-READ 17 with the honest caveat that it is a
+ceiling, not a score. The caveat was true and the cause was wrong: `Repo.transaction/1` opens a
+transaction and moves no row, but the universal Barkpark shape puts the opener at line N, the
+advisory lock at N+1 and the PRE-write load at N+3 — and `post_read?/2` is pure line arithmetic.
+Removing one token takes POST-READ 17→6. **The instrument, not the corpus, held the number.**
+
+**PDS-D474 — CAS-CONFIRMED-ECHO IS PROVEN SHADOWED, NOT MERELY SUSPECTED.** Wave 33 wrote that CAS
+0 is "probably shadowed" by POST-READ's precedence. It is, and the proof is at source:
+`BlockOps.fenced_paper_update/4` satisfies BOTH `has_select_in_update?/1` (`select: d`,
+`block_ops.ex:983`) and `cas_confirmed?/1` (`update_all` matched against `{1, [saved]}`, `:986-989`),
+and `shape_of/3` tests the select arm FIRST. A bucket that can never be populated on a corpus that
+demonstrably contains a member is not evidence of absence. Filed as `pds-w34-census-cas-shadow`,
+with an explicit warning not to close it by reordering the arms.
+
+**PDS-D475 — THE ROUND TRIP IS REAL, AND ONLY THE REVIEWER COULD SEE IT.** Slice 1 removes the
+seven ledger arms from POST-READ (they were there only because `transaction` scored as a write);
+slice 2 gives them a genuine `select:` inside the update. Each builder could prove only their half.
+Running the CORRECTED census against a tree carrying BOTH takes POST-READ **6 → 14**, with
+`tasks_controller.ex` :558 :652 :861 :1327 :1352 :1379 :1422 :1655 all returning via ARM 1 — eight
+at the ENDPOINT lens, seven at the CALL-SITE lens, six at the FILES lens. **Do not merge one
+without the other:** slice 2 alone leaves seven arms sitting in a bucket on a false certificate
+while carrying a `select:`, which looks worse than either end alone.
+
+**THREE NUMBERS CORRECTED AT THE LENS, EXACTLY AS THE WISH DEMANDED.** The route closure is
+54/14/23, not the brief's 42/14/35 (the brief measured A+B+C WITHOUT the clause-collapse fix;
+re-owning 15 sites changes which `def` each route starts from). The shipped shape reads 6/0/26/59,
+not the predicted 4/0/27/60. CAS reads 0, not the predicted 1. On the ledger side the arm count is
+seven at the call-site lens, not the six the slice title carries and not the three the bp task
+title carried. On the Go side the basis surface is SEVEN judged bases, not six, and the census
+file's own prose ("thirteen"/"ten"/"three") was a 12-site undercount of a real 25.
+
+**EVERY SURVIVING POST-READ IS PRINTED AS `ARM 1 ADMISSIBLE`, NEVER AS PROVEN.**
+`has_select_in_update?/1` cannot prove the selected row reaches the printed value, and the live
+counterexample is in this corpus: `fenced_paper_update/4` selects the saved row and its caller
+prints a pre-write rev. The census now says so in three places plus a per-arm survivor roll, so a
+later wave cannot quote "N post-reads" as compliance. This is the wish's POST-READ-is-a-ceiling
+instruction carried, not re-learnt.
+
+**HAND-BUCKETING THE 91 DID NOT HAPPEN THIS WAVE, AND THAT IS THE SEQUENCING WORKING.** The wish
+named it the real work. It is `pds-w34-hand-bucket-register`, round 3, and it is deliberately last
+because a bucketing built on a lens with two wrong buckets is a map with a broken legend — POST-READ
+was 65% artefact and CAS was structurally unpopulatable until this wave measured both. The
+UNCLASSIFIED population moved 47 → 59 as a direct consequence of correcting the lens, so the
+judgment owed grew rather than shrank. **The next wave owes the 91 their buckets.**
+
+**REVIEWER'S OWN MUTATIONS, CHOSEN AFTER THE GATES WERE WRITTEN.** (1) `release.ex` reverted to
+origin/main: exactly ONE test red, the release arm, six siblings green, and the LINEAGE assertion
+fired (`receipt == pre-write stored`) rather than the weaker equality one. (2) An INHERITED Go site
+(`network/add-subnet`) given an explicit contradicting `hzResBasisHead`: both legs red by name, and
+verified undefended on main. (3) A fourth `send_resp(conn, 202)` added to `pulse_controller.ex`:
+the repaired residue total followed its evidence 19 → 20 where the shipped script would have
+printed a list of 4 beside a total of 19. All three reverted.
+
+**REVIEWER FIX, ONE SLICE.** `scripts/pds-status-only-residue.exs` printed `send_resp(conn, 2xx)
+sites: 3` twice and added a **literal `+ 3`** to a residue total beside a list it rescanned every
+run — a number that cannot follow its own evidence, in the script whose entire subject is numbers
+that cannot follow their evidence. Both now come off one derived list. The header also gained the
+limits of its own counts: A3-echo 6 is a FLOOR (the arm requires `not calls?(payload)`, so an echo
+built through a helper call is invisible), `write_reachable` 130 is a heuristic partition, and the
+enclosing-def attribution is last-def-before-line.
+
+**FILED, NOT TAKEN:** `pds-w34-census-cas-shadow`, `pds-w34-ledger-background-write-arms` (five more
+arms of the identical shape outside the nine-arm family — `fence.ex:112`, `ttl_sweeper.ex:405`/`:564`,
+`compactor.ex:305`/`:547`), `pds-w34-declared-basis-literals-need-constants`, and — filed at review —
+`pds-w34-census-import-arity` (the new import resolver is name-scoped, not arity-scoped: a superset
+edge that can admit a certifier through a call that does not exist, plus CLAUSE-COLLAPSE being
+printed rather than guarded).
+
+**WHAT THE NEXT WAVE TAKES, IN DISPATCH ORDER.** Merge round 1 (#8854 and #8855 TOGETHER, then
+#8856 and #8857 in any order). Then `pds-w34-unreachable-error-positive-arm` (round 2; it edits the
+same census file and needs the corrected lens under it). Then, once that is in,
+`pds-w34-hand-bucket-register` and `pds-w34-owning-doc-amendment` — **the doc amendment is now
+overdue rather than optional**: merging #8854 makes `docs/decisions/success-claim-census.md` quote
+POST-READ 17 and write-routed 64 against a lens that reads 6 and 54, and NO gate compares that doc's
+prose to the census, so the stale doc ships GREEN. A receipt without a read, on this epic's own
+paperwork.
+
 ### Wave 33 2026-08-01 — "The Elixir surface gets counted, and the ledger stops lying about itself" — REVIEWED. Grade A− (paper `pds-wave-33-2026-08-01`)
 
 **SIX ROUND-1 SLICES BUILT, SIX GREEN, SIX PUSHED WITH PRs OPEN.** Every gate was re-run by the
