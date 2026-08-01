@@ -699,6 +699,60 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-01 — wave 15 REVIEW — six of six round-1 slices shipped and pushed, grade **A−**
+
+**Paper:** `cloud-console-hardening-wave-15-2026-07-31`. PRs #8739-#8744. Nothing merged by the wave;
+the lead merges and closes the merge-gated criterion on each row.
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| s1 fold bar + pin deletion | `…fold-b-0-r` | #8739 | `calc(40vh - 60px)` makes contentTop `0.4H − 4` an IDENTITY; pin deleted whole, replacement mutation-proven. Reviewer derived TOPBAR from the shipped bytes. |
+| s2 archives resurrect | `…scrolli-1` | #8740 | wrap + bounded scroller + a genuinely two-state cue; diagnosis corrected before any CSS was touched. |
+| s3 billing tier grid | `…cut-in--2` | #8741 | `repeat(auto-fit, minmax(230px, 1fr))`; the row's "boundary defect" framing refuted at eight widths. |
+| s4 fleet lead column | `…hostnam-3-r` | #8742 | the recorded root cause was half wrong and the fix says so; reviewer turned the scope PROOF into a check. |
+| s5 site link phone band | `…phone--4` | #8743 | one scoped rule head; 30 of 36 cells → 0, both themes. |
+| s6 criteria amended | `…measu-5` | #8744 | three amendments by measurement, each with a REFUSED clause; two rows closed by content. |
+
+**FIVE of six put a person back in front of something they could not see or reach** — the ratio the
+wish demanded, met without padding. The one instrument-shaped slice (s6) is ledger repair, not a gate.
+
+**What this wave proves about instruments, and it is the durable lesson.** On a tree carrying the
+fleet-row defect the W13 leg prints `108 / 108 cells clean` and exits 0 while the new W15 leg exits 1
+with 12 findings on the identical bytes. **A page-level assertion cannot see a cell that spills
+INSIDE the page** — `.fleet-url` computes `overflow: visible`, so 58% of a hostname was painted
+THROUGH the badge chips without moving `documentElement.scrollWidth` by one pixel. Both legs were
+re-run by the reviewer on the same mutated scratch tree.
+
+**Reviewer changes, both mutation-proven.** (1) s1's fold identity read a hard-coded `TOPBAR = 56`
+while the driven margin is 4px at every height; it now parses `.topbar { height: … }` out of the
+shipped bytes, so a taller topbar reds the cheap unit leg (56 → 72px ⇒ exit 1). (2) s4 PROVED that
+its two declarations unscoped ship an 846px page scrollWidth at 721/769 and then guarded that with a
+comment; the W15 leg now drives `fleet-support-failed` and 721/769 and reads page scrollWidth —
+dropping the media query reds it at `846 > 721`, 125px off-screen, both themes.
+
+**The widening found one pre-existing defect and it is ITEMISED, not swept:** at 721/769 the stacked
+support row truncates `.status-pill-detail` 463 → 295/343 — the operator cannot read WHY the instance
+failed. `cch-w15-bl-fleet-support-detail-truncated-stacked-band`. The allowlist entry names the row,
+scenario, selector and exactly two widths; **an entry matching NOTHING is itself a failure**
+(mutation-proven), so paying the row reds the guard until the entry is deleted.
+
+**Ledger.** Three slice rows had LAPSED leases and had fallen back to `open` with finished work —
+`bp task ready` would have offered them for rebuilding; re-claimed to `in_progress`. The four backlog
+rows the wave PAID were left at 0 stamped; criteria stamped from re-driven runs, with an honest
+`--miss` where the scenario-axis gap was worked around rather than closed. A duplicate probe row
+(`cch-w15-probe-publishwall-20260801`, s5's criteria verbatim at 0/8) cancelled. Two new rows filed:
+the support-row truncation above, and `cch-w15-bl-stamp-merger-silently-drops-evidence` — **two
+independent builders in this one wave saw `bp task stamp` print a success receipt and read back
+`met=false`**, and neither filed it.
+
+**Merge order.** Four slices touch `app.css` and three bump `cssom-heads.baseline` to three different
+numbers (1244, 1245, 1245). They merge CLEAN and WRONG. **Re-measure on the merged tree (D158); do
+not add deltas.** No slice registers anything; `.github/required-checks.json` untouched.
+
+**Next wave takes the deferred round 2 in dependency order** — `cch-w15-s7` (sweep theme/height/
+scenario axes, dark first) after s1 merges, then `cch-w15-s8` (E11 widening) — plus the two rows this
+review filed, and the `PLAN_CATALOG` fixture seam without which s3's 230px floor has no guard at all.
+
 ### 2026-08-01 — wave 15 DECIDE (build in flight) — 8 slices, five of them a person's screen, and the instrument stops certifying what it does not measure
 
 **Wave Paper:** `cloud-console-hardening-wave-15-2026-07-31`. Charter PR is docs-only; the Paper carries
