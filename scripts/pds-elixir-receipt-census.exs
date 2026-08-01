@@ -264,12 +264,17 @@ defmodule PDS.Census do
   #
   # -- THE OPENING BALANCE, STATED SO IT CANNOT BE ROUNDED UP (PDS-D526/D527).
   #   8 rows  PROVEN / end-to-end            mutation-attested; the row carries the line
-  #   9 rows  PROVEN / end-to-end-unmutated  ALREADY CONJUNCTIVE in the committed suite,
+  #   7 rows  PROVEN / end-to-end-unmutated  ALREADY CONJUNCTIVE in the committed suite,
   #                                          BUT ITS FALSIFIER WAS NEVER EXERCISED — the
   #                                          conjunction was READ, not made to fail
   #   1 tag   PROVEN inside an UNJUDGED row  github_webhook_controller.ex:194's
   #                                          `:already_stamped` tag only (see below)
-  # That is the 18 of PDS-D526, and NINE OF THE EIGHTEEN ARE UNMUTATED. Below the line,
+  # PDS-D526 opened this at 18 (9 + 9). IT CLOSED AT 16, AND THE TWO MISSING ROWS WERE
+  # TAKEN BY THIS WAVE'S OWN FALSIFIER, NOT BY AN ARGUMENT: BASIS-FALSIFIERS refused
+  # bulldocs_ingest_controller.ex:630 and :715, whose cited tests drive the route and never
+  # read the paper back. Both now read UNJUDGED / unjudged_other with the refusal written
+  # in the row. THAT IS THE LEDGER WORKING — a wave that could only ever ratify its own
+  # brief would be paperwork. Below the line,
   # and NOT part of it: 6 rows carry `side_effect_existence_only`, which PDS-D499 maps to
   # UNJUDGED — the cited Repo read asserts an audit row EXISTS, never that the printed
   # field equals the stored one. Three of those six are the wave's own "weaker still"
@@ -434,7 +439,9 @@ defmodule PDS.Census do
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:164
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "1989150", "124223564"},
-      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs:319"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "DEMOTED ON THE ADVISORY LINE. side_effect_existence_only claims a Repo read that asserts EXISTENCE; the cited positive control (bulldocs_ingest_controller_test.exs:319) reads nothing back at all, so it cannot even assert that."},
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:244
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.ingest_html/4", "19560303", "124223564"},
@@ -458,11 +465,15 @@ defmodule PDS.Census do
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:630
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.apply_op/2", "133005745", "10224315"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs:595"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. The brief ruled it end_to_end_unmutated; the arm refused the citation (bulldocs_ingest_controller_test.exs:595 drives the batch route but never reads the paper back), so the receipt-vs-stored-row question is unjudged."},
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:715
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.apply_op/2", "85655901", "15024779"},
-      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs:397"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "DEMOTED BY THIS WAVE'S OWN FALSIFIER, not by argument. Same shape as its batch sibling: bulldocs_ingest_controller_test.exs:397 drives the single-op route and asserts the returned fragment, and nothing reads the stored paper back."},
     # barkpark_web/controllers/bulldocs_ingest_controller.ex:814
     %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
             "BarkparkWeb.BulldocsIngestController.propose/2", "78347098", "122622379"},
@@ -836,6 +847,7 @@ defmodule PDS.Census do
     report_shapes(classified)
     report_declared_register(classified)
     report_judgment_register(classified)
+    falsifiers = if register_scope(classified) == :real, do: report_basis_falsifiers(classified), else: :skipped
     if show_sites?, do: report_each_site(classified)
     report_blind_spots(parsed)
     delegate = report_delegate_probe(index)
@@ -843,7 +855,7 @@ defmodule PDS.Census do
     ms = System.monotonic_time(:millisecond) - t0
 
     integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms,
-      parsed)
+      parsed, falsifiers)
   end
 
   # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
@@ -2962,7 +2974,7 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- integrity
 
-  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed) do
+  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
@@ -3004,7 +3016,7 @@ defmodule PDS.Census do
        else
          "Barkpark.Tasks.close (defdelegate, #{delegate.delegates} on the facade) reaches NO write verb within the route budget — the facade probe is blind"
        end}
-    ] ++ register_checks(classified, parsed)
+    ] ++ register_checks(classified, parsed) ++ falsifier_check(falsifiers)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -3036,11 +3048,271 @@ defmodule PDS.Census do
     end
   end
 
+  # ----------------------------------------------------------- basis falsifiers
+  #
+  # THE VOCABULARY IS ONLY WORTH ANYTHING IF A SCRIPT CAN REFUSE A TOKEN (PDS-D525). Each
+  # value in @basis_vocab names a falsifier; this reads the committed test tree and fires
+  # the ones it can DECIDE. It is TIERED AS MEASURED, not as hoped:
+  #
+  #   REDS (5)      end_to_end (and end_to_end_unmutated, the same predicate minus the
+  #                 mutation) · stub_mapping_only, THE "DOES read Repo" HALF ONLY ·
+  #                 context_differential_only · basis_stale (a direct --keys join, built
+  #                 FIRST because this wave's own slices re-key rows) · no_observer, the
+  #                 MODULE-SUBSTRING half only, which needs no test-tree index.
+  #   ADVISORY      everything else, printed as a counted CONTRADICTION line at exit 0 —
+  #                 the DRIFT pattern this census already uses.
+  #
+  # A CITED PATH THAT DOES NOT EXIST REDS. It is never silently skipped: a citation to a
+  # file nobody can open is the paperwork this ledger exists to refuse.
+  #
+  # THE PREDICATE THE WISH ASKED FOR IS A FALSE FALSIFIER AND IS NOT BUILT. "The cited
+  # test references the site's MODULE" refuses ALL of this wave's committed PROVEN
+  # differentials, because pds_group_c_receipt_differential_test.exs contains the string
+  # `Controller` ZERO times — conn-driven tests name a URL, not a module — and it GREENS a
+  # cross-wired citation. Route linkage replaces it and is ADVISORY, never redding:
+  # PluginSettings/Secret route literals are all-dynamic (the URL lives in the enclosing
+  # `scope`, and reading the literal alone manufactured 3 FALSE contradictions on genuine
+  # PROVEN rows) and `GithubWebhookController` appears ZERO times in router.ex because the
+  # routes are macro-generated, so linkage is UNCHECKABLE for all 14 webhook rows.
+  #
+  # `shape_assertion_only`'s falsifier is UNDECIDABLE as written and is implementable only
+  # as a denylist of weak predicates (is_list/is_map/is_binary/bare truthiness). It is
+  # advisory, and @basis_vocab says so in the falsifier text rather than shipping an arm
+  # whose name promises more than its code delivers.
+  #
+  # HELPER RESOLUTION IS MANDATORY, AND THE HELPER-NAME REGEX IS [\w!?]+ (both cost the
+  # prototype an iteration). The decisive `Repo.` / `build_conn` token routinely lives in
+  # a helper — `stored/1`, `deliver/3`, `stub_intake/1`, `assert_receipt_is_stored!/2` —
+  # never in the cited block; and `\w+` truncates `assert_receipt_is_stored!` at the `!`
+  # and FALSELY REFUSES four genuine rows.
+  # THE PROBE IS THE SUBSTRING `Repo.`, AND ITS LIMIT IS MEASURED. A test that reads
+  # Postgres through a CONTEXT MODULE carries no such token — inbound_events_test.exs's
+  # `link_state/2` goes through `Content.get_document/4` and `detached_conflicts/1` through
+  # `Conflicts.list/1`. That is exactly why `two_hop_composed` is ADVISORY: on this probe
+  # its falsifier is not decidable, so it prints a counted CONTRADICTION and never a red.
+  # The redding values are the ones the probe CAN decide, and nothing else was promoted to
+  # redding on the grounds that it would usually be right.
+  @test_root "api/test"
+  @conn_tokens ["build_conn", "json_response", "conn |>", "|> post(", "|> get(",
+                "|> put(", "|> delete(", "%{conn:", "conn: conn", "authed("]
+  @repo_token "Repo."
+
+  defp basis_falsifiers(classified) do
+    if File.dir?(@test_root) do
+      cache = %{}
+
+      {findings, _cache} =
+        classified
+        |> resolve_register()
+        |> Enum.reduce({[], cache}, fn {r, status, _site}, {acc, c} ->
+          case status do
+            :live -> {f, c} = check_row_basis(r, c)
+              {acc ++ f, c}
+
+            _ ->
+              {acc, c}
+          end
+        end)
+
+      {:ran, findings}
+    else
+      :no_test_tree
+    end
+  end
+
+  defp check_row_basis(r, cache) do
+    ev = Map.get(r, :evidence, "")
+    tier_of_basis = elem(Map.get(@basis_vocab, r.basis, {"?", "?", :advisory}), 2)
+
+    cond do
+      r.basis == :no_observer ->
+        {no_observer_findings(r), cache}
+
+      r.basis in [:end_to_end, :end_to_end_unmutated, :stub_mapping_only,
+                  :context_differential_only, :side_effect_existence_only, :two_hop_composed] ->
+        cited_findings(r, ev, tier_of_basis, cache)
+
+      true ->
+        {[], cache}
+    end
+  end
+
+  defp cited_findings(r, "", tier, cache),
+    do: {[finding(r, tier, "carries no citation, and its falsifier needs one")], cache}
+
+  defp cited_findings(r, ev, tier, cache) do
+    case String.split(ev, ":") do
+      [path, line] ->
+        if File.exists?(path) do
+          {text, cache} = cited_text(path, String.to_integer(line), cache)
+          {judge_citation(r, ev, tier, text), cache}
+        else
+          # ALWAYS A RED, whatever the basis's tier: an unopenable citation is not a weak
+          # judgment, it is no judgment at all.
+          {[finding(r, :reds, "cites #{ev}, and that PATH DOES NOT EXIST")], cache}
+        end
+
+      _ ->
+        {[finding(r, :reds, "cites #{inspect(ev)}, which is not a `path:line`")], cache}
+    end
+  end
+
+  defp judge_citation(r, ev, tier, text) do
+    conn? = Enum.any?(@conn_tokens, &String.contains?(text, &1))
+    repo? = String.contains?(text, @repo_token)
+
+    case r.basis do
+      b when b in [:end_to_end, :end_to_end_unmutated] ->
+        cond do
+          not conn? -> [finding(r, tier, "#{ev} drives no route (no conn token in the cited block or its helpers)")]
+          not repo? -> [finding(r, tier, "#{ev} never reads the stored row back (no `Repo.` in the cited block or its helpers)")]
+          true -> []
+        end
+
+      :stub_mapping_only ->
+        # ONLY THE REPO HALF REDS. The seam half ("has no injection seam") is advisory:
+        # a seam can be a put_env, a Mox, a passed fun or a config key, and a denylist of
+        # spellings would refuse honest rows.
+        if repo?,
+          do: [finding(r, tier, "#{ev} DOES read Repo — `stub_mapping_only` understates what the suite proves")],
+          else: []
+
+      :context_differential_only ->
+        if conn?,
+          do: [finding(r, tier, "#{ev} BUILDS A CONN — the controller->wire hop is covered, so this is not context-differential-only")],
+          else: []
+
+      :side_effect_existence_only ->
+        if not repo?,
+          do: [finding(r, :advisory, "#{ev} reads no Repo at all, so it cannot even assert existence")],
+          else: []
+
+      :two_hop_composed ->
+        if not repo?,
+          do: [finding(r, :advisory, "#{ev} reads no Repo — the second hop is not visible in the cited block")],
+          else: []
+
+      _ ->
+        []
+    end
+  end
+
+  # THE MODULE HALF ONLY. `no_observer` claims NOTHING in the test tree names this site;
+  # one substring hit refutes it, and that needs no index and no route.
+  defp no_observer_findings(r) do
+    mod = r.key |> elem(1) |> String.split(".") |> Enum.drop(-1) |> Enum.join(".")
+
+    hit =
+      Path.wildcard(@test_root <> "/**/*.exs")
+      |> Enum.find(&String.contains?(File.read!(&1), mod))
+
+    if hit,
+      do: [finding(r, :reds, "`no_observer` is refuted — #{mod} is named in #{hit}")],
+      else: []
+  end
+
+  defp finding(r, tier, why), do: %{key: r.key, basis: r.basis, tier: tier, why: why}
+
+  # THE CITED BLOCK PLUS ITS HELPERS, ONE LEVEL DEEP. The block runs from the cited line to
+  # the `end` at its own indentation (capped, because a runaway scan would swallow the file
+  # and green everything).
+  defp cited_text(path, line, cache) do
+    lines = Map.get_lazy(cache, path, fn -> path |> File.read!() |> String.split("\n") end)
+    cache = Map.put(cache, path, lines)
+    block = block_at(lines, line)
+
+    helpers =
+      ~r/([\w!?]+)\(/
+      |> Regex.scan(block)
+      |> Enum.map(&List.last/1)
+      |> Enum.uniq()
+      |> Enum.flat_map(&helper_body(lines, &1))
+      |> Enum.join("\n")
+
+    {block <> "\n" <> helpers, cache}
+  end
+
+  defp block_at(lines, line) do
+    start = max(line - 1, 0)
+    head = Enum.at(lines, start, "")
+    indent = String.length(head) - String.length(String.trim_leading(head))
+
+    lines
+    |> Enum.drop(start)
+    |> Enum.take(200)
+    |> Enum.reduce_while([], fn l, acc ->
+      closed? =
+        acc != [] and String.trim(l) == "end" and
+          String.length(l) - String.length(String.trim_leading(l)) == indent
+
+      if closed?, do: {:halt, [l | acc]}, else: {:cont, [l | acc]}
+    end)
+    |> Enum.reverse()
+    |> Enum.join("\n")
+  end
+
+  # `[\w!?]+`, NEVER `\w+`: `\w+` truncates assert_receipt_is_stored! at the bang and the
+  # def is then never found, which falsely refuses four genuine rows.
+  defp helper_body(lines, name) do
+    lines
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {l, _n} -> Regex.match?(~r/^\s*defp?\s+#{Regex.escape(name)}\(/, l) end)
+    |> Enum.map(fn {_l, n} -> block_at(lines, n) end)
+  end
+
+  defp report_basis_falsifiers(classified) do
+    p("BASIS FALSIFIERS (PDS-D525 — a vocabulary token is only a claim if a script can")
+    p("refuse it; tiered AS MEASURED, so an undecidable falsifier is advisory, not a lie)")
+    p(String.duplicate("-", 78))
+
+    case basis_falsifiers(classified) do
+      :no_test_tree ->
+        p("  SKIPPED — this corpus carries no #{@test_root}/ tree, so no citation can be opened.")
+        p("  THIS IS NOT A PASS. The census is normally run over `git archive HEAD api/lib")
+        p("  scripts`, which excludes the tests on purpose; run it from a full checkout to")
+        p("  arm these arms. Within a present test tree, a citation that cannot be opened REDS.")
+        p("")
+        :skipped
+
+      {:ran, findings} ->
+        {red, advisory} = Enum.split_with(findings, &(&1.tier == :reds))
+        p("  checked #{Enum.count(@register)} row(s) against #{length(Enum.filter(@basis_vocab, fn {_k, {_c, _f, t}} -> t == :reds end))} redding value(s) · #{length(red)} refusal(s) · #{length(advisory)} advisory contradiction(s)")
+
+        Enum.each(red, fn f ->
+          p("      REFUSED  #{short(elem(f.key, 0))} #{elem(f.key, 1)}  [#{f.basis}]")
+          wrap(f.why, "               ")
+        end)
+
+        Enum.each(advisory, fn f ->
+          p("      CONTRADICTION  #{short(elem(f.key, 0))} #{elem(f.key, 1)}  [#{f.basis}] #{f.why}")
+        end)
+
+        if findings == [], do: p("      none — every decidable falsifier holds")
+        p("")
+        {:ran, red}
+    end
+  end
+
   # ---------------------------------------------------------- register integrity
   #
   # THREE ARMS, ALL SCOPED TO THE REAL CORPUS. They assert COMPLETENESS and INTEGRITY and
   # never a verdict distribution — a reclassification cannot red this build, which is the
   # whole reason the ratchet is safe to leave armed.
+  # A SKIPPED SCOPE CONTRIBUTES NO ARM AT ALL, rather than a PASS nobody earned.
+  defp falsifier_check(:skipped), do: []
+
+  defp falsifier_check({:ran, red}) do
+    why =
+      if red == [] do
+        "every decidable falsifier holds across the register's cited basis tokens"
+      else
+        "#{length(red)} basis token(s) REFUSED by their own falsifier: " <>
+          Enum.map_join(Enum.take(red, 4), " · ", &"#{short(elem(&1.key, 0))} [#{&1.basis}] #{&1.why}")
+      end
+
+    [{"BASIS-FALSIFIERS", red == [], why}]
+  end
+
   defp register_checks(classified, parsed) do
     case register_scope(classified) do
       :scoped_out -> []
