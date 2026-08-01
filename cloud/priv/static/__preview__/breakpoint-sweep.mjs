@@ -97,11 +97,13 @@
 //  LEG B — THE RENDER SWEEP (`--render`)
 // ─────────────────────────────────────────────────────────────────────────────
 //  WIDTH AXIS = a boundary walk B-1 / B / B+1 over every derived breakpoint.
-//  That is four breakpoints (620, 720, 768, 899) giving 12 widths. THE WIDTH
-//  900 IS STILL WALKED, as 899+1 — dropping 900 from the axis costs exactly
-//  ONE width, 901, and nothing else. (It was five breakpoints and 13 widths
-//  until cch-w16-s8 deleted app.css's only `max-width: 900px` rule; the
-//  `@media (min-width: 900px)` block that remains parses as the boundary 899.)
+//  That is five breakpoints (620, 720, 768, 830, 899) giving 15 widths. THE
+//  WIDTH 900 IS STILL WALKED, as 899+1 — dropping 900 from the axis cost
+//  exactly ONE width, 901, and nothing else. (It was five breakpoints and 13
+//  widths until cch-w16-s8 deleted app.css's only `max-width: 900px` rule —
+//  the `@media (min-width: 900px)` block that remains parses as the boundary
+//  899 — and four/12 until W17-S6 added `@media (max-width: 830px)`, the
+//  breakpoint that keeps the past-due money message whole.)
 //
 //  SCREEN AXIS = SCENARIO x ROUTE, never section.view alone. Content is
 //  scenario-bound: on scen=mixed-fleet the notifications/tokens/env/sites/
@@ -176,7 +178,7 @@
 // ─────────────────────────────────────────────────────────────────────────────
 //  The fresh-CDP-target-per-cell requirement is what BUYS liveness, and it
 //  costs roughly a second per cell. The full render leg is 26 cells x 2 themes
-//  x 12 widths = 624 cells: budget MINUTES. The theme axis DOUBLED that, for an
+//  x 15 widths = 780 cells: budget MINUTES. The theme axis DOUBLED that, for an
 //  axis stated above to be coverage rather than yield — slice it with
 //  `--theme light` when you are chasing a width, not a mode. Two traps proven the hard way: Page.navigate to
 //  a URL differing only in its hash is a SAME-DOCUMENT navigation, so injected
@@ -243,7 +245,15 @@ export function boundaryWalk(breakpoints) {
   return [...out].sort((a, b) => a - b);
 }
 
-// Derived from app.css: 620, 720, 768, 899. Declared here as the sweep's
+// W17-S6 ADDED 830. `@media (max-width: 830px)` is where GR116's topbar tighten
+// now lives — the width at which the past-due money message ("Payment failed ·
+// fix billing", scrollWidth 168) last fits beside the liveness chip. Leg A
+// caught its absence exactly as designed: with the rule shipped and this list
+// unchanged the sweep exited 2, "UNCOVERED breakpoint 830px — the boundary walk
+// is missing 829, 830, 831." A CSS slice that adds a breakpoint owes this list
+// an entry, and the sweep will not let it forget.
+//
+// Derived from app.css: 620, 720, 768, 830, 899. Declared here as the sweep's
 // committed axis so Leg A can refuse when the stylesheet grows a breakpoint
 // this list does not carry — and, since cch-w15's phantom half, when it loses
 // one. 900 LEFT THIS LIST because cch-w16-s8 deleted app.css's only
@@ -252,7 +262,7 @@ export function boundaryWalk(breakpoints) {
 // parsed as the boundary 899, which is why 899 stays. THE WIDTH 900 IS STILL
 // DRIVEN — boundaryWalk emits 899+1 — so the only width this shrink costs is
 // 901.
-export const BREAKPOINTS = [620, 720, 768, 899];
+export const BREAKPOINTS = [620, 720, 768, 830, 899];
 export const WIDTHS = boundaryWalk(BREAKPOINTS);
 
 const INST = IDS.liveInstance;
@@ -343,8 +353,8 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 74
 // name-keyed entries below, which is what makes a 100th scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 20 vary the CONTENT of a panel already rendered at all 12 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
-  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 9 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity — over a grid already walked at all 12 widths.",
+  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 20 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
+  "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 9 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity — over a grid already walked at all 15 widths.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 8 vary binding/verify content inside the same .detail-grid.",
   "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 7 are member-role and empty-state variants of those same panels.",
   "hash:#": "Routes whose head is a bare `#` — `#/invitations/accept` and `#/auth/reset`. These render a single centred card over the sign-in surface: no shell, no grid, nothing for a breakpoint to fold.",
@@ -723,7 +733,8 @@ export function parseThemeMembers(css, html) {
 //   THAT EXACT STATE WAS THEN REACHED FOR REAL, and the refusal caught it:
 // cch-w16-s8 deleted the `max-width: 900px` tier rule, and with the literal not
 // yet shrunk Leg A exited 2 naming `PHANTOM breakpoint 900px`. Four breakpoints
-// is now the CORRECT derived count (620/720/768/899 -> 12 widths); the tell was
+// is now the CORRECT derived count at the time (620/720/768/899 -> 12 widths;
+// W17-S6 has since added 830, making it five and 15); the tell was
 // never the number four, it was four derived against a thirteen-width walk.
 export function axisCoverage(derived, declared) {
   const d = new Set(declared.map(String));

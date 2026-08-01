@@ -136,10 +136,14 @@ test("app.css's declared axis is exactly the sweep's BREAKPOINTS, with nothing u
   const r = parseMediaBreakpoints(APP_CSS);
   assert.deepEqual(r.breakpoints, BREAKPOINTS);
   assert.deepEqual(r.unresolved, []);
-  // 12 widths, not 13: cch-w16-s8 dropped 900 from BREAKPOINTS with the CSS rule
-  // that declared it, and the ONLY width that leaves is 901. 900 is still here,
-  // walked as 899+1.
-  assert.deepEqual(WIDTHS, [619, 620, 621, 719, 720, 721, 767, 768, 769, 898, 899, 900]);
+  // 15 widths. cch-w16-s8 dropped 900 from BREAKPOINTS with the CSS rule that
+  // declared it — the ONLY width that left is 901, since 900 is still walked as
+  // 899+1 — taking this to 12. W17-S6 then added `@media (max-width: 830px)`
+  // for the past-due money message, which brings 829/830/831 and takes it to 15.
+  // THIS LITERAL IS THE POINT: a CSS slice that adds or removes a breakpoint has
+  // to come here and say which widths it moved. Leg A refuses either way, and it
+  // DID refuse W17-S6's first draft ("UNCOVERED breakpoint 830px").
+  assert.deepEqual(WIDTHS, [619, 620, 621, 719, 720, 721, 767, 768, 769, 829, 830, 831, 898, 899, 900]);
 });
 
 test("the raw grep over-counts @media — comment-stripping is why the parser does not", () => {
@@ -496,7 +500,7 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
   const r = coverageReport({ css, html: INDEX_HTML });
   assert.equal(r.ok, false);
   assert.deepEqual(r.phantomBreakpoints, [620]);
-  assert.deepEqual(r.breakpoints, [720, 768, 899], "the mutation really did remove it — otherwise the refusal above is vacuous");
+  assert.deepEqual(r.breakpoints, [720, 768, 830, 899], "the mutation really did remove it — otherwise the refusal above is vacuous");
   // and the unmutated tree is clean, so this is the mutation talking
   assert.deepEqual(coverageReport({ css: APP_CSS, html: INDEX_HTML }).phantomBreakpoints, []);
 });
