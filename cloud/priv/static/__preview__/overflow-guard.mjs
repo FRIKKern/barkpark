@@ -199,7 +199,17 @@ const DEFECTS = [
 // per-cell measurement below also reads documentElement.scrollWidth: dropping
 // the media query, or raising the 899 stack threshold above 900, now REDS here
 // instead of shipping. Filed residue this narrows: cch-bl-w15-fleet-leg-scenario-axis-of-two.
-const FLEET_WIDTHS = [721, 769, 899, 900, 940, 983, 1000];
+//
+// W16-S3 WIDENED THE AXIS DOWN TO THE PHONE, because the leg was STRUCTURALLY
+// BLIND TO ITS OWN WORST CELL. The set above started at 721: no phone width at
+// all, so the band where `fleet-support-failed`'s money message lost 69% of
+// itself (320: `.status-pill-detail` scrollWidth 463 vs clientWidth 142) could
+// not be measured, and mixed-fleet + fleet-v4 were ALSO truncating at 320/360/
+// 390 with nothing to say so. 800/830/860 close the other hole — the 769..899
+// interior was unvisited, and the filed row's own title ("721 and 769")
+// understated a band that runs 320-860. Paying a row while leaving the guard
+// blind to that row's worst width is this wave's disease; this is the cure.
+const FLEET_WIDTHS = [320, 360, 390, 430, 620, 721, 769, 800, 830, 860, 899, 900, 940, 983, 1000];
 const FLEET_SCENS = ["mixed-fleet", "fleet-v4", "fleet-support-failed"];
 const FLEET_TEXT_SELS = [".fleet-name", ".fleet-url", ".fleet-meta"];
 
@@ -212,15 +222,16 @@ const FLEET_TEXT_SELS = [".fleet-name", ".fleet-url", ".fleet-meta"];
 // row is paid, this guard tells you to delete the entry instead of quietly
 // carrying it forever. Measured identically on origin/main and on this branch,
 // so the slice introduced none of it.
-const FLEET_KNOWN = [
-  {
-    scen: "fleet-support-failed",
-    sel: ".status-pill-detail",
-    widths: [721, 769],
-    row: "cch-w15-bl-fleet-support-detail-truncated-stacked-band",
-    why: "the stacked row truncates 'verify: no heartbeat within the provisioning window' to 295/343px of 463 — the operator cannot read WHY the instance failed. Pre-existing on origin/main at the identical numbers; below this slice's 900px scope.",
-  },
-];
+//
+// EMPTY AS OF W16-S3, AND THAT IS THE ALLOWLIST WORKING. The single entry —
+// `cch-w15-bl-fleet-support-detail-truncated-stacked-band` @ 721/769 — was
+// DELETED IN THE SAME DIFF as its remedy (`.fleet-status .status-pill`'s wrap,
+// app.css). With the remedy on disk and the entry still present this guard
+// exited 1 with exactly one finding, the stale-allowlist tripwire below saying
+// "matched NOTHING" — which is the entry telling its author to delete it. Do
+// not re-add a row here to make a red go away: an entry buys silence at exactly
+// one scenario/selector/width triple and must be deleted the day it is paid.
+const FLEET_KNOWN = [];
 const knownHit = (scen, sel, width) =>
   FLEET_KNOWN.find((k) => k.scen === scen && k.sel === sel && k.widths.includes(width));
 
@@ -825,9 +836,9 @@ async function main() {
       const D = "W13-detail-route-band";
       process.stdout.write(
         `\n${D} — ${BAND_ROUTES.length} routes x ${BAND_WIDTHS.length} widths x 2 themes` +
-        ` (${BAND_ROUTES.length * BAND_WIDTHS.length * 2} cells)\n`,
+        ` (${BAND_ROUTES.length * BAND_WIDTHS.length * 2} cells) + .detail-rail .status-pill on both axes\n`,
       );
-      let cells = 0, offenders = 0, misrouted = 0;
+      let cells = 0, offenders = 0, misrouted = 0, railPills = 0, railBad = 0;
       for (const r of BAND_ROUTES) {
         for (const theme of ["light", "dark"]) {
           // Enter at 900 — ABOVE the band — so a route that only renders at one
@@ -844,7 +855,19 @@ async function main() {
               `(function(){var d=document.documentElement;` +
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var t=document.querySelector('.inst-tab[aria-current="page"]');` +
-              `return {sw:d.scrollWidth, cw:d.clientWidth, view:v?v.id:'none',` +
+              // W16-S3: THE RAIL'S OWN PILL, measured in the cells this leg
+              // already visits. `cch-w14-bl-status-pill-label-overflows-rail`
+              // lived HERE and every leg in this file walked past it: the page
+              // never scrolls (the chip clips, it does not push), so a
+              // page-level assertion certifies a rail whose label paints 36.52px
+              // past its own chip. Both axes, because a wrap fixes the
+              // horizontal one and can invent the vertical one.
+              `var rp=[].slice.call(document.querySelectorAll('.detail-rail .status-pill')).map(function(p){` +
+              `  var pr=p.getBoundingClientRect(); var l=p.querySelector('.status-pill-label');` +
+              `  return {sw:p.scrollWidth,cw:p.clientWidth,sh:p.scrollHeight,ch:p.clientHeight,` +
+              `    lh:l?+l.getBoundingClientRect().height.toFixed(2):0,ph:+pr.height.toFixed(2),` +
+              `    lsw:l?l.scrollWidth:0,lcw:l?l.clientWidth:0,t:(p.textContent||'').slice(0,40)};});` +
+              `return {sw:d.scrollWidth, cw:d.clientWidth, view:v?v.id:'none', rp:rp,` +
               ` tab:t?t.textContent:null, theme:d.getAttribute('data-theme')};})()`,
             );
             cells++;
@@ -863,12 +886,41 @@ async function main() {
               offenders++;
               fail(D, `${r.name}/${theme}@${width}: scrollWidth ${m.sw} > viewport ${m.cw} — ${over}px of the page is off-screen at rest, with no cue`);
             }
+            // (3) THE RAIL'S PILLS — element geometry, both axes. Counted
+            // separately from `cells` so this leg's 108/108 stays 108/108.
+            for (const p of m.rp) {
+              railPills++;
+              if (p.sw > p.cw) {
+                railBad++;
+                fail(D, `${r.name}/${theme}@${width} .detail-rail .status-pill: scrollWidth ${p.sw} > clientWidth ${p.cw} — ${Math.round((1 - p.cw / p.sw) * 100)}% of "${p.t}" renders OUTSIDE its own chip (the label declares no overflow, so it is painted, not clipped) and the page never scrolls, which is why every page-level leg above walks past it`);
+              }
+              if (p.lsw > p.lcw) {
+                railBad++;
+                fail(D, `${r.name}/${theme}@${width} .status-pill-label: scrollWidth ${p.lsw} > clientWidth ${p.lcw} — the LABEL's own box does not hold its glyphs. Shrinking the label box alone scores clean on \`label.right - pill.right\` and moves no glyph; this is the metric that cannot be bought that way`);
+              }
+              if (p.sh > p.ch) {
+                railBad++;
+                fail(D, `${r.name}/${theme}@${width} .detail-rail .status-pill: ${p.sh}px of text in a ${p.ch}px chip — "${p.t}" paints BELOW the capsule. This is the wrap remedy's own trap: without \`height: auto\` it scores clean on every width metric above`);
+              }
+              if (p.lh > p.ph + 0.5) {
+                railBad++;
+                fail(D, `${r.name}/${theme}@${width} .status-pill-label: the label box is ${p.lh}px tall inside a ${p.ph}px pill`);
+              }
+            }
             row.push(`${width}:${m.sw}${over > 0 ? "!" : ""}`);
           }
           process.stdout.write(`   ${r.name}/${theme}  ${row.join(" ")}\n`);
         }
       }
+      // AUDITED: an empty list is not a clean list. If the rail stops rendering
+      // a pill this leg would score 0 rail defects and read as a pass.
+      if (railPills === 0) {
+        fail(D, `zero .detail-rail .status-pill measured across ${cells} cells — the rail pill stopped rendering, so its assertions measured nothing. This is not a pass.`);
+      }
       if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${railPills} .detail-rail .status-pill(s) measured on both axes, ${railBad} outside their own chip`,
+        );
         okLine(
           `${cells} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
           ` (769/899 are the band edges, 900/1024 the controls above it); ${misrouted} misrouted;` +
@@ -884,9 +936,9 @@ async function main() {
       const cellCount = FLEET_SCENS.length * FLEET_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${FLEET_SCENS.length} scenarios x ${FLEET_WIDTHS.length} widths x 2 themes` +
-        ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges)\n`,
+        ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges + .status-pill HEIGHT)\n`,
       );
-      let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, pageOver = 0, rowsSeen = 0;
+      let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, pageOver = 0, rowsSeen = 0, overflowed = 0;
       const knownSeen = new Set();
       for (const scen of FLEET_SCENS) {
         for (const theme of ["light", "dark"]) {
@@ -905,13 +957,24 @@ async function main() {
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var sels=${JSON.stringify(FLEET_TEXT_SELS)};` +
               `var d=document.documentElement;` +
-              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,clips:[],ell:[],sq:[]};` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,clips:[],ell:[],sq:[],tall:[]};` +
               `[].slice.call(document.querySelectorAll('.fleet-row')).forEach(function(r,i){out.rows++;` +
               `  sels.forEach(function(s){var e=r.querySelector(s); if(!e) return;` +
               `    if(e.scrollWidth>e.clientWidth) out.clips.push({i:i,s:s,sw:e.scrollWidth,cw:e.clientWidth,t:(e.textContent||'').slice(0,32)});});` +
               `  var p=r.querySelector('.status-pill-detail');` +
               `  if(p&&p.scrollWidth>p.clientWidth) out.ell.push({i:i,sw:p.scrollWidth,cw:p.clientWidth,t:(p.textContent||'').slice(0,40)});` +
-              `  var b=r.querySelector('.fleet-badges');` +
+              // W16-S3 (d): IS THE CHIP TALL ENOUGH FOR ITS OWN TEXT. The first
+      // VERTICAL question any instrument in __preview__ has ever asked. The
+      // remedy for (b) is a WRAP, and a wrap without `height: auto` scores
+      // clean on every horizontal metric above while a 36px label sits inside
+      // a 24px chip and the second line paints BELOW the capsule — invisible
+      // to a scrollWidth-only scorer, which is what every leg in this file was.
+      `  var pl=r.querySelector('.status-pill');` +
+      `  if(pl){var plr=pl.getBoundingClientRect();` +
+      `    if(pl.scrollHeight>pl.clientHeight) out.tall.push({i:i,k:'chip',sh:pl.scrollHeight,ch:pl.clientHeight,t:(pl.textContent||'').slice(0,40)});` +
+      `    [].slice.call(pl.children).forEach(function(c){var cr=c.getBoundingClientRect();` +
+      `      if(cr.height>plr.height+0.5) out.tall.push({i:i,k:c.className,sh:+cr.height.toFixed(2),ch:+plr.height.toFixed(2),t:(c.textContent||'').slice(0,40)});});}` +
+      `  var b=r.querySelector('.fleet-badges');` +
               `  if(b&&b.scrollWidth>0&&b.getBoundingClientRect().width+0.5<b.scrollWidth)` +
               `    out.sq.push({i:i,w:+b.getBoundingClientRect().width.toFixed(2),sw:b.scrollWidth});});` +
               `return out;})()`,
@@ -954,7 +1017,11 @@ async function main() {
               squeezed++;
               fail(D, `${scen}/${theme}@${width} row${s.i} .fleet-badges: box ${s.w}px around ${s.sw}px of content — the badge column was collapsed to buy the text room`);
             }
-            const bad = m.clips.length + m.sq.length + (m.psw > m.pcw ? 1 : 0) +
+            for (const t of m.tall) {
+              overflowed++;
+              fail(D, `${scen}/${theme}@${width} row${t.i} ${t.k === "chip" ? ".status-pill" : "." + t.k}: ${t.sh}px of text in a ${t.ch}px chip — "${t.t}" paints BELOW the capsule. A wrap without \`height: auto\` scores clean on every scrollWidth metric and still puts the words outside the box.`);
+            }
+            const bad = m.clips.length + m.sq.length + m.tall.length + (m.psw > m.pcw ? 1 : 0) +
               m.ell.filter(() => !knownHit(scen, ".status-pill-detail", width)).length;
             row.push(`${width}:${m.rows}r${bad ? "!" + bad : ""}`);
           }
@@ -974,7 +1041,8 @@ async function main() {
         okLine(
           `${cells} / ${cells} cells clean (${rowsSeen} fleet rows measured, ${knownSeen.size} known-row cells itemised: ${FLEET_KNOWN.map((k) => k.row).join(", ") || "none"}) across ` +
           `${FLEET_WIDTHS.join("/")}; ${clipped} clipped text cells, ${ellipsed} ellipsed money ` +
-          `messages, ${squeezed} squeezed badge columns, ${pageOver} pages scrolling sideways; ` +
+          `messages, ${squeezed} squeezed badge columns, ${overflowed} chips shorter than their own text, ` +
+          `${pageOver} pages scrolling sideways; ` +
           `${FLEET_KNOWN.length} itemised known row(s), every other cell judged`,
         );
       }

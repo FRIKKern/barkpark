@@ -5211,3 +5211,78 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .offload-watch { display: flex; flex-direction: column; gap: 8px; margin-top: 4px; padding: 10px 12px; border: 1px solid var(--border); border-radius: 10px; }
 .offload-watch-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
 .offload-watch-title { font-weight: 600; font-size: 13px; color: var(--text); }
+
+/* ====================================== W16-S3 PILL TEXT STAYS IN ITS CHIP
+   Pays TWO filed rows — `cch-w14-bl-status-pill-label-overflows-rail` and
+   `cch-w15-bl-fleet-support-detail-truncated-stacked-band`. They are ONE
+   banner because they share this anchor and `cssom-heads.baseline`, NOT
+   because they share a rule: they fail in different containers, on different
+   children, in disjoint bands.
+
+   GR11/GR25 CARVE-OUT, ARGUED NOT ASSUMED. GR25 forbids EDITING the four
+   quarantined pill families. Nothing below edits one: every declaration here
+   is an ADD under a WRAPPER selector (`.detail-rail`, `.fleet-status` —
+   app.css:2270 already states both are wrappers), the base blocks at
+   :2913-2957 are byte-identical, and this is the D157 precedent ("an ADD, not
+   a restyle") plus D191's inheritance statement. `git diff` on this file
+   touches no existing declaration.
+
+   THE METRIC. Every "fixed" below is `scrollWidth <= clientWidth` on BOTH the
+   pill and its offending child, never the right-edge delta
+   `label.right - pill.right`. The delta is a FALSE-CLEAN oracle: the measured
+   candidate `.detail-rail .status-pill-label { flex: 0 1 auto; min-width: 0 }`
+   ALONE drives it +36.52 -> -12.00 (a perfect score) while
+   `label.scrollWidth 130 > clientWidth 81` and `pill.scrollWidth 155 >
+   clientWidth 117` — the label BOX shrank 49px, the glyphs did not move, and
+   `.status-pill-label` declares no overflow, so 38% of "No content binding"
+   still paints outside the chip. `flex: 0 0 auto` at :2935 is ALREADY on disk,
+   so re-declaring it is a measured no-op; the shrink line below only earns its
+   place NEXT TO `white-space: normal`, which is what actually moves glyphs.
+
+   THE VERTICAL TRAP. A wrap without `height: auto` scores clean on every
+   HORIZONTAL metric while a 36px label sits inside a 24px chip
+   (`pill.scrollHeight 29 > clientHeight 22`) and the second line paints below
+   the capsule. No instrument in __preview__ measured any vertical dimension
+   before this slice; overflow-guard's W15 leg now asserts
+   `pill.scrollHeight <= pill.clientHeight`, mutation-proven by deleting
+   `height: auto` here.
+
+   THE 2px IS DERIVED, NOT TASTE. The base chip is `height: 24px` + 1px border
+   each side around an 18px label line box, i.e. a 2px optical inset per side.
+   `padding-top/bottom: 2px` REPRODUCES that inset exactly, so a single-line
+   pill measures 24px before and after (2+18+2+2 = 24) and only a WRAPPED pill
+   grows. `min-height: 24px` keeps the floor when the label is short. The 8/12/
+   16/20/24 --space-* scale has no 4px step, so a token was not available and
+   none is invented. */
+.detail-rail .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+}
+/* The shrink+wrap pair. `min-width: 0` lets the label fall below its
+   max-content width; `flex: 0 1 auto` lets flexbox ask. Neither means anything
+   without `white-space: normal` above — see THE METRIC. */
+.detail-rail .status-pill-label { flex: 0 1 auto; min-width: 0; }
+
+/* The fleet row's money message: "verify: no heartbeat within the provisioning
+   window" measured scrollWidth 463 against clientWidth 142 at 320 (69% of the
+   sentence unrendered) and 295/343 at 721/769 — the operator could not read WHY
+   the instance failed. The filed row's title says "721 and 769"; the driven band
+   is 320/360/390/430/620/721/769/800/830/860, clean at >= 899.
+   `align-items: flex-start` puts the dot on the FIRST line instead of the
+   vertical middle of a two-line chip; `margin-top` centres the 7px dot on that
+   18px line box ((18-7)/2 = 5.5px — derived from the measured line box, not
+   eyeballed). `overflow: visible; text-overflow: clip` retires the ellipsis
+   machinery the wrap makes unreachable, so nothing can silently re-truncate. */
+.fleet-status .status-pill {
+  white-space: normal;
+  height: auto;
+  min-height: 24px;
+  padding-top: 2px;
+  padding-bottom: 2px;
+  align-items: flex-start;
+}
+.fleet-status .status-pill-dot { margin-top: 5.5px; }
+.fleet-status .status-pill-detail { overflow: visible; text-overflow: clip; }

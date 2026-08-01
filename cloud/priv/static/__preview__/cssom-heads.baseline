@@ -212,4 +212,20 @@
 # MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 233681 B sha256 1cf9bac24cf0...,
 # authored rule heads 1248 == CSSOM style rules 1248, flattened selectors 1213/1213,
 # MISSES 0, PARITY PASS. Both prose records above are kept.
-1248
+# W16-S3 2026-08-01 (cch-w16-s3-pill-text-bounded-rail-and-fleet): 1248 -> 1253, +5
+# authored rule heads, ALL ADDS under wrapper selectors — `.detail-rail .status-pill`,
+# `.detail-rail .status-pill-label`, `.fleet-status .status-pill`,
+# `.fleet-status .status-pill-dot`, `.fleet-status .status-pill-detail`. The pill's own
+# four families at app.css:2913-2957 are byte-identical (GR11/GR25 carve-out, D157
+# ADD-not-restyle). MISSES 0, so this is an unrecorded ADD, never a parity defect.
+# HOW 1253 WAS OBTAINED, since a sixth collision in this file is likely: the sentinel
+# `1` was written here deliberately and cssom-parity.mjs run — it printed
+# "BASELINE MISMATCH: 1253 authored rule heads, sidecar baseline is 1 (+1252)", i.e.
+# the TOOL named the value. 1248 + 5 also happens to equal 1253; that arithmetic is a
+# coincidence of a quiet tree and is NOT how this line may be produced. D158 stands:
+# on any rebase or merge conflict here, re-run the tool on the MERGED tree and take
+# what it prints. Never merge-resolve this number, never add deltas.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 237836 B sha256 1ed8286de6c3...,
+# authored rule heads 1253 == CSSOM style rules 1253, flattened selectors 1218/1218,
+# MISSES 0, PARITY PASS.
+1253
