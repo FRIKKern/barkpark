@@ -124,6 +124,13 @@ defmodule BarkparkWeb.PdsW36RevokeAllReceiptTest do
       seed_sessions!(user, 3)
       assert live_session_count(user.id) == 3
 
+      # THE ORACLE MUST BE ABLE TO SAY THE OTHER THING. Without this line the two
+      # assertions below are both satisfied by a hardcoded `false` — exactly the
+      # defect PDS-D503 filed — so the differential could not tell a read-back
+      # from the literal it replaced. A provisioned member reads TRUE.
+      assert Scim.org_user_active?(org, user) == true,
+             "the active oracle answers false before any deprovision — it is not reading the rows"
+
       body =
         build_conn()
         |> put_req_header("authorization", "Bearer #{token}")
