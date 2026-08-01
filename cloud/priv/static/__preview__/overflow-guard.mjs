@@ -175,6 +175,7 @@ const DEFECTS = [
   "W13-detail-route-band",
   "W15-fleet-row-text-bounded",
   "W18-overview-card-pill",
+  "W20-op-gate-pill-bounded",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -1456,6 +1457,139 @@ async function main() {
         okLine(
           `[att …] cells are \`.attention-row .status-pill-detail\` — a DIFFERENT host in the same DOM, ` +
           `printed for comparison and deliberately NOT judged here (task-802585b77fc136b1 owns that band)`,
+        );
+      }
+    }
+
+    // ── W20: the OPERATOR GATE pill, on a surface nobody can reach today ────
+    //    NO PERSON-FACING SEAT, STATED IN THE INSTRUMENT ITSELF. The operator
+    //    console has population ZERO on the running system: PLATFORM_ADMIN_EMAILS
+    //    is unset (re-derived by `printenv`'s EXIT CODE inside the one running
+    //    control-plane container — NOT by `docker inspect`, whose Config.Env
+    //    carries the bare compose-passthrough NAME and reads as a false
+    //    positive), the key is absent from the host .env, /v1/operator/fleet
+    //    answers 401 while / answers 200, and there is no second source for the
+    //    flag: cloud/config/runtime.exs feeds ONE list that both the /v1/me
+    //    boolean in router.ex and the operator pipeline in auth.ex read, and
+    //    `x in []` is false for every x. This leg is INSTRUMENT work with a
+    //    LATENT tail — one env line makes the defect live for a real person at
+    //    every phone width and across the tablet band below.
+    //
+    //    THE DEFECT: `.op-gate` is a flex row and the base `.status-pill`
+    //    declares no `flex`, so the chip inherits `flex-shrink: 1` and is
+    //    squeezed narrower than the word it contains — the label paints outside
+    //    its own capsule. Fixed by ONE declaration, `.op-gate .status-pill {
+    //    flex: 0 0 auto }`. The five-declaration wrap recipe the three other
+    //    hosts carry was DRIVEN against this host and does NOT fix it (charter
+    //    D220): every clipped cell stays clipped. The extraction is refused;
+    //    __css_check's E14 measures DIVERGENCE between the copies instead.
+    //
+    //    THE VACUITY TRAP IS SCENARIO-DEPENDENCE, and it is why this leg pins
+    //    its own axes. The defect is NON-MONOTONIC in viewport width, because
+    //    the shell folds at 720 and the sidebar returns above it and re-narrows
+    //    the column. Driven on origin/main bytes, light, #operator:
+    //      • `operator-zero-staging` — red across the phone band, CLEAN at
+    //        620/700/720, RED AGAIN across 740-800, clean from 830.
+    //      • `operator-halted` — a second band of exactly ONE cell, at 740.
+    //      • `operator-console` — NO second band at all.
+    //    A leg driving only `operator-console` above 620 reads a clean upper
+    //    boundary and ships a vacuous green, so `operator-zero-staging` and a
+    //    740-800 cell are ASSERTED PRESENT below, not merely listed. A second
+    //    vector: the `operator-visible` scenario renders ZERO `.status-pill` in
+    //    the whole document, so a leg scoped to it would exit 0 having measured
+    //    nothing — hence the zero-pill FAIL per cell.
+    if (requested.includes("W20-op-gate-pill-bounded")) {
+      const D = "W20-op-gate-pill-bounded";
+      // BLOCK-SCOPED on the `const D` precedent above: these axes belong to
+      // this leg alone and must not read as shared file constants.
+      const GATE_SCENS = ["operator-console", "operator-halted", "operator-zero-staging"];
+      // 14 widths. The phone band, the CLEAN shelf that makes the second band a
+      // discontinuity rather than a tail, the second band itself, and 830 as the
+      // measured upper edge (clean on pre-fix bytes, so it pins the edge rather
+      // than assuming it).
+      const GATE_WIDTHS = [320, 360, 390, 430, 480, 620, 700, 720, 740, 760, 768, 780, 800, 830];
+      const SECOND_BAND = [740, 800];
+      // ANTI-VACUITY 0 — the axes themselves. An edit that drops the
+      // scenario-dependent scenario or the second band would leave a leg that
+      // passes for the wrong reason; it reds here instead of going quiet.
+      if (!GATE_SCENS.includes("operator-zero-staging")) {
+        fail(D, `axis check: \`operator-zero-staging\` is not in the scenario set — it is the ONLY scenario red across the whole second band, so without it this leg cannot see 740-800 at all`);
+      }
+      if (!GATE_WIDTHS.some((w) => w >= SECOND_BAND[0] && w <= SECOND_BAND[1])) {
+        fail(D, `axis check: no width in ${SECOND_BAND[0]}-${SECOND_BAND[1]} — the defect is NON-MONOTONIC in width, so a phone-only sweep certifies a clean upper boundary that is not there`);
+      }
+      const cellCount = GATE_SCENS.length * GATE_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${GATE_SCENS.length} operator scenarios x ${GATE_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells; .op-gate .status-pill scrollWidth vs clientWidth, + page overflow)\n`,
+      );
+      let cells = 0, pillsSeen = 0, squeezed = 0, pageOver = 0;
+      for (const scen of GATE_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter wide and assert the LANDED view — `?scen=` alone does not
+          // route (see the W13 note), and a phantom console is worse than none.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#operator`,
+            `document.querySelector('.op-gate .status-pill') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-operator';})()`,
+          );
+          const row = [];
+          for (const width of GATE_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var d=document.documentElement;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,pills:0,bad:[],m:[]};` +
+              `[].slice.call(document.querySelectorAll('.op-gate .status-pill')).forEach(function(p,i){` +
+              `  out.pills++;` +
+              `  out.m.push(p.clientWidth+'/'+p.scrollWidth);` +
+              `  if(p.scrollWidth>p.clientWidth) out.bad.push({i:i,sw:p.scrollWidth,cw:p.clientWidth,t:(p.textContent||'').trim().slice(0,32)});` +
+              `});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-operator") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-operator" — the hash did not route, so nothing below this line measures the operator console`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty list is not a clean list. `operator-visible`
+            // renders zero `.status-pill` in the entire document — scoped there
+            // this leg would print a green having measured nothing. Zero pills
+            // is a FAILURE, not a pass, at every cell.
+            if (m.pills === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero \`.op-gate .status-pill\` rendered — nothing was measured, this is not a pass`);
+              row.push(`${width}:0p`);
+              continue;
+            }
+            pillsSeen += m.pills;
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the operator console is off-screen sideways`);
+            }
+            for (const b of m.bad) {
+              squeezed++;
+              fail(D, `${scen}/${theme}@${width} gate${b.i} \`.op-gate .status-pill\`: scrollWidth ${b.sw} > clientWidth ${b.cw} — the chip is ${b.sw - b.cw}px narrower than its own label "${b.t}", which therefore paints OUTSIDE the capsule`);
+            }
+            row.push(`${width}:${m.m.join(",")}${m.bad.length ? " !" + m.bad.length : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${pillsSeen} .op-gate .status-pill measured) across ` +
+          `${GATE_WIDTHS.join("/")} on ${GATE_SCENS.join(" + ")}; ${squeezed} chips narrower than their ` +
+          `own label, ${pageOver} pages scrolling sideways. Cells print clientWidth/scrollWidth so the ` +
+          `discontinuity is readable: the second band at ${SECOND_BAND[0]}-${SECOND_BAND[1]} is driven on ` +
+          `\`operator-zero-staging\` EXPLICITLY, and zero measured pills fails rather than passes`,
+        );
+        okLine(
+          `this leg is INSTRUMENT work: the operator console has population zero today ` +
+          `(PLATFORM_ADMIN_EMAILS unset — re-derive with printenv's EXIT CODE, never docker inspect), ` +
+          `so it fills no person-facing seat. One env line makes every cell above person-facing`,
         );
       }
     }
