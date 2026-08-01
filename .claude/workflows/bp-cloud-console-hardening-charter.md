@@ -961,6 +961,59 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-02 — wave 20 REVIEW — 5/5 built, gated, pushed and PR'd. Grade A-
+
+Paper: `cloud-console-hardening-wave-20-2026-08-01`. **Every slice landed as a PR** — #8984 s3
+(`…-0-r`), #8985 s6 (`…-1-r`), #8986 s8, #8987 s9, #8988 s7. Six consecutive waves ended with work
+stranded on local branches; this one did not.
+
+**What shipped.** Four person-facing screens plus one instrument slice, exactly the ratio the wish
+demanded. s3: `displayUrl(bp)` at BOTH text sites + `overflow-wrap: break-word` — 14 of 42 phone cells
+were dropping the TLD, so two instances on different domains read as one string; 0 after, and 0 at the
+85-char DNS cap where origin/main scores 30 clipped. s6: the fourth wrapper-scoped wrap copy, and
+GR109 taught to ITERATE — it asked with `querySelector`, so it could only ever have seen the 30.6% row
+and never the 41.4% one. s8: the 621-740 topbar block, `CHIP_BAND_A`'s 9px tolerance DELETED, the
+`BREAKPOINTS` 740 debt paid in the same commit, and the guard's own "13 of 17" checkmark shown to be
+one too high in dark. s9: the 769-899 band — `.attention-main` measured **0.00px** wide, with the
+paint-through proven by rect-intersection (620.18px² of name over the "View instance" button) and
+screenshots, and the remedy PRICED over four driven candidates rather than argued. s7: one
+declaration, `flex: 0 0 auto`, and D210's extraction trigger settled — REFUSED and replaced by E14,
+because count is not what makes copying wrong, divergence is.
+
+**Reviewer's own work.** Two fixes, both mutation-proven, both on the slice they belong to: `displayUrl`
+now shaves an UPPERCASED scheme (nothing normalises `bp.url`, so one stored `HTTPS://` would have
+repainted the exact thing the slice removes while every lowercase fixture stayed green); and
+`.attention-row` is now **required-present** in `WRAP_REQUIRED_HOSTS`, not merely counted — the builder
+named that gap themselves, and without it a scan degrading to 3-of-4 that lost precisely the attention
+queue's copy still read clean. Every slice gate re-run green on the final state.
+
+**The integrated tree was BUILT and DRIVEN, not assumed.** All five merged into a probe branch:
+`overflow-guard.mjs` needs a hand resolution (git aligns the s7 and s9 legs line-by-line; a naive
+keep-both is a syntax error — keep each leg whole and sequential), app.css resolves as a
+concatenation. With that resolution: **771/771 tests, `__css_check` 0, OVERFLOW GUARD PASS across all
+nine legs**, sweep/smoke/seal 0. **The merged sidecar number is 1267 authored heads / 1225 flattened,
+MISSES 0** — s8's 1260 is correct for s8 alone, and D158 still stands (re-run on the merged tree).
+
+**Reachability re-derived independently, not re-read** (the E2 dual-review trigger): one running
+control-plane container, `printenv PLATFORM_ADMIN_EMAILS` **rc=1**, the key absent from
+`/opt/barkpark/cloud/.env`, and a fresh single-source grep — `runtime.exs:340` writes, `notifications.ex:389`
+reads, `router.ex:1334` and `auth.ex:338` are the only gates, `x in []` is false for every x. s7 fills
+no seat, and the PR says so. **Residual: both re-derivations read ONE host** — a genuinely independent
+third reviewer should ask "is barkpark.cloud the only control plane?" before merge.
+
+**Nothing stalled.** No deferred slices; no not-green slices. Ledger honest on all five: `in_progress`,
+evidence stamped as the work happened, the merge-gated criterion left open for the lead in every case.
+Open children now **88** (was ~85 at Decide) — the wave filed three new backlog rows rather than
+absorbing what it found.
+
+**Next wave takes:** (a) `.detail-url-text` — the exact shape s3 just removed from the card still ships
+on the instance workspace head beside the copy button (`cch-w20-bl-detail-url-text-ellipsised-on-phone`,
+UNDRIVEN — drive it first, and close it measured-clean if it reads 0); (b) `.fleet-url` has no wrap rule
+and the W15 leg measures only the fixture's short strings — the same vacuity class s3 had to fix inside
+its own leg, and at the DNS cap that leg would very likely red; (c) `cch-w16-s7-citation-anchors-e11-widening`,
+still structurally blocked and still riding only as instrument work; (d) `cch-w20-bl-attention-band-wrap-point-not-uniform`.
+`Cloud gate` on main stays a PROVEN flake (`task-079ef706ee5289c4`) — report, never adopt.
+
 ### 2026-08-01 — wave 20 DECIDE (build in flight) — 5 slices, all round 1, four person-facing, and the sequencer dies
 
 Paper: `cloud-console-hardening-wave-20-2026-08-01`. Law 0 at first claim, from the seal predicate's
