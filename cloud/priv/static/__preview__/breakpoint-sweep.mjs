@@ -156,9 +156,9 @@
 //  RUN
 //    node cloud/priv/static/__preview__/breakpoint-sweep.mjs            # Leg A
 //    node …/breakpoint-sweep.mjs --cssom                # + browser axis parity
+//    node …/breakpoint-sweep.mjs --tiers5               # Leg T (5-plan fixture)
 //    node …/breakpoint-sweep.mjs --render               # Leg B (minutes)
 //    node …/breakpoint-sweep.mjs --render --widths 900 --cell fleet     # slice
-//    node …/breakpoint-sweep.mjs --tiers5               # Leg T (5-plan fixture)
 //    BREAKPOINT_SWEEP_ROOT=<dir> …    # measure an exported tree (origin/main)
 //    BREAKPOINT_SWEEP_CSS=<file> …    # parse a DIFFERENT app.css than is served
 //    CHROME=/path/to/chrome …         # browser override
