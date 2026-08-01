@@ -1251,18 +1251,25 @@ func readCapped(r io.Reader, max int64) ([]byte, error) {
 }
 
 // renderError renders a classified API error. Under -o json/yaml it emits the
-// canonical {ok:false, error:{code, message, request_id, hint}} envelope on
-// stdout (same contract as the cloud built-ins' useError, richer because apiError
-// carries request_id + hint) so a scripted `bp … -o json | jq` gets a parseable
-// body rather than empty stdout. For table/minimal it prints the human shape to
-// stderr: the message line, an indented fix-suggestion hint when one is
-// registered, and — under -v — the machine code and request id for support.
-// Centralised so every error path (single request, paginated reads) is identical.
+// canonical {ok:false, error:{code, message, request_id, hint, details}} envelope
+// on stdout (same contract as the cloud built-ins' useError, richer because
+// apiError carries request_id + hint + details) so a scripted `bp … -o json | jq`
+// gets a parseable body rather than empty stdout. For table/minimal it prints the
+// human shape to stderr: the message line, the server's `details` as sorted
+// `key: value` lines, an indented fix-suggestion hint when one is registered,
+// and — under -v — the machine code and request id for support. details comes
+// FIRST of the continuation lines because it is the specific fact (which filter,
+// which field, which rule) while the hint is the generic advice; a reader who
+// stops after one line should get the fact. Centralised so every error path
+// (single request, paginated reads) is identical.
 func renderError(out *writer, ae apiError) {
-	if renderErrorEnvelope(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint()) {
+	if renderErrorEnvelopeDetailed(out, ae.code, ae.errorMessage(), ae.requestID, ae.hint(), ae.details) {
 		return
 	}
 	out.userErr("%s", ae.errorMessage())
+	for _, line := range detailLines(ae.details) {
+		out.errf("  %s", line)
+	}
 	if h := ae.hint(); h != "" {
 		out.errf("  hint: %s", h)
 	}

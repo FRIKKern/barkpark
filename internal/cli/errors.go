@@ -1,8 +1,10 @@
 package cli
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"sort"
 	"strings"
 )
 
@@ -15,6 +17,16 @@ type apiError struct {
 	message    string
 	requestID  string
 	serverHint string // envelope `hint` field — the server's per-error fix suggestion
+	// details is the envelope `details` object VERBATIM, kept as raw JSON. The
+	// server sets it on 18 error paths and its shape is per-code — {field:[…]}
+	// for validation_failed, {field,rule,fix,index} for label_spine,
+	// {similar:[…]} for duplicate_task, {filter:"…"} for invalid_filter. It is
+	// deliberately NOT decoded into a typed map: a typed decode fits exactly one
+	// of those shapes and fails the whole unmarshal on the others (the
+	// mutateErrorMessage bug), so the ONE payload that explains the refusal is
+	// the first thing lost. Raw bytes survive every shape and re-serialize
+	// byte-identically into the -o json / -o yaml envelope.
+	details json.RawMessage
 }
 
 // codeExit is the SINGLE canonical error.code -> exit mapping (contract spine
@@ -157,6 +169,10 @@ func classifyError(status int, body []byte) apiError {
 			Message   string `json:"message"`
 			RequestID string `json:"request_id"`
 			Hint      string `json:"hint"`
+			// Declared so encoding/json stops DISCARDING it: an unmapped key is
+			// dropped silently, which is why every `details` the server has ever
+			// sent died here and no printer could show it (PDS-D457).
+			Details json.RawMessage `json:"details"`
 		} `json:"error"`
 	}
 	if err := json.Unmarshal(body, &canon); err == nil && canon.Error.Code != "" {
@@ -166,6 +182,7 @@ func classifyError(status int, body []byte) apiError {
 			message:    canon.Error.Message,
 			requestID:  canon.Error.RequestID,
 			serverHint: canon.Error.Hint,
+			details:    normalizeDetails(canon.Error.Details),
 		}
 	}
 
@@ -289,12 +306,29 @@ func capBody(body []byte) string {
 // renderError) both route through, so a failing `bp <anything> -o json | jq`
 // gets a parseable body on stdout rather than empty stdout.
 func renderErrorEnvelope(out *writer, code, msg, requestID, hint string) bool {
+	return renderErrorEnvelopeDetailed(out, code, msg, requestID, hint, nil)
+}
+
+// renderErrorEnvelopeDetailed is renderErrorEnvelope plus the envelope `details`
+// object — the per-code payload that names WHICH field/filter/rule the server
+// refused. docs/cli/error-exit-table.md has declared details part of the v1
+// envelope since :15 (and tells the CLI to print it at :97, to read
+// details.retry_after at :117, and names error.details as wire contract at :153);
+// the CLI never complied, because the canon struct in classifyError did not
+// declare the key and encoding/json dropped it. This is that compliance, and it
+// is purely ADDITIVE: no existing key moves or changes type, and an empty/absent
+// details is omitted, so renderErrorEnvelope's ~60 detail-less call sites emit
+// byte-identical bytes through this delegation.
+func renderErrorEnvelopeDetailed(out *writer, code, msg, requestID, hint string, details json.RawMessage) bool {
 	errObj := map[string]any{"code": code, "message": msg}
 	if requestID != "" {
 		errObj["request_id"] = requestID
 	}
 	if hint != "" {
 		errObj["hint"] = hint
+	}
+	if d := normalizeDetails(details); d != nil {
+		errObj["details"] = d
 	}
 	m := map[string]any{"ok": false, "error": errObj}
 	switch out.output {
@@ -306,6 +340,73 @@ func renderErrorEnvelope(out *writer, code, msg, requestID, hint string) bool {
 		return true
 	}
 	return false
+}
+
+// normalizeDetails reduces a raw `details` value to either nil (nothing worth
+// showing) or its COMPACT bytes. Nothing-worth-showing is: absent, JSON null,
+// the empty object, the empty array, or bytes that are not valid JSON at all —
+// the last so a malformed server payload can never make stdout unparseable under
+// -o json. Compacting keeps key ORDER as the server sent it (raw bytes are never
+// re-marshalled through a Go map, which would alphabetize them — the exact
+// fingerprint that proved issue #4938 was observing bp and not the server).
+func normalizeDetails(raw json.RawMessage) json.RawMessage {
+	if len(raw) == 0 {
+		return nil
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return nil
+	}
+	switch buf.String() {
+	case "", "null", "{}", "[]":
+		return nil
+	}
+	return json.RawMessage(buf.Bytes())
+}
+
+// detailLines renders a `details` payload as the sorted `key: value` lines the
+// human shapes (table/minimal) print above the hint. Scalars print VERBATIM (a
+// string without its JSON quotes, so `filter: zzzgarbage` reads like a value and
+// not like a fragment of a document); objects and arrays print as compact JSON,
+// so a heterogeneous payload — {field,rule,fix,index}, {similar:[…]},
+// {title:["can't be blank"]} — survives whole rather than being flattened to the
+// one shape the CLI happened to expect. A details that is not an object at all
+// (an array, or a bare scalar) prints as a single `details: …` line. Returns nil
+// when there is nothing to print.
+func detailLines(raw json.RawMessage) []string {
+	d := normalizeDetails(raw)
+	if d == nil {
+		return nil
+	}
+	var obj map[string]json.RawMessage
+	if err := json.Unmarshal(d, &obj); err != nil || len(obj) == 0 {
+		return []string{"details: " + string(d)}
+	}
+	keys := make([]string, 0, len(obj))
+	for k := range obj {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+	lines := make([]string, 0, len(keys))
+	for _, k := range keys {
+		lines = append(lines, k+": "+detailValue(obj[k]))
+	}
+	return lines
+}
+
+// detailValue renders ONE details value for the human line: a JSON string loses
+// its quotes, every other shape (number, bool, null, object, array) prints as
+// compact JSON.
+func detailValue(raw json.RawMessage) string {
+	var s string
+	if err := json.Unmarshal(raw, &s); err == nil {
+		return s
+	}
+	var buf bytes.Buffer
+	if err := json.Compact(&buf, raw); err != nil {
+		return strings.TrimSpace(string(raw))
+	}
+	return buf.String()
 }
 
 // usageErrf reports a usage-level (exit 2) failure from a BUILT-IN command's
