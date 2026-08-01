@@ -4679,7 +4679,7 @@
           ? '<div class="fleet-url failed">&mdash; provisioning failed</div>'
           : provisioning
             ? provisionChipHtml(bp, Date.now()) // C3: "configuring · 1m 42s"
-            : '<div class="fleet-url">' + esc(publicUrl(bp)) + "</div>";
+            : '<div class="fleet-url">' + esc(displayUrl(bp)) + "</div>";
 
     // Billing suspension (see router.ex barkpark_json): the box exists but the
     // platform stopped it — folded into statusOf()'s single pill below.
@@ -5049,7 +5049,7 @@
         providerChipHtml(bp.provider) + statusPill(bp) +
       "</div>" +
       fleetInfraLine(bp) +
-      '<div class="instance-card-url">' + esc(publicUrl(bp)) + "</div>" +
+      '<div class="instance-card-url">' + esc(displayUrl(bp)) + "</div>" +
       '<div class="instance-card-spark spark--' + esc(role) + '">' + sparklineSvg(spark, { width: 100, height: 30 }) + "</div>" +
       '<div class="instance-card-stats">' + statsHtml + studio + "</div>" +
     "</div>";
@@ -5598,6 +5598,27 @@
   // operator chose; the provisioning FQDN stays the canonical row identity.
   function publicUrl(bp) {
     return bp.custom_host ? "https://" + bp.custom_host : bp.url;
+  }
+
+  // cch-w20-s3: the address as TEXT, which is a different job from the address
+  // as a PAYLOAD. The two places the URL is read rather than acted on — the
+  // front-screen card (`.instance-card-url`) and the fleet row (`.fleet-url`) —
+  // render a 12px mono line that at 320px had to hold up to 86 characters
+  // (`validate_length(:slug, max: 63)` + `@base_domain`), so the scheme was
+  // costing eight columns of the only part that DISTINGUISHES two boxes: the
+  // host. This is a SECOND helper and never a change to publicUrl(), because
+  // the copy payload (`data-copy`, instanceHeaderHtml) and every future href
+  // still need the whole address. The shave alone cannot BOUND anything at
+  // that length — `.instance-card-url`'s `overflow-wrap: break-word` does —
+  // so the two ship together; see the app.css rule.
+  // REVIEW (wave 20): the scheme match is case-INSENSITIVE. Schemes are
+  // case-insensitive by RFC 3986 and nothing here normalises `bp.url` or
+  // `bp.custom_host` before it is rendered, so a stored "HTTPS://" would
+  // otherwise have painted the scheme back onto the line this helper exists to
+  // shave — a silent regression of the whole slice on one uppercased record.
+  function displayUrl(bp) {
+    var raw = publicUrl(bp);
+    return String(raw == null ? "" : raw).replace(/^https?:\/\//i, "");
   }
 
   function instanceHeaderHtml(bp) {
@@ -19038,6 +19059,9 @@
       fleetMetaHtml: fleetMetaHtml, fleetAutoupdateText: fleetAutoupdateText,
       fleetUpdateChip: fleetUpdateChip, fleetUpdateChipHtml: fleetUpdateChipHtml,
       withoutUpdateState: withoutUpdateState, fleetRow: fleetRow,
+      // cch-w20-s3: the TEXT form of the address (scheme shaved) beside the
+      // payload form, so a test can hold both apart in one assertion.
+      publicUrl: publicUrl, displayUrl: displayUrl,
       // gr-p3 instance workspace (GR24, screens/02): the v4 header (two-axis
       // compound pill + address copy + bp CLI disclosure) and the composed
       // Overview pass — both pure string builders; the toggle wiring

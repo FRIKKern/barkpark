@@ -12106,3 +12106,50 @@ test("cch-w14-s2: the clip cue is driven from a MEASURED state, on every trigger
   assert.match(js, /if \(!onRoute && !crossed\) \{ navStripCue\(\); return; \}/,
     "a resize that did not cross the fold must leave the person's disclosure choice alone");
 });
+
+// ── cch-w20-s3: the address as TEXT vs the address as a PAYLOAD ──────────────
+// Appended at the END on purpose: node --test numbers tests positionally, and
+// this wave's evidence cites existing numbers (658 is the copy-payload guard).
+// Inserting anywhere above would renumber somebody else's proof.
+test("cch-w20-s3: displayUrl shaves the scheme, publicUrl keeps it — and a custom host rides the same rule", () => {
+  const bp = { url: "https://production-5b2c1e.barkpark.cloud" };
+  assert.equal(hooks.publicUrl(bp), "https://production-5b2c1e.barkpark.cloud");
+  assert.equal(hooks.displayUrl(bp), "production-5b2c1e.barkpark.cloud");
+  // an attached custom host is THE address, and it is shaved the same way
+  const custom = { url: "https://production-5b2c1e.barkpark.cloud", custom_host: "app.acme.no" };
+  assert.equal(hooks.publicUrl(custom), "https://app.acme.no");
+  assert.equal(hooks.displayUrl(custom), "app.acme.no");
+  // http is shaved too (a self-hosted control plane), and only at the FRONT
+  assert.equal(hooks.displayUrl({ url: "http://box.internal/https://x" }), "box.internal/https://x");
+  // no address yet (provisioning) → the empty string, never "undefined"
+  assert.equal(hooks.displayUrl({}), "");
+  // a path is kept whole — the shave is the scheme, not a truncation
+  assert.equal(hooks.displayUrl({ url: "https://acme.barkpark.cloud/sites/blog/" }), "acme.barkpark.cloud/sites/blog/");
+  // REVIEW (wave 20): an uppercased scheme is shaved too. Nothing normalises
+  // bp.url before render, and a case-SENSITIVE match would have painted the
+  // scheme back on for that one record while every driven cell stayed green.
+  assert.equal(hooks.displayUrl({ url: "HTTPS://production-5b2c1e.barkpark.cloud" }), "production-5b2c1e.barkpark.cloud");
+  assert.equal(hooks.displayUrl({ custom_host: "app.acme.no", url: "HtTp://box.internal" }), "app.acme.no");
+});
+
+test("cch-w20-s3: BOTH text sites shave the scheme together — the card and the fleet row never disagree", () => {
+  const bp = {
+    id: "bp-1", name: "Production", slug: "production", url: "https://production-5b2c1e.barkpark.cloud",
+    host: "production-5b2c1e.barkpark.cloud", health_status: "ok", agent_status: "online",
+    version: "0.9.2", provision_status: "succeeded",
+  };
+  const row = hooks.fleetRow(bp);
+  assert.match(row, /class="fleet-url">production-5b2c1e\.barkpark\.cloud</);
+  assert.ok(row.indexOf('class="fleet-url">https://') === -1,
+    "the fleet row must not keep the scheme while the card drops it — that split is the sin scenarios.mjs:2331 exists to prevent");
+  // …while the PAYLOAD keeps the whole address: a person copying it needs the
+  // scheme. This is the same guarantee test 658 (GR24) pins on the header.
+  const header = hooks.instanceHeaderHtml(bp);
+  assert.match(header, /data-copy="https:\/\/production-5b2c1e\.barkpark\.cloud"/);
+  assert.match(header, /detail-url-text">https:\/\/production-5b2c1e\.barkpark\.cloud</);
+  // the card's own site is source-pinned: instanceCardHtml is not exported, so
+  // the browser guard (overflow-guard.mjs W18 leg) is what measures it live.
+  const js = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.match(js, /class="instance-card-url">' \+ esc\(displayUrl\(bp\)\)/);
+  assert.match(js, /class="fleet-url">' \+ esc\(displayUrl\(bp\)\)/);
+});
