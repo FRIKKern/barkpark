@@ -2576,6 +2576,74 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 36 2026-08-01 — "Spend the judgment, then gate the arrivals" — REVIEWED. Grade B+ (paper `pds-wave-36-2026-08-01`)
+
+**FOUR OF FIVE ROUND-1 SLICES BUILT, ALL FOUR GREEN, ALL FOUR PUSHED WITH PRs OPEN.** Three round-≥2
+slices were deferred BY DESIGN under the sequenced-rounds law and are untouched and open on the
+ledger. Every gate was re-run by the reviewer on the final state, and the reviewer ran THREE
+independent mutations of its own — one per code slice — rather than re-reading the builders' proofs.
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w34-census-import-arity` | `…-argv-stri-0` | #8949 | ARGV-STRICT; a real `--selftest` (CWD injection, 9 cases, 5 mutants) that asserts NO bucket count; CLAUSE-COLLAPSE's owner-nil fail-open closed; per-arm FAIL prose; the arity key; `--keys` as pure TSV |
+| `task-b75cb51e6184a423` | `…-stop-confla-1` | #8950 | `record_interaction/4` widened to four causal `{:skipped, reason}` classes; a `recorded:` discriminator at both consumers over a TOTAL match with no catch-all left; `record_correction/4` folded in with a `status:` key |
+| `pds-w36-groupc-diffs` | `…-receipt-store-2` | #8951 | 11 committed `receipt == stored row` differentials over 6 Group C sites + the webhook `stamped:`/`reconciled:` pair driven end-to-end; `api/test` only, zero production code |
+| `pds-w36-revoke-all-sessions-count` | `…-unrea-4-r` | #8952 | `revoke_all_user_sessions/1` widened to `{:ok, count}`; the count reaches `POST /v1/auth/reset` and the SCIM deprovision summary; the SCIM receipt's `active` becomes a storage read instead of a hardcoded render argument |
+
+**PDS-D510 — THE ARITY KEY IS OUTPUT-NEUTRAL ON THIS CORPUS, RE-DERIVED BY THE REVIEWER.** Running
+`origin/main`'s census and the wave-36 census over the same tree produces byte-identical output apart
+from the deliberate CLAUSE-COLLAPSE prose change. The stricter call resolution costs no route edge at
+`29cb76e60`. This is a MEASURED property of this corpus, not a structural guarantee, and there is no
+integrity arm over route counts — correctly, since an arm over a bucket is the defect this epic files.
+The honest guard is a committed key-set differential, which is the register slice's job.
+
+**PDS-D511 — THE SELFTEST IS NOT VACUOUS, PROVEN BY A REVIEWER MUTATION DISTINCT FROM THE BUILDER'S.**
+Disarming the `EMITTERS-PARTITION` arm to a literal `true` makes `--selftest` exit 1 with
+`FAIL EMITTERS-PARTITION exit 0, expected 1`. The instrument now catches its own disarmament.
+
+**PDS-D512 — THE WEBHOOK DIFFERENTIAL'S LOAD-BEARING PROPERTY HOLDS UNDER AN INDEPENDENT PROBE.**
+Stripping the PR number and commit sha out of `compose_reconcile_evidence/3` leaves the wire receipt
+byte-identical (its assertion PASSES) and reds the test at the `gate["evidence"]` **stored-row**
+assertion. The gap between those two line numbers is the differential, and it is real.
+
+**PDS-D513 — A DIFFERENTIAL WHOSE ORACLE CANNOT SAY THE OTHER THING PROVES NOTHING; THE REVIEWER
+FIXED ONE IN PLACE.** The SCIM PATCH test asserted `active == false` **and**
+`active == Scim.org_user_active?(org, user)` — **both satisfied by a hardcoded `false`**, i.e. by the
+exact literal the slice removes. The differential could not tell a read-back from the literal. Fixed
+on `…-unrea-4-r` (`88de98813`) by asserting the oracle reads TRUE for a provisioned member BEFORE the
+deprovision, and mutation-proven: `org_user_active?/2` replaced by `do: false` reds it. **THE GENERAL
+LAW: a read-back oracle must be exercised at BOTH of its values inside the same test file, or the
+assertion is satisfiable by the constant it replaced.**
+
+**PDS-D514 — THE SCIM TENANCY JUDGMENT SURVIVES INDEPENDENT RE-DERIVATION (HIGH-FLIP-RISK, CLEARED
+BUT STILL OWED A SECOND HUMAN READ).** `member_of_org?/2` is scoped through `workspace_ids(org)`
+(`organization_id == org.id`); `org_user_active?/2` returns the CONJUNCTION
+`Repo.exists?(user) and member_of_org?`, so a non-member reads `false` regardless and bare user
+existence is never disclosed; and the function is reached only after `get_org_user/2` already proved
+membership, so it discloses nothing the caller had not already established. No cross-tenant leak.
+
+**PDS-D515 — THE DECLARED REGISTER DID NOT DRIFT, VERIFIED AGAINST A BASELINE RATHER THAN ASSUMED.**
+`sed -n '399p;417p' auth_controller.ex` still prints both `json(conn, %{ok: true})` receipts on the
+final state, and `CATCH-ALL-TO-SUCCESS FINDINGS 2 undeclared of 3 fired` matches an `origin/main`
+baseline run exactly. Slice 2's edits sit BELOW the two `@declared` rows it could have shifted, and
+`@declared` names only `auth_controller.ex`, `github_webhook_controller.ex` and
+`bulldocs_form_controller.ex` — none of which slice 2 touches. No finding was silently resurrected.
+
+**PDS-D516 — WHAT DID NOT SHIP, AND IT IS THE WAVE'S ONE REAL FAILURE.** `pds-w36-help-seal-fix` —
+the wave's **only measured refutation**, the `tasks_controller.ex:83` truncation help that tells a
+caller a field was truncated when nothing they received was truncated — was claimed by its builder at
+19:40, pulsed once, and then produced **no branch, no commit and 0/8 criteria**. It was not reported
+as not-green; it simply vanished from the wave's own accounting, which is itself an instance of the
+defect this epic exists to file. The task is `in_progress` at epoch 3 with an honest stall now-line;
+the probe at `.claude/worktrees/wf_67c37f46-151-24` is still valid. It is a stated dependency of BOTH
+round-2 slices, so **wave 37 must dispatch it first**.
+
+**THE DISPATCH ORDER WAVE 37 INHERITS.** Merge round 1 (#8949, #8950, #8951, #8952) → re-dispatch
+`pds-w36-help-seal-fix` → then `pds-w34-owning-doc-amendment` (needs #8950 + #8952 + help-seal merged)
+and `pds-w34-hand-bucket-register` (needs all of round 1 merged, and `--keys` from #8949) → then
+`pds-w35-elixir-census-gate` LAST, coordinated with the Console wave which owns the
+`.github/workflows/**` fence.
+
 ### Wave 35 2026-08-01 — "Finish the lens, then spend the judgment" — REVIEWED. Grade A− (paper `pds-wave-35-2026-08-01`)
 
 **THREE ROUND-1 SLICES BUILT, THREE GREEN, THREE PUSHED WITH PRs OPEN.** Four round-≥2 slices were
