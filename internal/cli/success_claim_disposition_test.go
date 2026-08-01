@@ -180,6 +180,10 @@ var claimDispositions = []claimDisposition{
 	{Name: "supportRemoveRun.done/dns-swept", Post: []string{"@len"}},
 	{Name: "supportRemoveRun.done/dns-swept-names", Post: []string{"#0"}},
 	{Name: "supportAddRun.success/max-class", Post: []string{"capacity_stdout"}},
+	// Same axis, the DEGRADED fork: the contradicting half is a box whose answer
+	// carries no class at all, so the post-condition the receipt must switch on is
+	// still the box's raw stdout.
+	{Name: "supportAddRun.success/max-class-degraded", Post: []string{"capacity_stdout"}},
 	{
 		Name:     "supportAddRun.success",
 		Identity: []string{"ID", "Name"},
