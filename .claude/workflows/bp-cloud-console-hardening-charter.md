@@ -817,6 +817,56 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-01 — wave 17 REVIEW — three of three round-1 slices shipped and pushed, grade **A−**
+
+**Paper:** `cloud-console-hardening-wave-17-2026-08-01`. PRs #8849-#8851. Nothing merged by the wave;
+the lead merges and closes the merge-gated criterion on each row. **MERGE ORDER IS MECHANICAL:
+#8850 → #8851 → #8849.**
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| s4 Visit link gated on deployment | `…door-to-a-s-0-r` | #8849 | Wave 16's purest vision row, paid. ONE predicate (`current_deployment_id`), FOUR anchors — two of which bypass `siteOpenLink`, so gating the function fixes half the row. The refused alternative is refuted by an assertion over the corpus. ZERO app.css lines. The never-deployed DETAIL grew D182's ruled pair where it previously said nothing while offering two doors. |
+| s8 drop the 900 tier rule | `…the-axis-a-1` (unchanged) | #8850 | One deleted CSS line: billing-trial 56 measured defects → 2, both survivors named and owned by round 3. Baseline 1253 → **1252**, named by the tool via the D158 sentinel. The re-arm is the real work — the obvious re-point is vacuous (899 is declared three times), so the mutation moves a VALUE onto an existing breakpoint under a post-condition clamp. |
+| s6 past-due chip across the tablet band | `…being-c-2-r` (**stacked on s8**) | #8851 | 769-830 goes 168/153 → 168/168 in both themes, driven in a real browser; the chip guard moved off its single 768 read onto 17 widths and reds on main's bytes with 20 findings. The builder reproduced the WRONG destination rather than trusting the decision that named it. |
+
+**THE ESCAPE, AND IT IS WAVE 16'S OWN FINDING RECURRING ONE WAVE LATER.** s6 adds
+`@media (max-width: 830px)` to `app.css`; `breakpoint-sweep` derives its width axis FROM `app.css`;
+s6's gate contains no instrument that reads that axis. On the builder's own bytes **Leg A exits 2** —
+`UNCOVERED breakpoint 830px — the boundary walk is missing 829, 830, 831` — and
+`breakpoint-sweep.test.mjs` reds **5** tests. Leg A is WIRED (`console-harness.yml:286/289`), so the
+merge would have gone red on a slice whose own gate was green. **A gate that does not include every
+instrument scanning the file you touched is not a gate — said in wave 16, unenforced in wave 17.**
+Fixed in review: `BREAKPOINTS` → `[620,720,768,830,899]` (15 boundary widths), WIDTHS literal +
+mutation-test expectation + every width-count sentence moved with it, and the full render leg at the
+three NEW widths driven clean across **156 cells** (exit 0). s6's branch is rebased onto s8's because
+it now needs the axis file s8 owns. The CLASS is filed as
+`cch-w17-bl-css-slice-gate-must-include-leg-a`: derive gate composition from the `files:` labels.
+
+**RE-DERIVED INDEPENDENTLY, not re-read.** s4's HIGH-FLIP-RISK judgment came back sound from the
+Elixir the builder honestly said he never opened: `current_deployment_id` is on `site_json/2`'s BASE
+map (`router.ex:10114`), both the list (`:6037`) and detail (`:6057`) go through it, and the pointer
+moves only under `make_current == true AND status == "live"` (`:7333-7340`) with illegal edges 409'd —
+so the predicate fails CLOSED. s8's 56 → 2 re-drove to exactly 2, both `select#bp-theme-picker`
+"Evergreen" at 320. And **the whole wave was merged into one probe tree and re-run**: sweep 51/51,
+`__app.test` 762/762, smoke 100 scenarios, Leg A 5 breakpoints → 15 widths, `__css_check` 0 errors,
+`cssom-parity` **1252 == 1252** with a real Chrome, OVERFLOW GUARD PASS.
+
+**ONE MERGE CONFLICT, resolved in advance.** s4 and s8/s6 both edit `RESIDUE_FAMILY_REASONS`
+(`hash:#instance` 20 → 21 vs the width count). Merged wording, driven green: `These 21 … at all 15
+widths` / `… walked at all 15 widths`.
+
+**THE RATIO, HONESTLY.** Three person-facing slices flew against the wish's floor of four; the other
+three named rows are round-2/round-3 deferrals under the sequenced-rounds law, not stalls. A
+deferral is not a delivery, and the entry says so.
+
+**NEXT WAVE:** merge in order, then round 2 —
+`cch-w16-s7-citation-anchors-e11-widening` and
+`cch-w16-bl-attention-pill-detail-truncated-front-screen` (the FRONT screen hiding 66% of why an
+instance is degraded, the most-seen surface in the product) — then round 3's
+`cch-w17-s-topbar-phone-band-wrap`, which pays three filed phone rows at once. **Inherit two
+mechanical facts:** the baseline lands at **1252**, and the axis lands at `[620,720,768,830,899]` /
+15 widths — the topbar wrap adds **430** and owes `BREAKPOINTS` an entry (its task now says so).
+
 ### 2026-08-01 — wave 16 REVIEW — four of four round-1 slices shipped and pushed, grade **A−**
 
 **Paper:** `cloud-console-hardening-wave-16-2026-08-01`. PRs #8816-#8819. Nothing merged by the wave;
