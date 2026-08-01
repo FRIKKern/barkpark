@@ -1798,6 +1798,12 @@ defmodule PDS.Census do
   # corpus floor with the sentinel check on ONE cond arm, so no fixture list is both small
   # enough to mutate and large enough to pass.
   #
+  # PDS-D511, RESTATED HONESTLY (PDS wave 37). It is often quoted as "the selftest was
+  # disarmed". It was not: it disarmed EMITTERS-PARTITION, ONE ARM OF NINE, and the other
+  # eight kept going red on their own mutants throughout. The wave-37 finding is a
+  # different and larger one — KEYS-ONE-LINE-PER-SITE was never armed AT ALL, because the
+  # relation it asserted is true by construction (see judge_selftest_case/5 below).
+  #
   # IT ASSERTS NO BUCKET COUNT — not one. Exit codes, arm names, refusal prose, and one
   # RELATION (keys lines == emitted, both read off the same invocation). A selftest that
   # pinned POST-READ or the unclassified denominator would red the build on every honest
@@ -1894,8 +1900,44 @@ defmodule PDS.Census do
       argv: ["--keys"],
       mut: nil,
       exit: 0,
-      expect: :keys_relation,
-      proves: "--keys prints one TSV line per emitted site — the relation, never an integer"
+      expect: {:keys, :holds},
+      proves: "--keys prints one DISTINCT TSV line per emitted site, and the count survives an independent re-derivation"
+    },
+    # THE THREE MUTANTS THAT PROVE THE FLOOR IS NOT VACUOUS (PDS-D519). Each kills the
+    # keys emission a DIFFERENT way, and each names the sub-check that must catch it —
+    # a mutant caught by the WRONG sub-check is a FAIL here, not a pass.
+    %{
+      name: "KEYS-FLOOR-NOT-VACUOUS",
+      corpus: :full,
+      argv: ["--keys"],
+      mut:
+        {"{_consumers, emitted} = Enum.split_with(ast_sites" <> ", & &1.pattern?)",
+         "{_consumers, emitted} = {ast_sites, []}"},
+      exit: 0,
+      expect: {:keys, {:reds, "VACUOUS"}},
+      proves: "an emission zeroed inside keys_run/1 reds, instead of certifying 0 == 0 == 0"
+    },
+    %{
+      name: "KEYS-PARTIAL-DROP",
+      corpus: :full,
+      argv: ["--keys"],
+      mut:
+        {"{_consumers, emitted} = Enum.split_with(ast_sites" <> ", & &1.pattern?)",
+         "{_consumers, emitted} = (fn {c, e} -> {c, Enum.drop(e, 1)} end).(Enum.split_with(ast_sites, & &1.pattern?))"},
+      exit: 0,
+      expect: {:keys, {:reds, "independently derived emitted"}},
+      proves: "a ONE-ROW drop reds — measured to slip past a `tsv > 0` floor, which agrees with itself at the reduced number"
+    },
+    %{
+      name: "KEY-DISCRIMINATES",
+      corpus: :full,
+      argv: ["--keys"],
+      mut:
+        {"Enum.join([s.path, key_mfa(s), head_hash(s)" <> ", expr_fp(s)], \"\\t\")",
+         "Enum.join([s.path, key_mfa(s), head_hash(s)], \"\\t\")"},
+      exit: 0,
+      expect: {:keys, {:reds, "does not DISCRIMINATE"}},
+      proves: "dropping expr_fp from the key collapses two sites in one clause to one row — the register would silently lose a site"
     }
   ]
 
@@ -1940,52 +1982,59 @@ defmodule PDS.Census do
     with {:ok, mutated} <- apply_mutation(src, c.mut) do
       script = Path.join(root, "case-#{:erlang.phash2(c.name)}.exs")
       File.write!(script, mutated)
+      dir = Map.fetch!(dirs, c.corpus)
 
       # NEVER PIPED: System.cmd hands back the child's own status, which is the whole
       # point — `cmd | tail` reports tail's status and once logged an exit-2 refusal as 0.
-      {out, code} =
-        System.cmd("elixir", [script | c.argv],
-          cd: Map.fetch!(dirs, c.corpus),
-          stderr_to_stdout: true
-        )
+      {out, code} = System.cmd("elixir", [script | c.argv], cd: dir, stderr_to_stdout: true)
 
-      judge_selftest_case(base, c, out, code)
+      judge_selftest_case(base, c, out, code, {script, dir})
     else
       {:error, why} -> Map.merge(base, %{ok?: false, why: why})
     end
   end
 
-  defp judge_selftest_case(base, %{expect: :keys_relation} = c, out, code) do
-    lines = String.split(out, "\n", trim: true)
-    tsv = Enum.count(lines, &String.contains?(&1, "\t"))
-
-    summary =
-      Enum.find_value(lines, fn l ->
-        case Regex.run(~r/^keys (\d+) · emitted (\d+)/, l) do
-          [_, k, e] -> {String.to_integer(k), String.to_integer(e)}
-          _ -> nil
-        end
-      end)
-
-    cond do
-      code != c.exit ->
-        Map.merge(base, %{ok?: false, why: "exit #{code}, expected #{c.exit}"})
-
-      summary == nil ->
-        Map.merge(base, %{ok?: false, why: "--keys printed no summary line to stderr"})
-
-      elem(summary, 0) != tsv or elem(summary, 1) != tsv ->
+  # ------------------------------------------------------------- the keys floor
+  #
+  # WHY THIS IS FOUR CHECKS AND NOT ONE RELATION (PDS-D519). The shipped arm asserted
+  # `length(routed) == length(emitted)`, which keys_run/1 makes TRUE BY CONSTRUCTION —
+  # it maps over `emitted`. Forcing the emission to [] made `--keys` print zero lines
+  # over the real 804-file corpus while `--selftest` still printed SELFTEST OK at RC 0.
+  # A `tsv > 0` floor alone does not repair it either: a one-row drop passes, because
+  # keys, emitted and tsv all agree at the reduced number. The four checks below are
+  # ordered so the FAIL sentence names WHICH ONE fired, and the last one is the only
+  # genuinely independent path — a SECOND invocation of the same binary over the same
+  # corpus, deriving `emitted` through the census's own reporting instead of keys_run/1.
+  defp judge_selftest_case(base, %{expect: {:keys, mode}} = c, out, code, ctx) do
+    case {mode, keys_floor_verdict(out, code, c.exit, ctx)} do
+      {:holds, :ok} ->
         Map.merge(base, %{
-          ok?: false,
-          why: "TSV lines #{tsv} != keys #{elem(summary, 0)} / emitted #{elem(summary, 1)}"
+          ok?: true,
+          why: "exit 0 · TSV == keys == emitted == the census's OWN derived emitted · every key distinct · floor non-vacuous"
         })
 
-      true ->
-        Map.merge(base, %{ok?: true, why: "exit 0 · TSV lines == keys == emitted, all off one run"})
+      {:holds, {:red, why}} ->
+        Map.merge(base, %{ok?: false, why: why})
+
+      {{:reds, frag}, {:red, why}} ->
+        if String.contains?(why, frag) do
+          Map.merge(base, %{ok?: true, why: "went RED as required — #{why}"})
+        else
+          Map.merge(base, %{
+            ok?: false,
+            why: "went red on the WRONG sub-check (#{why}) — expected one naming #{inspect(frag)}"
+          })
+        end
+
+      {{:reds, frag}, :ok} ->
+        Map.merge(base, %{
+          ok?: false,
+          why: "THE MUTANT PASSED THE KEYS FLOOR — nothing here would catch it; expected a red naming #{inspect(frag)}"
+        })
     end
   end
 
-  defp judge_selftest_case(base, c, out, code) do
+  defp judge_selftest_case(base, c, out, code, _ctx) do
     missing = Enum.reject(c.expect, &String.contains?(out, &1))
 
     cond do
@@ -2000,6 +2049,69 @@ defmodule PDS.Census do
 
       true ->
         Map.merge(base, %{ok?: true, why: "exit #{c.exit} · printed #{inspect(hd(c.expect))}"})
+    end
+  end
+
+  defp keys_floor_verdict(out, code, want_exit, {script, dir}) do
+    lines = String.split(out, "\n", trim: true)
+    tsv = Enum.filter(lines, &String.contains?(&1, "\t"))
+    n = length(tsv)
+    distinct = length(Enum.uniq(tsv))
+
+    summary =
+      Enum.find_value(lines, fn l ->
+        case Regex.run(~r/^keys (\d+) · emitted (\d+)/, l) do
+          [_, k, e] -> {String.to_integer(k), String.to_integer(e)}
+          _ -> nil
+        end
+      end)
+
+    cond do
+      code != want_exit ->
+        {:red, "exit #{code}, expected #{want_exit}"}
+
+      summary == nil ->
+        {:red, "--keys printed no summary line to stderr"}
+
+      n == 0 ->
+        {:red,
+         "ZERO-FLOOR: --keys printed 0 TSV line(s). The one-line-per-site relation is VACUOUS at zero — 0 == 0 == 0 certifies nothing, and the register reads its rows off this emission"}
+
+      elem(summary, 0) != n or elem(summary, 1) != n ->
+        {:red,
+         "ONE-LINE-PER-SITE: TSV lines #{n} != keys #{elem(summary, 0)} / emitted #{elem(summary, 1)}"}
+
+      distinct != n ->
+        {:red,
+         "KEY-DISCRIMINATES: the key does not DISCRIMINATE: #{n} site(s) collapsed to #{distinct} distinct key(s)"}
+
+      true ->
+        independent_rederivation(n, script, dir)
+    end
+  end
+
+  # THE SECOND PATH. Runs the SAME (possibly mutated) script with `argv []` in the SAME
+  # fixture and reads `emitted` off the ordinary census report — a figure keys_run/1 does
+  # not produce and cannot influence. FAILS CLOSED: an unparsable figure is a red, never
+  # a shrug, because "the re-derivation could not read a number" and "the numbers agree"
+  # must never print the same verdict.
+  defp independent_rederivation(n, script, dir) do
+    {out, _code} = System.cmd("elixir", [script], cd: dir, stderr_to_stdout: true)
+
+    case Regex.run(~r/EMITTED success claims\s+(\d+)/, out) do
+      [_, e] ->
+        e = String.to_integer(e)
+
+        if e == n do
+          :ok
+        else
+          {:red,
+           "INDEPENDENT-REDERIVATION: --keys printed #{n} TSV line(s) but the census run over the SAME corpus independently derived emitted #{e}"}
+        end
+
+      _ ->
+        {:red,
+         "INDEPENDENT-REDERIVATION: the census run over the same corpus printed no parsable `EMITTED success claims` figure — failing CLOSED rather than passing on an unread number"}
     end
   end
 
@@ -2045,8 +2157,17 @@ defmodule PDS.Census do
 
       def reopen(id), do: Repo.update(id)
 
+      # TWO EMITTED SITES IN ONE CLAUSE (PDS-D519). Identical {path, module.name/arity,
+      # head_hash} — one clause, one head — and DIFFERENT expr_fp, because the two `%{}`
+      # nodes differ. Without this the fixture holds one emitted site, every key is
+      # trivially distinct, and KEY-DISCRIMINATES cannot fail on a fixture that never
+      # asks the key to discriminate anything.
       def receipt(id, n) do
-        %{#{@pair_atom}, id: id, moved: n}
+        if n > 0 do
+          %{#{@pair_atom}, id: id, moved: n}
+        else
+          %{#{@pair_atom}, id: id}
+        end
       end
 
       def consume(resp) do
