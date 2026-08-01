@@ -16,8 +16,6 @@ defmodule Barkpark.Tasks.Fence do
   # now routes through). The MOVE fence is folded into `Tasks.Move`'s reparent
   # CAS write directly (one UPDATE, not a second one).
 
-  import Ecto.Query, only: [from: 2]
-
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
@@ -30,7 +28,7 @@ defmodule Barkpark.Tasks.Fence do
 
   alias Barkpark.Content.Document
   alias Barkpark.Repo
-  alias Barkpark.Tasks.Edges
+  alias Barkpark.Tasks.{Edges, Internal}
 
   @event_task_mutated "task.mutated"
 
@@ -107,16 +105,14 @@ defmodule Barkpark.Tasks.Fence do
         new_claim = Map.put(claim, "epoch", current_epoch(doc) + 1)
         new_content = Map.put(content, "claim", new_claim)
 
-        {rows, _} =
-          from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-          |> Repo.update_all(
-            set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-          )
-
-        case rows do
-          1 ->
-            updated = %{doc | content: new_content, rev: new_rev}
-
+        # PDS-D451 — the receipt is the STORED row, not a reconstruction. This
+        # arm's receipt never reaches an HTTP caller, but it DOES reach every
+        # LiveView/SSE consumer through `Content.Broadcast`, which copies
+        # `doc.updated_at` into BOTH the `doc:` map AND `document._updatedAt`
+        # (`Envelope.render`) of the same message. A `%{doc | …}` merge omits
+        # `updated_at`, so both fields shipped the PREVIOUS write's timestamp.
+        case Internal.fenced_content_write(doc, observed_rev, new_content, new_rev) do
+          {:ok, updated} ->
             ev =
               insert_mutation_event!(
                 updated,
@@ -128,7 +124,10 @@ defmodule Barkpark.Tasks.Fence do
 
             task_broadcast(updated, @event_task_mutated, ev, observed_rev)
 
-          0 ->
+          # NOT an error atom: `nil` is the bundle-absent sentinel this arm has
+          # always returned on a lost CAS — `List.wrap(nil) == []` swallows it
+          # and `add_dep/3` still returns `{:ok, edge}`.
+          :stale ->
             nil
         end
 
