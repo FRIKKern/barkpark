@@ -3039,7 +3039,7 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    the row stacked but stayed CENTRED (acts left edge 441.28, not 275). Source
    order is the fix; keep this below the base rules, and no !important. */
 @media (max-width: 768px) {
-  .attention-row { flex-direction: column; align-items: flex-start; }
+  .attention-row { flex-direction: column; }
   /* …but the name/reason column still takes the full row, or it re-collapses. */
   .attention-row .attention-main { align-self: stretch; }
 }
