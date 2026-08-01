@@ -8015,7 +8015,12 @@ misattribution (D435) was caught.
   `hzResObservedResponse`'s `obj == nil` guard is unreachable through all six current create callers;
   deleting the guard outright leaves the full suite `ok 28.031s`. (5) *"The receipt names its basis" is
   not "the basis is strong"* — a create observing its own response object is honest and weak in the
-  same breath — **and per D438 the basis is not even DEFENDED until the round-2 arm lands.** (6)
+  same breath — **and per D438 the basis was not even DEFENDED until the round-2 arm landed.
+  AMENDED 2026-08-01: IT HAS. `pds-w32-census-binds-the-basis` shipped in #8856
+  (`0b5a5e7dc`), so zero now DOES cover basis honesty for the censused family — a reworded
+  basis constant no longer ships green. This limit is RETIRED, not softened; the other seven
+  stand, and (5)'s first half is untouched because a create observing its own response object
+  is still honest and weak in the same breath.** (6)
   *Nothing outside the hetzner glob is censused*: `internal/cli` carries **40** non-test
   receipt-emitting files outside the family against 13 inside — hetzner is **~25%** of the CLI's
   receipt-emitting file surface — with ≥58 literal `"ok": true` sites and 92 `✓` sites out there. (7)
