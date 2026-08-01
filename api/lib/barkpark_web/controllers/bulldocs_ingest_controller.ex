@@ -74,8 +74,18 @@ defmodule BarkparkWeb.BulldocsIngestController do
   alias Barkpark.Content.{Errors, Warnings}
   alias Barkpark.Tenancy
 
-  # The five DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
-  @op_kinds ~w(append-block insert-after patch-block replace-block remove-block)
+  # The SIX DocPatchOp discriminators (mirrors Barkpark.PortableDoc.Patch).
+  #
+  # PDS-D458: `move-block` was absent here while `Patch.apply_to_blocks/2`
+  # implemented it, `Patch`'s moduledoc documented it, `BlockOps
+  # .locate_paper_affected/2` handled it and the Studio LiveView emitted it —
+  # so over HTTP it 422'd `malformed_op` / "every op must name a known
+  # DocPatchOp": an error saying a KNOWN verb is unknown. It is ADDED rather
+  # than refused, because there was no rule keeping it out — only an
+  # un-updated allowlist. (`Papers.Proposals`' `@insert_op_kinds` stays the
+  # narrower `append-block`/`insert-after` pair: that one IS a real rule —
+  # proposals may never touch an existing block — and it is not drift.)
+  @op_kinds ~w(append-block insert-after patch-block replace-block remove-block move-block)
 
   # Learn-pointer advisory for the legacy body_html leg (authoring-excellence
   # ae-ingest-learn-pointer). The errors-as-instructions pattern teaches what

@@ -793,7 +793,34 @@ defmodule Barkpark.Content.Papers.BlockOps do
     constraints = Papers.Template.paper_declarations()
 
     Enum.reduce_while(ops, {:ok, blocks, []}, fn op, {:ok, acc, ids} ->
-      with {:ok, next} <- Patch.apply_patch(acc, op, constraints: constraints),
+      # HOIST (PDS-D458): `ensure_block_ids` runs PER OP, inside the fold, not
+      # once after it. Two defects share this one root — the batch used to read
+      # its receipt one step BEFORE the id existed, and to thread a still-id-less
+      # block into the next op:
+      #
+      #   1. RECEIPT. `locate_paper_affected` reads the id out of the post-op
+      #      list. Minting after the fold meant an id-less append/insert-after
+      #      located a `nil` block_id, the `nil -> ids` clause below dropped it,
+      #      and the batch answered `{"ok":true,…,"block_ids":[]}` about a block
+      #      it HAD minted and persisted — `ok: true` withholding the only
+      #      addressable identifier it created. The single-op path (:582) always
+      #      minted before locate and reported it correctly; the two shapes of
+      #      one route disagreed.
+      #   2. COLLISION. `Patch`'s duplicate guard is `id_exists?(blocks, block_id
+      #      (block))`, and `block_id/1` is a bare `Map.get` — so an id-less
+      #      block asks "does any block have id nil?". With minting deferred, the
+      #      FIRST id-less append left a nil-id block in the accumulator and the
+      #      SECOND one collided with it: 422 `duplicate_id` on a batch with no
+      #      duplicates. Minting per op leaves no nil-id block in `acc`, so the
+      #      real duplicate check (a literal id already present) still fires and
+      #      the phantom one cannot.
+      #
+      # Additive + idempotent, exactly as at the other chokepoints: a batch of
+      # id-bearing ops is byte-identical through it, and the post-fold
+      # `ensure_block_ids` at the caller is then a no-op that stays as the
+      # belt-and-braces chokepoint.
+      with {:ok, patched} <- Patch.apply_patch(acc, op, constraints: constraints),
+           next = ensure_block_ids(patched),
            {:ok, affected} <- locate_paper_affected(op, next) do
         new_ids =
           case affected.block_id do
@@ -1203,9 +1230,20 @@ defmodule Barkpark.Content.Papers.BlockOps do
   # Identical to the former Barkpark.Papers.locate_affected/2, except the
   # append/insert clauses now read the STORED block out of `new_blocks` rather
   # than trusting the op payload — so an op whose `block` carried no id reports
-  # the id `ensure_block_ids` just minted (the op-fold runs ensure_block_ids over
-  # `new_blocks` before this locate), keeping the broadcast frame's block_id and
-  # the persisted block in sync.
+  # the id `ensure_block_ids` just minted, keeping the broadcast frame's block_id
+  # and the persisted block in sync.
+  #
+  # CALLER CONTRACT (was falsified until PDS-D458, and this comment asserted the
+  # false half): a caller that wants a non-nil `block_id` for an id-less
+  # append/insert-after MUST run `ensure_block_ids` over `new_blocks` BEFORE
+  # calling this. `apply_paper_block_op/4` does so at :582; the BATCH fold did
+  # NOT — it minted once AFTER the fold, so this function was handed a list
+  # whose freshly-appended block was still id-less, which is exactly how the
+  # batch receipt came to withhold the id it had minted and persisted.
+  # `fold_paper_ops/2` now mints per op, so both paper paths honour it.
+  # `apply_document_block_op/5` still does not (its ids are minted downstream in
+  # `upsert_document`), so an id-less block op on a DOCUMENT reports block_id
+  # nil — a known, untouched gap on a different surface, not this contract.
   defp locate_paper_affected(%{"op" => "append-block", "block" => block}, new_blocks) do
     position = length(new_blocks) - 1
     stored = Enum.at(new_blocks, position) || block

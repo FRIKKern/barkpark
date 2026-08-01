@@ -544,6 +544,34 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       }
     end
 
+    # The shape an author NATURALLY writes: no id, because the server mints one.
+    # Every shipped batch test hardcoded ids, which is why the suite stayed green
+    # over a live 422 (PDS-D458).
+    defp append_op_noid_b(text) do
+      %{
+        "op" => "append-block",
+        "block" => %{
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => text}]
+        }
+      }
+    end
+
+    defp insert_after_op_noid_b(after_id, text) do
+      %{
+        "op" => "insert-after",
+        "afterId" => after_id,
+        "block" => %{
+          "type" => "paragraph",
+          "content" => [%{"type" => "text", "value" => text}]
+        }
+      }
+    end
+
+    defp block_ids_of(paper) do
+      paper |> pc("blocks") |> Enum.map(&Map.get(&1, "id"))
+    end
+
     setup do
       slug = "batch-target-#{System.unique_integer([:positive])}"
 
@@ -630,6 +658,159 @@ defmodule BarkparkWeb.BulldocsIngestControllerTest do
       assert pc(paper, "rev") == rev0
       refute pc(paper, "body_html") =~ "First."
       refute pc(paper, "body_html") =~ "Third."
+    end
+
+    # ── PDS-D458: id-less ops, the receipt, and move-block at the door ──────
+    #
+    # Every test above hands its ops a HARDCODED id. These drive the shape an
+    # author actually writes — no id at all — which used to 422 `duplicate_id`
+    # at n>=2 and, at n==1, answer `{"ok":true,…,"block_ids":[]}` about a block
+    # it HAD minted. The fix is the per-op `ensure_block_ids` hoist inside
+    # `BlockOps.fold_paper_ops/2`.
+
+    test "a multi-op ID-LESS append batch succeeds and reports one minted id per op",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      ops = [append_op_noid_b("First."), append_op_noid_b("Second.")]
+
+      conn = auth_post_b(conn, slug, %{"ops" => ops})
+
+      resp = json_response(conn, 200)
+      assert resp["ok"] == true
+      assert resp["op_count"] == 2
+      assert resp["rev"] == rev0 + 1
+
+      # THE RECEIPT: one minted id per op, not an empty list.
+      ids = resp["block_ids"]
+      assert length(ids) == 2
+      assert Enum.uniq(ids) == ids
+      assert Enum.all?(ids, &(is_binary(&1) and &1 != ""))
+
+      # And every reported id addresses a block that is really there.
+      paper = Content.get_paper(slug)
+      stored = block_ids_of(paper)
+      assert stored == ["intro" | ids]
+      assert pc(paper, "body_html") =~ "First."
+      assert pc(paper, "body_html") =~ "Second."
+    end
+
+    test "a multi-op ID-LESS insert-after batch succeeds and reports one minted id per op",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      ops = [
+        insert_after_op_noid_b("intro", "First."),
+        insert_after_op_noid_b("intro", "Second.")
+      ]
+
+      conn = auth_post_b(conn, slug, %{"ops" => ops})
+
+      resp = json_response(conn, 200)
+      assert resp["ok"] == true
+      assert resp["op_count"] == 2
+      assert resp["rev"] == rev0 + 1
+
+      ids = resp["block_ids"]
+      assert length(ids) == 2
+      assert Enum.uniq(ids) == ids
+      assert Enum.all?(ids, &(is_binary(&1) and &1 != ""))
+
+      paper = Content.get_paper(slug)
+      stored = block_ids_of(paper)
+      assert length(stored) == 3
+      assert Enum.sort(stored) == Enum.sort(["intro" | ids])
+    end
+
+    test "the SINGLE and BATCH shapes agree on block_ids for an identical id-less op",
+         %{conn: conn} do
+      seed = fn ->
+        s = "id-less-parity-#{System.unique_integer([:positive])}"
+
+        {:ok, _} =
+          Content.upsert_paper(
+            LabelFixtures.paper_attrs(%{
+              slug: s,
+              blocks: [
+                %{
+                  "id" => "intro",
+                  "type" => "paragraph",
+                  "content" => [%{"type" => "text", "value" => "Intro."}]
+                }
+              ]
+            })
+          )
+
+        s
+      end
+
+      op = append_op_noid_b("Same op, two shapes.")
+
+      single_slug = seed.()
+      batch_slug = seed.()
+
+      single = json_response(auth_post_b(conn, single_slug, op), 200)
+      batch = json_response(auth_post_b(build_conn(), batch_slug, %{"ops" => [op]}), 200)
+
+      # The batch used to answer [] here while single answered the minted id.
+      assert batch["block_ids"] == [single["block_id"]]
+      assert is_binary(single["block_id"]) and single["block_id"] != ""
+
+      # Both persisted the same block-id shape, one block past the seed.
+      assert block_ids_of(Content.get_paper(single_slug)) ==
+               block_ids_of(Content.get_paper(batch_slug))
+    end
+
+    test "a GENUINE duplicate id is still rejected — the nil guard did not blind the real check",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      ops = [append_op_b("dup", "one"), append_op_b("dup", "two")]
+
+      conn = auth_post_b(conn, slug, %{"ops" => ops})
+
+      resp = json_response(conn, 422)
+      assert resp["error"]["code"] == "duplicate_id"
+      assert resp["error"]["op"] == "append-block"
+      assert resp["error"]["target"] == "dup"
+
+      # Rolled back: the paper never saw either op.
+      paper = Content.get_paper(slug)
+      assert length(pc(paper, "blocks")) == 1
+      assert pc(paper, "rev") == rev0
+    end
+
+    test "move-block is accepted on the BATCH path (it was 422 malformed_op at the door)",
+         %{conn: conn, slug: slug, rev0: rev0} do
+      ops = [
+        append_op_b("b1", "First."),
+        append_op_b("b2", "Second."),
+        %{"op" => "move-block", "id" => "b1", "after" => "b2"}
+      ]
+
+      conn = auth_post_b(conn, slug, %{"ops" => ops})
+
+      resp = json_response(conn, 200)
+      assert resp["ok"] == true
+      assert resp["op_count"] == 3
+      assert resp["rev"] == rev0 + 1
+      assert resp["block_ids"] == ["b1", "b2"]
+
+      assert block_ids_of(Content.get_paper(slug)) == ["intro", "b2", "b1"]
+    end
+
+    test "move-block is accepted on the SINGLE path too", %{conn: conn, slug: slug} do
+      assert json_response(
+               auth_post_b(conn, slug, %{"ops" => [append_op_b("b1", "First.")]}),
+               200
+             )["ok"] == true
+
+      resp =
+        json_response(
+          auth_post_b(build_conn(), slug, %{"op" => "move-block", "id" => "b1", "after" => nil}),
+          200
+        )
+
+      assert resp["ok"] == true
+      assert resp["op"] == "move-block"
+      assert resp["block_id"] == "b1"
+      assert resp["position"] == 0
+
+      assert block_ids_of(Content.get_paper(slug)) == ["b1", "intro"]
     end
 
     test "single-op back-compat path still works (body IS the op)",
