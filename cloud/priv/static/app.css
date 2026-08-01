@@ -1538,6 +1538,27 @@ select.form-input {
 .site-open:hover { color: var(--text); text-decoration: underline; }
 .site-open:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); }
 a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
+/* W15-S5 (pays cch-w14-bl-site-open-phone-overflow): the SAME `.site-open` class
+   dresses two different contents — a 49px "Visit ↗" chip, and, in the site
+   detail head's `.fleet-url` sub-line, the WHOLE live URL as its own text. The
+   chip wants `white-space: nowrap`; the URL cannot have it. `esc(live)` renders
+   an unbreakable run (a host + path has no space, and the trailing `&nbsp;↗` is
+   non-breaking by construction), so nowrap pinned the URL at 372.03px wide
+   ending at x=388.03 and pushed documentElement.scrollWidth PAST the viewport
+   on every iPhone in portrait, both themes, on every site fixture: 320 (+68),
+   340 (+48), 360 (+28), 375 (+13), and 320 (+75) … 390 (+5) on the longer
+   `site-binding-bound` host. Page-level sideways scroll, no cue.
+   THE SHAPE IS WRAP, NOT TRUNCATION: the URL is the sub-line's whole content
+   and a person reads it to know WHERE the site lives, so ellipsing it would
+   trade a scrollbar for a lie. Wrapping costs row height only where the URL
+   does not fit; nothing is hidden and no cue is owed (a cue with nothing
+   clipped behind it is exactly the sweep's Q2 CUE_STUCK).
+   WHY `break-word` AND NOT `anywhere`/`break-all` (charter D165): `break-word`
+   permits the break WITHOUT lowering the element's min-content contribution,
+   so it cannot become the flex-squeeze that shredded `.fleet-name`/`.fleet-url`
+   into one-character columns. Scoped to `.fleet-url` so the `Visit ↗` chip in
+   the list row and the `.btn` in the badges keep their nowrap unchanged. */
+.fleet-url .site-open { white-space: normal; overflow-wrap: break-word; }
 
 /* ===================================================== DEPLOYMENTS
    gr-p3-site-detail (v4, screens2/05): the deploy ladder is ONE card — hairline-
