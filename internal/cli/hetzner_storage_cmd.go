@@ -416,8 +416,12 @@ func runHetznerBucketCreate(out *writer, args []string) int {
 	// LISTING is the credentials' own answer to "is it there?", so that is what
 	// the receipt is built from — and a bucket the listing does not carry
 	// afterwards refuses the claim instead of printing the name that was typed.
+	// The basis is passed because this read is NOT the hcloud single-resource
+	// GET hzResObserved defaults to (PDS-D437): object storage has no such verb
+	// for a bucket, so the claim rests on a collection listing scanned for the
+	// name, and the receipt says exactly that.
 	return hzResObserved(out, hetznerCtx(), "create", "bucket", name, name, nil,
-		hzS3BucketRead(c, name), hzObserveBucketCreated(hzS3Location(a)))
+		hzS3BucketRead(c, name), hzObserveBucketCreated(hzS3Location(a)), hzResBasisListScan)
 }
 
 func runHetznerBucketDelete(out *writer, args []string) int {
@@ -606,8 +610,10 @@ func runHetznerObjectPut(out *writer, args []string) int {
 	// existence-based HEAD serves both: an endpoint that answered 200 and
 	// persisted nothing now refuses instead of printing the size of a local file
 	// that never arrived.
+	// The basis names the HEAD (PDS-D437): the receipt is earned by an existence
+	// read on the stored key, not by a GET on an hcloud id.
 	return hzResObserved(out, ctx, "put", "object", key, key, nil,
-		hzS3HeadRead(c, bucket, key), hzObserveObjectStored(bucket, size))
+		hzS3HeadRead(c, bucket, key), hzObserveObjectStored(bucket, size), hzResBasisHead)
 }
 
 func runHetznerObjectGet(out *writer, args []string) int {

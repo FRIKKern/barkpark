@@ -76,12 +76,27 @@ import (
 const (
 	hzKeyConfirmedPresent = "confirmed_present"
 
-	// The two BASES a mutation receipt can be built from, named in the payload
-	// so a reader can weigh the claim without reading this file. The GET basis
-	// is strictly stronger: it is the server's own answer AFTER the action
-	// settled, not the object the create call handed back.
+	// The BASES a mutation receipt can be built from, named in the payload so a
+	// reader can weigh the claim without reading this file. The GET basis is
+	// strictly stronger than the response basis: it is the server's own answer
+	// AFTER the action settled, not the object the create call handed back.
 	hzResBasisGet      = "single-resource GET on the resolved id"
 	hzResBasisResponse = "the create response object"
+
+	// PDS-D437 — THE OBJECT-STORE BASES. hzResObserved's post-read is not always
+	// an hcloud single-resource GET: three S3 call sites re-read through the
+	// only primitives that store offers, and neither is a GET on an id. The
+	// wording deliberately matches the prose the census rows already carry for
+	// these verbs ("re-reads ListBuckets after the create", "HEADs the key
+	// after the write"), because this is that prose moved into the receipt.
+	//
+	// The HEAD basis is WEAKER than a GET in one specific way an operator
+	// should be able to weigh: it confirms that the KEY holds bytes, never that
+	// the bytes are the ones the verb sent. The list-scan basis is weaker
+	// again: it confirms the NAME appears in a collection listing, and Hetzner
+	// documents no consistency model for that listing.
+	hzResBasisHead     = "existence HEAD on the stored key"
+	hzResBasisListScan = "ListBuckets after the create, scanned for the name"
 
 	// hzKeyDivergence is the ADVISORY channel (PDS-D432): the receipt key a
 	// create uses to say "the API accepted this, and what came back is not what
@@ -197,7 +212,44 @@ type hzResObserveFn[T any] func(*T) hzResObservation
 // It shares hzResGoneRead[T] with the destroy half on purpose — the same
 // (value, *Response, error) triple, so the (nil, nil) miss stays
 // distinguishable from a transport error — and inverts what that miss MEANS.
-func hzResObserved[T any](out *writer, ctx context.Context, action, kind string, id any, name string, extra map[string]any, read hzResGoneRead[T], observe hzResObserveFn[T]) int {
+//
+// PDS-D437 — THE BASIS RIDES IN FROM THE CALL SITE. The trailing variadic names
+// the read this particular caller actually performed; omit it and the receipt
+// says hzResBasisGet, which is true for the ten hcloud callers and was the
+// hardcoded claim before this parameter existed. It is TRAILING and VARIADIC
+// precisely so those ten need no edit, and non-generic so it takes no part in
+// inferring T (TestHzResObservedInfersTWithAnExplicitBasis proves the inference
+// positively — no call site instantiates hzResObserved[T] explicitly).
+//
+// TWO FOOTGUNS THE VARIADIC CANNOT EXPRESS IN THE TYPE, so they are handled
+// here and stated in the open:
+//
+//	1. PASSING TWO BASES COMPILES and silently takes the FIRST. There is no
+//	   arity the compiler will reject; hzResBasisOf documents the choice.
+//	2. AN EMPTY STRING FALLS BACK to hzResBasisGet rather than emitting a blank
+//	   basis — a receipt whose confirmation_basis is "" is worse than one that
+//	   names the default, because a reader cannot tell it from a missing key.
+//
+// THE SHIPPED LIMIT, STATED (PDS-D438), and it is stated at the precision it
+// was MEASURED, not at the precision that would flatter it:
+//
+//	MUTATION A — swap one call site's basis constant for another's (backup
+//	create claims the ListBuckets scan while it HEADs). CAUGHT, by
+//	TestHzResObservedBasisIsVisibleToAnOperator, which pins the constant each
+//	of the three object-store sites emits. So the basis is not entirely
+//	undefended: the CHOICE at those three sites is now pinned.
+//	MUTATION B — leave every call site alone and change what hzResBasisHead
+//	SAYS ("single-resource GET on the resolved id, verified byte-for-byte" for
+//	a read that is an existence HEAD). ENTIRE PACKAGE SUITE GREEN, ok 29.380s.
+//	Every assertion in the package compares this key SYMBOLICALLY against the
+//	constant, so the constant's TRUTH is checked by nobody, and the receipt an
+//	operator reads is the only place the lie appears.
+//
+// That is the honest shape of what this slice bought: three per-site claims,
+// pinned to the constants they chose, whose constants nothing verifies against
+// the reads they name. Binding the basis to what the census KNOWS each row
+// reads is pds-w32-census-binds-the-basis. Do not read this as a guarantee.
+func hzResObserved[T any](out *writer, ctx context.Context, action, kind string, id any, name string, extra map[string]any, read hzResGoneRead[T], observe hzResObserveFn[T], basis ...string) int {
 	fresh, _, err := read(ctx)
 	switch {
 	case err != nil:
@@ -217,8 +269,19 @@ func hzResObserved[T any](out *writer, ctx context.Context, action, kind string,
 		// longer there at all.
 		return hzResNotReadable(out, action, kind, id, name)
 	default:
-		return hzResReportObserved(out, action, kind, id, name, extra, hzResBasisGet, observe(fresh))
+		return hzResReportObserved(out, action, kind, id, name, extra, hzResBasisOf(basis), observe(fresh))
 	}
+}
+
+// hzResBasisOf resolves the trailing variadic to the basis string the receipt
+// prints. It is the ONE place footgun (1) and footgun (2) above are decided:
+// extra elements are ignored (the first wins), and an empty first element
+// degrades to the GET default rather than emitting a blank confirmation_basis.
+func hzResBasisOf(basis []string) string {
+	if len(basis) > 0 && basis[0] != "" {
+		return basis[0]
+	}
+	return hzResBasisGet
 }
 
 // hzResObservedResponse is the CREATE half of the mutation apparatus.
