@@ -3914,6 +3914,53 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .live-chip { padding: 0 7px; gap: 0; }
 }
 
+/* ── W20-S8: THE PAST-DUE MONEY MESSAGE STOPS BEING CUT 721-740 ──────────────
+   Pays `cch-w17-bl-band-a-shell-fold-cliff` and the 721 half of
+   `cch-w14-bl-billing-chip-truncated-above-768` (its 769-820 half was paid by
+   #8851). The 830 block above says this band "is truncated too" and declares no
+   breakpoint here moves it — true of a breakpoint CHANGE, false of a NEW block:
+   the 830 tighten is already computed at 721 (14px/10px, identical to 320), so
+   the only remaining width comes from tightening FURTHER, which is what this
+   does.
+
+   WHAT A PERSON SAW ON MAIN, DRIVEN AT 501fb9670 (Chrome/150, both themes,
+   `?scen=billing-past-due|overview-past-due`), `#billing-chip` sw/cw:
+     light  721 168/160   725 168/162   730 168/164   735 168/166   740 168/168
+     dark   721 168/159   725 168/161   730 168/163   735 168/165   740 168/167
+   It is a LINEAR RAMP — 8/9, 6/7, 4/5, 2/3, 0/1 px short — NOT "~8px like 721".
+   "Payment failed · fix billing" is cut mid-word at the wide end of it, and the
+   guard scored the whole band a CHECKMARK for four waves (see overflow-guard's
+   GR108 leg, whose band-A tolerance this commit deletes).
+
+   WHY 4px ON BOTH AXES AND NOT 8px OF PADDING. The ramp's worst cell is 9px, and
+   `.topbar` has TWO squeezable axes here: its own inline padding (2 x 14px) and
+   its `column-gap` (10px). Driven, spending only the padding axis
+   (`padding: 0 var(--space-2)` = 8px, gap 4px) cures 740 but leaves 721/dark at
+   168/167 — a strict `<=` assertion and an rc=0 run cannot both hold. Halving
+   BOTH lands every one of the 16 band cells at 168/168, at FULL intrinsic width
+   rather than a pixel of slack. `--space-1` is retired (:340), so
+   `calc(var(--space-2) / 2)` is the only token-legal 4px.
+
+   THE LOWER BOUND IS LOAD-BEARING, NOT DECORATION. `.topbar` is declared at :794
+   and re-declared by the 830 block at :3911; a media query adds no specificity,
+   so the LAST equal-specificity declarant wins. Without `min-width: 621px` this
+   block would also be the last declarant BELOW 620 — driven, `.topbar`'s
+   computed `column-gap` at 320 and at 620 goes 10px -> 4px, falsifying the very
+   invariant the W19-S2 comment block below states about itself, and the guard
+   still exits 0 while it happens. That regression is invisible to git merge, to
+   `__css_check`, to `cssom-parity` and to `__app.test`; only the computed style
+   catches it. Same reason this block is authored HERE, above the 620 banner: the
+   region reads descending 830 > 740 > 620, and authoring it after the 620 block
+   merges clean and computes wrong.
+
+   HONESTY TAX (D218): these are macOS/Inter numbers and a face swap moves chip
+   widths by ~4px — larger than the 1px residues this band used to carry. The
+   4px-both-axes shape is chosen to sit OUTSIDE that noise floor (real slack at
+   full intrinsic width) rather than 1px inside it. ─────────────────────────── */
+@media (min-width: 621px) and (max-width: 740px) {
+  .topbar { padding: 0 calc(var(--space-2) / 2); gap: calc(var(--space-2) / 2); }
+}
+
 /* ── W19-S2: THE PHONE TOPBAR WRAPS AT 620 ───────────────────────────────────
    Pays three filed rows at once, on the one band that is on screen on EVERY
    route: `cch-w16-bl-trial-chip-truncated-on-every-phone` (the trial sentence),

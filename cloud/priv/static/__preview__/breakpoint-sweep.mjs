@@ -97,13 +97,15 @@
 //  LEG B — THE RENDER SWEEP (`--render`)
 // ─────────────────────────────────────────────────────────────────────────────
 //  WIDTH AXIS = a boundary walk B-1 / B / B+1 over every derived breakpoint.
-//  That is five breakpoints (620, 720, 768, 830, 899) giving 15 widths. THE
+//  That is six breakpoints (620, 720, 740, 768, 830, 899) giving 18 widths. THE
 //  WIDTH 900 IS STILL WALKED, as 899+1 — dropping 900 from the axis cost
 //  exactly ONE width, 901, and nothing else. (It was five breakpoints and 13
 //  widths until cch-w16-s8 deleted app.css's only `max-width: 900px` rule —
 //  the `@media (min-width: 900px)` block that remains parses as the boundary
-//  899 — and four/12 until W17-S6 added `@media (max-width: 830px)`, the
-//  breakpoint that keeps the past-due money message whole.)
+//  899 — four/12 until W17-S6 added `@media (max-width: 830px)`, the
+//  breakpoint that keeps the past-due money message whole, and five/15 until
+//  W20-S8 added 740, the breakpoint that keeps that same message whole in the
+//  shell-fold band below it.)
 //
 //  SCREEN AXIS = SCENARIO x ROUTE, never section.view alone. Content is
 //  scenario-bound: on scen=mixed-fleet the notifications/tokens/env/sites/
@@ -253,7 +255,16 @@ export function boundaryWalk(breakpoints) {
 // is missing 829, 830, 831." A CSS slice that adds a breakpoint owes this list
 // an entry, and the sweep will not let it forget.
 //
-// Derived from app.css: 620, 720, 768, 830, 899. Declared here as the sweep's
+// W20-S8 ADDED 740, and Leg A caught its absence the same way, on the first run
+// after the CSS landed: exit 2, "UNCOVERED breakpoint 740px — the boundary walk
+// is missing 739, 740, 741." It is the upper edge of
+// `@media (min-width: 621px) and (max-width: 740px)`, the block that keeps the
+// past-due money message whole across the 721-740 shell-fold band (the guard's
+// GR108 leg asserts those widths strictly now, with no tolerance). The prelude's
+// LOWER edge costs no entry: 620 is already declared, and 621 is walked as
+// 620+1.
+//
+// Derived from app.css: 620, 720, 740, 768, 830, 899. Declared here as the sweep's
 // committed axis so Leg A can refuse when the stylesheet grows a breakpoint
 // this list does not carry — and, since cch-w15's phantom half, when it loses
 // one. 900 LEFT THIS LIST because cch-w16-s8 deleted app.css's only
@@ -262,7 +273,7 @@ export function boundaryWalk(breakpoints) {
 // parsed as the boundary 899, which is why 899 stays. THE WIDTH 900 IS STILL
 // DRIVEN — boundaryWalk emits 899+1 — so the only width this shrink costs is
 // 901.
-export const BREAKPOINTS = [620, 720, 768, 830, 899];
+export const BREAKPOINTS = [620, 720, 740, 768, 830, 899];
 export const WIDTHS = boundaryWalk(BREAKPOINTS);
 
 const INST = IDS.liveInstance;
