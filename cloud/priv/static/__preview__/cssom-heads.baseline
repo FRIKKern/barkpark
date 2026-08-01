@@ -190,4 +190,26 @@
 # authored rule heads 1247 == CSSOM style rules 1247, flattened selectors 1212/1212,
 # MISSES 0, PARITY PASS. Both prose records above are kept: s5's +2 and s4's +2 are
 # separate facts about separate blocks and neither may be collapsed into the other.
-1247
+# Re-measured 2026-08-01 (cch-w15-s5-site-link-phone-band, at BUILD): 1244 authored
+# heads == 1244 CSSOM style rules, flattened selectors 1211/1211, MISSES 0, on a branch
+# off origin/main which read 1243 — MEASURED by running cssom-parity.mjs on this
+# branch's bytes (Chrome 150.0.7871.187, node v22.22.0, app.css 224079 B, sha256
+# 9371f25335e1…), not hand-incremented. The +1 is ONE new rule head,
+# `.fleet-url .site-open`, which lifts `white-space: nowrap` off the live-URL text link
+# in the site detail head so it wraps instead of pushing documentElement.scrollWidth
+# past the viewport on every iPhone width in portrait. MISSES 0 is what makes this an
+# unrecorded ADD rather than a parity defect.
+# FOR THE LEAD: wave 15's other slices also touch app.css. This number is +1 over
+# origin/main's 1243 and is NOT to be reconciled by arithmetic against another slice's
+# bump — RE-MEASURE on the merged tree (charter D158 REGENERATE-ON-REBASE). Three
+# collisions in this file across the last two waves all resolved that way.
+# LEAD RESOLUTION 2026-08-01 (merge of cch-w15-s5 onto main carrying s2+s4): the FIFTH
+# collision in this file this session, and the most instructive one. The branch measured
+# 1244 — a DOWN-bump, against a main that then read 1245; main now reads 1247 after its
+# two siblings; and the merged tree measures 1248. So this slice is a net PLUS ONE here
+# and was a net MINUS ONE there, purely because of what it was measured against. No
+# arithmetic over the three recorded deltas reaches 1248; only running the tool does.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 233681 B sha256 1cf9bac24cf0...,
+# authored rule heads 1248 == CSSOM style rules 1248, flattened selectors 1213/1213,
+# MISSES 0, PARITY PASS. Both prose records above are kept.
+1248
