@@ -2576,6 +2576,80 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 37 2026-08-02 — "Buy the judgment, don't declare it" — REVIEWED. Grade A− (paper `pds-wave-37-2026-08-01`)
+
+**ALL THREE ROUND-1 SLICES BUILT, ALL THREE GREEN, ALL THREE PUSHED WITH PRs OPEN.** Two round-≥2
+slices were deferred BY DESIGN under the sequenced-rounds law. Every gate was re-run by the reviewer
+on the final state, and the reviewer ran FOUR independent mutations of its own rather than re-reading
+the builders' proofs.
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w34-hand-bucket-register` | `…-selftest-floo-1` | #8989 | L0 the selftest floor (KEYS-ONE-LINE-PER-SITE was VACUOUS; ZERO-FLOOR + KEY-DISCRIMINATES + INDEPENDENT-REDERIVATION, 3 new mutants); L1 the 91-row register keyed on `{path,mfa,head_hash,expr_fp}` READ from `--keys`, REGISTER-COMPLETE bidirectional; L2 five redding basis falsifiers; L3 the 8-row population roster |
+| `pds-w36-help-seal-fix` | `…-computed-from-what-the--0-r` | #8992 | PDS-D502 repaired on BOTH routes in one commit — the seal hoisted into `task_list_response/3`, prime fed the sealed lists — with a committed 5-case differential mutation-proven PER HUNK |
+| `pds-w37-unread-callee-receipts` | `…-callee-cannot-fail-th-2` | #8993 | `Scim.delete_group/2` widened to `{:error, :not_found}` and matched at the caller; `Accounts.revoke_user_session_token/1` widened to `{:ok, revoked}` and the sign-out flash forked on the count |
+
+**PDS-D532 — THE REGISTER SURVIVES ITS OWN WAVE, MEASURED ON THE MERGED TREE, NOT PER BRANCH.** The
+reviewer merged all three wave-37 branches into one probe tree and re-ran the census: `CENSUS OK`,
+RC 0, `EMITTED 91`, **all ten arms PASS** — including `REGISTER-COMPLETE 91 ↔ 91 both directions`
+and `ROSTER-ANCHORS-EXIST`. No builder had this proof: slice 1's builder did not run the census at
+all, and slice 3's builder proved only its own branch. The wave's three code changes move neither the
+population nor any register key.
+
+**PDS-D533 — THE `end_to_end_unmutated` DISCIPLINE HELD WHERE IT MATTERED MOST: THE WEBHOOK FAMILY IS
+NOT RULED PROVEN×13.** The wish's hardest instruction is honoured in the committed data. Of the 14
+`github_webhook_controller.ex` rows, exactly ONE is `end_to_end` (`:189`, mutation-attested), one is
+`end_to_end_unmutated` (`:145`), one is `partial_tag_coverage` (`:194`, ONE row with a three-tag
+sub-list verdicted by its WEAKEST tag), and the remaining eleven read `stub_mapping_only`,
+`two_hop_composed` or `declared_basis`. A stub test quoted as certifying a fact is this epic's law
+violated one level up, and the ledger refuses to do it.
+
+**PDS-D534 — THE LEDGER TOOK TWO OF THE WAVE'S OWN BRIEFED PROVEN ROWS OFF THE COLUMN.** The brief
+opened PROVEN at 18 (9 + 9). It closed at **15** (8 `end_to_end` + 7 `end_to_end_unmutated`), because
+L2's own falsifier refused `bulldocs_ingest_controller.ex:630` and `:715` — their cited tests drive
+the route and never read the paper back. Both now read `unjudged_other` with the refusal written into
+the row. A wave that could only ever ratify its own brief would be paperwork; this one could not.
+
+**PDS-D535 — A HAND-TYPED TALLY WENT STALE INSIDE THE WAVE THAT FORBIDS TRANSCRIPTION, AND THE
+REVIEWER FIXED IT AT THE SOURCE.** The register header read `6 rows carry side_effect_existence_only`
+while the script's own derived print said **5** — `:164` was demoted to `unjudged_other` AFTER that
+integer was typed. The integer is now deleted from the comment and the comment points at the derived
+BASIS DISTRIBUTION block. The lesson is not "the builder miscounted": it is that a comment is the one
+place in this instrument where derivation is unavailable, so integers must not live there.
+
+**PDS-D536 — TWO ROSTER ROWS ARE STALE-ON-MERGE AND NO ARM CAN CATCH IT.** `scim_groups_controller.ex`
+and `session_controller.ex` are verdicted REFUTED at `501fb9670`; `pds-w37-unread-callee-receipts`
+repairs both — and both roster literals SURVIVE that repair as substrings, measured on the merged
+tree, so `ROSTER-ANCHORS-EXIST` still PASSes with the stale REFUTED verdicts intact. Marked
+STALE-ON-MERGE in the roster with the re-derivation obligation named. `tasks_controller.ex:83` carries
+the mirror-image UPGRADE-ON-MERGE note. **A verdict that outlives its defect is this roster's own
+over-claim, pointed at the roster.**
+
+**PDS-D537 — `BASIS-FALSIFIERS` IS DARK UNDER THE BRIEFED GATE CORPUS.** `git archive HEAD api/lib
+scripts` carries no test tree, so the arm prints SKIPPED — it says in words that SKIPPED is not a
+pass, but the five redding falsifiers only fire from a FULL checkout. The reviewer ran it from a full
+checkout and it fired: `checked 91 row(s) against 6 redding value(s) · 0 refusal(s) · 3 advisory
+contradiction(s)`. **`pds-w35-elixir-census-gate` must run the census from the checkout, not from an
+`api/lib`-only archive, or it will enrol a half-blind instrument.**
+
+**WHAT STALLED, AND WHY IT IS NOT A FAILURE.** `pds-w34-owning-doc-amendment` (round 2) and
+`pds-w35-elixir-census-gate` (round 3) were not built — both quote the population and both are
+downstream of round 1 under PDS-D508's ordering law. The wave 36 casualty
+(`tasks-controller-ex-83-tells-a-caller-a-…`) is accounted for: it is `pds-w36-help-seal-fix`, and it
+was re-derived and built this wave rather than assumed landed.
+
+**WHAT THE NEXT WAVE TAKES.** (1) Merge round 1 in the order #8992 → #8993 → #8989 (the register's
+notes are written against the other two landing first). (2) `pds-w34-owning-doc-amendment` the moment
+all three merge, at 14500 B, retiring `UNREACHABLE-ERROR` as a VOCABULARY change. (3) The two
+STALE-ON-MERGE roster rows and the `tasks_controller.ex:83` row — hand re-derivations no arm will
+demand. (4) `pds-w35-elixir-census-gate` LAST, running the census from the checkout (D537). (5)
+`pds-w37-api-logout-unread-revoke` — `auth_controller.ex:347` is the same disease one route over and
+it IS in the `ok:true` lens, so it can move EMITTED. (6) `pds-w37-two-hop-repo-probe` — the `Repo.`
+substring is measurably too narrow and will FALSELY REFUSE the next context-mediated `end_to_end` row.
+(7) A second INDEPENDENT reviewer is owed on the SCIM tenancy reachability (#8993) and on the
+PROVEN/UNJUDGED boundary (#8989) before merge; this workflow spawns exactly one, so that is a manual
+lead step.
+
 ### Wave 36 2026-08-01 — "Spend the judgment, then gate the arrivals" — REVIEWED. Grade B+ (paper `pds-wave-36-2026-08-01`)
 
 **FOUR OF FIVE ROUND-1 SLICES BUILT, ALL FOUR GREEN, ALL FOUR PUSHED WITH PRs OPEN.** Three round-≥2
