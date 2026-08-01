@@ -1048,7 +1048,6 @@ select.form-input {
   grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
   gap: 12px;
 }
-@media (max-width: 900px) { .tier-grid { grid-template-columns: 1fr 1fr; } }
 .tier {
   display: flex;
   flex-direction: column;
