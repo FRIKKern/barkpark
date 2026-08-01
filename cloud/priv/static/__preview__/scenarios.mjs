@@ -2276,7 +2276,8 @@ export const SCENARIOS = {
         id: THEATER_IDS.ready,
         name: "Hugin",
         slug: "hugin",
-        url: "hugin-5b2c1e.barkpark.cloud",
+        // W18 REVIEW: schemed with liveInstance — the last bare `url:` fixture.
+        url: "https://hugin-5b2c1e.barkpark.cloud",
         host: "hugin-5b2c1e.barkpark.cloud",
         health_status: "up",
         agent_status: "online",
@@ -2326,7 +2327,12 @@ export const SCENARIOS = {
           id: "bp-ov-degraded",
           name: "Reporting",
           slug: "reporting",
-          url: "reporting-5b2c1e.barkpark.cloud",
+          // W18 REVIEW: schemed with liveInstance. This box sits BESIDE
+          // `liveInstance` on the front screen (`?scen=overview-attention`),
+          // and `.instance-card-url` renders `publicUrl(bp)` — i.e. `bp.url` —
+          // as TEXT. Leaving this one bare printed two adjacent cards in two
+          // different address formats on the most-seen screen in the product.
+          url: "https://reporting-5b2c1e.barkpark.cloud",
           host: "reporting-5b2c1e.barkpark.cloud",
           health_status: "down",
           agent_status: "offline",
@@ -2378,7 +2384,12 @@ export const SCENARIOS = {
       barkparks: [
         bpBase({
           id: "5b2c1e00-0000-4000-8000-0000000000f1", name: "Gyldendal", slug: "gyldendal",
-          url: "gyldendal-506f0.barkpark.cloud", host: "gyldendal-506f0.barkpark.cloud",
+          // W18 REVIEW: the three fleet-v4 rows are schemed for the same reason
+          // as liveInstance — `.fleet-url` renders `publicUrl(bp)` as text, so a
+          // half-schemed fleet list is a formatting inconsistency a person sees.
+          // Driven: overflow-guard's W15 leg stays 90/90 with the 8 extra
+          // characters at every width from 320 up.
+          url: "https://gyldendal-506f0.barkpark.cloud", host: "gyldendal-506f0.barkpark.cloud",
           health_status: "down", agent_status: "online", version: "0.2.25",
           update_state: "current", update_latest_release: "0.2.25",
           region: "fsn1", server_type: "cx22", channel: "prod", autoupdate_enabled: true,
@@ -2386,7 +2397,7 @@ export const SCENARIOS = {
         }),
         bpBase({
           id: "5b2c1e00-0000-4000-8000-0000000000f2", name: "Guerrilla", slug: "guerrilla",
-          url: "guerrilla-77a1c.barkpark.cloud", host: "guerrilla-77a1c.barkpark.cloud",
+          url: "https://guerrilla-77a1c.barkpark.cloud", host: "guerrilla-77a1c.barkpark.cloud",
           health_status: "up", agent_status: "online", version: "0.1.0",
           update_state: "behind", update_running_release: "0.1.0", update_latest_release: "0.2.25",
           region: "fsn1", server_type: "cx32", channel: "prod", autoupdate_enabled: true,
@@ -2394,7 +2405,7 @@ export const SCENARIOS = {
         }),
         bpBase({
           id: "5b2c1e00-0000-4000-8000-0000000000f3", name: "Marketing", slug: "marketing",
-          url: "marketing-2b9c4.barkpark.cloud", host: "marketing-2b9c4.barkpark.cloud",
+          url: "https://marketing-2b9c4.barkpark.cloud", host: "marketing-2b9c4.barkpark.cloud",
           health_status: "up", agent_status: "online", version: "0.2.25",
           region: "hel1", server_type: "cx22", channel: "prod", autoupdate_enabled: false,
           provider: "azure", suspended: true, suspended_reason: "Payment failed — subscription past due",
