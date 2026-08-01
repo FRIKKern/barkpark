@@ -303,7 +303,7 @@ export const HEIGHTS = [390, 667, 800];
 export const HEIGHT_REASONS = {
   390: "LANDSCAPE. 720x390 is the binding height for the fold bar — the shipped 34vh cap read 0.4836 of H here while passing casual inspection at 800, so a height set without it cannot see the defect cch-w15-s1 fixed.",
   667: "SHORT PORTRAIT. iPhone SE / small-phone portrait: the shortest height at which the folded shell is a normal reading posture rather than an edge case.",
-  800: "THE DRIVEN DEFAULT. Leg B renders at 800 (HEIGHT below) and every Q3 number this epic quotes was taken there; naming it makes the render height part of the declared axis instead of a bare module const.",
+  800: "THE DRIVEN DEFAULT. Leg B renders at 800 (RENDER_HEIGHT below) and every Q3 number this epic quotes was taken there; naming it makes the render height part of the declared axis instead of a bare module const.",
 };
 // THE EPIC'S HEIGHTS DISAGREE, AND THIS IS THE DISAGREEMENT STATED RATHER THAN
 // HIDDEN: modal-oracle/overflow-guard commit to 900, the fold identity is
