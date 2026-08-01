@@ -1554,8 +1554,8 @@ export const SCENARIOS = {
   // every other instance fixture ships `sites: []` or a 100% never-deployed
   // set — so a guard asserting "no Visit anchor here" would have passed for the
   // wrong reason, on an empty list. This drives the SAME sitesListRows (no new
-  // fixture data) at the instance route, where five deployed rows must KEEP
-  // their door and two must not have one.
+  // fixture data) at the instance route, where the FOUR rows that have served a
+  // build must KEEP their door and the two that never have must not have one.
   "sites-on-instance": {
     label: "Instance workspace Sites card — the same six rows through siteRow, doors gated on deployment",
     authed: true,
