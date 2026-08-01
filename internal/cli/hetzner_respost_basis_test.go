@@ -180,6 +180,34 @@ func TestHzResObservedBasisIsVisibleToAnOperator(t *testing.T) {
 			t.Errorf("change-algorithm basis = %q, want the unchanged default %q", got, hzResBasisGet)
 		}
 	})
+
+	// THE FIFTH ARM (PDS): `dns record update` resolves NO id — it re-reads the
+	// (zone, name, type) key it was handed — so the default GET basis was a
+	// shipped receipt LIE, denied by the verb's own comment. This arm drives the
+	// real CLI against the hcloud fake and pins the honest basis; without it,
+	// dropping the trailing argument silently restores the lie.
+	t.Run("dns record update names the rrset key, not a resolved id", func(t *testing.T) {
+		f := newFakeHzAPI(t)
+		f.mux.HandleFunc("POST /zones/example.com/rrsets/www/A/actions/set_records", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 201, `{"action":{"id":43,"command":"set_rrset_records","status":"running","progress":0}}`)
+		})
+		f.mux.HandleFunc("GET /zones/example.com/rrsets/www/A", func(w http.ResponseWriter, r *http.Request) {
+			hzWriteJSON(w, 200, `{"rrset":{"id":"www/A","name":"www","type":"A","ttl":300,
+				"records":[{"value":"192.0.2.11"},{"value":"192.0.2.10"}]}}`)
+		})
+		hzActionsAllSucceed(f)
+
+		stdout, stderr, code := runHzCLI(t, "json", "hetzner", "dns", "record", "update",
+			"--zone", "example.com", "--type", "A", "--name", "www",
+			"--value", "192.0.2.10", "--value", "192.0.2.11")
+		if code != exitOK {
+			t.Fatalf("record update exited %d, stderr: %s", code, stderr)
+		}
+		if got := basisOf(t, stdout); got != hzResBasisRRSetKey {
+			t.Errorf("record update basis = %q, want %q — this verb resolves no id",
+				got, hzResBasisRRSetKey)
+		}
+	})
 }
 
 // TestHzResBasisOfDegradesRatherThanBlanking pins the resolver directly, so the
@@ -204,7 +232,11 @@ func TestHzResBasisOfDegradesRatherThanBlanking(t *testing.T) {
 	if got := hzResBasisOf([]string{hzResBasisHead}); got != hzResBasisHead {
 		t.Errorf("hzResBasisOf([head]) = %q, want it through untouched", got)
 	}
-	for _, b := range []string{hzResBasisGet, hzResBasisResponse, hzResBasisHead, hzResBasisListScan} {
+	// hzResBasisRRSetKey is the FIRST basis constant defined OUTSIDE the
+	// hetzner_respost_mutation.go block (it lives beside its verb in
+	// hetzner_dns_cmd.go), and this set is hand-listed — nothing adds it for us,
+	// so it is added here deliberately.
+	for _, b := range []string{hzResBasisGet, hzResBasisResponse, hzResBasisHead, hzResBasisListScan, hzResBasisRRSetKey} {
 		if strings.TrimSpace(b) == "" {
 			t.Errorf("basis constant is blank: %q", b)
 		}

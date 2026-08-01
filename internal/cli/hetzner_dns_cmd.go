@@ -704,6 +704,19 @@ func runHetznerDNSRecordCreate(out *writer, g globals, args []string) int {
 	return hzResObservedResponse(out, "create", "record", id, name, nil, obj, hzObserveRecordCreated)
 }
 
+// hzResBasisRRSetKey is `record update`'s OWN basis, defined here beside the
+// verb that emits it rather than with the four general bases in
+// hetzner_respost_mutation.go — the same reason hzSizeVerdict and
+// hzRestoreNotConfirmed live beside their verbs: it explains why THIS verb's
+// read differs, and nothing else may reach for it.
+//
+// The default basis hzResBasisOf falls back to says "on the resolved id", and
+// this verb resolves NO id: it re-reads the (zone, name, type) key it was
+// handed. That is exactly as strong as the id GET — a single-resource read that
+// cannot address a second rrset — but it is a DIFFERENT read, and a receipt may
+// not name a read the code did not perform.
+const hzResBasisRRSetKey = "single-resource GET on the (zone, name, type) key the verb already held"
+
 func runHetznerDNSRecordUpdate(out *writer, g globals, args []string) int {
 	const usage = "bp cloud hetzner dns record update --zone <z> --type <t> --name <n|@> --value <v> [--value <v>…] [--ttl <s>]"
 	a, ok := hzRecordArgs(out, args, true, usage)
@@ -754,7 +767,7 @@ func runHetznerDNSRecordUpdate(out *writer, g globals, args []string) int {
 	return hzResObserved(out, ctx, "update", "record", name, name, nil,
 		func(c context.Context) (*hcloud.ZoneRRSet, *hcloud.Response, error) {
 			return hc.Zone.GetRRSetByNameAndType(c, rrset.Zone, rrset.Name, rrset.Type)
-		}, hzObserveRecordUpdated(values, ttl))
+		}, hzObserveRecordUpdated(values, ttl), hzResBasisRRSetKey)
 }
 
 func runHetznerDNSRecordDelete(out *writer, g globals, args []string) int {
