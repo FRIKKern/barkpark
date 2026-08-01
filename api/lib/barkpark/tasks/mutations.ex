@@ -7,11 +7,10 @@ defmodule Barkpark.Tasks.Mutations do
   # wrappers over the shared `update_ref_list_by_id/5` core — twins,
   # differing only in the content key + event kind.
 
-  import Ecto.Query, only: [from: 2]
-
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       insert_mutation_event!: 5,
       caller_stamp: 1,
       task_broadcast: 4,
@@ -56,16 +55,9 @@ defmodule Barkpark.Tasks.Mutations do
             new_content = Map.put(doc.content, "labels", next)
             new_rev = generate_rev()
 
-            {rows, _} =
-              from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-              |> Repo.update_all(
-                set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-              )
-
-            case rows do
-              1 ->
-                updated = %{doc | content: new_content, rev: new_rev}
-
+            # PDS-D451: the receipt is the STORED row.
+            case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+              {:ok, updated} ->
                 ev =
                   insert_mutation_event!(
                     updated,
@@ -77,7 +69,7 @@ defmodule Barkpark.Tasks.Mutations do
 
                 {:ok, updated, [task_broadcast(updated, @event_task_relabeled, ev, observed_rev)]}
 
-              0 ->
+              :stale ->
                 {:error, :stale_claim}
             end
         end
@@ -152,16 +144,9 @@ defmodule Barkpark.Tasks.Mutations do
             new_content = Map.put(doc.content, field, next)
             new_rev = generate_rev()
 
-            {rows, _} =
-              from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-              |> Repo.update_all(
-                set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-              )
-
-            case rows do
-              1 ->
-                updated = %{doc | content: new_content, rev: new_rev}
-
+            # PDS-D451: the receipt is the STORED row.
+            case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+              {:ok, updated} ->
                 ev =
                   insert_mutation_event!(
                     updated,
@@ -174,7 +159,7 @@ defmodule Barkpark.Tasks.Mutations do
                 {:ok, updated,
                  [task_broadcast(updated, @event_task_referenced, ev, observed_rev)]}
 
-              0 ->
+              :stale ->
                 {:error, :stale_claim}
             end
         end

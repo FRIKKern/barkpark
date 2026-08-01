@@ -191,11 +191,10 @@ defmodule Barkpark.Tasks.Stage do
   check here would repeat that mistake under a new field name.
   """
 
-  import Ecto.Query, only: [from: 2]
-
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       insert_mutation_event!: 5,
       caller_stamp: 1,
       task_broadcast: 4,
@@ -640,16 +639,9 @@ defmodule Barkpark.Tasks.Stage do
       |> apply_adjudication_key(@reopen_trigger_key, adj.reopen_trigger)
       |> apply_adjudication_key(@disposition_rerun_key, adj.rerun)
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 ->
-        updated = %Document{doc | content: new_content, rev: new_rev}
-
+    # PDS-D451: the receipt is the STORED row, not a reconstruction of intent.
+    case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+      {:ok, updated} ->
         ev =
           insert_mutation_event!(
             updated,
@@ -664,7 +656,7 @@ defmodule Barkpark.Tasks.Stage do
 
         {:ok, updated, [task_broadcast(updated, @event_task_staged, ev, observed_rev)]}
 
-      0 ->
+      :stale ->
         {:error, :stale_claim}
     end
   end
