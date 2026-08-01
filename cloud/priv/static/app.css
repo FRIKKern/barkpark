@@ -3914,6 +3914,58 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .live-chip { padding: 0 7px; gap: 0; }
 }
 
+/* ── W19-S2: THE PHONE TOPBAR WRAPS AT 620 ───────────────────────────────────
+   Pays three filed rows at once, on the one band that is on screen on EVERY
+   route: `cch-w16-bl-trial-chip-truncated-on-every-phone` (the trial sentence),
+   `task-9fcf92e7a02fa5b8` (the past-due money message) and
+   `cch-w16-bl-theme-picker-select-clipped-at-320` (the theme palette control).
+
+   WHAT A PERSON SAW ON MAIN, DRIVEN AT 29cb76e60 (Chrome/150, both themes,
+   `?scen=billing-trial|billing-past-due&theme=…#settings/billing`):
+     @320 trial   `#billing-chip` 121/70  — "Trial · 14 days left" cut to "Trial ·"
+     @320 past-due `#billing-chip` 168/85 — "Payment failed · fix billing" cut mid-word
+     @320 `select#bp-theme-picker` 72/59 on trial, 72/55 on past-due — a UA-painted
+          control whose selected identity ("Evergreen") is cut with NO cue at all.
+   The page never scrolled sideways in any of those cells; `.topbar-right > *`
+   (:818) floors every child at min-width 0 and the chip's own `overflow: hidden`
+   (:4761) absorbs the squeeze. That trade was the right one for the PAGE and the
+   wrong one for the PERSON: it converts a scrollbar into a silently truncated
+   sentence. Below 620 there is no width to squeeze from, so the band WRAPS
+   instead of shrinking — the chip keeps its intrinsic width on its own line.
+
+   WHY 620 AND NOT 430. The identical declarations under a 430 prelude clear all
+   20 phone cells (320/360/375/390/430 x 2 themes x 2 billing scenarios) and stop
+   there — leaving a REAL truncated band immediately above themselves that no
+   committed instrument can see (`PHONE_WIDTHS` never asserts `#billing-chip`;
+   `CHIP_WIDTHS` starts at 721). Driven on main, the past-due money message reads
+   168/134 @431, 168/143 @450, 168/151 @470, 168/165 @500 and is whole only from
+   519; the trial sentence is cut 431-469. 620 kills that residue for free, and
+   it is ALREADY a declared breakpoint — so `BREAKPOINTS` in breakpoint-sweep.mjs
+   is untouched and Leg A stays at rc=0, where 430 reds it in BOTH directions
+   (CSS-only → `UNCOVERED breakpoint 430px`; list-only → `PHANTOM breakpoint
+   430px`). 621 measures byte-identical to base — same padding, same
+   `.topbar-right` gap and width, same 56px topbar, same `.content` top offset.
+
+   THE DESTINATION IS CASCADE-CRITICAL, exactly as it is for the 830 block above.
+   `.topbar` (:794) and `.topbar-right` (:807) are declared ~3100 lines up and the
+   830 block re-declares both at :3911-3912; a media query adds NO specificity, so
+   the LAST equal-specificity declarant wins. Nothing after this point declares
+   `.topbar` in a width media query, which is what makes 6px/12px and 6px the
+   computed values below 620 rather than 830's 0/14px and 8px. THE PROOF IS
+   COMPUTED STYLE, NOT POSITION: `.topbar`'s own `column-gap` computes 10px at
+   every width before and after this block (830 already sets it) and is NOT a
+   mutation signal — padding and `.topbar-right`'s gap are.
+
+   `flex: 0 0 auto` on `.billing-chip` is the load-bearing half: `.topbar-right >
+   *` sets `min-width: 0`, so without it the chip still shrinks-to-clip inside a
+   wrapped line and the wrap buys nothing. `.billing-chip` (:4748) declares no
+   `flex` of its own, so this is the only declarant. ────────────────────────── */
+@media (max-width: 620px) {
+  .topbar { height: auto; min-height: 56px; flex-wrap: wrap; padding: 6px 12px; }
+  .topbar-right { flex-wrap: wrap; justify-content: flex-end; gap: 6px; }
+  .billing-chip { flex: 0 0 auto; }
+}
+
 /* ============================================================================
    S14 portable archives — the fleet-view Archives panel. Archived-instance
    bundles read from object storage, each with a copy-paste resurrect command.

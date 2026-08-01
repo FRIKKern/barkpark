@@ -284,4 +284,26 @@
 # collides here today — but a round-2 or round-3 app.css slice will, and D158 stands:
 # re-run the tool on the MERGED tree and take what it prints. Never merge-resolve this
 # number, never add deltas.
-1256
+# W19-S2 2026-08-01 (cch-w19-s2-topbar-phone-band-620 — the phone topbar wraps at 620):
+# 1256 -> 1259, +3 authored rule heads, ALL ADDS, all inside ONE new
+# `@media (max-width: 620px)` block authored immediately after the 830 block at
+# app.css:3963-3967 — `.topbar`, `.topbar-right`, `.billing-chip`. Nothing existing was
+# edited: the block is a pure append, so every prior head is byte-identical.
+# HOW 1259 WAS OBTAINED (D158 sentinel, and NO ARITHMETIC — 1256 + 3 also equals 1259
+# and that coincidence is NOT how this line may be produced): the sentinel `1` was
+# written into the payload line deliberately (re-anchored with `grep -nE '^[0-9]+$'`,
+# which named line 287, not by trusting 287), then cssom-parity.mjs was run. It printed
+# "BASELINE MISMATCH: 1259 authored rule heads, sidecar baseline is 1 (+1258)." with
+# MISSES 0 — the TOOL named 1259, and MISSES 0 is what makes this an unrecorded ADD
+# rather than a parity defect. That number was written back verbatim.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 250262 B sha256 f8bf39c843eb…,
+# authored rule heads 1259 == CSSOM style rules 1259, FLATTENED SELECTORS 1221 authored
+# / 1221 CSSOM (the pair no prose entry has recorded since 1218/1218 — a holder quoting
+# only heads is quoting half the instrument), MISSES 0, PARITY PASS.
+# THE THREE NEW SELECTORS ARE THE THREE NEW FLATTENED ONES: 1218 -> 1221, one selector
+# per head, because none of the three rule heads is a selector list.
+# FOR THE LEAD: this slice is the wave's SOLE holder of this file in round 1 (D202).
+# A round-2 or round-3 app.css slice WILL collide here, and D158 stands: re-run the tool
+# on the MERGED tree and take what it prints. Never merge-resolve this number, never add
+# deltas.
+1259
