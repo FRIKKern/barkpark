@@ -871,6 +871,67 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-01 — wave 18 REVIEW — four of four round-1 slices shipped and pushed, grade **A**
+
+**Paper:** `cloud-console-hardening-wave-18-2026-08-01`. PRs **#8888-#8891**. Nothing merged by the wave.
+**MERGE ORDER DOES NOT MATTER:** the four branches touch pairwise-disjoint files, and all four were
+merged together locally with every gate re-run green on the integrated tree (guard exit 0 / 7 legs /
+28-28 W18 cells, parity 1256==1256 MISSES 0, selftest 147-0, `__app.test.mjs` 762-762, `__css_check`
+0 errors, smoke 100 scenarios). Merge in any order; close the merge-gated criterion on each row.
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| S1 the front screen says WHY | `…an-instance-is-0` (unchanged) | #8888 | THE WAVE'S REASON. 66.1% of the degradation reason was unreadable at 320 on the landing route (81.0% on mixed-fleet, still cut at 430). Four append-only heads, 28/28 clean on BOTH front-screen scenarios x 2 themes, and the leg SHIPS WITH THE CSS — `git grep -c instance-card-head` over `__preview__` and `.github` exited 1 on main. Three-way mutation proof incl. a negative control that scores a perfect HORIZONTAL card and reds on the vertical invariants. |
+| S2 overflow-guard gets a job | `…five-w-1-r` | #8889 | Five waves of assertions stop living in a file CI never ran. Byte-for-byte `tier-floor-render` clone, ONE invocation (28.5s → 12.6s, kills 3-of-6 false exit-2 refusals), no `continue-on-error`, all three D209 wiring edits in one commit + the selftest fix the omission would have red-lit (131/13 → 147/0). |
+| S3 residue paid by DRIVING | `…on-driven--2` (unchanged) | #8890 | Zero files, all ledger. Four person-facing rows paid on driven measurement, two criteria amended BY MEASUREMENT, three inherited errors corrected — one of them in the wave brief itself. |
+| S4 the live-site door | `…stops-resol-3-r` | #8891 | Every "Visit ↗" href was a RELATIVE reference resolving to the console's own origin — 4 of 4 doors, both row builders, both themes. Fixed by FIDELITY (`provisioning_url/1` stores the scheme), not by a workaround. |
+
+**THE WISH'S THREE "MECHANICAL FACTS" WERE ONE-THIRD WRONG, AND TWO BUILDERS CAUGHT IT BY DERIVING.**
+The brief said to inherit "four breakpoints (620/720/768/899) giving 12 boundary widths, down from
+five/13, because s8 dropped the 900 tier rule". Leg A on merged main prints
+`5 breakpoints [620,720,768,830,899] -> 15 boundary widths` — s6's 830 tier is in the axis and s8's
+drop did not remove a breakpoint. S3 corrected the harness prose to FIVE/FIFTEEN from the sweep's own
+output; S4 re-derived 100/26/25/75/13 from `scenarioReport` rather than copying the brief. The
+baseline fact (1252) and the `sites-on-instance` allowlist fact were both correct.
+**LAW RESTATED: a number handed down in a brief is L6. Derive it or do not quote it.**
+
+**FOUND AT REVIEW BY DRIVING, AND NOT PAPERED OVER.** S4's scheme fix is production-faithful — and
+that fidelity EXPOSES a defect the short fixture had been concealing for the whole epic:
+`.instance-card-url` is `overflow:hidden; text-overflow:ellipsis` (app.css:3067-3070) and renders
+`publicUrl(bp)` as TEXT, so the real address ellipsises on the FRONT SCREEN. Driven at review:
+**7 clipped cells** at 320/360 across both front-screen scenarios (244/288 for
+`https://production-5b2c1e.barkpark.cloud` at 320), against **0** on origin/main's bare fixtures.
+What is cut is the END — the TLD — so two boxes on different domains can render as the same visible
+string. **No committed instrument can see this**: the sweep's Q2 census counts `text-overflow:
+ellipsis` as an authored cue and skips the element, and no guard leg names the selector. Filed as
+`cch-w18-bl-instance-card-url-ellipsised-on-phone`. The review also finished S4's half-applied sweep
+(five bare `url:` fixtures left the front screen printing two address formats side by side) and drove
+the guard on it — W15 stays 90/90 with the eight extra characters.
+
+**LEDGER.** S1 criterion 4 was **amended by measurement at review**: as written it demanded a SINGLE
+old-length-zero hunk, which is jointly unsatisfiable with criterion 8's same-commit comment
+correction. Re-cut to the driven two-hunk shape (`-5323 +5323` and `@@ -5341,0 +5342,79 @@`, neither
+range intersecting 2913-2957) — the identical carve-out proof, a satisfiable row. S3's criterion 7
+evidence claimed "mixed-fleet renders ZERO `.attention-row`"; that holds only at mixed-fleet's DEFAULT
+route — at `#overview` the committed leg prints three (`[att 170/245 139/237 59/59]` at 320). The
+CONCLUSION survives (139/237 reproduced to the pixel); the sentence was corrected in place so wave 19
+does not inherit it. No task outside this wave was touched.
+
+**WHAT THE NEXT WAVE TAKES.** Round 2 as sequenced: `cch-w17-s-topbar-phone-band-wrap` once #8888 is
+merged (it is the second `cssom-heads.baseline` holder — rebased on the pill's 1256 it must MEASURE
+1259 by the D158 sentinel, never add), then `cch-w16-s7-citation-anchors-e11-widening` once #8888,
+#8891 and the topbar slice are all merged, **with its inventory re-derived by `citationScanFiles()`
+in the build commit** — three of this wave's four PRs move anchors it cites. Then the new
+`cch-w18-bl-instance-card-url-ellipsised-on-phone`, which is the same front screen and the same class
+of person-facing lie, and `cch-w17-bl-band-a-shell-fold-cliff`, now carrying a driven three-candidate
+token verdict.
+
+**READ #8889'S FIRST CI RUN BEFORE TREATING A RED AS A DEFECT.** The guard job's two remaining
+criteria are honest misses that only a pushed run can pay, and the guard's tolerances are pixel-level
+(a 9px band-A residual, a 5.5px dot centring derived from an 18px line box) measured on macOS Chrome
+150. If ubuntu-latest's font metrics shift those, the first run reds through the exit-1 arm naming a
+CSS bug that exists on no screen — the wrong reader instruction, and the class is worth a row.
+
 ### 2026-08-01 — wave 17 REVIEW — three of three round-1 slices shipped and pushed, grade **A−**
 
 **Paper:** `cloud-console-hardening-wave-17-2026-08-01`. PRs #8849-#8851. Nothing merged by the wave;
