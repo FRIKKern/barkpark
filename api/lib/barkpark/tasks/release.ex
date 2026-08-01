@@ -28,11 +28,10 @@ defmodule Barkpark.Tasks.Release do
   # Emits a `task.released` mutation_events row (previous_worker + epochs in
   # the document payload) and mirrors the PubSub broadcast post-commit.
 
-  import Ecto.Query
-
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       insert_mutation_event!: 5,
       check_holder: 2,
       task_broadcast: 4,
@@ -141,15 +140,11 @@ defmodule Barkpark.Tasks.Release do
       |> Map.put("claim", released_claim)
       |> Map.delete("assignee")
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^doc.rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 -> {:ok, %Document{doc | content: new_content, rev: new_rev}}
-      _ -> {:error, :stale_claim}
+    # PDS-D451: the receipt is the STORED row. Measured before this change —
+    # the reconstruction shipped the CLAIM's `updated_at`, byte-exact.
+    case fenced_content_write(doc, doc.rev, new_content, new_rev) do
+      {:ok, updated} -> {:ok, updated}
+      :stale -> {:error, :stale_claim}
     end
   end
 end

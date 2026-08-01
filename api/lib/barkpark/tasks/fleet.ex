@@ -440,15 +440,15 @@ defmodule Barkpark.Tasks.Fleet do
       |> Map.put("last_seen", now_iso())
       |> Map.put_new("ttl_s", @default_ttl_s)
 
-    {rows, _} =
-      from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-      |> Repo.update_all(
-        set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-      )
-
-    case rows do
-      1 -> {:ok, %Document{doc | content: new_content, rev: new_rev}}
-      0 -> {:error, :stale_beat}
+    # PDS-D451, PAID FOR FENCE-CONSISTENCY, NOT BECAUSE IT LIED. `receipt/2`
+    # below projects only content-derived keys, so the beat receipt is
+    # WIRE-CONVERGENT today and was measured convergent before this change.
+    # That honesty is incidental — it holds only as long as nobody adds `rev`
+    # or `updated_at` to the projection — so the arm returns the stored row
+    # like its six siblings, and the projection is pinned by a test.
+    case Barkpark.Tasks.Internal.fenced_content_write(doc, observed_rev, new_content, new_rev) do
+      {:ok, updated} -> {:ok, updated}
+      :stale -> {:error, :stale_beat}
     end
   end
 
