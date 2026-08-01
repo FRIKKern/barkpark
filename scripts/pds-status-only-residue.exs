@@ -91,6 +91,23 @@
 # arm 6 -> 5 and removes exactly that row (residue 19 -> 18). The repair was
 # REVERTED: this script ships no api/lib change.
 #
+# EVERY COUNT BELOW IS A FLOOR, NOT A SCORE (added at wave-34 review; quote it
+# with its lens or do not quote it).
+#   * A3-echo 6 is a FLOOR. `payload_class` calls ANY call in the payload
+#     :dynamic, and the echo arm requires `not calls?(payload)` — so a payload
+#     built from a request param THROUGH A HELPER (`%{deleted: to_string(id)}`)
+#     is an A3 echo in reality and invisible here. The arm catches the no-call
+#     case only.
+#   * write_reachable 130 is a HEURISTIC PARTITION, not a proof: `writes?/1`
+#     fires on the @mutate_words vocabulary against the @pure_mods denylist, so
+#     a context call named outside that vocabulary (`Foo.bump_counter/2`) is
+#     write-reachable in reality and read here. The SELFTEST proves the lens can
+#     say no on five probes; it does not bound the error rate.
+#   * The enclosing-def attribution is "last def whose line <= site line", which
+#     is wrong for a json/2 call inside an anonymous fn defined in one def and
+#     executed elsewhere, and for macro-generated code. None of the 19 are that
+#     shape; all 460 were not audited.
+#
 # PAYMENT IS OUT OF SCOPE — filed as pds-bl-status-only-residue-payment. 460
 # sites need a different lens; folding them into the ok:true census is the
 # error PDS-D448 caught.
@@ -442,18 +459,23 @@ Enum.each(hidden, fn r -> IO.puts("    #{r.file}:#{r.line}  #{r.fun}") end)
 IO.puts("")
 IO.puts("--- send_resp(conn, 2xx) sites ---")
 
-for f <- files do
-  src = File.read!(f)
-
-  src
-  |> String.split("\n")
-  |> Enum.with_index(1)
-  |> Enum.each(fn {l, i} ->
-    if Regex.match?(~r/send_resp\(\s*conn\s*,\s*2\d\d/, l) do
-      IO.puts("  #{Path.relative_to(f, root)}:#{i}  #{String.trim(l)}")
-    end
+# DERIVED, NOT HARDCODED (PDS wave 34 review). This list was printed and the
+# residue total below added a literal `+ 3` beside it — so a fourth
+# send_resp(conn, 2xx) would have grown the printed list while leaving the
+# RESIDUE number where it was. A number that cannot follow its own evidence is
+# the exact defect this script exists to measure; the total now counts this list.
+# (The scan itself is still a regex over lines while everything else is AST —
+#  a genuine lens mismatch, named here rather than hidden.)
+send_resp_sites =
+  Enum.flat_map(files, fn f ->
+    File.read!(f)
+    |> String.split("\n")
+    |> Enum.with_index(1)
+    |> Enum.filter(fn {l, _} -> Regex.match?(~r/send_resp\(\s*conn\s*,\s*2\d\d/, l) end)
+    |> Enum.map(fn {l, i} -> {Path.relative_to(f, root), i, String.trim(l)} end)
   end)
-end
+
+Enum.each(send_resp_sites, fn {f, i, l} -> IO.puts("  #{f}:#{i}  #{l}") end)
 
 IO.puts("")
 IO.puts("CENSUS OK  total=#{total} textual=#{textual} explicit2xx=#{length(explicit_2xx)}")
@@ -532,10 +554,12 @@ IO.puts("json/2 sites total:                                   #{total}")
 IO.puts("  literal-only payload (any status):                  #{lit}")
 IO.puts("  literal-only AND 2xx/implicit-200:                  #{lit2xx}")
 IO.puts("  literal-only AND 2xx AND write-reachable:           #{length(viol)}")
-IO.puts("send_resp(conn, 2xx) sites:                           3")
 IO.puts("  A3 request-echo AND 2xx AND write-reachable:        #{length(echo)}")
-IO.puts("send_resp(conn, 2xx) sites:                           3")
-IO.puts("STATUS-ONLY RESIDUE (literal-only + A3-echo + send_resp): #{length(Enum.uniq(viol ++ echo)) + 3}")
+IO.puts("send_resp(conn, 2xx) sites:                           #{length(send_resp_sites)}")
+
+IO.puts(
+  "STATUS-ONLY RESIDUE (literal-only + A3-echo + send_resp): #{length(Enum.uniq(viol ++ echo)) + length(send_resp_sites)}"
+)
 IO.puts("")
 IO.puts("--- REGISTER TSV (file\\tline\\tfun\\tstatus\\twrite\\tpayload_class) ---")
 
