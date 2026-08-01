@@ -1132,13 +1132,16 @@ func TestHetznerResourceReceiptEmittersStayInsideTheCensusGlob(t *testing.T) {
 //	    hzResBasisHead for hzResBasisListScan REDS it, measured — but it speaks
 //	    for four sites out of twenty-five, and it compares the printed value
 //	    against the CONSTANT, so it cannot see the constant itself change.
-//	(c) The two hzResDestroyedDeclared sites pass BARE STRING LITERALS into a
+//	(c) The two hzResDestroyedDeclared sites passed BARE STRING LITERALS into a
 //	    mandatory `basis string` parameter. No constant, no const block, no
-//	    test. THE BASIS SURFACE IS SIX, NOT FOUR: five hzResBasis* constants —
-//	    four in hetzner_respost_mutation.go and hzResBasisRRSetKey deliberately
-//	    outside that block, in hetzner_dns_cmd.go — plus these two literals.
-//	    Anything scoped to one file, or to the hzResBasis* identifiers, misses
-//	    three of the six.
+//	    test. THE BASIS SURFACE IS SEVEN, NOT FOUR: seven hzResBasis* constants —
+//	    four in hetzner_respost_mutation.go, hzResBasisRRSetKey deliberately
+//	    outside that block in hetzner_dns_cmd.go, and (since wave 35 paid
+//	    pds-w34-declared-basis-literals-need-constants)
+//	    hzResBasisBucketListAfterDelete and hzResBasisObjectKeyListAfterDelete
+//	    beside their verbs in hetzner_storage_cmd.go. Anything scoped to ONE
+//	    FILE still misses three of the seven, which is why the population is
+//	    globbed and derived rather than listed.
 //
 // A CORRECTION TO THIS PACKAGE'S OWN PROSE. hetzner_respost_basis_test.go says
 // "thirteen" / "the ten hcloud callers" / "the three object-store call sites".
@@ -1183,9 +1186,9 @@ func hzResExprText(fset *token.FileSet, src string, e ast.Expr) string {
 // shape this epic keeps finding: it looks like an index and defends only the
 // members somebody remembered. hzResBasisRRSetKey already proved a basis
 // constant can be declared in another file entirely, so nothing about the const
-// block's contents bounds the population. A SIXTH constant added anywhere under
-// hetzner_*.go enters this map the day it lands, and reds the coverage arms
-// below because it has no row.
+// block's contents bounds the population — the seven live constants sit in
+// THREE files. An EIGHTH constant added anywhere under hetzner_*.go enters this
+// map the day it lands, and reds the coverage arms below because it has no row.
 func hzResBasisConstants(t *testing.T) map[string]string {
 	t.Helper()
 	_, files := hzResParseSources(t)
@@ -1224,10 +1227,11 @@ func hzResBasisConstants(t *testing.T) map[string]string {
 // THE NAMED-CONSTANT RULE LIVES HERE, and it is the same discrimination the
 // scanner already makes for the action: an *ast.Ident is a SYMBOL the census can
 // bind to a class, an *ast.BasicLit is a sentence nothing can bind. A string at
-// an hzResObserved call site is REJECTED by name — not because literals are
-// ugly, but because the per-key table, the read binding and the wording gate all
-// key on the symbol, so a literal opts a site out of all three at once while
-// still printing a confirmation_basis an operator will trust.
+// ANY call site — wave 35 removed the hzResDestroyedDeclared exemption — is
+// REJECTED by name, not because literals are ugly, but because the per-key
+// table, the read binding and the wording gate all key on the symbol, so a
+// literal opts a site out of all three at once while still printing a
+// confirmation_basis an operator will trust.
 func hzResCaptureBasis(t *testing.T, site *hzResSite, call *ast.CallExpr, fset *token.FileSet, src string, consts map[string]string) {
 	t.Helper()
 	where := fmt.Sprintf("%s:%d", site.file, site.line)
@@ -1276,14 +1280,18 @@ func hzResCaptureBasis(t *testing.T, site *hzResSite, call *ast.CallExpr, fset *
 			t.Errorf("%s: %s passes a non-string basis literal", where, site.emitter)
 			return
 		}
-		if site.emitter == "hzResObserved" {
-			t.Errorf("%s: %s passes the STRING LITERAL %q as its confirmation basis. A LITERAL CANNOT BE BOUND TO "+
-				"A CLASS: the per-key pin, the read binding and the wording gate all key on the SYMBOL, so a "+
-				"literal opts this receipt out of all three at once. Declare an hzResBasis* constant and pass that.",
-				where, site.emitter, lit)
-			return
-		}
+		// EVERY EMITTER, not just hzResObserved. Until wave 35 the two
+		// hzResDestroyedDeclared sites were exempt, and that exemption was the
+		// hole: a literal is unbindable wherever it is passed, and nothing
+		// stopped a THIRD declared destroy landing with another bare string.
+		// The site is still RECORDED as a literal (basisForm below) so the
+		// coverage arms see it and it fails LOUDLY rather than vanishing from
+		// the population.
 		site.basisForm, site.basisText = hzBasisLiteral, lit
+		t.Errorf("%s: %s passes the STRING LITERAL %q as its confirmation basis. A LITERAL CANNOT BE BOUND TO "+
+			"A CLASS: the per-key pin, the read binding and the wording gate all key on the SYMBOL, so a "+
+			"literal opts this receipt out of all three at once. Declare an hzResBasis* constant and pass that.",
+			where, site.emitter, lit)
 	default:
 		t.Errorf("%s: %s passes a basis this census cannot resolve (%T) — neither a named constant nor a literal",
 			where, site.emitter, call.Args[ba])
@@ -1291,9 +1299,11 @@ func hzResCaptureBasis(t *testing.T, site *hzResSite, call *ast.CallExpr, fset *
 }
 
 // hzResBasisKeyed is one census key's basis expectation. `symbol` is the basis
-// identifier for a const/inherited/response site; `literal` is the wording for
-// the two declared object-store destroys, which pass a bare string into a
-// mandatory parameter. Exactly one is set.
+// identifier, and since wave 35 EVERY live row sets it: the two declared
+// object-store destroys, the last sites passing a bare string, became constants.
+// `literal` is kept as the pin a bare string WOULD get — hzResCaptureBasis now
+// reds such a site at capture, and this arm is the second signal, not the
+// first. Exactly one is set.
 type hzResBasisKeyed struct {
 	symbol  string
 	literal string
@@ -1318,9 +1328,10 @@ type hzResBasisKeyed struct {
 // adding a third field to hzResDisposition is a compile error on all of them at
 // once. The constraint stands; "the rows are unkeyed" is right about the rows
 // and wrong about the map.
-// THE POPULATION, DERIVED (not transcribed): 38 basis-carrying sites — 4
-// explicit constants, 21 inherited defaults, 11 response-emitter creates and 2
-// declared literals. 36 carry a literal (kind, action) key and are pinned below;
+// THE POPULATION, DERIVED (not transcribed): 38 basis-carrying sites — 6
+// explicit constants (4 plus the two declared destroys wave 35 named), 21
+// inherited defaults and 11 response-emitter creates, with NO literals left.
+// 36 carry a literal (kind, action) key and are pinned below;
 // the other 2 are the DISPATCH-SHARED sites (hetzner_net_cmd.go:1115 and :1693),
 // whose keys come from their callers and whose every arm inherits the SAME basis
 // argument, so there is nothing per-key to pin for them.
@@ -1375,13 +1386,16 @@ var hzResBases = map[string]hzResBasisKeyed{
 	"network/change-ip-range":        {symbol: "hzResBasisGet"},
 	"firewall/set-rules":             {symbol: "hzResBasisGet"},
 
-	// ---- The two DECLARED destroys, pinned by their literal wording. --------
-	// No symbol exists to pin: these pass a bare string into a mandatory
-	// parameter. That is itself the defect — filed as
-	// pds-w34-declared-basis-literals-need-constants — and until it is paid, the
-	// wording IS the pin.
-	"bucket/delete": {literal: "ListBuckets after the delete"},
-	"object/rm":     {literal: "ListObjects on the exact key prefix after the delete"},
+	// ---- The two DECLARED destroys, now pinned by SYMBOL like everything ----
+	// else. They were the only two rows in this table pinned by WORDING, because
+	// they passed bare strings into a mandatory parameter — so leg 1 compared a
+	// string to a hand-typed copy of ITSELF and a coordinated reword (call site
+	// plus row, one edit each) walked past it. Paid by
+	// pds-w34-declared-basis-literals-need-constants: both are constants beside
+	// their verbs in hetzner_storage_cmd.go, so the symbol pin is real here and
+	// the wording is defended separately by leg 3.
+	"bucket/delete": {symbol: "hzResBasisBucketListAfterDelete"},
+	"object/rm":     {symbol: "hzResBasisObjectKeyListAfterDelete"},
 }
 
 // hzResBasisReads is LEG 2: basis SYMBOL → the token the confirming read's
@@ -1409,15 +1423,23 @@ var hzResBasisReads = map[string][]string{
 	// bind. Its honesty is structural — the emitter cannot name another basis —
 	// and is asserted by its own arm below.
 	"hzResBasisResponse": nil,
+	// The two DECLARED NON-BINDING destroys. Their reads are S3 LISTINGS, not
+	// single-resource reads at all, which is why the receipt says "declared":
+	// bucket delete scans the collection, object rm lists under the deleted
+	// key's own prefix. Bound here like every other constant now that they ARE
+	// constants — this is what replaced hzResDeclaredBasisReads, which keyed on
+	// the census key because there was no symbol to key on.
+	"hzResBasisBucketListAfterDelete":    {"ListBuckets("},
+	"hzResBasisObjectKeyListAfterDelete": {"ListObjects("},
 }
 
-// hzResDeclaredBasisReads is LEG 2 for the two DECLARED destroys, keyed on the
-// census key because their basis is a bare literal with no symbol to key on.
-// They are the half of the basis surface a hzResBasis*-shaped scan misses.
-var hzResDeclaredBasisReads = map[string][]string{
-	"bucket/delete": {"ListBuckets("},
-	"object/rm":     {"ListObjects("},
-}
+// hzResDeclaredBasisReads is GONE (wave 35). It was LEG 2 for the two declared
+// destroys, keyed on the CENSUS KEY because their basis was a bare literal with
+// no symbol to key on. Both are constants now, so they ride hzResBasisReads
+// above with everything else — and the exemption that made a key-shaped table
+// necessary is closed in hzResCaptureBasis, which now refuses a literal at EVERY
+// emitter. Deleting this table before that refusal existed would have left the
+// next bare literal silently unjudged; the order was the point.
 
 // hzResBasisSites returns the derived sites that carry a basis at all.
 func hzResBasisSites(t *testing.T) []hzResSite {
@@ -1579,16 +1601,11 @@ func TestHetznerResourceBasisMatchesTheReadTheSitePerforms(t *testing.T) {
 		case s.basisForm == hzBasisResponse:
 			continue // no read exists to bind
 		case s.basisForm == hzBasisLiteral:
-			key := hzResSiteKey(s)
-			w, ok := hzResDeclaredBasisReads[key]
-			if !ok {
-				t.Errorf("RATCHET/DECLARED-BASIS-UNBOUND: %s:%d declares the basis %q for key %q, and no row in "+
-					"hzResDeclaredBasisReads says which listing that is. These are the two sites a "+
-					"hzResBasis*-shaped scan misses entirely — they pass a BARE LITERAL into a mandatory "+
-					"parameter — so an unbound one is unjudged, not exempt.", s.file, s.line, s.basisText, key)
-				continue
-			}
-			want, rule = w, fmt.Sprintf("the declared basis %q", s.basisText)
+			// A literal has no symbol, so nothing here can bind it to a read.
+			// hzResCaptureBasis already reds it BY NAME at capture, at every
+			// emitter — this arm would only repeat that in a shape that reads
+			// like a second, independent finding.
+			continue
 		default:
 			w, ok := hzResBasisReads[s.basisIdent]
 			if !ok {
@@ -1635,7 +1652,7 @@ func TestHetznerResourceBasisMatchesTheReadTheSitePerforms(t *testing.T) {
 }
 
 // TestHetznerResourceBasisEveryConstantIsBoundToARead is the OTHER direction of
-// leg 2, and it is what stops a SIXTH constant riding in unjudged: every basis
+// leg 2, and it is what stops an EIGHTH constant riding in unjudged: every basis
 // constant DERIVED from the sources must carry a read binding. Derivation is the
 // point — a hand list defends only what somebody remembered, and
 // hzResBasisRRSetKey already proved a constant can be declared anywhere.
