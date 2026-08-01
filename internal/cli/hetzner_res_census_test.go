@@ -124,10 +124,34 @@ type hzResDisposition struct {
 	note string
 }
 
-const (
-	hzUnpaidSubRemoval = "unpaid: pds-w29r2-subresource-removals"
-	hzUnpaidMutation   = "unpaid: pds-w29r2-mutation-receipts"
-)
+// PDS wave 32 — THE DEBT REACHED ZERO, AND WHAT THAT DOES NOT MEAN.
+//
+// The two `unpaid:` constants that used to live here — the sub-removal one and
+// the mutation one — are GONE, because every row that named one is paid. THE
+// METRIC IS A GREP FOR THEIR SHARED PREFIX (hz + Unpaid) OVER THIS FILE, and it
+// must read 0; it read 21 on the day this edit was made (2 declarations + 19
+// uses), which is why this paragraph spells the prefix apart rather than
+// quoting it — a comment that names the token would keep the metric off zero
+// forever. The honest headline is 17 unpaid SITES / 19 unpaid KEYS → 0.
+//
+// TWO NUMBERS THAT DO **NOT** GO TO ZERO, AND MUST NOT BE QUOTED AS IF THEY DID:
+//
+//	`grep -c 'unpaid:'`      floors at 4 — the hzResDisposition type doc plus the
+//	                         census's OWN unpaid-format validator below. Driving
+//	                         it to 0 would delete the enforcement.
+//	`grep -c 'hzResDone('`   stays at 6 across internal/cli: the func DEFINITION
+//	                         in hetzner_net_cmd.go, the two DECLARED classes
+//	                         (object/get, backup/restore), and the apparatus
+//	                         forwards.
+//
+// AND THE BOUNDARY ON THE CLAIM ITSELF. Zero unpaid rows means: every (kind,
+// action) in ONE resource family — the non-server Hetzner verbs — on ONE
+// provider now carries a disposition that names code something can falsify. It
+// does NOT mean every Barkpark verb is honest, it does not reach the server
+// surface or any non-Hetzner provider, and the REFUSAL direction is still proven
+// only by fakes: no live credential has ever been spent watching one of these
+// verbs refuse. That last gap is the same one wave 30's live placement-group
+// round trip stated for the success direction.
 
 // hzResDispositions is the ledger: every (kind, action) the sources emit, and
 // what its receipt is built from today. It is checked BIDIRECTIONALLY — a key
@@ -160,11 +184,19 @@ var hzResDispositions = map[string]hzResDisposition{
 	"primary-ip/unassign": {hzClassSubRemoval,
 		"paid: hzResObserved re-reads PrimaryIP.GetByID(pip.ID); hzObservePrimaryIPUnassigned"},
 
-	// ---- Round 2: the remaining sub-resource removals. --------------------
-	"network/delete-subnet":         {hzClassSubRemoval, hzUnpaidSubRemoval},
-	"network/delete-route":          {hzClassSubRemoval, hzUnpaidSubRemoval},
-	"firewall/remove-from-resource": {hzClassSubRemoval, hzUnpaidSubRemoval},
-	"volume/detach":                 {hzClassSubRemoval, hzUnpaidSubRemoval},
+	// ---- PAID by pds-w29-pay-net-dns: the last four sub-removals. ---------
+	// Two of these four are emitted by a SHARED DISPATCH SITE whose sibling arm
+	// is a PRESENT check. No arm of this census reads that direction branch, so
+	// the wrong-direction payment is invisible here by construction — the
+	// both-direction fakes in hetzner_net_cmd_test.go are what catch it.
+	"network/delete-subnet": {hzClassSubRemoval,
+		"paid: hzResObserved re-reads Network.GetByID(netw.ID); hzObserveNetworkSubnetAbsent"},
+	"network/delete-route": {hzClassSubRemoval,
+		"paid: hzResObserved re-reads Network.GetByID(netw.ID); hzObserveNetworkRouteAbsent — the delete-route arm of the shared dispatcher"},
+	"firewall/remove-from-resource": {hzClassSubRemoval,
+		"paid: hzResObserved re-reads Firewall.GetByID(fw.ID); hzObserveFirewallRemoved switches on the resource Type first"},
+	"volume/detach": {hzClassSubRemoval,
+		"paid: hzResObserved re-reads Volume.GetByID(vol.ID); hzObserveVolumeDetached"},
 
 	// ---- PAID by pds-w29-pay-lb: the LB family's six creates. -------------
 	// CLASS A2: the create RESPONSE object is server truth, so these observe
@@ -184,12 +216,25 @@ var hzResDispositions = map[string]hzResDisposition{
 	"certificate/create-managed": {hzClassCreate,
 		"paid: hzResObservedResponse observes result.Certificate; hzObserveCertificateManaged DECLARES the async issuance state rather than asserting `issued`"},
 
-	// ---- Round 2: the remaining create receipts. --------------------------
-	"volume/create":   {hzClassCreate, hzUnpaidMutation},
-	"network/create":  {hzClassCreate, hzUnpaidMutation},
-	"firewall/create": {hzClassCreate, hzUnpaidMutation},
-	"zone/create":     {hzClassCreate, hzUnpaidMutation},
-	"record/create":   {hzClassCreate, hzUnpaidMutation},
+	// ---- PAID by pds-w29-pay-net-dns: the last five creates. --------------
+	// Three of them are ADVISORY-ENROLLED (PDS-D432): network/create compares the
+	// POST-hzCIDR token, never the raw --ip-range flag (hzCIDR masks host bits,
+	// so the raw flag fires a FALSE advisory on a CORRECT create);
+	// firewall/create compares `rule_count` with the COUNT grade stated in the
+	// receipt; zone/create compares the RAW --mode value, because the resolved
+	// mode would be degenerately always-equal.
+	"volume/create": {hzClassCreate,
+		"paid: hzResObservedResponse observes result.Volume; hzObserveVolumeCreated reports the device the API assigned"},
+	"network/create": {hzClassCreate,
+		"paid: hzResObservedResponse observes the created Network under an EMPTY-ID COLLAPSE; hzObserveNetworkCreated " +
+			"advises on the normalised ip_range"},
+	"firewall/create": {hzClassCreate,
+		"paid: hzResObservedResponse observes result.Firewall; hzObserveFirewallCreated reports an OBSERVED rule_count, graded COUNT"},
+	"zone/create": {hzClassCreate,
+		"paid: hzResObservedResponse observes result.Zone; hzObserveZoneCreated advises on the RAW --mode token"},
+	"record/create": {hzClassCreate,
+		"paid: hzResObservedResponse observes result.RRSet under an EMPTY-ID COLLAPSE (the generated converter makes " +
+			"nil unreachable, so an id-less rrset is collapsed to nil); hzObserveRecordCreated"},
 
 	// ---- PAID by pds-w29-pay-storage-backup: the S3 writes. ---------------
 	// These take the STRONGER basis of the two a create can have: an actual
@@ -222,17 +267,31 @@ var hzResDispositions = map[string]hzResDisposition{
 	"primary-ip/assign": {hzClassRequestEcho,
 		"paid: hzResObserved re-reads PrimaryIP.GetByID(pip.ID); hzObservePrimaryIPAssigned checks the assignee PAIR"},
 
-	// ---- Round 2: the remaining request echoes. ---------------------------
-	"volume/attach":              {hzClassRequestEcho, hzUnpaidMutation},
-	"volume/resize":              {hzClassRequestEcho, hzUnpaidMutation},
-	"volume/change-protection":   {hzClassRequestEcho, hzUnpaidMutation},
-	"network/add-subnet":         {hzClassRequestEcho, hzUnpaidMutation},
-	"network/add-route":          {hzClassRequestEcho, hzUnpaidMutation},
-	"network/change-ip-range":    {hzClassRequestEcho, hzUnpaidMutation},
-	"firewall/set-rules":         {hzClassRequestEcho, hzUnpaidMutation},
-	"firewall/apply-to-resource": {hzClassRequestEcho, hzUnpaidMutation},
-	"zone/update":                {hzClassRequestEcho, hzUnpaidMutation},
-	"record/update":              {hzClassRequestEcho, hzUnpaidMutation},
+	// ---- PAID by pds-w29-pay-net-dns: the last ten request echoes. --------
+	// Every hcloud ACTION endpoint returns `{action}` and nothing else, so the
+	// single-resource GET on the RESOLVED id is the only server-side source —
+	// including for `record`, whose key is the (zone, name, type) the verb
+	// already holds rather than a numeric id.
+	"volume/attach": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads Volume.GetByID(vol.ID); hzObserveVolumeAttached binds on the RESOLVED server id"},
+	"volume/resize": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads Volume.GetByID(vol.ID); hzObserveVolumeSize reports the size the volume NOW carries"},
+	"volume/change-protection": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads Volume.GetByID(vol.ID); hzObserveVolumeProtection reads Protection.Delete"},
+	"network/add-subnet": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads Network.GetByID(netw.ID); hzObserveNetworkSubnetPresent reports the range the API CHOSE when --ip-range was omitted"},
+	"network/add-route": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads Network.GetByID(netw.ID); hzObserveNetworkRoutePresent — the add-route arm of the shared dispatcher"},
+	"network/change-ip-range": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads Network.GetByID(netw.ID); hzObserveNetworkIPRange"},
+	"firewall/set-rules": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads Firewall.GetByID(fw.ID); hzObserveFirewallRuleCount refuses on a differing count, graded COUNT"},
+	"firewall/apply-to-resource": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads Firewall.GetByID(fw.ID); hzObserveFirewallApplied switches on the resource Type first"},
+	"zone/update": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads Zone.GetByID(zone.ID); hzObserveZoneUpdated compares only what was ASKED for"},
+	"record/update": {hzClassRequestEcho,
+		"paid: hzResObserved re-reads GetRRSetByNameAndType on the key it holds; hzObserveRecordUpdated compares values order-insensitively"},
 
 	// ---- PAID by pds-w29-pay-storage-backup: the pair that is neither. ----
 	// object/put is ONE line on TWO paths (PutObject with a source size,
