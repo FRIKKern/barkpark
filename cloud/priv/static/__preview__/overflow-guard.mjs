@@ -274,6 +274,35 @@ const WIDTHS = [721, 750, 768, 769, 775, 780, 785, 800, 900, 1024, 1440];
 // measured threshold (overflowed at <=495, clean at >=496 pre-fix), so a run
 // that goes green here has crossed the bisection point rather than missed it.
 const PHONE_WIDTHS = [320, 360, 375, 390, 412, 430, 480, 495, 496, 620];
+
+// W17-S6: THE CHIP'S OWN WIDTH SET, BECAUSE THIS FILE USED TO ASK ITS QUESTION
+// AT ONE WIDTH. The money-message read below sat behind `await setViewport(768)`
+// — the ONLY tablet width where the chip is whole — while the page-overflow loop
+// above it walked 769/775/780/785 and then printed a green line naming those
+// widths. A reader of that line reasonably concluded the band above the
+// breakpoint had been checked; it had been, for the wrong question. Driven on
+// pre-fix bytes the chip was cut across TWO disjoint bands: 721-735 (168/160
+// down to 168/166 light, one px worse dark) and 769-800 light / 769-805 dark
+// (168/153 at 769 — 15px of "Payment failed · fix billing" gone). Both are
+// inside this set now, plus 810/820/830 which are CLEAN on pre-fix bytes and so
+// pin the upper edge as measured rather than as filed (cch-w14-bl said 769-820;
+// 820 and 830 both read 168/168).
+const CHIP_WIDTHS = [721, 725, 730, 735, 740, 741, 750, 768, 769, 775, 780, 785, 800, 805, 810, 820, 830];
+// THE ONE NAMED RESIDUAL, on the FLEET_ROW_RESIDUAL precedent (a skip that is
+// declared, capped and attributed, never silent). 721-735 is NOT the topbar
+// defect W17-S6 fixes: the GR116 tighten is already computed there (padding-left
+// 14px / column-gap 10px at 721, identical to 320) and the liveness label is
+// already folded, so no breakpoint in the topbar's own rules moves those cells.
+// It is the `@media (max-width: 720px){.app-shell{flex-direction:column}}` shell
+// fold — a 231px cliff at 721 — filed as `cch-w17-bl-band-a-shell-fold-cliff`.
+// The CAP is what keeps this from being an exemption: 9px is the worst shortfall
+// measured on pre-fix bytes (721 dark, 168 vs 159). Anything worse reds. That is
+// live: the rejected W17-S6 destination (the same four rules authored at ~:2318,
+// BEFORE the `.live-chip` base, where the later base kills their padding/gap)
+// drives 721 dark to 156 — a 12px shortfall — and this cap catches it.
+const CHIP_BAND_A = new Set([721, 725, 730, 735]);
+const CHIP_BAND_A_MAX_SHORTFALL = 9;
+const CHIP_BAND_A_RESIDUAL = "cch-w17-bl-band-a-shell-fold-cliff";
 const HEIGHT = 800;
 const CLASSIC_SCROLLBARS = process.env.OVERFLOW_GUARD_CLASSIC_SCROLLBARS === "1";
 
@@ -583,21 +612,52 @@ async function main() {
           }
           process.stdout.write(`   ${scen}/${theme}  ${row.join(" ")}\n`);
 
-          // Cosmetic half at the breakpoint: the past-due money message must be
-          // whole at 768 — correctness-only clips it to ~154.61 of ~169.78px.
-          await setViewport(768);
-          const chip = await evalJs(
-            `(function(){var c=document.getElementById('billing-chip');if(!c)return null;` +
-            `var r=c.getBoundingClientRect();` +
-            `return {sw:c.scrollWidth, cw:c.clientWidth, w:Math.round(r.width*100)/100, text:c.textContent};})()`,
-          );
-          if (!chip) fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@768: #billing-chip missing`);
-          else if (chip.sw > chip.cw + 1) fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@768: billing chip TRUNCATED — scrollWidth ${chip.sw} > clientWidth ${chip.cw} (rect ${chip.w}px, "${chip.text}")`);
-          else okLine(`${scen}/${theme}@768: chip whole — ${chip.w}px, scrollWidth ${chip.sw} <= clientWidth ${chip.cw} ("${chip.text}")`);
+          // Cosmetic half, across the WHOLE tablet band and not just at the
+          // breakpoint (W17-S6 — see CHIP_WIDTHS): the past-due money message
+          // must be whole. Correctness-only clips it to ~154.61 of ~169.78px at
+          // 768; the 768-block tighten alone leaves it cut from 769 to 805.
+          const chipRow = [];
+          let chipResidual = 0;
+          let chipCut = 0;
+          for (const width of CHIP_WIDTHS) {
+            await setViewport(width);
+            const chip = await evalJs(
+              `(function(){var c=document.getElementById('billing-chip');if(!c)return null;` +
+              `var r=c.getBoundingClientRect();` +
+              `return {sw:c.scrollWidth, cw:c.clientWidth, w:Math.round(r.width*100)/100, text:c.textContent};})()`,
+            );
+            if (!chip) { fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: #billing-chip missing`); chipRow.push(`${width}:missing`); continue; }
+            const cut = chip.sw > chip.cw + 1;
+            if (cut && CHIP_BAND_A.has(width)) {
+              // Declared residual — capped and attributed, never silent.
+              const shortfall = chip.sw - chip.cw;
+              if (shortfall > CHIP_BAND_A_MAX_SHORTFALL) {
+                fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: billing chip cut ${shortfall}px — WORSE than the ${CHIP_BAND_A_MAX_SHORTFALL}px residual pinned to ${CHIP_BAND_A_RESIDUAL} (scrollWidth ${chip.sw} > clientWidth ${chip.cw}, "${chip.text}")`);
+              } else { chipResidual++; }
+              chipRow.push(`${width}:${chip.sw}/${chip.cw}~`);
+              continue;
+            }
+            if (cut) { chipCut++; fail("GR108-tablet-topbar-overflow", `${scen}/${theme}@${width}: billing chip TRUNCATED — scrollWidth ${chip.sw} > clientWidth ${chip.cw} (rect ${chip.w}px, "${chip.text}")`); }
+            chipRow.push(`${width}:${chip.sw}/${chip.cw}${cut ? "!" : ""}`);
+          }
+          process.stdout.write(`   chip ${scen}/${theme}  ${chipRow.join(" ")}\n`);
+          // A summary line only when there is something to summarise. A green
+          // sentence printed beside its own ✗ lines is how this leg misled a
+          // reader for four waves — it does not get to do that again.
+          if (chipCut) {
+            process.stdout.write(`   ${scen}/${theme}: ${chipCut} of ${CHIP_WIDTHS.length} tablet widths CUT — see the ✗ lines above\n`);
+          } else if (chipResidual) {
+            okLine(`${scen}/${theme}: chip whole across ${CHIP_WIDTHS.length - chipResidual} of ${CHIP_WIDTHS.length} tablet widths — ${chipResidual} band-A cells cut within the ${CHIP_BAND_A_MAX_SHORTFALL}px residual (${CHIP_BAND_A_RESIDUAL}), NOT clean`);
+          } else {
+            okLine(`${scen}/${theme}: chip whole at all ${CHIP_WIDTHS.length} tablet widths ${CHIP_WIDTHS[0]}-${CHIP_WIDTHS[CHIP_WIDTHS.length - 1]}`);
+          }
         }
       }
       if (!failures.some((f) => f.defect === "GR108-tablet-topbar-overflow")) {
-        okLine(`0/${checks} overflowing across ${WIDTHS[0]}-${WIDTHS[WIDTHS.length - 1]} (sweep includes 769/775/780/785 — ABOVE the breakpoint)`);
+        // Says WHICH question it answered. Before W17-S6 this line read as if
+        // the band above the breakpoint had been cleared for the chip too; the
+        // chip was only ever read at 768. The chip now answers for itself above.
+        okLine(`0/${checks} PAGE-overflow cells across ${WIDTHS[0]}-${WIDTHS[WIDTHS.length - 1]} (sweep includes 769/775/780/785 — ABOVE the breakpoint). The chip's own question is answered per-width above, not by this line.`);
       }
     }
 

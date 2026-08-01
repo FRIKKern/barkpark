@@ -2304,14 +2304,17 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      section now (GR109): authored here, it sat ~700 lines BEFORE the base rule,
      whose later align-items:center silently killed the flex-start half at equal
      (0,0,1,0) specificity — the row stacked but stayed centred. */
-  /* GR116 cosmetic half — ships WITH the unconditional `.topbar-right > *
-     { min-width: 0 }` pair, never instead of it. The pair alone clips the
-     past-due chip to 154.61px of its 169.78px label at 768; tightening the
-     topbar here (was 720-only) buys the full money message back at tablet
-     widths. Three declarations: topbar padding/gap, topbar-right gap, and the
-     live-chip label fold (in the liveness-chip section, moved 720 -> 768). */
-  .topbar { padding: 0 14px; gap: 10px; }
-  .topbar-right { gap: 8px; }
+  /* GR116's topbar tighten (`.topbar` padding/gap + `.topbar-right` gap) MOVED
+     DOWN OUT OF THIS BLOCK to the single `@media (max-width: 830px)` block in
+     the liveness-chip section (W17-S6). It is one MOVE, not a duplicate: all
+     four GR116 tighten declarations now live together, because the past-due
+     money message is cut from 769 to 805 as well — above this breakpoint, where
+     nothing here can reach it. The destination is AFTER the `.live-chip` base
+     rule on purpose; authored next to this block it would sit BEFORE that base
+     and lose its padding/gap at equal (0,0,1,0) specificity — measurably worse
+     than shipping nothing. See the comment there. Nothing else moved:
+     this block is deliberately raised to nothing, and `.fleet-row` /
+     `.fleet-badges` stay where W14-S3 put them (D153 — no wholesale raise). */
 }
 
 @media (max-width: 720px) {
@@ -3851,11 +3854,54 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   .live-chip[data-state="live"] .live-dot.is-ping::after { animation: none; }
 }
 
-/* On a narrow topbar the label/ago fold away (same rule as .topbar-link); the
+/* ── GR116's topbar tighten, ALL FOUR DECLARATIONS, AT ONE BREAKPOINT ────────
+   On a narrow topbar the label/ago fold away (same rule as .topbar-link); the
    dot alone still carries the health signal. 720 -> 768 with GR116: the fold is
    the third cosmetic declaration that buys the past-due billing chip its full
-   169.78px label back at tablet widths. */
-@media (max-width: 768px) {
+   169.78px label back at tablet widths.
+
+   768 -> 830 with W17-S6, and the two `.topbar` heads MOVED HERE from the
+   `@media (max-width: 768px)` block ~1550 lines above. Driven on origin/main
+   bytes, the past-due chip ("Payment failed · fix billing", scrollWidth 168) is
+   cut ABOVE that breakpoint too — 769:153, 775:155, 780:158, 785:160, 800:166
+   light; one pixel worse in dark, out to 805 — because at 769 the topbar snaps
+   back to 20px padding / 16px gap and the liveness label unfolds, and 168px of
+   money message does not fit in what is left. 810/820/830 read 168/168 on main:
+   the ceiling is where the LONGEST string in the chip's value space fits, and
+   830 is that width for today's longest ("Payment failed · fix billing"). A
+   longer message needs this number re-measured, not assumed.
+
+   A MOVE, NOT A DUPLICATE: authoring a second copy at 830 costs +5 authored
+   rule heads; relocating costs 0 (1253 -> 1253, cssom-parity MISSES 0).
+
+   THE DESTINATION IS CASCADE-CRITICAL. The `.live-chip` base declares its OWN
+   `gap: 7px` and `padding: 0 10px` just above this comment. Authored instead
+   beside where the topbar declarations came from (~:2318, before that base)
+   this block ALSO parity-passes at exactly 1253 and MEASURABLY REGRESSES the
+   defect: driven, band A goes 160 -> 157 at 721 and 740/741 — clean on main at
+   168/168 — truncate at 166/165 in both themes. At equal (0,0,1,0) specificity
+   the LATER base wins, so the moved `.live-chip { padding: 0 7px; gap: 0 }`
+   silently dies and the chip keeps its wide padding. (The label fold itself
+   survives either way — the later `.live-chip-label` rule only sets `color` —
+   which is exactly why the head count and the fold both look fine while the
+   pixels get worse.) Net-zero head count is not evidence a move preserved
+   behaviour; only driving it is. Keep this block AFTER the `.live-chip` base.
+
+   THE LIVENESS LABEL FOLDS 769-830 AND THAT IS THE POINT (D191). Driven, a
+   topbar-only move still leaves 769 and 775 truncated in dark (164/168,
+   167/168): the last 4px come from the label/ago fold, so the four declarations
+   are not separable. GR116's sin is a truncated MONEY MESSAGE; the liveness
+   LABEL is not one — the dot still carries the health signal, exactly as it
+   already did from 768 down.
+
+   NOT BAND A. 721-740 is truncated too, but this tighten is ALREADY computed
+   there (14px/10px at 721, identical to 320): that band is the
+   `@media (max-width: 720px){.app-shell{flex-direction:column}}` shell fold, a
+   231px cliff, and no breakpoint change here moves it by a pixel. Filed as
+   `cch-w17-bl-band-a-shell-fold-cliff`. ────────────────────────────────────── */
+@media (max-width: 830px) {
+  .topbar { padding: 0 14px; gap: 10px; }
+  .topbar-right { gap: 8px; }
   .live-chip-label, .live-chip-ago { display: none; }
   .live-chip { padding: 0 7px; gap: 0; }
 }
