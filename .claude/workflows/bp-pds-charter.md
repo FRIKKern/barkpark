@@ -2576,6 +2576,75 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 33 2026-08-01 — "The Elixir surface gets counted, and the ledger stops lying about itself" — REVIEWED. Grade A− (paper `pds-wave-33-2026-08-01`)
+
+**SIX ROUND-1 SLICES BUILT, SIX GREEN, SIX PUSHED WITH PRs OPEN.** Every gate was re-run by the
+reviewer on the final state. The three `internal/cli` slices were additionally merged into ONE
+integration tree (`origin/main` + slices 2 + 3 + 4) and the whole package run there
+(`go test ./internal/cli/ -count=1` ok 24.5–31.4s across runs), because two of this wave's
+obligations are only meaningful on the FINAL tree, never on a branch.
+
+| slice | final branch | what it actually does |
+|---|---|---|
+| `pds-w33-ledger-postread-core` | `…-reporting-what-it--0` | one shared `Tasks.Internal.fenced_content_write/4` (`select: d` → `UPDATE … RETURNING`); six arms converted; `receipt_honesty_test.exs` diffs receipt vs `Repo.get!` through the wire's own `render_doc/1` |
+| `pds-w33-elixir-receipt-census` | `…-success-surface-gets-its-firs-1-r` | the first census of `api/lib`'s success surface: 103 textual → 95 AST → 91 EMITTED, build-free in 5.1s, five integrity checks that can go red |
+| `pds-bl-record-update-basis-overclaims` | `…-dns-record-update--2` | the shipped receipt lie: `hzResBasisRRSetKey` replaces the false "GET on the resolved id" |
+| `pds-w32-census-pin-simplify` | `…-total-delete-the-two-ce-3` | Arm A: `KEYS`/`NON_LITERAL` deleted, `TOTAL` kept and re-messaged around mutation I2, opaque arm renamed `OPAQUE_ACTION_CALLERS` |
+| `pds-w33-cli-renders-error-details` | `…-the-server-s-details-pay-4` | `bp` stops discarding the server's `details`; one undeclared struct key that blinded seven error codes and cost a public issue filed at the wrong layer |
+| `pds-w33-bulldocs-batch-id-honesty` | `…-the-nil-id-collision--5` | the hoist: `ensure_block_ids` per op inside `fold_paper_ops`; the withheld `block_ids` receipt, the phantom `duplicate_id`, and `move-block` refused at a door that called it unknown |
+
+**THE FRONTIER WAS SURVEYED HONESTLY AND THE NUMBER WAS DERIVED, NOT INHERITED.** The wish's 102 is
+not what the corpus holds: 103 textual occurrences resolve to 95 AST-literal pairs (a bare
+`{:ok, true}` tuple and a keyword `ok: true` QUOTE IDENTICALLY — separating them needs the key
+literal's metadata, and without that check ~100 ordinary result tuples enter the census), minus 8
+phantoms and 4 consumers, leaving **91 EMITTED claims**. The census refused to reproduce PDS-D448's
+64/17/10 split, printing a depth sweep and an explicit DRIFT line instead: at depth 3 it derives
+write 33 / read 12 / unrouted 46, and it labels 33 a FLOOR because the write count is a function of
+the route budget rather than a property of the code. **The sharp residual is that 35 emitted claims
+reach no `Repo` verb at all within six hops** (`pds-bl-elixir-claims-reach-no-repo-verb`).
+
+**THE CATEGORY-ERROR RULING WAS ANSWERED BY TRYING IT, AS THE WISH DEMANDED.** The Go apparatus does
+NOT port: `internal/cli`'s census keys on `(kind, action)` string literals at a fixed emitter arity,
+and Elixir has no such spine — the lens that works is a build-free AST walk with call-graph routing
+that follows `defdelegate` at ZERO depth cost (charge a delegate a hop and the 21-entry
+`Barkpark.Tasks` facade makes a naive detector report false). What DOES port is the doctrine:
+derive the denominator, state the lens, name the blind spots, and make the instrument able to go red.
+**PDS-D454 stands — no Elixir gate this wave**; the script's INTEGRITY can red, its NUMBERS never do.
+
+**TWO MUTATION REHEARSALS RE-RUN ON THE FINAL TREE BY THE REVIEWER, INDEPENDENTLY.** (i) Coherent I2
+(`runHetznerVolumeResize` → `return exitOK`, its `volume/resize` disposition row deleted in the same
+edit): `TOTAL = 49, want 50` is the **SOLE** red — the collision, enrolment, stale-row, kind-unpinned,
+siteFloor and `OPAQUE_ACTION_CALLERS` arms all stay green. (ii) Wave 32's exact non-literal-KIND
+mutation (`opaqueKind := "volume"` at `volume/detach`) run AFTER Arm A deletes `KEYS`: still four
+reds, every one naming `hetzner_net_cmd.go:480` at the kind guard, log line
+`NON_LITERAL=2  KEYS=51  OPAQUE_ACTION_CALLERS=0`. **Deleting `KEYS` does not open the hole**, and
+`pds-bl-opaque-arm-blind-to-nonliteral-kind` is stamped on that evidence.
+
+**THE GROWTH RATCHET IS ONLY HALF BUILT, AND THAT IS THE WAVE'S HONEST SHORTFALL.** Arm A reduced the
+growth tax from three integer edits to one; it did not remove it, and a NEW unpaid site is still
+caught by `TOTAL` — a number-shaped guard. Arm B (`pds-w32-census-binds-the-basis`), the ONLY leg that
+can catch a lying basis CONSTANT, is round 2 and unbuilt by the sequenced-rounds law. Until it lands,
+`hzResBasisRRSetKey` is asserted SYMBOLICALLY: rewording that constant to something false leaves the
+entire package green. Slice 2 moved the site from "names the wrong read" to "names the right read";
+it did not make the claim self-defending, and the receipt's basis is still true only because a human
+read two lines.
+
+**THE TWO TOOLING ROWS BIT EXACTLY AS PREDICTED, AND ONE OF THEM WAS MISFILED AT THE WRONG LAYER.**
+`bp-publish-wall-label-spine-rejects-3-tags` CLAIM A was never a server defect: the server has always
+sent `details`, and `bp`'s canon struct in `classifyError` never declared the key, so `encoding/json`
+discarded it silently — public issue #4938 was filed against the wrong layer and its own quoted body's
+ALPHABETICAL key order proves it was observing `bp`. CLAIM B (a third registered tag reds
+`label_spine`) is untouched and stays open. `bp-bulldocs-patch-batch-ops-fail-on-nil`'s filed error
+code was also wrong — the live code is `duplicate_id`, not `malformed_op`, and a builder handed
+`malformed_op` would have patched the allowlist and never touched the real guard.
+
+**WHAT THE NEXT WAVE TAKES.** Merge round 1 in dependency order, then dispatch the two deferred
+slices as their deps land: `pds-w33-ledger-postread-remainder` after `pds-w33-ledger-postread-core`,
+and `pds-w32-census-binds-the-basis` after BOTH `pds-w32-census-pin-simplify` and
+`pds-bl-record-update-basis-overclaims`. Then bucket the 91 by hand — the census's own UNCLASSIFIED
+47 and its POST-READ 17 (a CEILING: its evidence is line order inside the writing function, which
+cannot prove the read is OF THE ROW WRITTEN) are where wave 34's judgment is owed.
+
 ### Wave 32 2026-08-01 — "The debt reaches zero" — REVIEWED. Grade A (paper `pds-wave-32-2026-08-01`)
 
 **FOUR ROUND-1 SLICES BUILT, FOUR GREEN, FOUR PUSHED WITH PRs OPEN.** Every gate was re-run by the
@@ -7940,3 +8009,290 @@ carries `.go` changes. The debrief must say the arm's FUTURE reachability rides 
 The second credential spend — a live mutation post-read REFUSING against the real API, which would
 convert the epic's weakest claim into L1 — is FILED as the next spend, not smuggled in beside a
 read-only token. Zero is not the end of the epic; per D445 it is the end of one family on one provider.
+
+---
+
+## Wave 33 — the ledger this epic is written on, censused and paid
+
+**THE LAW, UNCHANGED SINCE WAVE 22: NO BARKPARK VERB MAY REPORT SUCCESS ON AN EXIT CODE ALONE.**
+Wave 32 took the Hetzner receipt debt to zero and drew an honest boundary around it. Wave 33 crosses
+that boundary onto the surface D445 limit (7) named as never censused by anything — `api/lib` — and
+finds the epic's own instrument inside it.
+
+- **PDS-D448 — THE DENOMINATOR IS 91 EMITTED SUCCESS BODIES, OF WHICH 64 ARE WRITE RECEIPTS AND 64 IS
+  A FLOOR. `102` IS WRONG IN BOTH DIRECTIONS AT ONCE.** Two independent build-free AST lenses
+  (`Code.string_to_quoted`, ~3.4 s over 804 `.ex` files) derive it. `git grep` returns 102 LINES / 103
+  OCCURRENCES (`auth_controller.ex:351` carries two on one line); only **95** are AST-literal pairs;
+  **8 are phantoms** — 7 `@doc`/comment prose and one WRONG KEY, `ops_live.ex:285` is `%{db_ok: true}`;
+  **4 are CONSUMERS, not emitters** — all four string-key sites (`bridge_client.ex:66,83,97`,
+  `pusher.ex:286`) pattern-match a REMOTE HTTP response. That leaves **91 emitted**, splitting **64
+  write / 17 read / 10 unrouted**, and the 10 unrouted are almost certainly writes, so 64 is a FLOOR
+  and never a ceiling. It simultaneously UNDERCOUNTS: 218 `json(conn, …)` across 50 files, **273**
+  `put_status(` lines of which **66** carry a 2xx, and **3** `send_resp(conn, 2xx)` are all invisible
+  to it. (The digest's "53 put_status" and "4 empty-2xx" do not re-derive; 218/50 does, exactly.)
+  **QUOTE THE LENS WITH THE NUMBER OR THE NUMBER LIES** — and D445 limit (7)'s own `102` is hereby
+  bounded, not repealed: it was a correct count of the wrong thing.
+- **PDS-D448a — THE LENS TRAP IS WORSE HERE THAN FILED, AND IT IS A `git grep` TRAP, NOT A `ugrep`
+  ONE.** On this host, `git grep -E '\bok: true'` returns **0** while `git grep -P`, BSD `grep -rE`
+  and `rg` all return **97** on the identical corpus — Apple git 2.39.5's POSIX ERE has no `\b`, and
+  it fails SILENTLY with exit 1 and no error. A census shipped with the obvious anchored form
+  under-reports 100 % while exiting clean. `ugrep` is not installed on this host at all, so the
+  digest's "4 instead of 98" could not be reproduced; the disease is the same and the instance is
+  stronger. **Every census this epic ships must state the engine it was measured with.**
+- **PDS-D449 — THE GO APPARATUS PORTS IN FOUR ARMS AND BREAKS IN THE FIFTH, AND THE BREAK IS
+  ARCHITECTURAL, NOT SYNTACTIC.** Answered by PORTING AND RUNNING, as the wish demanded, not by
+  reasoning. Arms A1–A4 port: `Code.string_to_quoted` is build-free, needs no mix project and dodges
+  the local `mix phx.server` OOM scar; a run over `tasks_controller.ex` recovered **24 of 24** sites in
+  0.47 s. **Arm A5 — "the paying symbol is CALLED FROM THE EMITTING FILE" — correctly FAILS**, because
+  Go colocates the receipt printer and its confirming read in one `hetzner_*_cmd.go` while Phoenix
+  MANDATES controller/context layering: `tasks_controller.ex` emits the close receipt and
+  `barkpark/tasks/close.ex` performs the write. A second, independent port of the symbol-binding arm
+  over **560** Elixir error atoms returned **0 hits** — a green that CANNOT go red, because Elixir
+  error atoms are module-global text so a producer in any of 27 files satisfies a consumer in any
+  other. **RULING: Rival C (a full Elixir census) is JUSTIFIED ON EVIDENCE for wave 34, but only with
+  A5 REPLACED by a two-hop controller→context→Repo binding.** A verbatim lift-and-shift would ship the
+  vacuous green this epic exists to prosecute.
+- **PDS-D449a — TWO PORTING TRAPS, BOTH HIT FOR REAL, BOTH OF THEM GREENS THAT CANNOT GO RED.** (i)
+  Running the semantic lens over only the 27 CARRIER files returned `read=25 write=0` — every action
+  false, no error, no warning. (ii) On the full 804-file corpus it still returned 24/25 false, because
+  `Barkpark.Tasks` is a **24-`defdelegate` facade** and `defdelegate` is not `def`; only after
+  following delegates to depth 3 did the two lenses reach `agree=25 disagree=0`. **AND THE MUTATION
+  REHEARSAL ITSELF HAS THE SAME TRAP**: deleting only the 3 `Repo.update_all` from `close.ex` LANDED
+  (3→0, `git diff --stat` proved it) and left `close` GREEN — correctly, because `Repo.transaction` at
+  `:167,:282` still writes. Removing all 5 write-verb calls flipped `close` true→false and `agree`
+  25→24, and restoring flipped it back. **AN INCOMPLETE MUTATION IS INDISTINGUISHABLE FROM A LENS THAT
+  CANNOT FAIL.** Always `git diff --stat` the mutation before reading its verdict.
+- **PDS-D450 — PDS-D361 IS SUPERSEDED FOR THE WRITE-RECEIPT PROPERTY: THE HONESTY GOES SERVER-SIDE.**
+  D361 made client-side a HARD CONSTRAINT on one checkable basis — "an API-side fix does not take
+  effect until guerrilla deploys, and that deploy is the same human gate already holding
+  `pds-w25-round-terminal`". **THAT BASIS IS MEASURED EXPIRED**: guerrilla serves `6b1fe3738`, exactly
+  ONE commit behind `origin/main`, deployed the same day, uptime 6367 s, and the charter records
+  elsewhere that guerrilla AUTO-DEPLOYS ON MERGE. The dedup argument has also INVERTED. A CLI receipt
+  is PER-CLIENT and must be re-implemented once per caller class, and the evidence says the CLI-only
+  apparatus already failed to be one apparatus: `bp task stamp`'s read-back is blind to MCP-issued
+  stamps (`pds-w26-mcp-stamp-bypasses-readback`, OPEN), **there is no `internal/cli/tasks_close_cmd.go`
+  on main at all** so close has no CLI seam to hang one on, `apiclient`'s `TaskClose/N/RevN` return
+  only `(notices, help, err)` and DROP `env.Doc` on the floor, and Studio/LiveView and every SDK reach
+  the API directly and inherit nothing. **An API-layer receipt is inherited by all of them.** D361 is
+  not repealed for the epic; it is superseded for THIS property, on a re-derived basis.
+- **PDS-D450a — `pds-w26-stamp-readback` IS NOT A FALSE-PAID ROW, AND THAT MATTERS MORE THAN IF IT
+  WERE.** All 7 closed criteria are VERB-scoped and every evidence anchor lands in Go
+  (`internal/cli/tasks_stamp_cmd.go`, `internal/taskboard/criterion_readback.go`,
+  `internal/apiclient/client.go`); ZERO criteria and ZERO anchors reference `api/lib/`. The row's own
+  description declares the layer — "CLIENT-SIDE by ruling" — and it filed its own residue
+  (`pds-w26-mcp-stamp-bypasses-readback`). **So `stamp.ex` still reconstructing on main contradicts
+  nothing the row claimed.** The epic's most expensive error mode — a false-done on the very row about
+  false receipts — was CHECKED and DID NOT OCCUR. Record the negative result; it is what makes the
+  positive ones worth something.
+- **PDS-D451 — THE FIX IS A REAL POST-READ, NOT A BOUND TIMESTAMP, AND THE GENERATED COLUMNS ARE WHY.**
+  The measured defect is a FAMILY OF NINE, not one site: `close.ex` ×3 (`:238`, `:601`, `:803`),
+  `claim.ex` ×2 (`:321` do_claim, `:392` do_renew), `move.ex:133`, `stamp.ex:231`, `release.ex:147`,
+  `pulse.ex:167`, `stage.ex:646`, `mutations.ex` ×2 — every one `set: [content:, rev:, updated_at:
+  DateTime.utc_now()]` followed by `%{doc | content: new_content, rev: new_rev}`, i.e. `updated_at` is
+  DELIBERATELY WRITTEN to the DB and DELIBERATELY OMITTED from the reconstruction. Measured on
+  COMMITTED rows outside any sandbox transaction: CLAIM / RENEW / STAMP / CLOSE each diverge in exactly
+  ONE field, `:updated_at`, at BOTH struct level and wire level (`params.ex:230` puts it on the wire),
+  with `content` and `rev` BYTE-EQUAL — and each verb's echoed value is EXACTLY the STORED value of the
+  PREVIOUS write. **The receipt is deterministically one write stale, and under a slow path the
+  staleness window is UNBOUNDED, not "about 100 ms".** The cheapest fix — bind the timestamp once and
+  put it in both places — is REFUSED, for a reason no argument could have supplied: `documents` carries
+  `slug_text` / `author_text` / `category_text` as `GENERATED ALWAYS AS (…) STORED`, and a
+  `%{doc | content: …}` reconstruction CANNOT recompute them (measured: all three `equal=false` while
+  `content` and `rev` are equal). **The reconstruction pattern is PROVABLY INCAPABLE of carrying
+  DB-computed state**, so the moment any arm touches a mirrored key the receipt lies about CONTENT, not
+  timing. No live task arm reaches that today — this is a CLASS proof, not a live-path proof, and the
+  wave text must not imply tasks ship wrong slugs. It is nonetheless what retires the
+  "it's only a timestamp, ship a declared exemption" escape.
+- **PDS-D451a — THE SHARPEST ATTACK LANDED AND DIED IN THE SAME MEASUREMENT, AND ONE ARM IS HONEST.**
+  "CAS-confirmed is not a lie" LANDS on `content`/`rev` (byte-equal, the CAS really does prove exactly
+  one row took exactly this content) and DIES on `updated_at`. So **CAS-CONFIRMED ECHO is the right
+  label AND that bucket has a live, deterministic, wire-reaching defect in it.** Two refinements the
+  headline needs: (i) the divergence is NOT a commit-time or trigger effect — exactly ONE trigger in
+  the whole migration set writes `documents` (`revisions_bind_document`, AFTER INSERT ON `revisions`,
+  which the task CAS arms never fire) and there is NO `DEFERRABLE` constraint on `documents` at all, so
+  the in-sandbox measurement was hiding nothing and that was proven by re-measuring after COMMIT, not
+  by asserting it; (ii) `close.ex:802`'s cascade-unblock reconstruction is WORSE than the others
+  because it never returns to an HTTP caller — it is BROADCAST, and `Content.Broadcast` copies
+  `doc.updated_at` verbatim onto three PubSub/SSE topics, so the stale value reaches every LiveView.
+  **AND `move.ex`'s noop arm is CLEAN — zero divergent fields, struct and wire — because it performs no
+  write and returns the struct it read.** The population is NOT uniformly guilty, the label
+  discriminates, and a census that cannot say "this one is honest" is propaganda.
+- **PDS-D452 — POST-READ IS NOT AN EMPTY BUCKET, AND IT WAS DECLARED EMPTY BY THE WRONG LENS.**
+  `Repo.reload` = **0** occurrences in all of `api/lib` against **85** `Repo.update_all` — true, and
+  USELESS. `returning:` = 3 occurrences, ALL on `insert_all`, NONE on `update_all`, **because Ecto
+  SILENTLY IGNORES `:returning` on `update_all` and yields `{count, nil}`** — and the repo documents
+  this itself, at `auth.ex:139-141`, in a comment written by whoever hit it. The honest idiom is
+  `select:` INSIDE the update query. Derived: **80 `Repo.update_all` call sites across 37 files**, of
+  which **8 are genuine post-reads** (~10 %): 4 RETURNING-via-`select:` (`writer.ex:1063`,
+  `block_ops.ex:958`, `auth.ex:148`, `webhooks.ex:487`) and 4 GET-AFTER (`access.ex:206`,
+  `cycle_fleet.ex:652/2359/2379`). **So the census HAS positive exemplars and "the bucket is empty"
+  must not be published.** Two teeth ride the exemplars: honesty is OPT-IN ON THE CLIENT
+  (`fenced_or_plain_update/3` takes the RETURNING path only when the caller supplied `ifRev`, else it
+  falls to `Repo.update(changeset)`), and — sharper — `block_ops.ex:747-770` OBTAINS the row Postgres
+  actually holds as `{:ok, saved}`, spends it only on side effects, and returns `rev: rev`, the
+  in-memory PRE-WRITE `paper_next_rev(doc)`, which reaches the wire at
+  `bulldocs_ingest_controller.ex:613-624`. **A POST-READ THAT DOES NOT REACH THE RECEIPT IS NOT A
+  POST-READ.**
+- **PDS-D453 — THE TAXONOMY IS SIX SHAPES, NOT FOUR, AND TWO OF THE NEW ONES WERE MEASURED LIVE.**
+  Beyond POST-READ / CAS-CONFIRMED ECHO / PURE ECHO / UNREACHABLE-ERROR: **(5) WRONG-ROW** — a success
+  asserted about `drafts.<id>` and consumed at `<id>`. Measured on live guerrilla: a PATCH naming a
+  BARE published task id returns **HTTP 200** with `results[0].id = "drafts.<id>"` and a fresh rev,
+  while BOTH canonical readers (`/v1/data/doc/.../task/<bare-id>` and `/v1/tasks/<bare-id>`, the route
+  behind every claim/stamp/close) still serve the OLD rev and OLD content — for **42–52 s**, outside
+  PDS-D334's stated 5–40 s bound. The success envelope emits **no warning**: there are exactly FOUR
+  `Warnings.put` emit sites in all of `api/lib` and none is twin-related. **22 live task rows currently
+  carry both ids and 12 of them DIVERGE on `lifecycle_status`** — draft `open` vs published
+  `done`/`cancelled`, draft newer on all 22 — including this epic's own `pds-w29-s3-fake-fails-closed`
+  and `pds-w27-census-self-honesty`; and `get_patch_base/4` reads the DRAFT FIRST, so the next patch on
+  any of those merges onto a base saying `open`. **(6) DISCARDED-POST-READ** — the `block_ops` shape
+  above. **CONSEQUENCE FOR ANY PORT: the census must key on the READER's id space, because a post-read
+  of the draft you just wrote classifies as POST-READ and is still a lie to every published reader.**
+- **PDS-D453a — THE "BACKGROUND COLLAPSE" IS NOT A RECONCILER, IT IS THE GITHUB BRIDGE.** The probe
+  healed in ~50 s because it had been mirrored to a real issue and `Link.put/4` collapses the draft
+  into the published row via `Content.publish_document/4`. **A mutate-patched task the GitHub bridge
+  does not mirror stays forked indefinitely** — which is exactly why the 12 diverging twins have
+  persisted for days. D334's "a background collapse flips them together" is true only for
+  github-mirrored tasks and FALSE as a general property; no census may rely on eventual convergence.
+  Note also that probing `type:task` is NOT side-effect-free: the probe minted GitHub issue #8761.
+- **PDS-D453b — THE WISH'S UNREACHABLE-ERROR PREDICTION IS REFUTED, AND THE BUCKET IS STILL WORTH
+  PAYING.** Predicted large; derived **3 genuine sites, ~2–3 %**. A stricter scan's candidates were
+  4-of-4 FALSE POSITIVES, all for one reason: Elixir helpers here signal failure through sentinels that
+  are not `:error` (`:invalid`, a `fail(...)` builder, delegation). The genuine shape is
+  CATCH-ALL-TO-SUCCESS and it is the purest violation in the population — `media_controller.ex:224-225`
+  and `search_controller.ex:332-334` are byte-identical twins converting EVERY failure of
+  `record_interaction` into `ok: true` with the id key silently missing. `auth_controller.ex:410-417`
+  is the DECLARED-HONEST control: it always returns `ok: true` by anti-enumeration design and says so
+  in its own `@doc`. **The bucket is small, cheap and qualitatively worst — file it, do not inflate
+  it.**
+- **PDS-D454 — THE CENSUS SHIPS AS A BUILD-FREE SCRIPT WITH NO GATE THIS WAVE, AND IT AMENDS THE
+  CANONICAL DOC RATHER THAN FORKING IT.** `docs/decisions/success-claim-census.md` is
+  `canonical-for: success-claim-census`, unique repo-wide, and its own STANDING RULE says shell and
+  Elixir "stay honest-and-unguarded until a real population exists to calibrate against — refusing to
+  ship a fake green is the successful outcome for those two surfaces". **This wave SUPPLIES that
+  population**, so the ruling is: derive it, publish the lens beside it, amend the owning doc, and let
+  wave 34 decide the gate once the 64 are bucketed. The script lives at
+  `scripts/pds-elixir-receipt-census.exs` — `scripts/pds-*` is in NEITHER Elixir path set, so it costs
+  no gate minute — and it MUST be mutation-proven able to go red, against D449a's two traps. **The
+  ratchet this wave actually ships is not an integer: it is the per-arm property that the returned
+  receipt EQUALS the stored row**, which is the growth ratchet the small rows were reaching for, in the
+  only shape that cannot be re-accrued by adding a site.
+- **PDS-D455 — ARM A SHIPS AS MEASURED ON THE FINAL TREE, AND ITS TRUE REDUNDANCY IS 2×, NOT 4×.**
+  Applied on `origin/main` (+4/−9 in `hetzner_res_census_test.go`), the suite is green (5/5,
+  TOTAL=50 NON_LITERAL=2 KEYS=52 OPAQUE_CALLERS=0) and the full `internal/cli` package passes in
+  29.3 s with `go vet` silent. Coherent mutation I2 (`volume/resize` emitter + dispatch case +
+  disposition row deleted in one edit, `git diff --stat` quoted BEFORE any verdict) leaves **TOTAL as
+  the SOLE red** — D444's central claim reproduces exactly on the post-Arm-A tree, so deleting KEYS
+  cost the I2 catch nothing and **TOTAL MUST BE KEPT AND RELABELLED, NEVER DELETED**. Two refinements:
+  (i) the INCOHERENT I2 (emitter deleted, row kept) is caught a second time by the genuinely
+  independent stale-row arm; (ii) **TOTAL's uniqueness is about COHERENCE, NOT ARITY** — no single-key
+  kind exists on main (the minima are backup/bucket/placement-group at 2 each, summing to 52), and a
+  constructed single-key case shows that an I2 which leaves the kind pin behind reds THREE arms while a
+  FULLY coherent one reds TOTAL alone. D444's wording stands; its scope condition should read "a
+  coherent removal".
+- **PDS-D456 — THE OPAQUE ARM IS RENAMED, NOT EXTENDED, AND THE "FOUR ARMS" IN THE FILED ROW ARE
+  REALLY TWO.** Wave 32's exact non-literal-KIND mutation (`opaqueKind := "volume"` at `volume/detach`)
+  re-run ON THE ARM-A TREE still reds BY NAME, with `OPAQUE_CALLERS` still reading 0 — **so the row's
+  second criterion is MET and Arm A opens no hole.** But the four tests that red are NOT four
+  independent arms: they are ONE guard — `hzResBuildCensus`'s `if s.kind == ""` `t.Errorf` — replicated
+  through every test that calls the builder, PLUS the stale-row arm, which IS independent. **True
+  redundancy is 2×.** `c.opaque` is structurally incapable of counting a non-literal KIND (the kind
+  branch `continue`s before the caller pass runs), so "extend the collector" would merge an unkeyable
+  SITE with an unresolvable CALLER under a message that says "non-literal ACTION" — a lie in the other
+  direction. **Rename to `OPAQUE_ACTION_CALLERS`, keep the pin (it is a zero-invariant, not a
+  population count, so it does not tax growth), and comment the builder guard as the single load-bearing
+  detector** — because a tidy-looking refactor of `hzResBuildCensus` to RETURN errors instead of calling
+  `t.Errorf` would silently delete four "arms" at once.
+- **PDS-D456a — ARM A MUST FIX THE COMMENT IT FALSIFIES, IN THE SAME COMMIT.**
+  `hetzner_res_census_test.go:852-854` still reads "The exact pins that DO tax growth today
+  (TOTAL=50 / KEYS=52) are a separate, filed question … and are untouched here." After Arm A that
+  sentence is false twice over. **Shipping it unamended would make the census file itself a document
+  naming a basis it no longer has** — precisely the disease this epic exists to prevent, committed by
+  the instrument that polices it.
+- **PDS-D457 — TWO FILED ROWS AND ONE PUBLIC GITHUB ISSUE BLAME THE WRONG LAYER; THE DEFECT IS SIX
+  LINES OF GO AND IT BLINDS SEVEN ERROR CODES.** The server SENDS `details`
+  (`Content.Errors.build/1` sets it at 18 call sites; `to_envelope/2` is `build |> stamp` and `stamp`
+  only adds hint + request_id, so it CANNOT strip it) — proven live: a 400 `invalid_filter` carries
+  `"details":{"filter":"zzzgarbage"}` on the wire and `bp` shows none of it in table, `-o json`,
+  `-o yaml`, `-o minimal` OR `-v`. Root cause is one omission: the `canon struct` in `classifyError`
+  (`internal/cli/errors.go`) declares only `code/message/request_id/hint`, so `encoding/json` silently
+  discards `details` — `git grep -c details -- internal/cli/errors.go` returns **0**. **The
+  misattribution is forensically provable**: `task-label-spine-details-null` (OPEN, synced to public
+  GitHub issue #4938) quotes an observed body with key order `code, hint, message, request_id` —
+  ALPHABETICAL, i.e. Go map marshal — while the real server emits `code, message, hint, details,
+  request_id` in insertion order. **The reporter observed the CLI, concluded the server was broken,
+  spent five round trips, and filed a public issue against an innocent layer.** The CLI also violates
+  its OWN published contract (`docs/cli/error-exit-table.md` lines 15 / 97 / 117 / 153 all mandate
+  printing `details`), so the fix is contract COMPLIANCE and purely additive. **THE MCP HYPOTHESIS IS
+  REFUTED**: no MCP file references `apiError` at all and `mcpRun` passes the RAW body verbatim, so 7
+  of 8 curated tools and every bridge tool already see `details` — the ONE exception is `task_create`,
+  whose `mutateErrorMessage` types details as `map[string][]string`, which fits `validation_failed` and
+  nothing else, so `label_spine` and `duplicate_task` fall to a raw-body path clamped at 200 runes that
+  cuts mid-hint. **A REFUSAL NAMING THE WRONG RULE IS THE SAME DISEASE AS A SUCCESS NAMING THE WRONG
+  READ, and this one has already cost five round trips, four publish attempts, one stranded draft, one
+  wrong Decide conclusion and a public issue against the wrong layer.**
+- **PDS-D457a — `label_spine`'s ACTUAL DECIDING RULE IS THE 20-CHARACTER RATIONALE FLOOR, AND THE
+  FILED DIAGNOSIS IS WRONG.** A three-arm bisection holding everything else constant: registered tags
+  + rationales ≥20 → PUBLISHES; one unregistered tag → **`unknown_tag`**, NOT `label_spine`; one
+  rationale at 18 chars → `label_spine`. `LabelSpine.validate/1` contains NO tag-registry check at all
+  (the registry is gate 3 in `AuthoringWall.enforce/5`), so there is no main-tag whitelist and no
+  hidden tag-set rule. **AND THIS WAVE'S OWN TWO ARM DRAFTS WERE STRANDED BY EXACTLY IT**: both carry
+  the tag rationale `internal/cli census` — **19 characters** against `@min_rationale 20`
+  (`label_spine.ex:60`, enforced at `:263`). The row `cch-w15-bl-publish-wall-rationale-length-opaque`
+  was published at 00:15 on 2026-08-01 — **25 minutes BEFORE** wave 32's Decide hit the same wall at
+  00:40 and misdiagnosed it as a server outage. Secondary gap: the `label_spine` hint advertises
+  description length and tag count and NEVER MENTIONS the rationale floor, so a reader shown only the
+  hint is pointed at the two things that were fine.
+- **PDS-D457b — D447's WHOLESALE PUBLISH-WALL OUTAGE IS REFUTED, AND WAVE 32 DID FILE ROWS.** Three
+  `type:task` documents were created AND published on guerrilla inside the same window D447 declares
+  the wall dead (00:15, 01:29, 01:37), and a fresh probe created + published + deleted cleanly this
+  wave. D447's minimal probe was missing `rationale`, which the wall requires. **Correspondingly,
+  "this wave filed NO backlog rows" is FALSE**: wave 32 filed FIVE published rows and left THREE as
+  drafts, including Arm A and Arm B **already authored at 8 criteria each** — Decide's job on them was
+  to PUBLISH, not to re-author. Two further creation hazards are real and distinct from the wall: the
+  find-or-create duplicate gate fires aggressively at CREATE on title similarity (HTTP 409
+  `duplicate_task`), and one create returned an unreproducible `internal_error` 500.
+- **PDS-D458 — THE BULLDOCS FIX IS THE HOIST, NOT THE DOOR-REFUSAL, AND THE FILED ERROR CODE IS
+  WRONG.** The live code is `duplicate_id`, NOT `malformed_op`: `POST /v1/paperflow/papers/:slug/ops`
+  with five ID-LESS `append-block` ops returns `422 {"code":"duplicate_id","message":"append-block
+  failed on nil","target":null}`. **A builder handed `malformed_op` would patch `valid_op_shape?` and
+  never touch the real guard**, which is `id_exists?(blocks, block_id(block))` — `block_id/1` is a bare
+  `Map.get(block,"id")` returning nil, and `id_exists?/2` has NO nil guard, so the second id-less
+  append collides with the first. `insert-after` carries the identical defect. **THERE IS NO BATCH-SIZE
+  CEILING**: 41 ID-BEARING ops in one batch return 200; the 41 sequential single-op calls that defeated
+  the `--if-rev` guard were unnecessary. Rollback is real and total (the fold halts strictly upstream
+  of every write). **THE RULING IS THE HOIST** — run `ensure_block_ids` per-op INSIDE `fold_paper_ops`
+  rather than once after it — because that is the only option that keeps the advertised id-less
+  authoring ergonomics AND simultaneously fixes the on-thesis receipt defect beside it: a ONE-op
+  id-less batch today answers `{"ok":true,"rev":2,"block_ids":[],"op_count":1}` — **`ok: true` with the
+  only addressable identifier withheld, because the receipt was read one step before the value
+  existed**, while the SINGLE-op path runs `ensure_block_ids` BEFORE locate and reports it correctly.
+  Two shapes of one route disagree, and the comment at `block_ops.ex:1204-1208` asserting the fold runs
+  `ensure_block_ids` before this locate is TRUE of one path and FALSE of the other. **Also: `move-block`
+  is implemented in `patch.ex:269`, documented in its moduledoc, handled by `locate_paper_affected` —
+  and ABSENT from `@op_kinds` (`bulldocs_ingest_controller.ex:78`), so it 422s `malformed_op` at the
+  door in both shapes. An error saying the verb is unknown, about a verb that is known and merely
+  un-allowlisted, is D457's disease at a third site.**
+- **PDS-D459 — THE LOCAL CHARTER IS 100 DECISIONS STALE AND THIS WAVE'S CHARTER PR WAS AUTHORED IN THE
+  WORKTREE, NOT COPIED FROM IT.** The primary checkout's copy tops out at **PDS-D345** (435,549 bytes)
+  while `origin/main` carries **PDS-D447** (699,031 bytes) — copying the local file into the charter
+  branch would have SILENTLY REVERTED 100 decisions inside a PR labelled docs-only. **The recipe is
+  therefore amended for every future wave: cut the worktree from `origin/main` and EDIT THE CHARTER
+  THERE.** This is the "brief waves from origin, not local" scar recurring at the write end rather than
+  the read end, and it is the most expensive shape it has taken.
+- **PDS-D460 — THREE CENSUS PRIMITIVES THAT FAIL SILENTLY, RECORDED SO NO LATER WAVE RE-LEARNS THEM.**
+  (i) `jq` CANNOT PARSE several live task envelopes — `Invalid string: control characters from U+0000
+  through U+001F must be escaped` on 6 of the 22 twins — so a jq-keyed census silently drops rows and
+  exits 0; use `python3 json.loads(..., strict=False)`. (ii) `bp doc get` reads the PUBLISHED
+  perspective and **404s a draft**, so the obvious probe for "does this draft exist" answers "no" for a
+  draft that does exist; use `bp task get <bare-id>` or `--perspective raw`. (iii) `bp task get` nests
+  everything under `.doc`, so a jq path written at the top level returns all-null — indistinguishable
+  from a missing row. All three are the same disease as D448a: a lens that answers confidently and
+  wrongly while exiting clean.
+
+**WHAT WAVE 33 DELIBERATELY DOES NOT DO.** It does not pay 91 sites, or even the 64. It pays the
+family that misleads worst — the ledger this epic's own 333-child tree is recorded through — and leaves
+a DERIVED denominator with a stated lens that wave 34 can trust. It does not build the second census
+(Rival C): D449 justifies it on evidence and hands wave 34 the A5 replacement it needs. It does not
+gate the Elixir surface: D454 says the population must be bucketed first, and refusing to ship a fake
+green remains the successful outcome. The `.github/**` fence holds for the concurrent Cloud Console
+wave; `cloud/**` is not touched.
