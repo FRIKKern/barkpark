@@ -74,6 +74,17 @@
 //        scope: the same two declarations unscoped were driven at an 846px
 //        page scrollWidth against a 721px viewport, because `flex-wrap: wrap`
 //        on the stacked (column) .fleet-row wraps into COLUMNS.
+//    W18-overview-card-pill         THE FRONT SCREEN, which every leg above is
+//        blind to: W15 measures cells but only on `#fleet`, so it printed
+//        "90 / 90 cells clean" on a tree where the LANDING route hid 66.1% of
+//        why an instance is degraded (`.instance-card-head .status-pill-detail`
+//        56 of 165px at 320 on overview-attention) and 81.0% on mixed-fleet.
+//        Drives both front-screen scenarios at 320/360/390/430/620/769/800 in
+//        both themes and asserts THREE invariants per cell — the detail is
+//        whole, the pill is tall enough for its own text, and the detail's
+//        bottom edge is inside the pill's. The last two are what stop the
+//        naive detail-only remedy from scoring perfectly while painting the
+//        sentence 24px below the capsule.
 //    GR115-bpconsole-dead-rule      at 700x800 .bp-console-body must compute
 //        the authored 40vh cap (320px) and the 13px legibility floor, same
 //        for .bp-console-toggle (pre-fix: 260px/12px/12px — the later base
@@ -120,9 +131,16 @@
 //  read identically under both, and the run prints the reserved track width it
 //  measured either way.
 //
-//  HONEST LIMIT — THIS FILE IS RUN BY NO WORKFLOW (charter D109, re-confirmed
-//  this wave: `grep -rn overflow-guard .github/` returns nothing, exit 1). It
-//  is a developer tripwire and the seal predicate's shell-out, NOT a CI gate.
+//  HONEST LIMIT — THIS FILE IS RUN BY NO WORKFLOW (charter D109). The sentence
+//  that used to stand here — "`grep -rn overflow-guard .github/` returns
+//  nothing, exit 1" — WAS STALE when W18 re-ran it: that grep now exits 0 with
+//  one hit, console-harness.yml:272, which is a COMMENT citing this very claim
+//  and not a step that runs anything. The limit is unchanged and the evidence
+//  for it is not the grep any more: no `run:` line in .github/ invokes this
+//  file. A header that quotes an exit code has to be re-driven when it is
+//  quoted, or the guard's own documentation becomes the untested sentence this
+//  guard exists to replace. It is a developer tripwire and the seal predicate's
+//  shell-out, NOT a CI gate.
 //  That is exactly how a tree whose body scrolled 106px at 390px passed every
 //  required context: nothing measured below 700px, and nothing ran this file.
 //
@@ -156,7 +174,46 @@ const DEFECTS = [
   "W12-narrow-viewport-truth",
   "W13-detail-route-band",
   "W15-fleet-row-text-bounded",
+  "W18-overview-card-pill",
 ];
+
+// W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
+// instance-card-head -- cloud/priv/static/__preview__ .github` exited 1 with no
+// output on origin/main: not one instrument in this epic had ever measured the
+// landing route's instance card, while on merged-main bytes
+// `.instance-card-head .status-pill-detail` rendered 56 of 165px of "Health
+// down · Agent offline" at 320 — 66.1% of WHY the box is degraded, unreadable
+// on the most-seen screen in the product. The W15 leg above is the only leg
+// that measures a CELL rather than the page, and it drives `#fleet` scenarios
+// only, so it printed "90 / 90 cells clean" on that same tree.
+//
+// TWO SCENARIOS, BECAUSE ONE OF THEM UNDERSTATES THE DEFECT. On `mixed-fleet`
+// the same selector hides 81.0% at 320 (45/237, "Payment failed — subscription
+// past due") and is STILL cut at 430, where `overview-attention` is already
+// clean — a leg driving only the attention fixture would have called 430 a
+// clean upper edge and shipped a band that reds on the other front-screen
+// scenario.
+//
+// THREE INVARIANTS PER CELL, and the two vertical ones are the point:
+//   (a) detail.scrollWidth <= detail.clientWidth — the defect itself.
+//   (b) pill.scrollHeight <= pill.clientHeight  — the wrap's own trap.
+//   (c) detail.bottom <= pill.bottom            — where the glyphs actually land.
+// (b) and (c) exist because the naive remedy (`.instance-card-head
+// .status-pill-detail { white-space: normal; overflow: visible; text-overflow:
+// clip }` alone) scores a PERFECT horizontal card on this leg's whole axis —
+// clientWidth == scrollWidth at 320/360/390 — while `pill.scrollHeight 47 >
+// clientHeight 22` and the sentence paints 24.00px BELOW the capsule. Driven,
+// not predicted: that negative control is this leg's mutation proof.
+//
+// HEIGHTS ARE REPORTED, NOT PINNED. The remedy takes the pill to 42px at 320
+// and back to 24px from 620 up ON THIS FIXTURE, and both numbers are in the
+// slice's evidence — but the wrap boundary is a property of the STRING, not of
+// the CSS: the production-dominant "Health unknown · Agent offline" is three
+// characters longer and moves the boundary from 425/430 to 450/460 and 360 to
+// 42px. A leg that pinned 24 at 430 would pass on the fixture and red on what
+// the server serves, so the pins live in the PR and the INVARIANTS live here.
+const CARD_WIDTHS = [320, 360, 390, 430, 620, 769, 800];
+const CARD_SCENS = ["overview-attention", "mixed-fleet"];
 
 // W15-S4: THE LEG THAT EXISTS BECAUSE THIS FILE WAS BLIND TO ITS OWN SUBJECT.
 // Every leg above asserts documentElement.scrollWidth — the PAGE. On the tree
@@ -1104,6 +1161,107 @@ async function main() {
           `messages, ${squeezed} squeezed badge columns, ${overflowed} chips shorter than their own text, ` +
           `${pageOver} pages scrolling sideways; ` +
           `${FLEET_KNOWN.length} itemised known row(s), every other cell judged`,
+        );
+      }
+    }
+
+    // ── W18: the FRONT SCREEN's instance card, which no leg above drives ────
+    //    See the note by CARD_WIDTHS. Element geometry on BOTH axes, on both
+    //    front-screen scenarios, because the horizontal score alone certifies
+    //    the trap.
+    if (requested.includes("W18-overview-card-pill")) {
+      const D = "W18-overview-card-pill";
+      const cellCount = CARD_SCENS.length * CARD_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${CARD_SCENS.length} scenarios x ${CARD_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells; .instance-card-head .status-pill-detail width, .status-pill height, detail bottom edge)\n`,
+      );
+      let cells = 0, pillsSeen = 0, clipped = 0, tall = 0, outside = 0, pageOver = 0;
+      for (const scen of CARD_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter wide and assert the landed view — `?scen=` alone does not
+          // route (see the W13 note), and a phantom table is worse than none.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#overview`,
+            `document.querySelector('.instance-card-head .status-pill-detail') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+          );
+          const row = [];
+          for (const width of CARD_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var d=document.documentElement;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,pills:0,clips:[],tall:[],out:[],h:[],att:[]};` +
+              `[].slice.call(document.querySelectorAll('.instance-card-head')).forEach(function(head,i){` +
+              `  var pill=head.querySelector('.status-pill'); if(!pill) return; out.pills++;` +
+              `  var pr=pill.getBoundingClientRect();` +
+              `  out.h.push(+pr.height.toFixed(2));` +
+              `  if(pill.scrollHeight>pill.clientHeight) out.tall.push({i:i,sh:pill.scrollHeight,ch:pill.clientHeight,t:(pill.textContent||'').slice(0,44)});` +
+              `  var det=head.querySelector('.status-pill-detail'); if(!det) return;` +
+              `  if(det.scrollWidth>det.clientWidth) out.clips.push({i:i,sw:det.scrollWidth,cw:det.clientWidth,t:(det.textContent||'').slice(0,48)});` +
+              `  var dr=det.getBoundingClientRect();` +
+              `  if(dr.bottom>pr.bottom+0.5) out.out.push({i:i,db:+dr.bottom.toFixed(2),pb:+pr.bottom.toFixed(2),t:(det.textContent||'').slice(0,48)});` +
+              `});` +
+              // REPORTED, NEVER ASSERTED: `.attention-row`'s pill is a DIFFERENT
+              // host in the SAME DOM, clipping in a DIFFERENT band (148/165 at
+              // 320, 117/165 at 769) and owned by task-802585b77fc136b1. It is
+              // printed so this slice's "we did not disturb it" is a number a
+              // reader can check, and it is NOT judged here — asserting another
+              // slice's open row would red this leg on merged main.
+              `[].slice.call(document.querySelectorAll('.attention-row .status-pill-detail')).forEach(function(e,i){` +
+              `  out.att.push(e.clientWidth+'/'+e.scrollWidth);});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-overview") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-overview" — the hash did not route, so nothing below this line measures the front screen`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty list is not a clean list. A front screen that
+            // stopped rendering instance-card pills would score zero findings.
+            if (m.pills === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero .instance-card-head .status-pill rendered — nothing was measured, this is not a pass`);
+              row.push(`${width}:0p`);
+              continue;
+            }
+            pillsSeen += m.pills;
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the front screen is off-screen sideways`);
+            }
+            for (const c of m.clips) {
+              clipped++;
+              fail(D, `${scen}/${theme}@${width} card${c.i} .instance-card-head .status-pill-detail: scrollWidth ${c.sw} > clientWidth ${c.cw} — ${Math.round((1 - c.cw / c.sw) * 100)}% of "${c.t}" is not rendered, so the front screen does not say WHY this instance is degraded`);
+            }
+            for (const t of m.tall) {
+              tall++;
+              fail(D, `${scen}/${theme}@${width} card${t.i} .instance-card-head .status-pill: ${t.sh}px of text in a ${t.ch}px chip — "${t.t}" paints BELOW the capsule. A wrap without \`height: auto\` scores clean on every scrollWidth metric and still puts the words outside the box.`);
+            }
+            for (const o of m.out) {
+              outside++;
+              fail(D, `${scen}/${theme}@${width} card${o.i} .instance-card-head .status-pill-detail: bottom ${o.db} is ${(o.db - o.pb).toFixed(2)}px BELOW the pill's bottom ${o.pb} — "${o.t}" is painted outside its own chip`);
+            }
+            const bad = m.clips.length + m.tall.length + m.out.length + (m.psw > m.pcw ? 1 : 0);
+            row.push(`${width}:${m.pills}p h${m.h.join(",")}${bad ? " !" + bad : ""}${m.att.length ? " [att " + m.att.join(" ") + "]" : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${pillsSeen} instance-card pills measured on BOTH axes) across ` +
+          `${CARD_WIDTHS.join("/")} on ${CARD_SCENS.join(" + ")}; ${clipped} truncated reasons, ` +
+          `${tall} chips shorter than their own text, ${outside} details painting below their pill, ` +
+          `${pageOver} pages scrolling sideways. Heights are printed (h…) per cell and pinned in the PR, ` +
+          `not here: the wrap boundary is a property of the fixture STRING`,
+        );
+        okLine(
+          `[att …] cells are \`.attention-row .status-pill-detail\` — a DIFFERENT host in the same DOM, ` +
+          `printed for comparison and deliberately NOT judged here (task-802585b77fc136b1 owns that band)`,
         );
       }
     }

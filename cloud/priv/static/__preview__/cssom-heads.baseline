@@ -261,4 +261,27 @@
 # MEASURED anyway, per D158 — never inferred from that argument: Chrome
 # 150.0.7871.187, node v22.22.0, authored rule heads 1252 == CSSOM style rules 1252,
 # flattened selectors 1218/1218, MISSES 0, PARITY PASS.
-1252
+# W18-S1 2026-08-01 (cch-w16-bl-attention-pill-detail-truncated-front-screen): 1252 ->
+# 1256, +4 authored rule heads, ALL ADDS under a WRAPPER selector —
+# `.instance-card-head` (a second, tail-authored head carrying only `flex-wrap: wrap`),
+# `.instance-card-head .status-pill`, `… .status-pill-dot`, `… .status-pill-detail`.
+# The pill's own four quarantined families at app.css:2913-2957 are byte-identical
+# (GR11/GR25 carve-out, D157 ADD-not-restyle, D198 wrapper ruling).
+# WHY FOUR AND NOT THREE, since a +3 variant exists and is cheaper: folding
+# `flex-wrap: wrap` into the EXISTING `.instance-card-head` at app.css:3064 edits an
+# existing declaration line and forfeits the old-length-zero `git diff -U0`
+# construction that proves :2913-2957 untouched WITHOUT anyone inspecting it. D198
+# refused the +3 on exactly that ground: the fourth head IS the carve-out proof's
+# price, not an oversight.
+# HOW 1256 WAS OBTAINED (D158, and no arithmetic — 1252 + 4 also equals 1256 and that
+# coincidence is NOT how this line may be produced): the sentinel `1` was written here
+# deliberately and cssom-parity.mjs run. It printed "BASELINE MISMATCH: 1256 authored
+# rule heads, sidecar baseline is 1 (+1255)" with MISSES 0 — the TOOL named the value,
+# and MISSES 0 is what makes this an unrecorded ADD rather than a parity defect.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 246573 B sha256 fc609a38467c…,
+# authored rule heads 1256 == CSSOM style rules 1256, MISSES 0, PARITY PASS.
+# FOR THE LEAD: this slice is the wave's SOLE holder of this file in round 1, so nothing
+# collides here today — but a round-2 or round-3 app.css slice will, and D158 stands:
+# re-run the tool on the MERGED tree and take what it prints. Never merge-resolve this
+# number, never add deltas.
+1256
