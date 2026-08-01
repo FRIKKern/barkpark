@@ -497,7 +497,12 @@ jobs:
         with:
           node-version: 22
 
-      - name: Overflow guard — all six defect legs in one browser run
+      # W18 REVIEW: the leg COUNT is deliberately not in this copy. Slice S1 of
+      # this same wave adds a seventh (`W18-overview-card-pill`), and a number
+      # baked into a step name is a sentence nothing re-derives — the disease
+      # this epic keeps curing. The guard prints its own leg roster on every
+      # run; read that, not this line.
+      - name: Overflow guard — every defect leg in one browser run
         env:
           CHROME: /usr/bin/google-chrome
         run: |
@@ -506,7 +511,7 @@ jobs:
           node cloud/priv/static/__preview__/overflow-guard.mjs || rc=$?
           case "$rc" in
             0)
-              echo "Overflow guard: all six legs measured clean in a real browser."
+              echo "Overflow guard: every leg it declared measured clean in a real browser (the roster is printed above)."
               ;;
             2)
               echo "::error title=Overflow guard REFUSED::The guard refused to measure (exit 2) — an ENVIRONMENT or COVERAGE fault, not a layout defect. NO claim is being made about any screen: nothing here says the console is clean and nothing here says it is broken. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the guard's port, a bring-up that outran SERVER_CAP, or a defect id the guard has no coverage for."
@@ -631,7 +636,7 @@ jobs:
           decide "console-unit"            "${R_UNIT}"    "${O_CONSOLE}"
           decide "cssom-parity"            "${R_CSSOM}"   "${O_CONSOLE}"
           decide "tier-floor-render"       "${R_TIER}"    "${O_CONSOLE}"
-          decide "overflow-guard"          "${R_OVERFLOW}" "${O_CONSOLE}"
+          decide "overflow-guard"          "${R_OVERFLOW}"  "${O_CONSOLE}"
 
           echo
           if [ "$bad" -ne 0 ]; then
