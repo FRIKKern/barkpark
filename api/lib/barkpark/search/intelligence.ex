@@ -13,6 +13,20 @@ defmodule Barkpark.Search.Intelligence do
   alias Barkpark.Search.{Crystal, Event, MergePattern, Sanitizer, Synonyms}
   alias Barkpark.Repo
 
+  @typedoc """
+  Why an interaction was not recorded. `:recording_disabled` is a deliberate
+  no-op; every other reason means a signal was lost, and callers are expected
+  to render the two differently.
+  """
+  @type interaction_skip_reason ::
+          :recording_disabled | :incomplete_reference | :unknown_query_event | :error
+
+  @typedoc """
+  Outcome of a correction signal. `:recorded` is the only value that means a
+  `correction` event reached the table.
+  """
+  @type correction_status :: :recorded | :recording_disabled | :blank | :identical | :error
+
   @popular_window_days 30
   @retention_days 90
   @default_limit 8
@@ -88,21 +102,35 @@ defmodule Barkpark.Search.Intelligence do
 
   @doc """
   Record a click or select interaction against a prior search event.
-  Returns `{:ok, event_id}` or `:skipped`. Never raises.
+
+  Returns `{:ok, event_id}` when a row was written, otherwise `{:skipped, reason}`.
+  The reason is the whole point: a caller must be able to tell a recorder that was
+  deliberately switched off from one that lost the write.
+
+    * `:recording_disabled` — recording is off for this request. A deliberate
+      no-op; nothing was lost.
+    * `:incomplete_reference` — the request carried no usable `query_event_id`
+      or `object_id`. A bad request, not a server fault.
+    * `:unknown_query_event` — the referenced search event does not exist for
+      this surface/scope, so the interaction has no parent to hang off.
+    * `:error` — an exception or exit was swallowed on the way to the insert
+      (a failed insert arrives here as a `MatchError`). A real failure.
+
+  Never raises — analytics must not break search.
   """
   @spec record_interaction(String.t(), String.t(), map(), keyword()) ::
-          {:ok, Ecto.UUID.t()} | :skipped
+          {:ok, Ecto.UUID.t()} | {:skipped, interaction_skip_reason()}
   def record_interaction(surface, scope, attrs, opts \\ [])
       when is_binary(surface) and is_binary(scope) and is_map(attrs) do
     if Keyword.get(opts, :disabled, false) do
-      :skipped
+      {:skipped, :recording_disabled}
     else
       safe_record_interaction(surface, scope, attrs, opts)
     end
   rescue
-    _ -> :skipped
+    _ -> {:skipped, :error}
   catch
-    _, _ -> :skipped
+    _, _ -> {:skipped, :error}
   end
 
   @doc """
@@ -315,9 +343,9 @@ defmodule Barkpark.Search.Intelligence do
   defp safe_record_interaction(surface, scope, attrs, opts) do
     do_record_interaction(surface, scope, attrs, opts)
   rescue
-    _ -> :skipped
+    _ -> {:skipped, :error}
   catch
-    _, _ -> :skipped
+    _, _ -> {:skipped, :error}
   end
 
   defp do_record_interaction(surface, scope, attrs, opts) do
@@ -327,7 +355,7 @@ defmodule Barkpark.Search.Intelligence do
     position = interaction_position(attrs)
 
     if is_nil(query_event_id) or object_id in [nil, ""] do
-      :skipped
+      {:skipped, :incomplete_reference}
     else
       case Repo.get(Event, query_event_id) do
         %Event{surface: ^surface, scope: ^scope, event_type: "search"} = search ->
@@ -359,7 +387,7 @@ defmodule Barkpark.Search.Intelligence do
           {:ok, event.id}
 
         _ ->
-          :skipped
+          {:skipped, :unknown_query_event}
       end
     end
   end
@@ -381,32 +409,52 @@ defmodule Barkpark.Search.Intelligence do
        `Synonyms.promote/4` (`source: "auto"`); a unique-constraint conflict is
        treated as "already exists".
 
-  Returns `{:ok, %{promoted: boolean, distinct_sessions: non_neg_integer}}`.
+  Returns `{:ok, %{status: status, promoted: boolean, distinct_sessions: non_neg_integer}}`.
+
+  `promoted: false, distinct_sessions: 0` is returned by four causally different
+  outcomes, so `status:` is what tells them apart:
+
+    * `:recorded` — a `correction` event was written.
+    * `:recording_disabled` — recording is off for this request (a no-op).
+    * `:blank` — `from` or `to` normalized to an empty string.
+    * `:identical` — `from` and `to` normalized to the same string.
+    * `:error` — an exception or exit was swallowed. The signal was lost.
+
   Never raises — wraps insert + promote so a correction signal can't break the
   request.
   """
   @spec record_correction(String.t(), String.t(), map(), keyword()) ::
-          {:ok, %{promoted: boolean(), distinct_sessions: non_neg_integer()}}
+          {:ok,
+           %{
+             status: correction_status(),
+             promoted: boolean(),
+             distinct_sessions: non_neg_integer()
+           }}
   def record_correction(surface, scope, attrs, opts \\ [])
       when is_binary(surface) and is_binary(scope) and is_map(attrs) do
     if Keyword.get(opts, :disabled, false) do
-      {:ok, %{promoted: false, distinct_sessions: 0}}
+      {:ok, correction_result(:recording_disabled)}
     else
       safe_record_correction(surface, scope, attrs, opts)
     end
   rescue
-    _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+    _ -> {:ok, correction_result(:error)}
   catch
-    _, _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+    _, _ -> {:ok, correction_result(:error)}
   end
 
   defp safe_record_correction(surface, scope, attrs, opts) do
     do_record_correction(surface, scope, attrs, opts)
   rescue
-    _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+    _ -> {:ok, correction_result(:error)}
   catch
-    _, _ -> {:ok, %{promoted: false, distinct_sessions: 0}}
+    _, _ -> {:ok, correction_result(:error)}
   end
+
+  # Every non-recorded correction outcome carries the same counters; only the
+  # status separates a deliberate no-op from a lost signal.
+  defp correction_result(status),
+    do: %{status: status, promoted: false, distinct_sessions: 0}
 
   defp do_record_correction(surface, scope, attrs, opts) do
     from_raw = correction_string(attrs, :from, "from")
@@ -418,10 +466,10 @@ defmodule Barkpark.Search.Intelligence do
 
     cond do
       from_norm == "" or to_norm == "" ->
-        {:ok, %{promoted: false, distinct_sessions: 0}}
+        {:ok, correction_result(:blank)}
 
       from_norm == to_norm ->
-        {:ok, %{promoted: false, distinct_sessions: 0}}
+        {:ok, correction_result(:identical)}
 
       true ->
         _ =
@@ -450,7 +498,7 @@ defmodule Barkpark.Search.Intelligence do
             not synonym_exists?(surface, scope, from_norm, to_norm, workspace_id) and
             promote_correction(surface, scope, from_norm, to_norm, workspace_id)
 
-        {:ok, %{promoted: promoted, distinct_sessions: distinct}}
+        {:ok, %{status: :recorded, promoted: promoted, distinct_sessions: distinct}}
     end
   end
 

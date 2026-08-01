@@ -329,9 +329,22 @@ defmodule BarkparkWeb.SearchController do
       workspace_id: workspace_id(conn)
     ]
 
+    # `recorded:` is the post-condition the caller actually asked about. A
+    # switched-off recorder is a deliberate no-op and keeps its honest 200; a
+    # lost write says so, with a status to match.
     case SearchIntelligence.record_interaction(dataset, params, record_opts) do
-      {:ok, id} -> json(conn, %{ok: true, interactionEventId: id})
-      _ -> json(conn, %{ok: true})
+      {:ok, id} ->
+        json(conn, %{ok: true, recorded: true, interactionEventId: id})
+
+      {:skipped, :recording_disabled} ->
+        json(conn, %{ok: true, recorded: false, reason: "recording_disabled"})
+
+      {:skipped, reason} ->
+        status = if reason == :error, do: :internal_server_error, else: :unprocessable_entity
+
+        conn
+        |> put_status(status)
+        |> json(%{ok: false, recorded: false, reason: Atom.to_string(reason)})
     end
   end
 
