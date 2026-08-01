@@ -64,8 +64,34 @@ defmodule Barkpark.AccountsTest do
       assert %User{id: id} = Accounts.verify_user_session_token(token)
       assert id == user.id
 
-      :ok = Accounts.revoke_user_session_token(token)
+      assert {:ok, 1} = Accounts.revoke_user_session_token(token)
       assert is_nil(Accounts.verify_user_session_token(token))
+    end
+
+    # PDS-D523: the revoke used to hardcode `:ok` over `Repo.update_all`, so the
+    # count died at the source and no caller could tell a live session's death
+    # from a no-op. The count now reaches the caller, and the stored row is what
+    # proves it — the assertion reads `revoked_at` back through Repo rather than
+    # trusting the return value it is checking.
+    test "revoke_user_session_token returns the rows it actually stamped, and 0 the second time" do
+      user = user_fixture()
+      {:ok, token} = Accounts.create_user_session_token(user)
+
+      assert {:ok, 1} = Accounts.revoke_user_session_token(token)
+
+      row = Repo.one(from s in UserSession, where: s.user_id == ^user.id)
+      refute is_nil(row.revoked_at)
+
+      # Idempotent, not an error: nothing left to revoke answers 0, and the
+      # already-stamped row is not re-stamped.
+      first_revoked_at = row.revoked_at
+      assert {:ok, 0} = Accounts.revoke_user_session_token(token)
+
+      assert Repo.one(from s in UserSession, where: s.user_id == ^user.id).revoked_at ==
+               first_revoked_at
+
+      # An unknown token was never a live session: 0, never a raise.
+      assert {:ok, 0} = Accounts.revoke_user_session_token("no-such-session-token")
     end
 
     test "only the SHA-256 hash is stored, never the plaintext" do

@@ -405,19 +405,29 @@ defmodule BarkparkWeb.SessionController do
     # Revoke the account session server-side (not just the cookie) — parity
     # with DELETE /v1/auth/logout; the API-token session key needs no
     # revocation (dropping the cookie is the whole grant).
-    case get_session(conn, "user_session") do
-      token when is_binary(token) and token != "" ->
-        Barkpark.Accounts.revoke_user_session_token(token)
+    revoked =
+      case get_session(conn, "user_session") do
+        token when is_binary(token) and token != "" ->
+          {:ok, n} = Barkpark.Accounts.revoke_user_session_token(token)
+          n
 
-      _ ->
-        :ok
-    end
+        _ ->
+          0
+      end
 
     conn
     |> configure_session(drop: true)
-    |> put_flash(:info, "Signed out.")
+    |> put_flash(:info, sign_out_flash(revoked))
     |> redirect(to: "/studio")
   end
+
+  # The receipt names what actually happened instead of asserting it. Both are
+  # successes — the cookie is dropped either way, so a benign double sign-out is
+  # never an error — but "a live session was revoked" and "there was nothing
+  # left to revoke" no longer arrive at the user as the same sentence over a
+  # count nobody read (PDS-D523).
+  defp sign_out_flash(0), do: "You were already signed out."
+  defp sign_out_flash(_revoked), do: "Signed out."
 
   # Harden the one-time-link response: never cached/stored, and the ticket URL
   # is never leaked onward as a Referer.

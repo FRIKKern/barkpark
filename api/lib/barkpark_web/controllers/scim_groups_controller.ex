@@ -135,8 +135,20 @@ defmodule BarkparkWeb.ScimGroupsController do
 
       group ->
         with_precondition(conn, group, fn conn ->
-          Scim.delete_group(org, group)
-          send_resp(conn, 204, "")
+          # 204 is a claim about the stored row, so it is answered over the
+          # delete's own outcome — never over a discarded count. A bare
+          # `{:ok, _} =` would be vacuous here: `{:ok, 0}` matches it, which is
+          # exactly the "removed nothing" case 204 must not cover (PDS-D523).
+          case Scim.delete_group(org, group) do
+            {:ok, _n} ->
+              send_resp(conn, 204, "")
+
+            # The row is gone (or never belonged to this org) between the
+            # org-scoped read above and this write — same answer the read
+            # itself gives for an id this org cannot see.
+            {:error, :not_found} ->
+              ScimResponse.error(conn, 404, "group not found in this organization")
+          end
         end)
     end
   end
