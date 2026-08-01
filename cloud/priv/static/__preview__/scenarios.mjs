@@ -97,7 +97,22 @@ const liveInstance = bpBase({
   id: IDS.liveInstance,
   name: "Production",
   slug: "production",
-  url: "production-5b2c1e.barkpark.cloud",
+  // cch-w18-s4 — `url` CARRIES ITS SCHEME, because the column does. The server
+  // writes this field as `"https://" <> provisioning_fqdn` at go-live
+  // (registry/barkpark.ex `provisioning_url/1`, and `clean_url/1` the same way),
+  // so a bare host here was never the envelope — it was a fixture that could not
+  // be told apart from one until somebody read the RESOLVED href.
+  // WHAT THE BARE HOST DID, DRIVEN (not a code reading): `siteLiveUrl` returns
+  // `bp.url` verbatim and `siteOpenLink` drops it into `href`, so every one of
+  // the four "Visit ↗" doors on `?scen=sites#sites` and on the instance Sites
+  // card emitted `href="production-5b2c1e.barkpark.cloud/sites/acme-web/"` — a
+  // RELATIVE reference, which the browser resolved against the page: measured
+  // `.href` = `http://localhost:4271/production-5b2c1e.barkpark.cloud/sites/
+  // acme-web/`, 4 of 4 doors on THE CONSOLE'S OWN ORIGIN. A person clicking
+  // "Open the live site" did not reach the site; they reached a 404 on the
+  // console. `host` below stays bare — it IS a hostname, and it is rendered as
+  // text, never as an href.
+  url: "https://production-5b2c1e.barkpark.cloud",
   host: "production-5b2c1e.barkpark.cloud",
   health_status: "up",
   agent_status: "online",
@@ -115,7 +130,8 @@ const behindInstance = bpBase({
   id: IDS.behindInstance,
   name: "Staging",
   slug: "staging",
-  url: "staging-5b2c1e.barkpark.cloud",
+  // cch-w18-s4: schemed, same reason as liveInstance above.
+  url: "https://staging-5b2c1e.barkpark.cloud",
   host: "staging-5b2c1e.barkpark.cloud",
   health_status: "up",
   agent_status: "online",
@@ -192,7 +208,8 @@ const suspendedInstance = bpBase({
   id: IDS.suspendedInstance,
   name: "Marketing",
   slug: "marketing",
-  url: "marketing-5b2c1e.barkpark.cloud",
+  // cch-w18-s4: schemed, same reason as liveInstance above.
+  url: "https://marketing-5b2c1e.barkpark.cloud",
   host: "marketing-5b2c1e.barkpark.cloud",
   health_status: "up",
   agent_status: "online",

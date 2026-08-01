@@ -25,7 +25,7 @@
 //             height-bearing @media, so the derived refusal refuses nothing
 //             today and legA's own output says so. The declared HEIGHTS set
 //             carries a written reason per value.
-//   SCENARIO  99 scenarios, 25 rendered, 74 in a COMMITTED residue literal.
+//   SCENARIO  100 scenarios, 25 rendered, 75 in a COMMITTED residue literal.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  WHY THIS EXISTS (cch wave 14, slice S1)
@@ -350,8 +350,8 @@ export function familyOf(scen) {
 }
 
 // The 13 families the residue falls into, each with the reason Leg B does not
-// render it. These are REASONS, not an allowlist: the allowlist is the 74
-// name-keyed entries below, which is what makes a 100th scenario refusable.
+// render it. These are REASONS, not an allowlist: the allowlist is the 75
+// name-keyed entries below, which is what makes a 101st scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
   "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 21 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 9 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity — over a grid already walked at all 15 widths.",
@@ -368,22 +368,30 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
 };
 
-// THE RESIDUE — 74 scenarios that exist and are NOT rendered by any cell,
+// THE RESIDUE — 75 scenarios that exist and are NOT rendered by any cell,
 // COMMITTED AS A LITERAL, name-keyed to the family that explains them.
 //
 // WHY A COMMITTED LITERAL AND NOT A COMPUTED ONE (charter D180). An allowlist
 // derived from the current residue is green under EVERY mutation, because it
 // grows with the artifact and can never refuse anything: it looks itemised, it
-// is even "artifact-derived", and it is 100% vacuous. Typed out, a 100th
+// is even "artifact-derived", and it is 100% vacuous. Typed out, a 101st
 // scenario has nowhere to hide.
 // WHY NAME-KEYED AND NOT FAMILY-KEYED. A 13-entry family list fails 3 of 4
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 21-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 99 scenarios · 26 cells over 25 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 74 · 13 families.
-// `familyOf` over all 99 gives 15; the two with ZERO residue are `hash:#sites`
-// and `hash:#activity`. 74 is the RESIDUE, not the census.
+// THE CENSUS THIS RECONCILES AGAINST: 100 scenarios · 26 cells over 25 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 75 · 13 families.
+// `familyOf` over all 100 gives 15; the two with ZERO residue are `hash:#sites`
+// and `hash:#activity`. 75 is the RESIDUE, not the census.
+// EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED (cch-w18-s4, D213):
+// `scenarioReport({ scenarios: SCENARIOS })` prints
+// {total:100, cells:26, distinctCovered:25, residue:75, families:13, ok:true},
+// `Object.keys(SCENARIO_RESIDUE).length` is 75 and `familyOf` over all 100
+// gives 15. The prose said 99/74 while the literal below already held 75 —
+// #8849's `sites-on-instance` moved the census and only the TEST literals
+// (breakpoint-sweep.test.mjs:516-522) were updated. A census that two files
+// spell differently is the staleness this file exists to make fatal.
 // STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
 // longer exists, or one that has since gained a cell, exits 2.
 export const SCENARIO_RESIDUE = {
