@@ -3847,11 +3847,74 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 12px;
   color: var(--muted-text);
 }
+/* THE RESURRECT CLUSTER TOOK ITS OWN WIDTH AND PUSHED THE PAGE (cch-w15-s2,
+   corrected diagnosis of cch-w14-bl-fleet-archives-band-721).
+   `flex: 0 0 auto` laid a 460.2px cluster (Resurrect button + the CLI chip)
+   into a 286px row content box, so the PAGE scrolled sideways — measured on
+   the two-row fixture at 171px @320, 116 @375, 101 @390, 0 at 500-719 and
+   10 @721: TWO DISJOINT BANDS, of which the sweep's boundary walk (floor 619)
+   can only ever see the second. The chip itself was never the defect — it
+   reported scrollWidth 337 == clientWidth 337 at every width.
+   IT IS FIXTURE-BOUND. The command is
+   `bp cloud instance resurrect <slug> --provider <kind>` and the registry caps
+   a slug at 63 chars, so the product maximum is a 110-char / 726px chip: on the
+   unfixed rule that is 561px of page overflow at 320 and the band reaches to
+   ~1121px. The fix is proven at the MAXIMUM, not at the 4-char fixture slug.
+   WHY NOT `min-width: 0` ALONE. `.cli-chip-code` already carries
+   overflow:hidden + text-overflow:ellipsis, so one `min-width: 0` takes page
+   overflow to 0 everywhere — and ellipses 35% of the command at 320 and 70% at
+   a max slug, with the cut landing INSIDE THE SLUG, the one variable an
+   operator has to read. A green sweep over a truncated shell command is the
+   failure this epic exists to prevent, so the command stays WHOLE and becomes
+   SCROLLABLE instead. (Copy was never at risk: `.copy-btn[data-copy]` carries
+   the full string verbatim whatever paints.)
+   WRAP FIRST, THEN SCROLL. `flex-basis: 100%` gives the cluster its own line
+   inside the already-wrapping `.archive-row`, and its own `flex-wrap` lets the
+   chip drop below the button on a phone. That alone is NOT enough (86/31/16px
+   residual at 320/375/390), so the chip is additionally bounded and scrollable.
+   Accepted cost: ~34px of row height per archived row at >= 390. */
 .archive-resurrect {
-  flex: 0 0 auto;
+  flex: 0 1 100%;
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
+  min-width: 0;
+}
+/* SCOPED ON PURPOSE — `.cli-chip` is shared (the webhook chips use it, and
+   `.cli-card .inst-life-cli .cli-chip` already overrides it). An unscoped chip
+   rule would blast every other surface that ships one. */
+.archive-resurrect .cli-chip {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+}
+.archive-resurrect .cli-chip-code {
+  min-width: 0;
+  max-width: 100%;
+  overflow-x: auto;
+  /* `clip`, not the inherited `ellipsis`: an ellipsis on a scroller is a lie —
+     it says "the rest is gone" where the rest is one swipe away. */
+  text-overflow: clip;
+  -webkit-mask-image: linear-gradient(to right, currentColor calc(100% - var(--archive-cli-fade)), transparent);
+  mask-image: linear-gradient(to right, currentColor calc(100% - var(--archive-cli-fade)), transparent);
+  /* TWO-STATE BY CONSTRUCTION, the `.set-matrix` idiom. The fade is
+     scroll-driven, so with nothing to scroll the timeline is INACTIVE and the
+     property keeps its 0px initial value — the edge only promises more when
+     there IS more. An unconditional cue would be a lie at >= 721, where the
+     chip fits whole, and the sweep's own Q2 CUE_STUCK class would say so. */
+  animation-name: archive-cli-edge-fade;
+  animation-duration: auto;
+  animation-timing-function: linear;
+  animation-fill-mode: both;
+  animation-timeline: scroll(self inline);
+}
+/* Registered so the length INTERPOLATES rather than jumping at the end of the
+   scroll; `inherits: false` so no descendant reports a cue it does not own. */
+@property --archive-cli-fade { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@keyframes archive-cli-edge-fade {
+  from { --archive-cli-fade: 32px; }
+  to { --archive-cli-fade: 0px; }
 }
 .archive-resurrect-btn {
   flex: 0 0 auto;
