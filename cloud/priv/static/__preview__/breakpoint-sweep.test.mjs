@@ -22,9 +22,13 @@ import { fileURLToPath } from "node:url";
 import {
   stripCssComments, boundaryOf, parseWidthClause, parseMediaBreakpoints,
   parseViewIds, boundaryWalk, coverageReport, selectCells,
+  parseHeightClause, parseThemeMembers, accentIdentities, axisCoverage,
+  familyOf, scenarioReport,
   BREAKPOINTS, WIDTHS, CELLS, COVERED_VIEWS, FOLD_FRACTION,
-  HIDING_UTILITIES,
+  HIDING_UTILITIES, THEMES, HEIGHTS, HEIGHT_REASONS, RENDER_HEIGHT,
+  SCENARIO_RESIDUE, RESIDUE_FAMILY_REASONS,
 } from "./breakpoint-sweep.mjs";
+import { SCENARIOS, SCENARIO_NAMES } from "./scenarios.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, "..");
@@ -338,4 +342,198 @@ test("hiding utilities are ENUMERATED, so a class merely containing 'hidden' is 
   assert.ok(HIDING_UTILITIES.includes("visually-hidden"));
   assert.ok(!HIDING_UTILITIES.includes("is-hidden-until-hover"));
   assert.equal(HIDING_UTILITIES.some((u) => u.includes("*")), false, "no globs — a regex is what over-skips");
+});
+
+// ── the HEIGHT axis, both halves ─────────────────────────────────────────────
+//
+// The derived half is VACUOUSLY GREEN on today's app.css — it refuses nothing,
+// because there is nothing to refuse. Two things follow, and both are pinned
+// here: the vacuity must be TRUE (zero height-bearing @media, not "the parser
+// missed them"), and the refusal must fire the moment one appears.
+
+test("the height half of a prelude is no longer eaten by the width half", () => {
+  // THE DEFECT, RESTATED AS A TEST. `(max-width: 720px) and (max-height: 400px)`
+  // used to lose its height clause with NO unresolved entry: the width eater
+  // consumed the only `width` token before the residue check, and the parser
+  // was never asked about height at all.
+  const clause = "(max-width: 720px) and (max-height: 400px)";
+  assert.deepEqual(parseWidthClause(clause).boundaries, [720]);
+  assert.deepEqual(parseWidthClause(clause).unresolved, []);
+  assert.deepEqual(parseHeightClause(clause).boundaries, [400], "the height half must survive the width pass");
+  const r = parseMediaBreakpoints(`@media ${clause} {.a{b:c}}`);
+  assert.deepEqual(r.breakpoints, [720]);
+  assert.deepEqual(r.heights, [400]);
+});
+
+test("a height query is not a width query, and vice versa", () => {
+  assert.deepEqual(parseHeightClause("(max-width: 812px)").boundaries, []);
+  assert.deepEqual(parseHeightClause("(max-width: 812px)").unresolved, []);
+  assert.deepEqual(parseWidthClause("(max-height: 600px)").boundaries, []);
+  assert.deepEqual(parseHeightClause("(max-height: 600px)").boundaries, [600]);
+  assert.deepEqual(parseHeightClause("(height <= 600px)").boundaries, [600]);
+});
+
+test("an UNREADABLE height is REFUSED too, on the same terms as a width", () => {
+  const r = parseMediaBreakpoints("@media (max-height: 40rem){.a{b:c}}");
+  assert.deepEqual(r.heights, []);
+  assert.equal(r.heightUnresolved.length, 1);
+});
+
+test("THE VACUITY IS REAL: app.css declares ZERO height-bearing @media today", () => {
+  // If this ever stops being true the derived refusal stops being vacuous, and
+  // the header line that SAYS it is vacuous has to change with it.
+  const r = parseMediaBreakpoints(APP_CSS);
+  assert.deepEqual(r.heights, [], "a height-bearing @media appeared — legA's 'VACUOUSLY GREEN' line is now a lie");
+  assert.deepEqual(r.heightUnresolved, []);
+});
+
+test("a height-bearing @media the declared set does not carry is REFUSED by value", () => {
+  const r = coverageReport({ css: APP_CSS + "\n@media (max-height: 600px){.p{c:r}}", html: INDEX_HTML });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.heights.uncovered, [600]);
+  // and a height the set DOES carry is fine — the refusal is about coverage,
+  // not about the mere existence of a height query
+  assert.equal(coverageReport({ css: APP_CSS + "\n@media (max-height: 390px){.p{c:r}}", html: INDEX_HTML }).heights.uncovered.length, 0);
+});
+
+test("every declared HEIGHT carries a written reason, landscape 390 among them", () => {
+  for (const h of HEIGHTS) {
+    assert.ok(HEIGHT_REASONS[h] && HEIGHT_REASONS[h].length > 40, `height ${h} needs a written reason, not a number`);
+  }
+  assert.ok(HEIGHTS.includes(390), "390 is the BINDING height for the fold bar — a set without it cannot see the defect it was built for");
+  assert.ok(HEIGHTS.includes(RENDER_HEIGHT), "the height Leg B actually renders at must be a member of the declared axis");
+  assert.equal(Object.keys(HEIGHT_REASONS).length, HEIGHTS.length, "a reason for a height that is not declared is rot");
+});
+
+// ── the THEME axis, and the trap that would red it on day one ────────────────
+
+test("the theme census is exactly 2, read from BOTH artifacts", () => {
+  const members = parseThemeMembers(APP_CSS, INDEX_HTML);
+  assert.deepEqual(members, ["dark", "light"]);
+  assert.deepEqual(members, THEMES);
+  // `light` is declared ONLY in the shell — app.css has no light selector — so
+  // a CSS-only derivation would report a ONE-member axis and drive half of it.
+  assert.deepEqual(parseThemeMembers(APP_CSS, "<html></html>"), ["dark"]);
+});
+
+test("THE DAY-ONE TRAP: data-bp-theme identity is NOT the theme axis", () => {
+  // The console carries a second, orthogonal switch with FIVE values. A
+  // derivation written as "any data-*theme* selector" derives SEVEN members and
+  // reds on an untouched tree. This assertion is what stops that rewrite.
+  const accents = accentIdentities(APP_CSS);
+  assert.deepEqual(accents, ["charple", "ember", "evergreen", "fjord", "iris"]);
+  for (const a of accents) {
+    assert.ok(!parseThemeMembers(APP_CSS, INDEX_HTML).includes(a), `accent identity ${a} must not leak into the theme axis`);
+  }
+  // index.html's root carries BOTH attributes; only data-theme is a theme
+  assert.deepEqual(parseThemeMembers("", '<html data-theme="light" data-bp-theme="evergreen">'), ["light"]);
+});
+
+test("the theme axis refuses in BOTH directions", () => {
+  const added = coverageReport({ css: APP_CSS + '\n[data-theme="sepia"] .p{c:r}', html: INDEX_HTML });
+  assert.equal(added.ok, false);
+  assert.deepEqual(added.themes.uncovered, ["sepia"]);
+  // removed: `light` lives only in the shell, so dropping it there is the whole
+  // mutation — and it is why the sweep grew a BREAKPOINT_SWEEP_HTML seam
+  const dropped = coverageReport({ css: APP_CSS, html: INDEX_HTML.replace(' data-theme="light"', "") });
+  assert.equal(dropped.ok, false);
+  assert.deepEqual(dropped.themes.phantom, ["light"]);
+});
+
+// ── axisCoverage, and the removed-breakpoint hole it pays ────────────────────
+
+test("axisCoverage names both directions and is empty on an agreeing pair", () => {
+  assert.deepEqual(axisCoverage([1, 2], [1, 2]), { uncovered: [], phantom: [] });
+  assert.deepEqual(axisCoverage([1, 2, 3], [1, 2]).uncovered, [3]);
+  assert.deepEqual(axisCoverage([1], [1, 2]).phantom, [2]);
+});
+
+test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-cannot-refuse-removed-breakpoint named", () => {
+  // Before this, the sweep kept driving 899/900/901 against a rule that no
+  // longer existed and printed an impossible "4 breakpoints -> 13 boundary
+  // widths" under a green tick.
+  const css = APP_CSS.replace(/max-width: 900px/g, "max-width: 768px").replace(/min-width: 900px/g, "min-width: 769px");
+  const r = coverageReport({ css, html: INDEX_HTML });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.phantomBreakpoints, [900]);
+  assert.deepEqual(r.breakpoints, [620, 720, 768, 899], "the mutation really did remove it — otherwise the refusal above is vacuous");
+  // and the unmutated tree is clean, so this is the mutation talking
+  assert.deepEqual(coverageReport({ css: APP_CSS, html: INDEX_HTML }).phantomBreakpoints, []);
+});
+
+// ── the SCENARIO axis: a committed literal that can actually lose ────────────
+
+test("the census reconciles: 99 scenarios, 25 distinct covered by 26 cells, 74 residue over 13 families", () => {
+  const r = scenarioReport({ scenarios: SCENARIOS });
+  assert.equal(r.total, SCENARIO_NAMES.length);
+  assert.equal(r.total, 99);
+  assert.equal(r.cells, 26);
+  assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
+  assert.equal(r.residue, 74, "74 is the RESIDUE, not the census");
+  assert.equal(r.families, 13);
+  assert.equal(r.ok, true);
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 74, "the COMMITTED literal, counted from the committed bytes");
+});
+
+test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
+  assert.equal(familyOf({ pathname: "/activate", deepLink: "#overview" }), "path:/activate");
+  assert.equal(familyOf({ deepLink: "#instance/abc/timeline" }), "hash:#instance");
+  assert.equal(familyOf({ deepLink: "#/invitations/accept?token=x" }), "hash:#");
+  assert.equal(familyOf({}), "no-deeplink");
+  // and every committed entry still agrees with the artifact it describes
+  for (const [name, family] of Object.entries(SCENARIO_RESIDUE)) {
+    assert.equal(familyOf(SCENARIOS[name]), family, `residue entry ${name} records ${family}`);
+  }
+});
+
+test("every residue family has a written reason, and no reason outlives its family", () => {
+  const used = new Set(Object.values(SCENARIO_RESIDUE));
+  assert.equal(used.size, 13);
+  for (const f of used) assert.ok(RESIDUE_FAMILY_REASONS[f] && RESIDUE_FAMILY_REASONS[f].length > 60, `family ${f} needs a written reason`);
+  assert.deepEqual(Object.keys(RESIDUE_FAMILY_REASONS).filter((f) => !used.has(f)), []);
+});
+
+test("A 100th SCENARIO IS REFUSED BY NAME — and a self-derived allowlist would not have", () => {
+  const grown = { ...SCENARIOS, "probe-hundredth": { label: "probe", deepLink: "#fleet", data: {} } };
+  const r = scenarioReport({ scenarios: grown });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.unlisted, ["probe-hundredth"]);
+  // THE VACUITY, DEMONSTRATED RATHER THAN ASSERTED: an allowlist computed from
+  // the current residue absorbs this mutation silently, because it grows with
+  // the artifact. That is why the 74 entries are typed out.
+  const selfDerived = Object.fromEntries(
+    Object.keys(grown).filter((n) => !CELLS.some((c) => c.scen === n)).map((n) => [n, familyOf(grown[n])]));
+  assert.equal(scenarioReport({ scenarios: grown, residue: selfDerived }).unlisted.length, 0,
+    "a computed allowlist can never refuse anything — it looks itemised and is 100% vacuous");
+});
+
+test("STALENESS IS FATAL: an entry naming a deleted scenario refuses, never logs", () => {
+  const shrunk = { ...SCENARIOS };
+  delete shrunk["fleet-v4"];
+  const r = scenarioReport({ scenarios: shrunk });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.stale, ["fleet-v4"]);
+});
+
+test("a residue scenario that GAINS a cell refuses — the entry's reason has expired", () => {
+  const cells = [...CELLS, { name: "probe-v4", scen: "fleet-v4", hash: "#fleet", view: "view-fleet", sentinel: ".fleet-row" }];
+  const r = scenarioReport({ scenarios: SCENARIOS, cells });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.promoted, ["fleet-v4"]);
+});
+
+test("a residue entry whose route MOVED refuses — its reason is about a different screen now", () => {
+  const moved = { ...SCENARIOS, "fleet-v4": { ...SCENARIOS["fleet-v4"], deepLink: "#operator" } };
+  const r = scenarioReport({ scenarios: moved });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.drift, [{ name: "fleet-v4", was: "hash:#fleet", now: "hash:#operator" }]);
+});
+
+test("a cell pointed at a scenario that no longer exists refuses", () => {
+  const r = scenarioReport({
+    scenarios: SCENARIOS,
+    cells: [...CELLS, { name: "probe", scen: "not-a-scenario", hash: "#fleet", view: "view-fleet", sentinel: ".fleet-row" }],
+  });
+  assert.equal(r.ok, false);
+  assert.deepEqual(r.phantomCells, ["not-a-scenario"]);
 });
