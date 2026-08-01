@@ -2576,6 +2576,90 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 35 2026-08-01 — "Finish the lens, then spend the judgment" — REVIEWED. Grade A− (paper `pds-wave-35-2026-08-01`)
+
+**THREE ROUND-1 SLICES BUILT, THREE GREEN, THREE PUSHED WITH PRs OPEN.** Four round-≥2 slices were
+deferred BY DESIGN under the sequenced-rounds law — `scripts/pds-elixir-receipt-census.exs` is the
+serial spine and four slices want it — and are untouched and open on the ledger. Every gate was
+re-run by the reviewer on the final state.
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w34-unreachable-error-positive-arm` | `…-unreachable-erro-0-r` | #8884 | UNREACHABLE-ERROR, a guardless fall-through reading 26, becomes a positive CATCH-ALL-TO-SUCCESS arm firing on exactly 3; a five-row `declared` register ships as committed data; three stale-prose sites now DERIVE |
+| `pds-w34-declared-basis-literals-need-constants` | `…-hetzner-destroy-bases-b-1` | #8885 | the two declared Hetzner destroy bases become named constants beside their verbs; the literal rejection extends to EVERY emitter; leg 1 stops self-comparing |
+| `pds-w34-ledger-background-write-arms` | `…-background-write-arms-broadcast-2` | #8886 | the five background write arms broadcast the STORED row; the leak was TWO fields of one message, and the new differential asserts both |
+
+**PDS-D493 — THE LENS NO LONGER ACCUSES ITS OWN CONTROL, AND UNCLASSIFIED IS 74 @ WIDE HEAD,
+CONTAINMENT, DEPTH 6, `b266a1a5e`.** The shipped arm fires on exactly `search_controller.ex:334`,
+`v1/media_controller.ex:225` and `github_webhook_controller.ex:87`; the honest siblings `:333` and
+`:224` print UNCLASSIFIED; `classified 17 + unclassified 74 == emitted 91`, CENSUS OK, exit 0. The
+denominator the register must spend is **74**, not the wish's 59 and not the owning doc's 47.
+`auth_controller.ex:417` is exonerated by construction, exactly as PDS-D476c predicted.
+
+**PDS-D493a — TWO OF THE BRIEF'S MUTATION INTEGERS DO NOT REPRODUCE, AND THE BUILDER STAMPED THEM
+AS MISSES RATHER THAN FLIPPING THEM.** Relaxing containment to `List.first()` takes the arm 3→**6**,
+not 3→5: it adds `search:333` and `media:224` as predicted, PLUS `github_webhook:86`, which lives in
+the same `receive/2` body as the `_other` clause and is reachable by ANY containment-free variant.
+Dropping BOTH `renders_ok_true?` and containment fires on **13**, not 11 — and DOES re-accuse
+`auth_controller.ex:417`, so the load-bearing claim stands while the integer does not. Both criteria
+remain open with `--miss` notes carrying the refuting rolls. **This is the behaviour the epic wants:
+a builder whose own measurement refutes the brief does not flip the lock.**
+
+**PDS-D493b — THE CARRIER COUNT IS 25 AST / 28 TEXTUAL, AND PDS-D488'S "26-or-28" IS ALSO WRONG.**
+The census now prints both readings live and types neither. The strict reading is one LOWER than the
+charter's own correction of the doc's error — a number corrected twice and still wrong until it was
+derived. The round-2 owning-doc amendment inherits this: it may not type 26.
+
+**PDS-D494 — THE REVIEWER RULES ON THE GATE: PDS-D482 STANDS, THE GATE IS IN, AND IT STILL LANDS
+LAST.** Wave 34's stated objection was "a gate over a lens with two measurably wrong buckets ratchets
+the wrongness into CI." Half of that objection is now DEAD at the lens, not by argument: the
+accusatory bucket is corrected and mutation-proven, and a register exists to except from it. The
+objection's remaining force is entirely about `--selftest`, which today performs a full census and
+exits 0 having asserted nothing — a required-context green that asserts nothing while doubling a
+docs-only PR's cost is this epic's own offence wearing the gate's badge. **The gate is ruled IN and
+sequenced LAST, after `--selftest` is real and the register exists.** Its assertions stay exactly
+three (integrity arms PASS, `--selftest` passes, register complete in BOTH directions) and never a
+bucket count.
+
+**PDS-D494a — AND THE CHEAP FLOOR IS REFUSED.** The slice-1 builder observed that "no new undeclared
+CATCH-ALL-TO-SUCCESS site" is now cheap and would fail loudly on a real regression. It is refused as
+a standalone gate: it is a BUCKET-ADJACENT pin, and a bucket pin that reds on an honest lens
+correction is precisely what PDS-D482 narrowed the gate to avoid. The same protection arrives
+non-arbitrarily as a consequence of register completeness — a new undeclared catch-all is a register
+gap, and the register direction is already one of the gate's three assertions.
+
+**PDS-D495 — THE CHARTER'S `:2657` ARM LINE NUMBERS ARE STALE BY EXACTLY +6 AND ARE AMENDED HERE.**
+The five background write arms are `fence.ex:118`, `ttl_sweeper.ex:411`, `ttl_sweeper.ex:570`,
+`compactor.ex:311`, `compactor.ex:553`. The wish and the original task brief carry the same +6 drift.
+
+**WHAT THE REVIEWER CHANGED.** Slice 1's declared register printed `status: SUPPRESSES a fired
+shape` for `github_webhook:87`. It does not suppress the shape — the shape still prints in the roll
+and in the counts; what is withheld is the FINDING. On an epic whose only admissible test is "would
+the printed sentence change if the response said the opposite," a status line that overstates what
+the machine did is the offence itself. It now reads `WITHHOLDS A FINDING`. The register's `basis`
+and `status` lines also ran to ~200 columns inside a report that draws 78-column rules; they wrap
+now. Slices 2 and 3 needed no changes.
+
+**WHAT THE REVIEWER PROVED INDEPENDENTLY.** (1) All five register basis citations were verified
+line-by-line at source: `auth:393`, `@doc :402-407` with the sentence at `:403-406` and the token on
+`:405`, `:417` sitting after the case closes at `:415`, `gh_webhook @doc :74-78`, `:86` ping, `:87`
+`_other`, `bulldocs_form @moduledoc :22-24` plus the one-line inline comment at `:53`, honest insert
+at `:50`. **Every one is accurate** — which matters because PDS-D479 was filed precisely because the
+previous basis citation was a phantom in four published places. (2) Slice 2's literal rejection was
+re-mutated: reverting `object rm`'s call site to a bare literal REDS at capture, by name. (3) Slice
+3's builder mutation-proved ARM 1 only; the reviewer reverted **ARM 5** (`Compactor.restore/2`)
+independently and the differential red on BOTH fields and on ARM 5 ONLY. Arms 2–4 are now covered by
+a helper whose failure mode is demonstrated on two different arms.
+
+**WHAT THE NEXT WAVE TAKES — THE DISPATCH ORDER IS THE HANDOFF.** Merge round 1 (#8884, #8885,
+#8886) first; #8884 must merge before anything else touches the census. THEN, as deps merge:
+round 2 = `pds-w34-census-import-arity` (ARGV-STRICT, a real `--selftest`, CLAUSE-COLLAPSE as the
+sixth arm, the per-arm FAIL render, the arity key) and `pds-w34-owning-doc-amendment` (which may run
+BESIDE it — disjoint files — and which must now also rename UNREACHABLE-ERROR to
+CATCH-ALL-TO-SUCCESS, quote 3 not 26/27, and take 25/28 for the carriers, never 26). Round 3 =
+`pds-w34-hand-bucket-register` against a denominator of **74**. Round 4 = `pds-w35-elixir-census-gate`,
+the cuttable slice, never the register.
+
 ### Wave 34 2026-08-01 — "The instrument is the first suspect" — REVIEWED. Grade A− (paper `pds-wave-34-2026-08-01`)
 
 **FOUR ROUND-1 SLICES BUILT, FOUR GREEN, FOUR PUSHED WITH PRs OPEN.** Three round-≥2 slices were
