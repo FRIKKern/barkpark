@@ -58,12 +58,30 @@ defmodule PDS.Census do
   ]
   @corpus_floor 600
 
+  # `transaction` IS NOT A WRITE VERB (PDS wave 34). Repo.transaction/1 OPENS a
+  # transaction; it moves no row. The universal Barkpark shape is
+  #   Repo.transaction(fn -> Repo.query!("SELECT pg_advisory_xact_lock(...)")
+  #                          Repo.get(Document, id)   # the PRE-write load
+  # so the opener scored WRITE at line N while the lock scored READ at N+1 and the
+  # pre-write load at N+3 — and post_read?/2 is pure line arithmetic. That single
+  # token manufactured 17 of 17 POST-READs on wave 33's shipped lens. Every verb
+  # left in this list moves a row.
   @write_verbs ~w(insert insert! update update! delete delete! insert_all update_all
-                  delete_all insert_or_update insert_or_update! transaction)a
+                  delete_all insert_or_update insert_or_update!)a
   @read_verbs ~w(all one one! get get! get_by get_by! aggregate exists? preload
                  stream reload reload!)a
   @repo_mods [:Repo, :Multi]
-  @max_depth 3
+
+  # DEPTH 6 IS THE CLOSURE OF THE ROUTE RELATION, NOT A TASTE. Sweeping the budget,
+  # write/read/unrouted reads 23/11/57 · 29/23/39 · 39/15/37 · 43/23/25 · 53/15/23 ·
+  # 54/14/23 for depths 1..6 and then 54/14/23 IDENTICALLY at 7,8,9,10,12,15,20,30 —
+  # the bfs seen-set makes the reachable set a finite closure and the route set is
+  # monotone in the budget. The SHAPE relation does NOT close until 12 (POST-READ 6
+  # here, 15/21/23/23/24 at 7/8/9/10/12), and every unit past 6 buys POST-READ
+  # inflation via cross-row certifiers, so above 6 this knob is a COMPLIANCE DIAL,
+  # not a lens. Printed at runtime by report_depth_sweep/2 so it cannot be read as
+  # taste. (The brief's 42/14/35 was the A+B+C lens WITHOUT the clause-collapse fix.)
+  @max_depth 6
   @sweep [1, 2, 3, 4, 5, 6]
 
   @shapes ~w(POST-READ CAS-CONFIRMED-ECHO PURE-ECHO UNREACHABLE-ERROR WRONG-ROW
@@ -195,10 +213,10 @@ defmodule PDS.Census do
         {:error, _} -> :parse_error
       end
 
-    {defs, sites} =
+    {defs, sites, imports} =
       case ast do
-        :parse_error -> {[], []}
-        ast -> {collect_defs(ast, path), collect_sites(ast, path)}
+        :parse_error -> {[], [], []}
+        ast -> {collect_defs(ast, path), collect_sites(ast, path), collect_imports(ast)}
       end
 
     %{
@@ -207,6 +225,7 @@ defmodule PDS.Census do
       textual: textual,
       textual_count: length(textual),
       parse_error?: ast == :parse_error,
+      imports: imports,
       defs: attribute(defs, sites) |> elem(0),
       sites: attribute(defs, sites) |> elem(1)
     }
@@ -354,6 +373,77 @@ defmodule PDS.Census do
     end
   end
 
+  # -- import collection ------------------------------------------------------
+  #
+  # WHY THIS EXISTS (PDS wave 34). raw_calls/1 emits an IMPORTED call as {:local, f},
+  # and callees/2 resolves {:local, f} only inside the CALLING module — so an imported
+  # helper is not merely mis-attributed, it is STRUCTURALLY INVISIBLE to the call
+  # graph. The corpus's one honest `select:`-inside-the-update writer,
+  # Barkpark.Tasks.Internal.fenced_content_write/4 (internal.ex:50, `select: d` at
+  # :54), is reached ONLY by `import Barkpark.Tasks.Internal, only: [...]`, so wave
+  # 33's lens could never name it. Each entry is {calling_module_segs, fun_name,
+  # imported_module_segs}.
+  defp collect_imports(ast), do: imports(ast, [], [])
+
+  defp imports(node, mod, acc) do
+    case node do
+      {:defmodule, _, [{:__aliases__, _, segs}, body]} ->
+        imports(body, mod ++ segs, acc)
+
+      {:import, _, [{:__aliases__, _, target} | opts]} ->
+        Enum.reduce(import_only_names(opts), acc, &[{mod, &1, target} | &2])
+
+      list when is_list(list) ->
+        Enum.reduce(list, acc, &imports(&1, mod, &2))
+
+      {a, b} ->
+        acc |> then(&imports(a, mod, &1)) |> then(&imports(b, mod, &1))
+
+      {_f, _, args} when is_list(args) ->
+        Enum.reduce(args, acc, &imports(&1, mod, &2))
+
+      _ ->
+        acc
+    end
+  end
+
+  # Only `only: [f: a]` is honoured. A bare `import Mod` or an `except:` list would
+  # make the graph guess at which names came from where; this census does not guess.
+  defp import_only_names(opts) do
+    {_, only} =
+      Macro.prewalk(opts, nil, fn
+        {k, v} = n, acc ->
+          case lit(k) do
+            {:lit, :only, _} -> {n, acc || v}
+            _ -> {n, acc}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    case only do
+      nil -> []
+      node -> fun_arity_names(node)
+    end
+  end
+
+  defp fun_arity_names(node) do
+    {_, names} =
+      Macro.prewalk(node, [], fn
+        {k, v} = n, acc ->
+          case {lit(k), lit(v)} do
+            {{:lit, f, _}, {:lit, a, _}} when is_atom(f) and is_integer(a) -> {n, [f | acc]}
+            _ -> {n, acc}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    Enum.uniq(names)
+  end
+
   defp head_sig({:when, _, [h | _]}), do: head_sig(h)
   defp head_sig({name, meta, args}) when is_atom(name) and is_list(args), do: {name, length(args), meta}
   defp head_sig({name, meta, _}) when is_atom(name), do: {name, 0, meta}
@@ -404,7 +494,12 @@ defmodule PDS.Census do
           |> Enum.sort_by(&(&1.last - &1.line))
           |> List.first()
 
-        %{s | def: owner && {owner.module, owner.name, owner.arity}}
+        # KEEP THE OWNING CLAUSE, not just its {module, name, arity} key. Wave 33's
+        # lens found the innermost containing def here and then threw the clause
+        # away, and resolve_exact/2 re-resolved the key to the FIRST def of that
+        # arity — 15 of 91 sites came back owned by a clause that does not contain
+        # their line. The line pins the clause.
+        %{s | def: owner && {owner.module, owner.name, owner.arity, owner.line}}
       end)
 
     {defs, sites}
@@ -434,12 +529,19 @@ defmodule PDS.Census do
       end)
       |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
 
+    # {calling_module, imported_fun} -> [imported_module_segs]
+    imports =
+      parsed
+      |> Enum.flat_map(& &1.imports)
+      |> Enum.group_by(fn {mod, f, _t} -> {mod, f} end, fn {_m, _f, t} -> t end)
+
     %{
       defs: all,
       by_key: by_key,
       by_module: by_module,
       modules: Map.keys(by_module),
-      callers_by_name: callers_by_name
+      callers_by_name: callers_by_name,
+      imports: imports
     }
   end
 
@@ -518,10 +620,12 @@ defmodule PDS.Census do
     |> Enum.take(12)
   end
 
-  defp resolve_exact(index, {mod, name, arity}) do
-    (Map.get(index.by_key, {mod, name}) || [])
-    |> Enum.find(&(&1.arity == arity))
-    |> Kernel.||(List.first(Map.get(index.by_key, {mod, name}) || []))
+  defp resolve_exact(index, {mod, name, arity, line}) do
+    cands = Map.get(index.by_key, {mod, name}) || []
+
+    Enum.find(cands, &(&1.line == line)) ||
+      Enum.find(cands, &(&1.arity == arity)) ||
+      List.first(cands)
   end
 
   defp bfs([], _index, _seen, verbs, depth, chain, _max), do: {verbs, depth, chain}
@@ -584,8 +688,11 @@ defmodule PDS.Census do
             last in @repo_mods and f in @read_verbs ->
               {n, [{:read, :"#{last}.#{f}", meta[:line]} | acc]}
 
-            last == :Repo and f in [:query, :query!] ->
-              {n, [{:read, :"Repo.#{f}", meta[:line]} | acc]}
+            # Repo.query/query! IS NOT A READ HERE (PDS wave 34). Every Repo.query
+            # site of consequence in this corpus is `SELECT pg_advisory_xact_lock(..)`
+            # — a lock acquisition, not a read of the row a receipt is about. Scored
+            # as a read it was worth 6 false POST-READs on its own. An advisory-lock
+            # allowlist measures identically and is more code; the clause is gone.
 
             true ->
               {n, acc}
@@ -609,10 +716,24 @@ defmodule PDS.Census do
   defp callees(%{module: mod} = d, index) do
     (d[:calls] || raw_calls(d))
     |> Enum.flat_map(fn
-      {:local, f} -> Map.get(index.by_key, {mod, f}, [])
-      {:remote, segs, f} -> resolve(index, segs, f)
+      # A {:local, f} with no def of that name in the calling module is either
+      # undefined or IMPORTED — and an imported call is a real edge, so follow it.
+      {:local, f} ->
+        case Map.get(index.by_key, {mod, f}, []) do
+          [] -> imported_defs(index, mod, f)
+          defs -> defs
+        end
+
+      {:remote, segs, f} ->
+        resolve(index, segs, f)
     end)
     |> Enum.uniq_by(&{&1.module, &1.name, &1.arity})
+  end
+
+  defp imported_defs(index, mod, f) do
+    index.imports
+    |> Map.get({mod, f}, [])
+    |> Enum.flat_map(&resolve(index, &1, f))
   end
 
   defp raw_calls(%{body: nil}), do: []
@@ -669,10 +790,11 @@ defmodule PDS.Census do
     cond do
       site.write? and selecting ->
         {"POST-READ",
-         "#{label(selecting)} writes with `select:` INSIDE the update query — the row is measured after the change (`returning:` is silently ignored by update_all, auth.ex:139-141, and is NOT this)"}
+         "ARM 1 ADMISSIBLE (not proven): #{label(selecting)} writes with `select:` INSIDE the update query — the row is measured after the change (`returning:` is silently ignored by update_all, auth.ex:139-141, and is NOT this). This does NOT prove the selected row reaches the printed value"}
 
       site.write? and reading_after ->
-        {"POST-READ", "#{label(reading_after)} reads back after its own write"}
+        {"POST-READ",
+         "ARM 2 ADMISSIBLE (weaker, line-order only): #{label(reading_after)} reads back after its own write — necessary, NOT sufficient"}
 
       site.write? and cas ->
         {"CAS-CONFIRMED-ECHO",
@@ -719,6 +841,13 @@ defmodule PDS.Census do
 
   # `returning:` is a BLIND lens — Ecto silently ignores it on update_all (auth.ex:139-141).
   # The honest idiom is `select:` INSIDE the update query.
+  #
+  # KNOWN RESIDUAL UNSOUNDNESS, NAMED AND NOT FIXED HERE (PDS wave 34). This prewalks the
+  # WHOLE function body for ANY `from(..., select: ...)`; it does not require the `select:`
+  # to be on the query that is UPDATED. move.ex:230 is a plain READ query carrying a
+  # `select:` inside a non-writing function, so it costs nothing today — but the predicate
+  # is unsound by construction, which is exactly why every POST-READ it admits is printed
+  # as ADMISSIBLE and never as proven. Filed as its own row.
   defp has_select_in_update?(nil), do: false
 
   defp has_select_in_update?(body) do
@@ -877,6 +1006,27 @@ defmodule PDS.Census do
     p("  touch no state. PDS-D448 judged them almost certainly writes. Read the write count")
     p("  as \"at least #{w} success claims are about a state change\".")
     p("")
+    report_clause_collapse(classified)
+  end
+
+  # ATTRIBUTION INTEGRITY, PRINTED. Every site must be owned by a def clause whose line
+  # range CONTAINS it. Wave 33's lens read 15 of 91 here — it found the innermost clause
+  # and then re-resolved the {module, name, arity} key to the FIRST clause of that arity
+  # (bulldocs_ingest_controller.ex:630, inside the batch clause of apply_op/2 at :604,
+  # came back owned by the single-op clause at :693). A site owned by a clause that does
+  # not contain it makes every downstream evidence claim about the wrong code.
+  defp report_clause_collapse(classified) do
+    owned = Enum.filter(classified, & &1.owner)
+    collapsed = Enum.reject(owned, &(&1.owner.line <= &1.line and &1.line <= &1.owner.last))
+
+    p("  CLAUSE-COLLAPSE  #{length(collapsed)} of #{length(classified)} sites attributed to a def clause that does")
+    p("  NOT contain their line (0 is correct; wave 33's shipped lens read 15).")
+
+    Enum.each(Enum.sort_by(collapsed, &{&1.path, &1.line}), fn s ->
+      p("      #{short(s.path)}:#{s.line} — owned by #{label(s.owner)} at :#{s.owner.line}-#{s.owner.last}")
+    end)
+
+    p("")
   end
 
   # WHY THE FLOOR IS A FLOOR, shown rather than asserted. The write count is a function
@@ -897,6 +1047,24 @@ defmodule PDS.Census do
     end)
 
     p("")
+    p("  WHY #{@max_depth} AND NOT MORE (PDS wave 34 — a depth without its reason reads as taste).")
+    p("  THE ROUTE RELATION CLOSES AT 6. Write-routed climbs 23/29/39/43/53/54 across depths")
+    p("  1..6 and then write 54 / read 14 / unrouted 23 is IDENTICAL at 7, 8, 9, 10, 12, 15,")
+    p("  20 and 30 — the bfs seen-set makes the reachable set a finite closure, and the route")
+    p("  set is MONOTONE in the budget by construction (a larger budget explores a superset),")
+    p("  so nothing is lost by stopping at the closure.")
+    p("  THE SHAPE RELATION DOES NOT CLOSE UNTIL 12, and every unit past 6 buys POST-READ")
+    p("  inflation from CROSS-ROW certifiers: POST-READ reads 6 here and 15/21/23/23/24 at")
+    p("  depths 7/8/9/10/12, flat from 12 on. NINE SITES LAUNDER IN AT DEPTH 7 ALONE, six of")
+    p("  them certified by Barkpark.Webhooks.record_endpoint_failure/2 — a real `select:` on")
+    p("  a WEBHOOK FAILURE COUNTER vouching for a session-revoke receipt (auth_controller.ex")
+    p("  :329) and for WebAuthn registration. A read of an unrelated row is not a post-read.")
+    p("  ABOVE 6 THIS KNOB IS A COMPLIANCE DIAL, NOT A LENS. 6 is where the route stops")
+    p("  growing and the evidence has not yet started lying.")
+    p("  (Wave 34's brief recorded 42/14/35 for the closure. That was the A+B+C lens WITHOUT")
+    p("  the clause-collapse fix; re-owning 15 sites to the clause that contains them moves")
+    p("  it to 54/14/23. Corrected here, at the lens that measures it.)")
+    p("")
     p("  PDS-D448 recorded write=#{@recorded.write} read=#{@recorded.read} unrouted=#{@recorded.unrouted}. That is NOT this lens at")
     p("  depth #{@max_depth}; it is what a deeper (or hand-followed) route sees. Both are honest and")
     p("  neither is a ceiling — which is the point. A success-claim census reports the")
@@ -915,6 +1083,12 @@ defmodule PDS.Census do
     p("  was written. `select:` inside the update query is the one spelling it CAN prove.")
     p("  Wave 34 confirms each one by hand; a POST-READ here is a candidate, not a verdict.")
     p("")
+    p("  EVERY POST-READ BELOW IS ADMISSIBLE, NONE IS PROVEN HONEST. Even ARM 1")
+    p("  (has_select_in_update?/1) only proves the update query CARRIES a `select:`; it does")
+    p("  NOT prove the caller SPENDS the selected row on the value it prints. That exact")
+    p("  failure mode is live in this corpus — BlockOps.fenced_paper_update/4 selects the")
+    p("  saved row and its caller prints a PRE-WRITE rev. Nothing here excludes it.")
+    p("")
 
     Enum.each(@shapes, fn sh ->
       n = Map.get(counts, sh, 0)
@@ -926,6 +1100,28 @@ defmodule PDS.Census do
     p(String.pad_trailing("  UNCLASSIFIED", 30) <> String.pad_leading(to_string(n), 4) <>
         "  the lens holds evidence but no verdict — wave 34 buckets these by hand")
     p("")
+    post_read_roll(classified)
+  end
+
+  # The POST-READ survivors, named with the arm that admitted them. A count alone lets a
+  # later wave quote "N post-reads" as compliance; the roll makes the arm — and therefore
+  # the strength of the evidence — impossible to quote without.
+  defp post_read_roll(classified) do
+    survivors =
+      classified
+      |> Enum.filter(fn s -> elem(s.shape, 0) == "POST-READ" end)
+      |> Enum.sort_by(&{&1.path, &1.line})
+
+    if survivors != [] do
+      p("  POST-READ SURVIVORS, BY ARM (admissible, never proven)")
+
+      Enum.each(survivors, fn s ->
+        arm = if String.starts_with?(elem(s.shape, 1), "ARM 1"), do: "ARM 1 select:", else: "ARM 2 line-order"
+        p("      #{short(s.path)}:#{s.line}  [#{arm}]  fn #{label(s.owner)}")
+      end)
+
+      p("")
+    end
   end
 
   defp shape_zero_note("WRONG-ROW"),
