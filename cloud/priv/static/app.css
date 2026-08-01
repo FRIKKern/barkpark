@@ -2179,9 +2179,79 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
      489px row), leaving `.fleet-main` 44.53px. Stacking removes the contest;
      the column is recorded, not repaired. `.fleet-main { min-width: 0 }` (:953)
      and `.fleet-badges { flex-wrap: wrap }` (:962) already ship — re-declaring
-     either here is a measured no-op. */
+     either here is a measured no-op.
+     PAID BY W15-S4 IN THE BLOCK DIRECTLY BELOW, and that paragraph's diagnosis
+     turned out to be HALF WRONG: in the worst cell the pill is the NARROWEST
+     box on the row, so capping the lead column buys it nothing. The mechanism
+     is `.fleet-main`'s zero flex-basis. Read that block before acting on this
+     one. */
   .fleet-row { flex-direction: column; align-items: stretch; }
   .fleet-badges { justify-content: flex-start; }
+}
+
+/* W15-S4 — THE ROW STOPS PAINTING THE HOSTNAME THROUGH THE BADGE CHIPS.
+   The COMPLEMENT of the `@media (max-width: 899px)` block directly above: that
+   block owns the STACKED band, this one owns the SIDE-BY-SIDE band. Edit one
+   and read the other (D159) — the two together must cover every width, and the
+   scope below is the whole reason this is a second block and not two more
+   declarations at :952.
+
+   WHAT A PERSON SAW. On `fleet-v4#fleet` at 900 in both themes the first row's
+   `.fleet-url` measured scrollWidth 144 against clientWidth 60 — 58% of the
+   hostname simply not rendered — and it is SPILL, not truncation: `.fleet-url`
+   computes `overflow: visible`, so the box ended at x=482.75 while its text
+   reached 566.80 and `.fleet-badges` began at 498.75. The hostname was PAINTED
+   THROUGH the chips. Driven over 769/830/899/900/940/983/1000/1100/1200 x 2
+   themes x mixed-fleet + fleet-v4 (36 cells): 12 clipped text cells, 8 of them
+   at the 900 control, and 6 rows whose text reached past the badge column.
+
+   THE ROOT CAUSE `cch-backlog-fleet-status-unbounded-lead-column` RECORDED IS
+   HALF WRONG, and the corrected measurement is why nothing here caps the lead
+   column: in the WORST cell `.fleet-status` is 131.80px — the NARROWEST pill on
+   the screen — while `.fleet-badges` is 331.80px. Capping the pill buys that
+   row nothing. The mechanism is `.fleet-main { min-width: 0; flex: 1 }` (:952),
+   i.e. `flex: 1 1 0%`: a ZERO hypothetical main size means the flex line never
+   registers as overflowing, so `.fleet-badges` (`flex: 0 1 auto`) is never
+   asked to shrink and the hostname is the structural loser regardless of the
+   pill's width. `flex: 1 1 auto` restores the content-sized basis so the line
+   DOES overflow; `flex-wrap: wrap` then lets the badges drop to their own line
+   instead of the text losing; `min-width: 200px` is the floor that makes the
+   wrap happen before the hostname is squeezed again.
+
+   MEASURED, same 36 cells: clipped text 12 -> 0, ellipsed money messages 0 -> 0,
+   page-level overflow 0 -> 0, spill past the badge column 6 -> 0, minimum
+   `.fleet-main` width 59.95 -> 202.89, and every `.fleet-badges` box at its
+   EXACT baseline width (nothing was collapsed to buy the text room). The <= 899
+   stacked band and the 1200 desktop control are byte-identical to baseline.
+   ACCEPTED TRADE: at 900-1100 a crowded row goes one line to two (94.19 ->
+   134.19 at 1000). Nothing is hidden and nothing is shredded — that is the
+   trade this block buys, said out loud.
+
+   THE `min-width: 900px` SCOPE IS LOAD-BEARING, NOT TIDINESS. The identical two
+   declarations UNSCOPED ship a NEW 846px page-level overflow at 721 and 769 on
+   `fleet-support-failed#fleet` in BOTH themes: below 899 `.fleet-row` is
+   `flex-direction: column`, and `flex-wrap: wrap` on a column flex container
+   wraps into additional COLUMNS. Do not "simplify away" the media query.
+
+   THREE SHAPES REFUTED BY MEASUREMENT — do not re-propose them:
+     `.fleet-status { max-width: 45% }` ellipses the money message in 60 of 64
+       cells, including the stacked band where there is no contest (39% of
+       "Payment failed - subscription past due" at 769). The exact sin GR116
+       exists to prevent.
+     `overflow-wrap: anywhere` scores 0 clips while growing `.fleet-url` from 36
+       to 90px tall — it shreds the person rather than fitting them (D165).
+     `.fleet-badges { min-width: 0 }` scores 0 on every text metric while
+       collapsing the badge column to 29.83px around an unshrinkable 66.33px
+       chip — the mirror image of the shred, and INVISIBLE to a clip-only
+       scorer, which is why overflow-guard's new W15 leg also asserts that the
+       badge column is never squeezed narrower than its own content.
+
+   GR11/GR25: `.fleet-status` and `.fleet-main` are WRAPPERS. Neither is one of
+   the four quarantined pill families (`status-pill`, `dep-pill`, `tlv-badge`,
+   `badge`/`fresh-badge`) and no pill rule block is touched here. */
+@media (min-width: 900px) {
+  .fleet-row { flex-wrap: wrap; }
+  .fleet-main { flex: 1 1 auto; min-width: 200px; }
 }
 
 /* GR65 TABLET (768px): three layouts break BEFORE the 720px phone threshold,

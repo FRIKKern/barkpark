@@ -58,6 +58,17 @@
 //        and asserts BOTH that the page does not scroll AND that the route
 //        asked for is the route that rendered — the second half is not
 //        ceremony, see the routing trap below.
+//    W15-fleet-row-text-bounded     THE CELLS, which every case above is blind
+//        to because every case above asserts the PAGE. The W13 leg printed
+//        "108 / 108 cells clean" on a tree where, at its own 900 control,
+//        eight fleet cells clipped — .fleet-url scrollWidth 144 against
+//        clientWidth 60 — and spilled the hostname through the badge chips
+//        without moving documentElement.scrollWidth at all. This leg drives
+//        mixed-fleet + fleet-v4 at 899/900/940/983/1000 in both themes and
+//        asks three questions per cell: is the text whole, is the money
+//        message whole, is the badge column still its own width. The second
+//        and third exist because the two cheapest "fixes" for the first each
+//        score perfectly on it while costing the person something else.
 //    GR115-bpconsole-dead-rule      at 700x800 .bp-console-body must compute
 //        the authored 40vh cap (320px) and the 13px legibility floor, same
 //        for .bp-console-toggle (pre-fix: 260px/12px/12px — the later base
@@ -139,7 +150,43 @@ const DEFECTS = [
   "GR115-bpconsole-dead-rule",
   "W12-narrow-viewport-truth",
   "W13-detail-route-band",
+  "W15-fleet-row-text-bounded",
 ];
+
+// W15-S4: THE LEG THAT EXISTS BECAUSE THIS FILE WAS BLIND TO ITS OWN SUBJECT.
+// Every leg above asserts documentElement.scrollWidth — the PAGE. On the tree
+// this leg was written against, the W13 leg printed "108 / 108 cells clean"
+// while, at its OWN 900 control, eight fleet cells were clipping: fleet-v4
+// row 1's `.fleet-url` measured scrollWidth 144 against clientWidth 60, 58% of
+// the hostname unrendered, and because `.fleet-url` computes `overflow:
+// visible` the remainder was PAINTED THROUGH the badge chips (box ended
+// 482.75, text reached 566.80, badges began 498.75). None of that moves the
+// page's scrollWidth by one pixel. A page-level assertion cannot see a cell
+// that spills INSIDE the page, so leaning on it certifies the regression.
+//
+// THREE QUESTIONS PER CELL, each the shape of a thing a person loses:
+//   (a) IS THE TEXT WHOLE — no `.fleet-name`/`.fleet-url`/`.fleet-meta`
+//       scrollWidth beyond its clientWidth. This is the defect itself.
+//   (b) IS THE MONEY MESSAGE WHOLE — no `.status-pill-detail` ellipsed. The
+//       cheapest "fix" for (a) is `.fleet-status { max-width }`, which buys
+//       the hostname by truncating "Suspended · Payment failed …". GR116
+//       exists to stop exactly that, so (a) may never be bought with (b).
+//   (c) IS THE BADGE COLUMN STILL ITSELF — `.fleet-badges` is never squeezed
+//       narrower than its own content. The other cheap "fix",
+//       `.fleet-badges { min-width: 0 }`, scores 0 on every TEXT metric while
+//       collapsing the badge box to 29.83px around an unshrinkable 66.33px
+//       chip: the mirror image of the shred, and invisible to a clip-only
+//       scorer. Asserted as a RELATION (width >= scrollWidth), never as pinned
+//       pixels — pinned px would red on any runner with different font metrics
+//       and say nothing about the person.
+//
+// WIDTHS: 900 is the control the defect lived at; 940 and 983 are the two
+// other widths that clipped pre-fix; 1000 is above them; 899 is the stacked
+// band immediately below, present so a future edit that leaks the fix out of
+// its `@media (min-width: 900px)` scope has somewhere to be caught.
+const FLEET_WIDTHS = [899, 900, 940, 983, 1000];
+const FLEET_SCENS = ["mixed-fleet", "fleet-v4"];
+const FLEET_TEXT_SELS = [".fleet-name", ".fleet-url", ".fleet-meta"];
 
 // W13-S4: the tablet band NOTHING in this file had ever driven a DETAIL ROUTE
 // at. 769 and 899 are the two edges of the band; 900 and 1024 are the controls
@@ -790,6 +837,81 @@ async function main() {
           `${cells} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
           ` (769/899 are the band edges, 900/1024 the controls above it); ${misrouted} misrouted;` +
           ` no exemptions — #fleet's W13 residual was paid by W14-S3 and its pin is gone`,
+        );
+      }
+    }
+
+    // ── W15: the fleet row's CELLS, which every leg above is blind to ───────
+    //    Element-level geometry, not page-level. See the note by FLEET_WIDTHS.
+    if (requested.includes("W15-fleet-row-text-bounded")) {
+      const D = "W15-fleet-row-text-bounded";
+      const cellCount = FLEET_SCENS.length * FLEET_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${FLEET_SCENS.length} scenarios x ${FLEET_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges)\n`,
+      );
+      let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, rowsSeen = 0;
+      for (const scen of FLEET_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter ABOVE the band, like the W13 leg, and assert the landed view —
+          // `?scen=` alone renders #overview and the whole table goes phantom.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#fleet`,
+            `document.querySelector('.fleet-row') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-fleet';})()`,
+          );
+          const row = [];
+          for (const width of FLEET_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var sels=${JSON.stringify(FLEET_TEXT_SELS)};` +
+              `var out={view:v?v.id:'none',theme:document.documentElement.getAttribute('data-theme'),rows:0,clips:[],ell:[],sq:[]};` +
+              `[].slice.call(document.querySelectorAll('.fleet-row')).forEach(function(r,i){out.rows++;` +
+              `  sels.forEach(function(s){var e=r.querySelector(s); if(!e) return;` +
+              `    if(e.scrollWidth>e.clientWidth) out.clips.push({i:i,s:s,sw:e.scrollWidth,cw:e.clientWidth,t:(e.textContent||'').slice(0,32)});});` +
+              `  var p=r.querySelector('.status-pill-detail');` +
+              `  if(p&&p.scrollWidth>p.clientWidth) out.ell.push({i:i,sw:p.scrollWidth,cw:p.clientWidth,t:(p.textContent||'').slice(0,40)});` +
+              `  var b=r.querySelector('.fleet-badges');` +
+              `  if(b&&b.scrollWidth>0&&b.getBoundingClientRect().width+0.5<b.scrollWidth)` +
+              `    out.sq.push({i:i,w:+b.getBoundingClientRect().width.toFixed(2),sw:b.scrollWidth});});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-fleet") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-fleet" — the hash did not route, so nothing below this line measures the fleet row`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty list is not a clean list. A scenario that
+            // renders zero rows would score 0 clips and read as a pass.
+            if (m.rows === 0) fail(D, `${scen}/${theme}@${width}: zero .fleet-row rendered — nothing was measured, this is not a pass`);
+            rowsSeen += m.rows;
+            for (const c of m.clips) {
+              clipped++;
+              fail(D, `${scen}/${theme}@${width} row${c.i} ${c.s}: scrollWidth ${c.sw} > clientWidth ${c.cw} — ${Math.round((1 - c.cw / c.sw) * 100)}% of "${c.t}" is not rendered, and the box computes overflow:visible so the remainder is painted THROUGH the badge column`);
+            }
+            for (const e of m.ell) {
+              ellipsed++;
+              fail(D, `${scen}/${theme}@${width} row${e.i} .status-pill-detail: scrollWidth ${e.sw} > clientWidth ${e.cw} — the money message "${e.t}" is truncated (GR116)`);
+            }
+            for (const s of m.sq) {
+              squeezed++;
+              fail(D, `${scen}/${theme}@${width} row${s.i} .fleet-badges: box ${s.w}px around ${s.sw}px of content — the badge column was collapsed to buy the text room`);
+            }
+            const bad = m.clips.length + m.ell.length + m.sq.length;
+            row.push(`${width}:${m.rows}r${bad ? "!" + bad : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join(" ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${rowsSeen} fleet rows measured) across ` +
+          `${FLEET_WIDTHS.join("/")}; ${clipped} clipped text cells, ${ellipsed} ellipsed money ` +
+          `messages, ${squeezed} squeezed badge columns; no exemptions`,
         );
       }
     }
