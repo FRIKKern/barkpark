@@ -115,11 +115,63 @@ row instead of by the state. This is the same A3 failure as
 will ever find it. The honest fix is a post-condition read of the OBJECT
 (`pg_trigger` / `pg_indexes` / `information_schema.columns`), not a wider glyph grep.
 
+### The real Elixir population (PDS wave 33) — the `ok: true` census
+
+The glyph was the wrong lens; the API's success claims are written `ok: true`. Derived
+by `scripts/pds-elixir-receipt-census.exs` (build-free AST over 804 `api/lib/**/*.ex`,
+~5 s, no mix project and no compile — it never boots the app):
+
+| layer | n | what it is |
+|---|---|---|
+| textual occurrences | 103 | plain substring, 102 lines (`auth_controller.ex:351` carries two) |
+| AST-literal pairs | 95 | real `ok:`/`"ok" =>` pairs — a bare `{:ok, true}` tuple quotes identically and is excluded by key metadata (`format: :keyword` / `assoc:`) |
+| phantoms | 8 | 7 prose in `@doc`/comments + `github/web/ops_live.ex:285`, which is `db_ok: true` — **a different key** |
+| consumers | 4 | `connectors/bridge_client.ex:66,83,97` + `sync/pusher.ex:286` pattern-match a REMOTE response; they make no claim |
+| **emitted claims** | **91** | the actual population |
+
+Routed through the call graph (defdelegate followed, and a defdelegate costs **zero**
+depth — it is a rename, not logic; charging it a hop is how the 21-entry
+`Barkpark.Tasks` facade makes a naive detector report 24/25 false). At depth 3:
+write **33** / read 12 / unrouted 46. At depth 6: 42 / 14 / 35.
+
+**33 is a FLOOR, and so is 42.** The write count is a function of the depth budget, not
+a property of the code — which is why the script prints the whole sweep instead of one
+integer. PDS-D448 recorded 64/17/10 by hand-following; both are honest and differ only
+in lens, and the script prints the DRIFT rather than hiding it. The harder finding:
+**35 emitted claims reach no `Repo` verb at all within six hops.**
+
+Shapes (PDS-D453), assertion-backed — `classified 44 + unclassified 47 == emitted 91`:
+POST-READ 17 · UNREACHABLE-ERROR 27 · UNCLASSIFIED 47 · the other four shapes 0, each
+printing why it is 0. Read POST-READ as a **ceiling**: its evidence is line order (a
+`Repo` read below a `Repo` write inside the writing function) — necessary, not
+sufficient, since the lens cannot prove the read is *of the row written*. Only `select:`
+**inside** the update query proves that; `returning:` is silently ignored by `update_all`
+(`auth.ex:139-141`) and proves nothing.
+
+**Blind spots, re-derived by the same run**: 218 `json(conn, …)`, 66 `put_status(2xx)`,
+3 `send_resp(conn, 2xx)` — every one of them a success claim this lens never sees.
+
+**The lens is part of the finding (PDS-D448a).** On macOS, Apple git 2.39.5's POSIX ERE
+has no `\b`: `git grep -E '\bok: true'` returns **0** and exits 1 *silently*, while
+`git grep -P`, BSD `grep -rE` and `rg` return 97. The census uses no regex at all. Two
+greens that could not fail were closed: a corpus of only the 27 carrier files reports
+`write=0` with no error (now **refused** by naming missing route-bearing sentinels, exit
+2), and the delegate facade — proven by mutation, removing all five write verbs from
+`close.ex` flips `DELEGATE-REACHES-WRITE` to FAIL and exit 1, while removing only the
+three `Repo.update_all` correctly stays green.
+
+**Ruling: still no Elixir gate (PDS-D454).** A population now exists, but a gate keyed on
+these integers would be the number-shaped guard this epic keeps filing as a defect. Wave
+34 buckets the write-routed sites by hand and decides the gate from the shapes. The
+script ships as a census, not a check: its *integrity* can go red (corpus, partition,
+delegate reach), its *numbers* never do.
+
 ## Standing rule
 
 Adding a receipt to `internal/cli` means adding its registry row. Shell and Elixir
-stay honest-and-unguarded until a real population exists to calibrate against —
-**refusing to ship a fake green is the successful outcome for those two surfaces.**
+stay unguarded — but Elixir is no longer uncounted: rerun
+`elixir scripts/pds-elixir-receipt-census.exs` (add `--sites` for all 91).
+**Refusing to ship a fake green is the successful outcome for those two surfaces.**
 
 ## Code anchors
 
@@ -127,3 +179,4 @@ stay honest-and-unguarded until a real population exists to calibrate against �
 - `internal/cli/cloud_autoupdate_cmd.go` — the A3 site converted with it (`autoupdateReceipt`, `autoupdateApplied`)
 - `templates/place-directory/install.sh` — the two unguarded shell claims (lines 29, 33)
 - `api/lib/mix/tasks/barkpark.workspace.provision_schemas.ex` — the single Elixir console claim (A2, compliant)
+- `scripts/pds-elixir-receipt-census.exs` — the Elixir census: population, lens, blind spots, shapes, and the three integrity checks that can go red
