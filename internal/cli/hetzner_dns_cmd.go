@@ -15,6 +15,8 @@ package cli
 import (
 	"context"
 	"fmt"
+	"slices"
+	"sort"
 	"strconv"
 	"strings"
 
@@ -60,6 +62,123 @@ func hzRRSetName(name string) string {
 // ---------------------------------------------------------------------------
 // zone
 // ---------------------------------------------------------------------------
+
+// THE DNS OBSERVERS (PDS wave 32). Both DNS read paths in hcloud-go v2.44
+// swallow a 404 into `(nil, resp, nil)` — `if IsError(err, ErrorCodeNotFound) {
+// return nil, resp, nil }` in ZoneClient.getByIDOrName (zone.go) and in
+// GetRRSetByNameAndType (zone_rrset.go). That is precisely the
+// hzResGoneRead[T] triple, so these plug into the MUTATION half with no new
+// apparatus — and it is why they must never be paid with hzResDestroyed, whose
+// (nil, nil) branch would report `confirmed_gone:true` for a create.
+
+// hzObserveZoneCreated reads the create receipt off the create RESPONSE object.
+// The ADVISORY pair is the RAW --mode token: hzResDivergence skips an empty
+// `asked`, so an unset --mode simply does not compare, while passing the
+// RESOLVED mode would be degenerately always-equal — an advisory that can never
+// fire is apparatus nobody can test.
+func hzObserveZoneCreated(askedMode string) hzResObserveFn[hcloud.Zone] {
+	return func(zone *hcloud.Zone) hzResObservation {
+		extra := map[string]any{"mode": string(zone.Mode), "record_count": zone.RecordCount}
+		if zone.TTL > 0 {
+			extra["ttl"] = zone.TTL
+		}
+		if zone.Status != "" {
+			extra["status"] = string(zone.Status)
+		}
+		if len(zone.AuthoritativeNameservers.Assigned) > 0 {
+			extra["nameservers"] = zone.AuthoritativeNameservers.Assigned
+		}
+		return hzResAgreesWith(extra, hzResDivergence(
+			hzResAsked{"mode", askedMode, string(zone.Mode)},
+		))
+	}
+}
+
+// hzObserveZoneUpdated confirms `dns zone update` against the zone the API now
+// reports. Both halves are OPTIONAL — the verb refuses upfront unless at least
+// one was given — so each is compared only when it was asked for.
+func hzObserveZoneUpdated(wantTTL *int, wantLabels map[string]string) hzResObserveFn[hcloud.Zone] {
+	return func(zone *hcloud.Zone) hzResObservation {
+		if wantTTL != nil && zone.TTL != *wantTTL {
+			return hzResDisagrees("ttl", strconv.Itoa(zone.TTL), strconv.Itoa(*wantTTL))
+		}
+		for k, want := range wantLabels {
+			got, present := zone.Labels[k]
+			if !present {
+				return hzResDisagrees("labels", "no label "+strconv.Quote(k), strconv.Quote(k)+"="+strconv.Quote(want))
+			}
+			if got != want {
+				return hzResDisagrees("labels", strconv.Quote(k)+"="+strconv.Quote(got),
+					strconv.Quote(k)+"="+strconv.Quote(want))
+			}
+		}
+		extra := map[string]any{"ttl": zone.TTL, "record_count": zone.RecordCount}
+		if len(zone.Labels) > 0 {
+			extra["labels"] = zone.Labels
+		}
+		return hzResAgrees(extra)
+	}
+}
+
+// hzRRSetValues reads the values an rrset NOW holds.
+func hzRRSetValues(rrset *hcloud.ZoneRRSet) []string {
+	values := make([]string, 0, len(rrset.Records))
+	for _, rec := range rrset.Records {
+		values = append(values, rec.Value)
+	}
+	return values
+}
+
+// hzObserveRecordCreated reads the create receipt off the create RESPONSE
+// object's rrset.
+func hzObserveRecordCreated(rrset *hcloud.ZoneRRSet) hzResObservation {
+	extra := map[string]any{
+		"type":   string(rrset.Type),
+		"values": hzRRSetValues(rrset),
+	}
+	if rrset.TTL != nil {
+		extra["ttl"] = *rrset.TTL
+	}
+	if rrset.Zone != nil && rrset.Zone.Name != "" {
+		extra["zone"] = rrset.Zone.Name
+	}
+	return hzResAgrees(extra)
+}
+
+// hzObserveRecordUpdated confirms `dns record update` by re-reading the rrset on
+// the (zone, name, type) key the verb already holds. Values are compared as a
+// SET-EQUAL multiset in order-insensitive fashion: the API is free to reorder an
+// rrset's records, and refusing on order would red a correct update.
+func hzObserveRecordUpdated(wantValues []string, wantTTL *int) hzResObserveFn[hcloud.ZoneRRSet] {
+	return func(rrset *hcloud.ZoneRRSet) hzResObservation {
+		observed := hzRRSetValues(rrset)
+		if len(wantValues) > 0 {
+			got := slices.Clone(observed)
+			want := slices.Clone(wantValues)
+			sort.Strings(got)
+			sort.Strings(want)
+			if !slices.Equal(got, want) {
+				return hzResDisagrees("values", fmt.Sprintf("%v", observed), fmt.Sprintf("%v", wantValues))
+			}
+		}
+		if wantTTL != nil {
+			if rrset.TTL == nil {
+				return hzResDisagrees("ttl", "no ttl at all", strconv.Itoa(*wantTTL))
+			}
+			if *rrset.TTL != *wantTTL {
+				return hzResDisagrees("ttl", strconv.Itoa(*rrset.TTL), strconv.Itoa(*wantTTL))
+			}
+		}
+		extra := map[string]any{"type": string(rrset.Type), "values": observed}
+		if rrset.TTL != nil {
+			extra["ttl"] = *rrset.TTL
+		}
+		if rrset.Zone != nil && rrset.Zone.Name != "" {
+			extra["zone"] = rrset.Zone.Name
+		}
+		return hzResAgrees(extra)
+	}
+}
 
 func runHetznerDNSZone(out *writer, g globals, args []string) int {
 	if g.help {
@@ -229,14 +348,16 @@ func runHetznerDNSZoneUpdate(out *writer, g globals, args []string) int {
 			return hzFail(out, "update dns zone "+zone.Name+": change-ttl action failed", werr)
 		}
 	}
-	extra := map[string]any{}
-	if ttl != nil {
-		extra["ttl"] = *ttl
-	}
+	// The update rides two ACTION/PATCH endpoints that report nothing about the
+	// settled zone, so the single-resource GET on the RESOLVED id is the only
+	// server-side source. Only what was ASKED FOR is compared.
+	wantLabels := map[string]string(nil)
 	if hasLabel {
-		extra["labels"] = labels
+		wantLabels = labels
 	}
-	return hzResDone(out, "update", "zone", zone.ID, zone.Name, extra)
+	return hzResObserved(out, ctx, "update", "zone", zone.ID, zone.Name, nil,
+		func(c context.Context) (*hcloud.Zone, *hcloud.Response, error) { return hc.Zone.GetByID(c, zone.ID) },
+		hzObserveZoneUpdated(ttl, wantLabels))
 }
 
 func runHetznerDNSZoneCreate(out *writer, g globals, args []string) int {
@@ -288,11 +409,9 @@ func runHetznerDNSZoneCreate(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "create dns zone "+name+": create action failed", werr)
 	}
-	extra := map[string]any{"mode": string(mode)}
-	if len(result.Zone.AuthoritativeNameservers.Assigned) > 0 {
-		extra["nameservers"] = result.Zone.AuthoritativeNameservers.Assigned
-	}
-	return hzResDone(out, "create", "zone", result.Zone.ID, result.Zone.Name, extra)
+	// CLASS A2, with the RAW --mode token as the advisory's asked side.
+	return hzResObservedResponse(out, "create", "zone", result.Zone.ID, result.Zone.Name,
+		nil, result.Zone, hzObserveZoneCreated(a.val("mode")))
 }
 
 func runHetznerDNSZoneDelete(out *writer, g globals, args []string) int {
@@ -564,15 +683,25 @@ func runHetznerDNSRecordCreate(out *writer, g globals, args []string) int {
 	if werr := hzWait(ctx, hc, result.Action); werr != nil {
 		return hzFail(out, "create dns record "+name+"/"+string(typ)+": action failed", werr)
 	}
-	extra := map[string]any{"type": string(typ), "values": values, "zone": strings.Trim(strings.TrimSpace(a.val("zone")), ".")}
-	if ttl != nil {
-		extra["ttl"] = *ttl
+	// THE EMPTY-ID COLLAPSE, AND WHY THE OBVIOUS PAINT DOES NOT WORK. Handing
+	// `result.RRSet` straight to hzResObservedResponse produces NO refusal:
+	// hcloud-go's generated ZoneRRSetFromSchema takes a schema VALUE and returns
+	// a freshly-allocated pointer assigned unconditionally, so result.RRSet is
+	// never nil — a create response with no `rrset` key would exit 0 with
+	// confirmed_present:true and EMPTY observed fields, which is WORSE than the
+	// argv echo it replaces. Collapsing an id-less rrset to nil is what makes the
+	// refusal reachable. LIVE BEHAVIOUR CHANGE: `bp cloud hetzner dns record
+	// create` now exits non-zero (hzResNotReadable) when the API accepts the
+	// create and hands back no usable rrset.
+	obj := result.RRSet
+	if obj != nil && obj.ID == "" {
+		obj = nil
 	}
 	id := any(name)
-	if result.RRSet != nil && result.RRSet.ID != "" {
-		id = result.RRSet.ID
+	if obj != nil {
+		id = obj.ID
 	}
-	return hzResDone(out, "create", "record", id, name, extra)
+	return hzResObservedResponse(out, "create", "record", id, name, nil, obj, hzObserveRecordCreated)
 }
 
 func runHetznerDNSRecordUpdate(out *writer, g globals, args []string) int {
@@ -619,14 +748,13 @@ func runHetznerDNSRecordUpdate(out *writer, g globals, args []string) int {
 			return hzFail(out, "update dns record "+name+"/"+string(typ)+": change-ttl action failed", werr)
 		}
 	}
-	extra := map[string]any{"type": string(typ), "zone": strings.Trim(strings.TrimSpace(a.val("zone")), ".")}
-	if len(values) > 0 {
-		extra["values"] = values
-	}
-	if ttl != nil {
-		extra["ttl"] = *ttl
-	}
-	return hzResDone(out, "update", "record", name, name, extra)
+	// `record` IS payable even though it resolves no numeric id: the read is a
+	// single-resource GET on the (zone, name, type) key the verb ALREADY HOLDS,
+	// so the confirming read cannot address a second rrset.
+	return hzResObserved(out, ctx, "update", "record", name, name, nil,
+		func(c context.Context) (*hcloud.ZoneRRSet, *hcloud.Response, error) {
+			return hc.Zone.GetRRSetByNameAndType(c, rrset.Zone, rrset.Name, rrset.Type)
+		}, hzObserveRecordUpdated(values, ttl))
 }
 
 func runHetznerDNSRecordDelete(out *writer, g globals, args []string) int {
