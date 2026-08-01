@@ -424,6 +424,20 @@ func runHetznerBucketCreate(out *writer, args []string) int {
 		hzS3BucketRead(c, name), hzObserveBucketCreated(hzS3Location(a)), hzResBasisListScan)
 }
 
+// hzResBasisBucketListAfterDelete is `bucket delete`'s OWN basis, declared here
+// beside the verb that emits it for hzResBasisRRSetKey's reason
+// (hetzner_dns_cmd.go): each basis belongs to exactly one verb and needs the
+// reason for THIS verb's read written next to it, and nothing else may reach
+// for it.
+//
+// Object storage has no single-resource read for a bucket, so the only answer
+// available after a DELETE is the collection listing — and because Hetzner's
+// S3-compatible endpoint documents no consistency model, that listing is
+// DECLARED NON-BINDING (see hzResDestroyedDeclared below). The wording says
+// which listing was taken and when, so an operator weighs the receipt as the
+// after-the-fact scan it is.
+const hzResBasisBucketListAfterDelete = "ListBuckets after the delete"
+
 func runHetznerBucketDelete(out *writer, args []string) int {
 	const usage = "bp cloud hetzner storage bucket delete --name <n> [--location <loc>] [--yes]"
 	a, err := parseHzArgs(args, hzS3Flags("name"), []string{"yes"}, usage)
@@ -449,7 +463,7 @@ func runHetznerBucketDelete(out *writer, args []string) int {
 	// DELETE is reported, never treated as a failed verb. The read fails CLOSED
 	// — an error is confirmed_absent=false, never an optimistic true.
 	return hzResDestroyedDeclared(out, "delete", "bucket", name, name, nil,
-		"ListBuckets after the delete", func() (bool, error) {
+		hzResBasisBucketListAfterDelete, func() (bool, error) {
 			buckets, lerr := c.ListBuckets(hetznerCtx())
 			if lerr != nil {
 				return false, lerr
@@ -712,6 +726,15 @@ func hzSizeVerdict(declared int64) map[string]any {
 	}
 }
 
+// hzResBasisObjectKeyListAfterDelete is `object rm`'s OWN basis, declared here
+// for the same reason as hzResBasisBucketListAfterDelete above — and it is a
+// DIFFERENT read, which is why it may not share that constant: the bucket case
+// lists a collection and looks for a name, this one lists under the deleted
+// key's own exact prefix. Both are DECLARED NON-BINDING, and the wording names
+// the prefix so the receipt cannot be read as a single-resource check on the
+// key.
+const hzResBasisObjectKeyListAfterDelete = "ListObjects on the exact key prefix after the delete"
+
 func runHetznerObjectRm(out *writer, args []string) int {
 	const usage = "bp cloud hetzner storage object rm --bucket <b> --key <k> [--yes]"
 	a, err := parseHzArgs(args, hzS3Flags("bucket", "key"), []string{"yes"}, usage)
@@ -736,7 +759,7 @@ func runHetznerObjectRm(out *writer, args []string) int {
 	// for under its own exact prefix, and anything but a clean absence is an
 	// honest ⚠ partial rather than a ✓.
 	return hzResDestroyedDeclared(out, "rm", "object", key, key, map[string]any{"bucket": bucket},
-		"ListObjects on the exact key prefix after the delete", func() (bool, error) {
+		hzResBasisObjectKeyListAfterDelete, func() (bool, error) {
 			objs, lerr := c.ListObjects(hetznerCtx(), bucket, key)
 			if lerr != nil {
 				return false, lerr

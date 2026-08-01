@@ -41,14 +41,18 @@ package cli
 // while naming a read that is NOT a GET on an id — it addresses a (zone, name,
 // type) composite key, and its bound read is GetRRSetByNameAndType, not
 // GetByID. Judged against hzResBasisGet's shape it reds honestly-wrongly on day
-// one. Six bases need six shapes.
+// one. Seven bases need seven shapes.
 //
-// AND THE SURFACE IS SIX, NOT FIVE. Two of the six are not constants at all:
-// hetzner_storage_cmd.go:451 and :738 pass BARE STRING LITERALS into
-// hzResDestroyedDeclared's mandatory `basis string` parameter. A gate that
-// iterates the hzResBasis* identifiers — or one scoped to
-// hetzner_respost_mutation.go, where only four of the five constants live —
-// judges four of six and calls it coverage.
+// AND THE SURFACE IS SEVEN, NOT FIVE — SPREAD OVER THREE FILES. Two of the
+// seven used to be no constants at all: hetzner_storage_cmd.go passed BARE
+// STRING LITERALS into hzResDestroyedDeclared's mandatory `basis string`
+// parameter until pds-w34-declared-basis-literals-need-constants named them
+// (hzResBasisBucketListAfterDelete, hzResBasisObjectKeyListAfterDelete, declared
+// beside their verbs). Iterating the hzResBasis* identifiers now reaches all
+// seven — but a gate scoped to hetzner_respost_mutation.go, where only FOUR of
+// them live, still judges four of seven and calls it coverage. That is why the
+// population is globbed from every non-test hetzner_*.go and derived, never
+// listed.
 
 import (
 	"regexp"
@@ -68,10 +72,10 @@ func hzBasisHasToken(s, tok string) bool {
 // that read must and must not use.
 //
 // THE WORDING IS NOT STORED HERE. Each row names its basis by IDENTIFIER (a
-// constant) or by census KEY (the two declared literals), and the wording is
-// looked up from the DERIVED source at check time. A row that carried its own
-// copy of the wording would be reworded in the same edit as the constant — the
-// exact self-comparison this leg exists to break.
+// constant) — or, if a bare literal ever reaches a call site again, by census
+// KEY — and the wording is looked up from the DERIVED source at check time. A
+// row that carried its own copy of the wording would be reworded in the same
+// edit as the constant — the exact self-comparison this leg exists to break.
 type hzBasisShape struct {
 	konst string // the hzResBasis* identifier, for a constant row
 	key   string // the (kind, action) census key, for a declared-literal row
@@ -144,9 +148,13 @@ func hzBasisShapes() []hzBasisShape {
 			notTokens:   []string{"id", "response"},
 		},
 		{
-			// THE TWO ROWS A hzResBasis*-SHAPED GATE MISSES. Bare literals, in
-			// another file, in a mandatory parameter.
-			key:   "bucket/delete",
+			// THE TWO ROWS THAT USED TO BE BARE LITERALS. They are constants
+			// now (hetzner_storage_cmd.go, beside their verbs), so they are
+			// keyed by IDENTIFIER like every other row — but they still prove
+			// the lesson that made them: a gate scoped to
+			// hetzner_respost_mutation.go, where only four of the seven live,
+			// judges four of seven and calls it coverage.
+			konst: "hzResBasisBucketListAfterDelete",
 			shape: "a DECLARED NON-BINDING bucket listing taken after the delete",
 			// Bound read: c.ListBuckets(…).
 			mustMethods: []string{"List"},
@@ -155,7 +163,7 @@ func hzBasisShapes() []hzBasisShape {
 			notTokens:   []string{"id", "response", "create"},
 		},
 		{
-			key:   "object/rm",
+			konst: "hzResBasisObjectKeyListAfterDelete",
 			shape: "a DECLARED NON-BINDING key-prefix listing taken after the delete",
 			// Bound read: c.ListObjects(…, bucket, key).
 			mustMethods: []string{"List"},
@@ -176,10 +184,12 @@ func (s hzBasisShape) hzBasisName() string {
 
 // hzResDerivedBasisWordings returns EVERY confirmation basis the scanned
 // sources can print, keyed the way hzBasisShapes keys them: constants by
-// identifier, declared literals by census key.
+// identifier, and any bare literal that reaches a call site by census key. Since
+// wave 35 the literal half is EMPTY and that is the point — the loop stays so a
+// new literal is judged rather than skipped.
 //
 // DERIVED, NOT ENUMERATED (HG-D31). The hand list is the hazard: nothing forces
-// a SIXTH constant, or a THIRD declared literal, into a list somebody typed.
+// an EIGHTH constant, or a fresh declared literal, into a list somebody typed.
 // Both halves come off the AST — hzResBasisConstants walks the const
 // declarations, and the literal half walks the actual call sites.
 func hzResDerivedBasisWordings(t *testing.T) map[string]string {
@@ -283,9 +293,10 @@ func TestHetznerResourceBasisWordingsAreDistinct(t *testing.T) {
 // non-vacuous IN BOTH DIRECTIONS: every basis the sources can print must have a
 // shape row, and every shape row must name a basis the sources still have.
 //
-// This is the arm that stops the sixth constant. hzResBasisRRSetKey already
+// This is the arm that stops the eighth constant. hzResBasisRRSetKey already
 // proved a basis can be declared outside the const block in another file, and
-// the two declared literals proved a basis need not be a constant at all — so
+// the two declared destroys proved a basis can arrive with no constant at all —
+// they have one now, in a THIRD file — so
 // the population is DERIVED and the table is checked against it, never the
 // other way round.
 func TestHetznerResourceBasisShapeTableCoversEverySource(t *testing.T) {
