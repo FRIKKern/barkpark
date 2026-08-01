@@ -224,11 +224,11 @@ type hzResObserveFn[T any] func(*T) hzResObservation
 // TWO FOOTGUNS THE VARIADIC CANNOT EXPRESS IN THE TYPE, so they are handled
 // here and stated in the open:
 //
-//	1. PASSING TWO BASES COMPILES and silently takes the FIRST. There is no
-//	   arity the compiler will reject; hzResBasisOf documents the choice.
-//	2. AN EMPTY STRING FALLS BACK to hzResBasisGet rather than emitting a blank
-//	   basis — a receipt whose confirmation_basis is "" is worse than one that
-//	   names the default, because a reader cannot tell it from a missing key.
+//  1. PASSING TWO BASES COMPILES and silently takes the FIRST. There is no
+//     arity the compiler will reject; hzResBasisOf documents the choice.
+//  2. AN EMPTY STRING FALLS BACK to hzResBasisGet rather than emitting a blank
+//     basis — a receipt whose confirmation_basis is "" is worse than one that
+//     names the default, because a reader cannot tell it from a missing key.
 //
 // THE SHIPPED LIMIT, STATED (PDS-D438), and it is stated at the precision it
 // was MEASURED, not at the precision that would flatter it:
