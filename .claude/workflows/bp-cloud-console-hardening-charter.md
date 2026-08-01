@@ -766,6 +766,52 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-01 — wave 16 REVIEW — four of four round-1 slices shipped and pushed, grade **A−**
+
+**Paper:** `cloud-console-hardening-wave-16-2026-08-01`. PRs #8816-#8819. Nothing merged by the wave;
+the lead merges and closes the merge-gated criterion on each row.
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| s1 tier-floor guard + 5-tier seam | `…can-los-0-r` | #8816 | the whole of #8741's billing fix had NO guard; now a byte-pin (wired, ~55ms) + a rendered job + a `--tiers5` seam, each naming the mutation it refuses and the one it is blind to. |
+| s2 sweep axes theme/height/scenario | `…cannot-se-1-r` | #8817 | three axes, refusals in BOTH directions, `--cell a,b,c` with a per-name refusal, and `cch-w15-bl-lega-cannot-refuse-removed-breakpoint` folded in. Suite 32 → 51. |
+| s3 pill text bounded | `…words-out-2` | #8818 | TWO filed person-facing rows paid in ONE 75-line additive hunk, plus the guard's first VERTICAL assertion. |
+| s5 stale-open audit | `…both-direction-3` | #8819 | 13+ rows adjudicated on CRITERIA in both directions; 9 closed, 2 cancelled as refuted, 2 drafts discarded, 1 deliberately left open at 2/3. |
+
+**THE PAIR IS JUSTIFIED BY MEASUREMENT, NOT BY TASTE — re-derived by the reviewer.** A 200px floor
+passes the FULL 13-width render leg **exit 0** while the byte-pin fails naming "measured 200px". So
+the render half is a `<=185` guard and the byte-pin a text guard; **neither subsumes the other**, and
+the 186..229 band is guarded ONLY textually. All three halves were re-driven at 180 (byte-pin fails;
+render reds `149 > 141 "Yours when the trial ends"`; `--tiers5` reds `3trk@185px` at 901 and
+`5trk@180.391px` at 1700) and `app.css` restored clean.
+
+**TWO REVIEWER FIXES, AND BOTH ARE THE WAVE'S OWN DISEASE.** (1) s2 renames the bare module const
+`HEIGHT` to `RENDER_HEIGHT`; s1's new `--tiers5` leg reads it. The two branches merge **CLEANLY** and
+then die at run time: `ReferenceError: HEIGHT is not defined` — no conflict marker, no test, and
+`--tiers5` is wired to no job, so nothing in CI would have said so. Fixed by giving the leg its own
+`TIERS5_HEIGHT`. (2) s2's three new `app.js:<line>` citations trip `__css_check` **E11 — 3 error(s)**
+— and `__css_check` runs in the WIRED `console-unit` job, so the merge PR would have reded. The
+slice's own gate did not include `__css_check` even though it edits a file `__css_check` scans.
+**A gate that does not include every instrument scanning the file you touched is not a gate.**
+
+**The ratio was met at the PLAN, and discharged honestly.** Of the wish's three named candidates only
+one is person-facing; `-detail-url-fixture-never-overflows` is a CORPUS row (240 == 240, truncated
+false in every cell) and `-cuestuck-…` is an INSTRUMENT row (the cue is correctly live; the sweep's
+note is wrong). The four that survive are s3 (paying TWO rows), s4, s6, s8 — **three of them are
+round-2 and did not fly this run.** Round 1 therefore shipped ONE person-facing slice; the ratio is
+paid only when s4/s6/s8 land, and the next wave must not treat it as already banked.
+
+**Merge order matters and is now cheap.** After the reviewer's anchor move, all four branches merge
+into `origin/main` with **zero conflicts** in any order, and the merged tree was driven green across
+the union of every gate: `__css_check` 0 errors · `__app.test.mjs` 758/758 · `breakpoint-sweep.test`
+51/51 · `seal-predicate.test` 49/49 · `smoke` 99/99 · `overflow-guard` PASS · `cssom-parity` PASS
+(1253 == baseline 1253) · `--tiers5` exit 0. **`cssom-heads.baseline` is 1253 after s3** — s6 and s8
+must re-measure on the merged tree with a real Chrome, never by arithmetic.
+
+**Cost the lead may want to reverse:** s2's theme axis DOUBLES Leg B (676 cells, ~15 min) for an axis
+the file itself calls coverage rather than yield. `--theme light` slices it back; defaulting Leg B to
+light and making `--theme dark` explicit keeps every refusal at zero cost.
+
 ### 2026-08-01 — wave 15 REVIEW — six of six round-1 slices shipped and pushed, grade **A−**
 
 **Paper:** `cloud-console-hardening-wave-15-2026-07-31`. PRs #8739-#8744. Nothing merged by the wave;
