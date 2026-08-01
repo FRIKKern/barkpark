@@ -125,8 +125,10 @@ defmodule PDS.Census do
   # can retract a false route bracket. A site whose route bracket is wrong says so here.
   @declared [
     %{
-      path: "api/lib/barkpark_web/controllers/auth_controller.ex",
-      line: 399,
+      key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
+      basis_spans: [{393, 393}],
+      basis_token: "never reveal whether the email is registered",
       class: "NO-OP-ACK",
       confirmation: "declared",
       basis: "inline comment :393 — \"Always 200 — never reveal whether the email is registered.\"",
@@ -136,8 +138,10 @@ defmodule PDS.Census do
           "does write a reset token when the address resolves.)"
     },
     %{
-      path: "api/lib/barkpark_web/controllers/auth_controller.ex",
-      line: 417,
+      key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
+      basis_spans: [{402, 407}],
+      basis_token: "anti-enumeration",
       class: "NO-OP-ACK",
       confirmation: "declared",
       basis:
@@ -152,8 +156,10 @@ defmodule PDS.Census do
           "wrongly accused for two waves."
     },
     %{
-      path: "api/lib/barkpark_web/controllers/github_webhook_controller.ex",
-      line: 86,
+      key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "17468236"},
+      basis_spans: [{74, 78}],
+      basis_token: "always answers 2xx unless intake genuinely",
       class: "NO-OP-ACK",
       confirmation: "declared",
       basis: "@doc :74-78 — \"always answers 2xx unless intake genuinely fails\"",
@@ -162,8 +168,10 @@ defmodule PDS.Census do
           "never fires here. A ping ack claims nothing beyond having been reached."
     },
     %{
-      path: "api/lib/barkpark_web/controllers/github_webhook_controller.ex",
-      line: 87,
+      key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "105570378"},
+      basis_spans: [{74, 78}, {87, 87}],
+      basis_token: "ignored:",
       class: "CATCH-ALL-TO-SUCCESS",
       confirmation: "declared",
       basis: "the response body itself — `ignored: \"event\"` on :87, plus @doc :74-78",
@@ -174,8 +182,10 @@ defmodule PDS.Census do
           "ignored, so the receipt does not pass an unhandled event off as handled work."
     },
     %{
-      path: "api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
-      line: 54,
+      key: {"api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
+            "BarkparkWeb.BulldocsFormController.submit/2", "123699679", "17468236"},
+      basis_spans: [{22, 24}, {53, 53}],
+      basis_token: "the trap stays invisible",
       class: "HONEYPOT",
       confirmation: "declared",
       route_claim: "ROUTE-MISCREDIT",
@@ -191,6 +201,572 @@ defmodule PDS.Census do
           "retracted from the shape vocabulary: route_tag/1 and evidence/3 read write?/depth only."
     }
   ]
+
+  # ------------------------------------------------------------- judgment register
+  #
+  # THE JUDGMENT LEDGER (PDS wave 37, task pds-w34-hand-bucket-register). One row per
+  # EMITTED success claim, keyed on {path, module.name/arity, head_hash, expr_fp} — CLASS
+  # AND LINE BOTH EXCLUDED. It is NOT a bucketing exercise and it asserts NO distribution:
+  # REGISTER-COMPLETE checks completeness and integrity, never how the verdicts fall, so
+  # no reclassification can red the build.
+  #
+  # DERIVED AT 501fb9670, off this script's OWN `--keys` emission (91 rows / 91 distinct).
+  # Every key here was READ from that TSV, never transcribed by hand.
+  #
+  # THE KEY LADDER, MEASURED AT THAT SHA — so nobody "simplifies" the key to three fields:
+  #     {path, mfa} = 75 distinct · +head_hash = 76 · +expr_fp = 91 · expr_fp ALONE = 67
+  # `expr_fp` IS THE LOAD-BEARING FIELD. One fingerprint (17468236, the bare success map
+  # with no discriminating key) covers 12 rows across 7 files; inside
+  # github_webhook_controller.ex, path+expr_fp alone collapses 14 rows to 12. `head_hash`
+  # buys exactly ONE row (75 -> 76) and is CARRIED FOR STABILITY, NOT UNIQUENESS: it
+  # survives an edit inside a clause body that re-fingerprints the expression, so a row
+  # demoted by basis-stale can still be found. gh:86 and gh:87 share {path, mfa,
+  # head_hash} and are separated by expr_fp ALONE.
+  #
+  # WHAT head_hash CANNOT DISCRIMINATE (scope stated, or a reader believes it is near
+  # unique on its own — it is not, and it does not need to be): across all 17,620 defs it
+  # collides in exactly 3 buckets WITHIN a {path, module.name/arity} group, and 0 times
+  # within the 75 site-owning groups. Only ONE of the three is a benign bodiless
+  # declaration head; the other TWO are DISTINCT functions inside two `defimpl Inspect,
+  # for: ...` blocks (plugins/github/errors.ex :94/:138, plugins/indx/errors.ex :118/:137)
+  # that this walker cannot tell apart. Corpus-wide — ignoring path and mfa — it is 912
+  # groups over 2,543 defs under this normaliser (the wave brief recorded 913/2,544 under
+  # another spelling; that figure does not survive a spelling change and is not quotable
+  # across one).
+  #
+  # CHURN, MEASURED across the three merges that landed into this sha: 5 orphaned / 5
+  # arrived / 86 common, and it was a PURE RE-KEY — the {path, mfa} multiset was
+  # byte-identical and only expr_fp moved. Expect ~5.5% of rows to re-key per code slice
+  # touching two controllers. `--keys` is C-locale sorted by {path, line}; a consumer that
+  # pipes it through `sort` without LC_ALL=C reorders it.
+  #
+  # THE SENTINEL PREDICATE, NAMED: sentinel-ok@repo-write,def+defp,tail-disjoint /
+  # total-meta-drop/phash2-term/v1 / 501fb9670. The 21 function-tail / 11 clause-local
+  # figures reproduce ONLY under that four-knob predicate (def+defp clauses with a
+  # do-block, a Repo-WRITE verb list, tail = last expression of a __block__, clause-local
+  # DISJOINT from function-tail). Dropping the write predicate gives 257/247; public def
+  # only gives 15/4; any Repo.* gives 23/18; non-disjoint gives 13.
+  #
+  # CAS IS A STRICT SUBSET OF POST-READ AT THIS LENS AND THIS SHA — the difference
+  # CAS-minus-POST-READ is EMPTY, and POST-READ-minus-CAS is the single site
+  # oidc_controller.ex:82. All 14 CAS sites reach POST-READ via ARM 1 (`select:`), zero
+  # via ARM 2, and the same function supplies both halves (Internal.fenced_content_write/4
+  # x13, BlockOps.fenced_paper_update/4 x1). RECORDED WITH ITS LENS AND SHA, NEVER AS A
+  # STANDING INVARIANT: a CAS spelling with no `select:` is describable
+  # (pds-bl-cas-int-tuple-spelling-blind) and would break it.
+  #
+  # -- THE THREE VERDICTS. There are exactly three, and nothing else is admitted.
+  #   PROVEN    a committed differential asserts `receipt == stored row`
+  #   REFUTED   measured divergent
+  #   UNJUDGED  named, WITH THE REASON — thirty honest UNJUDGED beat seventy-four
+  #             confident guesses, which is what dissolves the shadowed-bucket problem
+  #             instead of trading one shadowed bucket for another.
+  #
+  # -- THE OPENING BALANCE, STATED SO IT CANNOT BE ROUNDED UP (PDS-D526/D527).
+  #   8 rows  PROVEN / end-to-end            mutation-attested; the row carries the line
+  #   9 rows  PROVEN / end-to-end-unmutated  ALREADY CONJUNCTIVE in the committed suite,
+  #                                          BUT ITS FALSIFIER WAS NEVER EXERCISED — the
+  #                                          conjunction was READ, not made to fail
+  #   1 tag   PROVEN inside an UNJUDGED row  github_webhook_controller.ex:194's
+  #                                          `:already_stamped` tag only (see below)
+  # That is the 18 of PDS-D526, and NINE OF THE EIGHTEEN ARE UNMUTATED. Below the line,
+  # and NOT part of it: 6 rows carry `side_effect_existence_only`, which PDS-D499 maps to
+  # UNJUDGED — the cited Repo read asserts an audit row EXISTS, never that the printed
+  # field equals the stored one. Three of those six are the wave's own "weaker still"
+  # rows (tasks_controller.ex:1352, bulldocs_ingest_controller.ex:164 and
+  # auth_controller.ex:329, which proves session death through a SECOND ENDPOINT).
+  #
+  # -- THE BASIS VOCABULARY IS CLOSED, AND EACH VALUE CARRIES ITS OWN CHECK. An essay in
+  # a reason field is unfalsifiable paperwork; a vocabulary token is a claim a machine can
+  # refuse. PROSE IS PERMITTED ON EXACTLY ONE VALUE — `unjudged_other`, where it is
+  # REQUIRED, counted, printed, and never reds. @basis_vocab below is the authority.
+  # THIS WAVE ADDS FOUR VALUES to PDS-D499's eleven, each mechanically falsifiable:
+  #   end_to_end_unmutated   — the distinct token for a conjunction read but not exercised
+  #   declared_basis         — the five @declared rows; DECLARED-BASIS-INTACT is its check
+  #   partial_tag_coverage   — one emitted site, several rendered receipts (below)
+  #   unexamined             — no differential has been READ for this row. It is not a
+  #                            euphemism for "probably fine": it is the honest floor, and
+  #                            it is what 33 of these 91 rows say.
+  #
+  # -- MULTI-TAG SITES (PDS-D527). github_webhook_controller.ex:194's clause head is
+  # `{:ok, tag, doc_id} when tag in [...]` — ONE emitted site, THREE rendered receipts,
+  # and only `:already_stamped` is proven end-to-end. Such a row carries a `tags:`
+  # sub-list and THE ROW'S OWN VERDICT IS THE WEAKEST OF THEM. IT IS NOT SPLIT INTO THREE
+  # ROWS: three rows would name one emitted site three times and RED REGISTER-COMPLETE's
+  # row->site direction, the arm this wave is judged on.
+  #
+  # -- WHAT THE KEY MIGRATION KILLED, AND WHAT IT DELIBERATELY DID NOT. With one blank
+  # line inserted above github_webhook_controller.ex:87 (`perl -i -pe 'print "\n" if
+  # $. == 80'` — NOT `sed -i '' '398i\'`, which is a macOS no-op and proves nothing), the
+  # {path,line}-keyed spelling prints `1 undeclared of 1 fired` — A FALSE ACCUSATION
+  # against a committed basis, at exit 0 — while this one still prints `0 undeclared of 1
+  # fired` with only the printed anchor tracking to :88. REGISTER-COMPLETE and
+  # DECLARED-ROWS-RESOLVE both stay green through it, because neither joins on a line.
+  # DECLARED-BASIS-INTACT correctly REDS, and that is not a residual line dependency worth
+  # engineering away: a basis span NAMES PROSE IN A FILE, so it is line-anchored by
+  # nature, and the FAIL line carries the row and its recorded span so the fix is one edit.
+  #
+  # -- NO SCRIPT EVER WRITES A VERDICT. Arms check; they never assign. The one apparent
+  # exception is `basis_stale`, and it is not one: a row whose recorded head_hash/expr_fp
+  # no longer match is REPORTED as demoted at print time, and the committed row is left
+  # exactly as its author wrote it, so the demotion is visible as a diff-free fact rather
+  # than an edit nobody reviewed.
+  #
+  # -- WHAT THE MODULE-LINKAGE CHECK WOULD HAVE COST (PDS-D525). "The cited test
+  # references the site's MODULE" reads like the obvious falsifier and it is a FALSE one:
+  # `pds_group_c_receipt_differential_test.exs` contains the string `Controller` ZERO
+  # times, because conn-driven tests name a URL, not a module — the predicate refuses ALL
+  # of this wave's committed PROVEN differentials. Route linkage replaces it and is
+  # ADVISORY, never redding, because it is UNCHECKABLE for the 14 github_webhook rows
+  # (`GithubWebhookController` appears zero times in router.ex; the routes are
+  # macro-generated) and reading the literal alone manufactured three FALSE contradictions
+  # against genuine PROVEN rows whose route lives in an enclosing `scope`.
+  #
+  # -- HOME. In-file, beside @declared, at COMPACT row density (~4.4 lines/row). The
+  # 19-lines-per-row @declared shape would have added ~1,730 lines and doubled this
+  # script. PROSE LIVES IN THE WAVE PAPER, not here — except `unjudged_other`, where it is
+  # required. `.sobelow-skips` is FORBIDDEN as a home: PDS-D141 forbids PDS PRs from
+  # editing it, it is this repo's own worked example of a line-keyed register rotting
+  # silently, and a judgment register whose rows silence the instrument inverts this
+  # epic's law.
+
+  # THE VOCABULARY IS THE AUTHORITY, AND IT IS DATA. {verdict class, falsifier, tier} —
+  # `:reds` values are checked by the L2 basis falsifiers and go RED; `:advisory` values
+  # print a counted CONTRADICTION line at exit 0, because their falsifier is either
+  # undecidable as written or measured to manufacture false accusations.
+  @basis_vocab %{
+    end_to_end:
+      {"PROVEN", "the cited test drives the site's route AND reads the stored row back", :reds},
+    end_to_end_unmutated:
+      {"PROVEN", "the cited test drives the site's route AND reads the stored row back (mutation NEVER exercised)", :reds},
+    two_hop_composed:
+      {"UNJUDGED", "a single test spanning BOTH hops exists", :advisory},
+    stub_mapping_only:
+      {"UNJUDGED", "the cited test has no injection seam, or DOES read Repo", :reds},
+    context_differential_only:
+      {"UNJUDGED", "the cited test builds a conn", :reds},
+    side_effect_existence_only:
+      {"UNJUDGED", "the Repo read compares a printed field, not existence", :advisory},
+    shape_assertion_only:
+      {"UNJUDGED", "the assertion can fail on a wrong payload (implementable ONLY as a denylist of weak predicates — is_list/is_map/is_binary/bare truthiness — so it is advisory, and this name promises more than its code delivers)", :advisory},
+    payload_is_the_postcondition:
+      {"UNJUDGED", "any emitted value traces to params[...] or a fn head", :advisory},
+    request_param_echo:
+      {"UNJUDGED", "no emitted value traces to a request parameter", :advisory},
+    no_observer:
+      {"UNJUDGED", "any test references the site's module OR its route path", :reds},
+    basis_stale:
+      {"UNJUDGED", "the current head_hash+expr_fp equal the recorded pair", :reds},
+    partial_tag_coverage:
+      {"UNJUDGED", "every tag in the sub-list carries the same verdict as the row", :advisory},
+    declared_basis:
+      {"UNJUDGED", "the @declared row's basis span no longer carries its token (DECLARED-BASIS-INTACT)", :advisory},
+    unexamined:
+      {"UNJUDGED", "a committed test cites this site's route AND reads Repo back", :advisory},
+    unjudged_other:
+      {"UNJUDGED", "PROSE REQUIRED; counted and PRINTED in the integrity block; NEVER reds", :advisory}
+  }
+
+  @register [
+    # barkpark/plugins/sheets/web/import_controller.ex:64
+    %{key: {"api/lib/barkpark/plugins/sheets/web/import_controller.ex",
+            "Barkpark.Plugins.Sheets.Web.ImportController.create/2", "51320322", "13286890"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark/plugins/sheets/web/ops_controller.ex:71
+    %{key: {"api/lib/barkpark/plugins/sheets/web/ops_controller.ex",
+            "Barkpark.Plugins.Sheets.Web.OpsController.apply_ops/2", "36006285", "87176703"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:177
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.erase/2", "14672314", "70062513"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:329
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.revoke_session/2", "14482306", "17656195"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:369"},
+    # barkpark_web/controllers/auth_controller.ex:351
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.logout/2", "893943", "17468236"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:351
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.logout/2", "893943", "101485070"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:379
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.verify_email/2", "13273957", "17468236"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/auth_controller.ex:399
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.request_reset/2", "37852989", "17468236"},
+      verdict: "UNJUDGED", basis: :declared_basis},
+    # barkpark_web/controllers/auth_controller.ex:417
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.request_magic_link/2", "15394828", "17468236"},
+      verdict: "UNJUDGED", basis: :declared_basis},
+    # barkpark_web/controllers/auth_controller.ex:463
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.reset/2", "117976982", "93237454"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/pds_w36_revoke_all_receipt_test.exs:64",
+      attestation:
+        "mutation: hardcode sessionsRevoked — `mix test api/test/barkpark_web/controllers/pds_w36_revoke_all_receipt_test.exs:64` reds on Repo.aggregate",
+    },
+    # barkpark_web/controllers/auth_controller.ex:528
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.mfa_verify/2", "16615157", "38279071"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:463"},
+    # barkpark_web/controllers/auth_controller.ex:567
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.mfa_disable/2", "103479204", "17468236"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:463"},
+    # barkpark_web/controllers/auth_controller.ex:600
+    %{key: {"api/lib/barkpark_web/controllers/auth_controller.ex",
+            "BarkparkWeb.AuthController.mfa_step_up/2", "85508749", "111398976"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/auth_controller_test.exs:463"},
+    # barkpark_web/controllers/bulldocs_form_controller.ex:50
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
+            "BarkparkWeb.BulldocsFormController.submit/2", "123699679", "127244318"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_form_controller.ex:54
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_form_controller.ex",
+            "BarkparkWeb.BulldocsFormController.submit/2", "123699679", "17468236"},
+      verdict: "UNJUDGED", basis: :declared_basis},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:164
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.ingest_blocks/4", "1989150", "124223564"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs:319"},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:244
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.ingest_html/4", "19560303", "124223564"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs:97"},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:321
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.ingest_session/2", "11366553", "107043790"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:431
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.apply_session_op/2", "38576492", "88664755"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:502
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.append_session_event/2", "51520286", "61088078"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:551
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.touch_session_conversation/2", "104647366", "61088078"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:630
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.apply_op/2", "133005745", "10224315"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs:595"},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:715
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.apply_op/2", "85655901", "15024779"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/bulldocs_ingest_controller_test.exs:397"},
+    # barkpark_web/controllers/bulldocs_ingest_controller.ex:814
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_ingest_controller.ex",
+            "BarkparkWeb.BulldocsIngestController.propose/2", "78347098", "122622379"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/bulldocs_intents_controller.ex:50
+    %{key: {"api/lib/barkpark_web/controllers/bulldocs_intents_controller.ex",
+            "BarkparkWeb.BulldocsIntentsController.mark_processed/2", "120960553", "126280052"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/github_adopt_controller.ex:66
+    %{key: {"api/lib/barkpark_web/controllers/github_adopt_controller.ex",
+            "BarkparkWeb.GithubAdoptController.adopt/2", "109355155", "85172196"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/github_adopt_controller.ex:69
+    %{key: {"api/lib/barkpark_web/controllers/github_adopt_controller.ex",
+            "BarkparkWeb.GithubAdoptController.adopt/2", "109355155", "81072"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/github_status_controller.ex:65
+    %{key: {"api/lib/barkpark_web/controllers/github_status_controller.ex",
+            "BarkparkWeb.GithubStatusController.status/2", "63059312", "64996178"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/github_webhook_controller.ex:86
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "17468236"},
+      verdict: "UNJUDGED", basis: :declared_basis},
+    # barkpark_web/controllers/github_webhook_controller.ex:87
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.receive/2", "115025520", "105570378"},
+      verdict: "UNJUDGED", basis: :declared_basis},
+    # barkpark_web/controllers/github_webhook_controller.ex:111
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "124460091"},
+      verdict: "UNJUDGED", basis: :two_hop_composed, evidence: "api/test/barkpark/plugins/github/inbound_events_test.exs:201"},
+    # barkpark_web/controllers/github_webhook_controller.ex:115
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "96836141"},
+      verdict: "UNJUDGED", basis: :two_hop_composed, evidence: "api/test/barkpark/plugins/github/inbound_events_test.exs:201"},
+    # barkpark_web/controllers/github_webhook_controller.ex:120
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_inbound/2", "26011363", "39153928"},
+      verdict: "UNJUDGED", basis: :two_hop_composed, evidence: "api/test/barkpark/plugins/github/inbound_events_test.exs:235"},
+    # barkpark_web/controllers/github_webhook_controller.ex:145
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "38180227"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:165"},
+    # barkpark_web/controllers/github_webhook_controller.ex:150
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "96836141"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:112"},
+    # barkpark_web/controllers/github_webhook_controller.ex:154
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "39153928"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:122"},
+    # barkpark_web/controllers/github_webhook_controller.ex:161
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_intake/2", "108173332", "109773520"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+    # barkpark_web/controllers/github_webhook_controller.ex:189
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "46526763"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:209",
+      attestation:
+        "mutation: render stamped: without the merge write — `mix test api/test/barkpark_web/controllers/github_webhook_integration_test.exs:209` reds on Repo.get!",
+    },
+    # barkpark_web/controllers/github_webhook_controller.ex:194
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "107251666"},
+      verdict: "UNJUDGED", basis: :partial_tag_coverage, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:244",
+      tags: [
+        %{tag: :already_stamped, verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/controllers/github_webhook_integration_test.exs:244"},
+        %{tag: :no_marker, verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+        %{tag: :no_guardable_marker, verdict: "UNJUDGED", basis: :no_observer, evidence: ""},
+      ],
+    },
+    # barkpark_web/controllers/github_webhook_controller.ex:200
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "28623217"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+    # barkpark_web/controllers/github_webhook_controller.ex:205
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "62383269"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+    # barkpark_web/controllers/github_webhook_controller.ex:209
+    %{key: {"api/lib/barkpark_web/controllers/github_webhook_controller.ex",
+            "BarkparkWeb.GithubWebhookController.handle_pull_request/2", "15231052", "1432007"},
+      verdict: "UNJUDGED", basis: :stub_mapping_only, evidence: "api/test/barkpark_web/controllers/github_webhook_controller_test.exs:75"},
+    # barkpark_web/controllers/oidc_controller.ex:82
+    %{key: {"api/lib/barkpark_web/controllers/oidc_controller.ex",
+            "BarkparkWeb.OidcController.callback/2", "55913437", "73996638"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/plugin_settings_controller.ex:53
+    %{key: {"api/lib/barkpark_web/controllers/plugin_settings_controller.ex",
+            "BarkparkWeb.PluginSettingsController.update/2", "52263610", "17468236"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:251",
+      attestation:
+        "mutation: drop one key from the stored settings map — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:251` reds",
+    },
+    # barkpark_web/controllers/plugin_settings_controller.ex:65
+    %{key: {"api/lib/barkpark_web/controllers/plugin_settings_controller.ex",
+            "BarkparkWeb.PluginSettingsController.delete/2", "52373358", "17468236"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:272",
+      attestation:
+        "mutation: 200 without deleting the row — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:272` reds",
+    },
+    # barkpark_web/controllers/pulse_controller.ex:58
+    %{key: {"api/lib/barkpark_web/controllers/pulse_controller.ex",
+            "BarkparkWeb.PulseController.create/2", "89312836", "32961015"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/query_controller.ex:199
+    %{key: {"api/lib/barkpark_web/controllers/query_controller.ex",
+            "BarkparkWeb.QueryController.counts/2", "9322375", "98818316"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/saml_controller.ex:66
+    %{key: {"api/lib/barkpark_web/controllers/saml_controller.ex",
+            "BarkparkWeb.SamlController.acs/2", "32993266", "73996638"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/saml_controller_test.exs:117"},
+    # barkpark_web/controllers/search_controller.ex:190
+    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.reindex/2", "43259676", "54848977"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/search_controller.ex:316
+    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.delete_search_synonym/2", "57054890", "120063507"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:67",
+      attestation:
+        "mutation: flip `Synonyms.delete/4` to return {:ok, 0} without deleting — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:67` reds on the Repo read",
+    },
+    # barkpark_web/controllers/search_controller.ex:337
+    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.search_interaction/2", "79721084", "115364326"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/integration/v1_data_search_suggestions_test.exs:84"},
+    # barkpark_web/controllers/search_controller.ex:340
+    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.search_interaction/2", "79721084", "95315838"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/search_controller.ex:363
+    %{key: {"api/lib/barkpark_web/controllers/search_controller.ex",
+            "BarkparkWeb.SearchController.correction/2", "57827587", "73264487"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/secret_controller.ex:67
+    %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
+            "BarkparkWeb.SecretController.update/2", "4060754", "17468236"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:195",
+      attestation:
+        "mutation: store the PREVIOUS ciphertext — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:195` reds on the decode-back",
+    },
+    # barkpark_web/controllers/secret_controller.ex:80
+    %{key: {"api/lib/barkpark_web/controllers/secret_controller.ex",
+            "BarkparkWeb.SecretController.delete/2", "115609568", "17468236"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:145",
+      attestation:
+        "mutation: skip the audit insert — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:145` reds on the audit row",
+    },
+    # barkpark_web/controllers/self_update_controller.ex:24
+    %{key: {"api/lib/barkpark_web/controllers/self_update_controller.ex",
+            "BarkparkWeb.SelfUpdateController.trigger/2", "84801527", "68291924"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/site_deploy_controller.ex:81
+    %{key: {"api/lib/barkpark_web/controllers/site_deploy_controller.ex",
+            "BarkparkWeb.SiteDeployController.start/2", "126876520", "52242951"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/social_controller.ex:66
+    %{key: {"api/lib/barkpark_web/controllers/social_controller.ex",
+            "BarkparkWeb.SocialController.callback/2", "9871709", "73996638"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/tasks_controller.ex:83
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.task_list_response/3", "83021484", "1576835"},
+      verdict: "UNJUDGED", basis: :unjudged_other,
+      note:
+        "wave 36 measured this receipt divergent and pds-w36-help-seal-fix repaired it; no committed differential naming task_list_response/3 resolves in the tree at this sha, so the REPAIR is unjudged here rather than credited",
+    },
+    # barkpark_web/controllers/tasks_controller.ex:170
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.prime/2", "40556915", "123654328"},
+      verdict: "UNJUDGED", basis: :request_param_echo},
+    # barkpark_web/controllers/tasks_controller.ex:224
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.events/2", "114887844", "12538138"},
+      verdict: "UNJUDGED", basis: :request_param_echo},
+    # barkpark_web/controllers/tasks_controller.ex:316
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.claim/2", "130674472", "21159066"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:2435"},
+    # barkpark_web/controllers/tasks_controller.ex:371
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.show/2", "107047617", "14030995"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:435
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.claim_by_id/2", "59151065", "67476"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:105"},
+    # barkpark_web/controllers/tasks_controller.ex:558
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.release/2", "64399052", "86587931"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:741"},
+    # barkpark_web/controllers/tasks_controller.ex:587
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.close_response/3", "102889179", "17778956"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:149"},
+    # barkpark_web/controllers/tasks_controller.ex:652
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.stage/2", "86501420", "84462998"},
+      verdict: "PROVEN", basis: :end_to_end_unmutated, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:3147"},
+    # barkpark_web/controllers/tasks_controller.ex:788
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.stamp/2", "53080965", "119279425"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:126"},
+    # barkpark_web/controllers/tasks_controller.ex:861
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.pulse/2", "62712851", "71420310"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:169"},
+    # barkpark_web/controllers/tasks_controller.ex:922
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.edges/2", "29434876", "113319186"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:952
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.graph_show/2", "68876245", "14314567"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:984
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.graph_tasks/2", "6484558", "37641606"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:1008
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.graph_orphans/2", "87006539", "21591304"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:1015
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.graph_dangling/2", "113055363", "33214619"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:1142
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.graph_corpus/2", "84484341", "94052887"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tasks_controller.ex:1289
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.add_edge/2", "32780970", "67314930"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_test.exs:165"},
+    # barkpark_web/controllers/tasks_controller.ex:1327
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.relabel/2", "7475620", "84462998"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:209"},
+    # barkpark_web/controllers/tasks_controller.ex:1352
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.papers/2", "102968637", "84462998"},
+      verdict: "UNJUDGED", basis: :side_effect_existence_only, evidence: "api/test/barkpark_web/controllers/tasks_controller_test.exs:1724"},
+    # barkpark_web/controllers/tasks_controller.ex:1379
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.sessions/2", "36243778", "84462998"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:234"},
+    # barkpark_web/controllers/tasks_controller.ex:1422
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.move/2", "90153949", "84462998"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:194"},
+    # barkpark_web/controllers/tasks_controller.ex:1655
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.fleet_beat/2", "8622444", "8757049"},
+      verdict: "UNJUDGED", basis: :context_differential_only, evidence: "api/test/barkpark/tasks/receipt_honesty_remainder_test.exs:266"},
+    # barkpark_web/controllers/tasks_controller.ex:1696
+    %{key: {"api/lib/barkpark_web/controllers/tasks_controller.ex",
+            "BarkparkWeb.TasksController.fleet_roster/2", "116314994", "118018566"},
+      verdict: "UNJUDGED", basis: :payload_is_the_postcondition},
+    # barkpark_web/controllers/tickets_controller.ex:93
+    %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
+            "BarkparkWeb.TicketsController.index_own/2", "13011616", "113191402"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/tickets_controller.ex:169
+    %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
+            "BarkparkWeb.TicketsController.inbox/2", "102026838", "113191402"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/tickets_controller.ex:263
+    %{key: {"api/lib/barkpark_web/controllers/tickets_controller.ex",
+            "BarkparkWeb.TicketsController.render_ticket/3", "77961612", "114383917"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/v1/media_controller.ex:188
+    %{key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
+            "BarkparkWeb.V1.MediaController.delete_search_synonym/2", "57054890", "20252134"},
+      verdict: "PROVEN", basis: :end_to_end, evidence: "api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:82",
+      attestation:
+        "mutation: return the media surface's receipt without the delete — `mix test api/test/barkpark_web/contract/pds_group_c_receipt_differential_test.exs:82` reds",
+    },
+    # barkpark_web/controllers/v1/media_controller.ex:228
+    %{key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
+            "BarkparkWeb.V1.MediaController.search_interaction/2", "79721084", "115364326"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/v1/media_controller.ex:231
+    %{key: {"api/lib/barkpark_web/controllers/v1/media_controller.ex",
+            "BarkparkWeb.V1.MediaController.search_interaction/2", "79721084", "95315838"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/webauthn_controller.ex:64
+    %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
+            "BarkparkWeb.WebauthnController.register/2", "48289311", "78521592"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/webauthn_controller.ex:170
+    %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
+            "BarkparkWeb.WebauthnController.step_up/2", "118230159", "123849466"},
+      verdict: "UNJUDGED", basis: :unexamined},
+    # barkpark_web/controllers/webauthn_controller.ex:212
+    %{key: {"api/lib/barkpark_web/controllers/webauthn_controller.ex",
+            "BarkparkWeb.WebauthnController.delete/2", "99456611", "17468236"},
+      verdict: "UNJUDGED", basis: :unexamined}
+  ]
+
 
   # ---------------------------------------------------------------- entrypoint
 
@@ -259,12 +835,15 @@ defmodule PDS.Census do
     report_depth_sweep(emitted, index)
     report_shapes(classified)
     report_declared_register(classified)
+    report_judgment_register(classified)
     if show_sites?, do: report_each_site(classified)
     report_blind_spots(parsed)
     delegate = report_delegate_probe(index)
 
     ms = System.monotonic_time(:millisecond) - t0
-    integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms)
+
+    integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms,
+      parsed)
   end
 
   # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
@@ -1196,9 +1775,17 @@ defmodule PDS.Census do
   end
 
   # ------------------------------------------------------- declared register lookup
-
-  defp declared_for(%{path: path, line: line}),
-    do: Enum.find(@declared, &(&1.path == path and &1.line == line))
+  #
+  # KEYED ON THE FOUR-FIELD SITE KEY, NEVER {path, line} (PDS-D521). The line-keyed
+  # spelling SILENTLY RESURRECTED A FINDING: one blank line inserted seven lines above
+  # github_webhook_controller.ex:87 took `0 undeclared of 1 fired` -> `1 undeclared of 1
+  # fired` — a false accusation against a committed basis — and flipped this register's
+  # own status line to a FALSE sentence, at exit 0 in both runs. The line is now printed
+  # (tracked live off the resolved site) and never matched on.
+  defp declared_for(%{path: _} = site) do
+    key = site_key(site)
+    Enum.find(@declared, &(&1.key == key))
+  end
 
   defp declared_for(_), do: nil
 
@@ -1254,9 +1841,18 @@ defmodule PDS.Census do
   defp head_hash(_), do: "-"
 
   defp expr_fp(%{expr: expr}), do: fp(expr)
+  # THE `_` FALLBACK MATCHES head_hash/1 AND key_mfa/1 (PDS-D521). Without it, site_key/1
+  # raises FunctionClauseError on any map that is not a collected site — which is exactly
+  # what a register lookup does when a caller hands it a def record by mistake.
+  defp expr_fp(_), do: "-"
 
   defp key_mfa(%{owner: owner}) when not is_nil(owner), do: label(owner)
   defp key_mfa(_), do: "?"
+
+  # THE ONE SPELLING OF THE KEY. Every register — @declared and @register — joins on this
+  # and on nothing else. Line and CLASS are both excluded: a class in the key means every
+  # honest lens correction re-keys and orphans rows, which is the ratchet eating itself.
+  defp site_key(s), do: {s.path, key_mfa(s), head_hash(s), expr_fp(s)}
 
   # STDOUT IS TSV AND NOTHING ELSE — one line per emitted site, so a consumer can read it
   # with `cut` and a `wc -l` against it means what it says. The one-line summary goes to
@@ -1275,7 +1871,8 @@ defmodule PDS.Census do
     routed
     |> Enum.sort_by(&{&1.path, &1.line})
     |> Enum.each(fn s ->
-      IO.puts(Enum.join([s.path, key_mfa(s), head_hash(s), expr_fp(s)], "\t"))
+      {path, mfa, hh, fp} = site_key(s)
+      IO.puts(Enum.join([path, mfa, hh, fp], "\t"))
     end)
 
     IO.puts(
@@ -1591,18 +2188,30 @@ defmodule PDS.Census do
     p("shipping in internal/cli/hetzner_respost.go:197, never a new spelling)")
     p(String.duplicate("-", 78))
 
+    by_key = Map.new(classified, &{site_key(&1), &1})
+
     Enum.each(@declared, fn d ->
+      site = Map.get(by_key, d.key)
+
       # THE STATUS LINE SAYS WHAT IS ACTUALLY WITHHELD. A declared row never suppresses
       # the SHAPE — the arm still fires and the site still prints CATCH-ALL-TO-SUCCESS in
       # the roll. What it withholds is the FINDING. Writing "suppresses a fired shape"
       # would be this epic's own offence: a printed sentence that overstates what the
       # machine did.
       status =
-        if MapSet.member?(fired, {d.path, d.line}),
-          do: "WITHHOLDS A FINDING — an arm fires here; the shape still prints, the finding does not",
-          else: "documents only — no arm fires here"
+        cond do
+          site == nil ->
+            "ORPHAN — this row's four-field key matches NO emitted site in this corpus (DECLARED-ROWS-RESOLVE says so above)"
 
-      p("  #{short(d.path)}:#{d.line}  #{d.class} / #{d.confirmation}#{route_claim_tag(d)}")
+          MapSet.member?(fired, {site.path, site.line}) ->
+            "WITHHOLDS A FINDING — an arm fires here; the shape still prints, the finding does not"
+
+          true ->
+            "documents only — no arm fires here"
+        end
+
+      anchor = if site, do: ":#{site.line}", else: " (unresolved)"
+      p("  #{short(declared_path(d))}#{anchor}  #{d.class} / #{d.confirmation}#{route_claim_tag(d)}")
       wrap("basis:  " <> d.basis, "      ", "        ")
       wrap("status: " <> status, "      ", "        ")
       wrap(d.why, "      ")
@@ -1612,6 +2221,8 @@ defmodule PDS.Census do
 
   defp route_claim_tag(%{route_claim: claim}), do: "  ·  route_claim #{claim}"
   defp route_claim_tag(_), do: ""
+
+  defp declared_path(%{key: {path, _, _, _}}), do: path
 
   defp wrap(text, indent, hang \\ "") do
     width = 74 - String.length(indent)
@@ -1632,6 +2243,162 @@ defmodule PDS.Census do
     |> then(fn {lines, cur} -> Enum.reverse([cur | lines]) end)
     |> Enum.with_index()
     |> Enum.each(fn {line, i} -> p(indent <> if(i == 0, do: "", else: hang) <> line) end)
+  end
+
+  # ------------------------------------------------------- judgment register report
+  #
+  # THE DISTRIBUTION IS PRINTED AND NEVER ASSERTED. Nothing below can red the build; the
+  # arms that can live in integrity/10, and they check COMPLETENESS and INTEGRITY only.
+  # THE THREE RESOLUTION STATES, AND WHY `:stale` IS NOT AN ORPHAN. Churn is measured at
+  # ~5.5% of rows per code slice touching two controllers, and it is a PURE RE-KEY — the
+  # {path, mfa} multiset holds and only expr_fp moves. A row whose four-field key no
+  # longer matches but whose {path, mfa} still names exactly ONE unclaimed emitted site is
+  # DEMOTED to UNJUDGED / basis-stale and REPORTED; it does not red the build, because a
+  # ratchet that reds on every honest edit gets switched off. A row with no {path, mfa}
+  # match, or an ambiguous one inside a multi-site group, is an ORPHAN and REDS: the
+  # register would otherwise silently re-point a bought judgment at a different receipt.
+  #
+  # THE COMMITTED ROW IS NEVER EDITED BY THIS. The demotion is a print-time report, so a
+  # reader sees the stale basis and the author's original judgment side by side.
+  defp resolve_register(classified) do
+    live = Map.new(classified, &{site_key(&1), &1})
+    exact = MapSet.new(for r <- @register, Map.has_key?(live, r.key), do: r.key)
+    by_mfa = Enum.group_by(classified, &{&1.path, key_mfa(&1)})
+
+    {rows, _taken} =
+      Enum.map_reduce(@register, MapSet.new(), fn r, taken ->
+        case Map.get(live, r.key) do
+          nil ->
+            {path, mfa, _, _} = r.key
+
+            cands =
+              by_mfa
+              |> Map.get({path, mfa}, [])
+              |> Enum.reject(
+                &(MapSet.member?(exact, site_key(&1)) or MapSet.member?(taken, site_key(&1)))
+              )
+
+            case cands do
+              [s] -> {{r, :stale, s}, MapSet.put(taken, site_key(s))}
+              _ -> {{r, :orphan, nil}, taken}
+            end
+
+          s ->
+            {{r, :live, s}, taken}
+        end
+      end)
+
+    rows
+  end
+
+  defp report_judgment_register(classified) do
+    resolved = resolve_register(classified)
+
+    rows =
+      Enum.map(resolved, fn {r, status, site} ->
+        r |> Map.put(:resolved, site) |> Map.put(:status, status)
+      end)
+
+    scope = register_scope(classified)
+
+    p("JUDGMENT REGISTER (committed data — one row per emitted site, keyed on")
+    p("{path, module.name/arity, head_hash, expr_fp}; CLASS and LINE both EXCLUDED)")
+    p(String.duplicate("-", 78))
+
+    if scope == :scoped_out do
+      p("  SCOPED OUT — this corpus holds none of the #{length(@register)} registered paths, so the")
+      p("  register is neither checked nor reported here. This is NOT a pass: the synthetic")
+      p("  selftest fixture resolves zero rows by construction.")
+      p("")
+    else
+      # A DEMOTED ROW COUNTS AS UNJUDGED / basis_stale IN THE DISTRIBUTION, not as the
+      # verdict its author committed — otherwise the register would keep reporting a
+      # PROVEN it can no longer stand behind.
+      effective =
+        Enum.map(rows, fn r ->
+          if r.status == :stale, do: %{r | verdict: "UNJUDGED", basis: :basis_stale}, else: r
+        end)
+
+      by_verdict = Enum.frequencies(Enum.map(effective, & &1.verdict))
+      by_basis = Enum.frequencies(Enum.map(effective, & &1.basis))
+      other = Map.get(by_basis, :unjudged_other, 0)
+      stale = Enum.filter(rows, &(&1.status == :stale))
+
+      p("  rows #{length(@register)} · resolved to a live site #{Enum.count(rows, & &1.resolved)} · derived at 501fb9670")
+      p("  VERDICTS   #{Enum.map_join(["PROVEN", "REFUTED", "UNJUDGED"], " · ", &"#{&1} #{Map.get(by_verdict, &1, 0)}")}")
+      p("  PROVEN IS NOT ONE TIER: #{Map.get(by_basis, :end_to_end, 0)} end_to_end (mutation-attested) + #{Map.get(by_basis, :end_to_end_unmutated, 0)} end_to_end_unmutated")
+      p("  (the conjunction was READ, its falsifier NEVER exercised). Below the line and NOT")
+      p("  part of it: #{Map.get(by_basis, :side_effect_existence_only, 0)} side_effect_existence_only, which PDS-D499 maps to UNJUDGED.")
+      p("  unjudged_other (PROSE REQUIRED, counted, NEVER reds): #{other}")
+      p("")
+      p("  BASIS DISTRIBUTION (printed, never asserted — a reclassification cannot red this)")
+
+      by_basis
+      |> Enum.sort_by(fn {b, n} -> {-n, b} end)
+      |> Enum.each(fn {b, n} ->
+        {cls, _falsifier, tier} = Map.get(@basis_vocab, b, {"?", "?", :advisory})
+        p("      #{String.pad_trailing(to_string(b), 30)} #{String.pad_leading(to_string(n), 3)}  #{cls} · #{tier}")
+      end)
+
+      p("")
+      report_register_stale(stale)
+      report_register_tags(rows)
+      report_register_prose(rows)
+    end
+  end
+
+  defp report_register_stale([]), do: :ok
+
+  defp report_register_stale(stale) do
+    p("  BASIS-STALE DEMOTIONS (#{length(stale)}) — reported, NOT written back, and NOT a red build")
+
+    Enum.each(stale, fn r ->
+      {path, mfa, hh, fp} = r.key
+      now = site_key(r.resolved)
+
+      p("      #{short(path)}:#{r.resolved.line}  #{mfa}")
+      p("        recorded #{hh}/#{fp} · current #{elem(now, 2)}/#{elem(now, 3)}")
+      p("        #{r.verdict} / #{r.basis}  ->  UNJUDGED / basis_stale (the basis it was judged on has moved)")
+    end)
+
+    p("")
+  end
+
+  defp report_register_tags(rows) do
+    tagged = Enum.filter(rows, &Map.has_key?(&1, :tags))
+
+    Enum.each(tagged, fn r ->
+      anchor = if r.resolved, do: ":#{r.resolved.line}", else: " (unresolved)"
+      proven = Enum.count(r.tags, &(&1.verdict == "PROVEN"))
+
+      p("  MULTI-TAG  #{short(elem(r.key, 0))}#{anchor}  ONE emitted site, #{length(r.tags)} rendered receipts")
+      p("             row verdict #{r.verdict} / #{r.basis} — the WEAKEST of its tags (#{proven} of #{length(r.tags)} proven)")
+
+      Enum.each(r.tags, fn t ->
+        p("               #{String.pad_trailing(inspect(t.tag), 24)} #{String.pad_trailing(t.verdict, 9)} #{t.basis}")
+      end)
+
+      p("")
+    end)
+  end
+
+  defp report_register_prose(rows) do
+    prose = Enum.filter(rows, &(&1.basis == :unjudged_other))
+
+    Enum.each(prose, fn r ->
+      anchor = if r.resolved, do: ":#{r.resolved.line}", else: " (unresolved)"
+      p("  UNJUDGED-OTHER  #{short(elem(r.key, 0))}#{anchor}")
+      wrap(r.note, "      ", "  ")
+      p("")
+    end)
+  end
+
+  # THE SCOPE PREDICATE. The selftest's synthetic fixture holds none of these paths, so an
+  # unconditional arm would red the selftest on its own commit. A corpus holding SOME of
+  # them is the real corpus with a file missing — that is an orphan, and it reds.
+  defp register_scope(classified) do
+    live = MapSet.new(classified, & &1.path)
+    if Enum.any?(@register, &MapSet.member?(live, elem(&1.key, 0))), do: :real, else: :scoped_out
   end
 
   # The POST-READ survivors, named with the arm that admitted them. A count alone lets a
@@ -1933,8 +2700,8 @@ defmodule PDS.Census do
       corpus: :full,
       argv: ["--keys"],
       mut:
-        {"Enum.join([s.path, key_mfa(s), head_hash(s)" <> ", expr_fp(s)], \"\\t\")",
-         "Enum.join([s.path, key_mfa(s), head_hash(s)], \"\\t\")"},
+        {"IO.puts(Enum.join([path, mfa, hh" <> ", fp], \"\\t\"))",
+         "IO.puts(Enum.join([path, mfa, hh], \"\\t\"))"},
       exit: 0,
       expect: {:keys, {:reds, "does not DISCRIMINATE"}},
       proves: "dropping expr_fp from the key collapses two sites in one clause to one row — the register would silently lose a site"
@@ -2195,7 +2962,7 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- integrity
 
-  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms) do
+  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
@@ -2237,7 +3004,7 @@ defmodule PDS.Census do
        else
          "Barkpark.Tasks.close (defdelegate, #{delegate.delegates} on the facade) reaches NO write verb within the route budget — the facade probe is blind"
        end}
-    ]
+    ] ++ register_checks(classified, parsed)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -2267,6 +3034,114 @@ defmodule PDS.Census do
       p("CENSUS FAILED — an integrity check went red. Read the FAIL line above.")
       System.halt(1)
     end
+  end
+
+  # ---------------------------------------------------------- register integrity
+  #
+  # THREE ARMS, ALL SCOPED TO THE REAL CORPUS. They assert COMPLETENESS and INTEGRITY and
+  # never a verdict distribution — a reclassification cannot red this build, which is the
+  # whole reason the ratchet is safe to leave armed.
+  defp register_checks(classified, parsed) do
+    case register_scope(classified) do
+      :scoped_out -> []
+      :real -> [register_complete(classified), declared_rows_resolve(classified), declared_basis_intact(parsed)]
+    end
+  end
+
+  # BOTH DIRECTIONS, AND THE FAIL SENTENCE NAMES THE OFFENDER. site->row catches an
+  # emitted claim nobody has judged; row->site catches a row judging nothing (the shape a
+  # split multi-tag row would take). One direction alone is half a register.
+  defp register_complete(classified) do
+    resolved = resolve_register(classified)
+    site_keys = Enum.map(classified, &site_key/1)
+    row_keys = Enum.map(@register, & &1.key)
+    row_freq = Enum.frequencies(row_keys)
+
+    covered = MapSet.new(for {_r, st, s} <- resolved, st in [:live, :stale], do: site_key(s))
+    demoted = Enum.count(resolved, fn {_r, st, _s} -> st == :stale end)
+
+    unjudged = Enum.reject(site_keys, &MapSet.member?(covered, &1))
+    orphaned = for {r, :orphan, _s} <- resolved, do: r.key
+    dupes = for {k, n} <- row_freq, n > 1, do: k
+
+    ok? = unjudged == [] and orphaned == [] and dupes == []
+
+    why =
+      if ok? do
+        "#{length(row_keys)} row(s) <-> #{length(site_keys)} emitted site(s), both directions, no duplicate key" <>
+          if(demoted > 0, do: " (#{demoted} demoted to basis_stale — reported, never a red)", else: "")
+      else
+        Enum.join(
+          [
+            "#{length(unjudged)} emitted site(s) carry NO register row",
+            "#{length(orphaned)} register row(s) name NO emitted site",
+            "#{length(dupes)} key(s) carry more than one row"
+          ] ++
+            Enum.map(Enum.take(unjudged, 4), &"UNJUDGED SITE #{short(elem(&1, 0))} #{elem(&1, 1)} #{elem(&1, 2)}/#{elem(&1, 3)}") ++
+            Enum.map(Enum.take(orphaned, 4), &"ORPHANED ROW #{short(elem(&1, 0))} #{elem(&1, 1)} #{elem(&1, 2)}/#{elem(&1, 3)}") ++
+            Enum.map(Enum.take(dupes, 4), &"DUPLICATE ROW #{short(elem(&1, 0))} #{elem(&1, 1)}"),
+          " · "
+        )
+      end
+
+    {"REGISTER-COMPLETE", ok?, why}
+  end
+
+  # NOT "the row's line still carries a success pair" (PDS-D521): the pair occurs on 11
+  # lines of auth_controller.ex, so a line shift can land a row on a DIFFERENT site and
+  # pass silently, and the FAIL line becomes an eleven-candidate re-derivation instead of
+  # a one-edit fix. The row must match an EMITTED AST SITE.
+  defp declared_rows_resolve(classified) do
+    live = MapSet.new(classified, &site_key/1)
+    orphans = Enum.reject(@declared, &MapSet.member?(live, &1.key))
+
+    why =
+      if orphans == [] do
+        "all #{length(@declared)} declared row(s) resolve to an emitted site"
+      else
+        "#{length(orphans)} declared row(s) resolve to NO emitted site — a declared basis is suppressing nothing and nobody would know: " <>
+          Enum.map_join(orphans, " · ", fn d ->
+            {path, mfa, hh, fp} = d.key
+            "ORPHAN #{short(path)} #{mfa} #{hh}/#{fp} [#{d.class}]"
+          end)
+      end
+
+    {"DECLARED-ROWS-RESOLVE", orphans == [], why}
+  end
+
+  # THE BASIS ITSELF MUST STILL BE THERE. Each declared row records the SPAN(S) its prose
+  # lives in and one TOKEN that must occur inside one of them. Comparison is DOWNCASED on
+  # both sides: bulldocs_form's basis is written "so the trap stays invisible" at :24 and
+  # "# The trap stays invisible:" at :53, and a case-sensitive test silently loses one.
+  # THE FAIL LINE NAMES THE ROW AND ITS RECORDED SPAN, so the fix is one edit and not a
+  # re-derivation of where the sentence went.
+  defp declared_basis_intact(parsed) do
+    src = Map.new(parsed, &{&1.path, String.split(&1.src, "\n")})
+
+    drifted =
+      Enum.reject(@declared, fn d ->
+        lines = Map.get(src, declared_path(d), [])
+        token = String.downcase(d.basis_token)
+
+        Enum.any?(d.basis_spans, fn {lo, hi} ->
+          lines
+          |> Enum.slice((lo - 1)..(hi - 1)//1)
+          |> Enum.any?(&String.contains?(String.downcase(&1), token))
+        end)
+      end)
+
+    why =
+      if drifted == [] do
+        "all #{length(@declared)} basis token(s) still occur inside their recorded span(s)"
+      else
+        "#{length(drifted)} declared basis has DRIFTED off its recorded span: " <>
+          Enum.map_join(drifted, " · ", fn d ->
+            spans = Enum.map_join(d.basis_spans, ",", fn {lo, hi} -> ":#{lo}-#{hi}" end)
+            "#{short(declared_path(d))} #{elem(d.key, 1)} [#{d.class}] recorded span #{spans} no longer carries #{inspect(d.basis_token)}"
+          end)
+      end
+
+    {"DECLARED-BASIS-INTACT", drifted == [], why}
   end
 
   defp drift(label, got, key) do
