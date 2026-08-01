@@ -1169,14 +1169,35 @@ async function main() {
     //    See the note by CARD_WIDTHS. Element geometry on BOTH axes, on both
     //    front-screen scenarios, because the horizontal score alone certifies
     //    the trap.
+    //
+    //    W20-S3 EXTENDS THIS LEG IN PLACE with the card's SECOND text host,
+    //    `.instance-card-url`. It is the same defect class one element down:
+    //    on origin/main bytes the address line ellipsised at 14 of 42 driven
+    //    cells (320/360/390 x both scenarios x both themes), and what it drops
+    //    is the TAIL — the TLD — so two boxes on two different domains render
+    //    as the SAME visible string on the most-seen screen in the product.
+    //    `grep -n instance-card-url overflow-guard.mjs` returned nothing on
+    //    that tree: the pill half of this very leg was measuring beside a
+    //    blind spot.
+    //
+    //    THE VACUOUS-GREEN VECTOR THIS LEG MUST NOT WALK INTO: `mixed-fleet`
+    //    renders FIVE `.instance-card-url` of which TWO are EMPTY (a
+    //    provisioning and a failed box render a chip instead of an address, so
+    //    the node exists with no text and can never clip). A leg that counted
+    //    NODES would score 2 of every 5 assertions about nothing, and would
+    //    stay green if the card stopped rendering addresses entirely. So the
+    //    non-empty text node is REQUIRED: urls with text are counted per cell
+    //    and a cell that measures zero of them FAILS.
     if (requested.includes("W18-overview-card-pill")) {
       const D = "W18-overview-card-pill";
       const cellCount = CARD_SCENS.length * CARD_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${CARD_SCENS.length} scenarios x ${CARD_WIDTHS.length} widths x 2 themes` +
-        ` (${cellCount} cells; .instance-card-head .status-pill-detail width, .status-pill height, detail bottom edge)\n`,
+        ` (${cellCount} cells; .instance-card-head .status-pill-detail width, .status-pill height, detail bottom edge,` +
+        ` .instance-card-url width with a non-empty text node required)\n`,
       );
       let cells = 0, pillsSeen = 0, clipped = 0, tall = 0, outside = 0, pageOver = 0;
+      let urlsSeen = 0, urlsEmpty = 0, urlClipped = 0, stressSeen = 0, stressClipped = 0;
       for (const scen of CARD_SCENS) {
         for (const theme of ["light", "dark"]) {
           // Enter wide and assert the landed view — `?scen=` alone does not
@@ -1193,7 +1214,36 @@ async function main() {
               `(function(){` +
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var d=document.documentElement;` +
-              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,pills:0,clips:[],tall:[],out:[],h:[],att:[]};` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,pills:0,clips:[],tall:[],out:[],h:[],att:[],urls:0,urlsEmpty:0,urlClips:[],urlH:[],stress:0,stressClips:[]};` +
+              // W20-S3: the address line. TEXT-GATED — a node with no text is
+              // counted as empty and asserted about NOTHING, and the cell's
+              // non-empty count is asserted below so an all-empty render is a
+              // failure rather than a clean score.
+              `[].slice.call(document.querySelectorAll('.instance-card-url')).forEach(function(e,i){` +
+              `  var t=(e.textContent||'').trim();` +
+              `  if(!t){ out.urlsEmpty++; return; }` +
+              `  out.urls++; out.urlH.push(e.offsetHeight);` +
+              `  if(e.scrollWidth>e.clientWidth) out.urlClips.push({i:i,sw:e.scrollWidth,cw:e.clientWidth,t:t.slice(0,60)});` +
+              `});` +
+              // W20-S3, THE HALF THAT CAN LOSE. The fixture's own addresses are
+              // ~32 chars once the scheme is shaved, so on THESE strings the
+              // shave alone clears every width here — revert the stylesheet and
+              // the loop above still scores clean. That is exactly the vacuity
+              // this epic keeps finding: an instrument that only ever sees the
+              // easy string certifies a remedy it never tested. `slug` is
+              // capped at 63 by the API (validate_length) and `@base_domain` is
+              // "barkpark.cloud", so the address a real customer can create is
+              // ~85 characters — the length the WRAP, and only the wrap, bounds.
+              // Each non-empty address is swapped to that worst case, measured,
+              // and RESTORED in the same synchronous pass, so nothing below or
+              // after this eval sees a mutated DOM.
+              `var CAP=new Array(64).join('a')+'-5b2c1e.barkpark.cloud';` +
+              `[].slice.call(document.querySelectorAll('.instance-card-url')).forEach(function(e,i){` +
+              `  var t=(e.textContent||'').trim(); if(!t) return;` +
+              `  e.textContent=CAP; out.stress++;` +
+              `  if(e.scrollWidth>e.clientWidth) out.stressClips.push({i:i,sw:e.scrollWidth,cw:e.clientWidth,n:CAP.length});` +
+              `  e.textContent=t;` +
+              `});` +
               `[].slice.call(document.querySelectorAll('.instance-card-head')).forEach(function(head,i){` +
               `  var pill=head.querySelector('.status-pill'); if(!pill) return; out.pills++;` +
               `  var pr=pill.getBoundingClientRect();` +
@@ -1241,12 +1291,34 @@ async function main() {
               tall++;
               fail(D, `${scen}/${theme}@${width} card${t.i} .instance-card-head .status-pill: ${t.sh}px of text in a ${t.ch}px chip — "${t.t}" paints BELOW the capsule. A wrap without \`height: auto\` scores clean on every scrollWidth metric and still puts the words outside the box.`);
             }
+            // W20-S3: the address line, judged on the SAME cell. The empty
+            // count is printed, never asserted — a provisioning box legitimately
+            // has no address — but a cell where NOTHING carried text is a
+            // measurement that did not happen.
+            urlsEmpty += m.urlsEmpty;
+            if (m.urls === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero NON-EMPTY .instance-card-url rendered (${m.urlsEmpty} empty nodes) — the front screen printed no address at all, so nothing about the address was measured. This is not a pass`);
+            }
+            urlsSeen += m.urls;
+            stressSeen += m.stress;
+            for (const s of m.stressClips) {
+              stressClipped++;
+              fail(D, `${scen}/${theme}@${width} url${s.i} .instance-card-url @ the DNS cap: scrollWidth ${s.sw} > clientWidth ${s.cw} on a ${s.n}-character address (63-char slug + @base_domain, the longest a customer can create) — ${Math.round((1 - s.cw / s.sw) * 100)}% unrendered. The scheme shave alone clears the fixture's short strings and leaves THIS clipping; only the wrap bounds it`);
+            }
+            for (const u of m.urlClips) {
+              urlClipped++;
+              fail(D, `${scen}/${theme}@${width} url${u.i} .instance-card-url: scrollWidth ${u.sw} > clientWidth ${u.cw} — ${Math.round((1 - u.cw / u.sw) * 100)}% of "${u.t}" is not rendered. What gets dropped is the TAIL, so two instances on different domains read as the SAME string on the front screen`);
+            }
             for (const o of m.out) {
               outside++;
               fail(D, `${scen}/${theme}@${width} card${o.i} .instance-card-head .status-pill-detail: bottom ${o.db} is ${(o.db - o.pb).toFixed(2)}px BELOW the pill's bottom ${o.pb} — "${o.t}" is painted outside its own chip`);
             }
-            const bad = m.clips.length + m.tall.length + m.out.length + (m.psw > m.pcw ? 1 : 0);
-            row.push(`${width}:${m.pills}p h${m.h.join(",")}${bad ? " !" + bad : ""}${m.att.length ? " [att " + m.att.join(" ") + "]" : ""}`);
+            const bad = m.clips.length + m.tall.length + m.out.length + m.urlClips.length +
+              m.stressClips.length + (m.urls === 0 ? 1 : 0) + (m.psw > m.pcw ? 1 : 0);
+            row.push(
+              `${width}:${m.pills}p h${m.h.join(",")} ${m.urls}u/${m.urlsEmpty}e uh${[...new Set(m.urlH)].join(",")}` +
+              `${bad ? " !" + bad : ""}${m.att.length ? " [att " + m.att.join(" ") + "]" : ""}`,
+            );
           }
           process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
         }
@@ -1258,6 +1330,15 @@ async function main() {
           `${tall} chips shorter than their own text, ${outside} details painting below their pill, ` +
           `${pageOver} pages scrolling sideways. Heights are printed (h…) per cell and pinned in the PR, ` +
           `not here: the wrap boundary is a property of the fixture STRING`,
+        );
+        okLine(
+          `.instance-card-url: ${urlsSeen} NON-EMPTY address lines measured (${urlsEmpty} empty nodes counted and ` +
+          `deliberately asserted about nothing — a provisioning/failed box renders a chip, not an address), ` +
+          `${urlClipped} truncated addresses, and ${stressSeen} of those same lines re-measured at the DNS cap ` +
+          `(a 85-character address) with ${stressClipped} truncated — the half that can LOSE, because the scheme ` +
+          `shave alone clears the fixture's short strings. A cell measuring zero non-empty addresses FAILS, so the empty ` +
+          `nodes cannot manufacture a green. Per-cell "Nu/Me uh…" is the non-empty/empty split and the line ` +
+          `heights; the heights are REPORTED — the wrap boundary belongs to the STRING, not the CSS`,
         );
         okLine(
           `[att …] cells are \`.attention-row .status-pill-detail\` — a DIFFERENT host in the same DOM, ` +
