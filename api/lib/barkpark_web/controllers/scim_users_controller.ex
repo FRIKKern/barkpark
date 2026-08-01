@@ -74,8 +74,11 @@ defmodule BarkparkWeb.ScimUsersController do
       user ->
         with_precondition(conn, user, fn conn ->
           if deactivating?(params) do
-            {:ok, _} = Scim.deprovision_user(org, user)
-            json(conn, render_user(conn, user, false))
+            {:ok, _summary} = Scim.deprovision_user(org, user)
+            # READ THE ANSWER BACK. `active` was a literal `false` chosen by this
+            # clause, so the body was byte-identical whether the deprovision took
+            # or matched nothing (PDS-D503). Re-derive it from the stored rows.
+            json(conn, render_user(conn, user, Scim.org_user_active?(org, user)))
           else
             conn
             |> ScimResponse.with_etag(ScimResponse.version(user.updated_at))

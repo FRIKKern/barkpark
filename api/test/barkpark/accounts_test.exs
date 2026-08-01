@@ -80,7 +80,7 @@ defmodule Barkpark.AccountsTest do
       user = user_fixture()
       {:ok, t1} = Accounts.create_user_session_token(user)
       {:ok, t2} = Accounts.create_user_session_token(user)
-      :ok = Accounts.revoke_all_user_sessions(user)
+      assert {:ok, 2} = Accounts.revoke_all_user_sessions(user)
       assert is_nil(Accounts.verify_user_session_token(t1))
       assert is_nil(Accounts.verify_user_session_token(t2))
     end

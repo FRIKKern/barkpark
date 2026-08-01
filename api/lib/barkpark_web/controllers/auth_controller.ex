@@ -443,21 +443,24 @@ defmodule BarkparkWeb.AuthController do
   def magic_login(conn, _), do: error(conn, 400, "bad_request", "token is required")
 
   def reset(conn, %{"token" => token, "password" => password}) do
-    case Accounts.reset_user_password(token, %{password: password}) do
-      {:ok, user} ->
-        # A token-based reset also revokes every session ("sign out everywhere")
-        # and, on the recovery path, wipes MFA — a high-value account-recovery
-        # event worth recording on the tamper-evident trail.
+    case Accounts.reset_user_password_counting(token, %{password: password}) do
+      {:ok, user, sessions_revoked} ->
+        # A token-based reset revokes every session ("sign out everywhere") and,
+        # on the recovery path, wipes MFA — a high-value account-recovery event
+        # worth recording on the tamper-evident trail. `sessions_revoked` is the
+        # COUNT the revoke actually stamped, carried from
+        # Accounts.revoke_all_user_sessions/1 — the receipt reports the number
+        # rather than re-asserting the claim (PDS-D503).
         audit(%{
           category: "auth",
           action: "password_reset",
           subject: user.id,
           actor_type: "user",
           actor_id: user.id,
-          metadata: %{"via" => "reset_token"}
+          metadata: %{"via" => "reset_token", "sessions_revoked" => sessions_revoked}
         })
 
-        json(conn, %{ok: true})
+        json(conn, %{ok: true, sessionsRevoked: sessions_revoked})
 
       {:error, cs} ->
         error(conn, 422, "invalid_password", changeset_errors(cs))
