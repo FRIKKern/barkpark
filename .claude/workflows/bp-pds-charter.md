@@ -9216,3 +9216,473 @@ strictly sequenced. Round 1 builds three slices in parallel.
 HIGH-FLIP-RISK slices, flagged for independent re-derivation before merge: **slice 1** (the arm's
 fired set — the wide/narrow/write-guard interaction annihilates, D476a) and **slice 6** (the register
 key's stability under a same-arity clause insertion, D477 — the escape hatch's stated trigger).
+
+
+## Wave 36 — SPEND THE JUDGMENT, THEN GATE THE ARRIVALS (decided 2026-08-01)
+
+Wave 35 corrected the lens. Wave 36 pays into the ledger the lens was built for: **the register is the
+ledger, committed differentials are the currency, the CI arrival tripwire is the ratchet.** Wave Paper:
+`pds-wave-36-2026-08-01`. Epic task: `task-2ac1f95237c4a8e5`. Base sha for every number below:
+**`29cb76e60`**. Fence: `api/**`, `internal/**`, `deploy/**`, `scripts/pds-*`, `docs/**`, the `pds-*`
+namespace, plus a **one-file dispensation for `.github/workflows/elixir.yml`** (see PDS-D492). Fable
+unavailable — all 8 slices are Opus.
+
+### The ground truth this wave is authored against, re-derived seven times
+
+`classified 18 + unclassified 73 == emitted 91` · POST-READ **15** @ depth 6 (24@7, 29@8, 31@9-10,
+32@12) · CATCH-ALL-TO-SUCCESS **3 fired / 1 declared / 2 FINDINGS** · five integrity arms PASS ·
+`CENSUS OK` · RC 0. **The denominator is 73, not 74.** PDS-D476's 74 was correct at `b266a1a5e` and
+went stale at `a37f2f7ca` (#8886, wave 35's own slice 3): `Fence.add_dep/4` began routing through
+`Internal.fenced_content_write/4`, which carries a `select:`, certifying `tasks_controller.ex:1289
+add_edge/2` as the 15th ARM-1 survivor. The charter was sha-honest; the wish, the four task briefs and
+the lead notes transcribed the integer bare. **That is the epic's own lens-and-sha rule violated by the
+epic's own paperwork, and it is the reason every criterion in this wave derives in-process.**
+
+### The decisions
+
+- **PDS-D492 — THE WORKFLOW FENCE IS LIFTED FOR EXACTLY ONE FILE, AND THE FENCE WAS NEVER CONTENDED.**
+  PDS-D312 records `.github/workflows/**` as a **self-imposed** PDS fence, and it explicitly notes
+  `elixir.yml` carries **no** workflow-level `paths:` by design (D18/D31 skip-shim) — the exact property
+  the gate needs. Measured, not assumed: **zero of the nine open PRs** (8500, 8471, 8465, 8406, 8405,
+  6086, 6057, 6028, 2907) touch any path under `.github/workflows/`, and the concurrent Cloud Console
+  charter's own workflow fence names `console-harness.yml`, `cloud.yml`, `security.yml`,
+  `required-checks-drift.yml` and narrow `pr-task-gate.yml`/`doc-gates.yml` dispensations — **`elixir.yml`
+  appears nowhere in it.** `grep -rn 'pds-receipt-census' .github/workflows/` is EMPTY, so the job name is
+  free. The dispensation is `.github/workflows/elixir.yml` ONLY; `.github/required-checks.json` stays
+  untouchable.
+
+- **PDS-D493 — THE `--selftest` THE GATE ASSERTS DOES NOT EXIST, SO THE GATE IS ROUND 3 AND
+  `pds-w34-census-import-arity` IS ITS HARD PREREQUISITE.** `grep -c -- '--selftest'` over
+  `scripts/pds-elixir-receipt-census.exs` on origin/main is **0**; `main/1` reads exactly two flags
+  (`--sites`, `--files-from`) and ARGV is non-strict, so `--selftest` and `--nonsense-flag` alike run the
+  ordinary census and **exit 0 printing `CENSUS OK`**. A gate step written as the wave-35 brief specifies
+  would have been green having tested nothing — PDS-D467a confirmed at this sha, and the epic's law
+  violated by the gate meant to enforce it. The 10 `selftest` hits the search surfaces belong to
+  `scripts/pds-ledger-census.sh`, a **different instrument with a colliding name**; that name collision is
+  the source of the false premise. PDS-D467's stated condition ("the census ships a `--selftest` proven
+  able to red by mutation, AND the register exists as committed data") is therefore **unmet on both
+  halves today**, and the gate cannot precede either.
+
+- **PDS-D494 — ENGINE PARITY IS PROVEN CLEAN: THE GATE MAY ASSERT DERIVED INTEGERS WITH NO ENGINE
+  CAVEAT.** Under the CI pin (Elixir 1.18.1 / OTP 27, erts 15.2.7.10) and under the host (1.19.5 / OTP 28,
+  erts 16.3.1) the census prints **243 identical lines**; `diff` returns exactly two hunks, both
+  self-describing metadata — the engine banner (line 3) and the wall clock (line 242). Independently
+  reproduced inside `hexpm/elixir:1.18.1-erlang-27.0-debian-bookworm-20260610-slim` (linux/aarch64, no
+  `.git`, no deps): the full 428-line `--sites` output differs from the darwin run in the banner and the
+  wall clock alone. `18 + 73 == 91`, POST-READ 15, five arms PASS, RC 0, under both. Bounded caveat kept
+  honest: Homebrew's `erlang@27` is 27.3.4.14, so this is **Elixir 1.18.1 exact + OTP 27 major** — the
+  lens is `Code.string_to_quoted/2` (Elixir's own parser) and the only OTP-surface calls are in the
+  banner, so the residual is near-zero but unproven. **PDS-D486's parity conclusion survives; its quoted
+  split `40 + 51 == 91` is stale and must not be re-transcribed.**
+
+- **PDS-D495 — THE CORPUS REFUSAL IS HONEST (EXIT 2) AND THE `RC=0` SIGHTING WAS THE SHELL, NOT THE
+  SCRIPT. BUT `--files-from` IS A CONFIRMED VACUOUS GREEN AND IS BANNED FROM THE GATE.** `guard_corpus!`
+  refusal exits **2** unpiped under BOTH engines; `cmd | tail -1` reports tail's status and
+  `${pipestatus[@]}` prints `2 0`. That is this repo's own recorded never-pipe-to-tail trap recurring, and
+  it means the gate's refusal arm is NOT vacuous. Separately and worse than filed: removing **two** files
+  of 804 (`tasks_controller.ex`, `github_webhook_controller.ex`) leaves 802 — above the 600 floor, all
+  three sentinels present — and prints `EMITTED success claims 53`, `PASS CORPUS-INTACT 802 files >= 600`,
+  `PASS CLASSIFICATION-TOTAL classified 4 + unclassified 49 == emitted 53`, **`CENSUS OK`, RC 0.** 42% of
+  the population vanishes under a green banner because every arm is self-consistent *relative to the
+  corpus it was handed*. **The gate MUST invoke the census with no `--files-from` and no path filter of
+  any kind**, and the load-bearing arm is therefore **REGISTER-COMPLETE (bidirectional)**, not integrity.
+  Two operational corollaries: the gate job must pin `working-directory: '.'` (elixir.yml's prevailing
+  job default is `api`, from which the census exits 2 — failing closed, but a permanently-red required
+  check gets routed around rather than fixed), and any `run:` block that pipes the census must
+  `set -o pipefail`.
+
+- **PDS-D496 — THE TWO LIES ARE ONE CALLEE DEFECT, THE FIX IS THE THIRD OPTION, IT IS FREE — AND
+  `EMITTED DOES NOT MOVE`, WHICH REFUTES THIS WAVE'S OWN ORDERING RATIONALE.** Built and measured end to
+  end. `record_interaction/4`'s spec is `{:ok, uuid} | :skipped` and `:skipped` is produced from **seven
+  sites collapsing to four causally distinct classes** (`:98` disabled; `:103`/`:105` and `:318`/`:320`
+  rescue/catch; `:330` missing ids; `:362` dangling parent event). The controllers' `_` arm is therefore a
+  **total match over the one remaining value** — "report the failure" is not implementable at the
+  controller and "declare the arm" cannot produce a true reason. The repair is a public return widening to
+  `{:ok, uuid} | {:skipped, :recording_disabled | :incomplete_reference | :unknown_query_event | :error}`
+  with a `recorded:` discriminator on the wire. **Three premise corrections the brief must carry:** the
+  controllers call arity-**3** wrappers (`Content.SearchIntelligence.record_interaction/3` :32,
+  `Search.MediaIntelligence.record_interaction/3` :40), not `Intelligence.record_interaction/4`;
+  `intelligence.ex:1097` is **NOT** a sweep site (`emit_record_telemetry/3` is called only from `record/6`
+  at :61/:65/:69) — **there are ZERO in-module match sites**, so the sweep the direction budgeted does not
+  exist; and the complete consumer set of that return is **three** (two controller `case`s and
+  `interaction_test.exs:27`). The widening is free: `web/app/api/find-event/route.ts` never binds the
+  fetch, the browser client `.catch(noop)`s, the JS SDK has **no interaction verb at all**, the Go CLI has
+  zero callers, and `docs/api-v1.md` mentions the route **zero** times.
+  **THE HEADLINE: `EMITTED` is 91 before and 91 after.** What moves is the split, and it moves the
+  *opposite* way from intuition — `classified 18 + unclassified 73` becomes **`classified 16 +
+  unclassified 75`**, because the two sites were classified only by virtue of being a known-bad shape;
+  made honest they drop into "no verdict yet", which is exactly what the register is for. Mutation proof:
+  restoring the two original catch-alls over the widened callee returns `3 fired / 2 FINDINGS` and
+  `18 + 73`. Consequence: **the owning-doc amendment is NOT downstream of this slice** and the register's
+  denominator bump is known in advance. Any criterion written as "unclassified drops to N" is false.
+
+- **PDS-D496a — `record_correction/4` RIDES ALONG AND IS CENSUS-INVISIBLE; SAY SO IN THE TASK OR A LATER
+  READER WILL DELETE IT AS A NO-OP.** It returns `{:ok, %{promoted: false, distinct_sessions: 0}}`
+  byte-identically for a swallowed exception, a blank input, an identical from/to AND a disabled recorder,
+  and the controller hard-matches it into `%{ok: true, …}`. Adding a `status:` key is non-breaking (the
+  existing destructure still matches) and costs ~30 lines in the file the slice already opens. **Measured:
+  folding it in moves NO census integer** — no `case` at the call site, so the containment predicate
+  cannot see it. It is paid on reasoning, not because a gate demanded it, and **no gate will ever
+  regression-guard it.** A fourth instance outside the corpus is filed, not fixed:
+  `web/app/api/find-event/route.ts:78` returns `{ ok: true }` from inside the `catch` that swallowed the
+  upstream failure.
+
+- **PDS-D497 — PROVEN'S BAR DROPS THE `.patch` ARTEFACT. A COMMITTED MUTATION PATCH IS NOT MECHANICALLY
+  CHECKABLE, AND THE REPO'S OWN HARNESS REFUSES TO RUN ONE.** `git apply --check` verifies seven lines of
+  textual locality and nothing else. Measured against five refactor classes: **three-way (`-3`) defeats it
+  completely** — the stale patch applies *cleanly* to the refactored file and the mutation lands (the
+  earlier `THREEWAY_RC=1` was a false negative: `-3` refused on a dirty worktree and never merged);
+  **fuzz (`-C1`) defeats it** (`Context reduced to (2/2)`, RC 0); **relocation is invisible** (40 blank
+  lines above the hunk → RC 0, applied 40 lines lower — a patch cannot pin WHERE its mutation lands); and
+  **the fatal one, a semantic gut outside the ±3 window** — neutering `workspace_deletable?/2`, the exact
+  tenant post-condition the differential asserts, leaves `git apply --check` at **RC 0**. Only reindent is
+  reliably caught. Two structural blockers on top: `tooling/grip/test/rerun.test.mjs:679` pins
+  `git apply p.patch` in the **MUST STAY REFUSED** git denylist, so a PROVEN row citing a `.patch` is
+  uncheckable by the very instrument this epic built to check things; and applicability is not redness —
+  RC 0 never proves the named test goes red. **The bar is therefore:**
+  > **PROVEN** = a committed differential at `<test file:line>` asserts `receipt == stored row`, AND the
+  > row records the site's `head_hash` + `expr_fp` as of judgment, AND the row carries a mutation
+  > **ATTESTATION**: one line naming the mutation plus the single command that reproduces it.
+
+  Mechanically checkable with no DB and no patch application: (a) the cited test file exists and
+  references the site's module; (b) the site's CURRENT `head_hash`+`expr_fp` equal the recorded ones — on
+  mismatch the row **AUTO-DEMOTES to UNJUDGED with reason `basis-stale`**, which is the ratchet working,
+  not a red build. **NOT checkable, and the vocabulary must say so: that the mutation actually reds.**
+  Writing that down as an admitted gap is the honest move; dressing it in a `.patch` that `-3` will
+  happily apply to a gutted callee is the epic's law violated one level up.
+
+- **PDS-D498 — THE REGISTER KEY SURVIVES ITS MUTATIONS UNDER AN INDEPENDENT REIMPLEMENTATION, BUT
+  PDS-D477's COLLISION SENTENCE IS REFUTED IN SCOPE AND IN CHARACTER, AND THE NORMALISER IS
+  UNSHIPPED.** Three corrections, all measured:
+  1. **`head_hash`/`expr_fp` exist NOWHERE in `scripts/` or `tooling/`** — zero hits, including in the
+     1647-line census. Worse, `expr_fp` is not even *computable* from the shipped instrument: the site
+     record at `:344` is `%{path, line, pattern?, key, def}` and **never retains the container node**. The
+     key is a wave-36 proposal, not shipped code; D477's numbers came from an uncommitted scratch file
+     that is itself a **pre-#8886 copy** of the census.
+  2. **"collides 3 times in 17,620 defs corpus-wide" is right in number, wrong in scope.** The 3 is the
+     count of collisions **within `{path, module.name/arity}`**, measured over the corpus. The genuine
+     corpus-wide figure is **913 collision groups over 2,544 defs** — obviously so, since `def all()` and
+     `def user_agent(conn)` are byte-identical heads in 5–7 modules each. `head_hash` is nowhere near
+     unique on its own and **does not need to be**: `path` and `mfa` are in the tuple. The register header
+     must state the scope or a reader will believe the wrong thing.
+  3. **"all benign bodiless declaration heads" is FALSE for 2 of the 3.** Only `capabilities.ex
+     visible?/2` (:144 bodiless `@spec` companion vs :155 the real clause) fits. The other two —
+     `plugins/github/errors.ex inspect/2` :94 vs :138 and `plugins/indx/errors.ex inspect/2` :118 vs
+     :137 — are **genuinely distinct functions in two different `defimpl Inspect, for: …` blocks**. The
+     census's `defs/4` walker records no `defimpl` target, so both impls collapse into one `{path, mfa}`
+     and **the key cannot discriminate them.** Benign today (neither file carries an `ok: true` site) but
+     it is a real key limitation and it goes in the header.
+
+  **The 75-site-owning-group half of D477 is CONFIRMED**: 91 owner rows → 75 groups, **0 within-group
+  collisions**, and `head_hash` is **injective over all 76 owner clauses under both normalisers**. Both
+  D477 mutations pass independently: the same-`{module,name,arity}` clause insertion yields **0 orphans /
+  0 arrivals / empty class-attachment diff** (where `clause_ord` produced 1 orphan + 1 arrival + 1 silent
+  mis-attachment), and the `auth:351` branch swap yields **0/0 with both fingerprints unchanged**
+  (101485070 and 17468236), so the UNJUDGED row cannot silently re-attach to the PROVEN one.
+  **RULING: ship the TOTAL-drop normaliser** (`{f, _meta, a} -> {f, [], a}`, `phash2` of the **term**),
+  not D477's partial 11-key `Keyword.drop` + `inspect` string. The two are **partition-identical inside
+  every one of the 10,934 `{path,mfa}` groups across all 17,620 defs (0 partition diffs)** — so nothing is
+  lost — but the total drop is immune to an Elixir minor emitting a new metadata key, while the partial
+  drop re-keys everything. **The hash NUMBERS differ between them (`visible?/2` is 83655895 under D477's
+  and 52289869 under the total drop), so no integer may be transcribed across normalisers.** D477's
+  caveat (1) stands: the normaliser is part of the key; editing it is a re-key migration.
+  **Latent fragility for the header:** `expr_fp` is content-addressed, so the bare `%{ok: true}`
+  fingerprint is shared by 15 sites corpus-wide, and 10 `{path,mfa}` groups already hold multiple sites —
+  all disambiguated today by SHAPE. The key collides the day one function emits a **bare** `%{ok: true}`
+  twice from two branches, and **both `search_interaction/2` groups are this wave's own fix target**, so
+  PDS-D496's repair must not produce two identical containers in one clause.
+
+- **PDS-D499 — THE REASON VOCABULARY SURVIVES ITS OWN ATTACK; WHAT NARROWS IS THE FIELD LIST. TWO
+  CANDIDATES WERE AXIS ERRORS.** `route-miscredit` is already the field `route_claim` — and the census
+  states at `:117-119` that it is orthogonal to class **by design**, so folding it into the reason
+  vocabulary re-creates exactly the collapse that comment prevents. `declared-with-basis` is already the
+  pair `confirmation: "declared"` + `basis:` on five rows. Both stay FIELDS. The admitted vocabulary, each
+  value carrying its own tree-readable falsifier:
+  | value | verdict | the check that can prove it WRONG |
+  |---|---|---|
+  | `end-to-end` | PROVEN | cited test drives a route AND reads Repo back |
+  | `two-hop-composed` | UNJUDGED | a single test spanning both hops exists |
+  | `stub-mapping-only` | UNJUDGED | cited test has no injection seam, or DOES read Repo |
+  | `context-differential-only` | UNJUDGED | the cited test builds a `conn` |
+  | `side-effect-existence-only` | UNJUDGED | the Repo read compares a printed field, not existence |
+  | `shape-assertion-only` | UNJUDGED | the assertion can fail on a wrong payload |
+  | `payload-is-the-postcondition` | UNJUDGED | any emitted value traces to `params[…]` or a fn head |
+  | `request-param-echo` | UNJUDGED | no emitted value traces to a request parameter |
+  | `no-observer` | UNJUDGED | any test references the site's module OR its route path |
+  | `basis-stale` | UNJUDGED | current `head_hash`+`expr_fp` equal the recorded pair |
+  | `unjudged-other` | UNJUDGED | **prose REQUIRED**; count printed in the integrity block, never reds |
+
+  Three rules carried into the register: **(1)** a value is admitted only if a script can read the tree
+  and say it is wrong — `POST-READ` is not a candidate (it is line order, an inference no read
+  contradicts). **(2)** An arm may write the advisory HYPOTHESIS column and may **NEVER** write a verdict:
+  no vocabulary value is ever ASSIGNED by a script, only CHECKED by one. **(3)** The gate asserts
+  completeness and integrity, **never a verdict distribution**, so no reclassification can red the build —
+  proven by construction, since the census prints DRIFT lines today and still exits 0. The
+  `unjudged-other` escape valve is what stops mis-classification under deadline: prose then exists in
+  exactly one place, is counted, and cannot hide inside a value that sounds checked.
+  **`payload-is-the-postcondition`'s falsifier fires on a real row on day one** — `tasks_controller.ex:127`
+  binds `worker = params["worker"]` and `:171` echoes it — which is the vocabulary proving it can red
+  without inventing a mutation.
+
+- **PDS-D500 — THE PROVEN COLUMN'S OPENING BALANCE AT THE SITE LAYER IS ZERO, AND THIS WAVE BUYS
+  ~12 ROWS. THE WISH'S WEBHOOK FAMILY RULING IS RIGHT ABOUT THE CODE AND WRONG ABOUT THE PROOF.** Every
+  clause head in `github_webhook_controller.ex` names an outcome tag and both `{:error, _}` arms genuinely
+  5xx — the family passes the mechanical test at the *dispatch* level. It fails at the *fact* level:
+  `github_webhook_controller_test.exs` makes **`Repo.` = 0 calls in 360 lines** and injects all three
+  callees (`intake_fun`/`inbound_fun`/`merge_events_fun` via `put_env` at :40/:51/:62), and the same
+  stub-only shape holds for `site_deploy` (13 stubs / 0 readbacks), `github_adopt` (9/0) and
+  `github_status` (8/0) — **one ruling over 18 sites, not 13.** But the direction was **one link too
+  pessimistic**: for three tags the SECOND hop is already committed and reads Postgres back
+  (`merge_events_test.exs:87-95` proves the exact `{:ok,:stamped,doc_id,[1]}` tuple plus `Repo.get!`;
+  `inbound_events_test.exs:201/:235` prove `:dropped` with a NEGATIVE post-condition). Hence
+  `two-hop-composed` is a real third value, not a euphemism.
+  **Two corrections to the wish's own family sentence:** the file carries **14** emitted sites, not 13
+  (13 UNCLASSIFIED + 1 declared CATCH-ALL); and `:86` is `"ping" -> json(conn, %{ok: true})` — a **bare
+  `ok: true` with no discriminating field at all**, so "its receipts DISCRIMINATE" fails on that row under
+  the mechanical test. The honest family ruling is **12 discriminating + `:87` catch-all (declared) +
+  `:86` bare-ok (declared)**. Also confirmed: the naive `--sites | grep -c 'github_webhook_controller.ex:'`
+  prints **18** because prose lines match — a fourth-order trap of exactly the kind this epic prosecutes;
+  the header-anchored count is 14.
+  Elsewhere: `receipt_honesty_test.exs` and its remainder are genuine `receipt == stored row` differentials
+  with **ZERO `conn` calls**, so the 24 `tasks_controller` sites are `context-differential-only` — PROVEN
+  at the callee, the controller→wire hop UNJUDGED. `auth_controller_test.exs`'s six Repo reads are
+  audit-Event **existence** assertions (`side-effect-existence-only`), and
+  `graph_controller_test.exs:140/:151` assert `is_list` and pass on `[]` (`shape-assertion-only`) — three
+  distinct reasons a bucketer skimming for `Repo.` would misfile as one.
+
+- **PDS-D501 — THE CURRENCY IS BUYABLE AND WAS BOUGHT: THREE DIFFERENTIALS WRITTEN, GREEN ON MAIN, AND
+  MUTATION-PROVEN RED. LIFT THEM VERBATIM.** Not argued — run.
+  1. **`github_webhook_controller.ex:189` (`stamped:`) is now end-to-end PROVEN-able.** The scope-less
+     webhook path CAN seed and resolve a `merge_gate` criterion (`ingest_opts/0` :262-270 threads only
+     `[dataset: "production"]`, so `MergeEvents.fetch_task/3` resolves a doc created under
+     `TenancyFixtures.ensure_default_scope!` — first attempt, no `Sandbox.mode(:shared)`). Cost: **83
+     added lines** for the differential plus its reusable fixture, and **28 more** for the second tag
+     (`:194 reconciled:`) on the same fixture — *that* is the number the family ruling should be planned
+     on. Mutation: replacing `Tasks.reconcile_merge_gate/3` with `(fn _ -> {:ok, :stamped, [1]} end)` reds
+     the test **at :229 (the stored row), NOT at :221-222 (the JSON receipt)** — under the mutation the
+     wire body is byte-identical and its assertion PASSES. **The gap between those two line numbers IS the
+     differential**, and a stub-driven test would have stayed green through it.
+  2. **Group C: 3 sites written, 6 tests, green, killed twice by callee mutation.** Removing
+     `surface: ^surface` from `synonyms.ex:73` reds **both** surfaces from one line — D490a's
+     one-callee/two-surfaces thesis demonstrated mechanically. `search_synonyms_test.exs:62` asserts
+     `["ok"] == true` and **nothing else**, so `search:316`/`media:188` had zero post-condition anywhere
+     in the tree before this. **The prescribed MUT2 (`s/log_audit(/NOOP_log_audit(/`) is NOT a valid
+     mutation** — it renames the `defp` too and `NOOP_log_audit` is a valid Elixir *alias*, so the tree
+     fails to compile and a compile error proves nothing; the honest surgical mutation (delete only the
+     `log_audit(name, "delete", …)` call at `secrets.ex:230`) reds by name.
+  3. **Two D490a-adjacent flags corrected.** `plugin_settings_controller_test.exs` **EXISTS** (206 lines,
+     PUT→GET→DELETE round-trips at :83/:96/:118) — plugin_settings is the **cheapest** remaining pair, not
+     the expensive one. The expensive rows are `webauthn` ×3 (its suite carries a ~150-line in-process
+     ES256 authenticator; adding readbacks *there* is ~30 lines, duplicating it into one Group C file is
+     ~180) and `tickets:263` (routes mount only with the plugin enabled; `:plugin_routes` is excluded by
+     default). **RULING: webauthn's three land in the file that already owns the authenticator.**
+     Duplicating a crypto harness to satisfy a file-count claim is the duplication this repo files tasks
+     about — total drops from ~480 to ~330 lines.
+
+- **PDS-D502 — `tasks_controller.ex:83` IS THE WAVE'S ONE MEASURED REFUTATION, AND THE WISH'S TASKS
+  RULING IS THREE RULINGS, NOT ONE-WITH-AN-EXCEPTION.** `task_list_response/3` (:82-85) builds the payload
+  from `render_task_list/3` — which **seals** (`docs = seal_docs(docs, conn)` at :97) — and then pipes the
+  **RAW, UNSEALED** `docs` into `Params.maybe_put_brief_truncation_help/3`. The predicate
+  (`params.ex:434-437`) reads `doc.title` and `content["claim"]["now"]["text"]`; `Params.seal/3`
+  (:191-194) rewrites **only** `content`, so `title` can never diverge and **`claim` is the sole lever**.
+  Measured, non-admin caller with `claim` marked private: `help: ["truncated fields end with …"]` is
+  present while **`any ellipsis in ANY card the caller received? false`**. The honest law
+  (help present ⇒ some card carries `…`) **REDS on main**, RC 2. Two controls hold it down: an admin
+  caller on the same corpus gets `"nnn…"` and honest help; a long **title** truncates honestly. So it is
+  the seal, not the brief renderer, and it is claim-specific.
+  **Qualification the register must carry:** `claim` is declared on the task schema (`tasks/schema.ex:731`)
+  with **no** visibility attribute, so the divergence is **latent-but-supported** — it fires the moment a
+  tenant marks `claim` private/owner_only/readable_by, exactly the mechanism the file's own
+  `describe "field-visibility seal"` block already uses. The register's honest wording is **"REFUTED under
+  a supported schema declaration"**, never "REFUTED in production".
+  The family splits **7 / 2 / 2**: seven pure read echoes; **two** request-param echoes — `:170`'s
+  `worker:` **and** `events/2` `:224`, which echoes the caller's own `since` back as `cursor` on an empty
+  page; and **two** parallel derivations *about* the payload (`:83`, and `:1142 graph_corpus` whose
+  `nodes` is `real_nodes ++ phantom_nodes` — read ∪ synthesis, honestly self-labelled). Near-miss recorded
+  so nobody re-derives it as a bug: `:371`'s `child_count` counts the UNSEALED children beside the SEALED
+  render — benign only because `seal_docs/2` is a length-preserving `Enum.map`, i.e. one refactor from
+  `:83`'s defect. And a keying consequence: the census attributes `:83` to `task_list_response/3`, a
+  `defp` shared by `ready/2` AND `index/2`, so **one register row covers two routes and the key does not
+  name the route a person types.**
+
+- **PDS-D503 — `revoke_all_user_sessions/1` REACHES TWO LIVE RECEIPT-EMITTING ROUTES, ONE OF THEM IS
+  ALREADY A CENSUS SITE NOBODY CONNECTED TO IT, AND THE OTHER IS INVISIBLE TO THE LENS ENTIRELY.**
+  `accounts.ex:333` pipes into `Repo.update_all`, **discards `{count, nil}`**, and returns a literal `:ok`
+  under `@spec … :: :ok`. What it discards is a COUNT, not a failure value (D490a is right about that) —
+  and a count is exactly the post-condition the receipt implies.
+  1. **`POST /v1/auth/reset`** (router :1481) → `Accounts.reset_user_password/2` (:505) →
+     `do_reset_password/3` (:543) → the call at **:560, return discarded** → `json(conn, %{ok: true})` at
+     `auth_controller.ex:460`. **That receipt is ALREADY an emitted census site** (`--sites` prints
+     `auth_controller.ex:460 [WRITE d2] UNCLASSIFIED`), and `auth_controller.ex:448` carries prose
+     asserting *"A token-based reset also revokes every session ('sign out everywhere')"* — a claim about a
+     value destroyed two frames down. Revoking 0 of 3 sessions and 3 of 3 are byte-identical on the wire.
+  2. **SCIM `PATCH`/`PUT`/`DELETE /scim/v2/Users/:id`** (router :1504-1506, `pipeline :scim` →
+     `RequireScimToken` — a real non-admin write path an IdP holds) → `Scim.deprovision_user/3`
+     (`scim.ex:132`, inside `Repo.transaction`) → the same discarded call. Higher blast radius than the
+     logout lie: this is the *employee left, kill their access* path, its receipt renders `active: false`
+     as a **hardcoded render argument** (`scim_users_controller.ex:77`) rather than a read-back, and the
+     hard path is a bare `send_resp(conn, 204, "")`. **The census is blind to all three** — `--sites`
+     greps 0 for `scim`.
+  Recorded so nobody re-derives it as a route: `Accounts.update_user_password/3` (:198) documents
+  "revoking all sessions" but has **zero callers in `api/lib`**.
+
+- **PDS-D504 — THE SENTINEL HEADER NUMBERS REPRODUCE ONLY UNDER A FOUR-KNOB PREDICATE THE HEADER DOES
+  NOT CARRY, AND PDS-D489's "+11" MATCHES NO LENS ANYONE COULD CONSTRUCT.** An independent AST scan
+  (`Code.string_to_quoted!`, no regex) reproduces **21 function-tail / 11 clause-local exactly** — so
+  D489's figures are real measurements — but only under: unit = one `def`/`defp` **clause** with a
+  `do:` block, keyed `{path,name,arity,line}`; a **Repo-WRITE** predicate over a named verb list;
+  `tail(e)` = last expression of a `__block__`; clause-local **DISJOINT** from function-tail. Every knob is
+  load-bearing: dropping the write predicate gives **257/247**, public `def` only gives **15/4**,
+  widening to any `Repo.*` gives **23/18**, and dropping disjointness gives **13** where the header says
+  11. The header must print a predicate id (e.g.
+  `sentinel-ok@repo-write,def+defp,tail-disjoint / 1.19.5-OTP28 / 29cb76e60`) and the scan must ship
+  committed, so the number is a READ, not a transcription. **The "+11" as worded in D489 is
+  unre-derivable and must be replaced by the scan's output.** Two prior circulating figures — the
+  direction's "115" and the survey's 6/40 — reproduce under no constructible lens; the own-line regex
+  readings give 131/316/327.
+  **The flash+302 fourth success class is real but is a FAMILY OF ONE.** `report_blind_spots/1`
+  (`census.exs:1499`, called :217) greps **0** for `redirect|put_flash`, and the three declared counts
+  reproduce byte-exact (json(conn, **218** · put_status 2xx **66** · send_resp 2xx **3**). Population: 45
+  `put_flash(:info)` in `api/lib`, 7 in controllers across 2 files — but a sweep of all 20 flash-carrying
+  files finds only **three** that call any of the 32 sentinel functions, and only **one is lossy**:
+  `session_controller.ex:410` (`settings_live.ex:228` branches on it; `plugin_settings_live.ex:216`
+  carries a written basis comment). The lens half belongs in `report_blind_spots/1`; the code half is the
+  same public-return-widening shape as PDS-D496 and PDS-D503. Filed, not ridden.
+
+- **PDS-D505 — PDS-D485 IS STALE-BY-DRIFT, TRUE-AT-WRITING, AND `pds-w34-census-cas-shadow` CLOSES AS
+  DISSOLVED-BY-SET ON MEASUREMENT.** D485 entered at `d58f09a4a` whose parent is `b266a1a5e`; a clean run
+  there prints `classified 40 + unclassified 51 == emitted 91`, POST-READ **14**, CAS **0** — **all four of
+  D485's integers land on the nose.** Restated for today's main: **CAS 0→14, POST-READ 15 unchanged,
+  UNCLASSIFIED 73 unchanged, 0-shape sites 73.** The dissolution ARGUMENT gets STRONGER: under an
+  independent set lens (all four arm predicates emitted before the `cond`, so no arm can shadow another),
+  **`CAS \ POST-READ` is EMPTY at BOTH shas**, and `POST-READ \ CAS` is the single site
+  `oidc_controller.ex:82 callback/2` at both. All 14 CAS sites reach POST-READ via **ARM 1 (`select:`),
+  zero via ARM 2**, and in all 14 the **same function supplies both halves**
+  (`Internal.fenced_content_write/4` ×13, `BlockOps.fenced_paper_update/4` ×1) — because today's only CAS
+  idiom is `case Repo.update_all(query_with_select, …) do {1, [row]}`. Promoting CAS out of the shadow
+  therefore moves **no** site out of UNCLASSIFIED, which is what makes "dissolved by set" honest rather
+  than a re-shuffle. The single mover between the shas — `tasks_controller.ex:1289 add_edge/2` — entered
+  **both** sets simultaneously, so the invariant survived exactly the event that dated the numbers.
+  **Contingency stated, not hidden:** the emptiness holds because the CAS idiom puts `select:` on the same
+  query; `pds-bl-cas-int-tuple-spelling-blind` describes a spelling that would be CAS without a select.
+  Record the emptiness WITH its lens and sha, never as a standing invariant.
+  **LEDGER-VS-CHARTER DIVERGENCE, and it is our own disease:** D485 states "The task is CLOSED as
+  dissolved-by-set." `bp task get pds-w34-census-cas-shadow` returns `"lifecycle_status":"open"`. The
+  charter reports a closure the ledger does not carry — a receipt without a read, on the epic's own task
+  ledger. **The lead closes it on this wave's numbers, not on wave 35's assumption.**
+
+- **PDS-D506 — THE OWNING DOC IS WRONG IN ~26 PLACES, NOT 6 AND NOT 21, AND THE EXISTING BRIEF IS
+  STALE IN FOUR OF ITS OWN.** Full re-derivation against `29cb76e60`: **18 wrong integers/shape names**,
+  **2 true-but-misleading**, **a 3-part broken mutation record**, and **a structural absence**. Headlines:
+  `:143-144` prints `classified 44 + unclassified 47` and `POST-READ 17 · UNREACHABLE-ERROR 27 ·
+  UNCLASSIFIED 47` — a reader takes away *"half the population is judged"* when **eighteen of ninety-one**
+  are; `:135` depth-6 is `42/14/35` against a true `54/14/23` (only `read 14` survives); `:141`'s "35
+  reach no Repo verb" is **23**; `:158`'s "the 27 carrier files" is false under all three readings (25
+  AST-pair / 26 literal / 28 textual); `:63`/`:68` shell glyphs are 24/13 not 23/12; `:126`/`:128` are
+  104/9 not 103/8; `:156`'s engine-comparison figure is **99** (not the doc's 97 *and* not the brief's 98);
+  `:122`'s "~5 s" is refuted **without needing a quiet host** — parsing is sequential (`Enum.map(files,
+  &parse_file/1)` at :199, zero `Task.async`), so wall ≥ user CPU, and user CPU measured **11.99/13.86/
+  14.01 s**; the script **prints its own wall clock** every run, so the prose is contradicted by the
+  instrument. **DELETE the number, cite the printed line.**
+  **The mutation record at `:159-161` is three separate defects.** `close.ex` holds **ZERO** `Repo` write
+  verbs, so the recorded mutation cannot be performed; the live analogue is `internal.ex`
+  `Repo.update_all:57` + `Repo.insert!:386` and neutering **both** reds (RC 1); **but the "update_all-only
+  stays green" clause DOES reproduce at internal.ex** and must be re-derived rather than deleted — an
+  earlier reading that called it refuted had tested it on `close.ex`, where removing nothing is a vacuous
+  no-op. Also: the doc's "five write verbs / three `Repo.update_all`" are unsourced (internal.ex holds one
+  of each).
+  **DO NOT TOUCH the 11 confirmed claims** (AST 95, consumers 4, emitted 91, corpus 804, api/lib 48/17,
+  `provision_schemas.ex:114`, blind spots 218/66/3, D448's recorded 64/17/10, the `auth.ex` select-not-
+  returning anchor, `auth_controller.ex:351`'s genuine double-emit, `--sites` exists) — and note
+  `:144`'s "the other four shapes 0" survives **by coincidence**: the integer holds while the shape SET
+  changed (CAS-CONFIRMED-ECHO added, UNREACHABLE-ERROR gone). **The vocabulary correction is not optional
+  where the count matches.**
+  **The structural finding: the doc carries ZERO route-axis content** — eight incidental hits, every one
+  "route-bearing sentinels"/"write-routed" — and the register is about to introduce that axis. Scoping
+  this slice as "fix 21 integers" produces a doc that is arithmetically correct and **structurally unable
+  to describe the thing the wave is building.**
+
+- **PDS-D507 — THE BUDGET ENROLMENT IS A FIRST-TIME CHOICE, NOT A CAP RAISE, AND 12800 IS TOO TIGHT TO
+  SURVIVE ITS OWN AMENDMENT.** `scripts/check-doc-budgets.sh` gates **28 fixed paths + a 7-card loop**
+  (the brief's "33" is wrong) and `grep -c success-claim-census` returns **0** — the doc is gated by
+  nothing, and its `budget: 3200tok` header on line 1 is decorative: **a declared constraint with no read
+  behind it, on line 1 of the doc about unenforced claims.** The file is **11982 B**; a 12800 cap leaves
+  **818 B** while the wish REQUIRES adding a lens+sha annotation to every number (~286 B over ~22 numbers)
+  *and* route-axis prose. Enrolling at 12800 ships a gate that reds on its own amendment commit.
+  **RULING: retire the stale `:30-34` first-ship roster (313 B, and the registry is 42 rows now, not 17 —
+  it reads as a current inventory and is not one), then enrol at 13500 B with ≥800 B of measured
+  headroom.** This is not the cap-raising failure mode: there is no existing cap to raise. If the final
+  file cannot fit under 13500 with headroom, **compress the Go+shell sections (`:20-59` = 2573 B) — never
+  raise the number.** And the route-axis content is a **POINTER** to the register, never a table: the
+  register lives in the census, and duplicating 91 rows into a byte-budgeted doc is the drift machine this
+  wave exists to dismantle.
+
+- **PDS-D508 — THE ORDERING LAW OF THIS WAVE: ANYTHING THAT *QUOTES* THE POPULATION WAITS FOR EVERYTHING
+  THAT *MOVES* IT.** PDS-D496 refutes the direction's stated reason for landing the two lies first (EMITTED
+  is flat), so the ordering is re-derived on a different rationale. Four slices move the population or the
+  evidence base — the two lies (split 18+73 → 16+75), the `:83` seal fix, the revoke-count receipts
+  (`auth_controller.ex:460` is an emitted site), and the differentials (which the register must CITE as
+  PROVEN basis). The register and the owning doc both quote it. Therefore **round 1 = the instrument plus
+  the four movers; round 2 = the register and the doc; round 3 = the gate.** The register is never the
+  cuttable slice; **the gate is** — and if it slips, the tripwire slips one wave, not the ledger.
+  Corollary the builders carry: the census's `@declared` register is keyed on `{path, line}`
+  (`census.exs:1085`), so any slice shifting lines in `auth_controller.ex`,
+  `github_webhook_controller.ex` or `bulldocs_form_controller.ex` **silently resurrects a FINDING**. The
+  two-lies slice shifts `search_controller.ex` by +14 and is safe (no declared row there); the revoke
+  slice touches `auth_controller.ex` and **must re-run the census and re-pin the two declared auth lines
+  in the same commit.**
+
+- **PDS-D509 — TWO VACUOUS GREENS INSIDE THE EPIC'S OWN INSTRUMENTS, BOTH FILED, ONE ALREADY PROVEN BY
+  ITS OWN CANARY.** `required-checks.test.sh --hermetic` is **111 passed / 0 failed, RC 0** in a real git
+  checkout of `29cb76e60` (2m23s locally, 85–95 s as `Required-check spec gate` on a runner — a ~2.8×
+  host penalty worth carrying as the calibration constant). **But `--hermetic` is not hermetic**: §13
+  shells `git ls-files -- '*.md'` inside `REPO_ROOT`, and with no `.git` that prints nothing to stdout, so
+  §13's first assertion printed **`ok` over an EMPTY corpus**. It was caught only because §13's *second*
+  assertion is a planted-canary mutation check, which correctly failed. **The mutation arm did its job;
+  the assertion arm lied** — which is the whole argument for mutation proofs in one paragraph. Filed as
+  `pds-bl-hermetic-vacuous-green`. Second: `--files-from` truncation, PDS-D495. Neither rides this wave.
+  Related honesty note for the gate builder: `Required-check spec drift (advisory)` is **red on every
+  recent run** (97–107 s) while its blocking hermetic sibling is green — a standing red in the same fence
+  family, not the builder's breakage, and not to be "fixed" from inside an `elixir.yml`-fenced slice.
+
+### The sharpest attack on this plan, and how the wave absorbs it
+
+*"You have staffed maybe 25 of 91 rows with real judgment. The other ~66 will be UNJUDGED with a reason
+drawn from a closed vocabulary — a BUCKET wearing a verdict's badge. You have reinvented the six-shape
+taxonomy the wish just demoted to advisory, only now it is load-bearing and it reds the build."*
+
+Absorbed by PDS-D499's three rules, and the third is the load-bearing one: **the gate asserts completeness
+and integrity, never a verdict distribution.** A bucket correction can therefore never red the build; the
+only thing that reds is a NEW `ok: true` arriving with nobody having judged it. And the attack was run as a
+survey assignment rather than answered rhetorically — **more than half the vocabulary survived its own
+falsifiability test**, and what narrowed was the FIELD list (two candidates were axis errors that already
+exist as fields), not the mechanism.
+
+### The honest arithmetic of what this wave buys
+
+**~12 PROVEN rows**, not 91: 2 webhook (`:189` end-to-end + `:194` on the same fixture), 1 `:83` (bought by
+fixing it), ~3 Group C written and mutation-proven plus ~3 more at the same marginal cost, and the
+`:86`/`:87` no-op-ack pair whose post-condition is "nothing happened" and whose tests already prove nothing
+happened via `refute_received`. Everything else is honestly UNJUDGED **with a mechanically falsifiable
+reason**. Thirty honest UNJUDGED beats seventy-four confident guesses — and bought proof beats both, which
+is why the differentials ride in round 1 rather than being deferred to "later".
+
+### Wave 36 plan — 8 slices, 3 rounds
+
+| # | slice | task | round | fence | model |
+|---|---|---|---|---|---|
+| 1 | The census can be made to fail: ARGV-STRICT, a real `--selftest`, CLAUSE-COLLAPSE promoted, per-arm FAIL prose, the arity key, and `--keys` | `pds-w34-census-import-arity` | 1 | `scripts/pds-elixir-receipt-census.exs` | opus |
+| 2 | The two lies: one callee widening, a `recorded:` discriminator, `record_correction` folded in | `task-b75cb51e6184a423` | 1 | `intelligence.ex` + 2 controllers | opus |
+| 3 | Buy the currency: the Group C differential file + the webhook `stamped:`/`reconciled:` end-to-end pair | `pds-w36-groupc-webhook-differentials` | 1 | `api/test/**` only | opus |
+| 4 | `:83` REFUTED and repaired: the help line is computed from what the caller actually received | `pds-w36-brief-help-seal-divergence` | 1 | `tasks_controller.ex` + `params.ex` + test | opus |
+| 5 | The revoke count reaches the receipt on both routes — auth reset and SCIM deprovision | `pds-w36-revoke-all-sessions-count` | 1 | `accounts.ex`, `scim.ex`, 2 controllers, test | opus |
+| 6 | THE LEDGER: 91 judged rows keyed on `{path, mfa, head_hash, expr_fp}` + `REGISTER-COMPLETE` | `pds-w34-hand-bucket-register` | 2 | `scripts/pds-elixir-receipt-census.exs` | opus |
+| 7 | The owning doc's every number becomes a read | `pds-w34-owning-doc-amendment` | 2 | `docs/decisions/success-claim-census.md`, `check-doc-budgets.sh` | opus |
+| 8 | The arrival tripwire | `pds-w35-elixir-census-gate` | 3 | `.github/workflows/elixir.yml` | opus |
+
+HIGH-FLIP-RISK slices, flagged for independent re-derivation before merge: **slice 5** (the revoke-count
+receipt — a tenancy/security judgment on the *employee-left* path, where a wrong read is worse than no
+read), **slice 6** (the register key's stability and the PROVEN/UNJUDGED boundary — the verdict that every
+later wave inherits), and **slice 8** (a required-check promotion candidate: a census job NOT inside
+`elixir-gate`'s `needs` is auto-promotable by the next generator run on a `main` with
+`enforce_admins: true`, so all four aggregator edit points must land in ONE atomic diff).
