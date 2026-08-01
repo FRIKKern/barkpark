@@ -523,6 +523,96 @@ func successClaimRegistry() []claimSite {
 			Backed:       map[string]any{"capacity_stdout": `{"size_class":"standard"}`},
 			Contradicted: map[string]any{"capacity_stdout": `{"size_class":"heavy"}`},
 		},
+		{
+			// PDS wave 32. The row above only ever walks the MEASURED fork: both its
+			// halves parse to a class, so supportCapacityNarration's degraded branch —
+			// live, reachable from `bp cloud support add` whenever the box's capacity
+			// probe answers off-vocabulary or not at all — was exercised by nothing,
+			// and mutating it to print an empty sentence stayed green everywhere.
+			//
+			// Same entry point, same axis (the BOX'S RAW ANSWER), one fork over: the
+			// backed half is a box that measured itself, the contradicting half is a
+			// box whose answer carries no class at all. Production's own parser makes
+			// the call and success() prints whatever the narration returns — the row
+			// restates neither. The wording itself is pinned by
+			// TestSupportCapacityNarrationStatesTheDegradedMeasure below, because the
+			// change-when-the-response-does property alone is satisfied by ANY two
+			// different strings and so cannot tell "degraded, and it says so" from
+			// "degraded, silently".
+			Name: "supportAddRun.success/max-class-degraded",
+			Render: func(out *writer, resp any) {
+				r := supportAddIdentity
+				r.out = out
+				r.host = supportSuccessHost
+				stdout, _ := resp.(map[string]any)["capacity_stdout"].(string)
+				r.maxClass = supportParseSizeClass(stdout)
+				r.success()
+			},
+			Backed:       map[string]any{"capacity_stdout": `{"size_class":"standard"}`},
+			Contradicted: map[string]any{"capacity_stdout": `{"error":"fleet-run.sh: capacity: no such file"}`},
+		},
+	}
+}
+
+// registryRow returns the enrolled row with this exact Name, failing if it is
+// gone — so a test that pins one row's behavior can never pass vacuously after
+// a rename.
+func registryRow(t *testing.T, name string) claimSite {
+	t.Helper()
+	for _, site := range successClaimRegistry() {
+		if site.Name == name {
+			return site
+		}
+	}
+	t.Fatalf("no success-claim registry row named %q — the row it pins is gone", name)
+	return claimSite{}
+}
+
+// TestSupportCapacityNarrationStatesTheDegradedMeasure pins the fork the pair
+// property cannot reach on its own. supportCapacityNarration's degraded branch is
+// production's answer when the box could not measure itself, and an operator
+// reading `size: max class ` with nothing after it reads it as fine. So:
+//
+//   - the degraded sentence must exist and must NAME the degradation;
+//   - it must not read like a measured class (it cannot equal the measured
+//     sentence, and must not carry the class the measured half prints);
+//   - and success() must actually print THAT sentence — asserted by CALLING
+//     supportCapacityNarration and requiring the receipt to contain what it
+//     returned, never by restating its text here (#8688: a registry that
+//     restates a string proves the string exists, not that the code emits it).
+//
+// MUTATION-PROVEN: making the degraded branch return "" fails the non-empty arm;
+// making it return the measured wording fails the names-the-degradation arm.
+func TestSupportCapacityNarrationStatesTheDegradedMeasure(t *testing.T) {
+	degraded := supportCapacityNarration("")
+	if strings.TrimSpace(degraded) == "" {
+		t.Fatalf("supportCapacityNarration(\"\") = %q — an unmeasured capacity must be STATED, never printed as an "+
+			"empty tail the operator reads as a measured fact", degraded)
+	}
+	low := strings.ToLower(degraded)
+	for _, want := range []string{"not measured", "degraded"} {
+		if !strings.Contains(low, want) {
+			t.Errorf("supportCapacityNarration(\"\") = %q, want it to name the degradation (%q)", degraded, want)
+		}
+	}
+	const measuredClass = "standard"
+	if measured := supportCapacityNarration(measuredClass); degraded == measured {
+		t.Errorf("supportCapacityNarration(\"\") prints the same sentence as a MEASURED class — "+
+			"the receipt cannot tell the operator which one happened.\nboth: %q", degraded)
+	}
+	if strings.Contains(degraded, measuredClass) {
+		t.Errorf("supportCapacityNarration(\"\") = %q names a size class — a measure that did not happen "+
+			"must not read like one that did", degraded)
+	}
+
+	// And production must PRINT it: render the degraded half of the enrolled row
+	// and require the receipt to carry exactly what the narration returned.
+	site := registryRow(t, "supportAddRun.success/max-class-degraded")
+	receipt := renderClaim(t, site, site.Contradicted)
+	if !strings.Contains(receipt, degraded) {
+		t.Errorf("supportAddRun.success does not print supportCapacityNarration's degraded sentence (%q) when the "+
+			"box's answer carries no class — the branch is live in production but unreachable from the receipt.\nreceipt: %q",
+			degraded, receipt)
 	}
 }
 
