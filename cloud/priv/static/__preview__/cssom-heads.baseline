@@ -149,4 +149,21 @@
 # 150.0.7871.187, node v22.22.0, app.css 222460 B sha256 480fe6ad1e7a…, authored rule
 # heads 1243 == CSSOM style rules 1243, flattened selectors 1210/1210, MISSES 0,
 # PARITY PASS. s5 is a net PLUS TWO over the 1241 that s2 and s3 left on main.
-1243
+# Re-measured 2026-08-01 (cch-w15-s2-archives-resurrect-scroller, at BUILD): 1245
+# authored heads == 1245 CSSOM style rules, flattened selectors 1212/1212, MISSES 0 —
+# MEASURED by running cssom-parity.mjs on this branch off origin/main (which reads
+# 1243, and which this branch's first run reported as "+2 ABOVE"), not hand-derived.
+# The +2 are the TWO scoped chip rules the archives resurrect fix adds:
+# `.archive-resurrect .cli-chip` and `.archive-resurrect .cli-chip-code`. They are
+# SCOPED on purpose — `.cli-chip` is shared with the webhook chips, so an unscoped
+# edit would have moved this number by zero and changed four other surfaces instead.
+# NOT COUNTED, by design and consistent with the W12/W14 entries above: `@property
+# --archive-cli-fade` and `@keyframes archive-cli-edge-fade` are OPAQUE at-rules,
+# skipped on BOTH sides, so the two-state scroll cue costs zero heads; and
+# `.archive-resurrect` itself only gained declarations (flex-basis, flex-wrap,
+# min-width), which is a declaration change, not a head. MISSES 0 is what makes this
+# an unrecorded ADD rather than a parity defect.
+# FOR THE LEAD: three wave-15 slices touch app.css. This number and theirs merge
+# CLEAN and WRONG — re-measure on the merged tree (charter D158 REGENERATE-ON-REBASE);
+# do not add 2 to whatever lands first.
+1245
