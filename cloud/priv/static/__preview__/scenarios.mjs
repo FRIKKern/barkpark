@@ -327,19 +327,37 @@ const lastDeploy = (status, trigger, ago) => ({
   updated_at: tMinus(ago),
   inserted_at: tMinus(ago + 120),
 });
+// cch-w16-s4 (charter D199) — THE FIXTURE FIDELITY REPAIR. Until this slice
+// `site()` defaulted `current_deployment_id: null` and NOT ONE list row
+// overrode it, so the corpus asserted a state the SERVER CANNOT PRODUCE: pill
+// "Live" beside a null production pointer. The server moves that pointer only
+// after the box confirms a live flip, so ANY row whose deploy history reached
+// live once — live, rebuilding-over-a-previous-build, failed-over-a-last-good,
+// cancelled-over-a-last-good — carries a non-null pointer. Only a site that has
+// never served a build has null.
+// D182's census RESTATED with this diff: the corpus held 44 site rows, 40 of
+// them null-pointered, and ZERO preview-only sites. This diff sets the pointer
+// on the four deployed list rows and adds the first preview-only row, so the
+// list corpus is now 6 site rows / 2 null (acme-labs never-deployed +
+// acme-previews preview-only) / 1 preview-only.
+const depOf = (n) => "5b2c1e00-0000-4000-8000-0000000000e" + n;
 const sitesListRows = [
   site({
     id: "5b2c1e00-0000-4000-8000-0000000000c3",
     name: "acme-web", slug: "acme-web", domains: ["acme.com", "www.acme.com"],
     framework: "nextjs", github_repo: "acme/web", github_branch: "main",
     github_webhook_configured: true,
+    current_deployment_id: depOf(3),
     last_deployment: lastDeploy("live", "content-auto", 900),
   }),
   site({
     id: "5b2c1e00-0000-4000-8000-0000000000c4",
     name: "acme-blog", slug: "acme-blog", domains: ["blog.acme.com"],
     framework: "astro", github_webhook_configured: true,
-    // A content publish is rebuilding this static site right now.
+    // A content publish is rebuilding this static site right now — the PREVIOUS
+    // build is still being served, so the production pointer still names it.
+    // This row is why the gate cannot be `last_deployment.status === "live"`.
+    current_deployment_id: depOf(4),
     last_deployment: lastDeploy("building", "content-auto", 20),
   }),
   site({
@@ -347,6 +365,9 @@ const sitesListRows = [
     name: "acme-shop", slug: "acme-shop", domains: ["shop.acme.com"],
     framework: "nextjs", github_repo: "acme/shop", github_branch: "main",
     github_webhook_configured: true,
+    // A failed deploy never moves the pointer: the last good build is still
+    // serving. Its door is WORKING and must stay.
+    current_deployment_id: depOf(5),
     last_deployment: lastDeploy("failed", "manual", 3600),
   }),
   site({
@@ -367,7 +388,23 @@ const sitesListRows = [
     id: "5b2c1e00-0000-4000-8000-0000000000c7",
     name: "acme-guides", slug: "acme-guides", domains: ["guides.acme.com"],
     framework: "astro", github_webhook_configured: true,
+    // A cancel does not tear down what is already serving, so the pointer holds.
+    current_deployment_id: depOf(7),
     last_deployment: lastDeploy("cancelled", "manual", 1800),
+  }),
+  // cch-w15-bl-preview-only-site-fixture-missing, closed HERE: the corpus held
+  // ZERO preview-only sites, so the population the Visit-link defect was widest
+  // on — a site with branch previews and no production release — could not be
+  // driven at all. It has previews on, a slug (so siteLiveUrl MANUFACTURES a
+  // production URL for it out of the instance host), and NO production
+  // deployment: null pointer, no last_deployment. It must read "Not deployed"
+  // AND offer no production door, even though a URL is derivable for it. This
+  // is the row that proves the gate is the DEPLOYMENT fact and not "has a URL".
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000c8",
+    name: "acme-previews", slug: "acme-previews", domains: [],
+    framework: "nextjs", github_repo: "acme/previews", github_branch: "main",
+    github_webhook_configured: true, previews_enabled: true,
   }),
 ];
 
@@ -1503,6 +1540,26 @@ export const SCENARIOS = {
     label: "Sites list (v4) — deploy-status pills, host, framework, on <instance>, recency",
     authed: true,
     deepLink: "#sites",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: sitesListRows,
+      audit: [],
+    },
+  },
+
+  // cch-w16-s4: THE SAME six rows, rendered through the OTHER row builder.
+  // `siteRow` (the instance-workspace Sites card) had NO scenario at all, and
+  // every other instance fixture ships `sites: []` or a 100% never-deployed
+  // set — so a guard asserting "no Visit anchor here" would have passed for the
+  // wrong reason, on an empty list. This drives the SAME sitesListRows (no new
+  // fixture data) at the instance route, where the FOUR rows that have served a
+  // build must KEEP their door and the two that never have must not have one.
+  "sites-on-instance": {
+    label: "Instance workspace Sites card — the same six rows through siteRow, doors gated on deployment",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
       barkparks: [liveInstance],

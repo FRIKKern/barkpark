@@ -10857,6 +10857,114 @@ test("ssw8 siteRow: the FIRST row a stranger sees — real fields, a binding chi
   assert.ok(plain.includes("not linked") && plain.includes("Manual"), "and still reads honestly otherwise");
 });
 
+// ── cch-w16-s4 (charter D199): NO DOOR TO A SITE THAT HAS NEVER BEEN DEPLOYED ─
+//
+// Until this slice the console painted `Not deployed` and, in the SAME 8px flex
+// run, `<a class="site-open" title="Open the live site">Visit ↗</a>` — because
+// the affordance was gated on `siteLiveUrl`, which MANUFACTURES a URL out of the
+// instance host whenever the row carries a slug. There was ZERO coverage: this
+// file had never mentioned site-open, siteOpenLink or Visit, and the geometric
+// breakpoint sweep is structurally blind to a semantic contradiction.
+//
+// The states below are the shipped corpus, and the guard reads BOTH directions
+// on purpose. Removing the door from the rebuilding and deploy-failed rows would
+// be the same defect mirrored — a static site mid-rebuild is still serving its
+// previous build — which is exactly why the predicate is the production POINTER
+// and not `last_deployment.status === "live"`.
+const S4_STATES = [
+  { name: "live", current_deployment_id: "d-live", last_deployment: { status: "live", trigger: "content-auto" }, door: true },
+  { name: "rebuilding", current_deployment_id: "d-prev", last_deployment: { status: "building", trigger: "content-auto" }, door: true },
+  { name: "deploy-failed", current_deployment_id: "d-prev", last_deployment: { status: "failed", trigger: "manual" }, door: true },
+  { name: "cancelled", current_deployment_id: "d-prev", last_deployment: { status: "cancelled", trigger: "manual" }, door: true },
+  { name: "never-deployed", current_deployment_id: null, last_deployment: null, door: false },
+  { name: "preview-only", current_deployment_id: null, last_deployment: null, previews_enabled: true, door: false },
+];
+const s4Site = (st) => ({
+  id: "site-" + st.name, name: "acme-" + st.name, slug: "acme-" + st.name,
+  domains: [st.name + ".acme.com"], framework: "nextjs",
+  github_webhook_configured: true,
+  current_deployment_id: st.current_deployment_id,
+  ...(st.last_deployment ? { last_deployment: st.last_deployment } : {}),
+  ...(st.previews_enabled ? { previews_enabled: true } : {}),
+});
+const S4_BP = { id: "bp-1", name: "Production", url: "https://acme.barkpark.cloud" };
+
+test("cch-w16-s4: siteHasEverDeployed is the ONE predicate — the production pointer, not the URL and not the last row", () => {
+  // A URL is derivable for EVERY state (siteLiveUrl manufactures one from the
+  // instance host), so the URL can never be the gate.
+  for (const st of S4_STATES) {
+    assert.ok(hooks.siteLiveUrl(s4Site(st), S4_BP), st.name + " has a derivable URL either way");
+    assert.equal(hooks.siteHasEverDeployed(s4Site(st)), st.door, st.name + " → door " + st.door);
+  }
+  // The REFUSED predicate, spelled out so its refusal cannot quietly regress:
+  // it would strip a WORKING door from two states that are still serving.
+  const refused = (s) => !!(s.last_deployment && s.last_deployment.status === "live");
+  const stripped = S4_STATES.filter((st) => st.door && !refused(s4Site(st))).map((st) => st.name);
+  assert.deepEqual(stripped, ["rebuilding", "deploy-failed", "cancelled"],
+    "last_deployment.status==='live' would close three doors that still open");
+  // Absent/garbage payloads fail CLOSED — no door invented out of nothing.
+  for (const bad of [null, undefined, {}, { current_deployment_id: null }, { current_deployment_id: "" }]) {
+    assert.equal(hooks.siteHasEverDeployed(bad), false, "a payload with no pointer offers no door");
+  }
+});
+
+test("cch-w16-s4: all FOUR Visit anchors are gated — siteRow, globalSiteRow and BOTH detail-head doors", () => {
+  for (const st of S4_STATES) {
+    const s = s4Site(st);
+    const row = hooks.siteRow(s, S4_BP);
+    const global = hooks.globalSiteRow(s, S4_BP);
+    // Anchors 3 and 4 live in the SAME function: the .fleet-url full-URL run and
+    // the .fleet-badges Visit button. Gating siteOpenLink alone fixes neither.
+    const detail = hooks.siteDetailHtml(s, S4_BP, [], s.domains[0], []);
+    const badges = detail.slice(detail.indexOf('class="fleet-badges"'));
+    const url = detail.slice(detail.indexOf('class="fleet-url"'), detail.indexOf('class="fleet-badges"'));
+    if (st.door) {
+      assert.ok(row.includes('class="site-open"'), st.name + ": siteRow keeps its door");
+      assert.ok(global.includes('class="site-open"'), st.name + ": globalSiteRow keeps its door");
+      assert.ok(url.includes('class="site-open"'), st.name + ": the .fleet-url full-URL link stays");
+      assert.ok(badges.includes("site-open"), st.name + ": the .fleet-badges Visit button stays");
+      assert.equal(countAll(detail, "site-open"), 2, st.name + ": exactly the two detail-head doors");
+    } else {
+      assert.ok(!row.includes("site-open"), st.name + ": siteRow offers NO door");
+      assert.ok(!global.includes("site-open"), st.name + ": globalSiteRow offers NO door");
+      assert.ok(!url.includes("site-open"), st.name + ": no full-URL link on the detail head");
+      assert.ok(!badges.includes("site-open"), st.name + ": no Visit button on the detail head");
+      assert.equal(countAll(detail, "site-open"), 0, st.name + ": zero live-open affordances anywhere on the detail");
+      // …and the contradiction itself: never "Not deployed" beside a live door.
+      assert.ok(global.includes(">Not deployed<"), st.name + ": the list still says what is true");
+      assert.ok(!global.includes("Open the live site"),
+        st.name + ": nothing offers to open a site the same row calls Not deployed");
+    }
+  }
+});
+
+test("cch-w16-s4: the never-deployed DETAIL grows the neutral chip — it used to say nothing at all", () => {
+  const never = s4Site(S4_STATES[4]);
+  const detail = hooks.siteDetailHtml(never, S4_BP, [], "acme-never.acme.com", []);
+  assert.equal(countAll(detail, "dep-pill"), 1, "exactly one status chip in the head");
+  assert.ok(detail.includes(">Not deployed</span>"), "the visible copy matches the LIST word for word");
+  assert.ok(detail.includes('title="Not deployed to production"'), "the tooltip names the environment");
+  assert.ok(detail.includes('aria-label="Not deployed to production"'), "and so does the accessible name");
+  // The deployed detail is unchanged: a live pointer + a live row still reads Live.
+  const liveDetail = hooks.siteDetailHtml(
+    s4Site(S4_STATES[0]), S4_BP, [{ id: "d-live", status: "live" }], "acme-live.acme.com", []);
+  assert.ok(liveDetail.includes("dep-live") && !liveDetail.includes(">Not deployed<"),
+    "a live site is untouched by the neutral case");
+});
+
+test("cch-w16-s4: siteOpenLink itself stays honest — a null URL renders nothing to click", () => {
+  assert.equal(hooks.siteOpenLink(null), "");
+  assert.equal(hooks.siteOpenLink(""), "");
+  const a = hooks.siteOpenLink("https://acme.barkpark.cloud/sites/blog/");
+  assert.ok(a.includes('rel="noopener"') && a.includes('target="_blank"'), "the door still opens in a new tab");
+});
+
+// Count every occurrence of a literal — the gate assertions need a COUNT, not a
+// presence: "two doors became one" is the regression this file exists to catch.
+function countAll(hay, needle) {
+  return hay.split(needle).length - 1;
+}
+
 test("ssw8: siteLiveUrl — the manufactured 'Visit ↗' strips to URL-safe BEFORE escaping, never after", () => {
   const bp = { url: "https://acme.barkpark.cloud/" };
   // The payload's own url always wins — nothing is manufactured when the server sent one.
@@ -10884,8 +10992,18 @@ test("gr-p3: siteStatusChip — Deploying while in flight, Live only when the po
   const building = [{ id: "d2", status: "building" }, { id: "d1", status: "live" }];
   assert.match(hooks.siteStatusChip(site, building), /dep-building">Deploying/);
   // Pointer names a row that is not in the list (stale) → no chip, never invented.
+  // This site HAS served a build, so "Not deployed" here would be the same lie
+  // in the other direction: silence is the only honest answer.
   assert.equal(hooks.siteStatusChip({ current_deployment_id: "dx" }, live), "");
-  assert.equal(hooks.siteStatusChip({}, []), "");
+  // cch-w16-s4: a NEVER-deployed site used to take this same bare "" — so the
+  // detail head said NOTHING about deployment while offering two doors to the
+  // site. It now takes D182's ruled pair.
+  const never = hooks.siteStatusChip({}, []);
+  assert.match(never, /class="dep-pill"/, "the neutral chip rides the BARE base class — this slice ships no CSS");
+  assert.ok(!/dep-live|dep-building|dep-queued|dep-failed/.test(never), "no borrowed status colour");
+  assert.match(never, />Not deployed</, "the VISIBLE copy is the list's word for word");
+  assert.match(never, /title="Not deployed to production"/, "the tooltip names the environment");
+  assert.match(never, /aria-label="Not deployed to production"/, "…and so does the accessible name");
 });
 
 test("gr-p3: previewRow meta carries preview env + provenance + duration; failed preview gets the shared panel", () => {

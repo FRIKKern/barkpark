@@ -7280,6 +7280,28 @@
     }
     return null;
   }
+  // cch-w16-s4 (charter D199): HAS THIS SITE EVER SERVED A BUILD? The ONE
+  // predicate behind every "Visit ↗" affordance on every surface.
+  //
+  // WHY `current_deployment_id` AND NOTHING ELSE:
+  //   • It rides site_json/2's BASE map, so it is on the LIST payload and the
+  //     DETAIL payload alike — one field, no second fetch, no N+1, and no
+  //     tri-state: loadSite's degradation of a failed /deployments GET to []
+  //     cannot manufacture a false "nothing is deployed here", because the fact
+  //     lives on the SITE, not on the deployments read.
+  //   • The server moves that pointer only after the box confirms a live flip
+  //     (deploy.ex), and registry.ex spells `not is_nil(current_deployment_id)`
+  //     "deployed at least once" in so many words.
+  //   • REFUSED: `last_deployment && last_deployment.status === "live"`.
+  //     `last_deployment` is the NEWEST row only, so it cannot express "has
+  //     ever gone live" — it would strip a WORKING door from a site whose newest
+  //     deploy is Rebuilding (the previous build is still being served) or
+  //     Deploy failed (the last good build is still being served).
+  // The URL itself proves nothing: siteLiveUrl MANUFACTURES `<instance>/sites/
+  // <slug>/` whenever the instance has a url, which is strictly weaker than any
+  // deployment fact. This is the gate the file's own "never invent a dead link"
+  // comment above always meant.
+  function siteHasEverDeployed(s) { return !!(s && s.current_deployment_id); }
   // A "Visit ↗" anchor to the live site, opened in a new tab. Empty string when
   // there is no URL, so callers can concatenate unconditionally.
   function siteOpenLink(url) {
@@ -7531,7 +7553,8 @@
       '<div class="site-name">' + esc(domain) + "</div>" +
       '<div class="site-meta">' + fw + " &middot; " + repo + "</div>" +
       '</div><div class="fleet-badges">' +
-        siteOpenLink(siteLiveUrl(s, bp)) +
+        // cch-w16-s4: no door to a site that has never served a build.
+        siteOpenLink(siteHasEverDeployed(s) ? siteLiveUrl(s, bp) : null) +
         siteBindingChip(s) +
         freshnessBadge(s) +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
@@ -9494,7 +9517,9 @@
         '<div class="site-meta">' + fw + " &middot; " + instSeg + " &middot; updated " + esc(updated) + "</div>" +
       "</div>" +
       '<div class="fleet-badges">' +
-        siteOpenLink(siteLiveUrl(s, bp)) +
+        // cch-w16-s4: the row that used to paint "Not deployed" beside
+        // "Visit ↗ — Open the live site" in the same 8px flex run.
+        siteOpenLink(siteHasEverDeployed(s) ? siteLiveUrl(s, bp) : null) +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";
@@ -9665,8 +9690,21 @@
         return String(d.id) === String(site.current_deployment_id) && (d.status || "") === "live";
       })[0];
       if (cur) return '<span class="dep-pill dep-live">Live</span>';
+      // A pointer we cannot resolve (the deployments read degraded, or the page
+      // is mid-load) says NOTHING — the site HAS served a build, so "Not
+      // deployed" here would be the same lie in the other direction.
+      return "";
     }
-    return "";
+    // cch-w16-s4 (D182's ruled pair): a never-deployed site owed the detail a
+    // state and got a bare "" — so the head offered TWO ways to open a site it
+    // said nothing about. Visible copy is the LIST's word for word ("Not
+    // deployed"); the accessible name says which environment ("…to production"),
+    // so a screen reader is not left guessing whether a branch preview counts.
+    // BARE `.dep-pill`, no new class: D157 measured that .dep-queued declares
+    // only what the base already sets — the base IS the neutral look, and this
+    // slice ships zero CSS lines.
+    return '<span class="dep-pill" title="Not deployed to production"' +
+      ' aria-label="Not deployed to production">Not deployed</span>';
   }
 
   function siteDetailHtml(site, bp, deployments, domain, previews) {
@@ -9710,7 +9748,10 @@
         '<div class="deploys previews">' + previews.map(previewRow).join("") + "</div>"
       : "";
     var previewsFlag = site.previews_enabled === false ? "Off" : "On";
-    var live = siteLiveUrl(site, bp);
+    // cch-w16-s4: BOTH detail-head doors — the full-URL line in .fleet-url and
+    // the Visit button in .fleet-badges — hang off this one binding, so the head
+    // can never offer a door the row already refused.
+    var live = siteHasEverDeployed(site) ? siteLiveUrl(site, bp) : null;
     var liveLine = live
       ? ' &middot; <a class="site-open" href="' + esc(live) + '" target="_blank" rel="noopener">' + esc(live) + "&nbsp;&#8599;</a>"
       : "";
@@ -19041,6 +19082,12 @@
       // …and the URL the LIST surfaces manufacture when the payload carries none.
       // Unasserted until ssw8 despite being the "Visit ↗" a stranger clicks first.
       siteLiveUrl: siteLiveUrl,
+      // cch-w16-s4 (D199): the ONE deployment predicate all four Visit
+      // affordances hang off, plus the anchor builder itself — pinned here so
+      // the guard can assert the gate in BOTH directions rather than trusting
+      // that four call sites all call the same thing.
+      siteHasEverDeployed: siteHasEverDeployed,
+      siteOpenLink: siteOpenLink,
       // G-04 Notifications (the crown, GR33/GR34/GR36): the pure builders for the
       // settings-anatomy page — cell/channel state, the matrix + roster + email +
       // delivery-log markup, and the routing-write helpers. DOM mounts
