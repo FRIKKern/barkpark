@@ -636,56 +636,72 @@ gate_says() {
 
 # (a) the happy path: a console PR, everything ran and passed
 gate "full run, all green" 0 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (b) a legitimate docs-only skip greens the required context
 gate "docs-only PR, console jobs legitimately skipped" 0 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_ESCAPE=success \
   O_CONSOLE=false
 gate_says "legitimately not dispatched" "…and says so, rather than claiming the harness passed"
 
 # (c) an upstream FAILURE reds it — 720 red harness tests may never merge green
 gate "console-unit failed" 1 \
-  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=failure R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (d) THE BYPASS THIS SLICE EXISTS TO CLOSE: cssom-parity `skipped` only because
 #     its dependency died, while the dispatcher said it WAS needed.
 gate "cssom-parity skipped behind a live gate (upstream died)" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=skipped R_TIER=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=success R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_ESCAPE=success \
   O_CONSOLE=true
 gate_says "its gate is 'true', not 'false'" "…and names the reason (a skip is not a pass)"
 
 # (e) the dispatcher itself failing reds it, with empty outputs
 gate "dispatcher failed, output empty" 1 \
-  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_ESCAPE=success \
+  R_CHANGES=failure R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_ESCAPE=success \
   O_CONSOLE=
 
 # (f) the unfiltered ratchet may never skip
 gate "path-escape skipped" 1 \
-  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_ESCAPE=skipped \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=skipped \
   O_CONSOLE=true
 
 # (g) cancelled is not success
 gate "a cancelled upstream" 1 \
-  R_CHANGES=success R_UNIT=cancelled R_CSSOM=success R_TIER=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=cancelled R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (h) anything unrecognised is red — "cannot tell" is a failure, not a pass
 gate "an unrecognised result value" 1 \
-  R_CHANGES=success R_UNIT=neutral R_CSSOM=success R_TIER=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=neutral R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (i) an EMPTY result (a job silently dropped from `needs`) is red
 gate "an empty result string" 1 \
-  R_CHANGES=success R_UNIT= R_CSSOM=success R_TIER=success R_ESCAPE=success \
+  R_CHANGES=success R_UNIT= R_CSSOM=success R_TIER=success R_OVERFLOW=success R_ESCAPE=success \
   O_CONSOLE=true
 
 # (j) a garbage gate value must not license a skip
 gate "skip against a garbage gate value" 1 \
-  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_ESCAPE=success \
+  R_CHANGES=success R_UNIT=skipped R_CSSOM=skipped R_TIER=skipped R_OVERFLOW=skipped R_ESCAPE=success \
   O_CONSOLE=maybe
+
+# (k1) THE SILENT OMISSION, MADE LOUD (D209). Adding a job to `needs:` and to
+#      `env:` without adding its `decide` line is the one wiring mistake this
+#      aggregator cannot report on itself: the job's result is bound, unread,
+#      and the gate greens over it. This case fails the overflow-guard job and
+#      demands the gate go red AND name it — delete the `decide "overflow-guard"`
+#      line and this test is the thing that notices.
+gate "overflow-guard failed" 1 \
+  R_CHANGES=success R_UNIT=success R_CSSOM=success R_TIER=success R_OVERFLOW=failure R_ESCAPE=success \
+  O_CONSOLE=true
+gate_says "overflow-guard: failure" "…and names overflow-guard (its decide line is really invoked)"
+#      (The arithmetic half of that invariant — one `decide` per `needs:` entry
+#      — is already owned by the D36 `needs_without_decide` emitter above, which
+#      walks needs -> env var -> decide's 2nd argument and is mutation-proven in
+#      four directions. This case is its behavioural companion, not a second
+#      copy of it.)
 
 # (k) the aggregator's own step body must be able to fail. If the extracted
 #     script were empty or unparseable every case above would "pass" at exit 0
