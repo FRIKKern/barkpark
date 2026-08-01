@@ -120,7 +120,14 @@ test("boundaryWalk straddles every breakpoint and does NOT de-duplicate 899/900"
   const w = boundaryWalk([899, 900]);
   assert.deepEqual(w, [898, 899, 900, 901]);
   assert.ok(w.includes(899) && w.includes(900),
-    "at exactly 900 the tier grid has folded and the detail grid has not — they are different cells");
+    "adjacent breakpoints MERGE their walks without losing a width: 899 and 900 " +
+    "one apart still yield 898/899/900/901, four widths, not three. That is the " +
+    "property this assertion actually holds, and it is why dropping 900 from " +
+    "BREAKPOINTS costs only the width 901 — 900 survives as 899+1. " +
+    "(The reason this said until cch-w16-s8 — 'at exactly 900 the tier grid has " +
+    "folded and the detail grid has not' — was FALSE when written: driven on " +
+    "origin/main the tier grid computed TWO tracks at 899 (282.5/282.5), 900 " +
+    "(283/283) AND 901 (283.5/283.5). It folded nowhere near 900.)");
 });
 
 // ── the artifact today ───────────────────────────────────────────────────────
@@ -129,7 +136,14 @@ test("app.css's declared axis is exactly the sweep's BREAKPOINTS, with nothing u
   const r = parseMediaBreakpoints(APP_CSS);
   assert.deepEqual(r.breakpoints, BREAKPOINTS);
   assert.deepEqual(r.unresolved, []);
-  assert.deepEqual(WIDTHS, [619, 620, 621, 719, 720, 721, 767, 768, 769, 898, 899, 900, 901]);
+  // 15 widths. cch-w16-s8 dropped 900 from BREAKPOINTS with the CSS rule that
+  // declared it — the ONLY width that left is 901, since 900 is still walked as
+  // 899+1 — taking this to 12. W17-S6 then added `@media (max-width: 830px)`
+  // for the past-due money message, which brings 829/830/831 and takes it to 15.
+  // THIS LITERAL IS THE POINT: a CSS slice that adds or removes a breakpoint has
+  // to come here and say which widths it moved. Leg A refuses either way, and it
+  // DID refuse W17-S6's first draft ("UNCOVERED breakpoint 830px").
+  assert.deepEqual(WIDTHS, [619, 620, 621, 719, 720, 721, 767, 768, 769, 829, 830, 831, 898, 899, 900]);
 });
 
 test("the raw grep over-counts @media — comment-stripping is why the parser does not", () => {
@@ -450,13 +464,43 @@ test("axisCoverage names both directions and is empty on an agreeing pair", () =
 
 test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-cannot-refuse-removed-breakpoint named", () => {
   // Before this, the sweep kept driving 899/900/901 against a rule that no
-  // longer existed and printed an impossible "4 breakpoints -> 13 boundary
-  // widths" under a green tick.
-  const css = APP_CSS.replace(/max-width: 900px/g, "max-width: 768px").replace(/min-width: 900px/g, "min-width: 769px");
+  // longer existed and printed four DERIVED breakpoints against a thirteen-width
+  // walk under a green tick. cch-w16-s8 then reached that state for real by
+  // deleting app.css's `max-width: 900px` tier rule, and this refusal caught it
+  // (Leg A exit 2, `PHANTOM breakpoint 900px`).
+  //
+  // RE-ARMED ON 620, AND THE OBVIOUS RE-ARM IS VACUOUS. This used to mutate the
+  // 900px declarations. With the tier rule gone the only 900 left in app.css is
+  // `@media (min-width: 900px)`, and re-pointing at it PROVES NOTHING: 899 is
+  // declared THREE times (`max-width: 899px` twice, plus that block), so the
+  // axis reads [620,720,768,899] before AND after and `r.ok` comes back TRUE. A
+  // byte-diff clamp (`assert.notEqual(css, APP_CSS)`) passes on that no-op too,
+  // which is exactly the shape of guard this wave exists to stop shipping.
+  //
+  // So mutate BY VALUE onto an EXISTING breakpoint: 620 -> 720 removes 620 from
+  // the derived axis without inventing a new one, and BREAKPOINTS still declares
+  // it — a phantom, by construction.
+  const css = APP_CSS.replace(/max-width: 620px/g, "max-width: 720px");
+  // THE CLAMP IS A POST-CONDITION, NOT A BYTE DIFF: assert the property the
+  // mutation was for — that no 620px declaration survives it — so a regex that
+  // silently stops matching cannot leave this test asserting about unmutated
+  // bytes. IF THIS LINE REDS, DO NOT DELETE IT: it means app.css grew a 620
+  // declaration in a syntax this replace misses (range syntax `(width <= 620px)`,
+  // a `min-width: 620px` complement, a different space run). Widen the mutation
+  // to cover it; the clamp reding IS the guard working. It also reds on a
+  // COMMENT that merely mentions 620px — the parser strips comments and this
+  // count does not — and that is the one case where the fix is to reword the
+  // comment (app.css:2131 is the standing precedent for a breakpoint named
+  // inside one).
+  assert.equal((css.match(/620px/g) || []).length, 0,
+    "the 620px mutation left a 620px occurrence behind — app.css names 620 in a form " +
+    "`max-width: 620px` does not match (range syntax `(width <= 620px)`, a `min-width` " +
+    "complement, a different space run, or a comment), so the phantom below would be " +
+    "proving nothing. Widen the mutation, never remove this clamp.");
   const r = coverageReport({ css, html: INDEX_HTML });
   assert.equal(r.ok, false);
-  assert.deepEqual(r.phantomBreakpoints, [900]);
-  assert.deepEqual(r.breakpoints, [620, 720, 768, 899], "the mutation really did remove it — otherwise the refusal above is vacuous");
+  assert.deepEqual(r.phantomBreakpoints, [620]);
+  assert.deepEqual(r.breakpoints, [720, 768, 830, 899], "the mutation really did remove it — otherwise the refusal above is vacuous");
   // and the unmutated tree is clean, so this is the mutation talking
   assert.deepEqual(coverageReport({ css: APP_CSS, html: INDEX_HTML }).phantomBreakpoints, []);
 });

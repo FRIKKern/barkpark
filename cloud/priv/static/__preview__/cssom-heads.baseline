@@ -228,4 +228,37 @@
 # MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 237836 B sha256 1ed8286de6c3...,
 # authored rule heads 1253 == CSSOM style rules 1253, flattened selectors 1218/1218,
 # MISSES 0, PARITY PASS.
-1253
+# W16-S8 2026-08-01 (cch-w16-s8-drop-900-tier-rule-axis-and-baseline): 1253 -> 1252, a
+# DOWN-bump — only the SECOND this file has ever carried (cch-w14-s2's minus-two is the
+# first). It is cause 2 of the two the failure text names — a DELIBERATE DELETION — not
+# cause 1, a stray `/*` swallowing a live region. The MINUS ONE is one whole @media
+# wrapper holding exactly one rule: `@media (max-width: 900px) { .tier-grid {
+# grid-template-columns: 1fr 1fr; } }` at app.css:1051, which forced two tier tracks
+# onto every phone and pushed documentElement.scrollWidth to 413 in a 320 viewport.
+# THE SIGNATURE THAT SEPARATES A DELETION FROM A SWALLOW: flattened selectors are
+# 1218/1218 BEFORE and 1218/1218 AFTER, and MISSES stays 0. A `/*` swallow drops
+# flattened selectors with the heads; this drops one head and no selector, because the
+# deleted block's single selector `.tier-grid` still exists at app.css:1046.
+# NOT TOUCHED, and it matters: `@media (min-width: 900px)` at :2273 stays. That block is
+# what keeps 899 in the derived breakpoint axis after this deletion.
+# HOW 1252 WAS OBTAINED (D158, and the sixth-collision warning above was written for
+# exactly this): the sentinel `1` was written here deliberately and cssom-parity.mjs
+# run — it printed "BASELINE MISMATCH: 1252 authored rule heads, sidecar baseline is 1
+# (+1251)", i.e. the TOOL named the value. 1253 - 1 also equals 1252; that arithmetic is
+# a coincidence of a quiet tree and is NOT how this line may be produced. This slice is
+# the wave's SOLE holder of this file in round 1 (D202), so no sibling collides here —
+# but a LATER app.css slice will, and D158 stands: re-run the tool on the MERGED tree
+# and take what it prints. Never merge-resolve this number, never add deltas.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 237759 B sha256 24505040b13e...,
+# authored rule heads 1252 == CSSOM style rules 1252, flattened selectors 1218/1218,
+# MISSES 0.
+# LEAD RE-MEASUREMENT 2026-08-01 (rebase of the w17 billing stack onto main 1253):
+# the branch recorded 1252 against an older base and the merged tree ALSO measures
+# 1252 — the first collision this session where the branch's number survived the
+# rebase. That is not luck and it is worth saying why: this stack's net is a DELETION
+# (the 900 tier rule) plus additions that land inside blocks that already have heads,
+# so main's 1253 minus the dropped rule is 1252 whichever order the hunks arrive in.
+# MEASURED anyway, per D158 — never inferred from that argument: Chrome
+# 150.0.7871.187, node v22.22.0, authored rule heads 1252 == CSSOM style rules 1252,
+# flattened selectors 1218/1218, MISSES 0, PARITY PASS.
+1252
