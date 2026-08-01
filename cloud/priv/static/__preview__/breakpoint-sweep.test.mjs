@@ -241,13 +241,28 @@ function foldCap() {
   return { vh: Number(m[1]) / 100, minus: Number(m[2]) };
 }
 
+// The topbar the cap has to cancel, READ FROM THE SHIPPED BYTES rather than
+// restated (review fix, cch-w15-s1-r). The identity below is `cap - TOPBAR = 4`;
+// a hard-coded 56 would keep the test green while a taller topbar — a banner, a
+// second chip row — silently ate the whole 4px margin the driven run measured.
+// Deriving it means the growth reds HERE, in the cheap unit leg, instead of
+// only in a browser leg nobody runs on every push.
+function topbarHeight() {
+  const at = APP_CSS.indexOf("\n.topbar {");
+  assert.ok(at > 0, "the .topbar rule must exist — the fold cap is defined against its height");
+  const block = APP_CSS.slice(at, APP_CSS.indexOf("\n}\n", at) + 3);
+  const m = block.match(/height:\s*(\d+(?:\.\d+)?)px/);
+  assert.ok(m, "the topbar must declare a fixed px height — a fluid topbar makes the fold cap unprovable here");
+  return Number(m[1]);
+}
+
 test("the folded shell clears the fold bar at EVERY height, as an identity — not at one lucky phone", () => {
   const { vh, minus } = foldCap();
-  // Driven in Chrome (--render, both themes): contentTop = cap + TOPBAR exactly,
-  // with the topbar an invariant 56px. That makes a bare `Nvh` cap a FRACTION of
-  // `N + 56/H`, worst at the SMALLEST height — which is why the shipped 34vh read
-  // 0.4836 of H at landscape 390 while passing casual inspection at 800.
-  const TOPBAR = 56;
+  // Driven in Chrome (--render, both themes): contentTop = cap + TOPBAR exactly.
+  // That makes a bare `Nvh` cap a FRACTION of `N + TOPBAR/H`, worst at the
+  // SMALLEST height — which is why the shipped 34vh read 0.4836 of H at
+  // landscape 390 while passing casual inspection at 800.
+  const TOPBAR = topbarHeight();
   const contentTop = (H) => vh * H - minus + TOPBAR;
   // 390 is the BINDING height (landscape 720x390), not 800.
   for (const H of [800, 667, 390]) {
@@ -258,7 +273,7 @@ test("the folded shell clears the fold bar at EVERY height, as an identity — n
   // a CONSTANT 4px of margin, which only holds because the calc cancels the
   // topbar. Restate that as the identity, so a cap that merely happens to fit
   // one height cannot satisfy this test.
-  assert.equal(minus - TOPBAR, 4, "the cap must cancel the topbar (calc(Nvh - 60px) over a 56px bar), leaving a height-independent 4px margin");
+  assert.equal(minus - TOPBAR, 4, `the cap must cancel the topbar (calc(${vh * 100}vh - ${minus}px) over a ${TOPBAR}px bar), leaving a height-independent 4px margin — if the topbar grew, the cap must grow with it`);
   assert.equal(vh, FOLD_FRACTION, "the cap's fraction IS the bar — any other value makes the margin drift with height");
 });
 
