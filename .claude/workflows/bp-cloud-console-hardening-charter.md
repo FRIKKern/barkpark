@@ -913,6 +913,50 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-01 — wave 19 REVIEW — three of three round-1 build slices shipped and PUSHED, grade **A−**
+
+**Paper:** `cloud-console-hardening-wave-19-2026-08-01`. PRs **#8944 / #8945 / #8946**, all pushed and
+open; the lead merges. The three branches touch pairwise-disjoint files (`tooling/grip/ledger/**`,
+`app.css` + `cssom-heads.baseline`, `__css_check.mjs` + its fixture + `__app.test.mjs`), so **merge
+order does not matter** — but a round-2 `app.css` slice must re-run the D158 sentinel on the MERGED
+tree rather than resolving the baseline integer (D202/D158; S2 is the wave's sole holder).
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| S1 the guard is proven able to LOSE | `…able-to-los-0` (unchanged) | #8944 | **THE WISH'S FIRST OBLIGATION, PAID.** RED run `30714372486` — `Overflow guard (rendered)` 91407361675 **failure** and `Console gate` 91407442356 **failure**, with the D217 false-green trap disarmed by quoting the gate's own `dispatcher outputs: console='true'`. GREEN control `30714465001` on the byte-identical revert: 91407602434 / 91407666714 both success. `gh run watch` ran to CONCLUSION before the revert, so the red is `failure`, never `cancelled`. Proof PR #8928 CLOSED UNMERGED, branch deleted. Docs-only; the reviewer re-read both runs from `gh` and every job id matched to the digit. |
+| S2 the phone topbar wraps at 620 | `…the-trial--1` (unchanged) | #8945 | **THREE FILED PERSON-FACING ROWS PAID BY ONE 8-DECLARATION BLOCK.** 121/70 trial sentence, 168/85 money message, 72/59 (and 72/**55**, which the row had wrong) theme picker → 20/20 phone cells whole. 620 over 430 was **driven, not inherited**: 430 leaves the money message cut 431-519 where no committed instrument looks. Cascade proven by computed style, blast radius swept 80 cells, baseline re-derived by the D158 sentinel (tool named 1259, MISSES 0). All ten gate legs re-run green by the reviewer. |
+| S4 E14 — a drifting fourth wrap copy | `…recipe-that-dr-2` (unchanged) | #8946 | **THE DUPLICATION DECISION THE WISH DEMANDED, MADE DELIBERATELY.** D210's fourth-host extraction trigger is REFUSED (the five-declaration recipe does not fix `.op-gate`) and replaced with a declaration-parity check: start the recipe and you must finish it. Self-scoping, jacket-agnostic, core pinned as a literal, base excluded by selector SHAPE, two anti-vacuity guards. Zero workflow surface. Reviewer's INDEPENDENT mutation on a different real copy (`white-space` out of `.instance-card-head`) reds rc 0→1 naming only that host. |
+| S5 the ledger stops lying about itself | none — ledger-only, no PR | — | Five duplicate pairs cancelled with unique content migrated FIRST (one INVERTED, because D217 makes the sentence it would have copied false), eight rows closed, three inherited numbers lost to measurement (231/84→243/92, "the single advisory red"→two, 68-vs-44 decomposed rather than one losing). Closed 11/11 by the builder — defensible: no code, no merge gate, and leaving a proven row open is the exact stale-open shape it removed. |
+
+**Ledger fixes made by the reviewer.** `cch-w15-bl-overflow-guard-unwired` — the row that bought wave
+18's job and the reason this wave exists — is **CLOSED 6/6**: criteria 0 and 1 stamped on both run ids,
+independently re-read from `gh` before stamping, with the propagation-not-merge-blocking caveat written
+into the evidence itself. `cch-w19-bl-e14-shorthand-blind` FILED (priority 2, 5 criteria) — S4's builder
+was refused five times by a server timeout and left it unfiled; E14 reads longhand only, so a
+`padding: 2px 11px` fourth copy is invisible rather than wrong. Everything else was already honest:
+three built slices `in_progress` with only their merge-gated criterion open, four deferred slices
+`open`, eight backlog rows filed mid-flight.
+
+**Denominator, measured at review time and it MOVED under the wave:** 247 published children = 81 open
+/ 1 considering / 138 done / 24 cancelled / 3 in_progress. S5 measured 243 = 92/1/128/18/4 at the end
+of its own run. The delta is not reconciled here and the next ledger slice should not inherit either
+number — re-derive it.
+
+**What the next wave takes, in dispatch order.** Merge round 1 (#8944, #8945, #8946), then the four
+deferred slices as their deps land: `cch-w19-s3-instance-card-url-bounded` (after S2 — co-scoped
+`app.css`, and it becomes the baseline holder), then `cch-w19-s6-attention-row-wrap` (after s3 — the
+FOURTH wrap copy, now taken on purpose and enforced by E14), then `cch-w19-s8-band-a-shell-fold-cliff`
+(after s6 — and it must DELETE `CHIP_BAND_A`'s 9px tolerance in the same commit, or a real ≤9px
+regression keeps scoring a checkmark), then `cch-w19-s7-op-gate-one-declaration` (after s8 —
+**HIGH-FLIP-RISK: reachability**; `PLATFORM_ADMIN_EMAILS` was unset at L1, so an independent second
+re-derivation is owed before merge, not a re-read of the brief).
+
+**Two things the next wave must not re-inherit.** The red run printed `8 finding(s)`, not the briefed
+2 — six were GR115 reporting UA defaults on a scenario whose stylesheet did not apply, which a
+`max-width: 768px` edit cannot cause and which the green control on the same runner reported clean
+(`cch-w19-bl-gr115-intermittent-ua-defaults`, N=1 observation, deliberately NOT called a rate). And
+D219's block is **eight** declarations, not nine.
+
 ### 2026-08-01 — wave 19 DECIDE (build in flight)
 
 **Paper:** `cloud-console-hardening-wave-19-2026-08-01`. Charter PR: docs-only, opened this phase.
