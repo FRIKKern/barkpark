@@ -79,7 +79,14 @@ defmodule BarkparkWeb.TasksController do
   # the ONE top-level truncation-honesty help[] line whenever a brief card
   # lost bytes to the …-caps (charter law 2; full view never truncates, never
   # carries the line).
+  # PDS-D502: the help[] line is computed from the SEALED docs the caller
+  # actually received — the seal is hoisted here (out of render_task_list/3,
+  # which has exactly ONE caller) so the claim about the payload and the
+  # payload are derived from the SAME list. Sealing first is safe: Params.seal/3
+  # rewrites only `content`, and the count helpers read only id/doc_id.
   defp task_list_response(docs, conn, params) do
+    docs = seal_docs(docs, conn)
+
     %{ok: true, docs: render_task_list(docs, conn, params)}
     |> Params.maybe_put_brief_truncation_help(docs, Params.parse_view(params["view"]))
   end
@@ -90,12 +97,10 @@ defmodule BarkparkWeb.TasksController do
   # digests, the nine diet cuts); absent/unknown view → the full bd-compatible
   # shape with edge counts (the server default STAYS full — SDK/Studio/
   # taskboard untouched).
+  # The docs arrive ALREADY sealed (field-visibility seal, fail-closed) — the
+  # seal lives in task_list_response/3, this function's only caller, so the
+  # truncation-honesty help[] line sees exactly what is rendered here.
   defp render_task_list(docs, conn, params) do
-    # Field-visibility seal (fail-closed): redact each doc's content under the
-    # request's caller BEFORE either view renders it, so a private/owner_only
-    # field can never leak through the `content` echo or a promoted key.
-    docs = seal_docs(docs, conn)
-
     case Params.parse_view(params["view"]) do
       :brief ->
         child_counts = Params.batch_child_counts(docs, scope_opts(conn))
@@ -176,8 +181,9 @@ defmodule BarkparkWeb.TasksController do
           rails: prime_rails(in_progress, conn)
         }
         # axi-w2-s2: prime inherits the brief truncation-honesty help[] line —
-        # checked over BOTH card slices (charter law 2).
-        |> Params.maybe_put_brief_truncation_help(in_progress ++ ready, view)
+        # checked over BOTH card slices (charter law 2). PDS-D502: the SEALED
+        # lists, so the line describes what the caller received.
+        |> Params.maybe_put_brief_truncation_help(sealed_in_progress ++ sealed_ready, view)
 
       json(conn, maybe_put_notices(base, prime_notices(in_progress)))
     else
