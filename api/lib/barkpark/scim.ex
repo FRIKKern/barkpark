@@ -129,7 +129,7 @@ defmodule Barkpark.Scim do
     ws_ids = org |> workspace_ids()
 
     Repo.transaction(fn ->
-      Accounts.revoke_all_user_sessions(user)
+      {:ok, sessions_revoked} = Accounts.revoke_all_user_sessions(user)
 
       {dropped, _} =
         Repo.delete_all(
@@ -144,15 +144,42 @@ defmodule Barkpark.Scim do
 
       audit(org, user, "user_deprovisioned", %{
         "hard" => hard,
+        "sessions_revoked" => sessions_revoked,
         "memberships_dropped" => dropped,
         "tokens_revoked" => tokens_revoked
       })
 
       if hard, do: Repo.delete!(user)
 
-      %{memberships_dropped: dropped, tokens_revoked: tokens_revoked, hard: hard}
+      %{
+        sessions_revoked: sessions_revoked,
+        memberships_dropped: dropped,
+        tokens_revoked: tokens_revoked,
+        hard: hard
+      }
     end)
   end
+
+  @doc """
+  Is `user` still ACTIVE in `org`, READ BACK FROM STORAGE?
+
+  SCIM's `active` has no column of its own: a user is active in an org exactly
+  while their row exists AND they hold a membership in one of the org's
+  workspaces — the same pair `get_org_user/2` and `list_org_users/2` resolve.
+  Deprovision drops those memberships, so this read is the STORED answer to
+  "did the deprovision take", not a literal the caller chose (PDS-D503).
+  """
+  @spec org_user_active?(Organization.t(), User.t() | binary()) :: boolean()
+  def org_user_active?(%Organization{} = org, %User{id: id}), do: org_user_active?(org, id)
+
+  def org_user_active?(%Organization{} = org, user_id) when is_binary(user_id) do
+    case Repo.uuid_or_nil(user_id) do
+      nil -> false
+      uuid -> Repo.exists?(from(u in User, where: u.id == ^uuid)) and member_of_org?(org, uuid)
+    end
+  end
+
+  def org_user_active?(_org, _), do: false
 
   # Stamp `revoked_at` on every LIVE api_token owned by this user, so
   # `Auth.verify_token/1` rejects it immediately. Owner-bound PATs ONLY: share

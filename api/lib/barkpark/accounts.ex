@@ -197,7 +197,12 @@ defmodule Barkpark.Accounts do
           {:ok, User.t()} | {:error, Ecto.Changeset.t()} | {:error, :invalid_current}
   def update_user_password(%User{} = user, current_password, attrs) do
     if User.valid_password?(user, current_password) do
-      do_reset_password(user, attrs)
+      # Drops the revoked-session count deliberately: this arity publishes no
+      # claim about sessions, so it has nothing to carry it to.
+      case do_reset_password(user, attrs) do
+        {:ok, updated, _revoked} -> {:ok, updated}
+        err -> err
+      end
     else
       {:error, :invalid_current}
     end
@@ -328,15 +333,24 @@ defmodule Barkpark.Accounts do
     :ok
   end
 
-  @doc "Revoke all of a user's sessions (\"sign out everywhere\")."
-  @spec revoke_all_user_sessions(User.t()) :: :ok
+  @doc """
+  Revoke all of a user's live sessions ("sign out everywhere"). Returns
+  `{:ok, revoked}` — the NUMBER OF ROWS the revoke actually stamped.
+
+  The count is the post-condition every caller's receipt implies: a bare `:ok`
+  reads identically whether three sessions died or zero did (PDS-D503). Callers
+  that publish a "sessions were killed" claim MUST carry this number, not
+  re-assert it from the fact the call returned.
+  """
+  @spec revoke_all_user_sessions(User.t()) :: {:ok, non_neg_integer()}
   def revoke_all_user_sessions(%User{id: uid}) do
     now = DateTime.truncate(DateTime.utc_now(), :microsecond)
 
-    from(t in UserSession, where: t.user_id == ^uid and is_nil(t.revoked_at))
-    |> Repo.update_all(set: [revoked_at: now])
+    {revoked, _} =
+      from(t in UserSession, where: t.user_id == ^uid and is_nil(t.revoked_at))
+      |> Repo.update_all(set: [revoked_at: now])
 
-    :ok
+    {:ok, revoked}
   end
 
   @doc """
@@ -499,10 +513,32 @@ defmodule Barkpark.Accounts do
   # route malformed input onto the existing :error → 422 path, never a 500.
   def confirm_user(_), do: :error
 
-  @doc "Reset a password from a `\"reset\"` token plaintext, then revoke all sessions."
+  @doc """
+  Reset a password from a `"reset"` token plaintext, then revoke all sessions.
+
+  Drops the revoked-session count — use `reset_user_password_counting/2` on any
+  path whose receipt CLAIMS the sessions died (PDS-D503).
+  """
   @spec reset_user_password(term(), map()) ::
           {:ok, User.t()} | {:error, Ecto.Changeset.t()} | :error
-  def reset_user_password(plaintext, attrs) when is_binary(plaintext) do
+  def reset_user_password(plaintext, attrs) do
+    case reset_user_password_counting(plaintext, attrs) do
+      {:ok, user, _revoked} -> {:ok, user}
+      other -> other
+    end
+  end
+
+  @doc """
+  `reset_user_password/2` widened by its post-condition: returns
+  `{:ok, user, sessions_revoked}`, where `sessions_revoked` is the number of
+  live sessions the reset actually stamped `revoked_at` on.
+
+  This is what `POST /v1/auth/reset` reports. Without it the receipt is
+  byte-identical whether "sign out everywhere" killed three sessions or none.
+  """
+  @spec reset_user_password_counting(term(), map()) ::
+          {:ok, User.t(), non_neg_integer()} | {:error, Ecto.Changeset.t()} | :error
+  def reset_user_password_counting(plaintext, attrs) when is_binary(plaintext) do
     with %UserEmailToken{user_id: uid} = tok <- fetch_email_token(plaintext, "reset"),
          %User{} = user <- Repo.get(User, uid) do
       # Atomic reset + token-consume: reset the password FIRST so a policy-failing
@@ -512,9 +548,9 @@ defmodule Barkpark.Accounts do
       txn =
         Repo.transaction(fn ->
           case do_reset_password(user, attrs, reset_mfa: true) do
-            {:ok, reset_user} ->
+            {:ok, reset_user, revoked} ->
               case Repo.delete(tok, stale_error_field: :id) do
-                {:ok, _} -> reset_user
+                {:ok, _} -> {reset_user, revoked}
                 {:error, _cs} -> Repo.rollback(:stale)
               end
 
@@ -524,7 +560,7 @@ defmodule Barkpark.Accounts do
         end)
 
       case txn do
-        {:ok, reset_user} -> {:ok, reset_user}
+        {:ok, {reset_user, revoked}} -> {:ok, reset_user, revoked}
         {:error, %Ecto.Changeset{} = changeset} -> {:error, changeset}
         {:error, :stale} -> :error
       end
@@ -534,7 +570,7 @@ defmodule Barkpark.Accounts do
   end
 
   # Fail soft on a non-binary token — mirrors confirm_user/1's catch-all above.
-  def reset_user_password(_, _), do: :error
+  def reset_user_password_counting(_, _), do: :error
 
   # `reset_mfa: true` (the forgot-password / account-recovery path) also wipes
   # TOTP + recovery codes — MEDIUM-8: a token-based reset must FULLY recover a
@@ -557,8 +593,8 @@ defmodule Barkpark.Accounts do
 
     case Repo.update(changeset) do
       {:ok, user} ->
-        revoke_all_user_sessions(user)
-        {:ok, user}
+        {:ok, revoked} = revoke_all_user_sessions(user)
+        {:ok, user, revoked}
 
       err ->
         err
