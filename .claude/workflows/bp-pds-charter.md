@@ -2617,7 +2617,101 @@ bucket create's read is a `ListBuckets` scan — filed as `task-27246110ca95342a
 fixed in-wave because the fix lives in a file another live slice owns.
 
 **CHARTER HYGIENE NOTE:** wave 30's review entry is absent from this log — the top entry before this
-one is wave 29. Wave 30's story survives only in its Paper.
+one is wave 29. Wave 30's story survives only in its Paper. **AMENDED 2026-08-01 (wave 32): REPAIRED,
+AND THE CAUSE IS FOUND — it is systemic, not an accident.** The entry was never lost: it exists as
+commit `6f03e24b6` (+80/−0), parented on charter PR #8615's head `a336273432b6`, pushed **9m36s AFTER**
+that PR squash-merged at 20:31:47Z. A push onto an already-merged branch succeeds silently — no PR, no
+conflict, no gate — and a squash merge leaves the branch head off `main`, so nothing can ever carry it
+forward. The reviewer was following `bp-epic-cycle.workflow.js:841` verbatim (*"your step-8 wave-log
+entry therefore belongs on the CHARTER PR's branch"*), which is correct only while that PR is OPEN and
+has no guard for the lead merging it mid-review — which is exactly what the lead is supposed to do.
+`wave_log_appended` has four occurrences in that workflow and **zero readers**; step 11's mandatory
+push covers slice branches only. Waves 29 and 31 escaped by habit (each opened a dedicated fresh
+branch), not by mechanism. The repair was hand-applied, not cherry-picked — a cherry-pick CONFLICTS,
+measured, because `main` now carries wave 31 at the insertion point. Filed as
+`pds-bl-wavelog-routing-races-the-merge`.
+
+### Wave 30 2026-07-31 — "Finish the round, and pay the first L1" — REVIEWED. Grade A (paper `pds-wave-30-2026-07-31`)
+
+**THE HEADLINE: the epic stopped being entirely fake-proven.** Twenty-nine waves of post-conditions,
+fences and receipts, every one of them driven by a fake, a fixture or a static read — wave 29 named
+that against itself and this wave paid it. `scripts/pds-live-hetzner-placement-group.sh` drove a real
+`bp` verb against the real `api.hetzner.cloud` (create id 1806023 → bp read-back → an INDEPENDENT
+`curl` oracle, HTTP 200/186 bytes, id/name/type EQUAL to bp's receipt → delete with
+`confirmed_gone=true` → a real 404, `application/json`, 100 bytes, `error.code=not_found`), and
+`scripts/pds-live-bp-write-receipt.sh` drove five real `bp` writes against guerrilla `production` with
+every `_id`/`_rev` corroborated by an independent `/v1/data/query` read under the perspective the verb
+should have moved the doc into. **PDS-D401's load-bearing production assumption — "production always
+returns a JSON 404" — is MEASURED for the first time**, and its bytes are committed as
+`internal/cli/testdata/pds_live_hetzner_*.json` with a per-kind manifest, so the perishable half of a
+live proof leaves something that rides CI forever. Two kinds were harvested precisely so no assertion
+can pin a universal byte count (placement-group 100, server 91).
+
+**THE PREAMBLE WAS THE SLICE, AND IT HELD.** Both runners gate on bp's OWN resolution — a cheap read
+verb's exit code AND its receipt SHAPE — never on an env-var name; `refuse()` exits 3 and the word
+SKIP appears in neither script. The builder caught a fail-open in his own preflight (guerrilla serves
+published reads anonymously, so Leg B's read probe returned a perfectly-shaped listing under a garbage
+token) and closed it by additionally requiring `bp whoami` to report a writing `auth_tier`. Review
+re-derived the refusal independently rather than re-reading the claim: a stub `bp` exiting 0 printing
+`{"ok":true}` is REFUSED at rc=3 with the reason naming the law.
+
+**WHAT LANDED — 4 of 4 round-1 slices green.** (The PR column is a REPAIR-TIME ADDITION, added
+2026-08-01 by wave 32's charter repair: this entry was authored before the PR numbers were assigned.
+Everything else below is byte-identical to commit `6f03e24b6`, the reviewer's own orphaned text.)
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w29-pay-lb` | `…-print-what-th-0-r` | #8644 | `hzResObserved[T]`/`hzResObservedResponse[T]` in a new `hetzner_respost_mutation.go`; all 16 non-destroy lb-family sites paid; a 799-line stateful post-mutation-aware test file; 21 census keys flipped |
+| `pds-w29-registry-postcondition-invariant` | `…-stops-accepti-1` | #8645 | the three-arm relevance invariant + six row repairs; `TestSiteClaimsAreProbedWithResponseTypes` byte-identical |
+| `pds-w30-live-proof-runner` | `…-credential-gated-r-2-r` | #8647 | the epic's first L1, twice, plus harvested fixtures and a manifest |
+| `pds-w30-board-envelope-poison-parity` | `…-gains-the-two-p-3-r` | #8648 | the two transferring poisons per decoder; the four that cannot transfer declared with the measurement |
+
+**THE POLARITY IS THE WAVE'S RISKIEST JUDGMENT AND IT IS CORRECT.** Re-derived independently at
+review, not read: `hzResGoneRead[T]` yields `(nil, resp, nil)` on a JSON 404, so `fresh == nil` means
+"the API says it is not there" — EARNED for a destroy, UNMET for a mutation. All ten `hzResObserved`
+call sites are verbs the resource SURVIVES (add/delete-service, add/remove-target, change-algorithm,
+change-type, floating-ip and primary-ip assign/unassign), so the inverted refusal cannot fire on an
+honest verb. `TestHetznerMutationPolarityIsLoadBearing` pins BOTH directions on the SAME input and
+quotes all four receipts. **The `create` class needed a second entry point**: a create's response IS
+server truth, so `hzResObservedResponse` observes it and NAMES the weaker basis
+(`"the create response object"`) rather than dressing a non-read as a read — one more public symbol
+than the brief implied, and the right call.
+
+**THE HONEST LIMIT, STATED IN THE RUNS' OWN OUTPUT.** A live run against a CORRECT API proves exactly
+one direction — NO FALSE REFUSAL. It does NOT prove the refusal direction; a real Hetzner will not
+keep handing back a resource it deleted, so `hzResStillThere` stays fake-proven. Eight of the ten
+hcloud kinds have no harvested 404. A create CANNOT refuse (`hzResObservedResponse`'s observe hook can
+only agree), made visible on purpose in the lb-create fixture and filed as `task-37befa974015b2f2`.
+And `bp chat approve` exits rc=2, so the 204 carve-out is unreachable from the CLI by any live run.
+
+**ONE DECLARED DEVIATION the lead must weigh.** `pds-w29-pay-lb` edited
+`internal/cli/hetzner_net_cmd_test.go` (+13 lines, purely additive: one `GET /load_balancers/7` and one
+`GET /floating_ips/11` handler), which its brief forbade. Two shipped tests legitimately red without
+it — with a post-read in place and no single-resource GET registered, they land in the honest
+"not confirmed" arm — and the alternative was a red gate. No assertion weakened; both tests now
+exercise a real post-read. `pds-w29-pay-net-dns` owns that file and must rebase.
+
+**REVIEW FIXED IN PLACE, three things.** `gofmt` on the lb test tables and the census roster;
+`--selftest` state 4 was looking for `cli.toml` at `~/.config/hcloud/` while the oracle's own resolver
+branched on Darwin, so on macOS it reported the third credential rung UNPROVEN on a host that has it
+(one `default_hcloud_config()` now serves both); and the board test's doc comment now says its poison
+tables are a SUPERSET of the CLI's nine, not a mirror.
+
+**LEDGER.** All four builders claimed, pulsed and stamped as they worked; every merge-gated criterion
+left open for the lead; `pds-w29-pay-lb` criterion 12 an honest `--miss` with the deviation written
+into it. The wish's third weight is discharged: `pds-bl-board-tui-reader-honesty` was already AMENDED
+by Decide (PDS-D422) to the five/four measurement and the `snapshotErrorLabel` channel, and review paid
+rows 1 and 2 against the shipped branch after reproducing the fence mutation itself — 3/4, criterion 3
+merge-gated.
+
+**NEXT WAVE takes the two deferred round-2 slices in dependency order** — merge round 1 first
+(`pay-lb` FIRST of the payment family per PDS-D414), then `pds-w29-pay-storage-backup` (apparatus +
+the fail-closed fake, which is already on main), then `pds-w29-pay-net-dns` LAST, which also deletes
+the superseded `hzUnpaid*` constants. `pay-storage-backup` must NOT be reordered ahead of the fake.
+`pay-net-dns` must verify BY MUTATION that its change cannot make `OPAQUE_CALLERS` fail open. Beyond
+that: the SECOND live proof — the refusal direction has no live spelling, but eight unharvested 404
+kinds do, and a `--harvest-only` pass over them costs one credential and closes PDS-D401 for the whole
+family.
 
 ### Wave 29 2026-07-31 — "hzResDone, taken properly" — REVIEWED. Grade A (paper `pds-wave-29-2026-07-31`)
 
@@ -7215,7 +7309,9 @@ rows across 17 sites minus the two dual-verb executors' doubling, and storage/ba
 
 - **PDS-D426 — D418's RULING 3 SHIPPED ONE-DIRECTIONAL, SO DELETING A KIND IS ONE LINE TO FULL GREEN.**
   Ruling 3 was authored *"so deleting a kind costs an explicit reviewable edit rather than a row
-  cleanup that looks like tidying."* As implemented (`hetzner_res_census_test.go:684-690`) it iterates
+  cleanup that looks like tidying."* As implemented (the `hzResLedgerKinds` loop, `hetzner_res_census_test.go:725` on today's main —
+  this decision cited `:684-690`, which is now the *paid but NAMES NO SYMBOL* arm; corrected
+  2026-08-01 by wave 32, cite BY SYMBOL) it iterates
   `hzResLedgerKinds` and asserts each is live — **pinned ⊆ live, never live ⊆ pinned, and no length
   pin.** Measured twice, independently: deleting `"zone"` from the pin, with the zone rows and the zone
   sources untouched, leaves the suite `ok` with zero errors and the test cheerfully logging `KINDS=12`.
@@ -7230,9 +7326,13 @@ rows across 17 sites minus the two dual-verb executors' doubling, and storage/ba
   ARM 1 (`kind "bucket" is pinned but emits NO receipt any more`). **NO `len(hzResLedgerKinds)` PIN** —
   set equality implies it, and a bare length is precisely the renegotiable number D418 forbids. Growth
   cost of the whole ratchet: **ONE named line, and only when a brand-new resource KIND arrives**; a new
-  verb on an existing kind in an existing globbed file leaves all arms silent (measured). **SEPARATE,
+  verb on an existing kind in an existing globbed file leaves all RATCHET arms silent (measured).
+  *(Scoping fix, wave 32: read out of its sentence, "all arms" is false — a new UNPAID site reds the
+  enrolment arm `:629` BY NAME, a new KIND additionally reds `:870`, and a DUPLICATE key reds `:610`.
+  D426 did not claim otherwise — its own next sentence names the pins — but the phrase invited it.)* **SEPARATE,
   NOT SMUGGLED IN:** the thing actually taxing growth today is main's own EXACT pins `TOTAL=50` /
-  `KEYS=52` (`:702-714`) — a new verb reds both with number messages, which is D418's forbidden
+  `KEYS=52` (`:743` and `:751` on today's main; this decision cited `:702-714`, which is D418 ruling
+  1's companion grep — corrected 2026-08-01 by wave 32) — a new verb reds both with number messages, which is D418's forbidden
   floor-negotiation shape living next to the harmless `siteFloor = 40`. That question is filed as
   `pds-bl-census-exact-pins-tax-growth`, not folded into the ratchet slice. **ALSO NOT CLOSED BY THIS
   WAVE:** the `func`-value / method-value emitter shape is invisible to both the shipped scanner and
@@ -7467,3 +7567,308 @@ this wave's verifiers wrote. `internal/cli/cloud/dns.go` is not touched. The exa
 `TOTAL=50`/`KEYS=52`, the func-value scan blindness, the two runners' 228 duplicated lines, the lb
 by-name pin generalisation and the wave-30 ledger reconciliation are all FILED AS ROWS, not smuggled
 into a slice.
+
+## Wave 32 — "Take the debt to zero, and say what zero covers" — DECIDED 2026-08-01
+
+**PREMISE SMOKE, RUN NOT INHERITED (all against `origin/main` = `32662d0c4`).** `git grep -c
+'hzResDone(' origin/main -- 'internal/cli/hetzner_*_cmd.go'` = **20** (backup 1, dns 4, net 14,
+storage 1; `lb` absent — wave 31 closed that family entirely). `git grep -c hzUnpaid` on the census
+file = **21**. `CC=/usr/bin/clang go test -c -o /dev/null ./internal/cli/` exit **0**;
+`CC=/usr/bin/clang go test ./internal/cli/ -count=1` **ok, 28.568s** (host load ~25 — an upper bound,
+not a clean-host figure). `bash scripts/pds-live-hetzner-placement-group.sh --selftest` with no
+credential exits **3**. Explicit-instantiation emitter call sites: **0**. Every cited D-number below
+was `git show`n on origin/main and read for COVERAGE, not merely for existence — which is how D428's
+misattribution (D435) was caught.
+
+### Decisions
+
+- **PDS-D434 — "ZERO" HAS EXACTLY ONE SPELLING, AND TWO OF THE OBVIOUS GREPS CANNOT REACH IT.**
+  The metric is **`git grep -c hzUnpaid -- internal/cli/hetzner_res_census_test.go` = 0** (21 → 0),
+  equivalently **zero unpaid disposition rows**. The honest headline is **17 unpaid SITES / 19 unpaid
+  KEYS → 0**, always with its lens attached: 19 real call sites (the 20th grep hit is the `func
+  hzResDone` DEFINITION at `hetzner_net_cmd.go:54`), minus the two already paid by declared class, is
+  17; the two dual-verb dispatchers each carry two keys, so 17 sites → 19 keys. **`grep -c 'unpaid:'`
+  = 0 IS UNACHIEVABLE and must never be written as a criterion** — it floors at 4 (`:122` the type
+  doc, `:631`/`:639`/`:680` the census's own unpaid-format validator); driving it to 0 means deleting
+  the enforcement that makes an unpaid row nameable. **`grep -c 'hzResDone('` will still read 6 across
+  `internal/cli` after zero**, and the boundary D-number below publishes that map by name or the first
+  grepper concludes zero is a lie: the definition (`hetzner_net_cmd.go:54`), two DECLARED CLASSES
+  (`hetzner_storage_cmd.go:669` `object/get`, paid by `hzSizeVerdict`; `hetzner_backup_cmd.go:337`
+  `backup/restore`, paid by `hzRestoreNotConfirmed` — both `hzClassNoCheapPostRead`, both mechanically
+  bound at `hetzner_res_census_test.go:313`), and three apparatus forwards excluded BY NAME via
+  `hzResApparatus`.
+
+- **PDS-D435 — PDS-D428 DOES NOT SAY WHAT THREE WAVES HAVE CITED IT FOR; THE CENSUS-FILE OWNERSHIP
+  RULE IS THIS WAVE'S OWN, AND IT IS NARROWER.** `git show origin/main:.claude/workflows/bp-pds-charter.md
+  | sed -n '7272,7289p' | grep -n 'owner\|forbid\|only one\|single'` returns **nothing**. D428 rules
+  three things and none is ownership: merge ORDER, one take-both-sides conflict hunk at base 188-195,
+  and a ratchet FENCE whose own words are *"anywhere else, INCLUDING elsewhere in the dispositions
+  table, is measured conflict-free against both payments, and EOF placement is free against both"* —
+  which **presupposes a concurrent third editor**. The phrase *"one owner per merge"* occurs exactly
+  once charter-wide, at `:7042`, as a subordinate rationale clause inside **D418**; wave 31's dispatch
+  prose at `:7434` restated it in capitals and cited D428 only for the fence. **RULING:** the census
+  file's single-owner discipline stands for wave 32 — `pds-w29-pay-net-dns` owns it — but as THIS
+  wave's risk management, stated here, not as inherited law. Consequence, and it is the reason this
+  matters: the basis fix needed no charter permission and the feared serialisation was never
+  charter-mandated (see D437).
+
+- **PDS-D436 — D428's FIVE-ERRORS EVIDENCE IS REFUTED BY MEASUREMENT; THE RULING SURVIVES, THE NUMBER
+  DIES.** D428 pins *"exactly five errors — `undefined: hzUnpaidMutation` at `:182`, `:183`, `:184`,
+  `:205`, `:206`, one per surviving storage/backup row."* Measured on a clean extract of today's main:
+  deleting the consts with net/dns repaid compiles at **exit 0, ZERO errors** — because **not one
+  storage/backup row references `hzUnpaid*` any more.** #8685 repaid all five; D428's compile-break
+  tripwire has ALREADY FIRED AND BEEN DISCHARGED. All 19 surviving references are net/dns rows, i.e.
+  rows pay-net-dns itself owns. Worse, the count is unmeasurable in principle: deleting the consts
+  while leaving all 19 references errors at 10 lines plus `too many errors` — **the number a criterion
+  could pin is the Go compiler's cap, not the defect population.** D428's RULING (verify on the merge
+  result, with `go test -c`, never `go vet`) stands and is strengthened; its evidence is retired.
+  The criterion becomes **unconditional**: the MERGE RESULT compiles at `CC=/usr/bin/clang go test -c
+  -o /dev/null ./internal/cli/` exit 0, with a rehearsed fail-before proving the check can fail at
+  all. Note also there is **no `pay-net-dns` branch on origin**, so the conflict-marker half of D428's
+  question has no artefact and must not be quoted as settled.
+
+- **PDS-D437 — THE `confirmation_basis` FIX IS A TRAILING VARIADIC, IT WAS BUILT AND MEASURED AT ZERO
+  CHURN, AND IT THEREFORE RUNS IN ROUND 1 BESIDE pay-net-dns.** `hzResObserved` has **13** non-test
+  callers (not 17): ten honest single-resource GETs in `hetzner_lb_cmd.go`, and exactly three that
+  lie — `hetzner_storage_cmd.go:419` (a `ListBuckets` scan), `:609` (a `HeadObject`),
+  `hetzner_backup_cmd.go:221` (a `HeadObject`). Half the plumbing already shipped:
+  `hzResReportObserved` (`:246`) takes `basis string` and #8689 added `hzResBasisResponse`; the
+  residual hole is `hzResObserved` (`:200`) handing `hzResBasisGet` unconditionally at `:220`. A
+  verifier BUILT the fix: **3 files, +33/−5, `git diff --stat` over `hetzner_lb_cmd.go` and
+  `hetzner_res_census_test.go` prints NOTHING**, `go build`/`go vet` silent, full suite `ok 24.638s`,
+  and generic `T`-inference proven POSITIVELY at four arms (not merely "the build passed") because
+  the variadic is non-generic and trailing and so participates in no unification. The census is
+  structurally immune: its AST scanner indexes behind `len(call.Args) <= pos.kindArg` **lower** bounds
+  (`:444`, `:497`), never an exact arity. **REJECTED: a new named entry point** (`hzResObservedBasis`)
+  — also zero-churn at the ten, but it forces rewriting three `paid:` notes AND adding a symbol to
+  `hzResClassHelpers`, both edits to the file pay-net-dns owns. **SUB-RULING for pay-net-dns:** a
+  net/dns builder who needs a basis constant its reads actually warrant adds it to their OWN verb
+  file, following the `hzSizeVerdict` (`hetzner_storage_cmd.go:698`) / `hzRestoreNotConfirmed`
+  (`hetzner_backup_cmd.go:352`) precedent — never to `hetzner_respost_mutation.go`, or the two slices
+  re-couple.
+
+- **PDS-D438 — SLICE 3 SHIPS AN UNDEFENDED TRUTH, PROVEN BY MUTATION, AND THE BINDING ARM IS ROUND 2.**
+  Nothing in the repo defends the basis. Mutation: `hetzner_backup_cmd.go:221` made to pass
+  `hzResBasisListScan` — a receipt claiming it scanned a listing when it HEADs — and the **FULL**
+  package suite passed, `ok 26.830s`. Not one arm noticed; the only basis assertion in the package
+  (`hetzner_respost_test.go:451`) checks non-EMPTY, never the VALUE. So D437 as scoped replaces one
+  uniform lie with three per-call-site claims that are equally unguarded, and `hzResClassHelpers`
+  binds SYMBOLS never BASES (`hzClassCreate: {"hzResObservedResponse", "hzResObserved"}`, `:301`) — a
+  future S3 create can take the stronger helper and pass any basis it likes. The strategy's "designed
+  and proven-necessary by mutation during verify" is **DISCHARGED: it is necessary.** It lands in
+  `hetzner_res_census_test.go`, so it is **round 2** behind pay-net-dns, with the mutation output
+  carried on its row — a ratchet nobody proved can red is theatre, and this one is proven.
+
+- **PDS-D439 — HARVEST-ONLY'S GATE SPLITS IN TWO; THE HARVEST'S OWN CREDENTIAL FENCE IS UNTOUCHED.**
+  `--selftest` **hard-refuses at exit 3 with no credential** (measured twice, independently, and
+  `plan()`'s claim at `:503` that it *"makes no writes and needs no network"* is thereby REFUTED), so
+  a slice gated on it has a credential-gated green — and an exit 3 is visually indistinguishable from
+  a broken apparatus. But D429 and the slice's own criterion 7 require `--harvest-only` to KEEP
+  `resolve_oracle_token` *"so it refuses loudly rather than committing nine 401 bodies as 404
+  fixtures"* — and that is **correct and unchanged**, because an unauthenticated
+  `GET /v1/servers/999999999` returns a **401 JSON envelope, 79 bytes** (measured live), which is
+  exactly the raw material of the historical mutation. **RULING:** the credential-free work becomes a
+  SEPARATE, EXPLICITLY-OFFLINE arm — `--selftest-offline`, which must exit 0 with every
+  `HCLOUD_*`/`HETZNER_*` variable unset — never a relaxation of the harvest mode's gate. That is the
+  slice's CI-able gate; `--selftest` stays as the credential dividend. This deliberately edits a filed
+  criterion, at Decide, not by a builder mid-slice. Proven possible: a patched copy with only the four
+  credential states skipped ran all four MUTATION blocks (14 rows, both positive controls) at exit 0
+  under `env -u HCLOUD_TOKEN -u HCLOUD_CONFIG -u HCLOUD_CONTEXT -u HETZNER_API_TOKEN`.
+
+- **PDS-D440 — THE COHERENCE ARM CATCHES THE HISTORICAL MUTATION; THE MACHINE MARKER PROVABLY DOES
+  NOT, AND THE DEBRIEF MUST SAY SO.** Measured 7 arms × 6 manifest states. The decisive state is **2b**:
+  a real api.hetzner.cloud **401** body committed as `http_status: 200` WITH a fully-verifying
+  machine-emitted marker — `run_id`, TAB-delimited `curl -w` records, per-body sha256, a folded hash
+  chain, **all verifying, both marker arms PASS** — and all four shipped `TestPDSLive*` arms PASS too.
+  No digest can ever reach it: `http_status` and `content_type` are TRANSPORT facts absent from the
+  committed bytes, so an honestly-computed digest over a mislabelled row still verifies. What kills it
+  deterministically is a **COHERENCE** arm reading status and body together (2xx + a top-level
+  `error.code` is a contradiction; ≥400 without one is the other direction, and that reverse arm
+  firing is a FINDING, not a bug — say so in its comment or the first honest non-JSON 404 will be
+  "fixed" by deleting it). **Ship BOTH — the marker's job is to make the manifest's numbers DERIVED
+  rather than typed, which is non-accidentability, not unforgeability; nothing in a committed text
+  file is unforgeable without a secret.** And a THIRD arm is owed: a well-formed 404 **from the wrong
+  path** passes status, content-type and `error.code` all three — measured, with the shipped suite
+  **4/4 GREEN** on a planted wrong-path fixture — so only a per-kind message-token check can catch a
+  mistyped segment. State 4b also proves the shipped arms stop catching status flips once the harvest
+  lands: their apparent catch at a 2-kind population is a floor, invisible at three.
+
+- **PDS-D441 — DIGESTS ARE HYPHEN-CHUNKED; THE CREDENTIAL SCANNER IS NOT WIDENED, AND THE "CLEANER"
+  RIVAL IS MEASURABLY WEAKER.** `TestPDSLiveFixturesCarryNoCredential` globs `testdata/pds_live_*` —
+  **the manifest included** — and rejects `[A-Za-z0-9]{32,}`, so a bare sha256 (64-char run) REDS an
+  honest, credential-free manifest. Resolution: emit digests hyphen-chunked in 8-char groups. Proven
+  three ways: chunked digests pass; a planted fake 64-char token still REDS the **unchanged** scanner;
+  the regex is untouched so nothing is weakened. **REJECTED — exempt-by-field-whitelist:** a fake
+  64-char token parked in the whitelisted `sha256` slot PASSES the whitelist scanner while the
+  unchanged byte scanner REDS it. A field whitelist creates named slots a credential can hide in.
+  **ALSO REJECTED — widening to `{40,}`.** Corollary measured the hard way: the scanner reds on a
+  32+ char unbroken CamelCase **Go test name**, including its own (36 chars), so nothing in the
+  manifest may cite a test by CamelCase name — use snake_case or separators. No charter D-number
+  governed this collision before now; wave 32 rules it fresh.
+
+- **PDS-D442 — THE LENGTH RELAXATION IS AUTHORISED, BUT ITS FILTER AND ITS DEMO CORPUS ARE THE WHOLE
+  CRITERION.** The relaxation is FORCED, not prophylactic: `bytes = 75 + len(error.message)` exactly
+  (75 is the literal empty-message envelope; fitted on server=91, confirmed by placement-group=100),
+  so equal-length kind names collide on an HONEST harvest — `(server, volume)` @91 and
+  `(certificate, floating-ip)` @96, ten kinds into a 12-value band. **Computed over `http_status ==
+  404` ONLY, the relaxation REDS on a universal-length set (`404 fixtures=8 distinctLengths=1`).
+  UNFILTERED it is not merely weak but UNFALSIFIABLE** — the permanent 186-byte 200 fixture supplies a
+  second length by itself forever, and it stays green even on a corpus with exactly ONE 404 kind. The
+  incumbent ALREADY filters (`hetzner_live_fixtures_test.go:163`), so the criterion **preserves** the
+  filter rather than adding it. **AND THE GREENWASHING TRAP, which is in the filed criterion's own
+  wording:** on a 404-ONLY demo corpus the broken UNFILTERED build reds too, certifying itself — so
+  the demo corpus must be MANIFEST-SHAPED (the uniform 404s **plus** at least one non-404). Two
+  further pins: the message arm is **PAIRWISE DISTINCT ACROSS KINDS** (the within-kind reading is
+  structurally unfalsifiable at one body per kind), and the byte floor is **FIXED structural** (≥2
+  distinct counts, which is the definition of "not single-valued", not a renegotiable number) — a
+  floor SCALED to kind count REDS ON HONEST DATA (`distinctLengths=2 scaledFloor=4`), which is exactly
+  D426's own complaint. Finally, both arms read manifest integers and are meaningful ONLY because
+  `TestPDSLiveFixturesRecordTheirOwnKindAndLength` pins manifest bytes to disk bytes — an undocumented
+  coupling that must be stated in the relaxed test's comment.
+
+- **PDS-D443 — THE KIND→SEGMENT TABLE IS DERIVED AND PINNED, `record` IS REFUSED ON THE STRUCTURAL
+  GROUND, AND ZONE DEPOSITS WHAT CAME.** The flat shape is **NOT** `GET /v1/<kind>/999999999`: four of
+  the nine flat kinds need hyphen→underscore (`floating_ips`, `load_balancers`, `primary_ips`,
+  `placement_groups`), no such table exists anywhere in the repo, and a wrong-path 404 is
+  indistinguishable from a right-path one because the harvester writes the code it read. Derived from
+  hcloud-go v2.44's `opPath` constants: `strings.ReplaceAll(kind,"-","_")+"s"` reproduces **all nine**
+  segments with no irregulars — ship the DERIVATION plus the PINNED table, so a future kind where the
+  rule breaks reds. **`record` is refused on a ground stronger than the wish's:** there is no
+  `/records` collection in v2.44 at all (`grep` returns zero); records live only at
+  `/zones/%s/rrsets/%s/%s` (`zone_rrset.go:85`), so a flat probe would 404 on a missing ZONE and be
+  filed under `kind=record` — a fabricated fixture. **Independent and NOT to be conflated: `record` is
+  still PAYABLE** — `GetRRSetByNameAndType` (`:84`) and `GetRRSetByID` (`:109`) both exist and both
+  404-swallow into the `hzResGoneRead` shape, so pay-net-dns must not under-pay `dns_cmd.go:575`/`:629`
+  on harvest grounds. **`zone` is the one kind whose failure mode is unknowable offline:**
+  `ZoneClient.GetByID` merely `strconv`s the int into `getByIDOrName` against `/zones/%s`, an
+  id-**OR-NAME** lookup, and `999999999` is not a valid DNS name — the charter's own D417 records a
+  measured 114-byte zone 404, i.e. a 39-char message where `"zone not found"` is 14, which already
+  refutes the naive wording rule. **The runner must issue, record the REAL status/content-type/bytes,
+  deposit unconditionally, and JUDGE AFTERWARDS in the test — never assert-404-then-write, and never
+  pre-write a predicted row.** Target = **8 bodies**, and the brief must reconcile the two "nines" or
+  a builder files a wrong count: D429's nine is the UNHARVESTED set (includes `record`, excludes
+  placement-group); the flat-shape nine includes placement-group and excludes `record`.
+
+- **PDS-D444 — THE EXACT PINS ARE NOT DELETED; ONE IS KEPT AND RELABELLED, TWO ARE MEASURED
+  REDUNDANT.** Eleven mutations settle `pds-bl-census-exact-pins-tax-growth`, and they REFUTE the
+  growth premise while CONFIRMING a shrinkage shape nobody had named. Growth is caught by CONTENT, not
+  integers: a new unpaid site reds `:629` BY NAME, a new KIND additionally reds `:870`, a DUPLICATE key
+  reds `:610` (while `KEYS` stays 52 and does **not** red). **But mutation I2 — delete a real
+  dispositioned verb's `hzResDone` call so it returns `exitOK` with NO receipt, AND delete its row in
+  the same coherent commit — is caught by `TOTAL` and `KEYS` and by NOTHING ELSE.** That is precisely
+  *"a Barkpark verb reporting success on an exit code alone"*: the epic's founding law, repealable in
+  one silent commit. So the growth ratchet as scoped is **CUT, loudly** — it aimed at a hole `:629` /
+  `:870` / `:610` already close by name — and what replaces it is a three-line DELETION: **KEEP
+  `TOTAL != 50`, relabelled to what it demonstrably defends (the only arm that notices a receipt
+  retired coherently) with mutation I2 named in its message; DELETE `KEYS != 52`** (fires in lockstep
+  with TOTAL on I2 and on collapse, and is blind to the one shape it might have owned); **DELETE
+  `NON_LITERAL != 2`** (reddened in ZERO of eleven mutations). Floors are NOT a free upgrade: `< 50`
+  preserves the I2 catch and removes the honest-growth tax, but shrinkage MASKED BY PRIOR GROWTH then
+  passes fully green — a floor is only as strong as an exact pin if every growth commit bumps it,
+  restoring the tax. Anti-vacuity belongs to `siteFloor = 40` and the four named-key assertions, not to
+  the pins. **The tax does not bite wave 32 at all**: pay-net-dns swaps emitters at EXISTING sites, one
+  in one out, so TOTAL and KEYS do not move.
+
+- **PDS-D445 — THE BOUNDARY IS A DELIVERABLE, WITH ITS DENOMINATOR DERIVED. WHAT ZERO WILL AND WILL
+  NOT MEAN.** **WILL mean:** every `(kind, action)` key the Go census derives from the scanned hetzner
+  sources carries a disposition whose paying symbol is mechanically verified as CALLED from the
+  emitting file; no key carries an `unpaid:` note; `grep -c hzUnpaid` = 0; and the two surviving
+  direct `hzResDone` calls are DECLARED CLASSES naming what they do NOT verify. **WILL NOT mean —
+  eight limits, each derived:** (1) *one resource family on one provider*, and the census's scope is
+  the glob **`hetzner_*.go`** (13 non-test files), NOT `hetzner_*_cmd.go` as three waves have written
+  it — the boundary sentence must say so or it is wrong in both directions at once. (2) *`grep -c
+  'hzResDone('` still reads 6*, per D434's published map. (3) *The refusal direction is proven almost
+  entirely against FAKES*: exactly one L1 round trip has ever been bought (a placement group), and a
+  live run against a CORRECT API proves only NO-FALSE-REFUSAL. (4) *And for the CREATE half the
+  refusal is not even fake-proven — it is DEAD CODE*: hcloud-go v2.44's generated `*FromSchema`
+  converters take a schema VALUE and return a freshly-allocated pointer, assigned unconditionally, so
+  `hzResObservedResponse`'s `obj == nil` guard is unreachable through all six current create callers;
+  deleting the guard outright leaves the full suite `ok 28.031s`. (5) *"The receipt names its basis" is
+  not "the basis is strong"* — a create observing its own response object is honest and weak in the
+  same breath — **and per D438 the basis is not even DEFENDED until the round-2 arm lands.** (6)
+  *Nothing outside the hetzner glob is censused*: `internal/cli` carries **40** non-test
+  receipt-emitting files outside the family against 13 inside — hetzner is **~25%** of the CLI's
+  receipt-emitting file surface — with ≥58 literal `"ok": true` sites and 92 `✓` sites out there. (7)
+  *`api/lib` has NEVER been censused by anything*: **102** `ok: true` success bodies across 27 files
+  and 218 `json(conn, …)` responses across 50 files, and the only prior Elixir census counted GLYPHS —
+  a lens the doc itself rules structurally blind, because an HTTP receipt carries no checkmark. Zero
+  covers about a quarter of the Go CLI and **0%** of the Elixir HTTP surface. (8) *One nuance that
+  must not be over-corrected*: `success_claim_registry_test.go` is a FLOOR of **20** enrolled names
+  (30 rows), behaviourally mutation-gated — say floor-not-census, or a single grep falsifies the
+  boundary in the other direction.
+
+- **PDS-D446 — TWO NEW CENSUS BLIND SPOTS, BOTH MEASURED, BOTH FILED, AND ONE RIDES pay-net-dns AS A
+  CRITERION.** (a) **EXPLICIT GENERIC INSTANTIATION IS INVISIBLE TO THE ENTIRE CENSUS.**
+  `hzResSitesFromSource` asserts `call.Fun.(*ast.Ident)` (`:439`); a call written
+  `hzResObserved[hcloud.Network](...)` is an `*ast.IndexExpr`, so the site is not merely
+  undispositioned but **UNCOUNTED** — measured, TOTAL did not move and every arm including the pins
+  stayed silent. Live exposure today is **zero** (`grep -nE 'hzRes(Destroyed|Observed|ObservedResponse)\['`
+  over the non-test hetzner sources matches only the three `func` declarations), which is exactly why
+  it must be pinned NOW: pay-net-dns is about to write ~19 calls to precisely the three generic
+  emitters this affects, and explicit instantiation is idiomatic Go a builder may type without
+  thinking. It is a DIFFERENT shape from the already-filed `pds-bl-census-ast-scan-blind-to-func-values`;
+  the fix is two lines (also accept `*ast.IndexExpr`/`*ast.IndexListExpr` and unwrap `.X`). Pay-net-dns
+  carries the grep as a criterion; the fix is filed. (b) **RULING 1's `paid:` BINDING IS A WHOLE-FILE
+  GREP, so a paid row can describe code that no longer runs.** `:706-712` cuts the file out of
+  `wheres[0]` and asserts `strings.Contains(body, symbol+"(")`. Measured: deleting the confirming read
+  from `runHetznerVolumeDelete` outright — replacing `hzResDestroyed(…GetByID…)` with a bare
+  `hzResDone` — while leaving its `paid: hzResDestroyed re-reads Volume.GetByID(vol.ID)` row untouched
+  left the **ENTIRE census green** (TOTAL=50, KEYS=52, OPAQUE=0, five PASS). Only the behavioural fake
+  suite caught it — and three of the four dual-verb keys (`add-route`, `delete-route`,
+  `remove-from-resource`) have **no behavioural test at all**. This is `pds-w27-hetzner-gate-file-blindness`
+  recurring one level up. Filed; and it is the strongest argument for pay-net-dns's own criterion 3
+  (both-direction tests per pair), which is the only instrument that can catch a wrong-direction
+  payment, because **no census arm reads the direction branch** at `net:797`/`net:1215`.
+
+### Wave 32 plan — five slices, four in round 1
+
+| slice | round | after | what it does | gate |
+|---|---|---|---|---|
+| `pds-w31-harvest-only` | 1 | — | extends the wave-30 runner with a validated, manifest-emitting harvest + `--selftest-offline`; coherence, wrong-path and marker arms; the 404-filtered length relaxation | `bash scripts/pds-live-hetzner-placement-group.sh --selftest-offline` + `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'TestPDSLive'` |
+| `pds-w29-pay-net-dns` | 1 | — | the 19 net/dns census rows across 17 sites incl. both dual-verb executors; deletes both `hzUnpaid*` consts to reach `grep -c hzUnpaid` = 0 | `CC=/usr/bin/clang go test -c -o /dev/null ./internal/cli/ && CC=/usr/bin/clang go test ./internal/cli/ -count=1` |
+| `task-27246110ca95342a` | 1 | — | `confirmation_basis` as a trailing variadic; the three lying S3/backup call sites name their real read | `CC=/usr/bin/clang go test ./internal/cli/ -count=1` + a zero-churn diff |
+| `pds-bl-support-capacity-degraded-unpinned` | 1 | — | pins the degraded capacity narration the registry never exercises | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'TestSuccessClaim\|TestSupport'` |
+| `pds-bl-census-exact-pins-tax-growth` | 2 | pay-net-dns, task-27246110ca95342a | TWO ARMS, ONE MERGE — D444: keep+relabel TOTAL, delete KEYS and NON_LITERAL, I2 rehearsed; D438: the census learns each row's BASIS, proven by the lying-basis mutation that is green today | `CC=/usr/bin/clang go test ./internal/cli/ -count=1 -run 'TestHetznerResource'` |
+
+**HIGH-FLIP-RISK, an independent second reviewer owed BEFORE MERGE, as a ROW not as prose:**
+`pds-w31-harvest-only` (its credential-free premise was REFUTED as filed and re-cut here — the whole
+question of whether the load-bearing work is genuinely offline turns on a gate that does not exist
+yet; and eight new committed fixtures rest on a validation path that is fail-open TODAY) and
+`pds-w29-pay-net-dns` (the merge-result compile check, the wrong-direction payment that no census arm
+can see, and the explicit-instantiation grep that keeps the population honest).
+
+**PDS-D447 — THE TWO ROUND-2 CENSUS ARMS SHARE ONE ROW, AND THE REASON IS PARTLY A LIVE SERVER
+DEFECT THAT MUST BE RECORDED.** Both arms edit `internal/cli/hetzner_res_census_test.go`, so merging
+them is the correct cut on its own terms — two slices that must touch the same region of one file are
+merged or sequenced, and one owner / one merge / one census edit is strictly cheaper than two. They
+land on `pds-bl-census-exact-pins-tax-growth`, which is the row that FILED the pins question and whose
+premise this wave's eleven mutations answer. **But the honest second reason is that Decide could not
+file new rows at all: the Barkpark publish wall REJECTED EVERY NEWLY CREATED `type:task` DOCUMENT on
+guerrilla during this run — 422 `label_spine`, reproduced on a MINIMAL probe carrying only a title, a
+250-character description and two registered weighted tags with distinct strengths, and again with no
+tags and no parent.** Patching and republishing EXISTING published rows worked throughout (four wave
+slices were re-briefed that way), so the defect is scoped to document CREATION, not to authoring, and
+it is not the intermittent 500 the lead notes describe. **CONSEQUENCE, STATED RATHER THAN HIDDEN: this
+wave filed NO backlog rows.** Seven real findings surfaced by verification therefore live in this
+charter and in the wave Paper and NOWHERE in the ledger — the exact disease the wave-30 log repair
+above exists to cure, recurring one layer over. They are, so the next wave can file them the moment
+the wall lifts: (1) the explicit-generic-instantiation census blind spot and its two-line
+`*ast.IndexExpr` fix (D446a); (2) ruling 1's whole-file `paid:` grep, which lets a destroy lose its
+confirming read while its paid row stays green (D446b); (3) `hzResNotReadable`'s remediation hint
+renders `bp cloud hetzner record get …`, which is not a real verb for kind `record`/`zone`; (4)
+firewall/create's second unreachable nil guard and its argv-derived rule count; (5) the wave-log
+routing defect at `bp-epic-cycle.workflow.js:841` plus `wave_log_appended`'s zero readers; (6) the
+SECOND credential spend — a live mutation post-read REFUSING against the real API, which is the only
+thing that converts the epic's weakest claim into L1; (7) the Elixir HTTP receipt census (102
+`ok: true` bodies across 27 files, never censused by anything). **AND THE WALL ITSELF IS FINDING (8)**
+— a create path that refuses every document is a `bp task create` outage, and this epic's own law
+says an outage nobody recorded is indistinguishable from one that did not happen.
+
+**WHAT THIS WAVE DOES NOT DO, DELIBERATELY.** The `.github/**` fence holds for the concurrent Cloud
+Console wave, so `internal/cli/testdata/**` is NOT added to `go-tests.yml` — which means a
+fixtures-only PR still runs no Go job (`pds-bl-fixtures-only-pr-runs-no-go-job`, #8677, already
+filed), and the harvest slice's coherence arm is reachable this wave only because that slice also
+carries `.go` changes. The debrief must say the arm's FUTURE reachability rides an open row, not CI.
+The second credential spend — a live mutation post-read REFUSING against the real API, which would
+convert the epic's weakest claim into L1 — is FILED as the next spend, not smuggled in beside a
+read-only token. Zero is not the end of the epic; per D445 it is the end of one family on one provider.
