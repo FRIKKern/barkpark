@@ -5157,6 +5157,31 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--text);
 }
 
+/* cch-w20-s7 — `.op-gate` IS A WRAPPER, and this block is WRAPPER-SCOPED.
+   Every selector below is prefixed `.op-gate`; nothing here touches the base
+   `.status-pill` (app.css:2923-2938) or any other host's copy of it — the
+   GR25/D198 quarantine on the status-pill family is honoured by construction,
+   and the diff's own hunk is a PURE INSERT (old length zero), which is the
+   proof rather than this sentence.
+
+   THE DEFECT: `.op-gate` is `display: flex` and the base `.status-pill`
+   declares no `flex`, so the pill inherits the initial `flex-shrink: 1` and the
+   gate sentence squeezes it — the chip renders narrower than the word "Gate"
+   it contains, so its own label paints outside it. Non-monotonic in viewport
+   width: red across the phone band, clean around 620-720 where the shell folds
+   and the sentence gets the full column, and RED AGAIN across roughly 740-800
+   on `operator-zero-staging` (the sidebar returns above 720 and re-narrows the
+   column), clean again from 830.
+
+   ONE DECLARATION, NOT THE FIVE-DECLARATION WRAP RECIPE. Charter D220: the
+   recipe this epic copied onto three other hosts was DRIVEN here and does not
+   fix this one — every clipped cell stays clipped, the label stays unreadable,
+   and the horizontal score goes green while the words are still wrong. The
+   pill must simply refuse to shrink; the sentence beside it is the flexible
+   part. `flex` is not one of E14's five core properties, so this block starts
+   no recipe it must then finish (__css_check.mjs E14, design choice 1). */
+.op-gate .status-pill { flex: 0 0 auto; }
+
 /* The rollout's own vocabulary, stated once under the rows. */
 .op-foot {
   margin: var(--space-4) 0 0;
