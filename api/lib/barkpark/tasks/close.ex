@@ -35,6 +35,7 @@ defmodule Barkpark.Tasks.Close do
   import Barkpark.Tasks.Internal,
     only: [
       generate_rev: 0,
+      fenced_content_write: 4,
       insert_mutation_event!: 3,
       insert_mutation_event!: 5,
       caller_stamp: 1,
@@ -232,16 +233,8 @@ defmodule Barkpark.Tasks.Close do
     indices = Enum.map(synthetic, &Map.get(&1, "index"))
 
     with {:ok, new_content} <- merge_criteria(doc.content, synthetic) do
-      {rows, _} =
-        from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-        |> Repo.update_all(
-          set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-        )
-
-      case rows do
-        1 ->
-          updated = %{doc | content: new_content, rev: new_rev}
-
+      case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+        {:ok, updated} ->
           ev =
             insert_mutation_event!(
               updated,
@@ -254,7 +247,7 @@ defmodule Barkpark.Tasks.Close do
           {:ok, :stamped, indices, updated,
            [task_broadcast(updated, @event_task_criterion, ev, observed_rev)]}
 
-        0 ->
+        :stale ->
           {:error, :stale_rev}
       end
     end
@@ -595,15 +588,9 @@ defmodule Barkpark.Tasks.Close do
     criteria = autostamp_merge_gate(criteria, doc, worker_id, new_status, landed, ts_iso)
 
     with {:ok, new_content} <- merge_criteria(new_content, criteria) do
-      {rows, _} =
-        from(d in Document, where: d.id == ^doc.id and d.rev == ^observed_rev)
-        |> Repo.update_all(
-          set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-        )
-
-      case rows do
-        1 -> {:ok, %{doc | content: new_content, rev: new_rev}}
-        0 -> {:error, :stale_claim}
+      case fenced_content_write(doc, observed_rev, new_content, new_rev) do
+        {:ok, updated} -> {:ok, updated}
+        :stale -> {:error, :stale_claim}
       end
     end
   end
@@ -797,13 +784,14 @@ defmodule Barkpark.Tasks.Close do
         new_rev = generate_rev()
         new_content = Map.put(dep.content, "lifecycle_status", "open")
 
-        {1, _} =
-          from(d in Document, where: d.id == ^dep.id and d.rev == ^dep.rev)
-          |> Repo.update_all(
-            set: [content: new_content, rev: new_rev, updated_at: DateTime.utc_now()]
-          )
+        # The stored row, not a reconstruction: this receipt is BROADCAST —
+        # `Content.Broadcast` copies `doc.updated_at` onto three PubSub topics —
+        # so a struct-merge here ships a stale timestamp to every LiveView and
+        # SSE consumer. The hard match on `{:ok, _}` preserves the previous
+        # `{1, _} =` assertion: under the per-task advisory lock a lost fence
+        # here is a bug, not a race to swallow.
+        {:ok, unblocked} = fenced_content_write(dep, dep.rev, new_content, new_rev)
 
-        unblocked = %{dep | content: new_content, rev: new_rev}
         ev = insert_mutation_event!(unblocked, @event_task_mutated, dep.rev)
         [task_broadcast(unblocked, @event_task_mutated, ev, dep.rev)]
       else
