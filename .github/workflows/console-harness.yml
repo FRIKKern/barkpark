@@ -269,7 +269,12 @@ jobs:
       #
       # It belongs HERE, in the node-20 job, precisely because it needs no
       # Chrome and no port — so it cannot join the class of instruments nothing
-      # runs (`grep -rn overflow-guard .github/` still exits 1).
+      # runs. (That class had exactly one member, overflow-guard.mjs, and it is
+      # empty as of the `overflow-guard` job below. Note the old proof offered
+      # here — "`grep -rn overflow-guard .github/` still exits 1" — was
+      # self-refuting the moment this comment named the file: the honest
+      # predicate is always "no `run:` step invokes it", never a grep over
+      # prose.)
       #
       # Its unit tests run alongside it: the refusal's parser is where a blind
       # spot would hide (a width token the parser eats but cannot resolve
@@ -449,6 +454,79 @@ jobs:
               ;;
           esac
 
+  # overflow-guard (D208/D209): the browser-geometry guard that FIVE waves of
+  # person-facing fixes have shipped their assertions into — and that, until
+  # this job existed, no `run:` step in this repository ever invoked. Its
+  # 108/108 was a hand-run baseline nothing protected: a regression of the
+  # wave-15 fleet lead-column fix would have merged green while the epic's own
+  # browser guard certified it.
+  #
+  # Modelled on `tier-floor-render` above, deliberately byte-for-byte: node 22
+  # (node 20 has no global `WebSocket` and CDP bring-up exits 2 there with
+  # `WebSocket is not defined`), an explicit CHROME, `actions/checkout@v4` with
+  # no `ref:`, and the same 0/1/2/* ladder — a REFUSAL (2) is not a layout
+  # defect and must not send a reader hunting for a CSS bug that does not
+  # exist. Both still exit 1: a refusal is not a pass. Never
+  # `continue-on-error` — `needs.<job>.result` reads `success` for such a job
+  # even when it failed, laundering the lie straight into `Console gate`.
+  #
+  # ONE INVOCATION, NO `--defect` (D208). Chained per-leg invocations were
+  # measured on a quiet host at 28.5s against 12.6s for the single run, and
+  # produced 3/6 FALSE exit-2 refusals against SERVER_CAP = 8000 with a leaked
+  # serve.mjs child. One run pays Chrome + server bring-up once and dodges that
+  # class entirely. It also means the guard's `--defect` single-flag bug
+  # (`argv.indexOf` reads only the first occurrence) is NOT a precondition for
+  # this wiring — it stays an independent filed row.
+  #
+  # HONEST SCOPE: `Console gate`, the aggregator this job reaches branch
+  # protection through, is ADVISORY today — the live required set is
+  # `Elixir gate` and `PR references an active task`. This job RUNS on every
+  # console-touching PR and its red is visible; it does not by itself block a
+  # merge. Nothing is registered here and .github/required-checks.json is
+  # untouched.
+  overflow-guard:
+    name: Overflow guard (rendered)
+    needs: changes
+    if: needs.changes.outputs.console == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # W18 REVIEW: the leg COUNT is deliberately not in this copy. Slice S1 of
+      # this same wave adds a seventh (`W18-overview-card-pill`), and a number
+      # baked into a step name is a sentence nothing re-derives — the disease
+      # this epic keeps curing. The guard prints its own leg roster on every
+      # run; read that, not this line.
+      - name: Overflow guard — every defect leg in one browser run
+        env:
+          CHROME: /usr/bin/google-chrome
+        run: |
+          set -uo pipefail
+          rc=0
+          node cloud/priv/static/__preview__/overflow-guard.mjs || rc=$?
+          case "$rc" in
+            0)
+              echo "Overflow guard: every leg it declared measured clean in a real browser (the roster is printed above)."
+              ;;
+            2)
+              echo "::error title=Overflow guard REFUSED::The guard refused to measure (exit 2) — an ENVIRONMENT or COVERAGE fault, not a layout defect. NO claim is being made about any screen: nothing here says the console is clean and nothing here says it is broken. Fix what the log names: the Chrome binary, Node 22 (node 20 has no global WebSocket and this exits 2 there), a squatting server on the guard's port, a bring-up that outran SERVER_CAP, or a defect id the guard has no coverage for."
+              exit 1
+              ;;
+            1)
+              echo "::error title=Overflow guard DEFECT::A measured geometry defect in a real browser (exit 1) — an element whose scrollWidth exceeds its clientWidth, a truncated money message, a page scrolling sideways, or a dead rule that lost the cascade. See the ✗ lines above for the leg, the scenario/theme/width cell, the selector and its measured numbers."
+              exit 1
+              ;;
+            *)
+              echo "::error title=Overflow guard UNINTERPRETABLE::overflow-guard.mjs exited ${rc}, which is outside its vocabulary (0 clean / 1 measured defect / 2 refusal). Cannot tell, therefore red."
+              exit 1
+              ;;
+          esac
+
   console-gate:
     # ── THE AGGREGATOR — the one name that should carry branch protection ──
     #
@@ -480,7 +558,7 @@ jobs:
     # is a FAILURE, including a failure of the dispatcher itself.
     name: Console gate
     if: always()
-    needs: [changes, console-unit, cssom-parity, tier-floor-render, path-escape]
+    needs: [changes, console-unit, cssom-parity, tier-floor-render, overflow-guard, path-escape]
     runs-on: ubuntu-latest
     steps:
       - name: Decide (fail-closed over every upstream result)
@@ -489,6 +567,7 @@ jobs:
           R_UNIT: ${{ needs.console-unit.result }}
           R_CSSOM: ${{ needs.cssom-parity.result }}
           R_TIER: ${{ needs.tier-floor-render.result }}
+          R_OVERFLOW: ${{ needs.overflow-guard.result }}
           R_ESCAPE: ${{ needs.path-escape.result }}
           O_CONSOLE: ${{ needs.changes.outputs.console }}
         run: |
@@ -536,6 +615,19 @@ jobs:
             esac
           }
 
+          # WIRING A JOB IN IS THREE EDITS AND ALL THREE SHIP IN ONE COMMIT
+          # (D209): the `needs:` array above, an `R_*` entry in `env:` above,
+          # and a `decide` line below. `decide` is invoked BY HAND, once per
+          # upstream — there is deliberately NO loop over the needs set, because
+          # a loop cannot know each job's gate value. Omitting `needs:` fires
+          # the empty-result branch (LOUD); omitting the `env:` entry dies on
+          # `set -u` (LOUD); OMITTING THE `decide` LINE IS SILENTLY IGNORED —
+          # this gate then greens over a job it never read. So the review
+          # instruction is a COUNT, independently re-derived, not a reading:
+          # `decide` calls must equal the length of `needs:`. Today: 6 and 6.
+          # (The D36 emitter in scripts/console-path-escape-check.test.sh walks
+          # that whole chain per job and is mutation-proven in four directions.)
+          #
           # The dispatcher itself may never skip: without it there are no gate
           # values, so nothing downstream can be judged. Same for the ratchet,
           # which is deliberately unfiltered.
@@ -544,6 +636,7 @@ jobs:
           decide "console-unit"            "${R_UNIT}"    "${O_CONSOLE}"
           decide "cssom-parity"            "${R_CSSOM}"   "${O_CONSOLE}"
           decide "tier-floor-render"       "${R_TIER}"    "${O_CONSOLE}"
+          decide "overflow-guard"          "${R_OVERFLOW}"  "${O_CONSOLE}"
 
           echo
           if [ "$bad" -ne 0 ]; then
