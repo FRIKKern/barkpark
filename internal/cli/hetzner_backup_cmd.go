@@ -218,8 +218,12 @@ func runHetznerBackupCreate(out *writer, args []string) int {
 	// COMPOSED, not one anybody read. A HEAD on it is what turns this receipt
 	// from "the upload call did not error" into "the object is there" — and a
 	// backup that is not there is the one lie in this CLI that costs a database.
+	// The basis names the HEAD (PDS-D437). It is the weaker of the two things a
+	// reader might hope for: the key holds bytes. That the bytes are THIS dump
+	// is not confirmed, which is why hzObserveBackupStored declares `database`
+	// rather than asserting it.
 	return hzResObserved(out, hetznerCtx(), "create", "backup", key, key, nil,
-		hzS3HeadRead(c, bucket, key), hzObserveBackupStored(bucket, src.Database()))
+		hzS3HeadRead(c, bucket, key), hzObserveBackupStored(bucket, src.Database()), hzResBasisHead)
 }
 
 // hzObserveBackupStored reads the dump's receipt off the HEAD of its stored key,
