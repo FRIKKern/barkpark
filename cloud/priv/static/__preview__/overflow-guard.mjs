@@ -180,6 +180,7 @@ const DEFECTS = [
   "W21-members-roster-identity-and-remove",
   "W21-cruel-content-text-bounded",
   "W21-token-reveal-readable",
+  "W20-attention-name-column",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -2279,6 +2280,128 @@ async function main() {
           `FONT-CONDITIONAL (D218/D248): this leg never awaits document.fonts.ready and never asserts which ` +
           `face resolved, so every px above is provisional. The clipped/not-clipped verdicts and the ` +
           `character RATIOS are what it stands behind`,
+        );
+      }
+    }
+
+    // ── W20: WHICH box needs an operator, in the tablet band ────────────────
+    //    Every leg above measures a REASON, a PILL or a PAGE. Not one measures
+    //    `.attention-name` — `git grep -c attention-name -- cloud/priv/static/
+    //    __preview__ .github` exited 1 with no output on origin/main — so the
+    //    attention queue's IDENTITY column has never been instrumented, and the
+    //    W18 leg's `[att …]` line prints the neighbouring pill while the name
+    //    beside it measured 0px wide and scored nothing.
+    //
+    //    THE DEFECT THIS LEG EXISTS TO CATCH, driven on origin/main bytes: at
+    //    769 and 800 `.attention-main` measured 0.00px and `.attention-name`
+    //    read scrollWidth 67 / clientWidth 0 — the row said THAT something
+    //    needs attention and not WHICH box. Below 769 the GR109 stack saves it;
+    //    the band above it was never filed until this row.
+    //
+    //    THREE INVARIANTS, and the third is the one a width-only leg misses:
+    //      (a) name.clientWidth > 0        — the column exists at all.
+    //      (b) name.scrollWidth <= clientWidth — its text is not cut.
+    //      (c) the painted TEXT RUN (a Range over the name's contents, NOT its
+    //          box) does not intersect the first button's rect. A collapsed box
+    //          with no `overflow: hidden` scores (a) and (b) the instant a
+    //          floor is added and still paints glyphs across "View instance";
+    //          only the rect-intersection sees that, and it is what the
+    //          ellipsis half of the remedy is for.
+    if (requested.includes("W20-attention-name-column")) {
+      const D = "W20-attention-name-column";
+      // BLOCK-SCOPED on purpose (precedent: `const D` above): these widths are
+      // this row's band, not a shared vocabulary, and hoisting them into the
+      // constants region is how two slices start editing one line.
+      const NAME_WIDTHS = [320, 430, 768, 769, 800, 830, 860, 890, 900, 1000];
+      const NAME_SCENS = ["overview-attention", "mixed-fleet"];
+      const cellCount = NAME_SCENS.length * NAME_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${NAME_SCENS.length} scenarios x ${NAME_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells; .attention-name box + text run vs the row's first action button)\n`,
+      );
+      let cells = 0, namesSeen = 0, collapsed = 0, clipped = 0, painted = 0, pageOver = 0;
+      for (const scen of NAME_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter wide and assert the landed view — `?scen=` alone does not
+          // route (see the W13 note); a phantom table is worse than none.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#overview`,
+            `document.querySelector('.attention-row .attention-name') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+          );
+          const row = [];
+          for (const width of NAME_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var d=document.documentElement;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,names:0,zero:[],cut:[],hit:[]};` +
+              `[].slice.call(document.querySelectorAll('.attention-row')).forEach(function(r,i){` +
+              `  var name=r.querySelector('.attention-name'); if(!name) return; out.names++;` +
+              `  var label=(name.textContent||'').trim().slice(0,32);` +
+              `  if(name.clientWidth<=0) out.zero.push({i:i,cw:name.clientWidth,sw:name.scrollWidth,t:label});` +
+              `  else if(name.scrollWidth>name.clientWidth) out.cut.push({i:i,cw:name.clientWidth,sw:name.scrollWidth,t:label});` +
+              // The painted run, not the box: a Range over the name's contents
+              // reports where the GLYPHS land even when the box is 0px wide.
+              `  var btn=r.querySelector('.attention-acts button, .attention-acts a'); if(!btn) return;` +
+              `  var rg=document.createRange(); rg.selectNodeContents(name);` +
+              `  var tr=rg.getBoundingClientRect(), br=btn.getBoundingClientRect();` +
+              `  var ix=Math.min(tr.right,br.right)-Math.max(tr.left,br.left);` +
+              `  var iy=Math.min(tr.bottom,br.bottom)-Math.max(tr.top,br.top);` +
+              `  if(ix>0.5&&iy>0.5) out.hit.push({i:i,x:+ix.toFixed(2),y:+iy.toFixed(2),t:label,b:(btn.textContent||'').trim().slice(0,20)});` +
+              `});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-overview") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-overview" — the hash did not route, so nothing below this line measures the attention queue`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty list is not a clean list. An attention queue
+            // that stopped rendering rows would score zero findings, and this
+            // leg's whole subject would vanish while it printed a pass.
+            if (m.names === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero .attention-row .attention-name rendered — nothing was measured, this is not a pass`);
+              row.push(`${width}:0n`);
+              continue;
+            }
+            namesSeen += m.names;
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the overview is off-screen sideways`);
+            }
+            for (const z of m.zero) {
+              collapsed++;
+              fail(D, `${scen}/${theme}@${width} row${z.i} .attention-name: clientWidth ${z.cw} for ${z.sw}px of "${z.t}" — the name column collapsed to nothing, so the queue says THAT a box needs an operator and not WHICH one`);
+            }
+            for (const c of m.cut) {
+              clipped++;
+              fail(D, `${scen}/${theme}@${width} row${c.i} .attention-name: scrollWidth ${c.sw} > clientWidth ${c.cw} — ${Math.round((1 - c.cw / c.sw) * 100)}% of "${c.t}" is not rendered`);
+            }
+            for (const h of m.hit) {
+              painted++;
+              fail(D, `${scen}/${theme}@${width} row${h.i} .attention-name: the text run of "${h.t}" overlaps the "${h.b}" button by ${h.x} x ${h.y}px — the name is painting THROUGH the row's own actions, not merely truncated`);
+            }
+            const bad = m.zero.length + m.cut.length + m.hit.length + (m.psw > m.pcw ? 1 : 0);
+            row.push(`${width}:${m.names}n${bad ? " !" + bad : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${namesSeen} .attention-name(s) measured — EVERY row of the queue, ` +
+          `not a pinned one) across ${NAME_WIDTHS.join("/")} on ${NAME_SCENS.join(" + ")}; ` +
+          `${collapsed} collapsed name columns, ${clipped} cut names, ${painted} names painting through their own ` +
+          `action buttons, ${pageOver} pages scrolling sideways`,
+        );
+        okLine(
+          `769-899 is the DRIVEN band (mixed-fleet was cut through 860, overview-attention through 880); ` +
+          `768 and 900/1000 are carried as SHOULDERS — they were already clean on origin/main, so they cannot ` +
+          `detect a band block leaking sideways, only a remedy that breaks the stack or the desktop row`,
         );
       }
     }

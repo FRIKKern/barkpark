@@ -394,4 +394,16 @@
 # `grep -cE '^[0-9]+$'` confirmed to return exactly 1. authored rule heads 1266 ==
 # CSSOM style rules 1266, MISSES 0. Tenth collision this session; the second time the
 # branch's number survived, and both times only the tool knew that in advance.
-1266
+# LEAD RESOLUTION 2026-08-02 (#8987 rebased onto main 1266 after wave 21's four slices).
+# This PR had been stuck across three waves. The lead's earlier diagnosis of it was WRONG
+# in two ways, both now corrected in the record: it is NOT cch-w19-s8 (that is #8986,
+# merged), and it never conflicted on THIS file at all — its conflicts were app.css and
+# overflow-guard.mjs, and what it was MISSING was a bump it never had. Resolved by the
+# technique that beat the same conflict class four times tonight: overflow-guard.mjs by
+# LEG TRANSPLANT (checkout --ours, brace-walk the missing leg out of stage :3:, anchor it
+# after the last sibling, add the registry entry, then RUN the module — never node --check,
+# which passes files the ESM loader rejects); app.css by keep-both, which is right for CSS
+# and wrong for JS. Guard PASSES across 13 legs in a real browser. Baseline MEASURED here:
+# wrong sentinel, cssom-parity.mjs run, value read from its own failure text, exactly one
+# bare integer confirmed. authored rule heads 1269 == CSSOM style rules 1269, MISSES 0.
+1269
