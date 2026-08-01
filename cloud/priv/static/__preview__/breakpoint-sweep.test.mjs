@@ -21,7 +21,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   stripCssComments, boundaryOf, parseWidthClause, parseMediaBreakpoints,
-  parseViewIds, boundaryWalk, coverageReport,
+  parseViewIds, boundaryWalk, coverageReport, selectCells,
   BREAKPOINTS, WIDTHS, CELLS, COVERED_VIEWS, FOLD_FRACTION,
   HIDING_UTILITIES,
 } from "./breakpoint-sweep.mjs";
@@ -202,8 +202,46 @@ test("every cell carries a scenario, a hash, a view and a SENTINEL", () => {
   }
 });
 
-test("cell names are unique — --cell must select exactly one", () => {
+// ── --cell selection, and the typo it must not swallow ───────────────────────
+//
+// RE-PROSED (cch-w16-s2). This test used to read "--cell must select exactly
+// one", which stopped being true the moment `--cell a,b,c` shipped. Uniqueness
+// is still the invariant that makes a NAME a key; what changed is that a filter
+// now names a SET, and the interesting failure moved from "matches nothing" to
+// "matches SOME of what you asked for".
+
+test("cell names are unique — a name is a KEY, so --cell selects by name without ambiguity", () => {
   assert.equal(new Set(CELLS.map((c) => c.name)).size, CELLS.length);
+});
+
+test("--cell selects several cells, in the order asked, collapsing duplicates", () => {
+  const r = selectCells(CELLS, "billing-trial,fleet,billing-trial");
+  assert.deepEqual(r.cells.map((c) => c.name), ["billing-trial", "fleet"]);
+  assert.deepEqual(r.unknown, []);
+});
+
+test("no --cell at all selects the whole table", () => {
+  assert.equal(selectCells(CELLS, null).cells.length, CELLS.length);
+});
+
+test("THE TYPO MUST NOT NARROW SILENTLY: one unknown name in the list is REPORTED BY NAME", () => {
+  // The disease this fix exists for: a comma split that keeps the old
+  // `if (!cells.length)` guard leaves `--cell fleet,fleeet` selecting ONE cell
+  // and printing `verdict clean`, exit 0 — a green for a sweep the operator
+  // never asked for. The unknown set, not the selection's emptiness, is the
+  // signal, and it must name the offender rather than the whole filter.
+  const r = selectCells(CELLS, "fleet,fleeet");
+  assert.deepEqual(r.unknown, ["fleeet"], "the unknown name must be reported individually");
+  assert.equal(r.cells.length, 1, "and the naive split really would have narrowed to one — that is what makes this mutation real");
+  // the positive twin, so the assertion above is the typo talking and not a
+  // permanently-red check
+  assert.deepEqual(selectCells(CELLS, "fleet,billing-trial").unknown, []);
+});
+
+test("a blank member is not an unknown cell called \"\"", () => {
+  const r = selectCells(CELLS, "fleet, ,");
+  assert.deepEqual(r.unknown, []);
+  assert.deepEqual(r.cells.map((c) => c.name), ["fleet"]);
 });
 
 test("no sentinel is merely the screen's own container", () => {

@@ -158,6 +158,9 @@
 //    node …/breakpoint-sweep.mjs --cssom                # + browser axis parity
 //    node …/breakpoint-sweep.mjs --render               # Leg B (minutes)
 //    node …/breakpoint-sweep.mjs --render --widths 900 --cell fleet     # slice
+//    node …/breakpoint-sweep.mjs --render --cell fleet,billing-trial    # several
+//                                     # an unknown name in the list EXITS 2 by
+//                                     # name — it never narrows silently
 //    BREAKPOINT_SWEEP_ROOT=<dir> …    # measure an exported tree (origin/main)
 //    BREAKPOINT_SWEEP_CSS=<file> …    # parse a DIFFERENT app.css than is served
 //    CHROME=/path/to/chrome …         # browser override
@@ -246,6 +249,33 @@ export const CELLS = [
 
 // The view axis Leg B actually covers, derived from the cell table.
 export const COVERED_VIEWS = [...new Set(CELLS.map((c) => c.view))].sort();
+
+// `--cell a,b,c` — SELECTION, AND A PER-NAME REFUSAL. The per-name check is the
+// point, not the split: a comma split that keeps the old `if (!cells.length)`
+// guard reds ONLY when EVERY name is unknown, so `--cell fleet,fleeet` quietly
+// narrows to ONE cell and prints `verdict clean`, exit 0 — a typo silently
+// shrinking the sweep to a fraction of what the operator asked for is exactly
+// the false green this epic exists to kill. Returns the selection AND the
+// unknown names so the caller can name each one; order follows the FILTER (an
+// operator who writes `--cell billing-trial,fleet` gets that order), duplicates
+// collapse, and blank members (`--cell fleet,`) are ignored rather than being
+// reported as an unknown cell called "".
+export function selectNames(all, filter) {
+  if (filter == null) return { selected: [...all], unknown: [], asked: null };
+  const asked = String(filter).split(",").map((s) => s.trim()).filter(Boolean);
+  const known = new Set(all);
+  const unknown = asked.filter((n) => !known.has(n));
+  const selected = [];
+  for (const n of asked) if (known.has(n) && !selected.includes(n)) selected.push(n);
+  return { selected, unknown, asked };
+}
+
+// The same selection over the cell table, keyed by cell name.
+export function selectCells(all, filter) {
+  const byName = new Map(all.map((c) => [c.name, c]));
+  const r = selectNames([...byName.keys()], filter);
+  return { cells: r.selected.map((n) => byName.get(n)), unknown: r.unknown, asked: r.asked };
+}
 
 // `.content` must start inside the top FOLD_FRACTION of the viewport, at EVERY
 // width — there is no longer an exemption for the widths the shell fold owns.
@@ -879,8 +909,16 @@ async function legRender(rep) {
   const widthFilter = valOf("--widths");
   const cellFilter = valOf("--cell");
   const widths = widthFilter ? widthFilter.split(",").map(Number) : rep.widths;
-  const cells = cellFilter ? CELLS.filter((c) => c.name === cellFilter) : CELLS;
-  if (!cells.length) refuse(`--cell "${cellFilter}" matches no cell. Known: ${CELLS.map((c) => c.name).join(", ")}`);
+  const { cells, unknown } = selectCells(CELLS, cellFilter);
+  // NAME EACH UNKNOWN ONE. "matches no cell" over the whole filter is what let a
+  // typo narrow the run silently — the operator has to be told WHICH name the
+  // sweep did not recognise, and the run must not proceed on the remainder.
+  if (unknown.length) {
+    refuse(`--cell named ${unknown.length} cell${unknown.length > 1 ? "s" : ""} that do${unknown.length > 1 ? "" : "es"} not exist: ` +
+      `${unknown.map((n) => `"${n}"`).join(", ")}. Refusing rather than narrowing to the ${cells.length} that matched — a run over ` +
+      `fewer cells than you asked for reports a clean verdict for a sweep that never happened.\n   Known: ${CELLS.map((c) => c.name).join(", ")}`);
+  }
+  if (!cells.length) refuse(`--cell "${cellFilter}" selected no cell. Known: ${CELLS.map((c) => c.name).join(", ")}`);
 
   return withBrowser(async ({ cdp, evalJs, navSettle, openCell, closeCell, die }) => {
     const total = cells.length * widths.length;
