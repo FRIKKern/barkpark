@@ -1657,9 +1657,34 @@ const EXPECTATIONS = {
     check(reg) {
       const body = (reg.get("sites-body") || {}).innerHTML || "";
       assert.ok(body.length > 0, "#sites-body rendered empty");
-      // Exactly one v4 global row per fixture site.
-      assert.equal(countMatches(body, 'class="site-row site-row--global"'), 5,
+      // Exactly one v4 global row per fixture site. cch-w16-s4 grew the corpus
+      // from 5 to 6 (the first preview-only site).
+      assert.equal(countMatches(body, 'class="site-row site-row--global"'), 6,
         "one v4 density row per fixture site");
+      // cch-w16-s4 — THE CONTRADICTION, ASSERTED PER ROW, NOT PER PAGE. A page
+      // total can be satisfied by the wrong four rows; this splits the list on
+      // its own row head and reads each row's own two claims.
+      const rows = body.split('<div class="site-row').slice(1);
+      assert.equal(rows.length, 6, "the split found every row");
+      const undeployed = rows.filter((r) => r.includes(">Not deployed<"));
+      assert.equal(undeployed.length, 2,
+        "acme-labs (never deployed) and acme-previews (preview-only) both say so");
+      for (const r of undeployed) {
+        assert.ok(!r.includes("site-open"),
+          "a row that says Not deployed offers NO door: " + (r.match(/site-name">([^<]*)/) || [])[1]);
+      }
+      const deployed = rows.filter((r) => !r.includes(">Not deployed<"));
+      assert.equal(deployed.length, 4, "four rows have served a build");
+      for (const r of deployed) {
+        // …AND THE OTHER DIRECTION: rebuilding and deploy-failed rows are still
+        // SERVING their previous build, so stripping their door would be the
+        // same defect mirrored. This is the assertion `last_deployment.status
+        // === "live"` would have failed.
+        assert.ok(r.includes('class="site-open"'),
+          "a site that has served a build KEEPS its door: " + (r.match(/site-name">([^<]*)/) || [])[1]);
+      }
+      assert.equal(countMatches(body, 'title="Open the live site"'), 4,
+        "exactly four live-site doors on the page");
       // The leading status pill, states-complete across the four rows.
       assert.ok(body.includes("status-pill--ok"), "the live site reads an ok pill");
       assert.ok(body.includes("status-pill--warn"), "the rebuilding site reads a warn pill");
@@ -1684,6 +1709,35 @@ const EXPECTATIONS = {
       // GR28 kill list: the invented site-kind taxonomy never crosses in.
       assert.ok(!/\bMarketing\b|\bDocs\b|\bBlank\b|template picker|site-kind/i.test(body),
         "no invented Marketing/Docs/Blank kind taxonomy in the sites list");
+    },
+  },
+  // cch-w16-s4: the OTHER row builder. `siteRow` paints the instance
+  // workspace's Sites card, and it has NO status pill at all for a
+  // never-deployed site (freshnessBadge returns "") — so the contradiction was
+  // SILENT here rather than spelled out, and an absence-only guard on an empty
+  // fixture would have passed for the wrong reason. This drives the SAME six
+  // rows through it and asserts BOTH directions.
+  "sites-on-instance": {
+    what: "instance Sites card — siteRow keeps the door on four served sites and removes it from the two that never served",
+    check(reg) {
+      const body = (reg.get("instance-sites") || {}).innerHTML || "";
+      assert.ok(body.length > 0, "#instance-sites rendered empty");
+      const rows = body.split('<div class="site-row').slice(1);
+      assert.equal(rows.length, 6, "one instance row per fixture site");
+      assert.equal(countMatches(body, 'class="site-open"'), 4,
+        "four doors: the two that never served a build get none");
+      // Named, so a fixture reshuffle cannot silently move the gate.
+      const rowOf = (name) => rows.filter((r) => r.includes(">" + name + "<"))[0];
+      for (const name of ["acme-labs", "acme-previews"]) {
+        const r = rowOf(name);
+        assert.ok(r, name + " renders a row");
+        assert.ok(!r.includes("site-open"), name + " has never served a build — no door");
+      }
+      for (const name of ["acme.com", "blog.acme.com", "shop.acme.com", "guides.acme.com"]) {
+        const r = rowOf(name);
+        assert.ok(r, name + " renders a row");
+        assert.ok(r.includes('class="site-open"'), name + " has served a build — the door stays");
+      }
     },
   },
   // gr-p3-small-surfaces (E-03): the write-only env editor. The site detail

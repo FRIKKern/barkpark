@@ -25,7 +25,7 @@
 //             height-bearing @media, so the derived refusal refuses nothing
 //             today and legA's own output says so. The declared HEIGHTS set
 //             carries a written reason per value.
-//   SCENARIO  99 scenarios, 25 rendered, 74 in a COMMITTED residue literal.
+//   SCENARIO  100 scenarios, 25 rendered, 75 in a COMMITTED residue literal.
 //
 // ─────────────────────────────────────────────────────────────────────────────
 //  WHY THIS EXISTS (cch wave 14, slice S1)
@@ -335,7 +335,7 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 74
 // name-keyed entries below, which is what makes a 100th scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 20 vary the CONTENT of a panel already rendered at all 13 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
+  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 21 vary the CONTENT of a panel already rendered at all 13 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 9 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity — over a grid already walked at all 13 widths.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 8 vary binding/verify content inside the same .detail-grid.",
   "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 7 are member-role and empty-state variants of those same panels.",
@@ -362,14 +362,21 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 20-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 99 scenarios · 26 cells over 25 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 74 · 13 families.
-// `familyOf` over all 99 gives 15; the two with ZERO residue are `hash:#sites`
+// THE CENSUS THIS RECONCILES AGAINST: 100 scenarios · 26 cells over 25 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 75 · 13 families.
+// (cch-w16-s4 added the 100th, `sites-on-instance`, and its residue entry.)
+// `familyOf` over all 100 gives 15; the two with ZERO residue are `hash:#sites`
 // and `hash:#activity`. 74 is the RESIDUE, not the census.
 // STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
 // longer exists, or one that has since gained a cell, exits 2.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 20
+  // hash:#instance — 21
+  // cch-w16-s4: `sites-on-instance` renders the SAME six site rows the #sites
+  // cell already sweeps, through the instance workspace's Sites card. Its
+  // geometry is the .site-row grid the `sites` cell walks at all 13 widths; the
+  // scenario exists to drive the OTHER row builder's Visit gating, which is a
+  // semantic fact this sweep is structurally blind to.
+  "sites-on-instance": "hash:#instance",
   "provisioning": "hash:#instance",
   "usage-quota": "hash:#instance",
   "failed": "hash:#instance",

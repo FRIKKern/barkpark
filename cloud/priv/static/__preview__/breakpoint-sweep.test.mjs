@@ -463,16 +463,19 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 
 // ── the SCENARIO axis: a committed literal that can actually lose ────────────
 
-test("the census reconciles: 99 scenarios, 25 distinct covered by 26 cells, 74 residue over 13 families", () => {
+// cch-w16-s4 moved this census by one: `sites-on-instance` is the 100th
+// scenario and the 75th residue entry. That is the point of a typed-out
+// literal — a slice that adds a scenario has to come here and say so.
+test("the census reconciles: 100 scenarios, 25 distinct covered by 26 cells, 75 residue over 13 families", () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
   assert.equal(r.total, SCENARIO_NAMES.length);
-  assert.equal(r.total, 99);
+  assert.equal(r.total, 100);
   assert.equal(r.cells, 26);
   assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
-  assert.equal(r.residue, 74, "74 is the RESIDUE, not the census");
+  assert.equal(r.residue, 75, "75 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 74, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 75, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {
@@ -493,7 +496,7 @@ test("every residue family has a written reason, and no reason outlives its fami
   assert.deepEqual(Object.keys(RESIDUE_FAMILY_REASONS).filter((f) => !used.has(f)), []);
 });
 
-test("A 100th SCENARIO IS REFUSED BY NAME — and a self-derived allowlist would not have", () => {
+test("A 101st SCENARIO IS REFUSED BY NAME — and a self-derived allowlist would not have", () => {
   const grown = { ...SCENARIOS, "probe-hundredth": { label: "probe", deepLink: "#fleet", data: {} } };
   const r = scenarioReport({ scenarios: grown });
   assert.equal(r.ok, false);
