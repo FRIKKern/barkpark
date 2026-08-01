@@ -306,4 +306,35 @@
 # A round-2 or round-3 app.css slice WILL collide here, and D158 stands: re-run the tool
 # on the MERGED tree and take what it prints. Never merge-resolve this number, never add
 # deltas.
-1259
+# W20-S8 2026-08-01 (cch-w20-s8-band-a-shell-fold-cliff — the past-due money message
+# stops being cut at 721-740): 1259 -> 1260, +1 authored rule head, ONE add, inside ONE
+# new `@media (min-width: 621px) and (max-width: 740px)` block authored between the 830
+# block's close and the W19-S2 620 banner (keeping the region descending 830 > 740 >
+# 620) — `.topbar`. Nothing existing was edited: `git diff -U0` shows the block as a
+# hunk of OLD LENGTH ZERO (`@@ -3916,0 +3917,47 @@`), so every prior head is
+# byte-identical.
+# HOW 1260 WAS OBTAINED (D158 sentinel, and NO ARITHMETIC — 1259 + 1 also equals 1260
+# and that coincidence is NOT how this line may be produced): the payload line was
+# RE-ANCHORED with `grep -nE '^[0-9]+$'`, which named line 309, and the sentinel `1`
+# REPLACED it (never prepended — a prepend hand-authors the one silent failure mode,
+# two bare integers where the tool reads the first). cssom-parity.mjs was then run and
+# printed "BASELINE MISMATCH: 1260 authored rule heads, sidecar baseline is 1 (+1259).
+# … Bump the sidecar to 1260 IN THE SAME COMMIT as the CSS change" with MISSES 0 — the
+# TOOL named 1260, and MISSES 0 is what makes this an unrecorded ADD rather than a
+# parity defect. That number was written back verbatim and `grep -cE '^[0-9]+$'`
+# confirmed EXACTLY 1 payload line survives.
+# MEASURED: Chrome 150.0.7871.187, node v22.22.0, app.css 253419 B sha256 15473f0a7935…,
+# authored rule heads 1260 == CSSOM style rules 1260, FLATTENED SELECTORS 1221 authored
+# / 1221 CSSOM, MISSES 0, PARITY PASS.
+# THE FLATTENED PAIR DOES NOT MOVE, AND THAT IS NOT AN OMISSION (D222 — record the pair,
+# not half the instrument). `authored` is a Map keyed by NORMALISED SELECTOR, first
+# occurrence only (cssom-parity.mjs:532-537), so it is a DISTINCT-selector census:
+# `.topbar` is already authored at :794 and again in the 830 block, so a third head
+# carrying the same single selector adds a HEAD and no distinct SELECTOR. Heads +1,
+# flattened +0 is the signature of a scoped re-declaration, and it is the opposite of a
+# `/*` swallow, which drops flattened selectors ALONGSIDE heads.
+# FOR THE LEAD: this slice is the wave's SOLE holder of this file this round (D230) —
+# the other screen slices abstain by hard criterion, so the INTEGRATED tree will still
+# be short and needs one corrective bump. D158 stands: re-run the tool on the MERGED
+# tree and take what it prints. Never merge-resolve this number, never add deltas.
+1260
