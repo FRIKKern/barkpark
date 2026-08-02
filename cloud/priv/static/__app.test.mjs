@@ -12207,7 +12207,11 @@ test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no lo
   assert.ok(!self.includes(RLO), "the roster row carries no override either");
   assert.match(self, /class="set-row-name">mallory@evil\.com <span class="dim">\(you\)<\/span>/);
 
-  // Every explicit UAX#9 formatting character is neutralised, not just the RLO.
+  // All TWELVE UAX#9 bidi formatting characters are neutralised, not just the
+  // RLO: the nine explicit ones (LRE/RLE/LRO/RLO/PDF, LRI/RLI/FSI/PDI) and the
+  // three implicit marks (LRM/RLM/ALM). The loop below is the count — it walks
+  // the whole class, so a range narrowed in app.js reds here rather than
+  // shrinking silently.
   for (const c of ["‎", "‏", "؜", "‪", "‫", "‬", "‭", "‮",
                    "⁦", "⁧", "⁨", "⁩"]) {
     assert.equal(hooks.esc("a" + c + "b"), "ab", "U+" + c.charCodeAt(0).toString(16) + " must not survive esc()");

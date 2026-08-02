@@ -33,10 +33,13 @@
   function show(el) { if (el) el.hidden = false; }
   function hide(el) { if (el) el.hidden = true; }
   function setText(el, t) { if (el) el.textContent = t; }
-  // The nine UAX#9 EXPLICIT BIDI FORMATTING characters — LRM/RLM/ALM, the
-  // embedding+override pairs (LRE/RLE/PDF/LRO/RLO) and the isolates
-  // (LRI/RLI/FSI/PDI). None of them paints a glyph; every one of them can
-  // reorder the glyphs AROUND it, to the end of the enclosing paragraph.
+  // The TWELVE UAX#9 bidi formatting characters: the NINE explicit ones — the
+  // embeddings and overrides (LRE/RLE/LRO/RLO) with their terminator (PDF) and
+  // the isolates (LRI/RLI/FSI/PDI) — plus the three implicit marks LRM/RLM/ALM.
+  // None of them paints a glyph; every one of them can reorder the glyphs
+  // AROUND it, to the end of the enclosing paragraph. (Reviewed 2026-08-02: the
+  // class always held all twelve; only this sentence said "nine", counting the
+  // explicit set while listing the marks beside it.)
   var BIDI_CONTROLS = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069]/g;
   // esc() is the ONE choke point every user-authored string crosses on its way
   // into markup, so the reordering attack is neutralised here rather than at
