@@ -82,7 +82,21 @@ defmodule BarkparkWeb.ScimGroupsController do
         count: count
       )
 
-    resources = Enum.map(groups, &render_group(conn, &1))
+    # `members` on a LIST costs one membership query for the whole page, not one
+    # per group: the page's roles are resolved together and each role's holders
+    # fan out to every group carrying it (two groups may map to the same role).
+    by_role =
+      Scim.group_member_ids_by_role(
+        conn.assigns.scim_org,
+        groups |> Enum.map(& &1.role_name) |> Enum.uniq()
+      )
+
+    resources =
+      Enum.map(
+        groups,
+        &render_group(conn, &1, Map.get(by_role, &1.role_name, MapSet.new()), [])
+      )
+
     json(conn, ScimResponse.list_response(resources, total, start_index))
   end
 
@@ -229,9 +243,14 @@ defmodule BarkparkWeb.ScimGroupsController do
   # Single-resource render: `members` is read back from STORED rows, so a
   # member id that named nobody is absent from the receipt instead of being
   # echoed back from the request, and the unresolvable ids are named outright
-  # under the extension schema. List responses use `render_group/2` and omit
-  # `members` (RFC 7644 §3.4.2 attribute exclusion) rather than issue a
-  # per-group membership query.
+  # under the extension schema. LIST responses render through this same arity —
+  # `members` is present on every Resource — because this server advertises
+  # `members` with `"returned" => "default"` in its own /scim/v2/Schemas
+  # document and supports no `attributes`/`excludedAttributes` parameter
+  # anywhere, so a client cannot ask for the omission and the server never
+  # declared `"returned": "request"` (RFC 7643 §7) either. Omitting it was not
+  # attribute exclusion; it was the receipt disagreeing with the schema the
+  # same server publishes.
   defp render_group(conn, group, members, unmatched) do
     rendered =
       Map.put(
