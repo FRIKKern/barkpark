@@ -1027,12 +1027,25 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 | s6 Law 0 | `loop-epic/law-0-is-executed-with-an-honest-denomin-4-r` | `orphans` re-derived at first claim (**109**, not the briefed 97) and at debrief (111); C=1 D=2 F=0; wave net **+14**, stated plainly; 4 criteria-less rows perfected, 1 disposed |
 | s8 E11 sees the stylesheet | `loop-epic/the-epic-s-own-citation-guard-stops-bein-5-r` | `citationScanFiles()` widened to `.css` (fail-before: 3 errors on unrepaired bytes), all three repaired to SYMBOL + grep, `font-pin.mjs`'s three `app.css:<n>` anchors re-anchored to selectors |
 
+**ONE REVIEW REPAIR, and it is the wave's own lesson landing on the wave.** s2's slice gate
+(overflow-guard + `__css_check` + cssom-parity) does not run `__app.test.mjs`, so E14's same-file count
+pin — `4 wrapper-scoped wrap copy(ies)` in app.css — went stale. Appending `.detail-title-row
+.status-pill` as a COMMA MEMBER authors no new rule head, so cssom-parity is Δheads 0 and reports PASS,
+while E14 correctly counts a FIFTH copy. **Two instruments, two different questions, and only the one
+outside the slice's gate could see it.** CI caught it (Console client unit harness → Console gate, both
+RED on PR #9222). Repaired on the `-r` branch, bumped deliberately per the pin's own doctrine with
+`.detail-title-row` added to the seen-hosts loop so the new pin is DRIVEN. Not also added to
+`WRAP_REQUIRED_HOSTS` — that cascades into every E14 fixture stylesheet and is filed as
+`cch-w24-bl-detail-title-row-not-a-required-wrap-host`. PR #9222 closed, replaced by **#9228**.
+
 **THE INTEGRATION PROOF, run once on the union of all six.** The six branches merge into `origin/main`
 with **zero conflicts** (four touch `overflow-guard.mjs`, three touch `app.css` — D236's anchor
-arrangement held). On that integrated tree: `node --check` + `__app.test.mjs` 0 fail · `smoke.mjs` all
-101 scenarios · `__css_check` **0 error(s)** · `cssom-parity` **PARITY PASS, 1284 heads == baseline** ·
-the full browser guard **OVERFLOW GUARD PASS across all 17 legs**, including both new ones. This is the
-number the lead should merge against, not six separate greens.
+arrangement held). On that integrated tree, re-run AFTER the repair above: `node --check` +
+`__app.test.mjs` **776 pass / 0 fail** · `smoke.mjs` all 101 scenarios · `__css_check` **0 error(s)** ·
+`cssom-parity` **PARITY PASS, 1284 heads == baseline** · the full browser guard **OVERFLOW GUARD PASS
+across all 17 legs**, including both new ones. This is the number the lead should merge against, not
+six separate greens. Every PR is green except `Required-check spec drift (advisory)`, which is red on
+main and on every PR and is not this wave's.
 
 **WHAT THE WAVE DID NOT PAY, and the next wave inherits.**
 1. **The ratio came in at 3 of 6, not four.** s1/s2/s4 are person bodies; s5/s6/s8 are instrument and
