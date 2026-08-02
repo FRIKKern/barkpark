@@ -197,6 +197,7 @@ const DEFECTS = [
   "W15-fleet-row-text-bounded",
   "W18-overview-card-pill",
   "W23-cred-remediation-reachable",
+  "W24-cred-dialog-button-alive",
   "W20-op-gate-pill-bounded",
   "W21-inst-head-320-copy-reachable",
   "W21-members-roster-identity-and-remove",
@@ -2127,6 +2128,441 @@ async function main() {
           `driving it ALONE is green by construction (wave-23 clause 4), which is why it is the short control ` +
           `and never the only cell. No length bound was added anywhere — the copy is the product, and the ` +
           `remedy is where the viewport lands`,
+        );
+      }
+    }
+
+    // ── W24: the credential DIALOG's button actually connects the typed key ─
+    //    THE LEG ABOVE IS BLIND TO THE DIALOG, AND THAT IS WHY THIS ONE EXISTS.
+    //    W23-cred-remediation-reachable drives `#provider-connect
+    //    [data-connect-submit]` — the providers PAGE card, and only ever that.
+    //    Nothing in this harness had ever reached the credential MODAL
+    //    (`git grep -n 'launch-connect-provider\|openProviderCredential'
+    //    cloud/priv/static/__preview__` returned nothing), so the sheet a
+    //    person meets FIRST — the launch wizard's "Connect <provider>" door,
+    //    which is the only forward caller of `openProviderCredential` — was
+    //    measured by no instrument at all. On origin/main bytes its button was
+    //    DEAD: `$` is `document.querySelector` and `#view-providers` precedes
+    //    `#modal-root` in index.html, so over a painted providers card
+    //    `openProviderCredential` bound its submit handler to the PAGE's
+    //    button. Zero requests, zero toasts, no disable, and the sheet stayed
+    //    open. `openModal` only marks `#app-shell` inert — the page copy is
+    //    gone from pointer and AT reach but NOT from `document.querySelector`
+    //    — so the collision does not evaporate while the dialog is up.
+    //
+    //    THE BODY IS THE POSTED BYTES, NEVER "A POST HAPPENED". A leg that
+    //    asserted only that a request left the page would go green on a
+    //    one-sided fix that binds the dialog's button to the PAGE's fields —
+    //    which is the bug as originally FILED (`the modal POSTs the wrong
+    //    credential`), i.e. the guard would certify the defect it replaced.
+    //    Every cell types a per-cell SENTINEL and asserts the recorded body
+    //    carries THAT sentinel.
+    //
+    //    FOUR CELLS, AND TWO OF THEM ARE THE CONTROL AND THE LEAK:
+    //      (a) dialog-over-painted-card — the person body. Both hosts exist.
+    //      (b) control-card-never-painted — the same gestures on a route that
+    //          never painted the providers card, so exactly ONE host exists.
+    //          It POSTed correctly on broken bytes; if this cell ever reds,
+    //          the fix RELOCATED the bug instead of removing it.
+    //      (c) duplicate-write — `#settings/providers` -> `#scope-launch` ->
+    //          Escape -> type -> press the PAGE's button, WITHOUT
+    //          re-navigating. On broken bytes the dialog left a second handler
+    //          on the page's button: one press, TWO `POST /v1/providers`. The
+    //          cell asserts EXACTLY ONE, and it asserts its own honesty first
+    //          — a re-navigation calls `loadProviders()`, repaints the card
+    //          and clears the leak, so the cell stamps the card node before
+    //          opening the modal and FAILS if that same node is not still
+    //          mounted at submit time. Without that check the assertion is
+    //          green by construction.
+    //      (d) show-key-eye — the affordance the same two-host collision
+    //          killed twice over: the dialog's eye was dead AND the page's
+    //          became a net no-op (two handlers, two toggles). Measured as
+    //          `type` TRANSITIONS, baseline first.
+    //
+    //    THE AXIS IS WIDTH, NOT THEME — stated rather than padded. This leg
+    //    measures a BINDING, not a paint: a colour scheme cannot change which
+    //    element a handler landed on, and a second theme would double the cell
+    //    count while asking the same question twice. Width can: the launch
+    //    door is reached through the topbar's scope menu, so a phone where
+    //    `#scope-switch` or `#scope-launch` is unreachable is a cell that
+    //    proves nothing, and this leg would rather red on that than skip it.
+    if (requested.includes("W24-cred-dialog-button-alive")) {
+      const D = "W24-cred-dialog-button-alive";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      // `providers-connected` answers POST /v1/providers with the default 201
+      // (it carries no `providerConnect` fixture), which is the only scenario
+      // shape on which "the sheet CLOSES" can be measured at all — the two
+      // `providers-*` scenarios the leg above drives both answer 422 and hold
+      // the sheet open by design. It also carries no `catalog`, so the launch
+      // wizard resolves `no_provider` and renders the `.launch-connect-provider`
+      // door this leg walks through. Nothing is injected: every gesture below
+      // is one a person makes.
+      const CRED_DIALOG_SCEN = "providers-connected";
+      const CRED_DIALOG_VIEWPORTS = [[390, 844], [1000, 800]];
+      // ANTI-VACUITY 0 — the axes and the sentinel discipline, so a later edit
+      // cannot quietly turn this leg back into "a POST happened somewhere".
+      if (!CRED_DIALOG_VIEWPORTS.some(([w]) => w <= 430)) {
+        fail(D, `axis check: no phone width is in the viewport set — the launch door is reached through the topbar scope menu, and whether a person can reach it at all is exactly the width-dependent half this leg exists to measure`);
+      }
+      if (!CRED_DIALOG_VIEWPORTS.some(([w]) => w >= 900)) {
+        fail(D, `axis check: no desktop width is in the viewport set — a leg that only ever drove a phone could not tell you the dialog regressed on the geometry most operators connect a provider from`);
+      }
+      process.stdout.write(
+        `\n${D} — ${CRED_DIALOG_VIEWPORTS.length} viewports x 4 cells on ${CRED_DIALOG_SCEN}` +
+        ` (the launch wizard's Connect door -> the dialog's own field -> its own button, with the POSTED BODY read back)\n`,
+      );
+
+      // EVERY CELL IS A CROSS-DOCUMENT NAVIGATION, AND THAT COSTS A QUERY
+      // PARAM. This leg's cells differ from each other only by HASH
+      // (`#settings/providers` vs `#overview`), and a navigation that changes
+      // nothing but the fragment is a SAME-document navigation: Chrome keeps
+      // the DOM. Driven, not predicted — the `#overview` control cell reported
+      // TWO `#cred-submit` hosts, because it was still holding the providers
+      // card the previous cell had painted. A control that inherited the very
+      // condition it is the control FOR is worse than no control. The unique
+      // `cell` param forces a real document load; mock.js reads `scen` and
+      // nothing else off the page URL.
+      const credUrl = (hash, tag) =>
+        `${BASE}/?scen=${CRED_DIALOG_SCEN}&theme=light&cell=${encodeURIComponent(tag)}${hash}`;
+
+      // ── the drive, all of it person-gestures ──────────────────────────────
+      // Poll an expression until it is truthy. A cell that times out FAILS
+      // where it stood and measures nothing further — an unreached screen is
+      // never a clean screen.
+      const credWait = async (expr) => {
+        for (let w = 0; w < RENDER_CAP; w += 100) {
+          let v = false;
+          try { v = !!(await evalJs(`!!(${expr})`)); } catch { /* mid-render */ }
+          if (v) return true;
+          await sleep(100);
+        }
+        return false;
+      };
+      // THE READER FENCE (wave-23's one cross-slice defect, inverted). This
+      // leg reads the POSTED BYTES, and it will not borrow anyone's fixture to
+      // do it: nothing under `__preview__/fixtures` or `scenarios.mjs` is
+      // touched, so no other oracle's numbers move because this one was added.
+      // The recorder is installed per page load, over whatever `window.fetch`
+      // mock.js already installed, and it records only the route this leg is
+      // about.
+      const credArm = () => evalJs(
+        `(function(){window.__credPosts=[];` +
+        `if(window.__credProbe) return true;` +
+        `window.__credProbe=true;var of=window.fetch;` +
+        `window.fetch=function(i,init){` +
+        `var u=typeof i==='string'?i:((i&&i.url)||'');` +
+        `var m=String((init&&init.method)||(i&&i.method)||'GET').toUpperCase();` +
+        `if(m==='POST'&&u.indexOf('/v1/providers')>=0)` +
+        `window.__credPosts.push({url:u,body:String((init&&init.body)||'')});` +
+        `return of.apply(this,arguments);};return true;})()`,
+      );
+      // Open the launch wizard the way the product does it: the topbar scope
+      // menu's "+ Launch instance". NOT a route change — `#settings/providers`
+      // stays the rendered view underneath, which is the whole point of (c).
+      const credOpenLaunch = () => evalJs(
+        `(function(){var sw=document.getElementById('scope-switch');` +
+        `if(!sw) return {ok:false,why:'no #scope-switch in the topbar'};` +
+        `sw.click();var l=document.getElementById('scope-launch');` +
+        `if(!l) return {ok:false,why:'#scope-launch never rendered into the scope menu'};` +
+        `l.click();return {ok:true};})()`,
+      );
+      // The launch wizard's catalog panel resolves `no_provider` and offers the
+      // door. This is `openProviderCredential`'s ONLY forward caller.
+      const credOpenDialog = async () => {
+        if (!await credWait(`document.querySelector('#modal-root .launch-connect-provider')`)) {
+          return { ok: false, why: "the launch wizard never rendered a .launch-connect-provider door (its catalog panel did not resolve no_provider)" };
+        }
+        await evalJs(`document.querySelector('#modal-root .launch-connect-provider').click()`);
+        if (!await credWait(`document.querySelector('#modal-root #cred-token')`)) {
+          return { ok: false, why: "the credential dialog never rendered its own #cred-token" };
+        }
+        return { ok: true };
+      };
+      // What the page is holding once the gesture chain has run. Every id is
+      // counted ACROSS THE DOCUMENT (D228), because the count is the finding:
+      // two hosts is the condition the defect lives in, and a cell that finds
+      // one host on the painted route has not reproduced anything.
+      const credRead = () => evalJs(
+        `(function(){var root=document.getElementById('modal-root');` +
+        `var posts=(window.__credPosts||[]).map(function(p){var t=null,e=null;` +
+        `try{var b=JSON.parse(p.body)||{};t=(b.token===undefined?null:b.token);}catch(x){e=String((x&&x.message)||x);}` +
+        `return {token:t,parseErr:e,len:p.body.length};});` +
+        `return {posts:posts,n:posts.length,` +
+        `modalHidden:!!(root&&root.hidden),` +
+        `tokens:document.querySelectorAll('#cred-token').length,` +
+        `submits:document.querySelectorAll('#cred-submit').length,` +
+        `cardAlive:!!(window.__credCard&&window.__credCard.isConnected),` +
+        `view:(function(){var v=document.querySelector('section.view:not([hidden])');return v?v.id:'none';})(),` +
+        `toasts:[].slice.call(document.querySelectorAll('.toast-title')).map(function(t){return (t.textContent||'').trim();})};})()`,
+      );
+
+      let credCells = 0, credPosts = 0, credTwoHost = 0;
+      let credDead = 0, credWrongBody = 0, credOpenSheet = 0, credDouble = 0, credEyeDead = 0;
+      for (const [width, height] of CRED_DIALOG_VIEWPORTS) {
+        const row = [];
+
+        // (a) THE PERSON BODY — both hosts exist, the dialog is driven.
+        // (b) THE CONTROL — one host exists, identical gestures. `#overview`
+        //     never mounts the providers page, so `#cred-*` has a single host
+        //     there; this cell POSTed correctly on the broken bytes and is
+        //     what proves the fix removed the bug rather than moving it.
+        for (const cell of [
+          { name: "dialog-over-painted-card", hash: "#settings/providers", painted: true, sentinel: `w24-dialog-key-${width}` },
+          { name: "control-card-never-painted", hash: "#overview", painted: false, sentinel: `w24-control-key-${width}` },
+        ]) {
+          credCells++;
+          await setViewport(width, height);
+          await nav(
+            credUrl(cell.hash, `${cell.name}-${width}`),
+            cell.painted
+              ? `document.querySelector('#provider-connect [data-connect-submit]')`
+              : `(function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+          );
+          await credArm();
+          const opened = await credOpenLaunch();
+          if (!opened.ok) {
+            credDead++;
+            fail(D, `${cell.name}@${width}x${height}: the gesture chain never started — ${opened.why}. The launch wizard is the ONLY door to the credential dialog (openProviderPicker has no forward caller), so a person who cannot reach it here cannot connect a provider at all`);
+            row.push(`${cell.name}:!door`);
+            continue;
+          }
+          const reached = await credOpenDialog();
+          if (!reached.ok) {
+            credDead++;
+            fail(D, `${cell.name}@${width}x${height}: ${reached.why}. Nothing below this line was measured`);
+            row.push(`${cell.name}:!sheet`);
+            continue;
+          }
+          // Type into the DIALOG's own field, press the DIALOG's own button.
+          // Both are resolved inside `#modal-root` here on purpose: the guard
+          // must drive the element the PERSON is looking at, or it re-commits
+          // the very confusion it is measuring.
+          // THE HOST CENSUS IS TAKEN BEFORE THE PRESS, NEVER AFTER. A
+          // successful connect closes the sheet (`closeModal` empties
+          // `#modal-body`), so counting `#cred-token` after the click always
+          // reports ONE host on the painted route — a green-by-construction
+          // reading of the very condition this cell has to prove it entered.
+          const typed = await evalJs(
+            `(function(){var t=document.querySelector('#modal-root #cred-token');` +
+            `if(!t) return {ok:false,why:'no #cred-token inside the open dialog'};` +
+            `t.value=${JSON.stringify(cell.sentinel)};` +
+            `var s=document.querySelector('#modal-root #cred-submit');` +
+            `if(!s) return {ok:false,why:'no #cred-submit inside the open dialog'};` +
+            `var hosts={tokens:document.querySelectorAll('#cred-token').length,` +
+            `submits:document.querySelectorAll('#cred-submit').length,` +
+            `labels:document.querySelectorAll('#cred-label').length};` +
+            `window.__credCard=document.getElementById('provider-connect');` +
+            `s.click();return {ok:true,hosts:hosts};})()`,
+          );
+          if (!typed.ok) {
+            credDead++;
+            fail(D, `${cell.name}@${width}x${height}: ${typed.why} — the sheet rendered but the control the person presses is not in it`);
+            row.push(`${cell.name}:!ctrl`);
+            continue;
+          }
+          await credWait(`(window.__credPosts||[]).length > 0`);
+          const m = await credRead();
+          credPosts += m.n;
+          const hosts = typed.hosts;
+          if (cell.painted) {
+            if (hosts.tokens < 2 || hosts.submits < 2 || hosts.labels < 2) {
+              fail(D, `${cell.name}@${width}x${height}: at the moment the button was pressed the document held ${hosts.tokens} \`#cred-token\` / ${hosts.submits} \`#cred-submit\` / ${hosts.labels} \`#cred-label\` — the providers card was supposed to be painted UNDER the dialog, so this cell never entered the two-host condition the defect lives in and cannot have reproduced it`);
+            } else credTwoHost++;
+          } else if (hosts.submits !== 1) {
+            fail(D, `${cell.name}@${width}x${height}: the control cell held ${hosts.submits} \`#cred-submit\` — it is only a control while the dialog is the ONLY host, and a second one here means the route painted the providers card after all`);
+          }
+          if (m.n === 0) {
+            credDead++;
+            fail(D, `${cell.name}@${width}x${height}: the dialog's button produced ZERO \`POST /v1/providers\` — the person typed their key, pressed "Add provider", and nothing left the page (${m.tokens} #cred-token / ${m.submits} #cred-submit in the document, toasts: ${JSON.stringify(m.toasts)}). A dead button on the only screen that connects a provider`);
+            row.push(`${cell.name}:0post`);
+            continue;
+          }
+          if (m.n !== 1) {
+            credDouble++;
+            fail(D, `${cell.name}@${width}x${height}: ONE press produced ${m.n} \`POST /v1/providers\` — the credential was written more than once`);
+          }
+          for (const p of m.posts) {
+            if (p.parseErr) {
+              credWrongBody++;
+              fail(D, `${cell.name}@${width}x${height}: the POSTed body (${p.len} bytes) did not parse as JSON — ${p.parseErr}. This leg claims the BYTES carry the typed key, and it cannot claim that about a body it could not read`);
+            } else if (p.token !== cell.sentinel) {
+              credWrongBody++;
+              fail(D, `${cell.name}@${width}x${height}: the POSTed body carries token ${JSON.stringify(p.token)}, but the person typed ${JSON.stringify(cell.sentinel)} INTO THE DIALOG — the request left the page reading the wrong host's field, which is the bug one binding to the left`);
+            }
+          }
+          if (!m.modalHidden) {
+            credOpenSheet++;
+            fail(D, `${cell.name}@${width}x${height}: the credential succeeded (201) and the sheet is STILL OPEN — the person is left staring at a form they already submitted, with no way to tell it worked`);
+          }
+          row.push(`${cell.name}:${m.n}post ${hosts.tokens}tok/${hosts.submits}sub-hosts-at-press tok=${m.posts.map((p) => JSON.stringify(p.token)).join(",")} closed=${m.modalHidden}`);
+        }
+
+        // (c) THE DUPLICATE WRITE. Its honesty check comes FIRST: this cell is
+        //     only a measurement if the page card that was on screen before the
+        //     modal opened is the SAME node when the button is pressed. A
+        //     re-navigation would repaint it (loadProviders) and clear the leak,
+        //     and the assertion below would then be green by construction —
+        //     wave-23 clause 4, applied to this leg's own fixture-free drive.
+        credCells++;
+        await setViewport(width, height);
+        await nav(
+          credUrl("#settings/providers", `duplicate-write-${width}`),
+          `document.querySelector('#provider-connect [data-connect-submit]')`,
+        );
+        await credArm();
+        const dupSentinel = `w24-page-key-${width}`;
+        const dupOpened = await credOpenLaunch();
+        if (!dupOpened.ok) {
+          credDead++;
+          fail(D, `duplicate-write@${width}x${height}: could not open the launch wizard — ${dupOpened.why}`);
+          row.push("duplicate-write:!door");
+        } else {
+          const dupReached = await credOpenDialog();
+          if (!dupReached.ok) {
+            credDead++;
+            fail(D, `duplicate-write@${width}x${height}: ${dupReached.why}`);
+            row.push("duplicate-write:!sheet");
+          } else {
+            // Stamp the card node, dismiss with Escape (the reflex gesture),
+            // then type into the PAGE card and press ITS button. No
+            // navigation of any kind happens between the stamp and the press.
+            await evalJs(`window.__credCard=document.getElementById('provider-connect')`);
+            await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+            const dismissed = await credWait(`(function(){var r=document.getElementById('modal-root');return !!(r&&r.hidden);})()`);
+            const pressed = await evalJs(
+              `(function(){var t=document.querySelector('#provider-connect #cred-token');` +
+              `if(!t) return {ok:false,why:'no #cred-token in the providers card after the dialog was dismissed'};` +
+              `t.value=${JSON.stringify(dupSentinel)};` +
+              `var s=document.querySelector('#provider-connect [data-connect-submit]');` +
+              `if(!s) return {ok:false,why:'no [data-connect-submit] in the providers card'};` +
+              `s.click();return {ok:true};})()`,
+            );
+            if (!dismissed) fail(D, `duplicate-write@${width}x${height}: Escape did not dismiss the credential dialog — the sequence this cell pins never started`);
+            if (!pressed.ok) {
+              credDead++;
+              fail(D, `duplicate-write@${width}x${height}: ${pressed.why}`);
+              row.push("duplicate-write:!ctrl");
+            } else {
+              await credWait(`(window.__credPosts||[]).length > 0`);
+              const m = await credRead();
+              credPosts += m.n;
+              if (!m.cardAlive) {
+                fail(D, `duplicate-write@${width}x${height}: the \`#provider-connect\` node stamped before the modal opened is NO LONGER MOUNTED at submit time — the card repainted, which clears the leaked handler and makes the single-POST assertion below green by construction. This cell asserts nothing until that stops happening`);
+              }
+              if (m.view !== "view-providers") {
+                fail(D, `duplicate-write@${width}x${height}: the rendered view is "${m.view}", not "view-providers" — the sequence re-routed, and a re-render is exactly what this cell must not do`);
+              }
+              if (m.n === 0) {
+                credDead++;
+                fail(D, `duplicate-write@${width}x${height}: the page card's button produced ZERO \`POST /v1/providers\` after the dialog had been opened and dismissed — dismissing a sheet must not take the page's own control with it`);
+              } else if (m.n !== 1) {
+                credDouble++;
+                fail(D, `duplicate-write@${width}x${height}: ONE press of "Verify & connect" produced ${m.n} \`POST /v1/providers\` (tokens ${JSON.stringify(m.posts.map((p) => p.token))}) — the dismissed dialog left its handler on the PAGE's button, so the person's credential is written ${m.n} times and they are told about it ${m.toasts.length} times`);
+              }
+              for (const p of m.posts) {
+                if (p.token !== dupSentinel) {
+                  credWrongBody++;
+                  fail(D, `duplicate-write@${width}x${height}: the POSTed body carries ${JSON.stringify(p.token)}, not the ${JSON.stringify(dupSentinel)} typed into the page card`);
+                }
+              }
+              row.push(`duplicate-write:${m.n}post card=${m.cardAlive ? "same" : "REPAINTED"} tok=${m.posts.map((p) => JSON.stringify(p.token)).join(",")}`);
+            }
+          }
+        }
+
+        // (d) THE SHOW-KEY EYE, measured as `type` transitions and baselined
+        //     BEFORE the dialog is ever opened. Both halves are the same
+        //     collision: over a painted card the dialog's eye bound nothing,
+        //     and the page's collected a SECOND handler, so one press toggled
+        //     twice and the page's eye became a net no-op.
+        credCells++;
+        await setViewport(width, height);
+        await nav(
+          credUrl("#settings/providers", `show-key-eye-${width}`),
+          `document.querySelector('#provider-connect #cred-eye')`,
+        );
+        const eyeBase = await evalJs(
+          `(function(){var t=document.querySelector('#provider-connect #cred-token');` +
+          `var e=document.querySelector('#provider-connect #cred-eye');` +
+          `if(!t||!e) return {ok:false,why:'the providers card has no #cred-token/#cred-eye pair'};` +
+          `var before=t.type;e.click();var after=t.type;e.click();` +
+          `return {ok:true,before:before,after:after,back:t.type};})()`,
+        );
+        if (!eyeBase.ok) {
+          fail(D, `show-key-eye@${width}x${height}: ${eyeBase.why} — the baseline could not be taken, so nothing below it means anything`);
+          row.push("show-key-eye:!base");
+        } else {
+          if (!(eyeBase.before === "password" && eyeBase.after === "text" && eyeBase.back === "password")) {
+            credEyeDead++;
+            fail(D, `show-key-eye@${width}x${height}: the PAGE card's eye does not reveal the key even before a dialog exists — type went ${eyeBase.before} -> ${eyeBase.after} -> ${eyeBase.back}, and "Show key" that shows nothing is a control that lies about itself`);
+          }
+          const dlg = await credOpenLaunch();
+          const reached = dlg.ok ? await credOpenDialog() : { ok: false, why: dlg.why };
+          if (!reached.ok) {
+            credDead++;
+            fail(D, `show-key-eye@${width}x${height}: ${reached.why}`);
+            row.push("show-key-eye:!sheet");
+          } else {
+            const eyeM = await evalJs(
+              `(function(){var dt=document.querySelector('#modal-root #cred-token');` +
+              `var de=document.querySelector('#modal-root #cred-eye');` +
+              `var pt=document.querySelector('#provider-connect #cred-token');` +
+              `if(!dt||!de||!pt) return {ok:false,why:'the open dialog has no #cred-token/#cred-eye pair'};` +
+              `var dBefore=dt.type,pBefore=pt.type;de.click();` +
+              `var out={ok:true,dBefore:dBefore,dAfter:dt.type,pBefore:pBefore,pAfterDialogEye:pt.type};` +
+              `document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));` +
+              `return out;})()`,
+            );
+            if (!eyeM.ok) {
+              fail(D, `show-key-eye@${width}x${height}: ${eyeM.why}`);
+              row.push("show-key-eye:!pair");
+            } else {
+              if (eyeM.dAfter !== "text") {
+                credEyeDead++;
+                fail(D, `show-key-eye@${width}x${height}: the DIALOG's "Show key" left its own field at type "${eyeM.dAfter}" (from "${eyeM.dBefore}") — the person cannot see the key they are typing into the sheet they are looking at`);
+              }
+              if (eyeM.pAfterDialogEye !== eyeM.pBefore) {
+                credEyeDead++;
+                fail(D, `show-key-eye@${width}x${height}: pressing the DIALOG's eye changed the PAGE card's field from "${eyeM.pBefore}" to "${eyeM.pAfterDialogEye}" — the sheet reached behind itself and revealed a secret on a screen the person is not looking at`);
+              }
+              await credWait(`(function(){var r=document.getElementById('modal-root');return !!(r&&r.hidden);})()`);
+              const eyeAfter = await evalJs(
+                `(function(){var t=document.querySelector('#provider-connect #cred-token');` +
+                `var e=document.querySelector('#provider-connect #cred-eye');` +
+                `if(!t||!e) return {ok:false,why:'the providers card lost its #cred-token/#cred-eye pair'};` +
+                `var before=t.type;e.click();return {ok:true,before:before,after:t.type};})()`,
+              );
+              if (!eyeAfter.ok) {
+                fail(D, `show-key-eye@${width}x${height}: ${eyeAfter.why}`);
+              } else if (eyeAfter.after === eyeAfter.before) {
+                credEyeDead++;
+                fail(D, `show-key-eye@${width}x${height}: after the dialog had been opened and dismissed, the PAGE card's eye is a NET NO-OP — one press left the field at "${eyeAfter.after}" (two handlers, two toggles). The baseline above proves it worked a moment earlier, so this is the dialog's residue, not a broken control`);
+              }
+              row.push(`show-key-eye:base ${eyeBase.before}->${eyeBase.after}->${eyeBase.back} dlg ${eyeM.dBefore}->${eyeM.dAfter} page-after ${eyeAfter.before}->${eyeAfter.after}`);
+            }
+          }
+        }
+
+        process.stdout.write(`   ${width}x${height}  ${row.join("  ")}\n`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${credCells} / ${credCells} cells clean across ${CRED_DIALOG_VIEWPORTS.map(([w, h]) => `${w}x${h}`).join("/")} on ${CRED_DIALOG_SCEN} — ` +
+          `${credPosts} \`POST /v1/providers\` recorded and every one of them READ BACK: the body carries the ` +
+          `sentinel typed into the host the person was looking at, never merely "a request happened". ` +
+          `${credTwoHost} cells confirmed the TWO-HOST condition (>= 2 \`#cred-token\` in the document) before ` +
+          `driving the dialog, so the painted cells provably entered the state the defect lives in; the ` +
+          `\`#overview\` control has one host and is what proves a fix removed the bug rather than relocating ` +
+          `it. ${credDead} dead controls, ${credWrongBody} wrong-host bodies, ${credOpenSheet} sheets left open ` +
+          `after a 201, ${credDouble} duplicate writes, ${credEyeDead} dead or self-cancelling show-key eyes`,
+        );
+        okLine(
+          `THE DUPLICATE-WRITE CELL ASSERTS ITS OWN HONESTY FIRST: it stamps the \`#provider-connect\` node ` +
+          `before the modal opens and reds if that node is not still mounted at submit time, because a ` +
+          `re-navigation repaints the card (loadProviders), clears the leaked handler and would green the ` +
+          `single-POST assertion by construction. No fixture and no scenario was edited to build this leg — ` +
+          `the recorder wraps \`window.fetch\` in the page for the duration of the cell, so no other oracle ` +
+          `reading \`scenarios.mjs\` or \`__preview__/fixtures\` can move because this one was added`,
         );
       }
     }
