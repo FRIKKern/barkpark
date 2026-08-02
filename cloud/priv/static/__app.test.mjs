@@ -12166,3 +12166,85 @@ test("cch-w20-s3: BOTH text sites shave the scheme together — the card and the
   assert.match(js, /class="instance-card-url">' \+ esc\(displayUrl\(bp\)\)/);
   assert.match(js, /class="fleet-url">' \+ esc\(displayUrl\(bp\)\)/);
 });
+
+// ── cch-w22-s5: the console stops asserting false things ────────────────────
+// TWO misinformation defects, NEITHER of which is about length — this pair is
+// the wave's proof that CRUEL != LONG. (A) is 30 characters against a 160 cap;
+// (B) needs no attacker at all, only a browser clock behind the server's.
+
+const RLO = "\u202E"; // RIGHT-TO-LEFT OVERRIDE — scopes to end-of-paragraph
+// NBSP is the separator, not a space: @email_format (accounts/user.ex:31) is
+// ~r/^[^\s@]+@[^\s@]+$/ with NO `u` modifier, so its \s is ASCII-only and a
+// U+00A0 sails through — which is what makes the whole payload a SERVER-LEGAL
+// email rather than a thought experiment (proven with `elixir -e`, see the task).
+const NB = "\u00A0";
+
+test("cch-w22-s5 (A): esc() drops the bidi controls, so an actor email can no longer forge the audit verb", () => {
+  // THE FORGERY. activityRow builds ONE text run: esc(who) + " " + esc(verb).
+  // With an RLO in the email the browser painted `ops@acme.cometis a detaerc
+  // created a site` — the words "created a site" reading correctly, LTR — on a
+  // row whose record said site.deleted.
+  // The decoy is the REAL ACTION_LABELS vocabulary, pre-reversed: "created a
+  // site" backwards is "etis a detaerc".
+  const evil = "ops@acme.com" + RLO + NB + "etis" + NB + "a" + NB + "detaerc";
+  assert.equal(evil.length, 28, "the whole payload is 28 characters, against a 160-char email cap");
+  const row = hooks.activityRow({
+    actor: { email: evil }, action: "site.deleted", inserted_at: "2026-08-02T00:00:00Z",
+  });
+  assert.ok(!row.includes(RLO), "no bidi control survives into the markup");
+  // The verb the RECORD carries is the verb the row now spells, uninterrupted.
+  assert.match(row, /class="fleet-name">ops@acme\.com\u00A0etis\u00A0a\u00A0detaerc deleted a site/);
+  // The pre-reversed decoy text is still THERE (nothing is censored) — it just
+  // cannot reorder the system's words around it any more.
+  assert.ok(row.includes("etis" + NB + "a" + NB + "detaerc"), "the attacker's own letters are not laundered away");
+
+  // THE SECOND HOST, same commit: memberRowHtml's "(you)" self-marker used to
+  // be swallowed by the same run — painted `mallory)uoy( moc.live@<RLO>`.
+  const self = hooks.memberRowHtml(
+    { user_id: "u1", email: RLO + "mallory@evil.com", role: "member", joined_at: "2026-01-01T00:00:00Z" },
+    { role: "admin", userId: "u1" },
+  );
+  assert.ok(!self.includes(RLO), "the roster row carries no override either");
+  assert.match(self, /class="set-row-name">mallory@evil\.com <span class="dim">\(you\)<\/span>/);
+
+  // Every explicit UAX#9 formatting character is neutralised, not just the RLO.
+  for (const c of ["‎", "‏", "؜", "‪", "‫", "‬", "‭", "‮",
+                   "⁦", "⁧", "⁨", "⁩"]) {
+    assert.equal(hooks.esc("a" + c + "b"), "ab", "U+" + c.charCodeAt(0).toString(16) + " must not survive esc()");
+  }
+  // …and NOTHING ELSE MOVES: a string without them escapes byte-for-byte as
+  // before, so no existing body.includes(...) assertion changes meaning.
+  assert.equal(hooks.esc("<&\"'>"), "&lt;&amp;&quot;&#39;&gt;");
+  assert.equal(hooks.esc("ops@acme.com created instance"), "ops@acme.com created instance");
+  assert.equal(hooks.esc(null), "");
+  // The strip runs BEFORE the escape, so an entity's letters can never be
+  // re-read as text (the ssw8 esc-then-strip lesson, above).
+  assert.equal(hooks.esc("a&" + RLO + "b"), "a&amp;b");
+});
+
+test("cch-w22-s5 (B): relTime — a future timestamp is never 'just now', and the past is byte-identical", () => {
+  const now = Date.now();
+  const at = (ms) => new Date(now + ms).toISOString();
+
+  // THE DEFECT: Math.max(0, …) clamped every future delta to the freshest
+  // possible answer, on the row that carries Revoke (sessionRowHtml :1105
+  // beside .session-revoke :1110). Four futures, four distinct honest strings.
+  const future = [at(30e3), at(24 * 3600e3), at(365 * 24 * 3600e3), "2999-01-01T00:00:00Z"].map((s) => hooks.relTime(s));
+  assert.deepEqual(future.slice(0, 3), ["in <1m", "in 1d", "in 365d"]);
+  assert.match(future[3], /^in \d+d$/);
+  assert.equal(new Set(future).size, 4, "all four futures are distinguishable from each other");
+  for (const s of future) assert.notEqual(s, "just now");
+
+  // THE POSITIVE PATH IS UNCHANGED — these are exactly the strings main emits.
+  assert.equal(hooks.relTime(at(-30e3)), "just now");
+  assert.equal(hooks.relTime(at(-2 * 3600e3)), "2h ago");
+  assert.equal(hooks.relTime(at(-5 * 24 * 3600e3)), "5d ago");
+  assert.equal(hooks.relTime(at(-90e3)), "2m ago");
+  assert.equal(hooks.relTime(null), "—");
+  assert.equal(hooks.relTime("not-a-date"), "—");
+
+  // …and the honest string reaches the screen beside the destructive control.
+  const row = hooks.sessionRowHtml({ id: "s1", user_agent: "barkpark-cli/0.9", last_used_at: at(24 * 3600e3) });
+  assert.ok(row.includes("Active in 1d"), "the session row states the skew instead of claiming freshness");
+  assert.ok(row.includes("session-revoke"), "…on the same row as Revoke");
+});

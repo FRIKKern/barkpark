@@ -33,8 +33,28 @@
   function show(el) { if (el) el.hidden = false; }
   function hide(el) { if (el) el.hidden = true; }
   function setText(el, t) { if (el) el.textContent = t; }
+  // The nine UAX#9 EXPLICIT BIDI FORMATTING characters — LRM/RLM/ALM, the
+  // embedding+override pairs (LRE/RLE/PDF/LRO/RLO) and the isolates
+  // (LRI/RLI/FSI/PDI). None of them paints a glyph; every one of them can
+  // reorder the glyphs AROUND it, to the end of the enclosing paragraph.
+  var BIDI_CONTROLS = /[\u200E\u200F\u061C\u202A-\u202E\u2066-\u2069]/g;
+  // esc() is the ONE choke point every user-authored string crosses on its way
+  // into markup, so the reordering attack is neutralised here rather than at
+  // each of the ~hundreds of hosts: a U+202E RIGHT-TO-LEFT OVERRIDE inside an
+  // actor email has no block boundary between it and the system's own words, so
+  // it swallows the rest of the line — `ops@acme.com<RLO> ecnatsni detaerc`
+  // painted `ops@acme.comecnatsni deteled created instance` on an audit row
+  // whose record said DELETED (30 characters against a 160 cap), and the same
+  // run in memberRowHtml absorbed the "(you)" self-marker on a row carrying
+  // Remove. Dropping the controls (rather than wrapping each host in <bdi>) is
+  // the choice because they carry NO glyph: no legitimate string can look
+  // different for having lost them, so no existing substring assertion moves,
+  // while a <bdi> would have to be added — and remembered — at every host.
+  // Stripped BEFORE escaping, so an entity's letters can never be re-read as
+  // text (the ssw8 esc-then-strip lesson, __app.test.mjs).
   function esc(s) {
     return String(s == null ? "" : s)
+      .replace(BIDI_CONTROLS, "")
       .replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;").replace(/'/g, "&#39;");
   }
@@ -557,7 +577,23 @@
     if (!iso) return "—";
     var then = new Date(iso).getTime();
     if (isNaN(then)) return "—";
-    var secs = Math.max(0, Math.round((Date.now() - then) / 1000));
+    // A FUTURE timestamp is never "moments ago". The old Math.max(0, …) clamp
+    // painted +30s, +24h, +1y and the year 2999 all as "just now" — the
+    // freshest possible answer — and sessionRowHtml (:1105) puts that string
+    // in the same row as .session-revoke (:1110), i.e. beside the control an
+    // operator uses to pick which session to kill. No attacker is required:
+    // relTime compares a SERVER UTC stamp against the BROWSER's Date.now(), so
+    // a client clock running behind the server makes EVERY session row read
+    // "Active just now". 13 call sites inherit this clamp. A negative delta
+    // now gets its own vocabulary; the positive path is byte-identical.
+    var secs = Math.round((Date.now() - then) / 1000);
+    if (secs < 0) {
+      var ahead = -secs;
+      if (ahead < 60) return "in <1m";
+      var amins = Math.round(ahead / 60); if (amins < 60) return "in " + amins + "m";
+      var ahrs = Math.round(amins / 60); if (ahrs < 24) return "in " + ahrs + "h";
+      return "in " + Math.round(ahrs / 24) + "d";
+    }
     if (secs < 60) return "just now";
     var mins = Math.round(secs / 60); if (mins < 60) return mins + "m ago";
     var hrs = Math.round(mins / 60); if (hrs < 24) return hrs + "h ago";
@@ -19122,6 +19158,9 @@
       // Show-all/Collapse wiring (wireTimelineFeed) is browser-verified; the
       // toggle's two markup states are node-pinned via tlvGroupRowHtml.
       coalesceEntries: coalesceEntries,
+      // cch-w22-s5: the Overview digest's audit row — the host where an actor
+      // email and the system's own verb share ONE text run.
+      activityRow: activityRow,
       tlvCoalesceKey: tlvCoalesceKey,
       tlvCoalesceKeyByTarget: tlvCoalesceKeyByTarget,
       tlvVerdictOf: tlvVerdictOf,
