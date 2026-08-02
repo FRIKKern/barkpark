@@ -74,9 +74,9 @@ function bpBase(over) {
       suspended_reason: null,
       // cch-w21-s3: `barkpark_json` (web/router.ex:8371) serializes `custom_host`
       // on EVERY row — null until a team attaches a domain. It belongs in the
-      // envelope because `publicUrl()` (grep -n "function publicUrl" app.js) PREFERS it over
-      // `url`, so a
-      // row that merely OMITS the key is a row no fixture can make cruel.
+      // envelope because `publicUrl()` (`grep -n "function publicUrl" app.js`)
+      // PREFERS it over `url`, so a row that merely OMITS the key is a row no
+      // fixture can make cruel.
       custom_host: null,
       update_state: null,
       update_running_release: null,

@@ -956,8 +956,8 @@ select.form-input {
    committed adversarial fixture: a 253-char `custom_host` and a 255-char
    `name`, both AT the server's own `validate_length` caps — barkpark.ex:727
    and :466 — and `publicUrl()` (`grep -n "function publicUrl" app.js`) PREFERS
-   `custom_host` over `url`, so this
-   is the dominant real input, not an edge case). At a 320 viewport the fleet
+   `custom_host` over `url`, so this is the dominant real input, not an edge
+   case). At a 320 viewport the fleet
    table measured `.fleet-url` scrollWidth 1447 against clientWidth 250 — 83%
    of the address simply not rendered — and, because `.fleet-url` computes
    `overflow: visible`, the remainder painted THROUGH the badge column while

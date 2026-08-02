@@ -1933,8 +1933,8 @@ async function main() {
     //    admits 253 and 255 (`validate_length(:custom_host, max: 253)` at
     //    registry/barkpark.ex:727, `validate_length(:name, min: 1, max: 255)`
     //    at :466) and `publicUrl()` (`grep -n "function publicUrl" app.js`)
-    //    PREFERS `custom_host` over
-    //    `url` — so the DOMINANT real input on the fleet row was the one input
+    //    PREFERS `custom_host` over `url` —
+    //    so the DOMINANT real input on the fleet row was the one input
     //    no instrument had ever driven. `fleet-cruel-content` (scenarios.mjs)
     //    is that input, committed; this leg is what makes it bite.
     //
