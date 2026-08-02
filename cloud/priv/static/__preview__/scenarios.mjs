@@ -2834,7 +2834,7 @@ export const SCENARIOS = {
     },
   },
   "providers-empty": {
-    label: "Providers — nothing connected yet: the empty roster + the connect card armed on the first provider",
+    label: "Providers — nothing connected yet: the empty roster, the connect card armed on the first provider, and the server's REAL 275-character Azure remediation when verify-before-save fails",
     authed: true,
     deepLink: "#settings/providers",
     data: {
@@ -2842,6 +2842,37 @@ export const SCENARIOS = {
       barkparks: [], subscription: activeSub, sites: [], audit: [],
       providers: [],
       capabilities: settingsProviderCapabilities,
+      // ── W23-S6: THE REMEDIATION COPY THE SERVER ACTUALLY SENDS ────────────
+      // `providers-unverified` below carries a 168-character PARAPHRASE, and
+      // that string measures CLEAN at every phone geometry: on it the defect
+      // this fixture exists to expose cannot be produced, so a guard driving
+      // only it is green by construction (wave-23 clause 4). This is
+      // `connect_remediation("azure")` VERBATIM — the LONGEST clause the
+      // server can send — living on the scenario the defect was reproduced on
+      // (`providers-empty#settings/providers`, 390x390).
+      //
+      // The four clauses in cloud/lib/barkpark_cloud/failure_copy.ex:361-375
+      // measure 169 (hetzner) / 275 (azure) / 206 (cloudflare) / 88 (generic).
+      // Re-derive, do not quote:
+      //   node -e 'const s=require("fs").readFileSync("cloud/lib/barkpark_cloud/failure_copy.ex","utf8").split("\n");
+      //            const i=s.findIndex(l=>l.includes(`def connect_remediation("hetzner")`));
+      //            for(let k=i;k<i+16;k++){const m=s[k].match(/^\s*"(.*)"\s*$/); if(m) console.log(m[1].length)}'
+      // (The filed row cch-w21-bl-... cites `registry/failure_copy.ex`, which
+      // does not exist, and 89 for the generic clause, which is 88.)
+      //
+      // IT RIDES AN EXISTING KEY ON PURPOSE. A NEW `SCENARIOS` key is refused
+      // by breakpoint-sweep.mjs's census — "UNLISTED scenario … no cell renders
+      // it and SCENARIO_RESIDUE does not carry it", exit 2 — and that file is
+      // outside this slice's fence. Filed as
+      // cch-w23-bl-real-hetzner-remediation-scenario.
+      providerConnect: {
+        status: 422,
+        body: {
+          error: "provider_unverified",
+          // connect_remediation("azure") — 275 chars, VERBATIM.
+          remediation: "We couldn't authenticate to Azure with those details. In the Azure Portal → App registrations → your app, re-check the Directory (tenant) ID, Application (client) ID and Subscription ID, and that the client secret under Certificates & secrets hasn't expired — then reconnect.",
+        },
+      },
     },
   },
   "providers-unverified": {
