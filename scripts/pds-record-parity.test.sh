@@ -574,6 +574,29 @@ else
   echo "      below the fetch it paces only rows already scored — i.e. nothing on a healthy ledger"
 fi
 
+# THE TRUNCATION GUARD MUST STAY FENCED INSIDE THE `git log` BRANCH. Every axis-B
+# fixture in this harness runs through --fixture-dir inside THIS full checkout, and
+# every axis-A fixture but the four above hands over a --commits-file — so a future
+# edit that hoists `walk_truncation` to top level would UNCHECK `--axis b` on every
+# shallow CI checkout and this harness would stay GREEN. Position is the behaviour,
+# so position is what is asserted (the PACE-sleep idiom above, same reason).
+CHECKS=$((CHECKS + 1))
+WT_CALLS="$(grep -cE '^[[:space:]]*walk_truncation$' "$ARM")"
+WT_CALL="$(grep -nE '^[[:space:]]*walk_truncation$' "$ARM" | head -1 | cut -d: -f1)"
+WT_WORKTREE="$(grep -n 'UNCHECKED: not inside a git work tree' "$ARM" | head -1 | cut -d: -f1)"
+WT_LOG="$(grep -n "git log --format=%B | grep -oE 'PDS-D" "$ARM" | head -1 | cut -d: -f1)"
+WT_AXISB="$(grep -n '^axis_b()' "$ARM" | head -1 | cut -d: -f1)"
+if [ "$WT_CALLS" = "1" ] && [ -n "$WT_CALL" ] && [ -n "$WT_WORKTREE" ] && [ -n "$WT_LOG" ] &&
+   [ -n "$WT_AXISB" ] && [ "$WT_WORKTREE" -lt "$WT_CALL" ] && [ "$WT_CALL" -lt "$WT_LOG" ] &&
+   [ "$WT_LOG" -lt "$WT_AXISB" ]; then
+  echo "ok    walk_truncation is called ONCE, inside axis A's git-log branch (${WT_WORKTREE} < ${WT_CALL} < ${WT_LOG} < ${WT_AXISB})"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  walk_truncation must be called exactly once, between the work-tree check and the git log walk"
+  echo "      (calls=${WT_CALLS} call=${WT_CALL:-none} worktree=${WT_WORKTREE:-none} log=${WT_LOG:-none} axis_b=${WT_AXISB:-none})"
+  echo "      hoisted out of that branch it UNCHECKS --axis b and --commits-file on every shallow checkout"
+fi
+
 run 3 "an unknown argument is a USAGE error (exit 3)" -- --nonsense
 run 3 "a --grace-hours that is not a number is a USAGE error" -- --grace-hours six
 
