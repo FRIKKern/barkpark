@@ -176,6 +176,7 @@ const DEFECTS = [
   "W13-detail-route-band",
   "W15-fleet-row-text-bounded",
   "W18-overview-card-pill",
+  "W23-cred-remediation-reachable",
   "W20-op-gate-pill-bounded",
   "W21-inst-head-320-copy-reachable",
   "W21-members-roster-identity-and-remove",
@@ -1502,6 +1503,293 @@ async function main() {
         okLine(
           `[att …] cells are \`.attention-row .status-pill-detail\` — a DIFFERENT host in the same DOM, ` +
           `printed for comparison and deliberately NOT judged here (task-802585b77fc136b1 owns that band)`,
+        );
+      }
+    }
+
+    // ── W23-S6: THE FIX-IT INSTRUCTION, AND WHERE THE VIEWPORT LANDS ────────
+    //    Every leg above measures a box that is ALREADY on screen: it asks
+    //    whether text fits inside its own element, or whether the page scrolls
+    //    sideways. Not one of them asks the vertical question — is the thing
+    //    the SPA just revealed anywhere a person can see it. So a credential
+    //    failure at 390x390 could put the server's entire fix-it instruction
+    //    off the top of the phone and every cell in this file stayed green:
+    //    the box is not clipped, its text is whole, the page does not scroll
+    //    sideways, and the person still cannot read the sentence that tells
+    //    them what to do next.
+    //
+    //    THE DEFECT, driven at 390x390 on `providers-empty#settings/providers`
+    //    with the real Azure copy: box h=154, top=-21, bottom=132 against a
+    //    390px viewport — the FIRST LINE 21px above the top edge, with no cue
+    //    that anything is above. The gesture that produces it is the natural
+    //    one: reveal the copy, then scroll the BUTTON the person just pressed
+    //    into view — and the copy renders ABOVE that button.
+    //
+    //    THE FIXTURE IS THE FIRST HALF OF THIS LEG (wave-23 clause 4). The
+    //    shipped `providers-unverified` copy is a 168-character PARAPHRASE and
+    //    it measures CLEAN at every geometry here: on that string the defect
+    //    cannot be produced, so a leg driving it would be green by
+    //    construction with a perfectly real browser. `providers-empty` — the
+    //    scenario the defect was reproduced on — therefore now carries
+    //    `connect_remediation("azure")` VERBATIM, 275 characters, the longest
+    //    clause the server can send (cloud/lib/barkpark_cloud/failure_copy.ex
+    //    :361-375, whose four clauses measure 169/275/206/88). The length is
+    //    ASSERTED per cell against that number — a corpus that understates the
+    //    server is a corpus that certifies nothing — and the paraphrase is
+    //    kept as the labelled SHORT control so a regression on ordinary copy
+    //    is still visible.
+    //
+    //    D228, AND IT BITES TWICE HERE. `#cred-remediation` is rendered by TWO
+    //    hosts — the providers page's connect card and the credential modal —
+    //    and `#modal-root` sits AFTER `#view-providers` in index.html, so
+    //    `document.querySelector('#cred-remediation')` is the PAGE's box
+    //    whether or not a dialog is open. Every `#cred-remediation` and every
+    //    `#cred-submit` in the document is walked, the counts are printed, and
+    //    a cell that finds zero boxes — or zero REVEALED boxes — FAILS: an
+    //    instruction that never appeared is not an instruction on screen.
+    //
+    //    THREE ASSERTIONS PER REVEALED BOX, and the third is the one a
+    //    top >= 0 check alone cannot make:
+    //      (a) top >= 0            — the first line is not above the viewport.
+    //      (b) top <= viewportH - one line — it is not below the fold either;
+    //          the same "no gesture at all" bug pushes the box off the BOTTOM
+    //          when the button sat low, which scores a perfect (a).
+    //      (c) the first line is not COVERED. `.topbar` is `position: sticky;
+    //          top: 0` (56px, app.css:794), so a fix that aligns the box to
+    //          the scrollport's start edge lands it at top 0 UNDER the bar and
+    //          passes (a) and (b) while the person reads nothing.
+    //          `elementFromPoint` over the first line is what sees that.
+    //    Plus the button: `#cred-submit` must still intersect the viewport, so
+    //    a gesture that buys the instruction by scrolling the control away is
+    //    a red here and not a trade.
+    if (requested.includes("W23-cred-remediation-reachable")) {
+      const D = "W23-cred-remediation-reachable";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      // Two kinds because they are the only two `available: true` providers in
+      // app.js's PROVIDERS list and they render DIFFERENT credential forms
+      // (four fields vs one token); two scenarios because a fixture carries ONE
+      // `providerConnect` response and `route()` never sees the request body,
+      // so the string is a property of the SCENARIO, not of the kind.
+      //   · `providers-empty` — the scenario the defect was reproduced on —
+      //     now carries `connect_remediation("azure")` VERBATIM: 275 chars, the
+      //     longest the server can send.
+      //   · `providers-unverified` keeps its 168-character PARAPHRASE and is
+      //     driven here as the SHORT control, labelled as such. It is one
+      //     character under the real hetzner clause (169), so it does not
+      //     materially understate it — but it is NOT the server's string, and
+      //     that is written down rather than papered over:
+      //     cch-w23-bl-real-hetzner-remediation-scenario owns
+      //     giving the real 169 its own key (a new `SCENARIOS` key is refused
+      //     by breakpoint-sweep.mjs's census, which this slice is fenced out
+      //     of). A leg that only ever drove the worst string could not tell
+      //     you the shorter one regressed, which is why the short cell is here
+      //     at all.
+      const CRED_CELLS = [
+        { scen: "providers-empty", kind: "azure", chars: 275, src: "connect_remediation(\"azure\"), verbatim" },
+        { scen: "providers-unverified", kind: "hetzner", chars: 168, src: "the 168-char paraphrase, driven as the SHORT control" },
+      ];
+      // [width, height]. HEIGHT IS THE VARIABLE HERE, which is why this leg
+      // cannot use the file's width sets: 390x390 is the filed reproduction,
+      // 390x844 is the same phone in portrait (a taller viewport that must not
+      // be bought at its expense), and 320x568 is the smallest phone still
+      // shipped — the geometry where the box is tallest and the fold lowest.
+      const CRED_VIEWPORTS = [[390, 390], [390, 844], [320, 568]];
+      // ANTI-VACUITY 0 — the axes themselves, so a later edit cannot quietly
+      // drop the geometry the defect was measured at.
+      if (!CRED_VIEWPORTS.some(([w, h]) => w === 390 && h === 390)) {
+        fail(D, `axis check: 390x390 is not in the viewport set — it is the geometry the defect was reproduced at (top -21), and without it this leg cannot see it`);
+      }
+      if (!CRED_CELLS.some((c) => c.kind === "azure" && c.chars === 275)) {
+        fail(D, `axis check: the 275-character azure clause is not in the cell set — it is the longest string \`connect_remediation/1\` can send, and the only one the shipped 168-character fixture understates`);
+      }
+      if (!CRED_CELLS.some((c) => c.chars < 200)) {
+        fail(D, `axis check: no SHORT string is in the cell set — a leg that only ever drives the worst copy cannot tell you a shorter one regressed, which is the failure this file keeps finding in its own instruments`);
+      }
+      const credCellCount = CRED_CELLS.length * CRED_VIEWPORTS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${CRED_CELLS.length} provider kinds x ${CRED_VIEWPORTS.length} phone geometries x 2 themes` +
+        ` (${credCellCount} cells; the REAL verify-before-save gesture chain, then every #cred-remediation` +
+        ` and every #cred-submit in the document measured against the viewport)\n`,
+      );
+      let cells = 0, boxesSeen = 0, revealedSeen = 0, submitsSeen = 0;
+      let above = 0, below = 0, covered = 0, buttonGone = 0, shortCopy = 0;
+      for (const cell of CRED_CELLS) {
+        for (const theme of ["light", "dark"]) {
+          const row = [];
+          for (const [width, height] of CRED_VIEWPORTS) {
+            // EVERY CELL IS NAVIGATED FRESH. The verifier's dark iteration
+            // inherited the light run's DOM and its numbers were not
+            // independent; a gesture leg is worse than a geometry leg in that
+            // respect, because the box it measures is a state the previous
+            // cell already produced. Viewport first, then a full navigation,
+            // then the gesture — nothing here re-uses a rendered box.
+            await setViewport(width, height);
+            await nav(
+              `${BASE}/?scen=${cell.scen}&theme=${theme}#settings/providers`,
+              `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+              `return v && v.id==='view-providers' && document.querySelector('#provider-connect [data-connect-submit]');})()`,
+            );
+            // THE REAL GESTURE CHAIN: arm the kind, fill the form the way a
+            // person does, press the button. Nothing is injected — the copy
+            // arrives through the mock's 422 and app.js's own paint path.
+            const armed = await evalJs(
+              `(function(){` +
+              `var seg=[].slice.call(document.querySelectorAll('#provider-connect [data-connect-kind="${cell.kind}"]'));` +
+              `if(!seg.length) return {ok:false,why:'no [data-connect-kind="${cell.kind}"] segment in the connect card'};` +
+              `seg[0].click();` +
+              `var t=document.getElementById('cred-token'); if(t) t.value='guard-probe-token';` +
+              `['tenant_id','client_id','client_secret','subscription_id'].forEach(function(k){` +
+              `  var e=document.getElementById('cred-az-'+k); if(e) e.value='00000000-0000-4000-8000-000000000001';});` +
+              `var sub=[].slice.call(document.querySelectorAll('#provider-connect [data-connect-submit]'));` +
+              `if(!sub.length) return {ok:false,why:'no [data-connect-submit] in the connect card'};` +
+              `sub[0].click();` +
+              `return {ok:true};})()`,
+            );
+            cells++;
+            if (!armed.ok) {
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: the gesture chain never started — ${armed.why}. Nothing below this line was measured, and an unreached screen is not a clean screen`);
+              row.push(`${width}x${height}:!chain`);
+              continue;
+            }
+            let revealed = false;
+            for (let w = 0; w < RENDER_CAP; w += 100) {
+              revealed = await evalJs(
+                `[].slice.call(document.querySelectorAll('#cred-remediation'))` +
+                `.some(function(b){return !b.hidden && (b.textContent||'').trim().length>0;})`,
+              );
+              if (revealed) break;
+              await sleep(100);
+            }
+            if (!revealed) {
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: the verify-before-save chain never revealed a remediation box (422 provider_unverified -> showCredRemediation) — nothing below was measured`);
+              row.push(`${width}x${height}:!reveal`);
+              continue;
+            }
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var d=document.documentElement;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),vw:d.clientWidth,vh:d.clientHeight,` +
+              `  boxes:0,shown:[],submits:0,btns:[]};` +
+              // EVERY #cred-remediation in the document, never a singular query
+              // (D228) — the id has TWO hosts and index.html orders the page's
+              // before the dialog's.
+              `[].slice.call(document.querySelectorAll('#cred-remediation')).forEach(function(b,i){` +
+              `  out.boxes++;` +
+              `  var txt=(b.textContent||'').trim(); if(b.hidden||!txt.length) return;` +
+              `  var r=b.getBoundingClientRect();` +
+              `  var body=b.querySelector('.cred-remediation-body');` +
+              // The COPY's length, not the box's: the box also carries the "!"
+              // icon glyph, and a count that included it would score a
+              // 274-character string as satisfying a 275-character source.
+              `  var copy=((body?body.textContent:txt)||'').trim();` +
+              `  var cs=getComputedStyle(body||b);` +
+              `  var line=parseFloat(cs.lineHeight)||parseFloat(cs.fontSize)*1.45||18;` +
+              // (c) IS THE FIRST LINE ACTUALLY VISIBLE — the sticky topbar
+              // covers the scrollport's own start edge, so a box at top 0 can
+              // be perfectly "in the viewport" and still unreadable. Probed at
+              // the first line's vertical middle, at the body's left inset.
+              `  var br=(body||b).getBoundingClientRect();` +
+              `  var px=Math.min(Math.max(br.left+4,1),d.clientWidth-1);` +
+              `  var py=r.top+Math.min(line,r.height)/2;` +
+              `  var hit=(py>=0&&py<=d.clientHeight-1)?document.elementFromPoint(px,py):null;` +
+              `  out.shown.push({i:i,top:+r.top.toFixed(2),bottom:+r.bottom.toFixed(2),h:+r.height.toFixed(2),` +
+              `    line:+line.toFixed(2),len:copy.length,` +
+              `    hit:hit?(hit.className||hit.tagName):'none',` +
+              `    covered:!!(hit && !b.contains(hit))});` +
+              `});` +
+              // The button, on the SAME cell and by the same rule: a fix that
+              // wins the instruction by scrolling the control off is not a fix.
+              `[].slice.call(document.querySelectorAll('#cred-submit')).forEach(function(s,i){` +
+              `  out.submits++;` +
+              `  var sr=s.getBoundingClientRect();` +
+              `  out.btns.push({i:i,top:+sr.top.toFixed(2),bottom:+sr.bottom.toFixed(2),` +
+              `    vis:(sr.height>0&&sr.bottom>0&&sr.top<d.clientHeight)});` +
+              `});` +
+              `return out;})()`,
+            );
+            if (m.view !== "view-providers") {
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: rendered section.view "${m.view}", asked for "view-providers" — the hash did not route, so nothing below this line measures the credential flow`);
+              row.push(`${width}x${height}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${cell.scen}/${theme}@${width}x${height}: data-theme is "${m.theme}" — the theme did not apply`);
+            // THE ZERO-POPULATION REFUSALS. Both are named, and both are
+            // per-cell: a screen that renders no box, or renders one and never
+            // reveals it, has measured NOTHING and must not score a green.
+            if (m.boxes === 0) {
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: zero \`#cred-remediation\` in the document — the credential form did not render its remediation slot at all, so nothing about the instruction was measured. This is not a pass`);
+              row.push(`${width}x${height}:0b`);
+              continue;
+            }
+            boxesSeen += m.boxes;
+            if (m.shown.length === 0) {
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: ${m.boxes} \`#cred-remediation\` present and NOT ONE is revealed with text — "the instruction is on screen" would be true of an empty box, which is not what this leg claims`);
+              row.push(`${width}x${height}:${m.boxes}b/0shown`);
+              continue;
+            }
+            revealedSeen += m.shown.length;
+            submitsSeen += m.submits;
+            if (m.submits === 0) {
+              buttonGone++;
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: zero \`#cred-submit\` in the document — the control the person needs to retry does not exist on the screen the instruction was painted onto`);
+            }
+            for (const s of m.btns) {
+              if (!s.vis) {
+                buttonGone++;
+                fail(D, `${cell.scen}/${theme}@${width}x${height} submit${s.i}: \`#cred-submit\` sits at top ${s.top} / bottom ${s.bottom} against a ${m.vh}px viewport — the button the person must press again is OFF-SCREEN. The instruction may not be bought with the control`);
+              }
+            }
+            for (const b of m.shown) {
+              // The corpus may never understate the server.
+              if (b.len < cell.chars) {
+                shortCopy++;
+                fail(D, `${cell.scen}/${theme}@${width}x${height} box${b.i}: the remediation renders ${b.len} characters, but \`connect_remediation("${cell.kind}")\` sends ${cell.chars} (failure_copy.ex) — the fixture understates the string this screen must place`);
+              }
+              if (b.top < 0) {
+                above++;
+                fail(D, `${cell.scen}/${theme}@${width}x${height} box${b.i}: the remediation's top edge is ${b.top} — the FIRST LINE of a ${b.len}-character instruction is ${Math.abs(b.top).toFixed(2)}px ABOVE the viewport top (box h=${b.h}, bottom=${b.bottom}, viewportH=${m.vh}). The person reads the middle of a sentence whose beginning is off-screen, with no cue that anything is above`);
+              } else if (b.top > m.vh - b.line) {
+                below++;
+                fail(D, `${cell.scen}/${theme}@${width}x${height} box${b.i}: the remediation's top edge is ${b.top} against a ${m.vh}px viewport — the whole instruction is BELOW the fold (box h=${b.h}). Revealing copy the viewport never travels to is the same defect with the sign flipped`);
+              } else if (b.covered) {
+                covered++;
+                fail(D, `${cell.scen}/${theme}@${width}x${height} box${b.i}: the first line sits at top ${b.top} and \`elementFromPoint\` over it returns "${b.hit}" — something (the sticky .topbar, app.css:794) is PAINTED ON TOP of the instruction. top >= 0 is not the same as readable`);
+              }
+            }
+            const tops = m.shown.map((b) => `${b.top}+${b.h}`).join(",");
+            const btns = m.btns.map((b) => `${b.top}${b.vis ? "" : "!off"}`).join(",");
+            row.push(
+              `${width}x${height}:${m.boxes}b/${m.shown.length}shown ` +
+              `${m.shown.map((b) => b.len).join(",")}ch top[${tops}]<=${m.vh} ` +
+              `${m.submits}s btn[${btns}]`,
+            );
+          }
+          process.stdout.write(`   ${cell.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean — ${boxesSeen} \`#cred-remediation\` walked in total, ` +
+          `${revealedSeen} of them REVEALED through the real verify-before-save chain (arm the kind -> fill ` +
+          `the form -> press the button -> 422 provider_unverified), and ${submitsSeen} \`#cred-submit\` ` +
+          `measured beside them, across ${CRED_VIEWPORTS.map(([w, h]) => `${w}x${h}`).join("/")} x light+dark ` +
+          `on ${CRED_CELLS.map((c) => `${c.kind}(${c.chars}ch)`).join(" + ")}: ${above} instructions starting ` +
+          `above the viewport, ${below} below the fold, ${covered} painted under the sticky topbar, ` +
+          `${buttonGone} unreachable submit buttons, ${shortCopy} cells whose copy understated the server. ` +
+          `EVERY box and EVERY button in the document is walked (D228) — the id \`#cred-remediation\` has two ` +
+          `hosts and index.html orders the page's before the dialog's, so a singular query is structurally ` +
+          `unable to see one of them. A cell with zero boxes, or zero revealed boxes, FAILS`,
+        );
+        okLine(
+          `THE STRINGS, ASSERTED PER CELL AND ATTRIBUTED: ` +
+          `${CRED_CELLS.map((c) => `${c.scen} ${c.kind} >= ${c.chars}ch (${c.src})`).join("; ")}. ` +
+          `The azure number is re-derived from cloud/lib/barkpark_cloud/failure_copy.ex:361-375, whose four ` +
+          `clauses measure 169/275/206/88 — NOT the 89 the filed row cites, and NOT at the \`registry/\` path it ` +
+          `cites, which does not exist. The 168-character paraphrase measures CLEAN at every geometry here: ` +
+          `driving it ALONE is green by construction (wave-23 clause 4), which is why it is the short control ` +
+          `and never the only cell. No length bound was added anywhere — the copy is the product, and the ` +
+          `remedy is where the viewport lands`,
         );
       }
     }

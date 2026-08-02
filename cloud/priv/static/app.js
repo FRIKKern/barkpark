@@ -1954,14 +1954,71 @@
     return { token: t ? t.value : "" };
   }
 
+  // WHICH `#cred-remediation`. TWO hosts render that id — the providers page's
+  // connect card (providerConnectCardHtml) and the credential modal
+  // (openProviderCredential) — and `#modal-root` sits AFTER `#view-providers`
+  // in index.html, so a SINGULAR `$("#cred-remediation")` always returns the
+  // page's box: open the modal over a providers page that has already painted
+  // its card and the server's instruction lands in a hidden box behind the
+  // dialog. Iterate the whole population (D228) and prefer the open dialog's.
+  function credRemediationBox() {
+    var all = [].slice.call(document.querySelectorAll("#cred-remediation"));
+    if (!all.length) return null;
+    var root = $("#modal-root");
+    if (root && !root.hidden) {
+      var inModal = all.filter(function (b) { return root.contains(b); });
+      if (inModal.length) return inModal[inModal.length - 1];
+    }
+    return all.filter(function (b) { return !root || !root.contains(b); })[0] || all[0];
+  }
+
+  // THE INVARIANT: THE FIRST LINE OF THE REMEDIATION IS ON SCREEN, AND
+  // #cred-submit REMAINS REACHABLE.
+  //
+  // The copy appears ABOVE the button the person just pressed, and it is up to
+  // 275 characters of operator-authored product copy (`connect_remediation/1`,
+  // cloud/lib/barkpark_cloud/failure_copy.ex — 88 generic through 275 azure).
+  // On a 390x390 phone that box is ~154px tall, so revealing it and then
+  // scrolling the BUTTON into view — the natural gesture, and the one the
+  // defect was filed on — puts the first line 22px ABOVE the viewport top (the
+  // row filed 21px against an injected string; 22 is what this paint path
+  // re-measures under the pinned face): the person
+  // reads the middle of a sentence whose beginning is off-screen, with no cue
+  // that anything is above. The remedy is where the viewport LANDS, never a cap
+  // on the copy (capping deletes the instruction they need) and never a shorter
+  // box.
+  //
+  // So the BOX's top is what is scrolled to, not the button's. `block:"start"`
+  // aligns it to the start edge of every scroll ancestor; on the page path the
+  // sticky `.topbar` (56px, app.css:794) then covers that edge, so the occluded
+  // strip is given back with one `scrollBy`. Inside the dialog nothing overlays
+  // it and no compensation is applied. #cred-submit stays reachable for free:
+  // it renders BELOW the box, so a viewport that holds the box's top holds the
+  // button too — asserted, not assumed, by the overflow guard's
+  // W23-cred-remediation-reachable leg.
+  var CRED_REMEDIATION_GAP = 12;
+  function revealCredRemediation(box) {
+    box.hidden = false;
+    if (!box.scrollIntoView) return;
+    box.scrollIntoView({ block: "start" });
+    var root = $("#modal-root");
+    if (root && root.contains(box)) return;
+    var bar = document.querySelector(".topbar");
+    var pos = bar ? getComputedStyle(bar).position : "";
+    if (!bar || (pos !== "sticky" && pos !== "fixed")) return;
+    var need = bar.getBoundingClientRect().bottom + CRED_REMEDIATION_GAP -
+      box.getBoundingClientRect().top;
+    if (need > 0) window.scrollBy(0, -need);
+  }
+
   // Paint the server-owned remediation copy INSIDE the sheet (both kinds). Never
   // routed through friendly() — the copy is the server's, verbatim (esc'd only).
   function showCredRemediation(copy) {
-    var box = $("#cred-remediation");
+    var box = credRemediationBox();
     if (!box) return;
     box.innerHTML = '<span class="cred-remediation-ico" aria-hidden="true">!</span>' +
       '<span class="cred-remediation-body">' + esc(copy) + "</span>";
-    box.hidden = false;
+    revealCredRemediation(box);
   }
 
   function submitProviderCred(kind) {
@@ -1975,7 +2032,9 @@
       return;
     }
 
-    var rem = $("#cred-remediation");
+    // The SAME box the paint below targets (credRemediationBox, never a
+    // singular query) — clearing a different one leaves a stale instruction up.
+    var rem = credRemediationBox();
     if (rem) { rem.hidden = true; rem.innerHTML = ""; } // clear a prior failure
 
     var btn = $("#cred-submit");
@@ -2401,7 +2460,7 @@
       toast({ kind: "error", title: p.fields === "azure" ? "All four fields are required." : "An API key is required." });
       return;
     }
-    var rem = $("#cred-remediation");
+    var rem = credRemediationBox(); // the same box the paint below targets
     if (rem) { rem.hidden = true; rem.innerHTML = ""; }
     var btn = $("#cred-submit");
     if (btn) { btn.disabled = true; btn.textContent = "Verifying…"; }
