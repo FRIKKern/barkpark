@@ -1557,8 +1557,28 @@ select.form-input {
    its rail is wider than the shared 260px. SCOPED to the instance workspace: the
    site-deploys grid (bare .detail-grid) is byte-identical. The single-column
    collapse below (GR65: ≤768px, moved up from 720) still wins — same specificity,
-   later in source — so this only widens the desktop rail. */
-.detail-grid--instance { grid-template-columns: 1fr 340px; }
+   later in source — so this only widens the desktop rail.
+   W26-S1 — THE TRACK FLOORS AT min-content, AND THAT IS THE CAUSE. A bare `1fr`
+   is `minmax(auto, 1fr)`: it never shrinks below the content's min-content
+   width, so one long unbreakable-ish cell in the Sites card widened this track
+   to 1948.94px and took the whole page to 2573 against a 900px viewport — 1673px
+   of the instance workspace off-screen sideways, measured on origin/main
+   cfc2f2b77 at 900/1000/1280 in both themes. `minmax(0, 1fr)` restores the
+   escape the base `.detail-grid` above already has, and drives the page to
+   900/900, 1000/1000, 1280/1280 with `.detail-main` at 252/352/624. Nothing
+   below 900 moves — the single-column collapse (≤899px) already owns that band.
+   THE VICTIM FIX WAS REFUSED (D308): `overflow-wrap: anywhere` on `.site-name`
+   patches ONE cell of a floor that will produce a fourth, and `.site-name` is
+   bound by TWO emitters with DIFFERENT caps — `siteRow` (the compact instance
+   card) binds `domains[0]`, capped at 253 by a `validate_change` in
+   registry/site.ex that a length census CANNOT see, while `globalSiteRow` binds
+   `s.name` at 255 via `validate_length`. It is the census-invisible emitter that
+   carries the live defect, so a remedy keyed to the visible cap misses it.
+   The leg that can lose is W26-instance-track-min-content in overflow-guard.mjs
+   — page-level, because every `.site-name` cell reads scrollWidth == clientWidth
+   here (1555/1555 on the cruel row) and a cell-level assertion is green by
+   construction while the page drags. */
+.detail-grid--instance { grid-template-columns: minmax(0, 1fr) 340px; }
 .detail-main h2 { margin-bottom: 12px; }
 .detail-rail { background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); padding: 18px; box-shadow: var(--shadow-sm); }
 .detail-rail h2 { font-size: 12px; text-transform: uppercase; letter-spacing: 0.05em; color: var(--muted-text); margin-bottom: 6px; }
