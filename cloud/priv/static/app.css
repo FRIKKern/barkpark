@@ -2192,9 +2192,16 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   z-index: 2;
   /* STRETCH, or the pin is a hairline. The grid is `align-items: center`, and
      this cell is EMPTY — it laid out 1px tall (its own border-bottom) centred
-     in a 35px header row, so the channel headers scrolled straight THROUGH the
+     in the header row, so the channel headers scrolled straight THROUGH the
      label column at the top while the rows below were correctly covered.
-     Measured: corner rect y 107.375 h 1 inside a header row 90.375-125.375. */
+     Measured: corner rect y 107.375 h 1 inside a header row 90.375-125.375.
+     THE ROW IS 55px, NOT 35 (cch-w23-s5). This comment used to say "a 35px
+     header row" and the guard printed the same 35, because both read COLUMN 0
+     while two of the six channel headings wrap to two lines: the columns
+     measure [35, 35, 35, 55, 55, 35] in every cell (light/dark x 768/430/390).
+     `stretch` is what makes the pin as tall as the TALLEST heading; anything
+     shorter — a centred 40px corner leaves 7.5px uncovered top and bottom —
+     puts the headings back through the label column. */
   align-self: stretch;
   background: var(--muted-surface);
   border-right: 1px solid var(--border);
