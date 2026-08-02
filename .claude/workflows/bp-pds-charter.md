@@ -2576,6 +2576,80 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 41 2026-08-02 — REVIEWED, PUSHED, GRADED A- (paper `pds-wave-41-2026-08-02`)
+
+FIVE ROUND-1 SLICES BUILT, FIVE GREEN, FIVE PUSHED WITH PRs — the first wave in seven not to strand
+work on local branches in a shared checkout. Round 2 (`pds-w40-judgment-coverage-ladder`) was NOT built
+by design (sequenced-rounds law: it depends on the LiveView block landing).
+
+| slice | final branch | PR | verdict |
+|---|---|---|---|
+| `pds-w41-caps-component-gate` | `…bypass-eve-0-r` | #9230 | real disclosure, fixed; reviewer collapsed a forked `:write` tier into `Caps.write_capable?/2` |
+| `pds-w40-liveview-write-population` | `…replaces-t-1-r` | #9231 | the wave's structural work; reviewer fixed two unit slips |
+| `pds-w40-residual-helper-hop` | `…n-ary-ok--2` | #9232 | nothing needed fixing; RESIDUAL 30 → 14 |
+| `pds-w41-scim-crosstenant-pin` | `…is-the-one-unpinn-3-r` | #9233 | reviewer pinned the twin singular fence too |
+| `pds-w40-residue-lens-can-fail` | `…success-over-an-4-r` | #9234 | the lens can red; reviewer moved the unit reconciliation to the number |
+
+**PDS-D609 — THE DECLARED NON-ANSWER IS NOW A DISPOSITION, AND ITS SIZE IS 15 OF 22.** Re-derived at
+review, not transcribed: the partition at base `20d61d187` reads store 94 / reread 6 / echo 3 / cfgl 2 /
+literal 3 / helper **22** / onehop 8, `RESIDUAL 30`; after the n-ary widening plus the one-hop join it
+reads 101 / 8 / 8 / 2 / 5 / **7** / 7, `RESIDUAL 14`. The seven survivors each print a falsifiable
+mechanism, and two of them are a PERFECT JOIN DECIDING ZERO because their hop target is itself in the
+band — the finding, printed with its reason.
+
+**PDS-D610 — A THIRD OF THAT YIELD SITS ON A MECHANISM ITS OWN BUILDER KNOWS IS WRONG, IN THE
+OVER-ACCUSING DIRECTION.** `hop_subst/4` substitutes argument expressions BY NAME, so an argument that
+is a CALL contributes its own arguments' names rather than its return: 5 of the 15 decided rows class
+`request_echo` on values that descend from the write. It is printed as a blind shape rather than buried.
+The builder could not file it — `bp task create` errored six times — so the REVIEWER filed it:
+`pds-w41-hop-arg-producer`. A finding that lives only in a claim's now-line is a finding the epic loses.
+
+**PDS-D611 — THE LIVEVIEW SURFACE HAS A DENOMINATOR: 322 / 17634 corpus defs over 23 / 804 files,
+ROUTED 235 + COMPONENT 87.** The three mandated blind shapes all landed: `62 / 235 @6` marked FLOOR with
+BOTH reasons; 13 non-literal keys, all bare-variable heads; the process boundary printed as three figures
+in three units with `62 -> 99` retired and a sentence naming why the sum is a unit error. Closure is at
+depth **8**, measured flat through 9, 10, 12, 14. The block REFUTES the charter's own D580 in its output:
+this tree reads **63 / 235 @7**, so a note carrying 66 @7 is off by 3 and was copied.
+
+**PDS-D612 — TWO UNIT SLIPS WERE FOUND INSIDE THE BLOCK WHOSE SUBJECT IS UNITS.** Telemetry co-location
+printed `0 / 330` — a count of 8 defs denominated over the name-keyed grep total. And the non-literal
+SHAPE breakdown denominated over the BARE-VAR count, which is correct on this tree only because `other`
+and `none` are both zero; with one concatenated head it would have printed a fraction over 1. Both fixed
+at review. **A denominator that is right by coincidence is the same disease one level in.**
+
+**PDS-D613 — AN UNPINNED FENCE HAS A TWIN, AND THE TWIN WAS ALSO UNPINNED.** The slice pinned
+`Scim.group_member_ids_by_role/2` (the LIST read). Measured at review, deleting the fence from
+`group_member_ids/2` — the SINGULAR `GET /scim/v2/Groups/:id` render, a different query carrying its own
+copy of the clause — moved **ZERO tests** across Groups + Users (58/0). Both are now pinned in the same
+two-org fixture. **When a fence is found unpinned, grep for its copies before declaring the class closed.**
+
+**PDS-D614 — A SECURITY RULE WAS ABOUT TO SHIP FORKED.** The caps slice's component prop restated
+`Caps.gate/3`'s `:write` cond clause-for-clause, with private copies of `restricted?/1` and
+`has_principal?/1`, because those were private. Two enforcement points, one rule, no coupling: change the
+gate and the component-targeted path silently keeps the old law. `Caps.write_capable?/2` is now the single
+owner and mutating it reds BOTH suites (21 tests, 4 failures). The builder named this and declined it as
+out of scope; scope discipline is right for builders and wrong for the last hands before merge.
+
+**PDS-D615 — A SLICE REPORT CLAIMED AN OUTPUT SENTENCE THE OUTPUT DID NOT CARRY.** The residue lens's
+report stated the run says its A3 `0` does not contradict the census's `3`. Grep over the actual run
+output: the head paragraph names the two units but never the arm and never that figure. Fixed at the
+number. **Read the artifact, not the report about the artifact — including the builder's.**
+
+LEDGER TRUTH, AND A RECURRING FAILURE MODE NAMED: THREE of five slice tasks read `lifecycle_status: open`
+with a released or LAPSED claim while their now-lines said DONE. `in_progress` is reachable ONLY through
+`bp task claim`, so a lapsed lease silently rewrites a built slice into an unclaimed backlog row — the
+stale-open mirror of false-done. Reviewer re-claimed all of them and pulsed each with its PR. One criterion
+(`pds-w40-residual-helper-hop` #7) was TRUE and unstamped; verified by diff and stamped.
+
+NEXT WAVE TAKES, IN THIS ORDER: (1) merge round 1 — the two census PRs (#9231, #9232) auto-merge and the
+merged tree was verified `census rc=0` + `selftest rc=0` with 25 cases / 16 mutants, so either order works;
+(2) THEN `pds-w40-judgment-coverage-ladder`, re-measuring every integer BY RUN — the alias close and this
+wave's join have moved them again; (3) `pds-w41-hop-arg-producer`, because a third of the join's yield is
+wrong in the direction this epic exists to correct; (4) JUDGE the 322, now that the denominator exists.
+STILL BEHIND THE POLICY FENCE, SAID PLAINLY: **zero PDS instruments are wired to CI at all** —
+`pds-w41-residue-lens-unrun`, `pds-w38-record-parity-ci-lane`, `pds-w35-elixir-census-gate`.
+
+
 ### Wave 41 2026-08-02 — "Give every number a denominator" — DECIDED, building (paper `pds-wave-41-2026-08-02`)
 
 GROUND TRUTH, DERIVED IN-PROCESS by this phase over a clean `git archive origin/main` extraction at
@@ -11505,75 +11579,3 @@ D585's 182 CORRECTED BY RUN IN WAVE 41; cite the attribute and the grep, never t
 `gr-*` / `cch-*` appears NOWHERE in this charter and is retired from the fence description.
 CHARTER PR: docs-only, `Task: task-2ac1f95237c4a8e5`.
 
-### Wave 41 2026-08-02 — REVIEWED, PUSHED, GRADED A- (paper `pds-wave-41-2026-08-02`)
-
-FIVE ROUND-1 SLICES BUILT, FIVE GREEN, FIVE PUSHED WITH PRs — the first wave in seven not to strand
-work on local branches in a shared checkout. Round 2 (`pds-w40-judgment-coverage-ladder`) was NOT built
-by design (sequenced-rounds law: it depends on the LiveView block landing).
-
-| slice | final branch | PR | verdict |
-|---|---|---|---|
-| `pds-w41-caps-component-gate` | `…bypass-eve-0-r` | #9230 | real disclosure, fixed; reviewer collapsed a forked `:write` tier into `Caps.write_capable?/2` |
-| `pds-w40-liveview-write-population` | `…replaces-t-1-r` | #9231 | the wave's structural work; reviewer fixed two unit slips |
-| `pds-w40-residual-helper-hop` | `…n-ary-ok--2` | #9232 | nothing needed fixing; RESIDUAL 30 → 14 |
-| `pds-w41-scim-crosstenant-pin` | `…is-the-one-unpinn-3-r` | #9233 | reviewer pinned the twin singular fence too |
-| `pds-w40-residue-lens-can-fail` | `…success-over-an-4-r` | #9234 | the lens can red; reviewer moved the unit reconciliation to the number |
-
-**PDS-D609 — THE DECLARED NON-ANSWER IS NOW A DISPOSITION, AND ITS SIZE IS 15 OF 22.** Re-derived at
-review, not transcribed: the partition at base `20d61d187` reads store 94 / reread 6 / echo 3 / cfgl 2 /
-literal 3 / helper **22** / onehop 8, `RESIDUAL 30`; after the n-ary widening plus the one-hop join it
-reads 101 / 8 / 8 / 2 / 5 / **7** / 7, `RESIDUAL 14`. The seven survivors each print a falsifiable
-mechanism, and two of them are a PERFECT JOIN DECIDING ZERO because their hop target is itself in the
-band — the finding, printed with its reason.
-
-**PDS-D610 — A THIRD OF THAT YIELD SITS ON A MECHANISM ITS OWN BUILDER KNOWS IS WRONG, IN THE
-OVER-ACCUSING DIRECTION.** `hop_subst/4` substitutes argument expressions BY NAME, so an argument that
-is a CALL contributes its own arguments' names rather than its return: 5 of the 15 decided rows class
-`request_echo` on values that descend from the write. It is printed as a blind shape rather than buried.
-The builder could not file it — `bp task create` errored six times — so the REVIEWER filed it:
-`pds-w41-hop-arg-producer`. A finding that lives only in a claim's now-line is a finding the epic loses.
-
-**PDS-D611 — THE LIVEVIEW SURFACE HAS A DENOMINATOR: 322 / 17634 corpus defs over 23 / 804 files,
-ROUTED 235 + COMPONENT 87.** The three mandated blind shapes all landed: `62 / 235 @6` marked FLOOR with
-BOTH reasons; 13 non-literal keys, all bare-variable heads; the process boundary printed as three figures
-in three units with `62 -> 99` retired and a sentence naming why the sum is a unit error. Closure is at
-depth **8**, measured flat through 9, 10, 12, 14. The block REFUTES the charter's own D580 in its output:
-this tree reads **63 / 235 @7**, so a note carrying 66 @7 is off by 3 and was copied.
-
-**PDS-D612 — TWO UNIT SLIPS WERE FOUND INSIDE THE BLOCK WHOSE SUBJECT IS UNITS.** Telemetry co-location
-printed `0 / 330` — a count of 8 defs denominated over the name-keyed grep total. And the non-literal
-SHAPE breakdown denominated over the BARE-VAR count, which is correct on this tree only because `other`
-and `none` are both zero; with one concatenated head it would have printed a fraction over 1. Both fixed
-at review. **A denominator that is right by coincidence is the same disease one level in.**
-
-**PDS-D613 — AN UNPINNED FENCE HAS A TWIN, AND THE TWIN WAS ALSO UNPINNED.** The slice pinned
-`Scim.group_member_ids_by_role/2` (the LIST read). Measured at review, deleting the fence from
-`group_member_ids/2` — the SINGULAR `GET /scim/v2/Groups/:id` render, a different query carrying its own
-copy of the clause — moved **ZERO tests** across Groups + Users (58/0). Both are now pinned in the same
-two-org fixture. **When a fence is found unpinned, grep for its copies before declaring the class closed.**
-
-**PDS-D614 — A SECURITY RULE WAS ABOUT TO SHIP FORKED.** The caps slice's component prop restated
-`Caps.gate/3`'s `:write` cond clause-for-clause, with private copies of `restricted?/1` and
-`has_principal?/1`, because those were private. Two enforcement points, one rule, no coupling: change the
-gate and the component-targeted path silently keeps the old law. `Caps.write_capable?/2` is now the single
-owner and mutating it reds BOTH suites (21 tests, 4 failures). The builder named this and declined it as
-out of scope; scope discipline is right for builders and wrong for the last hands before merge.
-
-**PDS-D615 — A SLICE REPORT CLAIMED AN OUTPUT SENTENCE THE OUTPUT DID NOT CARRY.** The residue lens's
-report stated the run says its A3 `0` does not contradict the census's `3`. Grep over the actual run
-output: the head paragraph names the two units but never the arm and never that figure. Fixed at the
-number. **Read the artifact, not the report about the artifact — including the builder's.**
-
-LEDGER TRUTH, AND A RECURRING FAILURE MODE NAMED: THREE of five slice tasks read `lifecycle_status: open`
-with a released or LAPSED claim while their now-lines said DONE. `in_progress` is reachable ONLY through
-`bp task claim`, so a lapsed lease silently rewrites a built slice into an unclaimed backlog row — the
-stale-open mirror of false-done. Reviewer re-claimed all of them and pulsed each with its PR. One criterion
-(`pds-w40-residual-helper-hop` #7) was TRUE and unstamped; verified by diff and stamped.
-
-NEXT WAVE TAKES, IN THIS ORDER: (1) merge round 1 — the two census PRs (#9231, #9232) auto-merge and the
-merged tree was verified `census rc=0` + `selftest rc=0` with 25 cases / 16 mutants, so either order works;
-(2) THEN `pds-w40-judgment-coverage-ladder`, re-measuring every integer BY RUN — the alias close and this
-wave's join have moved them again; (3) `pds-w41-hop-arg-producer`, because a third of the join's yield is
-wrong in the direction this epic exists to correct; (4) JUDGE the 322, now that the denominator exists.
-STILL BEHIND THE POLICY FENCE, SAID PLAINLY: **zero PDS instruments are wired to CI at all** —
-`pds-w41-residue-lens-unrun`, `pds-w38-record-parity-ci-lane`, `pds-w35-elixir-census-gate`.
