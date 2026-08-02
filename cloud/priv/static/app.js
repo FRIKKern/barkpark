@@ -7649,6 +7649,63 @@
     return m.silent ? "" : siteBindingPill(m);
   }
 
+  // cch-w23-s3 — THE ROW STOPPED CLAIMING ONE DOMAIN FOR A TWO-DOMAIN SITE.
+  // Both list builders painted `domains[0]` and nothing else, so a site serving
+  // acme.com AND www.acme.com read as a one-domain site. The person is
+  // MISINFORMED, not locked out: the second domain IS reachable — the
+  // site-detail #site-domains TLS checklist (domainChecklistHtml) iterates the
+  // FULL array, so the truth is one drill-down away. What was missing was any
+  // hint from the list that a drill-down had anything more to show.
+  //
+  // WHAT IT SAYS — the ADDITIONAL count ("+1 more domain"), never the total.
+  // The row already shows one host; a total ("2 domains") makes the reader
+  // subtract to learn what is hidden, and reads as a contradiction beside a
+  // single visible name. "+1" alone is the cheap version (one more domain? one
+  // more environment?), so the noun is spelled out and pluralized. The unshown
+  // hosts themselves ride the `title` — the discriminating detail, at zero
+  // layout cost. It is supplementary, not a control: the authoritative list is
+  // the detail checklist, which is where the row already points.
+  // NO apex/www SPECIAL CASE. Treating www.acme.com as "the same domain" as
+  // acme.com needs an alias relationship the payload does not carry (the
+  // registry stores one flat normalized list), so the heuristic would have to
+  // be invented here — and a wrong guess prints nothing for a site that really
+  // does serve two domains, which is the exact misinformation this fixes.
+  // Three unrelated hostnames and an apex/www pair therefore count the same.
+  //
+  // WHAT IT COSTS, MEASURED (headless Chrome, scenarios `sites` +
+  // `sites-on-instance`, light, against the pre-fix bytes): on the #sites row
+  // the meta line wraps at 320/360/390 and the row grows 166 -> 184px (+18,
+  // exactly one 18px line); at 430 it does not wrap and the row is unchanged at
+  // 166. On the instance-workspace card the shorter meta line absorbs it with
+  // NO wrap at any width (128 -> 128 at 320). Page scrollWidth stays == 320 at
+  // every width on both bytes — this adds a line, never a sideways scroll.
+  // FIVE extra domains measures IDENTICALLY to one (184/36 at 320-390, 166/18
+  // at 430): the segment wraps whole either way, so the row does not keep
+  // growing with the count. Rows with nothing to add are byte-identical.
+  var SITE_MORE_DOMAINS_TITLE_MAX = 5; // a tooltip, not a list view
+  // How many configured domains the row does NOT show. 0 when there is nothing
+  // to say — the caller then emits NOTHING at all (no "+0", no empty element).
+  function siteExtraDomains(s) {
+    var d = s && s.domains;
+    if (!Array.isArray(d) || d.length < 2) return 0;
+    return d.length - 1;
+  }
+  // The trailing `.site-meta` segment, or "" — reused verbatim by BOTH list
+  // builders. It rides the row's EXISTING meta line and its " · " grammar
+  // rather than a new chip: 12px muted is the register a count belongs in (it
+  // must not compete with the site's identity), the line already exists in both
+  // builders, and folding in costs no new selector token.
+  function siteMoreDomainsSeg(s) {
+    var extra = siteExtraDomains(s);
+    if (!extra) return "";
+    var rest = s.domains.slice(1);
+    var shown = rest.slice(0, SITE_MORE_DOMAINS_TITLE_MAX);
+    var title = "Also serves " + shown.join(", ") +
+      (rest.length > shown.length ? " and " + (rest.length - shown.length) + " more" : "");
+    return " &middot; <span title=\"" + esc(title) + "\">+" + extra + " more domain" +
+      (extra === 1 ? "" : "s") + "</span>";
+  }
+
   function siteRow(s, bp) {
     var domain = (s.domains && s.domains[0]) || s.slug || s.name || "—";
     var fw = s.framework ? esc(s.framework) : "site";
@@ -7658,7 +7715,7 @@
     var auto = s.github_webhook_configured;
     return '<div class="site-row" data-id="' + esc(s.id) + '" role="button" tabindex="0"><div class="site-main">' +
       '<div class="site-name">' + esc(domain) + "</div>" +
-      '<div class="site-meta">' + fw + " &middot; " + repo + "</div>" +
+      '<div class="site-meta">' + fw + " &middot; " + repo + siteMoreDomainsSeg(s) + "</div>" +
       '</div><div class="fleet-badges">' +
         // cch-w16-s4: no door to a site that has never served a build.
         siteOpenLink(siteHasEverDeployed(s) ? siteLiveUrl(s, bp) : null) +
@@ -9621,7 +9678,10 @@
       '<div class="site-main">' +
         '<div class="site-name">' + esc(name) + "</div>" +
         '<div class="site-host">' + esc(host) + "</div>" +
-        '<div class="site-meta">' + fw + " &middot; " + instSeg + " &middot; updated " + esc(updated) + "</div>" +
+        // cch-w23-s3: the count of domains this row does NOT show, on the same
+        // meta line and in the same grammar as the compact siteRow above.
+        '<div class="site-meta">' + fw + " &middot; " + instSeg + " &middot; updated " + esc(updated) +
+          siteMoreDomainsSeg(s) + "</div>" +
       "</div>" +
       '<div class="fleet-badges">' +
         // cch-w16-s4: the row that used to paint "Not deployed" beside
@@ -19198,6 +19258,10 @@
       siteBindingPill: siteBindingPill,
       siteBindingChip: siteBindingChip,
       siteRow: siteRow,
+      // cch-w23-s3: the unshown-domain count both list builders share. The row
+      // used to claim ONE domain for a two-domain site — misinformation, not a
+      // lockout (the site-detail #site-domains checklist iterates them all).
+      siteExtraDomains: siteExtraDomains, siteMoreDomainsSeg: siteMoreDomainsSeg,
       // …and the URL the LIST surfaces manufacture when the payload carries none.
       // Unasserted until ssw8 despite being the "Visit ↗" a stranger clicks first.
       siteLiveUrl: siteLiveUrl,
