@@ -62,14 +62,58 @@ defmodule BarkparkCloud.FailureCopyTest do
     assert FailureCopy.humanize("provider returned invalid token") == auth
   end
 
-  test "dns/zone jargon → human domain copy, checked before capacity" do
+  test "every REAL dns emitter → human domain copy, checked before capacity" do
     dns = "Securing the domain failed on the provider side."
 
-    assert FailureCopy.humanize("dns zone create failed for example.barkpark.cloud") == dns
-    assert FailureCopy.humanize("dns record update failed") == dns
-    # A dns+quota string is a DOMAIN problem, not a server-capacity one — the
-    # ordering guarantees the domain copy wins over the capacity copy.
-    assert FailureCopy.humanize("dns zone quota exceeded") == dns
+    # The four shapes the tree can actually emit, each byte-faithful to its
+    # producer's `fmt.Errorf` (all READ-ONLY, cited per row). The three strings
+    # this test used to pin — "dns zone create failed …", "dns record update
+    # failed", "dns zone quota exceeded" — were SYNTHETIC: no producer anywhere
+    # emits them, so they proved only that the clause matched its own fixtures.
+    emitters = [
+      # internal/hetzner/dns.go:74 — hetzner dns upsert %q: %w
+      ~s|hetzner dns upsert "bp-acme-ac4e1f2a.barkpark.cloud": zone not found|,
+      # internal/hetzner/dns.go:137 — hetzner dns delete %q: %w
+      ~s|hetzner dns delete "bp-acme-ac4e1f2a.barkpark.cloud": status 409|,
+      # internal/cli/cloud/dns_cloud.go:146 — hcloud zone rrset set-records %q: %w: %s
+      ~s|hcloud zone rrset set-records "bp-acme-ac4e1f2a.barkpark.cloud": exit status 1: rrset invalid|,
+      # internal/cli/cloud/dns_cloud.go:169 — hcloud zone rrset delete %q: %w: %s
+      ~s|hcloud zone rrset delete "bp-acme-ac4e1f2a.barkpark.cloud": exit status 1: not found|
+    ]
+
+    for raw <- emitters do
+      assert FailureCopy.humanize(raw) == dns, "not classified as dns: #{raw}"
+    end
+
+    # internal/cli/cloud/dns_cloud.go:151 — change-ttl, and it carries a QUOTA
+    # token: a DNS step is a DOMAIN problem, not a server-capacity one, and the
+    # clause ordering is what guarantees the domain copy wins.
+    assert FailureCopy.humanize(
+             ~s|hcloud zone rrset change-ttl "bp-acme-ac4e1f2a.barkpark.cloud": exit status 1: zone quota exceeded|
+           ) == dns
+  end
+
+  test "the dns class no longer fires on a string that merely MENTIONS dns" do
+    # The deleted `dns` + `failed` leg made the whole class a catch-all. A
+    # capacity failure on a site whose SLUG contains `dns` — reachable through
+    # the non-admin POST /v1/sites, preserved verbatim into `base.Name` by
+    # `Barkpark.provisioning_subdomain/1` — must read as capacity.
+    assert FailureCopy.humanize(
+             ~s|hcloud server create "acme-dns-site-ac4e1f2a": exit status 1: resource_unavailable|
+           ) ==
+             "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+  end
+
+  test "the atomic ip-read-back sub-error is a NETWORK failure, not a domain one" do
+    # internal/cli/cloud/provider.go:637 — `hcloud server create %q: ip read-back
+    # failed (created server deleted to avoid an orphan): %w`. It carries a
+    # dns-bearing name AND the literal word `failed` in ONE line, which is
+    # precisely what the deleted leg keyed on. The cause is the wrapped network
+    # error, so the person must be told to retry, not to look at their domain.
+    raw =
+      ~s|hcloud server create "acme-dns-site-ac4e1f2a": ip read-back failed (created server deleted to avoid an orphan): dial tcp: i/o timeout|
+
+    assert FailureCopy.humanize(raw) == "A network step timed out. Retry usually fixes this."
   end
 
   test "network/timeout jargon → human network copy" do
@@ -83,7 +127,7 @@ defmodule BarkparkCloud.FailureCopyTest do
     for raw <- [
           "server type unavailable (SERVER_LIMIT_EXCEEDED)",
           "hcloud: unauthorized (401)",
-          "dns zone create failed",
+          ~s|hetzner dns upsert "bp-acme-ac4e1f2a.barkpark.cloud": zone not found|,
           "dial tcp: i/o timeout"
         ] do
       once = FailureCopy.humanize(raw)
@@ -264,6 +308,252 @@ defmodule BarkparkCloud.FailureCopyTest do
              "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
   end
 
+  ## THE FALLBACK-LADDER AGGREGATE IS CLASSIFIED PER SUB-ERROR (wave 25 S1).
+  ##
+  ## `CreateWithFallback` folds every candidate's failure into ONE string, so a
+  ## substring scan of the whole concatenation fires on any token ANY candidate
+  ## mentioned, on the header's own literal `failed`, and on the user's own slug.
+
+  @capacity "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+  @dns_copy "Securing the domain failed on the provider side."
+  @network "A network step timed out. Retry usually fixes this."
+  @auth "The hosting provider rejected our credentials. We're on it — try again shortly."
+
+  # internal/cli/cloud/provider.go:543-552 — HetznerCandidates' resilience
+  # ladder: base plus four fallbacks, deduped.
+  @ladder [
+    {"cx22", "fsn1"},
+    {"cx23", "fsn1"},
+    {"cx23", "hel1"},
+    {"cx33", "nbg1"},
+    {"cpx22", "fsn1"}
+  ]
+
+  # DERIVED, never pasted. `CreateWithFallback`
+  # (internal/cli/cloud/provider.go:569-578, READ-ONLY) composes exactly:
+  #
+  #   fmt.Errorf("create %q failed on all %d candidate type/locations:%s",
+  #              base.Name, len(candidates), sb.String())
+  #   fmt.Fprintf(&sb, "\n  - %s/%s: %s", spec.ServerType, spec.Region, err)
+  #
+  # so the header ends AT the colon with NO trailing space, and every entry is
+  # newline-two-space-dash prefixed. Composing from those two shapes is what
+  # makes these fixtures red when the producer's format changes.
+  defp aggregate(name, sub_errors) do
+    entries =
+      sub_errors
+      |> Enum.zip(@ladder)
+      |> Enum.map_join(fn {err, {type, region}} -> "\n  - #{type}/#{region}: #{err}" end)
+
+    ~s|create "#{name}" failed on all #{length(sub_errors)} candidate type/locations:| <>
+      entries
+  end
+
+  # internal/cli/cloud/provider.go:614 — `hcloud server create %q: %w: %s`,
+  # with hcloud's captured stderr as the tail.
+  defp create_failed(name, stderr) do
+    ~s|hcloud server create "#{name}": exit status 1: #{stderr}|
+  end
+
+  describe "humanize/1 — the fallback-ladder aggregate" do
+    # TRIGGER A — every sub-error is capacity, on a slug CONTAINING `dns`. The
+    # slug reaches `base.Name` verbatim (Barkpark.provisioning_subdomain/1) and
+    # is reachable through the non-admin POST /v1/sites, so before the split this
+    # person was told "Securing the domain failed" on every single attempt.
+    test "A: a wholly-capacity aggregate on a dns-bearing slug reads as CAPACITY" do
+      raw =
+        aggregate(
+          "acme-dns-site-ac4e1f2a",
+          List.duplicate(create_failed("acme-dns-site-ac4e1f2a", "resource_unavailable"), 5)
+        )
+
+      assert FailureCopy.aggregate?(raw)
+      assert FailureCopy.humanize(raw) == @capacity
+      refute FailureCopy.humanize(raw) == @dns_copy
+    end
+
+    # CONTROL C — byte-identical to A except the slug. If the fix were a blanket
+    # disabling of the DNS class, A and C would both pass while the real emitters
+    # above went red; they don't, so this pair isolates the cause to the slug.
+    test "C control: the same aggregate on a plain slug also reads as CAPACITY" do
+      plain =
+        aggregate(
+          "bp-stopwatch-ac4e1f2a",
+          List.duplicate(create_failed("bp-stopwatch-ac4e1f2a", "resource_unavailable"), 5)
+        )
+
+      cruel =
+        aggregate(
+          "acme-dns-site-ac4e1f2a",
+          List.duplicate(create_failed("acme-dns-site-ac4e1f2a", "resource_unavailable"), 5)
+        )
+
+      # The ONLY difference between the two fixtures is the slug.
+      assert String.replace(cruel, "acme-dns-site", "bp-stopwatch") == plain
+      assert FailureCopy.humanize(plain) == @capacity
+      assert FailureCopy.humanize(cruel) == FailureCopy.humanize(plain)
+    end
+
+    # TRIGGER B — one dns sub-error of five no longer outvotes the other four.
+    test "B: 1 dns + 4 capacity sub-errors reads as CAPACITY, not domain" do
+      raw =
+        aggregate("bp-stopwatch-ac4e1f2a", [
+          ~s|hetzner dns upsert "bp-stopwatch-ac4e1f2a.barkpark.cloud": zone not found|,
+          create_failed("bp-stopwatch-ac4e1f2a", "resource_unavailable"),
+          create_failed("bp-stopwatch-ac4e1f2a", "resource_unavailable"),
+          create_failed("bp-stopwatch-ac4e1f2a", "resource_unavailable"),
+          create_failed("bp-stopwatch-ac4e1f2a", "resource_unavailable")
+        ])
+
+      assert FailureCopy.humanize(raw) == @capacity
+    end
+
+    # The mirror of B: a genuine plurality of dns sub-errors still wins, so the
+    # split is not a way of never saying "domain" again.
+    test "a dns-dominated aggregate still reads as DOMAIN" do
+      raw =
+        aggregate("bp-stopwatch-ac4e1f2a", [
+          ~s|hetzner dns upsert "bp-stopwatch-ac4e1f2a.barkpark.cloud": zone not found|,
+          ~s|hetzner dns delete "bp-stopwatch-ac4e1f2a.barkpark.cloud": status 409|,
+          ~s|hcloud zone rrset set-records "bp-stopwatch-ac4e1f2a.barkpark.cloud": exit status 1: rrset invalid|,
+          create_failed("bp-stopwatch-ac4e1f2a", "resource_unavailable")
+        ])
+
+      assert FailureCopy.humanize(raw) == @dns_copy
+    end
+
+    # The ip read-back INSIDE an aggregate: dns-bearing name AND `failed` in one
+    # line, five times over, and still a network fault.
+    test "an all-ip-read-back aggregate reads as NETWORK" do
+      raw =
+        aggregate(
+          "acme-dns-site-ac4e1f2a",
+          for _ <- 1..5 do
+            ~s|hcloud server create "acme-dns-site-ac4e1f2a": ip read-back failed (created server deleted to avoid an orphan): dial tcp: i/o timeout|
+          end
+        )
+
+      assert FailureCopy.humanize(raw) == @network
+    end
+
+    # THE TIE RULE (charter D295): a tie falls through to the RAW pass-through.
+    # Note the atomic path would have said CAPACITY here — capacity is checked
+    # before auth — so this also proves the aggregate arm is the one running.
+    test "a TIE falls through to the raw string, verbatim" do
+      raw =
+        aggregate("bp-stopwatch-ac4e1f2a", [
+          create_failed("bp-stopwatch-ac4e1f2a", "resource_unavailable"),
+          create_failed("bp-stopwatch-ac4e1f2a", "unauthorized (401)"),
+          create_failed("bp-stopwatch-ac4e1f2a", "resource_unavailable"),
+          create_failed("bp-stopwatch-ac4e1f2a", "unauthorized (401)")
+        ])
+
+      assert FailureCopy.humanize(raw) == raw
+      refute FailureCopy.humanize(raw) == @capacity
+      refute FailureCopy.humanize(raw) == @auth
+    end
+
+    test "an aggregate whose sub-errors all classify to NOTHING passes through raw" do
+      raw =
+        aggregate("bp-stopwatch-ac4e1f2a", [
+          create_failed("bp-stopwatch-ac4e1f2a", "ssh key not found"),
+          create_failed("bp-stopwatch-ac4e1f2a", "ssh key not found")
+        ])
+
+      assert FailureCopy.humanize(raw) == raw
+    end
+
+    # BOTH markers are required. The discriminator is a TIE fixture: the
+    # aggregate arm returns it raw, while the atomic arm classifies the whole
+    # concatenation as capacity — so a string that takes the atomic arm is
+    # visibly different, not merely "also correct".
+    test "aggregate?/1 needs BOTH the header and the newline-two-space-dash separator" do
+      tie =
+        aggregate("bp-stopwatch-ac4e1f2a", [
+          create_failed("bp-stopwatch-ac4e1f2a", "resource_unavailable"),
+          create_failed("bp-stopwatch-ac4e1f2a", "unauthorized (401)")
+        ])
+
+      assert FailureCopy.aggregate?(tie)
+      assert FailureCopy.humanize(tie) == tie
+
+      # Header, but the entries are comma-joined — NOT the producer's separator.
+      header_only = String.replace(tie, "\n  - ", ", ")
+      refute FailureCopy.aggregate?(header_only)
+      assert FailureCopy.humanize(header_only) == @capacity
+
+      # The separator, but no header phrase: ordinary list formatting in an
+      # operator note.
+      separator_only =
+        String.replace(
+          tie,
+          ~s|create "bp-stopwatch-ac4e1f2a" failed on all 2 candidate type/locations:|,
+          "provisioning notes:"
+        )
+
+      refute FailureCopy.aggregate?(separator_only)
+      assert FailureCopy.humanize(separator_only) == @capacity
+
+      refute FailureCopy.aggregate?(nil)
+      refute FailureCopy.aggregate?("exceeded max provision attempts (3)")
+    end
+
+    # The aggregate is WRAPPED by its callers before it is stored
+    # (internal/cli/cloud/restore_driver.go:137 `resurrect create %q: %w`,
+    # warmpool_assign.go:30 `create warm server %q: %w`), so the header must not
+    # be anchored at the start of the string.
+    test "a WRAPPED aggregate still takes the aggregate arm" do
+      raw =
+        aggregate(
+          "acme-dns-site-ac4e1f2a",
+          List.duplicate(create_failed("acme-dns-site-ac4e1f2a", "resource_unavailable"), 5)
+        )
+
+      wrapped = ~s|resurrect create "acme-dns-site-ac4e1f2a": | <> raw
+
+      assert FailureCopy.aggregate?(wrapped)
+      assert FailureCopy.humanize(wrapped) == @capacity
+    end
+
+    # A typed refusal is still checked FIRST: it can never be split.
+    test "a typed refusal carrying both markers is still passed through verbatim" do
+      raw =
+        ~s|the instance refused the deploy (HTTP 400): E_BAD_NAME — | <>
+          aggregate("x", [create_failed("x", "resource_unavailable")])
+
+      assert FailureCopy.humanize(raw) == raw
+    end
+
+    test "aggregate output is idempotent under the client's second pass" do
+      raw =
+        aggregate(
+          "acme-dns-site-ac4e1f2a",
+          List.duplicate(create_failed("acme-dns-site-ac4e1f2a", "resource_unavailable"), 5)
+        )
+
+      once = FailureCopy.humanize(raw)
+      assert FailureCopy.humanize(once) == once
+    end
+  end
+
+  # ── site-spawner D28: the STATIC twin of "no build source". Its RAW string is
+  # asserted in registry_deployment_reaper_test.exs; its HUMANIZED output was
+  # asserted NOWHERE until wave 25 S1.
+
+  test "no-content-binding jargon → copy naming the --dataset cure, not 'connect a repo'" do
+    human = FailureCopy.humanize("site has no content binding (no dataset attached)")
+
+    assert human ==
+             "This site isn't bound to any content yet. Create it with --dataset <workspace>/<project>/<dataset>."
+
+    # It must NOT get the repo-flavoured "no build source" copy: a content-bound
+    # site builds from a Barkpark dataset, so "connect a repo" names neither the
+    # cause nor the cure.
+    refute human =~ "Connect a repo"
+    # Idempotent under the client's second pass.
+    assert FailureCopy.humanize(human) == human
+  end
+
   # ── connect_remediation/1 — verify-before-save copy naming the exact console.
 
   test "connect_remediation names the exact Hetzner + Azure console fix" do
@@ -273,6 +563,20 @@ defmodule BarkparkCloud.FailureCopyTest do
     assert FailureCopy.connect_remediation("azure") =~ "Certificates & secrets"
     # Unknown kind falls back to a provider-agnostic, actionable line.
     assert FailureCopy.connect_remediation("gcp") =~ "verify"
+  end
+
+  test "connect_remediation names the exact Cloudflare console fix (CONTENT, not parity)" do
+    # router_providers_catalog_test.exs asserts the ROUTE payload equals
+    # `FailureCopy.connect_remediation("cloudflare")` — real route/function parity,
+    # but it cannot lose on CONTENT: blank the copy and it stays green. This row
+    # is the content half, matching the hetzner/azure rows above.
+    cloudflare = FailureCopy.connect_remediation("cloudflare")
+
+    assert cloudflare =~ "Cloudflare dashboard"
+    assert cloudflare =~ "API Tokens"
+    assert cloudflare =~ "DNS"
+    # And it must not be the provider-agnostic fallback.
+    refute cloudflare == FailureCopy.connect_remediation("gcp")
   end
 
   # ── provider_not_connected_remediation/1 — the launch-time "connect first" copy.

@@ -32,16 +32,60 @@ defmodule BarkparkCloud.FailureCopy do
   ## Provider-error classes (coherence arc D58)
 
   The Hetzner/provisioner layer emits raw provider jargon
-  (`SERVER_LIMIT_EXCEEDED`, `resource_unavailable`, `unauthorized`, DNS
-  `zone create` failures, `connection refused`, …) that reached the dashboard
-  and CLI verbatim. Those are folded into four human classes — capacity, auth,
-  dns, network — matched case-insensitively (provider casing is inconsistent) so
-  no surface ever renders an ALL_CAPS code. The stored value stays RAW: only the
-  JSON boundary humanizes, so the timeline's forensic fold and the
-  `provision_failed` email keep the honest reason. The DNS class is checked
-  BEFORE the generic capacity class because a "dns zone quota" failure is a
-  domain problem, not a server-capacity one. All output copy is idempotent under
-  a second `humanize` pass (none of it re-matches a class token).
+  (`SERVER_LIMIT_EXCEEDED`, `resource_unavailable`, `unauthorized`,
+  `hetzner dns upsert "…"` failures, `connection refused`, …) that reached the
+  dashboard and CLI verbatim. Those are folded into four human classes —
+  capacity, auth, dns, network — matched case-insensitively (provider casing is
+  inconsistent) so no surface ever renders an ALL_CAPS code. The stored value
+  stays RAW: only the JSON boundary humanizes, so the timeline's forensic fold
+  and the `provision_failed` email keep the honest reason. The DNS class is
+  checked BEFORE the generic capacity class because a DNS step that failed on a
+  zone quota is a domain problem, not a server-capacity one. All output copy is
+  idempotent under a second `humanize` pass (none of it re-matches a class
+  token).
+
+  ### The DNS class is keyed on the PRODUCER'S vocabulary (wave 25 S1)
+
+  It used to read `contains("zone create") or (contains("dns") and
+  (contains("quota") or contains("failed")))`. NO producer in this tree emits
+  `zone create`, `dns zone` or `dns record` as an ERROR (`grep -rn` found them
+  only in this clause, its fixtures, and `bp cloud hetzner dns` HELP TEXT), so
+  the class was simultaneously DEAD on the real corpus and, via its `dns` +
+  `failed` leg, a catch-all for any string that merely mentions `dns`. The four
+  shapes the tree can actually emit are exactly two verb-anchored prefixes in
+  three READ-ONLY files:
+
+    * `hetzner dns <upsert|change-ttl|delete|resolve|list> %q` —
+      `internal/hetzner/dns.go:74,114,137,156`, `internal/cli/cloud/dns.go:279,319,359`
+    * `hcloud zone rrset <set-records|change-ttl|delete|list> %q` —
+      `internal/cli/cloud/dns_cloud.go:146,151,169,197`
+
+  `@dns_step` is anchored on the VERB rather than on the bare `hetzner dns`
+  prefix: the bare form is only safe because of a space character, which is not
+  a guarantee.
+
+  ### A fallback-ladder AGGREGATE is classified PER SUB-ERROR (wave 25 S1)
+
+  `CreateWithFallback` (`internal/cli/cloud/provider.go:569`, READ-ONLY) folds
+  every candidate's failure into ONE string —
+
+      create "acme-dns-site-ac4e1f2a" failed on all 5 candidate type/locations:
+        - cx22/fsn1: … resource_unavailable …
+        - cx23/fsn1: … resource_unavailable …
+
+  — so a substring scan of the WHOLE concatenation answers a question nobody
+  asked: it fires on any token ANY candidate happened to mention, and on the
+  header's own literal `failed`, and on the user's own slug (the `%q` is
+  `base.Name`, which carries the site slug verbatim through
+  `Barkpark.provisioning_subdomain/1` and the non-admin `POST /v1/sites`). A
+  site named `acme-dns-site` therefore had EVERY provisioning failure, forever,
+  reported as a domain failure while Hetzner was simply out of capacity.
+
+  So an aggregate is SPLIT: each sub-error is classified on its own and the
+  classes are folded. On a TIE — or when no sub-error classifies — the raw
+  string passes through (scrubbed) rather than a confident wrong cause being
+  invented; a person reading jargon is better off than a person retrying a
+  domain they never touched (charter D295).
 
   ## Typed refusals are NEVER humanized (site-spawner W11)
 
@@ -236,10 +280,91 @@ defmodule BarkparkCloud.FailureCopy do
 
   def humanize(other), do: other
 
+  # Every DNS-step error shape the tree can emit, VERB-ANCHORED. The producers
+  # are READ-ONLY (`internal/**`) and are exactly two `fmt.Errorf` prefixes:
+  #
+  #   hetzner dns <upsert|change-ttl|delete|resolve|list> %q  —
+  #     internal/hetzner/dns.go:74,92,107,114,137,156
+  #     internal/cli/cloud/dns.go:279,283,319,323,359
+  #   hcloud zone rrset <set-records|change-ttl|delete|list> %q —
+  #     internal/cli/cloud/dns_cloud.go:146,151,169,197
+  #     internal/cli/cloud/dns.go:434
+  #
+  # Anchoring on the VERB rather than the bare `hetzner dns` prefix is the point:
+  # the bare form only avoids matching `hetzner dnssomething` because of one
+  # space character, and a space is not a guarantee.
+  @dns_step ~r/\b(?:hetzner dns (?:upsert|change-ttl|delete|resolve|list)|hcloud zone rrset (?:set-records|change-ttl|delete|list))\b/
+
+  # The fallback-ladder aggregate's TWO markers. BOTH are required: the header
+  # phrase alone can appear inside a longer operator note, and the `"\n  - "`
+  # separator alone is ordinary list formatting. Requiring both is also what
+  # makes every pre-existing assertion byte-identical BY CONSTRUCTION — no string
+  # in the unit suite carries either marker, so the aggregate arm is unreachable
+  # for all of them.
+  #
+  # DELIBERATELY UNANCHORED. `CreateWithFallback`'s aggregate is WRAPPED by its
+  # callers before it is stored (`internal/cli/cloud/restore_driver.go:137`
+  # returns `resurrect create %q: %w`; `warmpool_assign.go:30` returns
+  # `create warm server %q: %w`), so a `^`-anchored header would be a selector
+  # that cannot reach the very strings this arm exists for.
+  @aggregate_header ~r/create "[^"]*" failed on all \d+ candidate type\/locations:/i
+  @aggregate_separator "\n  - "
+
+  @doc false
+  @spec aggregate?(term()) :: boolean()
+  def aggregate?(reason) when is_binary(reason) do
+    Regex.match?(@aggregate_header, reason) and
+      String.contains?(reason, @aggregate_separator)
+  end
+
+  def aggregate?(_other), do: false
+
   # The class fold: raw jargon → human copy, or the reason unchanged. Private —
   # every caller goes through `humanize/1` so nothing can reach a surface having
   # skipped the scrub.
+  #
+  # A typed refusal is checked before the aggregate split for the same reason it
+  # is checked first inside `classify_atomic/1`: it is already precise, already
+  # human, and interpolates a producer-controlled name.
   defp classify(reason) when is_binary(reason) do
+    if not typed_refusal?(reason) and aggregate?(reason) do
+      classify_aggregate(reason)
+    else
+      classify_atomic(reason)
+    end
+  end
+
+  # Split the aggregate on the producer's own separator, drop the header, and
+  # classify each candidate's error ALONE. A sub-error `classify_atomic/1`
+  # returns unchanged did not classify, so it casts no vote.
+  defp classify_aggregate(reason) do
+    reason
+    |> String.split(@aggregate_separator)
+    |> Enum.drop(1)
+    |> Enum.flat_map(fn sub ->
+      case classify_atomic(sub) do
+        ^sub -> []
+        copy -> [copy]
+      end
+    end)
+    |> Enum.frequencies()
+    |> fold_classes(reason)
+  end
+
+  # THE TIE RULE (charter D295, ratified — do NOT replace this with
+  # majority-then-first-appearance): a STRICT plurality wins; a tie, or no votes
+  # at all, falls through to the RAW pass-through. Naming one of two equally
+  # supported causes is how a person ends up retrying the wrong thing.
+  defp fold_classes(votes, reason) do
+    case Enum.sort_by(votes, fn {_copy, n} -> -n end) do
+      [] -> reason
+      [{copy, _n}] -> copy
+      [{copy, n}, {_runner_up, m} | _] when n > m -> copy
+      _tied -> reason
+    end
+  end
+
+  defp classify_atomic(reason) when is_binary(reason) do
     # Provider casing is inconsistent (`SERVER_LIMIT_EXCEEDED` vs
     # `resource_unavailable`); the provider-class clauses match this lowered
     # copy. The internal-jargon clauses above keep matching the raw `reason`
@@ -324,11 +449,15 @@ defmodule BarkparkCloud.FailureCopy do
         "This Azure region has no capacity for this VM size right now. In the Azure Portal → Virtual machines, pick another region or size — or retry shortly, since capacity is transient per region and size."
 
       # DNS: a domain/zone step failed on the provider. Checked BEFORE capacity
-      # so a "dns zone quota" failure reads as a domain problem, not a
-      # server-capacity one.
-      String.contains?(down, "zone create") or
-          (String.contains?(down, "dns") and
-             (String.contains?(down, "quota") or String.contains?(down, "failed"))) ->
+      # so a DNS step that failed on a zone quota reads as a domain problem, not
+      # a server-capacity one.
+      #
+      # Keyed on the producer's REAL vocabulary (see the moduledoc). The three
+      # tokens this clause used to carry — `zone create`, `dns zone`,
+      # `dns record` — are DELETED: no producer emits them, and the `dns` +
+      # `failed` leg they were bundled with turned the clause into "does this
+      # string mention dns anywhere", which the user's own slug can satisfy.
+      Regex.match?(@dns_step, down) ->
         "Securing the domain failed on the provider side."
 
       # Capacity / quota: Hetzner has no server of this type free, or the account

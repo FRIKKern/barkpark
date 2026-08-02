@@ -721,10 +721,39 @@ defmodule BarkparkCloud.ProvisioningTest do
       bp = barkpark_fixture(team)
       {:ok, job} = Registry.enqueue_provision_job(bp)
 
-      long_error =
-        "create \"bp-stopwatch\" failed on all 5 candidate type/locations: " <>
-          String.duplicate("- cx23/fsn1: hcloud server create: server limit reached; ", 12)
+      # DERIVED from the producer, not pasted. `CreateWithFallback`
+      # (internal/cli/cloud/provider.go:569-578, READ-ONLY) composes exactly:
+      #
+      #   fmt.Errorf("create %q failed on all %d candidate type/locations:%s",
+      #              base.Name, len(candidates), sb.String())
+      #   fmt.Fprintf(&sb, "\n  - %s/%s: %s", spec.ServerType, spec.Region, err)
+      #
+      # The old pasted fixture wrote "…locations: " followed by "- cx23/fsn1: …"
+      # — a trailing space where the producer has none, and a bare "- " where the
+      # producer emits "\n  - ". That drift is exactly what let a whole-string
+      # substring scan of the aggregate survive two waves (wave 25 S1). The
+      # candidate ladder is HetznerCandidates (provider.go:543-552).
+      ladder = [
+        {"cx22", "fsn1"},
+        {"cx23", "fsn1"},
+        {"cx23", "hel1"},
+        {"cx33", "nbg1"},
+        {"cpx22", "fsn1"}
+      ]
 
+      entries =
+        Enum.map_join(ladder, fn {type, region} ->
+          "\n  - #{type}/#{region}: hcloud server create \"bp-stopwatch\": exit status 1: server limit reached, resource_unavailable for this server type"
+        end)
+
+      long_error =
+        "create \"bp-stopwatch\" failed on all #{length(ladder)} candidate type/locations:" <>
+          entries
+
+      # The shape the producer guarantees: no space after the header's colon, and
+      # every entry newline-two-space-dash prefixed.
+      assert long_error =~ ~r/candidate type\/locations:\n  - /
+      refute long_error =~ "locations: "
       assert String.length(long_error) > 255
       assert {:ok, %ProvisionJob{} = failed} = Registry.fail_job(job.id, long_error)
       assert failed.status == "failed"
