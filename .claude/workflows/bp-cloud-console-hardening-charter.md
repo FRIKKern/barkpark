@@ -1078,6 +1078,92 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-02 — wave 25 REVIEW (grade A−; five slices green, all pushed, PRs #9253-#9257)
+
+**All five slices landed green and were re-gated on the reviewer's own tree**, and — the thing this
+epic keeps failing at — **all five auto-merge onto `origin/main` in sequence with ZERO conflicts**,
+with the integrated tree passing `__app.test.mjs` (782/782), `smoke.mjs` (102 scenarios),
+`__css_check`, `cssom-parity` (1286 == 1286, MISSES 0), `breakpoint-sweep` coverage and
+`breakpoint-sweep.test.mjs`. Three slices edited `overflow-guard.mjs`, two edited `app.css`, two
+edited `smoke.mjs` and `scenarios.mjs` — D236's anchor law is what bought that.
+
+**THE WISH'S REACHABILITY QUESTION IS ANSWERED, and re-derived independently at review.**
+`Barkpark.provisioning_subdomain/1` (`registry/barkpark.ex:288`) spends `63 − 8 − 1 = 54` on the slug
+and appends `"-" <> team_short_id` — so it emits **exactly 63 chars but only 54 UNBROKEN**, hyphen at
+char 55. The 63-char **unbroken** label is nonetheless reachable, by the other door:
+`validate_length(:slug, max: 63)` with `@slug_format ~r/^[a-z0-9][a-z0-9-]*$/` admits an all-alnum
+63, and `clean_url/1` emits it verbatim. **Both of the wave's reachability claims are true and they
+are DIFFERENT claims** — s1 needed "a short dns-bearing slug reaches `base.Name` verbatim" (it does;
+`provider.go:579` interpolates `base.Name`), s5 needed "63 unbroken is emittable and NOT via
+`provisioning_subdomain/1`" (correct, and correctly cited). A human second reviewer is still owed on
+both HIGH-FLIP-RISK judgments.
+
+**What shipped.** s1 — `humanize/1` splits the `CreateWithFallback` aggregate on the producer's own
+`"\n  - "` and classifies per sub-error, folded by strict plurality with a tie falling through to raw
+(D295); the DNS clause is re-keyed to a verb-anchored regex over the two real `fmt.Errorf` prefixes
+and the three unemittable tokens are deleted with their synthetic fixtures. The header regex is
+deliberately **unanchored** because every caller wraps the aggregate (`restore_driver.go:137`,
+`warmpool_assign.go:30`) — an argued deviation from the brief's sketch, and the right one.
+s2 — the ≤720 theater block pays the min-content escape **and** the step-row budget
+(`minmax(0,1fr)` + `.new-step{flex-wrap:wrap}` + the time column reflowed with **padding**, never
+margin); the filed row's "unsatisfiable by any patch" is refuted by a patch, and driving
+`theater-midflight` — the screen every successful signup watches, previously at zero coverage —
+turned up an **unfiled live defect** (`.new-step` 212/209 at 320 rising to 288/286 at 430) which the
+same reflow cures. Baseline 1284 → 1286 by the wrong-sentinel protocol.
+s3 — `.deploy-rail-fail` gets `overflow-wrap: anywhere` and `.detail-grid` gets its `minmax(0,1fr)`
+hoisted out of the ≤768 block; a scenario carrying a rail STAGE entry exists for the first time, with
+a KIND control on the same axis. **THE WRAP RULE IS STATED ONCE** at the head of `app.css`,
+three-valued plus the parent-side `min-width: 0`, every census derived with its counting rule printed
+beside it. s4 — the launch catalog stops lying after a connect, on **both** submit paths and **both**
+wizard shapes (inline remount, modal re-entry carrying the typed name). s5 — the cruel site row and
+env comment go into the EXISTING shared `sitesListRows`, derived from four server-side caps with a
+load-time `atLength` refusal, plus the five `FIXTURE_SHAPE_PINS` that array had never had.
+
+**Wave 24's one real defect is repaid.** Every slice touching `app.css` carried `__app.test.mjs` in
+its gate this time, and D301's ownership table is what made the difference — cssom-parity counts rule
+HEADS, E14 counts wrap COPIES, and both instruments now sit inside the same fence.
+
+**FOUR HONEST SHORTFALLS, named rather than dressed.** (1) **LAW 0 WAS NOT EXECUTED.** The wish said
+it is a claimed slice again; the wave plan filed none. Re-derived at debrief from the seal
+predicate's own token: **`orphans=118`**, against D303's first-claim **108** — the wave nets **+10**,
+exactly its five slice rows plus five backlog rows, with **no repayment named**. (Clause (b) is now
+PASS, up from D249's FAIL — the one thing that moved right unasked.) (2) **The wave filed a duplicate
+against itself**: Decide's `cch-w25-bl-site-name-drags-1885px-at-900-on-the-compact-builder` and
+s5's `cch-w25-bl-compact-site-row-sideways-at-900` are the same defect measured with two different
+cruel strings (2785/900 vs 2573/900). Collapsed at review — six criteria migrated onto the survivor,
+the duplicate cancelled; net −1. (3) Two backlog rows were filed **criteria-less** and therefore
+unstampable — the exact defect D290 named; `cch-w25-bl-d298-footer-value-pair-unobservable` was given
+four criteria at review. (4) **Clause 2 was answered, not measured** (D300) — an honest disposal, but
+"the instrument does not exist at that address" is a weaker result than the numbers the wish asked
+for.
+
+**D298 IS CORRECTED, NOT REFUTED.** Its `break-word` page-1011 measurement on `.deploy-rail-fail` was
+almost certainly taken with the cruel string in the footer ALONE — a configuration the product does
+not produce, because the same stage detail is rendered TWICE and the step caption's preserved
+min-content dominates the track. Driven the way the product delivers it, the footer's value changes
+nothing (box 248/248, 318/318, 292/292 either way). The shipped `anywhere` is correct and is now
+chosen by THE WRAP RULE rather than by a pixel this surface can show.
+
+**S3's `.detail-grid` hoist is the one line the lead should look at hardest.** It is outside the
+slice's named region, it touches every site AND instance detail screen, and the builder said so
+plainly. It can only lower a floor, 18 guard legs and the full sweep are green on it, and the leg's
+900 cell reds if it is reverted — but a track that can now shrink can clip content nothing measures.
+The `--instance` variant was deliberately not converted.
+
+**Next wave.** Merge round 1 in any order (all five are conflict-free; s2 owns the cssom baseline, so
+if only some land, s2's 1286 must land with them). There are no deferred round-2 slices. Then:
+(a) execute Law 0 with a claimed slice, against **118** — two waves have now stated the number
+without moving it; (b) the compact `siteRow` at 900, now one row with seven criteria and
+reproduce-before-fix as criterion 0, with the two-emitter misclass hazard on the same row (`.site-name`
+binds `s.name` in `globalSiteRow` and `domains[0]` in `siteRow`, two different caps); (c) `cch-w22-s7`
+remains clause 2's only honest home, and Decide's own filing says C6/C7/C8 are materially paid on
+`origin/main` — re-adjudicate against the bytes before rebuilding; (d) the /new theater family is
+still SCENARIO_RESIDUE for the sweep (`cch-w25-bl-new-theater-family-unswept`), `#cred-back` now sends
+a launch person to a picker nobody came from (`cch-w25-bl-cred-back-lands-on-a-picker-nobody-came-from`,
+strictly worse than before s4), and `task-c04dde30f94b14c9` asks whether every surface that renders
+`provision_error` actually passes through `humanize/1` — if any renders the raw column, s1's whole fix
+is invisible there. Paper: `cloud-console-hardening-wave-25-2026-08-02`.
+
 ### 2026-08-02 — wave 25 DECIDE (build in flight)
 
 The verify round changed four remedies and killed one slice, which is the wave working. **D294**
