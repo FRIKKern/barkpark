@@ -1847,6 +1847,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--text);
   font-size: 12.5px;
   line-height: 1.55;
+  /* cch-w26-s2 / D309 — THE UNFIXED TWIN. `.deploy-rail-fail` got exactly this
+     declaration in #9255; this box, which carries the SETTLED row's reason on
+     the same screen, did not. Without it the panel computes overflow-wrap:
+     normal, so a builder's own `Cannot find module '/opt/.../<205 unbreakable
+     chars>'` runs straight past the `.deploys{overflow:hidden}` card above —
+     and since #9255 hoisted `minmax(0,1fr)` onto `.detail-grid`, the track can
+     shrink below min-content, so the card SWALLOWS the excess instead of the
+     page scrolling: no scrollbar, no selection, no copy, nothing to signal the
+     sentence ended early. Driven pre-fix: glyphs at x=729.39 against .deploys
+     content edges of 587/687/711 — 142.39/42.39/18.39px of the reason gone at
+     900/1000/1024, and 186.39 at 320 — while documentElement read CLEAN in all
+     20 cells. `anywhere` rather than `break-word` because break-word preserves
+     min-content, which is precisely the floor the hoisted track no longer
+     honours. The honest cost is a taller panel; it is printed per cell by
+     overflow-guard's W26-deploy-fail-clip leg and pinned nowhere. */
+  overflow-wrap: anywhere;
 }
 .deploy-fail-dot {
   flex: 0 0 auto;
