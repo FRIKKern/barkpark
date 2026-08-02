@@ -439,4 +439,60 @@
 # sentinel written, cssom-parity.mjs run, value read from its own failure text, exactly
 # one bare integer confirmed. authored rule heads 1271 == CSSOM style rules 1271,
 # MISSES 0, PARITY PASS. Eleventh collision this session.
-1271
+# W22-S4 2026-08-02 (cch-w22-s4-2fa-enroll-modal-phone-band — the account modal's 2FA
+# enrollment stops resting off-screen on a phone): 1269 -> 1282, +13 authored rule heads,
+# ONE new `@media (max-width: 620px)` block authored at the foot of the ACCOUNT MODAL + 2FA
+# section, immediately after `.a2f-saved`. The thirteen heads are
+# `.modal-root:has(.am-modal)`, `.modal-root:has(.am-modal) .modal-card`, `.am-identity`,
+# `.am-who`, `.am-identity > .am-link`, `.am-head`, `.session-row`, `.a2f-enroll`,
+# `.a2f-manual`, `.a2f-qr`, `.a2f-confirm-row`, `.a2f-otp` and `.a2f-codes`. Nothing
+# existing was deleted and no existing rule gained a declaration.
+# 620 IS DELIBERATELY NOT A NEW BREAKPOINT: the measured overflow ends at 508.45px, so a
+# 520-keyed block would fit tighter — but a new breakpoint owes breakpoint-sweep.mjs's
+# BREAKPOINTS list an entry and this slice is fenced out of all three instruments, so the
+# derived axis stays [620, 720, 740, 768, 830, 899] and the boundary walk is unchanged
+# (verified: `node --test breakpoint-sweep.test.mjs` and Leg A both pass with the list
+# untouched — no UNCOVERED/PHANTOM breakpoint refusal).
+# THE FLATTENED PAIR MOVES BY EXACTLY TWO, and that asymmetry is the record worth keeping
+# (D222): 1225 -> 1227 authored / 1227 CSSOM. `authored` is a Map keyed by NORMALISED
+# SELECTOR, first occurrence only, so it is a DISTINCT-selector census — eleven of the
+# thirteen selectors are already authored elsewhere in this file (`.a2f-qr` at :5553,
+# `.modal-root:has(.am-modal) .modal-card` at :5508, and so on), so they add HEADS and no
+# distinct SELECTOR. The two exceptions are `.am-identity > .am-link` and
+# `.modal-root:has(.am-modal)` on its own, compounds that have never appeared before.
+# Heads +13 / flattened +2 is the scoped-re-declaration signature with two genuine new
+# selectors, and it is the OPPOSITE of a `/*` swallow, which drops flattened selectors
+# ALONGSIDE heads. MISSES 0 confirms an unrecorded ADD, not a parity defect.
+# MEASURED, not hand-incremented: cssom-parity.mjs run on this branch against the stale
+# 1269 printed "!! BASELINE MISMATCH: 1282 authored rule heads, sidecar baseline is 1269
+# (+13)" with "authored rule heads 1282 == CSSOM style rules 1282, MISSES 0" — the TOOL
+# named 1282 and that number was written back verbatim, then re-run to PARITY PASS.
+# Chrome 150.0.7871.187, node v22.22.0, app.css 279933 B sha256 76223772d7b9…. (The head
+# COUNT survived a late scoping change unmoved — two of the thirteen heads were narrowed
+# from `.modal-root` / `.modal-card` to `:has(.am-modal)` variants after review, which is
+# heads +0 / flattened +1. Both numbers were re-measured after that edit rather than
+# assumed to have stayed put.)
+# FOR THE LEAD: siblings s2, s3, s5 and bl also hold app.css this round. D158 REGENERATE-
+# ON-REBASE stands — re-run the tool on the MERGED tree and write what it prints. Never
+# resolve this number by hand and never add the slices' deltas: 1269 + 13 also equals
+# 1282, and that coincidence is not a measurement.
+# LEAD RESOLUTION 2026-08-02 (#9104 rebased onto main 1271 after #9102 and #9103).
+# Both prose records kept, number RE-MEASURED on the merged tree: 1284, a jump of THIRTEEN
+# — by far the largest single move this file has seen, and the 2FA enrollment modal is why:
+# a phone-band modal is a new block of scoped heads, not declarations added to existing
+# ones. That is the shape most likely to be mis-predicted by arithmetic, and it is exactly
+# why this file is never allowed to carry a reasoned number. MEASURED: wrong sentinel,
+# cssom-parity.mjs run, value taken from the tool's own failure text, exactly one bare
+# integer confirmed afterwards. authored rule heads 1284 == CSSOM style rules 1284,
+# MISSES 0, PARITY PASS. Twelfth collision this session; twelfth time only the tool knew.
+# LEAD RESOLUTION 2026-08-02 (#9104 rebased a SECOND time, onto main 1271 after #9103).
+# Both prose records kept; RE-MEASURED and the answer is 1284 again — the same value the
+# first rebase produced against a different base, because #9103 moved the count by zero.
+# Worth recording BECAUSE it repeated: a number that survives a rebase is not evidence
+# the doctrine is unnecessary, it is evidence about THIS pair of diffs. The 2FA modal is
+# a new block of scoped heads (+13, the largest single move this file has seen); #9103's
+# declarations landed inside blocks that already had heads (+0). Same session, adjacent
+# slices, and no arithmetic over deltas would have predicted either. MEASURED both times:
+# sentinel, run, read the tool's own failure text, confirm exactly one bare integer.
+# authored rule heads 1284 == CSSOM style rules 1284, MISSES 0, PARITY PASS.
+1284
