@@ -1467,6 +1467,76 @@ const cruelInstance = bpBase({
   provision_status: "succeeded",
 });
 
+// ── cch-w23-s1 — THE CRUEL PROVISION ERROR (the SHAPE axis, not the length) ──
+// The cruel corpus above bites on two strings a PERSON types. This one bites on
+// a string a MACHINE writes, and it is the axis nothing in this file carried:
+// the status pill's detail is `bp.provision_error` verbatim (`statusOf` in
+// app.js — `kind === "failed"` returns `detail: bp.provision_error`).
+//
+// THE CAP IS DERIVED FROM THE CHAIN, AND THE CHAIN HAS NO CAP. Unlike
+// custom_host (253) and name (255) above, there is NO `validate_length` to cite:
+//   · `provision_jobs.error` is a POSTGRES :text column —
+//     cloud/priv/repo/migrations/20260702130000_provision_job_error_to_text.exs
+//     does `modify :error, :text`, and its own comment says the worker's
+//     compound fallback-ladder error "exceeds varchar(255)", i.e. the widening
+//     happened BECAUSE a real error was longer than the old bound.
+//   · `ProvisionJob.changeset` (registry/provision_job.ex:152) casts `:error`
+//     and validates status/kind/attempts/bundle_ref — and carries ZERO
+//     `validate_length` on any field. Worker socket to pill, no bound.
+// So the effective cap is the RENDER PATH, not a schema number, and the length
+// below is derived as the smallest MEASURED biting value rather than the
+// largest legal one (2000 — registry.ex's only known string cap — merely makes
+// the same defect louder: page 13396 against 320 instead of 3555).
+//
+// AND THE CRUELTY IS SHAPE, NOT LENGTH — this is what makes a length cap the
+// wrong remedy (charter D267). Probed on `mixed-fleet#overview` with all 8
+// `.status-pill-detail` iterated per cell: a 1648-char WORD-BROKEN capture
+// (longest token 8 chars) is COMPLETELY CLEAN (page 320/320, worst detail
+// "none") — it just grows taller, while 512 chars in ONE UNBROKEN TOKEN take
+// the page to 3555/320. Re-driven HERE, on this fixture, in the tree that ships
+// it: unfixed, `#overview` measured documentElement.scrollWidth 3860 against a
+// 320 viewport and the detail 3754/170; `#fleet` 3856/320. It is the TOKEN, not
+// the total, that sets min-content, so the fixture below is a single unbroken
+// run — and 2000 chars (registry.ex's only known string cap) would only make
+// the same defect louder, never a different one.
+const CRUEL_PROVISION_ERROR_LEN = 512;
+// A base64 body echoed back from a provider API is the realistic shape of an
+// error with no break opportunity in it: no space, no hyphen, no slash, no dot.
+const cruelProvisionError = (function () {
+  const alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+  let s = "";
+  while (s.length < CRUEL_PROVISION_ERROR_LEN) s += alphabet;
+  return s.slice(0, CRUEL_PROVISION_ERROR_LEN);
+})();
+
+// THE FIXTURE'S OWN GUARD, in the fixture and not in a charter — the two
+// refusals a cruel CONTENT twin needs (cch-w22 ledger mechanism):
+//   GONE KIND   — the string no longer matches the length it cites.
+//   BREAKABLE   — the string is maximal but still self-wrapping, so the guard
+//                 that consumes it would be green by construction. A single
+//                 space or hyphen anywhere in here is enough to make the whole
+//                 leg vacuous, which is exactly the accident cch-w21's own
+//                 builder shipped on `.fleet-url`.
+if (cruelProvisionError.length !== CRUEL_PROVISION_ERROR_LEN) {
+  throw new Error(`cruel fixture: provision_error is ${cruelProvisionError.length} chars, the derived biting length is ${CRUEL_PROVISION_ERROR_LEN} — the fixture has GONE KIND`);
+}
+if (!/^[A-Za-z0-9]+$/.test(cruelProvisionError)) {
+  throw new Error("cruel fixture: provision_error carries a line-break opportunity (space, hyphen, slash, dot) — a BREAKABLE string wraps by itself and proves nothing about a wrap remedy");
+}
+
+// A FAILED box whose ONLY unusual property is the error string: kind name,
+// kind slug, no host (which is what `classifyBp` requires to read "failed").
+const cruelProvisionErrorInstance = bpBase({
+  id: "5b2c1e00-0000-4000-8000-0000000000c2",
+  name: "Analytics",
+  slug: "analytics",
+  provision_status: "failed",
+  provision_error: cruelProvisionError,
+  region: "fsn1",
+  server_type: "cx22",
+  provider: "hetzner",
+});
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -2547,13 +2617,19 @@ export const SCENARIOS = {
   // has to be visible in the SAME cell, not in a different fixture's run.
   // Reached on BOTH `#fleet` (the table) and `#overview` (the instance cards),
   // because the two unbounded hosts live one on each screen.
+  //
+  // cch-w23-s1 adds a THIRD row on the SHAPE axis: `cruelProvisionErrorInstance`
+  // carries a 512-character single-token provision error (see its derivation
+  // above) into `.status-pill-detail`, a host the two typed strings above never
+  // reach. Its name and slug are deliberately KIND so the error is the only
+  // variable, and `liveInstance` stays the kind control for both axes.
   "fleet-cruel-content": {
-    label: "Cruel content — a 253-char custom domain and a 255-char name, both server-legal",
+    label: "Cruel content — a 253-char custom domain, a 255-char name and a 512-char single-token provision error, all server-legal",
     authed: true,
     deepLink: "#fleet",
     data: {
       me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
-      barkparks: [cruelInstance, liveInstance],
+      barkparks: [cruelInstance, cruelProvisionErrorInstance, liveInstance],
       subscription: activeSub,
       sites: [],
       audit: [],
