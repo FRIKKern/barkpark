@@ -3454,19 +3454,31 @@
   // reloads the list (the new row shows, no plaintext).
   // The reveal modal body. PURE (node-pinned) so smoke asserts the plaintext-once
   // grammar without the click-opened modal: the amber only-time banner + a mono
-  // input-affix (copy + show/hide). pat_json carries no plaintext, so a refetch
+  // token line (copy + show/hide). pat_json carries no plaintext, so a refetch
   // cannot recover it — this is the one moment.
+  //
+  // THE SECRET IS TEXT, NOT AN INPUT VALUE (cch-w21-s4). It used to live in a
+  // single-line <input>, which can only ever SCROLL: driven at 320 through the
+  // real mint flow, 22 of the 51 characters the server mints were readable and
+  // 29 were hidden (scrollWidth 419 vs clientWidth 160) — on the one screen in
+  // the console whose own copy says you will never see this again. No CSS makes
+  // an input wrap, so the plaintext moved into a <code> text node that does
+  // (`break-all` is honest for an OPAQUE token where it would not be for a
+  // hostname). The <input> stays as an off-screen copy buffer — never focused,
+  // never in the tab order — because execCommand("copy") needs a form control
+  // when navigator.clipboard is unavailable.
   function tokenRevealHtml(plaintext, pat) {
     var label = (pat && pat.name) ? esc(pat.name) : "Your new token";
     return '<h2 class="modal-title" id="modal-title">Token created</h2>' +
       '<div class="notice notice-warn" role="alert">This is the only time you’ll see this token. Copy it now and store it somewhere safe.</div>' +
-      '<div class="field"><label class="label" for="token-reveal-value">' + label + "</label>" +
+      '<div class="field"><div class="label" id="token-reveal-label">' + label + "</div>" +
         '<div class="token-reveal">' +
-          '<div class="input-affix">' +
-            '<input class="form-input token-reveal-input" id="token-reveal-value" type="text" readonly value="' + esc(plaintext) + '" />' +
-            '<button class="affix-btn" id="token-eye" type="button" tabindex="-1" aria-label="Hide token">' + EYE_SVG + "</button>" +
-          "</div>" +
+          '<code class="token-reveal-input" id="token-reveal-text" tabindex="0" aria-label="Token value">' + esc(plaintext) + "</code>" +
+          '<button class="btn btn-sm" id="token-eye" type="button" aria-label="Hide token" aria-controls="token-reveal-text">' + EYE_SVG + "</button>" +
           '<button class="btn btn-sm" id="token-copy" type="button">Copy</button>' +
+          '<div class="input-affix">' +
+            '<input class="form-input token-reveal-input" id="token-reveal-value" type="text" readonly tabindex="-1" aria-hidden="true" value="' + esc(plaintext) + '" />' +
+          "</div>" +
         "</div>" +
       "</div>" +
       '<div class="modal-actions"><button class="btn btn-primary btn-block" id="token-done" type="button">Done</button></div>';
@@ -3475,21 +3487,31 @@
   function revealToken(plaintext, pat) {
     openModal(tokenRevealHtml(plaintext, pat));
     var input = $("#token-reveal-value");
-    if (input) { input.focus(); input.select(); }
+    var text = $("#token-reveal-text");
+    // Focus lands on the SECRET itself (the <code> is tabbable), never on the
+    // off-screen buffer — focusing that would scroll the modal to nowhere.
+    if (text) text.focus();
     // Show/hide: revealed by default (it is the one moment), mask on demand for
-    // over-the-shoulder safety.
+    // over-the-shoulder safety. The buffer keeps the plaintext either way, so a
+    // copy while masked still copies the real token.
     var shown = true;
     var eye = $("#token-eye");
     if (eye) eye.addEventListener("click", function () {
       shown = !shown;
       if (input) input.type = shown ? "text" : "password";
+      if (text) text.textContent = shown ? plaintext : new Array(plaintext.length + 1).join("•");
       eye.setAttribute("aria-label", shown ? "Hide token" : "Show token");
     });
     $("#token-copy").addEventListener("click", function () {
-      if (input) input.select();
       var ok = false;
-      try { ok = document.execCommand("copy"); } catch (e) { ok = false; }
-      if (!ok && navigator.clipboard) { navigator.clipboard.writeText(plaintext).then(function () {}); }
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(plaintext).then(function () {}, function () {});
+        ok = true;
+      }
+      if (!ok && input) {
+        input.select();
+        try { document.execCommand("copy"); } catch (e) { /* nothing else to try */ }
+      }
       toast({ kind: "success", title: "Copied to clipboard" });
     });
     $("#token-done").addEventListener("click", function () {

@@ -179,6 +179,7 @@ const DEFECTS = [
   "W21-inst-head-320-copy-reachable",
   "W21-members-roster-identity-and-remove",
   "W21-cruel-content-text-bounded",
+  "W21-token-reveal-readable",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -2075,6 +2076,209 @@ async function main() {
           `the ROBUST claim is the RATIO — the KIND corpus (\`mixed-fleet\`, 32-char host / 10-char name) and the ` +
           `CRUEL one (253/255, the server's own caps) now score the SAME on both assertions. Every px above is ` +
           `FONT-CONDITIONAL (D218): this guard never awaits document.fonts.ready and never asserts which face resolved`,
+        );
+      }
+    }
+
+    // ── W21: THE WRITE-ONCE TOKEN, on the one screen whose own copy says
+    //    "This is the only time you'll see this token." A READ defect, stated
+    //    plainly: the Copy button IS reachable in every driven cell and the old
+    //    <input> scrolled internally, so nothing was unclickable — but a person
+    //    told to save a secret they can only see 22 characters of cannot verify
+    //    they saved the right one.
+    //
+    //    WHY NO INSTRUMENT SAW IT. `git grep -c token-reveal --
+    //    cloud/priv/static/__preview__` hit ZERO on origin/main: the sweep, the
+    //    modal oracle and this guard all missed the reveal, and smoke.mjs pinned
+    //    it only as a STRING (`hooks.tokenRevealHtml`), never laid out at any
+    //    viewport. A node-pinned string can assert the token is PRESENT; only a
+    //    browser can assert it is READABLE.
+    //
+    //    THE MECHANISM AND ITS REMEDY. `.token-reveal` is a flex row and the
+    //    secret lived in an `<input>`, which can only ever scroll — no CSS makes
+    //    an input wrap, so the remedy had to move the plaintext into a `<code>`
+    //    text node (break-all is honest for an OPAQUE token where it would not
+    //    be for a hostname) and demote the input to an off-screen copy buffer.
+    //    Measured Δ0 CSSOM heads: every declaration folded into a rule that
+    //    already existed (D230/D231/D232 abstention — this leg's slice does not
+    //    hold the baseline).
+    //
+    //    THE VACUITY TRAPS, each asserted rather than assumed:
+    //      (a) THE FIXTURE UNDERSTATED THE SERVER. scenarios.mjs minted a
+    //          50-character token; the real PAT is 51 (accounts.ex:857 +
+    //          `defp generate_token` = "bpc_pat_" + 43 base64url chars). The
+    //          per-cell `len >= 51` assertion below makes a corpus that drifts
+    //          BACK to a shorter secret red here, so the fix cannot be undone by
+    //          quietly shortening the string it is measured against.
+    //      (b) A REACHABLE COPY BUTTON IS NOT A READABLE TOKEN. Both are
+    //          asserted per cell; the pre-fix tree passed the copy half at every
+    //          one of the 32 cells and failed the read half at all 32.
+    //      (c) ZERO HOSTS IS NOT A CLEAN HOST. A cell that reaches no reveal at
+    //          all FAILS — the gesture chain is the real one (#token-add →
+    //          #token-name → .token-ab → #token-submit → 201 → revealToken()),
+    //          so a routing or mock regression cannot manufacture a green.
+    //      (d) LEGIBILITY BOUGHT WITH SMALLER TYPE IS NOT LEGIBILITY (D240).
+    //          The host's COMPUTED font-size is read per cell and anything below
+    //          12px fails — this epic already ships 228 sub-12px instances
+    //          against its own contract and must not buy the 229th here.
+    //
+    //    FONT-CONDITIONAL (D218/D248): no preview instrument awaits
+    //    `document.fonts.ready` or asserts which face resolved, so the px and
+    //    per-character numbers below are provisional; the RATIOS and the
+    //    clipped/not-clipped verdicts are what this leg stands behind.
+    if (requested.includes("W21-token-reveal-readable")) {
+      const D = "W21-token-reveal-readable";
+      // BLOCK-SCOPED (the `const D` precedent): these axes belong to this leg.
+      // Two scenarios because they mint DIFFERENT fixture paths — `tokens-reveal`
+      // answers the scenario's own `tokenMint` override, `tokens-member` falls
+      // through to scenarios.mjs's default mint body — and because the member
+      // form renders no `.token-ab` checkboxes, so the gesture chain is exercised
+      // in both of its shapes.
+      const TOK_SCENS = ["tokens-reveal", "tokens-member"];
+      const TOK_WIDTHS = [320, 360, 390, 430];
+      // The length the SERVER mints. Not a fixture fact — a source fact.
+      const PAT_LEN = 51;
+      // ANTI-VACUITY 0 — the axes themselves.
+      if (!TOK_WIDTHS.includes(320)) {
+        fail(D, `axis check: 320 is not in the width set — it is the width at which more than half the secret was hidden, so without it this leg cannot see the defect at its worst`);
+      }
+      if (!TOK_SCENS.includes("tokens-member")) {
+        fail(D, `axis check: \`tokens-member\` is not in the scenario set — it is the only cell that drives the DEFAULT mint body and the member form (no .token-ab), so without it half the mint path is unmeasured`);
+      }
+      const tokCells = TOK_SCENS.length * TOK_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${TOK_SCENS.length} token scenarios x ${TOK_WIDTHS.length} widths x 2 themes` +
+        ` (${tokCells} cells; every character of the ${PAT_LEN}-char PAT readable, Copy on screen, type >= 12px)\n`,
+      );
+      let cells = 0, hostsSeen = 0, unreadable = 0, clipped = 0, offscreen = 0, tinyType = 0, pageOver = 0;
+      for (const scen of TOK_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter at the widest driven width and assert the LANDED view before
+          // touching anything — `?scen=` alone does not route.
+          await setViewport(430);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#settings/tokens`,
+            `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+            `return v && v.id==='view-tokens' && document.getElementById('token-add');})()`,
+          );
+          // THE REAL MINT GESTURE CHAIN, not the tokenRevealHtml hook.
+          await evalJs(
+            `(function(){` +
+            `document.getElementById('token-add').click();` +
+            `var n=document.getElementById('token-name'); n.value='Guard probe key';` +
+            `var ab=document.querySelector('.token-ab'); if(ab) ab.checked=true;` +
+            `document.getElementById('token-submit').click();` +
+            `return true;})()`,
+          );
+          let revealed = false;
+          for (let w = 0; w < RENDER_CAP; w += 100) {
+            if (await evalJs(`!!(document.getElementById('token-reveal-text')||document.getElementById('token-reveal-value'))`)) { revealed = true; break; }
+            await sleep(100);
+          }
+          if (!revealed) {
+            fail(D, `${scen}/${theme}: the mint flow never reached the reveal (#token-add -> #token-name -> .token-ab -> #token-submit -> 201) — nothing below was measured, and an unreached screen is not a clean screen`);
+            continue;
+          }
+          const row = [];
+          for (const width of TOK_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              `var text=document.getElementById('token-reveal-text');` +
+              `var input=document.getElementById('token-reveal-value');` +
+              `var host=text||input;` +
+              `var out={theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,kind:host?(text?'code':'input'):'none'};` +
+              `if(!host) return out;` +
+              `var r=host.getBoundingClientRect(); var cs=getComputedStyle(host);` +
+              `var val=text?(text.textContent||''):(input.value||'');` +
+              `out.len=val.length; out.fs=Math.round(parseFloat(cs.fontSize)*100)/100;` +
+              `out.sw=host.scrollWidth; out.cw=host.clientWidth; out.sh=host.scrollHeight; out.ch=host.clientHeight;` +
+              `out.right=Math.round(r.right); out.bottom=Math.round(r.bottom);` +
+              `out.vis=(r.width>0 && r.height>0 && cs.visibility!=='hidden' && cs.display!=='none');` +
+              `var probe=document.createElement('span');` +
+              `probe.style.cssText='position:absolute;left:-9999px;top:0;white-space:pre;visibility:hidden';` +
+              `probe.style.font=cs.font||(cs.fontStyle+' '+cs.fontWeight+' '+cs.fontSize+'/'+cs.lineHeight+' '+cs.fontFamily);` +
+              `probe.textContent=val||'x'; document.body.appendChild(probe);` +
+              `var full=probe.getBoundingClientRect().width; probe.parentNode.removeChild(probe);` +
+              `out.adv=val.length?full/val.length:0;` +
+              `var lh=parseFloat(cs.lineHeight)||(out.fs*1.5);` +
+              `var perLine=out.adv?Math.floor(out.cw/out.adv):0;` +
+              // An <input> is single-line BY CONSTRUCTION — it can only ever
+              // scroll — so its readable count is one line's worth. A wrapping
+              // text host gets the lines its own box actually shows. Nothing is
+              // clipped ⇒ every character is laid out; that case is exact, the
+              // clipped case is a monospace-advance ESTIMATE and says so.
+              `var linesShown=text?Math.max(1,Math.floor((out.ch+1)/lh)):1;` +
+              `out.visChars=(out.sw<=out.cw+1 && out.sh<=out.ch+1) ? val.length : Math.min(val.length, perLine*linesShown);` +
+              `var copy=document.getElementById('token-copy');` +
+              `if(copy){var cr=copy.getBoundingClientRect();` +
+              `out.copyRight=Math.round(cr.right); out.copyVis=(cr.width>0&&cr.height>0);` +
+              `out.gapX=Math.round(cr.left-r.right); out.gapY=Math.round(cr.top-r.bottom);}` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.kind === "none") {
+              fail(D, `${scen}/${theme}@${width}: no token host in the document — nothing was measured, this is not a pass`);
+              row.push(`${width}:none`);
+              continue;
+            }
+            hostsSeen++;
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            if (!m.vis) {
+              fail(D, `${scen}/${theme}@${width}: the token host (<${m.kind}>) is not rendered — a secret nobody can see is not a readable secret`);
+            }
+            // (a) the corpus may never understate the server.
+            if (m.len < PAT_LEN) {
+              fail(D, `${scen}/${theme}@${width}: the minted token is ${m.len} characters, but the server mints ${PAT_LEN} ("bpc_pat_" + 43 base64url chars) — the fixture understates the string this screen must render`);
+            }
+            // (d) legibility floor.
+            if (!(m.fs >= 12)) {
+              tinyType++;
+              fail(D, `${scen}/${theme}@${width}: the token renders at ${m.fs}px — below the type scale's --text-xs 12px floor (D240). Readability bought with smaller type is not readability`);
+            }
+            // the defect itself, on BOTH axes.
+            if (m.sw > m.cw + 1 || m.sh > m.ch + 1) {
+              clipped++;
+              fail(D, `${scen}/${theme}@${width}: the token host clips — scrollWidth ${m.sw} vs clientWidth ${m.cw}, scrollHeight ${m.sh} vs clientHeight ${m.ch}`);
+            }
+            if (m.visChars < m.len) {
+              unreadable++;
+              fail(D, `${scen}/${theme}@${width}: ${m.visChars} of ${m.len} characters of the write-once token are readable — ${m.len - m.visChars} are hidden on the one screen that says you will never see it again`);
+            }
+            if (m.right > m.pcw + 1) {
+              offscreen++;
+              fail(D, `${scen}/${theme}@${width}: the token host's right edge is at ${m.right} against a ${m.pcw}px viewport — ${m.right - m.pcw}px of the secret is off-screen sideways`);
+            }
+            // (b) the copy half, asserted separately so a readable token can
+            //     never buy a green for an unreachable button (or the reverse).
+            if (!m.copyVis) {
+              fail(D, `${scen}/${theme}@${width}: no rendered Copy control beside the token`);
+            } else if (m.copyRight > m.pcw + 1) {
+              fail(D, `${scen}/${theme}@${width}: Copy's right edge is at ${m.copyRight} against a ${m.pcw}px viewport — ${m.copyRight - m.pcw}px off-screen`);
+            }
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — the reveal pushes the page sideways`);
+            }
+            row.push(`${width}:${m.visChars}/${m.len}c ${m.cw}/${m.sw}px @${m.fs}px cp${m.copyRight}(x${m.gapX},y${m.gapY})`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${hostsSeen} token hosts reached through the REAL mint chain) across ` +
+          `${TOK_WIDTHS.join("/")} on ${TOK_SCENS.join(" + ")}; ${unreadable} cells hiding characters, ` +
+          `${clipped} clipping hosts, ${offscreen} secrets off-screen, ${tinyType} cells below the 12px floor, ` +
+          `${pageOver} pages scrolling sideways. Cells print readable/total characters, clientWidth/scrollWidth, ` +
+          `and Copy's right edge with its (x,y) gap to the token — so a fix that wins readability by pushing ` +
+          `the button away is visible in the same line`,
+        );
+        okLine(
+          `FONT-CONDITIONAL (D218/D248): this leg never awaits document.fonts.ready and never asserts which ` +
+          `face resolved, so every px above is provisional. The clipped/not-clipped verdicts and the ` +
+          `character RATIOS are what it stands behind`,
         );
       }
     }

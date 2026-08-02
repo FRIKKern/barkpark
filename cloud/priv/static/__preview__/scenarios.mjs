@@ -2304,10 +2304,16 @@ export const SCENARIOS = {
       tokens: [],
       // The mint POST answers the plaintext ONCE + pat_json (no plaintext/hash on
       // the row); smoke drives revealToken() directly with this shape.
+      // THE LENGTH IS THE SERVER'S, NOT A ROUND NUMBER (cch-w21-s4): the real
+      // PAT is 51 characters — accounts.ex:857 `plaintext = "bpc_pat_" <>
+      // generate_token()` over `defp generate_token, do:
+      // :crypto.strong_rand_bytes(32) |> Base.url_encode64(padding: false)`
+      // = 8 + 43. This fixture shipped 50 and so understated the reveal's
+      // narrow-viewport clip by one character on every driven cell.
       tokenMint: {
         status: 201,
         body: {
-          token: "bpc_pat_3xampLEon1yShoWnoNCEabcdef0123456789ABCDEF",
+          token: "bpc_pat_3xampLEon1yShoWnoNCEabcdef0123456789ABCDEFg",
           pat: { id: "tok_new", name: "CI deploy key", abilities: ["deploy"], last_used_at: null, expires_at: tPlus(30 * 86400), revoked_at: null, inserted_at: T },
         },
       },
@@ -3552,7 +3558,9 @@ export function route(name, method, path, state) {
       return d.tokenMint || {
         status: 201,
         body: {
-          token: "bpc_pat_previewONLYshownONCEabcdef0123456789ABCDEF",
+          // 51 characters, the server's own length (accounts.ex:857 +
+          // `defp generate_token` = "bpc_pat_" + 43 base64url chars).
+          token: "bpc_pat_previewONLYshownONCEabcdef0123456789ABCDEFg",
           pat: { id: "tok_new", name: "New token", abilities: ["read"], last_used_at: null, expires_at: tPlus(30 * 86400), revoked_at: null, inserted_at: T },
         },
       };
