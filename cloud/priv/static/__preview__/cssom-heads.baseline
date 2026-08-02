@@ -419,4 +419,24 @@
 # THE LEAD RE-MEASURES ON THE INTEGRATED TREE: three round-1 slices of wave 22 touch
 # this single integer, so 1271 is this branch's honest number and NOT a prediction for
 # main. Re-run the sidecar after integration; do not arithmetic the deltas together.
+#
+# W22-S3 MEASURED 2026-08-02 (env-comment 500 + .set-row-note wrap): UNCHANGED at
+# 1269, MISSES 0 — deliberately NOT bumped, and recorded rather than left silent.
+# This slice edits app.css in exactly one place: `.set-row-note` gains an
+# `overflow-wrap` DECLARATION and a block comment above it. Neither adds a rule
+# HEAD — the selector already existed — so the count cannot move, and a bump here
+# would be a lie the ratchet has no way to catch. MEASURED, not reasoned: 999999
+# written into this file, cssom-parity.mjs run, and the number read out of its own
+# failure text ("authored rule heads 1269 (baseline 999999 ← BELOW)"), then
+# restored. Clean re-run: authored rule heads 1269 (baseline 1269), CSSOM style
+# rules 1269, flattened selectors 1225/1225, MISSES 0, PARITY PASS.
+# LEAD RESOLUTION 2026-08-02 (#9103 rebased onto main 1271 after #9102 landed).
+# Both prose records kept; the number RE-MEASURED on the merged tree and it did NOT
+# move — 1271 before and after, because this slice's declarations land inside blocks
+# that already carry heads. An unchanged number is worth writing down as loudly as a
+# changed one: a silent no-op here is indistinguishable from a forgotten bump, and the
+# W13-S4 entries above are the precedent for saying so. MEASURED, not assumed: wrong
+# sentinel written, cssom-parity.mjs run, value read from its own failure text, exactly
+# one bare integer confirmed. authored rule heads 1271 == CSSOM style rules 1271,
+# MISSES 0, PARITY PASS. Eleventh collision this session.
 1271

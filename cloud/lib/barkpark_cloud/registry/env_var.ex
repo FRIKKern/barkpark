@@ -89,7 +89,17 @@ defmodule BarkparkCloud.Registry.EnvVar do
       message: "must be a valid env var name (letters, digits, _, not leading digit)"
     )
     |> validate_length(:key, max: 255)
-    |> validate_length(:comment, max: 1000)
+    # cch-w22-s3: 255, NOT 1000. `comment` is `add :comment, :string` — a bare
+    # varchar(255) (create_env_vars migration), and no migration in the tree ever
+    # widened it. A 1000 cap therefore ACCEPTED a 256-char comment
+    # (`valid?: true, errors: []`) and handed it to `Repo.insert_or_update`, which
+    # raised `Postgrex.Error … 22001 string_data_right_truncation`. That raise is
+    # not an `{:error, changeset}` tuple, so the POST /v1/env-vars case never
+    # matched it and — with no `Plug.ErrorHandler` anywhere in this app — it
+    # reached the person as a bare 500 under "Check the values and try again."
+    # Capping at the column turns it into the 422 the form already renders.
+    # `:key` above was always correct at 255; this is the same rule.
+    |> validate_length(:comment, max: 255)
     |> validate_scope_shape()
     |> assoc_constraint(:team)
     |> assoc_constraint(:barkpark)
