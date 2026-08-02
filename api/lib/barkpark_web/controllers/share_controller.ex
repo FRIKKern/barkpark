@@ -138,9 +138,22 @@ defmodule BarkparkWeb.ShareController do
   """
   def revoke_token(conn, %{"token_id" => token_id}) do
     case Barkpark.Auth.revoke_token(token_id) do
-      {:ok, _} -> json(conn, %{revoked: true, token_id: token_id})
-      {:error, :not_found} -> not_found(conn, "token not found")
-      {:error, _} -> unprocessable(conn, "could not revoke token")
+      # RECEIPT LAW (pds w39): `Auth.revoke_token/1` returns the UPDATED row
+      # (auth.ex:200-226). `revoked: true` was a literal and `token_id` echoed
+      # the path param — neither could change if the update wrote nothing. Both
+      # now descend from the returned row's own `revoked_at` stamp.
+      {:ok, revoked} ->
+        json(conn, %{
+          revoked: not is_nil(revoked.revoked_at),
+          token_id: revoked.id,
+          revoked_at: revoked.revoked_at
+        })
+
+      {:error, :not_found} ->
+        not_found(conn, "token not found")
+
+      {:error, _} ->
+        unprocessable(conn, "could not revoke token")
     end
   end
 

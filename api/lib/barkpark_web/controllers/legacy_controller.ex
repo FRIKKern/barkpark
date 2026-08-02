@@ -92,8 +92,12 @@ defmodule BarkparkWeb.LegacyController do
 
   def delete(conn, %{"type" => type, "id" => doc_id}) do
     case Content.delete_document(doc_id, type, @dataset, [source: :api] ++ scope_opts(conn)) do
-      {:ok, _} ->
-        json(conn, %{deleted: doc_id})
+      # RECEIPT LAW (pds w39): render the row the write returned, never the
+      # request. `delete_document/4` returns `{:ok, target}` — the document it
+      # actually removed (content/lifecycle.ex:694) — and `rev` is the store's
+      # own value, absent from the request, so an echo-of-`doc_id` revert reds.
+      {:ok, deleted} ->
+        json(conn, %{deleted: deleted.doc_id, type: deleted.type, rev: deleted.rev})
 
       # Halts + other errors fall through to action_fallback for the canonical
       # envelope (was a bare %{error: "halted", reason: reason}).
