@@ -6915,6 +6915,57 @@ test("S7: catalogPanelHtml renders honest non-ready states with an action", () =
   assert.match(err, /launch-catalog-retry/);
 });
 
+// ── W25-S3: the connect detour's decision ──────────────────────────────────
+// `launchConnectResume` is the pure half of "the launch catalog stops lying
+// after a connect": given the record written when the person pressed
+// `.launch-connect-provider`, it says what a 201 owes them. The two mounts it
+// drives are browser-verified (overflow guard, W25-launch-catalog-after-connect);
+// what is pinned here is that the decision itself cannot silently become "none"
+// — a resume that returns "none" on a live wizard IS the defect.
+test("W25-S3: launchConnectResume remounts a wizard that survived the sheet", () => {
+  const live = { isConnected: true };
+  // The runway renders INLINE in the overview body, so it is still mounted when
+  // the dialog closes — its catalog is what must be repainted.
+  assert.deepEqual(
+    plain(hooks.launchConnectResume({ container: live, opts: { runway: true }, name: "Runway Alpha", hash: "#overview" }, "#overview")),
+    { action: "remount", name: "Runway Alpha" },
+  );
+  // Route is irrelevant to a remount: repainting a hidden view's catalog is
+  // invisible and correct, and the person finds it honest when they return.
+  assert.equal(
+    hooks.launchConnectResume({ container: live, opts: { runway: true }, name: "N", hash: "#overview" }, "#settings/providers").action,
+    "remount",
+  );
+});
+
+test("W25-S3: launchConnectResume re-enters a modal wizard the sheet destroyed, name and all", () => {
+  // openModal owns ONE body, so pressing the door detaches #launch-modal-slot:
+  // the container is no longer connected and the typed name lives only in the
+  // record. Re-entering with it is the difference between "carry on" and
+  // "retype your instance name".
+  const gone = { isConnected: false };
+  assert.deepEqual(
+    plain(hooks.launchConnectResume({ container: gone, opts: { modal: true }, name: "Runway Alpha", hash: "#overview" }, "#overview")),
+    { action: "reenter", name: "Runway Alpha" },
+  );
+  // …but only where they left it. A person who wandered to the providers page
+  // and connected there is not asking for a launch modal to appear over it.
+  assert.equal(
+    hooks.launchConnectResume({ container: gone, opts: { modal: true }, name: "X", hash: "#overview" }, "#settings/providers").action,
+    "none",
+  );
+  // A detached NON-modal container is a wizard nobody can be returned to.
+  assert.equal(
+    hooks.launchConnectResume({ container: gone, opts: { runway: true }, name: "X", hash: "#overview" }, "#overview").action,
+    "none",
+  );
+  // No detour at all: a connect from the providers page with no launch in
+  // flight must move nothing. Total over junk, like every other classifier here.
+  assert.equal(hooks.launchConnectResume(null, "#overview").action, "none");
+  assert.equal(hooks.launchConnectResume({}, "#overview").action, "none");
+  assert.equal(hooks.launchConnectResume({ container: null, opts: { modal: true } }, "#overview").action, "none");
+});
+
 test("S7: launchProviderTabsHtml marks exactly the active provider pressed", () => {
   const tabs = hooks.launchProviderTabsHtml("azure");
   assert.match(tabs, /data-kind="azure" aria-pressed="true"/);

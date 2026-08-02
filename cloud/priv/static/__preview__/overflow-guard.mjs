@@ -198,6 +198,7 @@ const DEFECTS = [
   "W18-overview-card-pill",
   "W23-cred-remediation-reachable",
   "W24-cred-dialog-button-alive",
+  "W25-launch-catalog-after-connect",
   "W20-op-gate-pill-bounded",
   "W21-inst-head-320-copy-reachable",
   "W21-members-roster-identity-and-remove",
@@ -2309,6 +2310,16 @@ async function main() {
         `return {token:t,parseErr:e,len:p.body.length};});` +
         `return {posts:posts,n:posts.length,` +
         `modalHidden:!!(root&&root.hidden),` +
+        // W25 amendment, and the ONLY change this wave makes inside this leg:
+        // "the sheet closed" is a SPELLING of the person-facing invariant "the
+        // form I already submitted is off my screen", and it stopped being the
+        // only spelling. On the modal launch path a 201 now RE-ENTERS the
+        // launch wizard into the same `#modal-root` body
+        // (resumeLaunchAfterConnect), so the root correctly never goes hidden
+        // while the credential form is nonetheless gone. Read both; the
+        // assertion below accepts either and still reds when the person is
+        // left staring at the form.
+        `sheetGone:!document.querySelector('#modal-root #cred-token'),` +
         `tokens:document.querySelectorAll('#cred-token').length,` +
         `submits:document.querySelectorAll('#cred-submit').length,` +
         `cardAlive:!!(window.__credCard&&window.__credCard.isConnected),` +
@@ -2410,11 +2421,11 @@ async function main() {
               fail(D, `${cell.name}@${width}x${height}: the POSTed body carries token ${JSON.stringify(p.token)}, but the person typed ${JSON.stringify(cell.sentinel)} INTO THE DIALOG — the request left the page reading the wrong host's field, which is the bug one binding to the left`);
             }
           }
-          if (!m.modalHidden) {
+          if (!m.modalHidden && !m.sheetGone) {
             credOpenSheet++;
-            fail(D, `${cell.name}@${width}x${height}: the credential succeeded (201) and the sheet is STILL OPEN — the person is left staring at a form they already submitted, with no way to tell it worked`);
+            fail(D, `${cell.name}@${width}x${height}: the credential succeeded (201) and the sheet is STILL OPEN — the person is left staring at a form they already submitted, with no way to tell it worked (\`#modal-root\` visible AND still holding a \`#cred-token\`)`);
           }
-          row.push(`${cell.name}:${m.n}post ${hosts.tokens}tok/${hosts.submits}sub-hosts-at-press tok=${m.posts.map((p) => JSON.stringify(p.token)).join(",")} closed=${m.modalHidden}`);
+          row.push(`${cell.name}:${m.n}post ${hosts.tokens}tok/${hosts.submits}sub-hosts-at-press tok=${m.posts.map((p) => JSON.stringify(p.token)).join(",")} closed=${m.modalHidden} sheet-gone=${m.sheetGone}`);
         }
 
         // (c) THE DUPLICATE WRITE. Its honesty check comes FIRST: this cell is
@@ -2583,6 +2594,339 @@ async function main() {
           `single-POST assertion by construction. No fixture and no scenario was edited to build this leg — ` +
           `the recorder wraps \`window.fetch\` in the page for the duration of the cell, so no other oracle ` +
           `reading \`scenarios.mjs\` or \`__preview__/fixtures\` can move because this one was added`,
+        );
+      }
+    }
+
+    // ── W25: THE LAUNCH CATALOG AFTER A CONNECT — the console contradicting
+    //    the person about a fact THEY established ten seconds earlier.
+    //
+    //    THE PERSON BODY. A fresh team has no instances, so the launch wizard
+    //    renders INLINE in the overview body (the header launch button is
+    //    hidden at that population). They type a name; the hosting panel says
+    //    "Connect a Hetzner Cloud account to provision here" and offers the
+    //    door; they walk through it, paste a key, and get a 201 and the toast
+    //    "Provider connected". The panel behind the toast still says they have
+    //    no account, and still offers to connect it. `submitProviderCred`'s
+    //    success branch called `loadProviders()`, which repaints
+    //    `#view-providers` — a view that is HIDDEN on this route — and never
+    //    re-ran the wizard's catalog mount.
+    //
+    //    THE SECOND BODY, ON THE SAME SEAM. With >= 1 instance the wizard opens
+    //    as a MODAL, and `openModal` owns ONE body: pressing the same door
+    //    OVERWRITES `#launch-modal-slot`, so the wizard and the typed name
+    //    leave the document before the key is even entered. The 201 then left
+    //    the person on `#overview` with nothing to carry on from.
+    //
+    //    NOTHING REACHED ANY OF THIS. `git grep -l launch-connect-provider --
+    //    cloud/priv/static/__preview__ .github` named no instrument before this
+    //    leg; the only repo pin asserts the button's STRING appears in a
+    //    generated fragment, which is a fixture that cannot produce the defect
+    //    and a selector that cannot reach it.
+    //
+    //    THE FIXTURE HAS TO MODEL A SERVER THAT CHANGED. This defect is only
+    //    visible if the catalog read ANSWERS DIFFERENTLY after the connect —
+    //    on a mock that 404s `no_provider` forever, a panel still offering the
+    //    door is HONEST, and a leg asserting otherwise would demand the UI
+    //    invent an account. So the cell's own `window.fetch` wrapper (the
+    //    W24 recorder's technique, nothing under `__preview__/fixtures` or
+    //    `scenarios.mjs` touched) answers the catalog read `404 no_provider`
+    //    until a `POST /v1/providers` succeeds and a real priced catalog after
+    //    — and that flip is ASSERTED by an independent read per cell, because
+    //    a shim that silently stopped flipping would green every assertion
+    //    below by construction.
+    if (requested.includes("W25-launch-catalog-after-connect")) {
+      const D = "W25-launch-catalog-after-connect";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      // `empty` is the ONLY shape the runway body exists on — no instances, no
+      // providers fixture, no `catalog` fixture (so the pre-connect read is the
+      // honest 404) and no `providerConnect` override (so the POST is the
+      // default 201). `providers-connected` carries `liveInstance`, which is
+      // what puts the wizard in the MODAL and gives the second body its seat.
+      const LCC_RUNWAY_SCEN = "empty";
+      const LCC_MODAL_SCEN = "providers-connected";
+      const LCC_VIEWPORTS = [[390, 844], [1000, 800]];
+      // ANTI-VACUITY 0 — the axes. This leg measures a REMOUNT, not a paint,
+      // but width decides whether the person can reach either wizard at all:
+      // the modal body is opened through the topbar scope menu, and the runway
+      // is the phone-first first-run screen. A leg that drove one width could
+      // not tell you which half it had proven.
+      if (!LCC_VIEWPORTS.some(([w]) => w <= 430)) {
+        fail(D, `axis check: no phone width in the viewport set — the empty-fleet runway is the first screen a new team meets on a phone, and this leg exists to say whether it lies to them there`);
+      }
+      if (!LCC_VIEWPORTS.some(([w]) => w >= 900)) {
+        fail(D, `axis check: no desktop width in the viewport set — the modal wizard is reached through the topbar scope menu, and most operators connect a provider from a laptop`);
+      }
+      process.stdout.write(
+        `\n${D} — ${LCC_VIEWPORTS.length} viewports x 2 cells (${LCC_RUNWAY_SCEN} runway + ${LCC_MODAL_SCEN} modal)` +
+        ` (type a name -> the catalog's Connect door -> a real 201 -> what the wizard says about the account that now exists)\n`,
+      );
+
+      const lccWait = async (expr) => {
+        for (let w = 0; w < RENDER_CAP; w += 100) {
+          let v = false;
+          try { v = !!(await evalJs(`!!(${expr})`)); } catch { /* mid-render */ }
+          if (v) return true;
+          await sleep(100);
+        }
+        return false;
+      };
+      // A unique `cell` param per navigation: these cells differ only by hash
+      // on the modal scenario, and a fragment-only navigation is a SAME-document
+      // navigation that keeps the previous cell's DOM (the W24 leg measured
+      // exactly that trap).
+      const lccUrl = (scen, hash, tag) =>
+        `${BASE}/?scen=${scen}&theme=light&cell=${encodeURIComponent(tag)}${hash}`;
+      // The server model, installed over whatever mock.js put on `window.fetch`:
+      // record the connect, and let the catalog read answer like a control plane
+      // that now has a credential. The priced rows are the shape router.ex
+      // serves (regions[] + server_types[]); nothing else on the page changes.
+      const lccArm = () => evalJs(
+        `(function(){window.__lccPosts=[];window.__lccConnected=false;` +
+        `if(window.__lccProbe) return true;` +
+        `window.__lccProbe=true;var of=window.fetch;` +
+        `var CAT={currency:"EUR",regions:[{slug:"fsn1",name:"Falkenstein"}],` +
+        `server_types:[{slug:"cx22",cores:2,ram_gb:4,disk_gb:40,monthly_price:4.59}]};` +
+        `window.fetch=function(i,init){` +
+        `var u=typeof i==='string'?i:((i&&i.url)||'');` +
+        `var m=String((init&&init.method)||(i&&i.method)||'GET').toUpperCase();` +
+        `if(m==='GET'&&/\\/v1\\/providers\\/[^/]+\\/catalog$/.test(u)&&window.__lccConnected){` +
+        `return Promise.resolve(new Response(JSON.stringify(CAT),` +
+        `{status:200,headers:{"Content-Type":"application/json"}}));}` +
+        `if(m==='POST'&&u.indexOf('/v1/providers')>=0){window.__lccPosts.push(u);` +
+        `return of.apply(this,arguments).then(function(res){` +
+        `if(res.status===201) window.__lccConnected=true; return res;});}` +
+        `return of.apply(this,arguments);};return true;})()`,
+      );
+      // The shim's own honesty check, per cell: after the 201 the modelled
+      // server MUST answer the catalog read 200. If it does not, every
+      // assertion below is asking the wizard to paint an account that does not
+      // exist, and a stale panel would be the honest answer.
+      // Needs its OWN Runtime.evaluate: evalJs omits awaitPromise, so it would
+      // hand back an unresolved Promise handle instead of the status.
+      const lccFlipped = async () => {
+        const r = await cdp.send(
+          "Runtime.evaluate",
+          { expression: `fetch('/v1/providers/hetzner/catalog').then(function(r){return r.status;})`, returnByValue: true, awaitPromise: true },
+          sessionId,
+        );
+        if (r.exceptionDetails) return -1;
+        return r.result.value;
+      };
+      // Walk the door: press it, land in the credential dialog, type the key
+      // into the DIALOG's own field and press the DIALOG's own button. Every
+      // gesture is one a person makes.
+      // `settle` is what "the sheet is done with them" MEANS on each path, and
+      // the two are genuinely different: on the runway the dialog closes and
+      // the wizard behind it is still there, while on the modal path the same
+      // body is REUSED to re-enter the wizard, so `#modal-root` correctly never
+      // goes hidden. Both spellings assert the same thing — the credential form
+      // the person already submitted is off their screen.
+      const lccConnect = async (scope, sentinel, settle) => {
+        const pressed = await evalJs(
+          `(function(){var b=document.querySelector(${JSON.stringify(scope)}+' .launch-connect-provider');` +
+          `if(!b) return {ok:false,why:'no .launch-connect-provider door in ' + ${JSON.stringify(scope)}};` +
+          `b.click();return {ok:true};})()`,
+        );
+        if (!pressed.ok) return pressed;
+        if (!await lccWait(`document.querySelector('#modal-root #cred-token')`)) {
+          return { ok: false, why: "the credential dialog never rendered its own #cred-token after the door was pressed" };
+        }
+        const typed = await evalJs(
+          `(function(){var t=document.querySelector('#modal-root #cred-token');` +
+          `var s=document.querySelector('#modal-root #cred-submit');` +
+          `if(!t||!s) return {ok:false,why:'the open dialog has no #cred-token/#cred-submit pair'};` +
+          `t.value=${JSON.stringify(sentinel)};s.click();return {ok:true};})()`,
+        );
+        if (!typed.ok) return typed;
+        if (!await lccWait(`(window.__lccPosts||[]).length > 0`)) {
+          return { ok: false, why: "pressing the dialog's button produced ZERO `POST /v1/providers` — nothing was connected, so nothing below could have been about a connected account" };
+        }
+        if (settle === "closed") {
+          if (!await lccWait(`(function(){var r=document.getElementById('modal-root');return !!(r&&r.hidden);})()`)) {
+            return { ok: false, why: "the credential sheet never closed after the 201 — the drive stopped where W24 already measured" };
+          }
+        } else if (!await lccWait(`!document.querySelector('#modal-root #cred-token')`)) {
+          return { ok: false, why: "the credential form is STILL on screen after the 201 — the person is staring at a sheet they already submitted, and nothing about where they were returned to can be read off that" };
+        }
+        return { ok: true };
+      };
+
+      let lccCells = 0, lccStale = 0, lccLostName = 0, lccDead = 0;
+      for (const [width, height] of LCC_VIEWPORTS) {
+        const row = [];
+
+        // ── (a) THE RUNWAY. Inline wizard, survives the sheet: its catalog
+        //        must be repainted against the account that now exists.
+        lccCells++;
+        await setViewport(width, height);
+        await nav(
+          lccUrl(LCC_RUNWAY_SCEN, "#overview", `runway-${width}`),
+          `document.querySelector('#view-overview .launch-form .form-input')`,
+        );
+        await lccArm();
+        const runwaySentinel = `Runway Alpha ${width}`;
+        // PRECONDITION: the lie has to be ON SCREEN before the connect, or this
+        // cell never entered the state the defect lives in.
+        const before = await evalJs(
+          `(function(){var v=document.getElementById('view-overview');` +
+          `if(!v) return {ok:false,why:'#view-overview is not in the document'};` +
+          `var c=v.querySelector('.launch-catalog');` +
+          `if(!c) return {ok:false,why:'the runway wizard rendered no .launch-catalog panel'};` +
+          `return {ok:true,doors:v.querySelectorAll('.launch-connect-provider').length,` +
+          `text:(c.textContent||'').replace(/\\s+/g,' ').trim()};})()`,
+        );
+        if (!await lccWait(`(function(){var v=document.getElementById('view-overview');return !!(v&&v.querySelector('.launch-connect-provider'));})()`)) {
+          lccDead++;
+          fail(D, `runway@${width}x${height}: the empty-fleet runway never offered a \`.launch-connect-provider\` door (catalog panel: ${JSON.stringify((before && before.text) || "")}) — the person body starts at that door, so this cell measured nothing`);
+          row.push("runway:!door");
+        } else {
+          const typedName = await evalJs(
+            `(function(){var i=document.querySelector('#view-overview .launch-form .form-input');` +
+            `if(!i) return {ok:false,why:'the runway wizard has no name field'};` +
+            `i.value=${JSON.stringify(runwaySentinel)};return {ok:true};})()`,
+          );
+          if (!typedName.ok) {
+            lccDead++;
+            fail(D, `runway@${width}x${height}: ${typedName.why}`);
+            row.push("runway:!name");
+          } else {
+            const walked = await lccConnect("#view-overview", `w25-runway-key-${width}`, "closed");
+            if (!walked.ok) {
+              lccDead++;
+              fail(D, `runway@${width}x${height}: ${walked.why}. Nothing below this line was measured`);
+              row.push("runway:!connect");
+            } else {
+              const status = await lccFlipped();
+              if (status !== 200) {
+                fail(D, `runway@${width}x${height}: after the 201 the modelled control plane still answers \`GET /v1/providers/hetzner/catalog\` with ${status}, not 200 — a panel that keeps offering to connect would then be TELLING THE TRUTH, and every assertion in this cell would be green-by-construction nonsense. The cell asserts nothing until the server it models changes`);
+                row.push(`runway:!flip(${status})`);
+              } else {
+                // Bounded wait for the remount, then read whatever is there —
+                // a timeout must produce the FINDING, never a skip.
+                await lccWait(`(function(){var v=document.getElementById('view-overview');return !!(v&&!v.querySelector('.launch-connect-provider'));})()`);
+                const after = await evalJs(
+                  `(function(){var v=document.getElementById('view-overview');` +
+                  `var c=v&&v.querySelector('.launch-catalog');` +
+                  `var i=document.querySelector('#view-overview .launch-form .form-input');` +
+                  `return {doors:v?v.querySelectorAll('.launch-connect-provider').length:-1,` +
+                  `text:c?(c.textContent||'').replace(/\\s+/g,' ').trim():'(no .launch-catalog panel)',` +
+                  `region:!!(v&&v.querySelector('.launch-region')),` +
+                  `name:i?i.value:null};})()`,
+                );
+                if (after.doors !== 0 || /Connect a .* account to provision here/.test(after.text)) {
+                  lccStale++;
+                  fail(D, `runway@${width}x${height}: the person connected the account and the wizard STILL offers to connect it — ${after.doors} \`.launch-connect-provider\` door(s) and the panel reads ${JSON.stringify(after.text)}. Before the connect it read ${JSON.stringify(before.text)} with ${before.doors} door(s), so the screen did not move at all: the console is contradicting the person about the one fact they just established`);
+                } else if (!after.region) {
+                  lccStale++;
+                  fail(D, `runway@${width}x${height}: the Connect door is gone but no \`.launch-region\` took its place — the panel now reads ${JSON.stringify(after.text)}, which is neither the old lie nor the connected account's catalog. A person who just connected still cannot choose where to run`);
+                }
+                if (after.name !== runwaySentinel) {
+                  lccLostName++;
+                  fail(D, `runway@${width}x${height}: the typed instance name did not survive the connect — the field reads ${JSON.stringify(after.name)}, the person typed ${JSON.stringify(runwaySentinel)}. The runway wizard is rendered INLINE and is not supposed to be rebuilt by a remount of its catalog`);
+                }
+                row.push(`runway:doors ${before.doors}->${after.doors} region=${after.region} name=${JSON.stringify(after.name)}`);
+              }
+            }
+          }
+        }
+
+        // ── (b) THE MODAL. The sheet DESTROYS this wizard, so the only honest
+        //        return is to re-enter it with the name the person typed.
+        lccCells++;
+        await setViewport(width, height);
+        await nav(
+          lccUrl(LCC_MODAL_SCEN, "#overview", `modal-${width}`),
+          `(function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+        );
+        await lccArm();
+        const modalSentinel = `Modal Alpha ${width}`;
+        const opened = await evalJs(
+          `(function(){var sw=document.getElementById('scope-switch');` +
+          `if(!sw) return {ok:false,why:'no #scope-switch in the topbar'};` +
+          `sw.click();var l=document.getElementById('scope-launch');` +
+          `if(!l) return {ok:false,why:'#scope-launch never rendered into the scope menu'};` +
+          `l.click();return {ok:true};})()`,
+        );
+        if (!opened.ok || !await lccWait(`document.querySelector('#modal-root .launch-connect-provider')`)) {
+          lccDead++;
+          fail(D, `modal@${width}x${height}: the modal launch wizard never offered a \`.launch-connect-provider\` door — ${opened.ok ? "the wizard opened but its catalog panel did not resolve no_provider" : opened.why}`);
+          row.push("modal:!door");
+        } else {
+          // Stamp the wizard's own slot: this cell is only a measurement if the
+          // sheet really does take the wizard with it. If the slot survives,
+          // the premise changed and "the person was returned" would be green
+          // by construction.
+          const stamped = await evalJs(
+            `(function(){var i=document.querySelector('#modal-root .launch-form .form-input');` +
+            `if(!i) return {ok:false,why:'the modal wizard has no name field'};` +
+            `i.value=${JSON.stringify(modalSentinel)};` +
+            `window.__lccSlot=document.getElementById('launch-modal-slot');` +
+            `return {ok:!!window.__lccSlot,why:'#launch-modal-slot is not in the document'};})()`,
+          );
+          if (!stamped.ok) {
+            lccDead++;
+            fail(D, `modal@${width}x${height}: ${stamped.why}`);
+            row.push("modal:!slot");
+          } else {
+            const walked = await lccConnect("#modal-root", `w25-modal-key-${width}`, "wizard");
+            const destroyed = await evalJs(`!(window.__lccSlot && window.__lccSlot.isConnected)`);
+            if (!walked.ok) {
+              lccDead++;
+              fail(D, `modal@${width}x${height}: ${walked.why}. Nothing below this line was measured`);
+              row.push("modal:!connect");
+            } else if (!destroyed) {
+              fail(D, `modal@${width}x${height}: the \`#launch-modal-slot\` stamped before the door was pressed is STILL MOUNTED — the sheet no longer overwrites the wizard, so this cell never entered the condition it exists to measure and its "the person was returned" assertion would pass without proving anything`);
+              row.push("modal:!premise");
+            } else {
+              const status = await lccFlipped();
+              if (status !== 200) {
+                fail(D, `modal@${width}x${height}: the modelled control plane still answers the catalog read with ${status} after the 201 — see the runway cell's note; nothing here can be asserted against a server that did not change`);
+                row.push(`modal:!flip(${status})`);
+              } else {
+                await lccWait(`document.querySelector('#modal-root .launch-form .form-input')`);
+                const back = await evalJs(
+                  `(function(){var r=document.getElementById('modal-root');` +
+                  `var i=document.querySelector('#modal-root .launch-form .form-input');` +
+                  `return {modalHidden:!!(r&&r.hidden),wizard:!!i,name:i?i.value:null,` +
+                  `doors:document.querySelectorAll('#modal-root .launch-connect-provider').length,` +
+                  `view:(function(){var v=document.querySelector('section.view:not([hidden])');return v?v.id:'none';})()};})()`,
+                );
+                if (back.modalHidden || !back.wizard) {
+                  lccStale++;
+                  fail(D, `modal@${width}x${height}: after the 201 the person is NOT back in the launch wizard — modal hidden=${back.modalHidden}, wizard present=${back.wizard}, rendered view "${back.view}". They came to launch an instance, typed its name, connected an account because the console asked them to, and were left on a screen with nothing to carry on from`);
+                } else if (back.doors !== 0) {
+                  lccStale++;
+                  fail(D, `modal@${width}x${height}: the wizard came back but its catalog still offers ${back.doors} Connect door(s) for the account that was just connected`);
+                }
+                if (back.wizard && back.name !== modalSentinel) {
+                  lccLostName++;
+                  fail(D, `modal@${width}x${height}: the wizard came back EMPTY — the name field reads ${JSON.stringify(back.name)}, the person typed ${JSON.stringify(modalSentinel)}. Being returned to a form you have to retype is being sent back to the start with extra steps`);
+                }
+                row.push(`modal:slot=destroyed back=${back.wizard} doors=${back.doors} name=${JSON.stringify(back.name)}`);
+              }
+            }
+          }
+        }
+
+        process.stdout.write(`   ${width}x${height}  ${row.join("  ")}\n`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${lccCells} / ${lccCells} cells clean across ${LCC_VIEWPORTS.map(([w, h]) => `${w}x${h}`).join("/")} — ` +
+          `on \`${LCC_RUNWAY_SCEN}\` the inline runway's catalog was REPAINTED after the 201 (the Connect door ` +
+          `count went to 0, a \`.launch-region\` took its place, and the typed name survived), and on ` +
+          `\`${LCC_MODAL_SCEN}\` the wizard the sheet destroyed was RE-ENTERED carrying that name. ` +
+          `${lccStale} stale catalogs, ${lccLostName} lost names, ${lccDead} unreachable doors`,
+        );
+        okLine(
+          `EVERY CELL PROVED ITS OWN PREMISE BEFORE ASSERTING ANYTHING: the runway cell reds unless the ` +
+          `Connect door was on screen BEFORE the connect, the modal cell reds unless the stamped ` +
+          `\`#launch-modal-slot\` really left the document, and BOTH red unless an independent ` +
+          `\`GET /v1/providers/hetzner/catalog\` answers 200 after the 201 — because a catalog that is still ` +
+          `\`no_provider\` makes "the panel still offers Connect" the TRUTHFUL answer and every assertion here ` +
+          `green by construction. No fixture and no scenario was edited: the server model is a \`window.fetch\` ` +
+          `wrapper installed in the page for the life of the cell`,
         );
       }
     }
