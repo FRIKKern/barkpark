@@ -1545,7 +1545,8 @@ const cruelProvisionErrorInstance = bpBase({
 // every `me()` in here is `ada@acme.com`, whose rendered name is three glyphs.
 //
 // THE CAP IS DERIVED, AND 255 IS INADMISSIBLE. `.am-name` is not a display name:
-// `accountModel()` (app.js:682) sets `name: email.split("@")[0]`, the LOCAL PART
+// `accountModel()` (re-derive with `grep -n 'function accountModel'
+// cloud/priv/static/app.js`) sets `name: email.split("@")[0]`, the LOCAL PART
 // of the address. `BarkparkCloud.Accounts.User` has no `:name` field and no
 // `validate_length(:name, …)` at all — the ONLY cap on this string is
 //   · `validate_length(:email, max: 160)`  cloud/lib/barkpark_cloud/accounts/user.ex:165

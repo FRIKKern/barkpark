@@ -1347,7 +1347,8 @@ async function main() {
     //    derives from the `account-modal` name prefix).
     //
     //    WHAT IS BROKEN. `.am-name` (app.css:5631) renders `accountModel()`'s
-    //    `name`, which is `email.split("@")[0]` (app.js:682) — the person's own
+    //    `name`, which is `email.split("@")[0]` (accountModel() — re-derive with
+    //    `grep -n 'function accountModel' cloud/priv/static/app.js`) — the person's own
     //    email LOCAL PART, not a display name. The rule carried font-size,
     //    font-weight and line-height and nothing else, while its sibling
     //    `.am-line` (:5632) carries the full ellipsis triple. At the DERIVED cap
