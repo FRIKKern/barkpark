@@ -1090,6 +1090,94 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-02 — wave 26 REVIEW — 6/6 round-1 slices built, gated, reviewed, PUSHED and PR'd (#9297-#9302). Grade A−
+
+**LAW 0 IS THE HEADLINE AND IT MOVED THE WRONG WAY. Re-derived by the reviewer at `2026-08-02T17:52:02Z`:
+`VERDICT-TOKEN: SEAL-PREDICATE NO-SEAL a=FAIL b=PASS c=PASS orphans=123 considering=1 successor=cch-instruments-epic`.**
+D305 read **112** at 16:53:31Z. The delta reconciles exactly: **112 + 6 (this wave's own slice rows, filed
+under the parent epic by Decide at 17:01) + 5 (builder backlog rows, all five parented to
+`cloud-console-hardening-epic`) = 123.** The six slice rows retire the moment the lead's merges close
+them (→ 117); the **five backlog rows are net new and are a direct breach of D307, which this wave wrote
+and whose stated target was ZERO.** The clause failed inside the hour it was authored — which is the
+finding: **D307 as written is a sentence, and this wave is the proof that a sentence does not hold.** It
+needs a create-time machine check (refuse `parent_id: cloud-console-hardening-epic` for `*-bl-*` rows in a
+wave window), not another restatement. Two further honest notes: D307's predicate counts "filings, not
+scoped console work", but the seal predicate counts EVERY open child, so a wave's own slices are orphans
+until closed — the two numbers were never measuring the same thing; and three of the five new rows are
+genuine CONSOLE defects, which cannot legally be parented to an INSTRUMENTS successor, so "target ZERO" is
+unachievable as stated for a wave that actually finds console bugs.
+
+**AND THE PACKET IS STILL THE ONLY REAL LEVER, unmoved.** Re-verified by the reviewer:
+`git cat-file -e origin/main:.claude/workflows/bp-cloud-console-instruments-charter.md` → **rc 128**, so
+D172's condition on re-parenting is STILL unmet; **#8500 is still OPEN and untouched since
+2026-07-31T13:21:10Z**, three files. Nothing was re-parented this wave, deliberately: with the successor's
+charter absent, a reviewer moving rows would be exactly the untraceable laundering D306 warns about
+(`orphans = residue − gates − forwarded`, and a re-parent lowers it identically to an evidence close). **The
+finding, stated as the wish demanded rather than restated as a fourth filing: 58% of this roster is
+decision-ready behind three files that have sat for two days.**
+
+**SHIPPED, all six green, all six PUSHED with PRs open** — and the reviewer merged all six locally and
+re-ran the union: **OVERFLOW GUARD PASS on all 24 defects, `__app.test.mjs` 788/788, smoke 102/102,
+cssom PARITY PASS, `__css_check` 0 errors.** Four slices append to `overflow-guard.mjs` at the same two
+anchors; the conflicts are mechanical KEEP-BOTH and the union is proven green, so the merge order does not
+matter.
+
+- **s1 #9297** — the flagship, and it is a CAUSE fix. `.detail-grid--instance` gets `minmax(0,1fr)`; the
+  instance workspace stops dragging **1673px** at 900/1000/1280 in both themes. The reviewer re-ran the
+  mutation independently: reverting the declaration reds 6 cells while every `.site-name` still reads
+  **1555/1555** — the cell-level leg three previous filings would have written is green by construction
+  with the page 1673px off-screen. **Zero reviewer fixes.**
+- **s2 #9298** — D309's twin. `.deploy-fail` gets `overflow-wrap: anywhere`; up to **186px** of a person's
+  build error stops being thrown away silently inside `.deploys{overflow:hidden}`. The strongest artifact
+  in the wave: a rect-only sentinel PASSES 20/20 on the defective tree. Cruel fixture DERIVED from
+  `stage_failure_copy/1`. Reviewer additionally ran `breakpoint-sweep` (not in the slice gate) because the
+  fixture adds a `site-states` row — census unmoved. **Zero reviewer fixes.**
+- **s3 #9299** — the provision-failure email leads with the humanized cause and KEEPS the scrubbed capture.
+  **HIGH-FLIP-RISK**: the reviewer independently re-derived the customer-recipient judgment
+  (`dispatch_event/3` → `team_member_emails` → bare `TeamMembership` join, no role filter;
+  `platform_admin_emails/0` untouched) — two agreeing derivations, still worth one human read.
+  **Reviewer fixed 2:** pinned the untested degenerate (unclassified) branch — mutation-proven, exactly one
+  failure — and corrected two `failure_copy.ex` moduledoc sentences this slice invalidated.
+- **s4 #9300** — all four non-resuming credential-sheet exits now resume or clear; `openProviderPicker`
+  deleted rather than orphaned; `#cred-back` relabelled to a destination that exists.
+  **Reviewer fixed 1, and it is the wave's standing test applied to the wave itself:** the leg drove Escape
+  and INFERRED the × and the backdrop from them sharing one `reflexClose()`. Both are now driven from their
+  own sheets, and the reviewer mutation-proved the widening is load-bearing — routing only the `data-close`
+  path back to bare `closeModal()` reds exactly the two new cells while Escape stays green.
+- **s5 #9301** — `__css_check`'s KNOWN_GAPS list is now **EMPTY**; the `bp-lc-` head is allowlisted on a
+  refuted-demotion argument, with the closed-ness pinned by a DERIVED set assertion in `__app.test.mjs`.
+  Moves the roster by exactly ONE row and says so. **Reviewer fixed 1 (a broken comment line)** and corrected
+  two ledger claims: the brief's `cssom 1286` was NOT stale (the builder quoted the flattened-selector line),
+  and the "second `bp-lc-` emitter" blind spot is closed by measurement — there is exactly one.
+- **s6 #9302** — first geometry for `theater-ready` and `new-launch`. `new-launch` is a MEASURED REFUSAL
+  (an `<input>`'s width does not track its value). **`theater-ready` BITES: 408px of the post-signup hero
+  off-screen at 320, from the LONGEST url the control plane can issue** (`validate_length(:slug, max: 63)` +
+  `clean_url/1`). Filed as `task-ee662108818d603c` and shipped as a CEILING, not a certification.
+  **Zero reviewer fixes.**
+
+**THE ONE THING THIS WAVE LEFT ON THE TABLE, and the next wave should take it first:** s6 found a live
+person-facing defect on the screen every successful signup lands on, and shipped a guard that permanently
+TOLERATES it. The remedy is one declaration — `overflow-wrap: anywhere` on `.new-ready .mono` — with an
+exact in-file precedent at `.site-meta .mono` (`app.css`, `.site-meta .mono { font-family: var(--mono);
+overflow-wrap: anywhere; }`). It is a declaration inside a pre-existing head, so it moves no CSSOM head. The
+slice's own fence forbade it and Decide ruled FILE; the reviewer honoured that ruling rather than overriding
+Decide at the last moment, but a ceiling that tolerates a live defect is a debt with a due date.
+
+**LEDGER: CLEAN, and the best this epic has produced.** All six slice tasks `in_progress`, published,
+carrying `wave_paper` and a `files` fence, with every provable criterion stamped with real evidence
+(577–1435 bytes each) and ONLY the merge-gated row left open for the lead. No stamp was found overstated.
+No task outside this wave was touched. **The lead closes, on merge: criterion 7 (s1), 10 (s2), 7 (s3),
+9 (s4), 7 (s5), 8 (s6), plus `gr-backlog-css-check-missing-classes` for s5.** Zero ledger corrections were
+needed — the only ledger-shaped finding is the D307 breach above, which is a filing-discipline failure and
+not a dishonest row.
+
+**NEXT WAVE:** (1) merge these six, close the seven merge-gated rows, and re-derive orphans WITH a UTC stamp
+— it should read 117; (2) drive #8500 to a decision, because it is the only lever that moves 58% of the
+roster and it is now the epic's oldest untouched dependency; (3) take the `.new-ready .mono` declaration and
+drop s6's ceiling to 0; (4) make D307 machine-checkable at create time and fix its definition so it and the
+seal predicate count the same population; (5) `cch-w22-s7` remains unadjudicated against `origin/main`'s
+bytes — it was not taken this wave.
+
 ### 2026-08-02 — wave 26 DECIDE (six slices filed, all round 1; Paper `cloud-console-hardening-wave-26-2026-08-02`)
 
 **LAW 0 AT FIRST CLAIM: `orphans=112`, read at 2026-08-02T16:53:31Z on a clean detached worktree at `cfc2f2b77`.** Not 108 (D303), not 118 (the wave-25 debrief), not 117 (the wave-26 direction). All three were separated in TIME, not in tree — D305 reconciles them exactly, and the number is a live ledger read whose only tree input is a hardcoded gate map, so **from now on every seal run in this epic quotes a wall-clock UTC stamp, not only a sha.**
