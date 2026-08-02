@@ -16794,8 +16794,14 @@
         "</select></div>" +
       '<label class="set-toggle"><input type="checkbox" id="env-secret" checked /> Secret (mask everywhere it appears)</label>' +
       '<label class="set-toggle"><input type="checkbox" id="env-once" /> Write-once (can never be read or replaced — only deleted)</label>' +
+      // cch-w22-s3: maxlength MATCHES the column and the changeset (varchar(255)
+      // / validate_length(:comment, max: 255)). Without it the field accepted 256
+      // characters, the changeset accepted them too (it capped at 1000), and the
+      // insert raised Postgrex 22001 — a bare 500 the SPA reported as "Check the
+      // values and try again". The changeset cap is the real gate; this attribute
+      // is the courtesy that stops a person typing past it in the first place.
       '<div class="field"><label class="label" for="env-comment">Comment (optional)</label>' +
-        '<input class="form-input" id="env-comment" type="text" placeholder="What this is for" autocomplete="off" /></div>' +
+        '<input class="form-input" id="env-comment" type="text" placeholder="What this is for" autocomplete="off" maxlength="255" /></div>' +
       '<div class="cm-error" id="env-error" role="alert" hidden><p class="cm-error-msg" id="env-error-msg"></p></div>' +
       '<div class="set-save-row">' +
         '<button class="btn btn-primary" id="env-save" type="button">Add variable</button>' +

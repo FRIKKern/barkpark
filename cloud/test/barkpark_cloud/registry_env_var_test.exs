@@ -195,6 +195,56 @@ defmodule BarkparkCloud.RegistryEnvVarTest do
     end
   end
 
+  # cch-w22-s3 — the comment cap is a COLUMN fact, not a taste. `comment` is
+  # `add :comment, :string` = varchar(255). The changeset validated it at 1000,
+  # so 256 characters passed validation and then raised Postgrex 22001
+  # (string_data_right_truncation) inside `Repo.insert_or_update` — and because
+  # nothing in this app installs a `Plug.ErrorHandler`, the raise reached the
+  # person as a bare 500 behind "Check the values and try again."
+  #
+  # THE TEST HAS TO BE ABLE TO LOSE: it pins BOTH sides of the boundary. 255 must
+  # still WRITE (a cap that merely rejects everything long would also pass a
+  # one-sided test), and 256 must come back as a changeset error and never as a
+  # raise — which is why the 256 case goes through the real `put_env_var/2` write
+  # path rather than stopping at `EnvVar.changeset/2`.
+  describe "comment length is capped at the column (255), not at 1000" do
+    test "255 characters is accepted and stored verbatim" do
+      team = team_fixture()
+      comment = String.duplicate("x", 255)
+
+      assert {:ok, ev} =
+               Registry.put_env_var(team, %{
+                 key: "COMMENT_AT_CAP",
+                 value: "v",
+                 scope: "team",
+                 comment: comment
+               })
+
+      assert String.length(ev.comment) == 255
+      assert Repo.get!(EnvVar, ev.id).comment == comment
+    end
+
+    test "256 characters is a changeset error, not a Postgrex 22001 raise" do
+      team = team_fixture()
+
+      assert {:error, changeset} =
+               Registry.put_env_var(team, %{
+                 key: "COMMENT_OVER_CAP",
+                 value: "v",
+                 scope: "team",
+                 comment: String.duplicate("x", 256)
+               })
+
+      assert Enum.any?(errors_on(changeset).comment, &String.contains?(&1, "255"))
+
+      # and nothing was written — the 422 is honest about the row not existing
+      assert Repo.aggregate(
+               from(e in EnvVar, where: e.team_id == ^team.id and e.key == "COMMENT_OVER_CAP"),
+               :count
+             ) == 0
+    end
+  end
+
   describe "write-once" do
     test "a write to an is_shown_once var is refused; reveal is refused" do
       team = team_fixture()
