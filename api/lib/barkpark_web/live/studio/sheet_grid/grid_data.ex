@@ -248,8 +248,21 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
   # toggle-mode. It stays a DERIVED assign and is NOT a fourth prop — it fans
   # out to ~36 sites in sheet_grid.ex, so re-keying it here is what keeps a
   # write-denied member from being handed a UI of dead buttons.
+  # `hookable` is the SELECTION/NAVIGATION axis, and it is NOT `editable`
+  # (wave 43). It keys on CHROME alone, exactly like `Geometry.grid_sel/3`: a
+  # `:studio` grid gets a real selection rect, so it must also get the client
+  # hook — the hook is the SOLE producer of selection (cell-click / head-click /
+  # nav / nav-edge / nav-corner / select-all have no server-rendered phx-click
+  # anywhere). Keying hook attachment on `editable` froze the selection on A1 for
+  # BOTH populations `editable` excludes: a write-DENIED member, and a fully
+  # write-capable member who flipped the View chip. The three nav heads already
+  # refuse only `chrome: :reader`, so this adds no server surface; every write
+  # stays governed by `editable` and, last of all, by `Ops.send_ops/2`.
   def derive_editable(socket) do
-    assign(socket, editable: socket.assigns.mode == :edit and socket.assigns.write_capable)
+    assign(socket,
+      editable: socket.assigns.mode == :edit and socket.assigns.write_capable,
+      hookable: socket.assigns.chrome == :studio
+    )
   end
 
   # ── grid geometry ────────────────────────────────────────────────────────

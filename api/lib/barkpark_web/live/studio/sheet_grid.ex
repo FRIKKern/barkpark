@@ -137,13 +137,31 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   fail closed). Such a host refreshes via the `%{published_content: …}` update
   clause when a publish lands.
 
-  KNOWN REMAINING LIMIT (deliberate, wave 42): `phx-hook="SheetGrid"` is
-  `@editable`-gated, so a write-DENIED member still has no keyboard map and no
-  TSV clipboard copy. The hook is not re-keyed here because its keydown map
-  pushes WRITE events (edit-start, cell-toggle, paste, undo/redo) and its DOM
-  contract binds to the editable grid's id/role/aria — a read-mode hook is a
-  client-side slice, not a prop re-key. Find-in-sheet stays open for such a
-  member (see the `sheet-find` bar) so search survives the loss.
+  READ MODE HAS THE HOOK (wave 43, closing wave 42's one deliberate
+  user-facing harm). `phx-hook="SheetGrid"` keys on `@hookable`
+  (`chrome == :studio`, derived beside `@editable` in `GridData`), NOT on
+  `@editable` — because the hook is the SOLE PRODUCER of selection: cell-click /
+  head-click / nav / nav-edge / nav-corner / select-all have no server-rendered
+  `phx-click` anywhere. Gating it on `@editable` left a write-DENIED member — and
+  a fully write-capable member who flipped the View chip, since `@editable` is
+  `mode == :edit and write_capable` — staring at a selection highlight frozen on
+  A1 that nothing could move; the TSV copy, which reads `td.sheet-sel`, was
+  downstream of that. The three navigation heads already refused only
+  `chrome: :reader`, so nothing new is server-side reachable.
+
+  What still governs writes is unchanged: `@editable` fans the write affordances
+  out across the template, and `Ops.send_ops/2`'s `write_capable: false` clause
+  is the last wall. The client's read-mode allowlist (`READ_MODE_EVENTS` in
+  bp-sheet-grid.js, derived from the absent `data-fns`) is a UX-and-honesty
+  layer on top of that wall, not the wall — with one behaviour that is its own:
+  `edit-start` is the only mutation with no `send_ops` terminus, so dropping it
+  client-side is what keeps a read-mode socket from broadcasting "editing A1" to
+  every peer while no editor renders.
+
+  STILL OPEN (`pds-w43-bl-sheetgrid-reader-half`): the `/sheets/:slug` reader.
+  `Geometry.grid_sel(_, _, :reader)` is `{0, 0, 0, 0}`, so no `<td>` ever carries
+  `sheet-sel` and the same hook would be a silent no-op there; giving the reader
+  a selection is a chrome-policy decision, not this re-key.
 
   ## Per-user undo/redo (M4)
 
@@ -3015,36 +3033,53 @@ defmodule BarkparkWeb.Studio.SheetGrid do
         <% end %>
       </div>
 
-      <%!-- ONE wrapper for both modes (id + hook flip with @editable, so a
-            mode toggle still remounts the hook) and the peer layer OUTSIDE
-            the if-block: an `if` block is a single tracked dynamic whose
-            dependencies are everything inside it — peer assigns in there
-            would make every presence frame re-render the whole grid body
-            (measured ~15ms extra; see the moduledoc). --%>
+      <%!-- ONE wrapper for both modes (the id still flips with @editable, so a
+            mode toggle remounts the hook against the new DOM shape) and the
+            peer layer OUTSIDE the if-block: an `if` block is a single tracked
+            dynamic whose dependencies are everything inside it — peer assigns
+            in there would make every presence frame re-render the whole grid
+            body (measured ~15ms extra; see the moduledoc).
+
+            THREE ATTRIBUTES KEY ON @hookable, NOT @editable (wave 43): the
+            hook, the role, and the aria selection contract. They are the
+            SELECTION axis — a `:studio` grid has a real `grid_sel` rect and the
+            hook is its only producer, so a write-denied member (and anyone in
+            View mode) used to sit on a highlight frozen at A1. `data-fns` /
+            `data-fn-sigs` stay @editable-gated ON PURPOSE: their absence is
+            exactly what the hook derives `_readOnly` from, which is what drops
+            every write event client-side. --%>
       <div
         id={if @editable, do: "#{@id}-grid", else: "#{@id}-grid-view"}
         class="sheet-grid-wrap"
-        phx-hook={if @editable, do: "SheetGrid"}
+        phx-hook={if @hookable, do: "SheetGrid"}
         tabindex="0"
-        role={if @editable, do: "application", else: "region"}
+        role={if @hookable, do: "application", else: "region"}
         aria-label="Spreadsheet grid"
-        aria-describedby={@editable && "#{@id}-grid-instructions"}
-        aria-activedescendant={@editable && Cells.cell_dom_id(@id, @active)}
+        aria-describedby={@hookable && "#{@id}-grid-instructions"}
+        aria-activedescendant={
+          @hookable && Cells.cell_dom_id(if(@editable, do: @id, else: "#{@id}-view"), @active)
+        }
         data-fns={@editable && Enum.join(@fn_names, " ")}
         data-fn-sigs={@editable && Jason.encode!(@fn_sigs)}
         data-row-offset={@row_offset}
       >
         <%!-- WCAG 2.1.2: the grid traps Tab (it walks the selection). This
               hidden note tells a keyboard/AT user the one-shot escape hatch —
-              Escape then Tab falls through to the browser (see the hook). --%>
+              Escape then Tab falls through to the browser (see the hook). The
+              read-mode half of the sentence is the honest one: navigation and
+              copy work, editing does not. --%>
         <span
-          :if={@editable}
+          :if={@hookable}
           id={"#{@id}-grid-instructions"}
           class="sr-only"
           style="position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0;"
         >
-          Press Escape then Tab to leave the grid; F2 or Enter to edit the cell;
-          Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes.
+          Press Escape then Tab to leave the grid.
+          <%= if @editable do %>
+            F2 or Enter to edit the cell; Ctrl+Alt+= inserts rows, Ctrl+Alt+- deletes.
+          <% else %>
+            Arrow keys move the selection and Ctrl+C copies it; this sheet is read-only.
+          <% end %>
         </span>
         <div class="sheet-scroll">
           <%= if @editable do %>
@@ -3520,7 +3555,7 @@ defmodule BarkparkWeb.Studio.SheetGrid do
             <td
               id={Cells.cell_dom_id(@id, {c, r})}
               class={Cells.cell_class(c, r, @sel, @active, cell, @matches)}
-              aria-selected={Cells.aria_selected(@sel, c, r, @editable)}
+              aria-selected={Cells.aria_selected(@sel, c, r)}
               aria-colindex={c + 1}
               data-ref={ref}
               data-r={r}
