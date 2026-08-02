@@ -3097,7 +3097,45 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
    BOTH console families' bases sit ABOVE this block (GR115) — order is load-
    bearing here, not style. */
 @media (max-width: 720px) {
-  .new-theater-grid { grid-template-columns: 1fr; gap: 16px; }
+  /* cch-w25-s2 — THE MIN-CONTENT ESCAPE, PAID, plus the step-row budget that
+     made it look unsatisfiable.
+       A bare `1fr` track is `minmax(auto, 1fr)`: its floor is the content's
+     min-content, so the stacked theater track could not shrink below its
+     widest word and the grid overflowed its own card at 320 WITH THE ORDINARY
+     HOSTNAME on shipped bytes (.new-theater-grid sw/cw 251/214,
+     .new-failed-caption painting 250.97 inside 214). That is live today for
+     every failed signup on a 320 phone; it escaped every guard only because
+     the card's left offset kept the spill under the viewport.
+     `minmax(0, 1fr)` drops the floor to zero and the track fits.
+       THE ESCAPE ALONE PUTS THE TEAR BACK. Once .new-step-body may shrink,
+     `.new-step` — a flex row of 22px dot + 12px gap + body + 12px gap +
+     .new-step-time (margin-left:auto, white-space:nowrap, never shrinks) —
+     spends 84px of a 176px row on chrome and hands the body 92.25px for a
+     hostname that needs 129.22. That is a ROW-BUDGET fact, not a min-content
+     fact, and it is separable: wrap the row and give the time its own line at
+     <=720 and the body gets the full 176px. Hostname whole AND escape paid.
+       PADDING-left, NEVER margin-left, on the reflowed time. The margin form
+     passes the page guard while opening a silent 34px internal overflow
+     (.new-step 210/176) no page-level instrument can see; the global
+     border-box reset is why padding is contained and margin is not. 34px is
+     the dot (22) + the row gap (12), so the time still hangs under its label.
+       COST, PRINTED AND ACCEPTED (pinned nowhere — a bare pixel assertion is
+     a maintenance liability this epic has already deleted one of). Measured by
+     the guard leg itself at 320, which prints h= on every run so the trade
+     stays quotable rather than remembered: .new-failed 977.28 -> 1144.59px,
+     and .new-theater-grid on theater-midflight 813.17 -> 978.88px. This is a
+     VISIBLE DESIGN CHANGE — at <=720 every step's elapsed time sits on its own
+     line under its label. Accepted: a taller page scrolls, a torn hostname
+     cannot be typed.
+       IT ALSO CURES A DEFECT NOBODY FILED. On origin/main bytes the mid-flight
+     .new-step row overran itself at ALL FOUR phone widths (212/209 at 320,
+     288/286 at 430) — the nowrap time column simply did not fit its row. The
+     reflow removes it from the row's inline budget entirely.
+       Driven by overflow-guard's W24-theater-failed-hostname-whole leg, which
+     asserts the page number on both theater-failed AND theater-midflight. */
+  .new-theater-grid { grid-template-columns: minmax(0, 1fr); gap: 16px; }
+  .new-step { flex-wrap: wrap; }
+  .new-step-time { margin-left: 0; flex: 1 0 100%; padding-left: 34px; }
   .new-console-body, .bp-console-body { max-height: 40vh; }
   .new-ready .new-actions .btn { width: 100%; }
   .new-step-detail, .new-step-probe, .new-step-time,

@@ -12328,3 +12328,55 @@ test("cch-w22-s5 (B): relTime — a future timestamp is never 'just now', and th
   assert.ok(row.includes("Active in 1d"), "the session row states the skew instead of claiming freshness");
   assert.ok(row.includes("session-revoke"), "…on the same row as Revoke");
 });
+
+// ── cch-w25-s2: the theater's min-content escape, and the ONE declaration that
+//    silently un-fixes it ─────────────────────────────────────────────────────
+// The defect is geometry and its real proof is the browser leg
+// (W24-theater-failed-hostname-whole, now driving theater-failed AND
+// theater-midflight, page + every theater box asserted). What a node run CAN own
+// is the source-level shape that leg is slow to report: a `margin-left` where a
+// `padding-left` belongs. That swap PASSES every page-level assertion in this
+// repo while opening a silent 34px internal overflow (.new-step 210/176,
+// measured by driving it), because the global border-box reset contains padding
+// and never margin. It is a one-word tidy-up a future author will find inviting,
+// and this test is what makes the swap cost four seconds instead of a browser run.
+// Appended at the END on the file's own rule: node --test numbers positionally.
+test("cch-w25-s2: the <=720 theater block escapes min-content AND pays the step-row budget with PADDING", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  // Anchored on the declaration that stacks the theater, never on ordinal —
+  // app.css carries several 720 blocks.
+  const anchor = css.indexOf(".new-theater-grid { grid-template-columns:");
+  assert.ok(anchor > 0, "the theater/phone block must still carry the stacked track");
+  const at = css.lastIndexOf("@media (max-width: 720px)", anchor);
+  assert.ok(at > 0, "the stacked track must live inside a 720px block");
+  const block = css.slice(at, css.indexOf("\n}\n", anchor) + 3);
+  // The escape. A bare `1fr` is `minmax(auto, 1fr)` — its floor is min-content,
+  // which is exactly how the track measured 251/214 inside its own card at 320
+  // with the ORDINARY hostname, no cruel string involved.
+  assert.match(block, /\.new-theater-grid \{ grid-template-columns: minmax\(0, 1fr\);/,
+    "a bare 1fr floors at min-content and the theater track overflows its card at 320");
+  // The escape ALONE puts the hostname tear back (.new-step-body returns to a
+  // 92.25px box). These two are the other half and may never ship without it.
+  assert.match(block, /\.new-step \{ flex-wrap: wrap; \}/,
+    "without wrapping the row, the nowrap time column keeps 34px of a 176px row and the hostname tears");
+  assert.match(block, /\.new-step-time \{ margin-left: 0; flex: 1 0 100%; padding-left: 34px; \}/,
+    "the reflowed time must clear the auto margin, take its own line, and be inset with PADDING");
+  // The trap, stated as its own assertion so the failure message IS the reason.
+  // Read the VALUE and compare it — a negative lookahead here would backtrack
+  // over its own `\s*` and pass on any value at all, which is a guard that
+  // cannot lose wearing the costume of one.
+  const timeRule = block.slice(block.indexOf(".new-step-time {")).split("}")[0];
+  assert.equal((timeRule.match(/margin-left:\s*([^;]+)/) || [])[1], "0",
+    "margin-left on the reflowed time passes every page-level guard and opens a silent 34px .new-step overflow — use padding-left");
+  assert.ok(/padding-left:\s*34px/.test(timeRule),
+    "the 34px inset (dot 22 + row gap 12) is what keeps the time under its own label");
+  // And the browser leg that owns the geometry must still drive BOTH theater
+  // screens. Mid-flight is the screen every successful signup watches and had
+  // zero coverage in that file until this row; a remedy that quietly reshapes it
+  // is the blind spot, not a bonus.
+  const guard = fs.readFileSync(new URL("./__preview__/overflow-guard.mjs", import.meta.url), "utf8");
+  assert.match(guard, /SCENARIOS\["theater-midflight"\]/,
+    "the guard leg must drive theater-midflight — it shares every rule this remedy touched");
+  assert.ok(!/RESIDUAL \(reported, not asserted/.test(guard),
+    "the cruel-host page number is 320/320 now and is ASSERTED; the reported-not-asserted block must be gone");
+});
