@@ -105,6 +105,255 @@ defmodule PDS.Census do
   @shapes ~w(POST-READ CAS-CONFIRMED-ECHO PURE-ECHO CATCH-ALL-TO-SUCCESS WRONG-ROW
              DISCARDED-POST-READ)
 
+  # ------------------------------------------------------- routed population (L4)
+  #
+  # THE POPULATION A COMPLETENESS ARM IS ABOUT (PDS wave 38). REGISTER-COMPLETE proves
+  # "every emitted site carries a row, both directions" over a population THE LENS
+  # DEFINES BY A STRING — the sites that literally spell `ok: true`. SCIM's three write
+  # routes emit success with NO `ok` KEY AT ALL (`send_resp(conn, 204, "")` at
+  # scim_users_controller.ex, behind `pipeline :scim` → RequireScimToken, a real
+  # non-admin IdP write path), so they are STRUCTURALLY outside that claim and a green
+  # REGISTER-COMPLETE says exactly nothing about them. A green gate over a population the
+  # lens defines is a vacuous green wearing the LENS instead of the CORPUS.
+  #
+  # SO THE OUTSIDE POPULATION IS DERIVED FROM THE ROUTER — the one structure that already
+  # enumerates every reachable write — and EVERY MEMBER CARRIES A DISPOSITION.
+  #
+  # VOCABULARY: ROUTED-WRITE / DISPOSED (PDS-D552). The census already owns
+  # write-routed / read-routed / unrouted in the DRIFT rows, and those mean REPO-VERB
+  # REACHABILITY over emitted sites. Two different populations behind one word inside one
+  # instrument makes both unreadable, and the drift arms compare on those names.
+  #
+  # THE KEY IS THE QUAD {method, path, module, action}, AND IT IS MUTATION-PROVEN
+  # (PDS-D539). Planting a synthetic write route onto an ALREADY-DISPOSED pair moves a
+  # {module, action} key from N to N — the arrival is STRUCTURALLY INVISIBLE, and a new
+  # route to an existing controller action is the single most likely real-world change.
+  # The quad moves N to N+1 and the arm fires. The selftest fixture carries TWO routes to
+  # ONE pair for exactly this reason, so the key is asked to discriminate on every run.
+  #
+  # BUILD-FREE, LIKE EVERYTHING ELSE HERE (PDS-D540). Derived from the AST of router.ex
+  # unioned with the plugin route specs — never from a compiled Phoenix route table. This
+  # script boots no app (7-14 s against ~7 min on a cold _build), and Phoenix 1.8.9's
+  # route map carries no `pipe_through` key anyway. Two shapes force the AST regardless:
+  # several route calls in router.ex are MULTILINE, so a single-line grep undercounts them
+  # silently, and `Barkpark.Plugins.OnixEdit.register_routes/1` DELEGATES to
+  # `OnixEdit.Routes.all/0`, so a literal-tuple grep over plugins/*.ex returns ZERO routes
+  # for onixedit. Both are resolved below.
+  @router_path "api/lib/barkpark_web/router.ex"
+  @plugin_dir "api/lib/barkpark/plugins/"
+  @routed_write_methods ~w(post put patch delete)a
+  @routed_live_method :live
+
+  # ROUTE-GENERATING MACROS. `plugin_routes/1` this lens RESOLVES (it reads the plugin
+  # specs and mounts them); everything else it can only NAME. A macro whose expansion
+  # lives in a dependency is a blind shape by construction for a script that never
+  # compiles, and a lens that does not print its own blind shapes is propaganda.
+  @routed_macros [:plugin_routes, :live_dashboard, :forward, :resources]
+  @routed_resolved_macro :plugin_routes
+
+  # DISPOSITION CLASSES — written prose, dated, one per class rather than one per row.
+  # A class is what a human decided about a SHAPE; the rows below pin WHICH members that
+  # decision covers, and the quad is what makes an arrival visible.
+  @routed_exclusion_classes %{
+    liveview_handle_event:
+      "2026-08-02 (PDS wave 38): a LiveView route names {Module, :action-or-nil} and its writes live in handle_event/3, so there is no {Controller, action} pair for the receipt register to key on. EXCLUDED because this lens structurally cannot judge it — printed with its count so the exclusion is a fact and not a silence.",
+    status_only_receipt:
+      "2026-08-02 (PDS wave 38): the routed action reaches no `ok: true` / `\"ok\" => true` receipt this lens can see and carries no roster anchor — it claims success by STATUS alone (`send_resp(conn, 2xx, \"\")`, a bare `json/2`, a redirect). THIS IS THE POPULATION HOLE wave 38 named: SCIM's three IdP write routes land here. The register's completeness claim never covered these; now they are COUNTED instead of absent.",
+    action_not_in_corpus:
+      "2026-08-02 (PDS wave 38): the routed {module, action} resolves to no def under api/lib — the module is generated, vendored, or lives outside the corpus glob, so no span exists to read a receipt out of.",
+    selftest_fixture:
+      "2026-08-02 (PDS wave 38): a synthetic member that exists ONLY in the --selftest corpus (module Barkpark.Filler.M1, written by write_corpus!/2 and absent from the real tree). Carried on purpose: without a committed row the row->member direction of ROUTED-POPULATION-COMPLETE has nothing to go red on, and the TWO rows share one {module, action} pair so the quad key is asked to discriminate on every selftest run."
+  }
+
+  # THE DISPOSITION TABLE. `{method, path, module, action, class}` — committed data, the
+  # same shape as @register and @roster, generated from the live derivation and then read
+  # back. Rows whose module this corpus does not carry are OUT OF SCOPE, never a red: a
+  # disposition naming a module nobody can open judges nothing either way.
+  @routed_excluded [
+    {:post, "/v1/selftest-fixture-close", "Barkpark.Filler.M1", :noop, :selftest_fixture},
+    {:post, "/v1/selftest-departure-anchor", "Barkpark.Filler.M1", :noop, :selftest_fixture},
+    {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete, :status_only_receipt},
+    {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete, :status_only_receipt},
+    {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete, :status_only_receipt},
+    {:delete, "/v1/access/:id", "BarkparkWeb.AccessController", :revoke, :status_only_receipt},
+    {:delete, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :delete, :status_only_receipt},
+    {:delete, "/v1/auth/app-tokens/current", "BarkparkWeb.AppTokenController", :delete_current, :status_only_receipt},
+    {:delete, "/v1/fleet/support-tokens/:token_id", "BarkparkWeb.FleetSupportTokenController", :delete, :status_only_receipt},
+    {:delete, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete, :status_only_receipt},
+    {:delete, "/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member, :status_only_receipt},
+    {:delete, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share, :status_only_receipt},
+    {:delete, "/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete, :status_only_receipt},
+    {:delete, "/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete, :status_only_receipt},
+    {:delete, "/v1/shares", "BarkparkWeb.ShareController", :delete, :status_only_receipt},
+    {:delete, "/v1/shares/links/:id", "BarkparkWeb.ShareLinkController", :revoke, :status_only_receipt},
+    {:delete, "/v1/shares/tokens/:token_id", "BarkparkWeb.ShareController", :revoke_token, :status_only_receipt},
+    {:delete, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :delete, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members/:asset_id", "BarkparkWeb.V1.MediaCollectionsController", :remove_member, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :revoke_share, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id", "BarkparkWeb.TicketKeysController", :delete, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset/:name", "BarkparkWeb.SchemaController", :delete, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :delete, :status_only_receipt},
+    {:delete, "/w/:workspace_slug/v1/chat-hosts/:id", "BarkparkWeb.ChatHostController", :revoke, :status_only_receipt},
+    {:live, "/admin/fleet", "Barkpark.Plugins.Tasks.Web.FleetLive", :index, :liveview_handle_event},
+    {:live, "/admin/github", "Barkpark.Plugins.Github.Web.OpsLive", :index, :liveview_handle_event},
+    {:live, "/admin/onixedit/bokbasen", "Barkpark.Plugins.OnixEdit.Web.BokbasenLive", :index, :liveview_handle_event},
+    {:live, "/admin/onixedit/staleness", "Barkpark.Plugins.OnixEdit.Web.StalenessLive", :index, :liveview_handle_event},
+    {:live, "/admin/projects", "Barkpark.Plugins.Tasks.Web.BoardLive", :index, :liveview_handle_event},
+    {:live, "/admin/pulse", "Barkpark.Plugins.Pulse.Web.DashboardLive", :index, :liveview_handle_event},
+    {:live, "/d/:dataset/papers/:slug", "BarkparkWeb.BulldocsLive", :index, :liveview_handle_event},
+    {:live, "/finder", "BarkparkWeb.FinderLive", :index, :liveview_handle_event},
+    {:live, "/papers/:slug", "BarkparkWeb.BulldocsLive", :index, :liveview_handle_event},
+    {:live, "/quiz/host/:pin", "BarkparkWeb.QuizHostLive", :index, :liveview_handle_event},
+    {:live, "/quiz/play/:pin", "BarkparkWeb.QuizPlayLive", :index, :liveview_handle_event},
+    {:live, "/sheets/:slug", "BarkparkWeb.SheetsReaderLive", :index, :liveview_handle_event},
+    {:live, "/studio/chat", "BarkparkWeb.Studio.ChatLive", nil, :liveview_handle_event},
+    {:live, "/studio/chat/:session_id", "BarkparkWeb.Studio.ChatLive", nil, :liveview_handle_event},
+    {:live, "/studio/onixedit/ping", "Barkpark.Plugins.OnixEdit.PingLive", :index, :liveview_handle_event},
+    {:live, "/studio/org-admin", "BarkparkWeb.Studio.OrgAdminLive", nil, :liveview_handle_event},
+    {:live, "/studio/styleguide", "BarkparkWeb.Studio.StyleguideLive", nil, :liveview_handle_event},
+    {:live, "/studio/styleguide/swatch", "BarkparkWeb.Studio.SwatchLive", nil, :liveview_handle_event},
+    {:live, "/studio/tickets", "Barkpark.Plugins.Tickets.InboxLive", :index, :liveview_handle_event},
+    {:live, "/studio/tmux", "BarkparkWeb.Studio.TmuxLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/admin/fleet", "Barkpark.Plugins.Tasks.Web.FleetLive", :index, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/admin/github", "Barkpark.Plugins.Github.Web.OpsLive", :index, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/admin/onixedit/bokbasen", "Barkpark.Plugins.OnixEdit.Web.BokbasenLive", :index, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/admin/onixedit/staleness", "Barkpark.Plugins.OnixEdit.Web.StalenessLive", :index, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/admin/projects", "Barkpark.Plugins.Tasks.Web.BoardLive", :index, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/admin/pulse", "Barkpark.Plugins.Pulse.Web.DashboardLive", :index, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio", "BarkparkWeb.Studio.StudioLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/*path", "BarkparkWeb.Studio.StudioLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_plugins", "BarkparkWeb.Admin.PluginsLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/_plugins/:plugin/settings", "BarkparkWeb.Admin.PluginSettingsLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/api-tester", "BarkparkWeb.Studio.ApiTesterLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/d/:dataset/studio/media", "BarkparkWeb.Studio.MediaLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/papers/:slug", "BarkparkWeb.BulldocsLive", :index, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/studio/chat", "BarkparkWeb.Studio.ChatLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/studio/chat-hosts", "BarkparkWeb.Studio.ChatHostsLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/studio/chat/:session_id", "BarkparkWeb.Studio.ChatLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/studio/connectors", "BarkparkWeb.Studio.ConnectorsLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/studio/onixedit/ping", "Barkpark.Plugins.OnixEdit.PingLive", :index, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/studio/settings", "BarkparkWeb.Studio.SettingsLive", nil, :liveview_handle_event},
+    {:live, "/w/:workspace_slug/p/:project_slug/studio/tickets", "Barkpark.Plugins.Tickets.InboxLive", :index, :liveview_handle_event},
+    {:patch, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :update, :status_only_receipt},
+    {:patch, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :update, :status_only_receipt},
+    {:patch, "/v1/chat/sessions/:id", "BarkparkWeb.ChatController", :update, :status_only_receipt},
+    {:patch, "/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update, :status_only_receipt},
+    {:patch, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id", "BarkparkWeb.V1.MediaController", :update, :status_only_receipt},
+    {:post, "/api/documents/:type", "BarkparkWeb.LegacyController", :create, :status_only_receipt},
+    {:post, "/api/playground", "BarkparkWeb.PlaygroundController", :provision, :status_only_receipt},
+    {:post, "/api/workspaces", "BarkparkWeb.WorkspaceController", :create, :status_only_receipt},
+    {:post, "/api/workspaces/:workspace_slug/import", "BarkparkWeb.WorkspaceController", :import, :status_only_receipt},
+    {:post, "/api/workspaces/:workspace_slug/projects", "BarkparkWeb.WorkspaceController", :create_project, :status_only_receipt},
+    {:post, "/auth/reset/:token", "BarkparkWeb.SessionController", :reset_submit, :status_only_receipt},
+    {:post, "/login", "BarkparkWeb.SessionController", :create, :status_only_receipt},
+    {:post, "/login/account", "BarkparkWeb.SessionController", :account, :status_only_receipt},
+    {:post, "/login/magic", "BarkparkWeb.SessionController", :magic_request, :status_only_receipt},
+    {:post, "/login/mfa", "BarkparkWeb.SessionController", :mfa, :status_only_receipt},
+    {:post, "/login/reset", "BarkparkWeb.SessionController", :reset_request, :status_only_receipt},
+    {:post, "/media/upload", "BarkparkWeb.MediaController", :upload, :status_only_receipt},
+    {:post, "/scim/v2/Groups", "BarkparkWeb.ScimGroupsController", :create, :status_only_receipt},
+    {:post, "/scim/v2/Users", "BarkparkWeb.ScimUsersController", :create, :status_only_receipt},
+    {:post, "/v1/access", "BarkparkWeb.AccessController", :mint, :status_only_receipt},
+    {:post, "/v1/access/claim", "BarkparkWeb.AccessController", :claim, :status_only_receipt},
+    {:post, "/v1/admin/rollback", "BarkparkWeb.SelfUpdateController", :rollback, :status_only_receipt},
+    {:post, "/v1/admin/site-deploy", "BarkparkWeb.SiteDeployController", :trigger, :status_only_receipt},
+    {:post, "/v1/auth/app-tokens", "BarkparkWeb.AppTokenController", :create, :status_only_receipt},
+    {:post, "/v1/auth/login", "BarkparkWeb.AuthController", :login, :status_only_receipt},
+    {:post, "/v1/auth/login-tickets", "BarkparkWeb.LoginTicketController", :create, :status_only_receipt},
+    {:post, "/v1/auth/magic-login", "BarkparkWeb.AuthController", :magic_login, :status_only_receipt},
+    {:post, "/v1/auth/mfa/enroll", "BarkparkWeb.AuthController", :mfa_enroll, :status_only_receipt},
+    {:post, "/v1/auth/register", "BarkparkWeb.AuthController", :register, :status_only_receipt},
+    {:post, "/v1/auth/saml/:org_slug/slo", "BarkparkWeb.SamlController", :slo, :status_only_receipt},
+    {:post, "/v1/auth/sso/route", "BarkparkWeb.SsoRoutingController", :route, :status_only_receipt},
+    {:post, "/v1/auth/tokens", "BarkparkWeb.AuthController", :create_token, :status_only_receipt},
+    {:post, "/v1/auth/webauthn/login", "BarkparkWeb.WebauthnController", :login, :status_only_receipt},
+    {:post, "/v1/auth/webauthn/login/challenge", "BarkparkWeb.WebauthnController", :login_challenge, :status_only_receipt},
+    {:post, "/v1/auth/webauthn/register/challenge", "BarkparkWeb.WebauthnController", :register_challenge, :status_only_receipt},
+    {:post, "/v1/auth/webauthn/step-up/challenge", "BarkparkWeb.WebauthnController", :step_up_challenge, :status_only_receipt},
+    {:post, "/v1/chat-host/enroll", "BarkparkWeb.ChatHostController", :enroll, :status_only_receipt},
+    {:post, "/v1/chat-host/heartbeat", "BarkparkWeb.ChatHostController", :heartbeat, :status_only_receipt},
+    {:post, "/v1/chat-host/rotate", "BarkparkWeb.ChatHostController", :rotate, :status_only_receipt},
+    {:post, "/v1/chat/sessions", "BarkparkWeb.ChatController", :create, :status_only_receipt},
+    {:post, "/v1/chat/sessions/:id/archive", "BarkparkWeb.ChatController", :archive, :status_only_receipt},
+    {:post, "/v1/chat/sessions/:id/state", "BarkparkWeb.ChatHostController", :report_state, :status_only_receipt},
+    {:post, "/v1/chat/sessions/:id/unarchive", "BarkparkWeb.ChatController", :unarchive, :status_only_receipt},
+    {:post, "/v1/cycles/:epic_id/:wave_id/assignments", "BarkparkWeb.CycleFleetController", :create_assignment, :status_only_receipt},
+    {:post, "/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results", "BarkparkWeb.CycleFleetController", :create_result, :status_only_receipt},
+    {:post, "/v1/cycles/:epic_id/:wave_id/open", "BarkparkWeb.CycleFleetController", :open, :status_only_receipt},
+    {:post, "/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
+    {:post, "/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
+    {:post, "/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
+    {:post, "/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
+    {:post, "/v1/data/search/:dataset/synonyms/promote", "BarkparkWeb.SearchController", :promote_search_synonym, :status_only_receipt},
+    {:post, "/v1/fleet/support-tokens", "BarkparkWeb.FleetSupportTokenController", :create, :status_only_receipt},
+    {:post, "/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
+    {:post, "/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},
+    {:post, "/v1/media/:dataset/collections/:id/members", "BarkparkWeb.V1.MediaCollectionsController", :add_member, :status_only_receipt},
+    {:post, "/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :share, :status_only_receipt},
+    {:post, "/v1/media/:dataset/processing/:id/callback", "BarkparkWeb.V1.MediaProcessingController", :callback, :status_only_receipt},
+    {:post, "/v1/media/:dataset/search/synonyms", "BarkparkWeb.V1.MediaController", :create_search_synonym, :status_only_receipt},
+    {:post, "/v1/media/:dataset/search/synonyms/promote", "BarkparkWeb.V1.MediaController", :promote_search_synonym, :status_only_receipt},
+    {:post, "/v1/media/:dataset/upload", "BarkparkWeb.V1.MediaController", :upload, :status_only_receipt},
+    {:post, "/v1/plugins/sheets/:slug/ops", "?", :apply_ops, :action_not_in_corpus},
+    {:post, "/v1/plugins/sheets/import", "?", :create, :action_not_in_corpus},
+    {:post, "/v1/plugins/tickets/keys", "BarkparkWeb.TicketKeysController", :create, :status_only_receipt},
+    {:post, "/v1/plugins/tickets/keys/:id/pause", "BarkparkWeb.TicketKeysController", :pause, :status_only_receipt},
+    {:post, "/v1/plugins/tickets/keys/:id/rotate", "BarkparkWeb.TicketKeysController", :rotate, :status_only_receipt},
+    {:post, "/v1/plugins/tickets/keys/:id/unpause", "BarkparkWeb.TicketKeysController", :unpause, :status_only_receipt},
+    {:post, "/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert, :status_only_receipt},
+    {:post, "/v1/shares", "BarkparkWeb.ShareController", :create, :status_only_receipt},
+    {:post, "/v1/shares/links", "BarkparkWeb.ShareLinkController", :mint, :status_only_receipt},
+    {:post, "/v1/shares/tokens", "BarkparkWeb.ShareController", :mint_token, :status_only_receipt},
+    {:post, "/v1/status/incidents", "BarkparkWeb.StatusController", :create_incident, :status_only_receipt},
+    {:post, "/v1/status/incidents/:id/resolve", "BarkparkWeb.StatusController", :resolve_incident, :status_only_receipt},
+    {:post, "/v1/tickets/:id/attachments", "BarkparkWeb.TicketsAttachmentsController", :create, :status_only_receipt},
+    {:post, "/v1/webhooks/:dataset", "BarkparkWeb.WebhookController", :create, :status_only_receipt},
+    {:post, "/v1/webhooks/:dataset/:id/deliveries/:event_id/replay", "BarkparkWeb.WebhookController", :replay, :status_only_receipt},
+    {:post, "/v1/webhooks/:dataset/:id/reenable", "BarkparkWeb.WebhookController", :reenable, :status_only_receipt},
+    {:post, "/v1/webhooks/:dataset/:id/rotate", "BarkparkWeb.WebhookController", :rotate, :status_only_receipt},
+    {:post, "/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/chat/tokens", "BarkparkWeb.ChatTokenController", :create, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments", "BarkparkWeb.CycleFleetController", :create_assignment, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/assignments/:assignment_id/results", "BarkparkWeb.CycleFleetController", :create_result, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/open", "BarkparkWeb.CycleFleetController", :open, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/promote", "BarkparkWeb.CycleFleetController", :promote, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/quarantine", "BarkparkWeb.CycleFleetController", :quarantine, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/activate", "BarkparkWeb.CycleFleetController", :activate_release_gate, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/:release_gate_id/papers/:role/stage", "BarkparkWeb.CycleFleetController", :stage_release_paper, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/release-gates/open", "BarkparkWeb.CycleFleetController", :admit_open_release_gate, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/rollback", "BarkparkWeb.CycleFleetController", :rollback, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/cycles/:epic_id/:wave_id/seal", "BarkparkWeb.CycleFleetController", :seal, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/mutate/:dataset", "BarkparkWeb.MutateController", :mutate, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/revision/:dataset/:id/restore", "BarkparkWeb.HistoryController", :restore, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/data/search/:dataset/synonyms", "BarkparkWeb.SearchController", :create_search_synonym, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/checkout", "BarkparkWeb.V1.MediaController", :checkout, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/:id/undo-checkout", "BarkparkWeb.V1.MediaController", :undo_checkout, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/members", "BarkparkWeb.V1.MediaCollectionsController", :add_member, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/collections/:id/share", "BarkparkWeb.V1.MediaCollectionsController", :share, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/search/synonyms", "BarkparkWeb.V1.MediaController", :create_search_synonym, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/media/:dataset/upload", "BarkparkWeb.V1.MediaController", :upload, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys", "BarkparkWeb.TicketKeysController", :create, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id/pause", "BarkparkWeb.TicketKeysController", :pause, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id/rotate", "BarkparkWeb.TicketKeysController", :rotate, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/plugins/tickets/keys/:id/unpause", "BarkparkWeb.TicketKeysController", :unpause, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/schemas/:dataset", "BarkparkWeb.SchemaController", :upsert, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/tokens", "BarkparkWeb.TokenController", :create, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset", "BarkparkWeb.WebhookController", :create, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/deliveries/:event_id/replay", "BarkparkWeb.WebhookController", :replay, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/reenable", "BarkparkWeb.WebhookController", :reenable, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/rotate", "BarkparkWeb.WebhookController", :rotate, :status_only_receipt},
+    {:post, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id/test-send", "BarkparkWeb.WebhookController", :test_send, :status_only_receipt},
+    {:post, "/w/:workspace_slug/v1/chat-hosts/enrollments", "BarkparkWeb.ChatHostController", :create_enrollment, :status_only_receipt},
+    {:put, "/api/workspaces/:workspace_slug/media/blob/*path", "BarkparkWeb.MediaController", :put_blob, :status_only_receipt},
+    {:put, "/scim/v2/Groups/:id", "BarkparkWeb.ScimGroupsController", :replace, :status_only_receipt},
+    {:put, "/scim/v2/Users/:id", "BarkparkWeb.ScimUsersController", :replace, :status_only_receipt},
+    {:put, "/v1/data/search/:dataset/settings", "BarkparkWeb.SearchController", :update_search_settings, :status_only_receipt},
+    {:put, "/v1/media/:dataset/search/settings", "BarkparkWeb.V1.MediaController", :update_search_settings, :status_only_receipt},
+    {:put, "/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt},
+    {:put, "/w/:workspace_slug/p/:project_slug/v1/webhooks/:dataset/:id", "BarkparkWeb.WebhookController", :update, :status_only_receipt}
+  ]
+
   # ------------------------------------------------------------- declared register
   #
   # COMMITTED DATA, NOT A SUPPRESSION SWITCH (PDS wave 35). A site lands here only with a
@@ -924,13 +1173,15 @@ defmodule PDS.Census do
     report_judgment_register(classified)
     falsifiers = if register_scope(classified) == :real, do: report_basis_falsifiers(classified), else: :skipped
     if show_sites?, do: report_each_site(classified)
+    routed = report_routed_population(routed_derivation(parsed), classified, parsed, index)
+    report_lens_can_miss(routed)
     report_blind_spots(parsed)
     delegate = report_delegate_probe(index)
 
     ms = System.monotonic_time(:millisecond) - t0
 
     integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms,
-      parsed, falsifiers)
+      parsed, falsifiers, routed)
   end
 
   # THE GLOB IS RELATIVE TO CWD, DELIBERATELY. `--selftest` censuses a synthetic tree by
@@ -2559,6 +2810,514 @@ defmodule PDS.Census do
     end
   end
 
+  # ----------------------------------------------------- routed population (L4a-d)
+
+  # THE WHOLE DERIVATION, IN ONE PASS OVER THE SOURCES THE CENSUS ALREADY READ. Returns
+  # :no_router when this corpus carries no router.ex — the ROUTER-PRESENCE predicate the
+  # two new arms hang on, so a synthetic or truncated corpus contributes NO arm rather
+  # than a PASS nobody earned.
+  defp routed_derivation(parsed) do
+    with %{src: src} <- Enum.find(parsed, &(&1.path == @router_path)),
+         {:ok, ast} <- Code.string_to_quoted(src) do
+      literal = router_literal_routes(ast)
+      mounts = router_mount_sites(ast)
+      specs = plugin_route_specs(parsed)
+
+      mounted =
+        for {prefix, bucket} <- mounts,
+            s <- specs,
+            auth_in_scope?(s.auth, bucket),
+            do: {s.method, prefix <> s.path, s.module, s.action}
+
+      # `scope "/" do post("/login", ...) end` composes to "//login". Phoenix normalises
+      # that away, so the key must too — otherwise the disposition table reads as a set of
+      # URLs nobody can find in the router and a reviewer cannot check a single row.
+      routes =
+        (literal ++ mounted)
+        |> Enum.map(fn {m, path, mod, a} -> {m, normalize_route_path(path), mod, a} end)
+        |> Enum.uniq()
+
+      %{
+        routes: routes,
+        population: Enum.filter(routes, &routed_member?/1),
+        mounts: mounts,
+        specs: specs,
+        macro_sites: router_macro_sites(ast),
+        textual_macro: count(src, "#{@routed_resolved_macro}(")
+      }
+    else
+      _ -> :no_router
+    end
+  end
+
+  # ROUTED-WRITE. A member is a route that can MOVE STATE: the four write methods, plus
+  # every LiveView mount — a LiveView's handle_event/3 writes are routed from here too,
+  # and dropping them silently is the exact move this slice exists to refuse. They are
+  # disposed EXCLUDED, with a count, rather than never counted.
+  defp routed_member?({m, _p, _mod, _a}),
+    do: m in @routed_write_methods or m == @routed_live_method
+
+  # -- the router AST ---------------------------------------------------------
+  #
+  # SCOPE STATE IS {path prefix, alias segments} AND BOTH NEST. `scope "/v1", BarkparkWeb
+  # do get("/x", FooController, :y) end` is GET /v1/x -> BarkparkWeb.FooController.y, and
+  # reading the literal alone (as an earlier route-linkage probe did) manufactures false
+  # findings on every scoped controller in the file.
+  defp router_literal_routes(ast), do: Enum.reverse(router_walk(ast, {"", []}, []))
+
+  @route_verbs ~w(get post put patch delete options head live)a
+
+  defp router_walk({:scope, _, args}, {prefix, aliases}, acc) do
+    {p, al, body} = scope_parts(args)
+    router_walk(body, {prefix <> p, aliases ++ al}, acc)
+  end
+
+  defp router_walk({verb, _, args}, {prefix, aliases} = ctx, acc) when verb in @route_verbs do
+    case args do
+      [path, mod, action | _] when is_binary(path) ->
+        [{verb, prefix <> path, alias_string(aliases, mod), action_atom(action)} | acc]
+
+      # `live "/x", FooLive` — Phoenix's 2-arity form, action nil. Dropping it undercounts
+      # the LiveView class by a third.
+      [path, mod] when is_binary(path) and verb == @routed_live_method ->
+        [{verb, prefix <> path, alias_string(aliases, mod), nil} | acc]
+
+      _ ->
+        router_descend(args, ctx, acc)
+    end
+  end
+
+  defp router_walk({_, _, args}, ctx, acc) when is_list(args), do: router_descend(args, ctx, acc)
+  defp router_walk({a, b}, ctx, acc), do: router_walk(b, ctx, router_walk(a, ctx, acc))
+  defp router_walk(l, ctx, acc) when is_list(l), do: router_descend(l, ctx, acc)
+  defp router_walk(_, _, acc), do: acc
+
+  defp router_descend(nodes, ctx, acc), do: Enum.reduce(nodes, acc, &router_walk(&1, ctx, &2))
+
+  # THE MOUNT SITES, WITH THE SCOPE THEY SIT IN. `plugin_routes(scope: :api)` inside
+  # `scope "/v1/plugins"` mounts every plugin spec tagged `auth: :api` under that prefix.
+  defp router_mount_sites(ast), do: Enum.reverse(mount_walk(ast, "", []))
+
+  defp mount_walk({:scope, _, args}, prefix, acc) do
+    {p, _al, body} = scope_parts(args)
+    mount_walk(body, prefix <> p, acc)
+  end
+
+  defp mount_walk({@routed_resolved_macro, _, [opts]}, prefix, acc) when is_list(opts),
+    # kw_lit/2, NOT the census's kw/2: kw/2 reads the literal_encoder-wrapped form that
+    # parse_file/1 produces, and this walk parses router.ex PLAIN. Reading a bare `:scope`
+    # key through kw/2 returns nil, every mount silently defaults to :admin, and the
+    # mounted population loses ~84 routes without a single error.
+    do: [{prefix, kw_lit(opts, :scope) || :admin} | acc]
+
+  defp mount_walk({_, _, args}, prefix, acc) when is_list(args),
+    do: Enum.reduce(args, acc, &mount_walk(&1, prefix, &2))
+
+  defp mount_walk({a, b}, prefix, acc), do: mount_walk(b, prefix, mount_walk(a, prefix, acc))
+  defp mount_walk(l, prefix, acc) when is_list(l), do: Enum.reduce(l, acc, &mount_walk(&1, prefix, &2))
+  defp mount_walk(_, _, acc), do: acc
+
+  # DELIBERATELY A SECOND WALK, NOT A FILTER OVER mount_walk/3. LENS-CAN-MISS asserts that
+  # the blind-shape DETECTOR is alive; if killing it also killed the mount resolution, the
+  # mutation would red ROUTED-POPULATION-COMPLETE as collateral and the selftest could not
+  # tell which arm caught it. Separate functions, surgical mutation.
+  defp router_macro_sites(ast), do: Enum.reverse(macro_walk(ast, []))
+
+  defp macro_walk({name, meta, args}, acc) when name in @routed_macros and is_list(args),
+    do: [{name, length(args), meta[:line] || 0} | Enum.reduce(args, acc, &macro_walk/2)]
+
+  defp macro_walk({_, _, args}, acc) when is_list(args), do: Enum.reduce(args, acc, &macro_walk/2)
+  defp macro_walk({a, b}, acc), do: macro_walk(b, macro_walk(a, acc))
+  defp macro_walk(l, acc) when is_list(l), do: Enum.reduce(l, acc, &macro_walk/2)
+  defp macro_walk(_, acc), do: acc
+
+  defp scope_parts(args) do
+    {body, rest} =
+      case List.last(args) do
+        [{{:__block__, _, [:do]}, b}] -> {b, Enum.drop(args, -1)}
+        [{:do, b}] -> {b, Enum.drop(args, -1)}
+        _ -> {nil, args}
+      end
+
+    {Enum.find_value(rest, "", &string_lit/1),
+     Enum.find_value(rest, [], fn
+       {:__aliases__, _, segs} -> segs
+       _ -> nil
+     end), body}
+  end
+
+  defp normalize_route_path(path) do
+    case path |> String.split("/", trim: true) |> Enum.join("/") do
+      "" -> "/"
+      p -> "/" <> p
+    end
+  end
+
+  defp string_lit({:__block__, _, [s]}) when is_binary(s), do: s
+  defp string_lit(s) when is_binary(s), do: s
+  defp string_lit(_), do: nil
+
+  defp alias_string(prefix, {:__aliases__, _, segs}), do: Enum.join(prefix ++ segs, ".")
+  defp alias_string(_, a) when is_atom(a), do: to_string(a)
+  defp alias_string(_, _), do: "?"
+
+  defp action_atom({:__block__, _, [a]}) when is_atom(a), do: a
+  defp action_atom(a) when is_atom(a), do: a
+  defp action_atom(_), do: :__dynamic__
+
+  # -- the plugin specs -------------------------------------------------------
+  #
+  # THE DELEGATION IS RESOLVED, NOT GREPPED (PDS-D540). `OnixEdit.register_routes/1` is
+  # `do: Routes.all()`. A literal-tuple grep over plugins/*.ex returns FOUR ROUTES SHORT
+  # and says nothing about it; here the callback body that holds no literal tuple is
+  # followed to the def it names, by SUFFIX match on the alias segments (the same trick
+  # resolve/4 uses), and that def's tuples are collected instead.
+  defp plugin_route_specs(parsed) do
+    plugin_files = Enum.filter(parsed, &String.starts_with?(&1.path, @plugin_dir))
+    bodies = Map.new(plugin_files, &{&1.path, plugin_defs(&1)})
+    all_defs = bodies |> Map.values() |> Enum.concat()
+
+    all_defs
+    |> Enum.filter(fn {_mod, name, _arity, _body} -> name == :register_routes end)
+    |> Enum.flat_map(fn {_mod, _n, _a, body} ->
+      case route_specs(body) do
+        [] -> follow_route_delegation(body, all_defs)
+        specs -> specs
+      end
+    end)
+    |> Enum.uniq()
+  end
+
+  defp plugin_defs(%{path: path, src: src}) do
+    case Code.string_to_quoted(src) do
+      {:ok, ast} -> plugin_def_walk(ast, [], path, [])
+      _ -> []
+    end
+  end
+
+  defp plugin_def_walk({:defmodule, _, [{:__aliases__, _, segs}, body]}, mod, path, acc),
+    do: plugin_def_walk(body, mod ++ segs, path, acc)
+
+  defp plugin_def_walk({op, _, [head, body]}, mod, path, acc) when op in [:def, :defp] do
+    {name, _req, arity, _} = head_sig(head)
+    [{mod, name, arity, body} | plugin_def_walk(body, mod, path, acc)]
+  end
+
+  defp plugin_def_walk({_, _, args}, mod, path, acc) when is_list(args),
+    do: Enum.reduce(args, acc, &plugin_def_walk(&1, mod, path, &2))
+
+  defp plugin_def_walk({a, b}, mod, path, acc),
+    do: plugin_def_walk(b, mod, path, plugin_def_walk(a, mod, path, acc))
+
+  defp plugin_def_walk(l, mod, path, acc) when is_list(l),
+    do: Enum.reduce(l, acc, &plugin_def_walk(&1, mod, path, &2))
+
+  defp plugin_def_walk(_, _, _, acc), do: acc
+
+  defp follow_route_delegation(body, all_defs) do
+    body
+    |> remote_calls()
+    |> Enum.flat_map(fn {segs, fun, arity} ->
+      all_defs
+      |> Enum.filter(fn {mod, name, ar, _b} -> name == fun and ar == arity and suffix?(mod, segs) end)
+      |> Enum.flat_map(fn {_m, _n, _a, b} -> route_specs(b) end)
+    end)
+  end
+
+  defp remote_calls(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {{:., _, [{:__aliases__, _, segs}, f]}, _, args} = n, acc when is_atom(f) and is_list(args) ->
+          {n, [{segs, f, length(args)} | acc]}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    Enum.uniq(acc)
+  end
+
+  # A ROUTE SPEC IS A 4- OR 5-TUPLE {method, path, Module, action[, opts]}. The 4-tuple
+  # form carries no opts and therefore the DEFAULT `auth: :admin` — read straight off
+  # BarkparkWeb.Router.Plugins.route_in_scope?/2, which is the code that actually mounts
+  # them, so this derivation and the compiler agree by construction rather than by hope.
+  defp route_specs(node), do: node |> specs_walk([]) |> Enum.reverse()
+
+  defp specs_walk({:{}, _, [m, path, mod, action]}, acc) do
+    case {action_atom(m), string_lit(path)} do
+      {m, p} when is_atom(m) and is_binary(p) and m != :__dynamic__ ->
+        [%{method: m, path: p, module: alias_string([], mod), action: action_atom(action), auth: :admin} | acc]
+
+      _ ->
+        acc
+    end
+  end
+
+  defp specs_walk({:{}, _, [m, path, mod, action, opts]}, acc) do
+    case {action_atom(m), string_lit(path)} do
+      {m, p} when is_atom(m) and is_binary(p) and m != :__dynamic__ ->
+        [%{method: m, path: p, module: alias_string([], mod), action: action_atom(action),
+           auth: kw_lit(opts, :auth) || :admin} | acc]
+
+      _ ->
+        acc
+    end
+  end
+
+  defp specs_walk({_, _, args}, acc) when is_list(args), do: Enum.reduce(args, acc, &specs_walk/2)
+  defp specs_walk({a, b}, acc), do: specs_walk(b, specs_walk(a, acc))
+  defp specs_walk(l, acc) when is_list(l), do: Enum.reduce(l, acc, &specs_walk/2)
+  defp specs_walk(_, acc), do: acc
+
+  defp kw_lit(opts, key) when is_list(opts) do
+    Enum.find_value(opts, fn
+      {k, v} -> if action_atom(k) == key, do: action_atom(v)
+      _ -> nil
+    end)
+  end
+
+  defp kw_lit(_, _), do: nil
+
+  # `:public` is the CALLSITE name and `:none` the SPEC-SIDE spelling of the same bucket
+  # (BarkparkWeb.Router.Plugins.auth_matches_scope?/2). Missing it drops every public
+  # plugin route silently.
+  defp auth_in_scope?(:none, :public), do: true
+  defp auth_in_scope?(auth, scope), do: auth == scope
+
+  # -- disposition ------------------------------------------------------------
+  #
+  # PRECEDENCE, EXACTLY ONCE: JUDGED > ROSTERED > EXCLUDED > UNDISPOSED. JUDGED and
+  # ROSTERED are DERIVED every run (a receipt that moves keeps its judgement); EXCLUDED is
+  # committed data pinned to the QUAD, which is what makes an arriving route visible.
+  #
+  # THE JUDGED RELATION IS ONE HOP, AND SAYING SO IS THE POINT. A receipt in the action's
+  # own span counts, and so does one in a def the action CALLS LOCALLY (close/2 renders
+  # through close_response/3). A receipt two helpers deep reads as EXCLUDED here — that is
+  # a stated limit of this relation, not a hidden one.
+  defp dispose_routed(population, classified, parsed, index) do
+    receipts = receipt_functions(classified)
+    rostered = roster_functions(parsed)
+    module_files = module_file_index(parsed)
+    committed = Map.new(@routed_excluded, fn {m, p, mod, a, c} -> {{m, p, mod, a}, c} end)
+
+    disposed =
+      Enum.map(population, fn {_m, _p, mod, action} = key ->
+        cond do
+          reaches?(index, mod, action, receipts) -> {key, :judged, nil}
+          reaches?(index, mod, action, rostered) -> {key, :rostered, nil}
+          Map.has_key?(committed, key) -> {key, :excluded, Map.fetch!(committed, key)}
+          true -> {key, :undisposed, nil}
+        end
+      end)
+
+    live = MapSet.new(population)
+
+    orphans =
+      for {m, p, mod, a, c} <- @routed_excluded,
+          not MapSet.member?(live, {m, p, mod, a}),
+          Map.has_key?(module_files, mod),
+          do: {{m, p, mod, a}, c}
+
+    dupes =
+      @routed_excluded
+      |> Enum.frequencies_by(fn {m, p, mod, a, _c} -> {m, p, mod, a} end)
+      |> Enum.filter(fn {_k, n} -> n > 1 end)
+      |> Enum.map(&elem(&1, 0))
+
+    %{
+      rows: disposed,
+      judged: Enum.count(disposed, &(elem(&1, 1) == :judged)),
+      rostered: Enum.count(disposed, &(elem(&1, 1) == :rostered)),
+      excluded: Enum.count(disposed, &(elem(&1, 1) == :excluded)),
+      undisposed: for({k, :undisposed, _} <- disposed, do: k),
+      orphans: orphans,
+      dupes: dupes,
+      classes: Enum.frequencies(for {_k, :excluded, c} <- disposed, do: c)
+    }
+  end
+
+  # {module string, function name} of every def that OWNS a register-covered emitted site.
+  defp receipt_functions(classified) do
+    for {_row, status, site} <- resolve_register(classified),
+        status in [:live, :stale],
+        %{def: {mod, name, _ar, _ln}} <- [site],
+        into: MapSet.new(),
+        do: {Enum.join(mod, "."), name}
+  end
+
+  # The roster names LITERALS, not functions. Resolve each literal to the def that
+  # contains it, so a routed action can be disposed ROSTERED by the same anchor the
+  # ROSTER-ANCHORS-EXIST arm already keeps honest.
+  defp roster_functions(parsed) do
+    by_path = Map.new(parsed, &{&1.path, &1})
+
+    for r <- @roster,
+        f = Map.get(by_path, r.path),
+        f != nil,
+        {:ok, line} <- [roster_anchor(%{r.path => f.src}, r)],
+        d <- f.defs,
+        d.line <= line and line <= d.last,
+        into: MapSet.new(),
+        do: {Enum.join(d.module, "."), d.name}
+  end
+
+  defp module_file_index(parsed) do
+    for f <- parsed, d <- f.defs, into: %{}, do: {Enum.join(d.module, "."), f.path}
+  end
+
+  # Direct hit, or ONE local hop out of the action's own body.
+  defp reaches?(index, module, action, targets) do
+    MapSet.member?(targets, {module, action}) or
+      index
+      |> action_defs(module, action)
+      |> Enum.any?(fn d ->
+        Enum.any?(d.calls, fn
+          {:local, f, _ar} -> MapSet.member?(targets, {module, f})
+          _ -> false
+        end)
+      end)
+  end
+
+  defp action_defs(index, module, action) do
+    segs = module |> String.split(".") |> Enum.map(&String.to_atom/1)
+    Map.get(index.by_key, {segs, action}, [])
+  end
+
+  # -- report -----------------------------------------------------------------
+
+  defp report_routed_population(:no_router, _classified, _parsed, _index) do
+    p("ROUTED-WRITE POPULATION — SKIPPED (this corpus carries no #{@router_path})")
+    p(String.duplicate("-", 78))
+    p("  NOT A PASS. Without the router there is no population to dispose, so the two")
+    p("  arms below contribute nothing rather than a green nobody earned.")
+    p("")
+    :no_router
+  end
+
+  defp report_routed_population(d, classified, parsed, index) do
+    disp = dispose_routed(d.population, classified, parsed, index)
+    lives = Enum.filter(d.population, fn {m, _, _, _} -> m == @routed_live_method end)
+    live_mods = lives |> Enum.map(fn {_, _, mod, _} -> mod end) |> Enum.uniq() |> length()
+    pairs = d.population |> Enum.map(fn {_, _, mod, a} -> {mod, a} end) |> Enum.uniq() |> length()
+
+    p("ROUTED-WRITE POPULATION — the denominator REGISTER-COMPLETE does not have")
+    p(String.duplicate("-", 78))
+    p("  key         {method, path, module, action}  (the QUAD; a {module, action} key")
+    p("              collapses this population #{length(d.population)} -> #{pairs} and cannot see an arriving")
+    p("              route to an action it already disposed)")
+    p("  derived     #{length(d.routes)} routed entries from #{@router_path} AST + #{length(d.specs)} plugin spec(s)")
+    p("              mounted at #{length(d.mounts)} #{@routed_resolved_macro}/1 callsite(s)")
+    p("  ROUTED-WRITE #{length(d.population)} member(s) — methods #{Enum.map_join(@routed_write_methods, "/", &to_string/1)} plus every LiveView mount")
+
+    p("")
+    p("  DISPOSITION — every member exactly once")
+    p("    JUDGED    #{pad(disp.judged)}  reaches a receipt this lens emitted AND the register judged")
+    p("    ROSTERED  #{pad(disp.rostered)}  reaches a hand-named roster site outside the lens")
+    p("    EXCLUDED  #{pad(disp.excluded)}  committed disposition row, by class:")
+
+    Enum.each(Enum.sort(disp.classes), fn {class, n} ->
+      p("      #{String.pad_trailing(to_string(class), 22)} #{pad(n)}")
+      wrap(Map.get(@routed_exclusion_classes, class, "(no prose — see @routed_exclusion_classes)"), "               ")
+    end)
+
+    p("    UNDISPOSED #{pad(length(disp.undisposed))}  <- ROUTED-POPULATION-COMPLETE reds on this")
+    p("    sum       #{pad(disp.judged + disp.rostered + disp.excluded + length(disp.undisposed))}  == population #{length(d.population)}")
+
+    p("")
+    p("  EXCLUDED CLASS, PRINTED RATHER THAN ASSUMED: LiveView")
+    p("    #{length(lives)} route entr(y/ies) over #{live_mods} distinct module(s). Every one is a MOUNT, not a")
+    p("    {Controller, action} pair — the writes live in handle_event/3, which carries no")
+    p("    routed action name at all. An arm silent about what it structurally cannot key")
+    p("    inherits the exact vacuity it replaces, so the count is printed on every run.")
+    p("")
+
+    Map.put(d, :disposition, disp)
+  end
+
+  # WHAT THE ROUTE LENS ITSELF CANNOT SEE. The blind shapes are NAMED with their line, and
+  # the resolved-macro count is DERIVED from the AST — a plain `grep -c` over router.ex
+  # counts comment prose as callsites, which is the transcription error this epic exists
+  # to kill, printed side by side so the difference is on the record.
+  defp report_lens_can_miss(:no_router), do: :ok
+
+  defp report_lens_can_miss(d) do
+    {resolved, blind} = Enum.split_with(d.macro_sites, &(elem(&1, 0) == @routed_resolved_macro))
+
+    p("WHAT THE ROUTE LENS CANNOT EXPAND (blind shapes, named and counted)")
+    p(String.duplicate("-", 78))
+    p("  #{length(resolved)}  #{@routed_resolved_macro}/1 callsite(s) — RESOLVED here (a plain substring count over")
+    p("     router.ex says #{d.textual_macro}; the difference is comment prose, which the AST does not count)")
+
+    if blind == [] do
+      p("  0  route-generating macro callsite(s) this lens cannot expand")
+    else
+      p("  #{length(blind)}  route-generating macro callsite(s) this lens CANNOT expand — the routes they")
+      p("     emit are absent from the population above, and that absence is stated here:")
+
+      Enum.each(blind, fn {name, arity, line} ->
+        p("       #{name}/#{arity} at #{short(@router_path)}:#{line} — expanded by a dependency this")
+        p("         build-free lens never compiles, so its routes are UNCOUNTED, not judged")
+      end)
+    end
+
+    p("")
+  end
+
+  # -- the two arms -----------------------------------------------------------
+  #
+  # THEY LIVE IN THE UNCONDITIONAL CHECKS LIST, NEVER INSIDE register_checks/2 (PDS-D541).
+  # register_scope/1 returns :scoped_out unless a live corpus path matches one of
+  # @register's controller paths, and router.ex is not one of them — an arm added there is
+  # UNMUTATABLE: a probe hardcoded false in that branch still printed SELFTEST OK. Each arm
+  # carries its OWN router-presence predicate instead.
+  defp routed_checks(:no_router), do: []
+
+  defp routed_checks(d) do
+    disp = d.disposition
+    {resolved, blind} = Enum.split_with(d.macro_sites, &(elem(&1, 0) == @routed_resolved_macro))
+    ok? = disp.undisposed == [] and disp.orphans == [] and disp.dupes == []
+    pairs = d.population |> Enum.map(fn {_, _, mod, a} -> {mod, a} end) |> Enum.uniq() |> length()
+
+    complete_why =
+      if ok? do
+        "#{length(d.population)} ROUTED-WRITE member(s) <-> #{disp.judged} judged + #{disp.rostered} rostered + #{disp.excluded} excluded, both directions, no duplicate key"
+      else
+        Enum.join(
+          [
+            "#{length(disp.undisposed)} ROUTED-WRITE member(s) carry NO disposition",
+            "#{length(disp.orphans)} disposition row(s) name NO live routed member",
+            "#{length(disp.dupes)} disposition key(s) carry more than one row",
+            "the quad key sees #{length(d.population)} member(s) where a {module, action} key sees #{pairs} — an arrival onto an already-disposed pair is INVISIBLE under the pair key"
+          ] ++
+            Enum.map(Enum.take(disp.undisposed, 4), fn {m, p, mod, a} ->
+              "UNDISPOSED ARRIVAL #{m} #{p} -> #{mod}.#{a}"
+            end) ++
+            Enum.map(Enum.take(disp.orphans, 4), fn {{m, p, mod, a}, c} ->
+              "ORPHANED DISPOSITION #{m} #{p} -> #{mod}.#{a} [#{c}]"
+            end) ++
+            Enum.map(Enum.take(disp.dupes, 4), fn {m, p, mod, a} ->
+              "DUPLICATE DISPOSITION #{m} #{p} -> #{mod}.#{a}"
+            end),
+          " · "
+        )
+      end
+
+    lens_why =
+      if resolved == [] do
+        "the blind-shape detector found ZERO #{@routed_resolved_macro}/1 callsite(s) in a router.ex that a plain substring count reads #{d.textual_macro} time(s) — the lens can no longer name what it cannot expand, so every population figure above is over an unknown denominator"
+      else
+        "#{length(resolved)} #{@routed_resolved_macro}/1 callsite(s) resolved (substring count #{d.textual_macro}; the rest is comment prose) · #{length(blind)} unexpandable macro callsite(s) NAMED: " <>
+          if blind == [],
+            do: "none",
+            else: Enum.map_join(blind, ", ", fn {n, a, l} -> "#{n}/#{a}:#{l}" end)
+      end
+
+    [
+      {"ROUTED-POPULATION-COMPLETE", ok?, complete_why},
+      {"LENS-CAN-MISS", resolved != [], lens_why}
+    ]
+  end
+
   # ---------------------------------------------------------------- blind spots
 
   defp report_blind_spots(parsed) do
@@ -2844,6 +3603,57 @@ defmodule PDS.Census do
       exit: 0,
       expect: {:keys, {:reds, "does not DISCRIMINATE"}},
       proves: "dropping expr_fp from the key collapses two sites in one clause to one row — the register would silently lose a site"
+    },
+    # THE ROUTED-POPULATION ARMS (PDS wave 38). Both directions, plus the blind-shape
+    # detector.
+    #
+    # WHY THE ARRIVAL IS PLANTED IN THE DERIVATION AND NOT IN THE FIXTURE ROUTER. The two
+    # corpora are written ONCE by selftest/0 with the UNMUTATED write_corpus!/2 and then
+    # censused by the mutant; a mutation to the fixture heredoc changes a function the
+    # mutant never calls and the case passes vacuously at exit 0 (measured — it is how the
+    # first draft of these two cases went green while asserting nothing). The route is
+    # therefore planted into the derived population itself, one synthetic quad onto
+    # Barkpark.Filler.M1.noop — a pair the fixture's TWO committed rows already dispose,
+    # so the arrival is exactly the shape a {module, action} key cannot see.
+    %{
+      name: "ROUTED-ARRIVAL-REDS",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"(literal ++ mounted)" <> "\n        |> Enum.map",
+         "(literal ++ mounted ++ [{:post, \"/v1/selftest-planted\", \"Barkpark.Filler.M1\", :noop}])\n        |> Enum.map"},
+      exit: 1,
+      expect: ["FAIL  ROUTED-POPULATION-COMPLETE", "UNDISPOSED ARRIVAL", "/v1/selftest-planted"],
+      proves: "a write route ARRIVING onto an ALREADY-DISPOSED {module, action} pair reds by name — the quad key sees it where a {module, action} key cannot, because the pair count does not move at all"
+    },
+    %{
+      name: "ROUTED-DEPARTURE-REDS",
+      corpus: :full,
+      argv: [],
+      mut:
+        {"{:post, \"/v1/selftest-departure-anchor\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture}" <> ",",
+         "{:post, \"/v1/selftest-departure-anchor\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},\n    {:post, \"/v1/selftest-never-routed\", \"Barkpark.Filler.M1\", :noop, :selftest_fixture},"},
+      exit: 1,
+      expect: ["FAIL  ROUTED-POPULATION-COMPLETE", "ORPHANED DISPOSITION", "/v1/selftest-never-routed"],
+      proves: "a committed disposition that names NO live routed member reds too — one direction alone is half an arm, and a row judging nothing is the shape a stale table takes"
+    },
+    %{
+      name: "LENS-CAN-MISS-ARMED",
+      corpus: :full,
+      argv: [],
+      mut: {"macro_sites: router_macro_sites(ast)" <> ",", "macro_sites: [],"},
+      exit: 1,
+      expect: ["FAIL  LENS-CAN-MISS", "blind-shape detector found ZERO"],
+      proves: "killing the blind-shape detector reds LENS-CAN-MISS BY NAME, not a neighbour — the population figures would otherwise sit over an unknown denominator"
+    },
+    %{
+      name: "LENS-CAN-MISS-NAMES-BLIND",
+      corpus: :full,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: ["PASS  LENS-CAN-MISS", "live_dashboard/2", "CANNOT expand"],
+      proves: "a route-generating macro the lens cannot expand is NAMED with its line, so the routes it emits are stated absent rather than silently missing"
     }
   ]
 
@@ -2856,7 +3666,18 @@ defmodule PDS.Census do
     p("")
 
     src = File.read!(@self_source)
-    root = Path.join(System.tmp_dir!(), "pds-census-selftest-#{System.unique_integer([:positive])}")
+    # THE OS PID IS LOAD-BEARING (PDS-D542). System.unique_integer/1 is VM-LOCAL: eight
+    # concurrent VMs joined onto one shared TMPDIR produced the IDENTICAL root FIVE times,
+    # and File.rm_rf!(root) below then deletes a concurrent run's corpus mid-flight. The
+    # dangerous shape is not the crash — at a small stagger it prints SELFTEST FAILED
+    # naming FAIL KEY-DISCRIMINATES, a vacuous RED wearing a real arm's name, which reads
+    # as a substantive regression in key-discrimination logic. mkdir_p! would repair only
+    # the crash and leave that shape alive; the OS pid makes the root globally unique.
+    root =
+      Path.join(
+        System.tmp_dir!(),
+        "pds-census-selftest-#{System.pid()}-#{System.unique_integer([:positive])}"
+      )
     dirs = %{full: Path.join(root, "full"), tiny: Path.join(root, "tiny")}
 
     write_corpus!(dirs.full, @selftest_filler)
@@ -3083,6 +3904,25 @@ defmodule PDS.Census do
     end
     """)
 
+    # THE FIXTURE ROUTER (PDS wave 38). Two write routes onto ONE {module, action} pair,
+    # so the quad key is asked to DISCRIMINATE on every selftest run; a route-generating
+    # macro this lens resolves (plugin_routes) and one it cannot (live_dashboard), so
+    # LENS-CAN-MISS has both a resolved site and a blind site to name. Both routes point
+    # at Barkpark.Filler.M1, a module that exists ONLY here — in the real tree the two
+    # committed :selftest_fixture disposition rows name a module the corpus does not
+    # carry and are OUT OF SCOPE, never a red.
+    w.("api/lib/barkpark_web/router.ex", """
+    defmodule BarkparkWeb.Router do
+      live_dashboard("/dashboard", metrics: BarkparkWeb.Telemetry)
+
+      scope "/v1" do
+        plugin_routes(scope: :admin)
+        post("/selftest-fixture-close", Barkpark.Filler.M1, :noop)
+        post("/selftest-departure-anchor", Barkpark.Filler.M1, :noop)
+      end
+    end
+    """)
+
     w.("api/lib/barkpark/repo.ex", """
     defmodule Barkpark.Repo do
       def update_all(q, opts), do: {0, [q | opts]}
@@ -3101,7 +3941,7 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- integrity
 
-  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers) do
+  defp integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms, parsed, falsifiers, routed) do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
@@ -3143,7 +3983,7 @@ defmodule PDS.Census do
        else
          "Barkpark.Tasks.close (defdelegate, #{delegate.delegates} on the facade) reaches NO write verb within the route budget — the facade probe is blind"
        end}
-    ] ++ register_checks(classified, parsed) ++ falsifier_check(falsifiers)
+    ] ++ routed_checks(routed) ++ register_checks(classified, parsed) ++ falsifier_check(falsifiers)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
