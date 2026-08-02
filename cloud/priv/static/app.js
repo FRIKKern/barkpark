@@ -361,16 +361,27 @@
     // GR56: the pin is consulted ONLY here, at the two reflex dismissal routes.
     // Every other close path — closeModal(), logout, a body's own button —
     // stays ungated, so a hung request can never imprison the operator.
+    // W26-S4: the reflex routes go through `reflexClose`, not bare closeModal().
+    // The credential sheet reached from a launch wizard leaves TWO records
+    // behind it — `launchConnectDetour` and the `LAUNCH_RETURN_KEY` stash — and
+    // this one closeModal() touched neither, so Escape / × / backdrop each
+    // walked the person out of a launch while the console went on believing
+    // they were still in it. Gated on the sheet being the open body, so every
+    // other dialog dismisses exactly as before.
+    var reflexClose = function () {
+      if (credentialSheetOpen()) dismissLaunchConnectSheet("reflex");
+      else closeModal();
+    };
     root.addEventListener("click", function (e) {
       if (!(e.target.hasAttribute && e.target.hasAttribute("data-close"))) return;
       var isX = e.target.classList && e.target.classList.contains("modal-x");
       if (!modalDismissAllowed(modalPinState(), isX ? "close-x" : "backdrop")) return;
-      closeModal();
+      reflexClose();
     });
     document.addEventListener("keydown", function (e) {
       if (root.hidden) return;
       if (e.key === "Escape") {
-        if (modalDismissAllowed(modalPinState(), "escape")) closeModal();
+        if (modalDismissAllowed(modalPinState(), "escape")) reflexClose();
         return;
       }
       trapModalTab(e);
@@ -1874,25 +1885,20 @@
     return PROVIDERS.filter(function (p) { return p.kind === kind; })[0] || PROVIDERS[0];
   }
 
-  function openProviderPicker() {
-    var rows = PROVIDERS.map(function (p) {
-      return '<button class="choice" ' + (p.available ? "" : "disabled") + ' data-kind="' + esc(p.kind) + '">' +
-        '<span class="choice-ico ' + p.cls + '">' + esc(p.mark) + "</span>" +
-        '<span class="choice-main"><span class="choice-name">' + esc(p.name) + "</span>" +
-        '<span class="choice-sub">' + esc(p.sub) + "</span></span>" +
-        (p.available ? '<span class="choice-chev">&rsaquo;</span>' : '<span class="choice-tag">Soon</span>') +
-      "</button>";
-    }).join("");
-    openModal(
-      '<h2 class="modal-title" id="modal-title">Connect a provider</h2>' +
-      '<p class="modal-sub">Barkpark provisions instances on the provider of your choice. ' +
-        "Server costs are billed to you by the provider.</p>" +
-      '<div class="choice-list">' + rows + "</div>"
-    );
-    $("#modal-body").querySelectorAll('.choice[data-kind]:not([disabled])').forEach(function (b) {
-      b.addEventListener("click", function () { openProviderCredential(b.getAttribute("data-kind")); });
-    });
-  }
+  // W26-S4 DELETED `openProviderPicker` RATHER THAN LEAVE A ZERO-REFERENCE
+  // ORPHAN. It painted a "Connect a provider" choice list, and its ONLY forward
+  // caller in this file was `#cred-back` — the credential sheet's own Back
+  // button, which is exactly the mis-wiring this slice repairs (a person who
+  // pressed "< Back to providers" mid-launch landed on a picker they never
+  // opened, inside a modal, with their wizard and their typed name gone).
+  // Nothing else reached it: `.launch-connect-provider` goes STRAIGHT to
+  // `openProviderCredential(kind)` with the kind already chosen, and the
+  // providers page connects through its own inline card. With Back rewired to
+  // the launch wizard the picker had no entry door at all, and a dead function
+  // behind a fix is just the next slice's finding — so it is gone, not fenced.
+  // Its `.choice*` styles stay in app.css (out of this slice's file fence) and
+  // its `choice-ico ` allowlist entry stays live through the sheet's own
+  // `.modal-head` tile and the providers roster's mini-tile.
 
   // The per-kind credential inputs. hetzner: one API key (affixed eye toggle).
   // azure: the four service-principal fields, the secret one carrying its own eye
@@ -1932,7 +1938,11 @@
     // index.html, so a singular lookup here binds the page's controls and
     // leaves the sheet the person is looking at completely dead.
     var body = openModal(
-      '<button class="modal-back" id="cred-back" type="button">&lsaquo; Back to providers</button>' +
+      // THE LABEL NAMES WHERE IT GOES (W26-S4). It used to read "Back to
+      // providers" and go to a provider picker nobody had come from. Every
+      // remaining door into this sheet is a launch wizard's Connect button, so
+      // Back has exactly one honest destination and now says so.
+      '<button class="modal-back" id="cred-back" type="button">&lsaquo; Back to your launch</button>' +
       '<div class="modal-head"><span class="choice-ico ' + p.cls + '">' + esc(p.mark) + "</span>" +
         '<h2 class="modal-title" id="modal-title">' + esc(p.name) + "</h2></div>" +
       '<p class="modal-sub">' + esc(p.blurb || "") + "</p>" +
@@ -1944,7 +1954,7 @@
     );
     if (!body) return;
     var back = body.querySelector("#cred-back");
-    if (back) back.addEventListener("click", openProviderPicker);
+    if (back) back.addEventListener("click", function () { dismissLaunchConnectSheet("back"); });
     var eye = body.querySelector("#cred-eye");
     var token = body.querySelector("#cred-token");
     if (eye) eye.addEventListener("click", function () { toggleEye(token, eye); });
@@ -11968,6 +11978,64 @@
     return { action: "none", name: detour.name || "" };
   }
 
+  // ── LEAVING THE SHEET WITHOUT CONNECTING (W26-S4) ─────────────────────────
+  // Pure: what DISMISSING the credential sheet owes a person who walked into it
+  // from a launch wizard. `via` is "back" — the forward-navigating
+  // "< Back to your launch" control, the only exit that promises a destination —
+  // or "reflex" (Escape / the × / the backdrop), which promise only "gone".
+  //
+  // THE DECISION IS PATH-ASYMMETRIC, and a single answer is WRONG on one path.
+  // Driven on origin/main bytes, five exits, `scen=mixed-fleet`, modal path:
+  // FOUR of five left the person with no wizard and a stash of their typed name
+  // orphaned in localStorage; only the 201 resumed. So:
+  //   "reenter" — MODAL + Back. `openModal` owns ONE body, so `#launch-modal-slot`
+  //               and the typed name left the document the instant the sheet
+  //               opened (driven: the stamped slot's `isConnected` is false).
+  //               The wizard has to be rebuilt with that name — the same
+  //               `launchConnectResume` branch the 201 already uses.
+  //   "close"   — everything else. On the RUNWAY the wizard is rendered INLINE
+  //               and is UNTOUCHED behind the sheet (driven: `inline wizard
+  //               still behind it: true`, `typed name still in the input:
+  //               "Runway Alpha"`), so closing IS the whole repair. Remounting
+  //               there would refetch a catalog for a provider the person just
+  //               DECLINED and reset `container._launchHosting` to
+  //               `{provider, region: null, server_type: null}`, discarding a
+  //               region and size they had already picked on a connected tab.
+  //
+  // EVERY decision clears, `back` and `reflex` alike. The stash outliving the
+  // launch it belonged to is not a tidiness point — it is two more person
+  // bodies, both driven: a GHOST launch modal popping over `#providers` when
+  // the person later connects through that page's own card, and an unrelated
+  // `?checkout=success` return auto-opening a launch modal prefilled with a
+  // name abandoned an hour ago.
+  function launchConnectDismiss(detour, hash, via) {
+    var r = launchConnectResume(detour, hash);
+    if (via === "back" && r.action === "reenter") return { action: "reenter", name: r.name, clear: true };
+    return { action: "close", name: r.name, clear: true };
+  }
+
+  // The DOM half. Total: with no detour on record it is a plain close, which is
+  // what every non-launch dialog's dismissal already is.
+  function dismissLaunchConnectSheet(via) {
+    var d = launchConnectDismiss(launchConnectDetour, location.hash, via);
+    launchConnectDetour = null;
+    if (d.clear) { try { localStorage.removeItem(LAUNCH_RETURN_KEY); } catch (x) {} }
+    // openLaunchModal REUSES the open body — no close/reopen flicker, and the
+    // focus trap never lets go.
+    if (d.action === "reenter") openLaunchModal(d.name);
+    else closeModal();
+    return d;
+  }
+
+  // Is the credential sheet the body currently on screen? `#cred-back` is its
+  // own marker — it renders in no other dialog. The reflex hook in wireModal is
+  // gated on this so that dismissing SOME OTHER dialog can never clear a launch
+  // the person is still in the middle of.
+  function credentialSheetOpen() {
+    var root = $("#modal-root");
+    return !!(root && !root.hidden && root.querySelector("#cred-back"));
+  }
+
   // Consume the detour (once — a record survives no second 201) and act on it.
   // Called from BOTH credential submit paths: the dialog (submitProviderCred)
   // and the providers-page card (submitInlineProviderCred), because a stale
@@ -12662,8 +12730,11 @@
     });
   }
 
-  // Provider connect lives in the modal flow above (openProviderPicker →
-  // openProviderCredential → submitProviderCred).
+  // Provider connect lives in the modal flow above: a launch wizard's
+  // `.launch-connect-provider` door → openProviderCredential → submitProviderCred,
+  // and out again through dismissLaunchConnectSheet on every exit that is not a
+  // 201. (The old openProviderPicker step is gone — W26-S4 deleted it with the
+  // Back button that was its only caller.)
 
   // =========================================================== ACCOUNT (/v1/me)
   // Real team name + account email for the topbar chip — replaces the opaque
@@ -19020,6 +19091,7 @@
       // browser-verified by the overflow guard's
       // W25-launch-catalog-after-connect leg.
       launchConnectResume: launchConnectResume,
+      launchConnectDismiss: launchConnectDismiss,
       wantsLaunchFlow: wantsLaunchFlow, runwaySubline: runwaySubline,
       welcomeHeroHtml: welcomeHeroHtml, launchedHash: launchedHash,
       launchFlowReducer: launchFlowReducer, readyFoldTrigger: readyFoldTrigger,

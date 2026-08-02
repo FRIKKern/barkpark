@@ -209,6 +209,7 @@ const DEFECTS = [
   "W24-theater-failed-hostname-whole",
   "W26-instance-track-min-content",
   "W26-deploy-fail-clip",
+  "W26-cred-sheet-exits",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -5145,6 +5146,348 @@ async function main() {
           `a remedy that hides the spill somewhere else; the glyph assertion is the only one that can refuse a ` +
           `rect-based sentinel, which measures the panel's own border box — already clipped to the card, and green ` +
           `by construction on the defective bytes. Heights are printed per cell and deliberately unpinned`,
+        );
+      }
+    }
+
+
+
+    // ── W26-S4: EVERY EXIT FROM THE CREDENTIAL SHEET, NOT JUST THE ONE THAT
+    //    WORKED ────────────────────────────────────────────────────────────
+    //    W25's leg above measures the ONE exit that already behaved — the 201.
+    //    A driven five-exit census on origin/main bytes found the other four
+    //    all leaving the person with no wizard and their typed instance name
+    //    orphaned in localStorage:
+    //
+    //      cred-back   modalHidden=false launchWizardBack=false orphanStash="Exit Probe"
+    //      escape      modalHidden=true  launchWizardBack=false orphanStash="Exit Probe"
+    //      modal-x     modalHidden=true  launchWizardBack=false orphanStash="Exit Probe"
+    //      backdrop    modalHidden=true  launchWizardBack=false orphanStash="Exit Probe"
+    //      submit-201  modalHidden=false launchWizardBack=true  orphanStash=null
+    //
+    //    `#cred-back` is the worst of the four because it is the only exit that
+    //    PROMISES A DESTINATION: it read "< Back to providers" and delivered a
+    //    provider picker the person never opened, inside a modal, with the
+    //    wizard and the name gone. The stash the other three leave behind is
+    //    two further bodies, both driven: a GHOST launch modal popping over
+    //    `#providers` when the person later connects through that page's own
+    //    card, and an unrelated `?checkout=success` return auto-opening a launch
+    //    modal prefilled with a name abandoned long ago.
+    //
+    //    THREE GREEN-BY-CONSTRUCTION TRAPS, EACH MEASURED, EACH AVOIDED HERE:
+    //    (1) AN UNSCOPED `.launch-connect-provider` ON `scen=empty` BINDS THE
+    //        RUNWAY BUTTON AND PASSES ON PRE-FIX BYTES. Driven: on `scen=empty`
+    //        `document.querySelectorAll('.launch-connect-provider')` returns 1
+    //        and ZERO of them are inside `#launch-modal-slot` — the first match
+    //        lives in `#view-overview`, because the empty-fleet runway renders
+    //        the wizard INLINE in the overview body. Pressing THAT door writes
+    //        no stash at all (`noteLaunchConnectDetour` stashes only
+    //        `if (opts && opts.modal)`; measured `bp_launch_return = null`), and
+    //        the inline wizard survives the sheet — so a leg that asserted
+    //        "the wizard is back with the name" would have been GREEN on the
+    //        DEFECTIVE tree without ever entering the modal path. Hence:
+    //        `scen=mixed-fleet` (non-empty), and EVERY query below is scoped to
+    //        `#launch-modal-slot`, plus an explicit per-cell assertion that the
+    //        runway wizard is NOT present behind the modal.
+    //    (2) `scen=providers-empty` carries `providerConnect: {status: 422}`, so
+    //        its connect can never 201. `mixed-fleet` names no `providerConnect`
+    //        override and defaults to 201 — this leg needs the 201 only for the
+    //        control cell, but the trap is recorded so a future widening does
+    //        not pick the 422 fixture and print a table about nothing.
+    //    (3) `#modal-root` carries NO `data-close` (measured:
+    //        `#modal-root[data-close]=false`), so a backdrop cell that clicks it
+    //        reports a false "does not close". The real backdrop is
+    //        `.modal-backdrop`, which does carry it, and that is what the reflex
+    //        half below clicks.
+    if (requested.includes("W26-cred-sheet-exits")) {
+      const D = "W26-cred-sheet-exits";
+      // BLOCK-SCOPED (D247). Phone + desktop for the same reason W25's leg
+      // carries both: the modal wizard is reached through the topbar scope menu
+      // on a laptop, and the same sheet is what a phone gets.
+      const EXIT_VIEWPORTS = [[390, 844], [1000, 800]];
+      // NON-EMPTY FLEET — trap (1). `mixed-fleet` renders no runway wizard, so
+      // the ONLY `.launch-connect-provider` on the page is the modal one.
+      const EXIT_SCEN = "mixed-fleet";
+      // The empty-fleet control this leg does NOT drive its assertions on: the
+      // runway path, where the correct answer is the OPPOSITE one (close and
+      // nothing else). Driven as its own cell at the end.
+      const RUNWAY_SCEN = "empty";
+      const STASH = "bp_launch_return";
+
+      process.stdout.write(
+        `\n${D} — ${EXIT_VIEWPORTS.length} viewports x 3 cells (modal Back / modal Escape / runway Back)` +
+        ` (type a name -> the catalog's Connect door -> leave the sheet WITHOUT connecting -> is the person still` +
+        ` mid-launch, and did the abandoned launch stop haunting the rest of the console)\n`,
+      );
+
+      const exitWait = async (expr) => {
+        for (let w = 0; w < RENDER_CAP; w += 100) {
+          let v = false;
+          try { v = !!(await evalJs(`!!(${expr})`)); } catch { /* mid-render */ }
+          if (v) return true;
+          await sleep(100);
+        }
+        return false;
+      };
+      // A unique `cell` param per navigation: these cells differ only by hash,
+      // and a fragment-only navigation is a SAME-document navigation that keeps
+      // the previous cell's DOM (the trap the W24 leg measured).
+      const exitUrl = (scen, hash, tag) =>
+        `${BASE}/?scen=${scen}&theme=light&cell=${encodeURIComponent(tag)}${hash}`;
+      // Count catalog reads. The runway cell's whole question is whether Back
+      // there is `closeModal()` AND NOTHING ELSE: the wrong single-function fix
+      // routes the runway through the remount branch, which refetches the
+      // catalog of a provider the person just DECLINED and resets
+      // `container._launchHosting` to a null region and size — discarding a
+      // choice they had already made. A DOM read cannot see that; a request
+      // count can.
+      const armCatalogCounter = () => evalJs(
+        `(function(){window.__w26cat=0;if(window.__w26armed) return true;window.__w26armed=true;` +
+        `var of=window.fetch;window.fetch=function(i,init){` +
+        `var u=typeof i==='string'?i:((i&&i.url)||'');` +
+        `var m=String((init&&init.method)||(i&&i.method)||'GET').toUpperCase();` +
+        `if(m==='GET'&&/\\/v1\\/providers\\/[^/]+\\/catalog$/.test(u)) window.__w26cat++;` +
+        `return of.apply(this,arguments);};return true;})()`,
+      );
+      // Open the modal launch wizard the way a person does — the topbar scope
+      // menu, a control on every route — and walk to the credential sheet
+      // through the wizard's OWN scoped Connect door.
+      const openModalSheet = async (sentinel) => {
+        const opened = await evalJs(
+          `(function(){var sw=document.getElementById('scope-switch');` +
+          `if(!sw) return {ok:false,why:'no #scope-switch in the topbar'};sw.click();` +
+          `var l=document.getElementById('scope-launch');` +
+          `if(!l) return {ok:false,why:'#scope-launch never rendered into the scope menu'};` +
+          `l.click();return {ok:true};})()`,
+        );
+        if (!opened.ok) return opened;
+        if (!await exitWait(`document.querySelector('#launch-modal-slot .launch-connect-provider')`)) {
+          return { ok: false, why: "the modal launch wizard never offered a `#launch-modal-slot`-scoped `.launch-connect-provider` door — the person body starts at that door, so nothing below it was measured" };
+        }
+        // TRAP (1), ASSERTED PER CELL rather than trusted from the fixture: if a
+        // runway wizard were also on the page, an unscoped selector anywhere in
+        // this cell could bind it and every assertion below would be about the
+        // wrong button.
+        const shape = await evalJs(
+          `(function(){var v=document.getElementById('view-overview');` +
+          `return {runway:!!(v&&v.querySelector('.launch-form .form-input')),` +
+          `scoped:document.querySelectorAll('#launch-modal-slot .launch-connect-provider').length,` +
+          `total:document.querySelectorAll('.launch-connect-provider').length};})()`,
+        );
+        if (shape.runway) {
+          return { ok: false, why: `a RUNWAY wizard is mounted behind the modal on \`${EXIT_SCEN}\` (${shape.total} \`.launch-connect-provider\` on the page, ${shape.scoped} of them scoped) — an unscoped query in this cell would bind the runway button, which writes no stash and whose wizard survives the sheet, so this cell would pass on the DEFECTIVE tree` };
+        }
+        const walked = await evalJs(
+          `(function(){var i=document.querySelector('#launch-modal-slot .launch-form .form-input');` +
+          `if(!i) return {ok:false,why:'the modal wizard has no name field'};` +
+          `i.value=${JSON.stringify(sentinel)};` +
+          `window.__w26slot=document.getElementById('launch-modal-slot');` +
+          `document.querySelector('#launch-modal-slot .launch-connect-provider').click();return {ok:true};})()`,
+        );
+        if (!walked.ok) return walked;
+        if (!await exitWait(`document.querySelector('#modal-root #cred-back')`)) {
+          return { ok: false, why: "the credential sheet never rendered its own `#cred-back` after the door was pressed — the person never reached the screen this leg is about" };
+        }
+        // PREMISE, both halves. The sheet must really have taken the wizard with
+        // it (otherwise "the person was returned" is green by construction), and
+        // the modal detour must really have stashed the name (otherwise this is
+        // the runway path wearing the modal path's clothes — trap (1) again).
+        const premise = await evalJs(
+          `(function(){var s=null;try{s=localStorage.getItem(${JSON.stringify(STASH)});}catch(e){}` +
+          `return {destroyed:!(window.__w26slot&&window.__w26slot.isConnected),stash:s};})()`,
+        );
+        if (!premise.destroyed) {
+          return { ok: false, why: "the `#launch-modal-slot` stamped before the door was pressed is STILL MOUNTED — the sheet no longer overwrites the wizard, so this cell never entered the condition it exists to measure" };
+        }
+        if (premise.stash !== sentinel) {
+          return { ok: false, why: `the modal detour did not stash the typed name (\`${STASH}\` reads ${JSON.stringify(premise.stash)}, expected ${JSON.stringify(sentinel)}) — the stash is written only \`if (opts && opts.modal)\`, so this cell is on the RUNWAY path and cannot see the defect` };
+        }
+        return { ok: true };
+      };
+
+      let exitCells = 0, exitLost = 0, exitStale = 0, exitDead = 0;
+      for (const [width, height] of EXIT_VIEWPORTS) {
+        const row = [];
+
+        // ── (a) THE MODAL, BACK. The forward-navigating exit. It must land the
+        //        person back in their wizard with the name they typed.
+        exitCells++;
+        await setViewport(width, height);
+        await nav(
+          exitUrl(EXIT_SCEN, "#overview", `back-${width}`),
+          `(function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+        );
+        await evalJs(`(function(){try{localStorage.removeItem(${JSON.stringify(STASH)});}catch(e){}return true;})()`);
+        const backSentinel = `Exit Probe ${width}`;
+        const reachedBack = await openModalSheet(backSentinel);
+        if (!reachedBack.ok) {
+          exitDead++;
+          fail(D, `modal-back@${width}x${height}: ${reachedBack.why}`);
+          row.push("back:!reach");
+        } else {
+          await evalJs(`document.querySelector('#modal-root #cred-back').click()`);
+          await exitWait(`document.querySelector('#launch-modal-slot .launch-form .form-input')`);
+          const m = await evalJs(
+            `(function(){var r=document.getElementById('modal-root');` +
+            `var i=document.querySelector('#launch-modal-slot .launch-form .form-input');` +
+            `var s=null;try{s=localStorage.getItem(${JSON.stringify(STASH)});}catch(e){}` +
+            `return {hidden:!!(r&&r.hidden),wizard:!!i,name:i?i.value:null,stash:s,` +
+            `picker:!!document.querySelector('#modal-root .choice-list'),` +
+            `title:(function(){var t=document.querySelector('#modal-root .modal-title');return t?t.textContent:null;})()};})()`,
+          );
+          if (!m.wizard) {
+            exitLost++;
+            fail(D, `modal-back@${width}x${height}: pressing Back left NO launch wizard — \`#launch-modal-slot\` is ${m.hidden ? "gone and the modal is closed" : "gone with the modal still open"}, the dialog reads ${JSON.stringify(m.title)}${m.picker ? " and a provider picker they never opened is on screen" : ""}. The person is mid-launch and the console has forgotten it (origin/main bytes: launchWizardBack=false, picker=true, title="Connect a provider")`);
+          } else if (m.name !== backSentinel) {
+            exitLost++;
+            fail(D, `modal-back@${width}x${height}: the wizard is back but the typed instance name is not — the field reads ${JSON.stringify(m.name)}, the person typed ${JSON.stringify(backSentinel)}. Returning them to an empty form is asking them to retype what the console already has`);
+          }
+          if (m.stash !== null) {
+            exitStale++;
+            fail(D, `modal-back@${width}x${height}: \`${STASH}\` still holds ${JSON.stringify(m.stash)} after the sheet was left — an abandoned launch's name that outlives its launch is consumed later by an UNRELATED \`?checkout=success\` return, which auto-opens a launch modal prefilled with it`);
+          }
+          row.push(`back:wizard=${m.wizard} name=${JSON.stringify(m.name)} stash=${JSON.stringify(m.stash)} picker=${m.picker}`);
+        }
+
+        // ── (b) THE MODAL, ESCAPE. A reflex exit promises only "gone" — but it
+        //        may not leave the launch haunting the rest of the console.
+        //        Escape, the × and the backdrop share ONE closeModal() through
+        //        wireModal, so this cell covers all three; `.modal-backdrop` is
+        //        named in trap (3) above because `#modal-root` carries no
+        //        `data-close` and clicking it proves nothing.
+        exitCells++;
+        await setViewport(width, height);
+        await nav(
+          exitUrl(EXIT_SCEN, "#overview", `esc-${width}`),
+          `(function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+        );
+        await evalJs(`(function(){try{localStorage.removeItem(${JSON.stringify(STASH)});}catch(e){}return true;})()`);
+        const escSentinel = `Escape Probe ${width}`;
+        const reachedEsc = await openModalSheet(escSentinel);
+        if (!reachedEsc.ok) {
+          exitDead++;
+          fail(D, `modal-escape@${width}x${height}: ${reachedEsc.why}`);
+          row.push("esc:!reach");
+        } else {
+          await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+          await exitWait(`(function(){var r=document.getElementById('modal-root');return !!(r&&r.hidden);})()`);
+          const m = await evalJs(
+            `(function(){var r=document.getElementById('modal-root');` +
+            `var s=null;try{s=localStorage.getItem(${JSON.stringify(STASH)});}catch(e){}` +
+            `return {hidden:!!(r&&r.hidden),stash:s};})()`,
+          );
+          if (!m.hidden) {
+            exitDead++;
+            fail(D, `modal-escape@${width}x${height}: Escape did not close the dialog at all — nothing about what it leaves behind can be read off a sheet that is still open`);
+          }
+          if (m.stash !== null) {
+            exitStale++;
+            fail(D, `modal-escape@${width}x${height}: \`${STASH}\` still holds ${JSON.stringify(m.stash)} after Escape — this is the generator of BOTH secondary bodies: a ghost launch modal pops over \`#providers\` the moment the person connects through that page's own card, and a later unrelated \`?checkout=success\` return auto-opens a launch modal prefilled with this abandoned name (origin/main bytes: both driven, prefilled "Ghost Name" and "Abandoned Launch")`);
+          }
+          row.push(`esc:hidden=${m.hidden} stash=${JSON.stringify(m.stash)}`);
+        }
+
+        // ── (c) THE RUNWAY, BACK. THE ASYMMETRY TRIPWIRE. Here the inline
+        //        wizard and the typed name are UNTOUCHED behind the sheet, so
+        //        the honest Back is `closeModal()` and NOTHING ELSE. A fix that
+        //        routes both paths through one resume takes the remount branch
+        //        here, refetching the catalog of a provider the person just
+        //        declined and resetting `container._launchHosting` — the
+        //        request count is the only instrument that can see it.
+        exitCells++;
+        await setViewport(width, height);
+        await nav(
+          exitUrl(RUNWAY_SCEN, "#overview", `runway-${width}`),
+          `document.querySelector('#view-overview .launch-form .form-input')`,
+        );
+        await evalJs(`(function(){try{localStorage.removeItem(${JSON.stringify(STASH)});}catch(e){}return true;})()`);
+        const runwaySentinel = `Runway Alpha ${width}`;
+        if (!await exitWait(`document.querySelector('#view-overview .launch-connect-provider')`)) {
+          exitDead++;
+          fail(D, `runway-back@${width}x${height}: the \`${RUNWAY_SCEN}\` runway never offered a \`.launch-connect-provider\` door — the asymmetry control measured nothing`);
+          row.push("runway:!door");
+        } else {
+          await armCatalogCounter();
+          await evalJs(
+            `(function(){var i=document.querySelector('#view-overview .launch-form .form-input');` +
+            `i.value=${JSON.stringify(runwaySentinel)};` +
+            `document.querySelector('#view-overview .launch-connect-provider').click();return true;})()`,
+          );
+          if (!await exitWait(`document.querySelector('#modal-root #cred-back')`)) {
+            exitDead++;
+            fail(D, `runway-back@${width}x${height}: the credential sheet never rendered its own \`#cred-back\``);
+            row.push("runway:!sheet");
+          } else {
+            // PREMISE: the inline wizard really does survive the sheet. If it
+            // did not, "close and nothing else" would be the wrong answer here
+            // and this cell would be pinning a lie.
+            const alive = await evalJs(
+              `(function(){var i=document.querySelector('#view-overview .launch-form .form-input');` +
+              `return {behind:!!i,name:i?i.value:null};})()`,
+            );
+            if (!alive.behind || alive.name !== runwaySentinel) {
+              exitDead++;
+              fail(D, `runway-back@${width}x${height}: the inline wizard did NOT survive the sheet (present=${alive.behind}, name=${JSON.stringify(alive.name)}) — the runway's premise changed, and "close and nothing else" is no longer the honest answer here`);
+              row.push("runway:!premise");
+            } else {
+              await evalJs(`window.__w26cat=0`); // count only what BACK causes
+              await evalJs(`document.querySelector('#modal-root #cred-back').click()`);
+              await exitWait(`(function(){var r=document.getElementById('modal-root');return !!(r&&r.hidden);})()`);
+              await sleep(400); // let any remount's catalog request leave
+              const m = await evalJs(
+                `(function(){var r=document.getElementById('modal-root');` +
+                `var i=document.querySelector('#view-overview .launch-form .form-input');` +
+                `var s=null;try{s=localStorage.getItem(${JSON.stringify(STASH)});}catch(e){}` +
+                `return {hidden:!!(r&&r.hidden),wizard:!!i,name:i?i.value:null,stash:s,cat:window.__w26cat,` +
+                `picker:!!document.querySelector('#modal-root .choice-list')};})()`,
+              );
+              if (!m.hidden || m.picker) {
+                exitLost++;
+                fail(D, `runway-back@${width}x${height}: Back left the person inside a modal (hidden=${m.hidden}, provider picker on screen=${m.picker}) instead of putting them back on the wizard that was behind it the whole time — on origin/main this cell read hidden=false, picker=true`);
+              }
+              if (!m.wizard || m.name !== runwaySentinel) {
+                exitLost++;
+                fail(D, `runway-back@${width}x${height}: the inline wizard or its typed name did not survive Back (present=${m.wizard}, name=${JSON.stringify(m.name)}, typed ${JSON.stringify(runwaySentinel)})`);
+              }
+              if (m.cat !== 0) {
+                exitStale++;
+                fail(D, `runway-back@${width}x${height}: Back fired ${m.cat} \`GET /v1/providers/*/catalog\` request(s). On the runway the wizard is UNTOUCHED behind the sheet, so Back owes it nothing — a remount here refetches the catalog of a provider the person just DECLINED and resets \`container._launchHosting\` to a null region and server_type, silently discarding a size they had already picked. This is the cell that separates the path-asymmetric fix from the one-function version`);
+              }
+              if (m.stash !== null) {
+                exitStale++;
+                fail(D, `runway-back@${width}x${height}: \`${STASH}\` reads ${JSON.stringify(m.stash)} — the runway path writes no stash, so anything here is a record leaking across paths`);
+              }
+              row.push(`runway:hidden=${m.hidden} wizard=${m.wizard} name=${JSON.stringify(m.name)} catalogGETs=${m.cat}`);
+            }
+          }
+        }
+
+        process.stdout.write(`   ${width}x${height}  ${row.join("  ")}\n`);
+      }
+
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${exitCells} / ${exitCells} cells clean across ${EXIT_VIEWPORTS.map(([w, h]) => `${w}x${h}`).join(" and ")}: ` +
+          `every exit from the credential sheet either returns the person to their launch or clears it, and none ` +
+          `leaves it half-remembered. ${exitLost} lost launches, ${exitStale} stale records, ${exitDead} cells that ` +
+          `could not reach the screen`,
+        );
+        okLine(
+          `THE SCOPE IS THE MEASUREMENT (trap 1). Every query in the modal cells is scoped to \`#launch-modal-slot\` ` +
+          `and the fixture is \`${EXIT_SCEN}\`, NOT \`empty\`: driven on \`empty\`, ` +
+          `\`document.querySelectorAll('.launch-connect-provider')\` returns 1 with ZERO inside \`#launch-modal-slot\` ` +
+          `— the first match is the RUNWAY button in \`#view-overview\`, which writes no stash ` +
+          `(\`bp_launch_return = null\`, the stash is written only \`if (opts && opts.modal)\`) and whose wizard ` +
+          `SURVIVES the sheet. An unscoped leg on \`empty\` therefore passes on pre-fix bytes. Each modal cell also ` +
+          `asserts that no runway wizard is mounted behind the modal, so the fixture cannot drift into that shape ` +
+          `silently`,
+        );
+        okLine(
+          `THE RUNWAY CELL IS THE ASYMMETRY TRIPWIRE, and it is a REQUEST count, not a DOM read: Back there must ` +
+          `fire ZERO \`GET /v1/providers/*/catalog\`. A one-function fix routing both paths through the resume ` +
+          `takes the remount branch here — refetching a declined provider's catalog and nulling ` +
+          `\`container._launchHosting\`'s region and server_type — and scores PERFECTLY on every DOM assertion in ` +
+          `this leg while doing it`,
         );
       }
     }

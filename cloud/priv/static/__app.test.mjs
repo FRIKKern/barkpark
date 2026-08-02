@@ -7014,6 +7014,86 @@ test("W25-S3: launchConnectResume re-enters a modal wizard the sheet destroyed, 
   assert.equal(hooks.launchConnectResume({ container: null, opts: { modal: true } }, "#overview").action, "none");
 });
 
+// ── W26-S4: LEAVING the credential sheet without connecting ────────────────
+// The block above pins what a 201 owes a person. This pins what a DISMISSAL
+// owes them, which until W26 was nothing at all: a driven five-exit census on
+// origin/main bytes (scen=mixed-fleet, modal path, every query scoped to
+// `#launch-modal-slot`) found FOUR of five exits leaving launchWizardBack=false
+// with the typed name orphaned in localStorage, and only the 201 resuming.
+//
+// The DOM half is browser-verified (overflow guard, W26-cred-sheet-exits).
+// What is pinned here is the DECISION, and specifically that it stays
+// ASYMMETRIC — a version that returns "reenter" on the runway passes any
+// modal-only test while silently discarding a picked region and size.
+test("W26-S4: Back re-enters the wizard the MODAL sheet destroyed", () => {
+  const gone = { isConnected: false };
+  assert.deepEqual(
+    plain(hooks.launchConnectDismiss({ container: gone, opts: { modal: true }, name: "Exit Probe", hash: "#overview" }, "#overview", "back")),
+    { action: "reenter", name: "Exit Probe", clear: true },
+  );
+  // Same route only, for the same reason the 201 path checks it: a person who
+  // wandered elsewhere is not asking for a launch modal to appear over it.
+  assert.equal(
+    hooks.launchConnectDismiss({ container: gone, opts: { modal: true }, name: "X", hash: "#overview" }, "#providers", "back").action,
+    "close",
+  );
+});
+
+test("W26-S4: Back on the RUNWAY closes and nothing else", () => {
+  // The inline wizard SURVIVES the sheet (driven: the typed name is still in
+  // the input behind it). Re-entering would rebuild a wizard already on screen;
+  // remounting would refetch a catalog for a provider the person just declined
+  // and reset container._launchHosting, discarding a picked region and size.
+  const live = { isConnected: true };
+  assert.deepEqual(
+    plain(hooks.launchConnectDismiss({ container: live, opts: { runway: true }, name: "Runway Alpha", hash: "#overview" }, "#overview", "back")),
+    { action: "close", name: "Runway Alpha", clear: true },
+  );
+});
+
+test("W26-S4: the reflex exits never re-enter, on either path", () => {
+  // Escape / × / backdrop promise "gone" and nothing more. Re-entering a wizard
+  // off an Escape would be a modal the person just dismissed reappearing.
+  for (const detour of [
+    { container: { isConnected: false }, opts: { modal: true }, name: "Exit Probe", hash: "#overview" },
+    { container: { isConnected: true }, opts: { runway: true }, name: "Runway Alpha", hash: "#overview" },
+  ]) {
+    assert.equal(hooks.launchConnectDismiss(detour, "#overview", "reflex").action, "close");
+  }
+});
+
+test("W26-S4: EVERY exit clears — the stash may never outlive its launch", () => {
+  // The clearing contract is the whole of the two secondary bodies. A stash that
+  // survives the launch it belonged to becomes a GHOST launch modal over
+  // `#providers` when the person later connects through that page's own card,
+  // and an unrelated `?checkout=success` return auto-opening a launch modal
+  // prefilled with a name abandoned long ago. Both were driven on origin/main.
+  const cases = [
+    [{ container: { isConnected: false }, opts: { modal: true }, name: "A", hash: "#overview" }, "#overview", "back"],
+    [{ container: { isConnected: false }, opts: { modal: true }, name: "A", hash: "#overview" }, "#overview", "reflex"],
+    [{ container: { isConnected: true }, opts: { runway: true }, name: "A", hash: "#overview" }, "#overview", "back"],
+    [{ container: { isConnected: true }, opts: { runway: true }, name: "A", hash: "#overview" }, "#overview", "reflex"],
+    // The wandered case: no resume is owed, but the stash is still cleared.
+    [{ container: { isConnected: false }, opts: { modal: true }, name: "A", hash: "#overview" }, "#providers", "back"],
+  ];
+  for (const [detour, hash, via] of cases) {
+    assert.equal(hooks.launchConnectDismiss(detour, hash, via).clear, true, `${via} @ ${hash} must clear`);
+  }
+});
+
+test("W26-S4: launchConnectDismiss is total over junk", () => {
+  // Dismissing a dialog with no launch in flight is the ordinary case — the
+  // decider runs on EVERY credential-sheet dismissal, so a throw here would be
+  // a dialog that cannot be closed.
+  for (const detour of [null, undefined, {}, { container: null, opts: { modal: true } }]) {
+    for (const via of ["back", "reflex", undefined, "nonsense"]) {
+      const d = hooks.launchConnectDismiss(detour, "#overview", via);
+      assert.equal(d.action, "close");
+      assert.equal(d.clear, true);
+    }
+  }
+});
+
 test("S7: launchProviderTabsHtml marks exactly the active provider pressed", () => {
   const tabs = hooks.launchProviderTabsHtml("azure");
   assert.match(tabs, /data-kind="azure" aria-pressed="true"/);
