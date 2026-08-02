@@ -1554,7 +1554,7 @@ async function main() {
         `\n${D} — ${FLEET_SCENS.length} scenarios x ${FLEET_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells, ${FLEET_TEXT_SELS.join("/")} + .status-pill-detail + .fleet-badges + .status-pill HEIGHT)\n`,
       );
-      let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, pageOver = 0, rowsSeen = 0, overflowed = 0;
+      let cells = 0, clipped = 0, ellipsed = 0, squeezed = 0, pageOver = 0, rowsSeen = 0, overflowed = 0, foreignRows = 0;
       const knownSeen = new Set();
       for (const scen of FLEET_SCENS) {
         for (const theme of ["light", "dark"]) {
@@ -1573,8 +1573,22 @@ async function main() {
               `var v=document.querySelector('section.view:not([hidden])');` +
               `var sels=${JSON.stringify(FLEET_TEXT_SELS)};` +
               `var d=document.documentElement;` +
-              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,clips:[],ell:[],sq:[],tall:[]};` +
-              `[].slice.call(document.querySelectorAll('.fleet-row')).forEach(function(r,i){out.rows++;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:0,docRows:document.querySelectorAll('.fleet-row').length,clips:[],ell:[],sq:[],tall:[]};` +
+              // cch-w24-s5 — THE WALK IS SCOPED TO THE VIEW IT JUST COMPUTED.
+              // It used to compute `v` and then iterate `document.querySelectorAll`,
+              // using the scope only to LABEL the output. `.fleet-row` is a
+              // four-anatomy class: `#view-overview` paints its own activity rows
+              // under the same class, carrying no `.fleet-url`, no `.status-pill`
+              // and no `.fleet-badges`, so every sub-read below is swallowed by
+              // `if(!e) return` and the rows are counted having been measured for
+              // nothing. Driven on `mixed-fleet`, a hash-nav `#overview` -> `#fleet`
+              // — what a PERSON clicks — leaves 8 rows document-wide against 5 in
+              // view, `document.querySelector('.fleet-row')` resolving into the
+              // HIDDEN `#view-overview`, and per-row `.status-pill` counts
+              // [0,0,0,1,1,1,1,1]. The leg survived only because `nav()` always
+              // changes the query string and reloads, which is a property of the
+              // harness, not of the leg.
+              `[].slice.call(v?v.querySelectorAll('.fleet-row'):[]).forEach(function(r,i){out.rows++;` +
               `  sels.forEach(function(s){var e=r.querySelector(s); if(!e) return;` +
               `    if(e.scrollWidth>e.clientWidth) out.clips.push({i:i,s:s,sw:e.scrollWidth,cw:e.clientWidth,t:(e.textContent||'').slice(0,32)});});` +
               `  var p=r.querySelector('.status-pill-detail');` +
@@ -1604,8 +1618,12 @@ async function main() {
             if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
             // AUDITED: an empty list is not a clean list. A scenario that
             // renders zero rows would score 0 clips and read as a pass.
-            if (m.rows === 0) fail(D, `${scen}/${theme}@${width}: zero .fleet-row rendered — nothing was measured, this is not a pass`);
+            if (m.rows === 0) fail(D, `${scen}/${theme}@${width}: zero .fleet-row rendered IN THE VISIBLE VIEW — nothing was measured, this is not a pass`);
             rowsSeen += m.rows;
+            // cch-w24-s5 — the rows the walk REFUSED, counted and named rather
+            // than silently dropped: a scope that cannot report what it excluded
+            // is indistinguishable from a scope that excluded nothing.
+            foreignRows += m.docRows - m.rows;
             // THE SCOPE TRIPWIRE (review addition). Element-level questions are
             // this leg's point, but the fix's own failure mode is PAGE-level and
             // lives BELOW its media query: unscoped, these declarations were
@@ -1655,7 +1673,8 @@ async function main() {
       }
       if (!failures.some((f) => f.defect === D)) {
         okLine(
-          `${cells} / ${cells} cells clean (${rowsSeen} fleet rows measured, ${knownSeen.size} known-row cells itemised: ${FLEET_KNOWN.map((k) => k.row).join(", ") || "none"}) across ` +
+          `${cells} / ${cells} cells clean (${rowsSeen} fleet rows measured IN THE VISIBLE VIEW, ` +
+          `${foreignRows} .fleet-row(s) elsewhere in the document refused, ${knownSeen.size} known-row cells itemised: ${FLEET_KNOWN.map((k) => k.row).join(", ") || "none"}) across ` +
           `${FLEET_WIDTHS.join("/")}; ${clipped} clipped text cells, ${ellipsed} ellipsed money ` +
           `messages, ${squeezed} squeezed badge columns, ${overflowed} chips shorter than their own text, ` +
           `${pageOver} pages scrolling sideways; ` +

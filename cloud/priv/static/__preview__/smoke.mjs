@@ -2782,9 +2782,194 @@ function assertCensus() {
   return false;
 }
 
+// ── cch-w24-s5: THE FENCE AROUND A READER ────────────────────────────────────
+// Every fence this epic has drawn goes around a FILE. None goes around a
+// READER, and a reader is what a fixture edit actually breaks. Wave 23's
+// cross-slice defect was exactly that: a new row in a fixture invalidated an
+// oracle that picked its neighbour POSITIONALLY, and the oracle blew up on its
+// own bytes a thousand lines away from the edit that caused it.
+//
+// WHAT THIS IS, AND WHAT IT DELIBERATELY IS NOT. It is NOT a port of
+// `SCENARIO_RESIDUE` (overflow-guard.mjs) and NOT a file-level census over
+// readers — see the written refusal below. It is the shape that is ALREADY
+// SHIPPED and already working in this file: the three `assert.equal` calls that
+// pin a fixture's CONTENT and name the reader's assumption in the message
+// ("the fixture must carry the tall shape, not the two-row short one"; "this
+// fixture's /v1/me must say 2FA is off"). Those refuse by name — they just sit
+// a thousand lines downstream of the edit, inside the scenario they defend.
+// Hoisting them into a committed literal asserted BEFORE any scenario runs is
+// the whole delta: the refusal arrives first, and it names the reader, the
+// fixture path and the assumption in one sentence.
+//
+// THE WRITTEN REFUSAL — NO FILE-LEVEL READER CENSUS IS BUILT HERE, and the
+// reason is measured, not argued. Three mutations were driven against the
+// unfenced tree:
+//   (A) a row PREPENDED to a fixture a reader indexes at [0] — smoke exit 1,
+//       but on a STATE pin on the line AFTER the positional read, naming
+//       neither the reader, nor the index, nor the fixture file: an accidental
+//       bystander catch.
+//   (B) the FAITHFUL replay — one row inserted MID-ARRAY in `fleet-cruel-content`,
+//       changing which row the kind-neighbour `.find()` returns — smoke exit 0
+//       (all 101 scenarios rendered), breakpoint-sweep exit 0, the cruel leg
+//       exit 0 while VISIBLY printing its counts moving.
+//   (C) the kind control made cruel — exit 0.
+// 0-for-3 on the defect class, and (A)'s single catch was a bystander. A census
+// keyed on NAMES cannot see a CONTENT edit that moves no name, so building one
+// would ship a guard that is green by construction — the epic's own fourth
+// clause. The pins below key on the VALUE a reader depends on instead.
+//
+// EXPLICITLY EXCLUDED, and not a gap: `exp.fleetRowsEqualFixture`'s
+// `const want = SCENARIOS[name].data.barkparks.length` — it DERIVES BOTH SIDES
+// from the same fixture (the render it counts is produced from that array), so
+// no fixture edit can ever red it, and that is CORRECT for its actual job of
+// proving the RENDER drops a row. Pinning it would pin a tautology.
+const FIXTURE_SHAPE_PINS = [
+  {
+    scenario: "account-modal",
+    path: "me.user.two_factor_enabled",
+    expected: false,
+    why: 'EXPECTATIONS["account-modal"].check feeds this fixture straight into hooks.accountModel and then asserts the OFF anatomy (a2f-badge reads Off, a2f-start offered, a2f-otp absent). An enrolled fixture makes every one of those assertions a statement about the wrong state',
+  },
+  {
+    scenario: "account-modal-2fa-on",
+    path: "me.user.two_factor_enabled",
+    expected: true,
+    why: 'EXPECTATIONS["account-modal-2fa-on"].check asserts the ON-row (a2f-regen, a2f-disable, never a2f-start) is DERIVED from /v1/me alone with zero extra fetches — the fixture is the only thing that can carry the on-state',
+  },
+  {
+    scenario: "account-modal-2fa-badcode",
+    path: "me.user.two_factor_enabled",
+    expected: false,
+    why: 'EXPECTATIONS["account-modal-2fa-badcode"].check opens the modal shell around an ENROLL panel; an already-enrolled fixture renders the on-row instead, and the rejection copy would be asserted against a shell that never offers enrollment',
+  },
+  {
+    scenario: "account-modal-tall",
+    path: "accountSessions.length",
+    expected: 9,
+    why: 'EXPECTATIONS["account-modal-tall"].check maps this array to session rows and pins 9 rows / 8 revokes / Log out BELOW the last row — the tall shape is the whole scenario, and a short fixture makes the strand-the-footer proof vacuous',
+  },
+  {
+    scenario: "fleet-cruel-content",
+    path: "barkparks.length",
+    expected: 3,
+    why: 'EXPECTATIONS["fleet-cruel-content"].check reads three DISTINCT rows out of this array by intent (the cruel host, the single-token provision error, the kind neighbour) and asserts all three render in ONE DOM — this is the array wave 23 broke by inserting a row',
+  },
+  {
+    scenario: "fleet-cruel-content",
+    path: "barkparks.#longerThan(custom_host,200)",
+    expected: 1,
+    why: 'the `cruel` reader is rows.find((b) => b.custom_host && b.custom_host.length > 200) — a SECOND over-long custom_host makes that find silently arbitrary, and every length assertion after it (253 at the validate_length cap) would be about whichever row happened to come first',
+  },
+  {
+    scenario: "fleet-cruel-content",
+    path: "barkparks.#longerThan(provision_error,200)",
+    expected: 1,
+    why: 'the `tokenRow` reader is rows.find((b) => b.provision_error && b.provision_error.length > 200); a second one makes the unbroken-token and verbatim-paint assertions pick a row nobody chose',
+  },
+  {
+    scenario: "fleet-cruel-content",
+    path: "barkparks.#with(host)",
+    expected: 2,
+    why: 'the `kind` reader is rows.find((b) => b !== cruel && b.host) — the cruel row carries a host of its own, so exactly ONE OTHER host-bearing row makes that find unambiguous. THIS IS THE WAVE-23 DEFECT PINNED: inserting a third host-bearing row changes the kind neighbour\'s identity, and the whole harness stayed green while it did',
+  },
+  {
+    scenario: "panel-overview",
+    path: "barkparks.length",
+    expected: 1,
+    why: 'the ONE surviving positional index in this file — const bp = SCENARIOS["panel-overview"].data.barkparks[0] — and every teardown count after it (fleet 1 -> 0, exactly one DELETE, the toast naming bp.name) is arithmetic on a single-instance fleet',
+  },
+  {
+    scenario: "timeline-coalesced",
+    path: "instanceEvents.#keys",
+    expected: 1,
+    why: 'EXPECTATIONS["timeline-coalesced"].check takes Object.values(d.instanceEvents)[0] — with a second instance keyed in, that [0] picks by insertion order and the coalescing grammar is asserted over whichever feed happened to be first',
+  },
+  {
+    scenario: "timeline-coalesced",
+    path: "instanceEvents.#values0.#eq(type,health)",
+    expected: 10,
+    why: 'the same check pins "&times; 10", ">Show all 10<" and 14 open rows (10 members + status + tls + 2 audit) — the 10 is the health burst\'s size, read from this fixture and typed into the assertions',
+  },
+  {
+    scenario: "timeline-coalesced",
+    path: "audit.length",
+    expected: 2,
+    why: 'the 14-row expanded count in that same check is 10 + 1 + 1 + THESE two audit rows; an audit edit moves the total and reds a row-count assertion that names none of this',
+  },
+  {
+    scenario: "fleet-support-online",
+    path: "barkparks.#eq(fleet_role,support)",
+    expected: 1,
+    why: 'EXPECTATIONS["fleet-support-online"].check reads .find((b) => b.fleet_role === "support") and renders the presence slot for it; a second support row makes the Online chip and the 1/1-slots capacity a statement about an arbitrary member',
+  },
+];
+
+// The path grammar, deliberately tiny — a dotted property walk plus four
+// counting segments, because what a reader depends on is usually a COUNT of
+// rows with a property, not a scalar buried at a fixed index:
+//   #keys                   Object.keys(x).length
+//   #values0                Object.values(x)[0]   (mirrors a reader that does the same)
+//   #with(prop)             array elements whose prop is truthy
+//   #eq(prop,value)         array elements whose String(prop) === value
+//   #longerThan(prop,n)     array elements whose prop is a string longer than n
+function readPinPath(root, pathStr) {
+  let cur = root;
+  for (const seg of pathStr.split(".")) {
+    if (cur === undefined || cur === null) return { missing: true, at: seg };
+    if (seg === "#keys") { cur = Object.keys(cur).length; continue; }
+    if (seg === "#values0") { cur = Object.values(cur)[0]; continue; }
+    const withM = /^#with\(([\w$]+)\)$/.exec(seg);
+    if (withM) { cur = (cur || []).filter((e) => e && e[withM[1]]).length; continue; }
+    const eqM = /^#eq\(([\w$]+),(.*)\)$/.exec(seg);
+    if (eqM) { cur = (cur || []).filter((e) => e && String(e[eqM[1]]) === eqM[2]).length; continue; }
+    const lenM = /^#longerThan\(([\w$]+),(\d+)\)$/.exec(seg);
+    if (lenM) {
+      cur = (cur || []).filter((e) => e && typeof e[lenM[1]] === "string" && e[lenM[1]].length > Number(lenM[2])).length;
+      continue;
+    }
+    cur = cur[seg];
+  }
+  return { value: cur };
+}
+
+// Runs BEFORE any scenario, like the census, and exits non-zero on its own —
+// the point is that the edit is named at the top of the run, not that some
+// downstream assertion eventually notices.
+function assertFixtureShapePins() {
+  const broken = [];
+  for (const pin of FIXTURE_SHAPE_PINS) {
+    const scen = SCENARIOS[pin.scenario];
+    if (!scen) {
+      broken.push("SHAPE PIN: scenario " + JSON.stringify(pin.scenario) + " no longer exists — the reader it fences " +
+        "is either gone or now asserting against the DEFAULT fixture");
+      continue;
+    }
+    const got = readPinPath(scen.data, pin.path);
+    if (got.missing) {
+      broken.push("SHAPE PIN: " + pin.scenario + ".data." + pin.path + " — the path went undefined at " +
+        JSON.stringify(got.at) + ", pinned " + JSON.stringify(pin.expected) + "\n    reader: " + pin.why);
+      continue;
+    }
+    if (got.value !== pin.expected) {
+      broken.push("SHAPE PIN: " + pin.scenario + ".data." + pin.path + " is " + JSON.stringify(got.value) +
+        ", pinned " + JSON.stringify(pin.expected) + "\n    reader: " + pin.why);
+    }
+  }
+  if (!broken.length) return true;
+  process.stdout.write(
+    "\nFIXTURE SHAPE: " + broken.length + " committed reader assumption(s) no longer hold. The fixtures live in " +
+    "cloud/priv/static/__preview__/scenarios.mjs; each line below names the READER that depends on the shape you " +
+    "changed. Fix the reader or restore the shape — do not delete the pin:\n  " + broken.join("\n  ") + "\n");
+  return false;
+}
+
 async function main() {
   if (!assertCensus()) {
     process.stdout.write("\ncensus guard failed — every scenario needs an expectation, both ways\n");
+    process.exit(1);
+  }
+  if (!assertFixtureShapePins()) {
+    process.stdout.write("\nfixture-shape guard failed — a fixture edit invalidated a reader, named above\n");
     process.exit(1);
   }
   const names = Object.keys(EXPECTATIONS);
