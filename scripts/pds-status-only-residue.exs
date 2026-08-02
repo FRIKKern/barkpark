@@ -772,6 +772,26 @@ defmodule Report do
     IO.puts("pinned allowlist: #{length(Pin.request_echo_allowlist())} CALLSITES; off-allowlist: #{length(unpinned)} CALLSITES")
     Enum.each(unpinned, fn r -> IO.puts("  OFF-ALLOWLIST #{r.file}:#{r.line}  #{r.fun}") end)
 
+    # THE RECONCILIATION BELONGS AT THE NUMBER, NOT ONLY IN THE HEAD (wave-41 review).
+    # The receipt census's derivation partition also prints a `request_echo` figure, in
+    # ROUTED ROWS. This arm's count is in CALLSITES over a WIDER corpus (every .ex under
+    # the root, not only routed controller actions) and a NARROWER predicate (payload vars
+    # ALL head-bound, no calls). The two are not the same measurement and must not be
+    # reconciled by moving either one: a builder who tunes this predicate until it
+    # reproduces the census's integer has manufactured agreement, which is the exact
+    # failure this lens exists to catch. Disagreement here is expected and is not a defect.
+    IO.puts(
+      "  UNIT: #{cs(length(echo), total)} here is CALLSITES. The receipt census's request_echo is"
+    )
+
+    IO.puts(
+      "  ROUTED ROWS over routed actions only — a different corpus and a different predicate."
+    )
+
+    IO.puts(
+      "  The two numbers are NOT expected to match, and neither may be tuned toward the other."
+    )
+
     IO.puts("")
     IO.puts("--- RESIDUE SUMMARY (denominator #{den} response callsites = #{total} json/2 + #{length(scan.send_resp)} send_resp) ---")
     lit = Enum.count(rows, &(&1.payload_class == :literal_only))
