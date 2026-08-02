@@ -244,9 +244,12 @@ defmodule BarkparkWeb.Studio.SheetGrid.GridData do
   def rows_per_page, do: @max_rows
 
   # `editable` rides the same persistence rule (it gates whole template
-  # subtrees): derived on update (read_only may arrive) and on toggle-mode.
+  # subtrees): derived on update (`write_capable` may arrive) and on
+  # toggle-mode. It stays a DERIVED assign and is NOT a fourth prop — it fans
+  # out to ~36 sites in sheet_grid.ex, so re-keying it here is what keeps a
+  # write-denied member from being handed a UI of dead buttons.
   def derive_editable(socket) do
-    assign(socket, editable: socket.assigns.mode == :edit and not socket.assigns.read_only)
+    assign(socket, editable: socket.assigns.mode == :edit and socket.assigns.write_capable)
   end
 
   # ── grid geometry ────────────────────────────────────────────────────────

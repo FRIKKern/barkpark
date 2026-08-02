@@ -14,7 +14,7 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
   The reader refreshes ONLY when a publish lands (the published-doc topic).
   Read-only is enforced in depth: every editing affordance is absent from
   the rendered HTML, a forged client event is dropped server-side
-  (`send_ops` guards on `read_only`, so no session ever starts), and the
+  (`send_ops` guards on `write_capable`, so no session ever starts), and the
   grid drops deltas + skips the session peek while read-only. The tab
   switcher keeps working.
 
@@ -421,7 +421,7 @@ defmodule BarkparkWeb.SheetsReaderLiveTest do
     target = with_target(view, "#sheet-reader-rdr-sort-forge")
 
     # A crafted client could still push these despite the stripped markup: the
-    # read_only guard clause no-ops them, and send_ops would drop them anyway.
+    # capability/chrome guard clauses no-op them, and send_ops would drop them anyway.
     render_hook(target, "sort-selection", %{"dir" => "asc"})
     render_hook(target, "sort-column", %{"col" => "1", "dir" => "asc"})
 

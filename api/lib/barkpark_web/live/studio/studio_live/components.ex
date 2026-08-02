@@ -1333,7 +1333,9 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         <%!-- Sheet grid editor (Sheets M2). One LiveComponent owns the whole
               surface; `{:sheets_op,…}` deltas reach it via send_update.
 
-              `read_only` is the CAPABILITY PROP, not a display flag: a
+              THREE PROPS, THREE AXES (SheetGrid's moduledoc is the contract):
+
+              `write_capable` is the CAPABILITY, not a display flag: a
               `phx-target`ed event carries a component cid and LiveView runs the
               COMPONENT socket's lifecycle for it, so the parent socket's
               `:handle_event` hooks — the `Caps` deny-gate among them — are never
@@ -1341,16 +1343,32 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
               gate this surface at all; the capability has to travel INTO the
               component, where `SheetGrid`'s write-head guards and the last wall
               in `SheetGrid.Ops.send_ops/2` already read it
-              (`grep -n 'read_only' lib/barkpark_web/live/studio/sheet_grid.ex`).
+              (`grep -n 'write_capable' lib/barkpark_web/live/studio/sheet_grid.ex`).
               Until this prop existed those guards were dead code on the Studio
-              path — the component defaults `read_only: false`. --%>
+              path — the component defaults `write_capable: false`.
+
+              `live_session={true}` is a SEPARATE decision and stays a literal
+              here rather than a derivation of the capability: a Studio member
+              entitled to READ this desk sees the same live draft session their
+              write-capable colleagues are editing. Wave 41 wired the single
+              overloaded flag and a denied member silently dropped to the
+              PUBLISHED row — two people, one sheet, different numbers. It is
+              also NOT derived from `chrome`, which is what keeps this line the
+              place to reconsider if a principal-LESS public-demo socket ever
+              needs the draft withheld.
+
+              `chrome={:studio}` is presentation only, and carries no authority:
+              document header, editor identity, selection highlight, keyboard
+              navigation. A denied member is still in Studio. --%>
         <.live_component
           module={BarkparkWeb.Studio.SheetGrid}
           id={"sheet-grid-#{Content.published_id(@sheet_doc.doc_id)}"}
           doc={@sheet_doc}
           dataset={@dataset}
           is_draft={@editor_is_draft}
-          read_only={not sheet_write_capable?(assigns)}
+          write_capable={sheet_write_capable?(assigns)}
+          live_session={true}
+          chrome={:studio}
           user_id={@user_id}
           presence_topic={@sheet_presence_topic}
           presences={@sheet_presences}

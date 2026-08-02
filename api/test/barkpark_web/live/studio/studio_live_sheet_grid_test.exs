@@ -681,7 +681,7 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     ])
 
     {view, target, _html} = open!(conn, "sg-tabcolor-ro")
-    # Flip to the non-editable host (mirrors the /sheets reader's read_only).
+    # Flip to the non-editable host (mode toggle; mirrors the reader chrome).
     html = render_hook(target, "toggle-mode", %{})
 
     assert html =~ ~s(data-test-id="sheet-tab-swatch-0")
@@ -1077,8 +1077,12 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert {:error, :no_session} = Session.peek("sg-nav-pure", @dataset)
   end
 
-  test "select-all, nav-edge and nav-corner are no-ops on a read-only host", %{conn: _conn} do
-    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, read_only: true}}
+  # CHROME, not capability: these three mutate only @active/@anchor, so the
+  # `:reader` surface (which suppresses the highlight they move) is what
+  # no-ops them. A write-DENIED Studio member keeps keyboard navigation —
+  # locked by the sibling test below.
+  test "select-all, nav-edge and nav-corner are no-ops on the :reader surface", %{conn: _conn} do
+    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, chrome: :reader}}
 
     assert {:noreply, ^socket} =
              BarkparkWeb.Studio.SheetGrid.handle_event("select-all", %{}, socket)
@@ -1096,6 +1100,60 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
                %{"corner" => "home", "shift" => false},
                socket
              )
+  end
+
+  # The other half of the axis choice, and the one that would have been broken
+  # by keying navigation on write capability: a Studio member who may NOT write
+  # still navigates. Same three events, a socket that differs from the one above
+  # ONLY in `chrome`, and the selection really moves.
+  test "select-all and nav-corner still move the selection for a write-DENIED Studio member",
+       %{conn: _conn} do
+    socket = %Phoenix.LiveView.Socket{
+      assigns: %{
+        __changed__: %{},
+        chrome: :studio,
+        write_capable: false,
+        active: {2, 2},
+        anchor: nil,
+        editing: nil,
+        menu: nil,
+        cols: 10,
+        rows: 20,
+        visible_first: 1,
+        visible_last: 20,
+        visible_rows: Enum.to_list(1..20),
+        used_cols: 4,
+        used_rows: 6,
+        cells: %{"B2" => %{"v" => 1}, "B3" => %{"v" => 2}}
+      }
+    }
+
+    {:noreply, after_all} =
+      BarkparkWeb.Studio.SheetGrid.handle_event("select-all", %{}, socket)
+
+    assert after_all.assigns.active == {1, 1}
+    assert after_all.assigns.anchor == {4, 6}
+
+    # Ctrl+↓ from B2 walks the filled run to its last cell (B3).
+    {:noreply, after_edge} =
+      BarkparkWeb.Studio.SheetGrid.handle_event(
+        "nav-edge",
+        %{"dir" => "down", "shift" => false},
+        socket
+      )
+
+    assert after_edge.assigns.active == {2, 3}
+
+    # Ctrl+Shift+End extends the selection (the non-paging branch).
+    {:noreply, after_corner} =
+      BarkparkWeb.Studio.SheetGrid.handle_event(
+        "nav-corner",
+        %{"corner" => "end", "shift" => true},
+        socket
+      )
+
+    assert after_corner.assigns.active == {4, 6}
+    assert after_corner.assigns.anchor == {2, 2}
   end
 
   test "a multi-cell selection surfaces SUM/AVG/COUNT in the status bar", %{conn: conn} do
@@ -1355,8 +1413,8 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert html =~ ~s(data-v="a,b")
   end
 
-  test "text-to-columns is a no-op on a read-only host", %{conn: _conn} do
-    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, read_only: true}}
+  test "text-to-columns is a no-op without write capability", %{conn: _conn} do
+    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, write_capable: false}}
 
     assert {:noreply, ^socket} =
              BarkparkWeb.Studio.SheetGrid.handle_event(
@@ -1693,8 +1751,8 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
     assert {:error, :no_session} = Session.peek("sg-extent-noop", @dataset)
   end
 
-  test "fill-range, fill-extent and autofit are no-ops on a read-only host", %{conn: _conn} do
-    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, read_only: true}}
+  test "fill-range, fill-extent and autofit are no-ops without write capability", %{conn: _conn} do
+    socket = %Phoenix.LiveView.Socket{assigns: %{__changed__: %{}, write_capable: false}}
 
     assert {:noreply, ^socket} =
              BarkparkWeb.Studio.SheetGrid.handle_event("fill-range", %{"to" => "B3"}, socket)
@@ -1779,7 +1837,9 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
         tab: viewer_tab,
         rev: 1,
         epoch: 1,
-        read_only: true
+        # Liveness OFF so `refetch/3` never peeks a session this pure-unit
+        # socket does not have — the tab remap is what's under test.
+        live_session: false
       }
     }
 
