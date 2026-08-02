@@ -193,6 +193,7 @@ const DEFECTS = [
   "GR115-bpconsole-dead-rule",
   "W12-narrow-viewport-truth",
   "W13-detail-route-band",
+  "W23-account-modal-identity-bounded",
   "W15-fleet-row-text-bounded",
   "W18-overview-card-pill",
   "W23-cred-remediation-reachable",
@@ -1334,6 +1335,210 @@ async function main() {
           `${cells} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
           ` (769/899 are the band edges, 900/1024 the controls above it); ${misrouted} misrouted;` +
           ` no exemptions — #fleet's W13 residual was paid by W14-S3 and its pin is gone`,
+        );
+      }
+    }
+
+    // ── W23-S2: THE ACCOUNT MODAL, which no leg in this file has ever seen ──
+    //    `git grep -c am-name -- cloud/priv/static/__preview__` returned 0 on
+    //    origin/main: every instrument in this epic measures a ROUTE, and the
+    //    account modal has none — it is click-opened over whatever screen is
+    //    live (mock.js's `?modal=account` is the seam, the same one shoot.sh
+    //    derives from the `account-modal` name prefix).
+    //
+    //    WHAT IS BROKEN. `.am-name` (app.css:5631) renders `accountModel()`'s
+    //    `name`, which is `email.split("@")[0]` (accountModel() — re-derive with
+    //    `grep -n 'function accountModel' cloud/priv/static/app.js`) — the person's own
+    //    email LOCAL PART, not a display name. The rule carried font-size,
+    //    font-weight and line-height and nothing else, while its sibling
+    //    `.am-line` (:5632) carries the full ellipsis triple. At the DERIVED cap
+    //    of 158 characters (`validate_length(:email, max: 160)`,
+    //    cloud/lib/barkpark_cloud/accounts/user.ex:165, minus "@" and one domain
+    //    character — see the cruelAccountEmail ledger in scenarios.mjs, and note
+    //    that the filed 255 is INADMISSIBLE because the server would reject it)
+    //    pre-fix bytes measured `.am-name` scrollWidth 1276 against clientWidth
+    //    172 @320 and 297 @1440 — the SAME 1276 at both, a CONTENT defect, not a
+    //    responsive one, which is why 1440 is in the width list. (The slice brief
+    //    and the backlog row quote 1362/1461/~1141: same 158-char cap, a
+    //    DIFFERENT stem. These numbers are THIS fixture's, re-driven on this
+    //    tree by stripping the remedy — 1276 at every width, `.modal-root`
+    //    1374@320 rising to 1811@1440. The px are stem-conditional; the ordinal
+    //    fact — a name outside its own box and a modal scrolling sideways — is
+    //    not. Reviewer re-derivation, cch-w23 review.)
+    //
+    //    WHY NO EXISTING LEG COULD HAVE SEEN IT, TWICE OVER:
+    //      · THE PAGE NEVER SCROLLS. `documentElement.scrollWidth ==
+    //        clientWidth` in every cell (320/320 …): the overflow is confined to
+    //        `.modal-root` (app.css:1114 — `overflow-y: auto` makes overflow-x
+    //        compute `auto`, and it declares no x control), which scrolls
+    //        sideways — measured 1054px at 320 on this fixture, 371px at 1440.
+    //        Every page-level leg above reads clean.
+    //      · RECT-BLINDNESS. `getBoundingClientRect().width` on `.am-name` reads
+    //        172 at 320 while `scrollWidth` reads 1276 — the box is inside its
+    //        container and the glyphs are not. A rect-against-container scan
+    //        returns ZERO on this defect, so this leg reads scrollWidth against
+    //        clientWidth ON THE ELEMENT.
+    //
+    //    THE FIFTH CLAUSE (D228): every host is `querySelectorAll` and every
+    //    population is COUNTED, PRINTED, and REFUSED at zero. There is exactly
+    //    one `.am-name` in an open account modal today — but "one" is a fact
+    //    about the current markup, not a licence to write `querySelector`: the
+    //    singular form cannot tell a modal that renders nothing from a modal
+    //    that renders a clean name, and that is precisely the green-by-
+    //    construction this wave exists to remove. A cell that measures zero
+    //    `.am-name`, zero `.modal-root`, or a `.modal-root` that never opened is
+    //    a NAMED FAILURE here, never a pass.
+    //
+    //    ANTI-VACUITY, SECOND ORDER (the `withBtns === 0` shape from the members
+    //    leg at :1878): a cruel cell whose name is not actually cruel proves
+    //    nothing, so the cruel scenario asserts its rendered name is AT the
+    //    derived cap, and the kind scenario asserts its own is short. A fixture
+    //    that goes kind reds this leg instead of greening it.
+    //
+    //    THE KIND CONTROL IS DRIVEN IN THE SAME CELLS: `account-modal` still
+    //    ships `ada@acme.com` (three glyphs). A remedy that bought the cruel
+    //    name by shredding an ordinary one reds on it.
+    if (requested.includes("W23-account-modal-identity-bounded")) {
+      const D = "W23-account-modal-identity-bounded";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      //   account-modal-revoke = the CRUEL twin (158-char local part)
+      //   account-modal        = the KIND control (ada@acme.com)
+      const AM_SCENS = [
+        { scen: "account-modal-revoke", cruel: true },
+        { scen: "account-modal", cruel: false },
+      ];
+      // The phone band, the fold, and 1440. The defect is width-independent, so
+      // a list that stopped at 620 would understate it as a mobile problem.
+      const AM_WIDTHS = [320, 360, 390, 430, 620, 900, 1440];
+      // The derived cap, restated here so the leg refuses a fixture that drifted
+      // BELOW it rather than measuring whatever it is handed.
+      const AM_NAME_CAP = 158;
+      // ANTI-VACUITY 0 — the axis itself.
+      for (const need of [320, 1440]) {
+        if (!AM_WIDTHS.includes(need)) {
+          fail(D, `axis check: ${need} is not in the width set — this defect measures the same 1276px at 320 and at 1440, and a set missing either end cannot show that it is a CONTENT defect rather than a responsive one`);
+        }
+      }
+      if (!AM_SCENS.some((s) => s.cruel) || !AM_SCENS.some((s) => !s.cruel)) {
+        fail(D, "axis check: the scenario set needs BOTH the cruel twin and a kind control — cruel alone cannot see a remedy that shreds ordinary names, kind alone cannot see the defect");
+      }
+      const cellCount = AM_SCENS.length * AM_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${AM_SCENS.length} account scenarios x ${AM_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells; every .am-name and every .modal-root iterated: scrollWidth vs clientWidth` +
+        ` on the ELEMENT, + the page as a tripwire)\n`,
+      );
+      let cells = 0, namesSeen = 0, rootsSeen = 0, nameOver = 0, rootOver = 0, pageOver = 0;
+      for (const s of AM_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter wide, and wait for the REAL modal: mock.js opens it only after
+          // /v1/me has painted the account chip, so there is no load event to
+          // key on. The predicate waits for the modal to be OPEN and NOTHING
+          // MORE — deliberately. Waiting on `.am-name` here would put the very
+          // population this leg counts inside its own readiness gate, and a DOM
+          // that stopped emitting the identity would time out as exit 2 (an
+          // ENVIRONMENT verdict) instead of reaching the zero-population refusal
+          // below at exit 1. A guard must not gate on the thing it measures.
+          await setViewport(900);
+          await nav(
+            `${BASE}/?scen=${s.scen}&theme=${theme}&modal=account`,
+            `(function(){var r=document.getElementById('modal-root');` +
+            `return !!(r && !r.hidden && r.querySelector('.modal-card'));})()`,
+          );
+          const row = [];
+          for (const width of AM_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){var d=document.documentElement;` +
+              `var r=document.getElementById('modal-root');` +
+              // ITERATED, NEVER SAMPLED (D228) — both hosts. `.modal-root` is a
+              // single id today; asking for it as a POPULATION is what makes a
+              // second modal root (or none) reportable instead of invisible.
+              `var names=[].slice.call(document.querySelectorAll('.am-name')).map(function(n){` +
+              `  var cs=getComputedStyle(n);` +
+              `  return {sw:n.scrollWidth,cw:n.clientWidth,ow:cs.overflowWrap,ws:cs.whiteSpace,te:cs.textOverflow,` +
+              `    len:(n.textContent||'').trim().length,t:(n.textContent||'').trim().slice(0,24)};});` +
+              `var roots=[].slice.call(document.querySelectorAll('.modal-root')).map(function(x){` +
+              `  return {sw:x.scrollWidth,cw:x.clientWidth,hidden:!!x.hidden};});` +
+              `return {psw:d.scrollWidth,pcw:d.clientWidth,theme:d.getAttribute('data-theme'),` +
+              ` open:!!(r && !r.hidden && r.querySelector('.modal-card')), names:names, roots:roots};})()`,
+            );
+            cells++;
+            if (m.theme !== theme) fail(D, `${s.scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: a closed modal is not a clean modal.
+            if (!m.open) {
+              fail(D, `${s.scen}/${theme}@${width}: the account modal is not open (#modal-root hidden or carrying no .modal-card) — nothing below this line measures the account modal, and a leg that scored this cell clean would be certifying an empty screen`);
+              row.push(`${width}:closed`);
+              continue;
+            }
+            // AUDITED: zero identities is not a clean identity.
+            if (m.names.length === 0) {
+              fail(D, `${s.scen}/${theme}@${width}: zero \`.am-name\` rendered inside an OPEN account modal — the person's identity is absent, and "nothing overflowed" is true of nothing. This is not a pass`);
+              row.push(`${width}:0n`);
+              continue;
+            }
+            if (m.roots.length === 0) {
+              fail(D, `${s.scen}/${theme}@${width}: zero \`.modal-root\` matched while the modal reports open — the container this defect's sideways scroll actually lives in was never measured`);
+              row.push(`${width}:0r`);
+              continue;
+            }
+            namesSeen += m.names.length;
+            rootsSeen += m.roots.length;
+            // SECOND ORDER: a cruel cell whose name is not cruel is a fixture
+            // that went kind, and it would green this leg against a live defect.
+            const longest = Math.max(...m.names.map((n) => n.len));
+            if (s.cruel && longest < AM_NAME_CAP) {
+              fail(D, `${s.scen}/${theme}@${width}: the longest \`.am-name\` is ${longest} characters, below the derived cap of ${AM_NAME_CAP} (email max 160 at cloud/lib/barkpark_cloud/accounts/user.ex:165, minus "@" and one domain char) — the cruel fixture has GONE KIND, so every clean line below it means nothing`);
+            }
+            if (!s.cruel && longest > 40) {
+              fail(D, `${s.scen}/${theme}@${width}: the kind control's \`.am-name\` is ${longest} characters — this scenario exists to prove an ordinary name survives the remedy, and it is no longer ordinary`);
+            }
+            for (const n of m.names) {
+              if (n.sw > n.cw) {
+                nameOver++;
+                fail(D, `${s.scen}/${theme}@${width} \`.am-name\` "${n.t}…": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${Math.round((1 - n.cw / n.sw) * 100)}% of the name of the person who is signed in renders outside its own box (computed overflow-wrap "${n.ow}", white-space "${n.ws}", text-overflow "${n.te}"). This is an email LOCAL PART, so it is the person's own address, and getBoundingClientRect() reads it as fitting`);
+              }
+            }
+            for (const x of m.roots) {
+              if (x.sw > x.cw) {
+                rootOver++;
+                fail(D, `${s.scen}/${theme}@${width} \`.modal-root\`: scrollWidth ${x.sw} > clientWidth ${x.cw} — the MODAL scrolls sideways by ${x.sw - x.cw}px (app.css:1114 declares overflow-y:auto, which computes overflow-x:auto, with no x control of its own). The page does not scroll, which is why every page-level leg in this file reads clean here`);
+              }
+            }
+            // THE PAGE IS A TRIPWIRE, NOT THE DEFECT: it measures 320/320 both
+            // before and after the fix. It is asserted so that a remedy which
+            // moves the overflow OUT of the modal and onto the document cannot
+            // pass as a fix.
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${s.scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — the remedy pushed the overflow out of the modal and onto the page, which is a different defect, not a fix`);
+            }
+            const nm = m.names.map((n) => `${n.cw}/${n.sw}@${n.len}c`).join(",");
+            const rt = m.roots.map((x) => `${x.cw}/${x.sw}`).join(",");
+            row.push(
+              `${width}:${m.names.length}n[${nm}] root[${rt}] psw${m.psw}` +
+              (m.names.some((n) => n.sw > n.cw) ? `!name` : ``) +
+              (m.roots.some((x) => x.sw > x.cw) ? `!root` : ``),
+            );
+          }
+          process.stdout.write(`   ${s.scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean — ${namesSeen} \`.am-name\` and ${rootsSeen} \`.modal-root\` ITERATED ` +
+          `(querySelectorAll on both, counted per cell, zero refused by name) across ${AM_WIDTHS.join("/")} ` +
+          `x light+dark on ${AM_SCENS.map((s) => s.scen + (s.cruel ? " (cruel)" : " (kind)")).join(" + ")}: ` +
+          `${nameOver} identities outside their own box, ${rootOver} modals scrolling sideways, ${pageOver} pages ` +
+          `scrolling sideways. The cruel cells are asserted to still BE cruel (a rendered name at the derived ` +
+          `${AM_NAME_CAP}-char cap) and the kind cells to still be ordinary, so a fixture that drifts reds this leg ` +
+          `rather than greening it`,
+        );
+        okLine(
+          `FONT PINNED (D218, paid by cch-w22-s1): nav() load()s every declared @font-face, awaits ` +
+          `document.fonts.ready and check()s each face before these px are read — a missing face is exit 2. ` +
+          `\`.am-name\` inherits the UI face, not the mono fallback D248 named, and what is ASSERTED here is ` +
+          `face-independent anyway: glyphs inside their own box, and a modal that does not scroll sideways`,
         );
       }
     }

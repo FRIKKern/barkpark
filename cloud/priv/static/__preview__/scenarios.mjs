@@ -1537,6 +1537,71 @@ const cruelProvisionErrorInstance = bpBase({
   provider: "hetzner",
 });
 
+// ── cch-w23-s2 — THE CRUEL IDENTITY (the account modal's content axis) ──────
+// The same mechanism as the fleet ledger above (cch-w21-s3): a cap READ OFF the
+// schema file that governs it, a string built to sit exactly at that cap with no
+// break opportunity, and throws at module load so the fixture cannot quietly go
+// kind. This is the ACCOUNT axis, which no fixture in this file had ever driven:
+// every `me()` in here is `ada@acme.com`, whose rendered name is three glyphs.
+//
+// THE CAP IS DERIVED, AND 255 IS INADMISSIBLE. `.am-name` is not a display name:
+// `accountModel()` (re-derive with `grep -n 'function accountModel'
+// cloud/priv/static/app.js`) sets `name: email.split("@")[0]`, the LOCAL PART
+// of the address. `BarkparkCloud.Accounts.User` has no `:name` field and no
+// `validate_length(:name, …)` at all — the ONLY cap on this string is
+//   · `validate_length(:email, max: 160)`  cloud/lib/barkpark_cloud/accounts/user.ex:165
+//   · `@email_format ~r/^[^\s@]+@[^\s@]+$/` (:31) — one "@", at least one
+//     character on each side of it, no spaces.
+// 160 total, minus the "@", minus at least one domain character, gives a
+// DERIVED admissible cap of 158 characters for what `.am-name` paints. The
+// backlog row cchi-w22-bl-am-name-unbounded-every-width asked for a 255-char
+// fixture: the server would reject that address, so it is a string NO PERSON CAN
+// PRODUCE — INADMISSIBLE in this ledger's own vocabulary, and a defect measured
+// only at 255 is a defect nobody has. 158 is measured, and 158 still overflows.
+const ACCOUNT_EMAIL_MAX = 160; // cloud/lib/barkpark_cloud/accounts/user.ex:165
+// The server's own email shape, copied verbatim from user.ex:31 so the fixture
+// can PROVE it is an address the server would accept rather than assert it.
+const ACCOUNT_EMAIL_FORMAT = /^[^\s@]+@[^\s@]+$/;
+// 160 − 1 ("@") − 1 (the shortest domain `@email_format` admits) = 158.
+const AM_NAME_MAX = ACCOUNT_EMAIL_MAX - 2;
+// A single-character domain is not decoration: it is what MAXIMISES the local
+// part under the 160-character cap, and the local part is the whole of what
+// `.am-name` renders — the domain never reaches this element. `dnsLabel` (above)
+// is reused for the padding because its output is exactly what is wanted here
+// too: one unbroken alphanumeric run, no hyphen, no dot, no separator a line
+// breaker can use.
+const cruelAccountLocal = dnsLabel("kristineandreassenbakkevoldhaugen", AM_NAME_MAX);
+const cruelAccountEmail = `${cruelAccountLocal}@x`;
+
+if (cruelAccountLocal.length !== AM_NAME_MAX) {
+  throw new Error(`cruel identity: the local part is ${cruelAccountLocal.length} chars, the derived cap is ${AM_NAME_MAX} (email max ${ACCOUNT_EMAIL_MAX} at user.ex:165, minus "@" and one domain char) — GONE KIND, fix the stem`);
+}
+if (cruelAccountEmail.length !== ACCOUNT_EMAIL_MAX || !ACCOUNT_EMAIL_FORMAT.test(cruelAccountEmail)) {
+  throw new Error(`cruel identity: ${cruelAccountEmail.length} chars against a ${ACCOUNT_EMAIL_MAX} cap, or not admissible by user.ex:31's @email_format — an address the server would REJECT proves nothing`);
+}
+// BREAKABLE (the refusal wave 22 added because wave 21's own builder shipped a
+// maximal-but-self-wrapping string): a run at the cap that a text renderer can
+// break by itself is not cruel — it wraps, nothing overflows, and the leg goes
+// green against a defect that is still shipped. Any of `-`, `.`, `_`, `+`,
+// whitespace is a break opportunity, so the local part must carry none.
+if (/[^a-z0-9]/.test(cruelAccountLocal)) {
+  throw new Error("cruel identity: the local part carries a character a line breaker can use (- . _ + or whitespace) — BREAKABLE, so it would wrap on its own and certify a rule that never bounded it");
+}
+
+// The cruel identity rides an EXISTING account scenario rather than a new key,
+// and this is a fence, not a preference: a new SCENARIOS key is refused by three
+// instruments this slice is fenced out of — smoke.mjs's census guard (every
+// scenario needs an expectation, exit 1), breakpoint-sweep.mjs's committed
+// residue literal (exit 2, "UNLISTED scenario") and its test's census numbers.
+// `account-modal-revoke` is the account scenario with the smallest blast radius:
+// it is the only one of the five that modal-oracle.mjs does NOT drive, and
+// smoke's click oracle asserts sessions and ids, never the identity text.
+// FILED, not implied: cch-w23-bl-cruel-identity-own-scenario.
+const cruelAccountMe = (function () {
+  const m = me("Guerrilla");
+  return Object.assign({}, m, { user: Object.assign({}, m.user, { email: cruelAccountEmail }) });
+})();
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -3207,12 +3272,21 @@ export const SCENARIOS = {
   // Revoke, then Sign-out-everywhere, and reads what the REAL code path paints.
   // Named with the `account-modal` prefix, which (as GR76 notes) auto-enrols it
   // in shoot.sh's screenshot set — intended, so the revoke state gets an eye too.
+  // cch-w23-s2: this scenario is ALSO the CRUEL IDENTITY twin. Its `me` carries
+  // an email whose local part sits at the derived 158-character cap (see the
+  // cruelAccountEmail ledger above `SCENARIOS`), so `.am-name` renders the
+  // longest name a person can actually own. Nothing this scenario already
+  // asserted reads the identity text — smoke's click oracle counts session rows
+  // and ids — and the KIND control is `account-modal` next door, still
+  // `ada@acme.com` (three glyphs), which is what makes a remedy that shreds an
+  // ordinary name red. Driven by overflow-guard's W23-account-modal-identity
+  // -bounded leg.
   "account-modal-revoke": {
-    label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count",
+    label: "Account modal — the revoke path, driven by real clicks: one row revoked, then sign-out-everywhere reporting the SERVER's count; ALSO the cruel-identity twin (a 158-char email local part, the derived cap)",
     authed: true,
     deepLink: "",
     data: {
-      me: me("Guerrilla"),
+      me: cruelAccountMe,
       barkparks: [liveInstance],
       subscription: activeSub,
       sites: [],

@@ -5705,7 +5705,51 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 15px; font-weight: 600;
 }
 .am-who { min-width: 0; flex: 1 1 auto; }
-.am-name { font-size: 15px; font-weight: 600; line-height: 1.3; }
+/* cch-w23-s2 — THE NAME IS AN EMAIL LOCAL PART, AND IT WAS UNBOUNDED.
+   `.am-name` is not a display name: `accountModel()` (app.js:682) sets
+   `name: email.split("@")[0]`, so what paints here is the part of the person's
+   own address before the "@". `BarkparkCloud.Accounts.User` has NO `:name`
+   field and no `validate_length(:name, …)`; the governing cap is
+   `validate_length(:email, max: 160)` (cloud/lib/barkpark_cloud/accounts/user.ex:165),
+   so the longest local part a person can actually own is 158 characters
+   (160 minus the "@" minus at least one domain character). A 255-char fixture
+   — which the backlog row cchi-w22-bl-am-name-unbounded-every-width asked for —
+   is a string NO PERSON CAN PRODUCE, so it proves nothing; 158 is the number
+   this rule is measured against.
+   THE ASYMMETRY IS THE DEFECT: the sibling `.am-line` below carries the full
+   ellipsis triple (overflow/text-overflow/white-space) and this rule carried
+   font-size, font-weight and line-height and nothing else — computed
+   overflow:visible / text-overflow:clip / white-space:normal /
+   overflow-wrap:normal, i.e. an unbreakable 158-glyph run with nothing to
+   break it.
+   WHAT A PERSON SEES — and it is NOT the page. Measured on pre-fix bytes with
+   the committed 158-char fixture (`account-modal-revoke`, Chrome
+   150.0.7871.187, font pinned): `.am-name` scrollWidth 1276 against clientWidth
+   172 @320 and 297 @1440 — the SAME 1276 at both ends, so it is a CONTENT
+   defect, not a responsive one — and `.modal-root` 1374/320 @320, 1811/1440
+   @1440, while `documentElement.scrollWidth == clientWidth` in EVERY cell
+   (320/320, 360/360 … 1440/1440). The overflow is confined to `.modal-root`
+   (:1114), whose `overflow-y: auto` makes `overflow-x` compute `auto` with no
+   x control of its own — so the symptom is A MODAL THAT SCROLLS SIDEWAYS
+   1054px at 320, not a page that does, and every page-level leg in
+   overflow-guard.mjs walks straight past it. (The slice brief quotes 1362 /
+   1461 / ~1141px: same cap, a different 158-character stem. The px are
+   string-conditional, the ORDINAL fact is not.)
+   THE REMEDY IS ONE DECLARATION, folded into this block rather than given a
+   new head. `overflow-wrap: anywhere` is this stylesheet's idiom for a machine
+   string with no break opportunity (`.site-meta .mono`, :1599) and — unlike
+   `word-break: break-word` — it also lowers the element's MIN-CONTENT
+   contribution, which is what stops `.am-identity`'s flex track (and with it
+   `.modal-root`) from sizing to the whole run.
+   NO ELLIPSIS TRIPLE HERE, deliberately, and not for symmetry's sake: charter
+   D253 measured this epic's inert-ellipsis doctrine false at the pixel, and a
+   cue that replaces the person's own identity with "…" hides exactly the thing
+   the row exists to show. Height is left UNBOUNDED for the same reason — a
+   line clamp on an identity trades a sideways scroll for a name its owner
+   cannot read, and the modal already scrolls vertically (:1114) for the
+   nine-session shape, so the extra lines cost nothing a person cannot reach.
+   Guarded by overflow-guard.mjs's W23-account-modal-identity-bounded leg. */
+.am-name { font-size: 15px; font-weight: 600; line-height: 1.3; overflow-wrap: anywhere; }
 .am-line {
   font-size: 12px; color: var(--muted-text); font-family: var(--mono);
   overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
