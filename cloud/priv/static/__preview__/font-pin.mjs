@@ -19,8 +19,14 @@
 //     families" or "Plex 400 + 500" is BLIND to a missing
 //     IBMPlexMono-SemiBold-latin.woff2 — measured: rc 0, output byte-identical
 //     to baseline — and that file is load-bearing CSS, `var(--mono)` at
-//     `font-weight: 600` in `.set-row-key` (app.css:2178), `.cm-name` (:3760)
-//     and the provider identity value (:1938). So the pin walks the page's OWN
+//     `font-weight: 600` in the SELECTORS `.set-row-key`, `.cm-name` and
+//     `.prov-identity-value` — re-derive the LIVE set by shape, never by line
+//     number (charter D274/D292):
+//       grep -nE 'var\(--mono\).*600|600.*var\(--mono\)' cloud/priv/static/app.css
+//     which returns those three rules and nothing else; the third arrives as its
+//     declaration body, so `grep -n '^\.prov-identity-value'` names it. If that
+//     grep returns a FOURTH rule, the derivation below already covers it — this
+//     comment is the motive, not the list. So the pin walks the page's OWN
 //     `document.fonts` set: every declared @font-face gets loaded and checked,
 //     and a weight added to app.css tomorrow is covered without editing this
 //     file. EXPECTED_FACES below is the floor that stops the derivation from

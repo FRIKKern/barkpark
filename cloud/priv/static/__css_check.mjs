@@ -75,9 +75,9 @@
 //       `node __css_check.mjs --orphan-check __css_check.orphan.fixture.css`
 //       (exit 1). Both fixture proofs are executed by __app.test.mjs.
 //   E11 banned source line-number citation (charter D41; bp-honest-gates D5):
-//       any scanned SPA / preview-harness file (top-level *.js|*.mjs +
-//       __preview__/*) citing `app.js:<line>` (also `app.js ~<line>` or an
-//       `app.js:<a>-<b>` range). THE RULING is a BAN,
+//       any scanned SPA / preview-harness / STYLESHEET file (top-level
+//       *.js|*.mjs|*.css + __preview__/*) citing `app.js:<line>` (also
+//       `app.js ~<line>` or an `app.js:<a>-<b>` range). THE RULING is a BAN,
 //       not a resolver: three separate blocks in one wave cited line numbers
 //       that were wrong on arrival or wrong the moment a sibling slice shifted
 //       the file +39 lines, so every live occurrence was ALREADY stale — there
@@ -762,16 +762,41 @@ export function bannedSourceCitationErrors(src, file) {
   return errs;
 }
 
-// The files E11 scans: every top-level *.js|*.mjs plus __preview__/*.js|*.mjs.
-// Read from the directory (never a hardcoded list) so a NEW harness file is
-// covered the moment it lands — a fixed list is the enumerate-don't-ban shape
-// bp-honest-gates D5 forbids.
+// The files E11 scans: every top-level *.js|*.mjs|*.css plus __preview__/* of
+// the same extensions. Read from the directory (never a hardcoded list) so a
+// NEW harness file is covered the moment it lands — a fixed list is the
+// enumerate-don't-ban shape bp-honest-gates D5 forbids.
+//
+// WHY .css IS IN THE SET, AND WHY THE REGEX IS NOT THE LEVER (charter D292).
+// This scan read `/\.m?js$/` only — 15 files, and app.css was not one of them —
+// while app.css carried THREE live `app.js:<n>` citations and the gate reported
+// `0 error(s)`. The guard was green over a violation of the rule it enforces.
+// The defect was REACH, not SHAPE: an `app.js:<n>` inside a stylesheet is
+// unreachable at ANY regex width, so widening the CITATION pattern could not
+// have found it. Paired mutation that pins the diagnosis: the identical string
+// pasted into a scanned .mjs reds by name, and removed returns exit 0 — same
+// string, one file away, opposite outcomes.
+//
+// THE OTHER HALF IS DELIBERATELY NOT HERE. Widening the CITATION alternation
+// (cross-file `<name>.<ext>:<line>` shapes) surfaces 72 findings across the
+// existing scan set; shipping a tripwire together with 72 repairs reds the
+// fail-before gate, so that half stays on its own row,
+// cch-w16-s7-citation-anchors-e11-widening. This function widens the FILE SET
+// only, which surfaced exactly three — all repaired in the same commit that
+// widened it, which is why the widened guard is green here rather than vacuous.
+//
+// SCOPE OF THE EXTENSION, stated so the next reader does not have to measure:
+// the .css members of this set are app.css plus the three __css_check fixture
+// stylesheets. The fixtures are deliberately malformed CSS, but E11 is a
+// full-TEXT regex and never parses, so their content cannot destabilise it —
+// they are scanned for citations exactly like everything else. Re-derive the
+// membership with: ls cloud/priv/static/*.css cloud/priv/static/__preview__/
 function citationScanFiles() {
   const out = [];
-  const jsLike = (f) => /\.m?js$/.test(f);
-  for (const f of fs.readdirSync(dir)) if (jsLike(f)) out.push(f);
+  const scanned = (f) => /\.(m?js|css)$/.test(f);
+  for (const f of fs.readdirSync(dir)) if (scanned(f)) out.push(f);
   const pv = path.join(dir, "__preview__");
-  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (jsLike(f)) out.push(path.join("__preview__", f));
+  if (fs.existsSync(pv)) for (const f of fs.readdirSync(pv)) if (scanned(f)) out.push(path.join("__preview__", f));
   return out.sort();
 }
 
