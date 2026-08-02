@@ -1361,6 +1361,41 @@ const EXPECTATIONS = {
       assert.ok(arch.includes("data-archives-retry"), "a working Retry renders");
     },
   },
+  // ── cch-w21-s3 (REVIEW ADDITION): the cruel fixture's expectation.
+  // The slice committed `fleet-cruel-content` and taught breakpoint-sweep about
+  // it, but not this file — and smoke's census guard is two-way, so the whole
+  // harness step exited 1 with "1 committed scenario(s) have NO expectation and
+  // were never run". That refusal is correct and it is the epic's own law: a
+  // fixture nothing asserts on is a green that means nothing. So the fixture
+  // gets a real expectation, and every string below is DERIVED FROM THE FIXTURE
+  // rather than typed — a corpus edit that quietly shortens the cruel content
+  // reds here instead of passing on a stale literal.
+  "fleet-cruel-content": {
+    what: "server-legal worst-case CONTENT on the fleet table — a 253-char custom domain and a 255-char name, rendered beside a KIND neighbour in the same DOM",
+    check(reg) {
+      const rows = SCENARIOS["fleet-cruel-content"].data.barkparks;
+      const cruel = rows.find((b) => b.custom_host && b.custom_host.length > 200);
+      const kind = rows.find((b) => b !== cruel);
+      assert.ok(cruel, "the fixture still carries a cruel row (a >200-char custom_host)");
+      assert.ok(kind, "the cruel row keeps a KIND neighbour — a bound that fixes one by shredding the other must be visible in the same DOM");
+      assert.equal(cruel.custom_host.length, 253, "the host sits AT the server's validate_length cap (registry/barkpark.ex:727)");
+      assert.equal(cruel.name.length, 255, "the name sits AT the server's cap (registry/barkpark.ex:466)");
+      assert.ok(
+        cruel.custom_host.split(".").some((l) => l.length === 63),
+        "at least one MAXIMAL 63-char DNS label — a hyphen is a line-break opportunity, so a hyphen-rich host is not cruel at all",
+      );
+      const body = (reg.get("fleet-body") || {}).innerHTML || "";
+      assert.ok(body.includes('class="fleet-row"'), "the fleet rows render");
+      // publicUrl() PREFERS custom_host, so the CRUEL host is what the row paints.
+      assert.ok(body.includes(cruel.custom_host), "the row renders the custom domain, not the barkpark.cloud fallback");
+      // The fixture name carries no HTML-escapable character, so it renders verbatim;
+      // this assertion also pins that (an escape would break the substring match).
+      assert.ok(!/[&<>"]/.test(cruel.name), "the cruel name stays free of escapable characters, so it renders verbatim");
+      assert.ok(body.includes(cruel.name), "the row renders the full 255-char name");
+      assert.ok(body.includes(kind.host), "the kind neighbour still renders its own short address in the same table");
+      assert.ok(countMatches(body, 'class="fleet-row"') >= 2, "both rows render — one of them alone proves nothing about the other");
+    },
+  },
   "fleet-archives-stored": {
     what: "the Archives panel lists portable bundles, each with a per-provider resurrect",
     check(reg) {
