@@ -305,6 +305,19 @@ const ALLOW_PREFIXES = [
   "set-matrix-cell",               // notifMatrixCellHtml(): + (isDefault ? " set-matrix-cell--default" : "")
   "fresh-badge fresh-badge--",     // freshnessBadge(): + m.dot (up | down | deploy | rebuild) + optional " is-rebuilding"
   "usage-bar-quota",               // usageMeterHtml(): + (tone === "ok" ? " dim" : "") (.usage-bar-quota / .dim)
+  // cch-w26-s5: promoted OUT of KNOWN_GAPS. The demotion's stated reason —
+  // "the suffix set comes from fixture text" — is REFUTED by the emitter.
+  // coherenceFixtureToHtml() (grep -n 'function coherenceFixtureToHtml' app.js)
+  // replaces on `/\b(info|warn|ok|danger)\b/g`: a CLOSED four-way alternation
+  // written in CODE. The fixture only chooses among the four the regex already
+  // names; it cannot introduce a fifth. `bp-lc-hex` is a SEPARATE literal head
+  // in the same function, not a capture. All five composable classes have rules
+  // (grep -n 'bp-lc' app.css). So this head is MORE bounded than most entries
+  // above, whose closed sets live only in a trailing comment. The closed-ness
+  // itself is pinned by a leg that can lose in __app.test.mjs (role-adjacent
+  // words outside the set emit no bp-lc- span) — widening the alternation reds
+  // that test, which an allowlist entry alone could never do.
+  "bp-lc-",                        // coherenceFixtureToHtml(): + captured role word (info | warn | ok | danger) — closed alternation in code
 ];
 
 // ── E13: the .dep-* VALUE SPACE, derived instead of described ───────────────
@@ -373,16 +386,19 @@ const KNOWN_GAPS = [
   // "notice-" E2 (fleetRolloutBannerHtml now emits whole class names), and the
   // E3 head:"" entry (all THREE var-then-concat sites — notifMatrixCellHtml,
   // freshnessBadge and usageMeterHtml's quota trailer — are inline-concat now).
-  // E3 — dynamic class heads the static walker cannot classify (var-then-concat).
-  // The SOLE survivor, and it is NOT a missing-rule gap: .bp-lc-info|warn|ok|
-  // danger|hex all have rules now, but E3 is an ALLOW_PREFIXES MEMBERSHIP
-  // question, not a rule-existence one, so authoring the CSS clears the
-  // "bp-lc-hex" E2 and leaves this firing. Kept demoted rather than allowlisted
-  // deliberately: unlike every other allowlisted head, the composed suffix here
-  // is a REGEX CAPTURE from an arbitrary committed fixture file, so the closed
-  // role set (info|warn|ok|danger) is an assumption about that file's contents
-  // rather than a property of this code. Demoting keeps it printed on every run.
-  { file: "app.js", head: "bp-lc-", why: "coherenceFixtureToHtml paints regex-captured role words as `bp-lc-` + word; .bp-lc-* rules now exist, but the suffix set comes from fixture text, so this stays reported rather than allowlisted" },
+  // cch-w26-s5 retired the LAST entry — the E3 `bp-lc-` head. It was demoted on
+  // the stated reason that "the composed suffix is a REGEX CAPTURE from an
+  // arbitrary committed fixture file, so the closed role set is an assumption
+  // about that file's contents rather than a property of this code." That reason
+  // is false against the emitter: coherenceFixtureToHtml() in app.js replaces on
+  // a CLOSED four-way alternation `/\b(info|warn|ok|danger)\b/g` written in code
+  // (grep -n 'function coherenceFixtureToHtml' app.js), so the fixture selects
+  // among four and cannot introduce a fifth. It is now an ALLOW_PREFIXES member,
+  // with the closed-ness pinned by a test that reds if the alternation widens.
+  //
+  // THE LIST IS NOW EMPTY, AND THAT IS THE POINT: the checker no longer exits 0
+  // by having been told to ignore a row it attributes to an open backlog task.
+  // Whatever lands here next must carry an owner and a way out, not a waiver.
 ];
 
 // E6 — the conscious raw-color exceptions (decision 28). EXACT trimmed line
