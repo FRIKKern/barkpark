@@ -176,6 +176,7 @@ const DEFECTS = [
   "W15-fleet-row-text-bounded",
   "W18-overview-card-pill",
   "W20-op-gate-pill-bounded",
+  "W21-inst-head-320-copy-reachable",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -1590,6 +1591,145 @@ async function main() {
           `this leg is INSTRUMENT work: the operator console has population zero today ` +
           `(PLATFORM_ADMIN_EMAILS unset — re-derive with printenv's EXIT CODE, never docker inspect), ` +
           `so it fills no person-facing seat. One env line makes every cell above person-facing`,
+        );
+      }
+    }
+
+    // ── W21: the instance workspace HEAD at 320, and whether the address Copy
+    //    control is reachable at rest ────────────────────────────────────────
+    //    THE HOLE THIS FILLS. W13 drives the detail routes but its envelope
+    //    starts at 721; W12 drives 320-620 but only `#overview` and
+    //    `#notifications`. So the intersection — a DETAIL route at PHONE width
+    //    — had never been driven by any leg in this file, and on origin/main
+    //    bytes `#instance/<id>` scrolled the page 22px sideways at 320 on the
+    //    SHIPPED `mixed-fleet` fixture with no cruel content at all, putting
+    //    `.copy-btn`'s right edge at 342 against a 320 viewport: the one
+    //    control that hands a person their instance address, off-screen at
+    //    rest, on a route `applyRoute` dispatches to every signed-in reader.
+    //
+    //    THE BAND IS 320-ONLY AND THAT IS WHY THE WIDTH SET RUNS PAST IT.
+    //    360/375/390/430/620 all read `docsw == vp` before AND after the
+    //    remedy; they are here as the no-regression control, because the
+    //    cheapest "fix" for 320 is a width cap that quietly narrows every
+    //    phone above it.
+    //
+    //    THE CONTAINED-SCROLL FALSE POSITIVE IS EXCLUDED BY CONSTRUCTION, NOT
+    //    BY ALLOWLIST. At 360-390 `a.inst-tab` ("Metrics") has a right edge of
+    //    342-407, past the viewport — but it lives in `.inst-tabs`, which
+    //    computes `overflow-x: auto` (scrollWidth 391 vs clientWidth 288 at
+    //    320): a CONTAINED strip that scrolls itself and never moves
+    //    `documentElement.scrollWidth`. This leg asserts the PAGE and the COPY
+    //    CONTROLS, so that element cannot red here; and the containment is
+    //    asserted POSITIVELY per cell (an overflowing strip that ever computed
+    //    `overflow-x: visible` would become a page defect, and reds) rather
+    //    than suppressed by naming the selector.
+    //
+    //    EVERY COPY CONTROL, NOT THE FIRST. `panel-overview` renders SEVEN
+    //    `.copy-btn` (the bp-CLI chips) against `mixed-fleet`'s three; a
+    //    `querySelector` here would inspect the head's button on one fixture
+    //    and a CLI chip on the other. The worst right edge over ALL of them is
+    //    what a person meets, and zero measured controls FAILS — an empty list
+    //    is not a clean list (the GR109 singular-selector lesson, W20-S6).
+    if (requested.includes("W21-inst-head-320-copy-reachable")) {
+      const D = "W21-inst-head-320-copy-reachable";
+      // BLOCK-SCOPED on the `const D` precedent above: these axes belong to
+      // this leg alone and must never read as shared file constants (D247).
+      const HEAD_SCENS = ["mixed-fleet", "panel-overview"];
+      const HEAD_WIDTHS = [320, 360, 375, 390, 430, 620, 769];
+      // ANTI-VACUITY 0 — the axis itself. The defect band is 320-ONLY, so an
+      // edit that drops 320 leaves a leg that passes having never visited the
+      // one width where the page scrolls. It reds here instead of going quiet.
+      if (!HEAD_WIDTHS.includes(320)) {
+        fail(D, `axis check: 320 is not in the width set — the band is 320-ONLY (360-620 read \`docsw == vp\` on pre-fix bytes), so without it this leg cannot see the defect at all`);
+      }
+      const cellCount = HEAD_SCENS.length * HEAD_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${HEAD_SCENS.length} scenarios x ${HEAD_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells; #instance/<id> page overflow + EVERY .copy-btn's right edge)\n`,
+      );
+      let cells = 0, copiesSeen = 0, offscreen = 0, pageOver = 0;
+      for (const scen of HEAD_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter at 900 — ABOVE the band — and pin the hash: `?scen=` alone
+          // renders #overview (the W13 routing trap), and an overview screen
+          // measured under an instance-route heading is a phantom table.
+          await setViewport(900);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#instance/${INST}`,
+            `document.querySelector('.detail-head-main') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-instance';})()`,
+          );
+          const row = [];
+          for (const width of HEAD_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,` +
+              `  copies:0,urlCopies:0,worst:0,bad:[],strips:[]};` +
+              `[].slice.call(document.querySelectorAll('.copy-btn')).forEach(function(b,i){` +
+              `  var r=b.getBoundingClientRect(); out.copies++;` +
+              `  if(b.closest('.detail-url')) out.urlCopies++;` +
+              `  if(r.right>out.worst) out.worst=+r.right.toFixed(2);` +
+              `  if(r.right>d.clientWidth+0.5) out.bad.push({i:i,right:+r.right.toFixed(2),` +
+              `    inUrl:!!b.closest('.detail-url'),lbl:(b.getAttribute('aria-label')||b.title||'copy').slice(0,32)});` +
+              `});` +
+              // The containment claim, measured rather than assumed: any strip
+              // wider than its own box must own a non-visible overflow-x.
+              `[].slice.call(document.querySelectorAll('.inst-tabs')).forEach(function(s){` +
+              `  if(s.scrollWidth>s.clientWidth) out.strips.push({ox:getComputedStyle(s).overflowX,sw:s.scrollWidth,cw:s.clientWidth});` +
+              `});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-instance") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-instance" — the hash did not route, so nothing below this line measures the instance workspace`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty list is not a clean list. If the head stops
+            // rendering its address control this leg would score zero
+            // off-screen buttons and read as a pass.
+            if (m.copies === 0 || m.urlCopies === 0) {
+              fail(D, `${scen}/${theme}@${width}: ${m.copies} \`.copy-btn\` and ${m.urlCopies} inside \`.detail-url\` — the address copy control is not in the DOM, so nothing was measured. This is not a pass.`);
+              row.push(`${width}:0c`);
+              continue;
+            }
+            copiesSeen += m.copies;
+            // (1) THE PAGE. Strict equality: a viewport-sized page is the whole
+            // claim, and `>=` would tolerate the 22px this leg exists for.
+            if (m.psw !== m.pcw) {
+              pageOver++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} != clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the instance workspace is off-screen sideways at rest, with no cue`);
+            }
+            // (2) THE CONTROL. Every copy button, not the first.
+            for (const b of m.bad) {
+              offscreen++;
+              fail(D, `${scen}/${theme}@${width} .copy-btn[${b.i}]${b.inUrl ? " (the ADDRESS control)" : ""}: right edge ${b.right} is outside the ${m.pcw}px viewport — a person cannot reach "${b.lbl}" without scrolling the page sideways`);
+            }
+            // (3) THE CONTAINMENT, asserted rather than allowlisted.
+            for (const s of m.strips) {
+              if (s.ox === "visible") {
+                fail(D, `${scen}/${theme}@${width} .inst-tabs: scrollWidth ${s.sw} > clientWidth ${s.cw} with computed overflow-x:visible — the tab strip stopped containing its own scroll, so its tabs now push the PAGE instead of scrolling inside it`);
+              }
+            }
+            row.push(`${width}:${m.psw}${m.psw !== m.pcw ? "!" : ""}/c${m.copies}@${m.worst}${m.bad.length ? " !" + m.bad.length : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${copiesSeen} .copy-btn measured, ${offscreen} outside the viewport, ` +
+          `${pageOver} pages scrolling sideways) across ${HEAD_WIDTHS.join("/")} on ${HEAD_SCENS.join(" + ")}; ` +
+          `cells print scrollWidth/copy-count@worst-right-edge, so 320's 320/c3@304 reads against the 342/c3@342 ` +
+          `it replaced. The band is 320-ONLY: 360-620 are the no-regression control, not padding`,
+        );
+        okLine(
+          `\`a.inst-tab\` at 360-390 is NOT suppressed here — .inst-tabs computes overflow-x:auto, so the strip ` +
+          `scrolls itself and never moves documentElement.scrollWidth; that containment is asserted per cell ` +
+          `(a strip that ever computed overflow-x:visible reds) instead of being allowlisted away`,
         );
       }
     }
