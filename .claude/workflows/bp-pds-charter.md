@@ -2576,6 +2576,36 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 38 2026-08-02 — "The denominator is the router, not the string" — BUILDING (paper `pds-wave-38-2026-08-02`)
+
+**THE WISH ASKED AN EITHER/OR AND THE WAVE ANSWERS WITH A THIRD ANSWER.** "Widen the roster, or prove
+the roster's own arm can refuse a site it cannot see — and say which." Neither. Widening the roster
+moves 8 of ~120 dark members and leaves the same missing denominator; proving a hand list can refuse
+what it cannot see is not a thing a hand list can do. `REGISTER-COMPLETE` proves 91-of-91 over a
+population a STRING defines (`ok: true`), and `ROSTER-ANCHORS-EXIST` proves eight literals still
+occur. **NEITHER ARM HAS A DENOMINATOR.** Wave 38 derives the outside population from the ROUTER —
+the one structure that already enumerates every reachable write — and turns `@roster` from a
+confession list into a DISPOSITION TABLE over a derived set.
+
+| slice | round | task | what it does |
+|---|---|---|---|
+| routed population | 1 | `pds-w38-routed-population` | L4a-d: derive the write-routed set from router AST ∪ plugin tuples, dispose every member, `ROUTED-POPULATION-COMPLETE` on arrival semantics, `LENS-CAN-MISS` printing the blind shapes — plus the one-line selftest concurrency fix |
+| record parity | 1 | `pds-w38-record-parity-arm` | `scripts/pds-record-parity.sh` — the epic's law turned on the epic's own record |
+| SCIM group receipts | 1 | `pds-w38-scim-group-member-receipts` | three member-grant sites whose callee CANNOT fail; widen the callee, read it back |
+| ledger hygiene | 1 | `pds-w38-ledger-hygiene-derived` | close 9 merged-but-open rows on THIS wave's derived numbers |
+| verdict freshness | 2 | `pds-w38-verdict-freshness-arm` | a verdict that outlives its defect is a lie no arm can see today |
+| falsifier promotion | 2 | `pds-w38-falsifier-promotion` | promote by measurement — TWO survive, not ten, and the promotion rule needs its own non-vacuity guard |
+| owning doc | 2 | `pds-w34-owning-doc-amendment` | the route axis PDS-D506 found structurally absent |
+
+**FIFTH CONSECUTIVE WAVE TO FIND DISPATCH ITEMS PRE-PAID, and this time one of them was the LEAD's
+own blocking action.** The direction ordered "land PR #8971 before any builder flies"; it merged at
+`2026-08-02T23:54:01Z` as `f85188bdf`, two minutes before verification ran. Also pre-paid and cut
+from the wave: `pds-w34-census-cas-shadow` (done `2026-08-01T21:12:54Z`, closed on wave-37 DERIVED
+numbers and explicitly NOT on PDS-D485's claim — so the wish's item 2 describes a state the ledger
+had already repaired), `pds-w37-class-d-echo-family-unjudged` (done), and BOTH of the wish's
+emblematic SCIM anchors (`:77` repaired by #8952, `:102` never existed — the live 204 is `:105` and
+is BACKED). **The wish's item 2 premise was refuted by reading the ledger instead of the charter.**
+
 ### Wave 37 2026-08-02 — "Buy the judgment, don't declare it" — REVIEWED. Grade A− (paper `pds-wave-37-2026-08-01`)
 
 **ALL THREE ROUND-1 SLICES BUILT, ALL THREE GREEN, ALL THREE PUSHED WITH PRs OPEN.** Two round-≥2
@@ -10131,3 +10161,240 @@ this workflow spawns exactly one reviewer: **slice 2's L1 boundary** (which rows
 from 9 to 18 by reading the lens instead of a PR body), and **slice 3's tenancy judgment** (a cross-org
 SCIM Groups DELETE reached by a non-admin IdP bearer, where the wrong read is worse than no read — the
 same axis PDS-D514 cleared for slice 5 of wave 36).
+
+### Wave 38 decisions 2026-08-02 — the denominator is the router, not the string
+
+**PDS-D538 — THE WRITE-ROUTED DENOMINATOR IS 170, AND NOBODY'S 131, 136 OR 161 IS IT.** Two
+independent derivations agree exactly: the compiled route table
+(`Phoenix.Router.routes(BarkparkWeb.Router)` — 473 routes, 212 write entries) yields **170 distinct
+write `{plug, plug_opts}` pairs**, and an AST pass over `router.ex` (136 router-only) unioned with the
+AST of the 8 plugin `register_routes/1` owners (37, overlap 3) yields **170**. Set-identical, with two
+alias-resolution differences and zero cardinality difference. Every smaller number is an identified
+lens defect: `161` is `grep -cE '^\s*(post|put|patch|delete)\(.*\)\s*$'`, blind to 8 multiline calls at
+`router.ex` 1632/2135/2227/2233/2239/2251/2435/2443; `131` is that same lens deduped, losing 5 pairs
+(4× `CycleFleetController`, `V1.MediaCollectionsController.remove_member`) to multiline blindness and
+2 more to short-name collapse. **The direction's own headline integer arrived from a lens that could
+not see 8 members of its population — the wave's thesis happening to the wave.**
+
+**PDS-D539 — THE DISPOSITION KEY IS `{method, path, module, action}`, AND THE ARGUMENT THE DIRECTION
+GAVE FOR IT IS FALSE.** The direction argued `{module, action}` "LOSES the admin/non-admin fact on 33
+scoped twins." Measured: there ARE exactly 33 twins and all 33 ride different `pipe_through` sets, but
+**ZERO cross an admin/non-admin boundary** — they are TENANCY twins (15× `[:api,:require_admin]` vs
+`[:scoped_admin,:scoped_api]`, both admin; 6× `[:media_mutate]` vs `[:media_mutate,:scoped_api]`).
+Do not put that argument in a Paper; a reviewer will check it. **The real argument is a mutation.**
+Plant one synthetic write route onto an already-disposed pair (`WebhookController.create`):
+`{module,action}` goes **168 → 168** — the arrival is STRUCTURALLY INVISIBLE, JUDGED and DARK both
+byte-identical — while `{method,path,module,action}` goes **204 → 205**. Under the pair key the single
+most likely real change, a new route to an existing action, **can never fire `ROUTED-POPULATION-COMPLETE`**.
+That is a vacuous green wearing the KEY instead of the lens: this epic's disease one level below where
+the wave went hunting for it.
+
+**PDS-D540 — L4a STAYS BUILD-FREE: THE AST IS THE SHIPPED DERIVATION, THE COMPILED TABLE IS A
+ONE-TIME VALIDATION.** `Phoenix.Router.routes/1` IS obtainable compile-only (`mix run --no-start`,
+473 routes, exit 0, no app boot, no OOM — 7 min cold, **13.2 s warm**), and it settles D538. It does
+NOT ship as an arm. The census's identity is `build-free: no mix project, no compile, no app boot`,
+which is why it runs in 7–14 s; a 7-minute cold-`_build` arm would trade the instrument's whole
+economics for a derivation the AST already reproduces set-identically. Two further facts force the
+AST anyway: Phoenix 1.8.9's route map keys are `[:path,:metadata,:plug,:plug_opts,:verb,:helper]` —
+**`has_pipe_through_key=false`**, so the compiled table cannot supply the pipeline axis at all; and
+`Barkpark.Plugins.OnixEdit.register_routes/1` DELEGATES to `OnixEdit.Routes.all/0`, so a literal-tuple
+grep over `plugins/*.ex` silently returns 0 routes for onixedit. The AST derivation must resolve
+delegation, and the compiled-table equivalence is recorded HERE rather than re-run per census.
+
+**PDS-D541 — `LENS-CAN-MISS` IS BUILDABLE, MUTATION-PROVEN, AND COSTS 75 LINES — BUT IT MUST NOT
+LIVE INSIDE `register_checks/2`.** Built end-to-end in verification: a synthetic `router.ex` added to
+`write_corpus!/2` leaves all 12 existing selftest cases **byte-identically** green (`diff` of the full
+selftest stdout is EMPTY), because the router fixture carries no `ok: true` pair and because the
+write-verb detector at `census.exs:1548` requires `last in @repo_mods` — a bare `delete "/things/:id"`
+route macro is not a write verb to that lens. The arm then reds correctly on a killed detector:
+`SELFTEST OK — 13 cases, 9 of them mutants`. **THE TRAP, PROVEN:** an arm placed inside
+`register_checks/2` is UNMUTATABLE — a probe hardcoded `false` in its `:real` branch still printed
+`SELFTEST OK — 12 cases`, because `register_scope/1` (`census.exs:2486`) returns `:scoped_out` unless a
+live corpus path matches one of `@register`'s 23 controller paths, and `router.ex` is not one. The same
+probe moved to the unconditional `checks` list red immediately. **The seam is WHICH LIST THE ARM LIVES
+IN, not the arm's logic.** Second trap: the mutation anchor must be fragment-spliced (the selftest case
+literal contains the anchor string, and `apply_mutation/2` refuses an ambiguous anchor), or the slice
+reds on its own paperwork and looks like a code failure. And the arm derives **17** real macro sites,
+not the briefed 23 — 6 of the grep hits are comment prose.
+
+**PDS-D542 — `--selftest` IS CONCURRENCY-BROKEN, AND ITS WORSE FAILURE SHAPE IS A RED THAT NAMES A
+REAL ARM.** `census.exs:2859` builds its scratch root from `System.unique_integer/1`, which is
+VM-LOCAL, joined onto a shared `$TMPDIR`; `File.rm_rf!(root)` at `:2866` then deletes a concurrent
+run's corpus. Measured: 8 concurrent VMs produced `pds-census-selftest-2` **five times**. The briefed
+2-way reproduction returns a clean double green and is a FALSE NEGATIVE — do not read it as a
+refutation. Pinning the root makes it deterministic and the stagger selects the shape: at 25 s the
+briefed `File.Error` crash; **at 2 s, `SELFTEST FAILED — 1 case(s)` naming `FAIL KEY-DISCRIMINATES …
+went red on the WRONG sub-check`**, which reads as a substantive regression in key-discrimination
+logic. **That is a vacuous RED wearing an arm name — the exact mirror of the vacuous green this epic
+exists to kill, and strictly nastier, because a crash is obviously infrastructural and this is not.**
+The brief's alternative fix (`mkdir_p!` before the case write) repairs ONLY the crash shape and must
+not ship. The fix is one token — `System.pid()` in the root — proven by 8 distinct roots across 8
+concurrent VMs and three full concurrent selftests at the exact staggers that broke it, all rc 0.
+The trigger is already live and uncontrived: this host's real `TMPDIR` is one directory every agent
+shares.
+
+**PDS-D543 — FALSIFIER PROMOTION YIELDS TWO, NOT TEN, AND THE PROMOTION RULE ITSELF NEEDS A
+NON-VACUITY GUARD.** Measured over the 91 rows: promote `two_hop_composed` (with the probe widened to
+MODULE-QUALIFIED context reads) and `partial_tag_coverage`. Everything else stays advisory, and the
+wish's "promote every value that survives its own proof" would have shipped four lies. `two_hop`
+naively promoted REDS at 3 refusals — and **all three are FALSE**: the cited tests DO read persisted
+state, through `Content.get_document/4` and `Conflicts.list/1`, which a bare `Repo.` substring cannot
+see. Widening globally takes it to 0 refusals with **zero collateral on any other arm**, and the
+mutation (blinding those two context reads) reds it again. **A TRAP MEASURED INSIDE THE PROMOTION
+PROBE ITSELF:** a first widened token list that also contained the test-LOCAL helper names
+(`link_state(`, `detached_conflicts(`) made the mutation STOP FIRING — a manufactured green, produced
+by the wave's own instrument, caught only by mutating. The token list must be module-qualified reads
+only. `side_effect_existence_only` must NOT be promoted either way: its implemented predicate ("reads
+no `Repo` at all") is WEAKER than its written falsifier ("the `Repo` read compares a printed field"),
+and the written form is undecidable on substrings — a strict probe refuses 5 of 5 and the match at
+`auth_controller_test.exs:369` is provably a WHERE-clause filter inside the query, not an assertion.
+`declared_basis` is not a promotion at all: its 5 rows are exactly the 5 `@declared` keys and
+`DECLARED-BASIS-INTACT` already reds on them — promoting it double-counts an existing arm under a
+second name. Routing the five citation-free values through the citation falsifier manufactures **52
+"carries no citation" accusations** against a baseline of 3.
+
+**PDS-D544 — THE EXISTING REDDING TIER IS ALREADY ONE-THIRD VACUOUS, AND THE GUARD IS RETROACTIVE.**
+Of the 6 values tiered `:reds`, `basis_stale` has **no predicate at all** (`check_row_basis/2` never
+dispatches it) and `no_observer` carries **zero top-level rows** (its one occurrence is a nested
+`tags:` sub-tag, and sub-tags are not walked). Only FOUR redding values carry rows. `shape_assertion_only`
+and `not_a_receipt` have zero rows each, so a promotion criterion of "refusals == 0" promotes them
+TRIVIALLY over an empty set. **A value may enter `:reds` only when all four hold: a predicate is
+IMPLEMENTED (not merely written in `@basis_vocab` prose); rows > 0; the input the predicate needs is
+present on those rows; and the arm is MUTATION-PROVEN to refuse on a planted defect.** The printed
+"N redding value(s)" line must count ARMED-WITH-ROWS, not `@basis_vocab` entries. Separately,
+`no_observer`'s vocabulary text promises "the site's module OR its route path" while its implementation
+is headed "THE MODULE HALF ONLY" and does one `String.contains?` — a declared claim with no read
+behind it, in the instrument this epic built to find exactly that.
+
+**PDS-D545 — THE OWNING DOC'S CAP AMENDS 14500 → 15400, BY THE SAME METHOD PDS-D528 USED TO AMEND
+13500 → 14500.** A real route-axis amendment was BUILT, not estimated. The ladder: 11982 B on main →
+13102 B with every integer repaired and NO route axis → **15131 B with the route-axis section (+2029 B)**,
+which FAILS the real gate at 14500 → **14481 B** after five rounds of PDS-D507-sanctioned compression
+(Go+shell 4428 → 3809 B, −619 B off the doc's only mutation-proven narrative). So 14500 is
+SATISFIABLE — **by 19 bytes.** D507's own standard was ≥800 B of measured headroom; reaching
+14500-with-800 needs 781 B more out of a 3809 B remainder, i.e. deleting the mutation-proof narrative
+outright. **Shipping at 14500 enrols a cap that is true on merge day and false on the next sentence —
+the exact shape this epic files as a defect.** 15400 gives the shipped artifact ~919 B and stays
+mutation-provable (the same file reds at 14400 today). This is a FIRST ENROLMENT, not a cap raise:
+`grep -c success-claim-census scripts/check-doc-budgets.sh` is **0**. PDS-D528's 13930 B draft exists
+in NO ref and had a bare-pointer route axis; it never measured what a denominator-ownership section costs.
+
+**PDS-D546 — THE OWNING DOC UNDERCOUNTS ITS OWN INSTRUMENT'S RED-CAPABILITY BY SIX, IN TWO PLACES,
+AND THE TASK'S OWN CRITERION IS WRONG TOO.** The doc says "the three integrity checks that can go red"
+at `:166` and `:182`. The live run prints **TEN** arms, of which **NINE are red-capable in normal
+operation** (`CORPUS-INTACT` is reachable only via the `--selftest` bypass, and `census.exs:2717` says
+so in its own words). `pds-w34-owning-doc-amendment`'s acceptance criterion says "corrected to FOUR
+reachable arms" — wrong by five, and satisfying it as written ships a false number into the slice
+built to stop false numbers. **The criterion is amended by measurement before the slice is cut.**
+Also confirmed live: `UNREACHABLE-ERROR` is gone from `@shapes` and `CATCH-ALL-TO-SUCCESS` fires 1,
+so the doc names a shape that no longer exists; and the epic's OWN wave-36 re-derivation ledger row
+already reads stale ("3 fired", "five arms"). Even this epic's re-derivation recipes must be re-derived.
+
+**PDS-D547 — PDS-D537 DOES NOT COVER THE CUT IT WAS CITED FOR, AND THE CENSUS GATE IS CUT ON THE
+FENCE INSTEAD.** D537's ruling is a REMEDY, verbatim: "`pds-w35-elixir-census-gate` **must run the
+census from the checkout**, not from an `api/lib`-only archive." It says FIX THE CORPUS; it was cited
+as grounds to CUT THE SLICE. The archive-blindness ground is refuted by measurement besides: **zero
+workflows in this repo use `git archive`** (`actions/checkout@v4` at 6 sites in `elixir.yml`), so a CI
+census job is the FULLY-ARMED instrument — strictly MORE armed than the epic's own local runs. The
+blindness costs **1 arm of 10**, and the arrival tripwire reds identically under both corpora (a
+planted 92nd `ok: true` emitter reds `REGISTER-COMPLETE` by name at rc 1 in the archive corpus too).
+**The honest ground is the fence:** the gate lives in `.github/workflows/**`, which is the concurrent
+Console wave's fence, not this epic's (`api/**`, `internal/**`, `deploy/**`, `scripts/pds-*`). Cut on
+that, and record two live hazards for whoever builds it: `register_scope/1` scopes ALL FIVE register
+arms out of `--selftest`, so "`--selftest` passes" is a materially weaker warrant than the task text
+implies; and the D529 promotion hazard reproduces exactly — a STANDALONE census job is promoted into
+branch protection, the same job inside `elixir-gate`'s `needs:` is `exclude … S3 SUBSUMED`, and a
+third shape (paths-filtered standalone) is `S4 PATHS-FILTERED`. The brake is one line and nothing
+guards it.
+
+**PDS-D548 — L5's NON-VACUITY IS PINNED TO AXIS B, BECAUSE AXIS A SELF-HEALED ON THE LEAD ACTION.**
+With #8971 merged, 124 commits cite 187 distinct PDS-D numbers against a charter defining 537, and
+**axis A's unresolved count is 0** — under the loose test AND under the correct strict test. An arm
+whose red vanishes on an unrelated merge is a red nobody believes twice. Axis B over the 400 most
+recent merged PRs: 297 distinct task ids → 215 done, 81 open, 1 NOT_FOUND = **82 divergent**, of which
+**13 are epic ROOTS (`parent_id == null`) and 69 are leaf slices**. Roots are disposed
+`EPIC-ROOT-IN-FLIGHT` (advisory) — an epic open while its children merge is CORRECT. Three further
+rulings the arm must honour: the strict "PDS-Dnnn is DEFINED" test must key on the charter's bold-lead
+bullet form (`^\s*(?:[-*]\s+)?\*\*PDS-D(\d+)\b`, 537 defined) and **never on a markdown heading**,
+which would red on 183 of 187 and measure the charter's markdown dialect rather than its record; the
+grace window is **6 h** and must ASSERT `grace < window_span_hours` at runtime, because the 400-PR
+window is only 146.4 h wide and any grace ≥146 h makes the arm structurally vacuous over its whole
+population; and the extractor is `scripts/pr-task-gate.sh --extract-task-id`, never a second one —
+the ad-hoc jq lens keeps backticks that 404 on the ledger, manufacturing 7 false NOT_FOUNDs. Reuse
+pr-task-gate's three-valued contract (0/1/2) as SEMANTICS with a worst-case fold, never by calling
+its helpers, which each `exit`.
+
+**PDS-D549 — MERGED-BUT-OPEN IS NINE, AND THE 14 DONE-AT-0/N ROWS CONTAIN ZERO REASON-LESS
+FALSE-DONES.** The direction said three; the sound ledger-side predicate (every unmet criterion matches
+`/MERGE-GATED|LEAD CLOSES/i`, OR the unmet set is empty) over all 244 published open rows yields
+**nine**. Purest instance: `pds-bl-opaque-arm-blind-to-nonliteral-kind` is `open` at **2/2 met with no
+unmet criterion at all** — shipped, fully stamped, never closed. Excluded correctly by the predicate
+itself: `pds-w29-pay-lb` (12/14, one unmet is real unshipped work) and the two `pds-w25-round-*` rows
+(their "[MERGE-GATED]" text is a LEAD RE-DERIVATION of a pinned shard and says "this slice has no PR"
+— stamping them is the false-done this slice exists to fix). **Merging is NECESSARY, NOT SUFFICIENT,
+on five of the nine:** two demand a SECOND INDEPENDENT REVIEWER re-derive a SCIM tenancy claim, two
+demand the Sobelow breakdown unchanged against main's 24. **And the mirror inverts:** exactly 14 done
+rows sit at 0/N, and **14/14 carry a substantive `close_reason`** (REFUTED / SUPERSEDED / MOOT /
+ABSORBED / ALREADY FIXED) while only 9 carry `disposition_reason`. **THE FIELD SPLIT IS THE DEFECT,
+NOT THE ROWS** — a sweep reading only `disposition_reason` reports five phantom false-dones. Any arm
+sweeping done-0/N must read `close_reason ∪ disposition_reason` or it manufactures its own lie.
+Two population facts ride along: `bp task get` returns 413 children / 248 open while the published
+`bp doc query` lens returns 409 / 244 — **the epic's own ledger population is lens-dependent**, which
+is the disease this wave is chartered to name in the router; and **two of the nine merge commits carry
+no `Task:` trailer and no grep-able id** (`1cef6eed3` #8647, `8b2018bc0` #8648), resolved only by
+matching stamped evidence paths against `git show --stat`, which is L5's non-vacuity proof from a
+second direction and the direct reason the arm must run ledger-side.
+
+**PDS-D550 — 100% OF THE CENSUS'S DEFECT-ASSERTING VERDICTS ARE FALSE ON MERGED MAIN, AND NO ARM CAN
+SEE IT.** The census carries exactly TWO rows whose verdict asserts a defect (`REFUTED`, both in
+`@roster`; `@register` holds 15 PROVEN + 76 UNJUDGED and zero REFUTED). **Both are stale.** The
+scim_groups note says "the callee's return is DISCARDED ENTIRELY before a 204" — main forks on it
+(`case Scim.delete_group(org, group) do {:ok,_n} -> 204; {:error,:not_found} -> 404`, citing PDS-D523).
+The session_controller note says `revoke_user_session_token/1` "hardcodes `:ok`" — main returns
+`{:ok, revoked}` and the caller forks the flash on the count. A third, the `tasks_controller.ex:83`
+UPGRADE-ON-MERGE note, is falsified by a file: `pds_w36_help_seal_probe_test.exs` line 6 literally
+names `task_list_response/3`, refuting the wave-37 reviewer's own escape hatch ("it cites the ROUTE,
+never the function name"). **That is not SOME rows drifting — it is the entire accusatory surface of
+the instrument, wrong, while every arm prints PASS.** Proven blind in both directions: the census run
+over a tree with the three fixes REVERTED prints the SAME `ROSTER-ANCHORS-EXIST` line, PASS. The file
+admits it at `:410-411`: "So the ANCHOR arm cannot catch the staleness; nothing here can." A
+prototype VERDICT-FRESHNESS arm reds `3 of 3` on main and passes `all 3 still hold` on the revert —
+that bidirectional flip is the non-vacuity proof. **A SECOND FRESHNESS HOLE, SETTLED:** the census
+resolves evidence citations **BY `file:line`, NEVER BY MFA** (`cited_findings/4` splits on `":"`,
+`block_at/2` starts at the literal line). Padding a cited test by 40 lines repoints citation `:369` to
+an unrelated comment and `BASIS-FALSIFIERS` still PASSES with the contradiction count unchanged. The
+register KEY is hash-guarded; the evidence CITATION is guarded by nothing — so the `:83` row cannot be
+repaired by "citing the MFA", because there is no MFA channel, and its `basis: :unjudged_other` means
+`check_row_basis/2` runs NO falsifier on it at all.
+
+**PDS-D551 — SCIM IS EIGHT WRITE ROUTES, NOT THREE, AND THE THREE GROUP SITES ARE UNJUDGED, NOT
+REFUTED.** `ScimUsersController.{create,update,replace,delete}` + `ScimGroupsController.{create,replace,
+update,delete}`, all `pipe_through [:scim]`, where `RequireScimToken` resolves a bearer to an
+Organization and does NOTHING else — no user, no role, no membership. **The honest phrasing is
+ADMIN-MINTED, NON-ADMIN-AUTHORIZED, THIRD-PARTY-DRIVEN**: the token is minted by an org admin and then
+handed to an external IdP, so unlike the codelists refutation the path is not admin-gated at request
+time and its driver is a third party. Say it in those three words or a reviewer will refute "non-admin"
+the way codelists was refuted. The register carries ZERO rows matching `Scim`. Three group sites
+discard a callee result — `apply_members/3` at `:24`, the `for {op,uid}` loop at `:91-92`,
+`replace_group_members/3` at `:115` — and because `Scim.{add,remove}_group_member/3` and
+`replace_group_members/3` have **NO failure return whatsoever** (every clause is `{:ok, _}`), the
+disposition is **UNJUDGED / `unjudged_other`, not REFUTED**, and the repair is a WIDENED CALLEE, not a
+caller match — a different slice from the wave-37 `delete_group` shape. **AND THE POPULATION HOLE IS
+NOT SCIM-SHAPED:** the outside emission shape is bare `json/2` (**195 sites**), not `send_resp`, which
+is **FOUR sites tree-wide** and the rarest shape in the tree despite being the wish's emblem. Widening
+the roster toward `send_resp` adds at most 4 rows against ~120 dark members.
+
+**PDS-D552 — L4a MUST NOT REUSE `write-routed`, AND `route_claim` IS A LITERAL NOBODY DERIVES.** The
+census ALREADY OWNS `write-routed / read-routed / unrouted` (`:2071-2073`) meaning **Repo-verb
+reachability**, and all three are drifting on main today (64→54, 17→14, 10→23). L4 reusing those words
+puts two different populations behind one word inside one instrument, and the epic's own drift arms
+compare recorded-vs-derived on those names. **L4 uses ROUTED-WRITE / DISPOSED.** Relatedly, PDS-D525's
+"advisory route linkage" has a PRINT behind it, not a derivation: `route_claim` is a hand-declared
+string literal on ONE `@declared` row (`census.exs:191`), consumed only by `route_claim_tag/1` and
+`route_tag/1` to decorate output, and the census **never reads `router.ex` at all** (both mentions are
+prose comments). Not a phantom citation — a NOT-YET-BUILT, which is precisely the hole L4 fills.
+Finally, the genuinely unkeyable residue is **LiveView**, not the plugin macro: 43 route entries over
+**27 distinct modules**, every one verb `:get`, whose `handle_event/3` writes carry no
+`{Controller, action}` at all. The plugin macro shape is fully derivable and `GithubWebhookController.receive`
+joins cleanly. **`ROUTED-POPULATION-COMPLETE` must PRINT the LiveView exclusion with its count (27)
+as an EXCLUDED class, or the new arm inherits exactly the vacuity it replaces.**
