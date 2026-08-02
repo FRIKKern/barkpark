@@ -3473,7 +3473,13 @@
       '<div class="notice notice-warn" role="alert">This is the only time you’ll see this token. Copy it now and store it somewhere safe.</div>' +
       '<div class="field"><div class="label" id="token-reveal-label">' + label + "</div>" +
         '<div class="token-reveal">' +
-          '<code class="token-reveal-input" id="token-reveal-text" tabindex="0" aria-label="Token value">' + esc(plaintext) + "</code>" +
+          // REVIEW (cch-w21-s4-r): the accessible NAME comes from the field's own
+          // label, the way the retired `<label for="token-reveal-value">` supplied
+          // it — `aria-label` on a bare `<code>` is naming a role that PROHIBITS a
+          // name, so the token would have announced with the person's chosen key
+          // name orphaned above it. `role="textbox" aria-readonly="true"` is what
+          // this element now IS: a focusable, non-editable value field.
+          '<code class="token-reveal-input" id="token-reveal-text" tabindex="0" role="textbox" aria-readonly="true" aria-labelledby="token-reveal-label">' + esc(plaintext) + "</code>" +
           '<button class="btn btn-sm" id="token-eye" type="button" aria-label="Hide token" aria-controls="token-reveal-text">' + EYE_SVG + "</button>" +
           '<button class="btn btn-sm" id="token-copy" type="button">Copy</button>' +
           '<div class="input-affix">' +
@@ -3498,21 +3504,40 @@
     var eye = $("#token-eye");
     if (eye) eye.addEventListener("click", function () {
       shown = !shown;
-      if (input) input.type = shown ? "text" : "password";
+      // REVIEW (cch-w21-s4-r): the off-screen buffer is NOT masked with it. It is
+      // 1px and clipped, so masking buys no over-the-shoulder safety — and
+      // `type="password"` is exactly the state in which `execCommand("copy")` is
+      // refused by some engines, which would have turned "mask, then copy" into a
+      // failed copy of a secret that cannot be shown again.
       if (text) text.textContent = shown ? plaintext : new Array(plaintext.length + 1).join("•");
       eye.setAttribute("aria-label", shown ? "Hide token" : "Show token");
     });
+    // REVIEW (cch-w21-s4-r): the toast now reports what actually happened. The
+    // pre-review handler set `ok = true` the instant the clipboard PROMISE was
+    // issued and toasted success unconditionally, so a rejected write (denied
+    // permission, insecure context, no focus) told the person their write-once
+    // secret was saved when nothing had been copied — the one screen in the
+    // console where that lie is unrecoverable. Success is toasted on resolution;
+    // a rejection falls back to the off-screen buffer and, if that fails too,
+    // says so and tells the person what to do instead.
+    function copyViaBuffer() {
+      if (!input) return false;
+      input.select();
+      try { return !!document.execCommand("copy"); } catch (e) { return false; }
+    }
+    function copyDone(ok) {
+      if (ok) toast({ kind: "success", title: "Copied to clipboard" });
+      else toast({ kind: "error", title: "Couldn’t copy the token", body: "Select the token above and copy it manually — this is the only time it is shown." });
+    }
     $("#token-copy").addEventListener("click", function () {
-      var ok = false;
       if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(plaintext).then(function () {}, function () {});
-        ok = true;
+        navigator.clipboard.writeText(plaintext).then(
+          function () { copyDone(true); },
+          function () { copyDone(copyViaBuffer()); },
+        );
+        return;
       }
-      if (!ok && input) {
-        input.select();
-        try { document.execCommand("copy"); } catch (e) { /* nothing else to try */ }
-      }
-      toast({ kind: "success", title: "Copied to clipboard" });
+      copyDone(copyViaBuffer());
     });
     $("#token-done").addEventListener("click", function () {
       closeModal();
