@@ -332,6 +332,27 @@ defmodule Barkpark.Content.DedupWall do
     timeout = Keyword.get(opts, :dedup_timeout_ms, @query_timeout_ms)
     incumbent = DraftId.published_id(field_str(ref, :id))
 
+    if timeout <= 0 do
+      # A NON-POSITIVE BUDGET IS A DECISION, NOT A RACE. Handed straight to
+      # `Repo.transaction(timeout: 0)` this is a coin-flip: DBConnection raises
+      # only if the checkout actually queues, so a warm pool returns `{:ok,
+      # rows}` and the scan reports a clean corpus it was never given time to
+      # read. That is the exact failure this module exists to stop — a wall
+      # that answers "no duplicates" when it means "I could not look".
+      #
+      # Zero milliseconds of budget can only ever mean the scan did not happen,
+      # so say so before touching the pool. This also makes the two fail-LOUD
+      # legs deterministic: they drive `dedup_timeout_ms: 0` and were passing
+      # or failing on connection-checkout scheduling.
+      Logger.warning("Content.DedupWall degraded: non-positive scan budget (#{timeout}ms)")
+      {:degraded, "the duplicate scan was given no time to run (#{timeout}ms budget)"}
+    else
+      do_fetch_candidates(type, dataset, title, timeout, incumbent, opts)
+    end
+  end
+
+  defp do_fetch_candidates(type, dataset, title, timeout, incumbent, opts) do
+
     query =
       from(d in Document,
         as: :doc,
