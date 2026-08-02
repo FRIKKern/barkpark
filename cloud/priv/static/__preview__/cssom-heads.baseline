@@ -406,4 +406,17 @@
 # and wrong for JS. Guard PASSES across 13 legs in a real browser. Baseline MEASURED here:
 # wrong sentinel, cssom-parity.mjs run, value read from its own failure text, exactly one
 # bare integer confirmed. authored rule heads 1269 == CSSOM style rules 1269, MISSES 0.
-1269
+# W22-S2 (cch-w22-s2-site-row-name-and-host-bounded) 2026-08-02: 1269 -> 1271, MEASURED
+# by the sidecar's own recipe — the file still held 1269 (this branch's tree already
+# carried the change), cssom-parity.mjs was RUN, and the number was read out of its own
+# failure text: "authored rule heads 1271 (baseline 1269 <- ABOVE) ... CSSOM style rules
+# 1271 ... MISSES 0". MISSES 0 is what makes this a recorded ADD and not a parity defect.
+# The +2 are the two NEW heads this slice authors, both scoped away from the global row:
+#   .site-row:not(.site-row--global)             { flex-wrap: wrap; }
+#   .site-row:not(.site-row--global) .site-main  { flex: 1 1 200px; }
+# The wrap declarations themselves add ZERO heads — .site-name, .site-host and
+# .site-meta .mono already existed and only gained a declaration each.
+# THE LEAD RE-MEASURES ON THE INTEGRATED TREE: three round-1 slices of wave 22 touch
+# this single integer, so 1271 is this branch's honest number and NOT a prediction for
+# main. Re-run the sidecar after integration; do not arithmetic the deltas together.
+1271
