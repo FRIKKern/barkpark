@@ -4346,7 +4346,6 @@ defmodule PDS.Census do
           end)
         end
 
-
         Enum.each(red, fn f ->
           p("      REFUSED  #{short(elem(f.key, 0))} #{elem(f.key, 1)}  [#{f.basis}]")
           wrap(f.why, "               ")
