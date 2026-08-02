@@ -1612,7 +1612,9 @@ select.form-input {
 .site-name { font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
 .site-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; }
 /* FIXED, NOT REFUSED — and it is the ONE host here that needs `anywhere`.
-   `.site-meta .mono` is the worst text on the row, not the mildest: app.js:7617
+   `.site-meta .mono` is the worst text on the row, not the mildest: `siteRow()`
+   (grep -n 'function siteRow' app.js — a SECOND copy of the same concat lives in
+   `siteDetailHtml()`; grep -n 'github_branch' app.js re-derives both)
    concatenates `github_repo` + "@" + `github_branch` into ONE span and both
    columns carry their own varchar(255), so a 511-char unbreakable token is
    reachable. Measured on the instance-workspace Sites card with that token,
@@ -1656,8 +1658,9 @@ select.form-input {
 }
 /* W22-S2, THE PRECONDITION THE WRAP ABOVE NEEDS ON THE OTHER ROW BUILDER.
    `.site-row--global` (the #sites list) stacks at <=720 (:2424), so its
-   `.site-main` always has a real box to wrap inside. The COMPACT row — `siteRow`
-   at app.js:7613, the instance-workspace Sites card — never got that stack, and
+   `.site-main` always has a real box to wrap inside. The COMPACT row — `siteRow()`
+   (grep -n 'function siteRow' app.js), the instance-workspace Sites card
+   rendered by `loadInstanceSites()` — never got that stack, and
    `.site-main`'s `flex: 1` is `1 1 0%`: with `min-width: 0` and an unshrinkable
    badge column beside it, its resolved width is LITERALLY ZERO. Measured on
    origin/main bytes, KIND content, no cruelty applied: `.site-name` "acme-web"
@@ -5706,7 +5709,8 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .am-who { min-width: 0; flex: 1 1 auto; }
 /* cch-w23-s2 — THE NAME IS AN EMAIL LOCAL PART, AND IT WAS UNBOUNDED.
-   `.am-name` is not a display name: `accountModel()` (app.js:682) sets
+   `.am-name` is not a display name: `accountModel()`
+   (grep -n 'function accountModel' app.js) sets
    `name: email.split("@")[0]`, so what paints here is the part of the person's
    own address before the "@". `BarkparkCloud.Accounts.User` has NO `:name`
    field and no `validate_length(:name, …)`; the governing cap is
