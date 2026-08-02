@@ -2085,6 +2085,10 @@
           body: "Connected " + (prov.kind || kind) + (prov.label ? " (" + prov.label + ")" : "") + "."
         });
         loadProviders();
+        // loadProviders repaints #view-providers ONLY. If this sheet was opened
+        // from a launch wizard's "Connect …" door, that wizard's catalog is now
+        // a lie — resume it (see resumeLaunchAfterConnect).
+        resumeLaunchAfterConnect();
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = "Add provider"; }
@@ -2509,6 +2513,9 @@
             p.name + (label ? " (" + label + ")" : "") + "." });
         loadProviders();
         loadCapabilityMatrix();
+        // The providers-page card connects the same account, so it owes a
+        // pending launch wizard the same repair the dialog does.
+        resumeLaunchAfterConnect();
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = verb; }
@@ -11898,13 +11905,92 @@
       });
     });
     var connect = container.querySelector(".launch-connect-provider");
-    if (connect) connect.addEventListener("click", function () { openProviderCredential(connect.getAttribute("data-kind")); });
+    if (connect) connect.addEventListener("click", function () {
+      // Remember WHICH wizard the person is walking out of before the sheet
+      // opens — see noteLaunchConnectDetour. Written first: on the modal path
+      // openProviderCredential destroys this container mid-call.
+      noteLaunchConnectDetour(container, opts, connect.getAttribute("data-kind") || kind, groupName);
+      openProviderCredential(connect.getAttribute("data-kind"));
+    });
     var retry = container.querySelector(".launch-catalog-retry");
     if (retry) retry.addEventListener("click", function () { mountLaunchCatalog(container, opts, kind, groupName); });
   }
 
+  // ── THE CONNECT DETOUR (the launch wizard's only door out) ────────────────
+  // `.launch-connect-provider` is the ONLY forward caller of
+  // openProviderCredential, and until this record existed nothing on the way
+  // back knew a launch was in progress: the 201 branch called loadProviders(),
+  // which repaints `#view-providers` — a HIDDEN view while the empty-fleet
+  // runway is on screen — and never re-ran the wizard's catalog mount. So the
+  // panel behind the success toast kept saying "Connect a Hetzner Cloud account
+  // to provision here" and kept offering the button, ten seconds after the
+  // person connected that exact account. The console contradicted itself about
+  // the one fact the person had just established.
+  //
+  // TWO PATHS, ONE RECORD. On the runway the wizard is rendered INLINE in the
+  // overview body and survives the dialog (`container.isConnected` stays true),
+  // so the honest repair is to remount its catalog against the account that now
+  // exists. In the modal the wizard does NOT survive: openModal owns ONE body
+  // and overwrites it, so `#launch-modal-slot` — and the typed name with it —
+  // leaves the document the instant the door is pressed. There the repair is to
+  // re-enter the wizard with that name rather than leave the person on
+  // `#overview` retyping it.
+  var launchConnectDetour = null;
+
+  function noteLaunchConnectDetour(container, opts, kind, groupName) {
+    var input = container.querySelector(".launch-form .form-input");
+    var name = ((input && input.value) || "").trim();
+    launchConnectDetour = {
+      container: container, opts: opts, kind: kind, groupName: groupName,
+      name: name, hash: location.hash,
+    };
+    // The modal path's node is about to be discarded, so the typed name has to
+    // outlive it. LAUNCH_RETURN_KEY is this flow's EXISTING stash — the 402
+    // plan fold writes the same name to the same key across the Stripe
+    // round-trip — so the detour reuses it instead of growing a second one.
+    if (opts && opts.modal) {
+      try { localStorage.setItem(LAUNCH_RETURN_KEY, name); } catch (x) {}
+    }
+  }
+
+  // Pure: what a successful connect owes the person who left a launch wizard.
+  // "remount" — their wizard is still mounted, repaint its catalog in place.
+  // "reenter" — the modal wizard was overwritten by the sheet; reopen it with
+  // the name they typed, but ONLY on the route they left it on (a person who
+  // wandered to the providers page and connected there is not asking for a
+  // modal to appear over it). "none" — nobody was in a wizard.
+  function launchConnectResume(detour, hash) {
+    if (!detour || !detour.container) return { action: "none", name: "" };
+    if (detour.container.isConnected) return { action: "remount", name: detour.name || "" };
+    if (detour.opts && detour.opts.modal && detour.hash === hash) {
+      return { action: "reenter", name: detour.name || "" };
+    }
+    return { action: "none", name: detour.name || "" };
+  }
+
+  // Consume the detour (once — a record survives no second 201) and act on it.
+  // Called from BOTH credential submit paths: the dialog (submitProviderCred)
+  // and the providers-page card (submitInlineProviderCred), because a stale
+  // catalog is just as false whichever form connected the account.
+  function resumeLaunchAfterConnect() {
+    var detour = launchConnectDetour;
+    launchConnectDetour = null;
+    var r = launchConnectResume(detour, location.hash);
+    if (r.action === "remount") {
+      mountLaunchCatalog(detour.container, detour.opts, detour.kind, detour.groupName);
+    } else if (r.action === "reenter") {
+      try { localStorage.removeItem(LAUNCH_RETURN_KEY); } catch (x) {}
+      openLaunchModal(r.name);
+    }
+    return r;
+  }
+
   // Step 1: name + a provider→region+size hosting picker + submit (state "name").
   function renderLaunchName(container, opts) {
+    // A freshly rendered wizard supersedes any pending connect detour: the node
+    // the old record points at is about to be repainted, and re-entering a
+    // wizard that is already on screen would be a second copy of it.
+    launchConnectDetour = null;
     var hero = opts.runway
       ? welcomeHeroHtml(subCache)
       : '<h2 class="modal-title" id="modal-title">Launch a Barkpark</h2>' +
@@ -18928,6 +19014,12 @@
       deployDetailHtml: deployDetailHtml, deployConsoleHtml: deployConsoleHtml,
       // A4 onboarding narrative (D56/D57/D60/D66): the launch component + runway +
       // ready-fold pure helpers.
+      // The connect detour's decision (remount / reenter / none) — the pure
+      // half of "the launch catalog stops lying after a connect". The two
+      // mounts it drives (mountLaunchCatalog / openLaunchModal) are
+      // browser-verified by the overflow guard's
+      // W25-launch-catalog-after-connect leg.
+      launchConnectResume: launchConnectResume,
       wantsLaunchFlow: wantsLaunchFlow, runwaySubline: runwaySubline,
       welcomeHeroHtml: welcomeHeroHtml, launchedHash: launchedHash,
       launchFlowReducer: launchFlowReducer, readyFoldTrigger: readyFoldTrigger,
