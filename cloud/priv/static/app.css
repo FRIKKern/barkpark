@@ -1531,9 +1531,72 @@ select.form-input {
 .site-row { display: flex; align-items: center; gap: 14px; padding: 14px 16px; background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius-lg); box-shadow: var(--shadow-sm); }
 .site-row + .site-row { margin-top: 10px; }
 .site-main { flex: 1; min-width: 0; }
-.site-name { font-size: 14px; font-weight: 600; }
+/* W22-S2 — THE SITE ROW'S THREE TEXT HOSTS ARE BOUND TO THEIR BOX.
+   `.site-name` (:1534), `.site-host` (:1544) and `.site-meta .mono` (:1536) each
+   render a server string that is admissibly LONG and admissibly UNBREAKABLE, and
+   until this block not one of them carried a wrap property. MEASURED on
+   origin/main bytes in headless Chrome (Chrome 150.0.7871.187), ?scen=sites#sites,
+   the same DOM carrying kind rows and cruel rows together:
+
+     KIND corpus (9-13 char names, real hosts): 0 of 18 cells spilling and
+       documentElement.scrollWidth == clientWidth at 320/390/430/620/900, both
+       themes. That control is why the numbers below are the CONTENT's fault and
+       not the layout's.
+     CRUEL corpus, same screen: a 255-char name reads .site-name 2015/254 at 320
+       (+1761) and takes documentElement to 2048/320 — 1728px of sideways PAGE
+       scroll — 2048/390, 2048/430, 2048/620, and 2418/900. A 253-char domain
+       reads .site-host 1822/254; a 66-char one (a 63-char DNS label + ".no")
+       reads 475/254. The ancestor walk finds NO overflow-x != visible above
+       either host at any width, so the spill reaches documentElement: this is
+       the whole page moving, not a cell clipping.
+
+   ADMISSIBLE, and that is the load-bearing half — a cruel fixture that the
+   server would refuse proves nothing. `registry/site.ex:241` is
+   `validate_length(:name, min: 1, max: 255)` and the column is
+   `add :name, :string` (`20260627150000_create_sites.exs:20`) = varchar(255), so
+   255 chars STORE. Unlike a name that doubles as an id, `Site.changeset/2`
+   (:209) casts `:slug` as its own REQUIRED field (`validate_required` :240,
+   `validate_length(:slug, max: 63)` :242) and `Registry.create_site/2`
+   (registry.ex:4332) never derives it from `:name` — `POST /v1/sites` even takes
+   an explicit one (`router.ex:5894`, `slug <- conn.body_params["slug"] ||
+   slugify(name)`). A 255-char display name over a short slug is a person's
+   ordinary choice, not an attack.
+   The host's cap is 253 and it is enforced by `validate_change` at
+   `registry/site.ex:432-436` (`is_binary(d) and String.length(d) <= 253 and
+   Regex.match?(@domain_format, d)`) — NOT by `validate_length`, so a
+   validate_length census cannot see this cap at all. `@domain_format` (:28) caps
+   each label at 63 and requires dots; a dot is not a CSS break opportunity, so a
+   legal domain arrives as one unbreakable run.
+
+   THE REMEDY IS `overflow-wrap: break-word` ON THE THREE HOSTS, and nothing on
+   their ancestors. `.site-main` already carries `min-width: 0; flex: 1` (:1533),
+   which grants PERMISSION to shrink below min-content but supplies no break
+   opportunity — the box duly shrinks and the unbreakable run overflows it. The
+   wrap is what makes that min-width: 0 yield something other than a spill.
+   `anywhere`, NOT chosen: it also drops the min-content contribution to one
+   character, the shred D165 measured on .fleet-url (0 clips while the row grows
+   112 -> ~430px). `break-word` keeps the intrinsic width honest and breaks only
+   the run that would not otherwise fit. */
+.site-name { font-size: 14px; font-weight: 600; overflow-wrap: break-word; }
 .site-meta { font-size: 12px; color: var(--muted-text); margin-top: 2px; }
-.site-meta .mono { font-family: var(--mono); }
+/* FIXED, NOT REFUSED — and it is the ONE host here that needs `anywhere`.
+   `.site-meta .mono` is the worst text on the row, not the mildest: app.js:7617
+   concatenates `github_repo` + "@" + `github_branch` into ONE span and both
+   columns carry their own varchar(255), so a 511-char unbreakable token is
+   reachable. Measured on the instance-workspace Sites card with that token,
+   pre-fix: 1901/21 at 430, 1901/1713 at 900, page 1936/430.
+   `break-word` was tried FIRST and left one cell red: at 900 the instance
+   detail's track is min-content-sized, `break-word` does not lower min-content,
+   and the page still read 2563/900 (1663px sideways) while every CELL reported
+   sw <= cw — a green that the page itself refutes. `anywhere` lowers the
+   min-content contribution, which is exactly the property that track needs, and
+   the page lands 900/900.
+   D165's shred is the cost of `anywhere` and it was MEASURED here, not assumed
+   away: across the KIND corpus (real 13-22 char repo@branch strings) at
+   320/390/430/620/900 in both themes, ZERO cells render taller than 40px — the
+   short strings are untouched. The shred D165 recorded on `.fleet-url` needed a
+   flex sibling free to squeeze the box to ~19px; the pair below denies that. */
+.site-meta .mono { font-family: var(--mono); overflow-wrap: anywhere; }
 .site-inst { color: var(--text); font-weight: 500; }
 /* E-01: the global #sites list adopts the fleet-row anatomy — a fixed leading
    status column, then the main block, then the badges. The instance-Overview
@@ -1541,7 +1604,7 @@ select.form-input {
    never disturbs it. */
 .site-row--global { align-items: center; }
 .site-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; }
-.site-host { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; }
+.site-host { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; overflow-wrap: break-word; }
 .site-inst-link { color: var(--text); font-weight: 500; text-decoration: none; }
 .site-inst-link:hover { text-decoration: underline; }
 .site-inst-link:focus-visible { outline: none; box-shadow: 0 0 0 2px var(--ring); border-radius: var(--radius-sm); }
@@ -1559,6 +1622,27 @@ select.form-input {
   white-space: pre;
   overflow-wrap: normal;
 }
+/* W22-S2, THE PRECONDITION THE WRAP ABOVE NEEDS ON THE OTHER ROW BUILDER.
+   `.site-row--global` (the #sites list) stacks at <=720 (:2424), so its
+   `.site-main` always has a real box to wrap inside. The COMPACT row — `siteRow`
+   at app.js:7613, the instance-workspace Sites card — never got that stack, and
+   `.site-main`'s `flex: 1` is `1 1 0%`: with `min-width: 0` and an unshrinkable
+   badge column beside it, its resolved width is LITERALLY ZERO. Measured on
+   origin/main bytes, KIND content, no cruelty applied: `.site-name` "acme-web"
+   reads 70/0 at 320/390/900 and 70/21 at 430, and the page itself runs 982/900 —
+   the name paints straight over the badges. That is the pre-existing state.
+   It is stated here because `overflow-wrap` interacts with it: inside a 0px box
+   `break-word` breaks EVERY character, so shipping the wrap alone turned the
+   sideways overprint into "acme-web" 168px tall, one glyph per line — D165's
+   shred, arrived at from the other direction. Measured, then repaired here.
+   `flex-basis: 200px` gives the main block a real base size so the row WRAPS
+   instead of crushing it, and the wrap is scoped `:not(.site-row--global)`
+   because a `flex-wrap: wrap` on the global row would meet its <=720
+   `flex-direction: column` — and wrap on a COLUMN container wraps into extra
+   COLUMNS, the same trap recorded at :2346. After this pair: 0 spilling cells
+   and page == viewport at 320/390/430/620/900, both themes, kind AND cruel. */
+.site-row:not(.site-row--global) { flex-wrap: wrap; }
+.site-row:not(.site-row--global) .site-main { flex: 1 1 200px; }
 .site-row[data-id] { cursor: pointer; }
 .site-row[data-id]:focus-visible { outline: none; border-color: var(--ring); box-shadow: 0 0 0 2px var(--ring-soft); }
 /* "Visit ↗" live-site link — sits among the row/detail badges. In a list row it
