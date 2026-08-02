@@ -137,7 +137,10 @@ defmodule Barkpark.Content.Writer do
     # :before_save), then the find-or-create gate (task-obsession layer 1): a
     # NEW kind:task birth is refused if it duplicates an existing task. Dedup
     # only fires when prev_doc is nil (a genuine create — updates/autosaves/
-    # publishes pass straight through) and fails open. See Barkpark.Tasks.Dedup.
+    # publishes pass straight through) and fails LOUD: a scan that times out or
+    # dies returns {:error, {:dedup_unavailable, msg}} rather than filing the
+    # task unchecked. content.dedup_bypass: true is the deliberate escape.
+    # See Barkpark.Tasks.Dedup.
     with :ok <- ensure_task_transition_legal(type, attrs, dataset, doc_id, prev_doc, opts),
          :ok <- ensure_task_born_adjudicated(type, attrs, doc_id, prev_doc, opts),
          :ok <- Barkpark.Tasks.Dedup.check_new_task(type, attrs, dataset, prev_doc, opts) do
