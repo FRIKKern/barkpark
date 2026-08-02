@@ -1014,6 +1014,64 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-02 — wave 24 REVIEW — grade A-. Six of eight built, all six green, and the union is green too
+
+**SHIPPED (round 1, all six re-gated by the reviewer on the final branches).**
+
+| slice | final branch | what landed |
+|---|---|---|
+| s1 credential dialog | `loop-epic/the-provider-credential-dialog-s-button--0-r` | `credQ()` — ONE resolver over the eight two-host `#cred-*` ids; render-time bindings scoped to their own host; leg `W24-cred-dialog-button-alive` reads the POSTed BODY back |
+| s2 instance detail | `loop-epic/the-failed-instance-s-own-detail-screen--1-r` | `.detail-title-row` appended as a comma member (Δheads 0); `.bp-tl-fail` wraps its box; `UNCAPPED-DERIVED` class; detail ROUTE with a per-scenario hash; measured wrapper scope; two-sided `cruelMin`/`kindMax` axis |
+| s4 first-run failure | `loop-epic/the-hostname-on-the-first-run-failure-sc-2-r` | `word-break: break-word` → `overflow-wrap: break-word` on 2 sites + the declaration ADDED to 2 that had none; leg `W24-theater-failed-hostname-whole` measures a Range over the hostname's own characters |
+| s5 the reader fence | `loop-epic/a-guard-leg-stops-measuring-rows-it-cann-3-r` | W15 walk scoped to the visible view (`foreignRows` reported, not dropped); 13 `FIXTURE_SHAPE_PINS` in `smoke.mjs` that name the READER, asserted before any scenario boots |
+| s6 Law 0 | `loop-epic/law-0-is-executed-with-an-honest-denomin-4-r` | `orphans` re-derived at first claim (**109**, not the briefed 97) and at debrief (111); C=1 D=2 F=0; wave net **+14**, stated plainly; 4 criteria-less rows perfected, 1 disposed |
+| s8 E11 sees the stylesheet | `loop-epic/the-epic-s-own-citation-guard-stops-bein-5-r` | `citationScanFiles()` widened to `.css` (fail-before: 3 errors on unrepaired bytes), all three repaired to SYMBOL + grep, `font-pin.mjs`'s three `app.css:<n>` anchors re-anchored to selectors |
+
+**THE INTEGRATION PROOF, run once on the union of all six.** The six branches merge into `origin/main`
+with **zero conflicts** (four touch `overflow-guard.mjs`, three touch `app.css` — D236's anchor
+arrangement held). On that integrated tree: `node --check` + `__app.test.mjs` 0 fail · `smoke.mjs` all
+101 scenarios · `__css_check` **0 error(s)** · `cssom-parity` **PARITY PASS, 1284 heads == baseline** ·
+the full browser guard **OVERFLOW GUARD PASS across all 17 legs**, including both new ones. This is the
+number the lead should merge against, not six separate greens.
+
+**WHAT THE WAVE DID NOT PAY, and the next wave inherits.**
+1. **The ratio came in at 3 of 6, not four.** s1/s2/s4 are person bodies; s5/s6/s8 are instrument and
+   ledger. The two slices that would have restored it — s3 (the runway catalog lying after a connect)
+   and s7 (three screens cruel by fixture) — are round 2 by the dependency law, not by neglect. Wave 25
+   must dispatch them FIRST.
+2. **Standing risk (a) grew rather than shrank.** s2 added a THIRD global wrap — `.bp-tl-fail {
+   overflow-wrap: anywhere }` — and measured it only against the cruel string. The two realistic
+   `provision_error` fixtures (`verify.login: 500 …`, the TLS one) were NOT driven through the line-box
+   probe. Believed safe, unproven.
+3. **Standing risk (b) is still unpinned and is now worth more.** Nothing pins HEIGHT against a cruel
+   string, and s2's own fix takes the failure box 60px → 399px and the pill to 348px at 320. Filed as
+   `cch-w24-bl-nothing-pins-height-against-a-cruel-string`, not smuggled in.
+4. **s4 knowingly made a hypothetical worse.** Under a 63-octet DNS label the theater page goes 623 →
+   732 against 320. Disclosed in the CSS, printed as a RESIDUAL line every run, and filed
+   (`cch-w24-bl-theater-grid-no-min-content-escape`) — but the reachability of that string was never
+   probed, which is the first criterion of the follow-up row.
+
+**THE WAVE'S OWN LESSON, LANDED.** Wave 23's cross-slice defect was a fixture edit blast-radiusing into
+a POSITIONAL reader. s5 drew the fence around the reader and proved it loud: wave 23's faithful replay
+was measured SILENT on this tree (smoke exit 0, `ok fleet-cruel-content` printed) and now exits 1 naming
+the reader, the path and `scenarios.mjs`, on two pins at once. s1 and s2 both drew the same fence from
+the other side — s1 records `window.fetch` in the page rather than editing a fixture, s2 takes a
+per-scenario HASH into an existing fixture rather than a new row.
+
+**LEDGER.** All six tasks `in_progress`, published, every provable criterion stamped, only the explicit
+MERGE-GATED row open for the lead. One fix: s5's criterion 7 (gate green) claimed 8/9 in its now-line
+while the store held 7/9 — a stamp that did not land. Re-stamped by the reviewer with the reviewer's own
+run as evidence. No task outside this wave was touched.
+
+**NEXT WAVE.** Dispatch order: merge round 1 (any order — proven conflict-free), then s3 once s1 is on
+main and s7 once s5 is on main. Then: pin HEIGHT against a cruel string (the one standing risk this epic
+has never measured); drive the two ordinary `provision_error` strings through s2's line-box probe before
+the global `anywhere` is trusted; answer whether the cloud slug pipeline can emit a 63-char label
+(it decides half of s4's argument); and widen the cruelty ledger in `cch-w22-s7` (still 0/16) only to
+families the sweep proves plural, member-reachable and biting.
+
+Paper: `cloud-console-hardening-wave-24-2026-08-02`.
+
 ### 2026-08-02 — wave 24 DECIDE (build in flight) — reach, on both axes, and four person bodies that are not the four we predicted
 
 **The frame held and the predictions did not.** The wave was cut on REACH — nothing certifies what it
