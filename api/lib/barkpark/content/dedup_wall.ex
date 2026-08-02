@@ -352,7 +352,6 @@ defmodule Barkpark.Content.DedupWall do
   end
 
   defp do_fetch_candidates(type, dataset, title, timeout, incumbent, opts) do
-
     query =
       from(d in Document,
         as: :doc,
