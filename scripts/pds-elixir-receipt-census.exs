@@ -158,9 +158,14 @@ defmodule PDS.Census do
     liveview_handle_event:
       "2026-08-02 (PDS wave 38): a LiveView route names {Module, :action-or-nil} and its writes live in handle_event/3, so there is no {Controller, action} pair for the receipt register to key on. EXCLUDED because this lens structurally cannot judge it — printed with its count so the exclusion is a fact and not a silence.",
     status_only_receipt:
-      "2026-08-02 (PDS wave 38): the routed action reaches no `ok: true` / `\"ok\" => true` receipt this lens can see and carries no roster anchor — it claims success by STATUS alone (`send_resp(conn, 2xx, \"\")`, a bare `json/2`, a redirect). THIS IS THE POPULATION HOLE wave 38 named: SCIM's three IdP write routes land here. The register's completeness claim never covered these; now they are COUNTED instead of absent.",
-    action_not_in_corpus:
-      "2026-08-02 (PDS wave 38): the routed {module, action} resolves to no def under api/lib — the module is generated, vendored, or lives outside the corpus glob, so no span exists to read a receipt out of.",
+      "2026-08-02 (PDS wave 40, correcting wave 38): the routed action reaches no `ok: true` / `\"ok\" => true` receipt THIS LENS keys on, and carries no roster anchor. THAT IS THE WHOLE CLAIM. Wave 38 also wrote that such a row \"claims success by STATUS alone\", and wave 40 MEASURED that: it is false for most of this class's own members, which do render the stored row and simply do not spell the key the lens greps for. That clause is RETIRED here; what each row's receipt actually does is the DERIVATION PARTITION printed below, class by class, with the producing call named for every row. THIS IS STILL THE POPULATION HOLE wave 38 named: SCIM's three IdP write routes land here. The register's completeness claim never covered these; now they are COUNTED, and now they are PARTITIONED.",
+    # `action_not_in_corpus` IS RETIRED (PDS wave 40). It held exactly two rows, both
+    # Sheets routes whose module reads `"?"` only because register_routes/1 binds the
+    # controller to a LOCAL VARIABLE — the defs were in the corpus the whole time, so the
+    # class's own prose ("resolves to no def under api/lib") was checkably untrue of every
+    # member it had. inline_alias_bindings/1 resolves them; both rows are now JUDGED and
+    # the class has no members. A disposition class whose prose no longer describes
+    # anything is deleted rather than kept warm for a member that may never arrive.
     selftest_fixture:
       "2026-08-02 (PDS wave 38): a synthetic member that exists ONLY in the --selftest corpus (module Barkpark.Filler.M1, written by write_corpus!/2 and absent from the real tree). Carried on purpose: without a committed row the row->member direction of ROUTED-POPULATION-COMPLETE has nothing to go red on, and the TWO rows share one {module, action} pair so the quad key is asked to discriminate on every selftest run."
   }
@@ -172,6 +177,18 @@ defmodule PDS.Census do
   @routed_excluded [
     {:post, "/v1/selftest-fixture-close", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     {:post, "/v1/selftest-departure-anchor", "Barkpark.Filler.M1", :noop, :selftest_fixture},
+    # THE SIX ECHO FIXTURE ROWS (PDS wave 40). Classed `status_only_receipt` ON PURPOSE:
+    # that is the class the derivation partition reads, and these six exist so the
+    # partition's request_echo verdict can be observed firing — and, on the `:repaired`
+    # corpus, observed NOT firing. Barkpark.Filler.EchoController exists ONLY in the
+    # selftest corpora, so in the real tree these rows name a module this corpus does not
+    # carry and are OUT OF SCOPE, never a red (the same contract the two rows above ride).
+    {:delete, "/v1/echo/asset/:id", "Barkpark.Filler.EchoController", :delete_asset, :status_only_receipt},
+    {:delete, "/v1/echo/document/:id", "Barkpark.Filler.EchoController", :delete_document, :status_only_receipt},
+    {:delete, "/v1/echo/schema/:name", "Barkpark.Filler.EchoController", :delete_schema, :status_only_receipt},
+    {:delete, "/v1/echo/share-link/:id", "Barkpark.Filler.EchoController", :revoke_share_link, :status_only_receipt},
+    {:delete, "/v1/echo/share-token/:token_id", "Barkpark.Filler.EchoController", :revoke_share_token, :status_only_receipt},
+    {:delete, "/v1/echo/webhook/:id", "Barkpark.Filler.EchoController", :delete_webhook, :status_only_receipt},
     {:delete, "/api/documents/:type/:id", "BarkparkWeb.LegacyController", :delete, :status_only_receipt},
     {:delete, "/api/workspaces/:workspace_slug", "BarkparkWeb.WorkspaceController", :delete, :status_only_receipt},
     {:delete, "/media/:id", "BarkparkWeb.MediaController", :delete, :status_only_receipt},
@@ -295,8 +312,6 @@ defmodule PDS.Census do
     {:post, "/v1/media/:dataset/search/synonyms", "BarkparkWeb.V1.MediaController", :create_search_synonym, :status_only_receipt},
     {:post, "/v1/media/:dataset/search/synonyms/promote", "BarkparkWeb.V1.MediaController", :promote_search_synonym, :status_only_receipt},
     {:post, "/v1/media/:dataset/upload", "BarkparkWeb.V1.MediaController", :upload, :status_only_receipt},
-    {:post, "/v1/plugins/sheets/:slug/ops", "?", :apply_ops, :action_not_in_corpus},
-    {:post, "/v1/plugins/sheets/import", "?", :create, :action_not_in_corpus},
     {:post, "/v1/plugins/tickets/keys", "BarkparkWeb.TicketKeysController", :create, :status_only_receipt},
     {:post, "/v1/plugins/tickets/keys/:id/pause", "BarkparkWeb.TicketKeysController", :pause, :status_only_receipt},
     {:post, "/v1/plugins/tickets/keys/:id/rotate", "BarkparkWeb.TicketKeysController", :rotate, :status_only_receipt},
@@ -3003,12 +3018,102 @@ defmodule PDS.Census do
     all_defs
     |> Enum.filter(fn {_mod, name, _arity, _body} -> name == :register_routes end)
     |> Enum.flat_map(fn {_mod, _n, _a, body} ->
+      body = inline_alias_bindings(body)
+
       case route_specs(body) do
         [] -> follow_route_delegation(body, all_defs)
         specs -> specs
       end
     end)
     |> Enum.uniq()
+  end
+
+  # A ROUTE MODULE BOUND TO A LOCAL VARIABLE IS STILL A ROUTE MODULE (PDS wave 40).
+  # `Barkpark.Plugins.Sheets.register_routes/1` opens with
+  # `import_controller = Barkpark.Plugins.Sheets.Web.ImportController` and then spells the
+  # route tuples with the VARIABLE. alias_string/2 sees `{:import_controller, _, nil}`,
+  # which is neither an `__aliases__` node nor an atom, and returns `"?"` — so two live
+  # write routes landed in `action_not_in_corpus` under prose ("resolves to no `def` under
+  # api/lib") that is checkably untrue: the defs are right there.
+  #
+  # NARROWED TO TOP-LEVEL BINDINGS, ON PURPOSE, AND THE NARROWING IS THE POINT. A
+  # scope-blind substitution ("collect every `var = SomeAlias` anywhere in the body") is
+  # INDISTINGUISHABLE from this one on today's corpus and WRONG: a name rebound inside a
+  # `fn`, a `case` clause or a comprehension does not hold the outer alias at the tuple's
+  # line, and substituting anyway would print a module the reader cannot find. So:
+  #
+  #   1. only the do-block's OWN statements bind (a nested `=` binds nothing here), and
+  #   2. a source-order fold RETIRES a name the moment anything rebinds it — at top level
+  #      to a non-alias, or ANYWHERE deeper at all.
+  #
+  # A name this pass retires is not guessed: the tuple keeps `"?"` and the row DECLINES.
+  # Declining is a smaller lie than inlining a binding that may not hold, and the selftest
+  # plants exactly that nested rebind to prove the two behaviours differ.
+  defp inline_alias_bindings(body) do
+    stmts = block_stmts(body)
+
+    top =
+      Enum.reduce(stmts, %{}, fn
+        {:=, _, [{name, _, ctx}, rhs]}, acc when is_atom(name) and is_atom(ctx) ->
+          case rhs do
+            {:__aliases__, _, segs} -> Map.put(acc, name, segs)
+            _ -> Map.delete(acc, name)
+          end
+
+        _, acc ->
+          acc
+      end)
+
+    # RETIRE ON ANY REBIND, WHEREVER IT LIVES. bind_counts/1 counts every `=` whose left
+    # side is this bare name; a top-level alias binding contributes exactly 1, so anything
+    # above 1 means the name is rebound somewhere this pass does not model, and the name
+    # leaves the substitution set rather than being applied on faith.
+    counts = bind_counts(body)
+    safe = for {name, segs} <- top, Map.get(counts, name, 0) == 1, into: %{}, do: {name, segs}
+
+    if safe == %{} do
+      body
+    else
+      Macro.prewalk(body, fn
+        {name, meta, ctx} = n when is_atom(name) and is_atom(ctx) ->
+          case Map.fetch(safe, name) do
+            {:ok, segs} -> {:__aliases__, meta, segs}
+            :error -> n
+          end
+
+        n ->
+          n
+      end)
+    end
+  end
+
+  # plugin_defs/1 stores a def's SECOND argument, which is the `[do: block]` keyword list
+  # Elixir quotes a do-block into — not the block. Unwrapping it here is what makes
+  # "top level" mean the statements the reader sees at the head of `register_routes/1`.
+  defp block_stmts([{key, block}]) when is_list(block) or is_tuple(block) do
+    if do_key?(key), do: block_stmts(block), else: []
+  end
+
+  defp block_stmts({:__block__, _, stmts}) when is_list(stmts), do: stmts
+  defp block_stmts(nil), do: []
+  defp block_stmts(other) when is_list(other), do: []
+  defp block_stmts(other), do: [other]
+
+  defp do_key?(:do), do: true
+  defp do_key?({:__block__, _, [:do]}), do: true
+  defp do_key?(_), do: false
+
+  defp bind_counts(body) do
+    {_, acc} =
+      Macro.prewalk(body, %{}, fn
+        {:=, _, [{name, _, ctx}, _rhs]} = n, acc when is_atom(name) and is_atom(ctx) ->
+          {n, Map.update(acc, name, 1, &(&1 + 1))}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    acc
   end
 
   defp plugin_defs(%{path: path, src: src}) do
@@ -3206,6 +3311,344 @@ defmodule PDS.Census do
     Map.get(index.by_key, {segs, action}, [])
   end
 
+  # ------------------------------------- derivation partition (PDS wave 40)
+  #
+  # THE CLASS PROSE MADE TWO CLAIMS AND ONLY ONE OF THEM WAS TRUE. Wave 38 wrote
+  # `status_only_receipt` as (A) "the routed action reaches no `ok: true` receipt this
+  # lens can see" AND (B) "it claims success by STATUS alone". Clause A is a property of
+  # THIS LENS and holds for every member by construction. Clause B is a claim about the
+  # CODE, and this pass measures it: most of these rows DO render the stored row, they
+  # simply do not spell the key the lens greps for. A gate whose largest exclusion class
+  # is described by a sentence false of two thirds of its members is the same vacuity
+  # this epic has now chased through the lens (w37), the key (w38) and the bucket (w39),
+  # wearing a fourth costume — so clause B is retired and replaced by the partition here.
+  #
+  # WHAT IT MAY AND MAY NOT TOUCH. This classifier RE-LABELS EXCLUDED SUB-CLASSES AND
+  # NOTHING ELSE. It never feeds receipt_functions/1 or roster_functions/1, and
+  # dispose_routed/4's cond is untouched, so a WRONG classifier here costs a MISLEADING
+  # LABEL and cannot cost a FALSE GREEN on coverage — the blast radius is capped by
+  # construction rather than by care.
+  #
+  # THE CLASS SET IS FIVE DECIDED CLASSES PLUS A RESIDUAL, NEVER A BINARY. A
+  # store_derived/request_echo split mis-accuses three real families this corpus carries:
+  # a receipt that renders a FRESH STORE READ after discarding the write's own return
+  # (CycleFleetController.{open,seal,promote,quarantine,rollback} render a `projection`;
+  # V1.MediaProcessingController.callback renders a `get_file` result) is neither honest
+  # store-derivation nor an echo; a receipt whose body is a LITERAL describes the store by
+  # value ZERO and the request by ZERO; and a redirect/flash whose text is a CONSTANT
+  # gated on an `{:ok, _}` whose payload is thrown away is a third shape again.
+  @derivation_class :status_only_receipt
+
+  # PRECEDENCE FOR A MULTI-CLAUSE ACTION: the most informative verdict any clause earns
+  # is the row's verdict. An action with one clause that renders the stored row and
+  # another that renders a literal DOES describe the store somewhere, and calling the
+  # whole row literal_only would understate it.
+  @derivation_order [
+    :store_derived,
+    :reread_receipt,
+    :request_echo,
+    :control_flow_gated_literal,
+    :literal_only,
+    :residual_helper_assembled,
+    :residual_onehop_unattributed,
+    :residual_undecided
+  ]
+
+  @derivation_residual [
+    :residual_helper_assembled,
+    :residual_onehop_unattributed,
+    :residual_undecided
+  ]
+
+  @derivation_prose %{
+    store_derived:
+      "the receipt renders a value bound out of an `{:ok, _}` payload whose producing call is NOT read-shaped — the response describes the row the write returned. Clause B of the wave-38 prose is FALSE of these rows.",
+    reread_receipt:
+      "the receipt renders an `{:ok, _}` payload from a READ-shaped call (get_/fetch_/list_/projection/...). The write's own return was discarded and the store was asked again; honest about the store, but one round trip away from the write it claims.",
+    request_echo:
+      "the receipt renders values bound in the action's own HEAD — request params. It describes what the CALLER SENT, not what the store holds: the species #9114 found six of on DELETE verbs, where a lying receipt costs a person the most.",
+    control_flow_gated_literal:
+      "the body is a CONSTANT (a redirect or a flash whose text carries no bound value) reached only inside an `{:ok, _}` branch whose payload is discarded. Describing the store by value: ZERO. Describing the request: ZERO. Neither derived nor an echo — success is asserted by CONTROL FLOW.",
+    literal_only:
+      "the response body carries no bound value at all and no discarded `{:ok, _}` gate this pass could attribute — a 204/empty-body or a fixed literal. This IS wave 38's clause B, and this class is how many rows actually deserved it.",
+    residual_helper_assembled:
+      "RESIDUAL, NOT DECIDED: the action's own body contains no response call — the receipt is assembled inside a helper. Bindings join across the hop and this pass declines to follow them rather than guess.",
+    residual_onehop_unattributed:
+      "RESIDUAL, NOT DECIDED: a response call exists and renders bound values, but none of them trace to an `{:ok, _}` payload OR to the action's head — they are bound by an intermediate this pass does not attribute.",
+    residual_undecided:
+      "RESIDUAL, NOT DECIDED: no response call and no local helper call in the action's own body (a defdelegate, a macro-generated action, or a clause whose whole body this pass cannot read)."
+  }
+
+  # The response emitters this pass reads. NOT a receipt-detection relation — those live
+  # in collect_sites/2 and are untouched — just the places a controller hands bytes back.
+  @derivation_render_fns [:json, :text, :html, :send_resp, :redirect, :render, :put_flash]
+
+  # READ-SHAPED PRODUCER NAMES. THIS IS A STRING TEST AND IT IS PRINTED AS ONE: every row
+  # below prints the producing call NAME it was classified on, so a reader can check the
+  # verdict against the source instead of trusting a list they cannot see.
+  @derivation_reread_stems ~w(get fetch load list read find lookup show query projection
+                              current preview)
+
+  defp derivation_partition(disp, index) do
+    for {{_m, _p, mod, action} = key, :excluded, class} <- disp.rows,
+        class == @derivation_class,
+        do: Map.put(derive_row(mod, action, index), :key, key)
+  end
+
+  defp derive_row(mod, action, index) do
+    case action_defs(index, mod, action) do
+      [] ->
+        %{
+          class: :residual_undecided,
+          producer: "-",
+          clauses: 0,
+          why: "the routed action resolves to no def this pass can open"
+        }
+
+      defs ->
+        defs
+        |> Enum.map(&derive_def/1)
+        |> Enum.min_by(&derivation_rank(&1.class))
+        |> Map.put(:clauses, length(defs))
+    end
+  end
+
+  defp derivation_rank(class), do: Enum.find_index(@derivation_order, &(&1 == class)) || 99
+
+  defp derive_def(%{body: nil}),
+    do: %{class: :residual_undecided, producer: "-", why: "defdelegate — no body to read"}
+
+  defp derive_def(d) do
+    body = expand_pipes(d.body)
+    {oks, discarded} = ok_walk(body)
+    head = dvars(d.head)
+
+    # READ THE SUCCESS BRANCH, NOT THE WHOLE BODY, WHENEVER THERE IS ONE. A controller's
+    # error branches render CHANGESETS and re-render FORMS out of the request, so unioning
+    # them with the success payload made every gated flash read as a request echo — a
+    # measured mis-verdict, not a hypothetical one: SessionController.reset_submit landed
+    # in request_echo on the `token: token` its FAILURE branch re-renders. When no clause
+    # pattern is `{:ok, _}` (the straight-line `{:ok, row} = ...` style) the whole body is
+    # the success path and is read as such.
+    scopes = success_scopes(body)
+    scoped = Enum.flat_map(scopes, &response_emissions/1)
+    emits = if scopes == [] or scoped == [], do: response_emissions(body), else: scoped
+
+    payload_vars =
+      Enum.reduce(emits, MapSet.new(), fn {_kind, expr}, acc ->
+        MapSet.union(acc, dvars(expr))
+      end)
+
+    used = for v <- payload_vars, Map.has_key?(oks, v), do: Map.fetch!(oks, v)
+    gate = names(discarded)
+
+    cond do
+      emits == [] ->
+        if local_helper_call?(d),
+          do: %{class: :residual_helper_assembled, producer: "-", why: "no response call in this clause"},
+          else: %{class: :residual_undecided, producer: "-", why: "no response call, no local helper call"}
+
+      used != [] ->
+        producers = names(used)
+
+        if Enum.all?(producers, &derivation_reread_name?/1),
+          do: %{class: :reread_receipt, producer: Enum.join(producers, "+"), why: "read-shaped producer"},
+          else: %{class: :store_derived, producer: Enum.join(producers, "+"), why: "write-shaped producer"}
+
+      MapSet.size(payload_vars) == 0 ->
+        gated? = Enum.any?(emits, fn {k, _} -> k in [:redirect, :put_flash] end) and gate != []
+
+        if gated?,
+          do: %{class: :control_flow_gated_literal, producer: Enum.join(gate, "+"), why: "constant behind a discarded {:ok, _}"},
+          else: %{class: :literal_only, producer: gate_or_dash(gate), why: "no bound value in the body"}
+
+      not MapSet.disjoint?(payload_vars, head) ->
+        %{class: :request_echo, producer: gate_or_dash(gate), why: "renders a value bound in the action's HEAD"}
+
+      true ->
+        %{class: :residual_onehop_unattributed, producer: gate_or_dash(gate), why: "bound values trace to neither an {:ok, _} payload nor the head"}
+    end
+  end
+
+  defp names(atoms), do: atoms |> Enum.map(&to_string/1) |> Enum.uniq() |> Enum.sort()
+  defp gate_or_dash([]), do: "-"
+  defp gate_or_dash(gate), do: "(gate " <> Enum.join(gate, "+") <> ")"
+
+  defp derivation_reread_name?(s) do
+    Enum.any?(@derivation_reread_stems, &(s == &1 or String.starts_with?(s, &1 <> "_")))
+  end
+
+  defp local_helper_call?(d) do
+    Enum.any?(raw_calls(d), fn
+      {:local, f, _ar} -> f not in @derivation_render_fns
+      _ -> false
+    end)
+  end
+
+  # -- the two AST probes the partition rests on ------------------------------
+  #
+  # ok_walk/1 harvests every var bound inside an `{:ok, _}` PATTERN — from `=`, from `<-`
+  # (so a `with` chain is read) and from `case` clause heads WITH THE SCRUTINEE
+  # ATTRIBUTED, which is the whole reason reread_receipt is separable from store_derived.
+  # A pattern whose payload binds NOTHING (`{:ok, _}`, `{:ok, _wave}`) is recorded on the
+  # other side of the pair: it is a success GATE whose value was thrown away.
+  defp ok_walk(body) do
+    {_, {binds, disc}} =
+      Macro.prewalk(body, {%{}, []}, fn
+        {op, _, [lhs, rhs]} = n, acc when op in [:=, :<-] ->
+          {n, note_ok(lhs, producer_name(rhs), acc)}
+
+        {:case, _, [scrut, kw]} = n, acc when is_list(kw) ->
+          {n, Enum.reduce(case_ok_patterns(kw), acc, &note_ok(&1, producer_name(scrut), &2))}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    {binds, Enum.reverse(disc)}
+  end
+
+  defp note_ok(lhs, producer, {binds, disc} = acc) do
+    case ok_payload(lhs) do
+      :no ->
+        acc
+
+      {:payload, inner} ->
+        vs = dvars(inner)
+
+        if MapSet.size(vs) == 0 do
+          {binds, [producer | disc]}
+        else
+          {Enum.reduce(vs, binds, &Map.put_new(&2, &1, producer)), disc}
+        end
+    end
+  end
+
+  defp ok_payload({:when, _, [pat | _]}), do: ok_payload(pat)
+
+  # THE LITERAL ENCODER WRAPS TWO-TUPLES TOO, AND MISSING THAT COSTS THE WHOLE PASS.
+  # parse_file/1 parses with `literal_encoder:`, which encodes a 2-tuple as
+  # `{:__block__, meta, [{a, b}]}` — not as the bare tuple. A first cut of this pass
+  # matched only the bare form, found ZERO `{:ok, _}` bindings in the entire corpus, and
+  # printed a partition with store_derived 0 and residual 101 that looked plausible and
+  # was measuring nothing. Both shapes are read here.
+  defp ok_payload({:__block__, _, [inner]}) when is_tuple(inner), do: ok_payload(inner)
+  defp ok_payload({a, b}), do: if(ok_atom?(a), do: {:payload, b}, else: :no)
+  defp ok_payload(_), do: :no
+
+  defp ok_atom?(:ok), do: true
+  defp ok_atom?({:__block__, _, [:ok]}), do: true
+  defp ok_atom?(_), do: false
+
+  # THE `{:ok, _}` BRANCHES, AS BODIES. A `case` clause whose head is an ok-pattern, and a
+  # `with` whose chain carries one, both name a region of code reached ONLY on success.
+  defp success_scopes(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {:case, _, [_scrut, kw]} = n, acc when is_list(kw) ->
+          {n, ok_clause_bodies(kw) ++ acc}
+
+        {:with, _, args} = n, acc when is_list(args) ->
+          gated? =
+            Enum.any?(args, fn
+              {:<-, _, [lhs, _rhs]} -> ok_payload(lhs) != :no
+              _ -> false
+            end)
+
+          {n, if(gated?, do: with_do_bodies(args) ++ acc, else: acc)}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    acc
+  end
+
+  defp ok_clause_bodies(kw) do
+    for {k, clauses} <- kw,
+        do_key?(k),
+        is_list(clauses),
+        {:->, _, [[pat], cbody]} <- clauses,
+        ok_payload(pat) != :no,
+        do: cbody
+  end
+
+  defp with_do_bodies(args) do
+    case List.last(args) do
+      kw when is_list(kw) -> for {k, b} <- kw, do_key?(k), do: b
+      _ -> []
+    end
+  end
+
+  defp case_ok_patterns(kw) do
+    for {k, clauses} <- kw,
+        do_key?(k),
+        is_list(clauses),
+        {:->, _, [[pat], _cbody]} <- clauses,
+        do: pat
+  end
+
+  defp producer_name({:|>, _, [_l, r]}), do: producer_name(r)
+  defp producer_name({:__block__, _, [inner]}), do: producer_name(inner)
+  defp producer_name({{:., _, [_m, f]}, _, _}) when is_atom(f), do: f
+  defp producer_name({f, _, args}) when is_atom(f) and is_list(args), do: f
+  defp producer_name(_), do: :__opaque__
+
+  # THE RESPONSE BODY, NOT THE RESPONSE. `redirect(conn, to: url)` contributes NO payload
+  # on purpose: the bytes a person reads back are the flash and the destination page, and
+  # neither describes the row that moved. Recording the `to:` expression would let a
+  # redirect to `~p"/docs/#{id}"` read as store-derived on an id the CALLER supplied.
+  defp response_emissions(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {f, _, [_c, payload]} = n, acc when f in [:json, :text, :html] ->
+          {n, [{f, payload} | acc]}
+
+        {:send_resp, _, [_c, _s, payload]} = n, acc ->
+          {n, [{:send_resp, payload} | acc]}
+
+        {:redirect, _, [_c, _opts]} = n, acc ->
+          {n, [{:redirect, nil} | acc]}
+
+        {:put_flash, _, [_c, _kind, msg]} = n, acc ->
+          {n, [{:put_flash, msg} | acc]}
+
+        {:render, _, [_c, _t, assigns]} = n, acc ->
+          {n, [{:render, assigns} | acc]}
+
+        {:render, _, [_c, _t]} = n, acc ->
+          {n, [{:render, nil} | acc]}
+
+        {{:., _, [_m, f]}, _, [_c, payload]} = n, acc when f in [:json, :text, :html] ->
+          {n, [{f, payload} | acc]}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    Enum.reverse(acc)
+  end
+
+  # A NAME SET, AND THE BLIND SHAPE THAT COMES WITH IT (printed below): shadowing is not
+  # modelled. `_`-prefixed names and `conn` are excluded — `conn` threads through every
+  # response call and would make every row look bound.
+  defp dvars(node) do
+    {_, acc} =
+      Macro.prewalk(node, MapSet.new(), fn
+        {name, _, ctx} = n, acc when is_atom(name) and is_atom(ctx) ->
+          s = Atom.to_string(name)
+
+          if String.starts_with?(s, "_") or name == :conn,
+            do: {n, acc},
+            else: {n, MapSet.put(acc, name)}
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    acc
+  end
+
   # -- report -----------------------------------------------------------------
 
   defp report_routed_population(:no_router, _classified, _parsed, _index) do
@@ -3247,6 +3690,9 @@ defmodule PDS.Census do
     p("    sum       #{pad(disp.judged + disp.rostered + disp.excluded + length(disp.undisposed))}  == population #{length(d.population)}")
 
     p("")
+    deriv = derivation_partition(disp, index)
+    report_derivation_partition(deriv, Map.get(disp.classes, @derivation_class, 0))
+
     p("  EXCLUDED CLASS, PRINTED RATHER THAN ASSUMED: LiveView")
     p("    #{length(lives)} route entr(y/ies) over #{live_mods} distinct module(s). Every one is a MOUNT, not a")
     p("    {Controller, action} pair — the writes live in handle_event/3, which carries no")
@@ -3254,7 +3700,70 @@ defmodule PDS.Census do
     p("    inherits the exact vacuity it replaces, so the count is printed on every run.")
     p("")
 
-    Map.put(d, :disposition, disp)
+    d |> Map.put(:disposition, disp) |> Map.put(:derivation, deriv)
+  end
+
+  # THE PARTITION, PRINTED IN FULL. Every row prints the producing call NAME it was
+  # classified on — a write-verb list that decides a verdict in silence is a string test
+  # nobody can audit, so this one is spelled out row by row and can be checked against
+  # the source by hand.
+  defp report_derivation_partition(rows, class_total) do
+    freqs = Enum.frequencies_by(rows, & &1.class)
+    residual = Enum.reduce(@derivation_residual, 0, &(&2 + Map.get(freqs, &1, 0)))
+    pairs = rows |> Enum.map(fn %{key: {_, _, mod, a}} -> {mod, a} end) |> Enum.uniq() |> length()
+
+    p("  DERIVATION PARTITION of the #{class_total} #{@derivation_class} row(s) — what the")
+    p("  receipt ACTUALLY renders, DERIVED this run over #{pairs} distinct {module, action} pair(s)")
+    p("  ------------------------------------------------------------------------")
+    p("  Clause A of the class prose (\"reaches no `ok: true` receipt this lens can see\")")
+    p("  holds for every row by construction. Clause B (\"claims success by STATUS alone\")")
+    p("  is a claim about the CODE, and this is the measurement of it:")
+    p("")
+
+    Enum.each(@derivation_order, fn class ->
+      n = Map.get(freqs, class, 0)
+      p("    #{String.pad_trailing(to_string(class), 28)} #{pad(n)}")
+      wrap(Map.fetch!(@derivation_prose, class), "                                 ")
+    end)
+
+    p("")
+    p("    sum#{String.duplicate(" ", 26)} #{pad(Enum.sum(Map.values(freqs)))}  == #{@derivation_class} #{class_total}")
+    p("    RESIDUAL (never folded into a decided class) #{pad(residual)}")
+    p("")
+
+    Enum.each(@derivation_order, fn class ->
+      case Enum.filter(rows, &(&1.class == class)) do
+        [] ->
+          :ok
+
+        members ->
+          p("    #{class} — all #{length(members)}, each with the producing call it was classified on:")
+
+          Enum.each(Enum.sort_by(members, fn %{key: {m, path, mod, a}} -> {mod, a, m, path} end), fn r ->
+            {m, path, mod, action} = r.key
+            p("      #{String.pad_trailing(to_string(m), 6)} #{path}")
+            p("             #{mod}.#{action}  ·  via #{r.producer}  ·  #{r.clauses} clause(s)  ·  #{r.why}")
+          end)
+
+          p("")
+      end
+    end)
+
+    p("  WHAT THIS PARTITION CANNOT SEE (its own blind shapes, printed with it)")
+    p("    · SHADOWING IS NOT MODELLED. dvars/1 is a NAME SET, so a name rebound between")
+    p("      its `{:ok, _}` binding and the render still reads as store-derived here.")
+    p("    · THE DENOMINATOR IS AN UPPER BOUND. The JUDGED relation upstream is ONE HOP")
+    p("      (dispose_routed/4 says so): a receipt two helpers deep reads as EXCLUDED and")
+    p("      lands in this partition rather than in JUDGED, so some rows below are not")
+    p("      status-only at all — they are judged receipts the relation could not reach.")
+    p("    · reread_receipt IS DECIDED BY THE PRODUCING CALL NAME, which is a string test.")
+    p("      Every row above prints that name, so the verdict is auditable prose rather")
+    p("      than a silent filter — check any row against its source and this pass loses.")
+    p("    · THE WHOLE DEF BODY IS READ, not a 2xx-only slice: an error-branch payload is")
+    p("      unioned with the success payload, so a row can be classified on either.")
+    p("    · A REDIRECT'S `to:` IS NOT A PAYLOAD. Recording it would let a redirect built")
+    p("      from a caller-supplied id read as store-derived.")
+    p("")
   end
 
   # WHAT THE ROUTE LENS ITSELF CANNOT SEE. The blind shapes are NAMED with their line, and
@@ -3338,7 +3847,37 @@ defmodule PDS.Census do
     [
       {"ROUTED-POPULATION-COMPLETE", ok?, complete_why},
       {"LENS-CAN-MISS", resolved != [], lens_why}
-    ]
+    ] ++ derivation_checks(d)
+  end
+
+  # A RELATION, NEVER A THRESHOLD (PDS wave 40). This arm asserts that the partition
+  # DISPOSES ITS OWN CLASS EXACTLY ONCE — the sum of the eight classes equals the
+  # `status_only_receipt` count the same run derived. Both sides move together on any
+  # honest lens correction, so it cannot red on churn; it reds only when a row falls out
+  # of the taxonomy or is counted twice, which is the failure a partition can actually
+  # have. It pins NO class count: pinning `store_derived == 60` would red the build every
+  # time a controller was repaired, which is the defect this epic files, not the guard.
+  defp derivation_checks(d) do
+    rows = Map.get(d, :derivation, [])
+    total = Map.get(d.disposition.classes, @derivation_class, 0)
+    freqs = Enum.frequencies_by(rows, & &1.class)
+    sum = Enum.sum(Map.values(freqs))
+    stray = freqs |> Map.keys() |> Enum.reject(&(&1 in @derivation_order))
+    residual = Enum.reduce(@derivation_residual, 0, &(&2 + Map.get(freqs, &1, 0)))
+
+    why =
+      if sum == total and stray == [] do
+        "#{total} #{@derivation_class} row(s) disposed EXACTLY ONCE across #{map_size(freqs)} class(es) — " <>
+          (freqs
+           |> Enum.sort_by(fn {c, _} -> derivation_rank(c) end)
+           |> Enum.map_join(", ", fn {c, n} -> "#{c} #{n}" end)) <>
+          " · RESIDUAL #{residual} printed with its count, never folded into a decided class"
+      else
+        "the partition sums to #{sum} over a #{@derivation_class} class of #{total}" <>
+          if stray == [], do: "", else: " · class(es) outside the declared taxonomy: #{inspect(stray)}"
+      end
+
+    [{"DERIVATION-PARTITION-TOTAL", sum == total and stray == [], why}]
   end
 
   # ---------------------------------------------------------------- blind spots
@@ -3810,6 +4349,55 @@ defmodule PDS.Census do
       expect: ["PASS  LENS-CAN-MISS", "live_dashboard/2", "CANNOT expand"],
       proves: "a route-generating macro the lens cannot expand is NAMED with its line, so the routes it emits are stated absent rather than silently missing"
     },
+    # THE DERIVATION PARTITION (PDS wave 40), PROVEN BY A CORPUS PAIR RATHER THAN A DIFF.
+    #
+    # The mutation axis here is the FIXTURE, not this file: `:full` carries the six
+    # pre-#9114 receipt bodies and `:repaired` carries the same six actions rendering the
+    # stored row. That is deliberate and it is the ONE shape where a fixture mutation is
+    # not vacuous — the two corpora are written by write_corpus!/3 BEFORE the case runs
+    # and are the very input under test, where a heredoc edit reached by no mutant would
+    # be a function the child never calls (measured, and recorded above the routed cases).
+    #
+    # AND IT FIRES BOTH WAYS. Presence alone would pass for a classifier that shouted
+    # "echo" at every delete verb it met; `refute:` is what makes the repaired corpus a
+    # real half of the proof rather than a second copy of the first.
+    %{
+      name: "PARTITION-NAMES-REQUEST-ECHO",
+      corpus: :full,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "request_echo — all 6",
+        "EchoController.delete_schema",
+        "EchoController.delete_document",
+        "EchoController.delete_asset",
+        "EchoController.revoke_share_token",
+        "EchoController.revoke_share_link",
+        "EchoController.delete_webhook"
+      ],
+      refute: ["store_derived — all 6"],
+      proves: "the classifier NAMES all six of the receipt bodies #9114 found answering with the request instead of the store — the species that costs a person most on a delete or revoke verb"
+    },
+    %{
+      name: "PARTITION-ECHO-REPAIRED-CLEAN",
+      corpus: :repaired,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: ["store_derived — all 6", "EchoController.delete_schema", "via delete"],
+      refute: ["request_echo — all 6", "request_echo — all 5", "request_echo — all 1"],
+      proves: "the SAME six actions, repaired to render the stored row, are named request_echo ZERO times — so the verdict is a derivation over the receipt's value expression, not a string test on the verb"
+    },
+    %{
+      name: "PARTITION-TOTAL-ARMED",
+      corpus: :full,
+      argv: [],
+      mut: {"rows = Map.get(d, :deriv" <> "ation, [])", "rows = tl(Map.get(d, :derivation, []))"},
+      exit: 1,
+      expect: ["FAIL  DERIVATION-PARTITION-TOTAL", "the partition sums to"],
+      proves: "a row that falls out of the partition reds BY NAME instead of shrinking a denominator — the arm asserts a RELATION (sum == the class it partitions), never a class count, so an honest reclassification can never red it"
+    },
     # THE FRESHNESS ARM (PDS wave 39), AND WHY ITS CORPUS IS THE REPO ITSELF.
     #
     # ROSTER-VERDICT-FRESH is scoped to the real corpus by register_scope/1 — the roster
@@ -3902,10 +4490,19 @@ defmodule PDS.Census do
     # it — the mutants are written into `root` and merely RUN with cwd here. It exists
     # because ROSTER-VERDICT-FRESH is scoped to the corpus its eight rows name, so the
     # synthetic tree scopes it OUT and a mutant there would prove nothing (PDS-D541).
-    dirs = %{full: Path.join(root, "full"), tiny: Path.join(root, "tiny"), repo: File.cwd!()}
+    # THE FOURTH CORPUS IS THE THIRD ONE REPAIRED. `:full` carries the six pre-#9114 echo
+    # receipts, `:repaired` carries the same six actions rendering the stored row: one
+    # difference, six rows, and the classifier has to move all six or the pair fails.
+    dirs = %{
+      full: Path.join(root, "full"),
+      tiny: Path.join(root, "tiny"),
+      repaired: Path.join(root, "repaired"),
+      repo: File.cwd!()
+    }
 
-    write_corpus!(dirs.full, @selftest_filler)
+    write_corpus!(dirs.full, @selftest_filler, :pre_9114)
     write_corpus!(dirs.tiny, 0)
+    write_corpus!(dirs.repaired, @selftest_filler, :repaired)
 
     results = Enum.map(@selftest_cases, &run_selftest_case(&1, src, dirs, root))
     File.rm_rf!(root)
@@ -3985,8 +4582,14 @@ defmodule PDS.Census do
     end
   end
 
+  # `refute:` EXISTS BECAUSE A PRESENCE-ONLY ASSERTION CANNOT SEE AN OVER-NAMING (PDS
+  # wave 40). A classifier that names SIX request echoes on a corpus carrying six is only
+  # half-proven: the other half is that it names NONE on the repaired corpus, and no list
+  # of expected substrings can state that. Absent from a case, it is [] and changes
+  # nothing about how every case before this wave is judged.
   defp judge_selftest_case(base, c, out, code, _ctx) do
     missing = Enum.reject(c.expect, &String.contains?(out, &1))
+    present = Enum.filter(Map.get(c, :refute, []), &String.contains?(out, &1))
 
     cond do
       code != c.exit ->
@@ -3996,6 +4599,12 @@ defmodule PDS.Census do
         Map.merge(base, %{
           ok?: false,
           why: "exit #{code} as required but never printed #{inspect(missing)}"
+        })
+
+      present != [] ->
+        Map.merge(base, %{
+          ok?: false,
+          why: "exit #{code} as required but printed what it must NOT: #{inspect(present)}"
         })
 
       true ->
@@ -4083,7 +4692,9 @@ defmodule PDS.Census do
   # phantom, one defdelegate facade that reaches a write verb, and enough filler to clear
   # the corpus floor. The receipt text is assembled from fragments so that no literal
   # success pair appears in THIS file's own source.
-  defp write_corpus!(dir, filler) do
+  defp write_corpus!(dir, filler), do: write_corpus!(dir, filler, :pre_9114)
+
+  defp write_corpus!(dir, filler, echo) do
     w = fn rel, body ->
       path = Path.join(dir, rel)
       File.mkdir_p!(Path.dirname(path))
@@ -4143,9 +4754,34 @@ defmodule PDS.Census do
         plugin_routes(scope: :admin)
         post("/selftest-fixture-close", Barkpark.Filler.M1, :noop)
         post("/selftest-departure-anchor", Barkpark.Filler.M1, :noop)
+        delete("/echo/schema/:name", Barkpark.Filler.EchoController, :delete_schema)
+        delete("/echo/document/:id", Barkpark.Filler.EchoController, :delete_document)
+        delete("/echo/asset/:id", Barkpark.Filler.EchoController, :delete_asset)
+        delete("/echo/share-token/:token_id", Barkpark.Filler.EchoController, :revoke_share_token)
+        delete("/echo/share-link/:id", Barkpark.Filler.EchoController, :revoke_share_link)
+        delete("/echo/webhook/:id", Barkpark.Filler.EchoController, :delete_webhook)
       end
     end
     """)
+
+    # THE SIX PRE-#9114 RECEIPT BODIES, AS A FIXTURE, AND WHY THEY ARE NOT READ FROM GIT.
+    # #9114 found six DELETE/revoke receipts answering with the REQUEST rather than the
+    # STORE. Reading them back with `git show` would be the obvious mutant and is the
+    # wrong one: this census invokes git NOWHERE and is normally run over
+    # `git archive HEAD api/lib scripts`, so a git dependency would need a gate of its
+    # own, and an arm proven only where it is scoped out is proven nowhere. So the six
+    # bodies are CARRIED here verbatim in shape, and the SAME six actions are written a
+    # second time REPAIRED into the `:repaired` corpus. The classifier must name all six
+    # on one and NONE on the other — presence proves it can see the species, `refute:`
+    # proves it is not simply shouting "echo" at every delete verb it meets.
+    w.("api/lib/barkpark/filler/echo_store.ex", """
+    defmodule Barkpark.Filler.EchoStore do
+      def delete(id), do: {:ok, %{id: id, name: id, deleted: true}}
+      def revoke(id), do: {:ok, %{id: id, revoked: true}}
+    end
+    """)
+
+    w.("api/lib/barkpark/filler/echo_controller.ex", echo_controller_source(echo))
 
     w.("api/lib/barkpark/repo.ex", """
     defmodule Barkpark.Repo do
@@ -4161,6 +4797,84 @@ defmodule PDS.Census do
       end
       """)
     end)
+  end
+
+  # THE RECEIPT DESCRIBES THE REQUEST: every emitted value is a name bound in the action's
+  # own HEAD, and the write's `{:ok, _}` payload is thrown away. A person deleting id X is
+  # told "deleted X" whether or not row X was ever there.
+  defp echo_controller_source(:pre_9114) do
+    """
+    defmodule Barkpark.Filler.EchoController do
+      def delete_schema(conn, %{"name" => name}) do
+        {:ok, _} = Barkpark.Filler.EchoStore.delete(name)
+        json(conn, %{deleted: name})
+      end
+
+      def delete_document(conn, %{"id" => doc_id}) do
+        {:ok, _} = Barkpark.Filler.EchoStore.delete(doc_id)
+        json(conn, %{deleted: doc_id})
+      end
+
+      def delete_asset(conn, %{"id" => id}) do
+        {:ok, _} = Barkpark.Filler.EchoStore.delete(id)
+        json(conn, %{deleted: id})
+      end
+
+      def revoke_share_token(conn, %{"token_id" => token_id}) do
+        {:ok, _} = Barkpark.Filler.EchoStore.revoke(token_id)
+        json(conn, %{revoked: true, token_id: token_id})
+      end
+
+      def revoke_share_link(conn, %{"id" => id}) do
+        {:ok, _} = Barkpark.Filler.EchoStore.revoke(id)
+        json(conn, %{revoked: true, id: id})
+      end
+
+      def delete_webhook(conn, %{"id" => id}) do
+        {:ok, _} = Barkpark.Filler.EchoStore.delete(id)
+        json(conn, %{deleted: id})
+      end
+    end
+    """
+  end
+
+  # THE REPAIRED SHAPE #9114 SHIPPED: the same six actions, same six routes, same six
+  # verbs — the receipt now renders the row the write RETURNED. If the classifier reads
+  # `delete` as an echo by name rather than by derivation, this corpus is where it says so.
+  defp echo_controller_source(:repaired) do
+    """
+    defmodule Barkpark.Filler.EchoController do
+      def delete_schema(conn, %{"name" => name}) do
+        {:ok, row} = Barkpark.Filler.EchoStore.delete(name)
+        json(conn, %{deleted: row.name})
+      end
+
+      def delete_document(conn, %{"id" => doc_id}) do
+        {:ok, row} = Barkpark.Filler.EchoStore.delete(doc_id)
+        json(conn, %{deleted: row.id})
+      end
+
+      def delete_asset(conn, %{"id" => id}) do
+        {:ok, row} = Barkpark.Filler.EchoStore.delete(id)
+        json(conn, %{deleted: row.id})
+      end
+
+      def revoke_share_token(conn, %{"token_id" => token_id}) do
+        {:ok, row} = Barkpark.Filler.EchoStore.revoke(token_id)
+        json(conn, %{revoked: row.revoked, token_id: row.id})
+      end
+
+      def revoke_share_link(conn, %{"id" => id}) do
+        {:ok, row} = Barkpark.Filler.EchoStore.revoke(id)
+        json(conn, %{revoked: row.revoked, id: row.id})
+      end
+
+      def delete_webhook(conn, %{"id" => id}) do
+        {:ok, row} = Barkpark.Filler.EchoStore.delete(id)
+        json(conn, %{deleted: row.id})
+      end
+    end
+    """
   end
 
   # ---------------------------------------------------------------- integrity
