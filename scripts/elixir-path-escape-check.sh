@@ -96,6 +96,7 @@ internal/provisioner/catalog/templates/**
 internal/taskboard/**
 js/packages/react/tests/fixtures/**
 scripts/async_env_seam_scan.exs
+scripts/pds-status-only-residue.exs
 web/__tests__/**'
 
 # EXEMPT — escapes that resolve to a real file but are NOT reachable from the
