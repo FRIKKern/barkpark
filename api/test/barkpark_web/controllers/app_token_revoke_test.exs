@@ -96,7 +96,13 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
       # Alive before: the verifier resolves it.
       assert {:ok, _} = Auth.verify_token(raw)
 
-      assert self_revoke(raw) |> json_response(200) == %{"revoked" => true}
+      # pds w40: the receipt now descends from `Auth.revoke_token/1`'s returned
+      # row (`revoked_at`, `id`) instead of a literal `true`; `revoked` is still
+      # truthy, so the wire contract this test guards is unchanged.
+      assert %{"revoked" => true, "revoked_at" => stamp} =
+               self_revoke(raw) |> json_response(200)
+
+      assert is_binary(stamp)
 
       # Fail-closed at the single choke point (WHERE clause, no read-path edit)…
       assert Auth.verify_token(raw) == {:error, :unauthorized}
@@ -132,12 +138,12 @@ defmodule BarkparkWeb.AppTokenRevokeTest do
 
       assert {:ok, _} = Auth.verify_token(raw)
 
-      assert revoke(admin, %{token: raw}) |> json_response(200) == %{"revoked" => true}
+      assert %{"revoked" => true} = revoke(admin, %{token: raw}) |> json_response(200)
       assert Auth.verify_token(raw) == {:error, :unauthorized}
 
       # Idempotent: re-revoking the already-dead token is another 200, not a
       # 404 — a logout retry must never error.
-      assert revoke(admin, %{token: raw}) |> json_response(200) == %{"revoked" => true}
+      assert %{"revoked" => true} = revoke(admin, %{token: raw}) |> json_response(200)
     end
 
     test "a non-admin bearer gets the SAME generic unauthorized as an invalid one (no tier oracle)",
