@@ -207,6 +207,7 @@ const DEFECTS = [
   "W21-token-reveal-readable",
   "W20-attention-name-column",
   "W24-theater-failed-hostname-whole",
+  "W26-instance-track-min-content",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -4705,6 +4706,164 @@ async function main() {
         okLine(
           `320/360 are the DRIVEN widths (the tear was measured at 320); 390/430 are SHOULDERS — already whole on ` +
           `origin/main, so they detect only a remedy that breaks the wider phone layout, never the tear itself`,
+        );
+      }
+    }
+    // ── W26-S1: THE INSTANCE WORKSPACE, WHICH DRAGGED 1673px AND NO LEG
+    //    MEASURED ────────────────────────────────────────────────────────────
+    //    THE PERSON: they open their instance workspace to see the sites running
+    //    on it. One site's domain is a real 253-character hostname. The whole
+    //    page slides sideways and the Sites card leaves the screen.
+    //
+    //    THE CAUSE: `.detail-grid--instance` shipped `grid-template-columns:
+    //    1fr 340px`. A bare `1fr` is `minmax(auto, 1fr)` — it floors at the
+    //    content's min-content width, so the main track measured 1948.94px and
+    //    documentElement.scrollWidth read 2573 against a 900px viewport. The
+    //    remedy is `minmax(0, 1fr)`, the same escape the base `.detail-grid`
+    //    already carries; nothing below 900 moves, because the ≤899 block
+    //    single-columns the grid there.
+    //
+    //    WHY THIS IS A PAGE ASSERTION AND NOT A CELL ONE, which is the whole
+    //    reason three earlier filings of this defect measured the wrong thing:
+    //    `overflow-wrap: break-word` already ships on `.site-name`, so the cell
+    //    never spills — it GROWS and shoves the track. Driven on origin/main
+    //    cfc2f2b77, ALL SEVEN `.site-name` cells read scrollWidth == clientWidth
+    //    at every width in both themes (the 253-char row: 1555/1555) while the
+    //    page was 1673px off-screen. A `sw > cw` leg on `.site-name` is GREEN BY
+    //    CONSTRUCTION on the defective tree — the wave's fifth standing clause,
+    //    live. This leg therefore asserts documentElement and REPORTS the cells.
+    //
+    //    THE TWO-EMITTER HAZARD, confirmed to the emitter and carried here
+    //    because a ledger keying `.site-name` to one cap misclassifies the other:
+    //    the COMPACT `siteRow` (the builder this screen uses) binds
+    //    `domains[0]`, capped at 253 by a `validate_change` in
+    //    registry/site.ex that a LENGTH CENSUS CANNOT SEE; `globalSiteRow` binds
+    //    `s.name`, capped at 255 by a `validate_length` a census reads straight
+    //    off. It is the census-invisible emitter that carries the live defect.
+    //
+    //    1280 APPEARS IN NO INSTRUMENT IN THIS REPO TODAY — this leg is the
+    //    first to drive it, and it is not decoration: the defect persists above
+    //    every band any other leg sweeps (2577/1280), so a sweep that stops at
+    //    1024 certifies a desktop that is still dragging.
+    //
+    //    THE FIXTURE EXISTED AND NOTHING MEASURED IT: `sites-on-instance` drives
+    //    the same rows — including the 253-char cruel domain — through the
+    //    compact builder at the instance route, and is an explicit
+    //    SCENARIO_RESIDUE entry in breakpoint-sweep.mjs. Only the instrument was
+    //    missing.
+    //
+    //    METHOD, both halves paid for by a lost verifier run each: (1) the lever
+    //    is NEVER injected as a <style> block — source order outranks the ≤899
+    //    rule and manufactures a catastrophic false negative (two columns forced
+    //    at 320, `.site-name` clientWidth 0). It is edited in app.css in place.
+    //    (2) The scenario's deepLink is NOT applied by the harness (GR125d), so
+    //    the hash is appended here — DERIVED from the scenario, never
+    //    transcribed, because a rotted uuid renders the overview screen and
+    //    prints a plausible table about the wrong page.
+    if (requested.includes("W26-instance-track-min-content")) {
+      const D = "W26-instance-track-min-content";
+      // BLOCK-SCOPED (precedent: `const D`, FAIL_WIDTHS above). 900/1000/1280
+      // are the DRIVEN widths — every one measured broken on origin/main.
+      // 320/390/720 are NEGATIVE CONTROLS: the ≤899 block already owns them and
+      // they were byte-identical across the fix, so they detect only a remedy
+      // that re-shreds the phone layout.
+      const TRACK_WIDTHS = [320, 390, 720, 900, 1000, 1280];
+      const { SCENARIOS } = await import("./scenarios.mjs");
+      const sc = SCENARIOS["sites-on-instance"];
+      if (!sc || !sc.deepLink || !sc.deepLink.startsWith("#instance/")) {
+        return die(`${D}: SCENARIOS["sites-on-instance"] no longer carries an #instance/ deepLink — the instance workspace cannot be reached, so nothing was measured`);
+      }
+      process.stdout.write(
+        `\n${D} — sites-on-instance at the instance route x ${TRACK_WIDTHS.length} widths x 2 themes ` +
+        `(${TRACK_WIDTHS.length * 2} cells; documentElement asserted, .detail-main and every .site-name cell ` +
+        `REPORTED — the cells read sw==cw even 1673px off-screen, which is why they cannot be the assertion)\n`,
+      );
+      let cells = 0, pageOver = 0, misrouted = 0, namesSeen = 0, cellSpill = 0;
+      for (const theme of ["light", "dark"]) {
+        // Enter at 900 — the narrowest DRIVEN width, above the single-column
+        // collapse — so a screen that renders at only one width cannot pass as
+        // a screen that renders everywhere.
+        await setViewport(900);
+        await nav(
+          `${BASE}/?scen=sites-on-instance&theme=${theme}${sc.deepLink}`,
+          `document.querySelector('.site-name') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-instance';})()`,
+        );
+        const row = [];
+        for (const width of TRACK_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){` +
+            `var d=document.documentElement;` +
+            `var v=document.querySelector('section.view:not([hidden])');` +
+            `var dm=document.querySelector('.detail-main');` +
+            `var g=document.querySelector('.detail-grid--instance');` +
+            `var names=[].slice.call(document.querySelectorAll('.site-name')).map(function(el){` +
+            `  return {sw:el.scrollWidth,cw:el.clientWidth,len:(el.textContent||'').length};});` +
+            // NAME THE BOX when the page drags. A page number alone sends the
+            // next reader back into DevTools; the widest right edges are the
+            // elements that pushed it, and one of them is the remedy's address.
+            `var wide=[];if(d.scrollWidth>d.clientWidth){` +
+            `  [].slice.call(document.querySelectorAll('#view-instance *')).forEach(function(el){` +
+            `    var r=el.getBoundingClientRect();if(r.width>0&&r.right>d.clientWidth+1)` +
+            `      wide.push({cls:(el.className||el.tagName||'?').toString().slice(0,40),right:+r.right.toFixed(2)});});` +
+            `  wide.sort(function(a,b){return b.right-a.right;});wide=wide.slice(0,3);}` +
+            `return {psw:d.scrollWidth,pcw:d.clientWidth,view:v?v.id:'none',theme:d.getAttribute('data-theme'),` +
+            ` dm:dm?+dm.getBoundingClientRect().width.toFixed(2):null,gtc:g?getComputedStyle(g).gridTemplateColumns:null,` +
+            ` names:names,wide:wide};})()`,
+          );
+          cells++;
+          // (1) THE ROUTE. Without this the whole table is about #overview.
+          if (m.view !== "view-instance") {
+            misrouted++;
+            fail(D, `sites-on-instance/${theme}@${width}: rendered section.view "${m.view}", asked for "view-instance" — the hash did not route, so nothing below this line measures the instance workspace`);
+            row.push(`${width}:?`);
+            continue;
+          }
+          if (m.theme !== theme) fail(D, `sites-on-instance/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+          // AUDITED: zero .site-name cells is not a clean Sites card. If the
+          // fixture stopped rendering rows, this leg would print a perfect
+          // table about an empty card — the cruel string is the whole point.
+          if (m.names.length === 0) {
+            fail(D, `sites-on-instance/${theme}@${width}: zero .site-name cells rendered — the Sites card is empty, so the cruel 253-char domain never reached the page and nothing was measured`);
+            row.push(`${width}:0n`);
+            continue;
+          }
+          namesSeen += m.names.length;
+          // (2) THE PIXELS — documentElement, the ONLY question that can fail
+          // on the defective tree.
+          if (m.psw > m.pcw) {
+            pageOver++;
+            const widest = (m.wide || []).map((x) => `.${x.cls} right=${x.right}`).join(" | ") || "none inside #view-instance";
+            fail(D, `sites-on-instance/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the instance workspace is off-screen sideways at rest, with the Sites card in it (grid-template-columns computed "${m.gtc}", .detail-main ${m.dm}px). Widest: ${widest}`);
+          }
+          // (3) THE CELLS — counted and REPORTED, never the pass condition.
+          // Printed so the "green by construction" claim stays quotable from a
+          // green run instead of resting on this comment.
+          cellSpill += m.names.filter((n) => n.sw > n.cw).length;
+          const longest = m.names.reduce((a, b) => (b.len > a.len ? b : a), m.names[0]);
+          row.push(`${width}:${m.psw}/${m.pcw}px dm=${m.dm} ${m.names.length}n max${longest.len}ch:${longest.sw}/${longest.cw}`);
+        }
+        process.stdout.write(`   sites-on-instance/${theme}  ${row.join("  ")}\n`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${TRACK_WIDTHS.join("/")} in both themes (${namesSeen} .site-name ` +
+          `cells rendered, one carrying the 253-char cruel domain): documentElement.scrollWidth <= clientWidth ` +
+          `everywhere. On origin/main cfc2f2b77 this same drive read 2573/900, 2573/1000 and 2577/1280 in BOTH ` +
+          `themes — 1673px of the instance workspace dragged sideways`,
+        );
+        okLine(
+          `${cellSpill} .site-name cell(s) with scrollWidth > clientWidth — and that number was ALSO 0 on the ` +
+          `defective tree (every cell read sw==cw, the cruel row 1555/1555, while the page was 1673px off-screen). ` +
+          `That is why this leg asserts the PAGE and only reports the cells: a cell-level assertion here is green ` +
+          `by construction, which is how this defect survived three filings`,
+        );
+        okLine(
+          `900/1000/1280 are the DRIVEN widths (all three measured broken); 320/390/720 are NEGATIVE CONTROLS — ` +
+          `the ≤899 block single-columns the grid there and every number was byte-identical across the fix, so ` +
+          `they detect only a remedy that re-shreds the phone layout. 1280 is driven by NO other instrument in ` +
+          `this repo: the defect outlived every band swept above, and a sweep stopping at 1024 certifies a ` +
+          `desktop that is still dragging`,
         );
       }
     }
