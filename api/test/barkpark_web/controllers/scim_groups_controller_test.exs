@@ -861,7 +861,7 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
       assert stored_holders(org_a, shared) == []
 
       # Org A's group carries the same role name and NO members of its own.
-      create_group(token_a, "A Holders", shared)
+      gid_a = create_group(token_a, "A Holders", shared) |> Map.fetch!("id")
 
       resources =
         scim(token_a)
@@ -876,6 +876,26 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
 
       assert leaked == [],
              "CROSS-TENANT DISCLOSURE: org A's GET /scim/v2/Groups returned #{inspect(leaked)}; " <>
+               "org B's user is #{user_b.id}"
+
+      # THE TWIN FENCE, PINNED IN THE SAME BREATH (added at wave-41 review).
+      # The LIST path resolves members through `group_member_ids_by_role/2`; the
+      # SINGLE-group GET resolves them through `group_member_ids/2`, a DIFFERENT
+      # query carrying its own copy of `m.workspace_id in ^ws_ids`. Measured
+      # rather than assumed: deleting the fence from `group_member_ids/2` alone
+      # left the Groups + Users files at 58 tests / 0 failures — the singular
+      # read was as unpinned as the list read was before this test existed. One
+      # extra request closes it, and the assertion prints what leaked.
+      singular =
+        scim(token_a)
+        |> get("/scim/v2/Groups/#{gid_a}")
+        |> json_response(200)
+        |> member_values()
+        |> Enum.uniq()
+
+      assert singular == [],
+             "CROSS-TENANT DISCLOSURE on the SINGULAR read: org A's " <>
+               "GET /scim/v2/Groups/#{gid_a} returned #{inspect(singular)}; " <>
                "org B's user is #{user_b.id}"
     end
 
