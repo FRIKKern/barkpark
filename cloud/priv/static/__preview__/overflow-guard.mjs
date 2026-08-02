@@ -210,6 +210,7 @@ const DEFECTS = [
   "W26-instance-track-min-content",
   "W26-deploy-fail-clip",
   "W26-cred-sheet-exits",
+  "W26-new-ready-and-launch-bounded",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -5512,6 +5513,452 @@ async function main() {
           `takes the remount branch here — refetching a declined provider's catalog and nulling ` +
           `\`container._launchHosting\`'s region and server_type — and scores PERFECTLY on every DOM assertion in ` +
           `this leg while doing it`,
+        );
+      }
+    }
+
+
+
+    // ── cch-w26-s6: THE TWO /new SCREENS NOBODY EVER MEASURED ───────────────
+    //    THE CENSUS, re-derived at origin/main cfc2f2b77 with its counting rule
+    //    (`grep -c '<scenario>'` over the three instruments — overflow-guard /
+    //    smoke / breakpoint-sweep):
+    //      theater-failed     21 / 1 / 1
+    //      theater-midflight  12 / 1 / 1
+    //      theater-ready       0 / 1 / 1
+    //      new-launch          0 / 2 / 1
+    //    So both screens on the HAPPY path of the launch journey — the one
+    //    every signup starts on and the one every successful signup ends on —
+    //    had markup coverage in smoke.mjs and ZERO geometry anywhere, while the
+    //    failure screen beside them carries 21 mentions. The width sweep cannot
+    //    close it: all four /new scenarios sit in breakpoint-sweep's
+    //    SCENARIO_RESIDUE under `path:/new` for an ARCHITECTURAL reason it
+    //    states itself — "The launch/theater page is likewise its own document
+    //    outside the shell" — and that sweep walks the console SHELL's screen
+    //    axis. This leg is the gap's only possible owner.
+    //
+    //    THE FIXTURES ARE KIND, AND THAT IS THIS LEG'S CENTRAL PROBLEM (the
+    //    wave's fourth standing clause: a guard whose FIXTURE cannot produce
+    //    the defect is green by construction). `theater-ready`'s longest
+    //    rendered run is its own instance URL at 35 chars; `new-launch` renders
+    //    no instance at all (`barkparks: []`, `sites: []`) — a template card, a
+    //    name field and a Launch button. A leg driven on these fixtures AS THEY
+    //    STAND proves nothing, so the KIND baseline below is driven FIRST and
+    //    printed with the longest run it found, precisely so the by-construction
+    //    green is on the record as a measurement rather than as a claim.
+    //
+    //    CRUELTY IS INJECTED AT RUNTIME AND DERIVED, NEVER PASTED, copying the
+    //    W24 leg's own stress pattern rather than authoring a fixture (which
+    //    would have meant touching scenarios.mjs, outside this slice's fence):
+    //      · the host is `"a".repeat(63) + ".barkpark.cloud"` — 63 is the RFC
+    //        1035 DNS LABEL CAP, so this is the longest unbreakable run any
+    //        real host can present and a stress built past it would assert
+    //        against a string this screen can never receive.
+    //      · the name is `"a".repeat(255)` — 255 is the SERVER'S OWN cap on a
+    //        site/instance name (`validate_length max: 255`), the same cap the
+    //        cruel-content fixture family is built at. It is the honest worst
+    //        case a person can type into `#new-name`, not an arbitrary number.
+    //
+    //    WHAT IS ASSERTED IS EVERY BOX, NOT A PINNED SELECTOR: every element
+    //    under `#new-body` is measured against its OWN client width, because
+    //    the W25 finding on the sibling screen was a box (.new-theater-grid
+    //    251/214) that the PAGE number never saw. Two kinds of element are
+    //    skipped and counted, never silently: form controls (an `<input>`
+    //    scrolls its own value by design — that is the control working, not an
+    //    overflow) and any box that declares `overflow-x: auto|scroll`, which
+    //    has opted into its own scroller. The skipped count is printed so the
+    //    exclusion cannot hide a screen.
+    //
+    //    THE OUTCOME IS SPLIT, AND SAYING SO IS THE POINT.
+    //      new-launch is a MEASURED REFUSAL, fully asserted and clean: a
+    //        255-char name leaves the page at 320/320 and no box under
+    //        #new-body over its own client width. The reason is structural and
+    //        worth writing down rather than re-discovering — an `<input>`'s
+    //        width does not track its value (it clips and scrolls internally),
+    //        so no string a person types into `#new-name` can widen this
+    //        screen. That is a real result for a screen that had none, and it
+    //        is a refusal, not a fix.
+    //      theater-ready BITES. It is FILED (task-ee662108818d603c), not fixed
+    //        here, and pinned as the ceiling described below.
+    //
+    //    IT CAN LOSE, AND THAT WAS DRIVEN, NOT ARGUED. Two mutations of the
+    //    SHIPPED tree, each applied to app.css, run, and reverted:
+    //      `.new-desc { white-space: nowrap }`  → 82 findings, exit 1. It reds
+    //        the KIND half of BOTH screens (theater-ready .new-desc 491/214 at
+    //        320 with the ordinary 35-char URL; new-launch page 479/320) AND
+    //        breaches the ceiling (622px of cruel drag against the 408px pin).
+    //      `#new-name { width: 140% }`          → 60 findings, exit 1. It reds
+    //        the field-containment assertion specifically (`#new-name` right
+    //        edge 352.59 against the card's inner edge 267) — the one question
+    //        on new-launch that the box sweep cannot ask, because the input is
+    //        excluded from it.
+    //
+    //    D274/D292: no line numbers above. Every citation is a grep or a class.
+    if (requested.includes("W26-new-ready-and-launch-bounded")) {
+      const D = "W26-new-ready-and-launch-bounded";
+      // BLOCK-SCOPED (precedent: `const D`, FAIL_WIDTHS above). The same phone
+      // band the theater family is driven at, so a remedy landing on the shared
+      // `.new-card` column is seen by both legs at the same widths.
+      const W26_WIDTHS = [320, 360, 390, 430];
+      // BUILT, never pasted, so the length is a fact of this line: 63 = the RFC
+      // 1035 DNS label cap.
+      const CRUEL_HOST = "a".repeat(63) + ".barkpark.cloud";
+      // 255 = the server's `validate_length max: 255` on a name.
+      const NAME_CAP = 255;
+      const CRUEL_NAME = "a".repeat(NAME_CAP);
+      const { SCENARIOS: S26 } = await import("./scenarios.mjs");
+
+      // ── THE DEFECT THIS LEG FOUND, FILED AND PINNED — NOT FIXED HERE ──────
+      //   The cruel host is not a synthetic string on this screen. Barkpark
+      //   itself validates `:slug` at `max: 63` and builds the customer-facing
+      //   FQDN as `clean_url(slug) = "https://" <> slug <> ".barkpark.cloud"` —
+      //   so `https://<63 chars>.barkpark.cloud`, exactly what is injected
+      //   below, is the LONGEST URL the control plane can hand this hero, and
+      //   a person who names their instance with a long slug gets it. Driven at
+      //   320 in both themes it takes documentElement.scrollWidth to 728
+      //   against 320: 408px of the screen every successful signup lands on is
+      //   off-screen sideways, because `.new-ready .mono` carries no wrap
+      //   escape and neither `.new-card` nor `.new-screen` scrolls.
+      //   FILED as task-ee662108818d603c. This slice
+      //   ships NO app.css change (its fence is this file) — so the cruel half
+      //   on theater-ready is pinned as a CEILING rather than certified:
+      //     · the drag may not exceed what was measured, and
+      //     · no box outside the measured set may join it.
+      //   A remedy SHRINKS both and stays green; a regression widens either and
+      //   reds. When the fix lands, drop the ceiling to 0 and delete the
+      //   subset rule — at which point this becomes an ordinary assertion.
+      const READY_CRUEL_DRAG = 408;
+      const READY_CRUEL_BOXES = ["new-body", "new-card card", "new-ready", "new-desc"];
+
+      // EVERY box under #new-body against its own client width. Form controls
+      // and declared scrollers are skipped AND COUNTED — an exclusion that is
+      // not printed is an exclusion that can hide a screen.
+      const BOXES_JS =
+        `[].slice.call(document.querySelectorAll('#new-body, #new-body *')).forEach(function(el){` +
+        `  var tn=el.tagName;` +
+        `  if(tn==='INPUT'||tn==='TEXTAREA'||tn==='SELECT'){out.skipped++;return;}` +
+        `  var ox=getComputedStyle(el).overflowX;` +
+        `  if(ox==='auto'||ox==='scroll'){out.skipped++;return;}` +
+        `  if(el.scrollWidth>el.clientWidth+1) out.boxes.push({cls:(el.className||tn||'?').toString().slice(0,40),sw:el.scrollWidth,cw:el.clientWidth});});`;
+      // The LONGEST RENDERED RUN on the screen — the number that makes the kind
+      // baseline honest. A whitespace split, so it is the longest token a line
+      // breaker cannot break at, measured over rendered text only.
+      const LONGEST_JS =
+        `var lw=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null);var ln;` +
+        `while((ln=lw.nextNode())){var lp=ln.parentElement;if(!lp||!lp.getClientRects().length) continue;` +
+        `  (ln.nodeValue||'').split(/\\s+/).forEach(function(t){if(t.length>out.longest){out.longest=t.length;out.longestTxt=t.slice(0,48);}});}`;
+      // The TIGHTEST margin any measured box has left, so "clean" carries a
+      // distance rather than a boolean. Same skip rule as the box sweep.
+      const TIGHT_JS =
+        `[].slice.call(document.querySelectorAll('#new-body *')).forEach(function(el){` +
+        `  var tn=el.tagName;if(tn==='INPUT'||tn==='TEXTAREA'||tn==='SELECT')return;` +
+        `  var ox=getComputedStyle(el).overflowX;if(ox==='auto'||ox==='scroll')return;` +
+        `  if(el.clientWidth>0){var mg=el.clientWidth-el.scrollWidth;if(mg<out.tight){out.tight=mg;out.tightCls=(el.className||tn||'?').toString().slice(0,40);}}});`;
+      // Names the boxes that pushed a dragging page. A page number alone sends
+      // the next reader back into DevTools.
+      const WIDEST_JS =
+        `if(d.scrollWidth>d.clientWidth){` +
+        `  [].slice.call(document.querySelectorAll('.new-screen *')).forEach(function(el){` +
+        `    var r=el.getBoundingClientRect();if(r.width>0&&r.right>d.clientWidth+1)` +
+        `      out.wide.push({cls:(el.className||el.tagName||'?').toString().slice(0,40),right:+r.right.toFixed(2)});});` +
+        `  out.wide.sort(function(a,b){return b.right-a.right;});out.wide=out.wide.slice(0,4);}`;
+      const widestOf = (m) => (m.wide || []).map((x) => `.${x.cls} right=${x.right}`).join(" | ") || "none inside .new-screen";
+
+      // The URL is DERIVED FROM THE FIXTURE, not transcribed — a transcribed
+      // host rots silently into "the leg measured a screen that no longer says
+      // it". Zero occurrences at runtime is a REFUSAL below, never a pass.
+      const readySc = S26["theater-ready"];
+      if (!readySc || !readySc.pathname || !readySc.search) {
+        return die(`${D}: SCENARIOS["theater-ready"] no longer carries pathname+search — the ready hero cannot be reached, so nothing was measured`);
+      }
+      const READY_URL = ((readySc.data && readySc.data.barkparks && readySc.data.barkparks[0]) || {}).url;
+      if (!READY_URL) {
+        return die(`${D}: SCENARIOS["theater-ready"] no longer carries barkparks[0].url — the run this leg measures is derived from it, so nothing could be stressed`);
+      }
+      const launchSc = S26["new-launch"];
+      if (!launchSc || !launchSc.pathname || !launchSc.search) {
+        return die(`${D}: SCENARIOS["new-launch"] no longer carries pathname+search — the launch step cannot be reached, so nothing was measured`);
+      }
+
+      process.stdout.write(
+        `\n${D} — theater-ready + new-launch x ${W26_WIDTHS.length} widths x 2 themes ` +
+        `(${W26_WIDTHS.length * 2 * 2} kind cells + 4 cruel probes; EVERY box under #new-body against its own ` +
+        `client width, the page, and the longest rendered run per cell. Cruelty is injected at runtime: a ` +
+        `${CRUEL_HOST.length}-char host (63-octet DNS label, the legal maximum) on the ready hero and a ` +
+        `${NAME_CAP}-char name in #new-name — the two screens' fixtures are KIND and the kind rows say so)\n`,
+      );
+
+      let rdCells = 0, rdUrls = 0, rdBox = 0, rdPage = 0, rdLongestKind = 0;
+      let lnCells = 0, lnBox = 0, lnPage = 0, lnLongestKind = 0;
+      let cruelRuns = 0, cruelBox = 0, cruelPage = 0, skippedSeen = 0, lnCruelBox = 0, lnCruelPage = 0;
+      let rdKindMargin = Infinity, lnKindMargin = Infinity, cruelMargin = Infinity;
+      let rdKindTightCls = "", lnKindTightCls = "", lnKindTight = Infinity, lnCruelFieldSw = 0, rdMonoSlack = Infinity, rdCruelMonoOver = 0, rdMonoKind = "", rdMonoCruel = "";
+
+      // ── A. theater-ready — the hero every successful signup lands on ───────
+      for (const theme of ["light", "dark"]) {
+        await setViewport(W26_WIDTHS[W26_WIDTHS.length - 1]);
+        await nav(
+          `${BASE}${readySc.pathname}${readySc.search}&scen=theater-ready&theme=${theme}`,
+          `document.querySelector('.new-ready') && document.querySelector('.new-ready .mono')`,
+        );
+        const row = [];
+        for (const width of W26_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){` +
+            `var d=document.documentElement;` +
+            `var out={ready:!!document.querySelector('.new-ready'),theme:d.getAttribute('data-theme'),` +
+            `psw:d.scrollWidth,pcw:d.clientWidth,urls:0,boxes:[],skipped:0,longest:0,longestTxt:'',wide:[],tight:1e9,tightCls:'',mono:null};` +
+            // The URL must be ON the screen. A hero that stopped naming the
+            // instance would let every line below print a perfect table about
+            // nothing at all.
+            `var uw=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null);var un;` +
+            `while((un=uw.nextNode())){if((un.nodeValue||'').indexOf(${JSON.stringify(READY_URL)})>=0){` +
+            `  var up=un.parentElement;if(up&&up.getClientRects().length) out.urls++;}}` +
+            BOXES_JS + TIGHT_JS + LONGEST_JS + WIDEST_JS +
+            // The mono run's PAINTED width is REPORTED at every width, not only
+            // on failure: "the URL fits with room to spare" is a claim about
+            // numbers, and a row that prints them only when red cannot be
+            // quoted for it. It is a rect, not scrollWidth — `.new-ready .mono`
+            // is an inline span, and scrollWidth on an inline box is 0, which
+            // would have read as a perfect fit at every width.
+            `var mo=document.querySelector('.new-ready .mono');` +
+            `if(mo){var mr=mo.getBoundingClientRect(),mp=mo.parentElement;` +
+            `  out.mono={w:+mr.width.toFixed(2),pcw:mp?mp.clientWidth:0};}` +
+            `return out;})()`,
+          );
+          rdCells++;
+          if (!m.ready) {
+            fail(D, `theater-ready/${theme}@${width}: no .new-ready on the page — the ready hero did not render, so nothing below this line measures it`);
+            row.push(`${width}:?`);
+            continue;
+          }
+          if (m.theme !== theme) fail(D, `theater-ready/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+          if (m.urls === 0) {
+            fail(D, `theater-ready/${theme}@${width}: zero rendered text nodes carry "${READY_URL}" — the hero no longer names the instance a person must click, so nothing was measured and this is not a pass`);
+            row.push(`${width}:0u`);
+            continue;
+          }
+          rdUrls += m.urls;
+          rdLongestKind = Math.max(rdLongestKind, m.longest);
+          skippedSeen = Math.max(skippedSeen, m.skipped);
+          if (m.psw > m.pcw) {
+            rdPage++;
+            fail(D, `theater-ready/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the hero every successful signup lands on is off-screen sideways. Widest: ${widestOf(m)}`);
+          }
+          for (const b of m.boxes) {
+            rdBox++;
+            fail(D, `theater-ready/${theme}@${width} .${b.cls}: scrollWidth ${b.sw} > clientWidth ${b.cw} with the ORDINARY fixture — a box on the ready hero is wider than the box that holds it, and no cruel string was needed to do it`);
+          }
+          if (m.tight < rdKindMargin) { rdKindMargin = m.tight; rdKindTightCls = m.tightCls; }
+          // The URL's OWN headroom — the number the cruel half destroys, and
+          // the only margin on this screen that is about content rather than
+          // about a block box exactly filling its parent.
+          if (m.mono && width === W26_WIDTHS[0]) {
+            rdMonoSlack = Math.min(rdMonoSlack, +(m.mono.pcw - m.mono.w).toFixed(2));
+            rdMonoKind = `${m.mono.w} painted into a ${m.mono.pcw}px box`;
+          }
+          row.push(`${width}:${m.urls}u ${m.psw}/${m.pcw}px mono ${m.mono ? `${m.mono.w}/${m.mono.pcw}` : "-"} run=${m.longest}c tight=${m.tight}px${m.boxes.length ? " box!" + m.boxes.length : ""}`);
+        }
+        // ── the cruel half, at the narrowest width only ──────────────────────
+        //   Same text nodes, one unbreakable 78-char URL. This is the half the
+        //   kind fixture cannot ask: 35 chars fit in this column at 320 whether
+        //   or not anything wraps — which is exactly why a leg driven on the
+        //   shipped fixture would have certified this screen.
+        //   It BITES, and the finding is filed rather than fixed (this slice's
+        //   fence is this file). What is asserted here is the CEILING form
+        //   described at the top of the block.
+        await setViewport(W26_WIDTHS[0]);
+        const cr = await evalJs(
+          `(function(){` +
+          `var d=document.documentElement;var hit=0;` +
+          `var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null);var n,ns=[];` +
+          `while((n=w.nextNode())){if((n.nodeValue||'').indexOf(${JSON.stringify(READY_URL)})>=0) ns.push(n);}` +
+          `ns.forEach(function(x){x.nodeValue=(x.nodeValue||'').split(${JSON.stringify(READY_URL)}).join(${JSON.stringify("https://" + CRUEL_HOST)});hit++;});` +
+          `void d.offsetWidth;` +
+          `var out={hit:hit,psw:d.scrollWidth,pcw:d.clientWidth,boxes:[],skipped:0,longest:0,longestTxt:'',wide:[],tight:1e9,tightCls:'',mono:null};` +
+          BOXES_JS + TIGHT_JS + LONGEST_JS + WIDEST_JS +
+          `var mo=document.querySelector('.new-ready .mono');` +
+          `if(mo){var mr=mo.getBoundingClientRect(),mp=mo.parentElement;out.mono={w:+mr.width.toFixed(2),pcw:mp?mp.clientWidth:0};}` +
+          `return out;})()`,
+        );
+        cruelRuns++;
+        if (cr.hit === 0) {
+          fail(D, `theater-ready/${theme}@${W26_WIDTHS[0]} CRUEL: the ${CRUEL_HOST.length}-char host replaced nothing — the cruel half measured no element, so this leg's only falsifiable question was not asked`);
+        }
+        // SUBSET, not equality: a remedy that takes boxes OFF this list must
+        // stay green (that is the fix landing), while any box JOINING it is a
+        // new surface the filed defect did not cover and reds.
+        for (const b of cr.boxes) {
+          cruelBox++;
+          if (!READY_CRUEL_BOXES.includes(b.cls)) {
+            fail(D, `theater-ready/${theme}@${W26_WIDTHS[0]} CRUEL .${b.cls}: scrollWidth ${b.sw} > clientWidth ${b.cw} — a box OUTSIDE the filed set [${READY_CRUEL_BOXES.join(", ")}] now overflows under the ${CRUEL_HOST.length}-char host, so the ready hero's spill has spread past what task-ee662108818d603c measured`);
+          }
+        }
+        const drag = cr.psw - cr.pcw;
+        if (drag > READY_CRUEL_DRAG) {
+          cruelPage++;
+          fail(D, `theater-ready/${theme}@${W26_WIDTHS[0]} CRUEL: a ${CRUEL_HOST.length}-char host takes documentElement.scrollWidth to ${cr.psw} against ${cr.pcw} — ${drag}px of drag, WIDER than the ${READY_CRUEL_DRAG}px ceiling filed as task-ee662108818d603c. Widest: ${widestOf(cr)}`);
+        }
+        cruelMargin = Math.min(cruelMargin, drag);
+        if (cr.mono) { rdCruelMonoOver = Math.max(rdCruelMonoOver, +(cr.mono.w - cr.mono.pcw).toFixed(2)); rdMonoCruel = `${cr.mono.w} painted into the same ${cr.mono.pcw}px box`; }
+        row.push(`cruel@${W26_WIDTHS[0]}:${cr.hit}n run=${cr.longest}c mono ${cr.mono ? `${cr.mono.w}/${cr.mono.pcw}` : "-"} box:${cr.boxes.length} page:${cr.psw}/${cr.pcw}px drag=${drag}px(<=${READY_CRUEL_DRAG} FILED)`);
+        process.stdout.write(`   theater-ready/${theme}  ${row.join("  ")}\n`);
+      }
+
+      // ── B. new-launch — the step EVERY signup starts on ────────────────────
+      //    It renders no instance at all, so there is nothing on it long enough
+      //    to overflow anything: the kind row's `run=` column is the proof of
+      //    that, and the cruel probe is the only question worth asking here.
+      for (const theme of ["light", "dark"]) {
+        await setViewport(W26_WIDTHS[W26_WIDTHS.length - 1]);
+        await nav(
+          `${BASE}${launchSc.pathname}${launchSc.search}&scen=new-launch&theme=${theme}`,
+          `document.querySelector('.new-launch') && document.getElementById('new-name')`,
+        );
+        const row = [];
+        for (const width of W26_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){` +
+            `var d=document.documentElement;var f=document.getElementById('new-name');` +
+            `var out={launch:!!document.querySelector('.new-launch'),name:!!f,btn:!!document.getElementById('new-launch-btn'),` +
+            `theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,boxes:[],skipped:0,longest:0,longestTxt:'',wide:[],tight:1e9,tightCls:'',field:null};` +
+            BOXES_JS + TIGHT_JS + LONGEST_JS + WIDEST_JS +
+            // The FIELD'S OWN CONTAINMENT: an input is excluded from the box
+            // sweep (it scrolls its value by design), so it is asked the only
+            // question that is really about layout — does its border box stay
+            // inside the card that holds it.
+            `var card=document.querySelector('.new-card');` +
+            `if(f&&card){var fr=f.getBoundingClientRect(),cr2=card.getBoundingClientRect();` +
+            `  var cs=getComputedStyle(card);` +
+            `  var inner=cr2.right-parseFloat(cs.paddingRight||0)-parseFloat(cs.borderRightWidth||0);` +
+            `  out.field={right:+fr.right.toFixed(2),inner:+inner.toFixed(2),cw:f.clientWidth,sw:f.scrollWidth};}` +
+            `return out;})()`,
+          );
+          lnCells++;
+          if (!m.launch || !m.name || !m.btn) {
+            fail(D, `new-launch/${theme}@${width}: .new-launch=${m.launch}, #new-name=${m.name}, #new-launch-btn=${m.btn} — the launch step did not render, so nothing below this line measures it`);
+            row.push(`${width}:?`);
+            continue;
+          }
+          if (m.theme !== theme) fail(D, `new-launch/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+          lnLongestKind = Math.max(lnLongestKind, m.longest);
+          skippedSeen = Math.max(skippedSeen, m.skipped);
+          if (m.psw > m.pcw) {
+            lnPage++;
+            fail(D, `new-launch/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the step every signup starts on is off-screen sideways. Widest: ${widestOf(m)}`);
+          }
+          for (const b of m.boxes) {
+            lnBox++;
+            fail(D, `new-launch/${theme}@${width} .${b.cls}: scrollWidth ${b.sw} > clientWidth ${b.cw} with the ORDINARY fixture — a box on the step every signup starts on is wider than the box that holds it`);
+          }
+          if (m.field) {
+            if (m.field.right > m.field.inner + 1) {
+              lnBox++;
+              fail(D, `new-launch/${theme}@${width} #new-name: the field's right edge is ${m.field.right} against the card's inner edge ${m.field.inner} — the one control on this screen paints outside the card that holds it`);
+            }
+            lnKindMargin = Math.min(lnKindMargin, m.field.inner - m.field.right);
+          }
+          if (m.tight < lnKindTight) { lnKindTight = m.tight; lnKindTightCls = m.tightCls; }
+          row.push(`${width}:${m.psw}/${m.pcw}px field ${m.field ? `${m.field.right}/${m.field.inner}` : "-"} run=${m.longest}c tight=${m.tight}px${m.boxes.length ? " box!" + m.boxes.length : ""}`);
+        }
+        // ── the cruel half: the longest name a person can actually submit ────
+        //   `#new-name` has no maxlength attribute, and the server caps a name
+        //   at 255 — so 255 chars of unbroken text is exactly what this control
+        //   can receive from a real person. An `input` event is dispatched
+        //   because a value set from script does not fire one, and a screen
+        //   that reacts to typing must be given the chance to.
+        await setViewport(W26_WIDTHS[0]);
+        const cn = await evalJs(
+          `(function(){` +
+          `var d=document.documentElement;var f=document.getElementById('new-name');` +
+          `if(!f) return {hit:0};` +
+          `f.value=${JSON.stringify(CRUEL_NAME)};` +
+          `f.dispatchEvent(new Event('input',{bubbles:true}));` +
+          `void d.offsetWidth;` +
+          `var out={hit:f.value.length,psw:d.scrollWidth,pcw:d.clientWidth,boxes:[],skipped:0,longest:0,longestTxt:'',wide:[],tight:1e9,tightCls:'',field:null};` +
+          BOXES_JS + TIGHT_JS + LONGEST_JS + WIDEST_JS +
+          `var card=document.querySelector('.new-card');` +
+          `if(card){var fr=f.getBoundingClientRect(),cr2=card.getBoundingClientRect();var cs=getComputedStyle(card);` +
+          `  var inner=cr2.right-parseFloat(cs.paddingRight||0)-parseFloat(cs.borderRightWidth||0);` +
+          `  out.field={right:+fr.right.toFixed(2),inner:+inner.toFixed(2),cw:f.clientWidth,sw:f.scrollWidth};}` +
+          `return out;})()`,
+        );
+        if (cn.hit !== NAME_CAP) {
+          fail(D, `new-launch/${theme}@${W26_WIDTHS[0]} CRUEL: #new-name holds ${cn.hit} chars after a ${NAME_CAP}-char write — the cruel half did not land, so this screen's only falsifiable question was not asked`);
+        } else {
+          // FULLY ASSERTED, unlike the ready hero's cruel half — this one comes
+          // back CLEAN on these bytes, so there is nothing to file and nothing
+          // to pin. The control holds its 255 chars internally (scrollWidth
+          // ~2037 against a ~212px client box, which is the input doing its
+          // job) and pushes neither the card nor the page.
+          for (const b of cn.boxes) {
+            lnCruelBox++;
+            fail(D, `new-launch/${theme}@${W26_WIDTHS[0]} CRUEL .${b.cls}: scrollWidth ${b.sw} > clientWidth ${b.cw} — a ${NAME_CAP}-char project name (the server's own validate_length cap, typeable into this field today) pushes a box on the launch step past its own client width`);
+          }
+          if (cn.field && cn.field.right > cn.field.inner + 1) {
+            lnCruelBox++;
+            fail(D, `new-launch/${theme}@${W26_WIDTHS[0]} CRUEL #new-name: the field's right edge is ${cn.field.right} against the card's inner edge ${cn.field.inner} — a ${NAME_CAP}-char name widens the control itself, so the one input on this screen paints outside its card`);
+          }
+          if (cn.psw > cn.pcw) {
+            lnCruelPage++;
+            fail(D, `new-launch/${theme}@${W26_WIDTHS[0]} CRUEL: a ${NAME_CAP}-char project name takes documentElement.scrollWidth to ${cn.psw} against ${cn.pcw} — ${cn.psw - cn.pcw}px of the step every signup starts on drags sideways. Widest: ${widestOf(cn)}`);
+          }
+          if (cn.field) lnCruelFieldSw = Math.max(lnCruelFieldSw, cn.field.sw);
+        }
+        cruelRuns++;
+        row.push(`cruel@${W26_WIDTHS[0]}:${cn.hit}c field ${cn.field ? `${cn.field.right}/${cn.field.inner} sw${cn.field.sw}/cw${cn.field.cw}` : "-"} box:${(cn.boxes || []).length} tight=${cn.tight}px page:${cn.psw}/${cn.pcw}px`);
+        process.stdout.write(`   new-launch/${theme}  ${row.join("  ")}\n`);
+      }
+
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${rdCells + lnCells} / ${rdCells + lnCells} kind cells clean across ${W26_WIDTHS.join("/")} in both ` +
+          `themes (${rdCells} theater-ready, ${lnCells} new-launch; ${rdUrls} rendered "${READY_URL}" runs measured, ` +
+          `${rdBox + lnBox} box overflows, ${rdPage + lnPage} pages dragging). Both screens had ZERO geometry ` +
+          `coverage in this file before this row — the census at origin/main cfc2f2b77 read theater-ready 0/1/1 and ` +
+          `new-launch 0/2/1 against theater-failed's 21/1/1`,
+        );
+        okLine(
+          `THE KIND ROWS ARE WHY THE CRUEL HALF EXISTS, and this is the measurement rather than the claim: the ` +
+          `longest rendered run is ${rdLongestKind} chars on theater-ready (its own instance URL) and ` +
+          `${lnLongestKind} on new-launch, which renders no instance at all. BY HOW MUCH MARGIN: the URL's painted ` +
+          `run clears its own paragraph by ${rdMonoSlack === Infinity ? "n/a" : rdMonoSlack + "px"} at the narrowest ` +
+          `width (${rdMonoKind} at ${W26_WIDTHS[0]}), and the tightest slack over EVERY measured box is ` +
+          `${rdKindMargin === Infinity ? "n/a" : rdKindMargin + "px"} on theater-ready (.${rdKindTightCls}) and ` +
+          `${lnKindTight === Infinity ? "n/a" : lnKindTight + "px"} on new-launch (.${lnKindTightCls}) — 0 because a ` +
+          `full-width block exactly fills its parent, never because anything is at its limit. Nothing this short ` +
+          `can overflow this column at any of these widths, so a leg driven on the SHIPPED fixtures alone would ` +
+          `have been green BY CONSTRUCTION and certified both screens`,
+        );
+        okLine(
+          `THE CRUEL HALF RAN ${cruelRuns} time(s) at ${W26_WIDTHS[0]} in both themes. new-launch is a MEASURED ` +
+          `REFUSAL and fully asserted: a ${NAME_CAP}-char project name (the server's validate_length cap, typeable ` +
+          `into #new-name today, no maxlength on the control) leaves ${lnCruelBox} box overflow(s) and ` +
+          `${lnCruelPage} dragging page(s) — the input holds it internally (scrollWidth ${lnCruelFieldSw} against a ` +
+          `~212px client box, which is the control working) and the field still clears the card's inner edge by ` +
+          `${lnKindMargin === Infinity ? "n/a" : lnKindMargin.toFixed(2) + "px"}`,
+        );
+        okLine(
+          `theater-ready is NOT a refusal — it BITES, and it is FILED, not fixed here (this slice's fence is this ` +
+          `file, so no app.css change ships with it): ${CRUEL_HOST.length} chars of URL — Barkpark's own ` +
+          `validate_length(:slug, max: 63) plus clean_url/1's "https://" <> slug <> ".barkpark.cloud", i.e. the ` +
+          `LONGEST url the control plane can hand this hero — drag the page ${cruelMargin === Infinity ? "n/a" : cruelMargin + "px"} ` +
+          `at ${W26_WIDTHS[0]} and overflow ${cruelBox} box(es) across the two themes — the URL's painted run goes ` +
+          `from ${rdMonoSlack === Infinity ? "n/a" : rdMonoSlack + "px"} INSIDE its paragraph to ${rdCruelMonoOver}px ` +
+          `OUTSIDE it (${rdMonoCruel}) — because .new-ready .mono ` +
+          `carries no wrap escape. Ceiling-pinned as task-ee662108818d603c: the drag may not ` +
+          `exceed ${READY_CRUEL_DRAG}px (${cruelPage} breach(es) this run) and no box outside ` +
+          `[${READY_CRUEL_BOXES.join(", ")}] may join it. A remedy shrinks both and stays green; a regression ` +
+          `widens either and reds`,
+        );
+        okLine(
+          `EVERY box under #new-body is measured against its OWN client width, never a pinned selector — the W25 ` +
+          `finding on the sibling screen (.new-theater-grid 251/214) was invisible to the page number. Up to ` +
+          `${skippedSeen} element(s) per cell are SKIPPED and counted: form controls (an <input> scrolls its value ` +
+          `by design) and boxes declaring overflow-x auto|scroll. ${W26_WIDTHS[0]} is the DRIVEN width; ` +
+          `${W26_WIDTHS.slice(1).join("/")} are SHOULDERS that can only catch a remedy breaking the wider phone layout`,
         );
       }
     }
