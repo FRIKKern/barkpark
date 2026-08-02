@@ -325,6 +325,44 @@ defmodule BarkparkCloud.NotificationsTest do
       refute body =~ "hcloud_9f2a1c7bE4d3Qz"
       assert body =~ "[redacted] rejected: resource_unavailable"
     end
+
+    # REVIEW (wave 26): the slice's own builder named this branch as the one
+    # honest hole in their guard — `cause_then_capture/1` collapses to the bare
+    # capture when `humanize/1` classifies nothing, which is correct BY
+    # CONSTRUCTION today (`humanize = classify |> scrub`, so the two strings are
+    # equal) and therefore guarded by nothing but that construction. A refactor
+    # that made `humanize/1` do anything else after the scrub would silently
+    # start printing the same paragraph twice, with a heading between the copies,
+    # to a customer. That is a sentence with a `defp`, and this wave refuses
+    # those. Pinned here.
+    test "provision_failed with an UNCLASSIFIABLE reason prints the capture once, with no heading" do
+      {team, _emails} = team_with_members(1)
+      {:ok, _} = Notifications.ensure_settings(team)
+
+      # Deliberately matches no class token in FailureCopy: no capacity, auth,
+      # dns or network vocabulary, and no builder-subset string.
+      reason = "the widget lathe reported schedule 7 with token sk_live_QQ11ZZ99aa"
+
+      assert :ok =
+               Notifications.dispatch_event(team, :provision_failed, %{
+                 name: "acme-site",
+                 detail: reason
+               })
+
+      assert_received {:email, email}
+      body = email.text_body
+
+      scrubbed = BarkparkCloud.FailureCopy.scrub(reason)
+      # PREMISE: this reason really is unclassified. Without it the test drifts
+      # into the classified path and asserts nothing about the branch it names.
+      assert BarkparkCloud.FailureCopy.humanize(reason) == scrubbed
+
+      assert body =~ scrubbed
+      refute body =~ "What the provider reported:"
+      # ONCE, not twice — the whole point of the branch.
+      assert length(String.split(body, scrubbed)) == 2
+      refute body =~ "sk_live_QQ11ZZ99aa"
+    end
   end
 
   ## Transactional (always platform transport, regardless of per-team settings)

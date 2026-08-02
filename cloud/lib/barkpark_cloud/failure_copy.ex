@@ -17,7 +17,10 @@ defmodule BarkparkCloud.FailureCopy do
   (`Web.Router.deployment_json/1` and `merge_job_status/4`), so:
 
     * the stored `failure_reason` / `error` stays RAW — logs, ops, and the
-      `provision_failed` email alert keep the honest internal reason;
+      `provision_failed` email alert keep the honest internal reason. (Wave 26
+      S3 / charter D310: that email now LEADS with `humanize/1`'s class and
+      keeps the scrubbed capture verbatim below it. "Keeps the honest reason"
+      is still exactly true; "does not classify" no longer is.);
     * every read surface (dashboard + CLI) renders human copy with NO client
       change;
     * unrecognized reasons pass through unchanged (graceful fallback — never
@@ -37,8 +40,10 @@ defmodule BarkparkCloud.FailureCopy do
   dashboard and CLI verbatim. Those are folded into four human classes —
   capacity, auth, dns, network — matched case-insensitively (provider casing is
   inconsistent) so no surface ever renders an ALL_CAPS code. The stored value
-  stays RAW: only the JSON boundary humanizes, so the timeline's forensic fold
-  and the `provision_failed` email keep the honest reason. The DNS class is
+  stays RAW, so the timeline's forensic fold and the `provision_failed` email
+  keep the honest reason. Two surfaces humanize: the JSON boundary, and — since
+  wave 26 S3 (D310) — the `provision_failed` alert email, which prepends the
+  class and retains the scrubbed capture in full below it. The DNS class is
   checked BEFORE the generic capacity class because a DNS step that failed on a
   zone quota is a domain problem, not a server-capacity one. All output copy is
   idempotent under a second `humanize` pass (none of it re-matches a class
