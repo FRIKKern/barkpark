@@ -2576,6 +2576,309 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 43 2026-08-02 — "Price everything in one unit, walk the door as far as the price allows, and mechanise the lesson" — DECIDED, building (paper `pds-wave-43-2026-08-02`)
+
+**INHERITED PREMISES THAT FAILED SMOKE, BEFORE ANY DECISION.** (1) The wish's `--census` flag — named by the
+wish, by my own strategic direction, AND by the digest — **DOES NOT EXIST**: `elixir
+scripts/pds-elixir-receipt-census.exs --census` exits **2**, `REFUSED: UNKNOWN ARGUMENT`, `accepted: --sites ·
+--files-from FILE · --keys · --selftest`. Three phases carried a flag the instrument refuses; the plain census
+is the **argv-EMPTY** invocation. That is the same defect Strategize found in `pds-record-parity.sh
+--selftest` (rc=3), one wave later, in this wave's own dispatch. (2) "record-parity is ENVIRONMENT-blocked" —
+**my own direction, refuted by two independent verifiers**: `scripts/pds-record-parity.test.sh` IS the
+selftest, 76 checks / 0 failures / **1.30–1.47 s USER CPU**, in a `mktemp -d` that is not a git repo, with no
+`gh`, no network to the ledger, no credentials. (3) The wish's D616–D631 range is stale — **D632 exists**.
+(4) `task-5a3b22be679c826a` does not BUILD the meter, it SPECIFIES it at 0/9; zero
+`:erlang.statistics(:runtime)` instrumentation exists on `origin/main`. (5) The brief's `task-2c6e0fff8a8a63c9`
+"in_progress under a finished worker" is stale by one sweep — it is `open` with `expired_at
+2026-08-02T18:15:00Z`. (6) D625 already retired "rides the already-required `Test (Elixir 1.18.1 / OTP 27.0)`"
+before the wish restated it. **Nine consecutive waves have refuted the artifact dispatch.**
+
+**PDS-D633 — THE METER IS BLIND EXACTLY WHERE THE DOOR IS, AND D605 GAINS A HOLE.** This is the finding that
+governs every number in the wave. `:erlang.statistics(:runtime)` is SOUND for pure in-BEAM work — a 40M-op
+reduce measured **338 ms** against an independent OS user-CPU delta of **340 ms**, under 1%. It is BLIND to
+port children: a child that really burns **2.58 s** user reports **6 ms** to the in-BEAM meter — and, the part
+no prior wave knew, `/usr/bin/time` wrapped around the BEAM is blind too, reading **0.17–0.19 s** across three
+trials, and a `Process.sleep(2000)` after the call does not change it, so reaping is NOT the cause. **There is
+no outer-meter fallback when the wrapper is the BEAM.** It is also floored at 1 ms (a single `Caps.derive/1`
+measures 0; n=1/10/100/1 000/10 000 all print `delta_ms=0`), blind to I/O wait (`Process.sleep(1500)` →
+`runtime_delta_ms=1`), blind to Postgres' own CPU (a separate OS process), and VM-GLOBAL — the same 5M-op
+target measures **124 ms with 0 sibling processes and 618 ms with 8**, a **5.0x** inflation that `async: false`
+alone cannot prevent. The blindness errs in the ONE direction a price column must not: **it makes an expensive
+thing look gate-able.** My own 4.35 s-parent-vs-281.73 s-wall gap was therefore a MEASUREMENT ARTIFACT, not
+host load — the census `--selftest` spawns each of its 30 cases as a port child. Leaf-metered, `--selftest` is
+**210.36 s USER CPU across 33 invocations** (mean 6.37 s, min 3.46, max 20.50), ~50x what the parent shows. My
+tier ratio was wrong by that factor; the conclusion (disqualified on price) survives and gets worse.
+**THEREFORE, LAW, THREE PLACEMENTS AND THREE UNITS:** (a) an instrument's price is measured with the OS meter
+around a **SHELL** (`/usr/bin/time -l bash -c '<instrument>'`) or `bash`'s `times` builtin — proven to see
+`user 2,18` / `children 0m2.310s` where the BEAM-wrapped meter saw 0.19 — **never** from inside a BEAM parent;
+(b) a test-side in-BEAM figure needs `async: false` AND `--max-cases 1` and is still only quotable on an
+otherwise-idle VM; (c) for a REGRESSION RATCHET under a required gate the unit is
+`Process.info(pid, :reductions)` — per-process and **byte-identical (2 500 395) at 0, 4 and 8 noise
+processes**, where milliseconds moved 5x — because BEAM exposes no per-process CPU counter at all
+(`Process.info/1`'s key list has `:reductions` and nothing cpu-named). **Every number this epic prints from a
+meter must carry the blind-spot sentence in the instrument's own `@moduledoc` AND its printed output**, not in
+prose a copy-paste can drop — a discipline restated is the defect clause 1 is about.
+
+**PDS-D634 — A DB-BOUND PATH IS PRICED IN QUERIES, NOT MILLISECONDS: `Caps.derive/1` COSTS 4 ROUND-TRIPS, AND
+8 PER DEBOUNCED KEYSTROKE.** Measured by run with a **process-scoped** `[:barkpark,:repo,:query]` counter
+(node-global `:telemetry.attach/4` over-counted 800 as 806 on the first pass — a global counter is
+contaminated by whatever shares the node, and that is a finding for anyone building one). A USER-principal
+derive issues **exactly 4** queries: three BYTE-IDENTICAL `Repo.one` membership loads (`:read`, `:write`, and
+`admin?/1`'s `:admin`, all reaching `Tenancy.Auth.membership/2`) plus ONE unconditional
+`Access.list_active_grants_for_grantee/1` `Repo.all` issued at `caps.ex:152` BEFORE any member arm, so `or`
+short-circuiting cannot avoid the load. An API-TOKEN principal costs **2**. The autosave EVENT path derives
+**TWICE** — `Caps.gate/3` classifies `paper-block-autosave` `:write` and derives, then
+`shared/paper.ex:99 write_denied?/1` derives again — asserted, not multiplied: `event.queries == 2 *
+hop.queries` at 1600 vs 800. At `phx-debounce="500"` that is **16 uncached Postgres round-trips per second per
+editing user**. THE UNIT RULING: across three runs of the identical loop, wall swung **2.47 → 18.52 ms/op
+(7.5x)**, BEAM user CPU moved 1.8x, and the query count did not move by one — **8.000, 8.000, 8.000**. And
+even the best user-CPU figure under-reports by ≥3.7x (1.202 ms wall vs 0.325 ms user for a single derive)
+because Postgres' CPU is in another OS process. **D605's user-CPU rule was derived from a CPU-bound census and
+does not transfer unmodified to an I/O-bound predicate: quote the query count as the load-invariant number,
+and label any latency figure with the load it was taken under.** THE FIX FOLLOWS FROM THE SHAPE, not from a
+mood: the three identical membership loads buy **zero** freshness and collapse to one without touching grant
+expiry truth (8 → 4); the grant `Repo.all` is the one that genuinely buys mid-session expiry truth and STAYS.
+That is strictly better than the short-TTL memo `pds-w42-bl-caps-derive-per-op-cost-unmeasured` floats, which
+trades the freshness `derive/1`'s own moduledoc defends. The instrument goes red under the memo — 3 tests, 3
+failures, every row at `queries=0` — so the price column descends from its substitution.
+
+**PDS-D635 — A LIVE WRITE BYPASS, PROVEN BY RUN WITH A CONTROL IN BOTH DIRECTIONS: THE READ-ONLY SHARE
+POSTURE LOSES TO `caps.write`.** `Caps.write_capable?/2` (`caps.ex:284-289`) tests `Map.get(caps, :write) ==
+true` **BEFORE** `restricted?/1`, and `derive/1` (`caps.ex:143-167`) computes `write` from membership and
+grants ONLY — it never reads `share_access`, `readonly_gate?`, `write_gate?` or `caller_context`. So a socket
+that is BOTH restricted AND has a write source short-circuits past the restriction, and the predicate's own
+docstring ("a RESTRICTED socket … does not [pass]") is **FALSE for all four restricted shapes**. IT IS
+REACHABLE THROUGH A REAL NON-ADMIN PATH: `LiveScope.authorize_read/4` offers the PUBLIC-SHARE arm BEFORE the
+grant arm — deliberately, "grants only ADD access, never REMOVE it" — so a signed-in NON-MEMBER holding an
+ACTIVE WRITE GRANT who mounts a desk that is also `:docs`-shared read-only gets grade `:share_read`:
+`share_access: :read`, `readonly_gate?: true`, and **no `caller_context` and no `write_gate?`**, so neither
+`Content.Scope.scope_to_grants/3`'s read-narrowing nor the per-event `Access.validate/3` write-narrowing is
+armed — while `derive/1` still returns `write: true`. **THE WRITE LANDS.** On that socket the REAL
+cid-targeted component event `inner-change` at `#paper-fb-<id>` wrote persisted state: `stored =
+%{"amount" => "REACHED"}`, `flash = %{}`. The same intent through the EVENT route was HALTED with "This
+workspace is shared read-only" — **the two enforcement seams disagree about the same principal, the same op,
+the same socket, and one of them is wrong.** AND IT ESCALATES: `Access.admits_desk?/3` auto-satisfies a
+grant's own `type`/`doc_id` because a desk cannot name them, deferring narrowing to `scope_to_grants` — which
+this grade never arms — so a write grant naming ONE doc **wrote a DIFFERENT paper on the same desk**
+(`stored(other) = %{"amount" => "ESCALATED"}`, no flash). The narrow "the grantee was substantively entitled"
+reading survives for a WORKSPACE-scoped grant; it does **not** survive the doc-scoped case, where the socket
+writes a document its grant does not name with every narrowing mechanism structurally disarmed by the grade it
+was given. Both named suites (`studio_live_caps_gate_test.exs`, `pds_w41_caps_component_gate_test.exs`) pass
+21/21 unchanged on this tree — **the hole is green under today's coverage.** THE FIX IS SURGICAL, NOT THE
+OBVIOUS REORDER: flipping `restricted?/1` above `caps.write` wholesale would also deny GRANT-graded sockets
+(`write_gate?` / `caller_context`), whose narrowing IS armed, breaking legitimate grantees. Wave 43 instead
+inserts a `readonly_posture?/1` arm — `share_access == :read or readonly_gate? == true`, the postures LiveScope
+DECLARED read-only — **above** the `caps.write` branch, and leaves the grant grades to the existing
+`restricted?` arm below. `derive/1` stays an honest authority function. Non-regression is proven by the two
+controls the probe already carries: the NEGATIVE control (identical setup, READ-only grant) must stay refused
+with the store unchanged, and the POSITIVE control (admin member, `share_access: nil`) must keep writing.
+**HIGH-FLIP-RISK: authorization/tenancy — an independent second reviewer is owed before merge.** The pure
+`{:grant, ctx}` grade did NOT reproduce (read-narrowing hid the doc, `paper_doc` nil, write a no-op) — that is
+INCONCLUSIVE, not cleared; `pds-w42-bl-grant-graded-component-arm-unbuilt` stays open and this wave must not
+record "the grant grade is safe."
+
+**PDS-D636 — THE DOOR IS WALKED TWICE MORE, AND THE COUNT IS 1 → 3 OF 19 WITH A PRICE PER ROW.** Both new
+doors were BUILT and gated in BOTH polarities before this decision. (a) THE CENSUS. Plain run (NO FLAG) rc=0
+`CENSUS OK`; the one-token `tl(…)` mutant on `classified = Enum.map(routed, &classify(&1, index))` — an anchor
+verified to occur EXACTLY ONCE at two different shas — reds over the **REAL repo corpus** naming a real module
+(`Sheets.Web.ImportController.create`), so no synthetic fixture tree is needed; the unknown-flag arm exits 2.
+Five paired samples: floor **32.67 s min / 34.78 s median / 39.72 s max USER CPU** for plain+mutant, +4.16 s
+for the ARGV arm (nearly all of it parsing the 7 106-line script, not censusing) — **~37 s total**, against
+the direction's budgeted ~18 s. `cd api && CC=clang mix test test/barkpark/pds_elixir_census_test.exs` → **3
+tests, 0 failures**. The plain path spawns NOTHING (both `System.cmd` sites are inside `defp selftest`), so
+D633's blindness does **not** contaminate this figure — the one place in the wave where the governing finding
+does not bite. (b) RECORD-PARITY, at **1.30–1.47 s user**, the cheapest door in the inventory and 12x cheaper
+than the census's plain run. THE DECLARATION IS LOAD-BEARING FOR CORRECTNESS, ON THE RECORD: #9290 and #9292
+each touched ONLY the census, and on each head `Test (Elixir ${{ matrix.elixir }} / OTP ${{ matrix.otp }})`
+concluded **`skipped`** while `Elixir gate` concluded `success` — against #9296 (which DID carry its
+`ELIXIR_TEST_ONLY_PATHS` line) concluding `Test (Elixir 1.18.1 / OTP 27.0) :: success`. Without the line the
+gate runs on every PR EXCEPT the ones that change the instrument. TWO DESIGN FACTS OR IT FLAKES IN CI:
+`@moduletag timeout: 600_000` is mandatory (each census arm is ~23 s wall against ExUnit's 60 s default;
+`config/test.exs:36`'s `45_000` is the DB checkout timeout, a different thing), and `cd: ctx.root` on the
+mutant invocation is load-bearing because the corpus glob is CWD-relative — a mutant run from its tmp dir
+would census an empty tree and pass vacuously. AND THE CENSUS CARRIES A FALSE SENTENCE ABOUT ITSELF TODAY:
+`census.exs:10-11` says "`scripts/pds-*` is in NEITHER Elixir path set … so this file costs no Elixir gate
+minute", which is already false on `origin/main` (line 99 declares `pds-status-only-residue.exs`) and becomes
+false about the census itself. In an epic whose law is that a receipt lies when its value does not descend
+from the write, an instrument carrying a false claim about its own gating is not a comment nit — wave 43
+rewrites it.
+
+**PDS-D637 — THE REASON COLUMN HAS FIVE CLASSES, NOT THREE, AND "THE FENCE" IS NOT ONE OF THEM.** The
+denominator is exactly `scripts/pds-*.{sh,exs}` = **19** (17 `.sh` + 2 `.exs`; note 4 lack the exec bit, so
+D607's "executable" means "a runnable program", not mode 0755). My direction permitted three answers —
+PRICE (in seconds), ENVIRONMENT (named), NOT-YET-BUILT — and two more were found by run that none of the three
+can express. **CONTENT-RED**: `pds-charter-ledger-sweep.sh --selftest` is **rc=1 on main TODAY** ("RED: an
+UNRESOLVED-CLAIM ARRIVAL is a charter claim nobody has adjudicated"), 2.36 s user — it cannot ride any gate
+until `scripts/pds-charter-ledger-adjudication.md` is updated, and that is neither a price nor an
+environment. **RED-BY-DESIGN / REPORTER**: record-parity's LIVE axis B exits 1 on **59 leaf rows** at
+`--limit 400`, 48 of them belonging to twelve OTHER epics that never consented to this instrument;
+`pds-bl-w39-record-parity-61-reds-owner-report` criterion 3 already demands the wave say "the arm is a
+REPORTER and must never carry a required check name." A related class — HUMAN-GATE — governs the sheet-grid
+harness, whose workflow states in its own header that it "only *gates* a PR once it is registered as a
+required check … (a human GitHub step)". THE FULL COLUMN, all 19, priced where measured:
+`pds-status-only-residue.exs` **THROUGH** (0.46 s) · `pds-record-parity.test.sh` **THROUGH this wave**
+(1.30 s) · `pds-elixir-receipt-census.exs` **THROUGH this wave** (~37 s plain+mutant+refusal; its
+`--selftest` stays disqualified at **210 s leaf-metered**) · `pds-ledger-census_test.sh` PRICE ~20–23 s,
+**viable, deferred to a wave-44 door** · `pds-scratch-target_test.sh` PRICE 4.30 s, probable local-PG
+dependency, unverified · `pds-charter-ledger-sweep.sh` **CONTENT-RED** · `pds-record-parity.sh` (live axis B)
+**RED-BY-DESIGN/REPORTER** · `pds-live-hetzner-placement-group.sh` declares `--selftest-offline` and is the
+best UNEXAMINED candidate, **NOT-YET-MEASURED** · `pds-window-sentinel.sh` **NOT-YET-BUILT as a checkable arm**
+(it is a watcher with no pass/fail selftest) · and nine ENVIRONMENT rows naming what they need:
+`pds-live-bp-write-receipt.sh` (live bp writes) · `pds-ledger-census.sh` (live ledger creds) ·
+`pds-pull-proof.sh` (prod DB + frozen blob) · `pds-secret-scan.sh` (DB-sourced ammo) ·
+`pds-scratch-target.sh` (Postgres) · `pds-crown-stamp.sh` (bp ledger writes) · `pds-crown-launch.sh`
+(long-running launcher) · `pds-climb-preflight.sh` (`gh` workflow state) · `pds-export-peak-measure.sh` and
+`pds-idle-sampler.sh` (sample a live host). **Every remaining refusal is now auditable and attackable BY
+NUMBER OR BY NAME rather than by mood** — a later wave can dispute "18 s" or "no ledger in CI", which is
+progress no "the fence forbids it" wave ever offered. AND THE HONEST SECOND HALF, said in D625's own words:
+**3 of 19 instruments run under a required gate, on every PR that could affect them — NOT on every PR.**
+Note also what the doors DO and DO NOT prove: record-parity's 76-check harness is **hermetic** — zero of its
+checks read a live ledger row (a logging `curl` shim recorded **0 calls** across the whole harness, and the
+shim is proven able to log), and its single real `gh` call is deliberately aimed at an unresolvable repo so
+that its FAILURE is the assertion. **That gates the ARM's own logic against regression, NOT the epic's
+record.** Wave 43 prints that sentence beside the count rather than letting a reader believe otherwise.
+
+**PDS-D638 — THE LEDGER LESSON IS TWO SHAPES WITH TWO DIFFERENT KEYS, AND ONE OF THEM CANNOT USE
+`expired_at` AT ALL.** The wave's own item 1 was contradicted by two surveyors and the contradiction is only
+half-dissolved. `claim.expired_at` EXISTS — **403 of 3 193** claim-bearing rows carry it, **zero**
+null-valued — and PDS-D323's ruling ("never derive LIVE claims from `claim.expired_at`, the filter returns
+ZERO") is CORRECT and about a DIFFERENT question. **SHAPE A** (reverted-to-open after expiry: `open` +
+`worker` null + `previous_worker` set + `expired_at` set + no release/close) fires on **196 rows**, 138 with
+work evidence, **6 fully criteria-complete while sitting `open`** — including this epic's own
+`pds-w42-liveview-authorization-column`, `pds-w41-residue-lens-unrun`, `pds-w42-paper-op-principal-gate`.
+**SHAPE B** (in_progress held by a finished worker) is 2 rows and **NEITHER carries `expired_at`** — by
+construction, because the lease is still held and the REAP is what writes the field. **A check keyed on
+`expired_at` PASSES VACUOUSLY on shape B, 100% of the time, forever.** Shape B's only honest key is
+`lifecycle_status == "in_progress"` AND `now() - claim.ts_iso > task_lease_ttl_seconds` (2700 s default,
+sweeper cron `* * * * *`), so shape B self-heals into shape A within ≤46 minutes — **which means a shape-B arm
+whose selftest does not INJECT a synthetic stale in_progress row ships as a permanent green that has never
+once fired**, the exact vacuous shape this epic exists to kill, relocated into the fix. A THIRD shape nobody
+named: **22 open rows** carrying a claim with `worker` SET and `closed_at` set — reopened rows whose stale
+claim was never cleared; a worker-keyed check reads them as held and an expiry-keyed check ignores them.
+MECHANICS, read from `origin/main`: the reap MERGES (`worker => nil`, `epoch+1`, `ts_iso`, `expired_at =
+ts_iso`, `previous_worker`), DELETES `resources`, and PRESERVES `now`/digests/`closed_*`; a **re-claim
+REPLACES the whole claim map**, so lapse history is NOT cumulative and any "N lapses this wave" undercounts by
+exactly the rows a lead re-claimed to clear a gate refusal. THE PR-GATE COST IS MEASURED AND UNCLEARABLE BY
+RE-RUN: a real refusal today quotes **"the claim by 'loop-decide' had ALREADY lapsed 4982s before this PR was
+opened"** — 83 minutes, not a near-miss race — and the identical message re-fires byte-identically 57 minutes
+later, because the gate compares against a FROZEN `PR_OPENED_AT`. **Only a re-claim clears it.** (The brief's
+"#9230 / 64 seconds" citation is NOT reproducible — that PR's gate passed and no failed run exists on its
+branch. Do not quote it.) `claim` rides `/v1/data/query` as a TOP-LEVEL key so an arm costs zero extra
+requests — but that projection is `perspective: published`, and one of the six fully-complete-but-open rows is
+`drafts.ppcc2-review-task-012`, so a data/query-only arm undercounts drafts BY CONSTRUCTION and must declare
+which lens it is. **python3 IS on the runner** — proven by mutation, not by image docs: the green `Elixir
+path-escape ratchet` job runs a harness that calls `python3` five times and `import yaml`, and stripping
+python3 from PATH makes it **rc=127**. So the ledger-census expiry arm is NOT environment-blocked. **The
+READ-BACK arm is split off**: it must issue a WRITE and re-read it, which cannot ride `--fixture-dir`, so it
+is live-only and goes to the backlog rather than sinking the expiry arm.
+
+**PDS-D639 — THE 32 ARE DERIVABLE, THE FOLD IS FREE, AND IT MAKES THE HEADLINE FRACTION WORSE — WHICH IS WHY
+IT IS A DERIVATION AND NOT A RUBBER STAMP.** Derived by run, not read: the residual decomposes into six
+modules (Tickets.InboxLive 11, Tasks.Web.BoardLive 9, OnixEdit BokbasenLive 8 + StalenessLive 2,
+Github.Web.OpsLive 1, QuizPlayLive 1). ONE missing `lvs_walk/3` clause is the entire blocking shape — the walk
+records a session only at a `live/3` node with a literal path, so the `plugin_routes(scope: …)` macro node
+inside a `live_session` records nothing and `sess == []` sends the clause to the residual. With the clause
+added: `RESIDUAL 32 → 0`, `reachable_unconditional 194 → 225`, `unreachable_no_hook_in_chain 9 → 10`,
+`sum 322` unchanged, every INTEGRITY arm still PASS, `--selftest` rc=0 at 30/20. QuizPlayLive lands
+`unreachable_no_hook_in_chain` because `:public_root` is macro-wrapped in its own `live_session` carrying
+`root_layout:` and **no `on_mount` key at all** — derivably EMPTY, a decided class, not a residual. **THE
+DENIES NUMERATOR DOES NOT MOVE: 137 stays 137, so the honest deny-by-default fraction goes 137/194 (70.6%) →
+137/225 (60.9%).** A fold that made the wave's headline worse is the strongest available evidence it is real.
+Cost: **16.06 s user patched vs 17.75 s baseline** — free. THREE OBLIGATIONS OR IT SHIPS A LIE: (a) the
+selftest's synthetic corpus writes ten fixture files and **NOT ONE under `api/lib/barkpark/plugins/`**, so
+`plugin_route_specs/1` returns `[]` and the new clause is **structurally unexercised** — the slice must add a
+plugin fixture with two live specs, one at a `live_session`-wrapped callsite asserting a decided class and one
+at a **sessionless** callsite asserting RESIDUAL non-zero, or the class does not descend from its
+substitution; (b) the residual PROSE becomes false on landing — it says the walk "cannot read" the
+live_session, and after the fold it CAN for 6 of 17 callsites; the true sentence is "clauses whose plugin
+mount callsite sits outside any live_session" (**11 of 17 sites, 8 auth buckets**, so the residual stays ALIVE
+and falsifiable — flipping the tickets spec from `auth: :admin` to `auth: :api` prints `RESIDUAL 11 / 322`
+WITH the fold in place); (c) **D620's claim that ChatLive is the only multi-session module of the 15 is
+INVALIDATED** — the fold makes routed modules resolving to a live_session 15 → 26 and multi-session clauses
+39 → 78. AND A LATENT MISCLASSIFICATION, found by a falsifier that REFUTED my own proposed test: a
+variable-bound spec module (resolving to `"?"`) does NOT decline into the residual — it lands in the DECIDED
+and WRONG `unreachable_component_lifecycle` class, caught today only by `ROUTED-POPULATION-COMPLETE` for a
+route-arrival reason that never mentions REACH. No live plugin spec uses a variable module today; the sheets
+plugin already writes controller specs that way, so it is one copy-paste from a live route.
+
+**PDS-D640 — PROVEN-BACKED IS 23 ROUTED-WRITE **MEMBERS**, AND THE UNIT WAS THE BUG.** All four ladder rungs
+reproduce at today's head — DISPOSED 252/252, UNDISPOSED 0, JUDGED 67, ROSTERED 7, EXCLUDED 178 (exactly two
+classes: `liveview_handle_event` 40 + `status_only_receipt` 138; **`action_not_in_corpus` is NOT emitted**, so
+the owning doc's `| action_not_in_corpus | 2 |` row must be DELETED). So clause 6's "dead for the third time"
+is half wrong: #9290 and #9292 moved no rung. What IS unsettled is PROVEN-BACKED, and by UNIT, not drift. The
+number **23 is reachable by THREE different sets over three different populations**: 15 proven receipt defs ∪
+8 roster defs = 23; 20 members + 3 roster ROWS = 23; proven-only MEMBER union 20 ∪ 3 = 23. Neighbours: the
+all-roster member union is **27**, the proven-only DEF union is **18**. Every union check the task's criteria
+specify — injection, printed overlap, both directions — passes in ALL of them, **which is precisely why the
+ambiguity survives the criteria**. AND THE TASK'S OWN CRITERION IS WRONG: `roster_functions/1` applies NO
+verdict filter and the @roster is 3 PROVEN / 5 UNJUDGED, so "15 proven defs ∪ 8 roster defs" counts **five
+UNJUDGED rows as PROVEN-BACKED**, including `ChatController.approval`, whose own roster note says its result
+"is discarded with `_ =`". A "PROVEN-BACKED" integer that does not descend from its rows' verdicts is this
+epic's law failing on the ladder built to enforce it. **THE RULING, and the line's exact printed form:**
+`PROVEN-BACKED  23 / 252 routed-write MEMBERS (FLOOR, one-hop) = |proven-register-reaching 20 ∪
+proven-roster-reaching 3|, OVERLAP 0`. Four reasons it is the only self-consistent choice: it is the
+charter's own authored unit (**PDS-D578, verbatim: "PROVEN-BACKED is 23/252 = 9.1% (20 register routes + 3
+roster)"** — so the wish's "'20 + 3' reproduces in neither unit" is REFUTED; it reproduces exactly, as a UNION
+with proven-only legs); it is same-unit as every neighbouring rung; it keeps the shipped headline without
+counting a single UNJUDGED row; and it is the ONLY reading whose shortfall does not collide — 74 − 23 = 51 in
+members, distinct from the register leg 67 − 20 = 47, where the all-roster member reading gives 47 and
+collides exactly. **OVERLAP 0 is a property of TODAY'S DATA, not of the code** — the two sets are independent
+comprehensions with nothing preventing a `{module, name}` from landing in both — so the print is an
+`Enum.count` over a `MapSet.union/2` taken ONCE, never `leg_a + leg_b`, with OVERLAP printed beside it as its
+own count. Six addition idioms sit in the same reporting flow (`census.exs:4033` is a four-term `+` inside the
+ladder's own print block, correct only because `dispose_routed/4`'s `cond` makes ITS classes disjoint by
+precedence — a property the ladder's two legs do NOT have). Two further corrections: ROSTER-REACHED computed
+precedence-free equals `disp.rostered` **today** (7 = 7), so that criterion is currently unfalsifiable by
+observation and must be proven by INJECTION, not by matching the printed 7; and the selftest baseline is
+**30 cases / 20 mutants**, so the task's "25 cases, 16 mutants" would RED A GREEN TREE — the third consecutive
+time that baseline has been quoted stale.
+
+**PDS-D641 — THE ONE STANDING USER-FACING HARM IS BIGGER THAN "CANNOT COPY", AND ITS STUDIO HALF NEEDS ZERO
+SERVER CODE.** Copy is 100% client-side (`bp-sheet-grid.js:853` listens for the DOM `copy` event;
+`_selectionTsv()` reads `td.sheet-sel` + `data-v`, which is stamped UNCONDITIONALLY on every `<td>`), and it
+needs exactly two things: `td.sheet-sel` in the DOM and a hook. A write-denied Studio member HAS the selection
+markup (`grid_sel(active, anchor, :studio)` returns a real rect) and NO hook — and because `cell-click`/`nav`
+have **no server-rendered `phx-click` binding anywhere**, the hook is their sole producer, so what that member
+actually has is **a selection highlight frozen on A1 that nothing can ever move**. Copy is downstream of that.
+The read-mode hook must restore SELECTION, not just clipboard. Derived BY SUBSTITUTION (27 key/gesture shapes
+dispatched at the shipped bundle), the mutation set a naive attach would expose is exactly **six** events —
+`edit-start, cell-toggle, clear-selection, undo, redo, toggle-style` — all terminating at `Ops.send_ops/2`,
+whose `write_capable: false` clause is "THE LAST WALL", so the read-mode key map is a **UX and honesty**
+requirement, not the security boundary. `presence-meta` must be DENIED for the `editing` flag specifically:
+`edit-start` is the ONE denied event with no `send_ops` terminus — it only assigns editing state and
+broadcasts "this person is editing A1" to every peer while the editor renders nothing. Copy already works
+under the exact read-mode DOM shape and **pushes zero events** (proven, with a `MUTANT=copy-pushes` arm that
+reds the assertion at rc=1), and the hook ALREADY self-derives `_readOnly` from the absence of `data-fns` —
+which the non-editable wrapper already omits — so the slice EXTENDS an existing axis rather than inventing
+one. **THE HARM CLASS IS LARGER THAN THE FILED TASK'S TITLE**: `@editable = mode == :edit and write_capable`,
+so a FULLY WRITE-CAPABLE member who clicks the View toggle lands in the identical DOM shape. One predicate
+change fixes both populations, which affirms the task's own third criterion. **THE READER HALF IS SPLIT OFF
+AND STAYS OPEN**: `grid_sel(_,_,:reader)` returns `{0,0,0,0}`, off the 1-based grid, so no `<td>` ever gets
+`sheet-sel` and the same hook is a silent no-op there; the three nav heads are explicitly `:reader`-refused
+server-side. Fixing the reader needs either a chrome-policy reversal wave 42 made deliberately or a
+client-only selection layer — a genuinely separate decision, and the Studio half ships alone. Note the proof
+surface: the 141-check `__hook.test.mjs` harness runs in CI on the right paths but its workflow is
+**self-declared advisory** (HUMAN-GATE, per D637).
+
+**PDS-D642 — THE WAVE 43 PLAN: SIX SLICES, FIVE IN ROUND 1, ONE DEFERRED, AND THE COLLISIONS RESOLVED BY
+MERGING RATHER THAN SEQUENCING.** All six wave-42 PRs (#9290 #9292 #9294 #9295 #9296 + charter #9258) are
+MERGED and are ancestors of `origin/main` — verified by `git merge-base --is-ancestor`, six for six — so
+**no wave-43 slice has an inbound merge-order wait** and every "AFTER … MERGES" criterion inherited from wave
+42 is already satisfied. The real ordering problem is intra-wave file collision, and it was resolved by
+CUTTING DIFFERENTLY rather than by rounds: the caps security fix and the caps cost instrument both rewrite
+`derive/1`'s membership closure and grants load, and the cost instrument's query-count assertions CHANGE from
+4 to 2 when the collapse lands — so they are **ONE slice, not two**. The census door and the record-parity
+door both edit `ELIXIR_TEST_ONLY_PATHS`'s single string literal — so they are **ONE slice**, and it does not
+touch `census.exs` at all (the header-prose fix moves into the census-owning slice). Three workstreams want
+`census.exs`: the residual fold builds in round 1; the ladder is **round 2**, dispatched after the fold
+merges; the depth-sweep memoization (`task-5a3b22be679c826a`) is deferred to wave 44 — D626's claim that it
+landed is refuted, it is NOT on `origin/main`, and its arrival would move the census floor price this wave
+just measured. `pds-w42-caps-prop-is-a-mount-snapshot` is likewise deferred: its unblocking dep merged, but
+its subject is the same `derive/1` region slice 1 is rewriting. **FABLE IS UNAVAILABLE THIS WAVE**; every
+slice dispatches on Opus, which is a real constraint on slice 1 (authorization) and slice 5 (visual surface)
+and is the reason both carry an explicit independent-second-reviewer demand rather than relying on builder
+depth.
+
 ### Wave 42 2026-08-02 — REVIEWED AND SEALED, grade A− — 5 of 5 slices green, pushed, and PR'd (paper `pds-wave-42-2026-08-02`)
 
 **WHAT LANDED.** Five slices, all gate-green on the reviewer's own re-runs, all pushed to `origin`, all
