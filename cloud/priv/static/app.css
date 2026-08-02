@@ -948,7 +948,39 @@ select.form-input {
 /* v4 screens/01: the lifecycle pill LEADS the row in its own column so names
    align down the list; the pill's detail truncates via the existing .status-pill
    rules (never edited here — charter GR11/GR25). */
-.fleet-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; }
+/* cch-w23-s1 — `max-width: 100%`, FOLDED IN PLACE, is what makes the wrap at
+   :3176 BIND in the side-by-side band. Driven on `fleet-cruel-content#fleet`
+   with `overflow-wrap: anywhere` already shipped on `.status-pill-detail`: at
+   320-898 the row is `flex-direction: column` and the page landed 320/320, but
+   at 900 and 1000 it was STILL 4108 against the viewport in both themes — the
+   detail measured 3754/3754, i.e. its own box had grown to the whole token, so
+   nothing about it was "overflowing" and no wrap could ever fire. The chain
+   says why: this column is `flex: 0 0 auto`, so its flex base size is
+   MAX-CONTENT and `flex-shrink: 0` forbids the line from taking any of it back
+   — the wrap is only consulted once something bounds the box.
+   `max-width: 100%` is the bound, and it is the SMALLEST one available: it caps
+   the column at the row's own width and lets `flex-wrap: wrap` (:2503, the
+   >=900 block) drop the badges to their own line, which is the trade that block
+   already accepted. Measured after: 900 lands 900/900 with the detail 502/502,
+   1000 lands 1000/1000 with 602/602.
+   `flex: 0 1 auto` WAS DRIVEN TOO, and the prediction that it would collapse
+   this column onto its 116px floor was WRONG: it measures IDENTICALLY (900 ->
+   502/502, 1000 -> 602/602, kind corpus unchanged), because `flex-wrap: wrap`
+   drops the badges before the line needs much shrink at all. It is refused for
+   a reason that is not pixels — it REWRITES an existing declaration, where this
+   is an ADD (D157), so the <=898 stacked band, where `flex-shrink` would act on
+   the COLUMN axis instead, is untouched by construction rather than by a second
+   measurement.
+   WHY NOT `max-width: 45%`: REFUTED BY MEASUREMENT at :2487 (it ellipsed the
+   money message in 60 of 64 cells) and not re-proposed here.
+   THE KIND CORPUS IS BYTE-IDENTICAL, which is the whole claim: on `mixed-fleet`
+   at 320/390/620/900/1000 every `.status-pill-detail` in this scope measures
+   exactly what it measured before this declaration (45/45, 130/130, 170/170,
+   245/245, 209/209, 237/237) — a row that already fits is never asked to
+   shrink, so nothing was bought at the kind row's expense.
+   GR11/GR25: `.fleet-status` is a WRAPPER (the vocabulary :2499 uses); no
+   quarantined pill family is edited here. */
+.fleet-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; max-width: 100%; }
 .fleet-main { min-width: 0; flex: 1; }
 /* cch-w21-s3 — THE TWO FLEET-ROW TEXT LINES ARE BOUNDED BY THE SAME ONE-WORD
    DECLARATION EACH, FOLDED IN PLACE (no new rule head, no new @media).
@@ -3146,6 +3178,44 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
+  /* cch-w23-s1 — ONE DECLARATION, FOLDED INTO THE EXISTING HEAD. This detail is
+     `bp.provision_error` verbatim (`statusOf`, app.js: kind "failed" returns
+     `detail: bp.provision_error`) and NOTHING between the worker socket and
+     this box bounds it: provision_jobs.error is a POSTGRES :text column
+     (migration 20260702130000_provision_job_error_to_text.exs, `modify :error,
+     :text`) and ProvisionJob.changeset carries ZERO validate_length.
+     THE DEFECT IS TOKEN SHAPE, NOT LENGTH, so a length cap is the WRONG remedy
+     (D267, and it inverts what cch-w21-bl-status-pill-detail-fed-by-uncapped-
+     error asked for): driven on the cruel fixture, 512 word-broken characters
+     are clean at every width while 512 characters in ONE UNBROKEN TOKEN took
+     #overview to documentElement.scrollWidth 3860 against a 320px viewport
+     (the detail itself 3754/170) and #fleet to 3856/320 — a cap loose enough to
+     keep a real capture readable still lets one token paint 3754px, and one
+     tight enough to stop the token shreds the capture.
+     `anywhere` rather than `break-word` for the same reason `.site-meta .mono`
+     (:1631) takes it: this is a MACHINE string, not prose, and only `anywhere`
+     lowers the box's min-content contribution — which is the property the
+     flex/grid track actually reads, and therefore the only one that stops the
+     PAGE being dragged sideways. Measured after: every host lands 3754 -> its
+     own box, page 320/320.
+     NO WRAP COMPANION IS AUTHORED ON THE THREE DESCENDANT OVERRIDES, and that
+     is a MEASUREMENT, not a shortcut. `.attention-row` (:3391), `.fleet-status`
+     (:6018) and `.instance-card-head` (:6097) rewrite ONLY the visibility pair
+     (`overflow: visible` plus the ellipsis property beside it) and NONE of them
+     sets `overflow-wrap`, so this
+     one declaration reaches the same element inside all three scopes and a
+     companion there would change ZERO pixels, which makes it a sentence rather
+     than a remedy. Re-driven per scope on `fleet-cruel-content` with EVERY
+     `.status-pill-detail` iterated and its wrapper scope named (not
+     `querySelector` — the fifth clause: a guard whose selector cannot reach the
+     defect is green by construction), light theme, at 320/390/620/900/1000:
+       .fleet-status       detail 3754/170 -> 170/170 @320, 3754/240 -> 240/240 @390
+       .attention-row      detail 3754/170 -> 170/170 @320, 3754/372 -> 372/372 @900
+       .instance-card-head detail 3754/164 -> 164/164 @320, 3754/496 -> 496/496 @900
+     Every host is fixed and there is nothing left to refuse — but ONE of them
+     needed a second declaration OUTSIDE this block to make the wrap bind at all:
+     see `.fleet-status`'s `max-width: 100%` at :983 and the note there. */
+  overflow-wrap: anywhere;
 }
 .status-pill-detail::before { content: "·"; margin-right: 6px; color: var(--dim); }
 .status-pill--ok { background: var(--ok-soft); border-color: hsl(var(--ok-hsl) / 0.28); }
