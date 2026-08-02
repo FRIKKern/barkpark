@@ -3,6 +3,56 @@
    CSS custom properties, light + dark via [data-theme]. No framework.
    ========================================================================== */
 
+/* ============================================================================
+   THE WRAP RULE (cch-w25-s3, charter D299) — READ THIS BEFORE ADDING A WRAP.
+   Stated once, here, by the slice that measured it. Two waves shipped
+   `overflow-wrap: anywhere` and `overflow-wrap: break-word` into this file in
+   the same round; both were right for their element and both carried their
+   measurements at the site, which reads as inconsistency until you read the
+   comments. It is THREE-VALUED, plus a parent-side half that is not optional.
+
+   PROSE (a sentence a person reads) ......... overflow-wrap: break-word
+     Breaks only a word that cannot fit its line, and PRESERVES min-content — so
+     the flex/grid track it sits in still asks for its longest word and cannot
+     collapse. Use it on names, captions, human copy.
+   MACHINE STRING (a path, a host, an id, a raw error) ... overflow-wrap: anywhere
+     Also breaks at the box edge, but LOWERS min-content, so the element cannot
+     force its own track — and therefore the PAGE — wider than the viewport,
+     whether or not an ancestor happens to carry the escape below. Read the
+     ordering honestly: the difference is only OBSERVABLE where something
+     actually consults a min-content floor, so a surface whose parent already
+     escapes will measure the two values identically (cch-w25-s3 drove exactly
+     that on `.deploy-rail-fail`). Choose by what the string IS, not by which
+     value the current markup can tell apart — the markup changes.
+   word-break: break-word ............. A LEGACY ALIAS WITH NO RULING. It behaves
+     like `anywhere` (min-content lowered), not like `break-word`, despite the
+     name. Do not add new ones; the SEVEN that exist are a POPULATION to triage
+     with a fixture each (cch-w24-bl-word-break-alias-remaining-seven), never a
+     to-do list to convert. `word-break: break-all` is a different declaration
+     and stays where it is: on opaque tokens (secrets, env keys, URLs) where
+     breaking mid-token IS the reading aid — five sites.
+   min-width: 0 ....................... THE OTHER HALF, on the flex/grid PARENT.
+     A flex item and a grid track both floor at their content's min-content, so
+     a wrap on the child without this on the parent yields a SPILL, not a wrap.
+     56 of this file's 62 `min-width` declarations are this escape, and none of
+     them had a written ruling until this block.
+
+   EVERY COUNT ABOVE IS DERIVED, WITH ITS COUNTING RULE, because a census quoted
+   without one is how two irreconcilable numbers get cited as a pair: comments
+   STRIPPED, then declarations counted — 12 `word-break` (7 break-word, 5
+   break-all), 62 `min-width` (66 occurrences less the FOUR that are `@media
+   (min-width: …)` preludes, which are not declarations at all), and 24
+   `overflow-wrap`. The raw line greps are higher (18 / 103 / 38) because this
+   block and the per-site comments name them in prose. Re-derive with a
+   comment-stripping pass, never a bare `grep -c`.
+
+   AND THE PART THAT IS NOT A DECLARATION: none of the four is provable by
+   reading. Every wrap in this file that is load-bearing carries a MEASUREMENT
+   at its site (page scrollWidth and the element's own scrollWidth, at a named
+   width, in a named fixture) and a leg in __preview__/overflow-guard.mjs that
+   reds without it. A wrap whose only guard is this paragraph is not guarded.
+   ========================================================================== */
+
 /* Self-hosted Inter (charter decision 27) — the console renders fully offline;
    no fonts.googleapis.com. One variable woff2 carries weights 100–900 (we use
    400/500/600/700), latin-subset. Italic is browser-synthesised (used only in
@@ -1486,7 +1536,22 @@ select.form-input {
 
 .detail-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-bottom: 24px; }
 .detail-head h1 { margin-bottom: 4px; }
-.detail-grid { display: grid; grid-template-columns: 1fr 260px; gap: 28px; align-items: start; }
+/* cch-w25-s3: THE MAIN COLUMN'S MIN-CONTENT ESCAPE, hoisted out of the
+   max-width:768 block onto the base rule (a DECLARATION change — same rule head,
+   so the CSSOM census does not move). A bare `1fr` track floors at its content's
+   min-content, so ONE unbreakable run anywhere in `.detail-main` pushes the
+   whole grid: with the deploy rail's failed BUILD stage on screen, the page
+   measured documentElement.scrollWidth 1070 against a 900 viewport, widest box
+   `.detail-rail` right=1069.72 — the sidebar shoved off the edge by the main
+   column. `minmax(0, 1fr)` is the same escape the ≤768 block has always applied;
+   this makes it true at every width. It cannot widen anything — it only lowers a
+   floor. Driven at 320/390/900 in both themes by overflow-guard's
+   W25-deploy-rail-fail-wrap leg, and reverting this one declaration reds its 900
+   cell. `.detail-grid--instance` below keeps its bare `1fr`: no leg in this file
+   drives an instance route against a string cruel enough to floor it, and a
+   conversion with no fixture that could fail is exactly the change this epic
+   refuses. */
+.detail-grid { display: grid; grid-template-columns: minmax(0, 1fr) 260px; gap: 28px; align-items: start; }
 /* The instance workspace rail hosts the per-host domain checklist (#instance-
    domains), which needs room for a rung's label + evidence code on one line — so
    its rail is wider than the shared 260px. SCOPED to the instance workspace: the
@@ -4919,6 +4984,57 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--text);
   font-size: 13px;
   line-height: 1.45;
+  /* cch-w25-s3 — THE SECOND HEAD OF A TWO-HEADED BOX. Wave 24 gave `.bp-tl-fail`
+     (above) `overflow-wrap: anywhere`; this twin — same padding, same border,
+     same font-size, same line-height, as the comment on the line above has said
+     since it was authored — kept `overflow-wrap: normal`, `word-break: normal`,
+     `overflow: visible`. It holds a deploy stage's `detail` VERBATIM: the
+     control plane scrubs console entries for SECRETS on ["line","detail"] and
+     never humanises them, three lines from the failure_reason that IS
+     humanised, so a builder's own `Cannot find module '/opt/barkpark/sites/
+     <slug>/releases/…'` — one unbreakable run carrying the person's own slug —
+     lands here whole.
+     PRE-FIX, MEASURED on `?scen=site-deploy-rail-failed` (the fixture this
+     slice had to write, because no scenario in the harness carried a rail STAGE
+     entry and the rail had therefore never rendered at any width): the box read
+     scrollWidth 454 against a 248px client box at 320 and 454/318 at 390 — 206px
+     and 136px of the error painted OUTSIDE its own border — and the page read
+     490/320, 490/390, 1070/900. After: 320/320, 390/390, 900/900 with every box
+     inside its border, both themes.
+     WHY `anywhere`, AND AN HONEST NARROWING OF THE MEASUREMENT THAT SENT THIS
+     SLICE HERE (charter D298). D298 recorded `break-word` on THIS box failing at
+     900 (page 1011) — measured with the cruel string injected into the FOOTER
+     ALONE. On a fixture that delivers the string the way the product does, that
+     comparison is NOT REPRODUCIBLE, because the same detail is rendered TWICE:
+     here, and in the step row's `.new-step-detail`. Driven at 320/390/900 in
+     both themes, swapping this box between `anywhere` and `break-word` changes
+     NOTHING (box 248/248, 318/318, 292/292 either way; page identical) — the
+     900 page overflow is `.new-step-detail`'s preserved min-content, and wave 24
+     chose `overflow-wrap: break-word` there DELIBERATELY so a hostname stays
+     whole (W24-theater-failed-hostname-whole reds if it is changed). D298 is
+     therefore MASKED on this surface, not refuted, and this box's value is
+     chosen by the RULE at the head of this file rather than by a pixel
+     difference this surface can show: the footer holds a machine string, and
+     `anywhere` keeps the box's own min-content low so it does not depend on an
+     ancestor escape it does not own. Anyone re-measuring D298's pair must
+     neutralise the step caption first, or they will measure the caption.
+     THE OTHER HALF IS THE PARENT, AND IT IS NOT OPTIONAL: `.detail-grid`'s
+     `minmax(0, 1fr)` escape used to be authored ONLY inside the max-width:768
+     block, leaving a bare `1fr` above it — a track that floors at its content's
+     min-content. It is now on the base rule (one declaration, same rule head).
+     Both mutations were driven and each reds a DIFFERENT assertion of the guard
+     leg: revert the track to `1fr` and the PAGE reds at 900 (1070/900, widest
+     `.detail-rail` right=1069.72); keep the track and delete the declaration
+     below and the BOX reds at every width (454 into 248/318/292) WHILE THE PAGE
+     STAYS GREEN at 900 — which is exactly why the leg asserts both.
+     THE COST IS HEIGHT, AND IT IS HONEST: the footer goes 135.06px → 172.75px
+     at 320 on a 240-character error. Nothing is hidden and nothing lies. The
+     guard PRINTS it per cell and deliberately does not pin it — a pixel pin on
+     a wrapped string is a claim about THAT string at THAT width.
+     Guard: overflow-guard.mjs W25-deploy-rail-fail-wrap, 320/390/900 x 2 themes,
+     page AND box, with the ordinary HEALTH string driven as a kind control in
+     the same cells. See THE WRAP RULE at the head of this file. */
+  overflow-wrap: anywhere;
 }
 
 /* ── Create-site "Deploy now" field ────────────────────────────────────────

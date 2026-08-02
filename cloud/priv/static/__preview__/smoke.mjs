@@ -21,7 +21,7 @@ import vm from "node:vm";
 import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import path from "node:path";
-import { SCENARIOS, SCENARIO_NAMES, route } from "./scenarios.mjs";
+import { SCENARIOS, SCENARIO_NAMES, route, RAIL_FAIL_CRUEL_DETAIL as SCEN_RAIL_CRUEL_DETAIL } from "./scenarios.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const APP_JS = fs.readFileSync(path.join(HERE, "..", "app.js"), "utf8");
@@ -864,6 +864,61 @@ const EXPECTATIONS = {
     container: "site-body",
     includes: ["dep-current", ">Redeploy<", ">Roll back to this<"],
     excludes: ["dep-pill dep-building"],
+  },
+  // cch-w25-s3: the deploy rail, FAILED. The first scenario in this harness
+  // whose console carries a rail STAGE entry — before it,
+  // `deployRailLedgerFromConsole` dropped every console line (no `stage` key)
+  // and the rail never mounted anywhere. The footer must carry the builder's
+  // raw string VERBATIM, so the expectation quotes the fixture's own derived
+  // detail rather than a transcription of it.
+  //
+  // WHY A `check` AND NOT AN `includes` LIST. The rail is mounted INTO
+  // `#deploy-rail-slot` by `mountDeployRail`, which reaches through
+  // `scope.querySelector` — a real-DOM seam this vm registry does not model, so
+  // the slot renders as an empty div here however correct the fixture is. The
+  // browser half of this proof is overflow-guard's W25 leg, which asserts the
+  // box in a real Chrome. What THIS half owns is the fold: the ledger keeps a
+  // stage entry, the rows carry the failure, and the markup puts the raw string
+  // in `.deploy-rail-fail` — every one of them off the committed fixture.
+  "site-deploy-rail-failed": {
+    what: "the deploy rail's FAILED fold — the ledger keeps the stage entry and the footer carries the builder's raw error",
+    check(reg, hooks) {
+      const scen = SCENARIOS["site-deploy-rail-failed"];
+      const deployments = scen.data.deploymentsBySite[scen.deepLink.split("/")[1]];
+      // The rail tracks the deployment still IN FLIGHT — the transient window
+      // this footer lives in. A fixture whose row went terminal would render no
+      // rail at all, so this is asserted rather than assumed.
+      const dep = hooks.railDeployment(deployments);
+      assert.ok(dep, "the fixture must carry an ACTIVE deployment or the rail never mounts");
+      // The precondition this whole slice rests on: before this scenario, no
+      // console entry in this harness carried a `stage`, so the ledger was
+      // always empty and the rail never rendered anywhere.
+      const ledger = hooks.deployRailLedgerFromConsole(dep.console);
+      assert.equal(Object.keys(ledger).length, 2, "PLAN + BUILD must survive the fold");
+      assert.equal(ledger.BUILD.status, "failed");
+      assert.equal(ledger.BUILD.detail, SCEN_RAIL_CRUEL_DETAIL,
+        "the footer must carry the builder's string VERBATIM — nothing humanises it");
+      const rows = hooks.deployRailRows(ledger);
+      const failed = rows.filter((r) => r.role === "failed")[0];
+      assert.ok(failed, "BUILD must fold to a failed row");
+      const html = hooks.deployRailHtml(rows, { deploymentId: dep.id, failureDetail: failed.caption });
+      assert.ok(html.includes("deploy-rail-status--failed"), "the pill must read the failed tone");
+      assert.ok(html.includes(">Deploy failed at Build<"), "the pill must name the stage that broke");
+      assert.ok(html.includes('<div class="deploy-rail-fail" role="alert">'), "the failure footer must render");
+      // The raw string, escaped, inside that footer — this is the text the
+      // CSS rule under measurement has to wrap.
+      const foot = html.split('<div class="deploy-rail-fail" role="alert">')[1].split("</div>")[0];
+      assert.ok(foot.includes("Cannot find module"), "the footer holds the builder's own error line");
+      assert.ok(foot.length >= 200, "the cruel detail must reach the footer at full length, not truncated by the SPA");
+      // The KIND control's own fold, from the same fixture's other site.
+      const kind = hooks.railDeployment(scen.data.deploymentsBySite[SCENARIOS["site-deploy-rail-failed"].data.sites[1].id]);
+      assert.ok(kind, "the control site must carry an active deployment too");
+      const kindRows = hooks.deployRailRows(hooks.deployRailLedgerFromConsole(kind.console));
+      const kindFail = kindRows.filter((r) => r.role === "failed")[0];
+      assert.ok(kindFail && kindFail.step === "HEALTH", "the control must fail at HEALTH, not BUILD");
+      assert.ok(/\s/.test(kindFail.caption) && kindFail.caption.length < SCEN_RAIL_CRUEL_DETAIL.length,
+        "the control must be the ORDINARY word-broken string — shorter, and breakable at spaces");
+    },
   },
   // Invitation accept: each committed terminal renders its designed card with
   // exactly one [data-invite-act] action (esc() turns ' into &#39; in copy).
