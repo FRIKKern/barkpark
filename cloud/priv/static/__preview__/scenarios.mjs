@@ -364,6 +364,40 @@ const lastDeploy = (status, trigger, ago) => ({
 // list corpus is now 6 site rows / 2 null (acme-labs never-deployed +
 // acme-previews preview-only) / 1 preview-only.
 const depOf = (n) => "5b2c1e00-0000-4000-8000-0000000000e" + n;
+
+// cch-w24-s7 — the cruel site strings, built by concatenation so the lengths
+// that make them cruel are auditable in the source rather than counted by eye.
+// `atLength` is the guard that can lose: shorten any of these back to a
+// comfortable string and every consumer of this module refuses on load, naming
+// the constant and both numbers. A cruel fixture that quietly stops being cruel
+// is the exact failure mode this slice exists to prevent.
+function atLength(what, s, n) {
+  if (s.length !== n) {
+    throw new Error(
+      "cruel fixture " + what + " is " + s.length + " chars, must be exactly " + n +
+      " — that length IS the derivation (see the cruel site row's header); fix the string, not the number",
+    );
+  }
+  return s;
+}
+// 255 = Site.changeset/2 validate_length(:name, max: 255). One token, no space.
+const CRUEL_SITE_NAME = atLength("site name",
+  "AcmeCorporateMarketingPlatformProductionContentDeliveryEdgeGateway" +
+  "CustomerFacingExperienceClusterPrimaryIngressNode" +
+  "NorthernEuropeanRegionalStaticAssetOriginForAcmeCommerce" +
+  "InternalGroupHoldingsInfrastructureRenderedWithoutOneSingleSpaceCharacterAnywhere260", 255);
+// 63 = the DNS label ceiling, and Barkpark.changeset/2's validate_length(:slug,
+// max: 63) — the slug POST /v1/launch hands to clean_url/1 UNSUFFIXED.
+const CRUEL_SITE_SLUG = atLength("site slug",
+  "acmecorporateplatformproductioncontentdeliveryedgegatewaynode01", 63);
+// 253 = validate_domains/1's cap, as 63 + 63 + 63 + 61 unbroken labels.
+const CRUEL_SITE_DOMAIN = atLength("site domain", [
+  CRUEL_SITE_SLUG,
+  "northerneuropeanregionalstaticassetoriginforacmecommerceeu0231x",
+  "customerfacingmarketingexperienceclusterprimaryingressnodea19x1",
+  "internalacmegroupholdingsinfrastructureexampledomainnamecorpg",
+].join("."), 253);
+
 const sitesListRows = [
   site({
     id: "5b2c1e00-0000-4000-8000-0000000000c3",
@@ -428,6 +462,67 @@ const sitesListRows = [
     name: "acme-previews", slug: "acme-previews", domains: [],
     framework: "nextjs", github_repo: "acme/previews", github_branch: "main",
     github_webhook_configured: true, previews_enabled: true,
+  }),
+  // cch-w24-s7 — THE CRUEL SITE ROW. Every string below is DERIVED from a cap a
+  // non-admin caller can actually reach; nothing here is invented cruelty.
+  //
+  //   NAME, 255 chars, ONE unbroken token — `Site.changeset/2`'s own
+  //     `validate_length(:name, min: 1, max: 255)`. A pasted title with the
+  //     spaces eaten is the realistic producer, so this is a FORMAT-legal
+  //     generator (a readable phrase concatenated), not `"x".repeat(255)`.
+  //     Re-derive: grep -n 'validate_length(:name' cloud/lib/barkpark_cloud/registry/site.ex
+  //
+  //   DOMAIN, 253 chars, FOUR unbroken labels of 63/63/63/61 — `validate_domains/1`
+  //     accepts any string `String.length(d) <= 253` matching `@domain_format`,
+  //     whose per-label shape is `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?` i.e. 63.
+  //     It is a `validate_change`, so a `validate_length` census cannot see it.
+  //     Re-derive: grep -n '@domain_format\|defp validate_domains' cloud/lib/barkpark_cloud/registry/site.ex
+  //     Reached by a plain team member through `POST /v1/sites/:id/domains`
+  //     (`with_team_site`, no admin gate). FORMAT-legal, not registrable — the
+  //     harness renders hostnames, it does not resolve them.
+  //
+  //   WHY A 63-CHAR UNBROKEN LABEL IS NOT HYPOTHETICAL: the platform MINTS them.
+  //     `POST /v1/launch` / `POST /v1/go-live` (non-admin — a team owner/admin
+  //     session or a `deploy` PAT) runs `slugify/1`, which lowercases and joins
+  //     on hyphens but NEVER truncates and NEVER inserts one into an already
+  //     alphanumeric name; `Barkpark.changeset/2` caps the slug at 63; and
+  //     `Barkpark.clean_url/1` then emits `https://<slug>.barkpark.cloud`
+  //     verbatim, hyphen-free. So a 63-char unbroken first label is a string the
+  //     product itself produces. Re-derive:
+  //       grep -n 'def clean_url' cloud/lib/barkpark_cloud/registry/barkpark.ex
+  //       grep -n 'validate_length(:slug' cloud/lib/barkpark_cloud/registry/barkpark.ex
+  //       grep -n 'defp slugify' cloud/lib/barkpark_cloud/web/router.ex
+  //     NOT `provisioning_subdomain/1`: it spends `@max_label_len - short - 1` on
+  //     the slug and then appends `"-" <> short`, so it ALWAYS carries a hyphen
+  //     at char 55 and can emit at most 54 unbroken characters. Citing it for a
+  //     63-char token would assert a string that cannot be emitted.
+  //
+  // WHAT THIS ROW IS FOR: it is a REGRESSION PIN, and its expected finding yield
+  // on today's CSS is ZERO — the `.site-name` / `.site-host` wrap already
+  // shipped, and driven, this row reads scrollWidth == clientWidth exactly. The
+  // value is that DELETING that wrap now reds an existing sweep cell naming
+  // `div.site-name` and `div.site-host`, instead of being guarded by a comment.
+  //
+  // NO HEIGHT IS ASSERTED ANYWHERE FOR THIS ROW, deliberately: `Q3 BELOW THE
+  // FOLD` reads `.content`'s own top offset and is structurally blind to a row
+  // displacing its siblings; breakpoint-sweep's narrowest width is 619, so the
+  // phone band where this row is tallest is measured by nothing; and a bare
+  // pixel pin was already deleted from this epic once (cch-w15-s1). A height
+  // claim here would have to be a reachability claim at a defended viewport
+  // height, and this slice does not have one to defend.
+  //
+  // DEPLOYED ON PURPOSE: a 253-char host that is merely queued is a hostname
+  // nobody has yet had to read. This row has served a build, so it keeps its
+  // door and its host line is the one a person is actually looking at.
+  site({
+    id: "5b2c1e00-0000-4000-8000-0000000000c9",
+    name: CRUEL_SITE_NAME,
+    slug: CRUEL_SITE_SLUG,
+    domains: [CRUEL_SITE_DOMAIN],
+    framework: "nextjs", github_repo: "acme/platform", github_branch: "main",
+    github_webhook_configured: true,
+    current_deployment_id: depOf(9),
+    last_deployment: lastDeploy("live", "manual", 1200),
   }),
 ];
 
@@ -887,8 +982,27 @@ const teamInvites = [
 // whole grammar: DATABASE_URL (team secret, commented), STRIPE_SECRET_KEY (team,
 // write-once → sealed-and-unreplaceable note), PUBLIC_SITE_URL (team, non-secret,
 // commented), WORKER_TOKEN (instance-scoped secret).
+// cch-w24-s7 — THE CRUEL ENV COMMENT, on the row that already carried one, so
+// the row census and every count assertion over these four rows is unmoved.
+// ADMISSIBILITY: `EnvVar.changeset/2` does `validate_length(:comment, max: 255)`
+// — 255 and NOT 1000, because the column is a bare `add :comment, :string`
+// (varchar(255)) that no migration ever widened. Re-derive:
+//   grep -n 'validate_length(:comment' cloud/lib/barkpark_cloud/registry/env_var.ex
+// So 255 unbroken characters is the WIDEST string the server will store here,
+// and it is server data painted verbatim into `.set-row-note` by the env row
+// builder (grep -n 'set-row-note' cloud/priv/static/app.js) — a user typed it,
+// so it wraps or it escapes. The realistic producer is a paste: an operator
+// documenting a rotation by dropping the whole reference in, spaces and all
+// eaten by the paste. Same regression-pin logic as the cruel site row: on
+// today's CSS the `.set-row-note` wrap already shipped and the yield is ZERO;
+// deleting that wrap is what this string exists to make red.
+const CRUEL_ENV_COMMENT = atLength("env comment",
+  "rotatedbyplatformautomationduringthenortherneuropeanregionalfailover" +
+  "exerciseandthenrecordedhereverbatimbecausethecommentfieldwastheonly" +
+  "placetheoperatorcouldreachwithoutanadmingrantseerunbookentrytwenty" +
+  "sixzeroeightzerotwoacmegroupholdingsinfrastructure2026", 255);
 const teamEnvVars = [
-  { id: "env_db", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: "Primary Postgres connection string", inserted_at: tMinus(90 * 86400), updated_at: tMinus(10 * 86400) },
+  { id: "env_db", key: "DATABASE_URL", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: false, comment: CRUEL_ENV_COMMENT, inserted_at: tMinus(90 * 86400), updated_at: tMinus(10 * 86400) },
   { id: "env_stripe", key: "STRIPE_SECRET_KEY", scope: "team", barkpark_id: null, is_secret: true, is_shown_once: true, comment: null, inserted_at: tMinus(60 * 86400), updated_at: tMinus(60 * 86400) },
   { id: "env_url", key: "PUBLIC_SITE_URL", scope: "team", barkpark_id: null, is_secret: false, is_shown_once: false, comment: "Canonical URL used in outbound emails", inserted_at: tMinus(30 * 86400), updated_at: tMinus(30 * 86400) },
   { id: "env_worker", key: "WORKER_TOKEN", scope: "barkpark", barkpark_id: IDS.liveInstance, is_secret: true, is_shown_once: false, comment: null, inserted_at: tMinus(5 * 86400), updated_at: tMinus(5 * 86400) },
