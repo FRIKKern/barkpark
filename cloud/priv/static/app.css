@@ -5092,7 +5092,33 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .vf-head-main .vf-meta { margin: 3px 0 0; }
 
 @media (max-width: 620px) {
-  .detail-head--inst { flex-direction: column; }
+  /* `align-items: stretch` IS THE FIX, and it is one declaration because the
+     defect is one declaration doing a different job in the stacked axis than
+     the one it was written for. `.detail-head--inst { align-items: flex-start }`
+     (above, unconditional) means TOP-ALIGN in the row axis — its intent. The
+     moment this head stacks, the same declaration means FIT-CONTENT, so
+     `.detail-head-main` sizes to its own min-content instead of the 288px the
+     page offers. Driven on the shipped `mixed-fleet` fixture at 320 (Chrome
+     150, both themes): head 326 against 288 available, page scrollWidth 342
+     against a 320 viewport, and `.copy-btn`'s right edge at 342 — the address
+     Copy control sat 22px OFF-SCREEN at rest, on a route dispatched to every
+     signed-in reader. Bisected, not assumed: hiding `.detail-url-text` alone
+     drops the head to 281.6 and the page to 320, so the 326 is that span's
+     38-char unbreakable URL (min-content 300) + 6px gap + the 20px button.
+     `.detail-title-row` measures the same 326 and is a PASSENGER — its own
+     max-content is 281.6, under the 288 available; it is stretched by the head,
+     not a cause. NOT a min-width clamp: `min-width: 0` AND `flex: 1 1 0` on
+     `.detail-url-text` were both driven and both left the page at 342, because
+     clamping an item does not lower a flex container's min-content
+     contribution. Only stretching the head does — which is what the SHARED
+     `.detail-head` already grants every other detail head when it stacks
+     (the 899 block, `flex-direction: column; align-items: stretch`); the
+     `--inst` variant silently opted out of the second half. Post-fix, driven:
+     320 reads scrollWidth 320 and the Copy button's right edge 304, with
+     `.detail-url-text` ellipsising at 262 (its phone-width ellipsis is a
+     separately filed row, not this one). Px are font-conditional (D218) — the
+     ORDINAL fact, a control past the viewport edge, is not. */
+  .detail-head--inst { flex-direction: column; align-items: stretch; }
   .detail-head--inst .detail-actions { justify-content: flex-start; }
 }
 
