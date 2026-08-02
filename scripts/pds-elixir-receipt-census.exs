@@ -3450,10 +3450,17 @@ defmodule PDS.Census do
     # came out of an `{:ok, _}` payload is a STORE value inside the callee, and a parameter
     # bound to a caller HEAD var is a request echo. Reusing the callee's own head instead
     # would print request_echo for EVERY helper that names its response value in a
-    # parameter — flatly wrong the first time that parameter IS a write return. The
-    # TicketKeys rows still class request_echo under substitution, and for a DIFFERENT and
-    # stated reason (their hop argument is a CALL, whose own argument names are what gets
-    # substituted) — printed as a blind shape below rather than left to look like agreement.
+    # parameter — flatly wrong the first time that parameter IS a write return.
+    #
+    # AND THE SUBSTITUTION READS THE ARGUMENT'S TOP-LEVEL SHAPE, not its flattened names
+    # (PDS wave 42). Until wave 42 the four TicketKeys rows classed request_echo because
+    # `stamp_response(conn, Keys.pause(id, …))` contributed the CALL'S OWN ARGUMENT NAMES —
+    # so the head var `id` landed in the parameter pattern `{:ok, key}` and the join
+    # accused a value that descends from the write. hop_arg_shape/1 now attributes the
+    # call's RETURN. `AuthController.register` was named alongside them in that prose and
+    # never sat on this mechanism at all: it passes the plain head var `email` and renders
+    # `%{user: %{email: email}}`, so its request_echo was TRUE before this fix and stays
+    # true after it — which is why it is the control the fix is checked against.
     {oks, head} = apply_hop_subst(oks_own, head_own, subst)
 
     # READ THE SUCCESS BRANCH, NOT THE WHOLE BODY, WHENEVER THERE IS ONE. A controller's
@@ -3561,14 +3568,21 @@ defmodule PDS.Census do
   @derivation_mute [:residual_helper_assembled, :residual_undecided]
 
   defp onehop_join(d, index, body, oks, head, local) do
-    cands =
+    substs =
       body
       |> hop_calls()
       |> Enum.flat_map(&hop_defs(d, index, &1))
       |> Enum.reject(fn {callee, _args} -> callee.module == d.module and callee.name == d.name end)
       |> Enum.uniq_by(fn {callee, args} -> {clause_id(callee), length(args)} end)
-      |> Enum.map(fn {callee, args} ->
-        {hop_label(callee), derive_def(callee, index, hop_subst(callee, args, oks, head))}
+      |> Enum.map(fn {callee, args} -> {callee, hop_subst(callee, args, oks, head)} end)
+
+    minted = Enum.reduce(substs, 0, fn {_callee, s}, n -> n + s.minted end)
+    opaque = Enum.reduce(substs, 0, fn {_callee, s}, n -> n + s.opaque end)
+    field = Enum.reduce(substs, 0, fn {_callee, s}, n -> n + s.field end)
+
+    cands =
+      Enum.map(substs, fn {callee, s} ->
+        {hop_label(callee), derive_def(callee, index, s), s.minted}
       end)
 
     {emitting, mute} = Enum.split_with(cands, &(elem(&1, 1).class not in @derivation_mute))
@@ -3578,17 +3592,37 @@ defmodule PDS.Census do
 
     case decided do
       [] ->
-        %{local | why: hop_refusal(emitting, mute), hop: %{decided: nil, target: nil, candidates: length(cands)}}
+        %{
+          local
+          | why: hop_refusal(emitting, mute),
+            hop: %{
+              decided: nil,
+              target: nil,
+              candidates: length(cands),
+              minted: minted,
+              minted_decided: 0,
+              opaque: opaque,
+              field: field
+            }
+        }
 
       _ ->
-        {label, best} = Enum.min_by(decided, &derivation_rank(elem(&1, 1).class))
+        {label, best, best_minted} = Enum.min_by(decided, &derivation_rank(elem(&1, 1).class))
 
         %{
           local
           | class: best.class,
             producer: best.producer,
             why: "ONE HOP into #{label} — #{best.why} (this clause's own body has no response call)",
-            hop: %{decided: best.class, target: label, candidates: length(cands)}
+            hop: %{
+              decided: best.class,
+              target: label,
+              candidates: length(cands),
+              minted: minted,
+              minted_decided: best_minted,
+              opaque: opaque,
+              field: field
+            }
         }
     end
   end
@@ -3600,8 +3634,8 @@ defmodule PDS.Census do
 
   defp hop_refusal(emitting, mute) do
     parts =
-      (Enum.map(mute, fn {l, _} -> "#{l} [emits nothing — a SECOND hop]" end) ++
-         Enum.map(emitting, fn {l, r} -> "#{l} [emits, but classes #{r.class}: #{r.why}]" end))
+      (Enum.map(mute, fn {l, _, _} -> "#{l} [emits nothing — a SECOND hop]" end) ++
+         Enum.map(emitting, fn {l, r, _} -> "#{l} [emits, but classes #{r.class}: #{r.why}]" end))
       |> Enum.uniq()
 
     "no response call in this clause; the ONE-HOP join decides nothing over #{length(parts)} target(s): " <>
@@ -3647,25 +3681,115 @@ defmodule PDS.Census do
   defp hop_defs(_d, index, {:remote, segs, f, args}),
     do: index |> resolve(segs, f, length(args)) |> Enum.map(&{&1, args})
 
+  # THE ARGUMENT'S TOP-LEVEL SHAPE DECIDES WHAT IT CONTRIBUTES (PDS wave 42, PDS-D617).
+  # dvars/1 is a Macro.prewalk that FLATTENS any node to a name set, so the argument
+  # `Keys.pause(id, current_workspace_id(conn))` contributed `id` — a HEAD name — and the
+  # callee clause classed request_echo on a value that in truth DESCENDS FROM THE WRITE.
+  # The names INSIDE a call are its inputs; what the parameter binds is its RETURN. So:
+  #
+  #   {:call, f}  — the argument IS a call: attribute `f`, its own producing call.
+  #   :opaque     — `Access.get` / `container[key]`: a subscript contributes NOTHING.
+  #                 Without this, `params["totp_code"]` attributes producer `:get` and a
+  #                 request param arrives dressed as a store binding — the same lie one
+  #                 shape over.
+  #   {:vars, s}  — everything else keeps the name-set behaviour, and FIELD ACCESS recurses
+  #                 into its LHS (`cred.user_id` contributes `cred`, never producer
+  #                 `:user_id`), because a field read is not a call at all.
+  #
+  # THE TEST IS ON THE TOP-LEVEL NODE, never "the argument CONTAINS a call" — AND THE
+  # COARSE RULE WAS RUN RATHER THAN ARGUED ABOUT (PDS wave 42). A prewalk that attributes
+  # the first call found ANYWHERE inside the argument — inside a map literal, inside a `fn`
+  # body, inside `Accounts.get_user(cred.user_id)` — takes the MINTED-argument count from
+  # 27 to 81 and puts a mint on 5 winning substitutions instead of 4. It moves no printed
+  # class over THIS corpus, which is the danger stated exactly: it is a silent 3x
+  # enlargement of the guessing surface, and the enlargement decides a row the first time
+  # a payload names one of those parameters. The top-level test attributes what the
+  # parameter actually BINDS; containment attributes something the expression merely
+  # mentions, which is the same category error as the defect being repaired here.
+  defp hop_arg_shape({{:., _, [Access, :get]}, _, [_ | _]}), do: :opaque
+
+  defp hop_arg_shape({{:., _, [{:__aliases__, _, [:Access]}, :get]}, _, [_ | _]}), do: :opaque
+
+  defp hop_arg_shape({{:., _, [{:__aliases__, _, _}, f]}, _, args})
+       when is_atom(f) and is_list(args),
+       do: {:call, f}
+
+  defp hop_arg_shape({{:., _, [lhs, f]}, _, []}) when is_atom(f), do: hop_arg_shape(lhs)
+
+  defp hop_arg_shape({{:., _, [_lhs, f]}, _, args}) when is_atom(f) and is_list(args),
+    do: {:call, f}
+
+  defp hop_arg_shape({f, _, args} = n) when is_atom(f) and is_list(args) do
+    if Macro.special_form?(f, length(args)) or Macro.operator?(f, length(args)) or
+         f in @derivation_render_fns,
+       do: {:vars, dvars(n)},
+       else: {:call, f}
+  end
+
+  defp hop_arg_shape(n), do: {:vars, dvars(n)}
+
+  # THE TWO HARDENED SHAPES ARE COUNTED, because neither DECIDES a row in this corpus and a
+  # guard whose effect is invisible is indistinguishable from one that was never written.
+  # Attributing them would print producer `user_id` for `cred.user_id` and producer `get`
+  # for `params["totp_code"]` — a request param dressed as a store binding — so the count
+  # is the standing evidence that the shapes were excluded on purpose.
+  defp hop_arg_field_access?({{:., _, [{:__aliases__, _, _}, _f]}, _, []}), do: false
+  defp hop_arg_field_access?({{:., _, [_lhs, f]}, _, []}) when is_atom(f), do: true
+  defp hop_arg_field_access?(_), do: false
+
+  # A CALL ARGUMENT WHOSE OWN INPUTS TRACE NOWHERE IS A MINTED VALUE, and it is COUNTED
+  # rather than given a class of its own (PDS-D618). Attributing the call name is right for
+  # `Keys.pause(id, …)`, whose inputs trace to the head; it is a GUESS for a call whose
+  # inputs trace to neither an `{:ok, _}` payload nor the head. None of those positions
+  # decides a row today, so the count is printed on every run and the day one does decide a
+  # row, the number moves in public instead of the verdict changing in silence.
+  defp hop_arg_minted(arg, oks, head) do
+    avars = dvars(arg)
+
+    if Enum.find_value(avars, &Map.get(oks, &1)) == nil and MapSet.disjoint?(avars, head),
+      do: 1,
+      else: 0
+  end
+
   defp hop_subst(callee, args, oks, head) do
     callee.head
     |> head_params()
     |> Enum.zip(args)
-    |> Enum.reduce(%{oks: %{}, head: MapSet.new(), params: MapSet.new()}, fn {param, arg}, acc ->
-      pvars = dvars(param)
-      avars = dvars(arg)
-      acc = %{acc | params: MapSet.union(acc.params, pvars)}
-
-      case Enum.find_value(avars, &Map.get(oks, &1)) do
-        nil ->
-          if MapSet.disjoint?(avars, head),
-            do: acc,
-            else: %{acc | head: MapSet.union(acc.head, pvars)}
-
-        producer ->
-          %{acc | oks: Enum.reduce(pvars, acc.oks, &Map.put(&2, &1, producer))}
+    |> Enum.reduce(
+      %{oks: %{}, head: MapSet.new(), params: MapSet.new(), minted: 0, opaque: 0, field: 0},
+      fn {param, arg}, acc ->
+        hop_subst_arg(acc, param, arg, oks, head)
       end
-    end)
+    )
+  end
+
+  defp hop_subst_arg(acc, param, arg, oks, head) do
+    pvars = dvars(param)
+    acc = %{acc | params: MapSet.union(acc.params, pvars)}
+    acc = if hop_arg_field_access?(arg), do: %{acc | field: acc.field + 1}, else: acc
+
+    case hop_arg_shape(arg) do
+      :opaque ->
+        %{acc | opaque: acc.opaque + 1}
+
+      {:call, producer} ->
+        %{
+          acc
+          | oks: Enum.reduce(pvars, acc.oks, &Map.put(&2, &1, producer)),
+            minted: acc.minted + hop_arg_minted(arg, oks, head)
+        }
+
+      {:vars, avars} ->
+        case Enum.find_value(avars, &Map.get(oks, &1)) do
+          nil ->
+            if MapSet.disjoint?(avars, head),
+              do: acc,
+              else: %{acc | head: MapSet.union(acc.head, pvars)}
+
+          producer ->
+            %{acc | oks: Enum.reduce(pvars, acc.oks, &Map.put(&2, &1, producer))}
+        end
+    end
   end
 
   defp head_params({:when, _, [h | _]}), do: head_params(h)
@@ -3931,6 +4055,14 @@ defmodule PDS.Census do
       |> Enum.frequencies_by(&Map.get(&1, :scope_read, :whole_body))
       |> then(&Map.merge(%{success_branch: 0, whole_body: 0, no_body: 0}, &1))
 
+    # THE MINTED-ARGUMENT EXPOSURE, COUNTED OVER THE SAME CLAUSE SET THE JOIN ATTEMPTED
+    # (uniq by clause id, so a def reached by two routed quads is counted once).
+    hops = rows |> Enum.flat_map(&Map.get(&1, :clause_results, [])) |> Enum.uniq_by(& &1.id)
+    minted = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :minted)))
+    minted_deciding = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :minted_decided)))
+    opaque_args = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :opaque)))
+    field_args = Enum.reduce(hops, 0, &(&2 + hop_stat(&1, :field)))
+
     p("  DERIVATION PARTITION of the #{class_total} #{@derivation_class} row(s) — what the")
     p("  receipt ACTUALLY renders, DERIVED this run over #{pairs} distinct {module, action} pair(s)")
     p("  ------------------------------------------------------------------------")
@@ -3993,12 +4125,26 @@ defmodule PDS.Census do
     p("      the action ran — contributes no var and can read as literal_only.")
     p("    · A REDIRECT'S `to:` IS NOT A PAYLOAD. Recording it would let a redirect built")
     p("      from a caller-supplied id read as store-derived.")
-    p("    · THE HOP SUBSTITUTES ARGUMENT EXPRESSIONS, AND AN ARGUMENT THAT IS A CALL")
-    p("      CONTRIBUTES ITS OWN ARGUMENTS' NAMES, NOT ITS RETURN. `stamp_response(conn,")
-    p("      Keys.pause(id, ...))` substitutes `id` into a parameter pattern `{:ok, key}`,")
-    p("      so the TicketKeys and AuthController.register rows class request_echo on a")
-    p("      value that in truth descends from the write. Attributing the hop argument's")
-    p("      OWN producing call is a second pass and is filed, not smuggled in here.")
+    p("    · A HOP ARGUMENT THAT IS A CALL IS ATTRIBUTED ON ITS OWN RETURN, AND FOR SOME OF")
+    p("      THEM THAT IS A GUESS. hop_arg_shape/1 reads the argument's TOP-LEVEL shape, so")
+    p("      `stamp_response(conn, Keys.pause(id, ...))` now attributes producer `pause`")
+    p("      instead of substituting the head var `id` into the parameter pattern")
+    p("      `{:ok, key}` — that substitution is what made the TicketKeys rows class")
+    p("      request_echo on a value that descends from the write. But #{minted} hop argument")
+    p("      position(s) are calls whose OWN inputs trace to NEITHER an `{:ok, _}` payload")
+    p("      NOR the head: their producer is MINTED from the call name alone, on no")
+    p("      provenance at all. #{minted_deciding} of them sit on the substitution the join CHOSE, so")
+    p("      that many are one parameter away from deciding a printed class. This is a")
+    p("      COUNTED exposure rather than a class of its own (PDS-D618): the numbers are")
+    p("      printed every run, so the day a mint decides a row it moves in public.")
+    p("    · FIELD ACCESS AND SUBSCRIPTS ARE NOT CALLS, and are excluded BY SHAPE rather")
+    p("      than by name — #{field_args} field-access and #{opaque_args} subscript hop argument position(s)")
+    p("      this run. `cred.user_id` recurses into `cred`, and `params[\"totp_code\"]`")
+    p("      contributes nothing at all. Attributing them would print producer `user_id`")
+    p("      and producer `get` — a request param dressed as a store binding, which is the")
+    p("      same over-accusation one shape over from the one just repaired. NEITHER count")
+    p("      decides a row in this corpus, which is exactly why it is printed: a guard")
+    p("      whose effect is invisible reads the same as one nobody wrote.")
     p("    · THE JOIN IS ONE HOP AND STOPS THERE. A helper that responds through a second")
     p("      helper stays residual by design, and its target is NAMED above as `emits")
     p("      nothing — a SECOND hop`, so the refusal can be checked instead of assumed.")
@@ -4058,6 +4204,9 @@ defmodule PDS.Census do
       masked: Enum.count(rows, &(row_class(&1, key) not in @derivation_residual and touch?.(&1)))
     }
   end
+
+  defp hop_stat(%{hop: hop}, key) when is_map(hop), do: Map.get(hop, key, 0)
+  defp hop_stat(_, _), do: 0
 
   defp row_class(%{clause_results: [_ | _] = cs}, key),
     do: cs |> Enum.min_by(&derivation_rank(Map.fetch!(&1, key))) |> Map.fetch!(key)
@@ -5111,6 +5260,36 @@ defmodule PDS.Census do
       expect: ["store_derived — all 6", "EchoController.delete_schema", "via delete"],
       refute: ["request_echo — all 6", "request_echo — all 5", "request_echo — all 1"],
       proves: "the SAME six actions, repaired to render the stored row, are named request_echo ZERO times — so the verdict is a derivation over the receipt's value expression, not a string test on the verb"
+    },
+    # THE HOP-ARGUMENT SHAPE DISPATCH (PDS wave 42), ARMED AGAINST ITS OWN REPAIR.
+    #
+    # Its corpus is the REPO, and it has to be: the four rows the repair moves are
+    # TicketKeysController.pause/unpause, which live in api/lib and not in any fixture
+    # heredoc. The mutation collapses the top-level {:call, _} dispatch back to the
+    # flattened NAME SET this wave repaired, and the child then re-prints the exact false
+    # verdict that shipped on main — the four routed TicketKeys rows accused of echoing the
+    # request, when `stamp_response(conn, Keys.pause(id, ...))` binds the write's return.
+    #
+    # IT ASSERTS NO BUCKET COUNT IT DOES NOT HAVE TO. "request_echo — all 8" and
+    # "request_echo — all 4" are the two SIDES of one relabel, and only a relabel of these
+    # four rows can move between them; an honest lens correction elsewhere in the class
+    # changes both strings together and this case is written to red only when the mutation
+    # fails to restore the defect (the anchor moved) or the repair silently stops working.
+    %{
+      name: "HOP-ARG-SHAPE-ARMED",
+      corpus: :repo,
+      argv: [],
+      mut:
+        {"case hop_arg_" <> "shape(arg) do",
+         "case (case hop_arg_" <> "shape(arg) do {:call, _} -> {:vars, dvars(arg)}; o -> o end) do"},
+      exit: 0,
+      expect: [
+        "request_echo — all 8",
+        "TicketKeysController.pause",
+        "renders a value bound in the action's HEAD (this clause's own body has no response call)"
+      ],
+      refute: ["request_echo — all 4", "via pause"],
+      proves: "collapsing the hop argument's TOP-LEVEL shape back to a flattened name set restores the over-accusation this wave repaired — four routed TicketKeys rows accused of echoing the request on a value that came out of Keys.pause/2 — so the repaired verdict is DERIVED from the dispatch and not a constant the roster happens to print"
     },
     %{
       name: "PARTITION-TOTAL-ARMED",
