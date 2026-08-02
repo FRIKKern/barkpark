@@ -177,6 +177,7 @@ const DEFECTS = [
   "W18-overview-card-pill",
   "W20-op-gate-pill-bounded",
   "W21-inst-head-320-copy-reachable",
+  "W21-members-roster-identity-and-remove",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -1730,6 +1731,197 @@ async function main() {
           `\`a.inst-tab\` at 360-390 is NOT suppressed here — .inst-tabs computes overflow-x:auto, so the strip ` +
           `scrolls itself and never moves documentElement.scrollWidth; that containment is asserted per cell ` +
           `(a strip that ever computed overflow-x:visible reds) instead of being allowlisted away`,
+        );
+      }
+    }
+
+    // ── W21-S1: THE MEMBERS ROSTER — WHO you are removing, and whether the
+    //    Remove button is on the screen at all. `#settings/members` is the
+    //    highest-stakes-per-mistake screen this epic owns and NO leg above has
+    //    ever navigated to it: every leg before this one drives `#`, `#fleet`,
+    //    `#billing`, a detail route or `#operator`.
+    //
+    //    THE DEFECT, three stacked failures in the GR33 row grammar:
+    //      (a) app.css `.set-row-main { min-width: 0; flex: 1 1 auto }` next to
+    //          `.set-row-side { flex: 0 0 auto }` makes the IDENTITY the only
+    //          shrinkable column — the role chip, Change role and Remove never
+    //          yield, so the column holding WHO the row is about absorbs the
+    //          whole deficit.
+    //      (b) `.set-row-name` declares `overflow: hidden; text-overflow:
+    //          ellipsis` and never `white-space: nowrap`, so the ellipsis is
+    //          INERT: an email is a single unbreakable word, it overflows a
+    //          21px column, and `overflow: hidden` hides it with NO cue.
+    //      (c) there is no `@media` anywhere in app.css touching `.set-row*` —
+    //          the roster has ONE layout at every width.
+    //
+    //    WHY BOTH ASSERTIONS AND NOT JUST PAGE OVERFLOW: the two failures are
+    //    independent. At 320 the action cluster leaves the viewport (page
+    //    overflow catches it); at 390 the page does NOT scroll sideways and the
+    //    identity is still clipped 77px with no cue, which every page-level leg
+    //    above is structurally blind to. A leg asserting only `documentElement`
+    //    would go green at 390 on the pre-fix bytes.
+    //
+    //    ROWS ARE ITERATED, NEVER SAMPLED (D228). Row 0 is `ada@acme.com
+    //    (you)` — no action buttons, and CLEAN at every width on the pre-fix
+    //    bytes. A `querySelector('.set-row')` leg reads row 0, measures the one
+    //    row that works, and certifies the screen. So every `.set-row` under
+    //    `#members-body` is walked and the walked COUNT is asserted non-zero
+    //    and printed, and the number of rows carrying an action cluster is
+    //    asserted non-zero too — an all-read-only roster (the `members-member`
+    //    scenario) would satisfy "no button off-screen" having measured no
+    //    button at all.
+    //
+    //    THE CUE PREDICATE IS THE POINT, and it is deliberately not "does the
+    //    element declare text-overflow: ellipsis". `text-overflow` paints only
+    //    when the line cannot wrap, i.e. when `white-space` computes to a
+    //    non-wrapping value. Declaring it beside `white-space: normal` is a
+    //    sentence, not a cue — which is exactly the pre-fix state. So a row
+    //    passes when the identity FITS (scrollWidth <= clientWidth) or when a
+    //    cue can ACTUALLY PAINT, never when one is merely declared.
+    //
+    //    FONT-CONDITIONAL (D218): nothing here awaits `document.fonts.ready`
+    //    and nothing asserts which face resolved, so every px is provisional
+    //    against a face swap. The INVARIANTS are not: "the button's right edge
+    //    is inside the viewport" and "the text fits or is cued" hold for any
+    //    face, which is why they are what is asserted rather than pinned px.
+    if (requested.includes("W21-members-roster-identity-and-remove")) {
+      const D = "W21-members-roster-identity-and-remove";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone and must never
+      // read as shared file constants.
+      const MEM_SCENS = ["members-populated"];
+      // The phone band where the row is broken, the fold, and 900 as a measured
+      // upper edge on pre-fix bytes so the band's top is pinned rather than
+      // assumed.
+      const MEM_WIDTHS = [320, 360, 390, 430, 480, 620, 700, 720, 760, 800, 900];
+      // ANTI-VACUITY 0 — the axis itself. The brief's four driven widths must
+      // survive any later edit to the list above.
+      for (const need of [320, 360, 390, 430]) {
+        if (!MEM_WIDTHS.includes(need)) {
+          fail(D, `axis check: ${need} is not in the width set — the roster is broken across the whole phone band and a set missing one of 320/360/390/430 cannot see it`);
+        }
+      }
+      if (!MEM_SCENS.includes("members-populated")) {
+        fail(D, `axis check: \`members-populated\` is not in the scenario set — it is the only members fixture that renders action buttons at all, so without it this leg measures a read-only roster and certifies nothing about Remove`);
+      }
+      const cellCount = MEM_SCENS.length * MEM_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — ${MEM_SCENS.length} members scenario x ${MEM_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells; every #members-body .set-row iterated: action-cluster right edge vs viewport,` +
+        ` .set-row-name scrollWidth vs clientWidth with a cue that can actually paint, + page overflow)\n`,
+      );
+      let cells = 0, rowsSeen = 0, actionRows = 0, offScreen = 0, clipped = 0, pageOver = 0;
+      for (const scen of MEM_SCENS) {
+        for (const theme of ["light", "dark"]) {
+          // Enter wide and assert the LANDED view — `?scen=` alone does not
+          // route (see the W13 note), and a phantom roster is worse than none.
+          await setViewport(1000);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#settings/members`,
+            `document.querySelector('#members-body .set-row') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-members';})()`,
+          );
+          const row = [];
+          for (const width of MEM_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              `var d=document.documentElement;` +
+              `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,rows:[]};` +
+              // EVERY row, in document order — never a sample (D228). Row 0
+              // carries no buttons and is clean at every width, so a sampled
+              // leg certifies the screen off the one row that works.
+              `[].slice.call(document.querySelectorAll('#members-body .set-row')).forEach(function(r,i){` +
+              `  var rec={i:i,btns:[],side:null,name:null};` +
+              `  var side=r.getElementsByClassName('set-row-side')[0];` +
+              `  if(side){var sr=side.getBoundingClientRect();rec.side=Math.round(sr.right*100)/100;}` +
+              `  [].slice.call(r.querySelectorAll('.set-row-side .btn')).forEach(function(b){` +
+              `    var br=b.getBoundingClientRect();` +
+              `    rec.btns.push({t:(b.textContent||'').trim(),right:Math.round(br.right*100)/100});` +
+              `  });` +
+              `  var n=r.getElementsByClassName('set-row-name')[0];` +
+              `  if(n){var cs=getComputedStyle(n);` +
+              `    rec.name={sw:n.scrollWidth,cw:n.clientWidth,ws:cs.whiteSpace,te:cs.textOverflow,` +
+              `      t:(n.textContent||'').trim().slice(0,40)};}` +
+              `  out.rows.push(rec);` +
+              `});` +
+              `return out;})()`,
+            );
+            cells++;
+            if (m.view !== "view-members") {
+              fail(D, `${scen}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-members" — the hash did not route, so nothing below this line measures the roster`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // AUDITED: an empty roster is not a clean roster.
+            if (m.rows.length === 0) {
+              fail(D, `${scen}/${theme}@${width}: zero \`#members-body .set-row\` rendered — nothing was measured, this is not a pass`);
+              row.push(`${width}:0r`);
+              continue;
+            }
+            rowsSeen += m.rows.length;
+            const withBtns = m.rows.filter((r) => r.btns.length > 0).length;
+            actionRows += withBtns;
+            if (withBtns === 0) {
+              fail(D, `${scen}/${theme}@${width}: ${m.rows.length} rows rendered and NOT ONE carries an action button — "no Remove off-screen" would be true of an empty set, which is not what this leg claims`);
+            }
+            if (m.psw > m.pcw) {
+              pageOver++;
+              fail(D, `${scen}/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the roster is off-screen sideways`);
+            }
+            for (const r of m.rows) {
+              for (const b of r.btns) {
+                if (b.right > m.pcw) {
+                  offScreen++;
+                  fail(D, `${scen}/${theme}@${width} row${r.i} "${b.t}": right edge ${b.right} > viewport ${m.pcw} — the control is OFF-SCREEN by ${Math.round((b.right - m.pcw) * 100) / 100}px, so the person cannot reach it`);
+                }
+              }
+              if (r.side != null && r.side > m.pcw) {
+                offScreen++;
+                fail(D, `${scen}/${theme}@${width} row${r.i} \`.set-row-side\`: right edge ${r.side} > viewport ${m.pcw} — the whole action cluster leaves the viewport`);
+              }
+              const n = r.name;
+              if (!n) continue;
+              // A CUE THAT CAN ACTUALLY PAINT. `text-overflow` is inert unless
+              // the line is forbidden to wrap — declaring `ellipsis` beside
+              // `white-space: normal` is a sentence, not a cue.
+              // `pre-wrap` and `pre-line` WRAP, so they are not on this list.
+              const cuePaints = n.te === "ellipsis" && (n.ws === "nowrap" || n.ws === "pre");
+              if (n.sw > n.cw && !cuePaints) {
+                clipped++;
+                fail(D, `${scen}/${theme}@${width} row${r.i} \`.set-row-name\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of the identity is hidden with NO cue that can paint (computed white-space "${n.ws}", text-overflow "${n.te}"; ellipsis is inert unless white-space forbids wrapping). This is WHO the row's Remove button acts on`);
+              }
+            }
+            // The cell string carries the NUMBERS, not a verdict glyph: the
+            // page's own scrollWidth, the right edge of every action button
+            // that exists (against the viewport), and every identity's
+            // clientWidth/scrollWidth. A reader can re-derive both assertions
+            // from the clean line alone, which is what makes a green here
+            // quotable rather than merely trusted.
+            const rm = m.rows.flatMap((r) => r.btns.map((b) => b.right)).join(",");
+            const id = m.rows.map((r) => (r.name ? `${r.name.cw}/${r.name.sw}` : "-")).join(",");
+            row.push(
+              `${width}:${m.rows.length}r/${withBtns}a psw${m.psw}` +
+              (rm ? ` act[${rm}]<=${m.pcw}` : ` act[none]`) +
+              ` id[${id}]` + (m.psw > m.pcw ? `!page` : ``),
+            );
+          }
+          process.stdout.write(`   ${scen}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean — ${rowsSeen} \`#members-body .set-row\` iterated in total ` +
+          `(${actionRows} of them carrying an action cluster, asserted non-zero per cell) across ` +
+          `${MEM_WIDTHS.join("/")} x light+dark on ${MEM_SCENS.join(" + ")}: ${offScreen} controls past the ` +
+          `viewport edge, ${clipped} identities hidden with no cue that can paint, ${pageOver} pages ` +
+          `scrolling sideways. Every row is walked, never sampled — row 0 is the self row, has no buttons, ` +
+          `and is clean on the PRE-FIX bytes, so a sampled leg certifies the screen off the one row that works`,
+        );
+        okLine(
+          `FONT-CONDITIONAL (D218): no preview instrument awaits document.fonts.ready or asserts which ` +
+          `face resolved, so the px above are provisional. What is ASSERTED is face-independent — a ` +
+          `control's right edge inside the viewport, and text that either fits or carries a paintable cue`,
         );
       }
     }

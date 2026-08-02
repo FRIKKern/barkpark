@@ -2108,7 +2108,16 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   flex: 0 0 auto;
 }
 .set-row-main { min-width: 0; flex: 1 1 auto; display: flex; flex-direction: column; gap: 2px; }
-.set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; }
+/* `overflow-wrap: anywhere` is what makes the `text-overflow: ellipsis` beside
+   it honest rather than decorative. An email is ONE unbreakable word, so with
+   the default `white-space: normal` the ellipsis can never paint (it needs a
+   line that is forbidden to wrap) and `overflow: hidden` silently swallowed
+   whatever did not fit — measured at 77px of "rex@acme.com" gone at 390px,
+   with no cue, on the row whose Remove button destroys that person's access.
+   `anywhere` also lowers this column's min-content contribution, which is what
+   lets `min-width: 0` on `.set-row-main` above actually yield. Same idiom the
+   sibling `.set-row-key` below already uses. */
+.set-row-name { font-size: var(--text-sm); font-weight: 600; color: var(--text); overflow: hidden; text-overflow: ellipsis; overflow-wrap: anywhere; }
 .set-row-key { font-size: var(--text-sm); font-weight: 600; color: var(--text); font-family: var(--mono); overflow-wrap: anywhere; }
 .set-row-meta { font-size: var(--text-xs); color: var(--muted-text); font-family: var(--mono); }
 .set-row-note { font-size: var(--text-xs); color: var(--dim); margin-top: 2px; }
@@ -2124,6 +2133,33 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   border-radius: var(--pill);
   padding: 1px var(--space-2);
   white-space: nowrap;
+}
+
+/* W21-S1 ROSTER PHONE BAND (620px) — the GR33 row stops being a desktop row
+   wearing a phone. Above 620 the row keeps today's single-line shape exactly;
+   at or below it the action cluster takes its OWN line and the identity gets
+   the full remaining width beside its avatar.
+   WHY: `.set-row-main { min-width: 0; flex: 1 1 auto }` beside `.set-row-side
+   { flex: 0 0 auto }` made the IDENTITY the only shrinkable column — the role
+   chip, Change role and Remove never yielded, so the column naming WHO the row
+   is about absorbed the entire deficit. Driven on origin/main bytes,
+   members-populated, both themes, every `#members-body .set-row` iterated:
+   at 320 the page scrolled sideways 12px and Remove's right edge landed at
+   331.86 against a 320 viewport (OFF-SCREEN — you cannot tap what is not
+   there), and `.set-row-name` clientWidth measured 0 on two rows. The clip ran
+   the whole phone band: 61-93px hidden at 390, still 21-37px at 430, clean
+   from 480 on THIS fixture. 620 is the band, not 480: the server caps an email
+   at 160 chars (accounts/user.ex validate_length), so 480 is an artefact of
+   twelve-character fixture strings and 620 — this file's existing phone
+   breakpoint, not a new one — is the first edge that survives a real address.
+   `flex-basis: 100%` (not `margin-left: auto`) is what forces the wrap: auto
+   margins only move an item inside a line, they never create one.
+   FONT-CONDITIONAL (D218): every px above was measured against an unpinned,
+   unasserted face. The ORDERING facts — identity clipped, controls past the
+   edge, both gone after this block — survive a face swap; the px do not. */
+@media (max-width: 620px) {
+  .set-row { flex-wrap: wrap; row-gap: var(--space-2); }
+  .set-row-side { flex-basis: 100%; justify-content: flex-end; }
 }
 
 /* ---------------------------------------------------------- responsive */
