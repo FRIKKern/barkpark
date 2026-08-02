@@ -3874,7 +3874,7 @@ defmodule PDS.Census do
     p("                 route of their own, so no {method, path} key can ever reach them")
     p("      THE NAME-KEYED COUNT IS THE DENOMINATOR #{raw}, NOT THE POPULATION: #{n} / #{raw} are")
     p("      arity 3, and #{length(tele)} / #{raw} are handle_event/4 telemetry callback(s) over")
-    p("      #{tele |> Enum.map(& &1.path) |> Enum.uniq() |> length()} / #{length(parsed)} file(s) — #{Enum.count(tele, &(&1.path in files))} / #{raw} of them in a file that carries a")
+    p("      #{tele |> Enum.map(& &1.path) |> Enum.uniq() |> length()} / #{length(parsed)} file(s) — #{Enum.count(tele, &(&1.path in files))} / #{length(tele)} of them in a file that carries a")
     p("      handle_event/3 clause at all. The split is by ARITY off the def table: a")
     p("      grep cannot see an arity and does not, which is how a name-keyed")
     p("      derivation lands #{length(tele)} / #{raw} too high.")
@@ -4021,8 +4021,14 @@ defmodule PDS.Census do
     p("    NON-LITERAL EVENT KEYS — the clause head names no event at all")
     p("      #{br} / #{nr} routed (#{lv_pct(br, nr)})  ·  #{ba} / #{n} repo-wide (#{lv_pct(ba, n)}) — the difference is")
     p("      #{ba - br} / #{n - nr} component clause(s), so the two units are not interchangeable here.")
-    p("      SHAPE, MEASURED: #{ba} / #{ba} are BARE VARIABLE heads. #{Map.get(ka, :other, 0)} / #{ba} are concatenations or")
-    p("      computed keys, and #{Map.get(ka, :none, 0)} / #{ba} have no first argument at all. A bare head")
+    # THE SHAPE DENOMINATOR IS THE NON-LITERAL POPULATION, NOT THE BARE-VAR COUNT.
+    # bare_var + other + none — they coincide on this tree only because `other` and
+    # `none` are both zero, and a denominator that is right by coincidence is the
+    # exact failure this block exists to name (fixed at wave-41 review).
+    nonlit = Map.get(ka, :bare_var, 0) + Map.get(ka, :other, 0) + Map.get(ka, :none, 0)
+    p("      SHAPE, MEASURED over the #{nonlit} / #{n} non-literal head(s): #{ba} / #{nonlit} are BARE")
+    p("      VARIABLE heads, #{Map.get(ka, :other, 0)} / #{nonlit} are concatenations or computed keys, and")
+    p("      #{Map.get(ka, :none, 0)} / #{nonlit} have no first argument at all. A bare head")
     p("      matches EVERY event that reaches it, so a per-event allowlist keyed on the")
     p("      head sees none of these — they are the shape a name-keyed gate cannot hold.")
     p("      (Literal heads: #{Map.get(ka, :literal, 0)} / #{n}.)")
