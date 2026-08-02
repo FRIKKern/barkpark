@@ -6211,6 +6211,54 @@ test("coherence: fixtureToHtml paints role words + hex chips and stays escape-sa
   assert.ok(!hooks.coherenceFixtureToHtml("workshop broker").includes("bp-lc-"));
 });
 
+// cch-w26-s5. The test above pins PRESENCE — the four role words it names all
+// get painted. It cannot lose if the alternation WIDENS: adding `error` to
+// `/\b(info|warn|ok|danger)\b/` leaves every assertion above true. That matters
+// now, because __css_check.mjs stopped demoting the `bp-lc-` E3 gap and
+// allowlisted the head instead, on exactly one ground: the suffix set is a
+// CLOSED alternation in code, not fixture text. An ALLOW_PREFIXES entry waives
+// the whole head — it can never notice a fifth suffix, and a fifth suffix would
+// paint a role word with a class that has no rule in app.css. So the closed-ness
+// has to be pinned HERE, by a leg that reds when the set changes.
+test("coherence: fixtureToHtml's role alternation is CLOSED — a fifth suffix reds this", () => {
+  // Every bp-lc- suffix the painter can emit, DERIVED by running it over a probe
+  // corpus rather than by reading the regex. The corpus carries the four real
+  // roles plus the role-adjacent vocabulary a well-meaning widening would reach
+  // for first — each on its own line so word boundaries are unambiguous.
+  const ROLES = ["info", "warn", "ok", "danger"];
+  const NEAR_MISSES = [
+    "error", "fail", "failed", "critical", "fatal", "alert", "notice",
+    "success", "debug", "trace", "pending", "unknown", "skip", "blocked",
+  ];
+  const probe = [...ROLES, ...NEAR_MISSES].join("\n");
+  const painted = hooks.coherenceFixtureToHtml(probe);
+  const emitted = new Set(
+    [...painted.matchAll(/class="bp-lc-([a-z-]+)"/g)].map((m) => m[1]),
+  );
+  assert.deepEqual(
+    [...emitted].sort(),
+    [...ROLES].sort(),
+    "the role alternation is no longer exactly {info, warn, ok, danger} — a suffix " +
+      "was added or removed. __css_check.mjs ALLOW_PREFIXES waives the whole " +
+      '"bp-lc-" head and CANNOT see this; author the .bp-lc-<new> rule in app.css ' +
+      "and update this set deliberately, or narrow the alternation back.",
+  );
+  // Stated as a negative too, so the failure message names the offender: no
+  // role-adjacent word outside the set may be painted at all.
+  for (const word of NEAR_MISSES) {
+    assert.ok(
+      !hooks.coherenceFixtureToHtml(word).includes("bp-lc-"),
+      `"${word}" is painted as a role but is not in the closed set — either it has ` +
+        "an authored .bp-lc- rule and belongs in ROLES above, or the alternation widened by accident",
+    );
+  }
+  // The hex chip is a SEPARATE literal head in the same helper, not a capture:
+  // it survives when every role word is absent, so it is not part of the set above.
+  const hexOnly = hooks.coherenceFixtureToHtml("#2563eb");
+  assert.match(hexOnly, /<span class="bp-lc-hex" style="--hex:#2563eb">#2563eb<\/span>/);
+  assert.ok(!emitted.has("hex"), "the probe corpus carries no hex cell, so the set stays role-only");
+});
+
 test("coherence: the helper block is byte-identical in app.js and coherence.html", () => {
   const appSrc = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
   const pageSrc = fs.readFileSync(COHERENCE_HTML, "utf8");
