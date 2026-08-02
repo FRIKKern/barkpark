@@ -177,6 +177,12 @@ defmodule PDS.Census do
   @routed_excluded [
     {:post, "/v1/selftest-fixture-close", "Barkpark.Filler.M1", :noop, :selftest_fixture},
     {:post, "/v1/selftest-departure-anchor", "Barkpark.Filler.M1", :noop, :selftest_fixture},
+    # THE LIVE ROUTE THE WAVE-42 FIXTURE ADDS. MANDATORY, not decorative: `live` is a
+    # ROUTED-WRITE method, so without this row every --selftest run exits 1 on
+    # `FAIL ROUTED-POPULATION-COMPLETE … UNDISPOSED ARRIVAL live /studio/fixture`. That
+    # is the disposition table refusing an arrival, NOT guard_corpus!/1 (which never
+    # refuses on this), and it fires whether or not the named module is written.
+    {:live, "/studio/fixture", "Barkpark.Filler.FixtureLive", nil, :selftest_fixture},
     # THE SIX ECHO FIXTURE ROWS (PDS wave 40). Classed `status_only_receipt` ON PURPOSE:
     # that is the class the derivation partition reads, and these six exist so the
     # partition's request_echo verdict can be observed firing — and, on the `:repaired`
@@ -3912,9 +3918,9 @@ defmodule PDS.Census do
     p("    routed action name at all. An arm silent about what it structurally cannot key")
     p("    inherits the exact vacuity it replaces, so the count is printed on every run.")
     p("")
-    report_liveview_population(lives, parsed, index)
+    lv = report_liveview_population(lives, parsed, index)
 
-    d |> Map.put(:disposition, disp) |> Map.put(:derivation, deriv)
+    d |> Map.put(:disposition, disp) |> Map.put(:derivation, deriv) |> Map.put(:liveview, lv)
   end
 
   # THE PARTITION, PRINTED IN FULL. Every row prints the producing call NAME it was
@@ -4149,6 +4155,7 @@ defmodule PDS.Census do
         p("    not a claim about the real tree either. A population of zero is printed so")
         p("    the absence is a measurement, not a block that quietly did not run.")
         p("")
+        :none
 
       _ ->
         lv_report(pop, tele, route_mods, parsed, index)
@@ -4238,6 +4245,7 @@ defmodule PDS.Census do
     lv_report_keys(routed, pop, nr, n)
     lv_report_hooks(comp, n, nc, index)
     lv_report_hole(route_mods, comp, parsed, closes.depth, index)
+    lv_verdict(pop, comp, route_mods, parsed, index)
   end
 
   # THE PROCESS BOUNDARY — THREE FIGURES, THREE UNITS, AND THE SUM IS THE ERROR.
@@ -4489,6 +4497,585 @@ defmodule PDS.Census do
   defp lv_stage(a) when is_atom(a), do: a
   defp lv_stage(_), do: :__opaque__
 
+
+  # ═══════════════════════════════════════════════════════════════════════════
+  # WAVE 42 — THREE COLUMNS OVER THE 322, AND WHY EACH KEY IS THE ONE IT IS
+  #
+  # Wave 41 gave this surface a DENOMINATOR. A denominator is not a verdict, and the
+  # obvious verdict is the wrong one twice over, so both wrong keys are named here:
+  #
+  #   REACH is keyed on {module, live_session}, NEVER on module. One module can be
+  #   routed in TWO live_sessions with DIFFERENT on_mount chains (that is not a
+  #   hypothetical — it is measured and printed below), so a module-keyed column
+  #   silently averages two different authorization postures into one.
+  #
+  #   DENIES is keyed on DENY-BY-DEFAULT, never on `{:halt, _}`. Every :handle_event
+  #   hook on this tree halts somewhere, so the halt key has ZERO discriminating power
+  #   and prints 100%. The structural difference between HANDLING an event and DENYING
+  #   one is WHICH PATH halts: a handler halts on a path selected BY THE EVENT NAME
+  #   (a literal clause head, or a guard over a name list); a gate halts on its
+  #   DEFAULT path — the events it does not name. That is a derivation over the AST's
+  #   selector shape, not a word list over function names.
+  #
+  #   ATTACH-CERTAINTY asks whether the deny gate is attached UNCONDITIONALLY. A gate
+  #   attached inside a runtime branch covers a clause only on the branch that runs,
+  #   and the honest static answer for such a gate is MAY-attach, never covered.
+  #
+  # THE RESIDUAL IS PRINTED AND NEVER FOLDED (PDS-D572). Modules whose only route
+  # comes from the plugin-mount macro carry NO derivable on_mount chain: the census
+  # already names that macro as a resolved shape whose live_session it cannot read.
+  # Those clauses are not "reachable" and not "unreachable" — they are UNDECIDED, and
+  # a column that resolves them by proxy has invented the answer it was asked for.
+  @lv_reach_order [
+    :unreachable_component_lifecycle,
+    :unreachable_no_hook_in_chain,
+    :reachable_unconditional,
+    :reachable_conditional
+  ]
+  @lv_reach_residual :residual_no_derivable_chain
+  @lv_event_stage :handle_event
+
+  defp lv_verdict(pop, comp, route_mods, parsed, index) do
+    sessions = lv_sessions(parsed)
+    sites = lv_hook_sites(index)
+    ev = Enum.filter(sites, &(&1.stage == @lv_event_stage))
+
+    # THE HOOK INVENTORY, BY MODULE, WITH BOTH PROPERTIES DERIVED PER SITE.
+    by_mod =
+      ev
+      |> Enum.group_by(& &1.mod)
+      |> Map.new(fn {m, ss} ->
+        {m,
+         %{
+           attach_uncond?: Enum.any?(ss, & &1.uncond?),
+           deny?: Enum.any?(ss, & &1.deny?),
+           deny_uncond?: Enum.any?(ss, &(&1.deny? and &1.uncond?)),
+           halts?: Enum.any?(ss, & &1.halts?)
+         }}
+      end)
+
+    comp_set = MapSet.new(comp, &lv_key(&1))
+
+    rows =
+      Enum.map(pop, fn d ->
+        mod = lv_mod(d)
+        sess = Map.get(sessions, mod, [])
+        chains = Enum.map(sess, &lv_chain_verdict(&1, by_mod))
+
+        class =
+          cond do
+            MapSet.member?(comp_set, lv_key(d)) -> :unreachable_component_lifecycle
+            not MapSet.member?(route_mods, mod) -> :unreachable_component_lifecycle
+            sess == [] -> @lv_reach_residual
+            Enum.all?(chains, &(&1.attach == :none)) -> :unreachable_no_hook_in_chain
+            Enum.all?(chains, &(&1.attach == :uncond)) -> :reachable_unconditional
+            true -> :reachable_conditional
+          end
+
+        %{
+          def: d,
+          mod: mod,
+          class: class,
+          sessions: Enum.map(sess, & &1.session),
+          # FAIL-CLOSED ACROSS SESSIONS: a clause routed in two sessions is credited
+          # only where EVERY session's chain carries the property. `Enum.all?` over an
+          # empty list is true, so the residual and component classes are excluded from
+          # every numerator below rather than silently credited.
+          deny?: chains != [] and Enum.all?(chains, & &1.deny?),
+          deny_uncond?: chains != [] and Enum.all?(chains, & &1.deny_uncond?),
+          halts?: chains != [] and Enum.all?(chains, & &1.halts?),
+          delegation?: lv_delegation?(d)
+        }
+      end)
+
+    freqs = Enum.frequencies_by(rows, & &1.class)
+    n = length(pop)
+    reachable = Enum.filter(rows, &(&1.class in [:reachable_unconditional, :reachable_conditional]))
+    nrch = length(reachable)
+    multi = Enum.filter(rows, &(length(&1.sessions) > 1))
+    theorem = lv_component_theorem(parsed)
+    proxy_mods = pop |> Enum.map(&lv_mod/1) |> Enum.uniq() |> Enum.reject(&MapSet.member?(route_mods, &1))
+    disagree = lv_sym_diff(theorem.with_clauses, proxy_mods)
+    deleg = Enum.count(rows, & &1.delegation?)
+
+    lv_print_reach(rows, freqs, n, sessions, multi)
+    lv_print_denies(reachable, nrch, n)
+    lv_print_attach(reachable, nrch, ev, by_mod)
+    lv_print_component(theorem, proxy_mods, disagree, n)
+    lv_print_derivation_denominator(deleg, n)
+
+    %{
+      population: n,
+      freqs: freqs,
+      order: @lv_reach_order,
+      residual: Map.get(freqs, @lv_reach_residual, 0),
+      sum: Enum.sum(Map.values(freqs)),
+      stray: freqs |> Map.keys() |> Enum.reject(&(&1 in [@lv_reach_residual | @lv_reach_order])),
+      reachable: nrch,
+      denies: Enum.count(reachable, & &1.deny?),
+      halt_keyed: Enum.count(reachable, & &1.halts?),
+      attach_certain: Enum.count(reachable, & &1.deny_uncond?),
+      multi_session: length(multi),
+      component_disagreement: length(disagree),
+      delegations: deleg
+    }
+  end
+
+  defp lv_key(d), do: {d.path, d.module, d.name, d.arity, d.line}
+
+  defp lv_chain_verdict(%{hooks: hooks}, by_mod) do
+    h = Enum.map(hooks, &Map.get(by_mod, &1, %{}))
+
+    %{
+      attach:
+        cond do
+          Enum.any?(h, &Map.get(&1, :attach_uncond?, false)) -> :uncond
+          Enum.any?(h, &Map.get(&1, :halts?, false)) -> :cond
+          h == [] -> :none
+          Enum.any?(h, &(map_size(&1) > 0)) -> :cond
+          true -> :none
+        end,
+      deny?: Enum.any?(h, &Map.get(&1, :deny?, false)),
+      deny_uncond?: Enum.any?(h, &Map.get(&1, :deny_uncond?, false)),
+      halts?: Enum.any?(h, &Map.get(&1, :halts?, false))
+    }
+  end
+
+  # -- REACH ------------------------------------------------------------------
+
+  defp lv_print_reach(rows, freqs, n, sessions, multi) do
+    p("    REACH — CAN A SOCKET-LEVEL HOOK REACH THIS CLAUSE AT ALL? (wave 42)")
+    p("      Keyed on {module, live_session}. #{map_size(sessions)} routed module(s) resolve to a")
+    p("      live_session with an on_mount chain THIS RUN READS OUT OF #{@router_path}.")
+
+    Enum.each(@lv_reach_order, fn c ->
+      p("        #{String.pad_trailing(to_string(c), 32)} #{pad(Map.get(freqs, c, 0))} / #{n}")
+    end)
+
+    p("        #{String.pad_trailing("RESIDUAL " <> to_string(@lv_reach_residual), 32)} #{pad(Map.get(freqs, @lv_reach_residual, 0))} / #{n}  <- PRINTED, NEVER FOLDED")
+    p("        #{String.pad_trailing("sum", 32)} #{pad(Enum.sum(Map.values(freqs)))} == population #{n}")
+    wrap(
+      "the RESIDUAL is clauses in modules the route lens reaches ONLY through the " <>
+        "#{@routed_resolved_macro}/1 mount, whose live_session this walk cannot read — so they carry NO derivable " <>
+        "hook chain. They are UNDECIDED, not unreachable: folding them into either " <>
+        "decided class would invent the verdict this column was asked for.",
+      "        "
+    )
+
+    p("      THE MULTI-SESSION KEY IS LOAD-BEARING, NOT DECORATIVE: #{length(multi)} / #{n} clause(s)")
+    p("      are routed in MORE THAN ONE live_session, so a module-keyed column would")
+    p("      decide them once and be wrong on one of the two mounts.")
+
+    multi
+    |> Enum.group_by(& &1.mod, & &1.sessions)
+    |> Enum.sort()
+    |> Enum.each(fn {m, ss} ->
+      p("        #{short_mod(m)} — #{length(ss)} clause(s) in live_session(s) #{ss |> List.first() |> Enum.map_join(", ", &inspect/1)}")
+    end)
+
+    p("      REACH IS A PROPERTY OF THE MECHANISM, NOT OF TODAY'S TREE: reachable_conditional")
+    p("      reads #{Map.get(freqs, :reachable_conditional, 0)} / #{n} on THIS run because every live_session that attaches at")
+    p("      #{inspect(@lv_event_stage)} attaches unconditionally. A column collapsed to two values on the")
+    p("      strength of that zero is wrong the day a session lands with a branched attach.")
+    p("")
+    rows
+  end
+
+  # -- DENIES -----------------------------------------------------------------
+
+  defp lv_print_denies(reachable, nrch, n) do
+    honest = Enum.count(reachable, & &1.deny?)
+    naive = Enum.count(reachable, & &1.halts?)
+
+    p("    DENIES — KEYED ON DENY-BY-DEFAULT, AND THE NAIVE KEY PRINTED AS A NAMED TRAP")
+    p("      THE TRAP, NAMED SO IT CANNOT BE MISTAKEN FOR THE ANSWER:")
+    p("        #{pad(naive)} / #{nrch}  clause(s) whose chain carries a hook that returns {:halt, _}")
+    p("                     ANYWHERE. This is #{lv_pct(naive, nrch)} and it is NOT a gating figure:")
+    p("                     a hook halts to say I HANDLED THIS EVENT just as readily as")
+    p("                     to say NO. A column that prints this has no discriminating")
+    p("                     power on this tree at all.")
+    p("      THE HONEST KEY — WHICH PATH HALTS:")
+    p("        #{pad(honest)} / #{nrch}  clause(s) whose EVERY live_session chain carries a hook that")
+    p("                     halts on its DEFAULT path — the events it does NOT name. A")
+    p("                     halt under a literal clause head, or under a guard over a")
+    p("                     name list, is event HANDLING and is not counted.")
+    p("      The two keys differ by #{naive - honest} / #{nrch} clause(s). Over the whole population that")
+    p("      is #{honest} / #{n} deny-by-default versus #{naive} / #{n} on the halt key.")
+    p("      NOT A NAME LIST. The classifier reads the SELECTOR of the branch each halt")
+    p("      sits under — clause-head literal, name-list guard, or default — and nothing")
+    p("      about what any function is called.")
+    p("")
+  end
+
+  # -- ATTACH-CERTAINTY -------------------------------------------------------
+
+  defp lv_print_attach(reachable, nrch, ev, by_mod) do
+    certain = Enum.count(reachable, & &1.deny_uncond?)
+    deny_mods = by_mod |> Enum.filter(fn {_, v} -> v.deny? end) |> Enum.map(&elem(&1, 0))
+    uncond = Enum.count(ev, & &1.uncond?)
+
+    p("    ATTACH-CERTAINTY — IS THE GATE THERE ON EVERY MOUNT, OR ONLY ON A BRANCH?")
+    p("      #{pad(certain)} / #{nrch}  reachable clause(s) covered by a deny-by-default gate that is")
+    p("                   attached UNCONDITIONALLY. #{uncond} / #{length(ev)} #{inspect(@lv_event_stage)} attach site(s) in")
+    p("                   this corpus sit outside every branch, and #{length(deny_mods)} module(s) carry a")
+    p("                   deny-by-default gate at all:")
+
+    Enum.each(Enum.sort(deny_mods), fn m ->
+      v = Map.fetch!(by_mod, m)
+      p("                     #{short_mod(m)} — deny-by-default, attached #{if v.deny_uncond?, do: "UNCONDITIONALLY", else: "inside a runtime branch"}")
+    end)
+
+    p("      A GATE ATTACHED ON A BRANCH IS A MAY-ATTACH, AND MAY-ATTACH IS NOT COVERAGE.")
+    p("      The larger deny-by-default figure in the column above is an UPPER BOUND on")
+    p("      what runs, never a coverage number: it counts chains that CAN attach a gate,")
+    p("      and this row counts the ones that always do. A gate whose only callsite is")
+    p("      inside a mount body is invisible to #{@router_path} entirely, so a")
+    p("      router-derived predicate would miss it in BOTH directions.")
+    p("")
+  end
+
+  # -- THE COMPONENT PARTITION, COMPUTED TWICE --------------------------------
+
+  defp lv_print_component(theorem, proxy_mods, disagree, n) do
+    p("    THE COMPONENT PARTITION, COMPUTED BOTH WAYS AND THE DISAGREEMENT PRINTED")
+    p("      THEOREM   #{length(theorem.with_clauses)} module(s) whose OWN top-level body carries")
+    p("                `use Phoenix.LiveComponent` (directly or through the project's")
+    p("                `:live_component` spelling) AND at least one handle_event/3.")
+    p("                #{length(theorem.modules)} module(s) match the use-walk in all; the walk reads only")
+    p("                TOP-LEVEL statements, so the module that DEFINES the macro inside")
+    p("                a `quote` is not one of them — it would otherwise false-positive")
+    p("                on itself, and it agrees today only because it carries no")
+    p("                handle_event/3 at all.")
+    p("      PROXY     #{length(proxy_mods)} module(s) carrying handle_event/3 that no live route names.")
+    p("      DISAGREEMENT #{length(disagree)} module(s)#{if disagree == [], do: " — the two lenses partition the #{n} identically.", else: ":"}")
+    Enum.each(disagree, &p("        #{short_mod(&1)}"))
+    p("      Two lenses that agree are two lenses, not one fact twice: the proxy is a")
+    p("      statement about the ROUTER and the theorem is a statement about the")
+    p("      MODULE, and only one of them survives a component that gains a route.")
+    p("")
+  end
+
+  # -- THE DERIVATION DENOMINATOR, UNJUDGED -----------------------------------
+
+  defp lv_print_derivation_denominator(deleg, n) do
+    p("    THE DERIVATION DENOMINATOR, PRINTED UNJUDGED (PDS-D621)")
+    p("      #{deleg} / #{n} clause(s) have a body that is EXACTLY ONE remote call and emit")
+    p("      nothing themselves. THE REASON THIS IS NOT A COLUMN: an anchor placed on")
+    p("      emission would swap those #{deleg} for the #{deleg} defs they delegate to and hide the")
+    p("      swap inside an unchanged denominator of #{n}. A numerator and a denominator")
+    p("      that answer different questions make a fraction that answers neither, so")
+    p("      the figure is printed as a SIZE and judged nowhere.")
+    p("")
+  end
+
+  # -- the live_session walk (a SECOND walk over router.ex, on purpose) --------
+  #
+  # routed_derivation/1's walk carries {path prefix, alias segments} and throws the
+  # live_session away — it is keyed on {method, path, module, action}, which cannot
+  # hold a session name. Widening it would move every downstream figure; this walk
+  # carries {aliases, session, on_mount chain} and reads NOTHING else.
+  defp lv_sessions(parsed) do
+    with %{src: src} <- Enum.find(parsed, &(&1.path == @router_path)),
+         {:ok, ast} <- Code.string_to_quoted(src) do
+      ast
+      |> lvs_walk({[], nil, []}, [])
+      |> Enum.filter(&(&1.session != nil))
+      |> Enum.uniq()
+      |> Enum.group_by(& &1.module)
+    else
+      _ -> %{}
+    end
+  end
+
+  defp lvs_walk({:scope, _, args}, {al, s, h}, acc) do
+    {_p, a2, body} = scope_parts(args)
+    lvs_walk(body, {al ++ a2, s, h}, acc)
+  end
+
+  defp lvs_walk({:live_session, _, args}, {al, _s, _h}, acc) when is_list(args) do
+    {name, opts} = lvs_parts(args)
+    lvs_walk(Keyword.get(opts, :do), {al, name, lvs_on_mount(opts)}, acc)
+  end
+
+  defp lvs_walk({@routed_live_method, _, [path, mod | _]}, {al, s, h}, acc)
+       when is_binary(path),
+       do: [%{module: alias_string(al, mod), session: s, hooks: h} | acc]
+
+  defp lvs_walk({_, _, args}, ctx, acc) when is_list(args),
+    do: Enum.reduce(args, acc, &lvs_walk(&1, ctx, &2))
+
+  defp lvs_walk({a, b}, ctx, acc), do: lvs_walk(b, ctx, lvs_walk(a, ctx, acc))
+  defp lvs_walk(l, ctx, acc) when is_list(l), do: Enum.reduce(l, acc, &lvs_walk(&1, ctx, &2))
+  defp lvs_walk(_, _, acc), do: acc
+
+  # EVERY KEYWORD LIST IN THE CALL, CONCATENATED — never `Enum.find/3`. Elixir does NOT
+  # merge a `do` block into a preceding option list when the options are a separate
+  # argument: `live_session :s, on_mount: [...], layout: {...} do … end` parses as
+  # [:s, [on_mount: …, layout: …], [do: …]]. A walk that reads the FIRST keyword list
+  # finds no `:do`, descends into nil, and reports ZERO routed live_sessions with every
+  # count still summing — the silent-empty failure this whole census exists to refuse
+  # (measured: it printed 235 / 322 RESIDUAL and a green arm).
+  defp lvs_parts([name | rest]) do
+    {lvs_atom(name), rest |> Enum.filter(&(is_list(&1) and Keyword.keyword?(&1))) |> Enum.concat()}
+  end
+
+  defp lvs_parts(_), do: {nil, []}
+
+  defp lvs_atom({:__block__, _, [a]}) when is_atom(a), do: a
+  defp lvs_atom(a) when is_atom(a), do: a
+  defp lvs_atom(_), do: nil
+
+  defp lvs_on_mount(opts) when is_list(opts) do
+    opts
+    |> Keyword.get(:on_mount, [])
+    |> List.wrap()
+    |> Enum.map(fn
+      {{:__aliases__, _, _} = m, _act} -> alias_string([], m)
+      {:__aliases__, _, _} = m -> alias_string([], m)
+      _ -> nil
+    end)
+    |> Enum.reject(&is_nil/1)
+  end
+
+  defp lvs_on_mount(_), do: []
+
+  # -- the hook sites, with BOTH properties derived ---------------------------
+
+  defp lv_hook_sites(index) do
+    Enum.flat_map(index.defs, fn
+      %{body: nil} -> []
+      d -> d.body |> expand_pipes() |> lvh_walk(false, d, index, [])
+    end)
+  end
+
+  defp lvh_walk(node, c?, d, index, acc) do
+    acc =
+      case node do
+        {{:., _, [_m, :attach_hook]}, _, [_s, _n, stage, f]} -> [lvh_site(d, stage, f, c?, index) | acc]
+        {:attach_hook, _, [_s, _n, stage, f]} -> [lvh_site(d, stage, f, c?, index) | acc]
+        _ -> acc
+      end
+
+    c2 = c? or lvh_branch?(node)
+
+    case node do
+      {a, b} ->
+        acc |> then(&lvh_walk(a, c2, d, index, &1)) |> then(&lvh_walk(b, c2, d, index, &1))
+
+      {f, _, args} when is_list(args) ->
+        Enum.reduce([f | args], acc, &lvh_walk(&1, c2, d, index, &2))
+
+      l when is_list(l) ->
+        Enum.reduce(l, acc, &lvh_walk(&1, c2, d, index, &2))
+
+      _ ->
+        acc
+    end
+  end
+
+  defp lvh_branch?({op, _, args}) when op in [:if, :unless, :case, :cond, :with] and is_list(args),
+    do: true
+
+  defp lvh_branch?(_), do: false
+
+  defp lvh_site(d, stage, fun, c?, index) do
+    clauses = lv_hook_clauses(fun, d, index)
+
+    %{
+      mod: lv_mod(d),
+      stage: lv_stage(stage),
+      uncond?: not c?,
+      halts?: Enum.any?(clauses, fn {sel, body} -> lvd_walk(body, sel, false) end),
+      deny?: Enum.any?(clauses, fn {sel, body} -> lvd_walk(body, sel, true) end)
+    }
+  end
+
+  # THE HOOK FUNCTION, RESOLVED TO {selector, body} CLAUSES. Two shapes ship on this
+  # tree — a local capture and an inline `fn` — and an unresolvable third contributes
+  # NO clause rather than a verdict nobody derived.
+  defp lv_hook_clauses({:&, _, [{:/, _, [{name, _, ctx}, ar]}]}, d, index)
+       when is_atom(name) and is_atom(ctx) do
+    a = lvs_int(ar)
+
+    index.defs
+    |> Enum.filter(&(&1.module == d.module and &1.name == name and &1.arity == a))
+    |> Enum.map(&{lv_sel_head(&1.head), &1.body})
+  end
+
+  defp lv_hook_clauses({:fn, _, clauses}, _d, _index) do
+    Enum.flat_map(clauses, fn
+      {:->, _, [heads, body]} -> [{lv_sel_pat(List.first(heads)), body}]
+      _ -> []
+    end)
+  end
+
+  defp lv_hook_clauses(_, _, _), do: []
+
+  defp lvs_int({:__block__, _, [i]}) when is_integer(i), do: i
+  defp lvs_int(i) when is_integer(i), do: i
+  defp lvs_int(_), do: -1
+
+  # THE SELECTOR OF A BRANCH: what decided that this path runs. A literal event name in
+  # the head, or a guard over a name list, is a NAMED selector — the branch runs only
+  # for events it spells out. Anything else is the DEFAULT path.
+  defp lv_sel_head({:when, _, [h, guard]}) do
+    if lv_guard_names?(guard), do: :named, else: lv_sel_pat(List.first(lv_args(h)))
+  end
+
+  defp lv_sel_head(h), do: lv_sel_pat(List.first(lv_args(h)))
+
+  defp lv_sel_pat({:__block__, _, [v]}) when is_binary(v), do: :named
+  defp lv_sel_pat({:__block__, _, [v]}) when is_atom(v) and v not in [true, false, nil], do: :named
+  defp lv_sel_pat(v) when is_binary(v), do: :named
+  defp lv_sel_pat(v) when is_atom(v) and v not in [true, false, nil], do: :named
+  defp lv_sel_pat(_), do: :default
+
+  defp lv_guard_names?({:in, _, _}), do: true
+
+  defp lv_guard_names?({_, _, args}) when is_list(args), do: Enum.any?(args, &lv_guard_names?/1)
+  defp lv_guard_names?({a, b}), do: lv_guard_names?(a) or lv_guard_names?(b)
+  defp lv_guard_names?(l) when is_list(l), do: Enum.any?(l, &lv_guard_names?/1)
+  defp lv_guard_names?(_), do: false
+
+  # `default_only?` false answers the NAIVE question (does this halt at all), true
+  # answers the honest one (does it halt on a path the event name did not select).
+  # ONE walk, one flag: two walks would be two chances to disagree with each other.
+  defp lvd_walk(node, sel, default_only?) do
+    if lv_halt?(node) do
+      not default_only? or sel == :default
+    else
+      case node do
+        {:->, _, [heads, body]} ->
+          lvd_walk(body, lv_sel_pat(List.first(heads)), default_only?)
+
+        {a, b} ->
+          lvd_walk(a, sel, default_only?) or lvd_walk(b, sel, default_only?)
+
+        {f, _, args} when is_list(args) ->
+          Enum.any?([f | args], &lvd_walk(&1, sel, default_only?))
+
+        l when is_list(l) ->
+          Enum.any?(l, &lvd_walk(&1, sel, default_only?))
+
+        _ ->
+          false
+      end
+    end
+  end
+
+  defp lv_halt?({{:__block__, _, [:halt]}, _}), do: true
+  defp lv_halt?({:halt, _}), do: true
+  defp lv_halt?(_), do: false
+
+  # -- the component THEOREM, and the module that must not match itself -------
+
+  defp lv_component_theorem(parsed) do
+    mods =
+      parsed
+      |> Enum.filter(&(:binary.match(&1.src, "LiveComponent") != :nomatch or
+                         :binary.match(&1.src, ":live_component") != :nomatch))
+      |> Enum.flat_map(&lv_use_walk/1)
+
+    with_clauses =
+      Enum.filter(mods, fn m ->
+        Enum.any?(parsed, fn f ->
+          Enum.any?(f.defs, &(lv_mod(&1) == m and &1.name == :handle_event and &1.arity == 3))
+        end)
+      end)
+
+    %{modules: mods, with_clauses: with_clauses}
+  end
+
+  defp lv_use_walk(%{src: src}) do
+    case Code.string_to_quoted(src) do
+      {:ok, ast} -> lvu_walk(ast, [], [])
+      _ -> []
+    end
+  end
+
+  defp lvu_walk({:defmodule, _, [{:__aliases__, _, segs}, body]}, mod, acc) do
+    m = mod ++ segs
+    inner = lvu_body(body)
+    acc = if Enum.any?(inner, &lvu_component?/1), do: [Enum.join(m, ".") | acc], else: acc
+    Enum.reduce(inner, acc, &lvu_walk(&1, m, &2))
+  end
+
+  defp lvu_walk(_, _, acc), do: acc
+
+  defp lvu_body(body) do
+    case body do
+      [{:do, {:__block__, _, stmts}}] -> stmts
+      [{:do, one}] -> [one]
+      _ -> []
+    end
+  end
+
+  # THE TOP-LEVEL RESTRICTION IS THE WHOLE POINT. `use Phoenix.LiveComponent` inside a
+  # `quote` block is the DEFINITION of the project's own `:live_component` spelling, not
+  # a use of it — lvu_body/1 returns only the module's own statements, so the definer is
+  # never a member of its own class.
+  defp lvu_component?({:use, _, [{:__aliases__, _, [:Phoenix, :LiveComponent]} | _]}), do: true
+
+  defp lvu_component?({:use, _, [{:__aliases__, _, _}, {:__block__, _, [:live_component]}]}),
+    do: true
+
+  defp lvu_component?({:use, _, [{:__aliases__, _, _}, :live_component]}), do: true
+  defp lvu_component?(_), do: false
+
+  defp lv_sym_diff(a, b) do
+    sa = MapSet.new(a)
+    sb = MapSet.new(b)
+    sa |> MapSet.symmetric_difference(sb) |> Enum.sort()
+  end
+
+  defp lv_delegation?(d) do
+    case lv_do(d.body) do
+      {{:., _, [{:__aliases__, _, _}, f]}, _, args} when is_atom(f) and is_list(args) -> true
+      _ -> false
+    end
+  end
+
+  defp lv_do(nil), do: nil
+
+  defp lv_do(body) when is_list(body) do
+    Enum.find_value(body, fn
+      {{:__block__, _, [:do]}, e} -> e
+      {:do, e} -> e
+      _ -> nil
+    end)
+  end
+
+  defp lv_do(e), do: e
+
+  defp short_mod(m), do: m |> String.split(".") |> Enum.take(-2) |> Enum.join(".")
+
+  # -- THE ARM. The block stops being print-only here (wave 42).
+  #
+  # A RELATION, NEVER A CLASS COUNT. It asserts that every clause in the population is
+  # disposed EXACTLY ONCE across the declared classes, residual included — so an honest
+  # reclassification (a live_session gaining a hook, a component gaining a route) moves
+  # two counts and can never red it, while a clause that falls out of the taxonomy reds
+  # BY NAME instead of shrinking a denominator nobody was watching.
+  defp liveview_checks(%{liveview: %{} = lv}) do
+    ok? = lv.sum == lv.population and lv.stray == []
+
+    why =
+      if ok? do
+        "#{lv.population} handle_event/3 clause(s) disposed EXACTLY ONCE across #{map_size(lv.freqs)} REACH class(es) — " <>
+          (lv.order
+           |> Enum.map(fn c -> "#{c} #{Map.get(lv.freqs, c, 0)}" end)
+           |> Enum.join(", ")) <>
+          " · RESIDUAL #{lv.residual} printed with its count, never folded · DENIES #{lv.denies} / #{lv.reachable} deny-by-default against #{lv.halt_keyed} / #{lv.reachable} on the naive halt key · ATTACH-CERTAINTY #{lv.attach_certain} / #{lv.reachable}"
+      else
+        "the REACH partition sums to #{lv.sum} over a population of #{lv.population}" <>
+          if lv.stray == [], do: "", else: " · class(es) outside the declared taxonomy: #{inspect(lv.stray)}"
+      end
+
+    [{"LIVEVIEW-REACH-CLOSES", ok?, why}]
+  end
+
+  defp liveview_checks(_), do: []
+
   # WHAT THE ROUTE LENS ITSELF CANNOT SEE. The blind shapes are NAMED with their line, and
   # the resolved-macro count is DERIVED from the AST — a plain `grep -c` over router.ex
   # counts comment prose as callsites, which is the transcription error this epic exists
@@ -4570,7 +5157,7 @@ defmodule PDS.Census do
     [
       {"ROUTED-POPULATION-COMPLETE", ok?, complete_why},
       {"LENS-CAN-MISS", resolved != [], lens_why}
-    ] ++ derivation_checks(d)
+    ] ++ derivation_checks(d) ++ liveview_checks(d)
   end
 
   # A RELATION, NEVER A THRESHOLD (PDS wave 40). This arm asserts that the partition
@@ -5217,6 +5804,77 @@ defmodule PDS.Census do
       expect: ["NO hop target resolves in this corpus", "THE ONE-HOP JOIN over the helper-assembled band"],
       refute: ["ONE HOP into SessionIssuer.issue/3"],
       proves: "with the hop resolution dead every attempted clause prints the empty-candidate refusal and every conversion disappears — so the yield printed above is DERIVED from the join, and the arms stay green through it, which is the point: this pass RE-LABELS and can never cost a false green"
+    },
+    # THE LIVEVIEW BLOCK STOPS BEING PRINT-ONLY (PDS wave 42, discharging the pin task).
+    #
+    # EVERY ASSERTION BELOW IS A FRACTION, NEVER A BARE NUMERATOR. Measured on the real
+    # tree: the routed and repo-wide numerators are IDENTICAL at every depth (13/34/40/
+    # 47/61/62/63/66), so a numerator-only assertion cannot tell the two lenses apart at
+    # any budget. The fixture reproduces that property by construction — its one
+    # component clause is write-FALSE at every depth — so the same trap is live here.
+    %{
+      name: "LIVEVIEW-DEPTH-FRACTION",
+      corpus: :full,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "0 / 1   (0.0%)    0 / 2   (0.0%)   <- @max_depth, the census budget",
+        "1 / 1 (100.0%)    1 / 2  (50.0%)   <- the relation CLOSES here",
+        "2 == population 2",
+        "1 / 1  clause(s) whose EVERY live_session chain",
+        "1 / 1  reachable clause(s) covered by a deny-by-default gate",
+        "PASS  LIVEVIEW-REACH-CLOSES"
+      ],
+      proves: "the routed fixture LiveView's write sits ONE HOP past @max_depth, so the sweep prints FALSE at the budget and TRUE at closure — and BOTH cells are asserted as fractions, numerator AND denominator, over a routed 1 and a population 2 that a bare integer could not distinguish"
+    },
+    %{
+      name: "LIVEVIEW-DEPTH-NOT-CONSTANT",
+      corpus: :full,
+      argv: [],
+      # MOVE THE WRITE ONE HOP, WITHOUT TOUCHING THE FIXTURE. write_corpus!/3 writes the
+      # corpus UNMUTATED before any mutant runs, so a fixture edit is a function the
+      # mutant never calls and passes vacuously. Charging the entry clause one hop less
+      # is the same displacement seen from the lens side.
+      # THE ANCHOR CARRIES ITS BINDING. The bare `bfs([{d, 0, …` spelling occurs THREE
+      # times in this file — apply_mutation/2 refuses an ambiguous anchor rather than
+      # mutating the first one it meets, which is the guard working.
+      mut: {"{verbs, _found, _chain} = bfs([{d, 0" <> ", [label(d)]}], index, MapSet.new(), %{}, nil, [], max)",
+            "{verbs, _found, _chain} = bfs([{d, -1, [label(d)]}], index, MapSet.new(), %{}, nil, [], max)"},
+      exit: 0,
+      expect: ["1 / 1 (100.0%)    1 / 2  (50.0%)   <- @max_depth, the census budget"],
+      refute: ["0 / 1   (0.0%)    0 / 2   (0.0%)   <- @max_depth, the census budget"],
+      proves: "the printed FRACTION at the budget moves from 0 / 1 to 1 / 1 when the write moves one hop — so it is a measurement of the tree and not a constant the block prints either way"
+    },
+    %{
+      name: "LIVEVIEW-WRITE-FLAG-ARMED",
+      corpus: :full,
+      argv: [],
+      # THE OTHER DIRECTION, AND THE ONE THAT WAS MEASURED VACUOUS. Forcing the write
+      # flag false made every LiveView depth cell read 0 and the census STILL exited 0
+      # with CENSUS OK — nothing in the selftest could see it. It can now.
+      mut: {"{Map.has_key?(verbs, :write)" <> ", Map.get(verbs, :visited, [])}",
+            "{false, Map.get(verbs, :visited, [])}"},
+      exit: 0,
+      expect: ["0 / 1   (0.0%)    0 / 2   (0.0%)   <- @max_depth, the census budget"],
+      refute: ["1 / 1 (100.0%)"],
+      proves: "a write flag forced false empties every depth cell and the case REDS on the missing 1 / 1 — the exact mutation that used to survive at exit 0 with every arm printing PASS"
+    },
+    %{
+      name: "LIVEVIEW-REACH-CLOSES-ARMED",
+      corpus: :full,
+      argv: [],
+      # A CLASS THAT LEAVES THE TAXONOMY. The arm asserts a RELATION (every clause
+      # disposed exactly once, residual included), never a class count, so an honest
+      # reclassification moves two numbers and cannot red it — this can.
+      # THE REPLACEMENT IS SPLIT TOO. Written whole it would CONTAIN the anchor, so the
+      # anchor would occur twice — once at the line it targets and once inside this very
+      # tuple — and apply_mutation/2 would refuse it as ambiguous.
+      mut: {"MapSet.member?(comp_set, lv_key(d)) -> :unreachable_component" <> "_lifecycle",
+            "MapSet.member?(comp_set, lv_key(d)) -> :unreachable_component" <> "_lifecycle" <> "_STRAY"},
+      exit: 1,
+      expect: ["FAIL  LIVEVIEW-REACH-CLOSES", "outside the declared taxonomy"],
+      proves: "a REACH class that falls out of the declared taxonomy reds BY NAME instead of quietly shrinking a denominator — the arm that makes this block catchable at all"
     }
   ]
 
@@ -5506,6 +6164,20 @@ defmodule PDS.Census do
     defmodule BarkparkWeb.Router do
       live_dashboard("/dashboard", metrics: BarkparkWeb.Telemetry)
 
+      # THE LIVE ROUTE (PDS wave 42). Without a `live(...)` line here `route_mods` is
+      # EMPTY and the ROUTED/COMPONENT split of the LiveView population is degenerate
+      # BY CONSTRUCTION — every clause lands COMPONENT, every REACH class but one reads
+      # zero, and the three columns below it certify a partition nobody exercised. It is
+      # wrapped in a live_session with an on_mount chain so the REACH lens has a chain
+      # to read; the committed :selftest_fixture disposition row is what keeps
+      # ROUTED-POPULATION-COMPLETE green on the arrival this route IS.
+      scope "/studio", Barkpark.Filler do
+        live_session :selftest_session,
+          on_mount: [{Barkpark.Filler.FixtureHook, :default}] do
+          live("/fixture", FixtureLive)
+        end
+      end
+
       scope "/v1" do
         plugin_routes(scope: :admin)
         post("/selftest-fixture-close", Barkpark.Filler.M1, :noop)
@@ -5538,6 +6210,56 @@ defmodule PDS.Census do
     """)
 
     w.("api/lib/barkpark/filler/echo_controller.ex", echo_controller_source(echo))
+
+    # THE LIVEVIEW FIXTURE (PDS wave 42), IN THREE COUPLED FILES. The routed LiveView's
+    # write sits EXACTLY ONE HOP BEYOND the census budget — handle_event is depth 0 and
+    # hop7/2 is depth 7, one past @max_depth — so the depth sweep prints a FALSE cell and a
+    # TRUE one past it, and both are asserted as FRACTIONS. A bare numerator could not
+    # tell the routed lens from the repo-wide one: they are identical at every depth by
+    # construction, here and on the real tree.
+    w.("api/lib/barkpark/filler/fixture_live.ex", """
+    defmodule Barkpark.Filler.FixtureLive do
+      use Phoenix.LiveView
+
+      def handle_event("fixture-save", params, socket), do: hop1(params, socket)
+
+      defp hop1(p, s), do: hop2(p, s)
+      defp hop2(p, s), do: hop3(p, s)
+      defp hop3(p, s), do: hop4(p, s)
+      defp hop4(p, s), do: hop5(p, s)
+      defp hop5(p, s), do: hop6(p, s)
+      defp hop6(p, s), do: hop7(p, s)
+      defp hop7(p, _s), do: Barkpark.Repo.update(p)
+    end
+    """)
+
+    # THE COMPONENT HALF. `use Phoenix.LiveComponent` at the module's OWN top level, with
+    # a handle_event/3 of its own — so the component THEOREM and the route PROXY each
+    # have a member to find, and their disagreement is measured rather than assumed.
+    w.("api/lib/barkpark/filler/fixture_component.ex", """
+    defmodule Barkpark.Filler.FixtureComponent do
+      use Phoenix.LiveComponent
+
+      def handle_event("fixture-comp", _params, socket), do: {:noreply, socket}
+    end
+    """)
+
+    # THE HOOK HALF. Attached UNCONDITIONALLY and denying on its DEFAULT path, so the
+    # REACH, DENIES and ATTACH-CERTAINTY columns each read a non-zero numerator on this
+    # corpus. A gate that halted only under literal heads would exercise the trap key
+    # and never the honest one.
+    w.("api/lib/barkpark/filler/fixture_hook.ex", """
+    defmodule Barkpark.Filler.FixtureHook do
+      import Phoenix.LiveView, only: [attach_hook: 4]
+
+      def on_mount(:default, _params, _session, socket) do
+        {:cont, attach_hook(socket, :fixture_gate, :handle_event, &gate/3)}
+      end
+
+      defp gate("fixture-read", _params, socket), do: {:cont, socket}
+      defp gate(_event, _params, socket), do: {:halt, socket}
+    end
+    """)
 
     w.("api/lib/barkpark/repo.ex", """
     defmodule Barkpark.Repo do
