@@ -394,8 +394,7 @@ const KNOWN_GAPS = [
   // a CLOSED four-way alternation `/\b(info|warn|ok|danger)\b/g` written in code
   // (grep -n 'function coherenceFixtureToHtml' app.js), so the fixture selects
   // among four and cannot introduce a fifth. It is now an ALLOW_PREFIXES member,
-  // with
-  // the closed-ness pinned by a test that reds if the alternation widens.
+  // with the closed-ness pinned by a test that reds if the alternation widens.
   //
   // THE LIST IS NOW EMPTY, AND THAT IS THE POINT: the checker no longer exits 0
   // by having been told to ignore a row it attributes to an open backlog task.
