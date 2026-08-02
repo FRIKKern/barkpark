@@ -1,0 +1,52 @@
+{
+  "run_id": "grip-20260802T0115Z-epic13-media-pipeline-survival",
+  "subject_area": "jarl-innleggene wave 2026-08-02, verifier epic13-pipeline-scripts — does the 'proven Epic-13 media pipeline' still exist on disk?",
+  "harness": "/private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad — the SAME session-scratchpad the Epic 9/11c/13 media work used. It did NOT die: this wave's session id is byte-identical to the one baked into every script path. It is still /private/tmp and still volatile; copy into the repo before budgeting a slice against it.",
+  "recipes": [
+    {
+      "subject": "the asciicast typed-demo driver survives and executes live commands",
+      "quantity": "tool:driver.sh-executes",
+      "rerun": "printf '# narration\\necho hello-from-driver\\n' > /tmp/probe.cmds && bash /private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad/media/driver.sh /tmp/probe.cmds /tmp",
+      "derived_level": "L1",
+      "deps": ["bash", "asciinema 3.2.1 (only for the recording wrapper around it)"],
+      "observed_at": "2026-08-02T01:15:00Z",
+      "observed": "890-byte /media/driver.sh present (mtime 2026-07-31 15:34). Dry run printed the dim narration line, then typed the command char-by-char behind a cyan \\u276f prompt at 0.022s/char and executed it for real: output 'hello-from-driver'. Nothing faked. Canonical params baked in: 0.022s per char, 0.3s pre-exec, 1.0s post-exec, 1.2s per narration line, 1.5s tail, BARKPARK_MANIFEST=/tmp/bp-manifest.json."
+    },
+    {
+      "subject": "the 4:3 recompose step survives and reproduces a 1440x1080 still from a real cast today",
+      "quantity": "tool:compose43-roundtrip",
+      "rerun": "cd /private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad && castvenv/bin/python frames43/compose43.py media/scaffy-run-remove.cast 57 100 30 0 4 62 20 /tmp/probe43.png tight",
+      "derived_level": "L1",
+      "deps": ["agg 1.9.0", "castvenv python3.10 + Pillow 12.3.0 + pyte", "epic9frames/crop.py render()", "epic9frames/castframe.py truncate()"],
+      "observed_at": "2026-08-02T01:16:00Z",
+      "observed": "Exit 0. stdout: '/tmp/probe43.png mode=tight window=62x20ch aspect=1.327 card_px_per_char=5.36'. PIL reports OUT (1440, 1080) ratio 1.3333333333333333 — exact 4:3. Also emits -card340.png (340x255) and -card240.png (240x180) for card-size judgement. agg render params fixed in epic9frames/crop.py: --theme asciinema --font-size 32 --idle-time-limit 0.05 --speed 50 --fps-cap 5 --last-frame-duration 2. Measured agg metrics hard-coded in compose43: char advance 19.3, line height 44.75, outer padding 17.5x/23.25y — derived from 100x30 vs 110x42 renders, so they are only valid for casts recorded at those terminal dims."
+    },
+    {
+      "subject": "recorded casts are 100x30, NOT the doctrine's --cols 80 --rows 24",
+      "quantity": "cast:terminal-dims",
+      "rerun": "head -c 120 /private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad/media/scaffy-run-remove.cast",
+      "derived_level": "L1",
+      "deps": ["asciinema 3.2.1 (v3 format)"],
+      "observed_at": "2026-08-02T01:16:00Z",
+      "observed": "Header: {\"version\":3,\"term\":{\"cols\":100,\"rows\":30},\"timestamp\":1785504868,\"idle_time_limit\":2.0,\"command\":\"bash .../media/driver.sh ...\"}. The published jarl-media-doctrine paper states 'set --cols 80 --rows 24'. Every accepted 4:3 still on jarl.no was in fact composed from a 100x30 cast, and compose43's crop metrics were measured at 100x30. A new recording at 80x24 would silently break the hard-coded ADV/LH/PX/PY constants. The header also leaks the absolute scratchpad path in `command` — that is the header-scrub obligation."
+    },
+    {
+      "subject": "the upload wrapper survives, its admin token is still valid, and every asset it published is still live",
+      "quantity": "tool:upload-wrapper-live",
+      "rerun": "curl -sS -o /dev/null -w '%{http_code}\\n' -H \"Authorization: Bearer $(cat /tmp/jarl_admin_token)\" https://jarl.barkpark.cloud/v1/media/production; curl -sS -o /dev/null -w '%{http_code}\\n' https://jarl.barkpark.cloud/media/files/2026/08/scaffy-kvittering-4x3-tett-2026-07-31-a4e14745.png",
+      "derived_level": "L1",
+      "deps": ["curl", "/tmp/jarl_admin_token (42 bytes, mtime 2026-07-30 16:27)", "recrop/upload.py", "frames43/wire43.py", "frames43/wire43b.py"],
+      "observed_at": "2026-08-02T01:18:00Z",
+      "observed": "GET /v1/media/production -> 200, {\"result\":{\"count\":47,...}}. The published 4:3 recompose returns 200 / 182437 bytes. Upload shape recorded in recrop/upload.py: POST {BASE}/media/upload -H 'Authorization: Bearer <token>' -F file=@<path> -F dataset=production, then PATCH {BASE}/v1/media/production/{id} with JSON {altText, caption}. Wrapper is admin-token-only; the non-admin UPLOAD path is NOT exercised by any of these scripts."
+    },
+    {
+      "subject": "a full rendered-page screenshot rig for jarl.no already exists — it was never built from scratch this wave",
+      "quantity": "tool:capture-rig-exists",
+      "rerun": "ls -la /private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad/epic13/capture-jarl.mjs /private/tmp/claude-501/-Users-frikkjarl-Documents-GitHub/2938d290-edae-40dd-bce3-1286cec080a8/scratchpad/epic13/jarl | head -20",
+      "derived_level": "L1",
+      "deps": ["playwright (resolves from scratchpad node_modules; chromium installed)", "https://jarl.no live"],
+      "observed_at": "2026-08-02T01:20:00Z",
+      "observed": "epic13/capture-jarl.mjs enumerates all 20 project slugs plus /, /prosjekter, /om, /kontakt, /notater, 3 notes and 3 papers; shoots fullPage at 1440x900 light, then 1440 dark via Playwright `colorScheme: 'dark'` (NO CDP needed), then 390x844 isMobile deviceScaleFactor 2; forces lazy media eager and scrolls the page before shooting; also opens the menu drawer. It carries a 90-line in-page metricsProbe returning maxFs/bodyFs, img/video/canvas/pre/svgLarge counts, largest visual element, per-section height + mediaShare, mediaViewportShare over the first 3 viewports, and a hairline count. 44 PNGs + metrics.json on disk, mtime 2026-08-01 23:45-23:50 (5 dark, 5 at 390). Dark/mobile currently cover only the 5 main templates + project-barkpark — extending the `dark`/`mobile` flags to all 20 slugs is a one-line edit, not a rig build."
+    }
+  ]
+}
