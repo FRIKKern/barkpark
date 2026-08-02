@@ -21,6 +21,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
   alias Barkpark.Content
   alias Barkpark.PortableDoc.{Projection, Render, TaskResolver}
   alias BarkparkWeb.ScopeHelpers
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.StudioLive.Blocks
   alias BarkparkWeb.Studio.StudioLive.PaperCanvas
   alias BarkparkWeb.Studio.StudioLive.Shared
@@ -67,6 +68,43 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     |> assign(save_status: "Read-only")
   end
 
+  # pds-w42 — THE PRINCIPAL GATE, AT THE CHOKEPOINT.
+  #
+  # The paper editor's composite field blocks (`composite` / `arrayOf` /
+  # `codelist` / `localizedText`) render as a nested `PaperFieldBlock`
+  # LiveComponent, and that component does NOT write: it does
+  # `send(self(), {:paper_op, op})`, which lands in `StudioLive`'s
+  # `handle_info({:paper_op, …})` and arrives HERE. `Caps.attach/1`'s
+  # `:studio_caps_gate` is an `attach_hook(_, :handle_event, _)`, and no
+  # `handle_event` hook — parent socket or component socket — can see a
+  # `handle_info`. So a write-denied principal reached persisted state through
+  # this door while the SAME intent sent as the `paper-op` EVENT was halted by
+  # the socket gate. A capability PROP on the component (the wave-41 SheetGrid
+  # remedy) would be inert here for the same reason: the component is not the
+  # writer.
+  #
+  # ONE RULE, NOT A FORK: the predicate is `Caps.write_capable?/2` — the same
+  # single copy the socket-level gate uses — fed FRESH caps (`Caps.derive/1`
+  # reloads grants, so mid-session expiry denies immediately). The flash is the
+  # gate's own wording so both seams speak one vocabulary.
+  #
+  # SCOPE, HONESTLY: this denies any principal `Caps` denies write — a
+  # read-only api_token or read-only member. It is silent on a principal-LESS
+  # socket, because `write_capable?/2` returns TRUE there BY DESIGN (the
+  # intentionally-open public-demo posture). Nobody may read this as
+  # "anonymous is now denied".
+  @write_denied_notice "You don't have access to do that."
+
+  defp write_denied?(socket) do
+    not Caps.write_capable?(socket.assigns, Caps.derive(socket))
+  end
+
+  defp refuse_write_denied(socket) do
+    socket
+    |> put_flash(:error, @write_denied_notice)
+    |> assign(save_status: "Read-only")
+  end
+
   @doc false
   def paper_pane_op(socket, op) do
     paper = socket.assigns[:paper_doc]
@@ -74,6 +112,11 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     dataset = socket.assigns.dataset
 
     cond do
+      # pds-w42 — FIRST, because a denied principal must not learn anything
+      # from the pane's own vetoes. See write_denied?/1.
+      write_denied?(socket) ->
+        refuse_write_denied(socket)
+
       read_only_pane?(socket) ->
         refuse_read_only_pane(socket)
 
@@ -135,6 +178,12 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     dataset = socket.assigns.dataset
 
     cond do
+      # pds-w42 — same principal gate as paper_pane_op/2, for the same reason
+      # the read-only-pane guard is duplicated here: a batch reaches this seam
+      # WITHOUT passing through paper_pane_op/2. See write_denied?/1.
+      write_denied?(socket) ->
+        refuse_write_denied(socket)
+
       # Same v1 read-only guard as paper_pane_op/2 — see its comment. The batch
       # path needs its own: a canvas run reaches here without passing through
       # paper_pane_op/2.
@@ -531,12 +580,28 @@ defmodule BarkparkWeb.Studio.StudioLive.Shared.Paper do
     type = socket.assigns[:editor_type]
     dataset = socket.assigns.dataset
 
-    case Content.apply_document_block_op(doc.doc_id, type, op, dataset, Shared.hook_opts(socket)) do
-      {:ok, _result} ->
-        sync_editor_blocks(socket)
+    cond do
+      # pds-w42 — paper_op/2's OTHER branch. The `{:paper_op, …}` message is
+      # routed by the same handle_info regardless of which branch it lands in,
+      # so the Beta document block editor is reachable from the same
+      # hook-invisible hop. Gate it with the one predicate. See write_denied?/1.
+      write_denied?(socket) ->
+        refuse_write_denied(socket)
 
-      {:error, _reason} ->
-        put_flash(socket, :error, "Edit failed")
+      true ->
+        case Content.apply_document_block_op(
+               doc.doc_id,
+               type,
+               op,
+               dataset,
+               Shared.hook_opts(socket)
+             ) do
+          {:ok, _result} ->
+            sync_editor_blocks(socket)
+
+          {:error, _reason} ->
+            put_flash(socket, :error, "Edit failed")
+        end
     end
   end
 
