@@ -2568,7 +2568,16 @@ defmodule BarkparkWeb.Studio.SheetGrid do
           </span>
         </:status_pill>
         <:actions>
+          <%!-- AUTHORIZATION axis, and the header's ONE authority-bearing item.
+                `toggle-mode` flips @mode, but @editable is `mode == :edit and
+                write_capable`, so without the capability the toggle changes
+                nothing a viewer can see: the label stays "Edit", the toolbar
+                never appears, and the button is the dead affordance this split
+                exists to remove (same rule as the cell context menu below).
+                A member who may not write is permanently in View and has
+                nothing to toggle between. --%>
           <button
+            :if={@write_capable}
             type="button"
             class="btn btn-ghost btn-sm"
             phx-click="toggle-mode"

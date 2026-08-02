@@ -491,6 +491,14 @@ defmodule Barkpark.SheetsParityTest do
     # …with every write affordance still gone (the capability half of the split).
     refute html_d =~ ~s(data-test-id="sheet-toolbar")
     assert html_a =~ ~s(data-test-id="sheet-toolbar")
+
+    # …AND no dead affordance left behind by restoring the header: `toggle-mode`
+    # flips @mode, but @editable is `mode == :edit and write_capable`, so for
+    # this member the button would change nothing at all — label, toolbar and
+    # grid identical before and after the click. It is not rendered. (Removing
+    # the `:if={@write_capable}` on the toggle reds this line.)
+    refute html_d =~ ~s(data-test-id="sheet-mode-toggle")
+    assert html_a =~ ~s(data-test-id="sheet-mode-toggle")
   end
 
   test "A↔D: the paper embed renders the same values, merges, widths and styles as the grid",
