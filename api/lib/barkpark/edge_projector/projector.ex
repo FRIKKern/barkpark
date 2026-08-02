@@ -69,12 +69,31 @@ defmodule Barkpark.EdgeProjector.Projector do
   """
   @spec project(String.t(), [map()], keyword()) :: {:ok, projection()}
   def project(_scope, docs, opts \\ []) when is_list(docs) do
+    opts = prefetch_schemas(docs, opts)
+
     edges =
       docs
       |> Enum.flat_map(fn doc -> edges_for_doc(doc, opts) end)
       |> dedup()
 
     {:ok, %{edges: edges, key_map: %{}}}
+  end
+
+  # SCHEMAS PREFETCH — `Content.extract_edges/2` re-reads the dataset's schema
+  # list once PER DOCUMENT unless a `:schemas` prefetch is threaded through its
+  # opts (see its `:schemas` note: the exact N+1 already measured and fixed on
+  # /v1/graph — 4096 identical schema queries, 34s first paint — which the
+  # projector never adopted). The schema list is invariant across one rebuild,
+  # so compute it ONCE here and pass it into every `edges_for_doc/2` call,
+  # mirroring `Content.Edges.corpus_edges_for_docs/3`. `put_new_lazy` keeps any
+  # caller-supplied prefetch.
+  defp prefetch_schemas([], opts), do: opts
+
+  defp prefetch_schemas([doc | _], opts) do
+    dataset =
+      Keyword.get(opts, :dataset) || Map.get(doc, :dataset) || Map.get(doc, "dataset")
+
+    Keyword.put_new_lazy(opts, :schemas, fn -> Content.list_schemas(dataset, opts) end)
   end
 
   # The per-doc union: core reference-field edges + every plugin's projected
@@ -119,12 +138,22 @@ defmodule Barkpark.EdgeProjector.Projector do
     {:ok, %{edges: edges}} = project(scope, docs, opts)
     from_pks = corpus_from_pks(docs, opts)
 
-    Repo.transaction(fn ->
-      deleted = delete_outbound_for(from_pks)
-      results = Content.add_edges(edges, add_opts(scope, opts))
-      added = Enum.count(results, &match?({:ok, _}, &1))
-      %{added: added, deleted: deleted}
-    end)
+    Repo.transaction(
+      fn ->
+        deleted = delete_outbound_for(from_pks)
+        results = Content.add_edges(edges, add_opts(scope, opts))
+        added = Enum.count(results, &match?({:ok, _}, &1))
+        %{added: added, deleted: deleted}
+      end,
+      # EXPLICIT transaction budget — a CHOSEN bound, not the inherited 15s
+      # adapter default. The batched write path (one endpoint-resolve query,
+      # chunked insert_all, one reload) clears the largest measured corpus
+      # (~4k docs) well inside this; a rebuild that cannot finish in 60s is
+      # poisoned and must FAIL LOUDLY — the timeout raises, the worker returns
+      # {:error, e}, Oban backs off and discards at max_attempts — rather than
+      # hold the connection forever.
+      timeout: 60_000
+    )
   end
 
   @doc """
