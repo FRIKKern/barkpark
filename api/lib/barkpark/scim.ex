@@ -424,29 +424,56 @@ defmodule Barkpark.Scim do
   @doc """
   Reconcile a group's membership to EXACTLY `user_ids` (SCIM `PUT` members
   full-replace). Users newly present gain the mapped role; users dropped from the
-  set revert to the default `member` role. Non-UUID ids are ignored (an IdP only
-  ever sends resolved resource ids). Every add/remove is audited via
-  `add_group_member`/`remove_group_member`. Returns `{:ok, %{added, removed}}`.
+  set revert to the default `member` role. Every add/remove is audited via
+  `add_group_member`/`remove_group_member`.
+
+  Returns `{:ok, %{added, removed, unmatched}}`, where `added`/`removed` count
+  the users whose stored membership the write ACTUALLY moved and `unmatched`
+  lists the supplied ids that named nobody this org can see — a malformed
+  (non-UUID) id, a user never provisioned into the org, or a user belonging to
+  ANOTHER organization. The previous shape counted set arithmetic (`MapSet.size`
+  of the intended diff) rather than writes, so "granted three" and "granted
+  nobody" reached the caller as the same number: a caller could not answer
+  honestly over it, however carefully it matched (PDS-D551).
   """
   @spec replace_group_members(Organization.t(), Group.t(), [binary()]) ::
-          {:ok, %{added: non_neg_integer(), removed: non_neg_integer()}}
+          {:ok, %{added: non_neg_integer(), removed: non_neg_integer(), unmatched: [binary()]}}
   def replace_group_members(%Organization{} = org, %Group{} = group, user_ids)
       when is_list(user_ids) do
-    desired =
-      user_ids |> Enum.map(&Repo.uuid_or_nil/1) |> Enum.reject(&is_nil/1) |> MapSet.new()
+    {valid, malformed} = Enum.split_with(user_ids, &(Repo.uuid_or_nil(&1) != nil))
 
-    current = current_group_members(org, group)
+    desired = valid |> Enum.map(&Repo.uuid_or_nil/1) |> MapSet.new()
+    current = group_member_ids(org, group)
     to_add = MapSet.difference(desired, current)
     to_remove = MapSet.difference(current, desired)
 
-    Enum.each(to_add, &add_group_member(org, group, &1))
-    Enum.each(to_remove, &remove_group_member(org, group, &1))
+    {added, unmatched} =
+      Enum.reduce(to_add, {0, malformed}, fn uid, {n, miss} ->
+        case add_group_member(org, group, uid) do
+          {:ok, _} -> {n + 1, miss}
+          {:error, :no_membership} -> {n, miss ++ [uid]}
+        end
+      end)
 
-    {:ok, %{added: MapSet.size(to_add), removed: MapSet.size(to_remove)}}
+    removed =
+      Enum.reduce(to_remove, 0, fn uid, n ->
+        case remove_group_member(org, group, uid) do
+          {:ok, _} -> n + 1
+          {:error, :no_membership} -> n
+        end
+      end)
+
+    {:ok, %{added: added, removed: removed, unmatched: unmatched}}
   end
 
-  # Users in the org's workspaces currently holding this group's mapped role.
-  defp current_group_members(org, %Group{role_name: role_name}) do
+  @doc """
+  The org's user ids currently holding `group`'s mapped role — the group's
+  membership as STORED, not as requested. A write receipt that claims members
+  must be computed from this, never from the request body or from a group
+  struct read before the write.
+  """
+  @spec group_member_ids(Organization.t(), Group.t()) :: MapSet.t(binary())
+  def group_member_ids(%Organization{} = org, %Group{role_name: role_name}) do
     ws_ids = workspace_ids(org)
 
     from(m in Membership,
@@ -490,40 +517,52 @@ defmodule Barkpark.Scim do
 
   @doc """
   Add `user_id` to `group`: set that user's membership role (in the org's
-  workspaces) to the group's mapped role. No-op if the user isn't provisioned
-  into the org, or if `user_id` is not a UUID (an IdP-supplied member value
-  binds to a `:binary_id` column — mirroring `replace_group_members/3`, a
-  malformed id folds to `{:ok, 0}` instead of raising, and is not audited).
-  Audited.
-  """
-  @spec add_group_member(Organization.t(), Group.t(), binary()) :: {:ok, non_neg_integer()}
-  def add_group_member(%Organization{} = org, %Group{} = group, user_id) do
-    case Repo.uuid_or_nil(user_id) do
-      nil ->
-        {:ok, 0}
+  workspaces) to the group's mapped role. Audited.
 
-      user_id ->
-        n = set_member_role(org, user_id, group.role_name)
-        audit_group(org, user_id, group, "group_member_added", group.role_name)
-        {:ok, n}
+  Returns `{:ok, n}` only when the write actually re-roled at least one stored
+  membership, and `{:error, :no_membership}` when the id named nobody this org
+  can see: a user never provisioned into the org, a user belonging to ANOTHER
+  organization (the update is scoped to this org's workspaces, so a cross-org
+  id matches zero rows), or a malformed non-UUID member value an IdP sent (it
+  binds to a `:binary_id` column, so it folds instead of raising).
+
+  The previous unconditional `{:ok, non_neg_integer()}` could not be matched
+  honestly by any caller — `{:ok, 0}` satisfies a bare `{:ok, _} =`, so
+  "granted the role" and "granted nobody" reached the receipt as the same
+  value, exactly the shape `delete_group/2` was widened out of (PDS-D523). The
+  outcome now lives in the tag. A grant that matched nobody is also no longer
+  audited: an audit row is a claim that a role changed hands, and none did.
+  """
+  @spec add_group_member(Organization.t(), Group.t(), binary()) ::
+          {:ok, pos_integer()} | {:error, :no_membership}
+  def add_group_member(%Organization{} = org, %Group{} = group, user_id) do
+    with user_id when not is_nil(user_id) <- Repo.uuid_or_nil(user_id),
+         n when n > 0 <- set_member_role(org, user_id, group.role_name) do
+      audit_group(org, user_id, group, "group_member_added", group.role_name)
+      {:ok, n}
+    else
+      _ -> {:error, :no_membership}
     end
   end
 
   @doc """
   Remove `user_id` from `group`: revert that user's membership role (in the
   org's workspaces) to the default `member`, revoking the mapped grant. Audited.
-  A non-UUID `user_id` folds to `{:ok, 0}` un-audited, as in `add_group_member/3`.
-  """
-  @spec remove_group_member(Organization.t(), Group.t(), binary()) :: {:ok, non_neg_integer()}
-  def remove_group_member(%Organization{} = org, %Group{} = group, user_id) do
-    case Repo.uuid_or_nil(user_id) do
-      nil ->
-        {:ok, 0}
 
-      user_id ->
-        n = set_member_role(org, user_id, @provision_role)
-        audit_group(org, user_id, group, "group_member_removed", @provision_role)
-        {:ok, n}
+  Returns `{:ok, n}` only when the write actually reverted at least one stored
+  membership, and `{:error, :no_membership}` when the id named nobody this org
+  can see — same three cases as `add_group_member/3`, and un-audited for the
+  same reason: no grant was revoked.
+  """
+  @spec remove_group_member(Organization.t(), Group.t(), binary()) ::
+          {:ok, pos_integer()} | {:error, :no_membership}
+  def remove_group_member(%Organization{} = org, %Group{} = group, user_id) do
+    with user_id when not is_nil(user_id) <- Repo.uuid_or_nil(user_id),
+         n when n > 0 <- set_member_role(org, user_id, @provision_role) do
+      audit_group(org, user_id, group, "group_member_removed", @provision_role)
+      {:ok, n}
+    else
+      _ -> {:error, :no_membership}
     end
   end
 
