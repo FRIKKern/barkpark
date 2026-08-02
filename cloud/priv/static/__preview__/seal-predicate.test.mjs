@@ -328,6 +328,170 @@ test('R4 MUTATION PROOF: with R4 removed, the identical run seals at a=PASS', ()
   assert.match(token(fixtureRun('self-successor.json').out), /REFUSED reason=SELF-SUCCESSOR/);
 });
 
+// ── R5 / R6 — THE DEAD LETTERBOX (wave 12) ──────────────────────────────────
+// Measured LIVE at 2026-07-31T05:47Z, on the origin/main copy of the predicate:
+//   node seal-predicate.mjs --successor gr-p5r5-successor-seal
+//   -> `epic cloud-console-hardening-epic   successor: gr-p5r5-successor-seal`
+// It RESOLVED, and was printed as the forwarding address, over a row that is
+// `lifecycle_status: done`, `status: published`, `parent_id:
+// cloud-console-hardening-epic` — a corpse, AND a child of the epic it forwards out
+// of, closed for PROMISING to file a successor. resolveTask read existence, `_type`
+// and `status` and NEVER `lifecycle_status`; R4 refuses only SUCCESSOR === EPIC, so
+// one hop below the epic was wide open. Two fences, two refusal codes, because "this
+// id is a corpse" and "this id is inside the epic" are different ledger facts.
+//
+// `sealable.json` is the control on purpose: it is the ONLY non-terminal fixture that
+// may exit 0, so each mutation below turns a REFUSAL back into a SEAL and the two
+// tokens side by side are the proof the fence carries weight.
+const successorFixture = (mutate, name) => {
+  const fx = JSON.parse(readFileSync(FIX('sealable.json'), 'utf8'));
+  mutate(fx.tasks['cch-fixture-successor-epic']);
+  fx.requiredContexts = [AGG];
+  const p = join(tmp('seal-pred-succ-'), name);
+  writeFileSync(p, JSON.stringify(fx));
+  return p;
+};
+const DEAD = (name) => successorFixture((t) => { t.lifecycle_status = name; }, `dead-${name}.json`);
+const INSIDE = (parent) => successorFixture((t) => { t.parent_id = parent; }, 'successor-inside-epic.json');
+
+// The mutations, hoisted so the fence tests and the mutation proofs cannot drift apart.
+const DROP_R5 = (src) => src.replace(
+  /  const lifecycle = doc\.lifecycle_status;\n  if \(!SUCCESSOR_LIVE_STATUSES\.includes\(lifecycle\)\)\n    return \{\n[\s\S]*?\n    \};\n/, '');
+const DROP_R6 = (src) => src.replace(/  const epic = opts\.epic;\n  if \(epic\) \{\n[\s\S]*?\n  \}\n/, '');
+
+test('R5: a successor that is a DONE row is REFUSED — a corpse is a dead letterbox', () => {
+  const { status, out } = run(['--ledger', DEAD('done'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(status, NO_SEAL, 'a done successor must not seal');
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=DEAD-SUCCESSOR/);
+  assert.match(out, /lifecycle_status=done/);
+  assert.match(out, /dead letterbox/);
+  assert.match(out, /Rejected id: cch-fixture-successor-epic/, 'the id is named AS rejected');
+  // It may be named as refused; it may never be rendered as an address.
+  assert.doesNotMatch(out, /successor: cch-fixture-successor-epic/);
+  assert.doesNotMatch(out, /forwarded by name/);
+  assert.doesNotMatch(out, /VERDICT: SEAL$/m);
+});
+
+test('R5: cancelled and a MISSING lifecycle_status are refused by the same fence', () => {
+  const cancelled = run(['--ledger', DEAD('cancelled'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(cancelled.status, NO_SEAL);
+  assert.match(token(cancelled.out), /REFUSED reason=DEAD-SUCCESSOR/);
+  assert.match(cancelled.out, /lifecycle_status=cancelled/);
+
+  // Absent is not live either: a row with no lifecycle at all is unworkable, and the
+  // refusal says `(absent)` rather than rendering `undefined` at a reader.
+  const absent = run(['--ledger', successorFixture((t) => { delete t.lifecycle_status; }, 'no-lifecycle.json'),
+    '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(absent.status, NO_SEAL);
+  assert.match(token(absent.out), /REFUSED reason=DEAD-SUCCESSOR/);
+  assert.match(absent.out, /lifecycle_status=\(absent\)/);
+  assert.doesNotMatch(absent.out, /undefined/);
+});
+
+test('R5: an in_progress successor still resolves — the fence refuses corpses, not work', () => {
+  const { status, out } = run(['--ledger', DEAD('in_progress'), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(status, SEAL, `in_progress is a LIVE successor: ${token(out)}`);
+  assert.match(token(out), /SEAL-PREDICATE SEAL a=PASS/);
+});
+
+test('R5 MUTATION PROOF: with the lifecycle fence removed, the DONE successor resolves again', () => {
+  const path = DEAD('done');
+  const { status, out } = mutatedRun(DROP_R5, ['--ledger', path, '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(status, SEAL, `without R5 a corpse is accepted as the forwarding address: ${token(out)}`);
+  assert.match(out, /successor: cch-fixture-successor-epic/, 'the pre-fix shape printed the corpse AS the address');
+  assert.match(token(out), /SEAL-PREDICATE SEAL a=PASS/);
+  // Both tokens, side by side.
+  assert.match(token(run(['--ledger', path, '--repo', REPO, '--guard-cmd', 'true']).out),
+    /REFUSED reason=DEAD-SUCCESSOR/);
+});
+
+test('R6: a successor that is a CHILD of the epic is REFUSED — R4 only caught the epic itself', () => {
+  const { status, out } = run(['--ledger', INSIDE(EPIC), '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(status, NO_SEAL, 'a child of the epic is not OUT of the epic');
+  assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=SUCCESSOR-INSIDE-EPIC/);
+  assert.match(out, /after 1 hop\(s\): cch-fixture-successor-epic -> cloud-console-hardening-epic/);
+  assert.doesNotMatch(out, /successor: cch-fixture-successor-epic/);
+  assert.doesNotMatch(out, /VERDICT: SEAL$/m);
+  // The distinction from R4 is the whole point: same defect, one hop down, own code.
+  assert.doesNotMatch(token(out), /SELF-SUCCESSOR/);
+});
+
+test('R6: a GRANDCHILD of the epic is refused too, and the trail is printed hop by hop', () => {
+  const fx = JSON.parse(readFileSync(FIX('sealable.json'), 'utf8'));
+  fx.tasks['cch-fixture-successor-epic'].parent_id = 'cch-fixture-middle';
+  fx.tasks['cch-fixture-middle'] = {
+    _id: 'cch-fixture-middle', _type: 'task', status: 'published',
+    lifecycle_status: 'open', parent_id: EPIC,
+  };
+  fx.requiredContexts = [AGG];
+  const p = join(tmp('seal-pred-succ-'), 'grandchild.json');
+  writeFileSync(p, JSON.stringify(fx));
+  const { status, out } = run(['--ledger', p, '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(status, NO_SEAL);
+  assert.match(token(out), /REFUSED reason=SUCCESSOR-INSIDE-EPIC/);
+  assert.match(out, /after 2 hop\(s\): cch-fixture-successor-epic -> cch-fixture-middle -> cloud-console-hardening-epic/);
+});
+
+test('R6: a successor OUTSIDE the epic still resolves, and a parent cycle terminates', () => {
+  // The committed happy path parents the successor at `cloud-console-goal` — outside.
+  assert.equal(fixtureRun('sealable.json').status, SEAL);
+
+  // A ledger cycle is a data fault, not a successor: the walk must stop rather than
+  // spin, and it must not manufacture a refusal out of a chain that never hits the epic.
+  const fx = JSON.parse(readFileSync(FIX('sealable.json'), 'utf8'));
+  fx.tasks['cch-fixture-successor-epic'].parent_id = 'cch-fixture-loop';
+  fx.tasks['cch-fixture-loop'] = {
+    _id: 'cch-fixture-loop', _type: 'task', status: 'published',
+    lifecycle_status: 'open', parent_id: 'cch-fixture-successor-epic',
+  };
+  fx.requiredContexts = [AGG];
+  const p = join(tmp('seal-pred-succ-'), 'cycle.json');
+  writeFileSync(p, JSON.stringify(fx));
+  const { status } = run(['--ledger', p, '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(status, SEAL, 'a cycle that never reaches the epic is not an inside-epic refusal');
+});
+
+test('R6 MUTATION PROOF: with the ancestry fence removed, a child of the epic resolves again', () => {
+  const path = INSIDE(EPIC);
+  const { status, out } = mutatedRun(DROP_R6, ['--ledger', path, '--repo', REPO, '--guard-cmd', 'true']);
+  assert.equal(status, SEAL, `without R6 a row inside the epic is accepted: ${token(out)}`);
+  assert.match(out, /successor: cch-fixture-successor-epic/);
+  assert.match(token(out), /SEAL-PREDICATE SEAL a=PASS/);
+  assert.match(token(run(['--ledger', path, '--repo', REPO, '--guard-cmd', 'true']).out),
+    /REFUSED reason=SUCCESSOR-INSIDE-EPIC/);
+});
+
+test('R5 and R6 are INDEPENDENT fences: dropping one leaves the other firing', () => {
+  // gr-p5r5-successor-seal was BOTH a corpse and a child of the epic. One fence must
+  // not be able to stand in for the other — a reader told "DEAD" learns nothing about
+  // where the row sits, and vice versa.
+  const both = successorFixture((t) => { t.lifecycle_status = 'done'; t.parent_id = EPIC; }, 'corpse-inside-epic.json');
+  assert.match(token(run(['--ledger', both, '--repo', REPO, '--guard-cmd', 'true']).out),
+    /REFUSED reason=DEAD-SUCCESSOR/, 'the lifecycle fence is read first');
+  assert.match(token(mutatedRun(DROP_R5, ['--ledger', both, '--repo', REPO, '--guard-cmd', 'true']).out),
+    /REFUSED reason=SUCCESSOR-INSIDE-EPIC/, 'with R5 gone, R6 catches the same row for its own reason');
+  assert.equal(mutatedRun((src) => DROP_R6(DROP_R5(src)),
+    ['--ledger', both, '--repo', REPO, '--guard-cmd', 'true']).status,
+  SEAL, 'with BOTH gone, the live-ledger corpse is accepted — the pre-wave-12 shape');
+});
+
+test('the three successor-resolution refusals carry three DISTINCT reason codes', () => {
+  // A single UNRESOLVABLE-SUCCESSOR for all of them would tell a reader that the id was
+  // unknown when in fact it was known, published, and disqualified for a stated reason.
+  const codes = new Set();
+  for (const args of [
+    ['--ledger', withRequired('sealable.json'), '--repo', REPO, '--guard-cmd', 'true', '--successor', 'task-DOES-NOT-EXIST-9999'],
+    ['--ledger', DEAD('done'), '--repo', REPO, '--guard-cmd', 'true'],
+    ['--ledger', INSIDE(EPIC), '--repo', REPO, '--guard-cmd', 'true'],
+  ]) {
+    const m = token(run(args).out).match(/reason=([A-Z-]+)/);
+    assert.ok(m, 'every refusal names a reason in its token');
+    codes.add(m[1]);
+  }
+  assert.deepEqual([...codes].sort(),
+    ['DEAD-SUCCESSOR', 'SUCCESSOR-INSIDE-EPIC', 'UNRESOLVABLE-SUCCESSOR']);
+});
+
 // ── THE FOURTH CLAUSE-(a) SHAPE: TERMINAL ───────────────────────────────────
 // Without it, R2 (no successor) + R3 (no placeholder resolves) make "zero residue,
 // terminal epic" UNREACHABLE — the epic is required to spawn a child forever.
