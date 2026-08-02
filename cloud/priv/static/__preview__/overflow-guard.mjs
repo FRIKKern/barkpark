@@ -3079,11 +3079,34 @@ async function main() {
     //    `.fleet-url`, so the count is asserted PER ROUTE against what that
     //    route is supposed to render, never against the union.
     //
+    //    THE THIRD ROW IS THE FAILED INSTANCE'S OWN DETAIL SCREEN (cch-w24-s2),
+    //    and until this wave both rows above were LIST routes — so the one
+    //    screen a person opens to read WHY provisioning failed had never been
+    //    driven with cruel content by anything in this file. On origin/main
+    //    bytes `?scen=fleet-cruel-content#instance/…c2` measured
+    //    documentElement.scrollWidth 4040 against 320 and 4280 against 1000,
+    //    while this leg printed `88 / 88 cells clean` and the whole guard
+    //    exited 0. THREE mechanics that row needed, none of which the pre-w24
+    //    table could express:
+    //      · A PER-SCENARIO HASH. The failed box exists in ONE fixture, so the
+    //        kind control has to live at a DIFFERENT hash (the live instance's
+    //        own detail) — with the row's single hash it was exit 2, an
+    //        ENVIRONMENT verdict standing in for a missing control.
+    //      · A WRAPPER SCOPE PER FINDING. Interpolating `route.sel` put 22 of
+    //        44 mutation-run findings on `.instance-card-name`, a clean
+    //        bystander; the scope is now MEASURED with `closest()` per element.
+    //      · AN EIGHTH CLASS. `provision_error` is admissible AND uncapped at
+    //        every layer, which is neither `CRUEL` (no person, no cap) nor
+    //        `NONE-POSSIBLE` (a 512-char token paints 3754px, so cruelty has
+    //        plenty to measure against) — see `UNCAPPED-DERIVED` below.
+    //
     //    FONT PINNED (D218, paid by cch-w22-s1): `nav()` load()s every declared
     //    @font-face, awaits `document.fonts.ready` and check()s each face
     //    before these px are read, so they are taken under a KNOWN face.
     //    The claim this leg stands behind is still the RATIO (0 offending cells
-    //    on the kind corpus vs N on the cruel one), not the absolute widths.
+    //    on the kind corpus vs N on the cruel one), not the absolute widths —
+    //    and as of cch-w24-s2 BOTH SIDES of that ratio are measured per cell
+    //    (`cruelMin` / `kindMax`) instead of asserted by a scenario-name regex.
     if (requested.includes("W21-cruel-content-text-bounded")) {
       const D = "W21-cruel-content-text-bounded";
       // BLOCK-SCOPED (D247): these axes belong to this leg alone.
@@ -3154,6 +3177,25 @@ async function main() {
       //                   @domain_format (site.ex:28) caps every label at 63; its
       //                   admissible maximum is 3 x 63-char labels + "." + a
       //                   61-char label = exactly 253.
+      //   UNCAPPED-DERIVED  (cch-w24-s2) admissible AND uncapped: a machine
+      //                   writes the value, NO layer bounds it, and it still
+      //                   bites. Distinct from NONE-POSSIBLE, which asserts
+      //                   cruelty has nothing to measure against — false here,
+      //                   because a 512-char single token paints 3754px. The
+      //                   `cap` field therefore cites the ABSENCE BY FILE
+      //                   (which migration widened the column, which changeset
+      //                   declines to validate it) and the cruel length is the
+      //                   SMALLEST MEASURED BITING value rather than the
+      //                   largest legal one — with its own load-time refusal in
+      //                   the fixture, so the row cannot go kind in silence.
+      //                   `provision_error` is the flagship and, today, the only
+      //                   member: `provision_jobs.error` is a POSTGRES :text
+      //                   column (the `modify :error, :text` migration under
+      //                   cloud/priv/repo/migrations) and `ProvisionJob.changeset`
+      //                   (registry/provision_job.ex) casts `:error` with ZERO
+      //                   `validate_length` among its validations.
+      //                   NOT `CRUEL`: that term means a person-typed value AT a
+      //                   cap, and there is neither a person nor a cap here.
       // A CRUEL row's fixture proves its own cap and format at load
       // (scenarios.mjs:1433-1442 throws on GONE-KIND and on a format the server
       // would reject), so those two refusals are enforced upstream of this table.
@@ -3165,24 +3207,98 @@ async function main() {
       // (cch-w22-s7 criteria 1-5 and 9-14) — a different animal, still open.
       const CRUEL_CLASSES = [
         "CRUEL", "INADMISSIBLE", "NONE-POSSIBLE", "GONE-KIND",
-        "BREAKABLE", "ADMIN-ONLY-AT-MINT", "FORMAT-LEGAL",
+        "BREAKABLE", "ADMIN-ONLY-AT-MINT", "FORMAT-LEGAL", "UNCAPPED-DERIVED",
       ];
+      // THE FAILED INSTANCE (cch-w24-s2). Its own detail screen is the ONLY
+      // place a person can read WHY provisioning failed, and it is the screen
+      // no row above reaches — `#overview` and `#fleet` are LIST routes.
+      const CRUEL_FAILED_INST = "5b2c1e00-0000-4000-8000-0000000000c2";
+      // TWO FIELDS PER ROW THE PRE-w24 TABLE DID NOT CARRY, and both exist
+      // because the axis assertions above are a REGEX OVER THE SCENARIO NAME —
+      // a naming rule, not a measurement (D285). Proven: making the KIND
+      // control cruel left this leg at exit 0 while it still printed "the KIND
+      // corpus (32-char host / 10-char name)", a sentence with its own
+      // refutation on the same screen.
+      //   cruelMin  the shortest rendered length that still counts as cruel on
+      //             this host. A cruel cell below it has GONE KIND.
+      //   kindMax   the CEILING the kind control must stay under. There is no
+      //             server floor to cite for this number, so it is chosen and
+      //             justified per row: it sits comfortably above what the kind
+      //             fixture renders today and far below the cruel value, which
+      //             is the whole job — it must catch a control that drifted
+      //             cruel without tripping on an ordinary edit.
+      // `scopes` names the WRAPPER the finding must blame. Blaming `sel` put 22
+      // of 44 pre-w24 findings on `.instance-card-name`, a clean bystander.
       const CRUEL_ROUTES = [
         {
           hash: "#fleet", view: "view-fleet", sel: ".fleet-url", ready: ".fleet-row",
+          scopes: ".fleet-main, .fleet-status, .fleet-row",
           scens: ["fleet-cruel-content", "mixed-fleet"],
           cap: "barkpark.custom_host <= 253 (registry/barkpark.ex:727) under @external_host_format (:109)",
           class: "CRUEL",
+          cruelMin: 253,
+          // `mixed-fleet` renders a 32-char host; 64 is double it and a quarter
+          // of the cap, so an ordinary hostname edit passes and a drift toward
+          // the 253-char twin reds.
+          kindMax: 64,
           predicate: "a person reading their fleet can see WHICH HOST a box answers on — the whole value, not the 14% of it that fits",
         },
         {
           hash: "#overview", view: "view-overview", sel: ".instance-card-name", ready: ".instance-card",
+          scopes: ".instance-card-head, .instance-card",
           scens: ["fleet-cruel-content", "mixed-fleet"],
           cap: "barkpark.name <= 255 (registry/barkpark.ex:466)",
           class: "INADMISSIBLE",
+          cruelMin: 255,
+          // `mixed-fleet`'s longest card name is 10 characters. 64 again: the
+          // slug cap is 63 and every mint path derives the slug from the name
+          // WITHOUT truncation (see INADMISSIBLE above), so a name a person can
+          // actually register cannot exceed 63 — which makes 64 the one kind
+          // ceiling on this host that is derived rather than picked.
+          kindMax: 64,
           predicate: "a person on the overview can tell their instances apart by name. KEPT as an UPPER BOUND, not as a reachability claim: 255 is unreachable (see INADMISSIBLE above), so this row proves the host survives a value CRUELLER than any mint path admits — it does NOT prove anyone can type one",
         },
+        {
+          // THE DETAIL ROUTE, and it carries a PER-SCENARIO hash because the
+          // failed box exists in ONE fixture. `mixed-fleet` has no `…c2`, so a
+          // shared hash would not route there at all and the run would die at
+          // exit 2 (page never became ready) — an ENVIRONMENT verdict standing
+          // in for a missing control. The kind control is the LIVE instance's
+          // own detail screen, which both fixtures render.
+          //
+          // TWO HOSTS IN ONE SELECTOR, on purpose. `.detail-title-row
+          // .status-pill-detail` is the pill that CLIPS (the person reads ~30
+          // of 512 characters); `.bp-tl-fail` is the timeline's failure box,
+          // which does not clip at all — it paints 3754px of ink OUTSIDE itself
+          // and DRAGS THE PAGE. Element-hiding bisect on the pre-fix tree:
+          // blanking the pill left the page at scrollWidth 4040, blanking
+          // `.bp-tl-fail` returned it to 320. A row that measured only the pill
+          // would fix the readable half and leave the console scrolling
+          // sideways, with `documentElement` as its only witness.
+          hash: "#instance/" + CRUEL_FAILED_INST, view: "view-instance", sel: ".detail-title-row .status-pill-detail, .bp-tl-fail",
+          ready: ".detail-title-row",
+          scopes: ".detail-title-row, .bp-tl-fail, .detail-rail, .attention-row",
+          scens: [
+            { scen: "fleet-cruel-content" },
+            { scen: "mixed-fleet", hash: "#instance/5b2c1e00-0000-4000-8000-0000000000a1" },
+          ],
+          cap: "provision_jobs.error is UNBOUNDED at every layer — a POSTGRES :text column (the `modify :error, :text` migration under cloud/priv/repo/migrations) and ProvisionJob.changeset (registry/provision_job.ex) casts :error with ZERO validate_length. The row's cruelMin is therefore the smallest MEASURED biting length, not a legal maximum",
+          class: "UNCAPPED-DERIVED",
+          cruelMin: 512,
+          // The kind control is the live instance, whose detail reads "Online"
+          // (6 characters). 64 keeps the ceiling identical across all three
+          // rows rather than tuning one number per host: any status detail a
+          // person is meant to READ AT A GLANCE is a short phrase, and a
+          // 64-character one is already past that.
+          kindMax: 64,
+          predicate: "a person whose instance failed to provision can open its own screen, READ the whole reason, and still use the console — instead of getting an ellipsis in the header and a page dragged 3.7k pixels sideways",
+        },
       ];
+      // Per-scenario hash, normalized once. A row may hand `scens` a bare
+      // scenario name (the hash is the row's) or `{ scen, hash }` (its own).
+      const cruelCells = (r) => r.scens.map((s) => (
+        typeof s === "string" ? { scen: s, hash: r.hash } : { scen: s.scen, hash: s.hash || r.hash }
+      ));
       // ANTI-VACUITY 0 — the axes. A leg that lost the cruel scenario, or the
       // kind control, or the sub-899 band, or its whole route table, passes for
       // the wrong reason.
@@ -3199,14 +3315,24 @@ async function main() {
         const at = `${route.hash} \`${route.sel}\``;
         // A cruel fixture is named for what it is; anything else in the row's
         // axis is a KIND control. That naming rule is what makes the two
-        // assertions below able to LOSE in both directions.
-        const cruel = route.scens.filter((s) => /cruel/.test(s));
-        const kind = route.scens.filter((s) => !/cruel/.test(s));
+        // assertions below able to LOSE in both directions — but a NAME is not
+        // a measurement, which is why `cruelMin`/`kindMax` are asserted per
+        // CELL further down and required here.
+        const cruel = cruelCells(route).filter((c) => /cruel/.test(c.scen));
+        const kind = cruelCells(route).filter((c) => !/cruel/.test(c.scen));
+        if (!route.scopes) {
+          fail(D, `axis check ${at}: the row declares no \`scopes\` — a finding that cannot name the WRAPPER it measured blames the row selector instead, which is how 22 of 44 pre-w24 findings landed on \`.instance-card-name\`, a clean bystander`);
+        }
+        if (!Number.isFinite(route.cruelMin) || !Number.isFinite(route.kindMax)) {
+          fail(D, `axis check ${at}: the row is missing its ${Number.isFinite(route.cruelMin) ? "kindMax ceiling" : "cruelMin floor"} — without both numbers the cruel/kind axis is a REGEX OVER A SCENARIO NAME and nothing measures whether the fixture on either side still is what it is called`);
+        } else if (route.kindMax >= route.cruelMin) {
+          fail(D, `axis check ${at}: kindMax ${route.kindMax} is not below cruelMin ${route.cruelMin} — the two ceilings overlap, so one string could satisfy BOTH sides of the axis and neither assertion could lose`);
+        }
         if (cruel.length === 0) {
-          fail(D, `axis check ${at}: this row carries NO cruel fixture (scens: ${route.scens.join(", ") || "none"}) — a row driven only on kind content measures the corpus every other leg already measures, and its green says nothing about the cap it cites (${route.cap})`);
+          fail(D, `axis check ${at}: this row carries NO cruel fixture (scens: ${cruelCells(route).map((c) => c.scen).join(", ") || "none"}) — a row driven only on kind content measures the corpus every other leg already measures, and its green says nothing about the cap it cites (${route.cap})`);
         }
         if (kind.length === 0) {
-          fail(D, `axis check ${at}: this row carries NO kind control (scens: ${route.scens.join(", ") || "none"}) — without one, a bound that fixes the cruel value by shredding today's rendering scores a clean sweep on this host`);
+          fail(D, `axis check ${at}: this row carries NO kind control (scens: ${cruelCells(route).map((c) => c.scen).join(", ") || "none"}) — without one, a bound that fixes the cruel value by shredding today's rendering scores a clean sweep on this host`);
         }
         if (!CRUEL_CLASSES.includes(route.class)) {
           fail(D, `axis check ${at}: class "${route.class}" is not in the ledger vocabulary (${CRUEL_CLASSES.join(", ")}) — an unclassified row is a family with no recorded verdict`);
@@ -3221,21 +3347,27 @@ async function main() {
       // Derived, never hardcoded: the corpus, the selector list and the cell
       // budget all come off the table, so a row added or dropped moves the
       // header with it instead of leaving it lying about what was measured.
-      const CRUEL_SCENS = [...new Set(CRUEL_ROUTES.flatMap((r) => r.scens))];
-      const cellCount = CRUEL_ROUTES.reduce((n, r) => n + r.scens.length, 0) * CRUEL_WIDTHS.length * 2;
+      const CRUEL_SCENS = [...new Set(CRUEL_ROUTES.flatMap((r) => cruelCells(r).map((c) => c.scen)))];
+      const cellCount = CRUEL_ROUTES.reduce((n, r) => n + cruelCells(r).length, 0) * CRUEL_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${CRUEL_SCENS.length} scenarios x ${CRUEL_ROUTES.length} routes x ${CRUEL_WIDTHS.length} widths x 2 themes` +
         ` (${cellCount} cells; ${CRUEL_ROUTES.map((r) => r.sel).join(" + ")} scrollWidth vs clientWidth, + documentElement.scrollWidth vs clientWidth)\n`,
       );
-      let cells = 0, seen = 0, spilled = 0, pageOver = 0;
+      let cells = 0, seen = 0, spilled = 0, pageOver = 0, wentKind = 0, wentCruel = 0;
       for (const route of CRUEL_ROUTES) {
-        for (const scen of route.scens) {
+        for (const cell of cruelCells(route)) {
+          const scen = cell.scen;
+          // The naming rule, restated where it is USED: a fixture is cruel iff
+          // it says so in its own name. Both halves of the axis are now
+          // asserted per CELL below, so a fixture that drifts across the line
+          // reds here instead of quietly re-labelling what this leg measures.
+          const isCruel = /cruel/.test(scen);
           for (const theme of ["light", "dark"]) {
             // Enter WIDE and assert the landed view — `?scen=` alone renders
             // #overview and the fleet table goes phantom (the W13/W15 note).
             await setViewport(1000);
             await nav(
-              `${BASE}/?scen=${scen}&theme=${theme}${route.hash}`,
+              `${BASE}/?scen=${scen}&theme=${theme}${cell.hash}`,
               `document.querySelector('${route.ready}') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='${route.view}';})()`,
             );
             const row = [];
@@ -3245,42 +3377,68 @@ async function main() {
                 `(function(){` +
                 `var v=document.querySelector('section.view:not([hidden])');` +
                 `var d=document.documentElement;` +
-                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0};` +
+                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0,longest:0};` +
                 `[].slice.call(document.querySelectorAll(${JSON.stringify(route.sel)})).forEach(function(e,i){` +
                 // A node with no text can never clip and must not be counted as
                 // a measured assertion (the vacuous-green vector W20-S3 named on
                 // `.instance-card-url`: a provisioning box renders the node empty).
                 `  var t=(e.textContent||'').trim(); if(!t) return;` +
                 `  out.n++;` +
+                `  if(t.length>out.longest) out.longest=t.length;` +
                 `  if(e.scrollWidth>out.worst) out.worst=e.scrollWidth;` +
-                `  if(e.scrollWidth>e.clientWidth) out.bad.push({i:i,len:t.length,sw:e.scrollWidth,cw:e.clientWidth,t:t.slice(0,28)});` +
+                // THE WRAPPER SCOPE, MEASURED RATHER THAN INTERPOLATED (D280).
+                // A finding that quotes the ROW selector blames whichever host
+                // the row is named after — 22 of 44 pre-w24 findings landed on
+                // `.instance-card-name`, a clean bystander — and two rows
+                // sharing a selector degrade a derived header to
+                // `.status-pill-detail + .status-pill-detail`. `closest()`
+                // includes the element itself, so a box that IS its own wrapper
+                // (`.bp-tl-fail`) reports itself, which is the truthful answer.
+                `  var sc=e.closest(${JSON.stringify(route.scopes || "*")});` +
+                `  var scope=(sc&&sc.classList.length)?('.'+sc.classList[0]):(sc?sc.tagName.toLowerCase():'<outside every declared scope>');` +
+                `  var cs=getComputedStyle(e);` +
+                `  if(e.scrollWidth>e.clientWidth) out.bad.push({i:i,len:t.length,sw:e.scrollWidth,cw:e.clientWidth,t:t.slice(0,28),scope:scope,ow:cs.overflowWrap,ws:cs.whiteSpace,te:cs.textOverflow,ov:cs.overflow});` +
                 `});` +
                 `return out;})()`,
               );
               cells++;
               if (m.view !== route.view) {
-                fail(D, `${scen}/${theme}@${width}${route.hash}: rendered section.view "${m.view}", asked for "${route.view}" — the hash did not route, so nothing below this line measures ${route.sel}`);
+                fail(D, `${scen}/${theme}@${width}${cell.hash}: rendered section.view "${m.view}", asked for "${route.view}" — the hash did not route, so nothing below this line measures ${route.sel}`);
                 row.push(`${width}:?`);
                 continue;
               }
-              if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}${route.hash}: data-theme is "${m.theme}" — the theme did not apply`);
+              if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}${cell.hash}: data-theme is "${m.theme}" — the theme did not apply`);
               if (m.n === 0) {
-                fail(D, `${scen}/${theme}@${width}${route.hash}: zero NON-EMPTY \`${route.sel}\` rendered — nothing was measured, this is not a pass`);
+                fail(D, `${scen}/${theme}@${width}${cell.hash}: zero NON-EMPTY \`${route.sel}\` rendered — nothing was measured, this is not a pass`);
                 row.push(`${width}:0`);
                 continue;
               }
               seen += m.n;
+              // ── THE AXIS, ASSERTED IN BOTH DIRECTIONS (D285) ──────────────
+              // The one-sided version — a name regex here, a load-time throw in
+              // the fixture that fires only when a CRUEL string SHORTENS — left
+              // a demonstrated hole: making the KIND control cruel kept this
+              // leg at exit 0 while it printed a sentence about "the KIND
+              // corpus" that the numbers on the same screen refuted.
+              if (isCruel && m.longest < route.cruelMin) {
+                wentKind++;
+                fail(D, `${scen}/${theme}@${width}${cell.hash}: the longest \`${route.sel}\` renders ${m.longest} characters, below this row's cruel floor of ${route.cruelMin} (${route.cap}) — the CRUEL fixture has GONE KIND, so every clean line under it is a pass over ordinary content`);
+              }
+              if (!isCruel && m.longest > route.kindMax) {
+                wentCruel++;
+                fail(D, `${scen}/${theme}@${width}${cell.hash}: the KIND control renders ${m.longest} characters, above this row's kind ceiling of ${route.kindMax} — a control that has itself gone cruel cannot show the remedy leaves ordinary content alone, and the "the KIND corpus scores the same" line below would be comparing two cruel corpora`);
+              }
               if (m.psw > m.pcw) {
                 pageOver++;
-                fail(D, `${scen}/${theme}@${width}${route.hash}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the page is off-screen sideways. \`${route.sel}\` has no bound, so it never clips ITSELF: it pushes the PAGE, which is invisible to an element-only scorer`);
+                fail(D, `${scen}/${theme}@${width}${cell.hash}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the page is off-screen sideways. A host on this route has no bound, so it never clips ITSELF: it pushes the PAGE, which is invisible to an element-only scorer`);
               }
               for (const b of m.bad) {
                 spilled++;
-                fail(D, `${scen}/${theme}@${width}${route.hash} el${b.i} \`${route.sel}\`: scrollWidth ${b.sw} > clientWidth ${b.cw} — ${Math.round((1 - b.cw / b.sw) * 100)}% of a ${b.len}-character value ("${b.t}…") is not rendered, and the box computes overflow:visible so the remainder paints THROUGH its neighbour`);
+                fail(D, `${scen}/${theme}@${width}${cell.hash} el${b.i} in \`${b.scope}\` (matched \`${route.sel}\`): scrollWidth ${b.sw} > clientWidth ${b.cw} — ${Math.round((1 - b.cw / b.sw) * 100)}% of a ${b.len}-character value ("${b.t}…") is not rendered. Computed ON THE MEASURED ELEMENT: overflow-wrap "${b.ow}", white-space "${b.ws}", text-overflow "${b.te}", overflow "${b.ov}". The scope named here is the wrapper a remedy has to be authored against — not the row's selector`);
               }
               row.push(`${width}:${m.n}x${m.worst}${m.bad.length ? "!" + m.bad.length : ""}${m.psw > m.pcw ? "P" + (m.psw - m.pcw) : ""}`);
             }
-            process.stdout.write(`   ${route.hash} ${scen}/${theme}  ${row.join(" ")}\n`);
+            process.stdout.write(`   ${cell.hash} ${scen}/${theme}  ${row.join(" ")}\n`);
           }
         }
       }
@@ -3299,10 +3457,18 @@ async function main() {
           `the overflow is readable as a worst number that never falls`,
         );
         okLine(
-          `the ROBUST claim is the RATIO — the KIND corpus (\`mixed-fleet\`, 32-char host / 10-char name) and the ` +
-          `CRUEL one (253/255, the server's own caps) now score the SAME on both assertions. The px above are ` +
-          `taken under a PINNED face (D218, paid by cch-w22-s1): nav() load()s every declared @font-face, awaits ` +
-          `document.fonts.ready and check()s each one, refusing at exit 2 rather than measuring a fallback`,
+          `the ROBUST claim is the RATIO, and BOTH SIDES OF IT ARE NOW MEASURED (D285): every cruel cell is asserted ` +
+          `AT OR ABOVE its row's cruel floor (${CRUEL_ROUTES.map((r) => r.cruelMin).join("/")}) and every kind cell AT OR BELOW its ` +
+          `row's kind ceiling (${CRUEL_ROUTES.map((r) => r.kindMax).join("/")}) — ${wentKind} cruel fixtures had gone kind, ${wentCruel} kind ` +
+          `controls had gone cruel. Before this, both halves of the axis were a REGEX OVER THE SCENARIO NAME, and a ` +
+          `control driven cruel scored a clean sweep under a header still calling it the kind corpus`,
+        );
+        okLine(
+          `each finding names the WRAPPER SCOPE it measured (${CRUEL_ROUTES.map((r) => r.scopes).join(" | ")}) rather than the ` +
+          `row selector — a leg that interpolates \`sel\` blames the family it is named after, which is how a mutation ` +
+          `run put 22 of 44 findings on \`.instance-card-name\` while the live defect sat in another wrapper. The px ` +
+          `above are taken under a PINNED face (D218, paid by cch-w22-s1): nav() load()s every declared @font-face, ` +
+          `awaits document.fonts.ready and check()s each one, refusing at exit 2 rather than measuring a fallback`,
         );
       }
     }

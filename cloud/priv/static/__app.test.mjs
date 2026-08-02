@@ -1919,22 +1919,38 @@ test("cch-w19-s4: the three survivor selectors are pinned — losing one reds", 
   }
 });
 
-test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all four copies there", () => {
+test("cch-w19-s4: E14 greens app.css's OWN bytes and sees all five copies there", () => {
   // The shipped tree is the subject the check was written for. If it cannot
   // green there it will be deleted, and if it cannot SEE there it is decorative.
   //
   // W20-S6 BUMPED THIS PIN 3 -> 4 AND WIDENED THE LOOP, in the same commit that
   // authored `.attention-row .status-pill`. That is the pin working, not the pin
-  // being in the way: a fourth wrapper-scoped copy is a CHANGE to the recipe's
+  // being in the way: a NEW wrapper-scoped copy is a CHANGE to the recipe's
   // blast radius, and the epic's own count is the thing that notices. The count
   // is a same-file pin of this repo's own stylesheet (pin-your-own,
   // derive-foreign), so it is bumped deliberately, never derived from the file
   // it is meant to measure.
+  //
+  // cch-w24-s2 BUMPED IT 4 -> 5, in review, for the same reason. The failed
+  // instance's own detail header gained the wrap by joining the
+  // `.instance-card-head` prelude as a COMMA MEMBER — delta-heads 0, CSSOM
+  // PARITY PASS, no new rule authored — and it is still a fifth wrapper-scoped
+  // copy with its own blast radius. THE COUNT IS WHAT NOTICED: nothing else in
+  // the wave's gates moved, and the slice's own gate (guard + __css_check +
+  // cssom-parity) did not include this harness. A comma member is invisible to
+  // a rule-head count and visible to this one, which is the whole point of
+  // keeping both.
+  //
+  // NOT ALSO ADDED TO `WRAP_REQUIRED_HOSTS` (__css_check.mjs). Doing so is the
+  // stronger pin and W20-S6's precedent — counted-but-not-required cannot see a
+  // scan degrading to 4-of-5 — but it cascades into every E14 fixture
+  // stylesheet, which is a deliberate edit to a curated oracle rather than a
+  // review repair. Filed as `cch-w24-bl-detail-title-row-not-a-required-wrap-host`.
   const appCss = fileURLToPath(new URL("./app.css", import.meta.url));
   const r = runCssCheck("--wrap-parity-check", appCss);
   assert.equal(r.status, 0, "app.css must be green under E14:\n" + r.out);
-  assert.match(r.out, /4 wrapper-scoped wrap copy\(ies\)/, r.out);
-  for (const host of [".attention-row", ".detail-rail", ".fleet-status", ".instance-card-head"]) {
+  assert.match(r.out, /5 wrapper-scoped wrap copy\(ies\)/, r.out);
+  for (const host of [".attention-row", ".detail-rail", ".detail-title-row", ".fleet-status", ".instance-card-head"]) {
     assert.match(r.out, new RegExp("\\" + host + " \\.status-pill:\\d+"), host + " must be seen with a line number:\n" + r.out);
   }
 });

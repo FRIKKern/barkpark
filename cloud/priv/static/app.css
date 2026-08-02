@@ -3142,6 +3142,35 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   color: var(--text);
   font-size: 13px;
   line-height: 1.45;
+  /* cch-w24-s2 — THE BOX THAT DRAGS THE PAGE, and it is not the pill. This box
+     holds `<b>Setup failed.</b> ` plus `provision_error` VERBATIM, and nothing
+     between the worker socket and here bounds that string: `provision_jobs.error`
+     is a POSTGRES :text column (the `modify :error, :text` migration under
+     cloud/priv/repo/migrations) and `ProvisionJob.changeset` (registry/
+     provision_job.ex) casts `:error` with ZERO `validate_length`.
+     ELEMENT-HIDING BISECT on the pre-fix tree, `?scen=fleet-cruel-content`
+     `#instance/…c2`: blanking `span.status-pill-detail` left the page at
+     documentElement.scrollWidth 4040 against a 320 viewport; blanking
+     `div.bp-tl-fail` returned it to 320/320 at 320/390/430/900 exactly. Fixing
+     the pill alone leaves a console scrolling 3.7k pixels sideways.
+     WHY IT SPILLS RATHER THAN CLIPS: computed `overflow: visible` with
+     `overflow-wrap: normal`, rect 250x60 and elScrollWidth 4004 — 3754px of ink
+     painted OUTSIDE the box, through whatever sits beside it.
+     TWO REMEDIES WERE PRICED, and this one wraps the BOX. The alternative —
+     splitting the machine string into its own `<span>` so only that span takes
+     `anywhere` — is refused twice over: it needs an app.js change (`timelineHtml`
+     builds this markup), which is outside this slice's file fence, and it is a
+     second head. THE PROSE IS NOT SHREDDED, and that is MEASURED rather than
+     assumed: `anywhere` breaks a word only when the word cannot fit its line,
+     and "Setup failed." is 80px against a 226px content box at 320 — driven at
+     320/390/900, the `<b>` renders on exactly ONE 80px line box in every cell,
+     before AND after. What changes is the machine string: one 3992px line box
+     becomes 19 line boxes at 320, 14 at 390, 8 at 900, all inside the border,
+     and the box grows from 60px tall to 399/305/192. That height is the honest
+     rendering of a 512-character error — nothing is hidden and nothing lies —
+     and it is UNASSERTED here: no guard in this epic pins height against a
+     cruel string (filed as its own row, not smuggled into this block). */
+  overflow-wrap: anywhere;
 }
 .bp-tl-fail b { color: var(--danger); }
 .bp-tl-retry { margin-top: 12px; }
@@ -6135,8 +6164,37 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 
    `overflow: visible; text-overflow: clip` retires the ellipsis machinery the
    wrap makes unreachable, so nothing can silently re-truncate the reason. */
+/* cch-w24-s2 — THE FOURTH PILL HOST, APPENDED TO THE PRELUDES ABOVE RATHER THAN
+   AUTHORED AS ITS OWN BLOCK. `.detail-title-row` is the instance's OWN detail
+   header, and it is the one screen a person opens to read WHY provisioning
+   failed. Driven on `?scen=fleet-cruel-content#instance/…c2`, pre-fix, light,
+   every `.status-pill-detail` iterated with its wrapper scope MEASURED (not
+   `querySelector`): `.detail-title-row` detail len 512, computed white-space
+   `nowrap`, overflow `hidden`, text-overflow `ellipsis`, 3754/208 at 320 —
+   about 30 of 512 characters readable, and no gesture reaches the rest.
+
+   THE HOST IS `.detail-title-row`, NOT `.detail-rail`. `.detail-rail
+   .status-pill` is a real `white-space: normal` rule, but it reaches ZERO
+   `.status-pill-detail`: only `statusPill()` emits a detail span and no call
+   site lands in a rail. A `.detail-rail .status-pill-detail` selector matches
+   NOTHING. The scope histogram over every non-empty detail on the console reads
+   20 `.attention-row` / 5 `.detail-title-row` / 40 `.fleet-status` / 40
+   `.instance-card-head` / 0 `.detail-rail` — that census is a survey artefact,
+   not something the guard reprints on a green run (the W21 leg names a wrapper
+   scope only on a FAILING element), so re-derive it by walking every
+   `.status-pill-detail` and reading `el.closest()` against the five wrappers.
+
+   WHY COMMA MEMBERS AND NOT A FOURTH COPY (D291). The three blocks above are
+   already the SAME five declarations three times; a fourth copy costs +2 CSSOM
+   rule heads, and `cssom-parity.mjs` holds the head baseline this wave abstains
+   from moving. Appended here the cost is Δheads 0 — measured, PARITY PASS, exit
+   0 — and the D210 "third copy is deliberate" note above keeps its meaning:
+   this is not a fourth clone, it is the third clone gaining a second scope.
+   `.detail-title-row` already declares `flex-wrap: wrap` of its own, so the
+   `.instance-card-head` head on the line below stays single-scoped. */
 .instance-card-head { flex-wrap: wrap; }
-.instance-card-head .status-pill {
+.instance-card-head .status-pill,
+.detail-title-row .status-pill {
   white-space: normal;
   height: auto;
   min-height: 24px;
@@ -6144,5 +6202,18 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   padding-bottom: 2px;
   align-items: flex-start;
 }
-.instance-card-head .status-pill-dot { margin-top: 5.5px; }
-.instance-card-head .status-pill-detail { overflow: visible; text-overflow: clip; }
+/* THE DOT COMES WITH THE PRELUDE, and it is a THIRD comma member rather than
+   the two the slice was cut for — stated plainly because it is a deviation.
+   `align-items: flex-start` above is what stops a wrapped pill centring its dot
+   against a 348px-tall capsule, and it puts the dot at the content-box top:
+   MEASURED at 320 on the cruel detail, dot top 423 with the first line box at
+   424 and 15px tall, so the dot's centre sat 5px above the centre of the line
+   it marks. 5.5px lands it at 432 against a line centre of 431.5. The same
+   number for a THIRD different reason — the head above derived it from an 18px
+   line box at 13px, the head below from an 18px line box at 12px, and this
+   scope from a 15px line box at 12px — so it is re-derived, never inherited.
+   Δheads 0: appending to an existing prelude authors no new rule. */
+.instance-card-head .status-pill-dot,
+.detail-title-row .status-pill-dot { margin-top: 5.5px; }
+.instance-card-head .status-pill-detail,
+.detail-title-row .status-pill-detail { overflow: visible; text-overflow: clip; }
