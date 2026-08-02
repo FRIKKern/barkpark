@@ -2576,6 +2576,58 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 39 2026-08-02 — "EXCLUDED is not a verdict" — REVIEWED. Grade A (paper `pds-wave-39-2026-08-02`)
+
+**ALL SIX ROUND-1 SLICES BUILT, ALL SIX GREEN ON THEIR FINAL STATE, ALL SIX PUSHED WITH PRs OPEN.**
+Two round-2 slices deferred BY DESIGN under the sequenced-rounds law. The reviewer re-ran every gate
+on the final branch, re-derived every high-flip-risk judgment independently rather than re-reading the
+builder's reasoning, and ran its OWN mutation of every claim it accepted.
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w38-verdict-freshness-arm` | `pds-w39-r-verdict-freshness` | #9112 | `ROSTER-VERDICT-FRESH` — all 8 `@roster` rows gain `anchor_mfa` + `def_fp`; a stale row is DEMOTED TO UNJUDGED AT PRINT TIME, never rewritten. The two REFUTED verdicts that outlived their repair are re-derived to PROVEN. 4 new `corpus: :repo` selftest cases, because the fixture corpus scopes the arm OUT |
+| `pds-w38-falsifier-promotion` | `pds-w39-r-falsifier-promotion` | #9113 | the tier is READ from `@basis_vocab` instead of hardcoded `:advisory`, so `two_hop_composed` can actually refuse; `@repo_tokens` is an ENUMERATED allowlist, never a shape regex; `armed_redding_values/0` kills the printed overcount |
+| `pds-bl-status-only-residue-payment` | `pds-w39-r-delete-receipts` | #9114 | six A3 request-echo DELETE receipts now descend from the write return — zero callees widened, all six already returned the row — plus a 6-test differential proven to discriminate PER SITE |
+| `pds-w39-record-parity-shallow-guard` | `pds-w39-r-record-parity` | #9115 | axis A REFUSES a truncated walk at exit 2 instead of printing PARITY over a corpus it never read. The predicate is on the WALK, not the store flag — this repo itself refutes the store guard |
+| `pds-w38-charter-ledger-disagreement-sweep` | `pds-w39-r-charter-sweep` | #9116 | 105 candidate lines / 74 slugs hand-adjudicated EXHAUSTIVELY, **nine** disagreements (not four), and the three blind shapes PRINTED WITH COUNTS |
+| `pds-w34-owning-doc-amendment` | `pds-w39-r-owning-doc` | #9117 | the owning doc's population becomes `router.ex`; `status_only_receipt` 138 named as THE HOLE with 72/252 = 28.6% printed and never thresholded; first byte-gate enrolment at a MEASURED cap |
+
+**PDS-D570 — THE WISH'S HEADLINE WAS ALREADY MERGED, FOR THE FIFTH CONSECUTIVE WAVE, AND SPENDING IT
+BEAT REBUILDING IT.** `ROUTED-POPULATION-COMPLETE` (252 members, UNDISPOSED 0) and `LENS-CAN-MISS`
+(17 resolved `plugin_routes/1` callsites, substring count 23, one unexpandable macro NAMED) both
+print PASS on `origin/main` today, with `LENS-CAN-MISS-ARMED` and `LENS-CAN-MISS-NAMES-BLIND` already
+in the selftest. The wish's 131 is 252 under the quad key and its 23 is the substring count the arm
+already prints beside the resolved 17. **The recurring lesson is not "the brief was wrong" — it is
+that a wave which does not RE-DERIVE its own dispatch spends its whole budget rebuilding merged code.**
+
+**PDS-D571 — MERGE ORDER IS LOAD-BEARING THIS WAVE, AND IT WAS MEASURED, NOT ASSUMED.** On
+`pds-w39-r-record-parity` axis A exits **1**, naming `UNRESOLVED-CITATION PDS-D564` — the slice's own
+commit cites a decision defined only in THIS charter PR. Run against this PR's charter content the same
+command prints `defined: 569 · cited: 189 · unresolved: 0 · PARITY` at exit 0. **The charter PR merges
+FIRST.** Separately, the charter↔ledger sweep is arrival-shaped over whole-line content hashes, so this
+PR's 314 new lines produce **6 unresolved-claim arrivals** — measured, named verbatim in the
+adjudication doc, and deliberately NOT adjudicated against an open PR whose lines can still move. That
+arm is not in `.github/workflows/**`, so the red is local and blocks nothing on `main`.
+
+**PDS-D572 — THE REVIEWER'S OWN MUTATIONS, BECAUSE A GATE READ IS NOT A GATE PROOF.** Three claims
+this wave rested on were re-proven by the reviewer rather than accepted: blinding the two context reads
+in `inbound_events_test.exs` turns `0 refusal(s)`/rc=0 into `3 refusal(s)`/`FAIL BASIS-FALSIFIERS`/rc=1;
+reverting two of the six DELETE receipts reds EXACTLY those two differential tests and leaves the other
+four green; and the newly-enrolled doc budget was proven able to fail by **GROWING THE FILE** (+900 B →
+`FAIL … 19407B, cap is 19307B`), which is the mutation a future author would actually perform — the
+builder had only proven it by moving the cap, which the gate's own author controls. The reviewer also
+added the placement assertion the record-parity builder named as his own cheapest gap, and proved IT
+able to fail by planting a hoisted `walk_truncation` call.
+
+**PDS-D573 — ONE CROSS-SLICE INCOHERENCE SHIPS KNOWINGLY, DISPOSED IN WRITING RATHER THAN SILENTLY.**
+After the six DELETE repairs merge, the census's `:status_only_receipt` class PROSE ("claims success by
+STATUS alone") is FALSE for the eight `@routed_excluded` rows those six occupy — the class ASSIGNMENT
+stays correct, because the lens still cannot key a `%{deleted: …}` receipt. The census is the hot centre
+of two other wave-39 slices, so editing it from the controllers slice is the exact two-builders-one-file
+collision the parallel design forbids. Filed as `pds-w39-literal-receipt-residue` criterion 5 and stated
+in the new test file's moduledoc and in the commit. **A disposed incoherence is a wave-level decision; a
+silent one is the disease.**
+
 ### Wave 38 2026-08-02 — "The denominator is the router, not the string" — REVIEWED. Grade A− (paper `pds-wave-38-2026-08-02`)
 
 **ALL FOUR ROUND-1 SLICES BUILT, ALL FOUR GREEN, ALL FOUR PUSHED WITH PRs OPEN.** Three round-≥2
