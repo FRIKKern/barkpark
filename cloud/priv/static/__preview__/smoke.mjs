@@ -1371,11 +1371,22 @@ const EXPECTATIONS = {
   // rather than typed — a corpus edit that quietly shortens the cruel content
   // reds here instead of passing on a stale literal.
   "fleet-cruel-content": {
-    what: "server-legal worst-case CONTENT on the fleet table — a 253-char custom domain and a 255-char name, rendered beside a KIND neighbour in the same DOM",
+    what: "server-legal worst-case CONTENT on the fleet table — a 253-char custom domain, a 255-char name and a 512-char single-token provision error, all rendered beside a KIND neighbour in the same DOM",
     check(reg) {
       const rows = SCENARIOS["fleet-cruel-content"].data.barkparks;
       const cruel = rows.find((b) => b.custom_host && b.custom_host.length > 200);
-      const kind = rows.find((b) => b !== cruel);
+      // cch-w23 REVIEW: the kind neighbour is picked by what makes it KIND — it
+      // renders a short address of its own — not by "whatever is not the cruel
+      // row". cch-w23-s1 added a THIRD row to this fixture (a failed box with a
+      // 512-char single-token provision error and NO host), and a positional
+      // `find(b => b !== cruel)` silently returned THAT one: `kind.host` went
+      // undefined and `body.includes(undefined)` failed the whole harness step.
+      // A selector that cannot say what it is selecting for is this epic's own
+      // fifth clause pointed at an oracle.
+      const kind = rows.find((b) => b !== cruel && b.host);
+      // The single-token row is asserted on its own terms below rather than
+      // being tolerated as "some other row".
+      const tokenRow = rows.find((b) => b.provision_error && b.provision_error.length > 200);
       assert.ok(cruel, "the fixture still carries a cruel row (a >200-char custom_host)");
       assert.ok(kind, "the cruel row keeps a KIND neighbour — a bound that fixes one by shredding the other must be visible in the same DOM");
       assert.equal(cruel.custom_host.length, 253, "the host sits AT the server's validate_length cap (registry/barkpark.ex:727)");
@@ -1394,6 +1405,18 @@ const EXPECTATIONS = {
       assert.ok(body.includes(cruel.name), "the row renders the full 255-char name");
       assert.ok(body.includes(kind.host), "the kind neighbour still renders its own short address in the same table");
       assert.ok(countMatches(body, 'class="fleet-row"') >= 2, "both rows render — one of them alone proves nothing about the other");
+      // cch-w23-s1's SHAPE axis: a machine-written error with no break
+      // opportunity, painted verbatim into the status pill's detail. Derived
+      // from the fixture, never typed, so a corpus edit that shortens or breaks
+      // the token reds here instead of passing on a stale literal.
+      if (tokenRow) {
+        assert.ok(
+          !/[\s\-./]/.test(tokenRow.provision_error),
+          "the provision error stays a SINGLE UNBROKEN TOKEN — a space, hyphen, slash or dot is a line-break opportunity, and a breakable string wraps by itself",
+        );
+        assert.ok(body.includes(tokenRow.provision_error), "the failed row paints the provision error verbatim into its status-pill detail");
+        assert.ok(countMatches(body, 'class="fleet-row"') >= 3, "all three rows render — the cruel host, the single-token error and the kind neighbour in ONE DOM");
+      }
     },
   },
   "fleet-archives-stored": {
