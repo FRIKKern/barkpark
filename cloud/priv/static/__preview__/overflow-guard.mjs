@@ -1355,18 +1355,25 @@ async function main() {
     //    cloud/lib/barkpark_cloud/accounts/user.ex:165, minus "@" and one domain
     //    character — see the cruelAccountEmail ledger in scenarios.mjs, and note
     //    that the filed 255 is INADMISSIBLE because the server would reject it)
-    //    pre-fix bytes measured `.am-name` scrollWidth 1362 against clientWidth
-    //    172 @320 and 297 @1440 — the SAME 1362 at both, a CONTENT defect, not a
-    //    responsive one, which is why 1440 is in the width list.
+    //    pre-fix bytes measured `.am-name` scrollWidth 1276 against clientWidth
+    //    172 @320 and 297 @1440 — the SAME 1276 at both, a CONTENT defect, not a
+    //    responsive one, which is why 1440 is in the width list. (The slice brief
+    //    and the backlog row quote 1362/1461/~1141: same 158-char cap, a
+    //    DIFFERENT stem. These numbers are THIS fixture's, re-driven on this
+    //    tree by stripping the remedy — 1276 at every width, `.modal-root`
+    //    1374@320 rising to 1811@1440. The px are stem-conditional; the ordinal
+    //    fact — a name outside its own box and a modal scrolling sideways — is
+    //    not. Reviewer re-derivation, cch-w23 review.)
     //
     //    WHY NO EXISTING LEG COULD HAVE SEEN IT, TWICE OVER:
     //      · THE PAGE NEVER SCROLLS. `documentElement.scrollWidth ==
     //        clientWidth` in every cell (320/320 …): the overflow is confined to
     //        `.modal-root` (app.css:1114 — `overflow-y: auto` makes overflow-x
     //        compute `auto`, and it declares no x control), which scrolls
-    //        sideways ~1141px. Every page-level leg above reads clean.
+    //        sideways — measured 1054px at 320 on this fixture, 371px at 1440.
+    //        Every page-level leg above reads clean.
     //      · RECT-BLINDNESS. `getBoundingClientRect().width` on `.am-name` reads
-    //        170 at 320 while `scrollWidth` reads 1362 — the box is inside its
+    //        172 at 320 while `scrollWidth` reads 1276 — the box is inside its
     //        container and the glyphs are not. A rect-against-container scan
     //        returns ZERO on this defect, so this leg reads scrollWidth against
     //        clientWidth ON THE ELEMENT.
@@ -1408,7 +1415,7 @@ async function main() {
       // ANTI-VACUITY 0 — the axis itself.
       for (const need of [320, 1440]) {
         if (!AM_WIDTHS.includes(need)) {
-          fail(D, `axis check: ${need} is not in the width set — this defect measures the same 1362px at 320 and at 1440, and a set missing either end cannot show that it is a CONTENT defect rather than a responsive one`);
+          fail(D, `axis check: ${need} is not in the width set — this defect measures the same 1276px at 320 and at 1440, and a set missing either end cannot show that it is a CONTENT defect rather than a responsive one`);
         }
       }
       if (!AM_SCENS.some((s) => s.cruel) || !AM_SCENS.some((s) => !s.cruel)) {
