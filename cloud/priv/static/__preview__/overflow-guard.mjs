@@ -3918,10 +3918,13 @@ async function main() {
       }
       const cellCount = FAIL_WIDTHS.length * 2;
       process.stdout.write(
-        `\n${D} — theater-failed x ${FAIL_WIDTHS.length} widths x 2 themes (${cellCount} cells;` +
-        ` the hostname's painted line boxes, then a ${CRUEL.length}-char cruel-token stress at the narrowest width)\n`,
+        `\n${D} — theater-failed + theater-midflight x ${FAIL_WIDTHS.length} widths x 2 themes (${cellCount * 2} cells;` +
+        ` the hostname's painted line boxes and every theater box against its own client width, then a` +
+        ` ${CRUEL.length}-char cruel-token stress at the narrowest width. h= is the failure card / mid-flight track` +
+        ` height at ${FAIL_WIDTHS[0]}, REPORTED — the remedy costs vertical room and no pixel is pinned)\n`,
       );
       let cells = 0, hostsSeen = 0, torn = 0, pageOver = 0, stressRuns = 0, stressSpill = 0;
+      let boxOver = 0, midCells = 0, midBoxOver = 0, midPageOver = 0;
       for (const theme of ["light", "dark"]) {
         await setViewport(FAIL_WIDTHS[FAIL_WIDTHS.length - 1]);
         await nav(
@@ -3934,7 +3937,28 @@ async function main() {
           const m = await evalJs(
             `(function(){` +
             `var d=document.documentElement;` +
-            `var out={failed:!!document.querySelector('.new-failed'),theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,hosts:0,torn:[]};` +
+            `var out={failed:!!document.querySelector('.new-failed'),theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,hosts:0,torn:[],boxes:[],h:0};` +
+            // cch-w25-s2 — THE ORDINARY-HOSTNAME HALF. Everything above this
+            // asks about the cruel string; this asks about the hostname the
+            // fixture actually ships, and on origin/main bytes it FAILED:
+            // .new-theater-grid measured sw/cw 251/214 at 320 because a bare
+            // `1fr` track floors at min-content. The page number never saw it
+            // — the card's left offset kept the spill inside 320 — which is
+            // why a page-only leg certified a screen that was already
+            // dragging its own card. Boxes, not pages, and no cruel fixture
+            // required.
+            //   .new-step is in this list for a reason a page number can
+            // never reach: the reflow's `margin-left` form passes every
+            // page-level assertion in this file while opening a silent 34px
+            // internal overflow (.new-step 210/176). Only the padding form is
+            // contained, and only this cell can tell the two apart.
+            `[].slice.call(document.querySelectorAll('.new-theater-grid,.new-theater-rail,.new-step,.new-step-body')).forEach(function(el){` +
+            `  if(el.scrollWidth>el.clientWidth+1) out.boxes.push({cls:(el.className||el.tagName||'?').toString().slice(0,40),sw:el.scrollWidth,cw:el.clientWidth});});` +
+            // The height is REPORTED, never asserted: the remedy is known to
+            // cost vertical room and a bare pixel pin on a reflowing box is a
+            // guard that fails on any honest copy edit. Printed so the trade
+            // stays quotable.
+            `var fb=document.querySelector('.new-failed');if(fb) out.h=+fb.getBoundingClientRect().height.toFixed(2);` +
             // The painted RUN, not the box: a Range over just the hostname's
             // characters reports one client rect per line box it lands on, so
             // >1 IS the tear a person sees. Measuring the element's box instead
@@ -3980,10 +4004,14 @@ async function main() {
             torn++;
             fail(D, `theater-failed/${theme}@${width} .${t.cls}: "${HOSTNAME}" is painted across ${t.lines} line boxes in a ${t.cw}px box (word-break:${t.wb}, overflow-wrap:${t.ow}) — the host a person must read to fix their failed setup is torn mid-word`);
           }
+          for (const b of m.boxes) {
+            boxOver++;
+            fail(D, `theater-failed/${theme}@${width} .${b.cls}: scrollWidth ${b.sw} > clientWidth ${b.cw} with the ORDINARY hostname — a theater box is wider than the box that holds it, and no cruel string was needed to do it (origin/main bytes: .new-theater-grid 251/214 at 320; the margin-left form of the time reflow: .new-step 210/176)`);
+          }
           // The page pair is printed at EVERY width, not only when it fails:
           // "the fix cost no horizontal room" is a claim about the numbers, and
           // a row that prints them only on failure cannot be quoted for it.
-          row.push(`${width}:${m.hosts}h ${m.psw}/${m.pcw}px${m.torn.length ? " !" + m.torn.length : ""}`);
+          row.push(`${width}:${m.hosts}h ${m.psw}/${m.pcw}px${m.torn.length ? " !" + m.torn.length : ""}${m.boxes.length ? " box!" + m.boxes.length : ""}${width === FAIL_WIDTHS[0] ? ` h=${m.h}` : ""}`);
         }
         // ── the cruel half, at the narrowest width only ──────────────────────
         //   Same text nodes, one unbreakable run, page asserted. This is what
@@ -4025,30 +4053,91 @@ async function main() {
           stressSpill++;
           fail(D, `theater-failed/${theme}@${FAIL_WIDTHS[0]} STRESS .${sp.cls}: scrollWidth ${sp.sw} > clientWidth ${sp.cw} — the cruel host overflows its own box, and neither the rail nor the console body scrolls sideways`);
         }
-        // MEASURED, PRINTED, AND DELIBERATELY NOT ASSERTED — the one thing in
-        // this leg that is reported rather than certified, so the sentence is
-        // here rather than in a debrief. A 63-char label drives the PAGE
-        // sideways at 320: 623px on pre-remedy bytes, 732px after. The only
-        // remedy is a min-content escape (`min-width: 0` on .new-theater-rail
-        // and .new-console-text), and it was DRIVEN: it takes the page to
-        // exactly 320/320 and puts THIS LEG'S OWN DEFECT BACK — .new-step-detail
-        // returns to a 92.25px box with the hostname across two line boxes at
-        // 320 and 360. The two goals share one lever, so asserting both would
-        // make this leg unsatisfiable by any patch. What is certified here is
-        // the hostname a person actually reads; the cruel-host page overflow is
-        // a PRE-EXISTING defect of the theater grid (it spilled before this
-        // change too) and is filed as cch-w24-bl-theater-grid-no-min-content-
-        // escape. Anyone widening this line must read that task first.
+        // cch-w25-s2 — WAS REPORTED, IS NOW ASSERTED. W24 left this number
+        // printed and uncertified with an argument that read as final: the
+        // escape (`min-width: 0` on .new-theater-rail) takes the cruel page to
+        // exactly 320/320 and puts THIS LEG'S OWN DEFECT BACK, .new-step-detail
+        // returning to a 92.25px box with the hostname across two line boxes —
+        // "the two goals share one lever, so asserting both is unsatisfiable by
+        // any patch."
+        //   THAT IS FALSE, AND THE REASON IS WORTH KEEPING. The 92.25px box is
+        // not a min-content fact, it is a STEP-ROW BUDGET fact: .new-step
+        // spends 84px of a 176px row on dot + gaps + a nowrap time column that
+        // never shrinks. Escape the track AND reflow the time onto its own line
+        // at <=720 and the body gets the full 176px — both halves in one tree.
+        // Shipped as `minmax(0,1fr)` + `.new-step{flex-wrap:wrap}` +
+        // `.new-step-time{margin-left:0;flex:1 0 100%;padding-left:34px}`.
+        //   The number this line now certifies moved 732 -> 320/320 at 320 in
+        // both themes. The widest-box list is still printed on failure, because
+        // a page number alone sends the next reader back into DevTools.
         const widest = (s.wide || []).map((x) => `.${x.cls} right=${x.right}`).join(" | ") || "none inside .new-screen";
         if (s.psw > s.pcw) {
-          process.stdout.write(
-            `   · ${theme} RESIDUAL (reported, not asserted — see the comment above this line and ` +
-            `cch-w24-bl-theater-grid-no-min-content-escape): a ${CRUEL.length}-char unbreakable host takes ` +
-            `documentElement.scrollWidth to ${s.psw} against ${s.pcw}. Widest: ${widest}\n`,
-          );
+          pageOver++;
+          fail(D, `theater-failed/${theme}@${FAIL_WIDTHS[0]} STRESS: a ${CRUEL.length}-char unbreakable host takes documentElement.scrollWidth to ${s.psw} against ${s.pcw} — ${s.psw - s.pcw}px of the failure screen drags sideways. Widest: ${widest}`);
         }
         row.push(`stress@${FAIL_WIDTHS[0]}:${s.hit}n box-spill:${s.spill.length} page:${s.psw}/${s.pcw}px`);
         process.stdout.write(`   theater-failed/${theme}  ${row.join("  ")}\n`);
+      }
+      // ── cch-w25-s2: theater-midflight, THE SCREEN EVERY SUCCESSFUL SIGNUP
+      //    WATCHES ──────────────────────────────────────────────────────────
+      //    It shares .new-theater-grid, .new-theater-rail and the .new-step
+      //    rows with the failure screen, so EVERY lever in the <=720 block
+      //    moves it — and before this row it appeared zero times in this file
+      //    and sits in breakpoint-sweep's unswept scenario residue. A remedy
+      //    aimed at the screen a few people reach, silently reshaping the one
+      //    everybody reaches, is exactly the blind spot the wave's fifth
+      //    standing clause names: a guard whose SELECTOR cannot reach the
+      //    defect is green by construction.
+      //    It carries no failure copy and no cruel token — nothing here is
+      //    about a hostname. What is asserted is the SHARED GEOMETRY: the page
+      //    does not drag, and no theater box is wider than its own client
+      //    width. Same widths, both themes.
+      {
+        const mid = SCENARIOS["theater-midflight"];
+        if (!mid || !mid.pathname || !mid.search) {
+          return die(`${D}: SCENARIOS["theater-midflight"] no longer carries pathname+search — the mid-flight screen cannot be reached, so the shared-geometry half measured nothing`);
+        }
+        for (const theme of ["light", "dark"]) {
+          await setViewport(FAIL_WIDTHS[FAIL_WIDTHS.length - 1]);
+          await nav(
+            `${BASE}${mid.pathname}${mid.search}&scen=theater-midflight&theme=${theme}`,
+            `document.querySelector('.new-theater-grid') && document.querySelector('.new-step')`,
+          );
+          const row = [];
+          for (const width of FAIL_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){` +
+              `var d=document.documentElement;` +
+              `var out={grid:!!document.querySelector('.new-theater-grid'),steps:document.querySelectorAll('.new-step').length,` +
+              `theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,boxes:[],h:0};` +
+              `[].slice.call(document.querySelectorAll('.new-theater-grid,.new-theater-rail,.new-step,.new-step-body')).forEach(function(el){` +
+              `  if(el.scrollWidth>el.clientWidth+1) out.boxes.push({cls:(el.className||el.tagName||'?').toString().slice(0,40),sw:el.scrollWidth,cw:el.clientWidth});});` +
+              `var g=document.querySelector('.new-theater-grid');if(g) out.h=+g.getBoundingClientRect().height.toFixed(2);` +
+              `return out;})()`,
+            );
+            midCells++;
+            // AUDITED: a screen that stopped rendering the rail would print a
+            // clean row about an empty page. Both the grid and at least one
+            // step row must be present or nothing below counts.
+            if (!m.grid || m.steps === 0) {
+              fail(D, `theater-midflight/${theme}@${width}: .new-theater-grid present=${m.grid}, .new-step rows=${m.steps} — the mid-flight theater did not render, so nothing was measured`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `theater-midflight/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            if (m.psw > m.pcw) {
+              midPageOver++;
+              fail(D, `theater-midflight/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the screen every successful signup watches is off-screen sideways`);
+            }
+            for (const b of m.boxes) {
+              midBoxOver++;
+              fail(D, `theater-midflight/${theme}@${width} .${b.cls}: scrollWidth ${b.sw} > clientWidth ${b.cw} — a box on the screen every successful signup watches is wider than its own client width (on origin/main bytes this cell caught .new-theater-grid 247/214 at 320 AND .new-step 212/209, the nowrap time column overrunning its row at all four widths)`);
+            }
+            row.push(`${width}:${m.steps}s ${m.psw}/${m.pcw}px${m.boxes.length ? " box!" + m.boxes.length : ""}${width === FAIL_WIDTHS[0] ? ` h=${m.h}` : ""}`);
+          }
+          process.stdout.write(`   theater-midflight/${theme}  ${row.join("  ")}\n`);
+        }
       }
       if (!failures.some((f) => f.defect === D)) {
         okLine(
@@ -4062,8 +4151,17 @@ async function main() {
           `nodes and every box holding it is re-asserted. Deleting the break declaration outright passes the first ` +
           `half and FAILS this one (.new-fail-copy 569/212, .new-failed-caption 557/214) — which is why the remedy ` +
           `is overflow-wrap:break-word, min-content intact and still breakable at the box edge, and not a deletion. ` +
-          `The PAGE under that same cruel host is printed above and NOT asserted; the comment beside it says why ` +
-          `and names the task that owns it`,
+          `The PAGE under that same cruel host is now ASSERTED too (cch-w25-s2): it read 732/320 on W24 bytes and ` +
+          `reads ${FAIL_WIDTHS[0]}/${FAIL_WIDTHS[0]} here`,
+        );
+        okLine(
+          `${boxOver + midBoxOver} box overflow(s) with the ORDINARY hostname across theater-failed and ` +
+          `theater-midflight (${midCells} mid-flight cells, ${midPageOver} pages dragging): .new-theater-grid, ` +
+          `.new-theater-rail, .new-step and .new-step-body are asserted against their OWN client widths, which is ` +
+          `the only instrument that can see either the 251/214 track the card's left offset used to hide or the ` +
+          `silent 34px .new-step spill the margin-left form of the time reflow opens. theater-midflight — the ` +
+          `screen every successful signup watches, and shares every rule this remedy touched — had zero coverage ` +
+          `in this file before this row`,
         );
         okLine(
           `320/360 are the DRIVEN widths (the tear was measured at 320); 390/430 are SHOULDERS — already whole on ` +

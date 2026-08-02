@@ -495,4 +495,17 @@
 # slices, and no arithmetic over deltas would have predicted either. MEASURED both times:
 # sentinel, run, read the tool's own failure text, confirm exactly one bare integer.
 # authored rule heads 1284 == CSSOM style rules 1284, MISSES 0, PARITY PASS.
-1284
+# cch-w25-s2 (SOLE BASELINE HOLDER this round, charter D302 under D202/D230). The <=720
+# theater block gains TWO new rule heads — `.new-step { flex-wrap: wrap; }` and
+# `.new-step-time { margin-left: 0; flex: 1 0 100%; padding-left: 34px; }` — paying the
+# theater grid's min-content escape without putting the hostname tear back. 1284 -> 1286.
+# MEASURED, NOT REASONED, even though this is the one shape arithmetic would have got
+# right: two new heads inside an EXISTING block, no scoped fork, no comma members moved.
+# Recorded precisely because it was predictable — a doctrine that is only obeyed when the
+# answer is surprising is not a doctrine. Wrong sentinel (a throwaway file containing `7`,
+# HEADS_BASELINE pointed at that PATH — it is a path, never an integer; an integer there
+# is an exit-2 ENVIRONMENT refusal that reads like a pass), cssom-parity.mjs run, number
+# taken from the tool's own failure text: "BASELINE MISMATCH: 1286 authored rule heads,
+# sidecar baseline is 7 (+1279)". Exactly one bare integer confirmed afterwards.
+# authored rule heads 1286 == CSSOM style rules 1286, MISSES 0, PARITY PASS.
+1286
