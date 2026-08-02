@@ -5215,7 +5215,7 @@ async function main() {
       const STASH = "bp_launch_return";
 
       process.stdout.write(
-        `\n${D} — ${EXIT_VIEWPORTS.length} viewports x 3 cells (modal Back / modal Escape / runway Back)` +
+        `\n${D} — ${EXIT_VIEWPORTS.length} viewports x 5 cells (modal Back / modal Escape / modal × / modal backdrop / runway Back)` +
         ` (type a name -> the catalog's Connect door -> leave the sheet WITHOUT connecting -> is the person still` +
         ` mid-launch, and did the abandoned launch stop haunting the rest of the console)\n`,
       );
@@ -5349,27 +5349,49 @@ async function main() {
           row.push(`back:wizard=${m.wizard} name=${JSON.stringify(m.name)} stash=${JSON.stringify(m.stash)} picker=${m.picker}`);
         }
 
-        // ── (b) THE MODAL, ESCAPE. A reflex exit promises only "gone" — but it
-        //        may not leave the launch haunting the rest of the console.
-        //        Escape, the × and the backdrop share ONE closeModal() through
-        //        wireModal, so this cell covers all three; `.modal-backdrop` is
-        //        named in trap (3) above because `#modal-root` carries no
-        //        `data-close` and clicking it proves nothing.
-        exitCells++;
-        await setViewport(width, height);
-        await nav(
-          exitUrl(EXIT_SCEN, "#overview", `esc-${width}`),
-          `(function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
-        );
-        await evalJs(`(function(){try{localStorage.removeItem(${JSON.stringify(STASH)});}catch(e){}return true;})()`);
-        const escSentinel = `Escape Probe ${width}`;
-        const reachedEsc = await openModalSheet(escSentinel);
-        if (!reachedEsc.ok) {
-          exitDead++;
-          fail(D, `modal-escape@${width}x${height}: ${reachedEsc.why}`);
-          row.push("esc:!reach");
-        } else {
-          await evalJs(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`);
+        // ── (b) THE MODAL, EVERY REFLEX EXIT. A reflex exit promises only
+        //        "gone" — but it may not leave the launch haunting the rest of
+        //        the console.
+        //
+        //        REVIEW (wave 26): all three ARE routed through one
+        //        `reflexClose()` in `wireModal`, and the builder drove all three
+        //        in a scratch census — but the shipped leg asserted only Escape
+        //        and rested the other two on that structural argument. A guard
+        //        whose coverage is an argument about the code it guards is the
+        //        thing this wave's standing test refuses: give the × its own
+        //        handler tomorrow and an Escape-only leg never notices. All
+        //        three are now DRIVEN, each from its own freshly-opened sheet.
+        //        Trap (3) is why the backdrop cell clicks `.modal-backdrop` and
+        //        not `#modal-root`, which carries no `data-close` at all and
+        //        would report a false "does not close".
+        const REFLEX_EXITS = [
+          ["escape", "Escape Probe", `document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}));return {ok:true};`],
+          ["x", "Close-X Probe", `var x=document.querySelector('#modal-root .modal-x[data-close]');if(!x) return {ok:false,why:'no \`.modal-x[data-close]\` in the open sheet — the × either lost its close hook or is no longer rendered, so this exit could not be driven'};x.click();return {ok:true};`],
+          ["backdrop", "Backdrop Probe", `var b=document.querySelector('#modal-root .modal-backdrop[data-close]');if(!b) return {ok:false,why:'no \`.modal-backdrop[data-close]\` in the open sheet — trap (3): \`#modal-root\` itself carries no \`data-close\`, so without the real backdrop this cell would report a false pass'};b.click();return {ok:true};`],
+        ];
+        for (const [via, label, clickJs] of REFLEX_EXITS) {
+          exitCells++;
+          await setViewport(width, height);
+          await nav(
+            exitUrl(EXIT_SCEN, "#overview", `${via}-${width}`),
+            `(function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-overview';})()`,
+          );
+          await evalJs(`(function(){try{localStorage.removeItem(${JSON.stringify(STASH)});}catch(e){}return true;})()`);
+          const reflexSentinel = `${label} ${width}`;
+          const reachedReflex = await openModalSheet(reflexSentinel);
+          if (!reachedReflex.ok) {
+            exitDead++;
+            fail(D, `modal-${via}@${width}x${height}: ${reachedReflex.why}`);
+            row.push(`${via}:!reach`);
+            continue;
+          }
+          const fired = await evalJs(`(function(){${clickJs}})()`);
+          if (!fired.ok) {
+            exitDead++;
+            fail(D, `modal-${via}@${width}x${height}: ${fired.why}`);
+            row.push(`${via}:!control`);
+            continue;
+          }
           await exitWait(`(function(){var r=document.getElementById('modal-root');return !!(r&&r.hidden);})()`);
           const m = await evalJs(
             `(function(){var r=document.getElementById('modal-root');` +
@@ -5378,13 +5400,13 @@ async function main() {
           );
           if (!m.hidden) {
             exitDead++;
-            fail(D, `modal-escape@${width}x${height}: Escape did not close the dialog at all — nothing about what it leaves behind can be read off a sheet that is still open`);
+            fail(D, `modal-${via}@${width}x${height}: ${via} did not close the dialog at all — nothing about what it leaves behind can be read off a sheet that is still open`);
           }
           if (m.stash !== null) {
             exitStale++;
-            fail(D, `modal-escape@${width}x${height}: \`${STASH}\` still holds ${JSON.stringify(m.stash)} after Escape — this is the generator of BOTH secondary bodies: a ghost launch modal pops over \`#providers\` the moment the person connects through that page's own card, and a later unrelated \`?checkout=success\` return auto-opens a launch modal prefilled with this abandoned name (origin/main bytes: both driven, prefilled "Ghost Name" and "Abandoned Launch")`);
+            fail(D, `modal-${via}@${width}x${height}: \`${STASH}\` still holds ${JSON.stringify(m.stash)} after ${via} — this is the generator of BOTH secondary bodies: a ghost launch modal pops over \`#providers\` the moment the person connects through that page's own card, and a later unrelated \`?checkout=success\` return auto-opens a launch modal prefilled with this abandoned name (origin/main bytes: both driven, prefilled "Ghost Name" and "Abandoned Launch")`);
           }
-          row.push(`esc:hidden=${m.hidden} stash=${JSON.stringify(m.stash)}`);
+          row.push(`${via}:hidden=${m.hidden} stash=${JSON.stringify(m.stash)}`);
         }
 
         // ── (c) THE RUNWAY, BACK. THE ASYMMETRY TRIPWIRE. Here the inline
@@ -5468,9 +5490,11 @@ async function main() {
       if (!failures.some((f) => f.defect === D)) {
         okLine(
           `${exitCells} / ${exitCells} cells clean across ${EXIT_VIEWPORTS.map(([w, h]) => `${w}x${h}`).join(" and ")}: ` +
-          `every exit from the credential sheet either returns the person to their launch or clears it, and none ` +
-          `leaves it half-remembered. ${exitLost} lost launches, ${exitStale} stale records, ${exitDead} cells that ` +
-          `could not reach the screen`,
+          `ALL FIVE exits from the credential sheet — Back, Escape, the ×, the backdrop and the runway's Back — ` +
+          `either return the person to their launch or clear it, and none leaves it half-remembered. Each reflex ` +
+          `exit is DRIVEN from its own freshly-opened sheet rather than inferred from the three sharing one ` +
+          `\`reflexClose()\`: a coverage claim that is an argument about the code under test is not coverage. ` +
+          `${exitLost} lost launches, ${exitStale} stale records, ${exitDead} cells that could not reach the screen`,
         );
         okLine(
           `THE SCOPE IS THE MEASUREMENT (trap 1). Every query in the modal cells is scoped to \`#launch-modal-slot\` ` +
