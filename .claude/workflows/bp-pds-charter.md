@@ -2576,6 +2576,303 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 41 2026-08-02 — "Give every number a denominator" — DECIDED, building (paper `pds-wave-41-2026-08-02`)
+
+GROUND TRUTH, DERIVED IN-PROCESS by this phase over a clean `git archive origin/main` extraction at
+**`20d61d1874a260fec273942dd32d7b4e29d86eb5`** (NOT the strategy block's `842032cbb`, NOT the primary
+checkout): census rc=0, `CENSUS OK`, **14 arms PASS / 0 FAIL**. `ROUTED-POPULATION-COMPLETE 252 <-> 67
+judged + 7 rostered + 178 excluded`, `UNDISPOSED 0`. `DERIVATION-PARTITION-TOTAL 138 = store_derived 94,
+reread_receipt 6, request_echo 3, control_flow_gated_literal 2, literal_only 3, residual_helper_assembled
+22, residual_onehop_unattributed 8 · RESIDUAL 30`.
+
+**PDS-D595 — THE WISH'S HEADLINE IS REFUTED FOR THE SEVENTH CONSECUTIVE WAVE, AND SO ARE FOUR CLAUSES OF
+MY OWN DIRECTION.** The wish says the measured `request_echo` population is **SEVEN**; it is **THREE**
+(#9164's four repairs are on main). Refuted with it: (1) **MERGE DEBT IS ZERO** — #9131, #9164, #9165,
+#9166 and #9167 are ALL merged (#9166 at 11:19:34Z; its `mix format` red was fixed by `90dd56429`, ONE
+blank line, before any surveyor looked), so "merge debt is the wave's first act" names an act that does
+not exist. (2) **SCIM item 4a is false on the trunk twice over** — `Scim.list_org_groups/2` filters
+`g.organization_id == ^oid` DIRECTLY, and the member fan-out is now `Scim.group_member_ids_by_role/2`
+deriving `ws_ids` from the AUTHENTICATED org; `Membership` carries no `organization_id`, so
+`workspace_ids/1` IS the canonical org fence, not a second-hand one. (3) **THE "request_echo at 3" UNIT
+CONFLATION RUNS THE OPPOSITE WAY FROM THE WISH** — the residue lens counts CALLSITES and correctly prints
+**0**; the census counts ROUTED ROWS and correctly prints **3**. A builder told to make the lens reproduce
+3 would manufacture a predicate to hit it. (4) **THE CI FENCE IS UNOCCUPIED** — zero open PRs and zero of
+the 40 most-recent remote branches touch `.github/`. The cut stands on POLICY and mechanics; saying it is
+held by a concurrent epic is saying something false.
+
+**PDS-D596 — THE 87 LIVECOMPONENT CLAUSES ARE OUTSIDE EVERY SOCKET-LEVEL GATE, AND THAT IS A SECURITY
+FINDING, NOT A CENSUS HOLE.** Proven behaviourally on this sha with the SAME event string on both sides,
+so classification cannot explain the difference. `Caps.classify("edit-commit") == :deny`. Sent at the
+LiveView level on a Studio socket: HALTED, flash *"You don't have access to do that."* Sent with
+`phx-target` at `#sheet-grid-<slug>` on the SAME socket: reaches `SheetGrid.handle_event/3` and PERSISTS
+the write — `Session.peek/2` reads `%{"A1" => %{"v" => 42}}` where it was `"orig"`. Non-vacuity proven by
+mutation (asserting the cell unchanged FAILS naming the persisted value). **THE PRINCIPAL CASE IS THE
+DISCLOSURE:** an authenticated **read-only api_token** (perms `["read"]`) is denied the LiveView-level
+`save` event and, on that same socket in the same test, writes `A1 = 1337` into persisted sheet state
+through the component. MECHANISM, from source not docs: `phoenix_live_view/channel.ex:250-262` branches on
+`msg.payload["cid"]` into `inner_component_handle_event/4`, which runs `Lifecycle.handle_event/3` on the
+COMPONENT socket; the parent's hook list lives on the PARENT socket and is never consulted. So the bypass
+is **generic to every socket-level `:handle_event` hook in the tree** — `Caps`' `:studio_caps_gate`,
+`LiveScope`'s `:live_scope_write_scope` and `:live_scope_readonly`, `StudioChrome`'s `:studio_chrome_nav`.
+Population: **87 LiveComponent clauses** (sheet_grid 80, tree_codelist_field 4, paper_field_block 3;
+graph_view 0), of which the charter's own 37 provably reach `Sheets.Session.apply_ops/4`. **THE FIX IS NOT
+A FOURTH `attach_hook`, which structurally cannot work** — it is passing a derived capability into the
+component (`SheetGrid` already carries `read_only` guard clauses on 11 write heads, and its `read_only`
+defaults FALSE at `sheet_grid.ex:224` while `studio_live/components.ex` passes it NO capability prop at
+all, so those guards are dead code on the Studio path) plus a gate in `Ops.send_ops/2`. HONEST SCOPE: prod
+Studio redirects anonymous to `/login` unless `BARKPARK_PUBLIC_DEMO_STUDIO`, so the sentence is "any
+principal Caps denies write", never "the internet" — overstating it would repeat exactly the clause-B
+error wave 40 retired. The share-read/grant grade is CONFIRMED-BY-CONSTRUCTION only (same code path),
+never run — filed, not claimed.
+
+**PDS-D597 — THE RESIDUAL IS CLAUSE-KEYED OR IT IS WRONG, AND 30 IS A FLOOR.** `derive_row/3` takes
+`Enum.min_by(&derivation_rank(&1.class))` over `@derivation_order`, so ANY decided class (ranks 0-4) beats
+ANY residual class (5-7). Measured by independent instrumentation whose patched stdout is byte-identical to
+baseline except the wall-clock line: **9 of the 138 rows print a DECIDED class while carrying a residual
+clause** (9 ROWS = 8 distinct clauses — `V1.MediaController.upload` is routed twice; quoting "9" without
+its unit is this epic's own disease). Residual-touching rows are **39**, not 30; distinct residual CLAUSES
+are **41** (26 helper + 15 onehop) against the printed 30 ROWS. **A SECOND MASK sits inside the residual
+band**: 3 rows carry BOTH residual classes and print `residual_helper_assembled`, so a successful hop
+shrinks that class by 3 while deciding 0 — `pds-w40-residual-helper-hop`'s filed criterion 1 ("shrinks by
+exactly the rows it decided") is **false-by-construction on those 3**, and a hop that decides them pushes
+the mask 9 → 12. **AND IN 2 OF THE 9 THE PRINTED CLASS DESCRIBES THE ERROR CLAUSE**:
+`SessionController.account` prints `request_echo` off its "email and password are required" re-render while
+its real sign-in clause is residual, and `SsoRoutingController.route` prints `literal_only` off its 400
+fallback while its real `json/2` success body is residual. **One of the census's three `request_echo` rows
+and one of its three `literal_only` rows are verdicts about a FAILURE BRANCH.**
+
+**PDS-D598 — THE ONE-HOP YIELD IS 15 OF 22, MEASURED, AND THE CHEAPEST MOVE IS NEITHER THE HOP NOR THE
+PRECEDENCE FIX.** Derived by running the census's own `resolve/4` + `derive_def/1` over every
+`residual_helper_assembled` clause's emitting hop targets, min-by `@derivation_order`: **15 decided / 7
+still residual** — store_derived 5, reread_receipt 3, request_echo 5, literal_only 2. The 7 each have a
+printed mechanism: `Auth.login`/`magic_login`/`mfa_enroll` reach `SessionIssuer.issue/3` only through the
+one-line wrapper `defp issue_session/3` (genuinely TWO hops); `Mutate.mutate` ×2 hop only into
+`respond_with_error/2`; `ScimUsers.replace` and `Webauthn.step_up_challenge` hop into targets that are
+themselves in the 8. **A SPEC AMBIGUITY MOVES THE NUMBER BY ONE**: the filed task says "ONE **local** hop",
+and `Webauthn.login`'s only converting target is the REMOTE `SessionIssuer.issue/3` — local-only yields
+**14**, not 15. **THE CHEAPEST MOVE NOBODY NAMED**: `ok_payload/1` matches only TWO-tuples, and a
+three-element ok tuple quotes as `{:{}, meta, [...]}` — so `MediaController.put_blob`'s
+`{:ok, written, receipt} <- Media.put_blob(…)` is a genuine store-derived receipt sitting in the residual
+8 **purely on TUPLE ARITY**; 31 n-ary ok-tuple sites exist across 14 controller files. **AND THE
+PROVENANCE PASS CARRIES A MIS-VERDICT HAZARD**: tracing a plain-`=` var to its producing call under the
+existing read-stem test makes `WebauthnController.login_challenge` (`challenge =
+Webauthn.authentication_challenge()`) come out `store_derived`, which is flatly false — a minted challenge
+is neither the store nor the request. Any provenance slice ships a `minted_value` class in the same PR or
+trades 8 undecided rows for 2 confidently wrong ones. **HOP AND PRECEDENCE ARE SEPARABLE**: none of the 9
+masked rows is in the 22 or the 8.
+
+**PDS-D599 — THE RESIDUE LENS CANNOT FAIL, AND IT REPORTS SUCCESS OVER AN EMPTY CORPUS. THE EPIC'S OWN LAW,
+IN THE EPIC'S OWN INSTRUMENT.** Derived in-process by this phase, not inherited: `root =
+List.first(System.argv()) || "api/lib"` — argv[0] is the ROOT, and there is no flag parser. So
+`elixir scripts/pds-status-only-residue.exs --selftest` runs over a directory named `--selftest`, and
+prints `json/2 sites total: 0` / `STATUS-ONLY RESIDUE …: 0`. `grep -c 'System.halt'` over the whole file
+is **0** — the lens has no exit code at all and can never red. A bogus root reproduces the same clean
+zeros. Its committed header is stale in the same shape: "Real population: 460 json/2 + 3 send_resp = 463"
+and "HONEST RESIDUE: 19 of 463" against a run today of **462 json/2, 3 send_resp, residue 11** — a
+transcription inside the instrument, hand-listing 19 rows of which 8 are repaired.
+
+**PDS-D600 — SCIM'S GROUPS READ FENCE IS THE ONE UNPINNED ORG BOUNDARY IN THE MODULE, PROVEN BY MUTATION
+BOTH WAYS.** Deleting `m.workspace_id in ^ws_ids` from `Scim.group_member_ids_by_role/2` leaves the SCIM
+Groups suite at `30 tests, 0 failures` — byte-identical to baseline — and the whole four-file SCIM surface
+at `60 tests, 0 failures`, also identical. Zero tests moved. A purpose-built two-org probe (each org owning
+a role independently named `shared-name`) FAILS against the mutated tree with the disclosure printed —
+`CROSS-TENANT DISCLOSURE: org A's GET /scim/v2/Groups returned ["fbc3d99c-…"]; org B's user is fbc3d99c-…`
+— and PASSES against the pristine tree. **Widening the mutation to ALL FIVE membership fences reds exactly
+THREE tests, every one of them a WRITE or a USERS path**; not one is the Groups READ member render. So the
+correct sentence is narrower and more damning than "SCIM tenancy is untested": the SCIM write and users
+surfaces ARE mutation-pinned; the Groups READ fence #9166 added is the one that is not. WHY the nine-criterion
+task missed it, in writing: criterion 1 QUOTES the `ws_ids` clause as evidence (a read, never a run), and
+criterion 5 "THE MUTANT" mutates the FEATURE, never the FENCE. **A nine-criterion task with an explicit
+mutant arm still shipped an unfalsifiable tenancy fence, because the mutant was aimed at the thing the
+author was proud of rather than at the thing that could hurt someone.** Also measured: the test suite's own
+authority helper `stored_holders/1` is org-BLIND, so it AGREES with an unscoped implementation by
+construction; every existing test mints a uniquely-named role, so the corpus structurally cannot contain the
+collision the fence exists to stop (the device-oracle lesson, again). The empty-list head
+`group_member_ids_by_role(%Organization{}, [])` is a COVERAGE hole not a boundary defect (removing it
+entirely is behaviourally identical) — but it is reached by the most ordinary request the endpoint serves,
+and a bare `raise` there leaves all 30 tests green. `deprovision_user/3`'s fence also survived the widened
+mutation unpinned — filed, not assumed.
+
+**PDS-D601 — PDS-D593 IS RETIRED: THE STACK IT NAMES CANNOT FAIL A TEST, FOUR SEALS DEEP.** (a)
+`safe_revoke/1` has a TOTAL rescue — named `DBConnection.OwnershipError`, a bare `e ->`, AND
+`catch :exit` — present since the function's introducing commit `8a0f105f3`, not a later repair. (b) The
+session is `GenServer.start` — UNLINKED and UNSUPERVISED — so nothing propagates to the test process. (c)
+The owning test asserts `{:DOWN, ^ref, :process, ^session, _}` with a **WILDCARD** reason: an abnormal exit
+satisfies it identically to `:normal`. (d) `config/test.exs:74` sets logger level `:warning` while
+safe_revoke's ownership branch logs at `:debug`. Proven by a standalone probe that IS the D593 mutation
+(rescue deleted, raise in `terminate/2` of an unlinked GenServer): it printed the exact
+`Probe.Session.terminate/2` error report AND reported `1 test, 0 failures`. **"Reuse the drain" would ship a
+green PR that fixes nothing** — `DataCase.owned_tasks/1` enumerates only `Task.Supervisor.children/1` of two
+supervisors and structurally cannot see a bare GenServer. THE FILE'S REAL FLAKE, replicated 1-in-20 with
+ZERO occurrences of "ownership" in any of the 20 runs, is `removes the stderr capture file on close`
+(`refute File.exists?(path)` → got true), **already filed and unclaimed as `spd-bl-claude-chat-stderr-leak`**
+— and measured here at ~7 leaked `barkpark-claude-*.stderr` files per run (269 total, 170 zero-byte, 142
+created inside a 20-run window), not the 1-per-run its task states.
+
+**PDS-D602 — THE ARM HAZARD IS A SET, NOT AN INTEGER, AND IT LANDS ON THE LIVEVIEW SLICE.** Mutation-proven
+at this sha, both directions. Deleting ONE `:liveview_handle_event` row one-way: rc=1, `FAIL
+ROUTED-POPULATION-COMPLETE … UNDISPOSED ARRIVAL live /finder -> BarkparkWeb.FinderLive.index`. Repointing
+that row's path instead: `1 disposition row(s) name NO live routed member … ORPHANED DISPOSITION`. At slice
+scale, lifting all 40 rows to a new attribute while leaving `dispose_routed/4`'s `committed` map and the
+`orphans` comprehension reading `@routed_excluded`: **40 UNDISPOSED, CENSUS FAILED** — the honest-work red,
+at full size. **THREE EDIT SHAPES, ALL RUN.** (a) TOUCH NOTHING: a slice that only ADDS a print block +
+its own arm has ZERO hazard. (b) RE-CLASS IN PLACE to a brand-new class atom: rc=0, 14 PASS, `CENSUS OK` —
+**no arm gates the class atom at all**, the report prints `(no prose — see @routed_exclusion_classes)` and
+stays green (a free affordance AND a silent hole, filed). (c) FULL LIFT: legal, but a THREE-SITE ATOMIC
+EDIT — any one site left behind is (a)'s 40-row red. `pds-w39-routed-disposition-regen` (#9035, open) is the
+repair path if a slice takes shape (c). Also mutation-proven: **`DERIVATION-PARTITION-TOTAL` is a
+CONSERVATION LAW ONLY** — forcing all 138 rows to `:store_derived` PASSES (`across 1 class(es) —
+store_derived 138 · RESIDUAL 0`, `CENSUS OK`) while dropping ONE row fails by name. The most consequential
+possible lie in that partition ships green. And the ORPHAN direction is CONDITIONALLY BLIND: the
+comprehension is gated by `Map.has_key?(module_files, mod)`, so a row naming a module the corpus does not
+carry is half-unfalsifiable (corroborates `pds-bl-w39-opaque-exclusion-row-unfalsifiable`).
+
+**PDS-D603 — EVERY LIVEVIEW INTEGER NEEDS `numerator / denominator @ depth`, AND `62 → 99` IS A THREE-WAY
+UNIT ERROR THAT MUST NEVER BE PRINTED.** Re-derived through the census's own resolver, no name regex:
+write-reaching over the 235 ROUTED `handle_event/3` clauses is **13 / 34 / 40 / 47 / 61 / 62 / 63 / 66** at
+depths 1-8, then flat at 66 through 9, 10, 12 and 14 — the relation CLOSES AT 8, measured PAST closure.
+**D580's transcribed sweep is WRONG at depth 7: it prints 66, the run prints 63.** The `62 → 99` arithmetic
+sums a depth-**6** count over the **routed 235** with a depth-invariant count over the **non-routed 87**,
+and silently drops a third term the charter never names — **12 routed clauses at depth 6 (13 at depth 8)
+cross a GenServer boundary WITHOUT write-reaching**, via `Plugins.Registry`, `Plugins.RunStatus.record/3`,
+`ChatHosts.Transport.call/1`, `Quiz.Room.call_existing/3`. Stated in ONE unit at closure depth 8 the
+boundary-credited numerator over the 322 population is **66 + 13 + 37 = 116**, not 99. **THE HONEST JOIN IS
+PER-CLAUSE AND MECHANIZABLE**: all 37 route `apply_ops/4` → `call_session(slug, dataset, {:apply_ops, ops,
+request_id})` → `GenServer.call`, and the LITERAL 3-tuple tag joins to `handle_call({:apply_ops,…})` at
+`session.ex:515`, whose write-reach by depth is `4:- 6:- 8:W 10:W 12:W` — **write-reaching only at depth 8**.
+A blind `+37` credits at the wrong depth; a blind `+0` misses a real write path. The join must be made at
+`apply_ops/4`, its only literal-bearing caller, never at `call_session/4`'s opaque `msg`. **AND THE JOIN
+SURFACES AN EPIC-LAW VIOLATION**: that `handle_call` replies `{:ok, %{rev: state.rev, …}}` read off
+IN-MEMORY state while `defp persist(state) do {_result, state} = persist_result(state); state end`
+**discards the persist result by name** — verbatim the wave-40 law, and an L4 read that must be proven by
+mutation before it is stamped. Two further units reconciled: non-literal event keys are **12/235 routed** and
+**13/322 repo-wide** (the 13th is `paper_field_block.ex:300`, a LiveComponent), all bare variable heads, zero
+concatenations; and "23 modules" and "26 modules" are BOTH true — 322 clauses live in 23 files, the census's
+routed lens names 26 modules of which **6 carry ZERO `handle_event/3`** (FleetLive, Pulse DashboardLive,
+QuizHostLive, SheetsReaderLive, OnixEdit PingLive, Studio SwatchLive), and 20 + 3 LiveComponent files = 23.
+**THE SWEEP IS DENOMINATOR-BLIND**: routed-235 and full-322 numerators are IDENTICAL at every depth (all 87
+component clauses are write-FALSE everywhere), so only the FRACTION distinguishes them — 62/235 = 26.4% vs
+62/322 = 19.3%, and no run output can catch a slice that prints 62 bare.
+
+**PDS-D604 — THE LADDER'S PROVEN LEG IS PROVEN TO MOVE, AND THE DOC IS STALE IN FIVE TERMS, NOT THREE.**
+Every ladder integer is now a run output, computed through the census's OWN `receipt_functions/1` /
+`roster_functions/1` / `reaches?/4`: **DISPOSED 252/252 · REGISTER-REACHED 67/252 · ROSTER-REACHED 7/252 ·
+PROVEN-BACKED 23/252** (20 register routes from 15 PROVEN register rows + 3 roster routes, OVERLAP 0),
+SHORTFALL **47** — not the 45 the filed task states, and REGISTER-REACHED is 67, not the 65 the task's own
+spec block prints. **The `:live` vs `[:live,:stale]` asymmetry is a NO-OP on today's tree** (both legs
+compute 20), so the PROVEN column is currently indistinguishable from a second membership count. Forced
+distinguishable by mutation — demoting ONE PROVEN register row's `expr_fp` to `:stale`: PROVEN-REGISTER-LIVE
+20 → 19, PROVEN-BACKED 23 → 22, register VERDICTS `PROVEN 15 → 14 / UNJUDGED 76 → 77`, `basis_stale 1`,
+while **JUDGED stays 67 and ROUTED-POPULATION-COMPLETE stays PASS**, rc=0, `CENSUS OK`. That is the whole
+indictment of the old legend, run rather than argued: the census retracts a verdict over a route and keeps
+printing "AND the register judged" over that same route. PROVEN-BACKED must be an `Enum.count` UNION, never
+`20 + 3` — OVERLAP 0 is a property of today's data, not of the code. `docs/decisions/success-claim-census.md`
+is stale at `:159` (JUDGED 65 → 67), `:161` (EXCLUDED 180 → 178) and `:173` (72/252 = 28.6% → 74/252 =
+29.4%) — **and at TWO more nobody has named**: `:171` still ships the clause wave 40 RETIRED IN CODE ("it
+claims success by STATUS alone", while the census's own prose reads "That clause is RETIRED here"), and
+`:169` lists `action_not_in_corpus | 2`, a class the run no longer prints at all. **A ladder PR that fixes
+three terms and leaves two is this epic's disease inside its own repair.** Budget measured, not assumed: a
+full five-term correction plus a 3-line ladder block gives `18678B <= 19307B` — 629B spare, no cap raise.
+`disp.proven_judged` DOES NOT EXIST (`grep` returns zero) and adding it would widen `dispose_routed/4` in
+tension with the same task's byte-untouched criterion: compute the PROVEN count alongside in
+`report_routed_population/4` and leave `disp` alone.
+
+**PDS-D605 — QUOTE USER CPU, NEVER WALL CLOCK; AND THE FIXTURE RECIPE IS FOUR COUPLED EDITS, NOT TWO.**
+The SAME census, same tree, same corpus, back to back: at load 69 `real 39.54 / user 9.97`; at load 41
+`real 15.95 / user 9.11`. **Wall clock swung 2.5x; user CPU moved 9%.** Every wall-clock second this epic
+has quoted (10.0, 9.5, 13.3, 18.0, 41-43, 136.29) is a load reading wearing a code label. `--selftest` is
+**24 census subprocesses** — 4 over the REPO corpus (~9-10 s CPU each) and 20 over the 626-file synthetic
+fixture — so **one added fixture case ≈ one more fixture-corpus census**, and that is the budget unit, not
+seconds. The recipe, executed end to end (24 cases / 16 mutants, rc=0): (1) the module inside
+`write_corpus!/3`, receipt pair spelled `#{@pair_atom}`; (2) the router line in the same heredoc; (3) **a
+`@routed_excluded` row — MANDATORY, or the row is UNDISPOSED and reds the arm on the honest work**, and it
+is inert on the real repo (full census output byte-identical except the wall-clock line); (4) the
+`@selftest_cases` entry with its anchor split across `<>`. FOUR TRAPS the reading-derived recipe does not
+carry: `Enum.take(disp.undisposed, 4)` means a mutant asserting its own route name must be the ONLY
+offender; **the charter's byte-identical-diff bar is UNREACHABLE for an EMITTING fixture** (`KEYS-PARTIAL-DROP`
+and `KEY-DISCRIMINATES` shift their DERIVED `why` numbers and stay PASS); class choice is load-bearing
+because `PARTITION-NAMES-REQUEST-ECHO` and `PARTITION-ECHO-REPAIRED-CLEAN` pin `"— all 6"` COUNTS; and
+`:repaired` is a THIRD corpus. Also refuted: the `@register` forbidden-path set is **23 paths, not 9**; a
+file at one of those paths is NOT enough (a non-emitting file leaves the arm set at 8, `CENSUS OK`) — the
+trigger is an EMITTED success-claim site, and one reds **FIVE** arms, not four (`ROSTER-VERDICT-FRESH`
+carries its own `register_scope/1` call); and `register_scope/1` has **FOUR** call sites, so the circulating
+"six consumers" reproduces from no lens.
+
+**PDS-D606 — MAIN IS NOT GREEN AND IS NOT BLOCKING, AND THE CIRCULATING SOBELOW BASELINE IS INCOMPLETE.**
+At `20d61d187` the per-commit check-runs feed returns 31 runs: exactly TWO failures (`Sobelow static
+analysis`, `Required-check spec drift (advisory)`), one `skipped` (Break-glass harness), 28 success —
+including `Elixir gate` and `Test (Elixir 1.18.1 / OTP 27.0)`. Both reds recur on 3 of the last 6 main
+heads, so neither is diff-caused; live protection requires exactly `["Elixir gate","PR references an active
+task"]`, so neither blocks. **Counted off the DECIDING step's own scan output (step 7, `mix sobelow --skip
+--exit Low`), the baseline is 24 findings = 9 Traversal.FileModule + 7 SQL.Query + 3 SQL.Stream + 3
+Config.CSRF + 2 CI.System.** The itemization circulating in the wave brief sums to **21** — it drops the
+three `Config.CSRF: Missing CSRF Protections` rows in `router.ex` (pipelines `media_mutate`, `user_auth`,
+`session_token_root`). Anyone diffing against a 21-row baseline either waives three real CSRF findings as
+"unchanged" without reading them, or manufactures a false regression alarm. **Use 24 with the five-way
+histogram, or do not quote a baseline at all.** The drift job's single failure of 115 is the four-vs-two
+spec gap (committed `.github/required-checks.json` declares FOUR contexts, live carries TWO) — and its own
+next step, the three-way drift check, was SKIPPED as a consequence, so that comparison has not run on main.
+Filed as backlog, out of fence.
+
+**PDS-D607 — THE CI FENCE, WITH ITS SECOND HALF FINALLY MEASURED.** `pds-w38-record-parity-ci-lane` and
+`pds-w35-elixir-census-gate` stay CUT behind the `.github/workflows/**` fence — as POLICY, with the fence
+measured UNOCCUPIED (D595). The second half now carries a denominator: **0 of 19 executable `pds-*`
+instruments are wired to CI**, and `.github/` references 65 distinct `scripts/…` paths of which **ZERO**
+match `^scripts/pds`. The only `PDS` string anywhere under `.github/` is a prose comment in
+`paper-readers.yml`. And `shell-harnesses.yml` triggers on an explicit 8-entry per-file paths list by
+design (its own header says a `pr-task-gate.sh` edit once failed to trigger it), so wiring a PDS instrument
+is not a one-line `run:` — it is `.github/workflows/**` bytes in BOTH paths lists plus a job. **A census
+that no job runs is a sentence with a shebang, and this epic knows that clause by heart.**
+
+**PDS-D608 — LIVEVIEW GOES FIRST AND THE ROUND TAX IS HALVED, MEASURED.** Only ONE pair collides: the
+ladder's disposition print block (`report_routed_population/4`, the `sum … == population` line) and the
+LiveView `EXCLUDED CLASS … LiveView` block sit **FIVE LINES APART** inside the same 41-line def, so git's
+3-line hunk context makes them a textual conflict — unavoidable, because the print IS the deliverable in
+both. The residual slice is fully disjoint at def AND attribute level (`@derivation_order` 3346,
+`@derivation_residual` 3357, `derive_row/3` 3398, `report_derivation_partition/2` 3728, all outside
+3697-3719). **ONE HAIRLINE THE SURVEY DID NOT NAME**: `report_derivation_partition/2`'s CALL SITE sits at
+3711-3712, INSIDE the five-line gap — so "disjoint" holds only while the residual builder keeps that
+function's SIGNATURE fixed, and that constraint is written into the slice. Round 1 = LiveView ‖ residual ‖
+three fully-disjoint slices; round 2 = ladder alone. The only soft collision is `@selftest_cases`
+tail-appends — assign head and tail and it is a non-event.
+
+**CHARTER SELF-CORRECTIONS LANDED THIS WAVE:** D580's depth sweep `…/61/62/66/66` → `…/61/62/63/66` and its
+`62 → 99` RETIRED (D603); D590's "`residual_helper_assembled` 22 is the visible upper edge" → **a FLOOR**
+(25 rows touch a helper clause, 26 distinct helper clauses exist) (D597); D585's `@routed_excluded` "182
+rows" → **186** (178 real + 8 fixture); D583's "held by a concurrent epic" → **fence UNOCCUPIED, policy
+only** (D595); D593 **RETIRED** (D601). The charter's "43 route entries over 27 distinct modules" reproduces
+from NO lens anyone built (census 40/26, router.ex 19, repo-wide 50) and is **RETIRED UNTIL RE-DERIVED**,
+never reconciled by narration. And D580's own transcribed depth sweep being wrong is the point: **the epic's
+decision record has the disease it exists to cure.**
+
+### WAVE 41 PLAN — 6 slices, 5 in round 1
+
+| # | slice | round | task | surface |
+|---|---|---|---|---|
+| 1 | LiveComponent-targeted events bypass every socket gate — pass the capability, not a fourth hook | 1 | `pds-w41-caps-component-gate` | `studio_live/components.ex` + `sheet_grid.ex` + new test |
+| 2 | The LiveView WRITE POPULATION, three columns, every integer `n/d @depth` | 1 | `pds-w40-liveview-write-population` | `census.exs` LiveView exclusion block |
+| 3 | The residual goes CLAUSE-KEYED: n-ary `ok_payload`, the one-hop join, the mask printed | 1 | `pds-w40-residual-helper-hop` | `census.exs` derivation region |
+| 4 | SCIM Groups' READ fence gets pinned by a mutation that can fail | 1 | `pds-w41-scim-crosstenant-pin` | `scim_groups_controller_test.exs` |
+| 5 | The residue lens gains an argv guard, a real selftest, and a HALT | 1 | `pds-w40-residue-lens-can-fail` | `scripts/pds-status-only-residue.exs` |
+| 6 | The judgment-coverage LADDER + the false JUDGED legend + FIVE stale doc terms | 2 (after 2) | `pds-w40-judgment-coverage-ladder` | `census.exs` print region + `docs/decisions/` |
+
+HIGH-FLIP-RISK, declared: **slice 1** (reachability and severity — is the component-targeted write reachable
+by a principal the gate denies, and is the honest scope "any principal Caps denies write" rather than
+"anonymous"); **slice 4** (tenancy — does the deleted fence actually disclose across orgs, and does the
+probe's own authority helper agree with an unscoped implementation). Both warrant a genuinely INDEPENDENT
+second reviewer before merge; this workflow spawns one reviewer, so that dispatch is a manual lead step.
+
+CUT THIS WAVE, ON THE RECORD, WITH ITS REASON: any `.github/workflows/**` byte (D607 — policy fence, fence
+measured unoccupied, second half stated with its denominator 0/19); the clause-PRECEDENCE fix (D597 — real,
+filed, but it moves which class prints and lands inside the two count-pinning selftest cases' blast radius,
+so it does not ride the same PR as the hop); the intra-def provenance pass (D598 — it must ship a
+`minted_value` class with it or it trades 8 undecided rows for 2 confidently wrong ones); PDS-D593 (D601 —
+RETIRED, the stack cannot fail a test and "reuse the drain" would ship a green PR that fixes nothing); the
+LiveScope share-read/grant component bypass (D596 — confirmed by construction only, never run; it needs a
+grant-graded socket probe, filed not claimed).
+CHARTER PR: docs-only, `Task: task-2ac1f95237c4a8e5`.
+
+
 ### Wave 40 2026-08-02 — "A class is a verdict too" — REVIEWED. Grade A (paper `pds-wave-40-2026-08-02`)
 
 **ALL FOUR ROUND-1 SLICES BUILT, ALL FOUR GREEN ON THEIR FINAL STATE, ALL FOUR PUSHED WITH PRs OPEN.**
@@ -2611,8 +2908,10 @@ fraction inside the anti-overstatement epic would have authored the next oversta
 OWN OUTPUT.** The wish's item 2 asked how many of the 138 were never status-only at all but judged
 receipts the one-hop relation could not reach. The partition prints that its denominator is an UPPER
 BOUND for exactly this reason and declines to quantify it — the quantification belongs to the ladder
-slice and widening into it would have collided. **`residual_helper_assembled` 22 is the visible upper
-edge of that population**: rows whose response call is not in the action's own def at all. That is the
+slice and widening into it would have collided. **`residual_helper_assembled` 22 is a FLOOR, not an upper
+edge — CORRECTED BY RUN IN WAVE 41, D597: 25 rows touch a helper clause (22 printed + 3 masked by a
+decided class) and 26 distinct helper clauses exist; the residual work population is 41 distinct CLAUSES,
+not 30 rows**: rows whose response call is not in the action's own def at all. That is the
 honest handle wave 41 should pull.
 
 **PDS-D591 — TWO REVIEWER FIXES, AND BOTH ARE THIS EPIC'S DISEASE INSIDE THIS WAVE'S OWN REPAIRS.**
@@ -11061,7 +11360,11 @@ filed 302 **does not reproduce and its stated derivation is false** — there ar
 handle_event`** in `api/lib`, so 330 − 8 = 322, and its "290 literal" is 309 by AST. Three blind shapes
 the denominator must print: the **process boundary** (37 clauses scored `no_repo_verb` provably reach
 a `GenServer.call`; crediting it lifts 62 → 99 and 62 must never be printed bare), **13 non-literal
-event keys**, and **depth closure at 8, not the census's `@max_depth 6`** (13/34/40/47/61/62/66/66).
+event keys**, and **depth closure at 8, not the census's `@max_depth 6`** (13/34/40/47/61/62/63/66 —
+CORRECTED BY RUN IN WAVE 41, D603: this line originally transcribed 66 at depth 7; the run says 63. AND
+`62 → 99` IS RETIRED — it is a three-way unit error summing a depth-6 routed-235 count with a
+depth-invariant non-routed-87 count and dropping the 13 routed GenServer-only clauses; the one-unit figure
+at closure depth 8 over the 322 population is 66 + 13 + 37 = 116).
 
 **PDS-D581 — ONE PROVEN LIVEVIEW LIE, AND IT IS A REVOKE VERB.** `handlers/shares.ex:70-75` hard-matches
 `{:ok, _count} = Sharing.remove_share/3` — a function whose `@spec` is `{:ok, non_neg_integer()}` with
@@ -11197,6 +11500,7 @@ the blind-shape AST replacement (D587 — real, filed, and it collides with the 
 `pds-w35-elixir-census-gate` and `pds-w38-record-parity-ci-lane` (D583 — POLICY cut, in those words,
 with the "zero PDS instruments are wired to CI at all" half said out loud).
 CHARTER SELF-CORRECTIONS LANDED HERE: D554's `~130` → 90 (D571); D563's `95 trees` → 114 (D584); the
-six-vs-eight units and the `:187`/`:189` swap (D574); `@routed_excluded` is `:172-357`, 182 rows (D585);
+six-vs-eight units and the `:187`/`:189` swap (D574); `@routed_excluded` is 186 rows (178 real + 8 fixture) —
+D585's 182 CORRECTED BY RUN IN WAVE 41; cite the attribute and the grep, never the line span;
 `gr-*` / `cch-*` appears NOWHERE in this charter and is retired from the fence description.
 CHARTER PR: docs-only, `Task: task-2ac1f95237c4a8e5`.
