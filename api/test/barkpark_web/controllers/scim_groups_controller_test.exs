@@ -5,7 +5,7 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
   alias Barkpark.{Accounts, Repo, Scim, Tenancy}
   alias Barkpark.Audit.Event
   alias Barkpark.Scim.Group
-  alias Barkpark.Tenancy.{Auth, Role, RolePermission}
+  alias Barkpark.Tenancy.{Auth, Membership, Role, RolePermission}
   import Ecto.Query
 
   defp create_group(token, name, role) do
@@ -44,6 +44,21 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
 
     role
   end
+
+  # PDS-D551 helpers: stored membership rows are the authority a write receipt
+  # must be derived from, so the assertions read them rather than a status code.
+  @ext "urn:barkpark:params:scim:schemas:extension:2.0:Group"
+
+  defp stored_roles(user_id),
+    do:
+      Repo.all(
+        from(m in Membership,
+          where: m.principal_type == "user" and m.principal_id == ^user_id,
+          select: m.role
+        )
+      )
+
+  defp member_values(body), do: Enum.map(body["members"] || [], & &1["value"])
 
   defp member_op(op, user_id),
     do:
@@ -444,6 +459,217 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
       |> json_response(200)
 
       assert Auth.authorize(user, ws.id, :write) == {:error, :forbidden}
+    end
+  end
+
+  # PDS-D551. Three write sites discarded their member-grant results and then
+  # answered success: create/2 (via apply_members/3), update/2's Operations
+  # comprehension (which then rendered the PRE-mutation group), and replace/2.
+  # The callee could not fail — add/remove returned {:ok, 0} for "granted
+  # nobody" — so the callee was widened to {:error, :no_membership} first and
+  # the receipt now carries `members` READ BACK FROM STORED ROWS. Every
+  # assertion below reads stored membership rows or the read-back receipt; a
+  # status code alone cannot distinguish a grant that took from one that
+  # matched nobody, which is exactly the lie under test.
+  #
+  # Reachability (re-derived at origin/main f85188bdf): router.ex:1493 opens
+  # scope "/scim/v2" and :1494 is pipe_through(:scim); pipeline :scim
+  # (router.ex:86-91) is accepts json / ApiSecurityHeaders / RateLimit /
+  # RequireScimToken and nothing else, and RequireScimToken.call/2 resolves a
+  # Bearer to an Organization only — no user, no role, no membership. The path
+  # is ADMIN-MINTED (Scim.mint_token/2), NON-ADMIN-AUTHORIZED (no admin plug at
+  # request time) and THIRD-PARTY-DRIVEN (the IdP holds the token).
+  describe "member grants answer over the write, not over the request (PDS-D551)" do
+    # POST /scim/v2/Groups (router.ex:1508)
+    test "POST: a member id that matches nobody does not answer like a real grant" do
+      %{ws: ws, token: token} = org_with_ws("grcpt")
+      custom_role(ws.id, "auditor", ["read"])
+      # a DISTINCT mapped role: group membership is "holds the group's role", so
+      # two groups sharing a role legitimately share members — the phantom group
+      # must map elsewhere for the comparison to be about the grant.
+      custom_role(ws.id, "phantom-auditor", ["read"])
+      provision(token, "real@grcpt.com")
+      real = Accounts.get_user_by_email("real@grcpt.com")
+      ghost = Ecto.UUID.generate()
+
+      granted =
+        scim(token)
+        |> post(
+          "/scim/v2/Groups",
+          Jason.encode!(%{
+            "displayName" => "Auditors",
+            "role" => "auditor",
+            "members" => [%{"value" => real.id}]
+          })
+        )
+        |> json_response(201)
+
+      phantom =
+        scim(token)
+        |> post(
+          "/scim/v2/Groups",
+          Jason.encode!(%{
+            "displayName" => "Phantoms",
+            "role" => "phantom-auditor",
+            "members" => [%{"value" => ghost}]
+          })
+        )
+        |> json_response(201)
+
+      # the two 201s are NOT the same answer
+      assert member_values(granted) == [real.id]
+      assert member_values(phantom) == []
+      assert granted[@ext] == nil
+      assert phantom[@ext]["unmatchedMembers"] == [ghost]
+
+      # stored rows, not the receipt, are the authority the receipt was derived from
+      assert stored_roles(real.id) == ["auditor"]
+    end
+
+    # PATCH /scim/v2/Groups/:id (router.ex:1512)
+    test "PATCH: the body reflects POST-mutation membership read back from stored rows" do
+      %{ws: ws, token: token} = org_with_ws("grpatch")
+      custom_role(ws.id, "reviewer", ["read"])
+      provision(token, "p@grpatch.com")
+      user = Accounts.get_user_by_email("p@grpatch.com")
+      gid = create_group(token, "Reviewers", "reviewer") |> Map.fetch!("id")
+
+      assert stored_roles(user.id) == ["member"]
+
+      added =
+        scim(token)
+        |> patch("/scim/v2/Groups/#{gid}", member_op("add", user.id))
+        |> json_response(200)
+
+      # the PRE-mutation group carried no members; this body does
+      assert member_values(added) == [user.id]
+      assert stored_roles(user.id) == ["reviewer"]
+
+      removed =
+        scim(token)
+        |> patch("/scim/v2/Groups/#{gid}", member_op("remove", user.id))
+        |> json_response(200)
+
+      assert member_values(removed) == []
+      assert stored_roles(user.id) == ["member"]
+    end
+
+    test "PATCH: an op that matched nobody is reported, not folded into a bare 200" do
+      %{ws: ws, token: token} = org_with_ws("grpmiss")
+      custom_role(ws.id, "triage", ["read"])
+      gid = create_group(token, "Triage", "triage") |> Map.fetch!("id")
+      ghost = Ecto.UUID.generate()
+
+      body =
+        scim(token)
+        |> patch("/scim/v2/Groups/#{gid}", member_op("add", ghost))
+        |> json_response(200)
+
+      assert member_values(body) == []
+      assert body[@ext]["unmatchedMembers"] == [ghost]
+      assert stored_roles(ghost) == []
+    end
+
+    # PUT /scim/v2/Groups/:id (router.ex:1511)
+    test "PUT: full-replace answers over the reconciliation it actually performed" do
+      %{ws: ws, token: token} = org_with_ws("grput")
+      custom_role(ws.id, "release", ["read"])
+      provision(token, "a@grput.com")
+      provision(token, "b@grput.com")
+      a = Accounts.get_user_by_email("a@grput.com")
+      b = Accounts.get_user_by_email("b@grput.com")
+      gid = create_group(token, "Releasers", "release") |> Map.fetch!("id")
+      ghost = Ecto.UUID.generate()
+
+      scim(token)
+      |> patch("/scim/v2/Groups/#{gid}", member_op("add", a.id))
+      |> json_response(200)
+
+      assert stored_roles(a.id) == ["release"]
+
+      # replace {a} with {b, ghost}: b is granted, a is reverted, ghost matched nobody
+      body =
+        scim(token)
+        |> put(
+          "/scim/v2/Groups/#{gid}",
+          Jason.encode!(%{
+            "displayName" => "Releasers",
+            "members" => [%{"value" => b.id}, %{"value" => ghost}]
+          })
+        )
+        |> json_response(200)
+
+      assert member_values(body) == [b.id]
+      assert body[@ext]["unmatchedMembers"] == [ghost]
+      assert stored_roles(a.id) == ["member"]
+      assert stored_roles(b.id) == ["release"]
+    end
+
+    # HIGH-FLIP-RISK: tenancy. The token is org-scoped, so a member id from
+    # ANOTHER org matches zero rows in this org's workspaces — the write must
+    # refuse it rather than answer 201 over a grant that never happened, and
+    # org B's stored rows must be untouched.
+    test "cross-org: a token for org A cannot grant membership to a user in org B" do
+      %{ws: ws_a, token: token_a} = org_with_ws("xorga")
+      %{token: token_b} = org_with_ws("xorgb")
+      custom_role(ws_a.id, "xrole", ["read"])
+      provision(token_b, "b@xorgb.com")
+      user_b = Accounts.get_user_by_email("b@xorgb.com")
+
+      assert stored_roles(user_b.id) == ["member"]
+
+      body =
+        scim(token_a)
+        |> post(
+          "/scim/v2/Groups",
+          Jason.encode!(%{
+            "displayName" => "Cross",
+            "role" => "xrole",
+            "members" => [%{"value" => user_b.id}]
+          })
+        )
+        |> json_response(201)
+
+      # refused in the receipt …
+      assert member_values(body) == []
+      assert body[@ext]["unmatchedMembers"] == [user_b.id]
+
+      # … and refused in the stored rows: org B's membership never moved
+      assert stored_roles(user_b.id) == ["member"]
+
+      # and nothing was audited as a grant that did not happen
+      refute Repo.exists?(
+               from(e in Event,
+                 where: e.subject == ^user_b.id and e.action == "group_member_added"
+               )
+             )
+    end
+
+    test "PATCH: a cross-org remove cannot revoke a role in another org" do
+      %{ws: ws_a, token: token_a} = org_with_ws("xorgrm-a")
+      %{ws: ws_b, token: token_b} = org_with_ws("xorgrm-b")
+      custom_role(ws_a.id, "arole", ["read"])
+      custom_role(ws_b.id, "brole", ["read"])
+      provision(token_b, "b@xorgrm.com")
+      user_b = Accounts.get_user_by_email("b@xorgrm.com")
+
+      gid_b = create_group(token_b, "B", "brole") |> Map.fetch!("id")
+
+      scim(token_b)
+      |> patch("/scim/v2/Groups/#{gid_b}", member_op("add", user_b.id))
+      |> json_response(200)
+
+      assert stored_roles(user_b.id) == ["brole"]
+
+      gid_a = create_group(token_a, "A", "arole") |> Map.fetch!("id")
+
+      body =
+        scim(token_a)
+        |> patch("/scim/v2/Groups/#{gid_a}", member_op("remove", user_b.id))
+        |> json_response(200)
+
+      assert body[@ext]["unmatchedMembers"] == [user_b.id]
+      assert stored_roles(user_b.id) == ["brole"]
     end
   end
 

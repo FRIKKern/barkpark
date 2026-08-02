@@ -15,18 +15,26 @@ defmodule BarkparkWeb.ScimGroupsController do
 
   @group_schema "urn:ietf:params:scim:schemas:core:2.0:Group"
 
+  # Barkpark extension schema (RFC 7643 §3.3): a member value the write could
+  # not resolve to anybody in this organization is reported here rather than
+  # dropped. Directory sync is eventually consistent — an IdP legitimately
+  # pushes a group's members before the users' own provisioning POSTs land — so
+  # an unresolvable member is answered as a PARTIAL success the IdP can
+  # reconcile, never as a 2xx that silently claims a grant that never happened.
+  @ext_schema "urn:barkpark:params:scim:schemas:extension:2.0:Group"
+
   # POST /scim/v2/Groups
   def create(conn, params) do
     org = conn.assigns.scim_org
 
     case Scim.create_group(org, params) do
       {:ok, group} ->
-        apply_members(org, group, member_ids(params["members"]))
+        %{unmatched: unmatched} = apply_members(org, group, member_ids(params["members"]))
 
         conn
         |> ScimResponse.with_etag(ScimResponse.version(group.updated_at))
         |> put_status(201)
-        |> json(render_group(conn, group))
+        |> json(render_group(conn, group, Scim.group_member_ids(org, group), unmatched))
 
       {:error, :unknown_role} ->
         ScimResponse.error(
@@ -56,7 +64,9 @@ defmodule BarkparkWeb.ScimGroupsController do
       group ->
         conn
         |> ScimResponse.with_etag(ScimResponse.version(group.updated_at))
-        |> json(render_group(conn, group))
+        |> json(
+          render_group(conn, group, Scim.group_member_ids(conn.assigns.scim_org, group), [])
+        )
     end
   end
 
@@ -86,16 +96,29 @@ defmodule BarkparkWeb.ScimGroupsController do
 
       group ->
         with_precondition(conn, group, fn conn ->
-          for {op, uid} <- member_ops(params["Operations"]) do
-            case op do
-              :add -> Scim.add_group_member(org, group, uid)
-              :remove -> Scim.remove_group_member(org, group, uid)
-            end
-          end
+          # Every op's outcome is READ: an add/remove that matched nobody in
+          # this org is collected, never discarded into a 200 that claims it.
+          unmatched =
+            Enum.reduce(member_ops(params["Operations"]), [], fn {op, uid}, miss ->
+              result =
+                case op do
+                  :add -> Scim.add_group_member(org, group, uid)
+                  :remove -> Scim.remove_group_member(org, group, uid)
+                end
+
+              case result do
+                {:ok, _n} -> miss
+                {:error, :no_membership} -> miss ++ [uid]
+              end
+            end)
+
+          # Re-read AFTER the loop: `group` was fetched before the writes, so
+          # rendering it would answer for the PRE-mutation resource (PDS-D551).
+          group = Scim.get_org_group(org, id) || group
 
           conn
           |> ScimResponse.with_etag(ScimResponse.version(group.updated_at))
-          |> json(render_group(conn, group))
+          |> json(render_group(conn, group, Scim.group_member_ids(org, group), unmatched))
         end)
     end
   end
@@ -112,11 +135,12 @@ defmodule BarkparkWeb.ScimGroupsController do
         with_precondition(conn, group, fn conn ->
           case Scim.update_group(org, group, params) do
             {:ok, updated} ->
-              Scim.replace_group_members(org, updated, member_ids(params["members"]))
+              {:ok, %{unmatched: unmatched}} =
+                Scim.replace_group_members(org, updated, member_ids(params["members"]))
 
               conn
               |> ScimResponse.with_etag(ScimResponse.version(updated.updated_at))
-              |> json(render_group(conn, updated))
+              |> json(render_group(conn, updated, Scim.group_member_ids(org, updated), unmatched))
 
             {:error, %Ecto.Changeset{} = cs} ->
               changeset_error(conn, cs)
@@ -155,8 +179,17 @@ defmodule BarkparkWeb.ScimGroupsController do
 
   # ── helpers ────────────────────────────────────────────────────────────────
 
-  defp apply_members(org, group, ids),
-    do: Enum.each(ids, &Scim.add_group_member(org, group, &1))
+  # Grant the group's role to each supplied member id and READ every grant's
+  # outcome — `Enum.each/2` here used to throw all of them away, so a 201 could
+  # claim a membership set the write never created.
+  defp apply_members(org, group, ids) do
+    Enum.reduce(ids, %{granted: 0, unmatched: []}, fn id, acc ->
+      case Scim.add_group_member(org, group, id) do
+        {:ok, _n} -> %{acc | granted: acc.granted + 1}
+        {:error, :no_membership} -> %{acc | unmatched: acc.unmatched ++ [id]}
+      end
+    end)
+  end
 
   defp member_ids(nil), do: []
 
@@ -192,6 +225,35 @@ defmodule BarkparkWeb.ScimGroupsController do
   # Catch-all: a list param (`?filter[]=x` → Plug parses to `["x"]`) or any other
   # non-scalar falls back to no-filter instead of raising FunctionClauseError → 500.
   defp parse_display_name_filter(_), do: nil
+
+  # Single-resource render: `members` is read back from STORED rows, so a
+  # member id that named nobody is absent from the receipt instead of being
+  # echoed back from the request, and the unresolvable ids are named outright
+  # under the extension schema. List responses use `render_group/2` and omit
+  # `members` (RFC 7644 §3.4.2 attribute exclusion) rather than issue a
+  # per-group membership query.
+  defp render_group(conn, group, members, unmatched) do
+    rendered =
+      Map.put(
+        render_group(conn, group),
+        "members",
+        members
+        |> Enum.sort()
+        |> Enum.map(
+          &%{"value" => &1, "$ref" => ScimResponse.location(conn, "Users", &1), "type" => "User"}
+        )
+      )
+
+    case unmatched do
+      [] ->
+        rendered
+
+      ids ->
+        rendered
+        |> Map.put("schemas", [@group_schema, @ext_schema])
+        |> Map.put(@ext_schema, %{"unmatchedMembers" => ids})
+    end
+  end
 
   defp render_group(conn, group) do
     %{
