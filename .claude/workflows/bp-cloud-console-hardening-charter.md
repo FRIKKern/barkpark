@@ -1052,6 +1052,68 @@ and `cch-w23-s5-w12-leg-corpus-and-deciding-numbers` are the instruments that ma
 in one file, and JS is keep-both-HOSTILE. Every gate command carries an explicit `OVERFLOW_GUARD_PORT`
 because :4199 is foreign-held (D275). Paper: `cloud-console-hardening-wave-23-2026-08-02`.
 
+### 2026-08-02 — wave 23 REVIEW — 6/6 round-1 slices built, gated, reviewed, PUSHED and PR'd (#9157-#9162). Grade B+
+
+Paper: `cloud-console-hardening-wave-23-2026-08-02` (debrief appended and republished).
+
+**What shipped, four of six on the person axis.** s1 (#9157): `.status-pill-detail` gets
+`overflow-wrap: anywhere` and `.fleet-status` gets `max-width: 100%` — the second is the honest surprise,
+because at >=900 that column is `flex: 0 0 auto`, so its base size is max-content and no wrap can EVER bind
+until something bounds the box; the brief's predicted remedy (a wrap companion on each of three descendant
+overrides) was refuted by measurement and shipped as zero declarations. s2 (#9158): `.am-name` renders the
+person's own email LOCAL PART and carried no wrap at all; the cap is **158**, not the filed 255, and at 158
+the modal scrolls sideways 1054px at 320 while the PAGE never moves — which is exactly why fourteen legs of
+page-level geometry walked past it for twenty-two waves. s3 (#9159): both site-row builders took
+`domains[0]` and only `domains[0]`; the row now names the additional count in the meta line's existing
+grammar, with the apex/www heuristic REFUSED in writing because the payload carries no alias relation.
+s6 (#9162): the credential fix-it instruction is scrolled to by the BOX's top, not the button's, with the
+sticky topbar's strip given back at runtime — and the fifth clause bit the fix itself, because
+`showCredRemediation` resolved a singular `$("#cred-remediation")` while TWO hosts render that id.
+s4 (#9160) and s5 (#9161) are the instruments: the cruelty ledger stops exiting 0 over an EMPTY table (the
+reviewer re-drove it: table emptied -> rc=1), and the W12 leg's two unlosable assertions now decide on
+numbers they print (both re-proven able to lose on the reviewer's own bytes — 54 findings and 12 findings).
+
+**THE SELECTOR SWEEP'S REAL LESSON, and the next wave should carry it.** s5 confirms what D265 predicted:
+converting `querySelector` -> `querySelectorAll` bought **exactly nothing** on half A — 220 cards across
+4 scenarios x 10 widths x 2 themes were the same width in all 80 cells, because `.instance-card` is a
+stretched grid item. The load-bearing fix was the CORPUS. A wave that mechanically converts the remaining
+40 single-element selectors will manufacture 40 green conversions and zero findings. **Convert only where
+the FIXTURE can produce a spread.**
+
+**Cross-slice: one conflict, one real regression, both fixed here.** The six branches merge with a single
+trivial keep-both in `scenarios.mjs` (s1 and s2 both insert after `cruelInstance`). The regression was
+invisible to every slice gate: s1's third fixture row broke `smoke.mjs`'s `fleet-cruel-content` expectation,
+which picked its "kind neighbour" POSITIONALLY (`rows.find(b => b !== cruel)`) and so returned the new
+host-less failed row — `kind.host` undefined, `FAIL fleet-cruel-content`, on s1's bytes ALONE. `smoke.mjs`
+is run by `console-harness.yml`; this would have merged red. Fixed on `…-0-r`, and the oracle now selects
+kind by what MAKES it kind. Second reviewer fix: s2 quoted the verifier brief's 1362/1461/~1141, which came
+from a different 158-char stem; re-derived on this tree (1276 / 1374 / 1811) and corrected in place.
+**The fully integrated tree is green: 15 legs, 776 unit tests, smoke 101/101, cssom parity 1284,
+breakpoint-sweep rc=0.**
+
+**LAW 0 REGRESSED AND THE WAVE DID NOT REPAY — say it plainly.** `orphans=93` at first claim,
+**107 at debrief**: the build round closed ZERO rows (roster `done` sat at 159, unmoved) while filing six
+slice rows and five backlog rows. D273's prescribed six-row repayment was never executed. The reviewer
+executed it post-hoc — all six wave-22 merge SHAs independently re-verified as ancestors of `origin/main`,
+`cch-w22-s2`'s criterion [3] closed by D273's written adjudication with its grep guardrail re-derived
+(0 ancestor-clipping shortcuts) — landing at **101**. That is still ABOVE 93. Six waves of slippage were
+paid once by wave 22 and the debt resumed immediately. **Wave 24 must budget the repayment as a SLICE with
+a claimant, not as a debrief chore**, and must count new filings against it: eleven rows filed cannot be
+netted by six closed.
+
+**Deferred/filed, none of it silent:** `cch-w23-bl-cruel-leg-blind-to-status-pill-detail` (the leg gating
+s1 never iterates `.status-pill-detail` — it caught the defect only through the page-global assertion, and
+its finding text names the WRONG selector), `cch-w23-bl-cred-form-ids-have-two-hosts` (the wider two-host
+bug: `#cred-submit`, `#cred-token` and four `#cred-az-*` all resolve to the PAGE's copy while the dialog is
+open — derived from DOM order, NOT reproduced), `cch-w23-bl-cruel-identity-own-scenario`,
+`cch-w23-bl-real-hetzner-remediation-scenario`, `cch-w23-bl-site-meta-320-line-guard`.
+
+**HIGH-FLIP-RISK, independence owed before merge (#9160):** s4's INADMISSIBLE verdict on `barkpark.name`
+rests on three greps of `router.ex` plus `slugify` — L2/L3 code-read evidence, never an L1 request against
+a live control plane. The charter records this judgment flipping twice. A genuinely independent second
+re-derivation is warranted, and the wave-reviewer's own re-derivation agreed with the builder's, which is
+concurrence, not independence.
+
 ### 2026-08-02 — wave 22 REVIEW — 6/6 round-1 slices built, gated, reviewed, pushed and PR'd. Grade B+
 
 Paper: `cloud-console-hardening-wave-22-2026-08-02` (debrief appended and republished). Round 2
