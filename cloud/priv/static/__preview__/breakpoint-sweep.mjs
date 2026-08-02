@@ -220,6 +220,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { IDS, SCENARIOS } from "./scenarios.mjs";
+import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(process.env.BREAKPOINT_SWEEP_ROOT || path.resolve(HERE, ".."));
@@ -1315,11 +1316,48 @@ async function withBrowser(fn) {
   const navSettle = async (sessionId, url, readyExpr, cap = SETTLE_CAP) => {
     await cdp.send("Page.navigate", { url }, sessionId);
     for (let w = 0; w < cap; w += 50) {
-      try { if (await evalJs(sessionId, `!!(${readyExpr})`)) { await sleep(16); return true; } } catch { /* navigating */ }
+      let ready = false;
+      // Pinned OUTSIDE the catch: a swallowed refusal would burn the whole cap
+      // and then report the three-clause liveness miss — a font fault wearing
+      // a dead-cell's clothes.
+      try { ready = !!(await evalJs(sessionId, `!!(${readyExpr})`)); } catch { /* navigating */ }
+      if (ready) { await pinFonts(sessionId, url); await sleep(16); return true; }
       await sleep(50);
     }
     await sleep(16);
     return false;
+  };
+
+  // THE FONT PIN (D218). Every cell height and every clipped-text verdict this
+  // sweep prints is a layout of whatever face resolved; until both families are
+  // proven present, every green here is font-conditional. See font-pin.mjs for
+  // why load() precedes ready (a ready-only pin reports two SHIPPED mono
+  // weights false on a perfectly healthy page).
+  //
+  // It needs its OWN Runtime.evaluate because evalJs below passes
+  // `awaitPromise: false` — through that helper the pin would come back as an
+  // unresolved Promise handle, i.e. truthy garbage, and the guard would be
+  // green by construction.
+  //
+  // Refusal is exit 2 via die(): a missing woff2 is an ENVIRONMENT fault, not
+  // a cell that overflows.
+  const pinFonts = async (sessionId, url) => {
+    let report = null;
+    try {
+      const r = await cdp.send(
+        "Runtime.evaluate",
+        { expression: FONT_PIN_JS, returnByValue: true, awaitPromise: true },
+        sessionId,
+      );
+      if (r.exceptionDetails) {
+        return die(fontPinRefusal(url, null) +
+          ` The pin itself threw: ${r.exceptionDetails.exception?.description || r.exceptionDetails.text}`);
+      }
+      report = r.result.value;
+    } catch (err) {
+      return die(fontPinRefusal(url, null) + ` CDP evaluate failed: ${err.message}`);
+    }
+    if (!report || !report.ok) return die(fontPinRefusal(url, report));
   };
 
   const evalJs = async (sessionId, expression) => {
