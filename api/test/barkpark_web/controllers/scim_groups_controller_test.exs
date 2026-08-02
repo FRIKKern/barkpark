@@ -5,7 +5,7 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
   alias Barkpark.{Accounts, Repo, Scim, Tenancy}
   alias Barkpark.Audit.Event
   alias Barkpark.Scim.Group
-  alias Barkpark.Tenancy.{Auth, Membership, Role, RolePermission}
+  alias Barkpark.Tenancy.{Auth, Membership, Organization, Role, RolePermission, Workspace}
   import Ecto.Query
 
   defp create_group(token, name, role) do
@@ -716,10 +716,20 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
       end
     end
 
-    defp stored_holders(role) do
+    # THE AUTHORITY IS ORG-KEYED (PDS-W41). It used to take a role alone and
+    # query `Membership` with NO org filter, which made it AGREE with an
+    # unscoped implementation by construction: deleting the
+    # `m.workspace_id in ^ws_ids` fence from `Scim.group_member_ids_by_role/2`
+    # left every assertion here green. An oracle that cannot disagree with the
+    # thing it checks is not an oracle. The org now scopes the read through
+    # `workspaces.organization_id` — the same fence `workspace_ids/1` applies —
+    # so a leak across orgs shows up as a difference, not as silence.
+    defp stored_holders(%Organization{id: oid}, role) do
       Repo.all(
         from(m in Membership,
-          where: m.principal_type == "user" and m.role == ^role,
+          join: w in Workspace,
+          on: w.id == m.workspace_id,
+          where: m.principal_type == "user" and m.role == ^role and w.organization_id == ^oid,
           select: m.principal_id,
           distinct: true
         )
@@ -728,7 +738,7 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
     end
 
     test "every Resource carries the role's STORED holders, fanned out across groups sharing a role" do
-      %{ws: ws, token: token} = org_with_ws("glistmem")
+      %{org: org, ws: ws, token: token} = org_with_ws("glistmem")
       custom_role(ws.id, "list-reviewer", ["read"])
       provision(token, "a@glistmem.com")
       provision(token, "b@glistmem.com")
@@ -751,9 +761,9 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
 
       # THE AUTHORITY: membership rows read back from the store, not the receipt
       # of the PATCHes above.
-      stored = stored_holders("list-reviewer")
+      stored = stored_holders(org, "list-reviewer")
       assert stored == Enum.sort([a.id, b.id])
-      assert stored_holders("list-bystander") == []
+      assert stored_holders(org, "list-bystander") == []
 
       resources =
         scim(token)
@@ -809,6 +819,82 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
 
       assert length(one) == length(twenty),
              "page-size dependent cost — 1 group: #{inspect(one)}\n20 groups: #{inspect(twenty)}"
+    end
+
+    # HIGH-FLIP-RISK: tenancy (PDS-W41). THE FENCE, NOT THE FEATURE.
+    #
+    # `Scim.group_member_ids_by_role/2` scopes its membership read with
+    # `m.workspace_id in ^ws_ids`. Deleting that clause at origin/main left this
+    # file at 30 tests / 0 failures BYTE-IDENTICAL, and the four-file SCIM
+    # surface at 60/0 — zero tests moved. Two structural reasons, both defeated
+    # here: the authority helper was org-blind (now org-keyed, above), and every
+    # existing test mints a UNIQUELY-NAMED role, so the corpus structurally could
+    # not contain the cross-org role-name COLLISION the fence exists to stop. A
+    # corpus that cannot hold its own sentinel produces silence, and silence
+    # reads as success.
+    #
+    # So: two orgs, each INDEPENDENTLY owning a role of the same name (roles are
+    # workspace-keyed, so this is legal and needs no conspiracy), org B's user
+    # holding it, org A's group on that name with zero members of its own. Org
+    # A's GET must render an EMPTY member list. Against the unfenced tree it
+    # renders org B's principal id, and the assertion prints it.
+    test "cross-org: a role name owned by BOTH orgs does not leak org B's holders into org A's listing" do
+      %{org: org_a, ws: ws_a, token: token_a} = org_with_ws("xlist-a")
+      %{org: org_b, ws: ws_b, token: token_b} = org_with_ws("xlist-b")
+
+      # The SAME string, minted independently in each org's own workspace.
+      shared = "shared-name"
+      custom_role(ws_a.id, shared, ["read"])
+      custom_role(ws_b.id, shared, ["read"])
+
+      provision(token_b, "b@xlist.com")
+      user_b = Accounts.get_user_by_email("b@xlist.com")
+
+      gid_b = create_group(token_b, "B Holders", shared) |> Map.fetch!("id")
+
+      scim(token_b)
+      |> patch("/scim/v2/Groups/#{gid_b}", member_op("add", user_b.id))
+      |> json_response(200)
+
+      # THE AUTHORITY, org-keyed: the holder exists in B and in B only.
+      assert stored_holders(org_b, shared) == [user_b.id]
+      assert stored_holders(org_a, shared) == []
+
+      # Org A's group carries the same role name and NO members of its own.
+      create_group(token_a, "A Holders", shared)
+
+      resources =
+        scim(token_a)
+        |> get("/scim/v2/Groups")
+        |> json_response(200)
+        |> Map.fetch!("Resources")
+
+      leaked =
+        resources
+        |> Enum.flat_map(&member_values/1)
+        |> Enum.uniq()
+
+      assert leaked == [],
+             "CROSS-TENANT DISCLOSURE: org A's GET /scim/v2/Groups returned #{inspect(leaked)}; " <>
+               "org B's user is #{user_b.id}"
+    end
+
+    # COVERAGE, NOT A BOUNDARY DEFECT. `group_member_ids_by_role(%Organization{}, [])`
+    # is reached by the MOST ORDINARY request the endpoint serves — the controller
+    # maps the page to role names, and an empty page yields `[]` — yet a bare
+    # `raise` in that head left all 30 tests green. Removing the head entirely is
+    # behaviourally IDENTICAL (the general clause with `role_names = []` returns
+    # `%{}` and the same clean 200), so this pins reachability, not a fence.
+    test "an org with zero groups lists cleanly — the empty role_names head is actually reached" do
+      %{token: token} = org_with_ws("glistempty")
+
+      body =
+        scim(token)
+        |> get("/scim/v2/Groups")
+        |> json_response(200)
+
+      assert body["Resources"] == []
+      assert body["totalResults"] == 0
     end
   end
 
