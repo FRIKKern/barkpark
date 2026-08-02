@@ -14,6 +14,11 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   alias BarkparkCloud.Mailer
   alias BarkparkCloud.Notifications.EmailSettings
 
+  # Separates the human cause from the raw provider capture below it, so a reader
+  # who only wants the answer can stop at the first paragraph and a reader
+  # forwarding this to support still has the honest bytes.
+  @capture_heading "What the provider reported:"
+
   @doc """
   Build the `%Swoosh.Email{}` for `event` going to `recipient`, with the team's
   `settings` supplying the From and `payload` supplying event detail (e.g. the
@@ -48,7 +53,7 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   defp render(:provision_failed, payload),
     do:
       {"Your Barkpark failed to provision",
-       "#{name(payload)} failed to provision.#{detail(payload)}"}
+       "#{name(payload)} failed to provision.#{cause_then_capture(payload)}"}
 
   defp render(:deployment_succeeded, payload),
     do: {"Deployment succeeded", "A deployment for #{name(payload)} succeeded."}
@@ -95,6 +100,48 @@ defmodule BarkparkCloud.Notifications.EventEmail do
     case Map.get(payload, :detail) || Map.get(payload, "detail") do
       d when is_binary(d) and d != "" -> "\n\n#{FailureCopy.scrub(d)}"
       _ -> ""
+    end
+  end
+
+  # wave 26 S3 (charter D310): the CAUSE first, the raw capture kept below it.
+  #
+  # The `provision_failed` alert is the one channel that reaches a person away
+  # from the console, and it was the only one that never CLASSIFIED. `router.ex`
+  # dispatches `%{detail: job.error}` RAW, and `detail/1` above scrubs it and
+  # stops there — so a capacity failure the dashboard renders as "Hetzner ran out
+  # of server capacity for this size" arrived in the customer's inbox as six
+  # lines of `CreateWithFallback` provider jargon. Same event, same minute, two
+  # stories.
+  #
+  # THE RULING IS BOTH, NOT EITHER. `failure_copy.ex:20`/`:41` state that this
+  # email deliberately keeps the honest internal reason; that intent is "do not
+  # launder the forensic value", and it is PRESERVED here — the scrubbed capture
+  # is retained verbatim, in full, unreordered, below the human class. A change
+  # that REPLACED or truncated it would contradict :20/:41 and is refused.
+  # `:136` of the same module lists this alert email among the surfaces that
+  # render the capture "to a PERSON"; leading with the cause is the intent this
+  # COMPLETES.
+  #
+  # `FailureCopy.humanize/1` is `classify() |> scrub()` — classification first,
+  # then the very scrub `detail/1` already applies — so routing through it cannot
+  # weaken the secret boundary; the class arms return literals, which carry no
+  # secret shape.
+  #
+  # An unclassified reason humanizes to the scrubbed reason itself. Emitting both
+  # would print the same paragraph twice, so in that case the capture stands
+  # alone exactly as it does today.
+  defp cause_then_capture(payload) do
+    case Map.get(payload, :detail) || Map.get(payload, "detail") do
+      d when is_binary(d) and d != "" ->
+        capture = FailureCopy.scrub(d)
+
+        case FailureCopy.humanize(d) do
+          ^capture -> "\n\n#{capture}"
+          cause -> "\n\n#{cause}\n\n#{@capture_heading}\n\n#{capture}"
+        end
+
+      _ ->
+        ""
     end
   end
 end
