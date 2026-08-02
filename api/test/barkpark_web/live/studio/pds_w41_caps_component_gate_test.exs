@@ -175,7 +175,7 @@ defmodule BarkparkWeb.Studio.PdsW41CapsComponentGateTest do
       render_hook(target, "edit-commit", %{"value" => "1337", "move" => "none"})
 
       # NON-VACUOUS: the absence of the write, read back from persisted state.
-      # Revert only the `read_only={...}` prop at the SheetGrid callsite and this
+      # Revert only the `write_capable={...}` prop at the SheetGrid callsite and this
       # assertion fails NAMING the persisted value — bound to a variable so the
       # failure prints `left: %{"v" => 1337}` rather than a custom message.
       after_component_event = persisted_a1("pds-w41-bypass")

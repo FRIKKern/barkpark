@@ -8,8 +8,10 @@ defmodule Barkpark.SheetsParityTest do
   EXECUTION through:
 
     * A — the Studio grid editor (`BarkparkWeb.Studio.SheetGrid`, edit mode)
+    * A′ — the SAME Studio surface for a WRITE-DENIED member (the wave-42
+          `write_capable` arm: same session, same bytes, no write affordances)
     * B — Studio read-only View mode (the header toggle)
-    * C — the public reader `/sheets/:slug` (`read_only` grid)
+    * C — the public reader `/sheets/:slug` (the `chrome: :reader` grid)
     * D — a paper embedding the sheet (`PortableDoc.Render` of the snapshot
           at `/papers/:slug`)
     * F — the html / markdown exports (`Plugins.Sheets.{Html,Markdown}`)
@@ -34,6 +36,7 @@ defmodule Barkpark.SheetsParityTest do
 
   import Phoenix.LiveViewTest
 
+  alias Barkpark.Auth
   alias Barkpark.Content
   alias Barkpark.Plugins.Sheets.Engine
   alias Barkpark.Plugins.Sheets.Html, as: HtmlExport
@@ -42,6 +45,10 @@ defmodule Barkpark.SheetsParityTest do
   @dataset "production"
   @slug "parity-canonical"
   @paper_slug "2026-06-12-sheets-parity-embed"
+  # Arm D's principal: an authenticated member whose permission array is
+  # ["read"] — `Caps.write_capable?/2` is false for it, so the Studio callsite
+  # passes `write_capable={false}`. Not anonymous, not the public reader.
+  @denied_token "parity-write-denied"
 
   # ── the canonical sheet ─────────────────────────────────────────────────────
   #
@@ -430,6 +437,60 @@ defmodule Barkpark.SheetsParityTest do
 
       assert ["Data", "Extra"] = Enum.take(tabs, 2)
     end
+  end
+
+  # ── A↔A′: the write-denied member (pds-bl-w41-readonly-member-sees-published-only)
+  #
+  # The wave-41 component gate passed ONE overloaded flag (`read_only`) into the
+  # grid for any principal `Caps` denies write. That flag also chose the CONTENT
+  # SOURCE, so a member entitled to READ a sheet was served `@doc.content` — the
+  # published perspective — while a colleague with write held the live draft
+  # session open. Two people, one sheet, different numbers.
+  #
+  # The arm is named A′ rather than "D": D is already the paper embed on this
+  # suite's own surface list (the slice brief's "arm D" is this arm).
+  #
+  # FALSIFIABILITY: revert `live_session` at the Studio callsite (or re-key the
+  # content-source branch in `SheetGrid.update/2` onto write capability) and the
+  # `d == a` assertion prints C1 => "Q4" against C1 => "DRAFT-ONLY".
+  test "A↔A′: a write-denied member reads the SAME live session as a write-capable one, in a read-only STUDIO",
+       %{conn: conn} do
+    {:ok, _} = Auth.create_token(@denied_token, "parity write-denied", @dataset, ["read"])
+
+    # A — the write-capable member commits an edit that is NEVER published, so
+    # the live session and the published row now disagree by construction.
+    {:ok, studio, _} = live(conn, scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}"))
+    target = with_target(studio, "#sheet-grid-#{@slug}")
+    render_hook(target, "cell-click", %{"ref" => "C1", "shift" => false})
+    render_hook(target, "edit-commit", %{"value" => "DRAFT-ONLY", "move" => "none"})
+
+    html_a = render(studio)
+    a = extract_grid(html_a)
+
+    assert a.values["C1"] == "DRAFT-ONLY",
+           "the dirty session never took — arm A′ would be vacuous"
+
+    # A′ — the write-denied member, same sheet, same open session.
+    {:ok, denied, _} =
+      conn
+      |> Plug.Test.init_test_session(%{"api_token" => @denied_token})
+      |> live(scoped_studio("/d/#{@dataset}/studio/sheet/#{@slug}"))
+
+    html_d = render(denied)
+    d = extract_grid(html_d)
+
+    # The whole point: the same grid, cell for cell.
+    assert d == a
+
+    # …in a read-only STUDIO, not the public reader: the document header is
+    # back and the container never flips to the reader's identity.
+    assert html_d =~ ~s(data-test-id="studio-sheet-editor")
+    refute html_d =~ ~s(data-test-id="sheet-reader")
+    assert html_d =~ "pane-header editor-header"
+
+    # …with every write affordance still gone (the capability half of the split).
+    refute html_d =~ ~s(data-test-id="sheet-toolbar")
+    assert html_a =~ ~s(data-test-id="sheet-toolbar")
   end
 
   test "A↔D: the paper embed renders the same values, merges, widths and styles as the grid",

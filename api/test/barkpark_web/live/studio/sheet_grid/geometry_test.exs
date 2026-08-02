@@ -29,23 +29,27 @@ defmodule BarkparkWeb.Studio.SheetGrid.GeometryTest do
     end
   end
 
+  # These two take the CHROME axis, not write capability: stripping the
+  # highlight is what the `/sheets/:slug` surface looks like, and a Studio
+  # viewer keeps a cursor whether or not they may write (wave 42 —
+  # pds-bl-w41-readonly-member-sees-published-only).
   describe "grid_sel/3" do
-    test "read_only=true always returns the zero sentinel rect" do
-      assert Geometry.grid_sel({2, 3}, {5, 7}, true) == {0, 0, 0, 0}
+    test "chrome=:reader always returns the zero sentinel rect" do
+      assert Geometry.grid_sel({2, 3}, {5, 7}, :reader) == {0, 0, 0, 0}
     end
 
-    test "read_only=false delegates to selection_rect" do
-      assert Geometry.grid_sel({1, 1}, {3, 3}, false) == {1, 3, 1, 3}
+    test "chrome=:studio delegates to selection_rect — write capability is NOT consulted" do
+      assert Geometry.grid_sel({1, 1}, {3, 3}, :studio) == {1, 3, 1, 3}
     end
   end
 
   describe "grid_cursor/2" do
-    test "read_only=true returns zero sentinel" do
-      assert Geometry.grid_cursor({2, 5}, true) == {0, 0}
+    test "chrome=:reader returns zero sentinel" do
+      assert Geometry.grid_cursor({2, 5}, :reader) == {0, 0}
     end
 
-    test "read_only=false returns the active cell unchanged" do
-      assert Geometry.grid_cursor({4, 7}, false) == {4, 7}
+    test "chrome=:studio returns the active cell unchanged" do
+      assert Geometry.grid_cursor({4, 7}, :studio) == {4, 7}
     end
   end
 
