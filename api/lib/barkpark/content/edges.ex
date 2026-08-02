@@ -698,7 +698,19 @@ defmodule Barkpark.Content.Edges do
 
     # Only well-formed UUIDs join the `d.id` disjunct (mirrors add_edge/4's
     # CastError rescue, without the raise).
-    uuids = Enum.filter(ids, fn id -> match?({:ok, _}, Ecto.UUID.cast(id)) end)
+    #
+    # THE PREDICATE MUST BE `dump/1`, NOT `cast/1`, AND THE DIFFERENCE IS A LIVE
+    # CRASH. `Ecto.UUID.cast/1` has a second clause — `def cast(<<_::128>> =
+    # raw_uuid), do: {:ok, encode(raw_uuid)}` — that accepts ANY 16-BYTE binary
+    # as a raw UUID. `dump/1` has no such clause: it only accepts the 36-char
+    # hyphenated form. So a `cast`-guarded filter that then passes the RAW id to
+    # the query is asymmetric — it tests one function and feeds another. Any
+    # doc_id exactly 16 characters long (e.g. `wire-loop-186755`) passes `cast`,
+    # joins this disjunct, and blows up at dump time with
+    # `Ecto.Query.CastError: value ... cannot be dumped to type {:in, :binary_id}`,
+    # taking the whole projector job with it. Re-derive the clauses with
+    # `grep -n 'def cast(<<_::128>>' deps/ecto/lib/ecto/uuid.ex`.
+    uuids = Enum.filter(ids, fn id -> match?({:ok, _}, Ecto.UUID.dump(id)) end)
 
     query =
       Document
