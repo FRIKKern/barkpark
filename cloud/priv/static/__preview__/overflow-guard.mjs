@@ -204,6 +204,7 @@ const DEFECTS = [
   "W21-cruel-content-text-bounded",
   "W21-token-reveal-readable",
   "W20-attention-name-column",
+  "W24-theater-failed-hostname-whole",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -3795,6 +3796,259 @@ async function main() {
           `769-899 is the DRIVEN band (mixed-fleet was cut through 860, overview-attention through 880); ` +
           `768 and 900/1000 are carried as SHOULDERS — they were already clean on origin/main, so they cannot ` +
           `detect a band block leaking sideways, only a remedy that breaks the stack or the desktop row`,
+        );
+      }
+    }
+
+    // ── W24: THE FIRST-RUN FAILURE SCREEN, WHICH NO INSTRUMENT EVER RENDERED ─
+    //    `theater-failed` lives in breakpoint-sweep's SCENARIO_RESIDUE as
+    //    `path:/new` (re-derive: `grep -n 'theater-failed' cloud/priv/static/
+    //    __preview__/*.mjs` — scenarios.mjs defines it, smoke.mjs asserts its
+    //    MARKUP, breakpoint-sweep names it only to skip it). So the one screen
+    //    a person reaches when their very first provision fails had never been
+    //    laid out at any width by anything in this epic, and the width sweep
+    //    structurally cannot reach it: its narrowest cell is 619.
+    //
+    //    THE DEFECT, measured on origin/main bytes at 320: the hostname in the
+    //    failure narration — `hugin.barkpark.cloud` — is TORN MID-WORD across
+    //    two lines in `.new-step-detail` and in `.new-console-text`, while the
+    //    column that could have held it whole sat ~37px WIDER unused and
+    //    documentElement.scrollWidth never moved. The mechanism is D165's, but
+    //    NOT via `overflow-wrap: anywhere` (this wave measured 196 `anywhere`
+    //    element-instances and not one box narrowed): it is `word-break:
+    //    break-word`, the deprecated alias, which lowers min-content exactly as
+    //    `anywhere` does and which no ruling in this epic had ever covered.
+    //    Both elements computed `overflow-wrap: normal` while carrying it.
+    //
+    //    WHY THE REMEDY IS `overflow-wrap: break-word` AND NOT A DELETION.
+    //    Deleting the declaration is what the survey MEASURED, and it fixes the
+    //    tear — but it also restores an UNBREAKABLE min-content, and neither
+    //    console body nor step rail carries `overflow-x`, so one cruel string
+    //    spills the page sideways. This leg therefore asks the question in two
+    //    halves and a fix can only pass BOTH: the real hostname must be whole
+    //    (half a, which deletion and the replacement both pass), and a 240-char
+    //    unbreakable token injected into the SAME text nodes must not push the
+    //    page (half b, which the replacement passes and deletion does not).
+    //    That second half is the fixture that makes this leg able to lose in
+    //    the direction the cheap remedy fails in.
+    //
+    //    THE OTHER BREAK SITES ARE DISPOSED HERE, NOT CONVERTED. Re-derive the
+    //    population WITH ITS COUNTING RULE, because a census quoted without one
+    //    is how two numbers get cited as a pair: `grep -c 'word-break:'
+    //    cloud/priv/static/app.css` returns 15 LINES on these bytes, of which
+    //    THREE are prose (two comments this row authored, one the pre-existing
+    //    D165 note) — leaving 12 live declarations, 14 before this row converted
+    //    two. The brief said sixteen; sixteen is not reproducible by any rule
+    //    against these bytes. Converting the remainder because they share a
+    //    property is the exact green-by-construction this wave exists
+    //    to refuse — a conversion with no fixture that could make it fail.
+    //      FIVE ARE `break-all`, A DIFFERENT DECLARATION: .token-reveal-input,
+    //        .new-env-key, .wh-url, .wh-secret-code, .deploy-rail-live
+    //        .site-open. Every one wraps an OPAQUE token — a secret, an env
+    //        key, a URL — where breaking mid-token IS the reading aid and the
+    //        lowered min-content is the point, not the defect. Out of scope by
+    //        kind, not by convenience.
+    //      SEVEN ARE THE ALIAS ON SURFACES THIS LEG CANNOT REACH, and each is
+    //        named with the reason it went unmeasured rather than "it has
+    //        always been there":
+    //          .rail-row .v          already carries its own `min-width: 0`, so
+    //                                the escape the tear needs is present.
+    //          .new-step-probe       same screen, same family as the converted
+    //                                .new-step-detail — but theaterFailedSteps
+    //                                mounts no probe rows, so this screen has
+    //                                no fixture that can produce it. Absence
+    //                                measured (the leg walks every text node),
+    //                                not assumed.
+    //          .deploy-console-line, .deploy-detail   site-deploy surface, not
+    //                                /new; no fixture here renders them.
+    //          .bp-console-line      the instance-detail timeline console; W13
+    //                                and W21 drive that route but neither asks
+    //                                this property.
+    //          .wh-del-err, .tlv-detail   webhooks and timeline detail; no leg
+    //                                in this file renders either.
+    //        All seven are filed as cch-w24-bl-word-break-alias-remaining-seven
+    //        — a POPULATION to triage with a fixture each, never a to-do list
+    //        to convert.
+    //
+    //    D274/D292: no line numbers. Every citation above is a grep or a class.
+    if (requested.includes("W24-theater-failed-hostname-whole")) {
+      const D = "W24-theater-failed-hostname-whole";
+      // BLOCK-SCOPED (precedent: `const D`, NAME_WIDTHS above). 320 and 360 are
+      // the DRIVEN band — 320 is where the tear was measured; 390/430 are
+      // SHOULDERS, already whole on origin/main, so they cannot detect the tear
+      // and exist only to catch a remedy that breaks the phone layout upward.
+      const FAIL_WIDTHS = [320, 360, 390, 430];
+      // The token is the fixture's own hostname. Re-derive:
+      // `grep -n 'hugin.barkpark.cloud' cloud/priv/static/__preview__/scenarios.mjs`.
+      // Zero occurrences found at runtime is a REFUSAL below, not a pass — a
+      // fixture that stopped naming the host would make this leg unfalsifiable.
+      const HOSTNAME = "hugin.barkpark.cloud";
+      // The cruel host is the LONGEST LEGAL one, not an arbitrarily huge one:
+      // RFC 1035 caps a DNS label at 63 octets, so 63 chars is the widest
+      // unbreakable run any real hostname can present, and a stress built past
+      // it would be asserting against a string this screen can never receive.
+      // Built, never pasted, so its length is a fact of this line.
+      const CRUEL = "a".repeat(63) + ".barkpark.cloud";
+      // The URL is DERIVED from the scenario, not transcribed: `theater-failed`
+      // is reached by a real path plus a `?bp=` id, and a transcribed uuid rots
+      // silently into "the /new launch screen rendered instead".
+      const { SCENARIOS } = await import("./scenarios.mjs");
+      const sc = SCENARIOS["theater-failed"];
+      if (!sc || !sc.pathname || !sc.search) {
+        return die(`${D}: SCENARIOS["theater-failed"] no longer carries pathname+search — the failure screen cannot be reached, so nothing was measured`);
+      }
+      const cellCount = FAIL_WIDTHS.length * 2;
+      process.stdout.write(
+        `\n${D} — theater-failed x ${FAIL_WIDTHS.length} widths x 2 themes (${cellCount} cells;` +
+        ` the hostname's painted line boxes, then a ${CRUEL.length}-char cruel-token stress at the narrowest width)\n`,
+      );
+      let cells = 0, hostsSeen = 0, torn = 0, pageOver = 0, stressRuns = 0, stressSpill = 0;
+      for (const theme of ["light", "dark"]) {
+        await setViewport(FAIL_WIDTHS[FAIL_WIDTHS.length - 1]);
+        await nav(
+          `${BASE}${sc.pathname}${sc.search}&scen=theater-failed&theme=${theme}`,
+          `document.querySelector('.new-failed') && document.querySelector('.new-step-detail') && document.querySelector('.new-console-text')`,
+        );
+        const row = [];
+        for (const width of FAIL_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){` +
+            `var d=document.documentElement;` +
+            `var out={failed:!!document.querySelector('.new-failed'),theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,hosts:0,torn:[]};` +
+            // The painted RUN, not the box: a Range over just the hostname's
+            // characters reports one client rect per line box it lands on, so
+            // >1 IS the tear a person sees. Measuring the element's box instead
+            // would score a torn hostname as clean (the box never overflows —
+            // that is the whole point of the defect).
+            `var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null);` +
+            `var n;while((n=w.nextNode())){` +
+            `  var t=n.nodeValue||'';var i=t.indexOf(${JSON.stringify(HOSTNAME)});if(i<0) continue;` +
+            `  var el=n.parentElement;if(!el||!el.getClientRects().length) continue;` +
+            `  out.hosts++;` +
+            `  var rg=document.createRange();rg.setStart(n,i);rg.setEnd(n,i+${HOSTNAME.length});` +
+            `  var rects=[].slice.call(rg.getClientRects());` +
+            `  var tops={},lines=0;rects.forEach(function(r){var k=Math.round(r.top);if(!tops[k]){tops[k]=1;lines++;}});` +
+            `  if(lines>1){` +
+            `    var cs=getComputedStyle(el);` +
+            `    out.torn.push({cls:(el.className||el.tagName||'?').toString().slice(0,40),lines:lines,` +
+            `      cw:+el.getBoundingClientRect().width.toFixed(2),wb:cs.wordBreak,ow:cs.overflowWrap});` +
+            `  }` +
+            `}` +
+            `return out;})()`,
+          );
+          cells++;
+          if (!m.failed) {
+            fail(D, `theater-failed/${theme}@${width}: no .new-failed on the page — the /new failure screen did not render, so nothing below this line measures it`);
+            row.push(`${width}:?`);
+            continue;
+          }
+          if (m.theme !== theme) fail(D, `theater-failed/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+          // AUDITED: an absent hostname is not a whole hostname. If the fixture
+          // stopped naming the host, this leg would print a perfect table about
+          // nothing at all.
+          if (m.hosts === 0) {
+            fail(D, `theater-failed/${theme}@${width}: zero rendered text nodes carry "${HOSTNAME}" — nothing was measured, this is not a pass`);
+            row.push(`${width}:0h`);
+            continue;
+          }
+          hostsSeen += m.hosts;
+          if (m.psw > m.pcw) {
+            pageOver++;
+            fail(D, `theater-failed/${theme}@${width}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the failure screen is off-screen sideways`);
+          }
+          for (const t of m.torn) {
+            torn++;
+            fail(D, `theater-failed/${theme}@${width} .${t.cls}: "${HOSTNAME}" is painted across ${t.lines} line boxes in a ${t.cw}px box (word-break:${t.wb}, overflow-wrap:${t.ow}) — the host a person must read to fix their failed setup is torn mid-word`);
+          }
+          // The page pair is printed at EVERY width, not only when it fails:
+          // "the fix cost no horizontal room" is a claim about the numbers, and
+          // a row that prints them only on failure cannot be quoted for it.
+          row.push(`${width}:${m.hosts}h ${m.psw}/${m.pcw}px${m.torn.length ? " !" + m.torn.length : ""}`);
+        }
+        // ── the cruel half, at the narrowest width only ──────────────────────
+        //   Same text nodes, one unbreakable run, page asserted. This is what
+        //   separates the replacement from the deletion: with min-content
+        //   restored and no overflow-x anywhere on the rail or the console
+        //   body, the deletion drives the page sideways here.
+        await setViewport(FAIL_WIDTHS[0]);
+        const s = await evalJs(
+          `(function(){` +
+          `var d=document.documentElement;var hit=0;` +
+          `var w=document.createTreeWalker(document.body,NodeFilter.SHOW_TEXT,null);var n,ns=[];` +
+          `while((n=w.nextNode())){if((n.nodeValue||'').indexOf(${JSON.stringify(HOSTNAME)})>=0) ns.push(n);}` +
+          `ns.forEach(function(x){x.nodeValue=(x.nodeValue||'').split(${JSON.stringify(HOSTNAME)}).join(${JSON.stringify(CRUEL)});hit++;});` +
+          `void d.offsetWidth;` +
+          `var out={hit:hit,psw:d.scrollWidth,pcw:d.clientWidth,spill:[],wide:[]};` +
+          `ns.forEach(function(x){var el=x.parentElement;if(!el) return;` +
+          `  if(el.scrollWidth>el.clientWidth+1) out.spill.push({cls:(el.className||el.tagName||'?').toString().slice(0,40),sw:el.scrollWidth,cw:el.clientWidth});});` +
+          // NAME THE BOX. A page-level number alone sends the next reader back
+          // into DevTools; the widest right edges are the elements that pushed
+          // it, and one of them is always the remedy's real address.
+          `if(d.scrollWidth>d.clientWidth){` +
+          `  [].slice.call(document.querySelectorAll('.new-screen *')).forEach(function(el){` +
+          `    var r=el.getBoundingClientRect();if(r.width>0&&r.right>d.clientWidth+1)` +
+          `      out.wide.push({cls:(el.className||el.tagName||'?').toString().slice(0,40),right:+r.right.toFixed(2),w:+r.width.toFixed(2)});});` +
+          `  out.wide.sort(function(a,b){return b.right-a.right;});out.wide=out.wide.slice(0,4);` +
+          `}` +
+          `return out;})()`,
+        );
+        stressRuns++;
+        if (s.hit === 0) {
+          fail(D, `theater-failed/${theme}@${FAIL_WIDTHS[0]} STRESS: the cruel token replaced nothing — the stress half measured no element, so this leg's second question was not asked`);
+        }
+        // ASSERTED: every box that HOLDS the cruel host must contain it. This is
+        // what separates the remedy from a deletion — on pre-remedy bytes
+        // .new-fail-copy measured 569/212 and .new-failed-caption 557/214 here,
+        // both now clean, and a deletion of the break declaration reds this the
+        // same way. It is the falsifiable half of the stress.
+        for (const sp of s.spill) {
+          stressSpill++;
+          fail(D, `theater-failed/${theme}@${FAIL_WIDTHS[0]} STRESS .${sp.cls}: scrollWidth ${sp.sw} > clientWidth ${sp.cw} — the cruel host overflows its own box, and neither the rail nor the console body scrolls sideways`);
+        }
+        // MEASURED, PRINTED, AND DELIBERATELY NOT ASSERTED — the one thing in
+        // this leg that is reported rather than certified, so the sentence is
+        // here rather than in a debrief. A 63-char label drives the PAGE
+        // sideways at 320: 623px on pre-remedy bytes, 732px after. The only
+        // remedy is a min-content escape (`min-width: 0` on .new-theater-rail
+        // and .new-console-text), and it was DRIVEN: it takes the page to
+        // exactly 320/320 and puts THIS LEG'S OWN DEFECT BACK — .new-step-detail
+        // returns to a 92.25px box with the hostname across two line boxes at
+        // 320 and 360. The two goals share one lever, so asserting both would
+        // make this leg unsatisfiable by any patch. What is certified here is
+        // the hostname a person actually reads; the cruel-host page overflow is
+        // a PRE-EXISTING defect of the theater grid (it spilled before this
+        // change too) and is filed as cch-w24-bl-theater-grid-no-min-content-
+        // escape. Anyone widening this line must read that task first.
+        const widest = (s.wide || []).map((x) => `.${x.cls} right=${x.right}`).join(" | ") || "none inside .new-screen";
+        if (s.psw > s.pcw) {
+          process.stdout.write(
+            `   · ${theme} RESIDUAL (reported, not asserted — see the comment above this line and ` +
+            `cch-w24-bl-theater-grid-no-min-content-escape): a ${CRUEL.length}-char unbreakable host takes ` +
+            `documentElement.scrollWidth to ${s.psw} against ${s.pcw}. Widest: ${widest}\n`,
+          );
+        }
+        row.push(`stress@${FAIL_WIDTHS[0]}:${s.hit}n box-spill:${s.spill.length} page:${s.psw}/${s.pcw}px`);
+        process.stdout.write(`   theater-failed/${theme}  ${row.join("  ")}\n`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${hostsSeen} rendered "${HOSTNAME}" text runs measured — EVERY one on the ` +
+          `screen, not a pinned selector) across ${FAIL_WIDTHS.join("/")} in both themes; ${torn} torn hostnames, ` +
+          `${pageOver} pages scrolling sideways. Cells print hosts-found and, when torn, the count`,
+        );
+        okLine(
+          `THE CRUEL HALF RAN ${stressRuns} time(s) at ${FAIL_WIDTHS[0]} with ${stressSpill} box spill(s): a ` +
+          `${CRUEL.length}-char host (a 63-octet DNS label, the legal maximum) is substituted into the same text ` +
+          `nodes and every box holding it is re-asserted. Deleting the break declaration outright passes the first ` +
+          `half and FAILS this one (.new-fail-copy 569/212, .new-failed-caption 557/214) — which is why the remedy ` +
+          `is overflow-wrap:break-word, min-content intact and still breakable at the box edge, and not a deletion. ` +
+          `The PAGE under that same cruel host is printed above and NOT asserted; the comment beside it says why ` +
+          `and names the task that owns it`,
+        );
+        okLine(
+          `320/360 are the DRIVEN widths (the tear was measured at 320); 390/430 are SHOULDERS — already whole on ` +
+          `origin/main, so they detect only a remedy that breaks the wider phone layout, never the tear itself`,
         );
       }
     }

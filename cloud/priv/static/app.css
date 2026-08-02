@@ -1779,7 +1779,10 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 .deploy-fail--blocked .deploy-fail-dot { background: var(--warn); }
 /* dwb-19: the "last step before it broke" caption on the failed /new screen. */
-.new-failed-caption { font-size: 12px; color: var(--muted-text); margin: 10px 0 0; }
+/* cch-w24-s4: `overflow-wrap` here for the same reason as .new-fail-copy — the
+   caption echoes the failing step's detail, hostname and all, and unguarded a
+   63-char label measured scrollWidth 557 against a 214px box at 320. */
+.new-failed-caption { font-size: 12px; color: var(--muted-text); margin: 10px 0 0; overflow-wrap: break-word; }
 
 /* dwb-19: the live sub-caption under an active deployment's status — the
    build-side twin of .new-step-detail, same subtle fade/translate on change. */
@@ -2843,7 +2846,15 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 12px;
   color: var(--muted-text);
   line-height: 1.35;
-  word-break: break-word;
+  /* cch-w24-s4: NOT `word-break: break-word`. That deprecated alias lowers the
+     element's MIN-CONTENT, so the flex track shrank to the widest FRAGMENT and
+     tore `hugin.barkpark.cloud` across two lines inside a 92.25px box at 320
+     while 129px of the column sat unused. `overflow-wrap: break-word` leaves
+     min-content intact (the box widens, the host stays whole) and still breaks
+     a run that genuinely cannot fit — a 63-char DNS label, the legal maximum,
+     is measured not to spill. Guard: overflow-guard.mjs
+     W24-theater-failed-hostname-whole. */
+  overflow-wrap: break-word;
   animation: new-detail-in 0.28s ease;
 }
 .new-step.done .new-step-detail,
@@ -2947,6 +2958,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: 13px;
   line-height: 1.5;
   text-align: left;
+  /* cch-w24-s4: this paragraph is SERVER-OWNED text and carries the hostname.
+     With no break declaration at all, a 63-char DNS label (the legal maximum)
+     drove scrollWidth 569 against a 212px box and the whole page 623 against a
+     320px viewport — the panel has no overflow-x to catch it. Same guard leg. */
+  overflow-wrap: break-word;
 }
 .new-failed .new-actions { margin: 18px 0 0; }
 .new-failed .new-failed-caption {
@@ -2997,9 +3013,23 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font: 12px/1.55 var(--mono);
   scroll-behavior: smooth;
 }
-.new-console-line { display: flex; gap: 10px; white-space: pre-wrap; word-break: break-word; }
+/* cch-w24-s4: `overflow-wrap`, not `word-break: break-word` — the break is
+   INHERITED from here into .new-console-text (which declares none of its own),
+   and the alias dropped that child's min-content, tearing the hostname across
+   two lines at 320 AND 360 in a 115.59/155.59px box. Measured with the guard's
+   W24-theater-failed-hostname-whole leg, cruel half included. */
+.new-console-line { display: flex; gap: 10px; white-space: pre-wrap; overflow-wrap: break-word; }
 .new-console-line.dim { color: var(--console-dim); } /* dim on the dark console = its own theme-invariant token (5.21:1) */
 .new-console-ts { color: var(--console-dim); flex: 0 0 auto; font-variant-numeric: tabular-nums; }
+/* cch-w24-s4 MEASURED AND REJECTED: `min-width: 0` here (and on
+   .new-theater-rail) makes the 63-char cruel-host page fit exactly 320/320 —
+   and puts the tear straight back, because it hands the flex item permission to
+   shrink below its own content: .new-step-detail returned to a 92.25px box and
+   `hugin.barkpark.cloud` to two line boxes at 320 AND 360. The two goals share
+   one lever (min-content), so this file buys the REAL hostname's wholeness and
+   files the cruel-host page overflow as its own defect rather than paying for a
+   hypothetical string with the defect a person actually meets. Guard leg
+   W24-theater-failed-hostname-whole prints both numbers every run. */
 .new-console-text { flex: 1 1 auto; }
 
 /* dwb-16: connection-lost banner in the progress screen. */
