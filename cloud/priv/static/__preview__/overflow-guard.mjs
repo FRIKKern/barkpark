@@ -193,6 +193,7 @@ const DEFECTS = [
   "GR115-bpconsole-dead-rule",
   "W12-narrow-viewport-truth",
   "W13-detail-route-band",
+  "W25-deploy-rail-fail-wrap",
   "W23-account-modal-identity-bounded",
   "W15-fleet-row-text-bounded",
   "W18-overview-card-pill",
@@ -1337,6 +1338,200 @@ async function main() {
           `${cells} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
           ` (769/899 are the band edges, 900/1024 the controls above it); ${misrouted} misrouted;` +
           ` no exemptions — #fleet's W13 residual was paid by W14-S3 and its pin is gone`,
+        );
+      }
+    }
+
+    // ── W25-S3: THE DEPLOY RAIL'S FAILURE FOOTER — the SECOND head of the
+    //    two-headed box wave 24 fixed one head of. `.deploy-rail-fail` is what
+    //    app.css itself calls "the danger-soft twin of .bp-tl-fail": identical
+    //    padding, border, font-size and line-height, and — until this slice —
+    //    no wrap rule and no min-width. Computed in the live SPA it read
+    //    `overflow-wrap: normal`, `word-break: normal`, `overflow: visible`,
+    //    which is exactly the pre-fix state D279 filed for its twin.
+    //
+    //    THE PERSON: someone watching their deploy fail. The string in this box
+    //    is RAW BY DESIGN — the control plane scrubs console entries for
+    //    SECRETS on ["line","detail"] and never humanises them, three lines
+    //    away from the failure_reason that IS humanised — so a builder's own
+    //    `Cannot find module '/opt/barkpark/sites/<slug>/releases/…'` line,
+    //    one unbreakable run carrying the person's own slug, lands here whole.
+    //
+    //    A FIXTURE IS A PRECONDITION OF THIS LEG, NOT AN EXTRA. Before
+    //    cch-w25-s3, `grep -c deploy-rail-fail cloud/priv/static/__preview__/*`
+    //    returned 0 everywhere: NO scenario carried a rail STAGE entry at all,
+    //    `deployRailLedgerFromConsole` drops every console entry without a
+    //    `stage` key, and so the whole rail — head, steps, footer — had never
+    //    rendered in this harness at any width. `site-deploy-rail-failed` is
+    //    that fixture, and its cruel string is DERIVED from the two shell
+    //    producers rather than pasted (see the ledger in scenarios.mjs; the cut
+    //    is re-derived from the shell by __app.test.mjs, which reds if the
+    //    producer's cap moves — this leg asserts NO length of its own).
+    //
+    //    TWO ASSERTIONS, BECAUSE THE TWO HALVES OF THE REMEDY FAIL DIFFERENTLY,
+    //    and this is where the brief that sent this slice here was NARROWED by
+    //    its own fixture. Charter D298 recorded `overflow-wrap: break-word` on
+    //    the footer failing at 900 (page 1011) — measured with the cruel string
+    //    in the FOOTER ALONE. Driven on a fixture that delivers the string the
+    //    way the product does, the SAME detail lands in the footer AND in the
+    //    step row's `.new-step-detail`, and the footer's own value then makes
+    //    no observable difference: `anywhere` and `break-word` measure
+    //    identically (box 248/248 @320, 318/318 @390, 292/292 @900, both
+    //    themes). What drove the page to 1070 at 900 was `.new-step-detail`'s
+    //    preserved min-content, which wave 24 chose ON PURPOSE so a hostname
+    //    stays whole. D298 is MASKED here, not refuted — re-measuring its pair
+    //    means neutralising the step caption first. So the shipped remedy is
+    //    two declarations, and the MEASURED mutations are these:
+    //      revert `.detail-grid` to a bare `1fr` ....... the PAGE reds at 900
+    //          (1070 against a 900 viewport, widest `.detail-rail` right
+    //          1069.72) while every box stays inside its border.
+    //      keep the track, delete the footer's wrap .... the BOX reds at every
+    //          width (454 into 248 / 318 / 292) WHILE THE PAGE STAYS GREEN at
+    //          900. This is the parent-only remedy, and it is green by
+    //          construction to any page-level guard.
+    //    THEREFORE THIS LEG ASSERTS BOTH, AT 320/390/900. Drop the box
+    //    assertion and the parent-only remedy passes; drop the 900 cell and the
+    //    track regression passes. Neither is a spare.
+    //
+    //    THE KIND CONTROL IS DRIVEN IN THE SAME CELLS, on the same fixture's
+    //    other site: an ordinary HEALTH failure ("slot blue on :8081 returned
+    //    502 …"), word-broken and short — the sentence this epic distrusts,
+    //    measured instead of assumed. A remedy that bought the cruel string by
+    //    shredding an ordinary one reds there.
+    //
+    //    HEIGHT IS REPORTED, NEVER PINNED. The wrap is what makes a 240-char
+    //    error readable, and its honest cost is a taller box; a bare pixel pin
+    //    on that height would be a claim about THIS string at THIS width, and
+    //    this epic has already deleted one of those. The numbers are printed
+    //    per cell and live in the PR.
+    if (requested.includes("W25-deploy-rail-fail-wrap")) {
+      const D = "W25-deploy-rail-fail-wrap";
+      // BLOCK-SCOPED (D247). 320/390 are the phone widths every remedy passes;
+      // 900 is the DECIDING width — the only one above the 768 escape, and the
+      // only cell that can refuse `break-word`.
+      const RAIL_WIDTHS = [320, 390, 900];
+      const { SCENARIOS, RAIL_FAIL_CRUEL_DETAIL, RAIL_FAIL_KIND_DETAIL } = await import("./scenarios.mjs");
+      const sc = SCENARIOS["site-deploy-rail-failed"];
+      // The routes are DERIVED from the fixture, never transcribed: a pasted
+      // uuid rots silently into "the sites list rendered instead".
+      if (!sc || !sc.deepLink || !sc.data || !Array.isArray(sc.data.sites) || sc.data.sites.length < 2) {
+        return die(`${D}: SCENARIOS["site-deploy-rail-failed"] no longer carries a deepLink and two sites — the cruel rail and its control cannot both be reached, so nothing was measured`);
+      }
+      const RAIL_ROUTES = [
+        { name: "cruel", hash: sc.deepLink, detail: RAIL_FAIL_CRUEL_DETAIL, cruel: true },
+        { name: "kind", hash: "#site/" + sc.data.sites[1].id, detail: RAIL_FAIL_KIND_DETAIL, cruel: false },
+      ];
+      process.stdout.write(
+        `\n${D} — the cruel rail x ${RAIL_WIDTHS.length} widths x 2 themes (${RAIL_WIDTHS.length * 2} cells)` +
+        ` + the same axis on the KIND control; PAGE and BOX asserted in every cell` +
+        ` (cruel detail ${RAIL_FAIL_CRUEL_DETAIL.length} chars, control ${RAIL_FAIL_KIND_DETAIL.length})\n`,
+      );
+      let cells = 0, kindCells = 0, boxesSeen = 0, pageOver = 0, boxOver = 0;
+      for (const r of RAIL_ROUTES) {
+        for (const theme of ["light", "dark"]) {
+          // Enter at the WIDEST width — the rail mounts once, on load, from the
+          // deployments fetch; entering narrow would hide a route that only
+          // renders its footer on a phone layout.
+          await setViewport(RAIL_WIDTHS[RAIL_WIDTHS.length - 1]);
+          await nav(
+            `${BASE}/?scen=site-deploy-rail-failed&theme=${theme}${r.hash}`,
+            `document.querySelector('.deploy-rail-fail') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
+          );
+          const row = [];
+          for (const width of RAIL_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){var d=document.documentElement;` +
+              `var v=document.querySelector('section.view:not([hidden])');` +
+              // EVERY footer on the page, never a pinned one (D228's fifth
+              // clause): `querySelector` singular cannot tell a rail that
+              // rendered nothing from a rail that rendered a clean box.
+              `var fs=[].slice.call(document.querySelectorAll('.deploy-rail-fail')).map(function(f){` +
+              `  var cs=getComputedStyle(f);var t=(f.textContent||'');` +
+              `  var runs=t.split(/\\s+/).map(function(w){return w.length;});` +
+              `  return {sw:f.scrollWidth,cw:f.clientWidth,h:+f.getBoundingClientRect().height.toFixed(2),` +
+              `    ow:cs.overflowWrap,wb:cs.wordBreak,ov:cs.overflowX,len:t.length,` +
+              `    run:runs.length?Math.max.apply(null,runs):0,t:t};});` +
+              // NAME THE BOX THAT PUSHED THE PAGE. A page-level number alone
+              // sends the next reader into DevTools, and on this screen the
+              // answer is not always this leg's own element — the rail's step
+              // list renders the SAME builder string in `.new-step-detail`.
+              `var wide=[];if(d.scrollWidth>d.clientWidth){` +
+              `  [].slice.call(document.querySelectorAll('#view-site *')).forEach(function(el){` +
+              `    var r=el.getBoundingClientRect();if(r.width>0&&r.right>d.clientWidth+1)` +
+              `      wide.push({cls:(el.className||el.tagName||'?').toString().slice(0,40),right:+r.right.toFixed(2),w:+r.width.toFixed(2)});});` +
+              `  wide.sort(function(a,b){return b.right-a.right;});wide=wide.slice(0,4);}` +
+              `return {sw:d.scrollWidth, cw:d.clientWidth, view:v?v.id:'none', fs:fs, wide:wide,` +
+              ` theme:d.getAttribute('data-theme')};})()`,
+            );
+            if (r.cruel) cells++; else kindCells++;
+            // (1) THE ROUTE. Without this the whole table is phantom.
+            if (m.view !== "view-site") {
+              fail(D, `${r.name}/${theme}@${width}: rendered section.view "${m.view}", asked for "view-site" — the hash did not route, so nothing below this line measures the deploy rail`);
+              row.push(`${width}:?`);
+              continue;
+            }
+            if (m.theme !== theme) fail(D, `${r.name}/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+            // (2) AUDITED: an absent box is not a clean box. A fixture that
+            // stopped carrying a stage entry would take the rail with it and
+            // this leg would print a perfect table about nothing.
+            if (m.fs.length === 0) {
+              fail(D, `${r.name}/${theme}@${width}: zero .deploy-rail-fail rendered — the rail's failure footer is not on the page, so nothing was measured. This is not a pass.`);
+              row.push(`${width}:0box`);
+              continue;
+            }
+            // (3) ANTI-VACUITY, SECOND ORDER: a cruel cell whose string is not
+            // actually cruel proves nothing, and a control that drifted cruel
+            // would stop being a control. Both are asserted against the
+            // fixture's own exported strings — this leg pins no length of its
+            // own, so the producer's cap can move without touching this file.
+            for (const f of m.fs) {
+              boxesSeen++;
+              if (f.t !== r.detail) {
+                fail(D, `${r.name}/${theme}@${width} .deploy-rail-fail: rendered ${f.len} chars that are not the fixture's ${r.name} detail (${r.detail.length} chars) — the box under measurement is holding some other string`);
+                continue;
+              }
+              if (r.cruel && f.run < 40) {
+                fail(D, `${r.name}/${theme}@${width} .deploy-rail-fail: the longest unbreakable run is ${f.run} chars — the cruel fixture went KIND, so a green here would be green by construction`);
+              }
+              if (!r.cruel && f.run > 20) {
+                fail(D, `${r.name}/${theme}@${width} .deploy-rail-fail: the control's longest run is ${f.run} chars — it has drifted cruel and can no longer answer "did the remedy shred ordinary prose"`);
+              }
+              // (4) THE BOX. The only assertion that can refuse a bare
+              // `min-width: 0`, which takes the PAGE to green while leaving the
+              // glyphs painted outside their own border.
+              if (f.sw > f.cw) {
+                boxOver++;
+                fail(D, `${r.name}/${theme}@${width} .deploy-rail-fail: scrollWidth ${f.sw} > clientWidth ${f.cw} — ${f.sw - f.cw}px of the builder's error paints OUTSIDE its own box (overflow-wrap:${f.ow}, word-break:${f.wb}, overflow-x:${f.ov}), through whatever sits beside it`);
+              }
+            }
+            // (5) THE PAGE. The only assertion that can refuse `break-word`,
+            // and only at 900 — below the 768 escape it passes.
+            if (m.sw > m.cw) {
+              pageOver++;
+              const widest = (m.wide || []).map((x) => `.${x.cls} right=${x.right}`).join(" | ") || "none inside #view-site";
+              fail(D, `${r.name}/${theme}@${width}: documentElement.scrollWidth ${m.sw} > clientWidth ${m.cw} — ${m.sw - m.cw}px of the site screen is off-screen sideways while a person reads why their deploy failed. Widest: ${widest}`);
+            }
+            // HEIGHT IS PRINTED IN EVERY CELL, NOT ASSERTED (see the comment
+            // above this block). A wrap's honest cost is a taller box.
+            row.push(`${width}:${m.sw}/${m.cw}px box ${m.fs[0].sw}/${m.fs[0].cw} h${m.fs[0].h}`);
+          }
+          process.stdout.write(`   ${r.name}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cruel cells clean across ${RAIL_WIDTHS.join("/")} in both themes, plus ${kindCells} ` +
+          `KIND-control cells on the same axis (${boxesSeen} .deploy-rail-fail box(es) measured — every one on the ` +
+          `page, not a pinned selector); ${pageOver} pages scrolling sideways, ${boxOver} boxes spilling their own border`,
+        );
+        okLine(
+          `BOTH assertions are load-bearing and each refuses a DIFFERENT half of the remedy, both driven: reverting ` +
+          `.detail-grid to a bare 1fr reds the PAGE at 900 only (1070/900, widest .detail-rail right=1069.72), and ` +
+          `deleting .deploy-rail-fail's wrap reds the BOX at all three widths (454 into 248/318/292) while the page ` +
+          `stays GREEN at 900 — the parent-only remedy, green by construction to any page-level guard. Heights are ` +
+          `printed per cell and deliberately unpinned — a pixel pin on a wrapped string is a claim about that ` +
+          `string at that width`,
         );
       }
     }

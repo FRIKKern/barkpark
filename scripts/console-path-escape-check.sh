@@ -94,6 +94,19 @@ set -euo pipefail
 # dispatch on — which is exactly how the two would have merged into a live hole
 # with both ratchets reporting OK. Declaring it here is also what keeps main
 # GREEN whichever of the two lands first.
+#
+# THE TWO `deploy/` ENTRIES ARE THE CORPUS-DERIVATION METHOD PAYING ITS DISPATCH
+# BILL. Wave 25 stopped authoring cruel strings and started DERIVING them from
+# the code that emits them, so `__app.test.mjs` now reads the two site-deploy
+# shell scripts to re-derive the step vocabulary it asserts on. That makes those
+# scripts INPUTS to a console assertion: edit one, and what the console tests
+# conclude changes. Undeclared, the harness would not re-run on such an edit and
+# the derived value would go quietly stale — the exact "green by construction"
+# shape this epic exists to kill, arriving through the door the epic just opened.
+# This ratchet caught it on the slice that introduced it, which is the ratchet
+# working. Declaring here covers BOTH halves at once: `--match console` is what
+# console-harness.yml's `changes` dispatcher runs, so one list drives dispatch
+# and coverage and the two cannot drift apart.
 CONSOLE_PATHS='cloud/priv/static/**
 internal/taskboard/testdata/styleguide_lifecycle.txt
 internal/pdrender/testdata/styleguide_tokens.txt
@@ -102,6 +115,8 @@ design/emit-fence.test.mjs
 cloud/test/barkpark_cloud/web/**
 .github/required-checks.json
 .github/workflows/console-harness.yml
+deploy/lib/site-deploy-common.sh
+deploy/site-deploy-node.sh
 scripts/console-path-escape-check.sh
 scripts/console-path-escape-check.test.sh'
 
@@ -368,7 +383,13 @@ echo "console-path-escape-check: $count distinct repo-root read(s) resolved from
 # FAIL-CLOSED on a neutered scanner. "Nothing found" is never good news here.
 if [ "$count" -lt "$CONSOLE_ESCAPE_MIN" ]; then
   echo "::error::console-path-escape-check: only $count repo-root read(s) found, floor is $CONSOLE_ESCAPE_MIN." >&2
-  echo "  The SCANNER is broken, not the repo clean — the measured population is 9." >&2
+  # NO POPULATION NUMBER HERE. This message used to read "the measured
+  # population is 9"; it was 12 by the time anyone read it again, because every
+  # slice that adds a declared read moves it. A rotting integer inside the
+  # guard that exists to catch rot is the epic's own D41 lesson pointed at
+  # itself — cite the derivation, never the number.
+  echo "  The SCANNER is broken, not the repo clean — the live population is the" >&2
+  echo "  'distinct repo-root read(s) resolved' line printed just above." >&2
   echo "  Check the grep/awk in list_escapes before touching the floor." >&2
   exit 1
 fi

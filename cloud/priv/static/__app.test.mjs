@@ -9380,6 +9380,88 @@ test("W4 deployRailHtml: renders the shared step component + a copyable live URL
   assert.ok(failHtml.includes("probe 500"));
 });
 
+// ── cch-w25-s3: THE DEPLOY RAIL'S FAILURE FOOTER — the fixture's derivation ──
+// The footer holds a deploy stage's `detail` VERBATIM, and the fixture that
+// drives the browser guard composes its cruel string from the two shell
+// producers rather than transcribing one. These tests are what keeps that
+// derivation honest: they read the PRODUCER and red when it moves. Nothing here
+// treats the cut as an invariant — it is a shell convention in ONE producer (the
+// provision-step twin has no cap at all, and no control-plane branch re-asserts
+// it), so the assertion is "the fixture still mirrors what the shell does",
+// never "the shell does 240".
+const DEPLOY_COMMON_SH = path.join(REPO_ROOT, "deploy/lib/site-deploy-common.sh");
+const DEPLOY_NODE_SH = path.join(REPO_ROOT, "deploy/site-deploy-node.sh");
+
+test("cch-w25-s3: the rail fixture's cut is DERIVED from emit(), and reds when the producer moves it", async () => {
+  const scen = await import("./__preview__/scenarios.mjs");
+  const sh = fs.readFileSync(DEPLOY_COMMON_SH, "utf8");
+  // emit() is the only thing that bounds a stage detail on the way to the
+  // console. Read ITS cut, not a remembered number.
+  const emit = sh.slice(sh.indexOf("emit() {"), sh.indexOf("disk_free"));
+  const cut = emit.match(/cut -c1-(\d+)/);
+  assert.ok(cut, "emit() no longer cuts its detail at all — the fixture's ceiling has lost its producer");
+  assert.equal(scen.RAIL_FAIL_EMIT_CUT, Number(cut[1]),
+    "the fixture mirrors emit()'s cut; the producer moved it, so move the fixture (and re-run the overflow guard) " +
+    "rather than editing this number to match");
+  // The stem must OVERRUN the cut, or the fixture is quietly testing a string
+  // the producer would never have truncated — cruel by accident, kind by drift.
+  assert.equal(scen.RAIL_FAIL_CRUEL_DETAIL.length, scen.RAIL_FAIL_EMIT_CUT,
+    "the cruel fixture must land exactly ON the cut, which is what proves it exercised it");
+  // emit()'s normalisation, not just its length: no newline, tab or quote can
+  // survive it, so a fixture carrying one is not a string this box can receive.
+  assert.ok(!/[\n\r\t"]/.test(scen.RAIL_FAIL_CRUEL_DETAIL), "emit() replaces newlines, tabs and quotes with spaces");
+  assert.ok(!/ {2}/.test(scen.RAIL_FAIL_CRUEL_DETAIL), "emit() squeezes runs of spaces");
+  // AND IT IS ACTUALLY CRUEL: one unbreakable run long enough to bite. The
+  // browser guard asserts this too, in the rendered DOM; here it is asserted
+  // against the committed bytes so a fixture edit cannot go kind silently.
+  const longest = Math.max(...scen.RAIL_FAIL_CRUEL_DETAIL.split(/\s+/).map((w) => w.length));
+  assert.ok(longest > 100, "the cruel detail's longest unbreakable run is only " + longest + " chars");
+  // The KIND control is the other half of the pair: ordinary, word-broken.
+  const kindLongest = Math.max(...scen.RAIL_FAIL_KIND_DETAIL.split(/\s+/).map((w) => w.length));
+  assert.ok(kindLongest < 20, "the control has drifted cruel (" + kindLongest + "-char run) and can no longer be a control");
+});
+
+test("cch-w25-s3: both producers still exist and still emit an unhumanised stage detail", () => {
+  const node = fs.readFileSync(DEPLOY_NODE_SH, "utf8");
+  // The cruel string's stem is a `build_failure_reason` line: the LAST
+  // npm/Error line out of the build log, forwarded verbatim.
+  assert.ok(/build_failure_reason\(\) \{/.test(node), "build_failure_reason is the fixture's stem producer");
+  assert.ok(/emit BUILD failed "\$reason"/.test(node),
+    "BUILD failed must still forward build_failure_reason's raw line — the moment it is humanised, this box stops " +
+    "being a place a machine string can land and the fixture should be re-derived");
+  // The kind control's stem: the ordinary HEALTH probe failure.
+  assert.ok(/HEALTH_DETAIL="slot \$slot on :\$port returned \$code/.test(node),
+    "the control mirrors the HEALTH probe's own detail");
+});
+
+test("cch-w25-s3: .deploy-rail-fail wraps, and its parent grid carries the min-content escape", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const rule = css.match(/\n\.deploy-rail-fail\s*\{([\s\S]*?)\n\}/);
+  assert.ok(rule, ".deploy-rail-fail must still be its own rule");
+  assert.ok(/overflow-wrap:\s*anywhere/.test(rule[1]),
+    "the failure footer holds a machine string VERBATIM — see THE WRAP RULE at the head of app.css");
+  // The parent-side half. A wrap without it is a spill, not a wrap: with a bare
+  // `1fr` the page measured 1070 against a 900 viewport while every box stayed
+  // inside its own border.
+  assert.ok(/\.detail-grid \{[^}]*grid-template-columns:\s*minmax\(0, 1fr\) 260px/.test(css),
+    ".detail-grid's main track must carry the minmax(0,1fr) escape at every width, not only inside the 768 block");
+  // THE RULE ITSELF, stated once and ABOVE the generated fence so
+  // `node design/emit.mjs --write` can never clobber it.
+  const HEAD = "THE WRAP RULE (cch-w25-s3, charter D299)";
+  const ruleIdx = css.indexOf(HEAD);
+  const fenceIdx = css.indexOf("/* BEGIN GENERATED: tokens");
+  assert.ok(ruleIdx > 0, "the wrap rule must be stated in app.css");
+  assert.ok(ruleIdx < fenceIdx, "the wrap rule must sit ABOVE the generated tokens fence");
+  // STATED once; POINTED AT freely. The per-site comments end with "see THE
+  // WRAP RULE at the head of this file", and those back-pointers are the point
+  // — what must not exist twice is the rule ITSELF.
+  assert.equal(css.indexOf(HEAD, ruleIdx + 1), -1, "stated ONCE — a second copy is a second owner");
+  const ruleText = css.slice(ruleIdx, fenceIdx);
+  for (const value of ["overflow-wrap: break-word", "overflow-wrap: anywhere", "word-break: break-word", "min-width: 0"]) {
+    assert.ok(ruleText.includes(value), "the rule must name " + value + " — it is three-valued plus the parent half");
+  }
+});
+
 test("W4 railDeployment: picks the in-flight deployment, null when all terminal", () => {
   assert.equal(hooks.railDeployment([{ id: "a", status: "live" }, { id: "b", status: "failed" }]), null);
   const active = hooks.railDeployment([{ id: "a", status: "building" }, { id: "b", status: "live" }]);

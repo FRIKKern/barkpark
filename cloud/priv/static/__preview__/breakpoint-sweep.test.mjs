@@ -527,22 +527,27 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // cch-w16-s4 moved this census by one: `sites-on-instance` is the 100th
 // scenario and the 75th residue entry. That is the point of a typed-out
 // literal — a slice that adds a scenario has to come here and say so.
-// cch-w21-s3 moved it again: `fleet-cruel-content` is the 101st scenario and
-// the 76th residue entry. THIS EDIT WAS FORCED, NOT OPTIONAL — the bare sweep
+// cch-w21-s3 moved it again: `fleet-cruel-content` was the 101st scenario and
+// the 76th residue entry. THAT EDIT WAS FORCED, NOT OPTIONAL — the bare sweep
 // exited 2 with `UNLISTED scenario "fleet-cruel-content"` and this test exited
 // 1 on 100/75, which is exactly the "come here and say so" the literal exists
 // to compel. Four numbers moved and every one of them is derived from
 // `scenarioReport`, never typed from memory.
-test("the census reconciles: 101 scenarios, 25 distinct covered by 26 cells, 76 residue over 13 families", () => {
+// cch-w25-s3 moved it a third time, and both halves refused again:
+// `site-deploy-rail-failed` — the first fixture in this harness to carry a
+// deploy-rail STAGE entry — is the 102nd scenario and the 77th residue entry,
+// and the sweep exited 2 while this test exited 1 on 101/76. The numbers below
+// are `scenarioReport`'s, re-read after the entry landed.
+test("the census reconciles: 102 scenarios, 25 distinct covered by 26 cells, 77 residue over 13 families", () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
   assert.equal(r.total, SCENARIO_NAMES.length);
-  assert.equal(r.total, 101);
+  assert.equal(r.total, 102);
   assert.equal(r.cells, 26);
   assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
-  assert.equal(r.residue, 76, "76 is the RESIDUE, not the census");
+  assert.equal(r.residue, 77, "77 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 76, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 77, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

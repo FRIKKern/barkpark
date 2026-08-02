@@ -550,6 +550,101 @@ const webSiteMigrated = Object.assign({}, webSite, {
   current_deployment_id: depNowLive.id,
 });
 
+// ── cch-w25-s3: THE DEPLOY RAIL'S FAILURE FOOTER, derived from its producers ─
+//
+// No scenario in this file has ever carried a rail STAGE entry, so
+// `deployRailLedgerFromConsole` (app.js) dropped every console line and the
+// whole `.deploy-rail` — head, step list, and the `.deploy-rail-fail` footer —
+// has never rendered in this harness. These two lists are the fixture that
+// makes it render, and the cruel string below is COMPOSED from the shell that
+// actually emits it rather than transcribed from a screenshot.
+//
+// THE PRODUCERS, both read-only from here:
+//   `build_failure_reason` — deploy/site-deploy-node.sh. On a failed
+//     `npm ci && npm run build` it hands back the LAST line matching
+//     `npm ERR!|[Ee]rror:` out of the build log, verbatim and unbounded. A Next
+//     build's last error line is routinely a module-resolution path: one
+//     unbreakable run carrying the person's own slug and the build id.
+//   `emit()` — deploy/lib/site-deploy-common.sh. It collapses the detail's
+//     tabs/newlines/quotes to spaces, squeezes runs, trims, and CUTS it —
+//     `cut -c1-<N>`. That N is a SHELL CONVENTION IN ONE PRODUCER, not a
+//     contract: nothing in the control plane re-asserts it (the provision-step
+//     twin has no cap at all), so it is mirrored here as a NUMBER TO DERIVE,
+//     never as an invariant to assert. `__app.test.mjs` reads the cut out of
+//     the shell and reds when it moves — that test, not this comment, is what
+//     keeps the fixture honest.
+//
+// RE-DERIVE THE WHOLE STRING:
+//   grep -n 'build_failure_reason' deploy/site-deploy-node.sh
+//   grep -n 'cut -c1-' deploy/lib/site-deploy-common.sh
+//   node -e 'import("./cloud/priv/static/__preview__/scenarios.mjs").then(m=>console.log(m.RAIL_FAIL_EMIT_CUT, m.RAIL_FAIL_CRUEL_DETAIL.length))'
+export const RAIL_FAIL_EMIT_CUT = 240;
+// emit()'s own normalisation, in JS: tabs/newlines/quotes → space, squeeze,
+// trim, cut. Applied to the stem so the fixture is the string a person would
+// actually receive, not a hand-shortened idea of it.
+export function railEmitDetail(stem, cut = RAIL_FAIL_EMIT_CUT) {
+  return String(stem).replace(/[\n\r\t"]/g, " ").replace(/ +/g, " ").trim().slice(0, cut);
+}
+// The stem: a real `next build` module-resolution failure on THIS fixture's own
+// site (slug `acme-web`, the pnpm store layout Next standalone builds produce).
+// It is deliberately longer than the cut, so the fixture exercises the cut
+// instead of merely fitting under it.
+const railCruelStem =
+  "npm ERR! Error: Cannot find module '/opt/barkpark/sites/acme-web/releases/" +
+  "20260802T094118Z-9c1f2ab/.next/standalone/node_modules/.pnpm/@acme+design-system@4.2.1_react@18.3.1_" +
+  "next@15.1.6/node_modules/@acme/design-system/dist/tokens/index.js' imported from /opt/barkpark/sites/acme-web";
+export const RAIL_FAIL_CRUEL_DETAIL = railEmitDetail(railCruelStem);
+// THE KIND CONTROL — the ordinary HEALTH failure a person sees most days.
+// Derived from `HEALTH_DETAIL` in deploy/site-deploy-node.sh (the
+// "slot … returned <code> (want 200)" branch): word-broken, ordinary
+// punctuation, nothing unbreakable in it. It is short and probably fine, which
+// is exactly why it is MEASURED — a remedy that buys the cruel string by
+// shredding this one reds on it.
+export const RAIL_FAIL_KIND_DETAIL = railEmitDetail(
+  "slot blue on :8081 returned 502 (want 200) at /healthz after 12 attempts " +
+  "(last: curl exit 0, 30.2s) — boot failed, live slot untouched",
+);
+
+// The CRUEL rail: a deployment the control plane still calls `building` whose
+// SSE narration already carries BUILD failed. That pairing is the honest
+// TRANSIENT window this box lives in — `deployIsActive` (app.js) gates the rail
+// to queued/building/pushing, so the footer is on screen from the stage-failed
+// event until the control plane settles the row, and not one second longer.
+const depRailFailedCruel = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d6",
+  site_id: IDS.siteWeb,
+  status: "building",
+  git_ref: "7f31c0d5ba9e4c218d63a07f5e1b8c94a2d60f3b",
+  branch: "main",
+  detail: "building",
+  inserted_at: tMinus(74),
+  updated_at: tMinus(3),
+  console: [
+    { stage: "PLAN", status: "done", detail: "release 20260802T094118Z-9c1f2ab, blue → green", at: tMinus(74) },
+    { stage: "BUILD", status: "started", detail: "", at: tMinus(70) },
+    { stage: "BUILD", status: "failed", detail: RAIL_FAIL_CRUEL_DETAIL, at: tMinus(6) },
+  ],
+});
+// The KIND rail: same shape, same stage machine, an ordinary detail. Lives on
+// the OTHER site of the same fixture (acme-blog) so one scenario carries both
+// the cruel string and its control — see `deploymentsBySite` in route().
+const depRailFailedKind = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000d7",
+  site_id: IDS.siteBlog,
+  status: "building",
+  git_ref: "aa10ff2c4b7e8d6a1f0925c3b8e7d6c5b4a39281",
+  branch: "main",
+  detail: "building",
+  inserted_at: tMinus(120),
+  updated_at: tMinus(5),
+  console: [
+    { stage: "PLAN", status: "done", detail: "release 20260802T093902Z-aa10ff2, green → blue", at: tMinus(120) },
+    { stage: "BUILD", status: "done", detail: "npm ci && npm run build (astro static)", at: tMinus(40) },
+    { stage: "STAGE", status: "done", detail: "", at: tMinus(30) },
+    { stage: "HEALTH", status: "failed", detail: RAIL_FAIL_KIND_DETAIL, at: tMinus(8) },
+  ],
+});
+
 // ── invitations (GET /v1/invitations/:token preview + POST accept) ──────────
 // Preview envelope from router.ex: {team:{name,slug}, email, role, expires_at}.
 // The accept POST answers 200 {team_id} | 404 invalid_or_expired | 403
@@ -2160,6 +2255,35 @@ export const SCENARIOS = {
       sites: [webSiteMigrated, blogSite],
       audit: [],
       deployments: migratedDeployments,
+    },
+  },
+  // cch-w25-s3: THE DEPLOY RAIL, FAILED — the first scenario in this harness to
+  // carry a rail STAGE entry at all. Two sites, two rails, one fixture:
+  //   #site/<acme-web>  BUILD failed with the CRUEL string — a real
+  //                     module-resolution path off `build_failure_reason`, cut
+  //                     by emit(). This is what `.deploy-rail-fail` holds when
+  //                     a Node build dies, and nothing between the worker and
+  //                     the box breaks it.
+  //   #site/<acme-blog> HEALTH failed with the ORDINARY string — the control.
+  // Both deployments are still `building`, which is the honest transient window
+  // this footer lives in (deployIsActive gates the rail to queued/building/
+  // pushing). Driven by overflow-guard's W25-deploy-rail-fail-wrap leg at
+  // 320/390/900 in both themes, page AND box.
+  "site-deploy-rail-failed": {
+    label: "Deploy rail — a stage FAILED mid-flight; the footer carries the builder's raw error",
+    authed: true,
+    deepLink: "#site/" + IDS.siteWeb,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [webSiteInFlight, blogSite],
+      audit: [],
+      deployments: [depRailFailedCruel, depCurrent, depPrior],
+      deploymentsBySite: {
+        [IDS.siteWeb]: [depRailFailedCruel, depCurrent, depPrior],
+        [IDS.siteBlog]: [depRailFailedKind],
+      },
     },
   },
   // ── bp-login-ux W3 (decision 40): the /activate device-login approve page ──
@@ -3887,7 +4011,19 @@ export function route(name, method, path, state) {
     const s = d.sites.filter((x) => String(x.id) === siteMatch[1])[0];
     return s ? { status: 200, body: { site: s } } : { status: 404, body: { error: "not_found" } };
   }
-  if (/^\/v1\/sites\/[^/]+\/deployments$/.test(p)) return { status: 200, body: { deployments: d.deployments || [] } };
+  // cch-w25-s3: PER-SITE deployment lists. The default stays the scenario-wide
+  // `d.deployments` (every scenario written before this line is byte-identical
+  // through it); a scenario that needs two DIFFERENT deploy stories on one
+  // fixture — a cruel rail on one site and its kind control on the other —
+  // keys them by site id under `deploymentsBySite`. Without this seam the
+  // cruel string and its control would have to be two scenarios, which pays
+  // the census/residue blast radius twice for one measurement.
+  const depMatch = p.match(/^\/v1\/sites\/([^/]+)\/deployments$/);
+  if (depMatch) {
+    const bySite = d.deploymentsBySite || null;
+    const own = bySite && Object.prototype.hasOwnProperty.call(bySite, depMatch[1]) ? bySite[depMatch[1]] : null;
+    return { status: 200, body: { deployments: own || d.deployments || [] } };
+  }
   // gr-p3: branch previews now come from the scenario (d.previews) so the
   // preview-rows section is observable; absent → the honest empty list.
   if (/^\/v1\/sites\/[^/]+\/previews$/.test(p)) return { status: 200, body: { previews: d.previews || [] } };
