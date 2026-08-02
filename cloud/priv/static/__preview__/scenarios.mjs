@@ -72,6 +72,12 @@ function bpBase(over) {
       team_id: IDS.team,
       suspended: false,
       suspended_reason: null,
+      // cch-w21-s3: `barkpark_json` (web/router.ex:8371) serializes `custom_host`
+      // on EVERY row — null until a team attaches a domain. It belongs in the
+      // envelope because `publicUrl()` (grep -n "function publicUrl" app.js) PREFERS it over
+      // `url`, so a
+      // row that merely OMITS the key is a row no fixture can make cruel.
+      custom_host: null,
       update_state: null,
       update_running_release: null,
       update_latest_release: null,
@@ -1358,6 +1364,109 @@ const offloadRoster = (status, task) => [{
   last_seen: tMinus(8), ttl_s: 30, task: task || null,
 }];
 
+// ── cch-w21-s3 — THE CRUEL FIXTURE (server-legal worst-case CONTENT) ─────────
+// Every other fixture in this file is KIND: the longest host it ships is 32
+// characters (`production-5b2c1e.barkpark.cloud`) and the longest name is 10
+// ("Production", "Reporting", "Guerrilla"). The SERVER admits far more, and it
+// is the server's own caps — not an invented absurdity — that set the numbers
+// below:
+//   · `validate_length(:custom_host, max: 253)`   registry/barkpark.ex:727
+//   · `validate_length(:name, min: 1, max: 255)`  registry/barkpark.ex:466
+//   · `@external_host_format` (:109) admits an arbitrary customer-owned FQDN of
+//     TWO OR MORE labels, each `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?` — i.e. up
+//     to 63 characters with NO break opportunity a text renderer can use.
+// `publicUrl()` (`grep -n "function publicUrl" app.js`) PREFERS `custom_host`, so
+// an attached customer domain is the DOMINANT real input on `.fleet-url` and
+// `.instance-card-url`, not an edge case — and until this fixture existed no
+// instrument in this epic had ever driven one.
+//
+// THE LENGTHS ARE DERIVED AND ASSERTED, NEVER HAND-COUNTED. A fixture whose
+// cruelty is a typed-in number stops being cruel the first time somebody edits
+// a word in it and nothing complains. The three throws below are the fixture's
+// own guard: they run at module load, so every consumer of this file (the
+// sweep, the guard, mock.js, the browser) refuses rather than silently
+// measuring a fixture that has gone kind.
+const CUSTOM_HOST_MAX = 253; // registry/barkpark.ex:727
+const BARKPARK_NAME_MAX = 255; // registry/barkpark.ex:466
+const DNS_LABEL_MAX = 63; // @external_host_format's `[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?`
+// The server's external-host regex, copied verbatim from registry/barkpark.ex:109
+// so the fixture can PROVE it is admissible rather than assert it in prose.
+const EXTERNAL_HOST_FORMAT = /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)+$/;
+
+// Pad a stem to EXACTLY n characters while keeping the RFC-1035 label shape
+// (first and last character alphanumeric). `joiner` decides how cruel the label
+// is, and this is the whole difference between a fixture that bites and one
+// that does not: a HYPHEN IS A LINE-BREAK OPPORTUNITY. Driven on the first cut
+// of this fixture, a hyphen-rich 253-char host wrapped by itself and
+// `.fleet-url` never once exceeded its own box — the fixture had quietly made
+// itself kind. A 63-character label of unbroken alphanumerics is the real
+// worst case the server's own `@external_host_format` admits.
+function dnsLabel(stem, n, joiner = "") {
+  let s = stem;
+  while (s.length < n) s += joiner + stem;
+  s = s.slice(0, n);
+  return s.endsWith("-") ? s.slice(0, -1) + "0" : s;
+}
+
+// 63 + 63 + 63 + 58 + 2, four dots = 253, the cap exactly. THREE maximal DNS
+// labels with NO internal hyphen, because 63 unbroken glyphs is the longest run
+// a URL can carry with nothing — no space, no slash, no hyphen — for the line
+// breaker to use. The fourth label keeps its hyphens: a corpus of pure worst
+// case is its own kind of unrealistic, and the mixed host is what a real
+// customer domain looks like.
+const cruelCustomHost = [
+  dnsLabel("redaksjoneltinnholdogdistribusjonforheleforlagsgruppen", DNS_LABEL_MAX),
+  dnsLabel("gyldendalnorskforlagogdatterselskaperinorden", DNS_LABEL_MAX),
+  dnsLabel("publiseringarkivrettigheterogmetadataplattform", DNS_LABEL_MAX),
+  dnsLabel("kundeeid-domene-for-den-nordiske-plattformen", 58, "-"),
+  "no",
+].join(".");
+// 255 characters, the cap exactly, carrying ONE 62-character unbroken token —
+// a Norwegian compound is the realistic shape of a name with no break
+// opportunity, and it is the token, not the total, that decides min-content.
+const cruelName =
+  "Produksjon redaksjonsinnholdsplattformenforflersprakligpubliseringinorden " +
+  "arkiv og rettighetsstyring for alle avdelinger og datterselskaper i den " +
+  "nordiske forlagsgruppen, inkludert distribusjon og metadata for samtlige " +
+  "utgivelser fra 1892 og fram til 2026";
+
+if (cruelCustomHost.length !== CUSTOM_HOST_MAX) {
+  throw new Error(`cruel fixture: custom_host is ${cruelCustomHost.length} chars, the server's cap is ${CUSTOM_HOST_MAX} — the fixture has gone kind, fix the stems`);
+}
+if (!EXTERNAL_HOST_FORMAT.test(cruelCustomHost) || cruelCustomHost.split(".").filter((l) => l.length === DNS_LABEL_MAX).length < 1) {
+  throw new Error("cruel fixture: custom_host is not admissible by registry/barkpark.ex's @external_host_format, or carries no maximal 63-char label — a fixture the server would REJECT proves nothing");
+}
+if (cruelName.length !== BARKPARK_NAME_MAX) {
+  throw new Error(`cruel fixture: name is ${cruelName.length} chars, the server's cap is ${BARKPARK_NAME_MAX}`);
+}
+
+// The cruel row is a LIVE, healthy, up-to-date box: nothing about its state is
+// unusual, and that is the point — the ONLY variable is the length of two
+// strings a person is allowed to type.
+const cruelInstance = bpBase({
+  id: "5b2c1e00-0000-4000-8000-0000000000c1",
+  name: cruelName,
+  slug: "produksjon",
+  url: "https://produksjon-c1a2b3.barkpark.cloud",
+  host: "produksjon-c1a2b3.barkpark.cloud",
+  custom_host: cruelCustomHost,
+  health_status: "up",
+  agent_status: "online",
+  version: "0.9.2",
+  git_commit: "c1a2b3d4e5f60718293a4b5c6d7e8f9012345678",
+  last_seen_at: tMinus(30),
+  update_state: "current",
+  update_running_release: "0.9.2",
+  update_latest_release: "0.9.2",
+  update_checked_at: tMinus(420),
+  region: "fsn1",
+  server_type: "cx22",
+  channel: "prod",
+  autoupdate_enabled: true,
+  provider: "hetzner",
+  provision_status: "succeeded",
+});
+
 export const SCENARIOS = {
   loggedout: {
     label: "Logged out — the sign-in screen",
@@ -2421,6 +2530,27 @@ export const SCENARIOS = {
       sites: [],
       audit: [],
       archives: { status: 502, body: { ok: false, error: "Archive storage isn't configured for this deployment." } },
+    },
+  },
+  // ── cch-w21-s3: THE CRUEL CONTENT TWIN of the fleet list ──────────────────
+  // Same route, same components, same lifecycle states as `fleet-v4` above —
+  // the ONLY variable is the LENGTH of two strings the server already accepts
+  // (see the cruelCustomHost / cruelName note above the table). It carries a
+  // KIND neighbour (`liveInstance`, 32-char host / 10-char name) in the same
+  // DOM on purpose: a bound that fixes the cruel row by shredding the kind one
+  // has to be visible in the SAME cell, not in a different fixture's run.
+  // Reached on BOTH `#fleet` (the table) and `#overview` (the instance cards),
+  // because the two unbounded hosts live one on each screen.
+  "fleet-cruel-content": {
+    label: "Cruel content — a 253-char custom domain and a 255-char name, both server-legal",
+    authed: true,
+    deepLink: "#fleet",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [cruelInstance, liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
     },
   },
   "fleet-archives-stored": {

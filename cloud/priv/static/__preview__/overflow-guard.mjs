@@ -178,6 +178,7 @@ const DEFECTS = [
   "W20-op-gate-pill-bounded",
   "W21-inst-head-320-copy-reachable",
   "W21-members-roster-identity-and-remove",
+  "W21-cruel-content-text-bounded",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -1922,6 +1923,158 @@ async function main() {
           `FONT-CONDITIONAL (D218): no preview instrument awaits document.fonts.ready or asserts which ` +
           `face resolved, so the px above are provisional. What is ASSERTED is face-independent — a ` +
           `control's right edge inside the viewport, and text that either fits or carries a paintable cue`,
+        );
+      }
+    }
+
+    // ── W21-S3: CONTENT IS THE VARIABLE, and every leg above is blind to it ──
+    //    Every leg in this file drives the KIND corpus: the longest host any
+    //    fixture ships is 32 characters and the longest name is 10. The server
+    //    admits 253 and 255 (`validate_length(:custom_host, max: 253)` at
+    //    registry/barkpark.ex:727, `validate_length(:name, min: 1, max: 255)`
+    //    at :466) and `publicUrl()` (`grep -n "function publicUrl" app.js`)
+    //    PREFERS `custom_host` over
+    //    `url` — so the DOMINANT real input on the fleet row was the one input
+    //    no instrument had ever driven. `fleet-cruel-content` (scenarios.mjs)
+    //    is that input, committed; this leg is what makes it bite.
+    //
+    //    TWO HOSTS, TWO DIFFERENT FAILURE SHAPES, which is why one assertion
+    //    could not have caught both:
+    //      · `.fleet-url` (app.css:954) CLIPS ITSELF — it is font/colour/mono/
+    //        margin only, and its only wrap declaration (:1560) is scoped to
+    //        `.fleet-url .site-open`, the Visit chip, not the URL text. Driven
+    //        on pre-fix bytes it measured scrollWidth 1822 against clientWidth
+    //        250 and the remainder painted THROUGH the neighbouring column
+    //        (`overflow: visible`, exactly the SPILL app.css:2220 records).
+    //      · `.instance-card-name` (app.css:3134) NEVER CLIPS ITSELF — it has
+    //        no bound at all, so there is nothing for a per-element scrollWidth
+    //        check to see. It pushes the PAGE instead: documentElement
+    //        .scrollWidth 2395 against a 320 viewport, 2075px of sideways
+    //        scroll on the most-seen screen in the product. A leg that asked
+    //        only the element question would have scored this host PERFECT.
+    //    Hence BOTH assertions on BOTH hosts at every cell: the element bound
+    //    AND `document.documentElement.scrollWidth <= clientWidth`.
+    //
+    //    D228 (ITERATE, NEVER querySelector). `fleet-cruel-content` renders a
+    //    cruel row and a KIND one (`liveInstance`, 32/10) in the same DOM, in
+    //    that order — a singular query would inspect the cruel row and miss
+    //    the regression a bound could inflict on the kind neighbour, and the
+    //    reverse ordering would miss the defect entirely. Every `.fleet-url`
+    //    and every `.instance-card-name` in the document is measured.
+    //
+    //    THE KIND CORPUS IS DRIVEN HERE TOO, and not as decoration: `mixed-fleet`
+    //    is in the scenario set so the same cells prove the bound did not buy
+    //    the cruel row at the kind row's expense. That is the "shredded the
+    //    person rather than fitting them" failure (D165) stated as an assertion.
+    //
+    //    ANTI-VACUITY: a cell that measures zero elements FAILS. Both hosts are
+    //    counted per cell and a zero on either is a refusal, not a pass —
+    //    `#fleet` renders no `.instance-card-name` and `#overview` renders no
+    //    `.fleet-url`, so the count is asserted PER ROUTE against what that
+    //    route is supposed to render, never against the union.
+    //
+    //    THE PX ARE FONT-CONDITIONAL (D218): nothing here awaits
+    //    `document.fonts.ready` and nothing asserts which face resolved, so the
+    //    robust claim is the RATIO (0 offending cells on the kind corpus vs N
+    //    on the cruel one) and the absolute widths are provisional.
+    if (requested.includes("W21-cruel-content-text-bounded")) {
+      const D = "W21-cruel-content-text-bounded";
+      // BLOCK-SCOPED (D247): these axes belong to this leg alone.
+      const CRUEL_SCENS = ["fleet-cruel-content", "mixed-fleet"];
+      // The phone band where the page overflow is worst, the two boundary
+      // widths either side of the 899 stacked/side-by-side split (the fleet row
+      // changes flex-direction there, so a bound proven on one side proves
+      // nothing about the other), and 1000 as the wide control.
+      const CRUEL_WIDTHS = [320, 360, 390, 430, 620, 720, 768, 830, 898, 900, 1000];
+      // route -> [selector that must be present, expected section.view id]
+      const CRUEL_ROUTES = [
+        { hash: "#fleet", view: "view-fleet", sel: ".fleet-url", ready: ".fleet-row" },
+        { hash: "#overview", view: "view-overview", sel: ".instance-card-name", ready: ".instance-card" },
+      ];
+      // ANTI-VACUITY 0 — the axes. A leg that lost the cruel scenario, or the
+      // kind control, or the sub-899 band, passes for the wrong reason.
+      if (!CRUEL_SCENS.includes("fleet-cruel-content")) {
+        fail(D, `axis check: \`fleet-cruel-content\` is not in the scenario set — it is the ONLY fixture in the corpus carrying server-legal worst-case content, so without it this leg measures the kind corpus every other leg already measures`);
+      }
+      if (!CRUEL_SCENS.includes("mixed-fleet")) {
+        fail(D, `axis check: no KIND scenario in the set — without one, a bound that fixes the cruel row by shredding today's rendering scores a clean sweep`);
+      }
+      if (!CRUEL_WIDTHS.some((w) => w <= 899) || !CRUEL_WIDTHS.some((w) => w >= 900)) {
+        fail(D, `axis check: the width set does not straddle 899 — \`.fleet-row\` is column-direction below and row-direction above, so a bound proven on one side is unproven on the other`);
+      }
+      const cellCount = CRUEL_SCENS.length * CRUEL_WIDTHS.length * CRUEL_ROUTES.length * 2;
+      process.stdout.write(
+        `\n${D} — ${CRUEL_SCENS.length} scenarios x ${CRUEL_ROUTES.length} routes x ${CRUEL_WIDTHS.length} widths x 2 themes` +
+        ` (${cellCount} cells; .fleet-url + .instance-card-name scrollWidth vs clientWidth, + documentElement.scrollWidth vs clientWidth)\n`,
+      );
+      let cells = 0, seen = 0, spilled = 0, pageOver = 0;
+      for (const route of CRUEL_ROUTES) {
+        for (const scen of CRUEL_SCENS) {
+          for (const theme of ["light", "dark"]) {
+            // Enter WIDE and assert the landed view — `?scen=` alone renders
+            // #overview and the fleet table goes phantom (the W13/W15 note).
+            await setViewport(1000);
+            await nav(
+              `${BASE}/?scen=${scen}&theme=${theme}${route.hash}`,
+              `document.querySelector('${route.ready}') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='${route.view}';})()`,
+            );
+            const row = [];
+            for (const width of CRUEL_WIDTHS) {
+              await setViewport(width);
+              const m = await evalJs(
+                `(function(){` +
+                `var v=document.querySelector('section.view:not([hidden])');` +
+                `var d=document.documentElement;` +
+                `var out={view:v?v.id:'none',theme:d.getAttribute('data-theme'),psw:d.scrollWidth,pcw:d.clientWidth,n:0,bad:[],worst:0};` +
+                `[].slice.call(document.querySelectorAll(${JSON.stringify(route.sel)})).forEach(function(e,i){` +
+                // A node with no text can never clip and must not be counted as
+                // a measured assertion (the vacuous-green vector W20-S3 named on
+                // `.instance-card-url`: a provisioning box renders the node empty).
+                `  var t=(e.textContent||'').trim(); if(!t) return;` +
+                `  out.n++;` +
+                `  if(e.scrollWidth>out.worst) out.worst=e.scrollWidth;` +
+                `  if(e.scrollWidth>e.clientWidth) out.bad.push({i:i,len:t.length,sw:e.scrollWidth,cw:e.clientWidth,t:t.slice(0,28)});` +
+                `});` +
+                `return out;})()`,
+              );
+              cells++;
+              if (m.view !== route.view) {
+                fail(D, `${scen}/${theme}@${width}${route.hash}: rendered section.view "${m.view}", asked for "${route.view}" — the hash did not route, so nothing below this line measures ${route.sel}`);
+                row.push(`${width}:?`);
+                continue;
+              }
+              if (m.theme !== theme) fail(D, `${scen}/${theme}@${width}${route.hash}: data-theme is "${m.theme}" — the theme did not apply`);
+              if (m.n === 0) {
+                fail(D, `${scen}/${theme}@${width}${route.hash}: zero NON-EMPTY \`${route.sel}\` rendered — nothing was measured, this is not a pass`);
+                row.push(`${width}:0`);
+                continue;
+              }
+              seen += m.n;
+              if (m.psw > m.pcw) {
+                pageOver++;
+                fail(D, `${scen}/${theme}@${width}${route.hash}: documentElement.scrollWidth ${m.psw} > clientWidth ${m.pcw} — ${m.psw - m.pcw}px of the page is off-screen sideways. \`${route.sel}\` has no bound, so it never clips ITSELF: it pushes the PAGE, which is invisible to an element-only scorer`);
+              }
+              for (const b of m.bad) {
+                spilled++;
+                fail(D, `${scen}/${theme}@${width}${route.hash} el${b.i} \`${route.sel}\`: scrollWidth ${b.sw} > clientWidth ${b.cw} — ${Math.round((1 - b.cw / b.sw) * 100)}% of a ${b.len}-character value ("${b.t}…") is not rendered, and the box computes overflow:visible so the remainder paints THROUGH its neighbour`);
+              }
+              row.push(`${width}:${m.n}x${m.worst}${m.bad.length ? "!" + m.bad.length : ""}${m.psw > m.pcw ? "P" + (m.psw - m.pcw) : ""}`);
+            }
+            process.stdout.write(`   ${route.hash} ${scen}/${theme}  ${row.join(" ")}\n`);
+          }
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean (${seen} non-empty ${CRUEL_ROUTES.map((r) => r.sel).join(" / ")} measured) across ` +
+          `${CRUEL_WIDTHS.join("/")} on ${CRUEL_SCENS.join(" + ")}; ${spilled} text hosts wider than their own box, ` +
+          `${pageOver} pages scrolling sideways. Cells print count x worst scrollWidth, so a bound that merely HIDES ` +
+          `the overflow is readable as a worst number that never falls`,
+        );
+        okLine(
+          `the ROBUST claim is the RATIO — the KIND corpus (\`mixed-fleet\`, 32-char host / 10-char name) and the ` +
+          `CRUEL one (253/255, the server's own caps) now score the SAME on both assertions. Every px above is ` +
+          `FONT-CONDITIONAL (D218): this guard never awaits document.fonts.ready and never asserts which face resolved`,
         );
       }
     }

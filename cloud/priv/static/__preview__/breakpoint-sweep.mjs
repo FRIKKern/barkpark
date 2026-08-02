@@ -375,7 +375,7 @@ export const RESIDUE_FAMILY_REASONS = {
   "hash:#billing": "Billing is swept by two cells (trial tiers, past-due manage) — including the 230px tier floor s3 guards. These 3 vary member-role, cancelling copy and the portal return inside those same panels.",
   "hash:#operator": "The operator console is swept by two cells (console, halted). These 3 vary zero-staging / denied / unreadable states of the same panels.",
   "hash:#notifications": "Notifications are swept by two cells (configured, deliveries-error). These 2 are the empty and member-role variants of #notif-matrix.",
-  "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). This one is the v4 row variant of the same table.",
+  "hash:#fleet": "The fleet screen is swept by two cells (mixed fleet, archives). These 2 are the same table with different CONTENT: `fleet-v4` is the v4 row variant, and `fleet-cruel-content` (cch-w21-s3) is the deliberately CRUEL twin — a 253-char custom_host and a 255-char name, both at the server's own validate_length caps. Content length is overflow-guard's axis, not this sweep's: this sweep walks WIDTHS against a fixed corpus, and a fixture built to overflow every width would red every cell of the breakpoint walk for a reason the walk does not own. It is driven, at 11 widths x 2 themes x 2 routes, by overflow-guard's W21-cruel-content-text-bounded leg.",
   "hash:#signup": "The logged-out signup screen: no authed shell, and the sign-in surface is a single centred card with no grid to fold.",
 };
 
@@ -391,14 +391,18 @@ export const RESIDUE_FAMILY_REASONS = {
 // mutations — it swallows a new scenario with no deepLink, swallows one inside
 // the 21-member `hash:#instance` family, and goes green while its entry rots
 // when a multi-member-family scenario gains a cell.
-// THE CENSUS THIS RECONCILES AGAINST: 100 scenarios · 26 cells over 25 DISTINCT
-// scenarios (mixed-fleet is used twice) · residue exactly 75 · 13 families.
-// `familyOf` over all 100 gives 15; the two with ZERO residue are `hash:#sites`
-// and `hash:#activity`. 75 is the RESIDUE, not the census.
+// THE CENSUS THIS RECONCILES AGAINST: 101 scenarios · 26 cells over 25 DISTINCT
+// scenarios (mixed-fleet is used twice) · residue exactly 76 · 13 families.
+// cch-w21-s3 moved it by one: `fleet-cruel-content` is the 101st scenario and
+// the 76th residue entry, and the sweep REFUSED at exit 2 ("UNLISTED scenario
+// \"fleet-cruel-content\" (family hash:#fleet)") until this line and the entry
+// below were written. That refusal is the literal doing its job, not friction.
+// `familyOf` over all 101 gives 15; the two with ZERO residue are `hash:#sites`
+// and `hash:#activity`. 76 is the RESIDUE, not the census.
 // EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED (cch-w18-s4, D213):
 // `scenarioReport({ scenarios: SCENARIOS })` prints
-// {total:100, cells:26, distinctCovered:25, residue:75, families:13, ok:true},
-// `Object.keys(SCENARIO_RESIDUE).length` is 75 and `familyOf` over all 100
+// {total:101, cells:26, distinctCovered:25, residue:76, families:13, ok:true},
+// `Object.keys(SCENARIO_RESIDUE).length` is 76 and `familyOf` over all 101
 // gives 15. The prose said 99/74 while the literal below already held 75 —
 // #8849's `sites-on-instance` moved the census and only the TEST literals
 // (breakpoint-sweep.test.mjs:516-522) were updated. A census that two files
@@ -490,8 +494,9 @@ export const SCENARIO_RESIDUE = {
   // hash:#notifications — 2
   "notif-empty": "hash:#notifications",
   "notif-member": "hash:#notifications",
-  // hash:#fleet — 1
+  // hash:#fleet — 2
   "fleet-v4": "hash:#fleet",
+  "fleet-cruel-content": "hash:#fleet",
   // hash:#signup — 1
   "loggedout-signup": "hash:#signup",
 };

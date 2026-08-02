@@ -950,8 +950,40 @@ select.form-input {
    rules (never edited here — charter GR11/GR25). */
 .fleet-status { flex: 0 0 auto; min-width: 116px; display: flex; align-items: center; }
 .fleet-main { min-width: 0; flex: 1; }
-.fleet-name { font-size: 14px; font-weight: 600; line-height: 1.3; }
-.fleet-url { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; }
+/* cch-w21-s3 — THE TWO FLEET-ROW TEXT LINES ARE BOUNDED BY THE SAME ONE-WORD
+   DECLARATION EACH, FOLDED IN PLACE (no new rule head, no new @media).
+   WHAT A PERSON SAW, driven on `fleet-cruel-content` (the epic's first
+   committed adversarial fixture: a 253-char `custom_host` and a 255-char
+   `name`, both AT the server's own `validate_length` caps — barkpark.ex:727
+   and :466 — and `publicUrl()` (`grep -n "function publicUrl" app.js`) PREFERS
+   `custom_host` over `url`, so this
+   is the dominant real input, not an edge case). At a 320 viewport the fleet
+   table measured `.fleet-url` scrollWidth 1447 against clientWidth 250 — 83%
+   of the address simply not rendered — and, because `.fleet-url` computes
+   `overflow: visible`, the remainder painted THROUGH the badge column while
+   `documentElement.scrollWidth` reached 1482: 1162px of sideways page scroll
+   with no cue. It was red at EVERY driven width, 1000 included (1447 vs 682).
+   `.fleet-name` is the same defect one line up, and it is why BOTH lines are
+   here: with only the URL bounded the page still measured 465 at 320, because
+   a real name carries an unbroken compound token the breaker cannot split.
+
+   WRAP, NOT ELLIPSIS, AND `break-word` NOT `anywhere` (D165, and the recorded
+   rejection at :2261 in this same file). An ellipsis on a hostname eats the
+   TLD — the one part that tells two boxes apart — so it trades a scrollbar
+   for a lie, which is the exact trade w20-s3 refused on `.instance-card-url`.
+   `anywhere` was already REFUSED on THIS track: it lowers the element's
+   min-content contribution, so `.fleet-main` stops registering as overflowing,
+   the badges are never asked to shrink, and the text becomes the flex-squeeze
+   loser (measured then at 36px -> 90px tall). `break-word` permits the break
+   WITHOUT lowering min-content, so the W15 row mechanics at :2270 are
+   untouched: driven after this change, `.fleet-main` still floors at 200px
+   above 900, `.fleet-badges` still sits at its exact baseline width, and the
+   KIND corpus (`mixed-fleet`) is byte-identical in every guard cell.
+   THE ROW'S PRICE, said out loud: on the CRUEL row only, the URL line goes
+   from one clipped line to a wrapped block — the row grows taller and nothing
+   is hidden. On today's content the row does not move at all. */
+.fleet-name { font-size: 14px; font-weight: 600; line-height: 1.3; overflow-wrap: break-word; }
+.fleet-url { font-size: 12px; color: var(--muted-text); font-family: var(--mono); margin-top: 3px; overflow-wrap: break-word; }
 .fleet-url.provisioning { color: var(--dim); font-family: var(--font); font-style: italic; }
 /* The mono metadata line: region · size · version · channel · autoupdate. */
 .fleet-meta { font-size: 12px; color: var(--dim); font-family: var(--mono); margin-top: 3px; }
@@ -3167,7 +3199,22 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .instance-card--info { border-left-color: var(--info); }
 .instance-card--ok { border-left-color: var(--ok); }
 .instance-card-head { display: flex; align-items: center; gap: 10px; }
-.instance-card-name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); margin-right: auto; }
+/* cch-w21-s3 — THE NAME IS BOUNDED, and it is a DIFFERENT failure shape from
+   the address line directly below it, which is why w20-s3's fix did not cover
+   it. `.instance-card-url` CLIPPED ITSELF, so a scrollWidth check could see it.
+   `.instance-card-name` has no bound at all and never clips: it is a flex item
+   in `.instance-card-head` with `min-width: auto`, so it holds its full
+   min-content width and pushes the PAGE. Driven on `fleet-cruel-content` at a
+   320 viewport, both themes: the element measured 497px inside a 288px card
+   with ZERO per-element findings, while `documentElement.scrollWidth` was 536
+   against clientWidth 320 — 216px of sideways scroll on the FRONT SCREEN, and
+   still 8px out at 768. An element-only scorer calls that host perfect.
+   BOTH DECLARATIONS ARE LOAD-BEARING: `min-width: 0` is what lets the flex
+   item shrink at all (without it `break-word` never gets a narrow enough line
+   box to break in), and `break-word` — not `anywhere`, for the min-content
+   reason recorded at :2261 — is what stops the shrink from clipping. Folded
+   into the existing rule: no new head, no new @media. */
+.instance-card-name { font-size: 16px; font-weight: 700; letter-spacing: -0.01em; color: var(--text); margin-right: auto; min-width: 0; overflow-wrap: break-word; }
 .instance-card-name:hover { color: var(--primary); }
 /* cch-w20-s3: the front screen's address line WRAPS instead of ellipsising.
    `white-space: nowrap` + `text-overflow: ellipsis` dropped the tail of a real
