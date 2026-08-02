@@ -1214,12 +1214,20 @@
 
   // ----------------------------------------------------------- eye toggle
   var EYE_SVG = '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>';
+  // Both arguments accept a SELECTOR STRING — the auth screens (#auth-eye,
+  // #reset-eye), whose ids have exactly ONE host — or an ELEMENT already
+  // resolved by the caller, which is what the credential forms pass because
+  // their ids have TWO hosts (see credQ below). The SIGNATURE does not change
+  // and this function learns nothing about scopes: the resolution is done by
+  // whoever knows which host it meant, so the two auth call sites keep working
+  // byte-for-byte.
+  function eyeTarget(x) { return typeof x === "string" ? $(x) : (x || null); }
   function toggleEye(inputSel, btnSel) {
-    var inp = $(inputSel);
+    var inp = eyeTarget(inputSel);
     if (!inp) return;
     var reveal = inp.type === "password";
     inp.type = reveal ? "text" : "password";
-    var b = $(btnSel);
+    var b = eyeTarget(btnSel);
     if (b) b.setAttribute("aria-label", reveal ? "Hide" : "Show");
   }
 
@@ -1919,7 +1927,11 @@
 
   function openProviderCredential(kind) {
     var p = providerMeta(kind);
-    openModal(
+    // The dialog binds to ITS OWN body (openModal hands it back), never through
+    // the document: the providers page renders the same ids and comes first in
+    // index.html, so a singular lookup here binds the page's controls and
+    // leaves the sheet the person is looking at completely dead.
+    var body = openModal(
       '<button class="modal-back" id="cred-back" type="button">&lsaquo; Back to providers</button>' +
       '<div class="modal-head"><span class="choice-ico ' + p.cls + '">' + esc(p.mark) + "</span>" +
         '<h2 class="modal-title" id="modal-title">' + esc(p.name) + "</h2></div>" +
@@ -1930,13 +1942,18 @@
       '<div class="cred-remediation" id="cred-remediation" role="alert" hidden></div>' +
       '<div class="modal-actions"><button class="btn btn-primary btn-block" id="cred-submit" type="button">Add provider</button></div>'
     );
-    $("#cred-back").addEventListener("click", openProviderPicker);
-    var eye = $("#cred-eye");
-    if (eye) eye.addEventListener("click", function () { toggleEye("#cred-token", "#cred-eye"); });
-    var azEye = $("#cred-az-eye");
-    if (azEye) azEye.addEventListener("click", function () { toggleEye("#cred-az-client_secret", "#cred-az-eye"); });
-    $("#cred-submit").addEventListener("click", function () { submitProviderCred(kind); });
-    var first = $("#cred-token") || $("#cred-az-tenant_id");
+    if (!body) return;
+    var back = body.querySelector("#cred-back");
+    if (back) back.addEventListener("click", openProviderPicker);
+    var eye = body.querySelector("#cred-eye");
+    var token = body.querySelector("#cred-token");
+    if (eye) eye.addEventListener("click", function () { toggleEye(token, eye); });
+    var azEye = body.querySelector("#cred-az-eye");
+    var azSecret = body.querySelector("#cred-az-client_secret");
+    if (azEye) azEye.addEventListener("click", function () { toggleEye(azSecret, azEye); });
+    var submit = body.querySelector("#cred-submit");
+    if (submit) submit.addEventListener("click", function () { submitProviderCred(kind); });
+    var first = token || body.querySelector("#cred-az-tenant_id");
     if (first) first.focus();
   }
 
@@ -1945,24 +1962,40 @@
     if (p.fields === "azure") {
       var f = {};
       AZURE_FIELDS.forEach(function (af) {
-        var el = $("#cred-az-" + af.key);
+        var el = credQ("#cred-az-" + af.key);
         f[af.key] = el ? el.value : "";
       });
       return f;
     }
-    var t = $("#cred-token");
+    var t = credQ("#cred-token");
     return { token: t ? t.value : "" };
   }
 
-  // WHICH `#cred-remediation`. TWO hosts render that id — the providers page's
-  // connect card (providerConnectCardHtml) and the credential modal
-  // (openProviderCredential) — and `#modal-root` sits AFTER `#view-providers`
-  // in index.html, so a SINGULAR `$("#cred-remediation")` always returns the
-  // page's box: open the modal over a providers page that has already painted
-  // its card and the server's instruction lands in a hidden box behind the
-  // dialog. Iterate the whole population (D228) and prefer the open dialog's.
-  function credRemediationBox() {
-    var all = [].slice.call(document.querySelectorAll("#cred-remediation"));
+  // WHICH `#cred-*`. EVERY id in the credential form has TWO hosts — the
+  // providers page's connect card (providerConnectCardHtml) and the credential
+  // modal (openProviderCredential) — and `#modal-root` sits AFTER
+  // `#view-providers` in index.html, so a SINGULAR `$("#cred-…")` always
+  // returns the PAGE's copy whether or not a dialog is open. That is eight ids
+  // (#cred-label, #cred-token, #cred-eye, #cred-submit, the four #cred-az-*
+  // and #cred-az-eye), and the damage is not cosmetic: `openProviderCredential`
+  // bound its submit handler to the PAGE's button, so over a painted providers
+  // card the dialog's "Add provider" did nothing at all — no request, no toast,
+  // no disable, and the sheet stayed open (reproduced in headless Chrome
+  // against a control cell that never painted the card). `openModal` does not
+  // hide, detach or clear `#view-providers` — it only marks `#app-shell`
+  // inert, which removes the page copy from pointer/AT reach but NOT from
+  // `document.querySelector` — so the collision does not evaporate while the
+  // dialog is up.
+  //
+  // ONE resolver for all of them (this is credRemediationBox's shape from
+  // wave 23, widened rather than joined by a ninth near-twin): iterate the
+  // whole population (D228), prefer the OPEN dialog's copy, and otherwise take
+  // the first copy that is not inside the dialog. It resolves at CALL time, so
+  // a handler bound while the dialog was up and fired after it closed reads the
+  // page's copy — which is what "the same form, whichever host is on screen"
+  // has to mean.
+  function credQ(sel) {
+    var all = [].slice.call(document.querySelectorAll(sel));
     if (!all.length) return null;
     var root = $("#modal-root");
     if (root && !root.hidden) {
@@ -1971,6 +2004,7 @@
     }
     return all.filter(function (b) { return !root || !root.contains(b); })[0] || all[0];
   }
+  function credRemediationBox() { return credQ("#cred-remediation"); }
 
   // THE INVARIANT: THE FIRST LINE OF THE REMEDIATION IS ON SCREEN, AND
   // #cred-submit REMAINS REACHABLE.
@@ -2024,7 +2058,8 @@
   function submitProviderCred(kind) {
     var p = providerMeta(kind);
     var fields = readCredentialFields(p);
-    var label = ($("#cred-label").value || "").trim();
+    var labelEl = credQ("#cred-label");
+    var label = ((labelEl && labelEl.value) || "").trim();
 
     var valid = p.fields === "azure" ? azureFieldsValid(fields) : !!(fields.token || "").trim();
     if (!valid) {
@@ -2037,9 +2072,8 @@
     var rem = credRemediationBox();
     if (rem) { rem.hidden = true; rem.innerHTML = ""; } // clear a prior failure
 
-    var btn = $("#cred-submit");
-    btn.disabled = true;
-    btn.textContent = "Verifying…";
+    var btn = credQ("#cred-submit");
+    if (btn) { btn.disabled = true; btn.textContent = "Verifying…"; }
 
     api("POST", "/v1/providers", providerCredBody(kind, fields, label)).then(function (r) {
       if (r.status === 201) {
@@ -2053,8 +2087,7 @@
         loadProviders();
         return;
       }
-      btn.disabled = false;
-      btn.textContent = "Add provider";
+      if (btn) { btn.disabled = false; btn.textContent = "Add provider"; }
       // Verify-before-save failure carries server-owned remediation (naming the
       // exact console fix) — render it in-sheet so the operator can act without
       // dismissing the form. Anything else falls back to friendly()'s copy.
@@ -2429,14 +2462,19 @@
     connect.querySelectorAll("[data-connect-kind]").forEach(function (btn) {
       btn.addEventListener("click", function () {
         renderConnectCard(list, btn.getAttribute("data-connect-kind"));
-        var f = $("#cred-token") || $("#cred-az-tenant_id");
+        // The card's OWN field, not the document's: the credential dialog
+        // renders #cred-token too, and a singular lookup here would focus the
+        // dialog's copy (or, with none open, be right only by source order).
+        var f = connect.querySelector("#cred-token") || connect.querySelector("#cred-az-tenant_id");
         if (f && f.focus) f.focus();
       });
     });
-    var eye = $("#cred-eye");
-    if (eye) eye.addEventListener("click", function () { toggleEye("#cred-token", "#cred-eye"); });
-    var azEye = $("#cred-az-eye");
-    if (azEye) azEye.addEventListener("click", function () { toggleEye("#cred-az-client_secret", "#cred-az-eye"); });
+    var eye = connect.querySelector("#cred-eye");
+    var token = connect.querySelector("#cred-token");
+    if (eye) eye.addEventListener("click", function () { toggleEye(token, eye); });
+    var azEye = connect.querySelector("#cred-az-eye");
+    var azSecret = connect.querySelector("#cred-az-client_secret");
+    if (azEye) azEye.addEventListener("click", function () { toggleEye(azSecret, azEye); });
     var submit = connect.querySelector("[data-connect-submit]");
     if (submit) submit.addEventListener("click", function () { submitInlineProviderCred(armed, list); });
   }
@@ -2454,7 +2492,7 @@
     var rotating = providerIsConnected(list, kind);
     var verb = rotating ? "Verify & replace" : "Verify & connect";
     var fields = readCredentialFields(p);
-    var label = (($("#cred-label") || {}).value || "").trim();
+    var label = ((credQ("#cred-label") || {}).value || "").trim();
     var valid = p.fields === "azure" ? azureFieldsValid(fields) : !!(fields.token || "").trim();
     if (!valid) {
       toast({ kind: "error", title: p.fields === "azure" ? "All four fields are required." : "An API key is required." });
@@ -2462,7 +2500,7 @@
     }
     var rem = credRemediationBox(); // the same box the paint below targets
     if (rem) { rem.hidden = true; rem.innerHTML = ""; }
-    var btn = $("#cred-submit");
+    var btn = credQ("#cred-submit");
     if (btn) { btn.disabled = true; btn.textContent = "Verifying…"; }
     api("POST", "/v1/providers", providerCredBody(kind, fields, label)).then(function (r) {
       if (r.status === 201) {
