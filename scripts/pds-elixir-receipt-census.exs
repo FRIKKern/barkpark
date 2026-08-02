@@ -3717,6 +3717,7 @@ defmodule PDS.Census do
     p("    routed action name at all. An arm silent about what it structurally cannot key")
     p("    inherits the exact vacuity it replaces, so the count is printed on every run.")
     p("")
+    report_liveview_population(lives, parsed, index)
 
     d |> Map.put(:disposition, disp) |> Map.put(:derivation, deriv)
   end
@@ -3795,6 +3796,388 @@ defmodule PDS.Census do
     p("      from a caller-supplied id read as store-derived.")
     p("")
   end
+
+  # -------------------------------------------- the LiveView WRITE population (L5)
+  #
+  # THE MOUNT COUNT IS NOT THE POPULATION (PDS wave 41). The block above prints how many
+  # ROUTE ENTRIES mount a LiveView, and that is the honest count of a thing nobody writes
+  # through: a mount performs no write. The writes live in `handle_event/3`, and until
+  # wave 41 the census had no denominator for them at all — so an exclusion whose count
+  # was printed was still an exclusion whose SIZE was unknown, which is the same silence
+  # one indirection out.
+  #
+  # EVERYTHING BELOW IS DERIVED IN-PROCESS THROUGH THIS CENSUS'S OWN RESOLVER
+  # (parse_file -> build_index -> bfs/verb_hits/callees). Membership is an AST shape — a
+  # def named `handle_event` at arity 3 — never a name regex, and never a `live_session`
+  # NAME (`:plugin_public` is EMPTY in this tree, so a name-keyed population silently
+  # drops the anonymous rows). Routed-ness is reachability from a ROUTE: the module the
+  # router names, joined to the module the def lives in.
+  #
+  # NO ARM READS ANY NUMBER THIS BLOCK PRINTS. It is a denominator for the NEXT wave to
+  # judge against, and a print-only surface cannot manufacture a green.
+  #
+  # WHY EVERY FIGURE CARRIES A DENOMINATOR AND A DEPTH. The write-reaching numerators are
+  # IDENTICAL over the routed 235 and the full 322 at every depth measured, because every
+  # component clause is write-FALSE everywhere. Only the FRACTION tells the two lenses
+  # apart, so a bare integer here would be unfalsifiable BY CONSTRUCTION — no run output
+  # could ever catch it. That is why `n / d @depth` is the only shape used below.
+  @lv_sweep [1, 2, 3, 4, 5, 6, 7, 8]
+  @lv_beyond [9, 10, 12, 14]
+
+  # THE PROCESS BOUNDARY, NAMED AS A SHAPE. `GenServer.call/2,3` leaves the caller's call
+  # graph: callees/2 resolves no edge across it, so bfs/7 stops and the write on the far
+  # side is invisible to every column above. Matched on the ALIAS TAIL, the same rule
+  # @repo_mods rides.
+  @lv_boundary_mod :GenServer
+  @lv_boundary_funs [:call, :cast, :multi_call]
+
+  defp report_liveview_population(lives, parsed, index) do
+    route_mods = lives |> Enum.map(fn {_, _, mod, _} -> mod end) |> MapSet.new()
+    pop = Enum.filter(index.defs, &(&1.name == :handle_event and &1.arity == 3))
+    tele = Enum.filter(index.defs, &(&1.name == :handle_event and &1.arity == 4))
+
+    p("  THE LIVEVIEW WRITE POPULATION — DERIVED THIS RUN, NEVER TRANSCRIBED (wave 41)")
+    p("  ------------------------------------------------------------------------")
+
+    case pop do
+      [] ->
+        p("    0 / #{length(index.defs)} corpus def(s) are handle_event/3 in this corpus — NOT A PASS, and")
+        p("    not a claim about the real tree either. A population of zero is printed so")
+        p("    the absence is a measurement, not a block that quietly did not run.")
+        p("")
+
+      _ ->
+        lv_report(pop, tele, route_mods, parsed, index)
+    end
+  end
+
+  defp lv_report(pop, tele, route_mods, parsed, index) do
+    routed? = &MapSet.member?(route_mods, lv_mod(&1))
+    {routed, comp} = Enum.split_with(pop, routed?)
+    n = length(pop)
+    nr = length(routed)
+    nc = length(comp)
+    raw = n + length(tele)
+
+    files = pop |> Enum.map(& &1.path) |> Enum.uniq()
+    mods = pop |> Enum.map(&lv_mod/1) |> Enum.uniq()
+    comp_files = comp |> Enum.map(& &1.path) |> Enum.uniq()
+    empty_mods = Enum.reject(route_mods, fn m -> Enum.any?(pop, &(lv_mod(&1) == m)) end)
+
+    nm = length(index.modules)
+
+    p("    POPULATION  #{n} / #{length(index.defs)} corpus def(s), over #{length(files)} / #{length(parsed)} corpus file(s)")
+    p("                in #{length(mods)} / #{nm} corpus module(s)")
+    p("      ROUTED     #{nr} / #{n} (#{lv_pct(nr, n)}) — clauses in the #{MapSet.size(route_mods)} / #{nm} module(s) the")
+    p("                 live route(s) name")
+    p("      COMPONENT  #{nc} / #{n} (#{lv_pct(nc, n)}) — LiveComponent clauses in #{length(comp_files)} / #{length(files)} file(s), no")
+    p("                 route of their own, so no {method, path} key can ever reach them")
+    p("      THE NAME-KEYED COUNT IS THE DENOMINATOR #{raw}, NOT THE POPULATION: #{n} / #{raw} are")
+    p("      arity 3, and #{length(tele)} / #{raw} are handle_event/4 telemetry callback(s) over")
+    p("      #{tele |> Enum.map(& &1.path) |> Enum.uniq() |> length()} / #{length(parsed)} file(s) — #{Enum.count(tele, &(&1.path in files))} / #{raw} of them in a file that carries a")
+    p("      handle_event/3 clause at all. The split is by ARITY off the def table: a")
+    p("      grep cannot see an arity and does not, which is how a name-keyed")
+    p("      derivation lands #{length(tele)} / #{raw} too high.")
+    p("      #{length(empty_mods)} / #{MapSet.size(route_mods)} routed module(s) carry ZERO handle_event/3 clause(s), which is why")
+    p("      the mount count cannot stand in for this one in either direction.")
+    p("")
+
+    rows =
+      Enum.map(@lv_sweep ++ @lv_beyond, fn depth ->
+        hits = Enum.filter(pop, &elem(lv_bfs(&1, index, depth), 0))
+        %{depth: depth, full: length(hits), routed: Enum.count(hits, routed?)}
+      end)
+
+    last = List.last(rows)
+    closes = Enum.find(rows, last, &(&1.full == last.full))
+    at_max = Enum.find(rows, last, &(&1.depth == @max_depth))
+    monotone? = rows |> Enum.map(& &1.full) |> then(&(&1 == Enum.sort(&1)))
+
+    p("    WRITE-REACHING BY DEPTH — EVERY ROW A FLOOR, BOTH REASONS PRINTED BELOW")
+    p("      depth   routed             full")
+
+    Enum.each(rows, fn r ->
+      mark =
+        cond do
+          r.depth == @max_depth -> "   <- @max_depth, the census budget"
+          r.depth == closes.depth -> "   <- the relation CLOSES here"
+          r.depth > @max_depth -> "   (past the census depth)"
+          true -> ""
+        end
+
+      p("      #{String.pad_leading(to_string(r.depth), 2)}   #{pad(r.routed)} / #{nr} #{lv_cell(r.routed, nr)}  #{pad(r.full)} / #{n} #{lv_cell(r.full, n)}#{mark}")
+    end)
+
+    p("")
+    p("      THE RELATION CLOSES AT #{closes.depth} — #{last.full} / #{n} @#{closes.depth} and FLAT at #{last.full} / #{n} through depths")
+    p("      #{Enum.map_join(Enum.filter(rows, &(&1.depth > closes.depth)), ", ", &to_string(&1.depth))}. Measured PAST closure on purpose: a closure claim that stops")
+    p("      at the closure has not observed the thing it asserts. Monotone in the budget:")
+    p("      #{if monotone?, do: "YES", else: "NO — the sweep FELL somewhere; read the table, not this line"}.")
+    at7 = Enum.find(rows, at_max, &(&1.depth == 7))
+    p("      A TRANSCRIBED FIGURE IS REFUTED HERE: this run reads #{at7.routed} / #{nr} @7, so a note")
+    p("      carrying #{last.full} / #{nr} @7 is off by #{last.full - at7.routed} / #{nr} and was copied, not measured.")
+    p("      @max_depth is #{@max_depth} and is NOT changed by this block: #{at_max.routed} / #{nr} @#{@max_depth} is what the")
+    p("      census's own budget sees; #{closes.full} / #{nr} @#{closes.depth} is what the relation closes at. BOTH")
+    p("      are printed, because a lens that prints one of them is choosing an answer.")
+    p("      FLOOR, REASON 1 — THE DEPTH BUDGET. #{at_max.routed} / #{nr} @#{@max_depth} rises to #{closes.routed} / #{nr} @#{closes.depth}.")
+    p("      FLOOR, REASON 2 — THE KEY. bfs/7's seen-set and callees/2's uniq_by are BOTH")
+    p("      {module, name, arity}, so exactly ONE clause per callee key is ever entered. A")
+    p("      write living in a SECOND clause of an already-visited key is invisible at")
+    p("      EVERY depth, and no budget buys it back. Neither reason is an estimate.")
+    p("      THE SWEEP IS DENOMINATOR-BLIND: the routed and full NUMERATORS are identical")
+    p("      at every depth above (all #{nc} / #{nc} component clauses are write-FALSE at every")
+    p("      depth), so only the FRACTION tells the two lenses apart — #{lv_pct(at_max.routed, nr)} vs #{lv_pct(at_max.full, n)} @#{@max_depth}.")
+    p("      A bare integer here could not be caught by any run output. Hence none is bare.")
+    p("")
+
+    lv_report_boundary(routed, comp, nr, nc, closes.depth, index)
+    lv_report_keys(routed, pop, nr, n)
+    lv_report_hooks(comp, n, nc, index)
+    lv_report_hole(route_mods, comp, parsed, closes.depth, index)
+  end
+
+  # THE PROCESS BOUNDARY — THREE FIGURES, THREE UNITS, AND THE SUM IS THE ERROR.
+  defp lv_report_boundary(routed, comp, nr, nc, closes, index) do
+    deep = List.last(@lv_beyond)
+
+    routed_cross =
+      fn depth ->
+        Enum.filter(routed, fn c ->
+          {w, vis} = lv_bfs(c, index, depth)
+          not w and lv_crosses?(vis)
+        end)
+      end
+
+    rc_max = routed_cross.(@max_depth)
+    rc_close = routed_cross.(closes)
+
+    comp_vis = Enum.map(comp, fn c -> {c, elem(lv_bfs(c, index, deep), 1)} end)
+    comp_cross = Enum.filter(comp_vis, fn {_, vis} -> lv_crosses?(vis) end)
+    cross_files = comp_cross |> Enum.map(fn {c, _} -> c.path end) |> Enum.uniq()
+
+    hc = Enum.filter(index.defs, &(&1.name == :handle_call and &1.arity == 3))
+
+    hc_by_tag =
+      hc
+      |> Enum.flat_map(fn d -> lv_tagged(lv_tag(List.first(lv_args(d.head))), d) end)
+      |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+
+    joins =
+      Enum.map(comp_cross, fn {_, vis} ->
+        vis |> lv_tags() |> Enum.filter(&Map.has_key?(hc_by_tag, &1))
+      end)
+
+    joined = Enum.count(joins, &(&1 != []))
+    tags = joins |> List.flatten() |> Enum.uniq()
+
+    p("    THE PROCESS BOUNDARY — THREE FIGURES IN THREE UNITS, AND THE SUM IS THE ERROR")
+    p("      A #{@lv_boundary_mod}.#{hd(@lv_boundary_funs)}/2,3 leaves the caller's call graph: callees/2 resolves no")
+    p("      edge across it, so every write column above stops at the send. Three separate")
+    p("      figures, and adding them is a UNIT ERROR — different denominators, different")
+    p("      depth regimes, and one of them does not count clauses at all:")
+    p("        #{length(comp_cross)} / #{nc} @any  component clause(s) crossing a boundary, in")
+    p("                       #{length(cross_files)} / #{length(Enum.uniq(Enum.map(comp, & &1.path)))} component file(s). Depth-invariant: they cross at")
+    p("                       every budget measured.")
+    p("        #{length(rc_close)} / #{nr} @#{closes}   routed clause(s) that cross a boundary and are NOT")
+    p("                       write-reaching (#{length(rc_max)} / #{nr} @#{@max_depth}). These sit in NO write column")
+    p("                       above — the third term a two-way sum drops on the floor.")
+    p("        #{length(tags)} / #{map_size(hc_by_tag)}        handle_call/3 LITERAL TAG(S) the crossing clauses join")
+    p("                       to, out of every literal-tagged handle_call/3 in the corpus:")
+
+    Enum.each(tags, fn t ->
+      Enum.each(Map.fetch!(hc_by_tag, t), fn d ->
+        prof =
+          Enum.map_join([4, @max_depth, closes, 10, 12], " ", fn depth ->
+            "#{depth}:#{if elem(lv_bfs(d, index, depth), 0), do: "W", else: "-"}"
+          end)
+
+        p("                       #{inspect(t)} -> #{label(d)}")
+        p("                         write-reach by depth  #{prof}")
+      end)
+    end)
+
+    p("      THE JOIN IS MADE ON THE LITERAL TAG, NEVER ON THE OPAQUE HOP. #{joined} / #{length(comp_cross)} of the")
+    p("      crossing clauses carry a LITERAL tuple tag somewhere in the def set the bfs")
+    p("      entered, and that tag matches a handle_call/3 head. The def that actually")
+    p("      calls #{@lv_boundary_mod} takes its message as a PARAMETER, so a join attempted there")
+    p("      matches nothing: joining at the opaque hop credits 0 / #{nc}, joining blindly")
+    p("      credits #{length(comp_cross)} / #{nc} at the WRONG depth, and the measured answer is #{length(comp_cross)} / #{nc}")
+    p("      reaching a handle_call clause itself write-reaching only from the depth in the")
+    p("      row above. A WAVE-40 FIGURE IS RETIRED HERE: any single number that adds a")
+    p("      depth-#{@max_depth} count over the routed #{nr} to a depth-invariant count over the #{nc}")
+    p("      is not a bigger truth, it is two denominators in a trench coat.")
+    p("")
+  end
+
+  # THE CLAUSE HEAD THAT NAMES NO EVENT. A bare variable head matches EVERY event, so any
+  # per-event allowlist keyed on the head is blind to it — printed in BOTH units because
+  # the routed lens and the repo-wide lens disagree by exactly the component clauses.
+  defp lv_report_keys(routed, pop, nr, n) do
+    kr = Enum.frequencies_by(routed, &lv_key_class/1)
+    ka = Enum.frequencies_by(pop, &lv_key_class/1)
+    br = Map.get(kr, :bare_var, 0)
+    ba = Map.get(ka, :bare_var, 0)
+
+    p("    NON-LITERAL EVENT KEYS — the clause head names no event at all")
+    p("      #{br} / #{nr} routed (#{lv_pct(br, nr)})  ·  #{ba} / #{n} repo-wide (#{lv_pct(ba, n)}) — the difference is")
+    p("      #{ba - br} / #{n - nr} component clause(s), so the two units are not interchangeable here.")
+    p("      SHAPE, MEASURED: #{ba} / #{ba} are BARE VARIABLE heads. #{Map.get(ka, :other, 0)} / #{ba} are concatenations or")
+    p("      computed keys, and #{Map.get(ka, :none, 0)} / #{ba} have no first argument at all. A bare head")
+    p("      matches EVERY event that reaches it, so a per-event allowlist keyed on the")
+    p("      head sees none of these — they are the shape a name-keyed gate cannot hold.")
+    p("      (Literal heads: #{Map.get(ka, :literal, 0)} / #{n}.)")
+    p("")
+  end
+
+  # UNGATEABLE-BY-HOOK. Counted here, fixed elsewhere: a component's handle_event never
+  # passes through a socket-level attach_hook, so the hook count and the population are
+  # printed together rather than either being assumed from the other.
+  defp lv_report_hooks(comp, n, nc, index) do
+    hooks = lv_hooks(index)
+    ev = Enum.filter(hooks, &(elem(&1, 1) == :handle_event))
+    hook_mods = ev |> Enum.map(fn {d, _} -> lv_mod(d) end) |> Enum.uniq()
+
+    p("    UNGATEABLE-BY-HOOK — a fourth column, new in wave 41")
+    p("      #{nc} / #{n} clause(s) are LiveComponent-targeted and therefore outside EVERY")
+    p("      socket-level attach_hook in this corpus. THE HOOK INVENTORY IS DERIVED TOO,")
+    p("      through expand_pipes/1: a piped `|> attach_hook(...)` carries THREE args in")
+    p("      the AST, so a matcher that only knows the four-arg shape undercounts silently.")
+    p("        of the #{length(hooks)} attach_hook callsite(s) in the corpus, #{length(ev)} / #{length(hooks)} are at the")
+    p("        :handle_event stage, across #{length(hook_mods)} / #{length(index.modules)} corpus module(s).")
+    p("      A component event is delivered to the COMPONENT, so 0 / #{length(ev)} of those")
+    p("      socket-stage hooks run for #{nc} / #{n} of it. COUNTED HERE, NOT FIXED")
+    p("      HERE — a census that repairs its own denominator cannot be read afterwards.")
+    wrap("component file(s): " <> (comp |> Enum.map(& &1.path) |> Enum.uniq() |> Enum.map_join(", ", &short/1)), "      ", "  ")
+    p("")
+  end
+
+  # A NAMED HOLE. handle_info/2 and handle_params/3 are writes NOBODY CLICKED — timers,
+  # PubSub deliveries, live patches — and nothing in this census disposes them. Named with
+  # its own denominator so the silence is a fact on every run rather than an omission.
+  defp lv_report_hole(route_mods, comp, parsed, closes, index) do
+    paths =
+      index.defs
+      |> Enum.filter(&MapSet.member?(route_mods, lv_mod(&1)))
+      |> Enum.map(& &1.path)
+      |> Enum.concat(Enum.map(comp, & &1.path))
+      |> MapSet.new()
+
+    hole =
+      Enum.filter(index.defs, fn d ->
+        ((d.name == :handle_info and d.arity == 2) or (d.name == :handle_params and d.arity == 3)) and
+          MapSet.member?(paths, d.path)
+      end)
+
+    h = length(hole)
+    files = hole |> Enum.map(& &1.path) |> Enum.uniq() |> length()
+    w_max = Enum.count(hole, &elem(lv_bfs(&1, index, @max_depth), 0))
+    w_close = Enum.count(hole, &elem(lv_bfs(&1, index, closes), 0))
+
+    p("    A NAMED HOLE, WITH ITS OWN DENOMINATOR: handle_info/2 + handle_params/3")
+    p("      #{h} / #{length(index.defs)} corpus def(s), over #{files} / #{MapSet.size(paths)} live file(s) (#{MapSet.size(paths)} / #{length(parsed)} corpus file(s)")
+    p("      carry a live module or a LiveComponent). Write-reaching #{w_max} / #{h} @#{@max_depth} and")
+    p("      #{w_close} / #{h} @#{closes} — #{w_close - w_max} / #{h} clause(s) bigger at closure than at the census")
+    p("      depth, on a surface no column above counts at all. These are writes a USER")
+    p("      NEVER CLICKED: a timer, a PubSub delivery, a live patch. NOTHING in this")
+    p("      census disposes them, and the count is printed so that sentence is")
+    p("      checkable rather than merely admitted.")
+    p("")
+  end
+
+  # -- the LiveView population's own primitives (all read the census resolver) --
+
+  defp lv_mod(d), do: Enum.join(d.module, ".")
+
+  defp lv_pct(_n, 0), do: "n/a"
+  defp lv_pct(n, d), do: "#{:erlang.float_to_binary(n / d * 100, decimals: 1)}%"
+
+  defp lv_cell(n, d), do: String.pad_leading("(" <> lv_pct(n, d) <> ")", 8)
+
+  defp lv_bfs(d, index, max) do
+    {verbs, _found, _chain} = bfs([{d, 0, [label(d)]}], index, MapSet.new(), %{}, nil, [], max)
+    {Map.has_key?(verbs, :write), Map.get(verbs, :visited, [])}
+  end
+
+  defp lv_args({:when, _, [h | _]}), do: lv_args(h)
+  defp lv_args({name, _, args}) when is_atom(name) and is_list(args), do: args
+  defp lv_args(_), do: []
+
+  defp lv_key_class(d) do
+    case List.first(lv_args(d.head)) do
+      {:__block__, _, [v]} when is_binary(v) or is_atom(v) -> :literal
+      v when is_binary(v) or is_atom(v) -> :literal
+      {name, _, ctx} when is_atom(name) and is_atom(ctx) -> :bare_var
+      nil -> :none
+      _ -> :other
+    end
+  end
+
+  defp lv_tag({:{}, _, [{:__block__, _, [t]} | _]}) when is_atom(t), do: t
+  defp lv_tag({{:__block__, _, [t]}, _}) when is_atom(t), do: t
+  defp lv_tag(_), do: nil
+
+  defp lv_tagged(nil, _d), do: []
+  defp lv_tagged(t, d), do: [{t, d}]
+
+  defp lv_crosses?(defs) do
+    Enum.any?(defs, fn d ->
+      Enum.any?(d[:calls] || raw_calls(d), fn
+        {:remote, segs, f, _a} -> List.last(segs) == @lv_boundary_mod and f in @lv_boundary_funs
+        _ -> false
+      end)
+    end)
+  end
+
+  defp lv_tags(defs) do
+    defs
+    |> Enum.flat_map(fn
+      %{body: nil} ->
+        []
+
+      %{body: body} ->
+        {_, acc} =
+          body
+          |> expand_pipes()
+          |> Macro.prewalk([], fn
+            {_f, _m, args} = node, acc when is_list(args) ->
+              {node, Enum.reduce(args, acc, fn a, s -> lv_tagged(lv_tag(a), :_) ++ s end)}
+
+            node, acc ->
+              {node, acc}
+          end)
+
+        Enum.map(acc, &elem(&1, 0))
+    end)
+    |> Enum.uniq()
+  end
+
+  defp lv_hooks(index) do
+    Enum.flat_map(index.defs, fn
+      %{body: nil} ->
+        []
+
+      d ->
+        {_, acc} =
+          d.body
+          |> expand_pipes()
+          |> Macro.prewalk([], fn
+            {{:., _, [_m, :attach_hook]}, _, [_s, _n, stage, _f]} = node, acc ->
+              {node, [{d, lv_stage(stage)} | acc]}
+
+            {:attach_hook, _, [_s, _n, stage, _f]} = node, acc ->
+              {node, [{d, lv_stage(stage)} | acc]}
+
+            node, acc ->
+              {node, acc}
+          end)
+
+        acc
+    end)
+  end
+
+  defp lv_stage({:__block__, _, [a]}) when is_atom(a), do: a
+  defp lv_stage(a) when is_atom(a), do: a
+  defp lv_stage(_), do: :__opaque__
 
   # WHAT THE ROUTE LENS ITSELF CANNOT SEE. The blind shapes are NAMED with their line, and
   # the resolved-macro count is DERIVED from the AST — a plain `grep -c` over router.ex
