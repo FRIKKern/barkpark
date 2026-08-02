@@ -97,6 +97,7 @@ import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { SCENARIOS } from "./scenarios.mjs";
+import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 
@@ -108,6 +109,22 @@ const DEFAULT_SCEN = [
   "account-modal-2fa-on",
   "account-modal-2fa-badcode",
 ];
+
+// The honest scope of this file's font pin, printed on EVERY run — a healthy
+// one and a refusing one. Measured, not assumed:
+//
+//   $ grep -rn 'modal-oracle' .github/workflows/ scripts/
+//   (no output)
+//
+// ZERO CI jobs and ZERO scripts invoke this oracle, so its exit 2 is read by
+// nobody today. The pin below buys EVIDENCE — a human running this by hand
+// learns which face resolved — and NOT enforcement. Saying so here is the
+// difference between "three instruments are pinned" and "three instruments are
+// gated"; only the first is true.
+const ORACLE_CI_SCOPE =
+  "font pin scope: this oracle is invoked by ZERO CI jobs and ZERO scripts " +
+  "(grep -rn 'modal-oracle' .github/workflows/ scripts/ → no hits), so its exit 2 " +
+  "buys evidence for whoever runs it by hand, not enforcement.";
 
 // Viewport. 900px tall on purpose: it is shorter than the 9-session account
 // card, which is what makes assertion 3 meaningful.
@@ -497,7 +514,8 @@ async function main() {
     if (!devPort) throw new Error("Chrome never wrote DevToolsActivePort — it did not start");
 
     const version = await (await fetch(`http://127.0.0.1:${devPort}/json/version`)).json();
-    process.stdout.write(`>> ${version.Browser} · node ${process.version}\n\n`);
+    process.stdout.write(`>> ${version.Browser} · node ${process.version}\n`);
+    process.stdout.write(`>> ${ORACLE_CI_SCOPE}\n\n`);
     cdp = await Cdp.connect(version.webSocketDebuggerUrl);
 
     const { targetId } = await cdp.send("Target.createTarget", { url: "about:blank" });
@@ -535,6 +553,33 @@ async function main() {
           await sleep(100);
         }
         if (!opened) await sleep(300); // let the assertion report the honest not-open state
+
+        // ── THE FONT PIN (D218) ───────────────────────────────────────────────
+        // card= heights, root scroll heights and every clipping verdict below
+        // are layouts of whatever face resolved. Pinned AFTER the modal-open
+        // poll (the modal must exist before its type matters) and BEFORE the
+        // assertion runs.
+        //
+        // EXIT 2 BY HAND, NOT BY THROW. The enclosing catch maps every throw to
+        // process.exit(1) — "a modal defect was measured". A missing woff2 is
+        // an ENVIRONMENT fault; laundering it into exit 1 is exactly the
+        // confusion this pin exists to end, so the refusal tears down and exits
+        // here rather than raising.
+        const pin = await cdp.send("Runtime.evaluate", {
+          expression: FONT_PIN_JS, returnByValue: true, awaitPromise: true,
+        }, sessionId).catch((err) => ({ __cdpError: err }));
+        const pinReport = pin && pin.__cdpError === undefined && !pin.exceptionDetails
+          ? pin.result.value
+          : null;
+        if (!pinReport || !pinReport.ok) {
+          await teardown();
+          process.stderr.write(
+            "\n!! ORACLE (exit 2): " + fontPinRefusal(label, pinReport) + "\n",
+          );
+          process.stderr.write(`   ${ORACLE_CI_SCOPE}\n`);
+          process.stderr.write(`   teardown ${teardownMs}ms\n`);
+          process.exit(2);
+        }
 
         const evald = await cdp.send("Runtime.evaluate", {
           expression: ASSERT_JS, returnByValue: true, awaitPromise: false,

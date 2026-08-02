@@ -161,6 +161,7 @@ import os from "node:os";
 import path from "node:path";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { FONT_PIN_JS, fontPinRefusal } from "./font-pin.mjs";
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.resolve(HERE, ".."); // cloud/priv/static
@@ -658,11 +659,50 @@ async function main() {
   const setViewport = (width, height = HEIGHT) =>
     cdp.send("Emulation.setDeviceMetricsOverride", { width, height, deviceScaleFactor: 1, mobile: false }, sessionId);
 
+  // THE FONT PIN (D218). Every width this file asserts is a layout of whatever
+  // face resolved, so until both families are proven present every green here
+  // is font-conditional. Runs AFTER the ready poll and BEFORE any measurement:
+  // load() every declared weight, await fonts.ready, then check() — see
+  // font-pin.mjs for why load() is necessary rather than belt-and-braces.
+  //
+  // Needs its OWN Runtime.evaluate: evalJs above omits awaitPromise, so it
+  // would hand back an unresolved Promise handle instead of the verdict.
+  //
+  // A refusal is exit 2 via die() — a missing woff2 is an ENVIRONMENT fault,
+  // never a measured overflow.
+  const pinFonts = async (url) => {
+    let report = null;
+    try {
+      const r = await cdp.send(
+        "Runtime.evaluate",
+        { expression: FONT_PIN_JS, returnByValue: true, awaitPromise: true },
+        sessionId,
+      );
+      if (r.exceptionDetails) {
+        return die(fontPinRefusal(url, null) +
+          ` The pin itself threw: ${r.exceptionDetails.exception?.description || r.exceptionDetails.text}`);
+      }
+      report = r.result.value;
+    } catch (err) {
+      return die(fontPinRefusal(url, null) + ` CDP evaluate failed: ${err.message}`);
+    }
+    // DELIBERATELY SILENT on success. A healthy run's output must stay
+    // BYTE-IDENTICAL to the pre-pin baseline, so that the diff proving "zero
+    // baselines re-measured" is a real proof and not a re-read of a changed
+    // format. The pin speaks only when it refuses.
+    if (!report || !report.ok) return die(fontPinRefusal(url, report));
+  };
+
   // Navigate and poll until `readyExpr` is truthy (the SPA mounts async).
   const nav = async (url, readyExpr) => {
     await cdp.send("Page.navigate", { url }, sessionId);
     for (let w = 0; w < RENDER_CAP; w += 100) {
-      try { if (await evalJs(`!!(${readyExpr})`)) return; } catch { /* navigating */ }
+      let ready = false;
+      // The pin is called OUTSIDE this catch on purpose: swallowing its refusal
+      // as "still navigating" would spend the whole RENDER_CAP and then report
+      // a never-ready page — a font fault wearing a timeout's clothes.
+      try { ready = !!(await evalJs(`!!(${readyExpr})`)); } catch { /* navigating */ }
+      if (ready) { await pinFonts(url); return; }
       await sleep(100);
     }
     throw new Error(`page never became ready: ${url} (waited on: ${readyExpr})`);
