@@ -131,18 +131,37 @@
 //  read identically under both, and the run prints the reserved track width it
 //  measured either way.
 //
-//  HONEST LIMIT — THIS FILE IS RUN BY NO WORKFLOW (charter D109). The sentence
-//  that used to stand here — "`grep -rn overflow-guard .github/` returns
-//  nothing, exit 1" — WAS STALE when W18 re-ran it: that grep now exits 0 with
-//  one hit, console-harness.yml:272, which is a COMMENT citing this very claim
-//  and not a step that runs anything. The limit is unchanged and the evidence
-//  for it is not the grep any more: no `run:` line in .github/ invokes this
-//  file. A header that quotes an exit code has to be re-driven when it is
-//  quoted, or the guard's own documentation becomes the untested sentence this
-//  guard exists to replace. It is a developer tripwire and the seal predicate's
-//  shell-out, NOT a CI gate.
-//  That is exactly how a tree whose body scrolled 106px at 390px passed every
-//  required context: nothing measured below 700px, and nothing ran this file.
+//  HONEST SCOPE — A WORKFLOW DOES RUN THIS FILE, AND IT IS NOT A REQUIRED CHECK
+//  (corrects charter D109, which this header carried as "THIS FILE IS RUN BY NO
+//  WORKFLOW" long after it stopped being true). Re-derived, by line:
+//  `.github/workflows/console-harness.yml:487` declares the `overflow-guard:`
+//  job ("Overflow guard (rendered)"), whose `run:` block opens at :508 and
+//  invokes `node cloud/priv/static/__preview__/overflow-guard.mjs` at :511, one
+//  invocation with no `--defect`, on every console-touching PR. What remains
+//  true is the WEAKER sentence, and only that one: the job reaches branch
+//  protection through `Console gate`, which is ADVISORY — the live required set
+//  is `Elixir gate` and `PR references an active task`, and `grep -n "Overflow
+//  guard" .github/required-checks.json` returns nothing. So its red is VISIBLE
+//  and does not by itself block a merge. It is also still a developer tripwire
+//  and the seal predicate's shell-out. A header that quotes a workflow — or an
+//  exit code — has to be re-driven when it is quoted, or the guard's own
+//  documentation becomes the untested sentence this guard exists to replace.
+//  The history is worth keeping straight: a tree whose body scrolled 106px at
+//  390px passed every required context because nothing measured below 700px and
+//  nothing ran this file. The second half of that has since been fixed.
+//
+//  THE SELECTOR CENSUS OF THIS FILE, with the counting rule beside it, because a
+//  census quoted without its rule is how two irreconcilable numbers get cited as
+//  one pair. The patterns below are written with a bracketed paren ON PURPOSE —
+//  as regexes they match exactly what the bare string does, but they do not
+//  themselves match, so quoting the census here does not move it:
+//    grep -o 'querySelector[(]'    | wc -l  →  68  OCCURRENCES
+//    grep -c 'querySelector[(]'             →  55  LINES carrying at least one
+//    grep -o 'querySelectorAll[(]' | wc -l  →  15  (grep -c agrees: 15)
+//  The two patterns are disjoint — `querySelectorAll[(]` does not match
+//  `querySelector[(]`. Charter D258's "65 / 20 per CALL" is refuted here: 65 is
+//  unreproducible by any rule against these bytes, and 20 is this file's 15
+//  POOLED with breakpoint-sweep.mjs's 5. Quote 68/55/15, never a mixed pair.
 //
 //  Exit codes: 0 = every requested defect measured fixed · 1 = a DEFECT WAS
 //  MEASURED and is still present · 2 = REFUSED to measure (no/unusable Chrome,
@@ -2314,36 +2333,149 @@ async function main() {
     if (requested.includes("W21-cruel-content-text-bounded")) {
       const D = "W21-cruel-content-text-bounded";
       // BLOCK-SCOPED (D247): these axes belong to this leg alone.
-      const CRUEL_SCENS = ["fleet-cruel-content", "mixed-fleet"];
       // The phone band where the page overflow is worst, the two boundary
       // widths either side of the 899 stacked/side-by-side split (the fleet row
       // changes flex-direction there, so a bound proven on one side proves
-      // nothing about the other), and 1000 as the wide control.
+      // nothing about the other), and 1000 as the wide control. ONE shared width
+      // axis — the 899 straddle is a property of `.fleet-row`, not of a family.
       const CRUEL_WIDTHS = [320, 360, 390, 430, 620, 720, 768, 830, 898, 900, 1000];
-      // route -> [selector that must be present, expected section.view id]
+      //
+      // ── THE CRUELTY LEDGER (D260 slice A / D269 / D271) ────────────────────
+      // A row is no longer "a selector and a hash". It is a CLAIM about ONE text
+      // host, carrying the evidence that makes the claim checkable:
+      //   hash/view/ready  how to reach the screen and how to know it landed
+      //   sel              the host measured — EVERY match, never the first
+      //   scens            THIS row's scenario axis: >=1 CRUEL fixture and >=1
+      //                    KIND control. PER-ROW, because a fixture that renders
+      //                    a cruel `.fleet-url` need not render a cruel
+      //                    `.instance-card-name`. As one leg-wide constant, "this
+      //                    host is driven cruel" was unfalsifiable per host: the
+      //                    axis assertions below never read the route table at
+      //                    all, so an EMPTY table still printed "cells clean".
+      //   cap              the server cap the cruel string is cut to, cited to
+      //                    the file that enforces it. A cruel string is cruel
+      //                    only while it still matches its cap.
+      //   class            WHY this family is or is not admissible (vocabulary
+      //                    below) — the verdict is RECORDED, never a silent gap.
+      //   predicate        the person-facing sentence this row buys.
+      //
+      // THE CLASS VOCABULARY — one admissible verdict and six refusals. A family
+      // that cannot be made cruel does not vanish from the ledger; it lands here
+      // with its reason, in the fixture, not in a charter:
+      //   CRUEL           a person-typed value AT the cap reaches this host, so
+      //                   the row is a live measurement and pays rent.
+      //   INADMISSIBLE    no person-typed write path reaches the field at ANY
+      //                   rung. `.fleet-meta`'s region/server_type (barkpark.ex
+      //                   :469/:470, max 255) are the flagship — the provisioner
+      //                   writes them. `barkpark.name`'s 255 (barkpark.ex:466) is
+      //                   inadmissible too, and NOT because of a role: every mint
+      //                   path derives `slug = slugify(name)` with NO truncation
+      //                   (router.ex:7892 go-live, :8115 resurrect, :2120
+      //                   register; slugify at :11243), and slug is capped at 63
+      //                   (barkpark.ex:468) — so a 255-char name 422s with
+      //                   `slug: should be at most 63 character(s)` even for an
+      //                   admin holding a real `deploy` PAT.
+      //   NONE-POSSIBLE   the field carries no cap at all, so no string is
+      //                   maximal and "cruel" has nothing to be measured against.
+      //   GONE-KIND       a string this file still calls cruel no longer matches
+      //                   the cap it cites — the cap moved, or the fixture was
+      //                   edited. The row then measures a KIND value under a
+      //                   cruel name, which is the quietest green there is.
+      //   BREAKABLE       maximal but still self-wrapping: the value hits the cap
+      //                   and the host wraps it anyway, so the cell cannot fail.
+      //                   W21's own builder shipped one by accident (a
+      //                   hyphen-rich 253-char host: every hyphen is a line-break
+      //                   opportunity). A BREAKABLE row is honest only while it
+      //                   says so.
+      //   ADMIN-ONLY-AT-MINT  reachable only through a grant frozen at mint: an
+      //                   admin-minted `deploy` PAT survives its holder's
+      //                   demotion to member and still returns 201, because the
+      //                   PAT branch encodes the ability at mint time and never
+      //                   re-checks the role at use time. Reachable — but not by
+      //                   the demoted person whose screen this is.
+      //   FORMAT-LEGAL    the cap is enforced by `validate_change` + a regex, not
+      //                   by length alone, so a LENGTH-ONLY generator records a
+      //                   FALSE NONE-POSSIBLE. `site.domains` (site.ex:431-435)
+      //                   refuses a 212-char SINGLE label with 422 because
+      //                   @domain_format (site.ex:28) caps every label at 63; its
+      //                   admissible maximum is 3 x 63-char labels + "." + a
+      //                   61-char label = exactly 253.
+      // A CRUEL row's fixture proves its own cap and format at load
+      // (scenarios.mjs:1433-1442 throws on GONE-KIND and on a format the server
+      // would reject), so those two refusals are enforced upstream of this table.
+      // SCOPE OF THIS SHAPE (cch-w23-s4): the row shape, the vocabulary and the
+      // two refusals only. ZERO new cruel families are added here — widening the
+      // ledger to the ~30 caps across the 8 schemas is later work, and only where
+      // a twin proves rent. Deliberately NOT built: a name-keyed ledger module, a
+      // per-assertion scoring refactor, and the three consumer rewrites
+      // (cch-w22-s7 criteria 1-5 and 9-14) — a different animal, still open.
+      const CRUEL_CLASSES = [
+        "CRUEL", "INADMISSIBLE", "NONE-POSSIBLE", "GONE-KIND",
+        "BREAKABLE", "ADMIN-ONLY-AT-MINT", "FORMAT-LEGAL",
+      ];
       const CRUEL_ROUTES = [
-        { hash: "#fleet", view: "view-fleet", sel: ".fleet-url", ready: ".fleet-row" },
-        { hash: "#overview", view: "view-overview", sel: ".instance-card-name", ready: ".instance-card" },
+        {
+          hash: "#fleet", view: "view-fleet", sel: ".fleet-url", ready: ".fleet-row",
+          scens: ["fleet-cruel-content", "mixed-fleet"],
+          cap: "barkpark.custom_host <= 253 (registry/barkpark.ex:727) under @external_host_format (:109)",
+          class: "CRUEL",
+          predicate: "a person reading their fleet can see WHICH HOST a box answers on — the whole value, not the 14% of it that fits",
+        },
+        {
+          hash: "#overview", view: "view-overview", sel: ".instance-card-name", ready: ".instance-card",
+          scens: ["fleet-cruel-content", "mixed-fleet"],
+          cap: "barkpark.name <= 255 (registry/barkpark.ex:466)",
+          class: "INADMISSIBLE",
+          predicate: "a person on the overview can tell their instances apart by name. KEPT as an UPPER BOUND, not as a reachability claim: 255 is unreachable (see INADMISSIBLE above), so this row proves the host survives a value CRUELLER than any mint path admits — it does NOT prove anyone can type one",
+        },
       ];
       // ANTI-VACUITY 0 — the axes. A leg that lost the cruel scenario, or the
-      // kind control, or the sub-899 band, passes for the wrong reason.
-      if (!CRUEL_SCENS.includes("fleet-cruel-content")) {
-        fail(D, `axis check: \`fleet-cruel-content\` is not in the scenario set — it is the ONLY fixture in the corpus carrying server-legal worst-case content, so without it this leg measures the kind corpus every other leg already measures`);
+      // kind control, or the sub-899 band, or its whole route table, passes for
+      // the wrong reason.
+      //
+      // THE EMPTY-TABLE REFUSAL (D271). This is the hole the shape change alone
+      // does NOT close: on the pre-ledger bytes the three axis assertions read
+      // only the scenario/width constants, so `CRUEL_ROUTES = []` walked zero
+      // cells, printed `0 / 0 cells clean`, and exited 0 — a PASS over an empty
+      // corpus, under a header naming two selectors it never measured.
+      if (CRUEL_ROUTES.length === 0) {
+        fail(D, `axis check: the route table is EMPTY — this leg would walk zero cells and still print "0 / 0 cells clean". A ledger with no rows measures nothing, and nothing measured is a refusal, not a pass`);
       }
-      if (!CRUEL_SCENS.includes("mixed-fleet")) {
-        fail(D, `axis check: no KIND scenario in the set — without one, a bound that fixes the cruel row by shredding today's rendering scores a clean sweep`);
+      for (const route of CRUEL_ROUTES) {
+        const at = `${route.hash} \`${route.sel}\``;
+        // A cruel fixture is named for what it is; anything else in the row's
+        // axis is a KIND control. That naming rule is what makes the two
+        // assertions below able to LOSE in both directions.
+        const cruel = route.scens.filter((s) => /cruel/.test(s));
+        const kind = route.scens.filter((s) => !/cruel/.test(s));
+        if (cruel.length === 0) {
+          fail(D, `axis check ${at}: this row carries NO cruel fixture (scens: ${route.scens.join(", ") || "none"}) — a row driven only on kind content measures the corpus every other leg already measures, and its green says nothing about the cap it cites (${route.cap})`);
+        }
+        if (kind.length === 0) {
+          fail(D, `axis check ${at}: this row carries NO kind control (scens: ${route.scens.join(", ") || "none"}) — without one, a bound that fixes the cruel value by shredding today's rendering scores a clean sweep on this host`);
+        }
+        if (!CRUEL_CLASSES.includes(route.class)) {
+          fail(D, `axis check ${at}: class "${route.class}" is not in the ledger vocabulary (${CRUEL_CLASSES.join(", ")}) — an unclassified row is a family with no recorded verdict`);
+        }
+        if (!route.cap || !route.predicate) {
+          fail(D, `axis check ${at}: the row is missing its ${!route.cap ? "cap citation" : "person-facing predicate"} — a cruel row that cannot say which cap it is cut to, or which person it is for, is a fixture with no claim attached`);
+        }
       }
       if (!CRUEL_WIDTHS.some((w) => w <= 899) || !CRUEL_WIDTHS.some((w) => w >= 900)) {
         fail(D, `axis check: the width set does not straddle 899 — \`.fleet-row\` is column-direction below and row-direction above, so a bound proven on one side is unproven on the other`);
       }
-      const cellCount = CRUEL_SCENS.length * CRUEL_WIDTHS.length * CRUEL_ROUTES.length * 2;
+      // Derived, never hardcoded: the corpus, the selector list and the cell
+      // budget all come off the table, so a row added or dropped moves the
+      // header with it instead of leaving it lying about what was measured.
+      const CRUEL_SCENS = [...new Set(CRUEL_ROUTES.flatMap((r) => r.scens))];
+      const cellCount = CRUEL_ROUTES.reduce((n, r) => n + r.scens.length, 0) * CRUEL_WIDTHS.length * 2;
       process.stdout.write(
         `\n${D} — ${CRUEL_SCENS.length} scenarios x ${CRUEL_ROUTES.length} routes x ${CRUEL_WIDTHS.length} widths x 2 themes` +
-        ` (${cellCount} cells; .fleet-url + .instance-card-name scrollWidth vs clientWidth, + documentElement.scrollWidth vs clientWidth)\n`,
+        ` (${cellCount} cells; ${CRUEL_ROUTES.map((r) => r.sel).join(" + ")} scrollWidth vs clientWidth, + documentElement.scrollWidth vs clientWidth)\n`,
       );
       let cells = 0, seen = 0, spilled = 0, pageOver = 0;
       for (const route of CRUEL_ROUTES) {
-        for (const scen of CRUEL_SCENS) {
+        for (const scen of route.scens) {
           for (const theme of ["light", "dark"]) {
             // Enter WIDE and assert the landed view — `?scen=` alone renders
             // #overview and the fleet table goes phantom (the W13/W15 note).
@@ -2397,6 +2529,13 @@ async function main() {
             process.stdout.write(`   ${route.hash} ${scen}/${theme}  ${row.join(" ")}\n`);
           }
         }
+      }
+      // THE RUN CHECK (D271). The header declares a cell budget off the table;
+      // the loop drives cells. If those two numbers disagree the "cells clean"
+      // line below is scored against a population that was never walked — a row
+      // skipped, a scenario list mutated mid-run, a `continue` that ran early.
+      if (cells !== cellCount) {
+        fail(D, `run check: drove ${cells} cells, the table declares ${cellCount} — the loop measured a different corpus than the header announced, so a "cells clean" line here would be counted over ${Math.abs(cellCount - cells)} cell(s) nobody drove`);
       }
       if (!failures.some((f) => f.defect === D)) {
         okLine(
