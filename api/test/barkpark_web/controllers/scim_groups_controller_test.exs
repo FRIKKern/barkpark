@@ -800,6 +800,7 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
       # THE TABLE IS `workspace_memberships`, not `memberships`: a proof that
       # greps the wrong name counts 0 and reads as a pass.
       membership_queries = fn qs -> Enum.count(qs, &(&1 =~ ~s(FROM "workspace_memberships"))) end
+
       assert membership_queries.(one) == 1,
              "1 group: #{inspect(one)}"
 
