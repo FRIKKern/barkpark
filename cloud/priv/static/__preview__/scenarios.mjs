@@ -1304,6 +1304,62 @@ const stCrash = deployment({
     { line: "build: exited with code 1", at: tMinus(21581) },
   ],
 });
+// ── cch-w26-s2: THE CRUEL DEPLOY ROW, derived from its producers ────────────
+//
+// WHY IT HAD TO BE COMMITTED. A census of every `failure_reason` in this file
+// before this row returned NINE values reducing to TWO distinct strings —
+// "npm run build exited 1" (22 chars, longest unbreakable run 9) and the
+// humanized github-push copy (122 chars, word-broken throughout). Neither can
+// clip: the widest `.deploy-fail` any committed fixture could paint fits inside
+// the `.deploys` card at every width this epic drives. So the panel's missing
+// wrap rule was UNREACHABLE by any instrument in this tree — a leg written
+// against the old corpus would have printed a perfect table on the defective
+// bytes. THE FIXTURE IS THE PRECONDITION OF THE LEG, not an extra.
+//
+// THE PRODUCER CHAIN, read-only from here, one hop LONGER than the rail's:
+//   `build_failure_reason` (deploy/site-deploy-node.sh:1372) — the last
+//     `npm ERR!|[Ee]rror:` line of the build log, verbatim and unbounded. On a
+//     Next build that is routinely a module-resolution path: ONE unbreakable
+//     run carrying the person's own slug and the release id.
+//   `emit()` (deploy/lib/site-deploy-common.sh) — normalises and CUTS it. This
+//     is the same string the deploy rail's footer holds, so it is reused here
+//     as RAIL_FAIL_CRUEL_DETAIL rather than re-derived (one producer, one
+//     fixture: if the shell's cut moves, __app.test.mjs reds and BOTH strings
+//     move together).
+//   `stage_failure_copy/1` (cloud/lib/barkpark_cloud/sites/deploy.ex:994) —
+//     the control-plane hop the RAIL DOES NOT TAKE. When the box reports a
+//     failed stage with a detail, the DEPLOYMENT ROW's `failure_reason` column
+//     is stamped `"<STAGE> failed — <detail>"`, and `FailureCopy.humanize/1`
+//     passes an unrecognised reason through verbatim. That prefix is why this
+//     is a DIFFERENT string from the rail's footer even though the cruel part
+//     is shared — and it is composed here, never pasted.
+//
+// RE-DERIVE:
+//   grep -n 'defp stage_failure_copy' -A 6 cloud/lib/barkpark_cloud/sites/deploy.ex
+//   node -e 'import("./cloud/priv/static/__preview__/scenarios.mjs").then(m=>console.log(m.DEPLOY_FAIL_CRUEL_REASON.length))'
+export function deployStageFailureCopy(stage, detail) {
+  return `${stage} failed — ${detail}`;
+}
+export const DEPLOY_FAIL_CRUEL_REASON = deployStageFailureCopy("BUILD", RAIL_FAIL_CRUEL_DETAIL);
+// The row itself: a SECOND crash on the same site's history, one stage-report
+// hop from the box. It is added rather than substituted because `stCrash`
+// above is the KIND crash every other harness asserts verbatim — replacing it
+// would have bought this leg its cruelty by deleting somebody else's control.
+const stCrashCruel = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000f8",
+  status: "failed",
+  git_ref: "e91b47c05d3a8f26b1c4d907e5a3f28b60c1d4e7",
+  branch: "main",
+  trigger: "manual",
+  failure_reason: DEPLOY_FAIL_CRUEL_REASON,
+  inserted_at: tMinus(30600),
+  updated_at: tMinus(30541),
+  console: [
+    { line: "cloning acme/web @ e91b47c", at: tMinus(30600) },
+    { line: "npm ci — ok (41s)", at: tMinus(30560) },
+    { line: "next build — module resolution failed", at: tMinus(30541) },
+  ],
+});
 const stBlocked = deployment({
   id: "5b2c1e00-0000-4000-8000-0000000000f3",
   status: "failed",
@@ -1335,7 +1391,11 @@ const stPrior = deployment({
   inserted_at: tMinus(259244),
   updated_at: tMinus(259200),
 });
-const siteStatesDeployments = [stLive, stCrash, stBlocked, stCancelled, stPrior];
+// cch-w26-s2: the cruel crash sits BETWEEN the two failures already here, so a
+// single screen carries the 255-char stage-report crash under measurement, the
+// 22-char crash, and the 122-char blocked copy that is this leg's KIND control
+// — one route, the defect and its control in the same paint.
+const siteStatesDeployments = [stLive, stCrash, stCrashCruel, stBlocked, stCancelled, stPrior];
 const siteStatesSite = Object.assign({}, webSite, {
   current_deployment_id: stLive.id,
 });

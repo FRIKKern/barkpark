@@ -208,6 +208,7 @@ const DEFECTS = [
   "W20-attention-name-column",
   "W24-theater-failed-hostname-whole",
   "W26-instance-track-min-content",
+  "W26-deploy-fail-clip",
 ];
 
 // W18-S1: THE FRONT SCREEN, WHICH EVERY LEG ABOVE IS BLIND TO. `git grep -c
@@ -4864,6 +4865,286 @@ async function main() {
           `they detect only a remedy that re-shreds the phone layout. 1280 is driven by NO other instrument in ` +
           `this repo: the defect outlived every band swept above, and a sweep stopping at 1024 certifies a ` +
           `desktop that is still dragging`,
+        );
+      }
+    }
+
+
+    // ── cch-w26-s2 (charter D309): THE DEPLOY ROW'S FAILURE PANEL — the
+    //    UNFIXED TWIN of the footer the leg above measures, and a regression
+    //    #9255 introduced. ────────────────────────────────────────────────────
+    //
+    //    THE PERSON: their deploy failed. They open site detail — the one
+    //    screen that says why — and the red panel silently swallows up to
+    //    142px of the reason. No scrollbar, no page scroll, no selection, no
+    //    copy: the tail is simply not painted, and hit-testing where it should
+    //    be returns the sidebar. On a 1024px laptop it is 18px, which is worse,
+    //    because nothing signals that a sentence ended early.
+    //
+    //    THE MECHANISM, to the line:
+    //      `.deploys` (app.css) carries `overflow: hidden`.
+    //      `.deploy-fail` declares display/gap/margin/padding/border/background/
+    //        color/font-size/line-height and NOTHING about wrapping — computed
+    //        `overflow-wrap: normal` — and its text span is a flex item at the
+    //        default `min-width: auto`.
+    //      #9255 hoisted `minmax(0, 1fr)` onto `.detail-grid`, so the main
+    //        track can now shrink BELOW min-content. Before that hoist the same
+    //        string pushed the PAGE sideways — ugly, but visible and scrollable
+    //        (mutation-driven: reverting the track reads page 1118/900 with
+    //        lostPx 0). After it, `.deploys{overflow:hidden}` eats the excess
+    //        in silence. The remedy is not the track — the track fixed a real
+    //        defect — it is the wrap the panel never had.
+    //
+    //    WHY THIS LEG CANNOT REST ON `documentElement`, and this is the whole
+    //    reason it exists: W13-detail-route-band drives THIS SCENARIO, at
+    //    900 and 1024, in both themes, and ran 108/108 CLEAN on the defective
+    //    tree. A clip is the exact defect a page-level instrument cannot see —
+    //    the page is clean BECAUSE the content was thrown away. The page number
+    //    is printed here per cell (it is the proof of that sentence) and is
+    //    asserted nowhere.
+    //
+    //    NOR ON A RECT. A block child's border box is already clipped to its
+    //    parent's width while its ink spills, so `box.right <= clipper.right`
+    //    is GREEN BY CONSTRUCTION for text overflow — driven as this leg's
+    //    negative control (see the mutation note in the task ledger). The two
+    //    signals that CAN lose:
+    //      (a) THE CLIPPER: `overflow-x != visible` AND `scrollWidth >
+    //          clientWidth` on the ancestor that does the clipping — found by
+    //          walking up from the panel, never by a pinned selector, so a
+    //          remedy that moves the clip somewhere else is still caught.
+    //      (b) THE GLYPHS: the maximum right edge of every painted text rect
+    //          inside the panel (Range.getClientRects, not the element rect)
+    //          against the clipper's CONTENT edge. This is the number a person
+    //          loses, in pixels, and it is what `lostPx` reports.
+    //
+    //    THE FIXTURE IS A PRECONDITION, NOT AN EXTRA. Every `failure_reason`
+    //    committed before this slice reduced to two strings, longest 122 chars
+    //    with a 9-char longest run — none of them can reach the card edge at
+    //    any width. `DEPLOY_FAIL_CRUEL_REASON` (scenarios.mjs) is composed from
+    //    the producer chain that actually emits this column —
+    //    `build_failure_reason` → `emit()`'s cut → `stage_failure_copy/1` —
+    //    and its cruelty is ASSERTED here per cell, so a fixture that drifted
+    //    kind reds instead of printing a green table about nothing.
+    //
+    //    THE KIND CONTROL rides the same route: the 122-char humanized
+    //    github-push copy, word-broken throughout, measured in every cell. A
+    //    remedy that bought the cruel string by shredding ordinary prose reds
+    //    on its width.
+    //
+    //    HEIGHT IS PRINTED, NEVER PINNED. Wrapping a 255-char error is what
+    //    makes it readable and its honest cost is a taller panel; a pixel pin
+    //    on a wrapped string is a claim about THAT string at THAT width, and
+    //    this epic has already deleted one of those.
+    if (requested.includes("W26-deploy-fail-clip")) {
+      const D = "W26-deploy-fail-clip";
+      // BLOCK-SCOPED (D247). The DRIVEN widths are the ones that MEASURABLY
+      // lose pixels on the defective tree: 320 (186.39px) and 390 (116.39px)
+      // on the phone, then the desktop band 900 / 1000 / 1024 / 1042
+      // (142.39 / 42.39 / 18.39 / 0.39). 1043 straddles the desktop bisection
+      // (-0.61) and 1440 is the clean upper shoulder; 720 and 769 are clean by
+      // MEASUREMENT, not assumption — below the 768 collapse the main column
+      // gets the full width (-173.72 / -14.61). The shoulders cannot detect
+      // the clip; they exist to catch a remedy that breaks a width the defect
+      // never touched.
+      const CLIP_WIDTHS = [320, 390, 720, 769, 900, 1000, 1024, 1042, 1043, 1440];
+      const DRIVEN = [320, 390, 900, 1000, 1024, 1042];
+      // `failureCopy()` (app.js) re-maps the humanized github-push reason onto
+      // its OWN copy, which spells the apostrophe ASCII while the server's
+      // fixture carries U+2019 — an idempotent raw→human/human→human mapping,
+      // deliberate and pinned by __app.test.mjs. Comparing bytes without this
+      // makes the KIND control unfindable on the page and turns the control
+      // half of this leg into a permanent red about nothing.
+      const norm = (s) => String(s).replace(/’/g, "'");
+      const { SCENARIOS, DEPLOY_FAIL_CRUEL_REASON } = await import("./scenarios.mjs");
+      const sc = SCENARIOS["site-states"];
+      // The route is DERIVED from the fixture, never transcribed: a pasted uuid
+      // rots silently into "the sites list rendered instead".
+      if (!sc || !sc.deepLink || !sc.data || !Array.isArray(sc.data.deployments)) {
+        return die(`${D}: SCENARIOS["site-states"] no longer carries a deepLink and a deployments list — the failed deploy rows cannot be reached, so nothing was measured`);
+      }
+      // The control is READ OUT OF THE FIXTURE, not typed here: the ordinary
+      // humanized github-push copy, whatever it currently says. If the fixture
+      // stopped carrying a second, kind failure this leg refuses rather than
+      // measuring the cruel row twice and calling one of them a control.
+      const KIND = (sc.data.deployments.find(
+        (d) => d.status === "failed" && d.failure_reason && d.failure_reason !== DEPLOY_FAIL_CRUEL_REASON &&
+          d.failure_reason.length > 60,
+      ) || {}).failure_reason;
+      if (!KIND) {
+        return die(`${D}: SCENARIOS["site-states"] carries no ORDINARY failed row beside the cruel one — the control half of this leg would have measured nothing`);
+      }
+      process.stdout.write(
+        `\n${D} — site-states x ${CLIP_WIDTHS.length} widths x 2 themes (${CLIP_WIDTHS.length * 2} cells; every ` +
+        `.deploy-fail on the page against the CLIPPER it actually sits in, glyph rects and clipper scrollWidth, ` +
+        `never documentElement — W13 drives this same route at 900/1024 and ran 108/108 clean on the defective ` +
+        `tree). Cruel reason ${DEPLOY_FAIL_CRUEL_REASON.length} chars, KIND control ${KIND.length}. h= is the ` +
+        `panel height, REPORTED — the wrap costs vertical room and no pixel is pinned\n`,
+      );
+      let cells = 0, panels = 0, cruelSeen = 0, kindSeen = 0, clipped = 0, spilled = 0, pageOver = 0;
+      for (const theme of ["light", "dark"]) {
+        // Enter at the WIDEST width — the deploy list mounts once, from the
+        // deployments fetch; entering narrow would measure a layout the mount
+        // never saw.
+        await setViewport(CLIP_WIDTHS[CLIP_WIDTHS.length - 1]);
+        await nav(
+          `${BASE}/?scen=site-states&theme=${theme}${sc.deepLink}`,
+          `document.querySelector('.deploy-fail') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
+        );
+        const row = [];
+        for (const width of CLIP_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){var d=document.documentElement;` +
+            `var v=document.querySelector('section.view:not([hidden])');` +
+            // THE CLIPPER IS FOUND, NOT NAMED. Walk up from the panel to the
+            // first ancestor whose overflow-x is not visible: that is the
+            // element doing the swallowing, whatever it is called today.
+            `function clipperOf(el){var p=el.parentElement;while(p&&p!==document.documentElement){` +
+            `  var cs=getComputedStyle(p);if(cs.overflowX!=='visible')return p;p=p.parentElement;}return null;}` +
+            // THE GLYPHS, not the box: Range.getClientRects over every text
+            // node in the panel. An element rect is already clipped to its
+            // parent — this is the only measurement that can see painted ink
+            // outside the card.
+            `function glyphRight(el){var max=null;var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null),n;` +
+            `  while((n=w.nextNode())){if(!(n.nodeValue||'').trim())continue;var r=document.createRange();r.selectNodeContents(n);` +
+            `    var rs=r.getClientRects();for(var i=0;i<rs.length;i++){if(rs[i].width>0&&(max===null||rs[i].right>max))max=rs[i].right;}}` +
+            `  return max;}` +
+            `var out={sw:d.scrollWidth,cw:d.clientWidth,view:v?v.id:'none',theme:d.getAttribute('data-theme'),boxes:[]};` +
+            // EVERY panel on the page, never a pinned one (D228): querySelector
+            // singular cannot tell a list that rendered nothing from a list of
+            // clean panels.
+            `[].slice.call(document.querySelectorAll('.deploy-fail')).forEach(function(f){` +
+            `  var cs=getComputedStyle(f);var t=(f.textContent||'');` +
+            `  var runs=t.split(/\\s+/).map(function(w){return w.length;});` +
+            `  var rec={t:t,len:t.length,run:runs.length?Math.max.apply(null,runs):0,ow:cs.overflowWrap,wb:cs.wordBreak,` +
+            `    h:+f.getBoundingClientRect().height.toFixed(2),bsw:f.scrollWidth,bcw:f.clientWidth,` +
+            `    gr:null,cl:null,clsw:0,clcw:0,clov:'',edge:null,lost:null,rect:+f.getBoundingClientRect().right.toFixed(2)};` +
+            `  var g=glyphRight(f);if(g!==null)rec.gr=+g.toFixed(2);` +
+            `  var cl=clipperOf(f);` +
+            `  if(cl){var r=cl.getBoundingClientRect();rec.cl=(cl.className||cl.tagName||'?').toString().slice(0,40);` +
+            `    rec.clsw=cl.scrollWidth;rec.clcw=cl.clientWidth;rec.clov=getComputedStyle(cl).overflowX;` +
+            `    rec.edge=+(r.left+cl.clientLeft+cl.clientWidth).toFixed(2);` +
+            `    if(rec.gr!==null)rec.lost=+(rec.gr-rec.edge).toFixed(2);}` +
+            `  out.boxes.push(rec);});` +
+            `return out;})()`,
+          );
+          cells++;
+          // (1) THE ROUTE. Without this the whole table is phantom.
+          if (m.view !== "view-site") {
+            fail(D, `site-states/${theme}@${width}: rendered section.view "${m.view}", asked for "view-site" — the hash did not route, so nothing below this line measures a deploy row`);
+            row.push(`${width}:?`);
+            continue;
+          }
+          if (m.theme !== theme) fail(D, `site-states/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+          // (2) AUDITED: an absent panel is not a clean panel.
+          if (m.boxes.length === 0) {
+            fail(D, `site-states/${theme}@${width}: zero .deploy-fail panels rendered — the failure copy is not on the page, so nothing was measured. This is not a pass.`);
+            row.push(`${width}:0box`);
+            continue;
+          }
+          let cruelHere = 0, kindHere = 0, worst = null;
+          // ONE VOICE PER CLIPPER. Three panels share the `.deploys` card, so
+          // an unguarded loop shouts the same clipped card three times and buries
+          // WHICH panel filled it. The clipper is asserted once, named by the
+          // widest panel inside it.
+          const clippersSaid = new Set();
+          for (const b of m.boxes) {
+            panels++;
+            const isCruel = norm(b.t) === norm(DEPLOY_FAIL_CRUEL_REASON);
+            const isKind = norm(b.t) === norm(KIND);
+            if (isCruel) { cruelSeen++; cruelHere++; }
+            if (isKind) { kindSeen++; kindHere++; }
+            // (3) ANTI-VACUITY, SECOND ORDER: a cruel cell whose string is not
+            // cruel proves nothing, and a control that drifted cruel stops
+            // being a control. Asserted against the FIXTURE's own strings —
+            // this leg pins no length of its own, so the shell's cut can move
+            // without touching this file.
+            if (isCruel && b.run < 40) {
+              fail(D, `site-states/${theme}@${width} .deploy-fail: the cruel row's longest unbreakable run is ${b.run} chars — the fixture went KIND, so a green here would be green by construction`);
+            }
+            if (isKind && b.run > 20) {
+              fail(D, `site-states/${theme}@${width} .deploy-fail: the control's longest run is ${b.run} chars — it has drifted cruel and can no longer answer "did the remedy shred ordinary prose"`);
+            }
+            // (4) THE CLIPPER. Every panel must sit in a clipper, or the walk
+            // found nothing and (a) measured nothing.
+            if (!b.cl) {
+              fail(D, `site-states/${theme}@${width} .deploy-fail (${b.len} chars): no clipping ancestor found — the walk that finds the element doing the swallowing returned nothing, so the clipper assertion measured nothing`);
+              continue;
+            }
+            if (b.clov !== "visible" && b.clsw > b.clcw && !clippersSaid.has(b.cl)) {
+              clippersSaid.add(b.cl);
+              clipped++;
+              const filler = m.boxes.filter((x) => x.cl === b.cl).sort((x, y) => (y.lost ?? -1e9) - (x.lost ?? -1e9))[0];
+              fail(D, `site-states/${theme}@${width} .${b.cl}: overflow-x:${b.clov} AND scrollWidth ${b.clsw} > clientWidth ${b.clcw} — ${b.clsw - b.clcw}px of a failed deploy's reason is inside a box that clips it, with no scrollbar and no page scroll (widest panel inside it: ${filler.len} chars, longest run ${filler.run}, overflow-wrap:${filler.ow}, word-break:${filler.wb})`);
+            }
+            // (5) THE PANEL'S OWN BORDER. Third signal, and the cheapest: the
+            // text span is a flex item at the default `min-width: auto`, so an
+            // unwrapped run overruns the panel itself before it reaches the
+            // card. It is NOT a spare for the clipper assertion — it goes
+            // green the moment a remedy moves the clip up a level — and NOT a
+            // spare for the glyphs, which are the only pixels a person loses.
+            if (b.bsw > b.bcw) {
+              spilled++;
+              fail(D, `site-states/${theme}@${width} .deploy-fail (${b.len} chars): scrollWidth ${b.bsw} > clientWidth ${b.bcw} — ${b.bsw - b.bcw}px of the reason paints outside the panel's own red border (overflow-wrap:${b.ow}, word-break:${b.wb})`);
+            }
+            // (6) THE GLYPHS. The pixels a person actually loses. Half a pixel
+            // of tolerance: sub-pixel text metrics are not a defect.
+            if (b.gr === null) {
+              fail(D, `site-states/${theme}@${width} .deploy-fail: the panel painted no text rects at all — the reason is not on screen, so the glyph half measured nothing`);
+              continue;
+            }
+            if (b.lost !== null && b.lost > 0.5) {
+              spilled++;
+              if (worst === null || b.lost > worst) worst = b.lost;
+              fail(D, `site-states/${theme}@${width} .deploy-fail (${b.len} chars): glyphs reach x=${b.gr} while .${b.cl}'s content edge sits at ${b.edge} — ${b.lost}px of WHY THE DEPLOY FAILED is painted outside the card and clipped away silently. The panel's own border box reads ${b.rect} (inside the edge), which is why a rect-based test is green here`);
+            }
+          }
+          // (7) BOTH FAMILIES MUST BE ON SCREEN IN EVERY CELL. A cell that lost
+          // the cruel row would print a clean number about the control alone.
+          if (cruelHere === 0) {
+            fail(D, `site-states/${theme}@${width}: the cruel ${DEPLOY_FAIL_CRUEL_REASON.length}-char reason is not among the ${m.boxes.length} panel(s) on the page — the defect's own fixture is missing, so this cell asserted nothing about it`);
+          }
+          if (kindHere === 0) {
+            fail(D, `site-states/${theme}@${width}: the ${KIND.length}-char KIND control is not on the page — a remedy that shreds ordinary prose would pass this cell unmeasured`);
+          }
+          // THE PAGE IS PRINTED, NEVER ASSERTED (see the header): on the
+          // defective tree it reads clean at every one of these widths, which
+          // is the whole reason this leg measures cells.
+          if (m.sw > m.cw) pageOver++;
+          const cruel = m.boxes.find((b) => norm(b.t) === norm(DEPLOY_FAIL_CRUEL_REASON)) || m.boxes[0];
+          const kind = m.boxes.find((b) => norm(b.t) === norm(KIND));
+          row.push(
+            `${width}:page ${m.sw}/${m.cw} cruel lost${cruel.lost === null ? "?" : cruel.lost} sw/cw ${cruel.bsw}/${cruel.bcw} h${cruel.h}` +
+            (kind ? ` kind lost${kind.lost === null ? "?" : kind.lost} h${kind.h}` : " kind:absent") +
+            (worst !== null ? ` WORST ${worst}px` : ""),
+          );
+        }
+        process.stdout.write(`   site-states/${theme}  ${row.join("  ")}\n`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${CLIP_WIDTHS.join("/")} in both themes (${panels} .deploy-fail ` +
+          `panel(s) measured — EVERY one on the page, not a pinned selector; ${cruelSeen} carried the cruel ` +
+          `${DEPLOY_FAIL_CRUEL_REASON.length}-char stage report, ${kindSeen} the ${KIND.length}-char KIND control), ` +
+          `${clipped} clipper(s) holding more than they show, ${spilled} panel(s) painting glyphs past their card`,
+        );
+        okLine(
+          `${DRIVEN.join("/")} are the DRIVEN widths — every one of them LOST PIXELS on the defective tree: 186.39 ` +
+          `@320, 116.39 @390, then 142.39 / 42.39 / 18.39 / 0.39 at 900 / 1000 / 1024 / 1042, glyphs at x=489.39 ` +
+          `(phone) and x=729.39 (desktop) against .deploys content edges of 303 / 373 / 587 / 687 / 711 / 729. ` +
+          `The desktop band bisects between 1042 (lost 0.39 — sub-pixel, the crossing itself) and 1043 (-0.61), ` +
+          `both carried here. 720/769 are SHOULDERS by MEASUREMENT, not assumption — the <=768 single-column ` +
+          `collapse hands the main column the full width and the same string reads -173.72 / -14.61 there — and ` +
+          `1043/1440 are the clean upper shoulders. Shoulders cannot detect the clip; they catch a remedy that ` +
+          `breaks a width the defect never touched`,
+        );
+        okLine(
+          `NEITHER SIGNAL IS A SPARE, and NEITHER IS documentElement: the page reads CLEAN at all ten widths on the ` +
+          `defective tree (W13-detail-route-band drives this same route at 900/1024 and ran 108/108 green on it), ` +
+          `because a clip is content thrown away rather than a page pushed sideways. The clipper assertion catches ` +
+          `a remedy that hides the spill somewhere else; the glyph assertion is the only one that can refuse a ` +
+          `rect-based sentinel, which measures the panel's own border box — already clipped to the card, and green ` +
+          `by construction on the defective bytes. Heights are printed per cell and deliberately unpinned`,
         );
       }
     }
