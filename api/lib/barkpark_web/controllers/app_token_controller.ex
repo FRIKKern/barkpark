@@ -138,8 +138,20 @@ defmodule BarkparkWeb.AppTokenController do
 
       true ->
         case Auth.revoke_token(token) do
-          {:ok, _} -> json(conn, %{revoked: true})
-          _ -> unprocessable(conn, "could not revoke token")
+          # RECEIPT LAW (pds w40): `Auth.revoke_token/1` returns the UPDATED row
+          # (auth.ex:200-225) — its own audit block already dereferences
+          # `revoked.id`. The old body was a literal `true` that stayed true even
+          # if the stamp never landed; `revoked` now descends from the persisted
+          # `revoked_at` and stays truthy, so the wire contract is unchanged.
+          {:ok, revoked} ->
+            json(conn, %{
+              revoked: not is_nil(revoked.revoked_at),
+              id: revoked.id,
+              revoked_at: revoked.revoked_at
+            })
+
+          _ ->
+            unprocessable(conn, "could not revoke token")
         end
     end
   end
@@ -161,8 +173,19 @@ defmodule BarkparkWeb.AppTokenController do
           unprocessable(conn, "admin tokens cannot be revoked through the app-token path")
         else
           case Auth.revoke_token(token) do
-            {:ok, _} -> json(conn, %{revoked: true})
-            _ -> unprocessable(conn, "could not revoke token")
+            # RECEIPT LAW (pds w40): same callee, same repair as
+            # `delete_current/2` above — the admin revoke-by-raw path answered
+            # with a literal `true` that could not distinguish a landed stamp
+            # from an unobserved one (auth.ex:200-225).
+            {:ok, revoked} ->
+              json(conn, %{
+                revoked: not is_nil(revoked.revoked_at),
+                id: revoked.id,
+                revoked_at: revoked.revoked_at
+              })
+
+            _ ->
+              unprocessable(conn, "could not revoke token")
           end
         end
     end

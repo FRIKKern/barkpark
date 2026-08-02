@@ -402,8 +402,18 @@ defmodule BarkparkWeb.V1.MediaController do
     with :ok <- require_write(conn),
          {:ok, file} <- Media.get_file(id, scope_opts(conn)),
          :ok <- ensure_dataset(file, dataset),
-         {:ok, _} <- Media.delete_file(id, scope_opts(conn)) do
-      json(conn, %{result: %{deleted: id}, syncTags: ["bp:ds:#{dataset}:media"]})
+         {:ok, deleted} <- Media.delete_file(id, scope_opts(conn)) do
+      # RECEIPT LAW (pds w40): `Media.delete_file/2` returns the row
+      # `Repo.delete(file, stale_error_field: :id)` removed (media.ex:413-455).
+      # This used to discard it and echo the `:id` path param. NOTE the trap the
+      # legacy twin (media_controller.ex:362-371) does not have: `file` is bound
+      # at :403 by a PRE-WRITE `Media.get_file/2` read, so `file.filename` would
+      # be store-SHAPED but not descended from the write. Every field below
+      # comes off `deleted` — the delete's own return.
+      json(conn, %{
+        result: %{deleted: deleted.id, filename: deleted.filename, dataset: deleted.dataset},
+        syncTags: ["bp:ds:#{dataset}:media"]
+      })
     else
       error -> error
     end
