@@ -599,7 +599,9 @@ defmodule PDS.Census do
     end_to_end_unmutated:
       {"PROVEN", "the cited test drives the site's route AND reads the stored row back (mutation NEVER exercised)", :reds},
     two_hop_composed:
-      {"UNJUDGED", "a single test spanning BOTH hops exists", :advisory},
+      {"UNJUDGED",
+       "the cited block or its resolved same-file helpers carry a NAMED persistence-read token (@repo_tokens: `Repo.` · `Content.get_document(` · `Conflicts.list(`)",
+       :reds},
     stub_mapping_only:
       {"UNJUDGED", "the cited test has no injection seam, or DOES read Repo", :reds},
     context_differential_only:
@@ -4021,11 +4023,17 @@ defmodule PDS.Census do
   # value in @basis_vocab names a falsifier; this reads the committed test tree and fires
   # the ones it can DECIDE. It is TIERED AS MEASURED, not as hoped:
   #
-  #   REDS (5)      end_to_end (and end_to_end_unmutated, the same predicate minus the
+  #   REDS          end_to_end (and end_to_end_unmutated, the same predicate minus the
   #                 mutation) · stub_mapping_only, THE "DOES read Repo" HALF ONLY ·
-  #                 context_differential_only · basis_stale (a direct --keys join, built
-  #                 FIRST because this wave's own slices re-key rows) · no_observer, the
+  #                 context_differential_only · two_hop_composed (PDS wave 39 — promoted
+  #                 WITH the widened @repo_tokens probe, mutation-proven, and the tier is
+  #                 read from @basis_vocab rather than hardcoded, which is what makes the
+  #                 promotion real) · basis_stale (a direct --keys join, built FIRST
+  #                 because that wave's own slices re-key rows) · no_observer, the
   #                 MODULE-SUBSTRING half only, which needs no test-tree index.
+  #                 THE PRINTED COUNT IS THE **ARMED** COUNT, NOT THIS LIST'S LENGTH:
+  #                 basis_stale has no predicate and no_observer no top-level rows, so the
+  #                 run prints what can actually refuse (armed_redding_values/0).
   #   ADVISORY      everything else, printed as a counted CONTRADICTION line at exit 0 —
   #                 the DRIFT pattern this census already uses.
   #
@@ -4052,17 +4060,45 @@ defmodule PDS.Census do
   # a helper — `stored/1`, `deliver/3`, `stub_intake/1`, `assert_receipt_is_stored!/2` —
   # never in the cited block; and `\w+` truncates `assert_receipt_is_stored!` at the `!`
   # and FALSELY REFUSES four genuine rows.
-  # THE PROBE IS THE SUBSTRING `Repo.`, AND ITS LIMIT IS MEASURED. A test that reads
+  # THE PROBE WAS THE SUBSTRING `Repo.`, AND ITS LIMIT WAS MEASURED. A test that reads
   # Postgres through a CONTEXT MODULE carries no such token — inbound_events_test.exs's
   # `link_state/2` goes through `Content.get_document/4` and `detached_conflicts/1` through
-  # `Conflicts.list/1`. That is exactly why `two_hop_composed` is ADVISORY: on this probe
-  # its falsifier is not decidable, so it prints a counted CONTRADICTION and never a red.
-  # The redding values are the ones the probe CAN decide, and nothing else was promoted to
-  # redding on the grounds that it would usually be right.
+  # `Conflicts.list/1`. That is why `two_hop_composed` was ADVISORY, and on the bare probe
+  # promoting it would have redded at 3 refusals, ALL THREE FALSE.
+  #
+  # SO THE PROBE IS NOW AN ENUMERATED ALLOWLIST OF NAMED PERSISTENCE-READING FUNCTIONS,
+  # AND A SHAPE REGEX IS FORBIDDEN (PDS wave 39). Widening by SHAPE — "any module-qualified
+  # `get`/`list`" — is the obvious edit and it is measured WRONG: that shape admits
+  # `Keyword.get(`, which manufactures FALSE refusals against `stub_mapping_only`, whose
+  # falsifier is INVERTED (a store read REFUTES the basis, so every token added to this
+  # list is a new way to ACCUSE a stub row). The list is therefore NAMES, one per real
+  # persistence-reading context function, each added only with its measured effect on
+  # EVERY dispatched basis.
+  #
+  # THE ZERO-COLLATERAL RESULT IS A CITATION ACCIDENT, NOT A PROPERTY OF THE TOKENS.
+  # `Content.get_document(` / `Conflicts.list(` occur in 71 test files under api/test;
+  # the widening is harmless today only because all 6 top-level `stub_mapping_only` rows
+  # cite ONE stub-only file (github_webhook_controller_test.exs, `Repo.` count 0, and
+  # neither widened token present). Re-cite any of them at one of the other 71 files and
+  # the widening starts manufacturing refusals. @stub_citation_allowlist below is the
+  # ARRIVAL TRIPWIRE for exactly that — it reds on the arrival, never on a count.
   @test_root "api/test"
   @conn_tokens ["build_conn", "json_response", "conn |>", "|> post(", "|> get(",
                 "|> put(", "|> delete(", "%{conn:", "conn: conn", "authed("]
-  @repo_token "Repo."
+  @repo_tokens ["Repo.", "Content.get_document(", "Conflicts.list("]
+
+  # THE FILES THE INVERTED-FALSIFIER ROWS ARE MEASURED SAFE AT. Not a count of rows, not a
+  # count of files: the SET of paths `stub_mapping_only` rows cite today. A row that
+  # arrives citing anything else has left the measured ground and REDS, because the
+  # zero-collateral claim above was measured over this set and nothing wider.
+  @stub_citation_allowlist ["api/test/barkpark_web/controllers/github_webhook_controller_test.exs"]
+
+  # THE BASES check_row_basis/2 ACTUALLY DISPATCHES THROUGH THE CITATION ARM. Held as ONE
+  # list because `armed_redding_values/0` reads it: a hand-copy would let the printed
+  # "N redding value(s)" drift from the code that does the refusing, which is the exact
+  # defect this wave is fixing one line down.
+  @cited_bases [:end_to_end, :end_to_end_unmutated, :stub_mapping_only,
+                :context_differential_only, :side_effect_existence_only, :two_hop_composed]
 
   defp basis_falsifiers(classified) do
     if File.dir?(@test_root) do
@@ -4095,8 +4131,7 @@ defmodule PDS.Census do
       r.basis == :no_observer ->
         {no_observer_findings(r), cache}
 
-      r.basis in [:end_to_end, :end_to_end_unmutated, :stub_mapping_only,
-                  :context_differential_only, :side_effect_existence_only, :two_hop_composed] ->
+      r.basis in @cited_bases ->
         cited_findings(r, ev, tier_of_basis, cache)
 
       true ->
@@ -4126,7 +4161,7 @@ defmodule PDS.Census do
 
   defp judge_citation(r, ev, tier, text) do
     conn? = Enum.any?(@conn_tokens, &String.contains?(text, &1))
-    repo? = String.contains?(text, @repo_token)
+    repo? = Enum.any?(@repo_tokens, &String.contains?(text, &1))
 
     case r.basis do
       b when b in [:end_to_end, :end_to_end_unmutated] ->
@@ -4140,9 +4175,23 @@ defmodule PDS.Census do
         # ONLY THE REPO HALF REDS. The seam half ("has no injection seam") is advisory:
         # a seam can be a put_env, a Mox, a passed fun or a config key, and a denylist of
         # spellings would refuse honest rows.
-        if repo?,
-          do: [finding(r, tier, "#{ev} DOES read Repo — `stub_mapping_only` understates what the suite proves")],
-          else: []
+        #
+        # THE ARRIVAL TRIPWIRE FIRST. This falsifier is INVERTED — a store read REFUTES
+        # the basis — so it is the one arm @repo_tokens can hurt, and its safety was
+        # measured only over @stub_citation_allowlist. A citation that arrives from
+        # anywhere else REDS rather than silently spending an unmeasured probe.
+        cited_file = ev |> String.split(":") |> List.first()
+
+        cond do
+          cited_file not in @stub_citation_allowlist ->
+            [finding(r, :reds, "cites #{ev}, OUTSIDE the measured-safe citation set for `stub_mapping_only` (#{Enum.join(@stub_citation_allowlist, ", ")}). This falsifier is INVERTED — a store read refutes it — and @repo_tokens' zero-collateral was measured only over that set. RE-MEASURE the widened probe against this file, then widen the allowlist.")]
+
+          repo? ->
+            [finding(r, tier, "#{ev} DOES read Repo — `stub_mapping_only` understates what the suite proves")]
+
+          true ->
+            []
+        end
 
       :context_differential_only ->
         if conn?,
@@ -4154,9 +4203,13 @@ defmodule PDS.Census do
           do: [finding(r, :advisory, "#{ev} reads no Repo at all, so it cannot even assert existence")],
           else: []
 
+      # THE TIER IS READ FROM THE VOCABULARY, NEVER HARDCODED HERE. A hardcoded
+      # `:advisory` made the @basis_vocab tier column DECORATIVE for this value: flipping
+      # it to :reds printed a promotion and passed a planted defect through at rc=0. The
+      # tier flip and this line are ONE change; neither is a promotion on its own.
       :two_hop_composed ->
         if not repo?,
-          do: [finding(r, :advisory, "#{ev} reads no Repo — the second hop is not visible in the cited block")],
+          do: [finding(r, tier, "#{ev} reads no persisted state — no #{Enum.map_join(@repo_tokens, " / ", &"`#{&1}`")} in the cited block or its helpers, so the second hop is not visible")],
           else: []
 
       _ ->
@@ -4227,6 +4280,42 @@ defmodule PDS.Census do
     |> Enum.map(fn {_l, n} -> block_at(lines, n) end)
   end
 
+  # THE PRINTED COUNT WAS THE VOCABULARY COLUMN, NOT THE INSTRUMENT (PDS-D544). The old
+  # line counted @basis_vocab entries tiered :reds — 6 — while only FOUR of them could
+  # refuse anything: `basis_stale` has NO PREDICATE at all (check_row_basis/2 never
+  # dispatches it; it is assigned dynamically inside the DISTRIBUTION renderer) and
+  # `no_observer` carries ZERO top-level rows (its one occurrence is a nested `tags:`
+  # sub-tag, and sub-tags are not walked). A number that counts the vocabulary is a claim
+  # about the table; this counts what is armed, which is a claim about the run.
+  defp armed_redding_values do
+    rows = @register |> Enum.map(& &1.basis) |> Enum.frequencies()
+
+    @basis_vocab
+    |> Enum.filter(fn {_k, {_c, _f, t}} -> t == :reds end)
+    |> Enum.sort_by(&elem(&1, 0))
+    |> Enum.reduce({[], []}, fn {k, _v}, {armed, inert} ->
+      dispatched? = k == :no_observer or k in @cited_bases
+      n = Map.get(rows, k, 0)
+
+      cond do
+        not dispatched? ->
+          {armed,
+           inert ++
+             [{k,
+               "NO PREDICATE — check_row_basis/2 never dispatches it, so it falls to the bare `true -> {[], cache}` clause and cannot refuse anything"}]}
+
+        n == 0 ->
+          {armed,
+           inert ++
+             [{k,
+               "0 top-level @register rows (a nested `tags:` sub-tag is not walked), so its predicate is never handed an input"}]}
+
+        true ->
+          {armed ++ [{k, n}], inert}
+      end
+    end)
+  end
+
   defp report_basis_falsifiers(classified) do
     p("BASIS FALSIFIERS (PDS-D525 — a vocabulary token is only a claim if a script can")
     p("refuse it; tiered AS MEASURED, so an undecidable falsifier is advisory, not a lie)")
@@ -4243,7 +4332,20 @@ defmodule PDS.Census do
 
       {:ran, findings} ->
         {red, advisory} = Enum.split_with(findings, &(&1.tier == :reds))
-        p("  checked #{Enum.count(@register)} row(s) against #{length(Enum.filter(@basis_vocab, fn {_k, {_c, _f, t}} -> t == :reds end))} redding value(s) · #{length(red)} refusal(s) · #{length(advisory)} advisory contradiction(s)")
+        {armed, tiered_but_inert} = armed_redding_values()
+
+        p("  checked #{Enum.count(@register)} row(s) against #{length(armed)} ARMED redding value(s) · #{length(red)} refusal(s) · #{length(advisory)} advisory contradiction(s)")
+        p("      ARMED = tiered :reds AND dispatched by check_row_basis/2 AND carrying >0 top-level")
+        p("      @register rows: #{Enum.map_join(armed, ", ", fn {k, n} -> "#{k} (#{n})" end)}")
+
+        if tiered_but_inert != [] do
+          p("      TIERED :reds BUT INERT, counted here rather than counted IN (PDS-D544):")
+
+          Enum.each(tiered_but_inert, fn {k, why} ->
+            p("        #{k} — #{why}")
+          end)
+        end
+
 
         Enum.each(red, fn f ->
           p("      REFUSED  #{short(elem(f.key, 0))} #{elem(f.key, 1)}  [#{f.basis}]")
