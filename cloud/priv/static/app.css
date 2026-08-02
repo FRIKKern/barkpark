@@ -5683,6 +5683,127 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .a2f-codes-actions { display: flex; align-items: center; justify-content: flex-end; gap: 16px; margin-top: 14px; }
 .a2f-saved { flex: 0 0 auto; }
 
+/* ---- the account modal's PHONE BAND (cch-w22-s4) -------------------------
+   THE DEFECT, measured (Chrome 150.0.7871.187, `?scen=account-modal-2fa-badcode
+   &modal=account`, both themes, mobile emulation): the account card has a hard
+   ~460.45px MIN-CONTENT FLOOR, and NEITHER max-width binds below it.
+   `.modal-card { width: 100%; max-width: 420px }` and
+   `.modal-root:has(.am-modal) .modal-card { max-width: 520px }` are both CAPS —
+   they can only make the card narrower than the space offered, never narrower
+   than its own content demands. `.modal-root` is a GRID; its implicit `auto`
+   column's minimum is the item's min-content, so the track sizes to 460.45 no
+   matter how small the viewport is, and `overflow-y: auto` makes `overflow-x`
+   compute `auto` — so the root becomes a horizontal scroller: scrollWidth 508
+   against clientWidth 320/360/390/430/480, in the 2FA-OFF phase AND the enroll
+   phase (the floor is NOT the enrollment row's fault; bisected below).
+
+   WHAT A PERSON SEES, AT REST, in the enroll phase (viewport-relative rects):
+     @320  root rests at scrollLeft 184; the QR sits at -135..-17 and #a2f-otp
+           at -1..107 — both OFF-SCREEN.
+     @360  #a2f-copy-secret 416.33..448.45 and #a2f-confirm 301..368.86 — both
+           OFF-SCREEN.
+     @390  #a2f-copy-secret 416.33..448.45 — OFF-SCREEN.
+     @430  #a2f-copy-secret 416.33..448.45 — OFF-SCREEN.
+     @480  everything on screen; the band ends there.
+   NOT "unreachable" — measured, both recover: scrolling `.modal-root` to its
+   end puts Copy at 268..300 (in view) at 360, and at scrollLeft 0 the QR sits
+   at 49..167 (in view) at 320. The honest claim is OFF-SCREEN AT REST, BEHIND A
+   HORIZONTAL SCROLL WITH NO VISIBLE AFFORDANCE — with overlay scrollbars there
+   is no cue that the pane scrolls at all, and on a phone the QR cannot be
+   scanned by the device showing it, so Copy IS the enrollment path.
+   WHY NO INSTRUMENT SAW IT: `documentElement.scrollWidth == clientWidth` at
+   every one of those widths (320/320, 360/360, 390/390, 430/430, 480/480) —
+   only `.modal-root` scrolls, so a page-level scorer reads clean.
+
+   THE FLOOR IS NOT THE 2FA ROW. Bisected by forcing `width: min-content` on
+   every descendant in turn: `.am-identity` measures 410.45 (= 38 avatar + 12
+   gap + `.am-who` 237.61 + 12 gap + the nowrap "Change password" link) and the
+   card adds 24+24 padding + 2 border = 460.45. `.a2f-enroll` is only 319.86 and
+   `.session-row` 246.55. So the remedy has to lower the min-content CONTRIBUTION
+   of the card's rows, not just the enrollment one — and per the house lesson
+   already recorded on `.detail-head--inst` (the 620 block above), CLAMPING an
+   item does not lower a flex container's min-content contribution: `.am-who`
+   already carries `min-width: 0` and contributes 237.61 anyway. What does lower
+   it is changing the container's SHAPE — a wrapping flex container's min-content
+   is the LARGEST item contribution, not the sum.
+
+   620 IS DELIBERATELY NOT A NEW BREAKPOINT. The overflow ends at 508.45px, so a
+   508- or 520-keyed block would fit tighter — but every new breakpoint in this
+   stylesheet owes `breakpoint-sweep.mjs`'s BREAKPOINTS list an entry, and this
+   slice is fenced out of all three instruments this round. 620 is an EXISTING
+   head (six blocks already declare it), so the derived breakpoint axis stays
+   [620, 720, 740, 768, 830, 899] and the sweep's boundary walk is unchanged.
+   The cost is that 509..620 also reflows; it is paid for by `flex-basis`, not
+   by the query — every rule below wraps only when the content genuinely stops
+   fitting, so at 480..620 the QR still sits BESIDE the manual column exactly as
+   drawn, and the stack appears at 430 and below where it is the only honest
+   composition.
+
+   `.a2f-secret-value` IS DELIBERATELY UNTOUCHED, and this is the one rule in
+   this block that is NOT here (charter D254): the secret is server-generated —
+   `TwoFactor.gen_secret/0` is 20 bytes → `Base.encode32(padding: false)` = 32
+   chars, and `secretGroups()` (app.js) inserts a space every 4 — so the string
+   is ALWAYS 39 chars with a longest WORD of 4. It has no content axis and no
+   overflow to fix: measured scrollWidth == clientWidth at every width, before
+   (212/212 at 320..480, 272/272 at 620/900) and after this band. Narrowing its
+   box makes it wrap into two groups-of-four lines, which is exactly what a
+   hand-typed secret wants. No `overflow-wrap` is shipped here.
+
+   Px are font-conditional (D218). The ORDINAL fact — a control past the
+   viewport edge at rest — is not. */
+@media (max-width: 620px) {
+  /* THE TRACK, which is the actual cause. `minmax(0, 1fr)` replaces the implicit
+     `auto` column whose minimum IS the card's min-content; `min-width: 0` lets
+     the card (a grid item, so `min-width: auto` by default) shrink to it.
+     SCOPED to `:has(.am-modal)`, following the GR57 precedent two rules above,
+     and this scoping is NOT tidiness — unscoped it is a REGRESSION for the 15+
+     other modal bodies that share `.modal-card`. Their min-content floors are
+     equally unmeasured, but nothing in this slice reflows their CONTENT: clamp
+     their track and the card box shrinks to the viewport while the content it
+     is supposed to hold keeps its old width and spills OVER the card's own
+     border and background. `.modal-root` would scroll by the same amount it
+     already does and the modal would merely look broken as well. Their floors
+     are filed, not fixed here. */
+  .modal-root:has(.am-modal) { grid-template-columns: minmax(0, 1fr); }
+  .modal-root:has(.am-modal) .modal-card { min-width: 0; }
+
+  /* Identity: the avatar keeps the name/email column beside it down to 140px,
+     then "Change password" drops to its own line under the text column rather
+     than forcing the whole card 410px wide. */
+  .am-identity { flex-wrap: wrap; row-gap: 6px; }
+  .am-who { flex: 1 1 140px; }
+  .am-identity > .am-link { margin-left: 50px; }
+
+  /* Section heads and session rows: the right-hand affordance wraps below its
+     heading instead of pinning the card open. */
+  .am-head { flex-wrap: wrap; row-gap: 2px; }
+  .session-row { flex-wrap: wrap; row-gap: 8px; }
+
+  /* Enrollment: the QR keeps its plate beside the manual column while that
+     column can hold 240px, and centres itself above it once it cannot. The auto
+     inline margins are inert while the row is intact — `.a2f-manual` grows into
+     all the free space, so there is none left for them to absorb. */
+  .a2f-enroll { flex-wrap: wrap; row-gap: 14px; }
+  .a2f-manual { flex: 1 1 240px; }
+  .a2f-qr { margin-inline: auto; width: 148px; height: 148px; }
+
+  /* The action row: the code field takes the width it is given rather than a
+     fixed 108px, and Confirm wraps under it only if even that is not enough. */
+  .a2f-confirm-row { flex-wrap: wrap; row-gap: 10px; }
+  .a2f-otp { flex: 1 1 120px; width: auto; }
+
+  /* The one-shot recovery sheet. HONEST LABEL: this one is a LEGIBILITY call,
+     not a measured overflow — driven both ways at 320 on `account-modal` with
+     the confirm arm succeeding, four across gives 8 chips of 70px (62px inside
+     the padding) against an 8-character mono code measuring ~60px, i.e. ~2px of
+     headroom, and two across gives 107px. Nothing overflowed at four; it is
+     2px from doing so, and D218 says every one of those px is font-conditional.
+     The recovery sheet is shown exactly once and is the last thing between a
+     person and a locked account, so it does not get to be the rule that is
+     2px from breaking. */
+  .a2f-codes { grid-template-columns: repeat(2, 1fr); }
+}
+
 /* GR56: `.modal-x` carries data-close, so a pin DEADENS it. An author rule beats
    the UA sheet regardless of specificity, so `.modal-x { display: grid }` would
    keep a DEAD × visible — this restores [hidden] for the pinned sheet.
