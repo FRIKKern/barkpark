@@ -34,6 +34,37 @@ THE SEPARATING RULE, stated so it can be argued with: a claim about the WORK
 ("all 16 sites paid") is standing and is scored against the live row; a claim
 about the LEDGER STATE at a moment ("stays open at 10/11") is historical.
 
+MEASURED BY THE WAVE-39 REVIEWER, 2026-08-02 — THIS TABLE REDS THE MOMENT THE
+WAVE-39 CHARTER PR (#9100) MERGES, AND HERE IS EXACTLY HOW MUCH. This table was
+adjudicated against the charter as it stands on `origin/main` (10,479 lines).
+The wave-39 charter is an OPEN PR, so the reviewer ran the sweep against that
+PR's charter content (10,788 lines) to measure the arrival before it lands:
+
+    bash scripts/pds-charter-ledger-sweep.sh --charter <#9100's charter>
+    → rc=1 · unresolved-claim arrivals: 6 · misclassified arrivals: 0
+
+The six, verbatim, with the reviewer's PROVISIONAL reading — **NOT adjudicated
+here, and deliberately not written into the table above**:
+
+| line | slug | provisional reading |
+|---|---|---|
+| 6923 | pds-w27-reader-transport-honesty | non-disposition — a shipped-slice table row; `guarded` describes the ARM, not the row |
+| 10582 | pds-w38-verdict-freshness-arm | non-disposition — PDS-D559 calls the row's CRITERIA defective, which is a criterion claim |
+| 10693 | pds-bl-spill-dir-path-drift | non-disposition — the charter QUOTING this sweep's own finding, not asserting a disposition |
+| 10694 | pds-w20-crown-fire | non-disposition — same shape, quoting the finding |
+| 10695 | pds-w34-census-cas-shadow | non-disposition — same shape, quoting the self-contradiction |
+| 10735 | pds-census | non-task — a `needs:` job name, the same reading already given to `pds-receipt-census` |
+
+WHY THE REVIEWER DID NOT JUST WRITE THEM IN. The fingerprint is a content hash of
+the whole line, and #9100 is OPEN and therefore still mutable — a row adjudicated
+against an unmerged line is a row that can be stale on arrival, which is the exact
+species this epic files. Note also that line 6923 was NOT a candidate before:
+the vocabulary is mined from the charter itself, so 314 lines of new prose move the
+stopword frequency table and admit lines that were previously below it. **The
+adjudication is owed on the POST-MERGE tree**, and `pds-w39-charter-ledger-corrections-owed`
+already carries a criterion for that re-run. Until then this arm is NOT enrolled in
+`.github/workflows/**`, so the red is local and blocks nothing on `main`.
+
 | fingerprint | line | slug | asserted | note |
 |---|---|---|---|---|
 | 0491b85db045 | 573 | pds-w1-crown-proof | non-disposition | PDS-D75 rewrites CRITERION 7's wording; a criterion edit is not a lifecycle claim |
