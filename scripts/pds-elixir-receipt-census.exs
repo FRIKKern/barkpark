@@ -652,46 +652,67 @@ defmodule PDS.Census do
   # row, or Repo.rollback — they are FALSE ACCUSATIONS, and a roster that carries them
   # would be the over-claiming this census exists to find, pointed the other way.
   #
-  # TWO ROWS ARE STALE-ON-MERGE, AND SAYING SO IS THE POINT (wave 37 review, 2026-08-02).
-  # scim_groups_controller.ex and session_controller.ex are verdicted REFUTED **at
-  # 501fb9670**. `pds-w37-unread-callee-receipts` repairs BOTH, and both roster literals
-  # SURVIVE that repair as substrings — measured, not assumed: the census run over the
-  # three wave-37 branches merged together prints ROSTER-ANCHORS-EXIST PASS with these
-  # verdicts unchanged. So the ANCHOR arm cannot catch the staleness; nothing here can.
-  # Whoever merges that slice OWNS re-deriving these two rows in the same wave — the note
-  # below is the obligation, and a REFUTED that outlives its defect is exactly the
-  # over-claim this roster exists to name, pointed at the roster itself.
+  # THOSE TWO ROWS WENT STALE EXACTLY AS PREDICTED, AND THE ARM THAT CATCHES IT NOW EXISTS
+  # (PDS wave 39). The previous text of this block ended "So the ANCHOR arm cannot catch
+  # the staleness; nothing here can." The first half still holds — ROSTER-ANCHORS-EXIST
+  # asserts the LITERAL still occurs, and fbc6b80a1 (#8993) repaired both callees while
+  # both literals survived byte-for-byte, so that arm printed PASS over two verdicts that
+  # had become FALSE. The second half is now wrong, and ROSTER-VERDICT-FRESH is what makes
+  # it wrong: every row records the ENCLOSING def it was judged against, as `anchor_mfa`
+  # (module.name/arity) and `def_fp` (the same total-meta-drop/phash2 fingerprint the
+  # register keys on, taken over that def's head+body). Either one moving DEMOTES the row
+  # to UNJUDGED AT PRINT TIME and reds the arm. Nothing here rewrites a verdict in this
+  # file — no script ever writes a verdict — so the demotion arrives as a diff-free fact
+  # and a human re-derives the row.
+  #
+  # BOTH GRANULARITIES, BECAUSE EACH IS BLIND WHERE THE OTHER SEES. `def_fp` catches the
+  # case that OCCURRED — the body changed under a stable name — and is blind to a
+  # body-identical RENAME. `anchor_mfa` catches the rename and is blind to a body edit
+  # under a stable name. Neither alone is the arm.
+  #
+  # THE TWO REFUTED ROWS BELOW WERE RE-DERIVED AGAINST MERGED MAIN in the same wave that
+  # shipped the arm, and both are now PROVEN: the callees were widened to report their own
+  # outcome and both callers answer over it. The verdicts and notes recorded here are
+  # therefore derived at 974d412ca, not at 501fb9670. The rest of the roster is unchanged.
   @roster [
     %{path: "api/lib/barkpark_web/controllers/scim_groups_controller.ex",
       literal: "Scim.delete_group(org, group)",
-      verdict: "REFUTED", basis: :unjudged_other,
-      note: "the callee's return is DISCARDED ENTIRELY before a 204, and Scim.delete_group/2 returns {:ok, n} including {:ok, 0}. STALE-ON-MERGE: pds-w37-unread-callee-receipts widens the callee to {:error, :not_found} and matches it at the caller; when that branch lands, RE-DERIVE this row — the literal survives, so no arm will red for you."},
+      anchor_mfa: "BarkparkWeb.ScimGroupsController.delete/2", def_fp: "48311107",
+      verdict: "PROVEN", basis: :end_to_end,
+      note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670, and that verdict outlived its defect by a whole wave). Scim.delete_group/2 (scim.ex:502-516) now returns {:error, :not_found} when Repo.delete_all removed nothing, so {:ok, 0} is UNREACHABLE, and the caller cases on the tag rather than discarding it: {:ok, _n} -> 204, {:error, :not_found} -> a SCIM 404. Driven and read back: scim_groups_controller_test.exs:215 deletes the row out from under the request through a repo telemetry handler, then asserts the 404 AND `refute Repo.get(Group, gid)`."},
     %{path: "api/lib/barkpark_web/controllers/scim_users_controller.ex",
       literal: "Scim.deprovision_user(org, user, hard: true)",
+      anchor_mfa: "BarkparkWeb.ScimUsersController.delete/2", def_fp: "19495067",
       verdict: "PROVEN", basis: :end_to_end_unmutated,
       note: "the match is `{:ok, _} =` over a raising Repo.delete! inside a transaction, so a failed deprovision cannot reach the 204."},
     %{path: "api/lib/barkpark_web/controllers/session_controller.ex",
       literal: "Barkpark.Accounts.revoke_user_session_token(token)",
-      verdict: "REFUTED", basis: :unjudged_other,
-      note: "revoke_user_session_token/1 hardcodes :ok over a Repo.update_all, so the flash and the redirect below it are true no matter how many rows moved. STALE-ON-MERGE: pds-w37-unread-callee-receipts widens it to {:ok, revoked} and forks the flash on the count; when that branch lands, RE-DERIVE this row — the literal survives, so no arm will red for you."},
+      anchor_mfa: "BarkparkWeb.SessionController.delete/2", def_fp: "94722031",
+      verdict: "PROVEN", basis: :end_to_end,
+      note: "RE-DERIVED at 974d412ca (was REFUTED at 501fb9670). revoke_user_session_token/1 (accounts.ex:336-347) carries @spec :: {:ok, non_neg_integer()} and returns the Repo.update_all count, the caller binds `{:ok, n} =` and the flash forks on it — sign_out_flash(0) is \"You were already signed out.\" Driven and read back: session_controller_test.exs:129 posts /logout twice and certifies the first flash against the STORED UserSession row's revoked_at, then that the second sign-out leaves that timestamp untouched."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "StudioChat.update_approval_status(id, request_id, status)",
+      anchor_mfa: "BarkparkWeb.ChatController.approval/2", def_fp: "121603508",
       verdict: "UNJUDGED", basis: :unjudged_other,
       note: "both arms of update_approval_status fold to :ok, and answer_approval's result is discarded with `_ =`."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "persist_user_turn(id, content)",
+      anchor_mfa: "BarkparkWeb.ChatController.create_message/2", def_fp: "83487517",
       verdict: "UNJUDGED", basis: :declared_basis,
       note: "a fail-soft persist, declared in the clause comment above it — the send is already on its way, so a persist miss must not turn a live send into an error."},
     %{path: "api/lib/barkpark_web/controllers/chat_controller.ex",
       literal: "json(%{request_id: request_id})",
+      anchor_mfa: "BarkparkWeb.ChatController.interrupt/2", def_fp: "23665871",
       verdict: "UNJUDGED", basis: :declared_basis,
       note: "the request_id: nil no-op, declared in the @doc."},
     %{path: "api/lib/barkpark_web/controllers/chat_host_controller.ex",
       literal: "{:ok, :accepted} -> conn |> put_status(:accepted) |> json(",
+      anchor_mfa: "BarkparkWeb.ChatHostController.event/2", def_fp: "62380347",
       verdict: "UNJUDGED", basis: :stub_mapping_only,
       note: "re-renders the callee's :accepted tag faithfully; the tag's truth against any stored row is a separate question this row does not answer."},
     %{path: "api/lib/barkpark_web/controllers/pulse_controller.ex",
       literal: "def preflight(conn, _params), do: send_resp(conn, 204,",
+      anchor_mfa: "BarkparkWeb.PulseController.preflight/2", def_fp: "131930615",
       verdict: "UNJUDGED", basis: :not_a_receipt,
       note: "a CORS preflight 204 claims nothing about work done. CARRIED ON PURPOSE, so the roster's own completeness is checkable: a roster of only the guilty is indistinguishable from a roster nobody finished."}
   ]
@@ -3353,19 +3374,29 @@ defmodule PDS.Census do
   # DERIVED from the literal on every run, never transcribed — that is the whole point of
   # anchoring on a literal.
   defp report_roster(parsed) do
-    src = Map.new(parsed, &{&1.path, &1.src})
-
     p("  THE POPULATION ROSTER — #{length(@roster)} NAMED sites outside this lens that report success")
     p("  without a read. A total names nobody; these are named, each with a verdict from")
     p("  the SAME vocabulary the register uses, and each anchored on a LITERAL.")
 
-    Enum.each(@roster, fn r ->
-      case roster_anchor(src, r) do
-        {:ok, line} ->
-          p("      #{String.pad_trailing(r.verdict, 9)} #{short(r.path)}:#{line}  [#{r.basis}]")
+    Enum.each(roster_freshness(parsed), fn {r, res} ->
+      case res do
+        %{state: :fresh, line: line, mfa: mfa} ->
+          p("      #{String.pad_trailing(r.verdict, 9)} #{short(r.path)}:#{line}  [#{r.basis}]  #{mfa}")
           wrap(r.note, "               ")
 
-        :missing ->
+        # DEMOTED AT PRINT TIME, NEVER REWRITTEN IN THE FILE. Same discipline as
+        # `basis_stale` on the register (PDS-D527): the committed row stays exactly as its
+        # author wrote it, so the demotion is a diff-free fact a human re-derives — no
+        # script assigns a verdict.
+        %{state: :stale, line: line, moved: moved} ->
+          p("      UNJUDGED  #{short(r.path)}:#{line}  [#{r.basis}]  VERDICT UNRE-DERIVED")
+          p("               recorded #{r.verdict}, demoted here because #{Enum.join(moved, " and ")}")
+          wrap(r.note, "               ")
+
+        %{state: :unresolved, why: why} ->
+          p("      UNJUDGED  #{short(r.path)}  ANCHOR UNRESOLVED — #{why} — see ROSTER-VERDICT-FRESH")
+
+        %{state: :absent} ->
           p("      #{String.pad_trailing(r.verdict, 9)} #{short(r.path)}  ANCHOR MISSING — see ROSTER-ANCHORS-EXIST")
       end
     end)
@@ -3398,6 +3429,128 @@ defmodule PDS.Census do
       end
 
     {"ROSTER-ANCHORS-EXIST", missing == [], why}
+  end
+
+  # -- ROSTER-VERDICT-FRESH ---------------------------------------------------
+  #
+  # A VERDICT THAT OUTLIVES ITS DEFECT IS THE OVER-CLAIM THIS CENSUS EXISTS TO FIND,
+  # POINTED AT THE CENSUS. Two @roster rows were verdicted REFUTED at 501fb9670; fbc6b80a1
+  # repaired both callees; both LITERALS survived byte-for-byte, so ROSTER-ANCHORS-EXIST
+  # printed PASS and the whole report was BYTE-IDENTICAL either side of the repair except
+  # two derived line numbers and the wall clock. The instrument could not tell a repaired
+  # tree from an unrepaired one, and its ENTIRE accusatory surface was those two rows.
+  #
+  # THE FIX IS A FIELD, NOT AN ARM. Freshness cannot be checked against a fact that is not
+  # recorded: the sha these verdicts were derived at lived only in a comment. Each row now
+  # carries `anchor_mfa` and `def_fp` for the def that ENCLOSES its literal, and this arm
+  # re-derives both every run. It is the same shape the register already uses for
+  # `basis_stale` — recorded key vs current key, demote at print time, never edit.
+  #
+  # THE RESOLUTION IS THE NARROWEST ENCLOSING def. roster_functions/1 takes EVERY def
+  # whose span contains the anchor because a superset only widens a disposition; a
+  # FINGERPRINT must be unambiguous, so ties go to the smallest span.
+  defp roster_freshness(parsed) do
+    by_path = Map.new(parsed, &{&1.path, &1})
+    Enum.map(@roster, fn r -> {r, roster_resolution(Map.get(by_path, r.path), r)} end)
+  end
+
+  # ABSENT IS NOT UNRESOLVED, AND THE SPLIT IS DELIBERATE. A file or literal that has left
+  # the corpus is ROSTER-ANCHORS-EXIST's finding, and two arms redding on one fact reads as
+  # two regressions. UNRESOLVED is the case only this arm can see: the literal is right
+  # there, and it sits inside no def at all.
+  defp roster_resolution(nil, _r), do: %{state: :absent}
+
+  defp roster_resolution(f, r) do
+    case roster_anchor(%{r.path => f.src}, r) do
+      :missing ->
+        %{state: :absent}
+
+      {:ok, line} ->
+        case roster_enclosing_def(f, line) do
+          nil ->
+            %{state: :unresolved, why: "#{short(r.path)}:#{line} lies inside no def this lens can see"}
+
+          d ->
+            roster_compare(r, d, line)
+        end
+    end
+  end
+
+  defp roster_enclosing_def(f, line) do
+    f.defs
+    |> Enum.filter(&(&1.line <= line and line <= &1.last))
+    |> Enum.min_by(&(&1.last - &1.line), fn -> nil end)
+  end
+
+  # THE SAME NORMALISER THE REGISTER KEY USES (@key_normaliser), over head AND body: a
+  # meta-dropped phash2 of the term, so a def that only MOVED fingerprints identically and
+  # the arm stays silent on unrelated churn. Editing fp/1 or drop_meta/1 re-keys these
+  # eight rows exactly as it re-keys the register's 91.
+  defp roster_def_fp(d), do: fp({d.head, d.body})
+
+  defp roster_compare(r, d, line) do
+    mfa = label(d)
+    dfp = roster_def_fp(d)
+
+    moved =
+      [
+        if(r.anchor_mfa != mfa, do: "anchor_mfa moved #{r.anchor_mfa} -> #{mfa}"),
+        if(r.def_fp != dfp, do: "def_fp moved #{r.def_fp} -> #{dfp}")
+      ]
+      |> Enum.reject(&is_nil/1)
+
+    state = if moved == [], do: :fresh, else: :stale
+    %{state: state, line: line, mfa: mfa, fp: dfp, moved: moved}
+  end
+
+  # IT LIVES IN THE UNCONDITIONAL CHECKS LIST, WITH ITS OWN SCOPE CALL — never as a fifth
+  # element of register_checks/2 (PDS-D541). The predicate is the same one, because the
+  # roster names files that live in the real corpus and none of them exist in the
+  # selftest's synthetic tree. THAT is why the mutants for this arm run over the REPO
+  # corpus (`corpus: :repo`) rather than the fixture: an arm proven only where it is
+  # scoped out is proven nowhere, which is the exact trap D541 named.
+  defp roster_freshness_checks(classified, parsed) do
+    case register_scope(classified) do
+      :scoped_out -> []
+      :real -> [roster_freshness_check(parsed)]
+    end
+  end
+
+  defp roster_freshness_check(parsed) do
+    rows = roster_freshness(parsed)
+    stale = for {r, %{state: :stale} = res} <- rows, do: {r, res}
+    unresolved = for {r, %{state: :unresolved} = res} <- rows, do: {r, res}
+    fresh = Enum.count(rows, fn {_r, res} -> res.state == :fresh end)
+    absent = Enum.count(rows, fn {_r, res} -> res.state == :absent end)
+
+    # 0-OF-8 IS NOT A PASS. An arm that certifies an empty set is the vacuous green this
+    # epic exists to refuse, and it is the exact failure mode a broken resolver produces.
+    vacuous? = fresh == 0 and stale == [] and unresolved == []
+
+    why =
+      cond do
+        vacuous? ->
+          "NOT ONE of #{length(@roster)} roster row(s) resolved to a def, so this arm certified an EMPTY SET — the resolver, not the roster, is what failed"
+
+        stale != [] or unresolved != [] ->
+          named =
+            Enum.map(stale, fn {r, res} ->
+              "STALE VERDICT #{r.verdict} #{short(r.path)}:#{res.line} — #{Enum.join(res.moved, " · ")}"
+            end) ++
+              Enum.map(unresolved, fn {_r, res} -> "UNRESOLVED ANCHOR #{res.why}" end)
+
+          "#{length(stale)} stale + #{length(unresolved)} unresolved of #{length(@roster)} roster row(s) — " <>
+            Enum.join(Enum.take(named, 4), " || ") <>
+            if(length(named) > 4, do: " || (+#{length(named) - 4} more, all listed in the roster block above)", else: "") <>
+            " — each was judged against a def that no longer exists in that shape, so it is DEMOTED TO UNJUDGED in the roster block above and a human owes it a re-derivation; this arm never edits a verdict"
+
+        true ->
+          "#{fresh} roster verdict(s) still name the def they were derived against — anchor_mfa AND def_fp both re-derived this run, never transcribed" <>
+            if(absent > 0, do: " (#{absent} row(s) absent from this corpus — ROSTER-ANCHORS-EXIST owns those)", else: "") <>
+            ". BLIND SHAPE, STATED: both granularities are SAME-FILE. `git show --stat fbc6b80a1` — the repair that made two of these rows stale — also touched scim.ex and accounts.ex, and a future repair confined to a CALLEE moves no byte inside the roster row's own def, so this arm would print PASS through it"
+      end
+
+    {"ROSTER-VERDICT-FRESH", not vacuous? and stale == [] and unresolved == [], why}
   end
 
   defp sum_occ(parsed, needle), do: Enum.sum(Enum.map(parsed, &count(&1.src, needle)))
@@ -3654,13 +3807,78 @@ defmodule PDS.Census do
       exit: 0,
       expect: ["PASS  LENS-CAN-MISS", "live_dashboard/2", "CANNOT expand"],
       proves: "a route-generating macro the lens cannot expand is NAMED with its line, so the routes it emits are stated absent rather than silently missing"
+    },
+    # THE FRESHNESS ARM (PDS wave 39), AND WHY ITS CORPUS IS THE REPO ITSELF.
+    #
+    # ROSTER-VERDICT-FRESH is scoped to the real corpus by register_scope/1 — the roster
+    # names eight files that exist only in api/lib, and the synthetic tree holds none of
+    # them. Mutating this arm and running it over the FIXTURE would run a check that
+    # returned [] before the mutation and [] after it, and print SELFTEST OK: the exact
+    # unmutatability D541 named. So these four cases census the REPO (`corpus: :repo`),
+    # which is where the arm is in scope, and the baseline below is what makes the three
+    # reds attributable to their mutations.
+    #
+    # EVERY MUTATION EDITS A COMMITTED @roster ROW OR THE ARM'S OWN RESOLVER — never the
+    # fixture heredoc, which write_corpus!/2 writes UNMUTATED before the mutant runs (a
+    # fixture mutation is a function the mutant never calls, and passes vacuously at
+    # exit 0; measured, and recorded above the routed cases).
+    %{
+      name: "REPO-BASELINE-GREEN",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: ["CENSUS OK", "PASS  ROSTER-VERDICT-FRESH"],
+      proves: "the arm is GREEN on the unmodified repo, so each red below is its mutation and not a tree that was already failing"
+    },
+    %{
+      name: "ROSTER-DEF-FP-MOVED",
+      corpus: :repo,
+      argv: [],
+      # The case that OCCURRED: fbc6b80a1 changed two def BODIES under stable names.
+      # Perturbing the RECORDED fingerprint is the same divergence seen from the other
+      # side — recorded pair vs re-derived pair — and it is the only side a selftest can
+      # edit without touching api/lib.
+      mut: {"def_fp: " <> "\"131930615\"", "def_fp: \"131930615-perturbed\""},
+      exit: 1,
+      expect: ["FAIL  ROSTER-VERDICT-FRESH", "def_fp moved", "pulse_controller.ex"],
+      proves: "a roster verdict whose def CHANGED under a stable name reds by name and is demoted to UNJUDGED at print time — the staleness that shipped through a whole wave with every arm printing PASS"
+    },
+    %{
+      name: "ROSTER-ANCHOR-MFA-MOVED",
+      corpus: :repo,
+      argv: [],
+      # The case that will occur NEXT: a def RENAMED with its body byte-identical. def_fp
+      # is blind to it by construction — the fingerprint is over head+body, and this
+      # mutation moves neither — so this case is what proves the second granularity is
+      # load-bearing rather than decorative.
+      mut:
+        {"anchor_mfa: " <> "\"BarkparkWeb.PulseController.preflight/2\"",
+         "anchor_mfa: \"BarkparkWeb.PulseController.cors_preflight/2\""},
+      exit: 1,
+      expect: ["FAIL  ROSTER-VERDICT-FRESH", "anchor_mfa moved", "cors_preflight/2"],
+      proves: "a roster verdict whose def was RENAMED under an identical body reds too — def_fp cannot see this one, so neither granularity alone is the arm"
+    },
+    %{
+      name: "ROSTER-FRESH-NOT-VACUOUS",
+      corpus: :repo,
+      argv: [],
+      # THE 0-OF-8 SHAPE. A resolver that finds no def makes every comparison unreachable,
+      # which is how a freshness arm certifies an empty set at exit 0 — the LENS-CAN-MISS
+      # -ARMED failure mode, wearing this arm's name.
+      mut:
+        {"|> Enum.min_by(&(&1.last - &1.line)" <> ", fn -> nil end)", "|> then(fn _ -> nil end)"},
+      exit: 1,
+      expect: ["FAIL  ROSTER-VERDICT-FRESH", "0 stale + 8 unresolved of 8", "UNRESOLVED ANCHOR"],
+      proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-8 — an arm that certifies an empty set is the vacuous green this epic refuses"
     }
   ]
 
   defp selftest do
     p("PDS CENSUS SELFTEST — can this instrument be made to go RED?")
     p(String.duplicate("=", 78))
-    p("  Mutates this file over a synthetic corpus (CWD injection) and requires each")
+    p("  Mutates this file over a synthetic corpus (CWD injection) — and, for the arms")
+    p("  the synthetic corpus scopes OUT, over the REPO corpus read-only — requiring each")
     p("  mutant to red on the arm it kills. Asserts exit codes, arm names and refusal")
     p("  prose — NEVER a bucket count, so an honest lens correction can never red it.")
     p("")
@@ -3678,7 +3896,11 @@ defmodule PDS.Census do
         System.tmp_dir!(),
         "pds-census-selftest-#{System.pid()}-#{System.unique_integer([:positive])}"
       )
-    dirs = %{full: Path.join(root, "full"), tiny: Path.join(root, "tiny")}
+    # THE THIRD CORPUS IS THE REPO ITSELF, AND IT IS READ-ONLY. Nothing below writes to
+    # it — the mutants are written into `root` and merely RUN with cwd here. It exists
+    # because ROSTER-VERDICT-FRESH is scoped to the corpus its eight rows name, so the
+    # synthetic tree scopes it OUT and a mutant there would prove nothing (PDS-D541).
+    dirs = %{full: Path.join(root, "full"), tiny: Path.join(root, "tiny"), repo: File.cwd!()}
 
     write_corpus!(dirs.full, @selftest_filler)
     write_corpus!(dirs.tiny, 0)
@@ -3983,7 +4205,10 @@ defmodule PDS.Census do
        else
          "Barkpark.Tasks.close (defdelegate, #{delegate.delegates} on the facade) reaches NO write verb within the route budget — the facade probe is blind"
        end}
-    ] ++ routed_checks(routed) ++ register_checks(classified, parsed) ++ falsifier_check(falsifiers)
+    ] ++
+        routed_checks(routed) ++
+        register_checks(classified, parsed) ++
+        roster_freshness_checks(classified, parsed) ++ falsifier_check(falsifiers)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
