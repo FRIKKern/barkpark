@@ -3402,6 +3402,7 @@ defmodule PDS.Census do
           class: :residual_undecided,
           producer: "-",
           clauses: 0,
+          scope_read: :no_body,
           why: "the routed action resolves to no def this pass can open"
         }
 
@@ -3416,7 +3417,12 @@ defmodule PDS.Census do
   defp derivation_rank(class), do: Enum.find_index(@derivation_order, &(&1 == class)) || 99
 
   defp derive_def(%{body: nil}),
-    do: %{class: :residual_undecided, producer: "-", why: "defdelegate — no body to read"}
+    do: %{
+      class: :residual_undecided,
+      producer: "-",
+      scope_read: :no_body,
+      why: "defdelegate — no body to read"
+    }
 
   defp derive_def(d) do
     body = expand_pipes(d.body)
@@ -3432,7 +3438,8 @@ defmodule PDS.Census do
     # the success path and is read as such.
     scopes = success_scopes(body)
     scoped = Enum.flat_map(scopes, &response_emissions/1)
-    emits = if scopes == [] or scoped == [], do: response_emissions(body), else: scoped
+    fallback? = scopes == [] or scoped == []
+    emits = if fallback?, do: response_emissions(body), else: scoped
 
     payload_vars =
       Enum.reduce(emits, MapSet.new(), fn {_kind, expr}, acc ->
@@ -3442,32 +3449,43 @@ defmodule PDS.Census do
     used = for v <- payload_vars, Map.has_key?(oks, v), do: Map.fetch!(oks, v)
     gate = names(discarded)
 
-    cond do
-      emits == [] ->
-        if local_helper_call?(d),
-          do: %{class: :residual_helper_assembled, producer: "-", why: "no response call in this clause"},
-          else: %{class: :residual_undecided, producer: "-", why: "no response call, no local helper call"}
+    # WHICH REGION DECIDED THIS CLAUSE IS RECORDED, NOT ASSERTED (PDS wave 40 review).
+    # The blind-shape block used to state "the whole def body is read", which stopped
+    # being true the moment success_scopes/1 landed — committed prose outliving its own
+    # code is the exact species this epic hunts, so the region is stamped per clause here
+    # and the two counts are DERIVED into the printed blind shape instead of described.
+    scope_read = if fallback?, do: :whole_body, else: :success_branch
 
-      used != [] ->
-        producers = names(used)
+    Map.put(
+      cond do
+        emits == [] ->
+          if local_helper_call?(d),
+            do: %{class: :residual_helper_assembled, producer: "-", why: "no response call in this clause"},
+            else: %{class: :residual_undecided, producer: "-", why: "no response call, no local helper call"}
 
-        if Enum.all?(producers, &derivation_reread_name?/1),
-          do: %{class: :reread_receipt, producer: Enum.join(producers, "+"), why: "read-shaped producer"},
-          else: %{class: :store_derived, producer: Enum.join(producers, "+"), why: "write-shaped producer"}
+        used != [] ->
+          producers = names(used)
 
-      MapSet.size(payload_vars) == 0 ->
-        gated? = Enum.any?(emits, fn {k, _} -> k in [:redirect, :put_flash] end) and gate != []
+          if Enum.all?(producers, &derivation_reread_name?/1),
+            do: %{class: :reread_receipt, producer: Enum.join(producers, "+"), why: "read-shaped producer"},
+            else: %{class: :store_derived, producer: Enum.join(producers, "+"), why: "write-shaped producer"}
 
-        if gated?,
-          do: %{class: :control_flow_gated_literal, producer: Enum.join(gate, "+"), why: "constant behind a discarded {:ok, _}"},
-          else: %{class: :literal_only, producer: gate_or_dash(gate), why: "no bound value in the body"}
+        MapSet.size(payload_vars) == 0 ->
+          gated? = Enum.any?(emits, fn {k, _} -> k in [:redirect, :put_flash] end) and gate != []
 
-      not MapSet.disjoint?(payload_vars, head) ->
-        %{class: :request_echo, producer: gate_or_dash(gate), why: "renders a value bound in the action's HEAD"}
+          if gated?,
+            do: %{class: :control_flow_gated_literal, producer: Enum.join(gate, "+"), why: "constant behind a discarded {:ok, _}"},
+            else: %{class: :literal_only, producer: gate_or_dash(gate), why: "no bound value in the body"}
 
-      true ->
-        %{class: :residual_onehop_unattributed, producer: gate_or_dash(gate), why: "bound values trace to neither an {:ok, _} payload nor the head"}
-    end
+        not MapSet.disjoint?(payload_vars, head) ->
+          %{class: :request_echo, producer: gate_or_dash(gate), why: "renders a value bound in the action's HEAD"}
+
+        true ->
+          %{class: :residual_onehop_unattributed, producer: gate_or_dash(gate), why: "bound values trace to neither an {:ok, _} payload nor the head"}
+      end,
+      :scope_read,
+      scope_read
+    )
   end
 
   defp names(atoms), do: atoms |> Enum.map(&to_string/1) |> Enum.uniq() |> Enum.sort()
@@ -3712,6 +3730,11 @@ defmodule PDS.Census do
     residual = Enum.reduce(@derivation_residual, 0, &(&2 + Map.get(freqs, &1, 0)))
     pairs = rows |> Enum.map(fn %{key: {_, _, mod, a}} -> {mod, a} end) |> Enum.uniq() |> length()
 
+    scope_counts =
+      rows
+      |> Enum.frequencies_by(&Map.get(&1, :scope_read, :whole_body))
+      |> then(&Map.merge(%{success_branch: 0, whole_body: 0, no_body: 0}, &1))
+
     p("  DERIVATION PARTITION of the #{class_total} #{@derivation_class} row(s) — what the")
     p("  receipt ACTUALLY renders, DERIVED this run over #{pairs} distinct {module, action} pair(s)")
     p("  ------------------------------------------------------------------------")
@@ -3759,8 +3782,15 @@ defmodule PDS.Census do
     p("    · reread_receipt IS DECIDED BY THE PRODUCING CALL NAME, which is a string test.")
     p("      Every row above prints that name, so the verdict is auditable prose rather")
     p("      than a silent filter — check any row against its source and this pass loses.")
-    p("    · THE WHOLE DEF BODY IS READ, not a 2xx-only slice: an error-branch payload is")
-    p("      unioned with the success payload, so a row can be classified on either.")
+    p("    · WHICH REGION DECIDED THE ROW IS MEASURED, NOT ASSUMED. success_scopes/1 reads")
+    p("      the `{:ok, _}` BRANCH where one carries a response call — #{scope_counts.success_branch} row(s) here.")
+    p("      The other #{scope_counts.whole_body} fall back to the WHOLE def body (no attributable success scope),")
+    p("      where an ERROR-branch payload can decide the verdict; #{scope_counts.no_body} row(s) have no body at")
+    p("      all. And a def with two unrelated success scopes contributes BOTH — the union")
+    p("      is taken, never proven benign.")
+    p("    · A VALUE THE PLUG ALREADY LOADED IS INVISIBLE. dvars/1 drops `conn`, so a")
+    p("      receipt built from `conn.assigns[:document]` — a store value fetched before")
+    p("      the action ran — contributes no var and can read as literal_only.")
     p("    · A REDIRECT'S `to:` IS NOT A PAYLOAD. Recording it would let a redirect built")
     p("      from a caller-supplied id read as store-derived.")
     p("")
