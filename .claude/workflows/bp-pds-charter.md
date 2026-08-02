@@ -2576,7 +2576,85 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
-### Wave 38 2026-08-02 — "The denominator is the router, not the string" — BUILDING (paper `pds-wave-38-2026-08-02`)
+### Wave 38 2026-08-02 — "The denominator is the router, not the string" — REVIEWED. Grade A− (paper `pds-wave-38-2026-08-02`)
+
+**ALL FOUR ROUND-1 SLICES BUILT, ALL FOUR GREEN, ALL FOUR PUSHED WITH PRs OPEN.** Three round-≥2
+slices were deferred BY DESIGN under the sequenced-rounds law. Every gate was re-run by the reviewer
+on the final state, the reviewer ran its own mutation of every fix it made, and it merged all four
+branches into one probe tree and re-ran the census there rather than trusting four per-branch greens.
+
+| slice | final branch | what it actually does |
+|---|---|---|
+| `pds-w38-routed-population` | `…-population-is-derived-f-0-r` | the ROUTED-WRITE population DERIVED from router.ex AST ∪ 83 plugin specs: **252 members keyed `{method, path, module, action}`**, every one disposed exactly once (65 JUDGED / 7 ROSTERED / 180 EXCLUDED / 0 UNDISPOSED). Two arms in the UNCONDITIONAL list behind their own router-presence predicate; 4 new selftest cases, 3 of them mutants |
+| `pds-w38-record-parity-arm` | `…-not-leave-its-task-row-o-1-r` | `scripts/pds-record-parity.sh` + a 54-check hermetic selftest — the epic's law turned on the epic's own record, RED today on 52 leaf rows |
+| `pds-w38-scim-group-member-receipts` | `…-grants-stop-answering--2-r` | the callee widened FIRST (`{:ok, pos_integer()} \| {:error, :no_membership}`), then read back at all three sites, then the receipt DERIVED from stored rows |
+| `pds-w38-ledger-hygiene-derived` | `…-open-rows-close-on-this--3-r` | NINE merged-but-open rows closed on this wave's derived numbers — not the dispatch's three — with six more refused by name |
+
+**PDS-D553 — THE POPULATION HOLE IS ANSWERED BY DERIVATION, AND THE ANSWER IS 252, NOT 204.** The
+wish's either/or ("widen the roster, or prove the roster's arm can refuse a site it cannot see") is
+answered by neither: the outside population is now DERIVED and every member carries a disposition,
+so SCIM's six IdP write routes (`POST`/`PUT`/`PATCH` on `/scim/v2/Groups` and `/scim/v2/Users`) are
+**counted** under an EXCLUDED class whose committed prose names them as the hole. Mid-build the
+builder found a real bug in the census's own reader — `kw/2` reads the `literal_encoder`-wrapped AST
+that `parse_file/1` produces, but the router walk parses PLAIN, so `kw(opts, :scope)` returned nil,
+every `plugin_routes/1` mount silently defaulted to `:admin`, and the population lost 84 routes with
+no error. **204 is what the derivation printed while that bug was live**, which is very likely where
+the brief's own 204/168 figures came from. Fixed with a local `kw_lit/2`. The write half of the
+derived total (212) is set-size-identical to the compiled Phoenix table's own write count.
+
+**PDS-D554 — A MUTATION PLANTED IN A FIXTURE THE MUTANT NEVER CALLS ASSERTS NOTHING, AND IT SHIPS
+GREEN.** The brief's recipe for the two new arms was to plant the synthetic arrival in the fixture
+router inside `write_corpus!/2`. `selftest/0` writes both corpora ONCE with the UNMUTATED
+`write_corpus!/2` and the mutant then censuses that already-written tree — it never calls
+`write_corpus!/2` at all. The builder's first draft of `ROUTED-ARRIVAL-REDS` / `ROUTED-DEPARTURE-REDS`
+passed the anchor check, applied cleanly, and exited 0 while asserting nothing. The arrival is now
+planted into the derived route union itself and the reason is a comment in the case list. **This is a
+correction to an L4 recipe this charter issued, found by shipping it and looking.**
+
+**PDS-D555 — THE ARM THAT REFUSES WRONG SENTENCES SAID TWO WRONG THINGS, AND ITS OWN 49-CHECK
+HARNESS COULD NOT SEE EITHER.** Reviewer-found and fixed in place on `pds-w38-record-parity-arm`:
+(1) PR #6371's body says literally `Task: n/a`; the canonical extractor returns `n/a`, the ledger
+404s, and the arm printed `NOT-FOUND … merged over a task id the ledger does not carry` — TRUE, but
+the accurate sentence is "the PR declared no task", and it **RED** where the structurally identical
+no-trailer case is advisory. A sentinel id is now a counted advisory (`declared none:`), disposed
+AFTER the one canonical grammar runs, two-sided fixture (sentinel greens, real ghost still reds),
+mutation-proven. (2) The `PDS_RECORD_PARITY_PACE` sleep sat at the BOTTOM of the sweep loop, after
+every `continue` — it fired only on rows already scored DIVERGENT and paced **nothing at all on a
+healthy ledger**. Moved before `ledger_fetch`, pinned structurally (a canned transport that answers
+instantly cannot tell the two placements apart by wall clock). Both defects lived at the seam this
+epic exists to police: not a false green, a **true statement in the wrong sentence**.
+
+**PDS-D556 — THE WAVE ANSWERED ITEM 2's FIRST HALF AND LEFT THE SECOND HALF UNBUILT, AND SAYS SO.**
+`pds-w34-census-cas-shadow` was already `done` (closed by `ledger-hygiene-w37` on wave-37 derived
+numbers, explicitly NOT on PDS-D485's claim) — the ledger-hygiene builder checked before spending a
+slice, exactly as the direction asked. But the direction's follow-on — "sweep for other rows where
+charter and ledger disagree, because one instance is never one instance" — was NOT built, and the
+builder said so rather than smoothing it. Neither record-parity axis covers that relation: axis B is
+merged-PR→lifecycle, axis A is commit→charter-definition; neither reads a charter SENTENCE asserting
+a task's disposition. Filed by the reviewer as `pds-w38-charter-ledger-disagreement-sweep`
+(published, priority 2, 4 criteria).
+
+**WHAT LANDS AS DEBT, NAMED RATHER THAN HIDDEN.** The 180 committed disposition rows red on EVERY
+honest route change with no mechanical repair path today and the FAIL line names at most four
+offenders — the arm working as designed, and also the most likely reason someone switches it off
+(`pds-w39-routed-disposition-regen`, filed). `JUDGED` is a ONE-HOP relation, so a receipt two helpers
+deep over-counts the hole. The derivation is never proven SET-IDENTICAL against the compiled Phoenix
+table — proving that needs the build the census exists to avoid; the count agreement is the strongest
+evidence available and the builder stamped the disagreement (469 derived vs 473 compiled = the four
+`live_dashboard/2` routes, NAMED as unexpandable).
+
+**WHAT THE NEXT WAVE TAKES.** (1) Merge round 1 in the order `pds-w38-routed-population` first, then
+the other three (only slice 1 touches the checks-list anchor). (2) Then the three deferred slices as
+their dep lands: `pds-w38-verdict-freshness-arm` and `pds-w38-falsifier-promotion` (both edit the same
+anchor slice 1 restructures — sequence them, do not parallelise), then `pds-w34-owning-doc-amendment`,
+whose criterion 7 must now name **252 / 40 LiveView over 26 modules / 1 unexpandable macro**, NOT the
+brief's 204 / 43 / 27, and whose slice-1 vocabulary rename (`UNREACHABLE-ERROR` → `CATCH-ALL-TO-SUCCESS`)
+it still has to carry. (3) `pds-w38-charter-ledger-disagreement-sweep`. (4) A genuinely
+out-of-band second reviewer is owed on `pds-w38-scim-group-member-receipts` before merge — this
+workflow spawns exactly one reviewer, and both the ledger-hygiene re-derivation and this review are
+same-wave agents.
+
+### Wave 38 2026-08-02 — the DECIDE record (unchanged, kept for the wave's own story)
 
 **THE WISH ASKED AN EITHER/OR AND THE WAVE ANSWERS WITH A THIRD ANSWER.** "Widen the roster, or prove
 the roster's own arm can refuse a site it cannot see — and say which." Neither. Widening the roster
