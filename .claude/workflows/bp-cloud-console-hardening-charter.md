@@ -971,6 +971,81 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-02 — wave 21 REVIEW — 4/4 built, gated, pushed and PR'd. Grade A-
+
+Paper: `cloud-console-hardening-wave-21-2026-08-02`. **Every round-1 slice landed as a PR** — #9057 s1,
+#9058 s2, #9059 s3 (`…-2-r`), #9060 s4 (`…-3-r`). Two waves in a row have now ended with the work on
+origin instead of on a local branch in a shared checkout.
+
+**What shipped, and the ratio held at four.** s1: the members roster stops hiding WHO a Remove button acts
+on — `.set-row-main` was the only shrinkable column and `.set-row-name`'s `text-overflow: ellipsis` was
+INERT beside `white-space: normal`, so at 320 the page scrolled 12px sideways and Remove's right edge sat at
+331.86 against a 320 viewport; the builder's own leg found FIVE broken rows where the brief named two. s2:
+ONE declaration — `.detail-head--inst { align-items: stretch }` in the existing 620 block — after a driven
+element-hiding bisect proved `.detail-url-text` (not `.detail-title-row`) sets the 326px min-content, and
+proved that `min-width: 0` and `flex: 1 1 0` both fail because clamping an item does not lower a flex
+container's min-content contribution. s3: the epic's **first committed adversarial fixture** —
+`fleet-cruel-content`, a 253-char `custom_host` and a 255-char `name` at the server's own
+`validate_length` caps, with its lengths DERIVED and asserted at module load so a fixture that goes kind
+refuses instead of measuring — plus the three bounds it exposes (54 cruel findings / 0 kind → 0 / 0).
+s4: the write-once PAT stops showing 22 of its 51 characters on the one screen that says you will never see
+it again; an `<input>` can only scroll, so the secret became a wrapping `<code>` and the input a clipped
+copy buffer, with the 12px `--text-xs` floor NOT crossed to buy it.
+
+**The builders' own honesty was the best instrument in the wave.** s3 shipped a THIRD bound the brief did
+not ask for and said so, because with only `.fleet-url` bounded the fleet page still measured 465 at 320.
+s3 also caught its own first fixture being too kind — a hyphen-rich 253-char host wraps itself — and rebuilt
+it out of unbroken 63-char labels. s2 filed the 621-899 residual of its own mechanism rather than widening
+into it. s4 declared an app.js widening outside its FILES list and checked sibling collision before typing.
+
+**Reviewer's own work — one of the three fixes was a merge blocker.** s3 taught `breakpoint-sweep.mjs` about
+its new scenario but not `smoke.mjs`, whose census is TWO-WAY: `console-harness.yml:237` exited 1 with *"1
+committed scenario(s) have NO expectation and were never run"*. The slice's own gate did not include smoke,
+so nobody saw it. The fixture now carries a real expectation whose every string is derived from the fixture.
+On s4: the token `<code>` carried `aria-label` on a role that PROHIBITS a name and left the key-name label
+orphaned (now `role="textbox" aria-readonly aria-labelledby`); the Copy handler set `ok = true` on promise
+ISSUE and toasted "Copied to clipboard" unconditionally, so a rejected write lied about an unrecoverable
+secret; and the off-screen buffer no longer flips to `type="password"`, the one state in which
+`execCommand("copy")` is refused. s1 and s2 needed nothing.
+
+**THE BASELINE ANSWER, MEASURED ON THE MERGED TREE.** s1's own note in `cssom-heads.baseline` predicts the
+integrated tree still needs a corrective bump. It does NOT. The reviewer merged all four branches in
+sequence in an isolated worktree and ran the tool: **1266 authored heads == 1266 baseline, flattened
+1225/1225, MISSES 0, PARITY PASS** — s2/s3/s4 really are Δ0. All four legs coexist and the integrated
+`overflow-guard.mjs` exits 0 naming twelve defects including all four W21 legs. **Merge them in any order and
+re-run the tool; do not add deltas, and do not bump.**
+
+**THE ONE MECHANICAL COST THE LEAD MUST BUDGET FOR.** Every one of the four slices appends its leg at the
+same anchor in `overflow-guard.mjs`, so **every merge after the first conflicts there**, and the conflict is
+not resolvable by hunk — a marker keep-both is a proven `SyntaxError` (D247), and a byte-offset splice cuts
+mid-line (the reviewer reproduced exactly that failure and had to redo the integration line-based). The
+resolution is mechanical and always the same: keep every leg WHOLE, append after the existing ones,
+immediately before the LAST `} catch (err) {`, and add each leg's string to `DEFECTS`. Four-wide append is
+what makes this wave cheap to build and expensive to merge, and the next wave should decide that trade
+deliberately rather than inherit it.
+
+**What was NOT done, said out loud.** The wish's item 1 — rebase and land `#8987` — **did not happen**. No
+wave-21 slice took it; Decide recorded it as D247 (land by leg, re-measured) and then seated four new
+screens instead. `#8987` is still OPEN with its `cssom-heads.baseline` conflict, and once wave 21 lands the
+target is 1266, not the 1264 or 1267 the earlier notes name. Its row (`cch-w20-s9-attention-name-column-collapse`,
+10/11 met) read `open` — i.e. claimable — while its work was finished and PR'd; the reviewer recorded that
+disposition in place. `cch-w19-s8-band-a-shell-fold-cliff` (0/10, unclaimed) is the OTHER row the wish's item 1
+conflated with it and is genuinely untouched. The D218 font pin was priced and deferred to round 2 by
+measurement (D248), which is the wish's own instruction, not a dodge.
+
+**Ledger.** The four slice rows are honest: each `in_progress`, evidence stamped as the builders worked,
+and ONLY the merge-gated criterion left open for the lead (s1 #9, s2 #8, s3 #10, s4 #9). The reviewer stamped
+s3's criterion 7 (baseline abstention machine-proven) because it is the first actor with a PR number to prove
+it with. A fresh Law-0 duplicate sweep over **185 live non-draft rows** across both epics returns **ZERO**
+near-duplicate pairs at Jaccard ≥ 0.5 — wave 20's collapse held and wave 21 added none.
+
+**Next wave.** Merge round 1, then dispatch the two deferred rows IN DEPENDENCY ORDER:
+`cchi-w21-s6-ci-renders-a-boundary-cell` (needs s1 merged) and `task-d862cf7f8e1108c1`, the TWO-face font pin
+(needs all four merged — it edits the shared `nav()`/`navSettle()` preamble every one of them appends to).
+Then land `#8987` on the 1266 tree. The four legs this wave added are all local-run-proven and
+mutation-proven, but **not one of them has been WATCHED to red in CI** — that is the standing test's unpaid
+half and it is what `cchi-w21-s6` exists to make cheap.
+
 ### 2026-08-02 — wave 21 DECIDE (build in flight) — 4 person-facing slices, 2 deferred, and the instruments come back GREEN
 
 Paper: `cloud-console-hardening-wave-21-2026-08-02`. Charter PR: see `charter_pr` in the run record.
