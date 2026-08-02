@@ -2576,6 +2576,92 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 40 2026-08-02 — "A class is a verdict too" — REVIEWED. Grade A (paper `pds-wave-40-2026-08-02`)
+
+**ALL FOUR ROUND-1 SLICES BUILT, ALL FOUR GREEN ON THEIR FINAL STATE, ALL FOUR PUSHED WITH PRs OPEN.**
+Three round-2 slices deferred BY DESIGN under the sequenced-rounds law. The reviewer re-ran every gate
+on the final branch, re-derived the two high-flip-risk judgments independently rather than re-reading
+the builder's reasoning, and fixed two defects in place — both of them the epic's OWN disease found
+inside this wave's own repairs.
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w40-request-echo-repairs` | `loop-epic/four-live-request-echo-receipts-answer-o-0` | #9164 | FIVE code sites (not four — `app_token_controller.ex` carries two) across four controllers answer over the store: `deleted.filename`, `shareEnabled` off the upserted doc, `revoked_at`/`id`, and the 201 credential receipt's insert-generated `id`/`inserted_at`. The pre-write-read TRAP held |
+| `pds-w40-derivation-partition` | `loop-epic/the-138-splits-by-derivation-with-a-resi-1-r` | #9165 | the 138 splits **88 store_derived · 7 reread · 7 request_echo · 2 gated_literal · 4 literal_only · RESIDUAL 30**, every row printing its producing call name; `DERIVATION-PARTITION-TOTAL` is a RELATION not a count; hermetic two-corpus mutant with a `refute:` half; the Sheets alias close retires `action_not_in_corpus` |
+| `pds-w40-scim-groups-list-members` | `loop-epic/get-scim-v2-groups-answers-with-its-stor-2` | #9166 | the ListResponse answers with its stored members in ONE membership query a page, telemetry-measured; the false RFC 7644 §3.4.2 comment is DELETED |
+| `pds-w40-shares-remove-postread` | `loop-epic/stopped-sharing-x-stops-being-a-lie-the--3-r` | #9167 | "Stopped sharing X" becomes a POST-READ of `Sharing.shared?/4`; the dual env+stored scope now reports STILL SHARED instead of a success sentence over a publicly-readable dataset |
+
+**PDS-D588 — THE WISH'S THREE HEADLINE ROWS WERE REFUTED BY THE ARTIFACT, FOR THE SIXTH CONSECUTIVE
+WAVE, AND THIS TIME THE CHARTER HAD ALREADY SAID SO.** The wish named `DELETE /v1/access/:id`,
+`DELETE /v1/auth/app-tokens` and `DELETE /api/workspaces/:slug` as rows that "claim success by STATUS
+alone". Re-derived in-process: the first renders `%{grant: render_grant(grant)}` out of `{:ok, grant}`,
+the second dispatches through a private helper and lands RESIDUAL rather than accused, the third
+renders `render_workspace(deleted)`. **None of the three is an echo.** The partition's own measurement
+is the answer to the wish's headline question, and the number is 7, not 138.
+
+**PDS-D589 — THE ANSWER TO "PRINT THE FRACTION" IS THAT THE PARTITION IS THE FRACTION, AND THE LADDER
+STAYS ROUND 2.** The wish asked for the judged fraction printed as a first-class number. It is already
+published and already wrong (`success-claim-census.md:173` reads 72/252 = 28.6% over a relation that
+applies no verdict filter and admits `:stale`), which is why D578 ruled it a LADDER and sequenced it
+behind the partition. Wave 40 shipped the partition; the ladder is `pds-w40-judgment-coverage-ladder`
+and is round 2 by the file-collision law, not by deferral. **A wave that shipped a single corrected
+fraction inside the anti-overstatement epic would have authored the next overstatement.**
+
+**PDS-D590 — THE ONE-HOP HOLE IS NOW SIZED FROM ABOVE, NOT MEASURED, AND THE PARTITION SAYS SO IN ITS
+OWN OUTPUT.** The wish's item 2 asked how many of the 138 were never status-only at all but judged
+receipts the one-hop relation could not reach. The partition prints that its denominator is an UPPER
+BOUND for exactly this reason and declines to quantify it — the quantification belongs to the ladder
+slice and widening into it would have collided. **`residual_helper_assembled` 22 is the visible upper
+edge of that population**: rows whose response call is not in the action's own def at all. That is the
+honest handle wave 41 should pull.
+
+**PDS-D591 — TWO REVIEWER FIXES, AND BOTH ARE THIS EPIC'S DISEASE INSIDE THIS WAVE'S OWN REPAIRS.**
+(1) The partition's blind-shape block asserted *"THE WHOLE DEF BODY IS READ"* — a sentence
+`success_scopes/1` made false the moment it landed, sitting inside the block whose entire stated
+purpose is honest disclosure. Replaced by a DERIVED measurement: **104 rows decided on the `{:ok, _}`
+success branch, 34 on the whole body** where an error-branch payload can still decide the verdict, 0
+with no body — plus the `conn`-shaped blind spot the builder named in their own review and did not
+print. (2) The repaired share receipt named `BARKPARK_SHARES` as the cause of any surviving share
+**without reading `shares_env/0` to check**. The env baseline is the only other source *today*, which
+is a fact about today, not a proof. It now derives the attribution and says "source unknown" when it
+cannot. **A receipt that blames a cause it did not read is the defect one level up, and both of these
+shipped inside slices written to kill exactly that.**
+
+**PDS-D592 — THE CROSS-SLICE PROOF THE ARM WAS DESIGNED FOR, RUN RATHER THAN ASSUMED.** Running the
+wave-40 census over a tree carrying slice 1's repairs moves the partition
+**`store_derived 88 -> 94`, `request_echo 7 -> 3`, `literal_only 4 -> 3`, `reread 7 -> 6`, sum still
+138, `DERIVATION-PARTITION-TOTAL` still PASS.** A controller repair is VISIBLE in the instrument and
+cannot red it — which is precisely why the arm pins a relation and never a class count. Slice 1 pays
+FOUR of the seven `request_echo` rows the partition names, and the merge order between slices 1 and 2
+does not matter.
+
+**PDS-D593 — THE BUILDER'S UNEXPLAINED TEST FAILURE IS NAMED, AND IT IS NOT THIS WAVE'S.** Slice 4's
+builder reported one irreproducible failure in a 1528-test run and honestly refused to claim they had
+identified it. Reproduced once here with the stack captured: a `DBConnection.OwnershipError` from
+`ClaudeChat.Session.terminate/2 -> safe_revoke/1 -> Auth.revoke_token/1 -> Audit.emit/1 ->
+Webhooks.Dispatcher.audit_targets/1` — a GenServer terminating after its owning test released the
+sandbox connection, the known `$callers`-scoped flake shape, in ClaudeChat and not in shares. Two
+subsequent clean runs went 1528/0. **Pre-existing; a candidate row for whoever owns the flake.**
+
+**PDS-D594 — THE 40 LIVEVIEW MOUNTS WERE DECIDED, NOT INHERITED A FOURTH TIME.** D580 sized the real
+population at **322 `handle_event/3` clauses in 23 modules** and refuted every rival integer with its
+reason (330 is the raw grep and enrols 8 telemetry `handle_event/4`; 235 drops 87 LiveComponent clauses
+of which 37 provably reach `Sheets.Session.apply_ops/4`; the filed 302 does not reproduce — there are
+ZERO `defp handle_event` in `api/lib`). It is filed as `pds-w40-liveview-write-population` and sequenced
+round 2 behind the ladder because it edits the adjacent census region. **The deferral is now a
+dependency, not a shrug** — and it carries its three mandatory blind shapes: the process boundary
+(62 is a FLOOR and must never be printed bare; crediting the `GenServer.call` lifts it to 99), 13
+non-literal event keys, and depth closure at 8 rather than `@max_depth 6`.
+
+**WHAT WAVE 41 TAKES.** Merge round 1 (#9164, #9165, #9166, #9167 — any order; D592 proves 1 and 2 are
+order-independent), then dispatch the three round-2 slices as their deps land:
+`pds-w40-judgment-coverage-ladder` after #9165, `pds-w40-residue-lens-can-fail` after #9164, and
+`pds-w40-liveview-write-population` after the ladder. The one genuinely NEW hunt is D590's:
+`residual_helper_assembled` 22 is the measured upper edge of the one-hop hole, and
+`pds-w40-residual-helper-hop` is already filed against it. `pds-w38-record-parity-ci-lane` and
+`pds-w35-elixir-census-gate` stay behind the `.github/workflows/**` POLICY fence (D583), with the
+"zero PDS instruments are wired to CI at all" half still said out loud.
+
 ### Wave 39 2026-08-02 — "EXCLUDED is not a verdict" — REVIEWED. Grade A (paper `pds-wave-39-2026-08-02`)
 
 **ALL SIX ROUND-1 SLICES BUILT, ALL SIX GREEN ON THEIR FINAL STATE, ALL SIX PUSHED WITH PRs OPEN.**
