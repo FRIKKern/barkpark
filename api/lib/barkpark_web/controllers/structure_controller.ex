@@ -3,13 +3,18 @@ defmodule BarkparkWeb.StructureController do
   GET /v1/structure/:dataset — the server's canonical desk structure as JSON.
 
   `Barkpark.Structure.build/2` is what Studio renders: host groups (content,
-  papers, sheets, books, media, taxonomy, settings) PLUS the plugin resolver
-  chain's contributions (frt's game groups, any future plugin's desk items).
-  The Go TUI consumed only raw schemas and rebuilt a crude desk client-side —
-  its private→Settings heuristic buried every plugin collection (sheet, book,
-  the 25 frt types) under Settings as broken singletons. Serving the real tree
-  makes the TUI's desk == Studio's desk, including plugin groups, with zero
-  client logic per plugin.
+  papers, sheets, books, media, taxonomy, content-types, settings) PLUS the
+  plugin resolver chain's contributions (frt's game groups, any future
+  plugin's desk items). The Go TUI consumed only raw schemas and rebuilt a
+  crude desk client-side — its private→Settings heuristic buried every plugin
+  collection (sheet, book, the 25 frt types) under Settings as broken
+  singletons. Serving the real tree makes the TUI's desk == Studio's desk,
+  including plugin groups, with zero client logic per plugin.
+
+  `content-types` (issue #8463) is the same generic-fallback fix applied to
+  the HOST side of that heuristic: a private, non-plugin-owned schema that
+  isn't marked `singleton: true` gets a real `:document_type_list` row there
+  instead of a dead Settings singleton.
 
   Auth matches the schema index the TUI already calls (admin token on the
   same pipelines); response: `{"structure": <node>}` where a node is

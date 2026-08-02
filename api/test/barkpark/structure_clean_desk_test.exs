@@ -15,7 +15,7 @@ defmodule Barkpark.StructureCleanDeskTest do
   alias Barkpark.Structure.Node
   alias BarkparkWeb.Studio.PaneBuilder
 
-  @host_node_ids ~w(post page project author category paper media-desk media-library settings book)
+  @host_node_ids ~w(post page project author category paper media-desk media-library content-types settings book)
 
   defp insert_schema!(attrs) do
     %SchemaDefinition{}
