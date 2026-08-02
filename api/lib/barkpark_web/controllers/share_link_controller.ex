@@ -218,9 +218,22 @@ defmodule BarkparkWeb.ShareLinkController do
   @doc "DELETE /v1/shares/links/:id — revoke one link."
   def revoke(conn, %{"id" => id}) do
     case Links.revoke(id) do
-      {:ok, _} -> json(conn, %{revoked: true, id: id})
-      {:error, :not_found} -> not_found_json(conn, "link not found")
-      _ -> unprocessable(conn, "could not revoke link")
+      # RECEIPT LAW (pds w39): `Links.revoke/1` returns the UPDATED link
+      # (sharing/links.ex:91-109). The old body was a literal `true` plus an echo
+      # of the `:id` path param; both now descend from the returned row's own
+      # `revoked_at` stamp, which the request never carries.
+      {:ok, revoked} ->
+        json(conn, %{
+          revoked: not is_nil(revoked.revoked_at),
+          id: revoked.id,
+          revoked_at: revoked.revoked_at
+        })
+
+      {:error, :not_found} ->
+        not_found_json(conn, "link not found")
+
+      _ ->
+        unprocessable(conn, "could not revoke link")
     end
   end
 
