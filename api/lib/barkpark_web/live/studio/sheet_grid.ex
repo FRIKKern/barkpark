@@ -72,6 +72,20 @@ defmodule BarkparkWeb.Studio.SheetGrid do
   minus every editing affordance — formula bar, hook, menus, resize handles
   and tab mutation buttons all drop away.
 
+  ## `read_only` is the CAPABILITY PROP — every host MUST pass it
+
+  It is not only a display flag. A `phx-target`ed event carries a component
+  cid, and LiveView runs the COMPONENT socket's lifecycle for it — the parent
+  socket's `:handle_event` hooks (the Studio `Caps` deny-gate among them) are
+  never consulted. So no hook on the host LiveView can gate this surface; the
+  host's write capability has to arrive HERE, as this prop. It defaults FALSE
+  (grep `read_only: false` in `mount/1`), which means a host that omits it
+  hands every write head and `Ops.send_ops/2` an unconditional yes — which is
+  exactly what the Studio callsite did before
+  `grep -n 'sheet_write_capable?' lib/barkpark_web/live/studio/studio_live/components.ex`
+  existed. Both hosts now pass it: the `/sheets/:slug` reader passes `true`
+  outright, Studio passes the negation of the socket's derived write cap.
+
   ## Read-only hosting (M4 — the public reader)
 
   A host passing `read_only={true}` (the `/sheets/:slug` reader) gets the

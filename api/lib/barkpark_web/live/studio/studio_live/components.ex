@@ -25,6 +25,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # HTTP 500 on /studio/rest and /studio/plugins). The literal `name="…"` sites
   # in this file stay literal — the icons tripwire owns those.
   alias BarkparkWeb.Icons
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
   alias Phoenix.LiveView.JS
@@ -1330,13 +1331,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         />
         <% @editor_view == :sheet and @sheet_doc != nil -> %>
         <%!-- Sheet grid editor (Sheets M2). One LiveComponent owns the whole
-              surface; `{:sheets_op,…}` deltas reach it via send_update. --%>
+              surface; `{:sheets_op,…}` deltas reach it via send_update.
+
+              `read_only` is the CAPABILITY PROP, not a display flag: a
+              `phx-target`ed event carries a component cid and LiveView runs the
+              COMPONENT socket's lifecycle for it, so the parent socket's
+              `:handle_event` hooks — the `Caps` deny-gate among them — are never
+              consulted. A fourth `attach_hook` on the parent therefore cannot
+              gate this surface at all; the capability has to travel INTO the
+              component, where `SheetGrid`'s write-head guards and the last wall
+              in `SheetGrid.Ops.send_ops/2` already read it
+              (`grep -n 'read_only' lib/barkpark_web/live/studio/sheet_grid.ex`).
+              Until this prop existed those guards were dead code on the Studio
+              path — the component defaults `read_only: false`. --%>
         <.live_component
           module={BarkparkWeb.Studio.SheetGrid}
           id={"sheet-grid-#{Content.published_id(@sheet_doc.doc_id)}"}
           doc={@sheet_doc}
           dataset={@dataset}
           is_draft={@editor_is_draft}
+          read_only={not sheet_write_capable?(assigns)}
           user_id={@user_id}
           presence_topic={@sheet_presence_topic}
           presences={@sheet_presences}
@@ -1738,6 +1752,21 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
     """
   end
+
+  # ── the SheetGrid capability prop ───────────────────────────────────────────
+  #
+  # May the socket's principal WRITE the mounted desk? This does NOT re-state
+  # the rule — it CALLS the one owner, `Caps.write_capable?/2`, which the
+  # socket-level deny-gate also calls. The component-targeted path never reaches
+  # that hook (a `phx-target`ed event runs the COMPONENT socket's lifecycle), so
+  # a fork here would be a security rule maintained in two places; the review of
+  # pds-w41-caps-component-gate collapsed it into one.
+  #
+  # `@caps` is the freshly-derived map StudioLive re-assigns on every grant
+  # change and expiry tick (`grep -n 'defp refresh_caps' lib/barkpark_web/live/studio/studio_live.ex`),
+  # so an expired grant drops the write prop on the next render.
+  defp sheet_write_capable?(assigns),
+    do: Caps.write_capable?(assigns, Map.get(assigns, :caps) || %{})
 
   # The expected fields STILL recommendable for the current Beta block list,
   # rendered into `data-expected-fields` for the slash menu's EXPECTED group.
