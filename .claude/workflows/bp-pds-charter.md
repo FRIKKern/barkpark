@@ -2576,6 +2576,58 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 39 2026-08-02 — "EXCLUDED is not a verdict" — REVIEWED. Grade A (paper `pds-wave-39-2026-08-02`)
+
+**ALL SIX ROUND-1 SLICES BUILT, ALL SIX GREEN ON THEIR FINAL STATE, ALL SIX PUSHED WITH PRs OPEN.**
+Two round-2 slices deferred BY DESIGN under the sequenced-rounds law. The reviewer re-ran every gate
+on the final branch, re-derived every high-flip-risk judgment independently rather than re-reading the
+builder's reasoning, and ran its OWN mutation of every claim it accepted.
+
+| slice | final branch | PR | what it actually does |
+|---|---|---|---|
+| `pds-w38-verdict-freshness-arm` | `pds-w39-r-verdict-freshness` | #9112 | `ROSTER-VERDICT-FRESH` — all 8 `@roster` rows gain `anchor_mfa` + `def_fp`; a stale row is DEMOTED TO UNJUDGED AT PRINT TIME, never rewritten. The two REFUTED verdicts that outlived their repair are re-derived to PROVEN. 4 new `corpus: :repo` selftest cases, because the fixture corpus scopes the arm OUT |
+| `pds-w38-falsifier-promotion` | `pds-w39-r-falsifier-promotion` | #9113 | the tier is READ from `@basis_vocab` instead of hardcoded `:advisory`, so `two_hop_composed` can actually refuse; `@repo_tokens` is an ENUMERATED allowlist, never a shape regex; `armed_redding_values/0` kills the printed overcount |
+| `pds-bl-status-only-residue-payment` | `pds-w39-r-delete-receipts` | #9114 | six A3 request-echo DELETE receipts now descend from the write return — zero callees widened, all six already returned the row — plus a 6-test differential proven to discriminate PER SITE |
+| `pds-w39-record-parity-shallow-guard` | `pds-w39-r-record-parity` | #9115 | axis A REFUSES a truncated walk at exit 2 instead of printing PARITY over a corpus it never read. The predicate is on the WALK, not the store flag — this repo itself refutes the store guard |
+| `pds-w38-charter-ledger-disagreement-sweep` | `pds-w39-r-charter-sweep` | #9116 | 105 candidate lines / 74 slugs hand-adjudicated EXHAUSTIVELY, **nine** disagreements (not four), and the three blind shapes PRINTED WITH COUNTS |
+| `pds-w34-owning-doc-amendment` | `pds-w39-r-owning-doc` | #9117 | the owning doc's population becomes `router.ex`; `status_only_receipt` 138 named as THE HOLE with 72/252 = 28.6% printed and never thresholded; first byte-gate enrolment at a MEASURED cap |
+
+**PDS-D570 — THE WISH'S HEADLINE WAS ALREADY MERGED, FOR THE FIFTH CONSECUTIVE WAVE, AND SPENDING IT
+BEAT REBUILDING IT.** `ROUTED-POPULATION-COMPLETE` (252 members, UNDISPOSED 0) and `LENS-CAN-MISS`
+(17 resolved `plugin_routes/1` callsites, substring count 23, one unexpandable macro NAMED) both
+print PASS on `origin/main` today, with `LENS-CAN-MISS-ARMED` and `LENS-CAN-MISS-NAMES-BLIND` already
+in the selftest. The wish's 131 is 252 under the quad key and its 23 is the substring count the arm
+already prints beside the resolved 17. **The recurring lesson is not "the brief was wrong" — it is
+that a wave which does not RE-DERIVE its own dispatch spends its whole budget rebuilding merged code.**
+
+**PDS-D571 — MERGE ORDER IS LOAD-BEARING THIS WAVE, AND IT WAS MEASURED, NOT ASSUMED.** On
+`pds-w39-r-record-parity` axis A exits **1**, naming `UNRESOLVED-CITATION PDS-D564` — the slice's own
+commit cites a decision defined only in THIS charter PR. Run against this PR's charter content the same
+command prints `defined: 569 · cited: 189 · unresolved: 0 · PARITY` at exit 0. **The charter PR merges
+FIRST.** Separately, the charter↔ledger sweep is arrival-shaped over whole-line content hashes, so this
+PR's 314 new lines produce **6 unresolved-claim arrivals** — measured, named verbatim in the
+adjudication doc, and deliberately NOT adjudicated against an open PR whose lines can still move. That
+arm is not in `.github/workflows/**`, so the red is local and blocks nothing on `main`.
+
+**PDS-D572 — THE REVIEWER'S OWN MUTATIONS, BECAUSE A GATE READ IS NOT A GATE PROOF.** Three claims
+this wave rested on were re-proven by the reviewer rather than accepted: blinding the two context reads
+in `inbound_events_test.exs` turns `0 refusal(s)`/rc=0 into `3 refusal(s)`/`FAIL BASIS-FALSIFIERS`/rc=1;
+reverting two of the six DELETE receipts reds EXACTLY those two differential tests and leaves the other
+four green; and the newly-enrolled doc budget was proven able to fail by **GROWING THE FILE** (+900 B →
+`FAIL … 19407B, cap is 19307B`), which is the mutation a future author would actually perform — the
+builder had only proven it by moving the cap, which the gate's own author controls. The reviewer also
+added the placement assertion the record-parity builder named as his own cheapest gap, and proved IT
+able to fail by planting a hoisted `walk_truncation` call.
+
+**PDS-D573 — ONE CROSS-SLICE INCOHERENCE SHIPS KNOWINGLY, DISPOSED IN WRITING RATHER THAN SILENTLY.**
+After the six DELETE repairs merge, the census's `:status_only_receipt` class PROSE ("claims success by
+STATUS alone") is FALSE for the eight `@routed_excluded` rows those six occupy — the class ASSIGNMENT
+stays correct, because the lens still cannot key a `%{deleted: …}` receipt. The census is the hot centre
+of two other wave-39 slices, so editing it from the controllers slice is the exact two-builders-one-file
+collision the parallel design forbids. Filed as `pds-w39-literal-receipt-residue` criterion 5 and stated
+in the new test file's moduledoc and in the commit. **A disposed incoherence is a wave-level decision; a
+silent one is the disease.**
+
 ### Wave 38 2026-08-02 — "The denominator is the router, not the string" — REVIEWED. Grade A− (paper `pds-wave-38-2026-08-02`)
 
 **ALL FOUR ROUND-1 SLICES BUILT, ALL FOUR GREEN, ALL FOUR PUSHED WITH PRs OPEN.** Three round-≥2
@@ -10435,7 +10487,8 @@ names `task_list_response/3`, refuting the wave-37 reviewer's own escape hatch (
 never the function name"). **That is not SOME rows drifting — it is the entire accusatory surface of
 the instrument, wrong, while every arm prints PASS.** Proven blind in both directions: the census run
 over a tree with the three fixes REVERTED prints the SAME `ROSTER-ANCHORS-EXIST` line, PASS. The file
-admits it at `:410-411`: "So the ANCHOR arm cannot catch the staleness; nothing here can." A
+admits it at `:660` (CORRECTED wave 39, PDS-D559 — this entry read `:410-411`, which is an unrelated
+`@register` row): "So the ANCHOR arm cannot catch the staleness; nothing here can." A
 prototype VERDICT-FRESHNESS arm reds `3 of 3` on main and passes `all 3 still hold` on the revert —
 that bidirectional flip is the non-vacuity proof. **A SECOND FRESHNESS HOLE, SETTLED:** the census
 resolves evidence citations **BY `file:line`, NEVER BY MFA** (`cited_findings/4` splits on `":"`,
@@ -10463,7 +10516,8 @@ is **FOUR sites tree-wide** and the rarest shape in the tree despite being the w
 the roster toward `send_resp` adds at most 4 rows against ~120 dark members.
 
 **PDS-D552 — L4a MUST NOT REUSE `write-routed`, AND `route_claim` IS A LITERAL NOBODY DERIVES.** The
-census ALREADY OWNS `write-routed / read-routed / unrouted` (`:2071-2073`) meaning **Repo-verb
+census ALREADY OWNS `write-routed / read-routed / unrouted` (`:2322-2324` — CORRECTED wave 39,
+PDS-D565; this entry read `:2071-2073`, which is `defp catch_all_span/2`) meaning **Repo-verb
 reachability**, and all three are drifting on main today (64→54, 17→14, 10→23). L4 reusing those words
 puts two different populations behind one word inside one instrument, and the epic's own drift arms
 compare recorded-vs-derived on those names. **L4 uses ROUTED-WRITE / DISPOSED.** Relatedly, PDS-D525's
@@ -10476,3 +10530,311 @@ Finally, the genuinely unkeyable residue is **LiveView**, not the plugin macro: 
 `{Controller, action}` at all. The plugin macro shape is fully derivable and `GithubWebhookController.receive`
 joins cleanly. **`ROUTED-POPULATION-COMPLETE` must PRINT the LiveView exclusion with its count (27)
 as an EXCLUDED class, or the new arm inherits exactly the vacuity it replaces.**
+
+## WAVE 39 (2026-08-02) — EXCLUDED IS NOT A VERDICT
+
+**PDS-D553 — THE WISH'S ITEMS 1 AND 2 WERE ALREADY BUILT, MERGED AND GREEN. FIFTH CONSECUTIVE WAVE.**
+Re-run of `scripts/pds-elixir-receipt-census.exs` on origin/main `974d412ca` prints
+`PASS ROUTED-POPULATION-COMPLETE 252 ROUTED-WRITE member(s) <-> 65 judged + 7 rostered + 180 excluded,
+both directions, no duplicate key`, `UNDISPOSED 0`, and `PASS LENS-CAN-MISS 17 plugin_routes/1
+callsite(s) resolved (substring count 23; the rest is comment prose) · 1 unexpandable macro callsite(s)
+NAMED: live_dashboard/2:2601`, with `LENS-CAN-MISS-ARMED` and `LENS-CAN-MISS-NAMES-BLIND` already in the
+selftest. The wish's **131** is 252 under the quad key (196 under the collapsed pair key, per D539); its
+**23** is the substring count the arm already prints beside the resolved 17. Wave 39 does not rebuild
+them — IT SPENDS THEM. The recurring lesson is not "the brief was wrong", it is that a wave which does
+not RE-DERIVE its own dispatch spends its whole budget rebuilding merged code.
+
+**PDS-D554 — `status_only_receipt` IS THE WAVE'S TARGET, AND IT DOES NOT DECOMPOSE THE WAY THE
+DIRECTION ASSUMED. THE AST PASS WAS BUILT AND ITS ANSWER KILLS ITS OWN SLICE.** `@routed_excluded`
+holds 138 `:status_only_receipt` quads (107 distinct `{module, action}` pairs) whose committed prose
+says the action "claims success by STATUS alone". A `--depth-split` probe reusing the census's OWN
+`callees/2` resolver (local · imported · remote-by-suffix · defdelegate) BFS'd all 107 at depths 2..6:
+`hop1_local_receipt 0 · hop1_crossmodule_receipt 0 · hop2plus_receipt 1 · emitter_unregistered 0 ·
+residue_no_emitter 106 · unresolvable_action 0 · sum 107`. **Doubling the ceiling 6 → 12 moves the
+split by ZERO** (truncation falls 50 → 18), so the residue is not a depth artefact. An independent
+BFS over all 180 EXCLUDED members at depth 2..4 recovered the SAME single member, and widening the
+target set from register-judged receipts to every `ok: true` emitter recovered zero more. **The
+two-hop hypothesis is REFUTED twice, by two independently-built relations.** The one recovery is
+`BarkparkWeb.SiteDeployController.trigger` at depth 2 (`trigger → do_trigger → defp start`, `ok: true`
+at `site_deploy_controller.ex:81`) — a genuine false exclusion, and the whole yield of widening depth.
+A response-primitive sub-split of the 106 residue reads `renders_body 99 · redirect_or_flash 6 ·
+send_resp_status_only 1`, and that ONE is a false positive of the sub-classifier itself
+(`saml_controller.ex:133` sends an HTML body). **ZERO of the 106 are proven bodiless-204.** The
+direction's five-way split measures 0 / ~99 / 6 / 1 / 0 — four of five classes empty. **There is no
+five-way decomposition to build.** The bucket is polluted in the OPPOSITE direction from the wish's
+assumption: it is not 138 defects filed as exclusions, it is ~130 honest store-derived receipts that
+merely decline the string `ok: true`, with the real liars undifferentiated among them. That is the
+epic's own "population defined by a string" error reappearing as the CLASSIFIER.
+
+**PDS-D555 — THE MANDATORY REPAIR HAS A TARGET, AND IT WAS ADJUDICATED A WAVE AGO AND NEVER PAID.**
+The digest concluded the request-vs-store species was "essentially EXHAUSTED in api/lib". It is not:
+`pds-bl-status-only-residue-payment` (OPEN, wave 34) names SIX "A3 REQUEST-ECHO" sites by file:line,
+and all six reproduce on origin/main AT THE FILED LINE — `schema_controller.ex:62 json(conn,
+%{deleted: name})`, `legacy_controller.ex:96`, `media_controller.ex:365`, `share_controller.ex:141`,
+`share_link_controller.ex:221`, `webhook_controller.ex:53`. Every one discards a `{:ok, _}` and echoes
+a REQUEST path param; every one is a member of the 23 DELETE rows of the 138. Quoted shape:
+`with {:ok, _} <- Content.delete_schema(name, dataset, opts) do json(conn, %{deleted: name})`. The five
+hand-reads that found "no confirmed instance" hunted the #9052 **shape** (`MapSet` arithmetic) rather
+than the **law** (does the emitted value descend from the write return). **THE LAW IS VIOLATED MOST
+OFTEN BY COUNTING OR ECHOING THE REQUEST, AND `MapSet` WAS ONE DIALECT OF IT, NOT THE SPECIES.** The
+only MapSet write receipt left in `api/lib` is the already-repaired `scim.ex` site; every
+`count: length(...)` in controllers is on a READ action.
+
+**PDS-D556 — THE DEPARTURE ARM IS THREE CASES, ONE IS FREE, ONE IS BUILDABLE AND PROVEN SILENT TODAY,
+ONE IS UNCATCHABLE AND MUST BE PRINTED AS THE ARM'S OWN BLIND SHAPE.** D1 (the receipt vanishes and no
+row is added) ALREADY REDS — `dispose_routed/4` falls to `:undisposed` and
+`ROUTED-POPULATION-COMPLETE` names it, though under the label `UNDISPOSED ARRIVAL`, which is prose for
+the opposite event. D2 (a committed exclusion row planted over a member the same run judges) is
+**BYTE-IDENTICALLY SILENT on merged main**: planting
+`{:post, "/v1/paperflow/papers", "BarkparkWeb.BulldocsIngestController", :ingest, :status_only_receipt}`
+over a JUDGED member leaves `PASS`, `EXCLUDED 180 (unmoved)`, `UNDISPOSED 0`, `CENSUS OK`, exit 0 —
+because `cond/1` precedence swallows the row and the orphan check only asks whether the quad is LIVE,
+which it is. **The exclusion table can be grown over a judged member with zero observable effect on any
+printed number or any arm.** D3 (judgment lost and row added in ONE commit) leaves a contradiction only
+in history and a build-free one-checkout lens structurally cannot read it. The arm ships as
+`ROUTED-DISPOSITION-UNSHADOWED` — **NOT** `ROUTED-DEPARTURE-REDS`, which is already taken by a selftest
+case proving the ORPHAN direction, and reusing the word would certify a different property. The
+non-redundant red-capability is proven by a departure that leaves `@register` INTACT: inserting one
+extra local hop between `TasksController.close` and its receipt def moves `JUDGED 65 → 64`,
+`UNDISPOSED 1`, exit 1, while `REGISTER-COMPLETE` stays `PASS 91 <-> 91`.
+
+**PDS-D557 — THE FIXTURE COST OF THE SHADOW ARM IS ASYMMETRIC, AND ONE MUTANT IS NOT ENOUGH.**
+`roster_functions/1` runs UNCONDITIONALLY (not behind `register_scope/1`), so a `@roster` row whose
+path the fixture corpus holds makes a fixture member ROSTERED at **zero cost to any shipped arm's data
+contract**; the two committed `:selftest_fixture` exclusion rows supply the other half free. The JUDGED
+branch costs FOUR ARMS — measured, not argued: adding ONE file at a live `@register` path flips
+`register_scope/1` to `:real` and reds `REGISTER-COMPLETE`, `DECLARED-ROWS-RESOLVE`,
+`DECLARED-BASIS-INTACT` and `ROSTER-ANCHORS-EXIST` over a corpus carrying none of their files. It is
+closed by a THIRD selftest corpus asserting the ARM NAME and the quad, **never the exit code** (which
+over there is earned by four unrelated reds — quoting it would itself be an exit-code claim). **BOTH
+branches need their own case:** with only the ROSTERED case, mutating `verdict in [:judged, :rostered]`
+→ `[:rostered]` printed `SELFTEST OK — 17 cases`. A live half of a new arm with no mutant on it is this
+epic's failure mode inside its own selftest.
+
+**PDS-D558 — THE CENSUS'S ENTIRE ACCUSATORY SURFACE IS FALSE, AND THE INSTRUMENT CANNOT TELL THE TWO
+TREES APART AT ALL.** A scoped four-file revert to `501fb9670` (`scim.ex`,
+`scim_groups_controller.ex`, `accounts.ex`, `session_controller.ex`; 71 insertions / 219 deletions)
+leaves the census output **BYTE-IDENTICAL except THREE lines**: two derived roster anchor line numbers
+(166→138, 411→410) and the wall clock. `PASS ROSTER-ANCHORS-EXIST all 8 roster literal(s) still occur
+in their named file` and `CENSUS OK` print in BOTH trees. D550 claimed this of one arm; it is true of
+the WHOLE 407-line report. **THE FRESHNESS GRANULARITY IS SETTLED BY MEASUREMENT:** all 8 `@roster`
+anchors resolve to exactly ONE enclosing def (spans 1–33 lines, median ~16). Over 95 `api/lib` commits
+a `def_fp` (fingerprint of the enclosing def's span) would have fired TWICE across all 8 rows —
+`fbc6b80a1` (#8993, the correct repair, hitting BOTH REFUTED rows) and one chat feature commit on an
+UNJUDGED row — **one unrelated fire per 95 commits, nine times quieter than the count-arm rate this
+epic already refuses.** Ship `def_fp` **plus `anchor_mfa`**, never a refutation literal: `def_fp` alone
+catches the case that occurred (body changed under a stable name) and is BLIND to the case that will
+occur next (def renamed under a body-identical span); `anchor_mfa` alone is blind the other way.
+Adding both fields to all 8 rows is proven inert — `roster_functions/1` reads only `r.path` and
+`r.literal`, and a planted run is output-identical but for the wall clock. **THE ARM'S OWN BLIND SHAPE,
+WHICH MUST BE PRINTED:** both granularities are same-file, and `git show --stat fbc6b80a1` proves the
+repair spanned the CALLEE files too — a future repair confined to the callee moves no byte inside the
+roster row's def and goes unseen.
+
+**PDS-D559 — THREE CRITERIA OF `pds-w38-verdict-freshness-arm` ARE DEFECTIVE, AND ONE OF THEM SENDS A
+BUILDER TO THE WRONG LINE. THE CHARTER CARRIES THE SAME WRONG COORDINATE.** The "nothing here can"
+admission is at `scripts/pds-elixir-receipt-census.exs:660`, inside the `@roster` header comment.
+**Lines 410-411 are an unrelated `@register` row** (`GithubWebhookController.receive/2`, basis_token
+"always answers 2xx unless intake genuinely"). A builder editing `:410-411` would amend a register
+row's basis prose and mark the criterion met. **PDS-D550 above cites `:410-411` and is hereby
+CORRECTED to `:660`** — the epic's own charter carrying a stale coordinate into a slice about stale
+coordinates. Criterion 5 is internally inconsistent: its prescribed mechanism ("each refutation literal
+is paired with an existence requirement on its anchor") ALREADY SHIPS as `roster_check/1` at `:3388`
+and is mutation-proven (renaming the anchor call yields `FAIL ROSTER-ANCHORS-EXIST 1 roster literal(s)
+have LEFT their file`), but that mechanism **structurally cannot** produce the proof the same criterion
+demands — renaming a refutation literal leaves the anchor intact, so the arm stays green and the
+freshness reading is "defect still present" = fresh = GREEN, the exact false green the criterion exists
+to kill. Criterion 4's revert direction is already discharged by this wave's verify round.
+
+**PDS-D560 — THE FALSIFIER PROMOTION IS A THREE-LINE PATCH AND THE ONE-LINE VERSION A BUILDER WILL
+WRITE IS A VACUOUS GREEN THAT ANNOUNCES ITS OWN PROMOTION.** `@basis_vocab` is a table; flipping
+`two_hop_composed`'s tier to `:reds` is INERT because `judge_citation/4` hardcodes
+`finding(r, :advisory, …)` for it at `census.exs:4158`. Measured: tier-flip alone + a planted defect
+(both context reads blinded in the cited test) prints `checked 91 row(s) against **7** redding value(s)
+· **0 refusal(s)**`, `CENSUS OK`, **rc=0** — the census ANNOUNCES a promotion while a planted defect
+walks through. Adding `:advisory` → `tier` at `:4158` makes the same mutation print `3 refusal(s)` /
+`FAIL BASIS-FALSIFIERS` / **rc=1**. **Criterion 1 must require the mutation-red at rc=1, never the tier
+value.** The narrow widening `@repo_token ["Repo.", "Content.get_document(", "Conflicts.list("]` takes
+`two_hop_composed` to `0 refusals · 0 advisory contradictions` with **zero collateral** across all 12
+cited files — but that safety is a CITATION ACCIDENT, not a property: those two tokens appear in **72
+test files** repo-wide, and today's 6 `stub_mapping_only` rows happen to cite one stub-only file whose
+`Repo.` count is 0. **The rule is an ENUMERATED ALLOWLIST OF NAMED PERSISTENCE-READING CONTEXT
+FUNCTIONS, never a shape regex:** adding `Keyword.get(` — the exact hit a
+`[A-Z]\w*\.(get|list|…)\(` regex produces — yields **4 false refusals** and reds the census, because
+`stub_mapping_only`'s falsifier is INVERTED (a store read REFUTES it) and `Keyword.get(` IS
+module-qualified. **`partial_tag_coverage` MUST NOT BE PROMOTED as the task states it:** it has no
+predicate in `check_row_basis/2` at all, and promoting it + planting the defect prints `8 redding
+value(s) · 0 refusal(s)`, `CENSUS OK`, **rc=0**, with the only diff being two DISPLAY lines. Its
+written falsifier also contradicts the census's own print (`the WEAKEST of its tags`, D527) and would
+red on the committed row on day one. **AND `--selftest` CANNOT WARRANT THIS ARM AT ALL:**
+`report_basis_falsifiers/1` runs only when `register_scope == :real` (`:1174`), and zero of the 16
+selftest cases touch BASIS-FALSIFIERS. The only available proof is an in-tree transcript.
+
+**PDS-D561 — THE PRINTED "N REDDING VALUE(S)" IS AN OVERCOUNT OF 2 AND THE PROMOTION GROWS IT UNLESS
+D544'S FIX SHIPS IN THE SAME PR.** `census.exs:4246` counts `@basis_vocab` entries tiered `:reds`, not
+values with rows or predicates. Derived by counting top-level `@register` rows per basis:
+`end_to_end 8 · end_to_end_unmutated 7 · context_differential_only 9 · stub_mapping_only 6 ·
+no_observer 0 · basis_stale 0`. **Armed-with-rows = 4. Printed = 6.** `no_observer`'s single occurrence
+is a NESTED `tags:` sub-tag (never walked); `basis_stale` carries no committed row and is assigned
+dynamically inside the distribution renderer. The overcount was watched printing **6 → 7 → 8** across
+three runs in which the arm's behaviour never changed.
+
+**PDS-D562 — `action_not_in_corpus` IS A FALSE EXCLUSION WHOSE COMMITTED PROSE IS CHECKABLY UNTRUE
+AGAINST A TABLE TWO LINES AWAY, AND ONE CLAUSE CLOSES IT TO ZERO.** The class says the routed
+`{module, action}` "resolves to no def under `api/lib`". Both defs DO exist and both emit `ok: true` —
+`sheets/web/import_controller.ex:64` and `sheets/web/ops_controller.ex:71` — at exactly the lines
+`@register`'s own comments cite (`census.exs:700`, `:704`). The cause is a THIRD unnamed blind shape:
+`plugins/sheets.ex:152-155` binds controllers to LOCAL VARIABLES, so the route tuples name a var, not
+an `__aliases__` node, and `alias_string/2` falls through to the literal `"?"`. **The exclusion is what
+PREVENTS the double-disposition being detected** — both members are simultaneously JUDGED-eligible (they
+carry `@register` keys) and EXCLUDED. A `+29/-0` `inline_alias_bindings/1` clause moves `JUDGED 65 → 67`,
+`EXCLUDED 180 → 178`, `action_not_in_corpus 2 → 0`, population unchanged at 252, `UNDISPOSED 0`, arm
+still `PASS`, selftest still `OK — 16 cases`. Mutation-proven: corrupting one `@register` module name
+reds the arm naming the member by its NOW-RESOLVED alias (it printed `"?"` before). **THE SWEEP IS
+COMPLETE AND RETURNS ZERO ADDITIONAL MEMBERS** — sheets is the only plugin with non-literal route
+modules (7 tuples, 5 of them `:get` and therefore outside the write population); all 24 other plugin
+route modules are fully-qualified. Reachability confirmed NON-ADMIN: `auth: :ingest` resolves to
+`pipe_through :ingest` = `accepts json` + `RequireIngestToken`, no admin plug (`router.ex:636-639`).
+**This slice does NOT shrink the backlog — it GROWS it by 2 UNJUDGED rows** (`VERDICTS PROVEN 15 ·
+REFUTED 0 · UNJUDGED 76` is byte-identical before and after). Frame it as closing a lie, never as
+"+2 judged". The two stale `"?"` rows left behind are proven INERT by deletion (output byte-identical),
+which is itself a small vacuity: **a stale exclusion row over an unresolvable module is structurally
+unfalsifiable and can outlive its cause forever.**
+
+**PDS-D563 — THE JUDGED FRACTION IS PRINTED AND NEVER ENFORCED, AND THAT IS NOW A MEASUREMENT RATHER
+THAN A HOPE.** Judgment coverage of the routed write surface is **72/252 = 28.6%** and no line of
+census output says so (`grep -nE '%|fraction|of 252|/252'` over the full output returns nothing).
+Running the instrument over 95 archived `api/lib` trees (2026-07-22 → 2026-08-02), the fraction moved
+**9 times — once per 10.6 commits**, the same order as the count-arm rate this epic already outlaws,
+and **all 8 denominator movers are plain FEATURE commits that touched no receipt** (connectors, a
+Studio fleet tile, auth app-token ×2, chat-wire, sessions ×2). A thresholded or non-decreasing arm
+would have redded five times in eleven days on work that shipped routes honestly. **BUT THE NUMERATOR
+IS A RATCHET:** judged went 55 → 56 → 60 → 61 → 65 and NEVER decreased across all 95 commits, and
+ROSTERED held at 7 throughout — so a departure arm has **zero measured false positives**. Print the
+fraction; red only on departure. Note also that `ROUTED-POPULATION-COMPLETE` FAILS at 90 of the 95
+historical shas: **arrival semantics buys immunity to UNRELATED churn, not to churn** — the reds are
+always about a route that genuinely arrived, but the person who tripped it was shipping a feature.
+
+**PDS-D564 — `pds-record-parity.sh`'s AXIS A CARRIES A VACUOUS GREEN NOBODY HAD NAMED, AND THE OBVIOUS
+GUARD PREDICATE IS THE WRONG ONE — THIS REPOSITORY ITSELF PROVES IT.** A `git clone --depth 1` prints
+`cited: 0 distinct PDS-D across the commit corpus · unresolved: 0` and
+`pds-record-parity: PARITY — every axis checked, nothing divergent.` at **exit 0** — the SAME verdict
+sentence the full checkout prints over a 188-citation corpus. A shallow clone IS a work tree, so the
+`:244` guard passes and `git log --format=%B` walks one commit; `actions/checkout@v4` is shallow by
+default. `grep -c shallow` on the arm and on its selftest = **0 and 0**, while its sibling
+`release-scan.sh:70-86` has an is-shallow FATAL. **THE PREDICATE MUST BE "IS THE WALK TRUNCATED",
+NEVER `--is-shallow-repository`:** the shared checkout `/Volumes/SATECHI/github/barkpark` answers
+`--is-shallow-repository` **true** while `git log HEAD` reaches the ROOT commit (5132 commits, one
+root) — the sole `.git/shallow` graft `360b675903` is NOT an ancestor of HEAD, left by one off-HEAD
+`--depth` fetch. The naive store-level guard was built first and watched UNCHECK the FULL checkout
+("TRUNCATED to 5132 commit(s)") — the mirror-image lie. Ship: store-shallow AND at least one graft is
+an ancestor of HEAD; unreadable graft list or a non-`true`/`false` answer FAILS CLOSED. **HARD
+UNCHECKED (exit 2), NO ENV ESCAPE** — unlike release-scan, whose truncated `commits[]` is still useful
+draft material, axis A's entire output is a VERDICT, and the honest escape (`--commits-file`) already
+exists on the CLI. Fenced to the git-log path, never top-level, or `--axis b` UNCHECKs on every shallow
+CI checkout. **AND OF ITS 61 LEAF REDS, ONLY FOUR ARE PDS's** — 12 Console, 10 studio-space-priority,
+9 Felix, 8 site-spawner, 6 honest-gates, 5 jarl, 4 mobile, 3 others. **93.4% of this arm's accusatory
+surface is eleven other epics' ledger**, so it is a REPORTER, never a gate. Six of six spot-checks are
+`open` at N−1 or N−2 criteria: the work shipped and the receipt was never read back.
+
+**PDS-D565 — THE CHARTER↔LEDGER SWEEP IS DECIDABLE, AND ITS COVERAGE IS 43%, WHICH MUST BE PRINTED OR
+THE SLICE COMMITS THE EPIC'S OWN DISEASE ONE LENS DOWN.** A same-line lens (a `pds-*` slug co-occurring
+with a disposition token) over 10,478 charter lines yields **46 candidate lines / 41 slugs** — small
+enough to hand-adjudicate exhaustively, so "proven undecidable" is NOT an available outcome. Three real
+disagreements: `pds-w29-pay-lb` charter "all 16 sites paid" (PR #8644 MERGED 2026-07-31) vs live
+**open 12/14**; `pds-bl-spill-dir-path-drift` charter "is paid" vs live **open 0/4**;
+`pds-w20-crown-fire` charter "is MOOT" vs live **considering 0/6**. Plus one stale self-quote:
+`pds-w34-census-cas-shadow` — the charter QUOTES `"lifecycle_status":"open"` at `:9820` while
+`:2628/:2681` say `done` and live is `done`. **THREE MEASURED BLIND SHAPES THE SLICE MUST PRINT WITH
+COUNTS:** (a) 59 residue lines expose **54 slugs the same-line lens never reaches**, 23 of them live
+non-terminal — the charter is hard-wrapped prose, so slug and verb routinely land on different lines;
+(b) the vocabulary is incomplete — 21 further same-line claims over 17 slugs assert disposition with
+REFUTED / parked / RE-SCOPED / superseded / deferred / retired / absorbed, and the wish's own five-word
+list cannot see `done`, `cancelled` or `lifecycle_status:`, which is how the charter asserts most often;
+(c) **7 of the 41 "slugs" are not tasks at all** — script filenames, a branch fragment, a Paper slug.
+The largest FP source is the `fails CLOSED` engineering idiom (7 of 29 in one pass), and one slug
+(`pds-w29-s3-fake-fails-closed`) fires the lens purely on its own name, so the slug must be stripped
+from the line before disposition matching. **A FOURTH DISAGREEMENT, FOUND SIDEWAYS:** PDS-D552 above
+cites the drift rows at `census.exs:2071-2073`; they are at **`:2322-2324`** (`:2071` is
+`defp catch_all_span/2`). Same species as D559's `:660`. **PDS-D552 IS HEREBY CORRECTED.**
+
+**PDS-D566 — THE `--sites` ARM AND THE ROUTED POPULATION DO NOT CONTRADICT EACH OTHER; THE
+"ROUTEDNESS DISAGREEMENT" CLASS IS 2, AND NEITHER MEMBER IS FINDABLE BY NAME-MATCHING.** `[UNROUTED]`
+in `--sites` means **no Repo verb reached within depth 6** — the census prints that legend verbatim at
+`:2322-2324` and `write?`/`read?` derive from a Repo-verb BFS with no route set as input. D552 already
+reserved the vocabulary. `receipt_functions/1` (`:3140-3146`) gates membership on **`@register`
+coverage**, never on routedness. A cross-join of all 23 `[UNROUTED]` emitters (12 owner defs, 8
+modules) against all 182 `@routed_excluded` rows returns **ZERO by name-join**, while two real members
+exist and evade it for two different reasons: `site_deploy_controller.ex:81` (owner is a private helper
+`start`, routed action is `trigger` — the D554 depth-2 member) and `sheets/web/ops_controller.ex:71`
+(`ok: true` at **DEPTH ZERO** inside `def apply_ops/2`, invisible only because the module stringifies
+to `"?"` — the D562 member). Ten other owner defs are refuted cleanly by reading their modules'
+excluded rows. **The decomposition slice is neither an AST depth pass nor a routedness reconciliation,
+because neither has enough work in it to be a slice.**
+
+**PDS-D567 — THE GATE IS CUT ON THE FENCE, FOR THE SECOND TIME, AND D537 IS NOW REFUTED FROM THREE
+DIRECTIONS.** `grep -rl 'git archive' .github/workflows/` returns NOTHING; every workflow uses
+`actions/checkout@v4`. `BASIS-FALSIFIERS` goes dark on a **DISK check** (`File.dir?("api/test")` at
+`:4068`), not on the census's corpus argument, and under the archive corpus it contributes NO ARM
+rather than a false PASS. On a full checkout the census prints **12 arms all PASS** with
+BASIS-FALSIFIERS ARMED (`checked 91 row(s) … 3 advisory contradiction(s)`). **D547's "1 arm of 10" is
+now 1 arm of 12** — #9050's two arms are corpus-independent, so the population growth SHRINKS the blind
+fraction. Cost is ruled on with a real number: **13.3 s (`--sites`) / 18.0 s (full) on a quiet host**,
+with independent quiet-host readings of 9.6 s, 9.8 s and 10.1 s — an order of magnitude inside the
+`<90 s` criterion. **The `--selftest` is the expensive half at ~41-43 s at 5% CPU (subprocess-bound),
+so the specified job payload is ~50 s locally BEFORE `setup-beam`, which is TIGHT, not comfortable.**
+Two hazards handed to whoever builds it: the S3 promotion brake is one comma
+(`needs: [… , pds-census]`) and is guarded by NOTHING mechanical (`grep -rn 'pds-receipt-census'
+.github/ scripts/` returns nothing) — though the task text already carries it as criterion 10; and
+the census has never been run on CI's pinned **Elixir 1.18.1 / OTP 27.0** (all local measurement is
+1.19.5 / OTP 28). **The fence is measured EMPTY — zero of eleven open PRs touch `.github/` at all —
+so this is a POLICY cut, not a collision.** Say that in words; a cut dressed as a collision is the
+same overstatement the epic hunts. The same ruling hands `pds-w38-record-parity-ci-lane` over, with
+D564's guard as its prerequisite.
+
+**PDS-D568 — `pds-w38-scim-groups-list-members`'s "DOCUMENT THE EXCLUSION" BRANCH IS NOT AVAILABLE,
+BECAUSE THE JUSTIFICATION IS UNREQUESTABLE AND SELF-CONTRADICTED.** The controller cites "RFC 7644
+§3.4.2 attribute exclusion" as licence to omit `members` from the ListResponse, while the SAME server
+advertises `members` with `"returned" => "default"` in its own `/scim/v2/Schemas` document and supports
+**no `attributes` / `excludedAttributes` parameter anywhere** (`git grep excludedAttributes` over the
+SCIM surface returns nothing). The spec-conformant way to decline is RFC 7643 §7's `"returned":
+"request"`, which the server neither declares nor honours — so taking the "document it" branch honestly
+costs MORE than fixing it. **The fix is ~8 lines and is not an N+1:** `group_member_ids/2`'s only
+per-group varying term is `m.role`, so `m.role in ^role_names` with `select: {m.role, m.principal_id}`
+plus `Enum.group_by/2` is **2 queries per page regardless of page size** (max page 200). Two groups may
+legitimately share a role_name, so the group_by must fan out. **No test asserts the list shape against
+stored rows — nor asserts members are ABSENT**, so today's omission is not even pinned. It stays LAST
+by the misled-ness metric (it is a READ and therefore not a member of the 252 at all), but it is
+adjacent evidence of the same disease: **prose asserting a property the code does not have, living in
+a comment instead of a bucket.**
+
+**PDS-D569 — THE WAVE'S OWN MEASUREMENT DISCIPLINE, RE-LEARNED THREE TIMES IN ONE ROUND.** (1) The
+digest declared the 6790 ms census figure "unreproducible … the honest answer is UNMEASURED"; a quiet
+host reproduces **6715 ms**, within 1.1%. The 85729 / 154457 ms readings were the LOAD. **A number is
+not refuted by measuring it on a busy host** — the honest verdict there is "not measurable here", never
+"unmeasured". (2) The digest asserted PDS-D524 "does not exist in the charter at all"; it exists at
+`:10061` but is about the 8-row roster, while the "~once per 11 commits" figure the wish attributes to
+it lives at `census.exs:643-645` and reads **7 moves over 80 commits**. The citation was a
+MIS-ATTRIBUTION and the correction over-corrected into a different wrong fact. (3) One verifier's first
+`pds-record-parity` run used `timeout`, absent on this host, and the shell reported RC=0 from the echo
+rather than the arm. **THE COMFORTING ANSWER WAS THE WRONG ONE, THREE TIMES OUT OF THREE.**
+
+### WAVE 39 PLAN — 8 slices, 6 in round 1
+
+| # | slice | round | task | surface |
+|---|---|---|---|---|
+| 1 | Verdict-freshness arm (`ROSTER-VERDICT-FRESH`, `def_fp` + `anchor_mfa`) | 1 | `pds-w38-verdict-freshness-arm` | `census.exs` @roster region |
+| 2 | Falsifier promotion + the redding-value overcount, one PR | 1 | `pds-w38-falsifier-promotion` | `census.exs` basis region |
+| 3 | Mandatory repair — six A3 request-echo receipts | 1 | `pds-bl-status-only-residue-payment` | `api/lib` controllers + tests |
+| 4 | `pds-record-parity.sh` truncated-walk guard | 1 | `pds-w39-record-parity-shallow-guard` | `scripts/pds-record-parity*.sh` |
+| 5 | Charter↔ledger disagreement sweep, coverage printed | 1 | `pds-w38-charter-ledger-disagreement-sweep` | new `scripts/pds-charter-ledger-sweep.sh` |
+| 6 | Owning-doc amendment, cap RE-MEASURED not transcribed | 1 | `pds-w34-owning-doc-amendment` | `docs/decisions/` + `check-doc-budgets.sh` |
+| 7 | Sheets alias close + judged fraction + SiteDeploy depth-2 | 2 (after 1) | `pds-w39-lens-closes-two-false-exclusions` | `census.exs` routed region |
+| 8 | `ROUTED-DISPOSITION-UNSHADOWED` shadow arm | 2 (after 1, 7) | `pds-w39-shadow-disposition-arm` | `census.exs` dispose region |
+
+CUT THIS WAVE, ON THE RECORD: the `status_only_receipt` five-way decomposition (D554 — no work in it);
+the depth-widening of the JUDGED relation (D554/D566 — buys one member and imports unbounded false
+JUDGED); `pds-w35-elixir-census-gate` and `pds-w38-record-parity-ci-lane` (D567 — the fence, as policy);
+`pds-w38-scim-groups-list-members` (D568 — real but last, and its cheap branch is the fix, not the doc).
+CHARTER SELF-CORRECTIONS LANDED HERE: D550's `:410-411` → `:660`; D552's `:2071-2073` → `:2322-2324`.
+CHARTER PR: docs-only, `Task: task-2ac1f95237c4a8e5`.
