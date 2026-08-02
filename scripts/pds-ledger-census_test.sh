@@ -722,6 +722,239 @@ expect_output_contains "an uppercase CLOSED is off-vocabulary, not a contradicti
 echo
 
 # =============================================================================
+# CLAUSE 7 — THE LEDGER LAPSE (PDS-D638). THREE SHAPES, TWO KEYS, AND A MUTANT
+# THAT CAN FIRE.
+#
+# Two waves running, slice rows lapsed to `open` with their work DONE, and each
+# debrief wrote the same paragraph. The paragraph becomes an arm here — and the
+# arm's whole difficulty is that its shapes DO NOT SHARE A KEY:
+#
+#   SHAPE A keys on claim.expired_at (+ previous_worker, + a null worker, + no
+#   released_at/closed_at): the TTL sweeper's exact fingerprint.
+#
+#   SHAPE B CANNOT. A shape-B row does NOT carry expired_at BY CONSTRUCTION —
+#   the lease is still HELD and the REAP is what writes that field — so a check
+#   keyed on expired_at passes VACUOUSLY on shape B 100% of the time, forever.
+#   Its only honest key is the HELD LEASE'S AGE against the TTL. And because
+#   shape B self-heals into shape A within <= TTL+60s, a live board has no
+#   shape-B row most instants: an arm that merely watched the board would be a
+#   permanent green that has NEVER ONCE FIRED. So STALELEASE below INJECTS a
+#   synthetic in_progress row whose claim.ts_iso is older than the TTL. That
+#   fixture is the difference between an arm and a decoration.
+#
+#   SHAPE C is reported on its own line and never folded: `open` while still
+#   wearing a finished claim. A worker-keyed check reads it as HELD; an
+#   expiry-keyed check cannot see it at all.
+#
+# THE GREENS ARE LOAD-BEARING, as everywhere else in this file: a RELEASED
+# claim, a FRESH lease and a TERMINAL row wearing an expired claim must all stay
+# silent, or the arm is just "always red" and proves nothing when it fires.
+# =============================================================================
+echo "clause 7 — the ledger lapse, in three shapes that do not share a key"
+
+# `claim_row` is `row` plus the top-level `claim` object /v1/data/query serves
+# beside it. The claim is passed as raw JSON so a fixture can express EXACTLY
+# which fields the sweeper left behind — which is the entire key of shape A.
+claim_row() {
+  local id=$1 parent=$2 lifecycle=$3 disposition=$4 reason=$5 claim=$6
+  printf '{"_id":"%s","_type":"task","_updatedAt":"2020-01-01T00:00:00.000000Z","parent_id":%s,"lifecycle_status":"%s","disposition":"%s","disposition_reason":"%s","claim":%s}' \
+    "$id" "$parent" "$lifecycle" "$disposition" "$reason" "$claim"
+}
+
+# The two rows every clause-7 page 1 keeps, so nothing ELSE in the file's
+# predicate can red and be mistaken for this clause firing.
+CLAUSE7_TAIL="$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),$(row unrelated 'null' open open 'unrelated. REOPEN: foxtrot')"
+
+# A stale lease and a fresh one. The FRESH one is generated at RUN TIME on
+# purpose: a fixture that hard-coded "recently" would rot into a stale lease and
+# the green control would flip red on a day nobody was looking.
+STALE_TS='2020-01-01T00:00:00.000000Z'
+FRESH_TS=$(date -u +%Y-%m-%dT%H:%M:%S.000000Z)
+
+# (a) SHAPE A — reverted to `open` by the sweeper, work evidence still on it.
+LAPSEA="$TMP/lapse-shape-a"
+build_healthy "$LAPSEA"
+page "$LAPSEA" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-42","expired_at":"2026-07-30T10:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z","now":{"text":"gating; branch pushed"}}'),$CLAUSE7_TAIL")"
+expect_status_matching "a reverted-to-open lapsed claim reds the predicate" 1 "row(s) are SHAPE A" \
+  run --page-limit 4 --fixture-dir "$LAPSEA" --assert-round-done
+expect_status_matching "and it NAMES the lapsed row and its remedy" 1 "REMEDY: re-claim and close on the evidence already there: deep-a" \
+  run --page-limit 4 --fixture-dir "$LAPSEA" --assert-round-done
+expect_output_contains "the work-evidence sub-count is reported beside the shape" \
+  "shape A  reverted-to-open after expiry       1   (1 carrying work evidence)" \
+  run --page-limit 4 --fixture-dir "$LAPSEA"
+expect_output_contains "lapse_shape_a is a ROW-ID LIST in --json, never a count" \
+  "$(printf '"lapse_shape_a": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$LAPSEA" --json
+expect_output_contains "and the work evidence is its own list" \
+  "$(printf '"lapse_shape_a_work_evidence": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$LAPSEA" --json
+# A lapsed row with NO now-line is still shape A — the sub-count is a sub-count,
+# not the key. A key that demanded work evidence would miss every lapse that
+# happened before the worker wrote one.
+LAPSEANOEV="$TMP/lapse-shape-a-no-evidence"
+build_healthy "$LAPSEANOEV"
+page "$LAPSEANOEV" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-41","expired_at":"2026-07-30T10:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_output_contains "a lapse with no now-line is still shape A, with 0 evidence" \
+  "shape A  reverted-to-open after expiry       1   (0 carrying work evidence)" \
+  run --page-limit 4 --fixture-dir "$LAPSEANOEV"
+
+# (b) THE GREENS FOR SHAPE A. A RELEASE writes released_at and a CLOSE writes
+# closed_at; only a LAPSE nulls the worker while preserving previous_worker. If
+# either of those rows counted, the arm would be reporting ordinary lifecycle as
+# a defect.
+RELEASED="$TMP/lapse-released-not-lapsed"
+build_healthy "$RELEASED"
+page "$RELEASED" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-42","expired_at":"2026-07-30T10:00:00.000000Z","released_at":"2026-07-30T10:05:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status "a RELEASED claim is not a lapse (released_at present)" 0 \
+  run --page-limit 4 --fixture-dir "$RELEASED" --assert-round-done
+expect_output_contains "and shape A stays empty for it" '"lapse_shape_a": []' \
+  run --page-limit 4 --fixture-dir "$RELEASED" --json
+# EVERY CONJUNCT OF SHAPE A'S KEY IS LOAD-BEARING, and these three fixtures are
+# what make that TRUE rather than asserted. Drop any one of them from the key and
+# one of these greens flips red:
+#   - no expired_at  -> a vacancy nobody can attribute to the sweeper. The remedy
+#     ("re-claim and close on the evidence") rests on the reap having happened;
+#     without the stamp there is no evidence it did.
+#   - no previous_worker -> a claim object that never named a holder is not a
+#     lapse, it is an empty claim.
+#   - closed_at present -> the row was CLOSED after the lapse. That is the
+#     lifecycle working, not a re-open lie.
+NOEXPIRY="$TMP/lapse-vacated-no-expiry"
+build_healthy "$NOEXPIRY"
+page "$NOEXPIRY" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-42","ts_iso":"2026-07-30T09:00:00.000000Z","now":{"text":"gating"}}'),$CLAUSE7_TAIL")"
+expect_status "a vacated claim with NO expired_at is not an expiry" 0 \
+  run --page-limit 4 --fixture-dir "$NOEXPIRY" --assert-round-done
+expect_output_contains "and shape A stays empty without the sweeper's stamp" '"lapse_shape_a": []' \
+  run --page-limit 4 --fixture-dir "$NOEXPIRY" --json
+NOPREV="$TMP/lapse-no-previous-worker"
+build_healthy "$NOPREV"
+page "$NOPREV" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"expired_at":"2026-07-30T10:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status "an expired claim that never named a holder is not a lapse" 0 \
+  run --page-limit 4 --fixture-dir "$NOPREV" --assert-round-done
+LAPSETHENCLOSED="$TMP/lapse-then-closed"
+build_healthy "$LAPSETHENCLOSED"
+page "$LAPSETHENCLOSED" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-42","expired_at":"2026-07-30T10:00:00.000000Z","closed_at":"2026-07-30T12:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status "a lapse that was then CLOSED is the lifecycle working" 0 \
+  run --page-limit 4 --fixture-dir "$LAPSETHENCLOSED" --assert-round-done
+TERMLAPSE="$TMP/lapse-terminal"
+build_healthy "$TERMLAPSE"
+page "$TERMLAPSE" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' done closed 'deep a reason four, finished. REOPEN: delta' '{"worker":null,"previous_worker":"epic-builder-wave-42","expired_at":"2026-07-30T10:00:00.000000Z","ts_iso":"2026-07-30T09:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status "a TERMINAL row wearing an expired claim does NOT red" 0 \
+  run --page-limit 4 --fixture-dir "$TERMLAPSE" --assert-round-done
+
+# (c) SHAPE B — THE ARM THAT WOULD OTHERWISE NEVER FIRE. A synthetic
+# `in_progress` row whose lease is older than the TTL. IT CARRIES NO
+# `expired_at`, exactly as a live shape-B row cannot: this fixture is what makes
+# an expired_at-keyed shape-B check provably vacuous rather than arguably so.
+STALELEASE="$TMP/lapse-shape-b-stale-lease"
+build_healthy "$STALELEASE"
+page "$STALELEASE" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' in_progress open 'deep a reason four. REOPEN: delta' "$(printf '{"worker":"epic-builder-that-finished","epoch":3,"ts_iso":"%s","now":{"text":"committing"}}' "$STALE_TS")"),$CLAUSE7_TAIL")"
+expect_status_matching "a lease held past the TTL reds the predicate" 1 "row(s) are SHAPE B" \
+  run --page-limit 4 --fixture-dir "$STALELEASE" --assert-round-done
+expect_status_matching "and its remedy is bp task release, not a re-claim" 1 "REMEDY: \`bp task release\`: deep-a" \
+  run --page-limit 4 --fixture-dir "$STALELEASE" --assert-round-done
+# THE SUBSTITUTION, PINNED. The fixture that reds shape B carries NO expired_at,
+# so an expired_at-keyed shape-B check greens on it — and shape A must ALSO stay
+# empty here, or the two shapes would be reading the same key after all.
+expect_output_contains "the shape-B row carries NO expired_at, so shape A is empty" '"lapse_shape_a": []' \
+  run --page-limit 4 --fixture-dir "$STALELEASE" --json
+expect_output_contains "lapse_shape_b is its own ROW-ID LIST" \
+  "$(printf '"lapse_shape_b": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$STALELEASE" --json
+expect_output_contains "and the arm prints the TTL it judged against" "TTL 2700s, key: instant - claim.ts_iso" \
+  run --page-limit 4 --fixture-dir "$STALELEASE"
+
+# THE KEY IS THE TTL, AND THE TTL IS THE SERVER'S. Widen it past the fixture's
+# age and the SAME row greens; that is the proof the arm reads a lease age and
+# not a hard-coded year.
+expect_status "the same stale lease GREENS under a wider TTL" 0 \
+  env BARKPARK_TASK_LEASE_TTL_SECONDS=100000000000 \
+  bash "$CENSUS" --root "$ROOT_SLUG" --pace 0 --retries 0 --page-limit 4 \
+  --fixture-dir "$STALELEASE" --assert-round-done
+expect_status_matching "an unreadable TTL env is a usage error, never a fallback" 3 "refusing to fall back" \
+  env BARKPARK_TASK_LEASE_TTL_SECONDS=soon \
+  bash "$CENSUS" --root "$ROOT_SLUG" --pace 0 --retries 0 --page-limit 4 \
+  --fixture-dir "$STALELEASE"
+
+# (d) THE GREEN FOR SHAPE B: a lease taken JUST NOW. A held lease inside its TTL
+# is a worker working, not a lapse.
+FRESHLEASE="$TMP/lapse-fresh-lease"
+build_healthy "$FRESHLEASE"
+page "$FRESHLEASE" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' in_progress open 'deep a reason four. REOPEN: delta' "$(printf '{"worker":"epic-builder-still-working","epoch":1,"ts_iso":"%s","now":{"text":"building"}}' "$FRESH_TS")"),$CLAUSE7_TAIL")"
+expect_status "a lease taken just now does NOT red" 0 \
+  run --page-limit 4 --fixture-dir "$FRESHLEASE" --assert-round-done
+expect_output_contains "and shape B is empty for it" '"lapse_shape_b": []' \
+  run --page-limit 4 --fixture-dir "$FRESHLEASE" --json
+
+# (e) FAIL CLOSED ON A HELD LEASE THAT CANNOT BE PLACED. An `in_progress` row
+# held by a worker with no readable claim.ts_iso sits on neither side of the
+# TTL, and a row the arm cannot place is never counted as fresh — exit 2,
+# exactly as clause 5 does for _updatedAt.
+NOLEASETS="$TMP/lapse-no-ts-iso"
+build_healthy "$NOLEASETS"
+page "$NOLEASETS" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' in_progress open 'deep a reason four. REOPEN: delta' '{"worker":"epic-builder-unplaceable","epoch":1}'),$CLAUSE7_TAIL")"
+expect_status_matching "a held lease with no ts_iso fails closed" 2 "never counted as fresh" \
+  run --page-limit 4 --fixture-dir "$NOLEASETS" --assert-round-done
+BADLEASETS="$TMP/lapse-bad-ts-iso"
+build_healthy "$BADLEASETS"
+page "$BADLEASETS" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' in_progress open 'deep a reason four. REOPEN: delta' '{"worker":"epic-builder-unplaceable","ts_iso":"last tuesday"}'),$CLAUSE7_TAIL")"
+expect_status_matching "an unreadable ts_iso fails closed too" 2 "cannot be placed on either side" \
+  run --page-limit 4 --fixture-dir "$BADLEASETS" --assert-round-done
+
+# (f) SHAPE C — `open` while still wearing a finished claim. It is NEITHER of
+# the other two shapes and its remedy is a third thing, so it gets its own line.
+SHAPEC="$TMP/lapse-shape-c"
+build_healthy "$SHAPEC"
+page "$SHAPEC" 1 200 "$(envelope 3 4 4 "$(claim_row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta' '{"worker":"epic-builder-wave-40","epoch":2,"ts_iso":"2026-07-29T09:00:00.000000Z","closed_at":"2026-07-29T11:00:00.000000Z"}'),$CLAUSE7_TAIL")"
+expect_status_matching "an open row wearing a closed claim reds the predicate" 1 "row(s) are SHAPE C" \
+  run --page-limit 4 --fixture-dir "$SHAPEC" --assert-round-done
+expect_status_matching "and its remedy is a THIRD thing: clear the stale claim" 1 "REMEDY: clear the stale claim: deep-a" \
+  run --page-limit 4 --fixture-dir "$SHAPEC" --assert-round-done
+expect_output_contains "shape C is NOT folded into shape A" '"lapse_shape_a": []' \
+  run --page-limit 4 --fixture-dir "$SHAPEC" --json
+expect_output_contains "shape C is NOT folded into shape B either" '"lapse_shape_b": []' \
+  run --page-limit 4 --fixture-dir "$SHAPEC" --json
+expect_output_contains "shape C is its own ROW-ID LIST" \
+  "$(printf '"lapse_shape_c": [\n    "deep-a"\n  ]')" \
+  run --page-limit 4 --fixture-dir "$SHAPEC" --json
+
+# (g) THE CONTROL. A board with no claims at all is silent on all three shapes —
+# an arm that reds on the healthy corpus would make every red above meaningless.
+expect_status "the healthy corpus is silent on all three shapes" 0 \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --assert-round-done
+expect_output_contains "shape A reads 0 on a healthy board" \
+  "shape A  reverted-to-open after expiry       0" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "shape B reads 0 on a healthy board" \
+  "shape B  in_progress held past the lease     0" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "shape C reads 0 on a healthy board" \
+  "shape C  open with a claim never cleared     0" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+
+# (h) THE LENS IS PRINTED, AND IT IS DERIVED. /v1/data/query answers
+# perspective: published, so a lapsed `drafts.` row is invisible to this arm and
+# visible to `bp task ls --all`. The perspective is read back off
+# result.perspective rather than asserted in a comment.
+expect_output_contains "the arm prints the LENS it read, derived from the response" \
+  "lens        /v1/data/query perspective:published" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and says plainly that it undercounts drafts BY CONSTRUCTION" \
+  "UNDERCOUNTS DRAFTS" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "the lens is machine-readable in --json" '"lens_perspective": "published"' \
+  run --page-limit 4 --fixture-dir "$HEALTHY" --json
+# A source that does NOT say which perspective it answered with is reported as
+# `<unset>`, never assumed to be published.
+NOPERSP="$TMP/lapse-no-perspective"
+build_healthy "$NOPERSP"
+page "$NOPERSP" 0 200 '{"result":{"count":4,"offset":0,"limit":4,"documents":['"$(row "$ROOT_SLUG" 'null' open open 'root row. REOPEN: never'),$(row kid-a "\"$ROOT_SLUG\"" open open 'kid a reason one. REOPEN: alpha'),$(row kid-b "\"$ROOT_SLUG\"" done closed 'kid b reason two. REACTIVATE: bravo'),$(row kid-c "\"$ROOT_SLUG\"" blocked parked 'kid c reason three. REOPEN: charlie' 'TRIGGER: charlie ships')"']}}'
+expect_output_contains "a source that names no perspective is <unset>, not assumed" \
+  "perspective:<unset>+published" \
+  run --page-limit 4 --fixture-dir "$NOPERSP"
+echo
+
+# =============================================================================
 # CLAUSE 4(a) — THE ROUND ANCHOR (PDS-D364/D365). 4(a) unanchored is
 # structurally unreachable by any round that discovers work: a row is BORN bare,
 # so a round that files one row can never certify. The anchor says WHICH ROUND
