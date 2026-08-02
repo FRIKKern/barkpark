@@ -9492,6 +9492,66 @@ test("E-01 globalSiteRow: no instance → honest 'on —', never a fabricated in
   assert.ok(!html.includes("site-inst-link"), "no dead link when the instance is unknown");
 });
 
+// ── cch-w23-s3: the row stops claiming ONE domain when the site has TWO ──────
+// Both list builders painted `domains[0]` and nothing else, so a site serving
+// acme.com AND www.acme.com read as a one-domain site. The person is
+// MISINFORMED, not locked out — the site-detail #site-domains TLS checklist
+// (domainChecklistHtml) does iterate the full array. These pin the count
+// segment: it names the ADDITIONAL domains, it is absent when there are none,
+// and the primary host still renders untouched.
+
+const W23S3_BP = { id: "bp-1", name: "Production", slug: "production", host: "h" };
+const w23s3Site = (domains) => ({
+  id: "site-1", name: "acme-web", slug: "acme-web", framework: "nextjs",
+  domains: domains, github_webhook_configured: true,
+});
+
+test("cch-w23-s3 siteExtraDomains: the ADDITIONAL count, never the total, and silent at 0/1", () => {
+  assert.equal(hooks.siteExtraDomains(w23s3Site(["acme.com", "www.acme.com"])), 1,
+    "two domains → ONE is unshown; the row reports what is missing, not what exists");
+  assert.equal(hooks.siteExtraDomains(w23s3Site(["a.com", "b.com", "c.com", "d.com", "e.com", "f.com"])), 5);
+  assert.equal(hooks.siteExtraDomains(w23s3Site(["acme.com"])), 0, "one domain hides nothing");
+  assert.equal(hooks.siteExtraDomains(w23s3Site([])), 0, "no domains hides nothing");
+  assert.equal(hooks.siteExtraDomains({ id: "s" }), 0, "a payload with no domains key hides nothing");
+  assert.equal(hooks.siteExtraDomains(null), 0);
+});
+
+test("cch-w23-s3 siteMoreDomainsSeg: '+N more domain(s)', pluralized, empty string when nothing is hidden", () => {
+  const one = hooks.siteMoreDomainsSeg(w23s3Site(["acme.com", "www.acme.com"]));
+  assert.ok(one.includes("+1 more domain"), "the count is additive and says what it counts");
+  assert.ok(!one.includes("+1 more domains"), "singular for one");
+  assert.ok(one.includes("www.acme.com"), "the hidden host is named in the title, not just counted");
+  assert.ok(!one.includes("acme.com<"), "the SHOWN host is not repeated as a hidden one");
+  const five = hooks.siteMoreDomainsSeg(w23s3Site(["a.com", "b.com", "c.com", "d.com", "e.com", "f.com"]));
+  assert.ok(five.includes("+5 more domains"), "plural for many");
+  // Degradation: nothing at all — not "+0", not an empty element that would
+  // still change row height.
+  assert.equal(hooks.siteMoreDomainsSeg(w23s3Site(["acme.com"])), "", "one domain emits NOTHING");
+  assert.equal(hooks.siteMoreDomainsSeg(w23s3Site([])), "", "zero domains emits NOTHING");
+  assert.ok(!hooks.siteMoreDomainsSeg(w23s3Site(["acme.com"])).includes("+0"), "never '+0'");
+});
+
+test("cch-w23-s3 BOTH list builders name the unshown domains — siteRow and globalSiteRow", () => {
+  for (const [label, render] of [["siteRow", hooks.siteRow], ["globalSiteRow", hooks.globalSiteRow]]) {
+    const two = render(w23s3Site(["acme.com", "www.acme.com"]), W23S3_BP);
+    assert.ok(two.includes("+1 more domain"), label + ": a two-domain site says one is unshown");
+    assert.ok(two.includes("acme.com"), label + ": the primary domain still renders");
+    assert.ok(two.includes("www.acme.com"), label + ": the unshown host is named in the title");
+    // The count rides the row's EXISTING meta line — no new visual language.
+    assert.ok(/class="site-meta"[^>]*>[^<]*(?:<[^>]*>[^<]*)*\+1 more domain/.test(two),
+      label + ": the count sits inside .site-meta, not in a new chip");
+
+    const oneDom = render(w23s3Site(["acme.com"]), W23S3_BP);
+    assert.ok(oneDom.includes("acme.com"), label + ": the single domain still renders");
+    assert.ok(!/more domain/.test(oneDom), label + ": one domain adds NOTHING");
+    assert.ok(!/\+0/.test(oneDom), label + ": never '+0'");
+
+    const none = render(w23s3Site([]), W23S3_BP);
+    assert.ok(none.includes("acme-web"), label + ": zero domains still falls back to slug/name");
+    assert.ok(!/more domain/.test(none), label + ": zero domains adds NOTHING");
+  }
+});
+
 // ── E-03 (gr-p3): the write-only env editor — KEY=VALUE parser + modal body ──
 
 test("E-03 parseEnvBlob: valid KEY=VALUE lines → env map; blanks + #comments skipped", () => {
