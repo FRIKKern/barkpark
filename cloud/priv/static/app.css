@@ -1778,9 +1778,34 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 }
 /* The abilities picker rides GR34's shared .set-check grammar now (see the
    .set-* anatomy block); the retired .token-ability* rules are gone. */
-.token-reveal { display: flex; gap: 8px; align-items: center; margin: 4px 0 2px; }
-.token-reveal .input-affix { flex: 1 1 auto; }
-.token-reveal-input { font-family: var(--mono); font-size: 12px; }
+/* The write-once reveal (cch-w21-s4). THREE HEADS, THE SAME THREE THAT WERE
+   ALREADY HERE — every declaration below folds into a rule that existed, so
+   this slice moves the CSSOM head count by ZERO (D230/D232 abstention: it is
+   not the baseline holder).
+   .token-reveal is a WRAPPING row: the secret takes a full line of its own and
+   Copy sits under it, because the token is a <code> text node now — an <input>
+   can only scroll, and at 320 it showed 22 of 51 characters. 12px is the type
+   scale's --text-xs floor and this rule stays ON it (D240): readability bought
+   with smaller type is not readability. `.token-reveal .input-affix` no longer
+   holds the visible field — it wraps the off-screen copy buffer, clipped rather
+   than display:none so execCommand("copy") can still select it. */
+.token-reveal { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 4px 0 2px; }
+.token-reveal .input-affix { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.token-reveal-input {
+  font-family: var(--mono);
+  font-size: 12px;
+  flex: 1 1 100%;
+  min-width: 0;
+  line-height: 1.55;
+  word-break: break-all;
+  overflow-wrap: anywhere;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  color: var(--text);
+  user-select: all;
+}
 
 /* ---- .notif-card / .notif-h: the GitHub-connection card in the Providers view
    (the ONLY remaining consumer; G-04 retired the Notifications view's own

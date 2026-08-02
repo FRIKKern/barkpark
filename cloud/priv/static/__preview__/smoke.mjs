@@ -2238,7 +2238,7 @@ const EXPECTATIONS = {
     },
   },
   "tokens-reveal": {
-    what: "the plaintext-once reveal — amber only-time banner + mono input-affix (copy + show/hide)",
+    what: "the plaintext-once reveal — amber only-time banner + the mono token on its own wrapping line (copy + show/hide), with the input-affix demoted to an off-screen copy buffer",
     check(reg, hooks) {
       const html = hooks.tokenRevealHtml("bpc_pat_3xampLEon1yShoWnoNCE", { name: "CI deploy key", abilities: ["deploy"] });
       assert.ok(html.includes("notice notice-warn"), "the amber only-time banner frames the reveal");
