@@ -3395,6 +3395,13 @@ defmodule PDS.Census do
         do: Map.put(derive_row(mod, action, index), :key, key)
   end
 
+  # THE ROW IS A MIN OVER ITS CLAUSES, AND THAT MIN IS A MASK (PDS wave 41). Any decided
+  # class outranks any residual one, so a two-clause action with one store_derived clause
+  # and one helper-assembled clause PRINTS store_derived and its residual clause is
+  # invisible in every count on the page. The min_by below is UNCHANGED — the precedence
+  # FIX is filed separately (pds-bl-w41-clause-precedence-mask) because it moves printed
+  # classes. What changes here is that the row now CARRIES its clause verdicts, both the
+  # local one and the post-hop one, so the mask can be COUNTED instead of inferred.
   defp derive_row(mod, action, index) do
     case action_defs(index, mod, action) do
       [] ->
@@ -3403,31 +3410,51 @@ defmodule PDS.Census do
           producer: "-",
           clauses: 0,
           scope_read: :no_body,
-          why: "the routed action resolves to no def this pass can open"
+          why: "the routed action resolves to no def this pass can open",
+          clause_results: []
         }
 
       defs ->
-        defs
-        |> Enum.map(&derive_def/1)
+        results = Enum.map(defs, &derive_def(&1, index))
+
+        results
         |> Enum.min_by(&derivation_rank(&1.class))
         |> Map.put(:clauses, length(defs))
+        |> Map.put(:clause_results, Enum.map(results, &Map.take(&1, [:id, :class, :pre_class, :hop, :why])))
     end
   end
 
   defp derivation_rank(class), do: Enum.find_index(@derivation_order, &(&1 == class)) || 99
 
-  defp derive_def(%{body: nil}),
+  defp derive_def(d, index), do: derive_def(d, index, nil)
+
+  defp derive_def(%{body: nil} = d, _index, _subst),
     do: %{
       class: :residual_undecided,
+      pre_class: :residual_undecided,
       producer: "-",
       scope_read: :no_body,
-      why: "defdelegate — no body to read"
+      why: "defdelegate — no body to read",
+      id: clause_id(d),
+      hop: nil
     }
 
-  defp derive_def(d) do
+  defp derive_def(d, index, subst) do
     body = expand_pipes(d.body)
-    {oks, discarded} = ok_walk(body)
-    head = dvars(d.head)
+    {oks_own, discarded} = ok_walk(body)
+    head_own = dvars(d.head)
+
+    # THE HOP SUBSTITUTES THE CALLER'S ARGUMENTS, IT DOES NOT REUSE THE CALLEE'S HEAD.
+    # `subst` is nil for an action's own clause and carries {oks, head, params} when this
+    # def is being read as a ONE-HOP callee: a parameter bound to a caller expression that
+    # came out of an `{:ok, _}` payload is a STORE value inside the callee, and a parameter
+    # bound to a caller HEAD var is a request echo. Reusing the callee's own head instead
+    # would print request_echo for EVERY helper that names its response value in a
+    # parameter — flatly wrong the first time that parameter IS a write return. The
+    # TicketKeys rows still class request_echo under substitution, and for a DIFFERENT and
+    # stated reason (their hop argument is a CALL, whose own argument names are what gets
+    # substituted) — printed as a blind shape below rather than left to look like agreement.
+    {oks, head} = apply_hop_subst(oks_own, head_own, subst)
 
     # READ THE SUCCESS BRANCH, NOT THE WHOLE BODY, WHENEVER THERE IS ONE. A controller's
     # error branches render CHANGESETS and re-render FORMS out of the request, so unioning
@@ -3456,7 +3483,7 @@ defmodule PDS.Census do
     # and the two counts are DERIVED into the printed blind shape instead of described.
     scope_read = if fallback?, do: :whole_body, else: :success_branch
 
-    Map.put(
+    local =
       cond do
         emits == [] ->
           if local_helper_call?(d),
@@ -3482,11 +3509,168 @@ defmodule PDS.Census do
 
         true ->
           %{class: :residual_onehop_unattributed, producer: gate_or_dash(gate), why: "bound values trace to neither an {:ok, _} payload nor the head"}
-      end,
-      :scope_read,
-      scope_read
-    )
+      end
+      |> Map.merge(%{scope_read: scope_read, id: clause_id(d), hop: nil})
+      |> then(&Map.put(&1, :pre_class, &1.class))
+
+    # ONE HOP, AND NEVER TWO: a clause reached AS a hop target carries a subst and is
+    # classified where it stands. That is what makes `Auth.login` -> `issue_session/3` ->
+    # `SessionIssuer.issue/3` stay residual instead of quietly becoming a two-hop join.
+    if subst == nil and local.class == :residual_helper_assembled,
+      do: onehop_join(d, index, body, oks, head, local),
+      else: local
   end
+
+  # A CLAUSE IDENTITY, DERIVED IN-RUN AND NEVER PERSISTED. {module, name, path, line} is
+  # stable for the length of ONE run and meaningless across commits, which is exactly the
+  # lifetime it is used for: de-duplicating the clause counts below, where one def clause
+  # is reached by TWO routed quads (V1.MediaController.upload) and would otherwise be
+  # counted twice in a population that calls itself DISTINCT.
+  defp clause_id(d), do: {Enum.join(d.module, "."), d.name, d.path, d.line}
+
+  defp apply_hop_subst(oks, head, nil), do: {oks, head}
+
+  defp apply_hop_subst(oks, head, s),
+    do: {Map.merge(s.oks, oks), head |> MapSet.difference(s.params) |> MapSet.union(s.head)}
+
+  # -- the one-hop join (PDS wave 41) -----------------------------------------
+  #
+  # WHY THIS IS NOT PDS-D573 REOPENED. D573 cut a one-hop DEPTH widening after two
+  # refutations, and both of those asked whether an `ok: true` EMITTER exists downstream —
+  # a question about COVERAGE, and the answer stayed no. This asks a different predicate
+  # over the same edge: does the VALUE this receipt renders descend from the write return?
+  # It changes no coverage number and cannot: the join runs INSIDE the derivation
+  # partition, over rows dispose_routed/4 has already EXCLUDED, and its only output is a
+  # label. A wrong join here costs a misleading class, never a false green.
+  #
+  # LOCAL **OR** REMOTE-RESOLVED, and the difference is measured, not stylistic:
+  # `WebauthnController.login`'s only converting target is the REMOTE SessionIssuer.issue/3,
+  # so a local-only rule scores one lower and would have called that row unattributable.
+  #
+  # THE TIE-BREAK IS MIN-BY @derivation_order OVER EVERY EMITTING CANDIDATE. Several of
+  # these clauses call three helpers that all respond; taking the first, the last, or
+  # demanding a unique target each measures a different and smaller number.
+  #
+  # A HOP MAY DECIDE A CLAUSE OR LEAVE IT EXACTLY AS IT WAS — it may NEVER move a clause
+  # from one residual class to another. That is the shape criterion (C) exists to catch: a
+  # residual class that shrinks while nothing gets decided is a smaller accusation, not a
+  # better one.
+  #
+  # A CLAUSE THAT EMITS NOTHING IS NOT A CANDIDATE. These two classes are precisely the
+  # "no response call in this def" verdicts, so a target wearing one is a SECOND hop.
+  @derivation_mute [:residual_helper_assembled, :residual_undecided]
+
+  defp onehop_join(d, index, body, oks, head, local) do
+    cands =
+      body
+      |> hop_calls()
+      |> Enum.flat_map(&hop_defs(d, index, &1))
+      |> Enum.reject(fn {callee, _args} -> callee.module == d.module and callee.name == d.name end)
+      |> Enum.uniq_by(fn {callee, args} -> {clause_id(callee), length(args)} end)
+      |> Enum.map(fn {callee, args} ->
+        {hop_label(callee), derive_def(callee, index, hop_subst(callee, args, oks, head))}
+      end)
+
+    {emitting, mute} = Enum.split_with(cands, &(elem(&1, 1).class not in @derivation_mute))
+
+    decided =
+      Enum.filter(emitting, &(derivation_rank(elem(&1, 1).class) <= derivation_rank(:literal_only)))
+
+    case decided do
+      [] ->
+        %{local | why: hop_refusal(emitting, mute), hop: %{decided: nil, target: nil, candidates: length(cands)}}
+
+      _ ->
+        {label, best} = Enum.min_by(decided, &derivation_rank(elem(&1, 1).class))
+
+        %{
+          local
+          | class: best.class,
+            producer: best.producer,
+            why: "ONE HOP into #{label} — #{best.why} (this clause's own body has no response call)",
+            hop: %{decided: best.class, target: label, candidates: length(cands)}
+        }
+    end
+  end
+
+  # THE REFUSAL IS PRINTED AND FALSIFIABLE, never a shrug. Every candidate the join reached
+  # is named with the verdict that disqualified it, so a reader can open the callee and
+  # take the claim apart.
+  defp hop_refusal([], []), do: "no response call in this clause, and NO hop target resolves in this corpus"
+
+  defp hop_refusal(emitting, mute) do
+    parts =
+      (Enum.map(mute, fn {l, _} -> "#{l} [emits nothing — a SECOND hop]" end) ++
+         Enum.map(emitting, fn {l, r} -> "#{l} [emits, but classes #{r.class}: #{r.why}]" end))
+      |> Enum.uniq()
+
+    "no response call in this clause; the ONE-HOP join decides nothing over #{length(parts)} target(s): " <>
+      Enum.join(parts, " · ")
+  end
+
+  defp hop_label(callee), do: "#{List.last(callee.module)}.#{callee.name}/#{callee.arity}"
+
+  # LIKE raw_calls/1, BUT IT KEEPS THE ARGUMENT EXPRESSIONS. raw_calls/1 throws them away
+  # for an arity, and the arity alone cannot say whether the value a helper renders came
+  # out of the caller's write.
+  defp hop_calls(body) do
+    {_, acc} =
+      Macro.prewalk(body, [], fn
+        {{:., _, [{:__aliases__, _, segs}, f]}, _, args} = n, acc when is_atom(f) and is_list(args) ->
+          {n, [{:remote, segs, f, args} | acc]}
+
+        {f, _, args} = n, acc when is_atom(f) and is_list(args) ->
+          if Macro.special_form?(f, length(args)) or Macro.operator?(f, length(args)) or
+               f in @derivation_render_fns do
+            {n, acc}
+          else
+            {n, [{:local, f, args} | acc]}
+          end
+
+        n, acc ->
+          {n, acc}
+      end)
+
+    Enum.reverse(acc)
+  end
+
+  # THE SAME RESOLUTION callees/2 USES, kept side by side with it on purpose: an imported
+  # helper emits as {:local, f} and is STRUCTURALLY INVISIBLE without the import fallback.
+  defp hop_defs(d, index, {:local, f, args}) do
+    case at_arity(Map.get(index.by_key, {d.module, f}, []), length(args)) do
+      [] -> imported_defs(index, d.module, f, length(args))
+      defs -> defs
+    end
+    |> Enum.map(&{&1, args})
+  end
+
+  defp hop_defs(_d, index, {:remote, segs, f, args}),
+    do: index |> resolve(segs, f, length(args)) |> Enum.map(&{&1, args})
+
+  defp hop_subst(callee, args, oks, head) do
+    callee.head
+    |> head_params()
+    |> Enum.zip(args)
+    |> Enum.reduce(%{oks: %{}, head: MapSet.new(), params: MapSet.new()}, fn {param, arg}, acc ->
+      pvars = dvars(param)
+      avars = dvars(arg)
+      acc = %{acc | params: MapSet.union(acc.params, pvars)}
+
+      case Enum.find_value(avars, &Map.get(oks, &1)) do
+        nil ->
+          if MapSet.disjoint?(avars, head),
+            do: acc,
+            else: %{acc | head: MapSet.union(acc.head, pvars)}
+
+        producer ->
+          %{acc | oks: Enum.reduce(pvars, acc.oks, &Map.put(&2, &1, producer))}
+      end
+    end)
+  end
+
+  defp head_params({:when, _, [h | _]}), do: head_params(h)
+  defp head_params({name, _, args}) when is_atom(name) and is_list(args), do: args
+  defp head_params(_), do: []
 
   defp names(atoms), do: atoms |> Enum.map(&to_string/1) |> Enum.uniq() |> Enum.sort()
   defp gate_or_dash([]), do: "-"
@@ -3552,6 +3736,17 @@ defmodule PDS.Census do
   # was measuring nothing. Both shapes are read here.
   defp ok_payload({:__block__, _, [inner]}) when is_tuple(inner), do: ok_payload(inner)
   defp ok_payload({a, b}), do: if(ok_atom?(a), do: {:payload, b}, else: :no)
+
+  # AND SO DOES TUPLE ARITY (PDS wave 41). A THREE-element ok tuple is not a tuple at all
+  # in quoted form — `{:ok, written, receipt}` is `{:{}, meta, [:ok, written, receipt]}` —
+  # so the two clauses above see NOTHING and every n-ary success binding in the corpus was
+  # invisible. MediaController.put_blob (`{:ok, written, receipt} <- Media.put_blob(...)`,
+  # rendering `written`, `receipt` and `byte_size(body)`) sat in the residual band PURELY
+  # ON ARITY: a genuinely store-derived receipt the lens could not see. The whole payload
+  # LIST is handed back — every element of an n-ary ok tuple is part of what succeeded.
+  defp ok_payload({:{}, _, [a | rest]}) when rest != [],
+    do: if(ok_atom?(a), do: {:payload, rest}, else: :no)
+
   defp ok_payload(_), do: :no
 
   defp ok_atom?(:ok), do: true
@@ -3754,6 +3949,8 @@ defmodule PDS.Census do
     p("    RESIDUAL (never folded into a decided class) #{pad(residual)}")
     p("")
 
+    report_derivation_mask(rows)
+
     Enum.each(@derivation_order, fn class ->
       case Enum.filter(rows, &(&1.class == class)) do
         [] ->
@@ -3771,6 +3968,8 @@ defmodule PDS.Census do
           p("")
       end
     end)
+
+    report_onehop_join(rows)
 
     p("  WHAT THIS PARTITION CANNOT SEE (its own blind shapes, printed with it)")
     p("    · SHADOWING IS NOT MODELLED. dvars/1 is a NAME SET, so a name rebound between")
@@ -3793,6 +3992,111 @@ defmodule PDS.Census do
     p("      the action ran — contributes no var and can read as literal_only.")
     p("    · A REDIRECT'S `to:` IS NOT A PAYLOAD. Recording it would let a redirect built")
     p("      from a caller-supplied id read as store-derived.")
+    p("    · THE HOP SUBSTITUTES ARGUMENT EXPRESSIONS, AND AN ARGUMENT THAT IS A CALL")
+    p("      CONTRIBUTES ITS OWN ARGUMENTS' NAMES, NOT ITS RETURN. `stamp_response(conn,")
+    p("      Keys.pause(id, ...))` substitutes `id` into a parameter pattern `{:ok, key}`,")
+    p("      so the TicketKeys and AuthController.register rows class request_echo on a")
+    p("      value that in truth descends from the write. Attributing the hop argument's")
+    p("      OWN producing call is a second pass and is filed, not smuggled in here.")
+    p("    · THE JOIN IS ONE HOP AND STOPS THERE. A helper that responds through a second")
+    p("      helper stays residual by design, and its target is NAMED above as `emits")
+    p("      nothing — a SECOND hop`, so the refusal can be checked instead of assumed.")
+    p("")
+  end
+
+  # THE PRECEDENCE MASK, COUNTED RATHER THAN INFERRED (PDS wave 41).
+  #
+  # WHY A ROW COUNT CANNOT SEE THIS AT ALL. derive_row/3 takes the MIN over its clauses'
+  # classes and every decided class outranks every residual one, so an action with one
+  # store_derived clause and one helper-assembled clause prints store_derived and its
+  # residual clause vanishes from the class list, from the RESIDUAL total, and from any
+  # before/after comparison drawn over printed rows. The residual population is therefore
+  # a CLAUSE population, and it is counted here as one — de-duplicated on the in-run clause
+  # id, because one def clause can be reached by two routed quads.
+  #
+  # AND IT IS THE ONLY CHECK THAT CATCHES A CLASS SHRINKING WITHOUT DECIDING ANYTHING. The
+  # one-hop join may DECIDE a residual clause or leave it exactly where it was; it may not
+  # move one residual class into another. The two deltas below are printed side by side so
+  # that invariant is arithmetic on the page rather than a promise in a comment.
+  defp report_derivation_mask(rows) do
+    clauses = rows |> Enum.flat_map(&Map.get(&1, :clause_results, [])) |> Enum.uniq_by(& &1.id)
+    pre = derivation_mask(rows, clauses, :pre_class)
+    post = derivation_mask(rows, clauses, :class)
+
+    p("  THE PRECEDENCE MASK, PRINTED BOTH SIDES — clause-keyed over #{length(clauses)} distinct clause(s)")
+    p("                                                    BEFORE HOP   AFTER HOP")
+    p("    decided row(s) carrying a RESIDUAL clause         #{pad(pre.masked)}        #{pad(post.masked)}")
+    p("    row(s) TOUCHING a residual clause                 #{pad(pre.touching)}        #{pad(post.touching)}")
+    p("    distinct RESIDUAL clause(s)                       #{pad(pre.residual)}        #{pad(post.residual)}")
+    p("    distinct DECIDED clause(s)                        #{pad(pre.decided)}        #{pad(post.decided)}")
+    p("")
+
+    p("    #{pre.residual - post.residual} residual clause(s) left the band and #{post.decided - pre.decided} decided clause(s) arrived — EQUAL, which is the whole")
+    p("    check: a join that shrank a residual class WITHOUT deciding anything would show")
+    p("    these two numbers apart, and a row count could not show it at all.")
+    p("    The masked count moved #{pre.masked} -> #{post.masked} (#{mask_delta(post.masked - pre.masked)}). It RISES when the hop decides the")
+    p("    clause a row was PRINTING while a second clause of that row stays residual — the")
+    p("    row joins a decided class and its residual clause becomes newly masked, which is")
+    p("    a disclosure rather than a regression. It is derived here either way.")
+    p("")
+  end
+
+  defp mask_delta(0), do: "unchanged"
+  defp mask_delta(n) when n > 0, do: "+#{n}"
+  defp mask_delta(n), do: "#{n}"
+
+  defp derivation_mask(rows, clauses, key) do
+    residual? = fn c -> Map.fetch!(c, key) in @derivation_residual end
+    touch? = fn r -> Enum.any?(Map.get(r, :clause_results, []), residual?) end
+    residual = Enum.count(clauses, residual?)
+
+    %{
+      residual: residual,
+      decided: length(clauses) - residual,
+      touching: Enum.count(rows, touch?),
+      masked: Enum.count(rows, &(row_class(&1, key) not in @derivation_residual and touch?.(&1)))
+    }
+  end
+
+  defp row_class(%{clause_results: [_ | _] = cs}, key),
+    do: cs |> Enum.min_by(&derivation_rank(Map.fetch!(&1, key))) |> Map.fetch!(key)
+
+  defp row_class(r, _key), do: r.class
+
+  # THE JOIN'S YIELD, AND EVERY REFUSAL IT MADE. A join that printed only its wins would be
+  # the same instrument this epic keeps filing: the clauses it could NOT decide are listed
+  # by name with the mechanism that stopped each one, so every line here can be opened and
+  # taken apart. A measured ZERO with a falsifiable reason is a finding.
+  defp report_onehop_join(rows) do
+    attempted =
+      rows
+      |> Enum.flat_map(&Map.get(&1, :clause_results, []))
+      |> Enum.uniq_by(& &1.id)
+      |> Enum.filter(&(&1.pre_class == :residual_helper_assembled))
+
+    {won, lost} = Enum.split_with(attempted, &(&1.class != &1.pre_class))
+    breakdown = won |> Enum.frequencies_by(& &1.class) |> Enum.sort_by(fn {c, _} -> derivation_rank(c) end)
+
+    p("  THE ONE-HOP JOIN over the helper-assembled band — LOCAL **or** REMOTE-resolved,")
+    p("  tie-broken MIN-BY @derivation_order over EVERY emitting candidate")
+    p("    clause(s) attempted   #{pad(length(attempted))}  (every clause whose own body carries no response call)")
+
+    p("    DECIDED by the hop    #{pad(length(won))}  #{if breakdown == [], do: "-", else: Enum.map_join(breakdown, ", ", fn {c, n} -> "#{c} #{n}" end)}")
+
+    p("    STILL RESIDUAL        #{pad(length(lost))}  each with the mechanism that stopped it, below")
+    p("")
+    p("    IT ASKS A DIFFERENT QUESTION FROM PDS-D573, over the same edge. D573's two")
+    p("    refutations asked whether an `ok: true` EMITTER exists downstream — a coverage")
+    p("    question, and the answer stayed no. This asks whether the VALUE the receipt")
+    p("    renders DESCENDS from the write return, which is the wave-40 law in one hop.")
+    p("")
+
+    Enum.each(Enum.sort_by(lost, fn %{id: {mod, name, path, _}} -> {mod, name, path} end), fn c ->
+      {mod, name, path, _line} = c.id
+      p("      #{mod}.#{name}  ·  #{short(path)}")
+      wrap(c.why, "             ")
+    end)
+
     p("")
   end
 
@@ -4491,6 +4795,39 @@ defmodule PDS.Census do
       exit: 1,
       expect: ["FAIL  ROSTER-VERDICT-FRESH", "0 stale + 8 unresolved of 8", "UNRESOLVED ANCHOR"],
       proves: "a resolver that resolves NOTHING reds on a stated unresolved COUNT instead of passing 0-of-8 — an arm that certifies an empty set is the vacuous green this epic refuses"
+    },
+    # THE ONE-HOP JOIN (PDS wave 41), AND WHY ITS CORPUS IS THE REPO. The join's whole
+    # subject is a HOP between two real defs, and the synthetic tree's controllers respond
+    # in their own bodies — a fixture would exercise the code and prove nothing about it.
+    # Neither case pins a COUNT: the first asserts one named conversion and one named
+    # refusal, the second asserts that BOTH move when the resolution is killed.
+    %{
+      name: "ONEHOP-DECIDES-AND-REFUSES",
+      corpus: :repo,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "ONE HOP into SessionIssuer.issue/3",
+        "AuthController.issue_session/3 [emits nothing — a SECOND hop]",
+        "THE PRECEDENCE MASK, PRINTED BOTH SIDES"
+      ],
+      # THE OVER-NAMING HALF. A join that followed TWO hops would print the wrapper itself
+      # as the deciding target, and no list of expected substrings can state that absence.
+      refute: ["ONE HOP into AuthController.issue_session/3"],
+      proves: "the join converts across a REMOTE target (WebauthnController.login -> SessionIssuer.issue/3, which a local-only rule scores one lower) AND refuses the two-hop wrapper BY NAME rather than silently — a refusal a reader can open and take apart"
+    },
+    %{
+      name: "ONEHOP-YIELD-NOT-CONSTANT",
+      corpus: :repo,
+      argv: [],
+      # Kill the candidate RESOLUTION, not the printing: the block still runs, so a printed
+      # yield that survives this mutation is a constant rather than a measurement.
+      mut: {"|> Enum.flat_map(&hop_de" <> "fs(d, index, &1))", "|> Enum.flat_map(fn _ -> [] end)"},
+      exit: 0,
+      expect: ["NO hop target resolves in this corpus", "THE ONE-HOP JOIN over the helper-assembled band"],
+      refute: ["ONE HOP into SessionIssuer.issue/3"],
+      proves: "with the hop resolution dead every attempted clause prints the empty-candidate refusal and every conversion disappears — so the yield printed above is DERIVED from the join, and the arms stay green through it, which is the point: this pass RE-LABELS and can never cost a false green"
     }
   ]
 
