@@ -273,6 +273,96 @@ defmodule BarkparkCloud.NotificationsTest do
       assert recipients == member_emails
       refute outsider.email in recipients
     end
+
+    # wave 26 S3 (charter D310). Before this, the body was the RAW scrubbed
+    # capture and nothing else: the dashboard said "Hetzner ran out of server
+    # capacity for this size" while the same person's inbox, for the same event
+    # in the same minute, said `create "…" failed on all 5 candidate
+    # type/locations:`. The fixture is the real producer's format
+    # (`internal/cli/cloud/provider.go:579`) — five candidates, four voting
+    # capacity and one mentioning DNS, so it also exercises the plurality fold —
+    # and it carries a credential-shaped `hcloud_…` token so the scrub has
+    # something to bite.
+    test "provision_failed leads with the humanized cause and keeps the raw capture below it" do
+      {team, _emails} = team_with_members(1)
+      {:ok, _} = Notifications.ensure_settings(team)
+
+      aggregate =
+        ~s(create "acme-site-ac4e1f2a" failed on all 5 candidate type/locations:) <>
+          "\n  - cx22/fsn1: server type cx22 unavailable in fsn1 (resource_unavailable)" <>
+          "\n  - cx32/fsn1: server type cx32 unavailable in fsn1 (resource_unavailable)" <>
+          "\n  - cx22/nbg1: server type cx22 unavailable in nbg1 (resource_unavailable)" <>
+          "\n  - cx32/hel1: hetzner dns upsert \"acme.example.com\": resource_unavailable" <>
+          "\n  - cx42/hel1: hcloud_9f2a1c7bE4d3Qz rejected: resource_unavailable"
+
+      assert :ok =
+               Notifications.dispatch_event(team, :provision_failed, %{
+                 name: "acme-site",
+                 detail: aggregate
+               })
+
+      assert_received {:email, email}
+      body = email.text_body
+
+      # THE CAUSE, in words a person can act on.
+      cause =
+        "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+
+      assert body =~ cause
+
+      # THE RAW CAPTURE, RETAINED — not removed, not truncated. The header line
+      # and a distinctive sub-line that only the raw aggregate carries.
+      assert body =~ ~s(create "acme-site-ac4e1f2a" failed on all 5 candidate type/locations:)
+      assert body =~ "- cx22/nbg1: server type cx22 unavailable in nbg1 (resource_unavailable)"
+
+      # ORDER: the cause is above the capture, not appended after it.
+      {cause_at, _} = :binary.match(body, cause)
+      {capture_at, _} = :binary.match(body, "failed on all 5 candidate")
+      assert cause_at < capture_at
+
+      # THE SCRUB STILL BITES on the retained capture — `humanize/1` is
+      # `classify |> scrub`, so the secret boundary is unchanged.
+      refute body =~ "hcloud_9f2a1c7bE4d3Qz"
+      assert body =~ "[redacted] rejected: resource_unavailable"
+    end
+
+    # REVIEW (wave 26): the slice's own builder named this branch as the one
+    # honest hole in their guard — `cause_then_capture/1` collapses to the bare
+    # capture when `humanize/1` classifies nothing, which is correct BY
+    # CONSTRUCTION today (`humanize = classify |> scrub`, so the two strings are
+    # equal) and therefore guarded by nothing but that construction. A refactor
+    # that made `humanize/1` do anything else after the scrub would silently
+    # start printing the same paragraph twice, with a heading between the copies,
+    # to a customer. That is a sentence with a `defp`, and this wave refuses
+    # those. Pinned here.
+    test "provision_failed with an UNCLASSIFIABLE reason prints the capture once, with no heading" do
+      {team, _emails} = team_with_members(1)
+      {:ok, _} = Notifications.ensure_settings(team)
+
+      # Deliberately matches no class token in FailureCopy: no capacity, auth,
+      # dns or network vocabulary, and no builder-subset string.
+      reason = "the widget lathe reported schedule 7 with token sk_live_QQ11ZZ99aa"
+
+      assert :ok =
+               Notifications.dispatch_event(team, :provision_failed, %{
+                 name: "acme-site",
+                 detail: reason
+               })
+
+      assert_received {:email, email}
+      body = email.text_body
+
+      scrubbed = BarkparkCloud.FailureCopy.scrub(reason)
+      # PREMISE: this reason really is unclassified. Without it the test drifts
+      # into the classified path and asserts nothing about the branch it names.
+      assert BarkparkCloud.FailureCopy.humanize(reason) == scrubbed
+
+      assert body =~ scrubbed
+      refute body =~ "What the provider reported:"
+      # ONCE, not twice — the whole point of the branch.
+      assert length(String.split(body, scrubbed)) == 2
+      refute body =~ "sk_live_QQ11ZZ99aa"
+    end
   end
 
   ## Transactional (always platform transport, regardless of per-team settings)
