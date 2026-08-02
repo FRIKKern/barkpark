@@ -242,11 +242,10 @@ defmodule BarkparkWeb.Studio.Caps do
       #     intentionally-open anonymous public-demo posture (an anonymous
       #     non-demo socket never reaches a write event un-restricted).
       :write ->
-        cond do
-          derive(socket).write -> {:cont, socket}
-          restricted?(socket) -> {:halt, deny(socket)}
-          has_principal?(socket) -> {:halt, deny(socket)}
-          true -> {:cont, socket}
+        if write_capable?(socket.assigns, derive(socket)) do
+          {:cont, socket}
+        else
+          {:halt, deny(socket)}
         end
 
       # :admin and :deny (default) both require admin, enforced on ALL sockets.
@@ -262,20 +261,48 @@ defmodule BarkparkWeb.Studio.Caps do
   defp deny(socket),
     do: put_flash(socket, :error, "You don't have access to do that.")
 
+  @doc """
+  THE `:write` TIER, AND THE ONLY COPY OF IT. Takes an assigns MAP plus an
+  already-derived caps map, so both enforcement points read one rule:
+
+    * the socket-level `gate/3` above, which passes `derive(socket)` — fresh,
+      so mid-session grant expiry denies immediately;
+    * a LiveComponent CALLSITE, which passes the render-time `@caps`. A
+      `phx-target`ed event carries a component cid and LiveView runs the
+      COMPONENT socket's lifecycle for it, so `gate/3` is structurally
+      unreachable there and the capability must travel in as a prop
+      (`grep -n 'read_only=' lib/barkpark_web/live/studio/studio_live/components.ex`).
+
+  Order is load-bearing: write-capable passes; a RESTRICTED socket (share-read
+  or grant grade) does not; a socket carrying a PRINCIPAL that lacks write does
+  not — that is the read-only api_token / read-only member hole; only a
+  principal-LESS socket falls through, i.e. the intentionally-open anonymous
+  public-demo posture. Forking this predicate is how the two points drift.
+  """
+  @spec write_capable?(map(), map()) :: boolean
+  def write_capable?(assigns, caps) when is_map(assigns) and is_map(caps) do
+    cond do
+      Map.get(caps, :write) == true -> true
+      restricted?(assigns) -> false
+      has_principal?(assigns) -> false
+      true -> true
+    end
+  end
+
   # A capability-RESTRICTED socket is one LiveScope decided to gate (a share
   # read grade or a grant grade). These were ALWAYS write-gated by this hook;
   # kept unchanged so share-read/grant sockets keep their fresh expiry-truth.
-  defp restricted?(socket) do
-    socket.assigns[:readonly_gate?] == true or
-      socket.assigns[:write_gate?] == true or
-      not is_nil(socket.assigns[:caller_context]) or
-      socket.assigns[:share_access] == :read
+  defp restricted?(assigns) do
+    Map.get(assigns, :readonly_gate?) == true or
+      Map.get(assigns, :write_gate?) == true or
+      not is_nil(Map.get(assigns, :caller_context)) or
+      Map.get(assigns, :share_access) == :read
   end
 
   # Does the socket carry an authenticated principal? A read-only such principal
   # must be write-denied (the hole this fix closes). A principal-LESS socket is
   # the anonymous public-demo posture, which stays intentionally open for write.
-  defp has_principal?(socket) do
-    not is_nil(socket.assigns[:api_token]) or not is_nil(socket.assigns[:current_user])
+  defp has_principal?(assigns) do
+    not is_nil(Map.get(assigns, :api_token)) or not is_nil(Map.get(assigns, :current_user))
   end
 end

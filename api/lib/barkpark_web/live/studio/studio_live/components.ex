@@ -25,6 +25,7 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
   # HTTP 500 on /studio/rest and /studio/plugins). The literal `name="…"` sites
   # in this file stay literal — the icons tripwire owns those.
   alias BarkparkWeb.Icons
+  alias BarkparkWeb.Studio.Caps
   alias BarkparkWeb.Studio.PaneBuilder
   alias BarkparkWeb.Studio.StudioLive.{DocActions, PaperCanvas, Paths}
   alias Phoenix.LiveView.JS
@@ -1754,39 +1755,18 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
 
   # ── the SheetGrid capability prop ───────────────────────────────────────────
   #
-  # May the socket's principal WRITE the mounted desk? This mirrors the `:write`
-  # tier of the Studio deny-gate (`grep -n 'defp gate' lib/barkpark_web/studio/caps.ex`)
-  # clause for clause, because the component-targeted path never reaches that
-  # hook: a write-capable socket writes; a capability-RESTRICTED socket does not;
-  # a socket carrying a PRINCIPAL that Caps denies write does not; and a
-  # principal-LESS socket falls through unchanged — that is the intentionally
-  # open anonymous public-demo posture (`BARKPARK_PUBLIC_DEMO_STUDIO`), which
-  # this slice deliberately does not change.
+  # May the socket's principal WRITE the mounted desk? This does NOT re-state
+  # the rule — it CALLS the one owner, `Caps.write_capable?/2`, which the
+  # socket-level deny-gate also calls. The component-targeted path never reaches
+  # that hook (a `phx-target`ed event runs the COMPONENT socket's lifecycle), so
+  # a fork here would be a security rule maintained in two places; the review of
+  # pds-w41-caps-component-gate collapsed it into one.
   #
   # `@caps` is the freshly-derived map StudioLive re-assigns on every grant
   # change and expiry tick (`grep -n 'defp refresh_caps' lib/barkpark_web/live/studio/studio_live.ex`),
   # so an expired grant drops the write prop on the next render.
-  defp sheet_write_capable?(assigns) do
-    cond do
-      Map.get(Map.get(assigns, :caps) || %{}, :write) == true -> true
-      caps_restricted_socket?(assigns) -> false
-      caps_has_principal?(assigns) -> false
-      true -> true
-    end
-  end
-
-  # Mirrors `Caps.restricted?/1` (private there) — a share-read or grant grade.
-  defp caps_restricted_socket?(assigns) do
-    Map.get(assigns, :readonly_gate?) == true or
-      Map.get(assigns, :write_gate?) == true or
-      not is_nil(Map.get(assigns, :caller_context)) or
-      Map.get(assigns, :share_access) == :read
-  end
-
-  # Mirrors `Caps.has_principal?/1` (private there).
-  defp caps_has_principal?(assigns) do
-    not is_nil(Map.get(assigns, :api_token)) or not is_nil(Map.get(assigns, :current_user))
-  end
+  defp sheet_write_capable?(assigns),
+    do: Caps.write_capable?(assigns, Map.get(assigns, :caps) || %{})
 
   # The expected fields STILL recommendable for the current Beta block list,
   # rendered into `data-expected-fields` for the slash menu's EXPECTED group.

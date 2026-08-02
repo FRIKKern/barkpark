@@ -57,7 +57,12 @@ defmodule BarkparkWeb.Studio.PdsW41CapsComponentGateTest do
 
   defp put_cfg(overrides) do
     base = Application.get_env(:barkpark, Barkpark.Plugins.Sheets.Session, [])
-    Application.put_env(:barkpark, Barkpark.Plugins.Sheets.Session, Keyword.merge(base, overrides))
+
+    Application.put_env(
+      :barkpark,
+      Barkpark.Plugins.Sheets.Session,
+      Keyword.merge(base, overrides)
+    )
   end
 
   defp stop_all_sessions do
