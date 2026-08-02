@@ -967,33 +967,105 @@ async function main() {
         ` (scrollbars: ${CLASSIC_SCROLLBARS ? "CLASSIC — reserved track measured" : "hidden"})\n`,
       );
 
-      // (a) the page body itself. The fleet grid is the offender: a bare `1fr`
-      //     track cannot go below the CARD's min-content, so the track — not
-      //     the card's children — is what overhangs a 358px container.
-      for (const theme of ["light", "dark"]) {
-        await setViewport(390);
-        await nav(
-          `${BASE}/?scen=mixed-fleet&theme=${theme}#overview`,
-          `document.querySelector('.instances-grid .instance-card')`,
-        );
-        const row = [];
-        for (const width of PHONE_WIDTHS) {
-          await setViewport(width);
-          const m = await evalJs(
-            `(function(){var d=document.documentElement;` +
-            `var g=document.querySelector('.instances-grid');var c=g&&g.querySelector('.instance-card');` +
-            `var r=Math.round((c?c.getBoundingClientRect().width:0)*1000)/1000;` +
-            `var gw=Math.round((g?g.getBoundingClientRect().width:0)*1000)/1000;` +
-            `return {sw:d.scrollWidth,cw:d.clientWidth,card:r,grid:gw,` +
-            ` tracks:g?getComputedStyle(g).gridTemplateColumns:''};})()`,
+      // (a) the page body, AND EVERY CARD IN THE GRID, ON FOUR FIXTURES. The
+      //     fleet grid is the offender: a bare `1fr` track cannot go below the
+      //     CARD's min-content, so the track — not the card's children — is
+      //     what overhangs a 358px container.
+      //
+      // W23-S5 — WHAT THIS HALF USED TO ASSERT, AND WHY IT COULD NOT LOSE.
+      // It read ONE card (`g.querySelector('.instance-card')`) on ONE scenario
+      // (mixed-fleet) and asked `card > grid + 1`. Both halves of that were
+      // dead, and only one of them for the obvious reason:
+      //
+      //  * THE PREDICATE CANNOT FIRE, EVER. `.instance-card` is a stretched
+      //    grid item under `grid-template-columns: minmax(0, 1fr)`
+      //    (app.css:3509, inside `@media (max-width: 620px)` — and every one of
+      //    the ten PHONE_WIDTHS is <= 620), so the card's border-box width IS
+      //    the track BY CONSTRUCTION. Measured over 4 scenarios x 10 widths x 2
+      //    themes: card[288..288]/grid288 at 320, card[588..588]/grid588 at 620,
+      //    identical in all 80 cells. `card > grid + 1` scored ZERO hits under
+      //    the reproduced historical defect (54 findings) AND under a 200-char
+      //    synthetic token (160 findings). CARD-RECT vs GRID-RECT is the same
+      //    vacuity wearing a rect: `cardRect.right > gridRect.right + 1` also
+      //    scored zero in both runs. Neither is asserted here.
+      //  * SO querySelectorAll ALONE BUYS NOTHING HERE — a homogeneous
+      //    population cannot produce a width spread. It is still what this leg
+      //    does, because the count is the honest thing to print, and `walked`
+      //    is asserted non-zero: a selector that stops matching must red rather
+      //    than sail through zero iterations.
+      //  * THE LOAD-BEARING FIX IS THE CORPUS. Under the reproduced defect all
+      //    54 findings land on `fleet-cruel-content` — this epic's own
+      //    worst-case fixture, which had NEVER reached this assertion — and
+      //    zero on mixed-fleet. The leg drove mixed-fleet only.
+      //
+      // WHAT DOES FIRE, 18/18 CELLS EACH: the NAME's rect against its own
+      // CARD's rect (nameRect.right 536.219 > cardRect.right 304) and the
+      // card-local scroll (card.scrollWidth 517 > clientWidth 284). Note the
+      // name element is itself blind to element-local scrollWidth (497/497), so
+      // the rect comparison must cross the element boundary — child rect
+      // against PARENT rect — to see anything at all.
+      const CARD_SCENS = ["mixed-fleet", "fleet-cruel-content", "overview-attention", "overview-past-due"];
+      // 320..496 is the defect band; 620 is CLEAN on pre-fix bytes (a 588px
+      // track holds the 497px name), so a width list that stopped at the widest
+      // phone would have measured nothing at all.
+      const BAND_TOP = 496;
+      let walked = 0;
+      let bandCards = 0;
+      let bandHits = 0;
+      let wideCards = 0;
+      let wideHits = 0;
+      const scenCounts = [];
+      for (const scen of CARD_SCENS) {
+        let scenN = null;
+        for (const theme of ["light", "dark"]) {
+          await setViewport(390);
+          await nav(
+            `${BASE}/?scen=${scen}&theme=${theme}#overview`,
+            `document.querySelector('.instances-grid .instance-card')`,
           );
-          const over = m.sw > m.cw;
-          if (over) fail(D, `mixed-fleet/${theme}@${width}#overview: body scrollWidth ${m.sw} > clientWidth ${m.cw} (${m.sw - m.cw}px overhang) — track ${m.tracks} on a ${m.grid}px container`);
-          else if (m.card > m.grid + 1) fail(D, `mixed-fleet/${theme}@${width}#overview: .instance-card ${m.card}px overhangs its ${m.grid}px grid — the track is still floored at the card's min-content`);
-          row.push(`${width}:${m.sw}${over ? "!" : ""}`);
+          const row = [];
+          for (const width of PHONE_WIDTHS) {
+            await setViewport(width);
+            const m = await evalJs(
+              `(function(){var d=document.documentElement;var R=function(v){return Math.round(v*1000)/1000;};` +
+              `var g=document.querySelector('.instances-grid');` +
+              `var cards=g?[].slice.call(g.querySelectorAll('.instance-card')):[];` +
+              `var hits=[];` +
+              `cards.forEach(function(c,i){var cr=c.getBoundingClientRect();` +
+              ` [].slice.call(c.querySelectorAll('*')).forEach(function(el){` +
+              `   var er=el.getBoundingClientRect();if(er.width<=0)return;` +
+              `   if(er.right>cr.right+1)hits.push({i:i,how:'rect',what:'.'+String(el.className||el.tagName).split(' ')[0],` +
+              `     a:R(er.right),b:R(cr.right)});});` +
+              ` if(c.scrollWidth>c.clientWidth+1)hits.push({i:i,how:'scroll',what:'.instance-card',` +
+              `   a:c.scrollWidth,b:c.clientWidth});});` +
+              `var gw=R(g?g.getBoundingClientRect().width:0);` +
+              `return {sw:d.scrollWidth,cw:d.clientWidth,n:cards.length,grid:gw,hits:hits.slice(0,4),` +
+              ` hitN:hits.length,tracks:g?getComputedStyle(g).gridTemplateColumns:''};})()`,
+            );
+            walked += m.n;
+            if (scenN === null) scenN = m.n;
+            const inBand = width <= BAND_TOP;
+            if (inBand) { bandCards += m.n; bandHits += m.hitN; } else { wideCards += m.n; wideHits += m.hitN; }
+            const over = m.sw > m.cw;
+            // The page and the cards are asked INDEPENDENTLY — an `else if`
+            // here would let a body that already overhangs hide every
+            // element-level finding underneath it.
+            if (over) fail(D, `${scen}/${theme}@${width}#overview: body scrollWidth ${m.sw} > clientWidth ${m.cw} (${m.sw - m.cw}px overhang) — track ${m.tracks} on a ${m.grid}px container`);
+            for (const h of m.hits) {
+              if (h.how === "rect") fail(D, `${scen}/${theme}@${width}#overview: .instance-card[${h.i}] ${h.what} rect right ${h.a} overhangs its card's right edge ${h.b} (${Math.round((h.a - h.b) * 10) / 10}px past) — the name pushes the card it lives in`);
+              else fail(D, `${scen}/${theme}@${width}#overview: .instance-card[${h.i}] scrollWidth ${h.a} > clientWidth ${h.b} (${h.a - h.b}px of the card is unreachable)`);
+            }
+            if (m.hitN > m.hits.length) fail(D, `${scen}/${theme}@${width}#overview: ${m.hitN - m.hits.length} further overhang(s) in this cell, not printed`);
+            row.push(`${width}:${m.sw}${over || m.hitN ? "!" : ""}`);
+          }
+          process.stdout.write(`   ${scen}/${theme}  n${scenN}  ${row.join(" ")}\n`);
         }
-        process.stdout.write(`   mixed-fleet/${theme}  ${row.join(" ")}\n`);
+        scenCounts.push(`${scen} n${scenN}`);
       }
+      // A selector that stops matching must RED, not sail through zero
+      // iterations printing a tick.
+      if (walked === 0) fail(D, `#overview: .instances-grid .instance-card matched NOTHING across ${CARD_SCENS.length} scenarios x ${PHONE_WIDTHS.length} widths x 2 themes — the selector no longer reaches the population it certifies`);
+      else okLine(`instance cards: walked ${walked} = ${CARD_SCENS.length} scenarios (${scenCounts.join(", ")}) x ${PHONE_WIDTHS.length} widths x 2 themes; defect band 320-${BAND_TOP} ${bandCards} cards ${bandHits} overhangs, 620 ${wideCards} cards ${wideHits} overhangs`);
 
       // (b) the notifications matrix must ADMIT it is clipped. Two independent
       //     cues, both measured: a label column that stays put while the
@@ -1053,14 +1125,47 @@ async function main() {
         // below is covered correctly. A screenshot catches that; a position
         // read does not. So: sample the middle of the label column at the
         // middle of the header row and name whatever is actually on top.
+        //
+        // W23-S5 — THE HEADER ROW IS 55px, NOT COLUMN 0's 35px. This probe used
+        // to take `hd` — the row height AND the hit-test y — from
+        // `s.querySelector('.set-matrix-col')`, i.e. COLUMN 0, while the census
+        // above it already walked ALL of them. Measured across all six cells
+        // (light/dark x 768/430/390): heights [35, 35, 35, 55, 55, 35] — two of
+        // the six channel headings wrap to two lines. col0 35, tallest 55,
+        // corner 55. So the shipped ok-line read "corner covers the header row
+        // (55/35px)" — a 20px margin that does not exist, against a row height
+        // that is not the row's. The true margin is ZERO.
+        //
+        // AND THE GAP WAS REACHABLE. Regressing the exact remedy this assertion
+        // certifies — `.set-matrix-corner` (app.css:2157) from `align-self:
+        // stretch` to `align-self: center; height: 40px` — left the old probe
+        // GREEN, printing "(40/35px)", while 7.5px of both 55px headings stood
+        // uncovered top and bottom and scrolled through the pinned label
+        // column. A 20px window (corner 35..55) in which this guard passed with
+        // the pin broken. `headH` is now the MAX over every column.
+        //
+        // THE HIT-TEST HALF IS BARREN AND SAYS SO. `align-items: center` puts
+        // every column's midpoint on the same y, so all six per-column probes
+        // answer identically — converting one elementFromPoint into six finds
+        // nothing, by construction, and the count is printed rather than
+        // dressed up. What is NOT barren is the TALL column's TOP EDGE: at
+        // `tall.top + 2` a centred 40px corner is simply not there, so that one
+        // extra probe measures the uncovered band the height arithmetic only
+        // implies.
         const mid = await evalJs(
-          `(function(){var s=document.querySelector('.set-matrix');var ev=s.querySelector('.set-matrix-event');` +
+          `(function(){var R=function(v){return Math.round(v*100)/100;};` +
+          `var s=document.querySelector('.set-matrix');var ev=s.querySelector('.set-matrix-event');` +
           `var co=s.querySelector('.set-matrix-corner');var cr=co.getBoundingClientRect();` +
-          `var hd=s.querySelector('.set-matrix-col').getBoundingClientRect();` +
-          `var hit=document.elementFromPoint(cr.left+cr.width/2,hd.top+hd.height/2);` +
-          `return {sl:s.scrollLeft,evLeft:Math.round(ev.getBoundingClientRect().left*100)/100,` +
-          ` cornerH:Math.round(cr.height*100)/100,headH:Math.round(hd.height*100)/100,` +
-          ` onTop:hit?(hit.className||hit.tagName):'nothing'};})()`,
+          `var cx=cr.left+cr.width/2;` +
+          `var cols=[].slice.call(s.querySelectorAll('.set-matrix-col')).map(function(c){return c.getBoundingClientRect();});` +
+          `var tall=cols.reduce(function(a,b){return b.height>a.height?b:a;},cols[0]);` +
+          `var name=function(el){return el?String(el.className||el.tagName):'nothing';};` +
+          `var probes=cols.map(function(h){return name(document.elementFromPoint(cx,h.top+h.height/2));});` +
+          `return {sl:s.scrollLeft,evLeft:R(ev.getBoundingClientRect().left),` +
+          ` cornerH:R(cr.height),headH:R(tall.height),col0H:R(cols[0].height),` +
+          ` heights:cols.map(function(h){return R(h.height);}),` +
+          ` probes:probes,probeMiss:probes.filter(function(p){return p.indexOf('set-matrix-corner')<0;}).length,` +
+          ` edge:name(document.elementFromPoint(cx,tall.top+2))};})()`,
         );
         await evalJs(`(function(){var s=document.querySelector('.set-matrix');s.scrollLeft=s.scrollWidth;})()`);
         await settle();
@@ -1087,9 +1192,17 @@ async function main() {
           // Cue 1 — the label column holds its ground while the channels move.
           if (rest.pos !== "sticky") fail(D, `notif-configured/${theme}@${width}: .set-matrix-event position is "${rest.pos}", expected "sticky" — the label column scrolls away with the channels`);
           else if (Math.abs(mid.evLeft - rest.scLeft) > 1.5) fail(D, `notif-configured/${theme}@${width}: sticky label left ${mid.evLeft} != scroller left ${rest.scLeft} after scrolling to ${mid.sl} — sticky is declared but DEAD (an overflow:hidden ancestor is the scrollport)`);
-          else if (mid.cornerH < mid.headH - 0.5) fail(D, `notif-configured/${theme}@${width}: the sticky corner is ${mid.cornerH}px tall in a ${mid.headH}px header row — the channel headings scroll THROUGH the pinned label column at the top (align-items:center collapses an empty cell)`);
-          else if (!String(mid.onTop).includes("set-matrix-corner")) fail(D, `notif-configured/${theme}@${width}: at the header row the label column is covered by "${mid.onTop}", not .set-matrix-corner`);
-          else okLine(`notif-configured/${theme}@${width}: ${rest.hidden}/${rest.cols} channel columns off-screen at rest; label column sticks at ${mid.evLeft} through scrollLeft ${mid.sl}, corner covers the header row (${mid.cornerH}/${mid.headH}px); reserved scrollbar track ${rest.track}px`);
+          else {
+            // Three INDEPENDENT reads, not a chain: the height shortfall and
+            // the top-edge hit-test are different measurements of the same
+            // break, and an `else if` would print only the first — exactly the
+            // reason the shipped ok-line went unexamined for so long.
+            const before = failures.length;
+            if (mid.cornerH < mid.headH - 0.5) fail(D, `notif-configured/${theme}@${width}: the sticky corner is ${mid.cornerH}px tall in a ${mid.headH}px header row (columns ${mid.heights.join("/")}; column 0 alone reads ${mid.col0H}px) — the channel headings scroll THROUGH the pinned label column at the top (align-items:center collapses an empty cell)`);
+            if (mid.probeMiss) fail(D, `notif-configured/${theme}@${width}: at the header row ${mid.probeMiss}/${mid.probes.length} column midpoints are covered by something other than .set-matrix-corner (${mid.probes.join(", ")})`);
+            if (!mid.edge.includes("set-matrix-corner")) fail(D, `notif-configured/${theme}@${width}: 2px below the top of the ${mid.headH}px header cell the label column is covered by "${mid.edge}", not .set-matrix-corner — a corner shorter than the TALLEST column leaves the heading scrolling through above it`);
+            if (failures.length === before) okLine(`notif-configured/${theme}@${width}: ${rest.hidden}/${rest.cols} channel columns off-screen at rest; label column sticks at ${mid.evLeft} through scrollLeft ${mid.sl}, corner covers the header row (${mid.cornerH}/${mid.headH}px, columns ${mid.heights.join("/")}); ${mid.probes.length} column midpoints + the tall column's top edge all hit .set-matrix-corner; reserved scrollbar track ${rest.track}px`);
+          }
           // Cue 2 — the fade exists while clipped and retracts at the end.
           if (px(rest.fade) <= 0) fail(D, `notif-configured/${theme}@${width}: edge fade is ${rest.fade} while ${rest.sw - rest.cw}px of the matrix is hidden — nothing tells a person there is more`);
           else if (px(end.fade) > 0.5) fail(D, `notif-configured/${theme}@${width}: edge fade still ${end.fade} at scrollLeft ${end.sl} (the end) — the cue lies in the other direction`);
