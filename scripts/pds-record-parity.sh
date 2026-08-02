@@ -64,6 +64,39 @@
 #     REFUSES (exit 2) unless grace < span. That refusal is not a nicety; it is
 #     the only thing standing between this arm and structural vacuity.
 #
+# (4) A TRUNCATED COMMIT WALK IS UNCHECKED, AND TRUNCATION IS TESTED ON THE
+#     WALK — NEVER ON THE STORE-LEVEL SHALLOW FLAG.
+#     Axis A's default corpus is `git log`. Under `git clone --depth 1` that
+#     walk sees ONE commit, the citation set is empty, `comm -23` over an empty
+#     left side is empty, and the arm printed `cited: 0 / unresolved: 0` and
+#     PARITY at exit 0 — the SAME verdict sentence a full checkout prints over
+#     188 citations. actions/checkout@v4 is shallow BY DEFAULT, so wiring this
+#     arm into CI unguarded ships a structurally-unfailable green in the very
+#     lane meant to guard it.
+#     THE TEMPTING WRONG PREDICATE, WHICH THIS REPO ITSELF REFUTES: sibling
+#     scripts/release-scan.sh keys its FATAL on `git rev-parse
+#     --is-shallow-repository`. The shared checkout answers TRUE while
+#     `git log HEAD` reaches the root (5132 commits, exactly one root) — the
+#     sole .git/shallow graft is NOT an ancestor of HEAD, left behind by one
+#     off-HEAD `--depth` fetch, and a single such fetch flips a STORE-level
+#     flag for the whole repository. A store-level guard was built first here
+#     and watched UNCHECK the FULL checkout with "TRUNCATED to 5132 commit(s)":
+#     the mirror-image lie, an arm refusing to read a corpus it holds in full.
+#     SO THE PREDICATE IS: store-shallow AND at least one entry of
+#     `$(git rev-parse --git-common-dir)/shallow` is an ancestor of HEAD.
+#     Under --depth 1 the graft list holds HEAD itself, `--is-ancestor HEAD
+#     HEAD` is true, and the real case still fires. An unreadable graft list,
+#     a missing common-dir, a graft that cannot be tested, or a non-true/false
+#     answer all FAIL CLOSED to UNCHECKED.
+#     NO ENV ESCAPE. release-scan's truncated commits[] is still useful draft
+#     material, so its stamped RELEASE_SCAN_ALLOW_SHALLOW buys something. This
+#     arm's entire output is a VERDICT, and a verdict over a corpus you cannot
+#     see is exactly the vacuous green the epic exists to refuse. The honest
+#     escape is on the CLI already: --commits-file hands the arm its corpus.
+#     FENCED TO THE GIT-LOG PATH. Never top-level: axis B reads gh and the
+#     ledger and touches no history, so a top-level guard would UNCHECK
+#     `--axis b` on every shallow CI checkout for no reason at all.
+#
 # ── REUSE, DO NOT REWRITE ─────────────────────────────────────────────────────
 #
 # The task-id extractor is `scripts/pr-task-gate.sh --extract-task-id` — this
@@ -109,13 +142,15 @@
 #   1  DIVERGENT — at least one leaf slice merged over an open row, or a cited
 #                  D that the charter does not define
 #   2  UNCHECKED — the arm could not look (no gh, no credentials, ledger down,
-#                  no charter) OR it REFUSED to run vacuously (grace >= span)
+#                  no charter, a TRUNCATED commit walk) OR it REFUSED to run
+#                  vacuously (grace >= span)
 #   3  USAGE     — bad invocation
 #
 # usage:
 #   bash scripts/pds-record-parity.sh
 #   bash scripts/pds-record-parity.sh --axis a
 #   bash scripts/pds-record-parity.sh --limit 400 --grace-hours 6
+#   bash scripts/pds-record-parity.sh --commits-file <file>  # axis A corpus, verbatim
 #   bash scripts/pds-record-parity.sh --fixture-dir <dir>   # hermetic, selftest
 
 set -uo pipefail
@@ -210,6 +245,68 @@ now_epoch() {
 echo "pds-record-parity: the epic's law, turned on the epic's own record"
 echo "  repo=${REPO}  ledger=${LEDGER_BASE}  dataset=${DATASET}${FIXTURE_DIR:+  transport=FIXTURES(${FIXTURE_DIR})}"
 
+# ── is THIS walk truncated? (ruling 4) ────────────────────────────────────────
+# Sets WALK_STATE to one of:
+#   complete   — `git log HEAD` reaches the root; the corpus is whole
+#   truncated  — a graft sits on HEAD's own history; the walk stops early
+#   unknown    — git would not answer; FAIL CLOSED, treated as truncated
+# WALK_GRAFT names the offending graft, WALK_REASON explains an `unknown`.
+#
+# The store-level flag ALONE is not the question. It is repository-wide, and one
+# off-HEAD `--depth` fetch sets it for a checkout whose HEAD history is complete
+# (this repo, today). The question is whether a graft lies on HEAD's OWN history.
+WALK_STATE=""
+WALK_GRAFT=""
+WALK_REASON=""
+walk_truncation() {
+  WALK_STATE=""; WALK_GRAFT=""; WALK_REASON=""
+
+  local store
+  store="$(git rev-parse --is-shallow-repository 2>/dev/null)" || store=""
+  case "$store" in
+    false) WALK_STATE="complete"; return 0 ;;
+    true)  : ;;
+    *)     WALK_STATE="unknown"
+           WALK_REASON="\`git rev-parse --is-shallow-repository\` answered '${store:-<nothing>}', which is neither true nor false"
+           return 0 ;;
+  esac
+
+  # Store-shallow. Now ask whether it touches HEAD.
+  local common
+  common="$(git rev-parse --git-common-dir 2>/dev/null)" || common=""
+  if [ -z "$common" ]; then
+    WALK_STATE="unknown"
+    WALK_REASON="the store is shallow but \`git rev-parse --git-common-dir\` answered nothing, so the graft list cannot be located"
+    return 0
+  fi
+
+  local grafts="${common%/}/shallow"
+  if [ ! -r "$grafts" ]; then
+    WALK_STATE="unknown"
+    WALK_REASON="the store is shallow but the graft list ${grafts} is missing or unreadable, so no graft can be tested against HEAD"
+    return 0
+  fi
+
+  local g rc
+  while read -r g || [ -n "$g" ]; do
+    case "$g" in ''|\#*) continue ;; esac
+    git merge-base --is-ancestor "$g" HEAD >/dev/null 2>&1
+    rc=$?
+    case "$rc" in
+      0) WALK_STATE="truncated"; WALK_GRAFT="$g"; return 0 ;;
+      1) : ;;   # a real answer: this graft is off HEAD's history
+      *) WALK_STATE="unknown"
+         WALK_GRAFT="$g"
+         WALK_REASON="graft ${g} could not be tested against HEAD (git merge-base --is-ancestor exit ${rc})"
+         return 0 ;;
+    esac
+  done < "$grafts"
+
+  WALK_STATE="complete"
+  WALK_REASON="store-shallow, but no graft in ${grafts} lies on HEAD's history"
+  return 0
+}
+
 # ══ AXIS A — a commit may not cite an authority that does not exist ═══════════
 axis_a() {
   echo
@@ -245,6 +342,37 @@ axis_a() {
       echo "  UNCHECKED: not inside a git work tree — the commit corpus is unreachable" >&2
       raise 2; return 0
     fi
+
+    # RULING 4. A shallow checkout IS a work tree, so the check above passes and
+    # `git log` happily walks its one commit. Fenced HERE, to the git-log path
+    # only — --commits-file brings its own corpus and axis B reads no history.
+    walk_truncation
+    if [ "$WALK_STATE" != "complete" ]; then
+      local seen_commits seen_cites
+      seen_commits="$(git rev-list --count HEAD 2>/dev/null)" || seen_commits=""
+      seen_cites="$(git log --format=%B 2>/dev/null | grep -oE 'PDS-D[0-9]+' | sort -u | wc -l | tr -d ' ')"
+      {
+        if [ "$WALK_STATE" = "truncated" ]; then
+          echo "  UNCHECKED: TRUNCATED WALK — this checkout's history is grafted ON HEAD, so"
+          echo "             any citation tally printed here would be a tally over a corpus"
+          echo "             the arm never read."
+          echo "             graft:   ${WALK_GRAFT} (an ancestor of HEAD — the walk stops here)"
+        else
+          echo "  UNCHECKED: WALK COMPLETENESS UNKNOWN — the arm could not establish that it"
+          echo "             can see the whole history, and it fails CLOSED rather than green."
+          echo "             reason:  ${WALK_REASON}"
+          [ -n "$WALK_GRAFT" ] && echo "             graft:   ${WALK_GRAFT}"
+        fi
+        echo "             visible: ${seen_commits:-unknown} commit(s) reachable from HEAD, ${seen_cites} distinct PDS-D"
+        echo "             A verdict over a corpus you cannot see is the vacuous green this arm"
+        echo "             exists to refuse, so it refuses instead of printing PARITY at exit 0."
+        echo "             fix (CI):    check out with \`fetch-depth: 0\` (actions/checkout is shallow BY DEFAULT)"
+        echo "             fix (local): \`git fetch --unshallow\`"
+        echo "             or hand the arm its corpus explicitly: --commits-file <file>"
+      } >&2
+      raise 2; return 0
+    fi
+
     git log --format=%B | grep -oE 'PDS-D[0-9]+' | sort -u > "$cites"
   fi
 

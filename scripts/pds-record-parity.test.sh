@@ -47,10 +47,16 @@ LAST_OUT=""
 # the exit code. The output is kept in LAST_OUT so a fixture can additionally
 # assert on WHAT was said, not merely on the number: an arm that reds for the
 # wrong reason is a different defect from an arm that reds.
-run() {
-  local want="$1" label="$2"; shift 3
+run() { run_at "$ARM" "$@"; }
+
+# `run_at <arm-path> <expected-rc> <label> -- <args…>` — the same, against a COPY
+# of the arm planted in another repository. The shallow / off-HEAD-graft fixtures
+# need this: the arm `cd`s to `dirname $0/..`, so the only way to point its
+# default `git log` corpus at a fixture repo is to run the copy that lives there.
+run_at() {
+  local arm="$1" want="$2" label="$3"; shift 4
   CHECKS=$((CHECKS + 1))
-  LAST_OUT="$(bash "$ARM" "$@" 2>&1)"
+  LAST_OUT="$(bash "$arm" "$@" 2>&1)"
   local got=$?
   if [ "$got" -ne "$want" ]; then
     FAILURES=$((FAILURES + 1))
@@ -61,6 +67,14 @@ run() {
   fi
   echo "ok    ${label}  (exit ${got})"
   return 0
+}
+
+# `harness_fail <msg>` — a FIXTURE that did not come out in the shape it needs to
+# be in proves nothing about the arm, and must never be scored as a pass.
+harness_fail() {
+  FAILURES=$((FAILURES + 1))
+  CHECKS=$((CHECKS + 1))
+  echo "FAIL  FIXTURE PRECONDITION: $1"
 }
 
 # `says <needle> <label>` — assert on the last run's output.
@@ -176,6 +190,124 @@ says "LENS ARTIFACT" "the heading lens labels its own red as an artifact"
 # charter has resolved exactly zero citations.
 run 2 "a missing charter lands in UNCHECKED, never a silent PASS" -- --axis a --charter "$TMP/no-such-charter.md" --commits-file "$CM_OK"
 says "UNCHECKED: charter not found" "the UNCHECKED names the missing charter"
+
+echo
+
+# ══ AXIS A, THE DEFAULT PATH — the `git log` corpus itself ═══════════════════
+#
+# EVERY fixture above hands the arm a `--commits-file`, which means the DEFAULT
+# corpus — `git log` — had ZERO coverage, and that is exactly where the vacuous
+# green lived: under `git clone --depth 1` the arm printed `cited: 0 /
+# unresolved: 0` and PARITY at exit 0, the same verdict sentence a full checkout
+# prints over 188 citations. actions/checkout@v4 is shallow BY DEFAULT.
+#
+# These fixtures are hermetic and NETWORK-FREE: a synthetic origin cloned over
+# `file://` (a local transport — and the only one under which `--depth` is not
+# silently ignored). Global/system git config is neutered so a host with, say,
+# `commit.gpgsign = true` cannot break fixture construction.
+echo "AXIS A — the default git-log corpus (truncated-walk guard)"
+
+GITFX="$(cd "$TMP" && pwd -P)/gitfx"          # physical: GIT_CEILING_DIRECTORIES does not resolve symlinks
+mkdir -p "$GITFX"
+export GIT_CONFIG_GLOBAL=/dev/null GIT_CONFIG_SYSTEM=/dev/null
+export GIT_AUTHOR_NAME=pds GIT_AUTHOR_EMAIL=pds@example.invalid
+export GIT_COMMITTER_NAME=pds GIT_COMMITTER_EMAIL=pds@example.invalid
+
+# `plant <dir>` — put a copy of the arm where its own `cd $(dirname $0)/..`
+# lands in the fixture repo.
+plant() { mkdir -p "$1/scripts" && cp "$ARM" "$1/scripts/pds-record-parity.sh"; }
+
+# ORIGIN: `main` cites PDS-D1..3 (all defined by $CH). An ORPHAN `sidecar`
+# branch cites PDS-D9 and shares no ancestor with main — that disjointness is
+# what makes the off-HEAD graft below genuinely off-HEAD.
+ORIGIN="$GITFX/origin"
+(
+  set -e
+  git init -q -b main "$ORIGIN"
+  cd "$ORIGIN"
+  for n in 1 2 3; do echo "$n" > "f$n"; git add -A; git commit -q -m "chore: per PDS-D$n"; done
+  git checkout -q --orphan sidecar
+  git rm -q -rf . >/dev/null 2>&1 || true
+  echo s > s.txt; git add -A; git commit -q -m "chore: sidecar per PDS-D9"
+  git checkout -q main
+) >/dev/null 2>&1 || harness_fail "could not build the synthetic origin repo"
+
+# ── (1) THE REAL CASE: a --depth 1 checkout ──────────────────────────────────
+SHALLOW="$GITFX/shallow"
+git clone -q --depth 1 "file://$ORIGIN" "$SHALLOW" >/dev/null 2>&1 || harness_fail "could not build the --depth 1 clone"
+plant "$SHALLOW"
+SH_GRAFT="$(head -1 "$SHALLOW/.git/shallow" 2>/dev/null || true)"
+SH_HEAD="$(git -C "$SHALLOW" rev-parse HEAD 2>/dev/null || true)"
+if [ -z "$SH_GRAFT" ] || [ "$SH_GRAFT" != "$SH_HEAD" ]; then
+  harness_fail "the --depth 1 clone did not graft at HEAD (graft='${SH_GRAFT}' head='${SH_HEAD}') — the fixture would prove nothing"
+fi
+
+run_at "$SHALLOW/scripts/pds-record-parity.sh" 2 \
+  "a --depth 1 checkout is UNCHECKED, never PARITY" -- --axis a --charter "$CH"
+says "UNCHECKED: TRUNCATED WALK" "the refusal names the TRUNCATION"
+says "$SH_GRAFT" "the refusal names the GRAFT it stopped at"
+says "visible: 1 commit(s) reachable from HEAD" "the refusal states how much of the corpus it could see"
+says "fetch-depth: 0" "the refusal names the CI fix"
+says "git fetch --unshallow" "the refusal names the local fix"
+says "--commits-file" "the refusal names the honest escape"
+# The VERDICT SENTENCE, not the bare word: the refusal itself says the words
+# "instead of printing PARITY at exit 0", and a needle that loose would red on
+# the arm's own explanation of what it refused to do.
+says_not "pds-record-parity: PARITY" "the truncated run does NOT print the parity verdict sentence"
+says_not "unresolved: 0" "the truncated run does not report a citation tally it never computed"
+
+# ── (2) THE ESCAPE STILL WORKS on that same shallow checkout ─────────────────
+# Proves the guard is FENCED to the git-log path: --commits-file brings its own
+# corpus, so the arm still runs — and can still RED.
+run_at "$SHALLOW/scripts/pds-record-parity.sh" 0 \
+  "the shallow checkout still RUNS when handed --commits-file" -- --axis a --charter "$CH" --commits-file "$CM_OK"
+says "cited:      3 distinct PDS-D" "the escape reads the corpus it was handed, not the truncated walk"
+run_at "$SHALLOW/scripts/pds-record-parity.sh" 1 \
+  "the escape can still RED on a shallow checkout" -- --axis a --charter "$CH" --commits-file "$CM_BAD"
+says "UNRESOLVED-CITATION PDS-D777" "the escape's red still names the offending citation"
+
+# ── (3) THE OFF-HEAD GRAFT: store-shallow, HEAD complete ────────────────────
+# THIS IS THE FIXTURE THAT PINS THE PREDICATE. One `--depth` fetch of an
+# unrelated branch flips `--is-shallow-repository` to true for the whole
+# repository while `git log HEAD` still reaches the root — the shape the shared
+# checkout /Volumes/SATECHI/github/barkpark is in today (graft 360b675903, 5132
+# commits, one root). A future builder who "simplifies" the predicate back to
+# `--is-shallow-repository` reds HERE, by name.
+OFFHEAD="$GITFX/offhead"
+git clone -q "file://$ORIGIN" "$OFFHEAD" >/dev/null 2>&1 || harness_fail "could not build the full clone"
+git -C "$OFFHEAD" fetch -q --depth 1 origin sidecar >/dev/null 2>&1 || harness_fail "could not plant the off-HEAD graft"
+plant "$OFFHEAD"
+OH_STORE="$(git -C "$OFFHEAD" rev-parse --is-shallow-repository 2>/dev/null || true)"
+OH_GRAFT="$(head -1 "$OFFHEAD/.git/shallow" 2>/dev/null || true)"
+git -C "$OFFHEAD" merge-base --is-ancestor "${OH_GRAFT:-HEAD}" HEAD >/dev/null 2>&1
+OH_ANC=$?
+if [ "$OH_STORE" != "true" ] || [ "$OH_ANC" -ne 1 ]; then
+  harness_fail "the off-HEAD fixture is not in shape (is-shallow='${OH_STORE}' want true; is-ancestor rc=${OH_ANC} want 1) — it could pass for the wrong reason"
+fi
+
+run_at "$OFFHEAD/scripts/pds-record-parity.sh" 0 \
+  "a store-shallow repo whose HEAD history is COMPLETE still RUNS" -- --axis a --charter "$CH"
+says "cited:      3 distinct PDS-D" "the off-HEAD-graft repo's full corpus is read (3 commits, 3 citations)"
+says "unresolved: 0" "the off-HEAD-graft repo greens on its real corpus"
+says_not "TRUNCATED WALK" "a graft that is NOT an ancestor of HEAD does not truncate the walk"
+says_not "WALK COMPLETENESS UNKNOWN" "an off-HEAD graft is a decided answer, not an unknown"
+
+# ── (4) NOT A WORK TREE AT ALL — the pre-existing arm with zero coverage ────
+# GIT_CEILING_DIRECTORIES stops git's upward search at the fixture root, so a
+# host whose TMPDIR happens to sit inside a repository cannot make this pass
+# (or fail) for the wrong reason. $GITFX is a PHYSICAL path for the same reason.
+NOWT="$GITFX/nowt"
+mkdir -p "$NOWT"
+plant "$NOWT"
+export GIT_CEILING_DIRECTORIES="$GITFX"
+run_at "$NOWT/scripts/pds-record-parity.sh" 2 \
+  "a directory that is not a work tree is UNCHECKED" -- --axis a --charter "$CH"
+says "UNCHECKED: not inside a git work tree" "the UNCHECKED names the missing work tree"
+says_not "TRUNCATED WALK" "the work-tree refusal is not mislabelled as a truncated walk"
+unset GIT_CEILING_DIRECTORIES
+
+unset GIT_CONFIG_GLOBAL GIT_CONFIG_SYSTEM
+unset GIT_AUTHOR_NAME GIT_AUTHOR_EMAIL GIT_COMMITTER_NAME GIT_COMMITTER_EMAIL
 
 echo
 
@@ -440,6 +572,29 @@ else
   FAILURES=$((FAILURES + 1))
   echo "FAIL  the PACE sleep must precede ledger_fetch (pace=${PACE_LINE:-none} fetch=${FETCH_LINE:-none})"
   echo "      below the fetch it paces only rows already scored — i.e. nothing on a healthy ledger"
+fi
+
+# THE TRUNCATION GUARD MUST STAY FENCED INSIDE THE `git log` BRANCH. Every axis-B
+# fixture in this harness runs through --fixture-dir inside THIS full checkout, and
+# every axis-A fixture but the four above hands over a --commits-file — so a future
+# edit that hoists `walk_truncation` to top level would UNCHECK `--axis b` on every
+# shallow CI checkout and this harness would stay GREEN. Position is the behaviour,
+# so position is what is asserted (the PACE-sleep idiom above, same reason).
+CHECKS=$((CHECKS + 1))
+WT_CALLS="$(grep -cE '^[[:space:]]*walk_truncation$' "$ARM")"
+WT_CALL="$(grep -nE '^[[:space:]]*walk_truncation$' "$ARM" | head -1 | cut -d: -f1)"
+WT_WORKTREE="$(grep -n 'UNCHECKED: not inside a git work tree' "$ARM" | head -1 | cut -d: -f1)"
+WT_LOG="$(grep -n "git log --format=%B | grep -oE 'PDS-D" "$ARM" | head -1 | cut -d: -f1)"
+WT_AXISB="$(grep -n '^axis_b()' "$ARM" | head -1 | cut -d: -f1)"
+if [ "$WT_CALLS" = "1" ] && [ -n "$WT_CALL" ] && [ -n "$WT_WORKTREE" ] && [ -n "$WT_LOG" ] &&
+   [ -n "$WT_AXISB" ] && [ "$WT_WORKTREE" -lt "$WT_CALL" ] && [ "$WT_CALL" -lt "$WT_LOG" ] &&
+   [ "$WT_LOG" -lt "$WT_AXISB" ]; then
+  echo "ok    walk_truncation is called ONCE, inside axis A's git-log branch (${WT_WORKTREE} < ${WT_CALL} < ${WT_LOG} < ${WT_AXISB})"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  walk_truncation must be called exactly once, between the work-tree check and the git log walk"
+  echo "      (calls=${WT_CALLS} call=${WT_CALL:-none} worktree=${WT_WORKTREE:-none} log=${WT_LOG:-none} axis_b=${WT_AXISB:-none})"
+  echo "      hoisted out of that branch it UNCHECKS --axis b and --commits-file on every shallow checkout"
 fi
 
 run 3 "an unknown argument is a USAGE error (exit 3)" -- --nonsense
