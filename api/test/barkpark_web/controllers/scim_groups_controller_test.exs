@@ -673,6 +673,145 @@ defmodule BarkparkWeb.ScimGroupsControllerTest do
     end
   end
 
+  # PDS-D568: the LIST used to omit `members` entirely, citing "RFC 7644 §3.4.2
+  # attribute exclusion" — a licence the code does not have (`excludedAttributes`
+  # appears nowhere in api/, and /scim/v2/Schemas advertises `members` with
+  # "returned" => "default"). Nothing pinned the list shape in either direction:
+  # the only two Resources assertions were a partial map pattern and a
+  # displayName projection, both of which survive an added key.
+  #
+  # These assertions read STORED MEMBERSHIP ROWS, not the receipt of a grant the
+  # test just made, and the cost claim is measured by TELEMETRY, not by reading.
+  describe "GET /scim/v2/Groups renders members from stored rows (PDS-D568)" do
+    # Every repo query the REQUEST issues: ConnTest dispatches in the test
+    # process, so `self() == test` inside the handler isolates this request's
+    # queries from any other test's.
+    defp queries_during(fun) do
+      ref = make_ref()
+      test = self()
+
+      :telemetry.attach(
+        {__MODULE__, ref},
+        [:barkpark, :repo, :query],
+        fn _event, _measurements, meta, _cfg ->
+          if self() == test, do: send(test, {ref, meta.query})
+        end,
+        nil
+      )
+
+      try do
+        fun.()
+      after
+        :telemetry.detach({__MODULE__, ref})
+      end
+
+      drain_queries(ref, [])
+    end
+
+    defp drain_queries(ref, acc) do
+      receive do
+        {^ref, query} -> drain_queries(ref, [query | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+
+    defp stored_holders(role) do
+      Repo.all(
+        from(m in Membership,
+          where: m.principal_type == "user" and m.role == ^role,
+          select: m.principal_id,
+          distinct: true
+        )
+      )
+      |> Enum.sort()
+    end
+
+    test "every Resource carries the role's STORED holders, fanned out across groups sharing a role" do
+      %{ws: ws, token: token} = org_with_ws("glistmem")
+      custom_role(ws.id, "list-reviewer", ["read"])
+      provision(token, "a@glistmem.com")
+      provision(token, "b@glistmem.com")
+      a = Accounts.get_user_by_email("a@glistmem.com")
+      b = Accounts.get_user_by_email("b@glistmem.com")
+
+      # Two groups on ONE role is legitimate (a group IS "holds this role"), so
+      # both must answer with that role's holders — the fan-out.
+      gid = create_group(token, "Reviewers", "list-reviewer") |> Map.fetch!("id")
+      create_group(token, "Reviewers Mirror", "list-reviewer")
+      # a third group on a DIFFERENT role must NOT inherit them
+      custom_role(ws.id, "list-bystander", ["read"])
+      create_group(token, "Zeta Bystanders", "list-bystander")
+
+      for u <- [a, b] do
+        scim(token)
+        |> patch("/scim/v2/Groups/#{gid}", member_op("add", u.id))
+        |> json_response(200)
+      end
+
+      # THE AUTHORITY: membership rows read back from the store, not the receipt
+      # of the PATCHes above.
+      stored = stored_holders("list-reviewer")
+      assert stored == Enum.sort([a.id, b.id])
+      assert stored_holders("list-bystander") == []
+
+      resources =
+        scim(token)
+        |> get("/scim/v2/Groups")
+        |> json_response(200)
+        |> Map.fetch!("Resources")
+
+      by_name =
+        Map.new(resources, fn r -> {r["displayName"], Enum.sort(member_values(r))} end)
+
+      assert by_name == %{
+               "Reviewers" => stored,
+               "Reviewers Mirror" => stored,
+               "Zeta Bystanders" => []
+             }
+    end
+
+    test "membership costs ONE query a page — the same repo-query count for 1 group and for 20" do
+      %{ws: ws, token: token} = org_with_ws("glistcost")
+      custom_role(ws.id, "cost-role", ["read"])
+      provision(token, "c@glistcost.com")
+      c = Accounts.get_user_by_email("c@glistcost.com")
+
+      gid = create_group(token, "Group 01", "cost-role") |> Map.fetch!("id")
+
+      scim(token)
+      |> patch("/scim/v2/Groups/#{gid}", member_op("add", c.id))
+      |> json_response(200)
+
+      one = queries_during(fn -> scim(token) |> get("/scim/v2/Groups") |> json_response(200) end)
+
+      for n <- 2..20 do
+        create_group(token, "Group #{String.pad_leading(to_string(n), 2, "0")}", "cost-role")
+      end
+
+      twenty =
+        queries_during(fn ->
+          body = scim(token) |> get("/scim/v2/Groups") |> json_response(200)
+          assert body["totalResults"] == 20
+          # and the extra 19 groups all answer with the same stored holder
+          assert Enum.all?(body["Resources"], &(member_values(&1) == [c.id]))
+        end)
+
+      # THE TABLE IS `workspace_memberships`, not `memberships`: a proof that
+      # greps the wrong name counts 0 and reads as a pass.
+      membership_queries = fn qs -> Enum.count(qs, &(&1 =~ ~s(FROM "workspace_memberships"))) end
+
+      assert membership_queries.(one) == 1,
+             "1 group: #{inspect(one)}"
+
+      assert membership_queries.(twenty) == 1,
+             "20 groups: #{inspect(twenty)}"
+
+      assert length(one) == length(twenty),
+             "page-size dependent cost — 1 group: #{inspect(one)}\n20 groups: #{inspect(twenty)}"
+    end
+  end
+
   describe "error shapes carry scimType (RFC 7644 §3.12)" do
     test "unknown role → 400 scimType invalidValue" do
       %{token: token} = org_with_ws("gscimtype")

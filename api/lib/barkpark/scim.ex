@@ -486,6 +486,40 @@ defmodule Barkpark.Scim do
   end
 
   @doc """
+  The same STORED-row authority as `group_member_ids/2`, for MANY roles in ONE
+  query: `%{role_name => MapSet.t(user_id)}`.
+
+  A list response renders every group on the page, and every group's `members`
+  must come from stored rows — asking per group is a query per group on a path
+  whose page size is unbounded (`ScimResponse.paging/1` returns `count: nil`
+  when the client sends none, and `Scim.paginate/2` applies no limit for nil,
+  so an unpaged list answers for every group in the org). Batching keeps the
+  cost of a page at one membership query regardless of how many groups it
+  carries.
+
+  Roles with no holders are ABSENT from the map rather than mapped to an empty
+  set — callers pass their own default — and two groups may legitimately map to
+  the SAME role, so each role's set fans out to every group carrying it.
+  """
+  @spec group_member_ids_by_role(Organization.t(), [binary()]) :: %{
+          binary() => MapSet.t(binary())
+        }
+  def group_member_ids_by_role(%Organization{}, []), do: %{}
+
+  def group_member_ids_by_role(%Organization{} = org, role_names) when is_list(role_names) do
+    ws_ids = workspace_ids(org)
+
+    from(m in Membership,
+      where: m.principal_type == "user" and m.workspace_id in ^ws_ids and m.role in ^role_names,
+      select: {m.role, m.principal_id},
+      distinct: true
+    )
+    |> Repo.all()
+    |> Enum.group_by(&elem(&1, 0), &elem(&1, 1))
+    |> Map.new(fn {role, ids} -> {role, MapSet.new(ids)} end)
+  end
+
+  @doc """
   Delete `group` from `org`. Tenancy-scoped: the delete is filtered by
   `organization_id`, so a token for org A can never remove a group in org B.
 
