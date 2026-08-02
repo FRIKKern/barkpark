@@ -271,6 +271,25 @@ ledger "$FX404" fixture-leaf-done 200 "$(task_doc fixture-leaf-done done fixture
 run 1 "a merged PR naming a task the ledger does not carry is a definitive RED" -- --axis b --fixture-dir "$FX404"
 says "NOT-FOUND  fixture-ghost" "the 404 row is named"
 
+# …but a DECLARED ABSENCE is not a ghost. #6371 on the live record says
+# literally `Task: n/a`; the canonical grammar extracts `n/a` as an id and the
+# ledger 404s on it. Reporting that as "merged over a task id the ledger does
+# not carry" is a true statement wearing the wrong sentence, and it REDS where
+# the structurally identical no-trailer case is advisory. Two-sided: the
+# sentinel must be advisory AND the real ghost above must still red, or the
+# disposition rule has degraded into a suppression switch.
+FXNA="$TMP/fxna"
+mkdir -p "$FXNA"
+prs "$FXNA/prs.json" \
+  "701|2026-01-01T00:00:00Z|n/a" \
+  "702|2026-01-03T00:00:00Z|N/A" \
+  "703|2026-01-05T04:00:00Z|fixture-leaf-done"
+ledger "$FXNA" fixture-leaf-done 200 "$(task_doc fixture-leaf-done done fixture-root-open)"
+run 0 "a PR declaring \`Task: n/a\` is advisory, not a NOT-FOUND red" -- --axis b --fixture-dir "$FXNA"
+says "declared none: 2 PRs declare a SENTINEL id" "both spellings of the sentinel are counted, case-insensitively"
+says_not "NOT-FOUND  " "no ghost task is manufactured out of a declared absence"
+says "task ids:   1 distinct across 3 PRs" "the sentinel never reaches the ledger sweep"
+
 # A 2xx with no document in the envelope is an answer that answers NOTHING. It
 # is not evidence the task is absent (absence answers 404) — UNCHECKED.
 FXNULL="$TMP/fxnull"
@@ -404,6 +423,23 @@ if grep -q 'bash "$EXTRACTOR" --extract-task-id' "$ARM"; then
   echo "ok    the task-id extractor is the canonical scripts/pr-task-gate.sh verb"
 else
   FAILURES=$((FAILURES + 1)); echo "FAIL  the arm has grown a second copy of the trailer grammar"
+fi
+
+# THE PACE SLEEP MUST PRECEDE THE REQUEST IT PACES. It first shipped at the
+# BOTTOM of the sweep loop, after every `continue` — so it fired only on rows
+# that had already been fetched AND scored DIVERGENT, and paced nothing at all
+# on a healthy ledger. Position is the whole behaviour here, and position is
+# what this asserts: a wall-clock fixture over a canned transport that answers
+# instantly could not tell the two placements apart.
+CHECKS=$((CHECKS + 1))
+PACE_LINE="$(grep -n 'sleep "\$PACE"' "$ARM" | head -1 | cut -d: -f1)"
+FETCH_LINE="$(grep -n 'if ! ledger_fetch "\$tid"' "$ARM" | head -1 | cut -d: -f1)"
+if [ -n "$PACE_LINE" ] && [ -n "$FETCH_LINE" ] && [ "$PACE_LINE" -lt "$FETCH_LINE" ]; then
+  echo "ok    the PACE sleep sits BEFORE the ledger request it paces (${PACE_LINE} < ${FETCH_LINE})"
+else
+  FAILURES=$((FAILURES + 1))
+  echo "FAIL  the PACE sleep must precede ledger_fetch (pace=${PACE_LINE:-none} fetch=${FETCH_LINE:-none})"
+  echo "      below the fetch it paces only rows already scored — i.e. nothing on a healthy ledger"
 fi
 
 run 3 "an unknown argument is a USAGE error (exit 3)" -- --nonsense

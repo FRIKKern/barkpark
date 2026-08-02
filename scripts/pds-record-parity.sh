@@ -399,7 +399,7 @@ axis_b() {
     raise 2; return 0
   fi
 
-  local no_trailer=0 i=0 body id num merged b64
+  local no_trailer=0 declared_none=0 i=0 body id num merged b64 idlc
   # The body is carried BASE64, not TSV-escaped. A PR body is arbitrary
   # markdown — it contains newlines (which the trailer grammar anchors to and
   # therefore must survive intact), tabs, and backslashes. Round-tripping it
@@ -416,6 +416,21 @@ axis_b() {
       no_trailer=$((no_trailer + 1))
       continue
     fi
+    # A DECLARED ABSENCE IS AN ABSENCE, NOT A GHOST TASK. #6371's body says
+    # literally `Task: n/a`. The canonical grammar extracts `n/a` as the id and
+    # the ledger 404s on it, which the row disposition would then report as
+    # "merged over a task id the ledger does not carry" — a TRUE statement
+    # wearing the WRONG sentence, and a RED where the structurally identical
+    # case (no trailer at all, #105 in the fixtures) is advisory. Both are the
+    # same fact: the PR declared no task. This is a DISPOSITION rule over the
+    # extracted string, not a second trailer grammar — the grammar still runs
+    # first and still owns what counts as an id.
+    idlc="$(printf '%s' "$id" | tr '[:upper:]' '[:lower:]')"
+    case "$idlc" in
+      n/a|n\\a|na|none|nil|null|tbd|-|todo)
+        declared_none=$((declared_none + 1))
+        continue ;;
+    esac
     printf '%s\t%s\t%s\n' "$id" "$num" "$merged" >> "$ids"
   done < <(jq -r '.[] | [(.number|tostring), .mergedAt, (.body // "" | @base64)] | @tsv' "$prs")
 
@@ -424,6 +439,8 @@ axis_b() {
   echo "  extractor:  ${EXTRACTOR} --extract-task-id  (absence = EMPTY STDOUT, never \$?)"
   echo "  task ids:   ${n_ids} distinct across ${i} PRs"
   echo "  no trailer: ${no_trailer} PRs carry no Task: trailer (advisory — predates the gate)"
+  echo "  declared none: ${declared_none} PRs declare a SENTINEL id (Task: n/a and friends) — the same"
+  echo "                 fact as no trailer, said out loud (advisory, never a ghost-task red)"
 
   # ── ledger sweep, serial and paced ────────────────────────────────────────
   local now grace_secs
@@ -439,6 +456,12 @@ axis_b() {
     # first one merged days back.
     latest="$(awk -F'\t' -v t="$tid" '$1==t {print $3}' "$ids" | sort | tail -1)"
     prlist="$(awk -F'\t' -v t="$tid" '$1==t {print "#"$2}' "$ids" | sort -u | tr '\n' ',' | sed 's/,$//')"
+
+    # PACE THE READ, NOT THE VERDICT. This sleep used to sit at the BOTTOM of
+    # the loop body, after every `continue` — so it fired only on the DIVERGENT
+    # rows and paced nothing on a healthy ledger, which is precisely the sweep
+    # that needs pacing. It belongs immediately before the request.
+    [ "$PACE" != "0" ] && sleep "$PACE"
 
     if ! ledger_fetch "$tid"; then
       echo "    UNCHECKED  ${tid}  (${LF_REASON} after ${RETRIES} attempts)  ${prlist}"
@@ -509,8 +532,6 @@ axis_b() {
     echo "    DIVERGENT  ${tid}  lifecycle=${lifecycle}  parent=${parent}  merged over an OPEN row  ${prlist}"
     printf '%s\n' "$tid" >> "$leaves"
     n_leaf=$((n_leaf + 1)); raise 1
-
-    [ "$PACE" != "0" ] && sleep "$PACE"
   done < <(cut -f1 "$ids" | sort -u)
 
   local n_divergent=$(( n_open + n_notfound ))
