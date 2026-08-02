@@ -2576,6 +2576,86 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 42 2026-08-02 — REVIEWED AND SEALED, grade A− — 5 of 5 slices green, pushed, and PR'd (paper `pds-wave-42-2026-08-02`)
+
+**WHAT LANDED.** Five slices, all gate-green on the reviewer's own re-runs, all pushed to `origin`, all
+carrying an open PR for the lead. Nothing was reviewed from a builder's report alone; every integer below
+was reproduced by run in the reviewer's worktree.
+
+| # | Task | Final branch | PR | Reviewer gate |
+|---|---|---|---|---|
+| 1 | `pds-w41-hop-arg-producer` | `loop-epic/the-one-hop-join-stops-accusing-values-t-0` | #9290 | census rc=0 `CENSUS OK` 14/0; selftest rc=0 26 cases / 17 mutants |
+| 2 | `pds-w42-liveview-authorization-column` | `loop-epic/the-322-liveview-handlers-get-a-verdict--1` | #9292 | census rc=0 `CENSUS OK` 15/0; selftest rc=0 29 cases / 19 mutants |
+| 3 | `pds-w42-paper-op-principal-gate` | `loop-epic/a-write-denied-studio-member-stops-writi-2` | #9294 | 10 tests / 0 failures; 4 red under mutation |
+| 4 | `pds-bl-w41-readonly-member-sees-published-only` | `loop-epic/read-only-splits-into-three-axes-and-a-r-3-r` **(-r, fixed)** | #9295 | 182 tests / 0 failures; `mix format --check-formatted` rc=0 |
+| 5 | `pds-w41-residue-lens-unrun` | `loop-epic/one-pds-instrument-finally-runs-under-a--4` | #9296 | 3 tests / 0 failures; ratchet rc=0; ratchet `--selftest` 113/0 |
+
+**THE JOIN STOPPED OVER-ACCUSING, MEASURED BY THE REVIEWER, NOT TRANSCRIBED.** `store_derived` 101 → **105**,
+`request_echo` 8 → **4**, `RESIDUAL` **14 unchanged**, hop `DECIDED` **15 unchanged**. The four TicketKeys rows
+print `via pause` / `via unpause` and `write-shaped producer`; `AuthController.register` stays `request_echo`
+and is the control D616 said it was. The false prose is gone from both sites.
+
+**THE 322 HAVE THREE COLUMNS.** REACH `87 / 9 / 194 / 0` with `RESIDUAL 32` printed and never folded,
+`sum 322 == population 322`. DENIES **137/194** honest against the named trap **194/194**.
+ATTACH-CERTAINTY **0/194** — both deny-by-default modules attach inside a runtime branch, so 137 is an
+UPPER BOUND and the block says so. Arm count **14 → 15** (`LIVEVIEW-REACH-CLOSES`, a relation, never a class
+count). The wish's clause-3 move — judge the 322 starting with the 87 ungateable-by-hook — landed.
+
+**CROSS-SLICE PROOF THE REVIEWER RAN RATHER THAN ASSUMED.** Slices 1 and 2 share `census.exs`. Merged
+(`ort`, no conflict): combined census rc=0 `CENSUS OK` **15 PASS / 0 FAIL**, combined selftest rc=0
+**"30 cases, 20 of them mutants that went red as required"**. The LiveView block printed the identical
+`87/9/194/0/32` beside a slice that moves five derivation classes — the wave-42 pin measures the LENS, not
+the tree. Either merge order is safe.
+
+**PDS-D632 — THE REVIEWER'S OWN FIX: RESTORING CHROME RESTORES ITS AFFORDANCES, AND ONE OF THEM WAS DEAD.**
+Slice 4's whole point is that a write-denied Studio member gets the Studio document header back. That header
+carries exactly one authority-bearing item — the Edit/View toggle — and `toggle-mode` flips `@mode` while
+`@editable` is `mode == :edit and write_capable`, so for that member the button changed **nothing**: same
+label, no toolbar, byte-identical grid. That is the dead-affordance failure the slice's own cell-context-menu
+comment says the three-axis split exists to remove, reintroduced one slot over by the fix itself. Gated on
+`:if={@write_capable}` and pinned in the A′ parity arm; **proven non-vacuous by mutation** — deleting the
+guard reds `refute html_d =~ ~s(data-test-id="sheet-mode-toggle")`. Commit `a6a0e9169` on the `-r` branch.
+THE GENERAL FORM, for the next wave that splits an overloaded flag: **an axis that restores a surface
+restores every control on it, and a control is only restored if it can still change something.**
+
+**LEDGER, AND THE WISH'S CLAUSE 8 RECURRING EXACTLY AS PREDICTED.** Two of five slice rows —
+`pds-w42-paper-op-principal-gate` (lease expired 17:23:01Z) and `pds-w41-residue-lens-unrun` (17:11:00Z) —
+had silently reverted to `lifecycle: open` with their work DONE and their criteria stamped. Wave 41 lost
+three rows this way; wave 42 lost two. Re-claimed to restore `in_progress`. THE LARGER OMISSION:
+`task-2c6e0fff8a8a63c9` — the wish's clause 4, "PIN THE LIVEVIEW BLOCK" — read **0/9 open** while slice 2
+discharged it; criteria 0-6 are now stamped from the reviewer's own runs and **criterion 7 (cost in USER
+CPU) is recorded as an honest MISS**, because it was never measured on a quiet host by anyone. That single
+unmet row is the one thing the pin still owes.
+
+**CLAUSE 7 WAS ANSWERED, AND NOT BY THIS REVIEWER.** The Decide phase already declined the ClaudeChat flake
+IN WRITING (D631, "another epic's parent"). The reviewer searched instead of filing a duplicate and confirmed
+it: `spd-bl-claude-chat-stderr-leak` is open under `studio-space-priority-desk` with a real diagnosis
+(load-dependent race, 1-in-13013 on `453ee749a`, plus the vacuous-green finding). Cross-referenced as
+PDS-D593 on that row so the next PDS wave stops re-discovering it. It is not nobody's; it is somebody else's.
+
+**CLAUSE 6, HALF-PAID.** `pds-w41-residue-lens-unrun` puts **1 of 19** instruments under the required
+`Elixir gate` with **zero bytes of `.github/`** — the fence was never the only door. `pds-w38-record-parity-ci-lane`
+and `pds-w35-elixir-census-gate` remain open and unstarted; the second half of the sentence still has to be
+said, and the door slice 5 opened is the way to say it.
+
+**HIGH-FLIP-RISK, DECLARED AND STILL OWED.** Slices 3 (security + reachability) and 4 (authorization
+boundary). The reviewer performed a DISTINCT re-derivation of slice 3's chokepoint claim — every sender of
+`{:autosave_form,…}` and `{:dispatch_send,…}` is a PARENT-socket handler behind the Caps hook, so no other
+`handle_info` seam is reachable from a component cid today — and proved slice 3's tests red under mutation
+(4 of 6). A genuinely INDEPENDENT second reviewer on both slices is still warranted before merge; this
+workflow spawns one reviewer, so that dispatch is a manual lead step.
+
+**WHAT STALLED: nothing.** The three deferred slices — `task-5a3b22be679c826a`, `pds-w40-judgment-coverage-ladder`,
+`pds-w42-caps-prop-is-a-mount-snapshot` — were round-2 BY DESIGN under the sequenced-rounds law, are open,
+unclaimed and untouched. DISPATCH ORDER FOR THE LEAD: merge round 1 (#9290 and #9292 in either order, then
+#9294, #9295, #9296); `task-5a3b22be679c826a` unblocks on #9292; `pds-w40-judgment-coverage-ladder` on
+#9290 **and** #9292 (its ladder must be a UNION FOLD, never an addition); `pds-w42-caps-prop-is-a-mount-snapshot`
+on #9295, whose `-r` branch re-keys the very callsite it re-derives.
+
+**MERGE-GATED CRITERIA THE LEAD CLOSES ON MERGE:** `pds-w41-hop-arg-producer` #10, `pds-w42-liveview-authorization-column`
+#13, `pds-w42-paper-op-principal-gate` #9, `pds-bl-w41-readonly-member-sees-published-only` #12,
+`pds-w41-residue-lens-unrun` #9, `task-2c6e0fff8a8a63c9` #8.
+
 ### Wave 42 2026-08-02 — "A class must descend from its substitution, and the fence is not the only door" — DECIDED, building (paper `pds-wave-42-2026-08-02`)
 
 GROUND TRUTH, RE-DERIVED IN-PROCESS by this phase over a clean `git archive origin/main` extraction at
