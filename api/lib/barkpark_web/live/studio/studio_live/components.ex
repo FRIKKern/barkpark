@@ -1330,13 +1330,26 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
         />
         <% @editor_view == :sheet and @sheet_doc != nil -> %>
         <%!-- Sheet grid editor (Sheets M2). One LiveComponent owns the whole
-              surface; `{:sheets_op,…}` deltas reach it via send_update. --%>
+              surface; `{:sheets_op,…}` deltas reach it via send_update.
+
+              `read_only` is the CAPABILITY PROP, not a display flag: a
+              `phx-target`ed event carries a component cid and LiveView runs the
+              COMPONENT socket's lifecycle for it, so the parent socket's
+              `:handle_event` hooks — the `Caps` deny-gate among them — are never
+              consulted. A fourth `attach_hook` on the parent therefore cannot
+              gate this surface at all; the capability has to travel INTO the
+              component, where `SheetGrid`'s write-head guards and the last wall
+              in `SheetGrid.Ops.send_ops/2` already read it
+              (`grep -n 'read_only' lib/barkpark_web/live/studio/sheet_grid.ex`).
+              Until this prop existed those guards were dead code on the Studio
+              path — the component defaults `read_only: false`. --%>
         <.live_component
           module={BarkparkWeb.Studio.SheetGrid}
           id={"sheet-grid-#{Content.published_id(@sheet_doc.doc_id)}"}
           doc={@sheet_doc}
           dataset={@dataset}
           is_draft={@editor_is_draft}
+          read_only={not sheet_write_capable?(assigns)}
           user_id={@user_id}
           presence_topic={@sheet_presence_topic}
           presences={@sheet_presences}
@@ -1737,6 +1750,42 @@ defmodule BarkparkWeb.Studio.StudioLive.Components do
     </.pane_layout>
 
     """
+  end
+
+  # ── the SheetGrid capability prop ───────────────────────────────────────────
+  #
+  # May the socket's principal WRITE the mounted desk? This mirrors the `:write`
+  # tier of the Studio deny-gate (`grep -n 'defp gate' lib/barkpark_web/studio/caps.ex`)
+  # clause for clause, because the component-targeted path never reaches that
+  # hook: a write-capable socket writes; a capability-RESTRICTED socket does not;
+  # a socket carrying a PRINCIPAL that Caps denies write does not; and a
+  # principal-LESS socket falls through unchanged — that is the intentionally
+  # open anonymous public-demo posture (`BARKPARK_PUBLIC_DEMO_STUDIO`), which
+  # this slice deliberately does not change.
+  #
+  # `@caps` is the freshly-derived map StudioLive re-assigns on every grant
+  # change and expiry tick (`grep -n 'defp refresh_caps' lib/barkpark_web/live/studio/studio_live.ex`),
+  # so an expired grant drops the write prop on the next render.
+  defp sheet_write_capable?(assigns) do
+    cond do
+      Map.get(Map.get(assigns, :caps) || %{}, :write) == true -> true
+      caps_restricted_socket?(assigns) -> false
+      caps_has_principal?(assigns) -> false
+      true -> true
+    end
+  end
+
+  # Mirrors `Caps.restricted?/1` (private there) — a share-read or grant grade.
+  defp caps_restricted_socket?(assigns) do
+    Map.get(assigns, :readonly_gate?) == true or
+      Map.get(assigns, :write_gate?) == true or
+      not is_nil(Map.get(assigns, :caller_context)) or
+      Map.get(assigns, :share_access) == :read
+  end
+
+  # Mirrors `Caps.has_principal?/1` (private there).
+  defp caps_has_principal?(assigns) do
+    not is_nil(Map.get(assigns, :api_token)) or not is_nil(Map.get(assigns, :current_user))
   end
 
   # The expected fields STILL recommendable for the current Beta block list,
