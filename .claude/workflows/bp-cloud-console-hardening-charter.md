@@ -983,6 +983,73 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
+### 2026-08-02 — wave 22 REVIEW — 6/6 round-1 slices built, gated, reviewed, pushed and PR'd. Grade B+
+
+Paper: `cloud-console-hardening-wave-22-2026-08-02` (debrief appended and republished). Round 2
+(`cch-w22-s7`, the cruelty ledger) is deferred BY DESIGN behind s1+s2+s3+s4 on main — not a stall.
+
+**What shipped.** s1 `font-pin.mjs`: one shared `FONT_PIN_JS` that walks the page's OWN `document.fonts`
+set (weight list DERIVED, not typed), `load()`s every declared face, awaits `fonts.ready`, then `check()`s
+each face at its own weight, with `EXPECTED_FACES` as the floor that stops the derivation shrinking to
+zero; wired into all three navigating instruments (19 navigations, not D248's stale 14), each with its own
+`Runtime.evaluate({awaitPromise:true})` because both existing `evalJs` helpers would return an unresolved
+Promise handle and be green by construction; refusal is exit 2 everywhere. s2: `.site-name`/`.site-host`
+`overflow-wrap: break-word` and `.site-meta .mono` `anywhere`, plus the `flex-wrap`/`flex-basis` pair the
+compact Sites card needs — without it the wrap SHIPS a shred, because that card's `.site-main` already
+resolves to literally 0px. s3: `validate_length(:comment, max: 255)` matching the `varchar(255)` column
+(a 256-char comment was a bare `Postgrex 22001` 500), `maxlength="255"` on the input, `overflow-wrap`
+on `.set-row-note`, and a two-sided Elixir test. s4: one `@media (max-width: 620px)` block, 13 rule heads,
+NO overflow declaration — it replaces the modal grid's implicit `auto` column with `minmax(0,1fr)` scoped
+`:has(.am-modal)` and lets four flex rows wrap; the floor was bisected to `.am-identity` (410.45), NOT to
+the enrollment row. s5: bidi controls stripped inside `esc()` (the one choke point), and `relTime` stops
+clamping a future delta to "just now" beside Revoke. s6: Law 0 executed — 24 rows disposed, +3 filed
+forward, reconciled row by row, orphans 107 → 90.
+
+**Reviewer fixes, both about a shipped sentence being false.** (1) Six sites in `overflow-guard.mjs` still
+printed *"no preview instrument awaits document.fonts.ready or asserts which face resolved"* — a guard
+asserting it is unpinned while its own `nav()` pins. Corrected on `…-0-r`; the cost is that s1's
+byte-identity-to-pre-pin claim is retired on the reviewed branch (prose only, zero measured numbers moved).
+(2) `BIDI_CONTROLS` matches twelve characters while its comment said "nine"; corrected on `…-4-r`.
+
+**What the reviewer re-derived independently rather than re-reading.** The font pin can lose: SemiBold
+woff2 off disk → rc=2 naming `600=error/check:false`. s3's Elixir test can lose: cap back to 1000 → 1
+failure, and it is the 256 case with the literal `22001`, not a neighbour. s5's HIGH-FLIP-RISK reachability:
+`elixir -e` against the real `@email_format`/`@no_control_chars` — the NBSP-separated 28-grapheme payload
+matches BOTH while the brief's space-separated one is REJECTED, so the builder's correction of its own
+brief holds (still L2, not a 201 — a second independent reviewer is warranted before merge). s4: the modal
+driven in a real browser at 360 and 320 (`modal-root` 360/360 and 320/320, scrollLeft 0, Copy 228..260),
+and the two track rules disarmed live — at 320 the root returns to 336/320, so `minmax(0,1fr)` is
+load-bearing. s6: `grep -c align-items` on `99ea46c1b`'s app.css diff = 0, and seven disposed rows read
+back — the unpayable row still open, `cch-w20-s9` done 11/11, ZERO closed rows carrying `met:true` with
+empty evidence.
+
+**Where the wave falls short of its own wish, stated plainly.** The HEADLINE clause — make cruel the
+DEFAULT, not a slice — is round 2. Four of six slices ship a fix whose committed fixture cannot produce
+the defect, and s2/s4 have no committed guard at all (they were fenced out of the instruments so s1 could
+own them cleanly, and both said so first). By this wave's own fifth clause those are measurements, not
+guards, until `cch-w22-s7` lands. Law 0 moved −17 but did NOT clear wave 20's 85 — 93 live at review under
+continuing wave load; the brief's `99−23=76` was arithmetic against a denominator that no longer existed,
+and the slice reported that rather than the 76. **D256's integer is superseded**: the mechanism stands,
+the number does not — re-read live, reconcile by row, never carry it from a brief.
+
+**Three corrections to this wave's own citations.** `cloud/lib/barkpark_cloud/sites/site.ex` does not
+exist — the file is `cloud/lib/barkpark_cloud/registry/site.ex` (line numbers correct). The s5 brief's
+forgery payload is rejected by the very regex cited as its legality proof; only U+00A0 separators make it
+server-legal. `do_discard_draft/4` is at `lifecycle.ex:605`, not `:446`.
+
+**What the lead must know before merging.** THREE round-1 slices touch `cssom-heads.baseline` AND
+`app.css` — s2 measures 1271 (+2 heads), s3 measures 1269 (+0: a declaration is not a head), s4 measures
+1282 (+13). They WILL conflict on that file's last line. **Re-measure with `cssom-parity.mjs` on the
+integrated tree; do not add the deltas.** Merge order: s1 → s2/s3/s4 → s5 → s6, then dispatch s7. The
+merge-gated criterion on all six rows is the lead's to close. `s5`'s `relTime` returns the literal
+`"in <1m"`; all thirteen call sites pass through `esc()` today, so the `<` is escaped — a latent hazard
+for the fourteenth caller, deliberately left unchanged.
+
+**Ledger.** s2 and s5 read `lifecycle_status=open` only because their builders' claim leases lapsed after
+the work finished; the reviewer adjudicated both in place (`bp task stage <id> open`, same-state edge) with
+a note naming the commit, the re-run gate and the fact that they are NOT available work. No epoch was taken
+from a builder, and no task outside this wave was mutated.
+
 ### 2026-08-02 — wave 22 DECIDE (build in flight) — cruel by DEFAULT, and the mechanism had to be rebuilt before it could ship
 
 Paper: `cloud-console-hardening-wave-22-2026-08-02`. Charter PR: see `charter_pr` in the run record —
