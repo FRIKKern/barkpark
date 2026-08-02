@@ -1822,11 +1822,13 @@ async function main() {
     //    passes when the identity FITS (scrollWidth <= clientWidth) or when a
     //    cue can ACTUALLY PAINT, never when one is merely declared.
     //
-    //    FONT-CONDITIONAL (D218): nothing here awaits `document.fonts.ready`
-    //    and nothing asserts which face resolved, so every px is provisional
-    //    against a face swap. The INVARIANTS are not: "the button's right edge
-    //    is inside the viewport" and "the text fits or is cued" hold for any
-    //    face, which is why they are what is asserted rather than pinned px.
+    //    FONT PINNED (D218, paid by cch-w22-s1): `nav()` now load()s EVERY
+    //    declared @font-face, awaits `document.fonts.ready` and check()s each
+    //    face before a single px below is read — a missing or substituted face
+    //    is exit 2, not a silent re-measure. The px are therefore taken under a
+    //    KNOWN face rather than whatever arrived. They are still not pinned:
+    //    the INVARIANTS are what is asserted — "the button's right edge is
+    //    inside the viewport" and "the text fits or is cued" hold for any face.
     if (requested.includes("W21-members-roster-identity-and-remove")) {
       const D = "W21-members-roster-identity-and-remove";
       // BLOCK-SCOPED (D247): these axes belong to this leg alone and must never
@@ -1962,9 +1964,10 @@ async function main() {
           `and is clean on the PRE-FIX bytes, so a sampled leg certifies the screen off the one row that works`,
         );
         okLine(
-          `FONT-CONDITIONAL (D218): no preview instrument awaits document.fonts.ready or asserts which ` +
-          `face resolved, so the px above are provisional. What is ASSERTED is face-independent — a ` +
-          `control's right edge inside the viewport, and text that either fits or carries a paintable cue`,
+          `FONT PINNED (D218, paid by cch-w22-s1): nav() load()s every declared @font-face, awaits ` +
+          `document.fonts.ready and check()s each face before these px are read — a missing face is exit 2. ` +
+          `What is ASSERTED is face-independent anyway — a control's right edge inside the viewport, and ` +
+          `text that either fits or carries a paintable cue`,
         );
       }
     }
@@ -2015,10 +2018,11 @@ async function main() {
     //    `.fleet-url`, so the count is asserted PER ROUTE against what that
     //    route is supposed to render, never against the union.
     //
-    //    THE PX ARE FONT-CONDITIONAL (D218): nothing here awaits
-    //    `document.fonts.ready` and nothing asserts which face resolved, so the
-    //    robust claim is the RATIO (0 offending cells on the kind corpus vs N
-    //    on the cruel one) and the absolute widths are provisional.
+    //    FONT PINNED (D218, paid by cch-w22-s1): `nav()` load()s every declared
+    //    @font-face, awaits `document.fonts.ready` and check()s each face
+    //    before these px are read, so they are taken under a KNOWN face.
+    //    The claim this leg stands behind is still the RATIO (0 offending cells
+    //    on the kind corpus vs N on the cruel one), not the absolute widths.
     if (requested.includes("W21-cruel-content-text-bounded")) {
       const D = "W21-cruel-content-text-bounded";
       // BLOCK-SCOPED (D247): these axes belong to this leg alone.
@@ -2115,8 +2119,9 @@ async function main() {
         );
         okLine(
           `the ROBUST claim is the RATIO — the KIND corpus (\`mixed-fleet\`, 32-char host / 10-char name) and the ` +
-          `CRUEL one (253/255, the server's own caps) now score the SAME on both assertions. Every px above is ` +
-          `FONT-CONDITIONAL (D218): this guard never awaits document.fonts.ready and never asserts which face resolved`,
+          `CRUEL one (253/255, the server's own caps) now score the SAME on both assertions. The px above are ` +
+          `taken under a PINNED face (D218, paid by cch-w22-s1): nav() load()s every declared @font-face, awaits ` +
+          `document.fonts.ready and check()s each one, refusing at exit 2 rather than measuring a fallback`,
         );
       }
     }
@@ -2163,10 +2168,11 @@ async function main() {
     //          12px fails — this epic already ships 228 sub-12px instances
     //          against its own contract and must not buy the 229th here.
     //
-    //    FONT-CONDITIONAL (D218/D248): no preview instrument awaits
-    //    `document.fonts.ready` or asserts which face resolved, so the px and
-    //    per-character numbers below are provisional; the RATIOS and the
-    //    clipped/not-clipped verdicts are what this leg stands behind.
+    //    FONT PINNED (D218/D248, paid by cch-w22-s1): `nav()` load()s every
+    //    declared @font-face, awaits `document.fonts.ready` and check()s each
+    //    face before these px are read — a missing woff2 is exit 2, not a
+    //    silently re-measured fallback. The RATIOS and the clipped/not-clipped
+    //    verdicts remain what this leg stands behind.
     if (requested.includes("W21-token-reveal-readable")) {
       const D = "W21-token-reveal-readable";
       // BLOCK-SCOPED (the `const D` precedent): these axes belong to this leg.
@@ -2317,9 +2323,9 @@ async function main() {
           `the button away is visible in the same line`,
         );
         okLine(
-          `FONT-CONDITIONAL (D218/D248): this leg never awaits document.fonts.ready and never asserts which ` +
-          `face resolved, so every px above is provisional. The clipped/not-clipped verdicts and the ` +
-          `character RATIOS are what it stands behind`,
+          `FONT PINNED (D218/D248, paid by cch-w22-s1): nav() load()s every declared @font-face, awaits ` +
+          `document.fonts.ready and check()s each face before these px are read, refusing at exit 2 on a ` +
+          `missing one. The clipped/not-clipped verdicts and the character RATIOS are what it stands behind`,
         );
       }
     }
