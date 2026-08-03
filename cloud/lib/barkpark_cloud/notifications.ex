@@ -33,6 +33,7 @@ defmodule BarkparkCloud.Notifications do
   alias BarkparkCloud.Accounts
   alias BarkparkCloud.Accounts.Team
   alias BarkparkCloud.Mailer
+  alias BarkparkCloud.Registry.Site
   alias BarkparkCloud.Registry.Vault
   alias BarkparkCloud.Repo
   alias BarkparkCloud.Workers.ChatNotificationWorker
@@ -439,6 +440,34 @@ defmodule BarkparkCloud.Notifications do
     error ->
       Logger.error("Notifications.dispatch_event/3 crashed: #{Exception.message(error)}")
       :ok
+  end
+
+  @doc """
+  Dispatch an alert `event` keyed by a **Site** — the deployment-side twin of the
+  router's barkpark-keyed helper (charter D333).
+
+  Deployment carries only `belongs_to :site`, and `Site` carries `belongs_to
+  :team`, so a deployment-failure trigger has no team in hand. This resolves the
+  owning team through the site and puts the SITE's name into the payload, so the
+  alert names the thing that failed instead of falling back to EventEmail's
+  generic "Your Barkpark".
+
+  It lives HERE and not in the router on purpose: the producers are
+  `Registry.transition_deployment_fenced/4`, `Registry.reap_stale_deployments/0`
+  (a cron worker, no request at all) and `Registry.create_failed_deployment/3` —
+  none of which can reach a private router helper.
+
+  A since-deleted or non-UUID site id is a silent `:ok`; `dispatch_event/3`
+  itself never raises.
+  """
+  @spec dispatch_site_event(binary() | nil, atom(), map()) :: :ok
+  def dispatch_site_event(site_id, event, payload \\ %{}) when is_atom(event) do
+    with id when is_binary(id) <- Repo.uuid_or_nil(site_id),
+         %Site{team_id: team_id, name: name} when is_binary(team_id) <- Repo.get(Site, id) do
+      dispatch_event(team_id, event, Map.put_new(payload, :name, name))
+    else
+      _ -> :ok
+    end
   end
 
   # always_send bypasses the per-event toggle but still honours alerts_enabled.

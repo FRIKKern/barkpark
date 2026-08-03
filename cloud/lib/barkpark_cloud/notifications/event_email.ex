@@ -58,8 +58,16 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   defp render(:deployment_succeeded, payload),
     do: {"Deployment succeeded", "A deployment for #{name(payload)} succeeded."}
 
+  # wave 28 S6: `deployment_failed` renders through `cause_then_capture/1`, NOT
+  # `detail/1`. Its `:detail` is the deployment's `failure_reason` — reaper prose
+  # like "exceeded max deploy claim attempts (stale builder lease)" — which
+  # `detail/1` would scrub and ship raw. The dashboard classifies the same string;
+  # the inbox now tells the same person the same story, with the honest capture
+  # kept below the class exactly as D310 ruled for `provision_failed`.
   defp render(:deployment_failed, payload),
-    do: {"Deployment failed", "A deployment for #{name(payload)} failed.#{detail(payload)}"}
+    do:
+      {"Deployment failed",
+       "A deployment for #{name(payload)} failed.#{cause_then_capture(payload)}"}
 
   defp render(:agent_reachable, payload),
     do: {"Your Barkpark is reachable again", "#{name(payload)} is reporting healthy again."}
@@ -90,8 +98,7 @@ defmodule BarkparkCloud.Notifications.EventEmail do
 
   # The event's free-text detail, appended as its own paragraph.
   #
-  # wave 13 S2: SCRUBBED. For `provision_failed`, `deployment_failed` and
-  # `agent_unreachable` this string is the RAW failure reason — a remote ssh/
+  # wave 13 S2: SCRUBBED. For the failure events this string is the RAW reason — a remote ssh/
   # provider capture that can carry a credential the control plane never chose to
   # print — and an email leaves our boundary for good. This is the sole reader of
   # `:detail` in the email channel; `Notifications.Render.render/2` never reads it,
@@ -103,7 +110,8 @@ defmodule BarkparkCloud.Notifications.EventEmail do
     end
   end
 
-  # wave 26 S3 (charter D310): the CAUSE first, the raw capture kept below it.
+  # wave 26 S3 (charter D310), extended to `deployment_failed` by wave 28 S6:
+  # the CAUSE first, the raw capture kept below it.
   #
   # The `provision_failed` alert is the one channel that reaches a person away
   # from the console, and it was the only one that never CLASSIFIED. `router.ex`
