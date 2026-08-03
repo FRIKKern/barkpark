@@ -819,11 +819,21 @@ defmodule Barkpark.Content.Writer do
   # `validation_failed`, no new error code, no new controller branch), same
   # non-`:api` source exemption, same two-tier hard/warn doctrine.
   #
-  # THE SCOPING IS LOAD-BEARING, NOT POLITENESS. The guard fires only for a
-  # birth whose `content.parent_id` (drafts-normalised) is the epic. Disabling
-  # only that leg takes `mutate_controller_test.exs` from 36/36 to 23 failures,
-  # including the D53 create-family pins — because a filing law armed over the
-  # whole roster refuses every fixture in the repository that files a task.
+  # THE SCOPING, AND WHAT IT IS MEASURABLY WORTH TODAY. The guard fires only for
+  # a birth whose `content.parent_id` (drafts-normalised) is the epic. The wave
+  # brief predicted that deleting that one arm would take
+  # `mutate_controller_test.exs` to 23 failures including the D53 create-family
+  # pins; RUN, IT DOES NOT — the mutation (delete `not cch_epic_child?(parent)
+  # -> :ok`, change nothing else) yields 46 tests / 1 failure, and that one
+  # failure is this slice's own scoping test. The prediction was derived against
+  # a PRESENCE requirement, which would indeed refuse every task fixture in the
+  # repo; D331 made ABSENCE the warn tier, and no fixture outside this slice's
+  # own block carries a `surface` key at all, so an unscoped guard has almost
+  # nothing to refuse. The scoping still ships — it is what stops this epic's
+  # filing law from silently becoming a global rule the day another epic uses
+  # the word `surface` — but it is a DESIGN boundary, not a load-bearing leg
+  # under today's corpus, and saying otherwise here would be the kind of
+  # sentence this epic exists to delete.
   #
   # WHAT IS HARD: an OFF-VOCABULARY `surface`. The vocabulary is closed and
   # EXACT CASE, for the reason the birth fence states about `OPEN`/`open`: a
