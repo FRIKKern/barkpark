@@ -3696,6 +3696,135 @@ test("cch-w13-s1 a finished or failed run is still determinate — 100% and 'Set
   assert.equal(hooks.overallEtaText(failed), "");
 });
 
+// ── cch-w27-s6: a FAILED run announces the count it SHOWS, never a weighted guess ──
+// Measured live at Decide on #instance (NOT /new — `scen=theater-failed` renders
+// the hero with hasOverall:false and no progressbar at all): `scen=failed`
+// painted `class="prov-overall is-failed"` / `role="progressbar"` /
+// `aria-valuenow="82"` with an inline fill of 82% (782.27px of a 954px track)
+// beside the summary "Setup failed", over a step list of six rows reading
+// [done,done,done,done,failed,skipped] — 4 of 6 = 66.7%. The 82 is the
+// expectedMs weighting of the hand-written SERVER_STEP_EXPECTED_MS constants
+// ((15+45+35+20)/140), read aloud by a screen reader as progress on a run that
+// has already stopped. `fleet-support-failed` announced 53 ((20+60+25)/200)
+// where 3 of 6 = 50. Nothing in the committed browser harness covers this:
+// `aria-valuenow` / `data-overall` / `prov-overall` appear ZERO times across
+// __preview__/{overflow-guard,smoke,breakpoint-sweep,modal-oracle}.mjs, so this
+// closes an unowned surface rather than duplicating a leg.
+
+const W27_NOW = Date.parse("2026-07-03T12:00:00Z");
+const w27At = (secAgo) => new Date(W27_NOW - secAgo * 1000).toISOString();
+
+// __preview__/scenarios.mjs `failedSteps` (scen=failed, the Reporting box).
+const w27FailedBp = {
+  provision_status: "failed",
+  provision_steps: [
+    { step: "create", status: "started", at: w27At(320) },
+    { step: "create", status: "done", at: w27At(280) },
+    { step: "secure", status: "started", at: w27At(280) },
+    { step: "secure", status: "done", at: w27At(230) },
+    { step: "configure", status: "started", at: w27At(230) },
+    { step: "configure", status: "done", at: w27At(150) },
+    { step: "content", status: "started", at: w27At(150) },
+    { step: "content", status: "done", at: w27At(90) },
+    { step: "verify", status: "started", at: w27At(90) },
+    { step: "verify", status: "failed", at: w27At(68), detail: "verify.login: 500 — Studio never came up" },
+  ],
+};
+// __preview__/scenarios.mjs `supportFailedRow` (scen=fleet-support-failed).
+const w27SupportFailedBp = {
+  fleet_role: "support",
+  provision_status: "failed",
+  provision_steps: [
+    { step: "create", status: "started", at: w27At(3900) },
+    { step: "create", status: "done", at: w27At(3860) },
+    { step: "configure", status: "started", at: w27At(3860) },
+    { step: "configure", status: "done", at: w27At(3760) },
+    { step: "content", status: "started", at: w27At(3760) },
+    { step: "content", status: "done", at: w27At(3700) },
+    { step: "verify", status: "started", at: w27At(3700) },
+    { step: "verify", status: "failed", at: w27At(3400) },
+  ],
+};
+
+test("cch-w27-s6 scen=failed: the master bar announces the COUNT the step list shows (4 of 6 → 67), never the expectedMs-weighted 82", () => {
+  const rows = hooks.provisionSteps(w27FailedBp, W27_NOW);
+  // The exact six rows the screen renders, in order.
+  assert.deepEqual([...rows.map((r) => r.step)], ["create", "secure", "configure", "content", "verify", "ready"]);
+  assert.deepEqual([...rows.map((r) => r.role)], ["ok", "ok", "ok", "ok", "failed", "pending"]);
+  const doneCount = rows.filter((r) => r.role === "ok").length;
+  assert.equal(doneCount, 4);
+
+  const o = hooks.provisionOverall(rows);
+  assert.equal(o.failed, true);
+  assert.equal(o.planned, false, "a failed run still makes no prediction — planned stays false, the ETA stays suppressed");
+  assert.equal(hooks.overallSummaryText(o), "Setup failed");
+  assert.equal(hooks.overallEtaText(o), "");
+  // 4 of 6 = 66.7 → 67. NOT 82.
+  assert.equal(o.pct, Math.round((doneCount / rows.length) * 100));
+  assert.equal(o.pct, 67);
+
+  const html = hooks.provisionOverallHtml(rows);
+  assert.match(html, /class="prov-overall is-failed"/);
+  // A stopped run keeps role=progressbar AND a value — the count is a fact the
+  // eye already reads off the checklist, so the announcement must match it.
+  assert.match(html, /role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="67"/);
+  assert.match(html, /data-overall-fill style="width:67%"/);
+  // The fabricated figure is gone from BOTH the announcement and the paint.
+  assert.doesNotMatch(html, /aria-valuenow="82"/);
+  assert.doesNotMatch(html, /width:82%/);
+});
+
+test("cch-w27-s6 scen=fleet-support-failed: 3 of 6 announces 50, not the weighted 53", () => {
+  const rows = hooks.provisionSteps(w27SupportFailedBp, W27_NOW);
+  assert.deepEqual([...rows.map((r) => r.role)], ["ok", "pending", "ok", "ok", "failed", "pending"]);
+  const o = hooks.provisionOverall(rows);
+  assert.equal(o.failed, true);
+  assert.equal(o.pct, 50);
+  const html = hooks.provisionOverallHtml(rows);
+  assert.match(html, /aria-valuenow="50"/);
+  assert.match(html, /data-overall-fill style="width:50%"/);
+  assert.doesNotMatch(html, /aria-valuenow="53"/);
+});
+
+test("cch-w27-s6 the neighbours are untouched: a PLANNED mid-flight run still announces nothing, a finished run still announces 100", () => {
+  // theater-midflight's shape: five planned rows, the third in flight.
+  const mid = [
+    paceRow("create", "ok"), paceRow("secure", "ok"),
+    { step: "configure", role: "active", label: "configure", elapsedMs: 10000, caption: "", probes: [] },
+    paceRow("verify", "pending"), paceRow("ready", "pending"),
+  ];
+  const midO = hooks.provisionOverall(mid);
+  assert.equal(midO.failed, false);
+  assert.equal(midO.planned, true);
+  assert.equal(hooks.overallSummaryText(midO), "Step 3 of 5");
+  assert.doesNotMatch(hooks.provisionOverallHtml(mid), /aria-valuenow/);
+  // A finished run: 100 is a fact about what happened.
+  const doneRows = [paceRow("create", "ok"), paceRow("ready", "ok")];
+  assert.match(hooks.provisionOverallHtml(doneRows), /aria-valuenow="100"/);
+  // The READY arm mounts no bar at all — the /new mount is guarded on rows.
+  assert.match(APP_SRC, /var mountRows = newDisplayRows\(\);/);
+  assert.match(APP_SRC, /\(mountRows \? provisionOverallHtml\(mountRows\) : ""\)/);
+});
+
+test("cch-w27-s6 the tick agrees with the mount: patchProvisionOverall re-announces the same count on a failed run", () => {
+  const rows = hooks.provisionSteps(w27FailedBp, W27_NOW);
+  const attrs = {};
+  const track = {
+    setAttribute: (k, v) => { attrs[k] = v; },
+    removeAttribute: (k) => { delete attrs[k]; },
+  };
+  const fill = { style: {} };
+  const el = {
+    className: "",
+    querySelector: (sel) => (sel === "[data-overall-fill]" ? fill
+      : sel === ".prov-overall-track" ? track : { textContent: "" }),
+  };
+  hooks.patchProvisionOverall({ querySelector: () => el }, rows);
+  assert.equal(attrs["aria-valuenow"], "67");
+  assert.equal(fill.style.width, "67%");
+  assert.equal(el.className, "prov-overall is-failed");
+});
+
 test("cch-w13-s1 BOTH mount sites: the instance timeline renders the indeterminate bar, and /new mounts the same builder", () => {
   // Mount 2, driven end to end off a real fleet payload.
   const tl = hooks.instanceTimelineHtml({

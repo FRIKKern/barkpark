@@ -14239,7 +14239,20 @@
     // reader and shows a determinate 78% to an eye reading "Step 3 of 5" — the
     // lie the person cannot see to discount. A planned run therefore fills by
     // COUNT (finished rows / rows), the same fact the headline already states.
-    if (planned) {
+    //
+    // cch-w27-s6: a FAILED run fills by count too, and for the same reason. The
+    // `!failed` term above is right about `planned` (a failed run makes no
+    // prediction, so it keeps its ETA suppression and KEEPS announcing a value)
+    // but it also switched the count-based fill off at exactly the moment the
+    // weighted figure became indefensible: `scen=failed` painted 82% and
+    // announced a value of 82 over a step list reading 4 of 6 done — an
+    // expectedMs weighting of invented constants, read aloud as progress on a
+    // run that has no remaining time to weight. A terminated run has one honest
+    // number and the checklist already shows it, so the bar paints and
+    // announces THAT (4 of 6 → 67). Dropping the value instead would strip the
+    // screen-reader user of the count the eye still gets, and a valueless
+    // progressbar reads "still working" — wrong for a run that has stopped.
+    if (planned || failed) {
       var doneCount = 0;
       for (var d = 0; d < rows.length; d++) if (rows[d].role === "ok") doneCount++;
       pct = (doneCount / rows.length) * 100;
@@ -19085,6 +19098,10 @@
       // cch-w13-s1: the ETA copy is its own seam — null (not "") when the rows
       // are planned, so the honest-empty arm is pinnable without a DOM.
       overallEtaText: overallEtaText,
+      // cch-w27-s6: the headline copy and the 1s TICK are seams too — a failed
+      // run's announced value has to survive the in-place patch, not just the
+      // first render.
+      overallSummaryText: overallSummaryText, patchProvisionOverall: patchProvisionOverall,
       // Zero-paste Vercel handoff (task-4e4a53b101a97051): the claim-area builders.
       vercelClaimHtml: vercelClaimHtml, vercelClaimLinkHtml: vercelClaimLinkHtml,
       vercelCloneUrl: vercelCloneUrl,
