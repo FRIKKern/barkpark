@@ -1489,7 +1489,7 @@ const previewFailedRow = deployment({
   updated_at: tMinus(8981),
 });
 // THE CRUEL PREVIEW ROW. It is ADDED, never substituted: `previewLiveRow` and
-// `previewFailedRow` above are the KIND controls — an 9-char branch and a
+// `previewFailedRow` above are the KIND controls — a 9-char branch and a
 // 41-char host — and a remedy that bought the cruel row by shredding ordinary
 // prose has to red somewhere. It is LIVE rather than failed on purpose: a
 // failed preview row paints a `.deploy-fail` panel, and adding a third of those
