@@ -3047,7 +3047,15 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .new-gh { border: 1px solid var(--border); border-radius: var(--radius); padding: 14px; text-align: left; }
 .new-gh .label { display: block; margin-bottom: 4px; }
 .new-gh-steps { margin: 8px 0 0; padding-left: 18px; font-size: 13px; }
-.new-ready .mono { font-family: var(--mono); font-size: 13px; }
+/* W27: the hero every successful signup lands on names the instance's URL, and
+   `https://<63-char DNS label>.barkpark.cloud` — 78 chars with no break
+   opportunity, the LONGEST url clean_url/1 can issue — painted 670.81px into a
+   214px paragraph at 320 and dragged the whole page 408px sideways. The wrap
+   escape is the remedy, same declaration and same reason as `.site-meta .mono`
+   above: `anywhere` breaks only where nothing else can, so the shipped 35-char
+   host keeps the exact rects it had. Measured, both themes: page 728/320 -> 320/320,
+   4 box overflows -> 0, mono 670.81/214 -> 210.61/214. */
+.new-ready .mono { font-family: var(--mono); font-size: 13px; overflow-wrap: anywhere; }
 
 /* failed step — the theater's failure stage (GR18(4)): head carries the honest
    server-owned failCopy; the rail shows the snap (failed red, rest skipped);
