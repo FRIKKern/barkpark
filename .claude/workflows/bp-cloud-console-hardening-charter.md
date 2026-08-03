@@ -1101,6 +1101,73 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-03 — wave 27 REVIEW — 6/6 round-1 slices built, gated, reviewed, PUSHED and PR'd (#9354-#9359). Grade A
+
+**THE WISH'S HEADLINE QUESTION IS ANSWERED, AND THE ANSWER WAS AN INSTRUMENT DEFECT BOTH TIMES.** The lead
+measured `orphans=123 b=FAIL` and pre-committed to "the arithmetic in the debrief is wrong and that is itself
+the next finding." It was not the arithmetic, and the reviewer re-derived both halves independently — four live
+runs, not a re-read of the builder's reasoning:
+
+| run | predicate | result |
+|---|---|---|
+| `git archive` root | PRE-FIX | rc 1, `NO-SEAL a=FAIL b=FAIL`, **6 false "is not an ancestor of origin/main" sentences** |
+| same root | FIXED | rc 2, `INFRA-FAULT code=REPO-NOT-A-GIT-WORK-TREE`, **zero** invented findings |
+| `--epic …-epicc` (one typo) | PRE-FIX | **rc 0, `VERDICT: SEAL`, `a=PASS b=PASS c=PASS orphans=0`, live** |
+| same typo | FIXED | rc 1, `REFUSED reason=EMPTY-ROSTER` |
+
+So `b=FAIL` was never a regression and never checkout sensitivity in the sense wave 26 diagnosed — it was five
+clause-(b) legs resolving against a `--repo` the lead had pointed at an extraction, each reporting its own miss
+as a defect sentence. **The predicate that certifies this epic corrupted two consecutive waves' primary finding
+and could also SEAL an epic that does not exist.** Both are fixed and both mutation-proved.
+
+**LAW 0 WAS PAID AT DECIDE, BY HAND — 57 RE-PARENTED. THE CLOSE COUNT IS A DIFFERENT INTEGER AND SO IS THE
+FILING COUNT.** Reviewer's live re-derivation at seal time, quoting all three provenance facts D319 now demands
+— tree `0f16750f9`, root `<worktree>/wf_77fe34c1-d0f-37`, live:
+`VERDICT-TOKEN: SEAL-PREDICATE NO-SEAL a=FAIL b=PASS c=PASS orphans=62 considering=1 successor=cch-instruments-epic mode=live stubbed=0 waived=0 roster=288 repo=… head=0f16750f9`.
+
+**60 → 62, AND THE +2 IS FULLY ATTRIBUTED RATHER THAN AVERAGED.** Exactly two rows entered the parent after
+Decide's read, both filed by the Decide phase itself at 10:33Z before any builder flew, and both are genuine
+person-facing console defects (`cch-w27-bl-deployment-failed-toggle-fires-nothing`,
+`cch-w27-bl-connection-refused-classified-as-timeout`). **Meanwhile thirteen rows were filed under
+`cch-instruments-epic` at create time — every single instrument-residue row this wave produced, and every builder
+follow-up.** That is D307/D324 holding for the first time in this epic's history, measured rather than asserted:
+zero instrument residue reached the parent. The generator is not shut (D307 is still a sentence, and the
+create-time door guard is filed as `cchi-w27-bl-d307-create-time-door-guard`), but the population that made the
+number rise in wave 26 did not rise here.
+
+**THE STRUCTURAL CONCERN WAVE 26'S REVIEWER ESCALATED IS DISCHARGED, NOT DEFERRED.** No slice this wave ships an
+instrument that tolerates a defect it found. Slice 1 took the 408px ceiling to a refusal AND replaced its subset
+allowlist with an unconditional rule (mutation-measured strictly stronger: 10 findings vs 2). Slice 4 pins
+nothing and files the two selectors it could not pay rather than fencing them with an allowance. Slice 5 refuted
+its own filed row's remedy by MEASURING two rejected candidates dead. Slice 6 changed the number rather than
+bounding it.
+
+| # | task | final branch → PR | verdict |
+|---|---|---|---|
+| 1 | `task-ee662108818d603c` | `…url-is-whole-at-320-t-0` → **#9354** | flagship, clean; 408 → 0 with the shipped host's rects byte-identical |
+| 2 | `task-c04dde30f94b14c9` | `…tells-the-rail-one--1` → **#9355** | 255 tests 0 fail; SSE secret boundary independently re-derived |
+| 3 | `gr-bl-seal-predicate-provenance-gap` | `…invents-findings-on-a-2` → **#9356** | 64/64; the two defects above, both proved by live run |
+| 4 | `cch-w26-bl-deploy-row-siblings-unwrapped` | `…swallowe-3-r` → **#9357** | fixture derived from `preview_slug_for/2`; reviewer fixed one article typo |
+| 5 | `cch-w25-bl-flick-to-bottom-overshoots-retry` | `…cannot-r-4` → **#9358** | 18/18 reachable; two candidates measured dead, not argued |
+| 6 | `task-a5a9c63ee5b22fc3` | `…announces-a-fa-5` → **#9359** | 792/792; criterion 0 honestly `--miss`, unpaid half filed |
+
+**FIVE OF SIX ARE PERSON BODIES**, against a floor of four. Slice 3 is the instrument, and it is the one that
+made the last two waves' headline finding false.
+
+**LEDGER FIXES.** Two slice tasks (`task-ee662108818d603c`, `task-a5a9c63ee5b22fc3`) read `lifecycle_status: open`
+with a LAPSED claim while their work was built, gated and 8-of-9 stamped — the board was advertising finished
+work as ready to claim. Re-claimed as `cch-w27-reviewer` (open → in_progress is refused by raw patch; `bp task
+claim` is the sanctioned verb) and pulsed with the reviewer's gate re-run. Every merge-gated criterion is left
+open for the LEAD on all six.
+
+**WHAT THE NEXT WAVE MUST KNOW.** (1) Merge round 1 in any order — the six diffs are file-disjoint by D326's
+anchor assignment, verified: registry slots and leg blocks never collide, the try-tail is unclaimed, and the
+three `app.css` payments sit at :1833 / :3050 / :3345. Merge #9356 (the predicate) FIRST anyway, so the next
+wave's own seal read is taken with a predicate that cannot lie. (2) `cchi-w27-bl-d307-create-time-door-guard`
+is now the highest-leverage instrument row in the epic: this wave proved the law can hold by hand, and the door
+guard is what makes it hold without a Fable watching. (3) An independent second reviewer is still owed on #9355's
+SSE secret-boundary judgement and #9356's EMPTY-ROSTER live-only gating.
+
 ### 2026-08-03 — wave 27 DECIDE (six slices filed, all round 1; Paper `cloud-console-hardening-wave-27-2026-08-02`)
 
 **LAW 0 WAS PAID AT DECIDE, BY HAND, BEFORE A SINGLE BUILDER FLEW — 57 ROWS RE-PARENTED, ORPHANS 117 → 60.**
