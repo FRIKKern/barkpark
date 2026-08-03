@@ -96,6 +96,7 @@ internal/provisioner/catalog/templates/**
 internal/taskboard/**
 js/packages/react/tests/fixtures/**
 scripts/async_env_seam_scan.exs
+scripts/pds-door-census.sh
 scripts/pds-elixir-receipt-census.exs
 scripts/pds-record-parity.test.sh
 scripts/pds-status-only-residue.exs
