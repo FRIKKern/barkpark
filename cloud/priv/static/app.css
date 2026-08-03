@@ -3367,7 +3367,55 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   overflow-wrap: anywhere;
 }
 .bp-tl-fail b { color: var(--danger); }
-.bp-tl-retry { margin-top: 12px; }
+/* cch-w25-bl-flick-to-bottom-overshoots-retry — THE RECOVERY CONTROL IS DOCKED
+   TO THE VIEWPORT, and this is the ONE declaration block that decides whether a
+   person whose provision failed can reach it at all.
+   THE MEASUREMENT. `.bp-tl-retry` is emitted inside `.bp-timeline`, and
+   `.bp-timeline` is not the last thing on the page — `.detail-grid--instance`
+   follows it inside `#instance-tabpanel`. Flick to `document.body.scrollHeight`
+   on the SHIPPED strings and the control sat at top -725.25 in a 2452px
+   document at 320x568 (`scen=failed` and `mixed-fleet`), -393.34 at 390x844,
+   and -96.06 at 1280x900 — 18 of 18 cells above the viewport, hit-testing to
+   nothing. It is not phone-only and it is not a cruel-corpus artefact.
+   THREE CANDIDATES WERE PRICED AND TWO WERE MEASURED DEAD, on this tree, with
+   the W27 leg in __preview__/overflow-guard.mjs as the instrument:
+     · DOM ORDER (the filed row's own remedy — emit Retry after `.bp-console`):
+       -470.98 at 320x568, -159.22 at 390x844, green ONLY at 1280 (+50.31).
+       It buys 254px of a 725px overshoot, because the overshoot is 993.98px of
+       detail grid BELOW the timeline, not console height inside it.
+     · `position: sticky; bottom: 16px`: BYTE-IDENTICAL to no fix at all
+       (-725.25 / -393.34 / -96.06). A sticky box is constrained by its
+       CONTAINING BLOCK, which here is `.bp-timeline` — it releases at exactly
+       the moment the timeline leaves the viewport, which is the moment the
+       person needs it. Sticky would need the control re-parented to the tab
+       panel, and `wireInstanceTimeline` queries `[data-tl-retry]` inside the
+       timeline section it just re-rendered, so that move strands the wiring.
+     · SCROLL-ANCHOR ON FAILURE (`scrollIntoView` when the timeline mounts):
+       also byte-identical (-725.25 / -393.34 / -96.06). A one-shot gesture is
+       undone by the person's next one, and the gesture in this row IS the next
+       one.
+   SO: fixed. The dock is scoped to the failure state by construction — the
+   button is only emitted while `isProvisionFailed(bp)`, so nothing floats over
+   a healthy instance screen (the leg drives `panel-overview` as that control).
+   It sits BELOW `--z-menu`/`--z-modal`/`--z-toast`, so a dialog, a menu or a
+   toast still covers it rather than fighting it. `env(safe-area-inset-bottom)`
+   keeps it off the home indicator. The 36px height is the honest cost of a
+   control that is now a touch target rather than an inline button — `.btn-sm`'s
+   28px is short for a floating action. It DOES float over scrolling content
+   mid-page, which is what a dock is; what it must never do is permanently eat
+   the page's END, and `instanceOverviewHtml` pays that clearance in the failed
+   state (the leg asserts zero rect overlap with any `.rail-row`/`.card` at the
+   document bottom, so deleting that padding reds this leg). */
+.bp-tl-retry {
+  position: fixed;
+  left: 50%;
+  bottom: calc(16px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  z-index: var(--z-tabnav);
+  height: 36px;
+  padding: 0 18px;
+  box-shadow: var(--elev-3);
+}
 
 /* The timeline's expandable console (.bp-console-*) is authored NEXT TO its
    .new-console twin, ABOVE the shared theater/phone media block — see GR115:

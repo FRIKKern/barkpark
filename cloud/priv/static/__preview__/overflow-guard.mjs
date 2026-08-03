@@ -202,6 +202,7 @@ const DEFECTS = [
   "W24-cred-dialog-button-alive",
   "W25-launch-catalog-after-connect",
   "W20-op-gate-pill-bounded",
+  "W27-failed-retry-reachable-after-flick",
   "W21-inst-head-320-copy-reachable",
   "W21-members-roster-identity-and-remove",
   "W21-cruel-content-text-bounded",
@@ -1344,6 +1345,237 @@ async function main() {
           `${cells} / ${cells} cells clean across ${BAND_WIDTHS[0]}-${BAND_WIDTHS[BAND_WIDTHS.length - 1]}` +
           ` (769/899 are the band edges, 900/1024 the controls above it); ${misrouted} misrouted;` +
           ` no exemptions — #fleet's W13 residual was paid by W14-S3 and its pin is gone`,
+        );
+      }
+    }
+
+    // ── W27-S5: THE RECOVERY CONTROL, AFTER THE CRUDEST GESTURE THERE IS ────
+    //    Every leg above this one asks whether a box that is ALREADY on screen
+    //    holds its own text, and W23's asks where the viewport landed after a
+    //    reveal. NONE of them asks the question a person whose provision just
+    //    FAILED asks with their thumb: fling to the bottom of the page, and is
+    //    the recovery control there.
+    //
+    //    IT IS NOT, AND THE FILED NUMBER UNDERSTATED IT. `.bp-tl-retry` is the
+    //    LAST-BUT-ONE child of `.bp-timeline`, and `.bp-timeline` is not the
+    //    last thing on the page: `.detail-grid--instance` follows it inside
+    //    `#instance-tabpanel`. On merged-main bytes, scrolled to
+    //    `document.body.scrollHeight`, Retry sat at top -725.25 at 320x568 on
+    //    the SHIPPED strings (`failed` / `mixed-fleet`) against the cruel
+    //    corpus's -563.94, and at -96.06 at 1280x900 — 9 of 9 cells across 3
+    //    scenarios x 3 viewports off the TOP of the viewport, hit-testing to
+    //    nothing.
+    //
+    //    THE ROW'S OWN PRESCRIBED REMEDY IS REFUTED AND THIS LEG IS WHAT
+    //    REFUTES IT. Re-ordering inside the timeline (emitting `.bp-tl-retry`
+    //    AFTER `.bp-console`, the app.js DOM order the row blamed) still reads
+    //    -470.98 at 320x568 and -159.22 at 390x844: it buys 254px of a 725px
+    //    overshoot, because the overshoot is 993.98px of detail grid BELOW the
+    //    timeline, not 254px of console inside it. A leg that asserted DOM
+    //    order would have gone green on that and moved the person nowhere.
+    //
+    //    SO THE ASSERTION IS REACHABILITY, NOT ORDER AND NOT PIXELS. Per cell,
+    //    after the flick: the control's rect is INSIDE the viewport on both
+    //    axes, and `document.elementFromPoint` at its own centre returns the
+    //    control itself — a docked control that something else paints over is
+    //    exactly as unreachable as one 725px above the fold, and a top >= 0
+    //    check alone cannot see that.
+    //
+    //    FOUR THINGS THAT CANNOT BE BOUGHT, because each one is how a green
+    //    here would be green by construction:
+    //      (a) THE FIXTURE MUST SCROLL. If the failed screen ever stops being
+    //          taller than the viewport, "flick to the bottom" is a no-op and
+    //          every cell passes without measuring anything.
+    //      (b) EXACTLY ONE CONTROL. A second, duplicate affordance would let a
+    //          singular query land on whichever copy happens to be on screen
+    //          while the person's eye is on the other one.
+    //      (c) THE PAGE'S OWN TAIL MUST CLEAR IT. A control docked to the
+    //          viewport bottom permanently covers whatever the document ends
+    //          with — here the identity rail's last rows. Reachability bought
+    //          by occluding content is a trade, not a fix, so the lowest
+    //          `.rail-row` / `.card` bottom is asserted ABOVE the dock's top.
+    //      (d) A NON-FAILED CONTROL CELL. `panel-overview` is a healthy
+    //          instance detail route: it must carry ZERO `.bp-tl-retry` and
+    //          nothing may be docked over it. A remedy that floated a control
+    //          over every instance screen scores perfectly on (a)-(c).
+    //
+    //    ROUTES ARE DERIVED FROM THE FIXTURES, NEVER TRANSCRIBED (D228's
+    //    lesson one level up): each scenario's failed box is found by
+    //    `provision_status === "failed"` in its own payload, so a fixture that
+    //    stops carrying one REFUSES rather than measuring a healthy screen.
+    if (requested.includes("W27-failed-retry-reachable-after-flick")) {
+      const D = "W27-failed-retry-reachable-after-flick";
+      // BLOCK-SCOPED (D247). [width, height] — HEIGHT is the variable this leg
+      // lives on, so it cannot use the file's width sets. 320x568 is the
+      // smallest phone still shipped and the worst cell; 390x844 is the
+      // ordinary phone; 1280x900 is the desktop cell that proves this is NOT
+      // phone-only (merged main: -96.06 there).
+      const FLICK_VIEWPORTS = [[320, 568], [390, 844], [1280, 900]];
+      const { SCENARIOS } = await import("./scenarios.mjs");
+      // THE SCENARIOS, and why these three: `failed` is the solo failed box
+      // (the shipped console, 4 real lines), `mixed-fleet` is the same failure
+      // inside a real estate (the route the row was re-measured on), and
+      // `fleet-support-failed` is a SUPPORT box's failure — a different
+      // provision_error, a different console, and the desktop cell that read
+      // worst-but-one at 1280.
+      const FLICK_SCENS = ["failed", "mixed-fleet", "fleet-support-failed"];
+      const flickCells = [];
+      for (const key of FLICK_SCENS) {
+        const sc = SCENARIOS[key];
+        const bps = (sc && sc.data && sc.data.barkparks) || [];
+        const bad = bps.find((b) => b && b.provision_status === "failed");
+        if (!bad) {
+          // AUDITED: a scenario that no longer carries a failed box cannot
+          // measure this defect. Refuse loudly rather than drive a healthy
+          // route and print a clean row.
+          fail(D, `scenario "${key}" carries no barkpark with provision_status "failed" (${bps.length} in the payload) — the route this leg drives would render a healthy instance, and a healthy instance has no Retry to reach`);
+          continue;
+        }
+        flickCells.push({ scen: key, id: bad.id, name: bad.name || bad.slug || bad.id });
+      }
+      if (flickCells.length !== FLICK_SCENS.length) {
+        fail(D, `only ${flickCells.length} of ${FLICK_SCENS.length} scenarios resolved a failed box — the cell table below is incomplete`);
+      }
+      if (!FLICK_VIEWPORTS.some(([w, h]) => w === 1280 && h === 900)) {
+        fail(D, `axis check: 1280x900 is not in the viewport set — merged main put Retry at -96.06 there, and a phone-fenced leg cannot see the desktop half of this defect`);
+      }
+      process.stdout.write(
+        `\n${D} — ${flickCells.length} failed-provision routes x ${FLICK_VIEWPORTS.length} geometries x 2 themes` +
+        ` (${flickCells.length * FLICK_VIEWPORTS.length * 2} cells; flick to document.body.scrollHeight, then` +
+        ` rect + elementFromPoint on .bp-tl-retry) + a healthy-route control per geometry\n`,
+      );
+      // The measurement, run AFTER the flick. `inView` is both axes: a control
+      // pushed off the left edge is unreachable in exactly the way a control
+      // above the top edge is.
+      const FLICK_READ =
+        `(function(){var R=function(v){return Math.round(v*100)/100;};` +
+        `var d=document.documentElement;var vh=window.innerHeight,vw=d.clientWidth;` +
+        `var rs=[].slice.call(document.querySelectorAll('.bp-tl-retry'));` +
+        `var out={n:rs.length,vw:vw,vh:vh,` +
+        ` view:(document.querySelector('section.view:not([hidden])')||{}).id||'none',` +
+        ` theme:d.getAttribute('data-theme'),` +
+        ` docH:R(Math.max(document.body.scrollHeight,d.scrollHeight)),` +
+        ` sy:R(window.scrollY),maxSy:R(Math.max(0,Math.max(document.body.scrollHeight,d.scrollHeight)-vh))};` +
+        `if(!rs.length) return out;` +
+        `var el=rs[0];var r=el.getBoundingClientRect();` +
+        `out.top=R(r.top);out.bottom=R(r.bottom);out.left=R(r.left);out.right=R(r.right);out.h=R(r.height);` +
+        `out.pos=getComputedStyle(el).position;` +
+        `out.inView=(r.top>=0&&r.bottom<=vh+0.5&&r.left>=0&&r.right<=vw+0.5);` +
+        `var hit=document.elementFromPoint(r.left+r.width/2,r.top+r.height/2);` +
+        `out.hit=!hit?'OFF-VIEWPORT':((hit===el||el.contains(hit))?'RETRY':String(hit.className||hit.tagName||'?'));` +
+        // (c) THE PAGE'S OWN TAIL. Every rail row / card inside the tab panel,
+        // lowest bottom wins — the content a viewport-docked control would eat.
+        // OVERLAP, not "is anything lower than the control". A control sitting
+        // IN FLOW legitimately has content below it; a control DOCKED to the
+        // viewport is a defect exactly when its box intersects a content box.
+        `var tail=[].slice.call(document.querySelectorAll('#instance-tabpanel .rail-row, #instance-tabpanel .card'));` +
+        `var low=null,cov=null;tail.forEach(function(e){var b=e.getBoundingClientRect();if(b.height<=0)return;` +
+        ` if(low===null||b.bottom>low.b) low={b:R(b.bottom),n:String(e.className||'').slice(0,40)};` +
+        ` var oy=Math.min(r.bottom,b.bottom)-Math.max(r.top,b.top);` +
+        ` var ox=Math.min(r.right,b.right)-Math.max(r.left,b.left);` +
+        ` if(oy>0.5&&ox>0.5&&(cov===null||oy*ox>cov.a)) cov={a:R(oy*ox),oy:R(oy),ox:R(ox),` +
+        `   n:String(e.className||'').slice(0,40),b:R(b.bottom)};});` +
+        `out.tail=low;out.cov=cov;out.tailN=tail.length;return out;})()`;
+      let cells = 0, offViewport = 0, badHit = 0, occluded = 0;
+      for (const cell of flickCells) {
+        for (const theme of ["light", "dark"]) {
+          const row = [];
+          for (const [width, height] of FLICK_VIEWPORTS) {
+            // Every cell navigated fresh at its own geometry — a scroll
+            // position inherited from the previous cell is not a gesture.
+            await setViewport(width, height);
+            await nav(
+              `${BASE}/?scen=${cell.scen}&theme=${theme}#instance/${cell.id}`,
+              `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+              `return v && v.id==='view-instance' && document.querySelector('.bp-timeline');})()`,
+            );
+            // THE FLICK. `scrollTo` to the document's own height is the crudest
+            // gesture a person has, and the browser clamps it to the real
+            // maximum — which is the point: wherever the bottom is, this lands
+            // there.
+            await evalJs(`window.scrollTo(0, document.body.scrollHeight); void 0`);
+            await sleep(120);
+            const m = await evalJs(FLICK_READ);
+            cells++;
+            if (m.view !== "view-instance") {
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: rendered section.view "${m.view}", asked for "view-instance" — nothing below this line measured the failure screen`);
+              row.push(`${width}x${height}:!route`);
+              continue;
+            }
+            // (a) THE FIXTURE MUST SCROLL.
+            if (m.maxSy <= 0) {
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: the failure screen is ${m.docH}px in a ${m.vh}px viewport — there is nothing to flick to, so this cell asserts nothing about reachability`);
+              row.push(`${width}x${height}:!flat`);
+              continue;
+            }
+            if (m.sy < m.maxSy - 1) {
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: the flick landed at scrollY ${m.sy} of a possible ${m.maxSy} — the gesture did not reach the bottom, so the reading below is not the bottom of the page`);
+            }
+            // (b) EXACTLY ONE CONTROL.
+            if (m.n !== 1) {
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: ${m.n} .bp-tl-retry in the document, expected exactly 1 — ${m.n === 0 ? "a failed provision with no recovery control at all" : "a duplicate affordance means a person can be looking at one copy while a singular query measures the other"}`);
+              row.push(`${width}x${height}:n=${m.n}`);
+              continue;
+            }
+            const before = failures.length;
+            if (!m.inView) {
+              offViewport++;
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: after a flick to the bottom of a ${m.docH}px document, .bp-tl-retry sits at top ${m.top} / bottom ${m.bottom} / left ${m.left} / right ${m.right} against a ${m.vw}x${m.vh} viewport (position: ${m.pos}) — the person flung to the end of the page looking for the recovery control and landed PAST it, with no cue that it is behind them`);
+            }
+            if (m.hit !== "RETRY") {
+              badHit++;
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: elementFromPoint at .bp-tl-retry's own centre returns "${m.hit}", not the control — ${m.hit === "OFF-VIEWPORT" ? "the centre is not on screen at all" : "something paints over it, and a covered control is exactly as unreachable as one above the fold"}`);
+            }
+            // (c) THE PAGE'S TAIL MUST CLEAR THE DOCK.
+            if (!m.tailN) {
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: zero .rail-row / .card measured inside #instance-tabpanel — the occlusion control has nothing to measure, and an empty list is not a clean list`);
+            } else if (m.cov) {
+              occluded++;
+              fail(D, `${cell.scen}/${theme}@${width}x${height}: the control's box overlaps "${m.cov.n}" by ${m.cov.ox}x${m.cov.oy}px (${m.cov.a}px², that row ending at ${m.cov.b} against the control's ${m.top}-${m.bottom}) — the recovery control is parked ON TOP of the page's own content. Reachability bought by occlusion is a trade, not a fix`);
+            }
+            if (failures.length === before) {
+              row.push(`${width}x${height}:${m.top}/${m.bottom}✓`);
+            } else {
+              row.push(`${width}x${height}:${m.top}!`);
+            }
+          }
+          process.stdout.write(`   ${cell.scen}/${cell.name}/${theme}  ${row.join("  ")}\n`);
+        }
+      }
+      // (d) THE HEALTHY CONTROL. A remedy that docked a control over every
+      // instance screen — or left one behind after the box recovered — passes
+      // every assertion above.
+      for (const [width, height] of FLICK_VIEWPORTS) {
+        await setViewport(width, height);
+        await nav(
+          `${BASE}/?scen=panel-overview&theme=light#instance/${INST}`,
+          `(function(){var v=document.querySelector('section.view:not([hidden])');` +
+          `return v && v.id==='view-instance' && document.querySelector('.detail-grid--instance');})()`,
+        );
+        await evalJs(`window.scrollTo(0, document.body.scrollHeight); void 0`);
+        await sleep(120);
+        const ctl = await evalJs(
+          `(function(){var d=document.documentElement;` +
+          `var rs=[].slice.call(document.querySelectorAll('.bp-tl-retry'));` +
+          `var fixedish=[].slice.call(document.querySelectorAll('#instance-tabpanel *')).filter(function(e){` +
+          `  var p=getComputedStyle(e).position;return p==='fixed'||p==='sticky';}).map(function(e){` +
+          `  return String(e.className||e.tagName).slice(0,40);});` +
+          `return {n:rs.length,docked:fixedish,vh:window.innerHeight,` +
+          ` docH:Math.round(Math.max(document.body.scrollHeight,d.scrollHeight))};})()`,
+        );
+        if (ctl.n !== 0) {
+          fail(D, `panel-overview@${width}x${height}: ${ctl.n} .bp-tl-retry on a HEALTHY instance detail route — the recovery control is scoped to the failure, or it is furniture`);
+        } else if (ctl.docked.length) {
+          fail(D, `panel-overview@${width}x${height}: ${ctl.docked.length} fixed/sticky element(s) inside #instance-tabpanel on a healthy route (${ctl.docked.join(", ")}) — a control docked over every instance screen is not this defect's remedy`);
+        } else {
+          okLine(`panel-overview@${width}x${height}: healthy route carries 0 .bp-tl-retry and 0 docked elements in #instance-tabpanel (${ctl.docH}px document) — the remedy is scoped to the failure state`);
+        }
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells: after a flick to the document bottom .bp-tl-retry is inside the viewport on both axes` +
+          ` and hit-tests to ITSELF at its own centre, at 320x568 / 390x844 / 1280x900 across ${flickCells.map((c) => c.scen).join(", ")}` +
+          ` — ${offViewport} off-viewport, ${badHit} covered, ${occluded} parked over the page's own tail`,
         );
       }
     }
