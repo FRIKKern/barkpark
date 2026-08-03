@@ -2576,6 +2576,76 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 44 2026-08-03 — REVIEWED AND PUSHED, grade A− — 3 slices delivered green, a 4th RECOVERED FROM A DEAD BUILDER, 4 PRs open (paper `pds-wave-44-2026-08-03`)
+
+**WHAT LANDED (4 PRs, all pushed, none merged — the lead merges).**
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `pds-w44-grant-door-narrowing` | `…a-doc-scoped-write-grant-stops-writing-a-0-r` | #9377 | A live write bypass closed at the door a `handle_event` hook cannot see. Reviewer re-derived the chain from source and re-proved non-vacuity by his OWN mutation. |
+| `pds-w44-census-fold-and-blindspot` | `…the-residual-32-gets-judged-and-the-mete-1` | #9378 | RESIDUAL 32 → 0 with the deny numerator HELD at 137. A/B re-derived independently by the reviewer. |
+| `pds-w44-palette-harness-repair` | `…the-sheet-grid-palette-harness-stops-com-3-r` | #9379 | The 4-week red on `sheet-grid-js.yml` was a harness attribution bug, not a WCAG defect. Two reviewer fixes on top. |
+| `pds-w44-door-census-instrument` | `…the-price-column-stops-being-charter-pro-2-r` | #9380 | **RECOVERED BY REVIEW.** Fully built and gated, never committed. |
+
+**PDS-D653 — A TASK CAN BE 11/12 STAMPED AND ITS BRANCH EMPTY, AND NOTHING IN THE WAVE SAYS SO.**
+`pds-w44-door-census-instrument` stamped eleven criteria with real run evidence, its claim now-line read
+`committing: gate green (door-census rc=0, escape-check rc=0, rider 8/8); branching
+loop-epic/the-price-column-stops-being-charter-pro-2` — and `git diff origin/main...that-branch` is
+**EMPTY**. The builder died between the last stamp and the first `git commit`. The slice appeared in
+NEITHER the wave's built-slice handoff NOR its not-green list, so the only trace of a finished 37 KB
+instrument was three uncommitted files in a shared worktree the next cycle resets. Recovered read-only
+(that worktree was never checked out), re-gated from scratch on a branch cut from `origin/main`:
+`pds-door-census.sh` rc=0 (UNDISPOSED 0 of 20, ERRORS 0), `--selftest` rc=0 (8 PASS / 0 FAIL),
+`elixir-path-escape-check.sh --check` rc=0, rider rc=0 (8 tests). **THE RULE THIS BUYS: the ledger is
+the index of what to sweep. A review must diff every wave task's stated branch against `origin/main`
+and treat an empty diff as a STRANDED SLICE, not as an absent one** — the built-slice handoff is a
+report, and a report cannot describe the builder that stopped before writing it.
+
+**PDS-D654 — A GATE THAT DOES NOT TRIGGER ON ITS OWN SUBJECT IS GREEN FOR FREE.** `sheet-grid-js.yml`
+runs `__palette.test.mjs`, which parses `root.html.heex`, `presence_state.ex` and `tokens_gen.ex` — and
+the workflow triggered on **none of them**. The contrast harness therefore never ran on a PR that
+changed a hue, a background token, or the presence palette: i.e. on every PR that could break it. This
+is D633's law ("a gate lies when its green costs nothing to produce") in its cheapest form yet — not a
+skip shim, not a vacuous assertion, just a `paths:` list that omits the subject. Repaired in #9379.
+**Generalise it:** for every workflow this epic gates, the trigger paths must be a superset of the files
+its harness READS, not just the files it lives in.
+
+**PDS-D655 — TWO INSTRUMENTS SHIPPED CONTRADICTORY PROSE ABOUT THE SAME FINDING, IN THE SAME WAVE.**
+`pds-door-census.sh` printed the meter blindness as a **236x** `real/user` ratio;
+`pds-elixir-receipt-census.exs` refuted exactly that on its own runs (113x, then 123x, for the *same*
+fan-out — `real` counts waiting, so the ratio measures host load). Both were correct about the direction
+and only one was correct about the figure. Reconciled in review onto the load-independent leaf-metered
+FLOOR (a wrapper reading user 6.05 s over 33 children conceals ≥ ~140 s, and is under HALF the price of
+ONE child). **THE RULE: when a finding ships inside more than one instrument, one of them owns the
+sentence and the others cite it. Two hand-typed copies drift on their first edit — which is the same
+argument the census's own `@blind_spot` attribute already makes, applied one level up.**
+
+**THE BRIEF WAS REFUTED AGAIN, MAKING IT TEN CONSECUTIVE WAVES.** (a) Dispatch asked for the blindness
+"measured at 236x"; the artifact says do not quote a ratio at all. (b) The palette brief priced TWO stale
+couplings; there were **three** — `--fg-muted` was pattern-matched for an `hsl()` both themes author as
+`var(--muted-text)`, so that check had found ZERO declarations and could never have run. (c) `#5b9dff`
+vs the real dark bg is **7.31:1**, not the brief's 7.27. (d) The hook harness is **165** checks, not 175.
+(e) The door census enumerates **20** programs, not 19 — it counts itself.
+
+**MEASURED, ON A HOST THAT WAS NOT QUIET.** The reviewer's own census run read `user cpu 17330 ms`
+against `wall clock 95801 ms` — a 5.5× gap on a box carrying 24 stray busy-loop processes from an
+unrelated session four days old. That gap IS D605's argument, reproduced by accident: the wall figure is
+the load, the CPU figure is the code.
+
+**WHAT STALLED.** Nothing red. The three round-2 slices (`pds-w44-judgment-coverage-ladder`,
+`pds-w44-hetzner-offline-door`, `pds-w44-charter-sweep-adjudication`) were deferred BY DESIGN under the
+sequenced-rounds law and remain unbuilt. One flake filed rather than swallowed:
+`ChatRenderGoldenTest`'s sidebar byte-lock reds under parallel studio-suite load and passes in isolation
+and on re-run (`task-441f5a5669e0ab6b`).
+
+**WHAT THE NEXT WAVE SHOULD TAKE.** In order: merge round 1 (#9377 first — it is the security fix;
+#9379 second, because it unblocks #9335's red `Sheet-grid hook unit harness`); then dispatch
+`pds-w44-judgment-coverage-ladder` once #9378 merges, `pds-w44-hetzner-offline-door` once #9380 merges,
+and `pds-w44-charter-sweep-adjudication` once the charter PR #9353 merges. Two slices carry
+HIGH-FLIP-RISK judgments and are owed a genuinely independent second reviewer before merge: #9377
+(security/tenancy) and #9380 (whether leg A admits a fraudulent THROUGH — and it has had exactly ONE
+pair of eyes, because its builder never reached its own review dispatch).
+
 ### Wave 43 2026-08-02 — "Price everything in one unit, walk the door as far as the price allows, and mechanise the lesson" — DECIDED, building (paper `pds-wave-43-2026-08-02`)
 
 **INHERITED PREMISES THAT FAILED SMOKE, BEFORE ANY DECISION.** (1) The wish's `--census` flag — named by the
