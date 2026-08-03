@@ -7,8 +7,12 @@
 # WHAT THIS IS. A build-free AST census of every `ok: true` / `"ok" => true` success
 # claim under api/lib. It runs under plain `elixir` with NO mix project and NO compile
 # (`Code.string_to_quoted/2` only), so it never boots the app — deliberately, because
-# `mix phx.server` OOMs on this host. `scripts/pds-*` is in NEITHER Elixir path set
-# (scripts/elixir-path-escape-check.sh), so this file costs no Elixir gate minute.
+# `mix phx.server` OOMs on this host. THIS FILE — not the `scripts/pds-*` CLASS — is in
+# neither Elixir path set (scripts/elixir-path-escape-check.sh), so it costs no Elixir
+# gate minute. The class-wide version of that sentence was FALSE when it was written:
+# scripts/pds-status-only-residue.exs is declared in ELIXIR_TEST_ONLY_PATHS there, and a
+# pds-* script that an ExUnit case shells is DISPATCHED ON like any other suite input. A
+# receipt that misstates its own gating is the defect this census exists to name.
 #
 # WHAT THIS IS NOT. It is NOT a gate. It ships no floor over the population, because
 # the ruling stands (PDS-D454): Elixir stays honest-and-unguarded until the write-routed
@@ -39,6 +43,44 @@
 #       tail` reports tail's status, which is how the exit-2 refusal was once logged RC 0.
 
 defmodule PDS.Census do
+  # ------------------------------------------------------------- the blind spot
+  #
+  # DECLARED ABOVE @moduledoc ON PURPOSE. A module attribute is read at DEFINITION
+  # time, so the doc string can only interpolate a list that already exists; moving
+  # this below @moduledoc would silently document an empty blind spot.
+  #
+  # ONE SOURCE OF TRUTH, REFERENCED TWICE — @moduledoc just below, and banner/0's
+  # printed output. That is the whole point of PDS-D633: the obligation is that the
+  # sentence survives a COPY-PASTE OF THE NUMBERS. Prose next to a figure is dropped
+  # by whoever quotes the figure; two hand-typed copies drift the first time one is
+  # edited. A list referenced twice can do neither.
+  @blind_spot [
+    "AN OS METER AROUND THIS SCRIPT MEASURES THE PARENT BEAM AND NOTHING ELSE.",
+    "`--selftest` fans out to CHILD BEAMs (System.cmd/3, one per case) and the",
+    "wrapper sees none of their cycles. MEASURED, LIKE FOR LIKE: `/usr/bin/time -p`",
+    "around a 33-case `--selftest` reported user 6.05 s — while ONE plain census,",
+    "metered inside its own BEAM, is the ~15 s printed as `user cpu` below. The",
+    "wrapper's figure for all thirty-three children is under HALF the price of ONE",
+    "of them, and nine of the cases run this same 804-file corpus, so ~140 s of",
+    "user CPU is a FLOOR on what those 6.05 s conceal. DO NOT QUOTE A RATIO: real/",
+    "user was 113x on that run and 236x on an earlier one, because `real` counts",
+    "waiting — the load-independent statement is the DIRECTION, and it runs the",
+    "ONE WAY A PRICE COLUMN MUST NOT: it makes an expensive instrument look",
+    "gate-able. There is no outer-meter fallback when the thing wrapped is a BEAM",
+    "that fans out; a leaf-metered price is the sum over the children, per child.",
+    "The `user cpu` figure below is BEAM-INTERNAL and covers THIS process only —",
+    "for the plain census, which spawns nobody, that is the whole price."
+  ]
+
+  @moduledoc """
+  A build-free AST census of the `api/lib` success surface. See the header comment
+  above `defmodule` for the lens, the exits, and what this is NOT (it is not a gate).
+
+  ## Price, and the blind spot in measuring it
+
+  #{Enum.map_join(@blind_spot, "\n  ", & &1)}
+  """
+
   # ---------------------------------------------------------------- constants
 
   # Recorded by PDS-D448 (wave 33 survey). Printed as DRIFT lines, never enforced —
@@ -183,6 +225,17 @@ defmodule PDS.Census do
     # is the disposition table refusing an arrival, NOT guard_corpus!/1 (which never
     # refuses on this), and it fires whether or not the named module is written.
     {:live, "/studio/fixture", "Barkpark.Filler.FixtureLive", nil, :selftest_fixture},
+    # THE FOUR PLUGIN-MOUNT ARRIVALS THE WAVE-43 FIXTURE ADDS. Three are MOUNTED (the
+    # fixture plugin's three live specs, joined onto their auth bucket's callsite) and one
+    # is the literal sessionless route for the module the `?` spec cannot name. Same
+    # contract as the row above: `live` is a ROUTED-WRITE method, so each is an arrival
+    # ROUTED-POPULATION-COMPLETE reds on until it is disposed — and each names a module
+    # (or, for the declining spec, a non-module `?`) that the REAL tree does not carry, so
+    # all four are OUT OF SCOPE there rather than orphans.
+    {:live, "/plugins/ops-live", "Barkpark.Filler.PluginOpsLive", :index, :selftest_fixture},
+    {:live, "/plugins/api-live", "Barkpark.Filler.PluginLooseLive", :index, :selftest_fixture},
+    {:live, "/plugins/var-live", "?", :index, :selftest_fixture},
+    {:live, "/plugins/loose-var", "Barkpark.Filler.PluginVarLive", nil, :selftest_fixture},
     # THE SIX ECHO FIXTURE ROWS (PDS wave 40). Classed `status_only_receipt` ON PURPOSE:
     # that is the class the derivation partition reads, and these six exist so the
     # partition's request_echo verdict can be observed firing — and, on the `:repaired`
@@ -1190,7 +1243,14 @@ defmodule PDS.Census do
   end
 
   defp census(opts) do
-    t0 = System.monotonic_time(:millisecond)
+    # USER CPU, NOT WALL CLOCK (PDS-D605). D605 forbids a wall-clock figure standing in
+    # for a price, and its own evidence is THIS census — so the census printing one was
+    # the instrument contradicting the finding it supplies. `:erlang.statistics(:runtime)`
+    # is the in-BEAM user-CPU meter, sound to <1% against an OS delta (PDS-D633) and, per
+    # the blind spot above, scoped to this process. The FIRST element is total runtime
+    # since VM start; the second is time-since-last-call, which is GLOBAL STATE — reading
+    # a delta of the first perturbs nothing a later caller depends on.
+    {cpu0, _since_last} = :erlang.statistics(:runtime)
     show_sites? = opts.sites?
     files = corpus(opts)
 
@@ -1222,7 +1282,8 @@ defmodule PDS.Census do
     report_blind_spots(parsed)
     delegate = report_delegate_probe(index)
 
-    ms = System.monotonic_time(:millisecond) - t0
+    {cpu1, _since_last} = :erlang.statistics(:runtime)
+    ms = cpu1 - cpu0
 
     integrity(files, textual, ast_sites, phantoms, consumers, emitted, classified, delegate, ms,
       parsed, falsifiers, routed)
@@ -1250,6 +1311,13 @@ defmodule PDS.Census do
     p("            Every textual count here is :binary.matches/2 substring matching.")
     p("law         no Barkpark verb may report success on an exit code alone (PDS wave 22)")
     p("gate        NONE. This prints a population; it does not police one (PDS-D454).")
+
+    # THE PRINTED HALF OF PDS-D633, FROM THE SAME LIST @moduledoc CARRIES. It is printed
+    # rather than only documented because a green ExUnit case prints NOTHING: a rider that
+    # asserts the sentence exists cannot put the sentence in front of whoever reads a run.
+    [head | rest] = @blind_spot
+    p("blind spot  #{head}")
+    Enum.each(rest, &p("            " <> &1))
     p("")
   end
 
@@ -4670,11 +4738,16 @@ defmodule PDS.Census do
   #   attached inside a runtime branch covers a clause only on the branch that runs,
   #   and the honest static answer for such a gate is MAY-attach, never covered.
   #
-  # THE RESIDUAL IS PRINTED AND NEVER FOLDED (PDS-D572). Modules whose only route
-  # comes from the plugin-mount macro carry NO derivable on_mount chain: the census
-  # already names that macro as a resolved shape whose live_session it cannot read.
-  # Those clauses are not "reachable" and not "unreachable" — they are UNDECIDED, and
-  # a column that resolves them by proxy has invented the answer it was asked for.
+  # THE RESIDUAL IS NARROWED BY DERIVATION, NEVER BY PROXY (PDS-D572, folded in wave 43).
+  # Wave 42 printed the residual whole on the reason that a module routed only through
+  # the plugin-mount macro "carries no derivable on_mount chain". That was a fact about
+  # THIS FILE'S WALK, not about the tree: for a callsite INSIDE a live_session the chain
+  # is two hops away in data the census already reads (spec.auth -> callsite.scope ->
+  # the live_session literal), and lv_session_index/1 now takes those two hops. What
+  # stays in the residual is what is genuinely undecidable — a spec mounted at a callsite
+  # outside every live_session, and a spec whose module resolves to `?`. Those clauses
+  # are not "reachable" and not "unreachable"; a column that resolved THEM by proxy would
+  # still have invented the answer it was asked for.
   @lv_reach_order [
     :unreachable_component_lifecycle,
     :unreachable_no_hook_in_chain,
@@ -4683,9 +4756,16 @@ defmodule PDS.Census do
   ]
   @lv_reach_residual :residual_no_derivable_chain
   @lv_event_stage :handle_event
+  # The ONE plugin auth bucket whose route the mount macro does not emit bare — see
+  # lv_session_index/1, where the mirror and its safe-staleness direction are stated.
+  # DECLARED HERE, WITH THE OTHER REACH ATTRIBUTES, BECAUSE A MODULE ATTRIBUTE IS READ AT
+  # DEFINITION TIME: declared next to its user it read `nil` in lv_print_reach/6 above it
+  # and printed `auth: nil` in a line whose whole job is to name the bucket.
+  @lvs_macro_wrapped_auth :public_root
 
   defp lv_verdict(pop, comp, route_mods, parsed, index) do
-    sessions = lv_sessions(parsed)
+    sidx = lv_session_index(parsed)
+    sessions = sidx.sessions
     sites = lv_hook_sites(index)
     ev = Enum.filter(sites, &(&1.stage == @lv_event_stage))
 
@@ -4747,7 +4827,7 @@ defmodule PDS.Census do
     disagree = lv_sym_diff(theorem.with_clauses, proxy_mods)
     deleg = Enum.count(rows, & &1.delegation?)
 
-    lv_print_reach(rows, freqs, n, sessions, multi)
+    lv_print_reach(rows, freqs, n, sessions, multi, sidx)
     lv_print_denies(reachable, nrch, n)
     lv_print_attach(reachable, nrch, ev, by_mod)
     lv_print_component(theorem, proxy_mods, disagree, n)
@@ -4792,22 +4872,31 @@ defmodule PDS.Census do
 
   # -- REACH ------------------------------------------------------------------
 
-  defp lv_print_reach(rows, freqs, n, sessions, multi) do
-    p("    REACH — CAN A SOCKET-LEVEL HOOK REACH THIS CLAUSE AT ALL? (wave 42)")
+  defp lv_print_reach(rows, freqs, n, sessions, multi, sidx) do
+    p("    REACH — CAN A SOCKET-LEVEL HOOK REACH THIS CLAUSE AT ALL? (wave 42, folded 43)")
     p("      Keyed on {module, live_session}. #{map_size(sessions)} routed module(s) resolve to a")
     p("      live_session with an on_mount chain THIS RUN READS OUT OF #{@router_path}.")
+    p("      #{sidx.mount_sites - sidx.sessionless_sites} / #{sidx.mount_sites} #{@routed_resolved_macro}/1 callsite(s) sit INSIDE a live_session, so a")
+    p("      plugin-mounted module resolves its chain through its OWN spec's auth: (wave 43).")
+    p("      #{sidx.macro_wrapped} live spec(s) carry auth: #{inspect(@lvs_macro_wrapped_auth)}, which the mount macro wraps in a")
+    p("      live_session of its OWN carrying root_layout: and NO on_mount — a chain that is")
+    p("      derivably EMPTY rather than unreadable, so those clauses are DECIDED, not residual.")
 
     Enum.each(@lv_reach_order, fn c ->
       p("        #{String.pad_trailing(to_string(c), 32)} #{pad(Map.get(freqs, c, 0))} / #{n}")
     end)
 
-    p("        #{String.pad_trailing("RESIDUAL " <> to_string(@lv_reach_residual), 32)} #{pad(Map.get(freqs, @lv_reach_residual, 0))} / #{n}  <- PRINTED, NEVER FOLDED")
+    p("        #{String.pad_trailing("RESIDUAL " <> to_string(@lv_reach_residual), 32)} #{pad(Map.get(freqs, @lv_reach_residual, 0))} / #{n}  <- UNDECIDABLE, NEVER FOLDED")
     p("        #{String.pad_trailing("sum", 32)} #{pad(Enum.sum(Map.values(freqs)))} == population #{n}")
     wrap(
-      "the RESIDUAL is clauses in modules the route lens reaches ONLY through the " <>
-        "#{@routed_resolved_macro}/1 mount, whose live_session this walk cannot read — so they carry NO derivable " <>
-        "hook chain. They are UNDECIDED, not unreachable: folding them into either " <>
-        "decided class would invent the verdict this column was asked for.",
+      "the RESIDUAL is clauses whose plugin mount callsite sits OUTSIDE any live_session: " <>
+        "#{sidx.sessionless_sites} of the #{sidx.mount_sites} #{@routed_resolved_macro}/1 callsite(s) in #{short(@router_path)} carry no enclosing " <>
+        "live_session (#{sidx.sessionless_buckets} distinct auth bucket(s)), so a spec mounted ONLY there has no " <>
+        "on_mount chain to read anywhere in the router. They are UNDECIDED, not " <>
+        "unreachable. A spec whose module this lens cannot name (`?`) declines the join " <>
+        "for the same reason. What is NOT in the residual any more is a spec mounted " <>
+        "inside a live_session: wave 43 joins its own auth: to its own callsite's scope: " <>
+        "and reads the chain that is right there.",
       "        "
     )
 
@@ -4923,18 +5012,99 @@ defmodule PDS.Census do
   # live_session away — it is keyed on {method, path, module, action}, which cannot
   # hold a session name. Widening it would move every downstream figure; this walk
   # carries {aliases, session, on_mount chain} and reads NOTHING else.
-  defp lv_sessions(parsed) do
+  # THE FOLD (PDS wave 43). Wave 42 printed the residual and refused to fold it, on a
+  # stated reason: a module routed ONLY through the plugin mount "carries no derivable
+  # on_mount chain". That reason was true of THIS WALK and false of the tree. The chain
+  # is derivable in TWO HOPS over data this census already reads:
+  #
+  #   hop 1  the spec's OWN `auth:` — plugin_route_specs/1 carries it per spec.
+  #   hop 2  the mount callsite's OWN `scope:` and the live_session literal it sits in —
+  #          the same router.ex node mount_walk/3 already reads for the prefix.
+  #
+  # and the two are joined by auth_in_scope?/2, which is the census's existing mirror of
+  # BarkparkWeb.Router.Plugins' own mapping. NOTHING IS RESOLVED BY PROXY: the route's own
+  # auth: selects the callsite, and the callsite's enclosing on_mount is read as a literal.
+  # A module mounted at a callsite that sits OUTSIDE every live_session still resolves to
+  # NO session and stays in the residual — which is what keeps the residual falsifiable
+  # rather than zero by construction.
+  #
+  # THE ONE MACRO-SIDE WRAP, MIRRORED THE WAY auth_in_scope?/2 MIRRORS THE MAPPING.
+  # `:public_root` is the single bucket whose route the mount macro does NOT emit bare:
+  # BarkparkWeb.Router.Plugins.emit_route_ast/1 wraps each such route in a live_session of
+  # its OWN carrying the spec's `root_layout:` AND NOTHING ELSE — no `on_mount` key exists
+  # in that quote to read. So the chain is not unreadable there, it is derivably EMPTY,
+  # and an empty chain is a DECIDED class (unreachable_no_hook_in_chain), never the
+  # residual. NARROW ON PURPOSE: every other bucket emits `live/4` bare, so its chain is
+  # whatever the ROUTER LITERAL wraps the callsite in — and if that is nothing, the clause
+  # stays undecided. The day the macro gains a second wrapping bucket this mirror goes
+  # stale in the SAFE direction: the new bucket reads sessionless and lands back in the
+  # residual, which is a shrinking claim, never an invented one.
+  defp lv_session_index(parsed) do
     with %{src: src} <- Enum.find(parsed, &(&1.path == @router_path)),
          {:ok, ast} <- Code.string_to_quoted(src) do
-      ast
-      |> lvs_walk({[], nil, []}, [])
-      |> Enum.filter(&(&1.session != nil))
-      |> Enum.uniq()
-      |> Enum.group_by(& &1.module)
+      walked = lvs_walk(ast, {[], nil, []}, [])
+      {sites, literal} = Enum.split_with(walked, &Map.has_key?(&1, :plugin_scope))
+
+      sessions =
+        (literal ++ lvs_mounted(sites, parsed))
+        |> Enum.filter(&(&1.session != nil))
+        |> Enum.uniq()
+        |> Enum.group_by(& &1.module)
+
+      sessionless = Enum.filter(sites, &(&1.session == nil))
+
+      %{
+        sessions: sessions,
+        mount_sites: length(sites),
+        sessionless_sites: length(sessionless),
+        sessionless_buckets: sessionless |> Enum.map(& &1.plugin_scope) |> Enum.uniq() |> length(),
+        macro_wrapped: parsed |> lvs_specs() |> Enum.count(&(&1.auth == @lvs_macro_wrapped_auth))
+      }
     else
-      _ -> %{}
+      _ ->
+        %{
+          sessions: %{},
+          mount_sites: 0,
+          sessionless_sites: 0,
+          sessionless_buckets: 0,
+          macro_wrapped: 0
+        }
     end
   end
+
+  defp lvs_specs(parsed), do: parsed |> plugin_route_specs() |> Enum.filter(&lvs_joinable?/1)
+
+  defp lvs_mounted(sites, parsed) do
+    specs = lvs_specs(parsed)
+
+    for site <- sites,
+        s <- specs,
+        auth_in_scope?(s.auth, site.plugin_scope),
+        do: lvs_mount_entry(s, site)
+  end
+
+  defp lvs_mount_entry(%{auth: @lvs_macro_wrapped_auth} = s, _site),
+    do: %{module: s.module, session: lvs_macro_session(s), hooks: []}
+
+  defp lvs_mount_entry(s, site), do: %{module: s.module, session: site.session, hooks: site.hooks}
+
+  # The macro names that session `plugin_root_<path slug>_<phash2 of the module atom>`.
+  # The hash half is a COLLISION DEVICE over module atoms this lens holds as strings, so
+  # it is dropped rather than faked: the path slug already makes one name per route, which
+  # is the only property the {module, live_session} key asks of it.
+  defp lvs_macro_session(%{path: path}) do
+    slug = path |> String.replace(~r/[^A-Za-z0-9]+/, "_") |> String.trim("_")
+    String.to_atom("plugin_root_#{slug}")
+  end
+
+  # A SPEC WHOSE MODULE THIS LENS CANNOT NAME DECLINES — it never joins. `alias_string/2`
+  # answers `"?"` for a route module inline_alias_bindings/1 could not resolve (a name
+  # rebound somewhere this pass does not model), and joining on `"?"` would credit a
+  # live_session to a module NOBODY CAN OPEN — a printed verdict over an unnamed subject,
+  # which is exactly the invention the residual exists to refuse. The selftest mutates
+  # this predicate to `true` and watches the routed-module count grow by the phantom.
+  defp lvs_joinable?(%{method: @routed_live_method, module: mod}), do: mod != "?"
+  defp lvs_joinable?(_), do: false
 
   defp lvs_walk({:scope, _, args}, {al, s, h}, acc) do
     {_p, a2, body} = scope_parts(args)
@@ -4949,6 +5119,16 @@ defmodule PDS.Census do
   defp lvs_walk({@routed_live_method, _, [path, mod | _]}, {al, s, h}, acc)
        when is_binary(path),
        do: [%{module: alias_string(al, mod), session: s, hooks: h} | acc]
+
+  # THE MOUNT CALLSITE, RECORDED WITH THE CONTEXT IT SITS IN — the one clause wave 42 was
+  # missing. `live_session :plugin_ops do plugin_routes(scope: :ops) end` quotes to a
+  # `{:plugin_routes, _, [[scope: :ops]]}` node holding no `live/3`, so the generic clause
+  # below descended into it and recorded NOTHING; every clause in every module mounted
+  # there then met `sess == []` and landed in the residual. `|| :admin` is not a fallback
+  # of convenience — it is mount_walk/3's default, spelled the same way on purpose so the
+  # two walks cannot disagree about which bucket an option-less callsite mounts.
+  defp lvs_walk({@routed_resolved_macro, _, [opts]}, {_al, s, h}, acc) when is_list(opts),
+    do: [%{plugin_scope: kw_lit(opts, :scope) || :admin, session: s, hooks: h} | acc]
 
   defp lvs_walk({_, _, args}, ctx, acc) when is_list(args),
     do: Enum.reduce(args, acc, &lvs_walk(&1, ctx, &2))
@@ -5214,7 +5394,7 @@ defmodule PDS.Census do
           (lv.order
            |> Enum.map(fn c -> "#{c} #{Map.get(lv.freqs, c, 0)}" end)
            |> Enum.join(", ")) <>
-          " · RESIDUAL #{lv.residual} printed with its count, never folded · DENIES #{lv.denies} / #{lv.reachable} deny-by-default against #{lv.halt_keyed} / #{lv.reachable} on the naive halt key · ATTACH-CERTAINTY #{lv.attach_certain} / #{lv.reachable}"
+          " · RESIDUAL #{lv.residual} printed with its count — mount callsites outside every live_session, never folded · DENIES #{lv.denies} / #{lv.reachable} deny-by-default against #{lv.halt_keyed} / #{lv.reachable} on the naive halt key · ATTACH-CERTAINTY #{lv.attach_certain} / #{lv.reachable}"
       else
         "the REACH partition sums to #{lv.sum} over a population of #{lv.population}" <>
           if lv.stray == [], do: "", else: " · class(es) outside the declared taxonomy: #{inspect(lv.stray)}"
@@ -5998,11 +6178,11 @@ defmodule PDS.Census do
       mut: nil,
       exit: 0,
       expect: [
-        "0 / 1   (0.0%)    0 / 2   (0.0%)   <- @max_depth, the census budget",
-        "1 / 1 (100.0%)    1 / 2  (50.0%)   <- the relation CLOSES here",
-        "2 == population 2",
-        "1 / 1  clause(s) whose EVERY live_session chain",
-        "1 / 1  reachable clause(s) covered by a deny-by-default gate",
+        "0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget",
+        "1 / 4  (25.0%)    1 / 5  (20.0%)   <- the relation CLOSES here",
+        "5 == population 5",
+        "2 / 2  clause(s) whose EVERY live_session chain",
+        "2 / 2  reachable clause(s) covered by a deny-by-default gate",
         "PASS  LIVEVIEW-REACH-CLOSES"
       ],
       proves: "the routed fixture LiveView's write sits ONE HOP past @max_depth, so the sweep prints FALSE at the budget and TRUE at closure — and BOTH cells are asserted as fractions, numerator AND denominator, over a routed 1 and a population 2 that a bare integer could not distinguish"
@@ -6021,8 +6201,8 @@ defmodule PDS.Census do
       mut: {"{verbs, _found, _chain} = bfs([{d, 0" <> ", [label(d)]}], index, MapSet.new(), %{}, nil, [], max)",
             "{verbs, _found, _chain} = bfs([{d, -1, [label(d)]}], index, MapSet.new(), %{}, nil, [], max)"},
       exit: 0,
-      expect: ["1 / 1 (100.0%)    1 / 2  (50.0%)   <- @max_depth, the census budget"],
-      refute: ["0 / 1   (0.0%)    0 / 2   (0.0%)   <- @max_depth, the census budget"],
+      expect: ["1 / 4  (25.0%)    1 / 5  (20.0%)   <- @max_depth, the census budget"],
+      refute: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget"],
       proves: "the printed FRACTION at the budget moves from 0 / 1 to 1 / 1 when the write moves one hop — so it is a measurement of the tree and not a constant the block prints either way"
     },
     %{
@@ -6035,9 +6215,9 @@ defmodule PDS.Census do
       mut: {"{Map.has_key?(verbs, :write)" <> ", Map.get(verbs, :visited, [])}",
             "{false, Map.get(verbs, :visited, [])}"},
       exit: 0,
-      expect: ["0 / 1   (0.0%)    0 / 2   (0.0%)   <- @max_depth, the census budget"],
-      refute: ["1 / 1 (100.0%)"],
-      proves: "a write flag forced false empties every depth cell and the case REDS on the missing 1 / 1 — the exact mutation that used to survive at exit 0 with every arm printing PASS"
+      expect: ["0 / 4   (0.0%)    0 / 5   (0.0%)   <- @max_depth, the census budget"],
+      refute: ["1 / 4  (25.0%)    1 / 5  (20.0%)"],
+      proves: "a write flag forced false empties every depth cell and the case REDS on the missing 1 / 4 — the exact mutation that used to survive at exit 0 with every arm printing PASS"
     },
     %{
       name: "LIVEVIEW-REACH-CLOSES-ARMED",
@@ -6054,6 +6234,57 @@ defmodule PDS.Census do
       exit: 1,
       expect: ["FAIL  LIVEVIEW-REACH-CLOSES", "outside the declared taxonomy"],
       proves: "a REACH class that falls out of the declared taxonomy reds BY NAME instead of quietly shrinking a denominator — the arm that makes this block catchable at all"
+    },
+    # THE WAVE-43 FOLD, EXERCISED BY THE CORPUS RATHER THAN BY THE REAL TREE. The three
+    # cases below are the substitution the folded class has to descend from: the fixture
+    # plugin's three live specs meet a mount callsite inside a live_session, a callsite
+    # outside every live_session, and a module name this lens cannot resolve — and each
+    # shape is asserted as a FRACTION over the same population of 5, so a fold that
+    # decided everything and a fold that decided nothing are both visible here.
+    %{
+      name: "LIVEVIEW-PLUGIN-MOUNT-FOLDS",
+      corpus: :full,
+      argv: [],
+      mut: nil,
+      exit: 0,
+      expect: [
+        "1 / 3 plugin_routes/1 callsite(s) sit INSIDE a live_session",
+        "Keyed on {module, live_session}. 2 routed module(s) resolve to a",
+        "reachable_unconditional            2 / 5",
+        "RESIDUAL residual_no_derivable_chain   2 / 5",
+        "sum                                5 == population 5"
+      ],
+      proves: "a plugin spec mounted INSIDE a live_session resolves the chain at its own callsite and lands DECIDED (reachable_unconditional 2 / 5), while the spec mounted at the sessionless callsite and the one whose module resolves to `?` stay UNDECIDED (RESIDUAL 2 / 5) — the residual is narrowed by derivation on this corpus and is NOT zero by construction"
+    },
+    %{
+      name: "LIVEVIEW-PLUGIN-MOUNT-NOT-CONSTANT",
+      corpus: :full,
+      argv: [],
+      # KILL THE EMISSION, KEEP THE CLAUSE. The walk still matches the mount node and
+      # still descends; it simply records nothing — which is EXACTLY the wave-42 shape
+      # this slice repaired, reproduced on demand. If the decided class survived this,
+      # it would be coming from somewhere other than the callsite.
+      mut: {"do: [%{plugin_scope: kw_lit(opts, :scope)" <> " || :admin, session: s, hooks: h} | acc]",
+            "do: acc"},
+      exit: 0,
+      expect: ["RESIDUAL residual_no_derivable_chain   3 / 5", "reachable_unconditional            1 / 5"],
+      refute: ["RESIDUAL residual_no_derivable_chain   2 / 5"],
+      proves: "with the mount callsite unrecorded the plugin LiveView falls straight back into the residual (2 / 5 -> 3 / 5) — so the DECIDED class above is produced by this clause and not by a module-name pattern or a sibling route"
+    },
+    %{
+      name: "LIVEVIEW-PLUGIN-VAR-DECLINES",
+      corpus: :full,
+      argv: [],
+      # LET THE UNNAMEABLE SPEC JOIN. The fixture plugin binds one route module to a name
+      # inline_alias_bindings/1 retires, so the spec's module reads `?`; with the guard
+      # neutered that phantom is credited a live_session and the routed-module count grows
+      # by a module NOBODY CAN OPEN. The count is the observable, and it moves.
+      mut: {"defp lvs_joinable?(%{method: @routed_live_method, module: mod}), do: mod != " <> "\"?\"",
+            "defp lvs_joinable?(%{method: @routed_live_method, module: mod}), do: mod != " <> "\"!\""},
+      exit: 0,
+      expect: ["Keyed on {module, live_session}. 3 routed module(s) resolve to a"],
+      refute: ["Keyed on {module, live_session}. 2 routed module(s) resolve to a"],
+      proves: "the `?` decline is load-bearing: without it the fold credits a live_session to a spec whose module this lens cannot name, and the printed routed-module count goes 2 -> 3 on a corpus whose openable routed modules never changed"
     }
   ]
 
@@ -6357,6 +6588,24 @@ defmodule PDS.Census do
         end
       end
 
+      # THE PLUGIN-MOUNT HALF (PDS wave 43). BOTH SHAPES, ON PURPOSE: one
+      # plugin_routes/1 callsite INSIDE a live_session (its specs resolve a chain and
+      # land in a DECIDED class) and one OUTSIDE every live_session (its specs resolve
+      # nothing and stay in the RESIDUAL). Without the second the residual would be zero
+      # on this corpus by construction and the selftest could not tell a fold from a
+      # rubber stamp. The third route is LITERAL and sessionless: it routes the module
+      # the plugin's own `?` spec fails to name, so that module is IN route_mods and its
+      # clause can be watched staying undecided while the `?` spec declines to join.
+      scope "/plugins", Barkpark.Filler do
+        live_session :selftest_plugin_session,
+          on_mount: [{Barkpark.Filler.FixtureHook, :default}] do
+          plugin_routes(scope: :ops)
+        end
+
+        plugin_routes(scope: :api)
+        live("/loose-var", PluginVarLive)
+      end
+
       scope "/v1" do
         plugin_routes(scope: :admin)
         post("/selftest-fixture-close", Barkpark.Filler.M1, :noop)
@@ -6439,6 +6688,49 @@ defmodule PDS.Census do
       defp gate(_event, _params, socket), do: {:halt, socket}
     end
     """)
+
+    # THE PLUGIN HALF (PDS wave 43) — THE FIRST FIXTURE FILE UNDER @plugin_dir. Until
+    # this file existed plugin_route_specs/1 returned [] on the synthetic corpus, so the
+    # wave-43 mount clause emitted NOTHING under --selftest and the fold was structurally
+    # unexercised: a class that never descends from a substitution is not proven by the
+    # green run that carried it. Three live specs, one per shape the join must tell apart:
+    #
+    #   auth: :ops     mounted at a callsite INSIDE live_session :selftest_plugin_session
+    #                  -> a DECIDED class, through the spec's own auth:.
+    #   auth: :api     mounted at a callsite OUTSIDE every live_session
+    #                  -> RESIDUAL, which is what keeps the residual falsifiable here.
+    #   auth: :ops     spelled with a name inline_alias_bindings/1 RETIRES (bound at top
+    #                  level AND rebound inside a fn, so bind_counts/1 reads 2) -> the
+    #                  module resolves to `?` and the spec DECLINES the join rather than
+    #                  crediting live_session :selftest_plugin_session to a module nobody
+    #                  can open. The module it would have named is routed LITERALLY and
+    #                  sessionlessly in the fixture router, so the decline is observable
+    #                  as that module staying in the residual.
+    w.("api/lib/barkpark/plugins/filler_plugin.ex", """
+    defmodule Barkpark.Plugins.FillerPlugin do
+      def register_routes(_ctx) do
+        ops_mod = Barkpark.Filler.PluginOpsLive
+        var_mod = Barkpark.Filler.PluginVarLive
+        _rebound = Enum.map([], fn m -> var_mod = m end)
+
+        [
+          {:live, "/ops-live", ops_mod, :index, auth: :ops},
+          {:live, "/api-live", Barkpark.Filler.PluginLooseLive, :index, auth: :api},
+          {:live, "/var-live", var_mod, :index, auth: :ops}
+        ]
+      end
+    end
+    """)
+
+    Enum.each(["PluginOpsLive", "PluginLooseLive", "PluginVarLive"], fn m ->
+      w.("api/lib/barkpark/filler/#{Macro.underscore(m)}.ex", """
+      defmodule Barkpark.Filler.#{m} do
+        use Phoenix.LiveView
+
+        def handle_event("#{Macro.underscore(m)}-save", _params, socket), do: {:noreply, socket}
+      end
+      """)
+    end)
 
     w.("api/lib/barkpark/repo.ex", """
     defmodule Barkpark.Repo do
@@ -6602,7 +6894,11 @@ defmodule PDS.Census do
     drift("read-routed", Enum.count(classified, &(not &1.write? and &1.read?)), :read)
     drift("unrouted", Enum.count(classified, &(not &1.write? and not &1.read?)), :unrouted)
     p("")
-    p("wall clock  #{ms} ms  (build-free: no mix project, no compile, no app boot)")
+    # STILL EXACTLY ONE LINE, AND IT SAYS SO. PDS-D605's fixture recipe reads this census
+    # as "byte-identical except the volatile line", and it named that line by its old
+    # `wall clock` label — which this run no longer prints. The line names ITSELF volatile
+    # so the recipe can be re-derived from the output instead of transcribed from D605.
+    p("user cpu  #{ms} ms  (THE ONE VOLATILE LINE — build-free: no mix project, no compile, no app boot; BEAM-internal, this process only, see `blind spot` above)")
 
     if Enum.all?(checks, &elem(&1, 1)) do
       p("CENSUS OK")
