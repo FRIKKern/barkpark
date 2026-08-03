@@ -378,18 +378,61 @@ class Refusal extends Error {
   }
 }
 
+// CURL IS NO LONGER MUTE. `curl -sG` carries no `--fail`, so an HTTP 401/403/404/500 with
+// a JSON error body PARSED FINE and the caller's `.result.documents` then threw a bare
+// `TypeError: Cannot read properties of undefined (reading 'documents')` —
+// `code=UNSPECIFIED`. It failed CLOSED, which is right, and named neither the HTTP status
+// nor the `request_id` it had just parsed and thrown away, which is the whole diagnosis a
+// reader needs. `-w` appends the status on its own trailing line so the status is read
+// from curl itself rather than guessed from the body's shape.
 function q(params) {
-  const a = ['-sG', `${SERVER}/v1/data/query/production/task`];
+  const a = ['-sG', `${SERVER}/v1/data/query/production/task`, '-w', '\n%{http_code}'];
   for (const [k, v] of params) a.push('--data-urlencode', `${k}=${v}`);
   a.push('-H', `Authorization: Bearer ${TOKEN}`);
-  let body;
-  try { body = execFileSync('curl', a, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
-  catch (e) { throw new Infra(`curl failed: ${String(e.message).slice(0, 90)}`); }
-  try { return JSON.parse(body); }
-  catch { throw new Infra(`response is not JSON (${body.slice(0, 60).replace(/\s+/g, ' ')})`); }
+  let raw;
+  try { raw = execFileSync('curl', a, { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 }); }
+  catch (e) { throw new Infra(`curl failed: ${String(e.message).slice(0, 90)}`, 'LEDGER-UNREACHABLE'); }
+  // TRAILING WHITESPACE FIRST. `-w '\n%{http_code}'` emits no newline after the code, but
+  // a `lastIndexOf('\n')` over bytes that DO end in one reads the status as the empty
+  // string and then reports `HTTP ` — a diagnosis with a hole exactly where the number
+  // goes, which is the defect this whole change exists to remove.
+  const trimmed = raw.replace(/\s+$/, '');
+  const cut = trimmed.lastIndexOf('\n');
+  const status = cut === -1 ? '000' : trimmed.slice(cut + 1).trim();
+  const body = cut === -1 ? trimmed : trimmed.slice(0, cut);
+  let parsed = null;
+  try { parsed = JSON.parse(body); } catch { parsed = null; }
+  if (!/^2\d\d$/.test(status)) {
+    const err = (parsed && (parsed.error || parsed)) || {};
+    throw new Infra(
+      `the ledger answered HTTP ${status} — error.code=${err.code || '(none named)'} request_id=${(parsed && (parsed.request_id || err.request_id)) || '(none returned)'} message=${String(err.message || '').slice(0, 90) || '(none)'}. `
+      + 'Nothing about clause (a) or bucket (c) is asserted: a roster this program could not fetch is not a roster it fetched and found clean.',
+      'LEDGER-UNREADABLE');
+  }
+  if (parsed === null)
+    throw new Infra(`response is not JSON (HTTP ${status}; ${body.slice(0, 60).replace(/\s+/g, ' ')})`, 'LEDGER-UNREADABLE');
+  return parsed;
 }
 // NEVER bare ?parent_id= — proven at Decide to silently return 500 unfiltered rows.
-const fetchRoster = (parentId) => q([['filter[parent_id]', parentId], ['limit', '500']]).result.documents;
+//
+// AND NEVER AN UNCHECKED PAGE. `result.count` is the PAGE SIZE, not a total; the response
+// carries no total and no `hasMore`, so a parent with more children than the limit returns
+// exactly `limit` rows with NOTHING to say it was cut. Measured: lower this to 3 and the
+// predicate printed `VERDICT: SEAL  orphans=0` at exit 0 over a roster of 288 carrying 57
+// orphans — a DRIVEN false seal, exit 0, from one number. A real parent in this ledger
+// today has 521 children and returns exactly 500 with `count=500` and no signal. A page
+// that is FULL is indistinguishable from a page that is COMPLETE, so a full page is
+// refused rather than counted.
+const ROSTER_PAGE_LIMIT = 500;
+const fetchRoster = (parentId) => {
+  const docs = q([['filter[parent_id]', parentId], ['limit', String(ROSTER_PAGE_LIMIT)]]).result.documents;
+  if (!Array.isArray(docs)) throw new Infra(`the roster of ${parentId} is not an array of documents`, 'ROSTER-NOT-AN-ARRAY');
+  if (docs.length >= ROSTER_PAGE_LIMIT)
+    throw new Infra(
+      `the roster of ${parentId} came back FULL — ${docs.length} rows against a page limit of ${ROSTER_PAGE_LIMIT}, and this endpoint returns no total and no hasMore. A full page cannot be told from a complete one, so every row beyond it is invisible: clause (a) would count orphans over a population it silently truncated and report orphans=0 as evidence. Nothing is asserted about clause (a).`,
+      'ROSTER-TRUNCATED');
+  return docs;
+};
 const fetchById = (id) => q([['filter[_id]', id]]).result.documents[0] || null;
 
 // A successor must be a row someone can still WORK. `done` and `cancelled` are
@@ -469,7 +512,193 @@ function gitDiffPaths(sha) {
     .split('\n').map((l) => l.trim()).filter(Boolean);
 }
 
-function verifyCommit(d, commit, fixture, problems) {
+// ---------------------------------------------------------------------------
+// FOUR PROBES — "I COULD NOT LOOK" IS NOT "THE THING IS BROKEN"
+//
+// The ancestry leg used to be one `try/catch` around `merge-base --is-ancestor`, and
+// its catch swallowed FIVE distinguishable conditions into one identical sentence about
+// the PRODUCT: `commit <sha> is not an ancestor of origin/main`. Measured on origin/main
+// in a pristine `git clone --depth 1 --branch main` of this repository: six of those
+// sentences, all six false, none of them about the product. Wave 27 fixed the shape at
+// the ROOT (a `git archive` extraction is refused before any clause runs) and left it
+// standing at the OBJECT — a real checkout of a real repository whose HISTORY is simply
+// not present.
+//
+// WHAT WAS MEASURED, so no future reader re-derives it (charter D328/D335):
+//
+//   (A) rc 1 FROM `merge-base --is-ancestor` IS AMBIGUOUS. In a depth-1 clone with the
+//       commit object fetched IN (grafted), `cat-file -e` is rc 0, `git show
+//       --name-only` is rc 0 WITH REAL BYTES, and `is-ancestor` still answers rc 1 for a
+//       commit a full clone confirms IS an ancestor. OBJECT PRESENCE IS NOT THE
+//       DISCRIMINATOR; the truncated WALK is.
+//   (B) `git rev-parse --is-shallow-repository` ALONE OVER-REPORTS. This repository's own
+//       `.git/shallow` holds one graft (`360b675903…`) that is NOT on main's ancestry, so
+//       the developer host, every epic worktree, and even a plain `git clone` over
+//       file:// all answer `true`. EXPECT is-shallow=true LOCALLY WITH walk=complete —
+//       that is a correct reading, not a degraded environment. A leg keyed on the
+//       store-level flag alone would degrade every local run to "unreadable".
+//   (C) `actions/checkout@v4` makes TWO shapes. push->main resolves `origin/main` (rc 0)
+//       and misses the OBJECTS (rc 128). A pull_request checkout fetches only
+//       `refs/remotes/pull/N/merge`, so `rev-parse --verify --quiet origin/main` answers
+//       rc 1 — the SAME code as an honest "no". Both still die rc 128 at merge-base, so
+//       the discrimination keys on the MERGE-BASE rc and on the four probes, never on
+//       "does origin/main resolve" alone.
+//
+// THE FOUR PROBES, read SEPARATELY and never folding one's rc into another's:
+//
+//   1. REF     `rev-parse --verify --quiet origin/main` — is there a thing to compare to?
+//   2. OBJECT  `cat-file -e <sha>^{commit}` — is the commit itself in this store?
+//   3. WALK    is a graft on HEAD's OWN history? — PORTED from
+//              `scripts/pds-record-parity.sh:261 walk_truncation()`, which is
+//              mutation-proven in `scripts/pds-record-parity.test.sh`. That file is
+//              PDS-owned and a concurrent wave is live on it, so the LOGIC is ported
+//              rather than the file imported — and this file's own header law is ZERO
+//              DEPENDENCIES anyway. EXTENDED here with the REF leg, because
+//              `walk_truncation` only ever asks about HEAD and the pull_request shape's
+//              failure is that `origin/main` does not exist at all.
+//   4. ANCESTRY `merge-base --is-ancestor` — reached only with 1, 2 and 3 clean, and only
+//              THEN is its rc 1 an honest claim about the PRODUCT.
+//
+// A FIFTH LEG NOBODY NAMED, and it is the false PASS to the others' false FAIL: a grafted
+// clone ALSO corrupts clause (b)'s DIFF. `git show --name-only` for
+// `8fd00b6afb1eca55d…` returns 7535 paths in a grafted clone versus 5 in a full one — the
+// parent is absent, so the whole tree renders as additions and BOTH the path-touch leg
+// and the diff grep pass by construction. Probing only ancestry would fix the false FAIL
+// and leave a false PASS standing, so `diffIntegrity` is probed on the ancestor path too.
+const gitProbe = (args) => {
+  const r = spawnSync('git', ['-C', REPO, ...args], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  // A spawn that never ran and a `null` status are BOTH "git would not answer". They are
+  // reported as 128 — git's own can-not-look code — and never as 1, which is an ANSWER.
+  return { rc: r.error || r.status === null ? 128 : r.status, out: (r.stdout || '').trim() };
+};
+
+// PORTED from scripts/pds-record-parity.sh:261 `walk_truncation()`, fail-closed in all
+// four of its own unknown shapes (non-boolean store answer, missing common dir,
+// unreadable graft list, untestable graft). Memoised: it is repository-wide, asked once
+// per registered defect, and cannot change mid-run.
+let _walkCache = null;
+function walkTruncation() {
+  if (_walkCache) return _walkCache;
+  const set = (state, reason, graft = null) => (_walkCache = { state, reason, graft });
+
+  const store = gitProbe(['rev-parse', '--is-shallow-repository']);
+  if (store.rc !== 0)
+    return set('unknown', `\`git rev-parse --is-shallow-repository\` exited ${store.rc}, so this checkout will not say whether its walk is whole`);
+  if (store.out === 'false') return set('complete', 'the store is not shallow at all');
+  if (store.out !== 'true')
+    return set('unknown', `\`git rev-parse --is-shallow-repository\` answered '${store.out || '<nothing>'}', which is neither true nor false`);
+
+  // Store-shallow. THE STORE FLAG IS NOT THE QUESTION (see (B) above): ask whether a
+  // graft lies on HEAD's OWN history.
+  const common = gitProbe(['rev-parse', '--git-common-dir']);
+  if (common.rc !== 0 || !common.out)
+    return set('unknown', 'the store is shallow but `git rev-parse --git-common-dir` answered nothing, so the graft list cannot be located');
+  const dir = common.out.startsWith('/') ? common.out : `${REPO}/${common.out}`;
+  const grafts = `${dir.replace(/\/$/, '')}/shallow`;
+  if (!existsSync(grafts))
+    return set('unknown', `the store is shallow but the graft list ${grafts} is missing or unreadable, so no graft can be tested against HEAD`);
+  let list;
+  try { list = readFileSync(grafts, 'utf8'); }
+  catch { return set('unknown', `the store is shallow but the graft list ${grafts} could not be read, so no graft can be tested against HEAD`); }
+
+  for (const line of list.split('\n')) {
+    const g = line.trim();
+    if (!g || g.startsWith('#')) continue;
+    const r = gitProbe(['merge-base', '--is-ancestor', g, 'HEAD']);
+    if (r.rc === 0) return set('truncated', `graft ${g} lies on HEAD's own history, so this walk stops early`, g);
+    if (r.rc === 1) continue;               // a real answer: this graft is off HEAD's history
+    return set('unknown', `graft ${g} could not be tested against HEAD (git merge-base --is-ancestor exit ${r.rc})`, g);
+  }
+  return set('complete', `store-shallow, but no graft in ${grafts} lies on HEAD's history`);
+}
+
+// The graft shas themselves, full-length, for the diff-integrity probe. [] when the
+// store is not shallow or the list is unreadable — the WALK probe is what reports an
+// unreadable graft list, and reporting it twice would double-count one condition.
+function graftList() {
+  const w = walkTruncation();
+  if (w.state === 'complete' && w.reason === 'the store is not shallow at all') return [];
+  const common = gitProbe(['rev-parse', '--git-common-dir']);
+  if (common.rc !== 0 || !common.out) return [];
+  const dir = common.out.startsWith('/') ? common.out : `${REPO}/${common.out}`;
+  try { return readFileSync(`${dir.replace(/\/$/, '')}/shallow`, 'utf8').split('\n').map((l) => l.trim()).filter(Boolean); }
+  catch { return []; }
+}
+
+// PROBE 5 — CAN THIS COMMIT'S DIFF BE COMPUTED AT ALL? A graft boundary has no parent in
+// the store, so git renders its patch against the EMPTY TREE and every path in the
+// repository reads as an addition. Clause (b) then passes by construction on a register
+// entry it never actually verified.
+function diffIntegrity(sha) {
+  const rl = gitProbe(['rev-list', '--parents', '-n', '1', sha]);
+  if (rl.rc !== 0) return { state: 'unknown', why: `\`git rev-list --parents -n 1 ${sha}\` exited ${rl.rc}` };
+  const parents = rl.out.split(/\s+/).filter(Boolean).slice(1);
+  const full = gitProbe(['rev-parse', `${sha}^{commit}`]).out;
+  if (full && graftList().includes(full))
+    return { state: 'grafted', why: `${full} is a GRAFT BOUNDARY in this store — git has no parent for it, so \`git show\` renders the whole tree as additions and both the path leg and the diff grep would pass over a patch nobody has` };
+  for (const p of parents) {
+    if (gitProbe(['cat-file', '-e', `${p}^{commit}`]).rc !== 0)
+      return { state: 'missing-parent', why: `its parent ${p} is NOT in this object store, so the patch \`git show\` would render is not this commit's patch` };
+  }
+  if (!parents.length && walkTruncation().state !== 'complete')
+    return { state: 'unknown', why: 'git reports NO parent for it while this walk is not known to be whole, so its rendered patch cannot be trusted to be its own' };
+  return { state: 'intact', why: `${parents.length} parent(s) present` };
+}
+
+// THE COMPOSITE READ. Returns one of:
+//   { verdict: 'ancestor' }        — 1,2,3,5 clean and merge-base said YES
+//   { verdict: 'not-ancestor' }    — 1,2,3 clean and merge-base said NO. A PRODUCT claim.
+//   { verdict: 'unavailable', code, sentence } — this checkout could not look.
+// The reading string names ALL FOUR probes on every unavailable sentence, so a reader
+// never has to guess which leg answered what.
+function historyProbe(sha) {
+  const ref = gitProbe(['rev-parse', '--verify', '--quiet', 'origin/main']);
+  const obj = gitProbe(['cat-file', '-e', `${sha}^{commit}`]);
+  let ancRc = null;
+  if (ref.rc === 0 && obj.rc === 0) ancRc = gitProbe(['merge-base', '--is-ancestor', sha, 'origin/main']).rc;
+  const walk = walkTruncation();
+  const reading = () => `[ref: origin/main ${ref.rc === 0 ? `resolves to ${ref.out.slice(0, 12)}` : `DOES NOT RESOLVE (rev-parse --verify rc ${ref.rc})`}`
+    + ` | object: ${obj.rc === 0 ? 'present' : `ABSENT (cat-file -e rc ${obj.rc})`}`
+    + ` | walk: ${walk.state} (${walk.reason})`
+    + ` | ancestry: ${ancRc === null ? 'NOT RUN — an earlier probe already answered' : `merge-base --is-ancestor rc ${ancRc}`}]`;
+  const unavailable = (code, why) => ({
+    verdict: 'unavailable',
+    code,
+    sentence: `HISTORY-UNAVAILABLE: commit ${sha} — ${code}. ${why} This is a fact about THIS CHECKOUT, not about the product: nothing is claimed about whether the fix landed. ${reading()}`,
+  });
+
+  if (ref.rc !== 0)
+    return unavailable('MISSING-REF', 'There is no `origin/main` in this checkout to compare anything against — the shape a pull_request checkout leaves behind, where only refs/remotes/pull/N/merge was ever fetched.');
+  if (obj.rc !== 0)
+    return unavailable('MISSING-OBJECT', 'The commit object itself is not in this store — the shape `actions/checkout@v4` leaves behind on a push, where origin/main resolves and the history behind it was never fetched.');
+  if (ancRc !== 0 && ancRc !== 1)
+    return unavailable('ANCESTRY-UNREADABLE', `\`git merge-base --is-ancestor\` exited ${ancRc}, which is git refusing to answer rather than answering no.`);
+
+  if (ancRc === 1) {
+    // rc 1 IS AMBIGUOUS (see (A)). Only a walk known to be WHOLE makes it a product claim.
+    if (walk.state !== 'complete')
+      return unavailable(walk.state === 'truncated' ? 'WALK-TRUNCATED' : 'WALK-UNKNOWN',
+        `merge-base answered "no", but this walk is ${walk.state}, so "no" is what a truncated history says about a commit it cannot reach — measured: a grafted depth-1 clone answers rc 1 for a commit a full clone confirms IS an ancestor.`);
+    // The cheap corroborator, measured: after an rc-1 answer, `git merge-base <sha>
+    // origin/main` prints a real sha for a genuinely non-ancestor tip and NOTHING for a
+    // walk that could not reach far enough. Fails closed on "nothing".
+    const mb = gitProbe(['merge-base', sha, 'origin/main']);
+    if (mb.rc !== 0 || !mb.out)
+      return unavailable('NO-MERGE-BASE',
+        `merge-base answered "no" and \`git merge-base ${sha} origin/main\` then found NO common ancestor at all (rc ${mb.rc}). A commit genuinely off main still shares a fork point with it; sharing none means this store cannot place the commit, not that the product lacks the fix.`);
+    return { verdict: 'not-ancestor' };
+  }
+
+  // An ancestor — but a grafted commit's PATCH is not its patch. Probe 5, or the false
+  // FAIL is fixed and a false PASS is left standing in its place.
+  const integ = diffIntegrity(sha);
+  if (integ.state !== 'intact')
+    return unavailable('DIFF-UNVERIFIABLE',
+      `It IS an ancestor of origin/main, but its DIFF cannot be verified here: ${integ.why}. Certifying the registered path and grep against that patch would be a clause-(b) PASS over bytes this checkout does not have.`);
+  return { verdict: 'ancestor' };
+}
+
+function verifyCommit(d, commit, fixture, problems, unavailable) {
   if (fixture) {
     // Fixture mode is a MUTATION CONTROL, never a live claim. `landed` stands in for
     // ancestry; `diffs[sha]` optionally stands in for the patch so the diff rule is
@@ -486,12 +715,23 @@ function verifyCommit(d, commit, fixture, problems) {
     return 'fixture diff';
   }
 
-  try { execFileSync('git', ['-C', REPO, 'merge-base', '--is-ancestor', commit, 'origin/main'], { stdio: 'ignore' }); }
-  catch { problems.push(`commit ${commit} is not an ancestor of origin/main`); return null; }
+  const probe = historyProbe(commit);
+  if (probe.verdict === 'unavailable') { unavailable.push(probe.sentence); return null; }
+  // The ONE honest product sentence, reached only with all four probes clean.
+  if (probe.verdict === 'not-ancestor') { problems.push(`commit ${commit} is not an ancestor of origin/main`); return null; }
 
   let paths, body;
   try { paths = gitDiffPaths(commit); body = gitDiffBody(commit); }
-  catch (e) { throw new Infra(`git show ${commit} failed: ${String(e.message).slice(0, 90)}`); }
+  catch (e) {
+    // RECLASSIFIED (wave 29). This catch used to throw `Infra`, which unwinds to the
+    // top-level handler and prints `INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN` at exit 2
+    // — a PROCESS-level fault for a PER-DEFECT condition, and exactly the shape
+    // cch-w28-s1's clause-(a) tripwire is armed to red. A commit whose patch this store
+    // cannot render is the same fact as a commit this store cannot reach: b's own letter,
+    // at exit 1, with clauses (a) and (c) still evaluated and still printed.
+    unavailable.push(`HISTORY-UNAVAILABLE: commit ${commit} — DIFF-UNREADABLE. \`git show\` could not render its patch here (${String(e.message).slice(0, 90)}). This is a fact about THIS CHECKOUT, not about the product: nothing is claimed about whether the fix landed.`);
+    return null;
+  }
 
   const missing = (d.diff.paths || []).filter((p) => !paths.includes(p));
   if (missing.length) problems.push(`commit ${commit} does not touch ${missing.join(', ')} — the registered fix is not in this diff`);
@@ -609,6 +849,11 @@ function evaluateLadder(fixture, guardOverride, waivers) {
       ? fixture.defectCommits[d.id] : d.commit;
     const problems = [];
     const notes = [];
+    // A THIRD BUCKET, and the whole point of it is that it is NOT `problems`. A problem
+    // is a claim about the PRODUCT; an unavailable is a claim about THIS CHECKOUT. Fold
+    // them together and the instrument is back to reporting defect-shaped prose for a
+    // condition that is only "I could not look".
+    const unavailable = [];
 
     if (!commit) problems.push('NO COMMIT — defect is known and unlanded');
     else {
@@ -616,7 +861,7 @@ function evaluateLadder(fixture, guardOverride, waivers) {
       // own. Printing `verified by ancestry + diff` beside a diff mismatch would be a
       // success line over a read that failed — this file's whole subject.
       const before = problems.length;
-      const how = verifyCommit(d, commit, fixture, problems);
+      const how = verifyCommit(d, commit, fixture, problems, unavailable);
       if (how && problems.length === before) notes.push(`commit ${commit} verified by ancestry + ${how}`);
       else if (how) notes.push(`commit ${commit} IS an ancestor of origin/main, but its DIFF did not verify — see below; nothing about this fix is certified`);
     }
@@ -728,7 +973,7 @@ function evaluateLadder(fixture, guardOverride, waivers) {
       problems.push(`NO MEASUREMENT (rung 3): ${d.unmeasured || 'nothing measures this defect'}`);
     }
 
-    ladder.push({ id: d.id, rung, problems, notes, stubbed, waived });
+    ladder.push({ id: d.id, rung, problems, notes, unavailable, stubbed, waived });
   }
   return ladder;
 }
@@ -740,8 +985,13 @@ const RUNG_MARK = { 1: '✓', 2: '◐', 3: '·' };
 function pushLadder(L, ladder) {
   for (const e of ladder) {
     const bad = e.problems.length > 0;
-    L.push(`  ${bad ? '✗' : RUNG_MARK[e.rung] || '·'} ${e.id}  (rung ${e.rung}${e.rung === 2 ? ' — MEASURED-ELSEWHERE' : ''})`);
+    // `?` is its own mark, deliberately not `✗`. An entry this checkout could not read is
+    // not an entry that failed, and a reader scanning marks must be able to see the
+    // difference without reading a sentence.
+    const mark = bad ? '✗' : (e.unavailable.length ? '?' : RUNG_MARK[e.rung] || '·');
+    L.push(`  ${mark} ${e.id}  (rung ${e.rung}${e.rung === 2 ? ' — MEASURED-ELSEWHERE' : ''})`);
     e.notes.forEach((n) => L.push(`        ${n}`));
+    e.unavailable.forEach((u) => L.push(`        ${u}`));
     e.problems.forEach((p) => L.push(`        ${p}`));
   }
 }
@@ -771,11 +1021,15 @@ function ladderOnly(fixture, guardOverride, stamp, head) {
 
   const byRung = { 1: 0, 2: 0, 3: 0 };
   for (const e of ladder) byRung[e.rung] = (byRung[e.rung] || 0) + 1;
-  const clean = ladder.filter((e) => !e.problems.length).length;
+  // An entry this checkout could not READ is not one it read and found clean — the same
+  // sentence wave 27 wrote for the roster and the root, pointed at clause (b)'s history.
+  const clean = ladder.filter((e) => !e.problems.length && !e.unavailable.length).length;
   const flagged = ladder.filter((e) => e.problems.length);
+  const unread = ladder.filter((e) => e.unavailable.length);
 
   L.push(`READING: rung1=${byRung[1]} (measured HERE by a committed guard)  rung2=${byRung[2]} (MEASURED-ELSEWHERE)  rung3=${byRung[3]} (neither)`);
   L.push(`         ${clean} of ${ladder.length} entr(ies) read clean; ${flagged.length} carr(y) a stated problem${flagged.length ? `: ${flagged.map((e) => e.id).join(', ')}` : ''}`);
+  L.push(`         ${unread.length} of ${ladder.length} entr(ies) could not be read from THIS CHECKOUT${unread.length ? `: ${unread.map((e) => e.id).join(', ')}. Their history is absent here; no claim is made about the product for any of them` : ' — every registered commit was reachable and its patch renderable here'}`);
   L.push('');
   L.push('WHAT THIS READING IS NOT:');
   L.push('  1. NOT a verdict. A rung-3 entry above is a READING, not a failure of this');
@@ -800,7 +1054,21 @@ function ladderOnly(fixture, guardOverride, stamp, head) {
   L.push('     console-harness.yml. Registering the Console gate moves no line above.');
   L.push('     Clause (b) is blind to it, and this reading will not let anyone say');
   L.push('     otherwise.');
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} repo=${REPO} head=${head || 'NOT-READ'}`);
+  L.push('  5. NOT a claim that the history it needed was HERE. `b-unavailable=N/M` in the');
+  L.push('     token counts the register entries whose commit this checkout could not');
+  L.push('     reach or whose patch it could not render — a depth-1 CI checkout reads');
+  L.push('     M/M and says so, instead of printing M sentences about a product it never');
+  L.push('     looked at. THIS PATH STILL EXITS 0 (charter D335): the condition is carried');
+  L.push('     in LETTERS, never in an exit code. An instrument that reads and then exits');
+  L.push('     1 gets wired in as a gate, and `console-unit` checks out at');
+  L.push('     actions/checkout@v4\'s depth-1 default on every push to main — exit-1-on-read');
+  L.push('     would leave the BLOCKING Console gate permanently red for an environment');
+  L.push('     fact. The VERDICT path is where an unreadable history costs an exit code.');
+  // `b-unavailable=` sits IMMEDIATELY AFTER `b-clean=` and before `a=`: readers (and this
+  // file's own tests) anchor on the token's HEAD (`^… LADDER-ONLY b-rungs=…`) and on its
+  // TAIL (`mode=live repo=… head=…`), so a new field belongs between the two b-fields and
+  // nowhere else.
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} b-unavailable=${unread.length}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} repo=${REPO} head=${head || 'NOT-READ'}`);
   console.log(L.join('\n'));
   return 0;
 }
@@ -922,6 +1190,17 @@ function main() {
   // to read the ladder is what made the ladder unreadable for four waves.
   if (LADDER_ONLY) return ladderOnly(fixture, guardOverride, STAMP, HEAD);
 
+  // R7 — BUCKET (c) HAS NO CARDINALITY FLOOR EITHER. This is R1 and the EMPTY-ROSTER
+  // floor pointed at the third population. With `PERMANENT_HUMAN_GATES = {}` the
+  // BUCKET (c) section prints NOTHING AT ALL, `gateMissing` is the empty filter of an
+  // empty list, and the token still reads `c=PASS` — a clause certified over zero rows.
+  // Placed AFTER the `--ladder-only` divert on purpose: a reading never evaluates bucket
+  // (c) and prints `c=NOT-READ` in its own letters, so a floor on the population it
+  // deliberately does not read would refuse a run that claims nothing about it.
+  if (Object.keys(PERMANENT_HUMAN_GATES).length === 0)
+    throw new Refusal('EMPTY-GATE-TABLE',
+      'PERMANENT_HUMAN_GATES is empty — bucket (c) would print no row at all and still certify c=PASS over zero gates. The bucket exists to DISCLOSE the rows no commit can ever close; disclosing none of them is not the same as there being none, and an unrun clause is not a passed clause.');
+
   // Trimmed BEFORE R4 compares it: `--successor " cloud-console-hardening-epic"` must
   // not slip past the self-successor refusal on a space.
   const SUCCESSOR_RAW = arg('--successor') || (fixture ? fixture.successor : null) || null;
@@ -1031,6 +1310,12 @@ function main() {
   const waivers = new Set(fixture ? (fixture.unmeasuredWaivers || []) : []);
   const ladder = evaluateLadder(fixture, guardOverride, waivers);
   const defectFails = ladder.filter((e) => e.problems.length);
+  // PER-DEFECT, NEVER PROCESS-LEVEL (charter D335). An entry whose history this checkout
+  // could not read blocks the seal — an unrun clause is not a passed clause — but it does
+  // so as b's OWN LETTER at exit 1, with clauses (a) and (c) still evaluated and still
+  // printed. A process-level exit-2 INFRA-FAULT would print `a=UNKNOWN b=UNKNOWN
+  // c=UNKNOWN` and throw away two clause readings that were perfectly available.
+  const defectUnread = ladder.filter((e) => e.unavailable.length);
 
   // ── output ─────────────────────────────────────────────────────────────────
   L.push(`epic ${EPIC}   successor: ${terminal ? `${TERMINAL} (no successor — post-condition roster read: live=0 considering=0)` : SUCCESSOR}`);
@@ -1053,7 +1338,12 @@ function main() {
   L.push('');
 
   const gateMissing = gateReport.filter((g) => !g.resolved);
-  const ok = orphans.length === 0 && defectFails.length === 0 && gateMissing.length === 0;
+  const ok = orphans.length === 0 && defectFails.length === 0 && gateMissing.length === 0
+    && defectUnread.length === 0;
+  // FAIL outranks HISTORY-UNAVAILABLE: a defect this run DID measure and found unpaid is
+  // a louder fact than one it could not look at, and `b-unavailable=` below carries the
+  // second condition either way, so nothing is hidden by the precedence.
+  const bLetter = defectFails.length ? 'FAIL' : (defectUnread.length ? 'HISTORY-UNAVAILABLE' : 'PASS');
   const measuredHere = ladder.filter((e) => e.rung === 1 && !e.problems.length && !e.stubbed).length;
   const stubbedCount = ladder.filter((e) => e.stubbed).length;
   const waivedCount = ladder.filter((e) => e.waived).length;
@@ -1083,6 +1373,13 @@ function main() {
     L.push('VERDICT: NO SEAL');
     if (orphans.length) L.push(`  - ${orphans.length} residue row(s) carry no forwarding address and no gate label (clause a)`);
     if (defectFails.length) L.push(`  - ${defectFails.length} known user-facing defect(s) unlanded, unverifiable or UNMEASURED (clause b): ${defectFails.map((e) => e.id).join(', ')}`);
+    if (defectUnread.length) {
+      L.push(`  - ${defectUnread.length} known user-facing defect(s) could NOT BE READ from this checkout (clause b, HISTORY-UNAVAILABLE): ${defectUnread.map((e) => e.id).join(', ')}`);
+      L.push('    THIS IS NOT A DEFECT CLAIM. Their history is absent HERE — a depth-1 or');
+      L.push('    pull_request checkout has no origin/main history to compare against — so this');
+      L.push('    run makes no statement about whether those fixes landed. Re-run from a');
+      L.push('    checkout with full history (`git fetch --unshallow`) to get an answer.');
+    }
     if (gateMissing.length) L.push(`  - ${gateMissing.length} hardcoded human gate(s) failed to resolve (bucket c)`);
     L.push('  This is an acceptable, pre-committed outcome. The named successor is the honest handoff.');
   }
@@ -1093,7 +1390,13 @@ function main() {
   // sensitive to (the same command printed b=FAIL from a stale primary checkout and
   // b=PASS from a clean worktree). No future wave can quote a seal run without also
   // quoting the tree and the population it was taken from.
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${orphans.length === 0 ? 'PASS' : 'FAIL'} b=${defectFails.length === 0 ? 'PASS' : 'FAIL'} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'}`);
+  // `b-unavailable=` is APPENDED AFTER `head=` and ONLY WHEN NON-ZERO. Appended, because
+  // the clause letters' run (`a=… b=… c=… orphans=…`) is anchored by readers and by this
+  // file's own tests. Only when non-zero, because a run over a checkout with whole history
+  // must stay BYTE-IDENTICAL to the token this predicate emitted before the discrimination
+  // existed — a new field on every green would make every previously-quoted token
+  // unmatchable for a condition that did not occur.
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${orphans.length === 0 ? 'PASS' : 'FAIL'} b=${bLetter} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'}${defectUnread.length ? ` b-unavailable=${defectUnread.length}/${ladder.length}` : ''}`);
   console.log(L.join('\n'));
   return ok ? 0 : 1;
 }
