@@ -156,9 +156,9 @@ belongs rather than in this sentence):
 |---|---|---|
 | routed entries from `router.ex` AST | 469 | plus 83 plugin specs mounted at 17 `plugin_routes/1` callsites |
 | **ROUTED-WRITE population** | **252** | `post`/`put`/`patch`/`delete` plus every LiveView mount |
-| JUDGED | 65 | reaches a receipt this lens emitted AND the register judged |
+| JUDGED | 67 | reaches a receipt this lens emitted AND the register judged |
 | ROSTERED | 7 | reaches a hand-named roster site outside the lens |
-| EXCLUDED | 180 | committed, dated disposition row — see the classes below |
+| EXCLUDED | 178 | committed, dated disposition row — see the classes below |
 | **UNDISPOSED** | **0** | `ROUTED-POPULATION-COMPLETE` reds on this |
 | sum | 252 | == the population, both directions, no duplicate key |
 
@@ -166,16 +166,26 @@ belongs rather than in this sentence):
 
 | class | n | why |
 |---|---|---|
-| `action_not_in_corpus` | 2 | the routed `{module, action}` resolves to no `def` under `api/lib` — generated, vendored, or outside the corpus glob |
 | `liveview_handle_event` | 40 | a LiveView route names a MOUNT; its writes live in `handle_event/3`, which carries no routed action name for a receipt register to key on (26 distinct modules) |
-| **`status_only_receipt`** | **138** | **THE HOLE.** The routed action reaches no `ok: true` / `"ok" => true` receipt this lens can see and carries no roster anchor — it claims success by STATUS alone (`send_resp(conn, 2xx, "")`, a bare `json/2`, a redirect). SCIM's three IdP write routes land here. |
+| **`status_only_receipt`** | **138** | **THE HOLE.** The routed action reaches no `ok: true` / `"ok" => true` receipt this lens can see and carries no roster anchor. SCIM's three IdP write routes land here. Wave 38 also called it "success by STATUS alone"; wave 40 MEASURED that and RETIRED the clause — most of these rows DO render the stored row, they just do not spell the key the lens greps for. The run prints the retirement and the derivation partition that replaced it. |
 
-**THE JUDGED FRACTION IS 72/252 = 28.6%** — printed, never thresholded. Naming the 40
+The run emits exactly these TWO classes; `action_not_in_corpus` was listed here and
+occurs ZERO times in the output.
+
+**THE JUDGMENT-COVERAGE LADDER, four rungs printed every run (wave 45):** population
+**252** members -> judged-coverage **74** -> VERDICTED **23** -> **PROVEN-BACKED 23
+MEMBERS**. The top rung is ONE `Enum.count` over ONE `MapSet.union` of two INDEPENDENT
+legs, never `leg_a + leg_b` — OVERLAP is 0 today, so the addition prints the same 23 and
+the integer is no evidence. The selftest case `LADDER-UNION-NOT-SUM` is the only
+discriminator: it injects a leg-B def into leg A and requires `naive > UNION`, which an
+addition can never print. MEMBERS is load-bearing — 23 is also the size of a wrong set
+(proven register defs ∪ every roster def, crediting the roster's UNJUDGED rows).
+
+**THE JUDGED FRACTION IS 74/252 = 29.4%** — printed, never thresholded. Naming the 40
 LiveView mounts while omitting the 138 would satisfy the letter of "excluded is
 disclosed" and conceal the finding: **the largest single class in this population is a
 receipt shape this lens cannot see at all.** The register's completeness claim never
-covered the 138; wave 38 made them COUNTED instead of absent, which is the whole of
-the improvement.
+covered the 138; wave 38 made them COUNTED instead of absent.
 
 **LENS-CAN-MISS — the blind-shape roll, printed with a count on every run.** A
 completeness claim without a stated blind spot is the vacuous green wearing the lens
