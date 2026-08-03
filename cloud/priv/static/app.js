@@ -5945,10 +5945,19 @@
     var railGroup = function (label, rows) {
       return '<div class="rail-group"><div class="rail-group-label">' + esc(label) + "</div>" + rows + "</div>";
     };
+    // cch-w25-bl-flick-to-bottom-overshoots-retry: on a FAILED box the Retry
+    // control is docked to the viewport bottom (app.css `.bp-tl-retry`), so the
+    // document's last rows need room to clear it — otherwise the recovery
+    // control permanently covers the tail of the identity rail, and reachability
+    // bought by occlusion is a trade rather than a fix. Inline because the dock
+    // is a STATE, not a route: only a failed box pays the space, and expressing
+    // that in app.css would mean a new rule head for a two-value condition.
+    // 84px = the dock's 16px inset + its 36px box + a 32px breath.
+    var dockClearance = lc.failed ? ' style="padding-bottom:84px"' : "";
     return timeline +
       // detail-grid--instance widens the rail (the domain checklist lives there);
       // the site-deploys grid keeps the bare .detail-grid (byte-identical).
-      '<div class="detail-grid detail-grid--instance">' +
+      '<div class="detail-grid detail-grid--instance"' + dockClearance + ">" +
         // .inst-overview gives the main column a uniform vertical rhythm so the
         // golden-path + update + Sites cards read as evenly-spaced sections.
         '<div class="detail-main inst-overview">' +
