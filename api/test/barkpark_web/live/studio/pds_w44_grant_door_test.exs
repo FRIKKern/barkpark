@@ -369,6 +369,21 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
       # renamed) the replace becomes a no-op, the "mutant" compiles the SHIPPED
       # door, and every assertion below would pass while proving NOTHING. This
       # assert turns that silent vacuity into a RED that names its own cause.
+      #
+      # AND IT COUNTS, because `global: false` takes the FIRST occurrence: `mutant
+      # != original` proves only that SOMETHING was replaced, not that the DOOR
+      # was. If a refactor introduces an earlier textual match, the first form
+      # would stay green while mutating a site that is not the door. The
+      # expression occurs exactly ONCE in `paper.ex` today; pinning that is what
+      # makes "the first occurrence" and "the door" the same sentence.
+      assert length(String.split(original, @door_expression)) - 1 == 1,
+             "the door expression #{inspect(@door_expression)} occurs " <>
+               "#{length(String.split(original, @door_expression)) - 1} time(s) in " <>
+               "#{@door_path}, not exactly once. `global: false` substitutes the FIRST " <>
+               "occurrence, so more than one makes this case mutate an unknown site and " <>
+               "none makes it mutate nothing. Re-derive the expression from " <>
+               "grant_target_denied?/3 — do NOT relax this guard to a mere != check."
+
       assert mutant != original,
              "substitution missed its target in #{@door_path}: the door expression " <>
                "#{inspect(@door_expression)} is no longer present verbatim. Re-derive it " <>
