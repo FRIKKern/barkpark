@@ -103,12 +103,7 @@ defmodule Barkpark.PdsDoorCensusTest do
     {check_out, check_rc} =
       System.cmd(bash, [census, "--check"], cd: root, stderr_to_stdout: true)
 
-    {:ok,
-     census: census,
-     bash: bash,
-     root: root,
-     check_out: check_out,
-     check_rc: check_rc}
+    {:ok, census: census, bash: bash, root: root, check_out: check_out, check_rc: check_rc}
   end
 
   # Reads one of the census's own printed count lines, e.g. `UNDISPOSED : 0 of 20`.
