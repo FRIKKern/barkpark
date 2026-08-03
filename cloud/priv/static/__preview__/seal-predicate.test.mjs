@@ -1262,13 +1262,26 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
 
   // MUTATION CONTROL — remove ONLY the floor and the identical run seals over zero
   // children, prints its own fabrication, and reports a=PASS. (The gate fetch is stubbed
-  // so the control stays hermetic; if any of the three mutations failed to apply the
+  // so the control stays hermetic; if any of the four mutations failed to apply the
   // assertions below red rather than passing vacuously.)
+  //
+  // THE FOURTH STUB IS THE ANCESTRY EXEC, AND IT IS NOT OPTIONAL IN CI. This control
+  // asserts the OVERALL verdict is SEAL, which needs clauses (b) and (c) to pass too —
+  // but clause (b) shells `git merge-base --is-ancestor <commit> origin/main`, and
+  // `actions/checkout@v4` clones at depth 1 (console-harness.yml pins fetch-depth: 1),
+  // so that ancestry read CANNOT resolve on a runner. Unstubbed, the control reported
+  // `NO-SEAL a=PASS b=FAIL` and reddened for a reason that has nothing to do with the
+  // floor it exists to test: green in a full clone, red in CI, from the same bytes.
+  // Stubbing it keeps the control hermetic in the same sense the gate fetch already is
+  // — clause (b)'s own behaviour is proven by its own tests, not by this one.
   const sealed = mutatedRun(
     (src) => emptyLiveRoster(src)
       .replace('if (!fixture && children.length === 0)', 'if (false && children.length === 0)')
       .replace('const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
-        'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });'),
+        'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });')
+      .replace(
+        "try { execFileSync('git', ['-C', REPO, 'merge-base', '--is-ancestor', commit, 'origin/main'], { stdio: 'ignore' }); }",
+        'try { /* hermetic control: a depth-1 CI clone has no origin/main to resolve */ }'),
     ['--repo', REPO, '--successor', 'TERMINAL']);
   assert.equal(sealed.status, SEAL, `pre-fix, an empty roster sealed at exit 0: ${token(sealed.out)}`);
   assert.match(sealed.out, /^VERDICT: SEAL$/m);
