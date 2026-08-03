@@ -68,6 +68,39 @@
 #
 # THE METER BLIND SPOT (PDS-D633 / D646) — printed by every run, see BLIND_SPOT.
 #
+# PREDICATE (iii) WAS PROXIMITY, NOT MEMBERSHIP (wave 45, PDS-D649)
+# -----------------------------------------------------------------
+# THE CLAIM, recorded here because a comment ships with the merge and a PR body
+# does not: until wave 45 predicate (iii) was implemented as TEXTUAL PROXIMITY,
+# not argument-list membership. The classifier comment-filtered the line
+# carrying the call and then spliced the NEXT TWO LINES IN RAW, so what it
+# actually tested was "attribute-bound and NEAR something executed". Three
+# shapes walked through it, each producing THROUGH with a price, rc=0, ERRORS 0:
+# (A) the attribute named only in a COMMENT one line below an unrelated
+# `System.cmd`; (B) the attribute only `File.regular?`'d on a line adjacent to
+# an unrelated `System.cmd`; (C) a TRAILING `#` comment INSIDE the argument
+# list, which survives a whole-line comment filter. The window was wrong in the
+# OTHER direction too: a genuine five-line `Port.open` door classified
+# BOUND-UNEXEC — an honest door declined — so the repair was never "decline
+# more". It is `arg_span`: walk from the opening paren until parens balance.
+#
+# AND THE SELFTEST WAS GREEN ON ALL OF IT, because its fraud fixture
+# (`pds-fx-fraud.sh`) forgets to BIND — the literal is on a comment line and
+# never `@attr`-bound, so it exits at the COMMENT branch and never reaches the
+# execution test at all. A fixture that cannot reach the predicate cannot
+# exercise it. The five wave-45 arms all bind first, and each REDS on revert.
+#
+# RESIDUAL HOLES, STATED RATHER THAN IMPLIED GONE:
+#   1. `blank_strings` understands DOUBLE-QUOTED strings only, not sigils or
+#      charlists. A paren inside `~s(…)` miscounts, and the span then runs to
+#      its bound — MORE permissive, never less, so it can admit a fraud, not
+#      deny an honest door.
+#   2. The 40-line bound is SILENT when hit. A call longer than 40 lines yields
+#      a truncated span with no diagnostic.
+#   3. BOUND-UNEXEC is tested BEFORE the leg-A aggregation in the table, so a
+#      single decoy binding anywhere can RED a legitimately-through door. That
+#      is PRE-EXISTING, not introduced here, and is not this slice to move.
+#
 # WHAT THIS DOES NOT MODEL
 # ------------------------
 # COMPOSITION. Several of these programs are wrappers that invoke peers. This
@@ -173,10 +206,25 @@ ESCAPE_CHECK="$SCRIPT_DIR/elixir-path-escape-check.sh"
 # by a reader.
 DENOMINATOR_CONVENTION='WITH-HARNESSES'
 
+# PER GLOB, NEVER ONE `ls` OVER TWO. `ls -1 pds-*.sh pds-*.exs` exits NON-ZERO
+# when EITHER glob is unmatched, and the plain `list="$(instruments)"` assignment
+# inherits that rc under `set -euo pipefail` (:85) — a tree with .sh files and no
+# .exs aborted the whole run at rc=1 having printed NOT ONE BYTE on stdout or
+# stderr, the exact silent success/failure this instrument exists to catch. It
+# also made run_census()'s own "enumerated ZERO ... the enumerator is broken, not
+# the repo empty" diagnostic DEAD CODE: `set -e` killed the script before the
+# guard could be reached. A glob that matches nothing must contribute nothing,
+# never kill the census.
 instruments() {
   (
     cd -- "$SCAN_ROOT/scripts" 2>/dev/null || exit 0
-    ls -1 pds-*.sh pds-*.exs 2>/dev/null | LC_ALL=C sort -u
+    for g in 'pds-*.sh' 'pds-*.exs'; do
+      # shellcheck disable=SC2086  # $g is a glob PATTERN — expansion is the point
+      for f in $g; do
+        [ -e "$f" ] || continue
+        printf '%s\n' "$f"
+      done
+    done | LC_ALL=C sort -u
   )
 }
 
@@ -243,6 +291,76 @@ classify_one_file() {
     }
     function mentions_attr(line, a) {
       return (line ~ ("@" a "([^A-Za-z0-9_]|$)"))
+    }
+
+    # --- ARGUMENT-LIST MEMBERSHIP, not textual proximity -------------------
+    # The shipped predicate spliced the call line plus the NEXT TWO LINES RAW
+    # into a match window. That is "bound and NEAR something executed", and
+    # PDS-D649 demands "bound AND EXECUTED" — three fraud shapes walked through
+    # it (see the header) and a genuine five-line Port.open door was DECLINED.
+    # These three functions replace the window with the real question: is the
+    # tainted token INSIDE the argument list of this call?
+
+    # Blank the CONTENTS of double-quoted strings, keeping the delimiters, so a
+    # `)` or a `#` inside a literal can neither close a span nor start a comment.
+    # Only for the COUNTING/scanning pass — membership is tested against the raw
+    # text, because blanking would erase a literal that IS the argument.
+    function blank_strings(s,   out, i, c, inq, esc, n) {
+      out = ""; inq = 0; esc = 0
+      n = length(s)
+      for (i = 1; i <= n; i++) {
+        c = substr(s, i, 1)
+        if (inq) {
+          if (esc) { esc = 0; out = out " "; continue }
+          if (c == "\\") { esc = 1; out = out " "; continue }
+          if (c == "\"") { inq = 0; out = out "\""; continue }
+          out = out " "
+        } else {
+          if (c == "\"") { inq = 1; out = out "\""; continue }
+          out = out c
+        }
+      }
+      return out
+    }
+
+    # Cut a line at its first UNQUOTED `#`. This is what closes fraud C — a
+    # TRAILING comment INSIDE the argument list, which survives a whole-line
+    # comment filter. Offsets are preserved (the result is a prefix), so a
+    # position taken in the cut line indexes the raw line identically.
+    function cut_comment(s,   b, p) {
+      b = blank_strings(s)
+      p = index(b, "#")
+      if (p > 0) return substr(s, 1, p - 1)
+      return s
+    }
+
+    # Walk from the opening paren at L[start][pos] until parens BALANCE, and
+    # return the RAW (comment-cut, un-blanked) text of the span. Whole comment
+    # lines drop out; every line is cut at its first unquoted `#`; the counting
+    # pass runs over the string-blanked text. Bounded at 40 lines so a file with
+    # an unbalanced paren cannot make this walk the whole tree.
+    function arg_span(start, pos,   span, depth, k, cut, blk, ch, m, n) {
+      span = ""; depth = 0
+      for (k = start; k <= NR && k < start + 40; k++) {
+        if (k > start && is_comment(L[k])) continue
+        cut = cut_comment(L[k])
+        if (k == start) {
+          cut = substr(cut, pos)
+          if (cut == "") return ""
+        }
+        span = (span == "") ? cut : (span "\n" cut)
+        blk = blank_strings(cut)
+        n = length(blk)
+        for (m = 1; m <= n; m++) {
+          ch = substr(blk, m, 1)
+          if (ch == "(") depth++
+          else if (ch == ")") {
+            depth--
+            if (depth <= 0) return span
+          }
+        }
+      }
+      return span
     }
 
     BEGIN {
@@ -355,17 +473,27 @@ classify_one_file() {
           }
         }
 
-        # execution: a tainted token inside a System.cmd/Port.open argument list.
-        # A 3-line window covers the multi-line call shape the doors use without
-        # reaching an unrelated neighbouring call.
+        # EXECUTION: a tainted token inside a System.cmd/Port.open ARGUMENT LIST,
+        # delimited by arg_span. EVERY call opening on the line is scanned, not
+        # just the first — a line carrying two calls would otherwise hide the
+        # second one behind the first.
         exec_at = 0
         for (i = 1; i <= NR && exec_at == 0; i++) {
           if (is_comment(L[i])) continue
-          if (L[i] !~ /System\.cmd[ \t]*\(/ && L[i] !~ /Port\.open[ \t]*\(/) continue
-          win = L[i]
-          for (j = i + 1; j <= i + 2 && j <= NR; j++) win = win "\n" L[j]
-          if (attr != "" && mentions_attr(win, attr)) { exec_at = i; break }
-          for (v in TV) if (mentions(win, v)) { exec_at = i; break }
+          probe = cut_comment(L[i])
+          if (probe !~ /System\.cmd[ \t]*\(/ && probe !~ /Port\.open[ \t]*\(/) continue
+          rest2 = probe
+          off = 0
+          while (match(rest2, /(System\.cmd|Port\.open)[ \t]*\(/)) {
+            popen = off + RSTART + RLENGTH - 1   # 1-based index of "(" in L[i]
+            rest2 = substr(rest2, RSTART + RLENGTH)
+            off = popen
+            span = arg_span(i, popen)
+            if (span == "") continue
+            if (attr != "" && mentions_attr(span, attr)) exec_at = i
+            if (exec_at == 0) for (v in TV) if (mentions(span, v)) { exec_at = i; break }
+            if (exec_at != 0) break
+          }
         }
 
         if (bkind[b] == "ATTR") {
@@ -660,7 +788,8 @@ selftest() {
 
   mkdir -p "$tmp/scripts" "$tmp/api/test/barkpark" "$tmp/api/test/barkpark_web/studio" "$tmp/api/lib"
 
-  for s in pds-fx-three.sh pds-fx-four.sh pds-fx-inline.sh pds-fx-fraud.sh pds-fx-orphan.sh; do
+  for s in pds-fx-three.sh pds-fx-four.sh pds-fx-inline.sh pds-fx-fraud.sh pds-fx-orphan.sh \
+    pds-fx-nearcomment.sh pds-fx-nearread.sh pds-fx-trailing.sh pds-fx-port.sh; do
     printf '#!/usr/bin/env bash\nexit 0\n' >"$tmp/scripts/$s"
   done
   printf '# fixture\n' >"$tmp/scripts/pds-fx-inbeam.exs"
@@ -743,6 +872,81 @@ defmodule OrphanTest do
 end
 EOF
 
+  # ---- THE PROXIMITY FRAUDS (PDS-D649, wave 45) ---------------------------
+  # The shipped predicate spliced the call line plus the NEXT TWO LINES RAW into
+  # a match window, which implements "bound and NEAR something executed". Each
+  # of the three fixtures below is BOUND and NEVER EXECUTED, and each produced
+  # LEGA-BOUND-EXEC — a THROUGH with a price, rc=0, ERRORS 0 — under that window.
+  # Every one of them also carries a GENUINE door in the same file, so an arm
+  # that merely declined everything nearby would not go green here.
+
+  # FRAUD A — named ONLY in a COMMENT one line below an unrelated System.cmd.
+  cat >"$tmp/api/test/barkpark/nearcomment_test.exs" <<'EOF'
+defmodule NearCommentTest do
+  use ExUnit.Case, async: false
+  @near_rel "../../../scripts/pds-fx-nearcomment.sh"
+  @real_a_rel "../../../scripts/pds-fx-three.sh"
+  test "runs something else" do
+    {_o, 0} = System.cmd("bash", [Path.expand(@real_a_rel, __DIR__)])
+    # @near_rel is covered too, honest
+  end
+end
+EOF
+
+  # FRAUD B — only File.regular?'d, on a line ADJACENT to an unrelated
+  # System.cmd. This is the orphan fixture above differing by ONE line of
+  # proximity: the ERROR arm was one neighbour away from unreachable.
+  cat >"$tmp/api/test/barkpark/nearread_test.exs" <<'EOF'
+defmodule NearReadTest do
+  use ExUnit.Case, async: false
+  @nearread_rel "../../../scripts/pds-fx-nearread.sh"
+  @real_b_rel "../../../scripts/pds-fx-three.sh"
+  test "reads one, runs another" do
+    {_o, 0} = System.cmd("bash", [Path.expand(@real_b_rel, __DIR__)])
+    assert File.regular?(Path.expand(@nearread_rel, __DIR__))
+  end
+end
+EOF
+
+  # FRAUD C — a TRAILING `#` comment INSIDE the argument list. The tightest of
+  # the three: it survives a WHOLE-LINE comment filter, so only a cut at the
+  # first UNQUOTED `#` removes it.
+  cat >"$tmp/api/test/barkpark/trailing_test.exs" <<'EOF'
+defmodule TrailingTest do
+  use ExUnit.Case, async: false
+  @trailing_rel "../../../scripts/pds-fx-trailing.sh"
+  @real_c_rel "../../../scripts/pds-fx-three.sh"
+  test "runs something else" do
+    {_o, 0} = System.cmd("bash", [
+      Path.expand(@real_c_rel, __DIR__) # @trailing_rel is also run
+    ])
+  end
+end
+EOF
+
+  # THE SECOND DIRECTION — an HONEST Port.open door whose argument list spans
+  # FIVE lines. The 3-line window DECLINED this one (BOUND-UNEXEC), so a fix
+  # that only declined harder would fail this arm. The span must reach further
+  # than the window did AND stop at the closing paren.
+  cat >"$tmp/api/test/barkpark/port_test.exs" <<'EOF'
+defmodule PortDoorTest do
+  use ExUnit.Case, async: false
+  @port_rel "../../../scripts/pds-fx-port.sh"
+  test "runs the door through a port" do
+    port =
+      Port.open(
+        {:spawn_executable, System.find_executable("bash")},
+        [
+          :binary,
+          :exit_status,
+          args: [Path.expand(@port_rel, __DIR__)]
+        ]
+      )
+    assert is_port(port)
+  end
+end
+EOF
+
   INSTRUMENT_LIST="$(cd "$tmp/scripts" && ls -1 pds-*.sh pds-*.exs | LC_ALL=C sort)"
 
   local saved_root="$SCAN_ROOT"
@@ -771,6 +975,14 @@ EOF
   check "Code.require_file gets its OWN disposition" IN-BEAM-REQUIRE pds-fx-inbeam.exs
   check "THE FRAUD: comment naming a real instrument in a System.cmd file" COMMENT pds-fx-fraud.sh
   check "bound but executed by nothing" BOUND-UNEXEC pds-fx-orphan.sh
+  check "FRAUD A: bound, named only in a COMMENT one line below a real System.cmd" \
+    BOUND-UNEXEC pds-fx-nearcomment.sh
+  check "FRAUD B: bound, only File.regular?'d NEXT TO an unrelated System.cmd" \
+    BOUND-UNEXEC pds-fx-nearread.sh
+  check "FRAUD C: bound, named only in a TRAILING # comment INSIDE the arg list" \
+    BOUND-UNEXEC pds-fx-trailing.sh
+  check "SECOND DIRECTION: an HONEST Port.open door spanning FIVE lines" \
+    LEGA-BOUND-EXEC pds-fx-port.sh
 
   # The fraud arm, said the other way round: the file DOES contain System.cmd,
   # so the weaker predicate would have admitted it.
@@ -792,6 +1004,31 @@ EOF
     echo "  FAIL  the class vocabulary is $nclasses, or admits a class it must not"
     fail=$((fail + 1))
   fi
+
+  # THE ENUMERATOR MUST NOT DIE SILENTLY. One `ls` over two globs inherits a
+  # non-zero rc when EITHER is unmatched, and `set -e` then aborted the run
+  # having printed nothing at all. The `if` is what makes this arm SURVIVABLE:
+  # under the shipped enumerator the assignment fails and the else branch fires
+  # instead of killing the selftest — which is exactly how this arm REDS on a
+  # revert rather than taking the whole run down with it.
+  local shonly enum_out enum_rc saved_root2
+  shonly="$tmp/shonly"
+  mkdir -p "$shonly/scripts"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$shonly/scripts/pds-fx-shonly.sh"
+  saved_root2="$SCAN_ROOT"
+  SCAN_ROOT="$shonly"
+  enum_out=''
+  if enum_out="$(instruments)"; then enum_rc=0; else enum_rc=$?; fi
+  if [ "$enum_rc" -eq 0 ] && [ "$enum_out" = 'pds-fx-shonly.sh' ]; then
+    echo "  PASS  the enumerator survives a .sh-only tree (no pds-*.exs): rc=0, [$enum_out]"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  the enumerator on a .sh-only tree gave rc=$enum_rc, [$enum_out] —"
+    echo "        a NON-ZERO rc here aborts the whole run under set -e having printed"
+    echo "        NOTHING, which is the silent failure this census exists to catch"
+    fail=$((fail + 1))
+  fi
+  SCAN_ROOT="$saved_root2"
 
   echo
   printf '%s\n' "$BLIND_SPOT"
