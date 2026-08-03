@@ -120,7 +120,49 @@ defmodule BarkparkCloud.FailureCopyTest do
     network = "A network step timed out. Retry usually fixes this."
 
     assert FailureCopy.humanize("dial tcp: i/o timeout") == network
-    assert FailureCopy.humanize("connection refused") == network
+  end
+
+  # cch-w28-s5 (D321(3)): this assertion USED to read
+  # `humanize("connection refused") == network`, i.e. it pinned the defect as
+  # correct behaviour. A refused connection is a peer that answered with an RST —
+  # nothing is listening — so "retry usually fixes this" is the one remedy that
+  # cannot work. The class is split; the copy names the cause and asks for a
+  # CAUSE CHECK, never a retry.
+  test "a refused connection is NOT a timeout: its own class, and no retry advice" do
+    refused =
+      "Nothing is listening on the port we dialled — the service on the box is down or hasn't finished starting. Check the instance's health in the console."
+
+    assert FailureCopy.humanize("connection refused") == refused
+    assert FailureCopy.humanize("dial tcp 10.0.0.4:4000: connect: connection refused") == refused
+    assert FailureCopy.humanize("ssh: connect to host 1.2.3.4 port 22: ECONNREFUSED") == refused
+
+    # The timeout class keeps its own copy, byte-identical.
+    assert FailureCopy.humanize("dial tcp: i/o timeout") ==
+             "A network step timed out. Retry usually fixes this."
+
+    # No retry advice, and no phrase an earlier arm would claim on a second pass.
+    refute refused =~ ~r/retry/i
+    refute String.contains?(refused, "connection refused")
+    refute String.contains?(refused, "the instance refused the deploy")
+  end
+
+  test "refused-class copy is idempotent under a second pass" do
+    for raw <- [
+          "connection refused",
+          "dial tcp 10.0.0.4:4000: connect: connection refused",
+          "ssh: connect to host 1.2.3.4 port 22: ECONNREFUSED"
+        ] do
+      once = FailureCopy.humanize(raw)
+      assert FailureCopy.humanize(once) == once
+    end
+  end
+
+  test "a dial that retried to its deadline and was REFUSED reads as refused, not timeout" do
+    # Both tokens in one capture. The refusal is the actionable half — a closed
+    # port stays closed — so the refused arm is checked FIRST.
+    raw = "dial tcp 10.0.0.4:4000: i/o timeout after 3 attempts: connection refused"
+
+    assert FailureCopy.humanize(raw) =~ "Nothing is listening on the port we dialled"
   end
 
   test "provider-class copy is idempotent under a second pass (never re-matches a class)" do
@@ -798,5 +840,107 @@ defmodule BarkparkCloud.FailureCopyTest do
       assert FailureCopy.humanize(nil) == nil
       assert FailureCopy.humanize(42) == 42
     end
+  end
+end
+
+defmodule BarkparkCloud.FailureCopyDeploymentDetailTest do
+  @moduledoc """
+  cch-w28-s5 — THE LAST RAW `detail` KEY ON THE DEPLOY PAYLOAD.
+
+  `deployment_json/1` humanizes `failure_reason` and — since cch-w27-s2 — folds
+  `console[].detail` and `stages[].detail` through `Sites.Deploy.stage_caption/2`.
+  Its own TOP-LEVEL `detail:` key was the one boundary left: it read
+  `FailureCopy.scrub/1`, so the live sub-caption under the status pill shipped
+  raw provider jargon in the SAME payload whose `failure_reason` had already been
+  classified. This pins the fold at the `deployment_json` level — a row built
+  DIRECTLY (`%Deployment{status: …, detail: …}`), never by racing the worker,
+  whose window is sub-second and whose fixture would be flaky.
+  """
+  use BarkparkCloud.DataCase, async: true
+
+  import Plug.Test
+  import Plug.Conn
+
+  alias BarkparkCloud.{Accounts, FailureCopy, Registry}
+  alias BarkparkCloud.Registry.Deployment
+  alias BarkparkCloud.Web.Router
+
+  @opts Router.init([])
+  @password "correct-horse-battery"
+
+  # A refused-connection capture as a box actually folds it — the class this
+  # slice split out, so the assertion moves only if BOTH halves shipped.
+  @raw_refused "dial tcp 10.0.0.4:4000: connect: connection refused"
+  @refused_copy "Nothing is listening on the port we dialled — the service on the box is down or hasn't finished starting. Check the instance's health in the console."
+
+  defp setup_site do
+    n = System.unique_integer([:positive])
+    {:ok, user} = Accounts.register_user(%{email: "u-#{n}@example.com", password: @password})
+    {:ok, team} = Accounts.create_team(%{name: "Team #{n}", slug: "team-#{n}"})
+    {:ok, _} = Accounts.add_member(team, user, "owner")
+    {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+    {:ok, site} = Registry.create_site(bp, %{name: "S #{n}", slug: "s-#{n}"})
+    {:ok, token} = Accounts.create_user_session_token(user)
+    {site, token}
+  end
+
+  defp deployment_row(site, attrs) do
+    Repo.insert!(struct(%Deployment{site_id: site.id, environment: "production"}, attrs))
+  end
+
+  # GET /v1/sites/:id/deployments is the list `deployment_json/1` renders
+  # UNWRAPPED — no `site_deployment_json/3` stage overlay in the way.
+  defp rendered(site, token) do
+    conn = conn(:get, "/v1/sites/#{site.id}/deployments")
+    conn = put_req_header(conn, "authorization", "Bearer #{token}")
+    conn = Router.call(conn, @opts)
+    assert conn.status == 200
+    Jason.decode!(conn.resp_body)["deployments"]
+  end
+
+  test "a FAILED row's top-level detail is CLASSIFIED, not merely scrubbed" do
+    {site, token} = setup_site()
+
+    deployment_row(site, %{status: "failed", detail: @raw_refused, failure_reason: @raw_refused})
+
+    assert [%{"detail" => detail, "failure_reason" => reason}] = rendered(site, token)
+
+    # The whole point: ONE string, ONE story, in ONE payload.
+    assert detail == @refused_copy
+    assert reason == @refused_copy
+    refute detail =~ "dial tcp"
+  end
+
+  test "a non-failed row's top-level detail is still SCRUBBED, never classified" do
+    {site, token} = setup_site()
+
+    raw = "BUILD npm install — Authorization: Bearer sk-live-9Xq2LmT4vB7nR1zC8kW5"
+    deployment_row(site, %{status: "building", detail: raw})
+
+    assert [%{"detail" => detail}] = rendered(site, token)
+
+    # `stage_caption/2`'s non-failed arm IS the scrub the old code applied — the
+    # narration survives, the credential does not, and no class sentence is
+    # invented for a build that has not failed.
+    assert detail =~ "BUILD npm install"
+    assert detail =~ "[redacted]"
+    refute detail =~ "sk-live-9Xq2LmT4vB7nR1zC8kW5"
+  end
+
+  test "a BUILDING row carrying jargon is NOT rewritten into a failure class" do
+    {site, token} = setup_site()
+
+    deployment_row(site, %{status: "building", detail: @raw_refused})
+
+    assert [%{"detail" => detail}] = rendered(site, token)
+    assert detail == FailureCopy.scrub(@raw_refused)
+    refute detail == @refused_copy
+  end
+
+  test "a nil detail stays nil" do
+    {site, token} = setup_site()
+    deployment_row(site, %{status: "queued", detail: nil})
+
+    assert [%{"detail" => nil}] = rendered(site, token)
   end
 end
