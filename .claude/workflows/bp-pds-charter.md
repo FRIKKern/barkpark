@@ -2576,6 +2576,50 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 45 2026-08-03 — REVIEWED AND PUSHED, grade A — 5 of 5 round-1 slices green, 5 PRs open, 3 round-≥2 slices deferred BY DESIGN (paper `pds-wave-45-2026-08-03`)
+
+**WHAT LANDED (5 PRs, all pushed, none merged — the lead merges).**
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `pds-w45-grant-door-nonvacuity` | `…9377-s-non-vacuity-stops-being-a-tautolo-0-r` | #9433 | The tautology on the live grant door is gone: a real `Code.compile_string` substitution on `shared/paper.ex`, asserting the escalated bytes LAND. Reviewer pinned the door expression to exactly ONE occurrence. |
+| `pds-w45-lega-argument-list` | `…leg-a-reads-the-argument-list-not-the-ne-1-r` | #9434 | Leg A tests argument-list MEMBERSHIP, and the enumerator stops dying silently. Reviewer found and closed FRAUD D. Selftest 8 → 14 arms. |
+| `pds-w44-judgment-coverage-ladder` | `…proven-backed-as-a-union-never-an-additi-2` | #9438 | Four-rung ladder; PROVEN-BACKED is one `Enum.count` over one `MapSet.union`, and the ONLY discriminator ships as a selftest case. No reviewer changes. |
+| `pds-w45-sweep-failopen` | `…the-charter-sweep-s-fail-open-closes-and-3-r` | #9441 | The second read fails CLOSED; the selftest stops being the corpus's hostage. Reviewer co-landed the census row correction. |
+| `pds-w45-criterion-venue` | `…a-criterion-names-the-claim-not-the-cont-4` | #9442 | One additive bullet: a criterion names the CLAIM, never the container. No reviewer changes. |
+
+**PDS-D664 — A REPAIRED PREDICATE CARRIES ITS OLD DEFECT FOR EXACTLY ONE LINE.**
+`arg_span` replaced the three-line proximity window with a real paren-balance walk, and three fraud
+shapes flipped to BOUND-UNEXEC as designed. It still returned the **whole closing line**. So
+`System.cmd(…) ; File.regular?(@fraud)` — a token named AFTER the closing paren, on the call's own
+line — still read as argument-list membership: bound, never executed, THROUGH with a price. One line
+of the old window, living inside the new predicate, past a 13-arm green selftest. The span now cuts
+back to the closing paren's column and the arm (FRAUD D) reds LEGA-BOUND-EXEC on revert. **The rule:
+when you replace a window with a boundary, the boundary is where the window's last residue hides —
+test the token that sits just OUTSIDE the new one, not just the ones that sat inside the old one.**
+
+**PDS-D665 — BOTH LEGS OR NEITHER APPLIES TO EVIDENCE STRINGS, NOT ONLY TO DECLARED PATH SETS.**
+The sweep slice's own fix makes `--selftest` rc=0, which turns the door census's disposition row for
+that instrument (evidence: "`--selftest` rc=1") into a stale receipt **the moment it merges** — on
+the instrument whose entire subject is receipts that lie. The builder was fenced out of the census
+and correctly recorded the correction in two durable venues instead of applying it. Review co-landed
+the one-line row edit on the SAME branch: the behaviour and the receipt that describes it merge
+together or not at all. A fence that splits a behaviour from its own receipt has to be closed by
+whoever holds both — that is the reviewer, and the fix belongs on the branch that causes the drift.
+
+**WHAT STALLED — nothing. Three slices were DEFERRED BY DESIGN** under the sequenced-rounds law, each
+on a hard dependency that must merge first: `pds-w45-census-ledger-integrity` (round 2, after #9434 —
+same file, ~180 lines move), `pds-w45-price-provenance` (round 3, after round 2 — same file, built on
+top), `pds-w44-hetzner-offline-door` (round 4, after both — it needs the retire shape and `--measure`
+that rounds 2 and 3 create). Their tasks are open, unclaimed, 0/N met, and honestly so.
+
+**WHAT THE NEXT WAVE TAKES.** Merge round 1 in any order (the five PRs are file-disjoint except that
+#9434 and #9441 both touch `pds-door-census.sh`, in non-overlapping regions), then dispatch the three
+deferred slices STRICTLY in dependency order: round 2 → round 3 → round 4, re-deriving every anchor at
+each merged base. Then wave 46's own work: adjudicate the sweep's 59 arrivals (the vocabulary moves
+again with THIS charter, so it could not have been done here), price the receipt census's UNMEASURED-
+LOCAL arm, and justify or tier `pds-ledger-census_test.sh` at 40.33 s CPU rather than shrugging at it.
+
 ### Wave 44 2026-08-03 — REVIEWED AND PUSHED, grade A− — 3 slices delivered green, a 4th RECOVERED FROM A DEAD BUILDER, 4 PRs open (paper `pds-wave-44-2026-08-03`)
 
 **WHAT LANDED (4 PRs, all pushed, none merged — the lead merges).**
