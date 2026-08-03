@@ -88,7 +88,62 @@ function hslToRgb(str) {
 // Comments are stripped first: a /* … */ banner sits between the closing brace
 // of one rule and the selector of the next, so leaving it in makes the selector
 // unrecognisable (and its commas fake a selector list).
-const CSS = SRC.replace(/\/\*[\s\S]*?\*\//g, " ");
+const CSS_WITH_MEDIA = SRC.replace(/\/\*[\s\S]*?\*\//g, " ");
+
+// `@media (prefers-color-scheme: …)` blocks are dropped WHOLE before the rule
+// table is built. Theme resolution in this harness is ATTRIBUTE-driven
+// (html[data-theme]); the media queries are the no-attribute OS fallback, and
+// root.html.heex:231 wraps a bare `:root { … }` in a prefers-dark query — which
+// the flat rule regex would otherwise hand to the LIGHT cascade as a
+// single-selector `:root` rule. It declares no background token today, so this
+// is a latent hazard rather than a live one: the day emit.mjs adds --bg there,
+// the light anchor would silently take a DARK value and this gate would score
+// light hues against a dark background — the exact failure it was just repaired
+// for, in the other direction. Removing the blocks kills the class instead of
+// waiting for the tripwire to mis-name it.
+function stripMediaBlocks(css) {
+  let out = "";
+  let i = 0;
+
+  while (i < css.length) {
+    const at = css.indexOf("@media", i);
+    if (at === -1) {
+      out += css.slice(i);
+      break;
+    }
+
+    const open = css.indexOf("{", at);
+    const prelude = open === -1 ? "" : css.slice(at, open);
+    if (open === -1 || !/prefers-color-scheme/i.test(prelude)) {
+      out += css.slice(i, at + 6);
+      i = at + 6;
+      continue;
+    }
+
+    out += css.slice(i, at);
+
+    let depth = 0;
+    let j = open;
+    for (; j < css.length; j++) {
+      if (css[j] === "{") depth++;
+      else if (css[j] === "}" && --depth === 0) break;
+    }
+    i = j === css.length ? j : j + 1;
+  }
+
+  return out;
+}
+
+const CSS = stripMediaBlocks(CSS_WITH_MEDIA);
+// The strip must actually have removed something — a silent no-op (a renamed
+// at-rule, a rewritten regex) would restore the hazard without a signal.
+// (The bare string also appears inside the theme <script>'s matchMedia calls,
+// so the probe is the AT-RULE shape, not the word.)
+const MEDIA_AT_RULE = /@media[^{]*prefers-color-scheme/i;
+assert.ok(
+  MEDIA_AT_RULE.test(CSS_WITH_MEDIA) && !MEDIA_AT_RULE.test(CSS),
+  "prefers-color-scheme media blocks were not stripped from the rule table",
+);
 const RULES = [...CSS.matchAll(/([^{}]+)\{([^{}]*)\}/g)].map((m) => ({
   selectors: m[1].trim().split(",").map((s) => s.trim().replace(/\s+/g, " ")),
   body: m[2],
