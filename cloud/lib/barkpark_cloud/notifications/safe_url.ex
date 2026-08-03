@@ -21,9 +21,20 @@ defmodule BarkparkCloud.Notifications.SafeUrl do
 
   Returns `:ok` or `{:error, :ssrf_blocked}` (plus `{:error, :bad_url}` /
   `{:error, :unresolvable}` for malformed / undiscoverable hosts).
+
+  ## The resolver seam
+
+  `check/2` takes an optional `:resolver` — anything with the shape of
+  `:inet.getaddrs/2`, which is the default. Production never passes it. It exists
+  so the hostname path (resolve-then-check, the only path an IP literal cannot
+  exercise) is testable WITHOUT asking a third party's DNS whether the suite may
+  pass: a merge-blocking CI context must not depend on a host this repo does not
+  own.
   """
 
   @type result :: :ok | {:error, :ssrf_blocked | :bad_url | :unresolvable}
+  @type resolver ::
+          (charlist(), :inet | :inet6 -> {:ok, [:inet.ip_address()]} | {:error, term()})
 
   # Hostnames we reject before even resolving — the obvious internal labels.
   @blocked_hosts ~w(localhost ip6-localhost ip6-loopback 0.0.0.0 0 ::1 ::)
@@ -36,22 +47,29 @@ defmodule BarkparkCloud.Notifications.SafeUrl do
 
   @doc """
   Validate `url` for SSRF safety. See the moduledoc for the full ruleset.
+
+  Options:
+
+    * `:resolver` — an `:inet.getaddrs/2`-shaped function. Defaults to
+      `&:inet.getaddrs/2`; see the moduledoc's "resolver seam".
   """
-  @spec check(String.t()) :: result()
-  def check(url) when is_binary(url) do
+  @spec check(String.t(), keyword()) :: result()
+  def check(url, opts \\ [])
+
+  def check(url, opts) when is_binary(url) and is_list(opts) do
     case URI.parse(url) do
       %URI{scheme: scheme, host: host}
       when scheme in ["http", "https"] and is_binary(host) and host != "" ->
-        check_host(host)
+        check_host(host, Keyword.get(opts, :resolver, &:inet.getaddrs/2))
 
       _ ->
         {:error, :bad_url}
     end
   end
 
-  def check(_), do: {:error, :bad_url}
+  def check(_, _), do: {:error, :bad_url}
 
-  defp check_host(host) do
+  defp check_host(host, resolver) do
     normalized = host |> String.downcase() |> String.trim_trailing(".") |> strip_brackets()
 
     cond do
@@ -62,7 +80,7 @@ defmodule BarkparkCloud.Notifications.SafeUrl do
         {:error, :ssrf_blocked}
 
       true ->
-        check_resolved(normalized)
+        check_resolved(normalized, resolver)
     end
   end
 
@@ -72,22 +90,22 @@ defmodule BarkparkCloud.Notifications.SafeUrl do
 
   # If the host is itself an IP literal, check it directly; otherwise resolve over
   # both families and reject if ANY returned address is private/loopback/etc.
-  defp check_resolved(host) do
+  defp check_resolved(host, resolver) do
     case :inet.parse_address(to_charlist(host)) do
       {:ok, addr} ->
         if private_address?(addr), do: {:error, :ssrf_blocked}, else: :ok
 
       {:error, _} ->
-        resolve_and_check(host)
+        resolve_and_check(host, resolver)
     end
   end
 
-  defp resolve_and_check(host) do
+  defp resolve_and_check(host, resolver) do
     charlist = to_charlist(host)
 
     addrs =
       Enum.flat_map([:inet, :inet6], fn family ->
-        case :inet.getaddrs(charlist, family) do
+        case resolver.(charlist, family) do
           {:ok, list} -> list
           {:error, _} -> []
         end
