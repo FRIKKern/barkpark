@@ -7829,6 +7829,31 @@
       (extra === 1 ? "" : "s") + "</span>";
   }
 
+  // cch-w28-s8 — THE ROW STOPPED GOING QUIET ABOUT A SITE THAT NEVER DEPLOYED.
+  // freshnessBadge returns "" when freshnessModel is nil, and cch-w16-s4
+  // correctly withholds the Visit door from a site that has never served a
+  // build — so a never-deployed row rendered TWO fewer controls than its
+  // neighbours and said nothing about why. The reader's only reading is "this
+  // row is broken", which is the one thing that is not true.
+  //
+  // The global sites list already solved this (siteStatusPill: neutral role,
+  // label "Not deployed"), and the site-detail head already ships the D182
+  // pair — visible "Not deployed", accessible name "Not deployed to
+  // production" so a screen reader is not left guessing whether a branch
+  // preview counts. This is the same sentence in the row's own vocabulary.
+  //
+  // BARE `.fresh-badge`, no new class and no app.css line: the base rule
+  // already paints the neutral look (.fresh-dot defaults to var(--dim)), and
+  // the modifiers are the ones that colour. NO meta trailer — there is no
+  // deploy, so there is no timestamp to state and none is invented.
+  function siteFreshnessSeg(s) {
+    if (freshnessModel(s)) return freshnessBadge(s);
+    return '<span class="fresh-badge" title="Not deployed to production"' +
+      ' aria-label="Not deployed to production">' +
+      '<span class="fresh-dot" aria-hidden="true"></span>' +
+      '<span class="fresh-label">Not deployed</span></span>';
+  }
+
   function siteRow(s, bp) {
     var domain = (s.domains && s.domains[0]) || s.slug || s.name || "—";
     var fw = s.framework ? esc(s.framework) : "site";
@@ -7843,7 +7868,7 @@
         // cch-w16-s4: no door to a site that has never served a build.
         siteOpenLink(siteHasEverDeployed(s) ? siteLiveUrl(s, bp) : null) +
         siteBindingChip(s) +
-        freshnessBadge(s) +
+        siteFreshnessSeg(s) +
         badge(auto ? "Auto-deploy" : "Manual", auto ? "online" : "unknown") +
         '<span class="fleet-chev" aria-hidden="true">&rsaquo;</span>' +
       "</div></div>";

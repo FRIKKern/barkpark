@@ -12770,3 +12770,73 @@ test("cch-w25-s2: the <=720 theater block escapes min-content AND pays the step-
   assert.ok(!/RESIDUAL \(reported, not asserted/.test(guard),
     "the cruel-host page number is 320/320 now and is ASSERTED; the reported-not-asserted block must be gone");
 });
+
+// ── cch-w28-s8: A NEVER-DEPLOYED SITE ROW SAYS SO ────────────────────────────
+//
+// siteRow's badge strip was siteOpenLink + siteBindingChip + freshnessBadge.
+// freshnessBadge opens `var m = freshnessModel(s); if (!m) return "";`, and
+// cch-w16-s4 correctly withholds the Visit door from a site that never served a
+// build — so the never-deployed row rendered TWO fewer controls than its
+// neighbours and never said why. Both directions are asserted: the never-
+// deployed row gains the neutral indicator, the deployed row keeps its badge.
+// Appended at the END on the file's own rule: node --test numbers positionally.
+test("cch-w28-s8: a never-deployed site row states 'Not deployed'; a deployed row is untouched", () => {
+  // THE FIXTURE MUST BE ABLE TO PRODUCE THE DEFECT (standing-test clause 4):
+  // no `last_deployment` and no `current_deployment_id`, so freshnessModel is
+  // genuinely nil and the old strip genuinely rendered "".
+  const never = {
+    id: "site-nd", slug: "acme-app", name: "acme-app", framework: "nextjs",
+    domains: ["app.acme.com"], github_repo: "acme/app", github_branch: "main",
+    github_webhook_configured: true,
+  };
+  assert.ok(!("last_deployment" in never) && !("current_deployment_id" in never),
+    "the fixture must carry NO deploy fact — otherwise this test is green by construction");
+  assert.ok(!hooks.freshnessModel(never),
+    "freshnessModel must really be nil for this fixture — that nil IS the defect's cause");
+  assert.equal(hooks.freshnessBadge(never), "",
+    "and the badge it feeds really renders nothing");
+
+  const BP = { id: "bp-1", name: "Production", url: "https://acme.barkpark.cloud" };
+  const row = hooks.siteRow(never, BP);
+  // The visible copy is the word D182 already ruled and the global list already
+  // paints — not a new sentence invented for this row.
+  assert.ok(row.includes(">Not deployed</span>"),
+    "the never-deployed row must SAY it is not deployed, not fall silent");
+  assert.ok(hooks.siteStatusPill(never).includes(">Not deployed<"),
+    "the row's word is the global sites list's word — one vocabulary, not two");
+  assert.match(row, /title="Not deployed to production"/,
+    "the tooltip names the environment, as the site-detail head already does");
+  assert.match(row, /aria-label="Not deployed to production"/,
+    "…and so does the accessible name — a screen reader must not guess at branch previews");
+  // NIL-HONEST: no invented green, no invented door, no fabricated timestamp.
+  assert.ok(!row.includes("site-open") && !row.includes("Visit"),
+    "cch-w16-s4's gate still holds — no door to a site that never served a build");
+  assert.ok(!/fresh-badge--(up|down|deploy|rebuild)/.test(row),
+    "the indicator must be the NEUTRAL base badge, never a coloured state it has not earned");
+  assert.ok(!row.includes("fresh-meta"),
+    "there is no deploy, so there is no timestamp — none may be fabricated");
+  // NO NEW CSS CLASS: app.css is drift-gated and this wave seated no cssom
+  // holder, so every class the new segment emits must already have a rule.
+  const s8css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  for (const cls of ["fresh-badge", "fresh-dot", "fresh-label"]) {
+    assert.ok(s8css.includes("." + cls + " "), "the row reuses the existing ." + cls + " rule");
+  }
+
+  // ARM 2 — THE DEPLOYED ROW IS UNCHANGED. Same site, one deploy fact added:
+  // it keeps its freshness badge verbatim and gains NO extra indicator.
+  const deployed = Object.assign({}, never, {
+    current_deployment_id: "dep-1",
+    last_deployment: {
+      status: "live", trigger: "manual", updated_at: new Date().toISOString(),
+    },
+  });
+  const liveRow = hooks.siteRow(deployed, BP);
+  assert.ok(liveRow.includes("fresh-badge--up") && liveRow.includes(">Live<"),
+    "a deployed row still states its freshness");
+  assert.ok(!liveRow.includes("Not deployed"),
+    "…and never carries the never-deployed sentence beside a live badge");
+  // Byte-level: the deployed row's badge slot IS freshnessBadge's own output,
+  // so this slice added nothing to the path it did not own.
+  assert.ok(liveRow.includes(hooks.freshnessBadge(deployed)),
+    "the deployed row's freshness badge is freshnessBadge's output, unmodified");
+});
