@@ -241,10 +241,37 @@ jobs:
       # actions/checkout@v4's depth-1 default (what both jobs here use) that exits
       # 128 `Not a valid object name`; the predicate catches ANY non-zero as "not an
       # ancestor", so running the instrument itself in CI would manufacture a false
-      # NO SEAL out of a shallow clone. The test file is hermetic instead — it
-      # spawns the predicate against committed fixtures with `--guard-cmd true`
-      # (verified: with a sentinel curl shim first on PATH, BP_TOKEN unset and
-      # BP_SERVER on a dead port, the sentinel never fired and it passed 11/11).
+      # NO SEAL out of a shallow clone. What runs here instead is the predicate's
+      # test file, which drives it against COMMITTED FIXTURES through `--ledger`:
+      # a fixture's own `landed`/`diffs` entries stand in for those git reads
+      # (seal-predicate.mjs:441-450), so the fixture-driven tests never ask a
+      # shallow clone a question it cannot answer.
+      #
+      # TWO THINGS THE OLD TEXT HERE ASSERTED AND THE BYTES REFUSE, both re-measured
+      # at 3a32373b8 rather than inherited:
+      #
+      #   * NOT every spawn is `--guard-cmd true`. Most are — that stub is how the
+      #     fixture tests isolate clause (b) from the guard arm — but the clause-(b)
+      #     ladder section runs WITHOUT it on purpose (its own words, at
+      #     seal-predicate.test.mjs:546: "Run WITHOUT --guard-cmd, so the two
+      #     committed guards actually execute"), so the two registered rung-1
+      #     guards — cloud/priv/static/__app.test.mjs and design/emit-fence.test.mjs
+      #     — really spawn and their stdout is really matched against `guardExpect`.
+      #
+      #   * NOT hermetic w.r.t. the NETWORK. One test spawns the predicate with no
+      #     `--ledger`, which `curl`s ${BP_SERVER:-https://guerrilla.barkpark.cloud}
+      #     for the live roster. Measured on a full clone: the whole suite passes
+      #     (59 tests, 59 pass at 3a32373b8 — a count that WILL drift, so run the
+      #     file rather than trust this number); re-run with
+      #     `BP_SERVER=http://127.0.0.1:1` and exactly one test reds —
+      #     `not ok 56 - wave 11: --ladder-only reaches the ladder the live refusals
+      #     never can`, `2 !== 1` at seal-predicate.test.mjs:1080 — because that
+      #     live spawn returns INFRA(2) where the assertion demands NO_SEAL(1). A
+      #     sentinel `curl` first on PATH fires exactly ONCE across the suite, in
+      #     that same test. So this step, and therefore the REQUIRED `Console gate`
+      #     that aggregates this job, is only as available as the ledger server:
+      #     read a SOLITARY red at test 56 as "the ledger was unreachable", and any
+      #     other red as a real defect.
       #
       # It passes `--repo <the real repo root>`, which is why the console path
       # set reaches .github/workflows/cloud.yml, design/emit-fence.test.mjs and
