@@ -10251,7 +10251,15 @@ defmodule BarkparkCloud.Web.Router do
       # SAME string to `failure_reason` and to `detail`, so scrubbing only the
       # former would ship a redacted field sitting beside its unredacted twin in
       # one payload.
-      detail: FailureCopy.scrub(d.detail),
+      #
+      # cch-w28-s5 (the D321(3) remainder): scrubbing is not ENOUGH here. On a
+      # `failed` row `fail/2` writes the same capture to `failure_reason`, which
+      # this very payload humanizes ten lines above — so the sub-caption under
+      # the status pill contradicted the row's own reason with raw jargon.
+      # `stage_caption/2` classifies on `failed` and scrubs on every other
+      # status, which is exactly the fold `console[].detail` and `stages[].detail`
+      # already use. One string, one class, one payload.
+      detail: Sites.Deploy.stage_caption(d.status, d.detail),
       # site-spawner D30: the static-build identity + which of the six stages is in
       # flight. Null on every container row, so the container view is unchanged.
       build_id: d.build_id,

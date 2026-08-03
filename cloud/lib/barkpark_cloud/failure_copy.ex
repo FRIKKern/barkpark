@@ -36,10 +36,15 @@ defmodule BarkparkCloud.FailureCopy do
 
   The Hetzner/provisioner layer emits raw provider jargon
   (`SERVER_LIMIT_EXCEEDED`, `resource_unavailable`, `unauthorized`,
-  `hetzner dns upsert "…"` failures, `connection refused`, …) that reached the
-  dashboard and CLI verbatim. Those are folded into four human classes —
-  capacity, auth, dns, network — matched case-insensitively (provider casing is
-  inconsistent) so no surface ever renders an ALL_CAPS code. The stored value
+  `hetzner dns upsert "…"` failures, `dial tcp: i/o timeout`, …) that reached the
+  dashboard and CLI verbatim. Those are folded into five human classes —
+  capacity, auth, dns, network and refused — matched case-insensitively (provider
+  casing is inconsistent) so no surface ever renders an ALL_CAPS code. The
+  REFUSED class was split out of network in wave 28 (D321(3)): a
+  `connection refused` is a peer that ANSWERED and said no — nothing was
+  listening on that port — so the network class's "retry usually fixes this" was
+  the advice most likely to waste the person's time. Its remediation is a cause
+  check, not a retry, and it is matched BEFORE the network class. The stored value
   stays RAW, so the timeline's forensic fold and the `provision_failed` email
   keep the honest reason. Two surfaces humanize: the JSON boundary, and — since
   wave 26 S3 (D310) — the `provision_failed` alert email, which prepends the
@@ -476,8 +481,21 @@ defmodule BarkparkCloud.FailureCopy do
       String.contains?(down, "unauthorized") or String.contains?(down, "invalid token") ->
         "The hosting provider rejected our credentials. We're on it — try again shortly."
 
+      # Refused: the peer ANSWERED and said no — an RST, nothing listening on the
+      # port we dialled. Split out of the network class in wave 28 (D321(3)),
+      # which fused it with `timeout` and therefore told a person to retry: the
+      # one remedy that cannot work, because a closed port stays closed until
+      # something starts listening. Checked BEFORE the timeout arm; an
+      # `econnrefused` capture that ALSO carries `timeout` (a dial that retried
+      # until the deadline) is still a refusal, and the refusal is the actionable
+      # half. The copy carries no token any earlier arm matches, does not repeat
+      # `connection refused` (so a second pass is idempotent), and does not carry
+      # `@box_refusal`'s phrase.
+      String.contains?(down, "connection refused") or String.contains?(down, "econnrefused") ->
+        "Nothing is listening on the port we dialled — the service on the box is down or hasn't finished starting. Check the instance's health in the console."
+
       # Network / timeout: a transient network step failed; a retry usually clears it.
-      String.contains?(down, "timeout") or String.contains?(down, "connection refused") ->
+      String.contains?(down, "timeout") ->
         "A network step timed out. Retry usually fixes this."
 
       true ->
