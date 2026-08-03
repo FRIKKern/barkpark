@@ -79,7 +79,13 @@
 # (A) the attribute named only in a COMMENT one line below an unrelated
 # `System.cmd`; (B) the attribute only `File.regular?`'d on a line adjacent to
 # an unrelated `System.cmd`; (C) a TRAILING `#` comment INSIDE the argument
-# list, which survives a whole-line comment filter. The window was wrong in the
+# list, which survives a whole-line comment filter. A FOURTH, (D), survived the
+# first repair and was closed in review: the span walk balanced the parens
+# correctly but returned the WHOLE CLOSING LINE, so a token named AFTER the
+# closing paren — `System.cmd(…) ; File.regular?(@fraud)` — still read as
+# membership. One line of the old proximity window, living inside the new
+# predicate. The span now stops at the column of the closing paren, and the arm
+# reds LEGA-BOUND-EXEC on revert. The window was wrong in the
 # OTHER direction too: a genuine five-line `Port.open` door classified
 # BOUND-UNEXEC — an honest door declined — so the repair was never "decline
 # more". It is `arg_span`: walk from the opening paren until parens balance.
@@ -88,7 +94,7 @@
 # (`pds-fx-fraud.sh`) forgets to BIND — the literal is on a comment line and
 # never `@attr`-bound, so it exits at the COMMENT branch and never reaches the
 # execution test at all. A fixture that cannot reach the predicate cannot
-# exercise it. The five wave-45 arms all bind first, and each REDS on revert.
+# exercise it. The six wave-45 arms all bind first, and each REDS on revert.
 #
 # RESIDUAL HOLES, STATED RATHER THAN IMPLIED GONE:
 #   1. `blank_strings` understands DOUBLE-QUOTED strings only, not sigils or
@@ -339,6 +345,15 @@ classify_one_file() {
     # lines drop out; every line is cut at its first unquoted `#`; the counting
     # pass runs over the string-blanked text. Bounded at 40 lines so a file with
     # an unbalanced paren cannot make this walk the whole tree.
+    #
+    # THE SPAN STOPS AT THE CLOSING PAREN, NOT AT THE END OF ITS LINE. Returning
+    # the whole final line would smuggle a slice of the OLD proximity window back
+    # in through the closing line: `System.cmd(..) ; File.regular?(@fraud)` would
+    # read as membership because `@fraud` sits in the returned text — bound, never
+    # executed, classified LEGA-BOUND-EXEC. Cutting back to the column of the
+    # paren itself is what makes "inside the argument list" mean inside it.
+    # (No apostrophes in here: this whole program is one single-quoted shell
+    # word, so one of them ends it and the census dies at parse time.)
     function arg_span(start, pos,   span, depth, k, cut, blk, ch, m, n) {
       span = ""; depth = 0
       for (k = start; k <= NR && k < start + 40; k++) {
@@ -356,7 +371,10 @@ classify_one_file() {
           if (ch == "(") depth++
           else if (ch == ")") {
             depth--
-            if (depth <= 0) return span
+            # `cut` is a SUFFIX of `span` and `blank_strings` is length-
+            # preserving, so column m of `cut` is column
+            # length(span) - length(cut) + m of `span`.
+            if (depth <= 0) return substr(span, 1, length(span) - length(cut) + m)
           }
         }
       }
@@ -789,7 +807,8 @@ selftest() {
   mkdir -p "$tmp/scripts" "$tmp/api/test/barkpark" "$tmp/api/test/barkpark_web/studio" "$tmp/api/lib"
 
   for s in pds-fx-three.sh pds-fx-four.sh pds-fx-inline.sh pds-fx-fraud.sh pds-fx-orphan.sh \
-    pds-fx-nearcomment.sh pds-fx-nearread.sh pds-fx-trailing.sh pds-fx-port.sh; do
+    pds-fx-nearcomment.sh pds-fx-nearread.sh pds-fx-trailing.sh pds-fx-port.sh \
+    pds-fx-tail.sh; do
     printf '#!/usr/bin/env bash\nexit 0\n' >"$tmp/scripts/$s"
   done
   printf '# fixture\n' >"$tmp/scripts/pds-fx-inbeam.exs"
@@ -947,6 +966,22 @@ defmodule PortDoorTest do
 end
 EOF
 
+  # FRAUD D — bound and named AFTER the closing paren, on the CLOSING LINE of a
+  # real System.cmd. The span walk balances parens correctly and would still have
+  # returned the WHOLE final line, so the old proximity window survived inside
+  # the new predicate for exactly one line. It is the tightest of the four: the
+  # token is on the same line as a genuine call, outside its argument list.
+  cat >"$tmp/api/test/barkpark/tail_test.exs" <<'EOF'
+defmodule TailTest do
+  use ExUnit.Case, async: false
+  @tail_rel "../../../scripts/pds-fx-tail.sh"
+  @real_d_rel "../../../scripts/pds-fx-three.sh"
+  test "runs one, merely reads the other on the closing line" do
+    {_o, 0} = System.cmd("bash", [Path.expand(@real_d_rel, __DIR__)]); assert File.regular?(Path.expand(@tail_rel, __DIR__))
+  end
+end
+EOF
+
   INSTRUMENT_LIST="$(cd "$tmp/scripts" && ls -1 pds-*.sh pds-*.exs | LC_ALL=C sort)"
 
   local saved_root="$SCAN_ROOT"
@@ -981,6 +1016,8 @@ EOF
     BOUND-UNEXEC pds-fx-nearread.sh
   check "FRAUD C: bound, named only in a TRAILING # comment INSIDE the arg list" \
     BOUND-UNEXEC pds-fx-trailing.sh
+  check "FRAUD D: bound, named AFTER the closing paren on the call's own line" \
+    BOUND-UNEXEC pds-fx-tail.sh
   check "SECOND DIRECTION: an HONEST Port.open door spanning FIVE lines" \
     LEGA-BOUND-EXEC pds-fx-port.sh
 
