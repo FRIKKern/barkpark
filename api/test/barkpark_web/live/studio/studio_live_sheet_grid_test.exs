@@ -2283,4 +2283,152 @@ defmodule BarkparkWeb.Studio.StudioLiveSheetGridTest do
       html
     end
   end
+
+  # ── read mode: the hook, the selection and the a11y contract (wave 43) ─────
+  #
+  # The harm this block pins is NOT "cannot copy" — it is a FROZEN SELECTION.
+  # `phx-hook="SheetGrid"` used to key on `@editable` (`mode == :edit and
+  # write_capable`), and the hook is the SOLE producer of selection: cell-click /
+  # head-click / nav / nav-edge / nav-corner / select-all have no server-rendered
+  # `phx-click` anywhere. So both populations `@editable` excludes — a write-DENIED
+  # member, and a fully write-capable member who flipped the View chip — were
+  # served a real `grid_sel` rect painted on A1 that nothing could ever move, and
+  # the TSV copy (which reads `td.sheet-sel`) was downstream of that.
+  #
+  # The predicate is now `@hookable` (`chrome == :studio`). `@editable` still
+  # governs every write affordance, `data-fns` stays `@editable`-gated (its
+  # absence is what the client derives its read-mode allowlist from), and
+  # `Ops.send_ops/2`'s `write_capable: false` clause is untouched.
+
+  test "a write-DENIED Studio member gets the hook, the role and the aria contract",
+       %{conn: _conn} do
+    doc = create_sheet!("sg-readmode-denied", one_tab(%{"A1" => %{"v" => "hello"}}))
+
+    html =
+      render_component(BarkparkWeb.Studio.SheetGrid,
+        id: "sheet-grid-sg-readmode-denied",
+        doc: doc,
+        dataset: @dataset,
+        is_draft: false,
+        write_capable: false,
+        live_session: true,
+        chrome: :studio,
+        user_id: nil,
+        presence_topic: nil,
+        presences: []
+      )
+
+    [wrap] = Regex.run(~r/<div[^>]*class="sheet-grid-wrap"[^>]*>/, html)
+
+    # THE FIX: the hook attaches, and the grid is an ARIA application with a
+    # live activedescendant — the id it names is the VIEW table's cell id, since
+    # a non-editable render stamps `<id>-view` on the table.
+    assert wrap =~ ~s(phx-hook="SheetGrid")
+    assert wrap =~ ~s(role="application")
+    assert wrap =~ ~s(aria-activedescendant="sheet-grid-sg-readmode-denied-view-cell-1-1")
+    assert wrap =~ ~s(aria-describedby="sheet-grid-sg-readmode-denied-grid-instructions")
+
+    # …and the write half is untouched: no function vocabulary (that absence IS
+    # the client's read-mode signal), no formula bar, no toolbar.
+    refute wrap =~ "data-fns="
+    refute wrap =~ "data-fn-sigs="
+    refute html =~ ~s(data-test-id="sheet-formula-bar")
+    refute html =~ ~s(data-test-id="sheet-toolbar")
+
+    # The instructions read honestly for a grid that navigates but cannot edit.
+    assert html =~ "Arrow keys move the selection and Ctrl+C copies it"
+    refute html =~ "F2 or Enter to edit the cell"
+
+    # aria-selected now rides the SELECTION axis, so the selected cell announces
+    # itself instead of being silent to assistive tech.
+    [a1_td] = Regex.run(~r/<td[^>]*data-ref="A1"[^>]*>/, html)
+    assert a1_td =~ ~s(aria-selected="true")
+    assert a1_td =~ "sheet-sel"
+  end
+
+  test "a write-CAPABLE member in View mode lands in the identical hookable shape",
+       %{conn: conn} do
+    create_sheet!("sg-readmode-view", one_tab(%{"A1" => %{"v" => "hello"}}))
+    {view, target, html} = open!(conn, "sg-readmode-view")
+
+    # Edit mode: the editable wrapper, with the function vocabulary stamped.
+    assert html =~ ~s(phx-hook="SheetGrid")
+    assert html =~ "data-fns="
+
+    # The View/Edit chip flips @editable to false while chrome stays :studio.
+    render_hook(target, "toggle-mode", %{})
+    view_html = render(view)
+    [wrap] = Regex.run(~r/<div[^>]*class="sheet-grid-wrap"[^>]*>/, view_html)
+
+    assert wrap =~ ~s(phx-hook="SheetGrid")
+    assert wrap =~ ~s(role="application")
+    assert wrap =~ ~s(aria-activedescendant="sheet-grid-sg-readmode-view-view-cell-1-1")
+    refute wrap =~ "data-fns="
+  end
+
+  test "SELECTION MOVES in the read-mode DOM shape: a cell-click and an arrow nav",
+       %{conn: conn} do
+    create_sheet!(
+      "sg-readmode-sel",
+      one_tab(%{"A1" => %{"v" => 1}, "C3" => %{"v" => 3}, "C4" => %{"v" => 4}})
+    )
+
+    {view, target, _html} = open!(conn, "sg-readmode-sel")
+    render_hook(target, "toggle-mode", %{})
+
+    # BEFORE: the selection sits on A1 — the frozen state this slice ends.
+    before_html = render(view)
+    [a1_before] = Regex.run(~r/<td[^>]*data-ref="A1"[^>]*>/, before_html)
+    assert a1_before =~ "sheet-active"
+    assert a1_before =~ ~s(aria-selected="true")
+
+    # A cell-click (the hook's own event — nothing else produces it) moves it.
+    render_hook(target, "cell-click", %{"ref" => "C3", "shift" => false})
+    after_click = render(view)
+    [a1_after] = Regex.run(~r/<td[^>]*data-ref="A1"[^>]*>/, after_click)
+    [c3_after] = Regex.run(~r/<td[^>]*data-ref="C3"[^>]*>/, after_click)
+    refute a1_after =~ "sheet-active"
+    assert a1_after =~ ~s(aria-selected="false")
+    assert c3_after =~ "sheet-active"
+    assert c3_after =~ ~s(aria-selected="true")
+
+    # An arrow key extends with Shift: C3 → C3:C4, both cells painted sheet-sel.
+    render_hook(target, "nav", %{"key" => "ArrowDown", "shift" => true})
+    after_nav = render(view)
+    [c3_nav] = Regex.run(~r/<td[^>]*data-ref="C3"[^>]*>/, after_nav)
+    [c4_nav] = Regex.run(~r/<td[^>]*data-ref="C4"[^>]*>/, after_nav)
+    assert c3_nav =~ "sheet-sel"
+    assert c4_nav =~ "sheet-sel"
+    assert c4_nav =~ ~s(aria-selected="true")
+  end
+
+  test "the /sheets/:slug reader keeps NO hook and NO aria-selected (out of scope)",
+       %{conn: _conn} do
+    doc = create_sheet!("sg-readmode-reader", one_tab(%{"A1" => %{"v" => "hello"}}))
+
+    html =
+      render_component(BarkparkWeb.Studio.SheetGrid,
+        id: "sheet-grid-sg-readmode-reader",
+        doc: doc,
+        dataset: @dataset,
+        is_draft: false,
+        write_capable: false,
+        live_session: false,
+        chrome: :reader,
+        user_id: nil,
+        presence_topic: nil,
+        presences: []
+      )
+
+    [wrap] = Regex.run(~r/<div[^>]*class="sheet-grid-wrap"[^>]*>/, html)
+    refute wrap =~ "phx-hook="
+    assert wrap =~ ~s(role="region")
+
+    # grid_sel(_, _, :reader) is {0,0,0,0} — off the 1-based grid, so no cell is
+    # ever selected and aria-selected is omitted entirely rather than stamping a
+    # meaningless "false" on every cell. Filed as pds-w43-bl-sheetgrid-reader-half.
+    [a1_td] = Regex.run(~r/<td[^>]*data-ref="A1"[^>]*>/, html)
+    refute a1_td =~ "aria-selected"
+    refute a1_td =~ "sheet-sel"
+  end
 end

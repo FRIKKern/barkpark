@@ -317,11 +317,21 @@ defmodule BarkparkWeb.SheetsGridProofTest do
     assert input_html =~ ~s(aria-autocomplete="list")
     assert input_html =~ ~s(aria-expanded="false")
 
-    # NOT-editable (the View toggle and the read-only reader share the ONE
-    # `@editable` gate — see GridData.derive_editable/1) renders neither the
-    # hook's data-fns nor the datalist: no autocomplete surface for a viewer.
+    # NOT-editable renders no AUTOCOMPLETE surface — no data-fns, no datalist.
+    #
+    # THE HOOK ITSELF NOW STAYS ATTACHED, and that is this slice's whole point.
+    # It used to key on `@editable`, so a member entitled to READ a sheet lost
+    # the hook and with it selection and copy — they could see the numbers and
+    # not take them. It now keys on `@hookable`, which is true for every Studio
+    # grid; the hook's own read-mode branch strips the write gestures. So the
+    # thing that must be absent for a viewer is the autocomplete AFFORDANCE,
+    # never the hook, and asserting the hook's absence here would re-pin the
+    # defect this slice exists to remove.
     view_html = render_hook(grid, "toggle-mode", %{})
-    refute view_html =~ ~s(phx-hook="SheetGrid")
+
+    assert view_html =~ ~s(phx-hook="SheetGrid"),
+           "the hook stays attached in read mode — that is what lets a viewer select and copy"
+
     refute view_html =~ "data-fns="
     refute view_html =~ ~s(data-test-id="sheet-fns-list")
   end
