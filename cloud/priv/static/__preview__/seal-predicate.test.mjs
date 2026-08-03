@@ -1264,11 +1264,19 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
   // children, prints its own fabrication, and reports a=PASS. (The gate fetch is stubbed
   // so the control stays hermetic; if any of the three mutations failed to apply the
   // assertions below red rather than passing vacuously.)
+  // `String.prototype.replace` on an anchor that no longer exists is a SILENT no-op, and
+  // `mutatedRun`'s own guard only proves that SOMETHING changed — the roster mutation
+  // alone would satisfy it. Each anchor is therefore asserted present before it is used.
+  const mustReplace = (src, from, to) => {
+    assert.ok(src.includes(from), `mutation anchor has drifted out of the predicate: ${from}`);
+    return src.replace(from, to);
+  };
   const sealed = mutatedRun(
-    (src) => emptyLiveRoster(src)
-      .replace('if (!fixture && children.length === 0)', 'if (false && children.length === 0)')
-      .replace('const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
-        'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });'),
+    (src) => mustReplace(
+      mustReplace(emptyLiveRoster(src),
+        'if (!fixture && children.length === 0)', 'if (false && children.length === 0)'),
+      'const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
+      'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });'),
     ['--repo', REPO, '--successor', 'TERMINAL']);
 
   // THIS CONTROL ASSERTS CLAUSE (a) ONLY — NEVER THE OVERALL EXIT CODE. The exit code
