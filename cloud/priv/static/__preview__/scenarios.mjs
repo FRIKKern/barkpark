@@ -699,6 +699,43 @@ export const RAIL_FAIL_KIND_DETAIL = railEmitDetail(
   "slot blue on :8081 returned 502 (want 200) at /healthz after 12 attempts " +
   "(last: curl exit 0, 30.2s) — boot failed, live slot untouched",
 );
+// cch-w27-s2 — THE CLASSIFYING CONTROL, and the reason it had to be added.
+//
+// Neither string above CLASSIFIES: run both through `FailureCopy.humanize/1`
+// (cloud/lib/barkpark_cloud/failure_copy.ex) and they come back byte-identical,
+// because neither carries a token any `classify_atomic/1` clause matches. So a
+// guard asserting "the rail caption and the row's failure_reason tell ONE story"
+// is GREEN BY CONSTRUCTION on the wave-26 pair — the two strings agree for the
+// same reason a broken clock agrees twice a day, and the guard could not have
+// caught the live divergence it exists to catch. That is standing-test clause 4
+// (a fixture that cannot produce the defect), and this constant is the fix.
+//
+// THE PRODUCER, read-only from here: `build_failure_reason()` —
+// deploy/site-deploy.sh:1939 (and its byte-identical node twin,
+// deploy/site-deploy-node.sh:1372). Its FIRST and highest-priority arm is
+// `grep -a 'FATAL' <build-log> | tail -1`, and the FATAL line the header at
+// site-deploy.sh:57 documents (emitted by the e2e's own npm at :935, asserted
+// onto the stage line at :1062) is this one, verbatim. It reaches the rail as
+// `BPSTAGE name=BUILD status=failed detail="…"`.
+//
+// It classifies: `unauthorized` → "The hosting provider rejected our
+// credentials. We're on it — try again shortly." — which is what the settled
+// row has always shown, and what the rail showed NOTHING of before this slice.
+//
+// RE-DERIVE THE WHOLE STRING:
+//   grep -n 'FATAL: 401 Unauthorized' deploy/site-deploy.sh
+//   grep -n "String.contains?(down, \"unauthorized\")" cloud/lib/barkpark_cloud/failure_copy.ex
+// `sites_deploy_stage_caption_test.exs` reads BOTH ends and reds when either
+// moves — that test, not this comment, is what keeps the fixture honest.
+//
+// NOT YET ROUTED INTO A SCENARIO: `smoke.mjs`'s cch-w10 census guard hard-fails
+// on any scenario with no paired EXPECTATIONS row, and smoke.mjs is outside this
+// slice's file fence. Wiring a third rail-fail scenario onto it is filed as
+// task-877bfc465162e104.
+export const RAIL_FAIL_CLASSIFYING_DETAIL = railEmitDetail(
+  "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog" +
+  " — the site read token is invalid",
+);
 
 // The CRUEL rail: a deployment the control plane still calls `building` whose
 // SSE narration already carries BUILD failed. That pairing is the honest

@@ -8506,6 +8506,29 @@ defmodule BarkparkCloud.Web.Router do
 
   defp scrub_entry(entry, _keys), do: entry
 
+  # cch-w27-s2: fold a stage/console entry's DETAIL through
+  # `Sites.Deploy.stage_caption/2` — classify it when that entry's own status is
+  # `failed`, scrub it otherwise. The status is read off the SAME entry, so an
+  # entry the worker has not stamped a status on falls to the scrub arm rather
+  # than being classified on a guess.
+  #
+  # Key-typed like `scrub_entry/2` above and for the identical reason: a
+  # JSONB-loaded console entry is string-keyed, a map `Sites.Deploy.stages/1`
+  # composed is atom-keyed. A non-map entry, or a non-binary detail, passes
+  # through untouched — a shape the worker has not written yet must degrade to
+  # "no caption", never crash the list serializer.
+  defp caption_entry(%{} = entry, status_key, detail_key) do
+    case Map.fetch(entry, detail_key) do
+      {:ok, detail} when is_binary(detail) ->
+        Map.put(entry, detail_key, Sites.Deploy.stage_caption(Map.get(entry, status_key), detail))
+
+      _ ->
+        entry
+    end
+  end
+
+  defp caption_entry(entry, _status_key, _detail_key), do: entry
+
   ## Onboarding action dispatch + serializer
 
   defp handle_onboarding_action(conn, %{"action" => "advance", "step" => step}, team) do
@@ -10206,7 +10229,21 @@ defmodule BarkparkCloud.Web.Router do
       #
       # wave 13 S2: build console lines are raw remote output, so they are
       # scrubbed at this boundary alongside failure_reason above.
-      console: Enum.map(d.console || [], &scrub_entry(&1, ["line", "detail"])),
+      #
+      # cch-w27-s2: the two keys now fold DIFFERENTLY, because two different
+      # readers hold them. `line` is the narration `deployConsoleHtml` prints —
+      # the raw capture, scrubbed and otherwise untouched. `detail` has exactly
+      # ONE client reader, `deployRailLedgerFromConsole`, which seeds the six-stage
+      # rail whose `.deploy-rail-fail` caption a person watches; on a `failed`
+      # entry that caption contradicted the `failure_reason` rendered ten lines
+      # above. `Sites.Deploy.stage_caption/2` classifies that one key on that one
+      # status and scrubs everything else — so the class reaches the rail and the
+      # capture keeps its only copy, in `line`, in the same payload.
+      console:
+        Enum.map(
+          d.console || [],
+          &(&1 |> scrub_entry("line") |> caption_entry("status", "detail"))
+        ),
       # dwb-19: the live sub-caption under the status pill (nil when none). The
       # site-detail deploy row renders it while the deploy is active.
       #
@@ -10243,7 +10280,13 @@ defmodule BarkparkCloud.Web.Router do
     # it is its OWN display boundary and needs its own scrub — otherwise the
     # stage detail ships the credential that the console entry it was derived
     # from just redacted, in the same payload.
-    |> Map.put(:stages, Enum.map(Sites.Deploy.stages(d), &scrub_entry(&1, :detail)))
+    #
+    # cch-w27-s2: and its own CLASSIFICATION, for the same reason. This is the
+    # stage bar `bp cloud site deploy` streams and `bp cloud site status` prints;
+    # a FAILED stage here named the raw cause while the `failure_reason` beside it
+    # named the human one. `stage_caption/2`'s non-failed arm IS the scrub this
+    # replaces, so no entry loses redaction. Atom keys — `stages/1` composes maps.
+    |> Map.put(:stages, Enum.map(Sites.Deploy.stages(d), &caption_entry(&1, :status, :detail)))
     |> Map.put(:url, deployment_url(d, site, bp))
   end
 
