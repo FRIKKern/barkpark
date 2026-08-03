@@ -159,7 +159,7 @@ HUMAN-GATE'
 # whose evidence is empty, or whose class is outside the vocabulary above, is a
 # hard error — a disposition without evidence is the vacuous green this epic
 # exists to remove. Absent rows are UNDISPOSED and red the run.
-PDS_DOOR_DISPOSITIONS='pds-charter-ledger-sweep.sh	CONTENT-RED	by run 2026-08-03: `--selftest` rc=1 "RED: an UNRESOLVED-CLAIM ARRIVAL is a charter claim nobody has adjudicated"; blocked on scripts/pds-charter-ledger-adjudication.md, not on price (CPU 3.42 s LOCAL)
+PDS_DOOR_DISPOSITIONS='pds-charter-ledger-sweep.sh	CONTENT-RED	by run 2026-08-03: `--check` rc=1 "RED: an UNRESOLVED-CLAIM ARRIVAL is a charter claim nobody has adjudicated" (59 arrivals); `--selftest` is rc=0 (3 of 3) and no longer hostage to the corpus; blocked on scripts/pds-charter-ledger-adjudication.md, not on price (CPU 3.42 s LOCAL)
 pds-record-parity.sh	RED-BY-DESIGN-REPORTER	by run 2026-08-03: `--selftest` rc=3 "unknown argument" — the flag does not exist; its only non-vacuous axis resolves task ids against the LIVE ledger and is red by design. A reporter must never carry a required check name.
 pds-window-sentinel.sh	NOT-YET-BUILT	source declares only `watch` and `preflight` verbs (scripts/pds-window-sentinel.sh:48-49); it is a host watcher with no pass/fail selftest to gate on.
 pds-ledger-census_test.sh	PRICE	CPU=33.44+6.89=40.33s LOCAL meter=/usr/bin/time -p around bash -c load1=24.26 2026-08-03 (rc=0, wall 68.24 s) — the SECOND tiering case; ~40 s CPU on a 2-4 vCPU runner needs its own justification.

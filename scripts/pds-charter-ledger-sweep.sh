@@ -66,11 +66,42 @@
 # shape, and a slug the paged corpus does not contain is CONFIRMED with a second
 # read (`bp task get`) before this run is allowed to call it NOT-A-TASK.
 #
+# AND THE SECOND READ FAILS CLOSED, because the confirmation used to be the
+# fail-open. `resolve()` asked for the row with errors ALLOWED and read a failed
+# read as an absence: `None` meant BOTH "the server says no such row" and "no
+# answer arrived", and `verdict()` spends `None` as NOT-A-TASK — the class that
+# CLEARS the row. Measured 2026-08-03, pre-fix, over ONE fixed ledger snapshot:
+# a dead bp (`exit 1`) and, sharper, an EXPIRED TOKEN (exit 3 with perfectly
+# VALID JSON, `error.code == "unauthorized"`) each produced output BYTE-IDENTICAL
+# to the healthy run — still printing "Each was CONFIRMED with a second read"
+# over 14 rows. A JSON-parse check alone would not have caught the second. The
+# discriminator was already on the wire and merely discarded: a status now needs
+# `ok:true` + a doc, an ABSENCE needs `ok:false` + `error.code == "not_found"`,
+# and anything else is UNCHECKED (rc=2) naming the slug. Both shims now rc=2
+# while a live bp stays byte-identical to the shipped report.
+#
 # EXITS: 0 every candidate resolved · 1 arrival (unresolved / misclassified) or
 #        a failed selftest · 2 UNCHECKED (missing dep, unreadable transport)
 #
+# ONE-LINE CORRECTION OWED TO THE DOOR CENSUS (recorded here, NOT applied — that
+# file is owned by other wave-45 slices). `scripts/pds-door-census.sh:123`
+# disposes this instrument CONTENT-RED on evidence quoting `--selftest` rc=1.
+# That evidence is STALE as of this commit: the selftest is now decoupled from
+# the corpus and runs rc=0 (3 of 3), while the CONTENT-RED is real and lives on
+# `--check`. The row's evidence should read, verbatim:
+#
+#   pds-charter-ledger-sweep.sh<TAB>CONTENT-RED<TAB>by run 2026-08-03: `--check`
+#   rc=1 "RED: an UNRESOLVED-CLAIM ARRIVAL is a charter claim nobody has
+#   adjudicated" (59 arrivals); `--selftest` is rc=0 (3 of 3) and no longer
+#   hostage to the corpus; blocked on scripts/pds-charter-ledger-adjudication.md,
+#   not on price (CPU 3.42 s LOCAL)
+#
+# `--check` is a real invocation as of this commit and is byte-identical to the
+# bare default run.
+#
 # USAGE
-#   bash scripts/pds-charter-ledger-sweep.sh
+#   bash scripts/pds-charter-ledger-sweep.sh            # the report
+#   bash scripts/pds-charter-ledger-sweep.sh --check     # the same run, NAMED
 #   bash scripts/pds-charter-ledger-sweep.sh --selftest
 #   bash scripts/pds-charter-ledger-sweep.sh --emit-template   # table skeleton
 #
@@ -87,10 +118,13 @@ while [ $# -gt 0 ]; do
     --charter)        CHARTER="${2:-}"; shift 2 ;;
     --table)          TABLE="${2:-}"; shift 2 ;;
     --ledger-cache)   CACHE="${2:-}"; shift 2 ;;
+    # `--check` is the default report under the name the door census cites it by,
+    # so an evidence string can quote an invocation that actually exists.
+    --check)          MODE="report"; shift ;;
     --emit-template)  MODE="template"; shift ;;
     --residue-slugs)  MODE="residue"; shift ;;
     --selftest)       SELFTEST=1; shift ;;
-    -h|--help)        sed -n '2,60p' "$0"; exit 0 ;;
+    -h|--help)        sed -n '2,106p' "$0"; exit 0 ;;   # through the USAGE block
     *) echo "pds-charter-ledger-sweep: UNCHECKED: unknown argument '$1'" >&2; exit 2 ;;
   esac
 done
@@ -135,19 +169,32 @@ def unchecked(msg):
 # body shape. A server that silently caps a page is a TRANSPORT FAILURE here,
 # never a smaller board.
 
-def bp_json(args, allow_error=False):
+def bp_json(args):
     try:
         p = subprocess.run(["bp"] + args, capture_output=True, text=True, timeout=120)
     except Exception as e:                                  # noqa: BLE001
         unchecked("bp %s did not run: %s" % (" ".join(args), e))
-    if p.returncode != 0 and not allow_error:
+    if p.returncode != 0:
         unchecked("bp %s exited %d: %s" % (" ".join(args), p.returncode, p.stderr.strip()[:200]))
     try:
         return json.loads(p.stdout)
     except Exception:                                       # noqa: BLE001
-        if allow_error:
-            return None
         unchecked("bp %s did not return JSON: %s" % (" ".join(args), p.stdout.strip()[:200]))
+
+def bp_probe(args):
+    """The RAW (returncode, parsed-or-None) of a read whose NEGATIVE answer is
+    itself evidence. `bp_json` cannot serve this: a read that must distinguish
+    "the server said no such row" from "the read did not happen" needs the exit
+    code AND the body, and any helper that collapses both into None hands the
+    caller a confirmed absence it never confirmed."""
+    try:
+        p = subprocess.run(["bp"] + args, capture_output=True, text=True, timeout=120)
+    except Exception as e:                                  # noqa: BLE001
+        unchecked("bp %s did not run: %s" % (" ".join(args), e))
+    try:
+        return p.returncode, json.loads(p.stdout)
+    except Exception:                                       # noqa: BLE001
+        return p.returncode, None
 
 LEDGER_PATH = os.path.join(CACHE, "ledger.json")
 
@@ -195,15 +242,29 @@ if os.path.exists(CONFIRM_PATH):
 def resolve(slug):
     """Live lifecycle_status, or None. A slug the paged corpus does not carry is
     CONFIRMED with a second read before this run may call it NOT-A-TASK: the
-    paged read is published-perspective, so a draft row would read as absent."""
+    paged read is published-perspective, so a draft row would read as absent.
+
+    FAIL-CLOSED, BOTH WAYS. `None` here is the strongest claim this instrument
+    makes about a row — it is what CLEARS a NOT-A-TASK adjudication — so it is
+    returned ONLY on the server's own `ok:false` + `error.code == "not_found"`.
+    A read that merely FAILED (a dead bp, or an expired token answering exit 3
+    with perfectly VALID JSON) is not an absence and must not spend as one: both
+    were measured BYTE-IDENTICAL to a healthy run before this guard existed."""
     if slug in STATUS:
         return STATUS[slug]
     if slug in CONFIRM:
         return CONFIRM[slug]
-    d = bp_json(["task", "get", slug, "-o", "json"], allow_error=True)
-    st = None
-    if isinstance(d, dict) and d.get("ok") and isinstance(d.get("doc"), dict):
-        st = d["doc"].get("lifecycle_status") or "unknown"
+    rc, d = bp_probe(["task", "get", slug, "-o", "json"])
+    ok_doc  = isinstance(d, dict) and d.get("ok") is True and isinstance(d.get("doc"), dict)
+    absent  = (isinstance(d, dict) and d.get("ok") is False
+               and isinstance(d.get("error"), dict)
+               and d["error"].get("code") == "not_found")
+    if not ok_doc and not absent:
+        unchecked("second read of '%s' exited %d and answered neither ok:true+doc nor "
+                  "ok:false+error.code=not_found — its ABSENCE IS UNPROVEN, and an unproven "
+                  "absence must never be spent as NOT-A-TASK (body: %s)"
+                  % (slug, rc, json.dumps(d)[:160] if d is not None else "<no JSON on stdout>"))
+    st = (d["doc"].get("lifecycle_status") or "unknown") if ok_doc else None
     CONFIRM[slug] = st
     try:
         with open(CONFIRM_PATH, "w") as fh:
@@ -530,21 +591,38 @@ if [ "$SELFTEST" = "1" ]; then
   # pipeline reports 141 and the assertion inverts — a selftest that fails on a
   # PASS. Measured here 2026-08-02; it cost a debugging round, so it is written
   # down rather than re-learned.
+  # THE SUBJECT UNDER TEST IS THE PLANT'S DELTA, NEVER THE CORPUS'S HEALTH.
+  # This assertion used to demand the literal `unresolved-claim arrivals : 0` in
+  # the mutant run — i.e. it demanded the whole charter be ADJUDICATED before the
+  # lens could be tested at all. So the selftest died at leg 1 the moment the
+  # corpus went red and LEGS 2 AND 3 NEVER RAN. A delta is both decoupled and
+  # STRICTLY STRONGER: it pins the cross-line plant at exactly +0 (and, at leg 3,
+  # the same-line plant at exactly +1) instead of `== 0` and `!= 0`.
+  arrivals_of() {
+    printf '%s\n' "$1" \
+      | sed -n 's/^ *unresolved-claim arrivals *: *\([0-9][0-9]*\) *$/\1/p' | head -1
+  }
+
   echo "--- same-line lens over the mutant (must NOT flag the planted claim) ---"
+  base_out="$(run_lens "$CHARTER" "$TABLE" "report" 2>&1)"; base_rc=$?
+  base_n="$(arrivals_of "$base_out")"
   same_line_out="$(run_lens "$MUT" "$TABLE" "report" 2>&1)"; same_line_rc=$?
+  mut_n="$(arrivals_of "$same_line_out")"
   case "$same_line_out" in
     *"$SENTINEL"*)
       echo "SELFTEST FAIL: the same-line lens named a CROSS-LINE claim — the plant is wrong" >&2
       exit 1 ;;
   esac
-  case "$same_line_out" in
-    *"unresolved-claim arrivals : 0"*) ;;
-    *)
-      echo "SELFTEST FAIL: the mutant run did not reach a clean arrival count (rc=$same_line_rc)" >&2
-      printf '%s\n' "$same_line_out" | tail -20 >&2
-      exit 1 ;;
-  esac
-  echo "same-line lens: rc=$same_line_rc, sentinel NOT flagged — confirmed blind, as claimed"
+  if [ -z "$base_n" ] || [ -z "$mut_n" ]; then
+    echo "SELFTEST FAIL: no arrival count to compare (charter rc=$base_rc '$base_n', mutant rc=$same_line_rc '$mut_n')" >&2
+    printf '%s\n' "$same_line_out" | tail -20 >&2
+    exit 1
+  fi
+  if [ "$mut_n" != "$base_n" ]; then
+    echo "SELFTEST FAIL: the CROSS-LINE plant moved the arrival count $base_n -> $mut_n (delta must be 0)" >&2
+    exit 1
+  fi
+  echo "same-line lens: rc=$same_line_rc, arrivals $base_n -> $mut_n (delta 0), sentinel NOT flagged — confirmed blind, as claimed"
 
   echo "--- residue lens over the mutant (MUST name the planted claim) ---"
   res_out="$(run_lens "$MUT" "$TABLE" "residue" 2>&1)"
@@ -567,14 +645,20 @@ if [ "$SELFTEST" = "1" ]; then
   } >> "$MUT2"
   echo "--- same-line lens over a planted SAME-LINE claim (MUST red as an arrival) ---"
   arr_out="$(run_lens "$MUT2" "$TABLE" "report" 2>&1)"; arr_rc=$?
+  arr_n="$(arrivals_of "$arr_out")"
   case "$arr_rc:$arr_out" in
     1:*"$SENTINEL"*)
-      printf '%s\n' "$arr_out" | grep -A2 "unresolved-claim arrivals"
-      echo "PROVEN: an unadjudicated same-line claim reds with rc=1 and is NAMED." ;;
+      printf '%s\n' "$arr_out" | grep "unresolved-claim arrivals"
+      printf '%s\n' "$arr_out" | grep "$SENTINEL" | head -1 ;;
     *)
       echo "SELFTEST FAIL: a planted same-line claim did not red (rc=$arr_rc) — the arm cannot fire" >&2
       exit 1 ;;
   esac
+  if [ "$arr_n" != "$((base_n + 1))" ]; then
+    echo "SELFTEST FAIL: the SAME-LINE plant moved the arrival count $base_n -> $arr_n (delta must be exactly 1)" >&2
+    exit 1
+  fi
+  echo "PROVEN: an unadjudicated same-line claim reds with rc=1, is NAMED, and moves arrivals $base_n -> $arr_n (delta 1)."
 
   echo "=== SELFTEST OK: 3 of 3 ==="
   exit 0
