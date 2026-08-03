@@ -40,9 +40,20 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
   shipped `sheets_reader_live_test.exs:451` uses `Session.whereis(...) == nil`,
   which is VACUOUS the moment a session exists).
 
-  NON-VACUITY. `pre_fix_grant_target_denied?/3` is the door AS IT STOOD before
-  this slice — the constant `false` — so the escalation is reproduced BY RUN in
-  the same file, and the substitution test names the escalated bytes.
+  NON-VACUITY, BY SUBSTITUTION ON THE SHIPPED MODULE (pds-w45). This block once
+  asserted against a TEST-LOCAL re-implementation of the pre-fix door — a private
+  function in THIS file returning the literal `false` — a tautology over a
+  literal, which observed no product code at all: flipping that literal reddened
+  the assertion with `shared/paper.ex` byte-identical. Its only other assertion
+  was a verbatim copy of test 2's oracle, so the block was one tautology plus one
+  duplicate and never showed the escalation LANDING. It is now a real
+  substitution: the case reads
+  `shared/paper.ex` from disk, substitutes the door expression at
+  `grant_target_denied?/3` out of the source, recompiles the module IN-VM, and
+  asserts the escalated bytes REACH THE STORE — the hand mutation wave 44's
+  reviewer ran is now reproduced by the merging artifact. `assert mutant !=
+  original` is the load-bearing substitution guard: a source reformat that misses
+  the target REDS instead of silently proving nothing.
 
   `async: false` — the paper-canvas flag is process-global.
   """
@@ -220,12 +231,6 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
     :ok
   end
 
-  # THE DOOR AS IT STOOD BEFORE THIS SLICE. `paper_pane_op/2`'s cond had exactly
-  # ONE capability arm (`write_denied?/1`); there was no target-aware arm at all,
-  # so the pre-fix answer for every socket is the constant `false`. Kept here so
-  # the escalation is reproducible BY RUN without shipping the hole.
-  defp pre_fix_grant_target_denied?(_socket, _type, _doc_id), do: false
-
   # ── 1. the grade, reproduced from the live socket ───────────────────────────
 
   describe "a signed-in NON-MEMBER with a DOC-scoped write grant" do
@@ -331,31 +336,110 @@ defmodule BarkparkWeb.Studio.PdsW44GrantDoorTest do
     end
   end
 
-  # ── 4. non-vacuity by substitution ──────────────────────────────────────────
+  # ── 4. non-vacuity by SUBSTITUTION ON THE SHIPPED MODULE ────────────────────
+
+  # The door's own source, on disk. Read at run time and recompiled IN-VM, so the
+  # oracle below observes PRODUCT CODE — not a copy of it kept in this file. A
+  # test-local re-implementation of the pre-fix door would be a tautology over a
+  # literal: it would red when the literal is flipped and stay green when
+  # `paper.ex` is gutted, which is precisely backwards.
+  @door_path Path.expand(
+               "../../../../lib/barkpark_web/live/studio/studio_live/shared/paper.ex",
+               __DIR__
+             )
+  @door_module BarkparkWeb.Studio.StudioLive.Shared.Paper
+
+  # `grant_target_denied?/3`'s whole body (paper.ex:152) — the arm pds-w44 added.
+  # Substituting it for the constant `false` restores the PRE-FIX door exactly:
+  # `paper_pane_op/2`'s cond is left with only the target-less `write_denied?/1`.
+  @door_expression "grant_graded?(socket.assigns) and not grant_admits_target?(socket, type, doc_id)"
+  @door_substitution "false"
 
   describe "NON-VACUITY" do
-    test "the PRE-FIX door (no target arm) admits the escalation the shipped one refuses", %{
+    test "the door arm SUBSTITUTED OUT of shared/paper.ex admits the escalation it refuses", %{
       conn: conn,
       ws: ws,
       proj: proj
     } do
+      original = File.read!(@door_path)
+      mutant = String.replace(original, @door_expression, @door_substitution, global: false)
+
+      # THE SUBSTITUTION GUARD, LOAD-BEARING — do not trim this as noise. If
+      # `paper.ex` is reformatted (the expression wrapped across lines, the arm
+      # renamed) the replace becomes a no-op, the "mutant" compiles the SHIPPED
+      # door, and every assertion below would pass while proving NOTHING. This
+      # assert turns that silent vacuity into a RED that names its own cause.
+      #
+      # AND IT COUNTS, because `global: false` takes the FIRST occurrence: `mutant
+      # != original` proves only that SOMETHING was replaced, not that the DOOR
+      # was. If a refactor introduces an earlier textual match, the first form
+      # would stay green while mutating a site that is not the door. The
+      # expression occurs exactly ONCE in `paper.ex` today; pinning that is what
+      # makes "the first occurrence" and "the door" the same sentence.
+      assert length(String.split(original, @door_expression)) - 1 == 1,
+             "the door expression #{inspect(@door_expression)} occurs " <>
+               "#{length(String.split(original, @door_expression)) - 1} time(s) in " <>
+               "#{@door_path}, not exactly once. `global: false` substitutes the FIRST " <>
+               "occurrence, so more than one makes this case mutate an unknown site and " <>
+               "none makes it mutate nothing. Re-derive the expression from " <>
+               "grant_target_denied?/3 — do NOT relax this guard to a mere != check."
+
+      assert mutant != original,
+             "substitution missed its target in #{@door_path}: the door expression " <>
+               "#{inspect(@door_expression)} is no longer present verbatim. Re-derive it " <>
+               "from grant_target_denied?/3 — do NOT delete this guard."
+
+      prev_conflict = Code.get_compiler_option(:ignore_module_conflict)
+
+      # RESTORE THE PRISTINE MODULE whatever happens below — including a failed
+      # assertion, which raises. Registered BEFORE the mutant is loaded so the
+      # recompile runs even if `compile_string/2` itself raises.
+      on_exit(fn ->
+        Code.put_compiler_option(:ignore_module_conflict, true)
+
+        try do
+          Code.compile_string(original, @door_path)
+        after
+          Code.put_compiler_option(:ignore_module_conflict, prev_conflict)
+        end
+      end)
+
+      # try/after, NOT a bare put + put: a raise mid-compile would otherwise
+      # leave `:ignore_module_conflict` globally TRUE for the rest of the suite,
+      # silently swallowing genuine module-conflict warnings in every later test.
+      #
+      # THE MUTANT COMPILE IS LOUD, AND EVERY WARNING IS EXPECTED — counted from
+      # the run, not guessed: 10, all downstream of the arm becoming the literal
+      # `false`. 3 unused variables (`socket`, `type`, `doc_id`, now unread by
+      # `grant_target_denied?/3`), 4 now-unreachable functions
+      # (`write_target_scope/3`, `grant_graded?/1`, `grant_admits_target?/3`,
+      # `active_grants/1`), and 3 "this clause in cond will never match" — one at
+      # EACH of the door's three call sites (paper.ex:233, :306, :716), which is
+      # itself the type checker confirming the substitution reached all of them.
+      # They do not fail the run. A reviewer seeing them has found the
+      # substitution working, not a bug.
+      try do
+        Code.put_compiler_option(:ignore_module_conflict, true)
+        [{@door_module, _bin} | _] = Code.compile_string(mutant, @door_path)
+      after
+        Code.put_compiler_option(:ignore_module_conflict, prev_conflict)
+      end
+
+      # `Shared.Paper` is reached only by REMOTE call from `StudioLive`, so a
+      # LiveView mounted after this point runs the mutant with no stale-code risk.
       {_user, conn} = grantee_session(conn, ws, proj)
       view = open_paper!(conn, ws, proj, @other_slug)
-      socket = socket_of(view)
 
-      # The reverted expression, run: the pre-fix door had no target-aware arm,
-      # so it answered `false` (admit) for this exact socket at this exact doc.
-      assert pre_fix_grant_target_denied?(socket, "paper", @other_slug) == false
-
-      # And every other arm of the cond admits it too — `write_denied?/1` is
-      # `not Caps.write_capable?/2`, which is FALSE here (proven above), and the
-      # pane is a paper. So with the new arm reverted this write LANDS, which is
-      # exactly what the substitution run shows.
-      caps = BarkparkWeb.Studio.Caps.derive(socket)
-      assert BarkparkWeb.Studio.Caps.write_capable?(socket.assigns, caps) == true
+      assert stored_value(ws, proj, @other_slug) == @orig
 
       inner_change(view, @escalated)
-      assert stored_value(ws, proj, @other_slug) == @orig
+
+      # THE ORACLE, INVERTED: with the shipped arm substituted out, the escalated
+      # bytes LAND. That is the escalation #9377 closed, reproduced by run — and
+      # it is the assertion the shipped door's own test (:280) proves CANNOT
+      # happen. One file, both directions, same oracle.
+      assert stored_value(ws, proj, @other_slug) == @escalated
+      refute flash_error(view) == @outside_grant_flash
     end
   end
 end
