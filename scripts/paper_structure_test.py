@@ -337,6 +337,69 @@ class PaperStructureAuditTest(unittest.TestCase):
         self.assertEqual(normalized[1]["head"], [text("Claim")])
         self.assertEqual(normalized[1]["rows"], [[text("Visible table fact")]])
 
+    def test_boolean_table_header_promotes_the_first_row(self):
+        blocks = [
+            {
+                "type": "table",
+                "header": True,
+                "rows": [
+                    [text("Surface"), text("Proof")],
+                    [text("TUI"), text("visible")],
+                ],
+            },
+            {
+                "type": "table",
+                "header": True,
+                "head": [text("Already canonical")],
+                "rows": [[text("Body")]],
+            },
+            {
+                "type": "table",
+                "header": True,
+                "head": [],
+                "rows": [[text("Promote me")], [text("Remain body")]],
+            },
+        ]
+        document = {"_id": "boolean-header", "_rev": "rev-1", "blocks": blocks}
+
+        report = audit_documents([document])
+        normalized = canonicalize_blocks(blocks)
+
+        self.assertEqual(report["violation_counts"], {"table_header_boolean": 3})
+        self.assertEqual(report["safe_repair_violations"], 3)
+        self.assertNotIn("header", normalized[0])
+        self.assertEqual(normalized[0]["head"], [text("Surface"), text("Proof")])
+        self.assertEqual(normalized[0]["rows"], [[text("TUI"), text("visible")]])
+        self.assertNotIn("header", normalized[1])
+        self.assertEqual(normalized[1]["head"], [text("Already canonical")])
+        self.assertEqual(normalized[1]["rows"], [[text("Body")]])
+        self.assertNotIn("header", normalized[2])
+        self.assertEqual(normalized[2]["head"], [text("Promote me")])
+        self.assertEqual(normalized[2]["rows"], [[text("Remain body")]])
+
+    def test_scalar_table_columns_become_canonical_headers(self):
+        blocks = [
+            {
+                "type": "table",
+                "columns": ["Corner", "Proof"],
+                "rows": [["writer", "does not crash"]],
+            }
+        ]
+        document = {"_id": "scalar-columns", "_rev": "rev-1", "blocks": blocks}
+
+        report = audit_documents([document])
+        normalized = canonicalize_blocks(blocks)
+
+        self.assertEqual(
+            report["violation_counts"], {"table_column_scalar_header": 1}
+        )
+        self.assertEqual(report["safe_repair_violations"], 1)
+        self.assertNotIn("columns", normalized[0])
+        self.assertEqual(normalized[0]["head"], [text("Corner"), text("Proof")])
+        self.assertEqual(
+            normalized[0]["rows"], [[text("writer"), text("does not crash")]]
+        )
+
     def test_camelcase_content_dialect_and_scalar_tables_become_canonical(self):
         blocks = [
             {
@@ -427,6 +490,12 @@ class PaperStructureAuditTest(unittest.TestCase):
                         "items": [json.dumps(text("snake alias"))],
                     },
                     {
+                        "type": "bulleted_list",
+                        "content": [
+                            {"type": "list_item", "content": text("bulleted alias")}
+                        ],
+                    },
+                    {
                         "type": "ordered-list",
                         "items": [json.dumps(text("ordered alias"))],
                     },
@@ -479,22 +548,23 @@ class PaperStructureAuditTest(unittest.TestCase):
         self.assertEqual(
             report["violation_counts"],
             {
-                "list_alias_dialect": 3,
+                "list_alias_dialect": 4,
                 "list_content_dialect": 1,
                 "table_content_dialect": 2,
             },
         )
-        self.assertEqual(report["safe_repair_violations"], 6)
-        self.assertEqual([child["type"] for child in children[:4]], ["list"] * 4)
+        self.assertEqual(report["safe_repair_violations"], 7)
+        self.assertEqual([child["type"] for child in children[:5]], ["list"] * 5)
         self.assertEqual(children[0]["items"], [text("camel alias")])
         self.assertEqual(children[1]["items"], [text("snake alias")])
-        self.assertEqual(children[2]["items"], [text("ordered alias")])
-        self.assertTrue(children[2]["ordered"])
-        self.assertEqual(children[3]["items"], [text("content list")])
-        self.assertEqual(children[4]["head"], [text("Surface"), text("Proof")])
-        self.assertEqual(children[4]["rows"], [[text("TUI"), text("visible")]])
-        self.assertEqual(children[5]["head"], [text("Claim")])
-        self.assertEqual(children[5]["rows"], [[text("proven")]])
+        self.assertEqual(children[2]["items"], [text("bulleted alias")])
+        self.assertEqual(children[3]["items"], [text("ordered alias")])
+        self.assertTrue(children[3]["ordered"])
+        self.assertEqual(children[4]["items"], [text("content list")])
+        self.assertEqual(children[5]["head"], [text("Surface"), text("Proof")])
+        self.assertEqual(children[5]["rows"], [[text("TUI"), text("visible")]])
+        self.assertEqual(children[6]["head"], [text("Claim")])
+        self.assertEqual(children[6]["rows"], [[text("proven")]])
         self.assertEqual(canonicalize_blocks(normalized), normalized)
 
     def test_ambiguous_expanded_dialect_is_quarantined_without_mutation(self):
@@ -534,6 +604,30 @@ class PaperStructureAuditTest(unittest.TestCase):
                 {"id": "paper-1", "type": "paper"},
             )
             self.assertTrue((plan_dir / "backups" / "paper-1.json").exists())
+
+    def test_repair_plan_does_not_mutate_audit_clean_documents(self):
+        document = {
+            "_id": "audit-clean-legacy-head",
+            "_rev": "rev-1",
+            "blocks": [
+                {
+                    "type": "table",
+                    "head": ["Heading"],
+                    "rows": [[text("Body")]],
+                }
+            ],
+        }
+        self.assertEqual(audit_documents([document])["safe_repair_violations"], 0)
+        self.assertNotEqual(canonicalize_blocks(document["blocks"]), document["blocks"])
+
+        with TemporaryDirectory() as temp:
+            plan_dir = Path(temp) / "plan"
+            manifest = write_repair_plan([document], plan_dir)
+
+            self.assertEqual(manifest["papers_changed"], 0)
+            self.assertEqual(manifest["backup_documents"], 0)
+            self.assertEqual(manifest["mutation_chunks"], 0)
+            self.assertFalse((plan_dir / "backups" / f"{document['_id']}.json").exists())
 
 
 if __name__ == "__main__":

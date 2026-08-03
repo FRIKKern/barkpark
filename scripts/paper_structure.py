@@ -148,7 +148,7 @@ def audit_blocks(
                 )
             )
 
-        if block_token in {"list", "bulletlist", "orderedlist"}:
+        if block_token in {"list", "bulletlist", "bulletedlist", "orderedlist"}:
             list_dialect = block_type != "list" or not isinstance(
                 block.get("items"), list
             )
@@ -262,7 +262,49 @@ def audit_blocks(
                     )
                 )
                 continue
+            if block.get("header") is True:
+                first_row = rows[0] if rows else None
+                safe = (
+                    (isinstance(block.get("head"), list) and bool(block.get("head")))
+                    or (
+                        not block.get("head")
+                        and isinstance(first_row, list)
+                        and all(
+                            isinstance(_canonical_inline(cell), list)
+                            for cell in first_row
+                        )
+                    )
+                )
+                findings.append(
+                    _violation(
+                        document,
+                        f"{block_path}.header",
+                        "table_header_boolean",
+                        safe=safe,
+                        detail=(
+                            "A boolean table header marker is not a row; the first "
+                            "row must be promoted to canonical block.head."
+                        ),
+                    )
+                )
             columns = block.get("columns")
+            if (
+                isinstance(columns, list)
+                and bool(columns)
+                and all(_record_scalar(column) for column in columns)
+            ):
+                findings.append(
+                    _violation(
+                        document,
+                        f"{block_path}.columns",
+                        "table_column_scalar_header",
+                        safe=not block.get("head") and not block.get("header"),
+                        detail=(
+                            "Scalar table columns are header labels, not record-field "
+                            "declarations; canonical readers consume block.head."
+                        ),
+                    )
+                )
             if isinstance(columns, list):
                 for column_index, column in enumerate(columns):
                     if (
@@ -644,7 +686,7 @@ def canonicalize_blocks(blocks: Any) -> Any:
         block_type = block.get("type")
         block_token = _type_token(block)
 
-        if block_token in {"list", "bulletlist", "orderedlist"} and (
+        if block_token in {"list", "bulletlist", "bulletedlist", "orderedlist"} and (
             block_type != "list" or not isinstance(block.get("items"), list)
         ):
             try:
@@ -732,6 +774,27 @@ def canonicalize_blocks(blocks: Any) -> Any:
                 block.pop("content", None)
 
         if block_type == "table" and isinstance(block.get("rows"), list):
+            if (
+                block.get("header") is True
+                and isinstance(block.get("head"), list)
+                and bool(block.get("head"))
+            ):
+                block.pop("header", None)
+
+            if (
+                block.get("header") is True
+                and not block.get("head")
+                and block["rows"]
+                and isinstance(block["rows"][0], list)
+            ):
+                candidate_head = [
+                    _canonical_inline(cell) for cell in block["rows"][0]
+                ]
+                if all(isinstance(cell, list) for cell in candidate_head):
+                    block["head"] = candidate_head
+                    block["rows"] = block["rows"][1:]
+                    block.pop("header", None)
+
             headers = block.get("headers")
             if (
                 not block.get("head")
@@ -756,6 +819,16 @@ def canonicalize_blocks(blocks: Any) -> Any:
                 ]
 
             columns = block.get("columns")
+            scalar_columns = (
+                isinstance(columns, list)
+                and bool(columns)
+                and all(_record_scalar(column) for column in columns)
+            )
+            if scalar_columns and not block.get("head") and not block.get("header"):
+                block["head"] = [_canonical_inline(column) for column in columns]
+                block.pop("columns", None)
+                columns = None
+
             legacy_columns = (
                 isinstance(columns, list)
                 and bool(columns)
@@ -983,6 +1056,11 @@ def write_repair_plan(
 
     for document in ordered_documents:
         blocks = document.get("blocks")
+        document_audit = audit_documents([document])
+        has_safe_findings = document_audit["safe_repair_violations"] > 0
+        if not has_safe_findings:
+            post_repair_documents.append(document)
+            continue
         normalized = canonicalize_blocks(blocks)
         post_document = dict(document)
         if "blocks" in document:
