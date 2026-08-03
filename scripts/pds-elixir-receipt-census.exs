@@ -3326,7 +3326,63 @@ defmodule PDS.Census do
       |> Enum.filter(fn {_k, n} -> n > 1 end)
       |> Enum.map(&elem(&1, 0))
 
+    # ---- THE JUDGMENT-COVERAGE LADDER, TAKEN EXACTLY ONCE, HERE -------------------
+    #
+    # THE TOP RUNG IS A UNION AND MUST NEVER BE A SUM. leg_a and leg_b are two
+    # INDEPENDENT predicates over the SAME population — a member can reach a PROVEN
+    # register def AND a PROVEN roster def, and adding the legs would count it twice.
+    # DO NOT COPY THE SHAPE OF THE `sum` LINE IN THE DISPOSITION BLOCK BELOW: that bare
+    # four-term plus is sound ONLY because the cond above assigns EXACTLY ONE label per
+    # member, so its four classes are disjoint BY CONSTRUCTION. Nothing makes these two
+    # legs disjoint. OVERLAP is 0 on today's tree, which means the addition and the
+    # union print the SAME 23 — the number is no evidence at all, and the injection
+    # mutants (selftest LADDER-UNION-NOT-SUM) are the only thing that can tell them
+    # apart. The count is taken HERE, once; the report only reads it.
+    leg_a = members_reaching(population, index, receipt_functions(classified, :proven, [:live, :stale]))
+    leg_b = members_reaching(population, index, roster_functions(parsed, :proven))
+    proven_backed = MapSet.union(leg_a, leg_b)
+
+    verdicted =
+      MapSet.union(
+        members_reaching(
+          population,
+          index,
+          receipt_functions(classified, {:in, ["PROVEN", "REFUTED"]}, [:live, :stale])
+        ),
+        members_reaching(population, index, roster_functions(parsed, {:in, ["PROVEN", "REFUTED"]}))
+      )
+
+    # THE TWO ZEROES, DERIVED RATHER THAN ASSUMED — both printed, because an arm nobody
+    # can see failing is an arm nobody knows is asleep.
+    loose_judged = members_reaching(population, index, receipts)
+    loose_rostered = members_reaching(population, index, rostered)
+    fresh_only_defs = receipt_functions(classified, :proven, [:live])
+    proven_defs = receipt_functions(classified, :proven, [:live, :stale])
+
+    ladder = %{
+      # COUNTED, NOT ADDED, even here where the cond guarantees disjointness — one
+      # traversal over the labels asks nothing of the reader.
+      judged_coverage: Enum.count(disposed, &(elem(&1, 1) in [:judged, :rostered])),
+      leg_a: MapSet.size(leg_a),
+      leg_b: MapSet.size(leg_b),
+      naive_sum: MapSet.size(leg_a) + MapSet.size(leg_b),
+      proven_backed: Enum.count(proven_backed),
+      overlap: MapSet.size(MapSet.intersection(leg_a, leg_b)),
+      verdicted: Enum.count(verdicted),
+      # precedence suppression: how many members the cond's JUDGED > ROSTERED order
+      # hides from the printed ROSTERED count, and how many EXCLUDED hides from JUDGED.
+      suppressed_rostered: MapSet.size(loose_rostered) - Enum.count(disposed, &(elem(&1, 1) == :rostered)),
+      suppressed_judged: MapSet.size(loose_judged) - Enum.count(disposed, &(elem(&1, 1) == :judged)),
+      proven_defs: MapSet.size(proven_defs),
+      proven_defs_live_only: MapSet.size(fresh_only_defs),
+      # THE WRONG ANSWER THAT SHARES THE RIGHT ANSWER'S VALUE, derived rather than
+      # asserted — and derived as a UNION here too, because a plus is what got this
+      # slice written.
+      def_union: MapSet.size(MapSet.union(proven_defs, roster_functions(parsed, :any)))
+    }
+
     %{
+      ladder: ladder,
       rows: disposed,
       judged: Enum.count(disposed, &(elem(&1, 1) == :judged)),
       rostered: Enum.count(disposed, &(elem(&1, 1) == :rostered)),
@@ -3339,9 +3395,21 @@ defmodule PDS.Census do
   end
 
   # {module string, function name} of every def that OWNS a register-covered emitted site.
-  defp receipt_functions(classified) do
-    for {_row, status, site} <- resolve_register(classified),
-        status in [:live, :stale],
+  #
+  # BOTH LEGS TOOK A VERDICT ARGUMENT IN WAVE 45, AND NEITHER HAD ONE BEFORE. This
+  # comprehension bound the register row to `_row` and filtered on FRESHNESS ALONE, so
+  # "the register judged it" meant "the register has a ROW for it" — including a row
+  # whose committed verdict is UNJUDGED. Its sibling roster_functions/1 carried no
+  # verdict test either. DISPOSITION still asks the loose question on purpose (`:any`):
+  # JUDGED means "this lens can see a receipt and a register row keys it", and narrowing
+  # THAT would silently re-label judged members EXCLUDED. `:proven` is the ladder's leg,
+  # which asks the strictly harder question the ladder's top rung is named after.
+  defp receipt_functions(classified), do: receipt_functions(classified, :any, [:live, :stale])
+
+  defp receipt_functions(classified, verdicts, statuses) do
+    for {row, status, site} <- resolve_register(classified),
+        status in statuses,
+        verdict_admits?(verdicts, row.verdict),
         %{def: {mod, name, _ar, _ln}} <- [site],
         into: MapSet.new(),
         do: {Enum.join(mod, "."), name}
@@ -3350,10 +3418,13 @@ defmodule PDS.Census do
   # The roster names LITERALS, not functions. Resolve each literal to the def that
   # contains it, so a routed action can be disposed ROSTERED by the same anchor the
   # ROSTER-ANCHORS-EXIST arm already keeps honest.
-  defp roster_functions(parsed) do
+  defp roster_functions(parsed), do: roster_functions(parsed, :any)
+
+  defp roster_functions(parsed, verdicts) do
     by_path = Map.new(parsed, &{&1.path, &1})
 
     for r <- @roster,
+        verdict_admits?(verdicts, r.verdict),
         f = Map.get(by_path, r.path),
         f != nil,
         {:ok, line} <- [roster_anchor(%{r.path => f.src}, r)],
@@ -3361,6 +3432,33 @@ defmodule PDS.Census do
         d.line <= line and line <= d.last,
         into: MapSet.new(),
         do: {Enum.join(d.module, "."), d.name}
+  end
+
+  # THE COUNT-FREE DISCRIMINATOR. The selftest asserts arm names and refusal prose and
+  # NEVER a bucket count, so the injection proof cannot be shipped as "expect 24" — an
+  # honest register edit would red it. It is shipped as this TOKEN instead: it flips the
+  # moment the naive addition and the union stop agreeing, which is precisely the
+  # condition an implementation that ADDED the legs could never produce.
+  defp union_verdict(%{naive_sum: n, proven_backed: u}) when n == u,
+    do: "[naive == UNION — no member is reached by both legs on this tree, so the number ALONE proves nothing about which computation produced it]"
+
+  defp union_verdict(%{naive_sum: n, proven_backed: u}),
+    do: "[naive > UNION — the addition would OVERCOUNT by #{n - u} member(s); the union held]"
+
+  # ONE verdict predicate for both legs, because two spellings of "is it PROVEN" is how
+  # the legs drift apart under the next edit.
+  defp verdict_admits?(:any, _v), do: true
+  defp verdict_admits?(:proven, v), do: v == "PROVEN"
+  defp verdict_admits?({:in, list}, v), do: v in list
+
+  # The members of the population that REACH any def in `targets` — no precedence, no
+  # suppression. A LADDER RUNG IS A SET OF MEMBERS, NOT A PARTITION CLASS: two rungs may
+  # overlap, which is exactly why the top rung is a union and never a sum.
+  defp members_reaching(population, index, targets) do
+    for {_m, _p, mod, action} = key <- population,
+        reaches?(index, mod, action, targets),
+        into: MapSet.new(),
+        do: key
   end
 
   defp module_file_index(parsed) do
@@ -4099,6 +4197,53 @@ defmodule PDS.Census do
 
     p("    UNDISPOSED #{pad(length(disp.undisposed))}  <- ROUTED-POPULATION-COMPLETE reds on this")
     p("    sum       #{pad(disp.judged + disp.rostered + disp.excluded + length(disp.undisposed))}  == population #{length(d.population)}")
+
+    p("")
+    lad = disp.ladder
+    p("  JUDGMENT-COVERAGE LADDER — four rungs, each a subset of the one above BY")
+    p("  CONSTRUCTION, and NOT asserted as one: rungs 3 and 4 filter the SAME reach")
+    p("  relation the disposition uses, over a strictly narrower def set, so a printed")
+    p("  subset check here could not fail — a green costing nothing to produce.")
+    p("    THE UNIT IS MEMBERS AND SAYING SO IS LOAD-BEARING: #{lad.proven_backed} is ALSO the size of a")
+    p("    DIFFERENT AND WRONG SET — |#{lad.proven_defs} proven register def(s) u every roster def| = #{lad.def_union} —")
+    p("    which credits the roster's UNJUDGED rows to the top rung. A rung printed")
+    p("    without its unit is ambiguous between that answer and this one, so every rung")
+    p("    below says MEMBERS: members of the ROUTED-WRITE population, routed quads.")
+    p("    1 population        #{pad(length(d.population))} MEMBERS  every routed-write quad")
+    p("    2 judged-coverage   #{pad(lad.judged_coverage)} MEMBERS  disposed JUDGED or ROSTERED")
+    p("    3 VERDICTED         #{pad(lad.verdicted)} MEMBERS  reaches a def whose register/roster row carries")
+    p("                            an EXPLICIT verdict (PROVEN or REFUTED, not UNJUDGED)")
+    p("    4 PROVEN-BACKED     #{pad(lad.proven_backed)} MEMBERS  reaches a def whose row is verdicted PROVEN")
+
+    if lad.verdicted == lad.proven_backed do
+      p("      RUNGS 3 AND 4 COINCIDE ON THIS TREE and that is a fact about the data, not")
+      p("      about the rungs: zero rows carry REFUTED right now, in the register or the")
+      p("      roster. The day one does, rung 3 rises above rung 4 and this line stops.")
+    end
+
+    p("    UNION, NEVER ADDITION: |A| #{lad.leg_a} + |B| #{lad.leg_b} = #{lad.naive_sum} naive; UNION #{lad.proven_backed}; OVERLAP #{lad.overlap}")
+    p("      #{union_verdict(lad)}")
+    wrap(
+      "leg A is the members reaching a PROVEN register def, leg B the members reaching a " <>
+        "PROVEN roster def. They are INDEPENDENT predicates over one population, so the top " <>
+        "rung is Enum.count over ONE MapSet.union taken once in dispose_routed/4 — never " <>
+        "leg_a + leg_b, and never the shape of the DISPOSITION `sum` line above, whose bare " <>
+        "plus is sound only because the cond there assigns exactly one label per member. " <>
+        "OVERLAP is #{lad.overlap} today, so the addition and the union print the SAME number and this " <>
+        "line is the ONLY place a reader can see that they are not the same computation. " <>
+        "The discriminator that can go RED is the selftest case LADDER-UNION-NOT-SUM, which " <>
+        "injects a leg-B member into leg A and requires naive_sum to exceed a held UNION.",
+      "      "
+    )
+
+    p("    THE ZEROES, PRINTED RATHER THAN IMPLIED — two arms that are NOT exercised today:")
+    p("      precedence suppression removes #{lad.suppressed_rostered} member(s) from ROSTERED and")
+    p("        #{lad.suppressed_judged} from JUDGED — the loose roster-reaching and receipt-reaching sets")
+    p("        equal the printed counts, so the cond's JUDGED > ROSTERED order hides nothing")
+    p("        on this tree and the ladder's legs are unaffected by it either way.")
+    p("      the freshness arm is a NO-OP: #{lad.proven_defs_live_only} proven register def(s) at status :live and")
+    p("        #{lad.proven_defs} at :live+:stale — the same set, because no PROVEN register row is stale")
+    p("        right now. NOTHING BELOW IS EVIDENCE THAT THE :stale ARM WORKS.")
 
     p("")
     deriv = derivation_partition(disp, index)
@@ -4900,6 +5045,15 @@ defmodule PDS.Census do
       "        "
     )
 
+    # THE `?` CLAUSE ABOVE IS THE ONLY UNQUANTIFIED SIBLING IN THAT SENTENCE, so it
+    # carries its bound HERE, in the output (PDS-D633: a number from a meter lives in
+    # the meter's own printed output, never in prose a copy-paste can drop).
+    p("        declined_live=#{sidx.declined_live}  <- live spec(s) whose module reads `?` and DECLINE the join,")
+    p("        a BOUND on the sentence above rather than a restatement of it. Printing it")
+    p("        at 0 is the point: nothing here announced when it stopped being 0, so the")
+    p("        sentence could describe an EMPTY SET for a whole wave with no line of this")
+    p("        report changing. It is a bound, never a pass — see the count itself.")
+
     p("      THE MULTI-SESSION KEY IS LOAD-BEARING, NOT DECORATIVE: #{length(multi)} / #{n} clause(s)")
     p("      are routed in MORE THAN ONE live_session, so a module-keyed column would")
     p("      decide them once and be wrong on one of the two mounts.")
@@ -5058,7 +5212,8 @@ defmodule PDS.Census do
         mount_sites: length(sites),
         sessionless_sites: length(sessionless),
         sessionless_buckets: sessionless |> Enum.map(& &1.plugin_scope) |> Enum.uniq() |> length(),
-        macro_wrapped: parsed |> lvs_specs() |> Enum.count(&(&1.auth == @lvs_macro_wrapped_auth))
+        macro_wrapped: parsed |> lvs_specs() |> Enum.count(&(&1.auth == @lvs_macro_wrapped_auth)),
+        declined_live: lvs_declined_live(parsed)
       }
     else
       _ ->
@@ -5067,9 +5222,21 @@ defmodule PDS.Census do
           mount_sites: 0,
           sessionless_sites: 0,
           sessionless_buckets: 0,
-          macro_wrapped: 0
+          macro_wrapped: 0,
+          declined_live: 0
         }
     end
+  end
+
+  # THE BOUND ON THE `?` DECLINE (PDS-D661, wave 45). The residual prose claimed a spec
+  # whose module this lens cannot name declines the join, and NOTHING counted the
+  # declines — an unquantified claim sitting beside five quantified siblings. It is
+  # DERIVED THROUGH lvs_joinable?/1 rather than through a second `mod != "?"` test, so
+  # the number cannot drift from the predicate it describes (and the selftest mutant
+  # that neuters that predicate moves this count too).
+  defp lvs_declined_live(parsed) do
+    live_specs = parsed |> plugin_route_specs() |> Enum.filter(&(&1.method == @routed_live_method))
+    length(live_specs) - Enum.count(live_specs, &lvs_joinable?/1)
   end
 
   defp lvs_specs(parsed), do: parsed |> plugin_route_specs() |> Enum.filter(&lvs_joinable?/1)
@@ -6254,7 +6421,7 @@ defmodule PDS.Census do
         "RESIDUAL residual_no_derivable_chain   2 / 5",
         "sum                                5 == population 5"
       ],
-      proves: "a plugin spec mounted INSIDE a live_session resolves the chain at its own callsite and lands DECIDED (reachable_unconditional 2 / 5), while the spec mounted at the sessionless callsite and the one whose module resolves to `?` stay UNDECIDED (RESIDUAL 2 / 5) — the residual is narrowed by derivation on this corpus and is NOT zero by construction"
+      proves: "a plugin spec mounted INSIDE a live_session resolves the chain at its own callsite and lands DECIDED (reachable_unconditional 2 / 5), while the spec mounted at the sessionless callsite stays UNDECIDED — the residual is narrowed by derivation on this corpus and is NOT zero by construction. THE SECOND RESIDUAL CLAUSE IS NOT THE `?` SPEC'S DOING, and wave 45 corrected this sentence for saying so: the `?` spec (route /var-live) contributes no clause to ANY class, and the clause that sits in the residual belongs to PluginVarLive, put into route_mods by the COMPENSATING LITERAL ROUTE live(\"/loose-var\", PluginVarLive) in the fixture router. Deleting that route moves exactly that one clause (RESIDUAL 2 / 5 -> 1 / 5), which is what makes the compensation total and this fraction meaningful"
     },
     %{
       name: "LIVEVIEW-PLUGIN-MOUNT-NOT-CONSTANT",
@@ -6285,6 +6452,31 @@ defmodule PDS.Census do
       expect: ["Keyed on {module, live_session}. 3 routed module(s) resolve to a"],
       refute: ["Keyed on {module, live_session}. 2 routed module(s) resolve to a"],
       proves: "the `?` decline is load-bearing: without it the fold credits a live_session to a spec whose module this lens cannot name, and the printed routed-module count goes 2 -> 3 on a corpus whose openable routed modules never changed"
+    },
+    # THE LADDER'S TOP RUNG, AND THE ONLY DISCRIMINATOR THAT EXISTS FOR IT (wave 45).
+    # OVERLAP is 0 on today's tree, so `leg_a + leg_b` and Enum.count(MapSet.union(..))
+    # BOTH print the same integer: an implementation that ADDED the legs would be green,
+    # right, and wrong, until the first member reached by both a PROVEN register def and
+    # a PROVEN roster def arrives. This case MANUFACTURES that member by injecting a
+    # leg-B def into leg A, and then asserts the RELATION rather than the count — an
+    # addition can never print `naive > UNION`, and an honest register edit can never
+    # red this, because no bucket number appears in either list.
+    %{
+      name: "LADDER-UNION-NOT-SUM",
+      corpus: :repo,
+      argv: [],
+      # THE ANCHOR IS SPLIT so this tuple does not match ITSELF — apply_mutation/2 refuses
+      # an ambiguous anchor, and a mut literal that occurs twice is exactly that.
+      mut:
+        {"leg_a = members_reaching(population, index, " <>
+           "receipt_functions(classified, :proven, [:live, :stale]))",
+         "leg_a = members_reaching(population, index, MapSet.union(" <>
+           "receipt_functions(classified, :proven, [:live, :stale]), " <>
+           "MapSet.new([{\"BarkparkWeb.ScimGroupsController\", :delete}])))"},
+      exit: 0,
+      expect: ["naive > UNION — the addition would OVERCOUNT by"],
+      refute: ["[naive == UNION"],
+      proves: "PROVEN-BACKED is ONE Enum.count over ONE MapSet.union and not leg_a + leg_b: a def already carried by leg B is injected into leg A, so the legs now share member(s), the naive addition rises above the union and the union HOLDS. Replace that union with an addition and this case reds, because the addition can only ever print `naive == UNION`"
     }
   ]
 
