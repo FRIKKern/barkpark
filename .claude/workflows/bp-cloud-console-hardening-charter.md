@@ -1170,6 +1170,81 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-03 — wave 28 REVIEW — 7/7 round-1 slices built, gated, reviewed, PUSHED and PR'd. Grade A−
+
+**THE ENVIRONMENT QUESTION WAS DECIDED AND #9356 IS GREEN WITHOUT WEAKENING WHAT WAS RED.** Option (b),
+per D327/D329: the empty-roster control at `seal-predicate.test.mjs` stopped asserting the OVERALL exit
+code — the conjunction of (a), (b) and (c) — and now asserts clause (a)'s letters (`a=PASS`, `orphans=0`,
+`mode=live`, `roster=0`) plus two anti-vacuity `doesNotMatch` guards. No `fetch-depth: 0`, no stubbed git
+leg, `.github/required-checks.json` untouched. Re-gated by the reviewer in BOTH environments on the final
+branch: full clone **65/65 rc 0**, and a real `git clone --depth 1 --no-local` (shallowness proved inside
+the clone: `git log --oneline --all | wc -l` = 1, `git rev-parse origin/main` exits 128) **65/65 rc 0**.
+The fabrication sentences were RELOCATED, not deleted, to a new committed fixture
+(`terminal-empty-roster.json`) that reaches them without any git history at all. Reviewer fix on top: the
+floor mutation's anchors are now asserted present before use — `String.replace` on a drifted anchor is a
+SILENT no-op and `mutatedRun`'s own guard would have been satisfied by the roster mutation alone.
+
+**ORPHANS RE-DERIVED WITH THE FIXED INSTRUMENT, FROM A REAL GIT TREE — all three things quoted.**
+UTC `2026-08-03T14:43:51Z` · tree sha `52a80c7be` · RESOLVED REPO ROOT
+`/Volumes/SATECHI/github/barkpark/.claude/worktrees/wf_e660e3b7-480-40`.
+`VERDICT-TOKEN: SEAL-PREDICATE NO-SEAL a=FAIL b=PASS c=PASS orphans=75 considering=1
+successor=cch-instruments-epic mode=live stubbed=0 waived=0 roster=307`. Roster 307
+`{done 195, in_progress 7, open 70, cancelled 34, considering 1}`; residue 78 (live 77, considering 1),
+forwarded 0, gates 3. **Note `b=PASS` — clause (b) resolves here because this is a FULL clone; that is
+exactly the environment fact wave 27 found, and it is unchanged in CI.** The two integers D306 asks for,
+as deltas against wave 27's `117 / roster 343 {189, 119, 34, 1}` at `c2affd445`: **re-parented out of this
+roster = 36** (343 → 307) and **closed = +6 done** (189 → 195). The 36 does not equal wave 27's 57 hand
+re-parents and the reconciliation is stated rather than smoothed: 343 − 57 = 286, and ~21 rows have been
+filed INTO the epic since (wave 28's 8 slice rows plus follow-ups), which lands at 307. Orphans fell
+117 → 75.
+
+**What shipped (per slice — final branch, verdict):**
+
+| Slice | Final branch | Verdict |
+|---|---|---|
+| `cch-w28-s1` empty-roster control asserts clause (a) | `…9356-goes-green…-0-r` | 65/65 in FULL and DEPTH-1. Reviewer hardened the mutation anchors. On #9356's branch — the lead merges #9356, not a new PR. |
+| `cch-w28-s3` console-harness hermeticity prose | `…console-harness-yml-stops-asserting-thre-1` | Comment-only, zero non-comment changed lines, YAML parses. Every number re-derived by the reviewer: suite is **59** on main, and `BP_SERVER=http://127.0.0.1:1` reds **exactly** `not ok 56`. No fixes needed. |
+| `cch-w28-s4` D307 door guard armed at the birth seat | `…d307-filing-law-door-guard-ships-arm-2-r` | 46/0 + 1554/0. HIGH-FLIP-RISK, independently re-derived. Reviewer DELETED a false sentence from the shipped comment: the brief's "23 failures" scoping prediction is **1 failure**, measured by running the mutation. |
+| `cch-w28-s5` refused connection is not a timeout | `…person-a-refused-connection-stops-being--3` | 83/0 + 202/0. Both halves mutation-proved by the builder. No fixes needed. |
+| `cch-w28-s6` deployment_failed actually dispatches | `…deployment-failed-toggle-stop-4-r` | 29/0. Reviewer added the missing test for `@reap_alert_cap` — a person-facing SUPPRESSION that no fixture crossed (standing clause 4 against the wave itself) — and made the cap readable via `Registry.reap_alert_cap/0`. Mutation-proved: removing the split reds exactly that test. |
+| `cch-w28-s7` unreachable resolver is `unknown` | `…unreachable-resolver-stops-bei-5-r` | 47/0 + 796/0. **Reviewer DECIDED the open question the builder correctly refused to decide** — see below. |
+| `cch-w28-s8` never-deployed row says "Not deployed" | `…never-deployed-site-row-in-the--6` | 793/0, fail-before proved by the builder, no new CSS. No fixes needed. |
+
+**`:nxdomain` IS AN ANSWER, NOT A FAULT — decided at review, superseding the letter of D332.** The s7
+builder built D332 as written and then measured that one fifth of it was wrong, filing
+`task-3fbfff8c97b50c8f` at priority 0 rather than quietly re-deciding. He was right to escalate and right
+about the measurement: re-run at review, `:inet.getaddrs` of a non-existent name returns
+`{:error, :nxdomain}` on **both** families — which is precisely what a freshly attached, still-propagating
+domain looks like through the real transport. Shipping D332's letter would have turned the MOST COMMON
+waiting state into "we could not check" and stripped its propagation advice: one lie swapped for another,
+in the very rung the slice existed to make honest. Fixed on the `-r` branch (`@answered_empty [:nxdomain]`
+folds a per-family nxdomain to `{:ok, []}`), with the mirror fix the wave's own fourth clause demands: the
+DNS test fakes now return `{:error, :nxdomain}` for a missing record instead of `{:ok, []}`, so the
+fixtures produce the shape production produces. `task-3fbfff8c97b50c8f` closed with the decision on the
+record. Faults are now raise / exit / timeout / no_nameservers / off-contract only.
+
+**Cross-slice integration was PROVEN, not assumed:** all seven branches merge cleanly onto `origin/main`
+in one probe branch, and on that integrated tree the FULL cloud suite is **2693 tests / 0 failures** and
+`__app.test.mjs` is **797/797**.
+
+**Ledger:** honest across the board with no fixes needed — every built slice `in_progress`, published,
+merge-gated criteria left open for the lead, `cch-w28-s4`'s refuted criterion stamped as an honest `--miss`
+with its numbers. `cch-w28-s2` correctly sits `open` (round 2, deferred by design). The only ledger
+mutation this review made was closing `task-3fbfff8c97b50c8f` with the nxdomain ruling.
+
+**What the next wave must know.** (1) **Round 2 is `cch-w28-s2`** (HISTORY-UNAVAILABLE discrimination),
+and it must land as a verdict-token LETTER at exit 1, never a process-level exit-2 INFRA-FAULT — an
+INFRA-FAULT prints `a=UNKNOWN` and would red s1's new control. That tripwire is armed on purpose. (2) The
+REQUIRED `Console gate` depends on `guerrilla.barkpark.cloud` being up (one live spawn, test 56); s3
+documented it and a comment is not a fix. (3) The D307 guard's ABSENCE tier is still a warn, and its
+scoping is a design boundary rather than a load-bearing leg under today's corpus — the backfill + ENUM
+promotion is the real row. (4) `unknown` makes the domain rail TERMINAL with **no re-check affordance**
+(the DOM mount was outside s7's anchors) — a transient resolver blip now needs a navigation to clear;
+that, plus `domainRungChip`'s missing `unknown` arm (`task-1daff7bc1bf46ceb`, a screen reader is still
+told "waiting"), is the residue this slice leaves. (5) `cch-w22-s7`'s remainder is still unfinished
+against origin/main's bytes.
+
+
 ### 2026-08-03 — wave 27 REVIEW — 6/6 round-1 slices built, gated, reviewed, PUSHED and PR'd (#9354-#9359). Grade A
 
 **THE WISH'S HEADLINE QUESTION IS ANSWERED, AND THE ANSWER WAS AN INSTRUMENT DEFECT BOTH TIMES.** The lead
