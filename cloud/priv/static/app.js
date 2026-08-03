@@ -9573,11 +9573,21 @@
         return r.role === "ok" || r.role === "failed" || r.role === "proxied";
       });
     });
+    // The re-check affordance's ONE condition, derived here so it is provable
+    // off a pure call: the poll has stopped (terminal) AND it stopped because a
+    // rung could not be MEASURED. A terminal host whose rungs are all settled
+    // (ok/failed/proxied) has nothing to re-ask; an unmeasurable one is exactly
+    // the case where asking again is the whole remedy, and the mounts otherwise
+    // leave the person with no way back short of a navigation.
+    var recheckable = terminal && out.some(function (d) {
+      return d.rows.some(function (r) { return r.role === "unknown"; });
+    });
     return {
       ok: !!(payload && payload.ok),
       checkedAt: (payload && typeof payload.checked_at === "string") ? payload.checked_at : null,
       empty: out.length === 0,
       terminal: terminal,
+      recheckable: recheckable,
       domains: out,
     };
   }
@@ -9592,18 +9602,33 @@
   }
 
   // Pure: one rung chip in the v4 rung-pill grammar (.dom-rung, gr-p3): ok → ●,
-  // failed → ✕, active → ◐, waiting → ·, proxied → ● info (informational — the
-  // domain is fronted by a proxy, so origin-pointing is a mode, not a check).
-  // The accessible name carries the state in WORDS, never colour alone.
-  function domainRungChip(row, showEvidence) {
+  // failed → ✕, active → ◐, unknown → ?, waiting → ·, proxied → ● info
+  // (informational — the domain is fronted by a proxy, so origin-pointing is a
+  // mode, not a check). The accessible name carries the state in WORDS, never
+  // colour or glyph alone.
+  //
+  // `unknown` — a rung the CONTROL PLANE attempted and could not measure — gets
+  // its OWN glyph and its own state words ("could not check"). It used to fall
+  // through to the waiting dot + the word "waiting", which told a screen-reader
+  // user the console was still working on a question nobody could ask: the same
+  // waiting-grammar lie domainStageRows removed one layer up (cch-w28-s7).
+  //
+  // `blocked` marks a pending rung the render layer knows was SKIPPED, not
+  // queued — every rung behind an unmeasurable one (its own evidence string
+  // already says "an earlier step couldn't be checked"). It keeps the waiting
+  // dot (nothing happened there) but never claims we are waiting on it.
+  function domainRungChip(row, showEvidence, blocked) {
     if (showEvidence === undefined) showEvidence = true;
     var glyph = row.role === "ok" || row.role === "proxied" ? "&#9679;"
       : row.role === "failed" ? "&#10007;"
-      : row.role === "active" ? "&#9684;" : "&middot;";
+      : row.role === "active" ? "&#9684;"
+      : row.role === "unknown" ? "&#63;" : "&middot;";
     var state = row.role === "ok" ? "done"
       : row.role === "failed" ? "failed"
       : row.role === "proxied" ? "proxied"
-      : row.role === "active" ? "in progress" : "waiting";
+      : row.role === "active" ? "in progress"
+      : row.role === "unknown" ? "could not check"
+      : blocked ? "not checked" : "waiting";
     return '<span class="dom-rung dom-rung--' + esc(row.role) + '" role="listitem" aria-label="' +
       esc(row.label + " — " + state) + '">' +
       '<span class="dom-rung-glyph" aria-hidden="true">' + glyph + "</span>" +
@@ -9621,20 +9646,26 @@
     if (!model || model.empty) {
       return railRow("Domain", (bp && bp.custom_host) || "—");
     }
-    return model.domains.map(function (d) {
+    var cards = model.domains.map(function (d) {
       var kind = domainKindChip(d.kind);
       // Evidence dedup: keep it on ok / failed / proxied / the FRONT non-ok
       // rung; drop the repeated "…an earlier step isn't passing." filler on
       // downstream pending rungs (render layer only — the pure domainStageRows
       // model is untouched).
       var frontSeen = false;
+      // Everything after an unmeasurable rung was SKIPPED, not queued — the
+      // server says so in its own evidence line. Render layer only (the pure
+      // domainStageRows model keeps its honest `pending` role).
+      var unknownSeen = false;
       var rungs = d.rows.map(function (row) {
         var showEvidence = true;
         if (row.role !== "ok" && row.role !== "proxied") {
           if (frontSeen && row.role === "pending") showEvidence = false;
           frontSeen = true;
         }
-        return domainRungChip(row, showEvidence);
+        var blocked = unknownSeen && row.role === "pending";
+        if (row.role === "unknown") unknownSeen = true;
+        return domainRungChip(row, showEvidence, blocked);
       }).join("");
       // Collapse identical remediation strings so two rungs with the same fix
       // render ONE amber note instead of a stack.
@@ -9656,6 +9687,16 @@
         remedies + when +
         "</div>";
     }).join("");
+    // The way back. When the checks stopped because one of them could not be
+    // MADE, the 4s poll is switched off on purpose (re-asking a dead resolver
+    // just spins) — so the person gets the control the timer no longer is.
+    // Both mounts re-bind [data-dom-recheck] after every innerHTML paint.
+    if (!model.recheckable) return cards;
+    return cards +
+      '<div class="dom-recheck">' +
+        '<button class="btn btn-sm" type="button" data-dom-recheck>Check again</button>' +
+        '<span class="dom-recheck-note">We couldn&#39;t complete these checks, so they stopped updating on their own.</span>' +
+      "</div>";
   }
 
   // Which mount owns the #instance-domains slot + its poll right now. A newer
@@ -9682,6 +9723,18 @@
       if (!r.ok || !r.data) return; // keep the static Domain row on 404/error
       var model = domainStages(r.data, Date.now());
       b.innerHTML = domainChecklistHtml(model, bp);
+      // innerHTML destroys listeners and app.js has no delegated dispatcher, so
+      // the re-check binds again after every paint. Calling the mount is exactly
+      // what the 4s timer would have done: it bumps domainSeq and clears the
+      // timer, so a stale in-flight response can never paint over the retry.
+      var again = b.querySelector("[data-dom-recheck]");
+      if (again) {
+        again.addEventListener("click", function () {
+          again.disabled = true;
+          again.textContent = "Checking…";
+          loadInstanceDomains(bp);
+        });
+      }
       if (!model.terminal) {
         clearTimeout(domainPollTimer);
         domainPollTimer = setTimeout(function () {
@@ -9713,6 +9766,15 @@
       if (model.empty) { b.innerHTML = ""; return; }
       b.innerHTML = '<div class="deploys-head"><h2>Domains</h2></div>' +
         domainChecklistHtml(model, null);
+      // Same re-bind after the same destroying paint (see loadInstanceDomains).
+      var again = b.querySelector("[data-dom-recheck]");
+      if (again) {
+        again.addEventListener("click", function () {
+          again.disabled = true;
+          again.textContent = "Checking…";
+          loadSiteDomains(site);
+        });
+      }
       if (!model.terminal) {
         clearTimeout(domainPollTimer);
         domainPollTimer = setTimeout(function () {
