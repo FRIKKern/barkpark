@@ -10296,12 +10296,44 @@
   // (v4.dc.html:569-575). Blocked (github-push family) keeps its calm amber
   // tone. A snap state: the CSS carries no transition/animation (failed never
   // eases). Empty reason → no panel. Pure.
-  function deployFailHtml(reason) {
+  //
+  // cch-w28-bl (refusal): `refused` paints the panel in the calm amber tone even
+  // when the reason family isn't github-push — a REFUSAL is a decision, not a
+  // crash, and crash-red would misname it. Callers pass it for terminal
+  // `cancelled` rows; every existing single-arg call is unchanged.
+  function deployFailHtml(reason, refused) {
     if (!reason) return "";
     return '<div class="deploy-fail' +
-      (failureTone(reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' +
+      (refused || failureTone(reason) === "blocked" ? " deploy-fail--blocked" : "") + '">' +
       '<span class="deploy-fail-dot" aria-hidden="true"></span>' +
       "<span>" + esc(failureCopy(reason)) + "</span></div>";
+  }
+
+  // cch-w28-bl: a REFUSED deployment. Sites.AutoDeployWorker.refuse/1 mints a
+  // terminal row at status "cancelled" (never "failed") carrying a full
+  // actionable sentence — the exact `bp cloud site deploy … --prebuilt …`
+  // remedy — in BOTH failure_reason and detail. Every render site gated on
+  // `st === "failed"` therefore threw the remedy away and left a bare Cancelled
+  // pill: the console HAD the answer and did not say it.
+  //
+  // A cancelled row with nothing to say is NOT a refusal — silence stays
+  // correct there (an operator-cancelled build invents no copy).
+  function deployIsRefusal(d, st) {
+    return (st || "") === "cancelled" && !!(d && (d.failure_reason || d.detail));
+  }
+
+  // The ONE sentence a refused row speaks. Both server channels carry the same
+  // bytes, so preferring failure_reason keeps the row from saying it twice.
+  function deployRefusalCopy(d) {
+    return (d && (d.failure_reason || d.detail)) || "";
+  }
+
+  // The panel a terminal row renders: the failure family as before, plus the
+  // refusal family. One helper so previewRow and deployRow cannot drift.
+  function deployTerminalFailHtml(d, st) {
+    if (st === "failed") return deployFailHtml(d.failure_reason);
+    if (deployIsRefusal(d, st)) return deployFailHtml(deployRefusalCopy(d), true);
+    return "";
   }
 
   // gr-p3 (v4): a settled deployment's honest duration — the two server stamps
@@ -10330,7 +10362,8 @@
           esc(d.preview_host || url) + "</a>"
       : '<span class="dim">pending routing</span>';
     var when = d.became_live_at || d.updated_at || d.inserted_at;
-    var fail = st === "failed" ? deployFailHtml(d.failure_reason) : "";
+    // cch-w28-bl: failed OR refused — a cancelled row that carries copy says it.
+    var fail = deployTerminalFailHtml(d, st);
     // gr-p3 (v4 anatomy): environment · trigger provenance (GR27) · duration ·
     // when — the same meta grammar as a production row.
     var pmeta = ["preview"];
@@ -10375,7 +10408,17 @@
       var since = d.inserted_at ? " (since " + fmtWhen(d.inserted_at) + ")" : "";
       return '<div class="deploy-detail deploy-queued" data-cap="queued">' + esc(msg + since) + "</div>";
     }
-    if (!deployIsActive(st) || !d.detail) return "";
+    // cch-w28-bl: the THIRD drop site, and the one a grep for `st === "failed"`
+    // misses — `deployIsActive` is queued|building|pushing, so EVERY terminal
+    // row's `detail` was discarded here, refusals included. A refused row's
+    // detail now speaks, but only when the failure panel above did not already
+    // say the same bytes (refuse/1 writes the identical sentence to both
+    // channels — rendering both would print the remedy twice).
+    if (!deployIsActive(st)) {
+      if (!deployIsRefusal(d, st) || !d.detail || d.detail === deployRefusalCopy(d)) return "";
+      return '<div class="deploy-detail" data-cap="' + esc(d.detail) + '">' + esc(d.detail) + "</div>";
+    }
+    if (!d.detail) return "";
     return '<div class="deploy-detail" data-cap="' + esc(d.detail) + '">' + esc(d.detail) + "</div>";
   }
 
@@ -11200,7 +11243,8 @@
     // The restored row keeps its ORIGINAL became_live_at, so name it a restore or the
     // old time reads as staleness (D25). Static prefix — only the time is server data.
     if (rolledBack) metaBits.push("restored build from " + esc(fmtWhen(d.became_live_at || when)));
-    var fail = st === "failed" ? deployFailHtml(d.failure_reason) : "";
+    // cch-w28-bl: failed OR refused — the preview twin of the same rule.
+    var fail = deployTerminalFailHtml(d, st);
     var action = promoteActionFor(d, currentId);
     var actionBtn = action
       ? '<button type="button" class="btn btn-ghost btn-sm dep-promote" data-dep-id="' + esc(d.id) + '" data-kind="' + esc(action.kind) + '">' + esc(action.label) + "</button>"
@@ -19297,6 +19341,14 @@
       promotePath: promotePath, promoteActionFor: promoteActionFor,
       promoteConfirmCopy: promoteConfirmCopy, promoteFailure: promoteFailure,
       deployRefLabel: deployRefLabel, deployRow: deployRow,
+      // cch-w28-bl: previewRow was NEVER exported, so the one test named for it
+      // guarded its assertions behind `if (html !== null)` and ran ZERO of them
+      // — deleting its whole failure panel left the suite 797/797 green while
+      // the deployRow twin's identical mutation went red. It is reachable now.
+      previewRow: previewRow,
+      // The refusal predicate + its single-voice copy accessor, so the terminal
+      // "cancelled but it HAS something to say" rule is assertable directly.
+      deployIsRefusal: deployIsRefusal, deployRefusalCopy: deployRefusalCopy,
       // Rollback endgame: the post-promote reconcile (Current chip stays put
       // until the new build is live) + the loadInstanceSites stale-paint guard.
       promoteReconcile: promoteReconcile, deployListHtml: deployListHtml,
