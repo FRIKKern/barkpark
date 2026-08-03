@@ -1229,6 +1229,42 @@ defmodule Barkpark.PortableDoc.RenderTest do
       assert html =~ ~s(<td)
     end
 
+    test "article mode treats scalar columns as a header row without crashing" do
+      block = %{
+        "id" => "t4",
+        "type" => "table",
+        "columns" => ["Corner", "Failure", "Proof"],
+        "rows" => [["Reader", "Empty list", "No empty list elements"]]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+
+      assert html =~ "<thead>"
+      assert html =~ "Corner"
+      assert html =~ "Failure"
+      assert html =~ "Proof"
+      assert html =~ "Reader"
+      assert html =~ "No empty list elements"
+    end
+
+    test "article mode promotes a boolean header when an empty head placeholder exists" do
+      block = %{
+        "id" => "t5",
+        "type" => "table",
+        "header" => true,
+        "head" => [],
+        "rows" => [["Surface", "Proof"], ["TUI", "Visible"]]
+      }
+
+      html = Render.render_block(block, %{style: :article})
+
+      assert html =~ "<thead>"
+      assert html =~ "Surface"
+      assert html =~ "Proof"
+      assert html =~ "TUI"
+      assert html =~ "Visible"
+    end
+
     test "email mode keeps the flat <td>-only gray table (regression)" do
       html = Render.render_block(@table, %{style: :email})
       refute html =~ "<thead>"

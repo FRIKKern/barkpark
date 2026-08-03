@@ -641,6 +641,19 @@ defmodule Barkpark.PortableDoc.Render.Compose do
     {column_head, record_keys} = table_column_head(b)
     raw_rows = Map.get(b, "rows", []) |> List.wrap()
 
+    declared_head =
+      case Map.get(b, "head") do
+        nil -> Map.get(b, "header")
+        [] -> Map.get(b, "header")
+        head -> head
+      end
+
+    {declared_head, raw_rows} =
+      case {declared_head, raw_rows} do
+        {true, [first | rest]} -> {table_row_cells(first), rest}
+        pair -> pair
+      end
+
     {legacy_head, body_rows} =
       case raw_rows do
         [%{"header" => true} = row | rest] ->
@@ -670,7 +683,12 @@ defmodule Barkpark.PortableDoc.Render.Compose do
 
     pd = %{"kind" => "PdTable", "rows" => rows}
 
-    case Map.get(b, "head") || Map.get(b, "header") || legacy_head || column_head do
+    head =
+      if is_list(declared_head) and declared_head != [],
+        do: declared_head,
+        else: legacy_head || column_head
+
+    case head do
       nil -> pd
       [] -> pd
       head_row -> Map.put(pd, "head", compose_row.(head_row))
@@ -1975,8 +1993,14 @@ defmodule Barkpark.PortableDoc.Render.Compose do
       end) ->
         {Enum.map(columns, &Map.get(&1, "text")), []}
 
+      Enum.all?(columns, &(is_binary(&1) or is_number(&1) or is_boolean(&1) or is_nil(&1))) ->
+        {Enum.map(columns, &stringish/1), []}
+
       true ->
-        keys = Enum.map(columns, &Map.get(&1, "key"))
+        keys =
+          if Enum.all?(columns, &is_map/1),
+            do: Enum.map(columns, &Map.get(&1, "key")),
+            else: []
 
         if Enum.all?(keys, &(is_binary(&1) and &1 != "")) do
           head = Enum.map(columns, &(Map.get(&1, "label") || Map.get(&1, "key")))

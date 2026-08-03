@@ -1538,6 +1538,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
               "bulletList",
               "bullet_list",
               "bullet-list",
+              "bulletedList",
+              "bulleted_list",
+              "bulleted-list",
               "orderedList",
               "ordered_list",
               "ordered-list"
@@ -1615,7 +1618,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
         do: Enum.map(columns, &Map.get(&1, "key")),
         else: []
 
-    Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
+    Enum.all?(columns, &is_map/1) and
+      Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
       Enum.uniq(keys) == keys and
       Enum.all?(columns, fn column ->
         label = Map.get(column, "label")
@@ -1634,6 +1638,9 @@ defmodule Barkpark.Content.Papers.BlockOps do
               "bulletList",
               "bullet_list",
               "bullet-list",
+              "bulletedList",
+              "bulleted_list",
+              "bulleted-list",
               "orderedList",
               "ordered_list",
               "ordered-list"
@@ -1932,7 +1939,8 @@ defmodule Barkpark.Content.Papers.BlockOps do
         else: []
 
     valid? =
-      Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
+      Enum.all?(columns, &is_map/1) and
+        Enum.all?(keys, &(is_binary(&1) and &1 != "")) and
         Enum.uniq(keys) == keys and
         Enum.all?(columns, fn column ->
           label = Map.get(column, "label")
@@ -1974,24 +1982,50 @@ defmodule Barkpark.Content.Papers.BlockOps do
   defp record_table_text(nil), do: ""
   defp record_table_text(value), do: to_string(value)
 
+  defp table_head_or_header(block) do
+    case Map.get(block, "head") do
+      nil -> Map.get(block, "header")
+      [] -> Map.get(block, "header")
+      head -> head
+    end
+  end
+
   defp normalize_array_table(block, rows) do
     block =
-      case {Map.get(block, "head") || Map.get(block, "header"), Map.get(block, "columns")} do
+      if is_list(Map.get(block, "head")) and Map.get(block, "head") != [] and
+           Map.get(block, "header") == true,
+         do: Map.delete(block, "header"),
+         else: block
+
+    block =
+      case {table_head_or_header(block), Map.get(block, "columns")} do
         {head, columns} when head in [nil, []] and is_list(columns) and columns != [] ->
-          if Enum.all?(columns, fn
-               %{"text" => text} = column when is_binary(text) -> map_size(column) == 1
-               _ -> false
-             end) do
-            block
-            |> Map.delete("columns")
-            |> Map.put(
-              "head",
-              Enum.map(columns, fn %{"text" => text} ->
-                [%{"type" => "text", "value" => text}]
-              end)
-            )
-          else
-            block
+          cond do
+            Enum.all?(columns, fn
+              %{"text" => text} = column when is_binary(text) -> map_size(column) == 1
+              _ -> false
+            end) ->
+              block
+              |> Map.delete("columns")
+              |> Map.put(
+                "head",
+                Enum.map(columns, fn %{"text" => text} ->
+                  [%{"type" => "text", "value" => text}]
+                end)
+              )
+
+            Enum.all?(columns, &record_table_scalar?/1) ->
+              block
+              |> Map.delete("columns")
+              |> Map.put(
+                "head",
+                Enum.map(columns, fn value ->
+                  [%{"type" => "text", "value" => record_table_text(value)}]
+                end)
+              )
+
+            true ->
+              block
           end
 
         _ ->
@@ -1999,7 +2033,16 @@ defmodule Barkpark.Content.Papers.BlockOps do
       end
 
     {block, rows} =
-      case {Map.get(block, "head") || Map.get(block, "header"), rows} do
+      case {table_head_or_header(block), rows} do
+        {true, [first | rest]} ->
+          case normalize_legacy_table_row(first) do
+            {:ok, cells, _header?} ->
+              {block |> Map.delete("header") |> Map.put("head", cells), rest}
+
+            :error ->
+              {block, rows}
+          end
+
         {head, [%{"header" => true, "cells" => cells} = row | rest]}
         when head in [nil, []] and is_list(cells) and map_size(row) == 2 ->
           {Map.put(block, "head", Enum.map(cells, &normalize_wrapped_table_cell/1)), rest}
