@@ -8,9 +8,11 @@ defmodule BarkparkWeb.Studio.Caps do
   `derive/1` computes `%{read: bool, write: bool, admin: bool}` for the mounted
   desk scope, from TWO arms unioned:
 
-    * **membership** — `Tenancy.Auth.authorize(principal, ws.id, action)` per
-      action for each principal the socket carries (`api_token` and/or
-      `current_user`); nil-safe (no principal ⇒ that arm is false).
+    * **membership** — `Tenancy.Auth`'s own decision for each principal the
+      socket carries (`api_token` and/or `current_user`), read off ONE
+      membership row loaded per principal and reused for `:read`/`:write`/
+      `:admin` (pds-w43 — three byte-identical `Repo.one`s collapsed to one);
+      nil-safe (no principal ⇒ that arm is false).
     * **grants** — each ACTIVE access-grant admitting the desk via
       `Access.admits_desk?(grant, action, desk)`. Grants are RELOADED FRESH
       (`Access.list_active_grants_for_grantee/1`, active-filtered in-query) on
@@ -139,6 +141,24 @@ defmodule BarkparkWeb.Studio.Caps do
   @doc """
   Compute `%{read, write, admin}` for the socket's mounted desk. Grants are
   reloaded fresh (expiry-truth). Safe when the workspace/desk is unresolved.
+
+  ## ONE membership load, three actions (pds-w43, PDS-D634)
+
+  This function used to ask `Tenancy.Auth.authorize/3` three times per
+  principal — `:read`, `:write`, and `admin?/1`'s `:admin` — and each of those
+  issues its own BYTE-IDENTICAL `Tenancy.Auth.membership/2` `Repo.one`. On the
+  autosave path `derive/1` runs TWICE per event (the socket gate, then
+  `Shared.Paper.write_denied?/1`), so a debounced keystroke cost 8 round-trips.
+  The membership row is now loaded ONCE per principal and the three decisions
+  are read off it — a USER-principal derive is 2 queries (was 4), an
+  API-TOKEN one is 1 (was 2).
+
+  What did NOT change: the grant `Repo.all` (`active_grants/1`) is still
+  UNCONDITIONAL and still per-`derive/1` — it is the load that buys mid-session
+  expiry truth, and there is deliberately NO TTL memo across ops. The decision
+  logic is `Tenancy.Auth`'s own (`permits?/2` for tokens, `role_permits?/3` for
+  users), read off the same row `authorize/3` would have loaded, so the answer
+  is byte-identical — only the round-trips are gone.
   """
   @spec derive(Phoenix.LiveView.Socket.t()) :: %{read: boolean, write: boolean, admin: boolean}
   def derive(socket) do
@@ -151,9 +171,12 @@ defmodule BarkparkWeb.Studio.Caps do
     desk = desk_scope(socket)
     grants = if is_map(desk), do: active_grants(socket), else: []
 
+    memberships = load_memberships(principals, ws_id)
+
     member = fn action ->
-      is_binary(ws_id) and
-        Enum.any?(principals, &(Tenancy.Auth.authorize(&1, ws_id, action) == :ok))
+      Enum.any?(memberships, fn {principal, membership} ->
+        membership_authorizes?(principal, membership, ws_id, action)
+      end)
     end
 
     granted = fn action ->
@@ -163,9 +186,40 @@ defmodule BarkparkWeb.Studio.Caps do
     %{
       read: member.(:read) or granted.(:read),
       write: member.(:write) or granted.(:write),
-      admin: admin?(socket)
+      admin: admin_from(socket, memberships, ws_id)
     }
   end
+
+  # ONE `Repo.one` per principal, reused for :read/:write/:admin. Returns
+  # `[{principal, membership_or_nil}]`. Mirrors `authorize/3`'s own totality:
+  # an unresolved workspace, or a principal shape `authorize/3` would have hit
+  # its catch-all `{:error, :forbidden}` clause with, contributes nothing.
+  defp load_memberships(principals, ws_id) when is_binary(ws_id) do
+    for principal <- principals, loadable_principal?(principal) do
+      {principal, Tenancy.Auth.membership(principal, ws_id)}
+    end
+  end
+
+  defp load_memberships(_principals, _ws_id), do: []
+
+  defp loadable_principal?(%Barkpark.Auth.ApiToken{id: id}) when is_binary(id), do: true
+  defp loadable_principal?(%Barkpark.Accounts.User{id: id}) when is_binary(id), do: true
+  defp loadable_principal?(_other), do: false
+
+  # The decision `Tenancy.Auth.authorize/3` makes, read off an ALREADY-LOADED
+  # membership row instead of re-loading it. Token: member AND its permissions
+  # array satisfies the action. User: the membership ROLE is the grant. A nil
+  # membership is a non-member ⇒ denied, exactly as `authorize/3` denies it.
+  defp membership_authorizes?(_principal, nil, _ws_id, _action), do: false
+
+  defp membership_authorizes?(%Barkpark.Auth.ApiToken{} = token, %_{}, _ws_id, action),
+    do: Tenancy.Auth.permits?(token, action)
+
+  defp membership_authorizes?(%Barkpark.Accounts.User{}, %{role: role}, ws_id, action)
+       when is_binary(role),
+       do: Tenancy.Auth.role_permits?(role, ws_id, action)
+
+  defp membership_authorizes?(_principal, _membership, _ws_id, _action), do: false
 
   @doc """
   Fresh admin predicate — an admin api_token OR an account with the `:admin`
@@ -177,6 +231,24 @@ defmodule BarkparkWeb.Studio.Caps do
     token_admin?(socket.assigns[:api_token]) or
       account_admin?(socket.assigns[:current_user], socket.assigns[:current_workspace])
   end
+
+  # `admin?/1`'s answer, read off the memberships `derive/1` already loaded.
+  # The token arm is deliberately membership-FREE (an `admin`-permissioned
+  # api_token is admin wherever it is), exactly as `admin?/1` has it — so it is
+  # asked of the raw assign, not of the loaded rows, and still answers on a
+  # socket whose workspace is unresolved.
+  defp admin_from(socket, memberships, ws_id) do
+    token_admin?(socket.assigns[:api_token]) or
+      Enum.any?(memberships, fn {principal, membership} ->
+        account_admin_from(principal, membership, ws_id)
+      end)
+  end
+
+  defp account_admin_from(%Barkpark.Accounts.User{}, %{role: role}, ws_id)
+       when is_binary(role) and is_binary(ws_id),
+       do: Tenancy.Auth.role_permits?(role, ws_id, :admin)
+
+  defp account_admin_from(_principal, _membership, _ws_id), do: false
 
   defp token_admin?(%_{} = token), do: Barkpark.Auth.has_permission?(token, "admin")
   defp token_admin?(_), do: false
@@ -273,8 +345,12 @@ defmodule BarkparkWeb.Studio.Caps do
       unreachable there and the capability must travel in as a prop
       (`grep -n 'read_only=' lib/barkpark_web/live/studio/studio_live/components.ex`).
 
-  Order is load-bearing: write-capable passes; a RESTRICTED socket (share-read
-  or grant grade) does not; a socket carrying a PRINCIPAL that lacks write does
+  Order is load-bearing, TOP DOWN: a READ-ONLY POSTURE (`share_access: :read`
+  or `readonly_gate?: true`) is denied FIRST — before `caps.write` gets a vote
+  — because `derive/1` never reads posture, so a share-read socket holding a
+  write GRANT otherwise short-circuited past its own restriction (pds-w43,
+  PDS-D635). Then: write-capable passes; a RESTRICTED socket (grant grade /
+  caller_context) does not; a socket carrying a PRINCIPAL that lacks write does
   not — that is the read-only api_token / read-only member hole; only a
   principal-LESS socket falls through, i.e. the intentionally-open anonymous
   public-demo posture. Forking this predicate is how the two points drift.
@@ -282,11 +358,37 @@ defmodule BarkparkWeb.Studio.Caps do
   @spec write_capable?(map(), map()) :: boolean
   def write_capable?(assigns, caps) when is_map(assigns) and is_map(caps) do
     cond do
+      readonly_posture?(assigns) -> false
       Map.get(caps, :write) == true -> true
       restricted?(assigns) -> false
       has_principal?(assigns) -> false
       true -> true
     end
+  end
+
+  # pds-w43 (PDS-D635) — THE READ-ONLY SHARE POSTURE, ABOVE `caps.write`.
+  #
+  # `derive/1` computes `write` from membership+grants ONLY; it never reads the
+  # socket's POSTURE. So a socket that is BOTH read-only-posture AND carries a
+  # write source used to short-circuit on the `caps.write` arm and pass —
+  # making this predicate's own docstring ("a RESTRICTED socket does not
+  # [pass]") false. Reachable without any admin step: `LiveScope.authorize_read/4`
+  # offers the public-share arm BEFORE the grant arm (deliberately — grants only
+  # ADD access), so a signed-in NON-MEMBER holding an ACTIVE WRITE GRANT who
+  # mounts a `:docs`-shared desk lands on grade `:share_read` (`share_access:
+  # :read`, `readonly_gate?: true`, NO `caller_context`, NO `write_gate?`) —
+  # neither `Content.Scope.scope_to_grants/3`'s read-narrowing nor the per-event
+  # `Access.validate/3` write-narrowing is armed, and the grant even escalated
+  # doc-scoped: a grant naming ONE doc wrote a DIFFERENT paper on the same desk.
+  #
+  # DELIBERATELY NARROWER THAN `restricted?/1`. Hoisting `restricted?/1` whole
+  # would also deny GRANT-graded sockets (`write_gate?` / `caller_context`),
+  # whose narrowing IS armed — a real regression for legitimate grantees. This
+  # arm names ONLY the two assigns that mean "this mount is read-only by
+  # posture", and the `restricted?/1` arm below stays exactly where it was.
+  defp readonly_posture?(assigns) do
+    Map.get(assigns, :share_access) == :read or
+      Map.get(assigns, :readonly_gate?) == true
   end
 
   # A capability-RESTRICTED socket is one LiveScope decided to gate (a share
