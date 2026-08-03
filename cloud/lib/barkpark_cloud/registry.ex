@@ -27,6 +27,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.Accounts.{Team, TeamMembership, User}
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.Subscription
+  alias BarkparkCloud.Notifications
 
   alias BarkparkCloud.Registry.{
     AgentEvent,
@@ -53,6 +54,30 @@ defmodule BarkparkCloud.Registry do
   # provisioning_fqdn_taken?/1. Every live instance reports within a minute of
   # provisioning, so 7 days of silence-from-birth is unambiguous abandonment.
   @abandoned_claim_after_days 7
+
+  # The four terminal reasons `reap_stale_deployments/0` stamps. Named so the
+  # alert fan-out below can pair a reaped row with the reason it was just written
+  # (a bulk `update_all` returns ids, not the row it wrote) without the two
+  # drifting apart. `FailureCopy.classify/1` has a clause for each.
+  @no_build_source_reason "no build source (upload an artifact via `bp deploy` or connect a GitHub repo)"
+  @no_content_binding_reason "no content binding (create the site with `--dataset <workspace>/<project>/<dataset>`)"
+  @stale_builder_reason "exceeded max deploy claim attempts (stale builder lease)"
+  @instance_unreachable_reason "instance unreachable — deploy could not be delivered; check instance health"
+
+  # BATCHING POLICY for a mass reap. `Notifications.dispatch_event/3` is
+  # SYNCHRONOUS for email (cloud/ has no Oban for the mail path — only for chat),
+  # and this sweep runs every minute on the `maintenance` queue. A cluster-wide
+  # incident can fail hundreds of rows in one pass, which would become hundreds
+  # of blocking `Mailer.deliver` calls inside one cron tick — enough to hold the
+  # queue past the next tick and to trip any provider's rate limit.
+  #
+  # So the sweep alerts at most this many DEPLOYMENTS per tick and logs the
+  # remainder. The choice is deliberate: past ~25 simultaneous failures the
+  # person's problem is an incident, not N deployments, and the 26th email tells
+  # them nothing the first 25 did not. Nothing is lost — every reaped row is
+  # terminal in the console with its reason, which is the surface of record. The
+  # correct fix is an Oban-backed mail queue; when that lands this cap should go.
+  @reap_alert_cap 25
 
   # Stale-claim recovery. A claimed job whose `claimed_at` is older than this is
   # treated as abandoned (the worker crashed, or its succeed/fail report failed in
@@ -5238,20 +5263,31 @@ defmodule BarkparkCloud.Registry do
   @spec create_failed_deployment(Site.t(), map(), String.t()) ::
           {:ok, Deployment.t()} | {:error, Ecto.Changeset.t()}
   def create_failed_deployment(%Site{} = site, attrs, reason) when is_binary(reason) do
-    Repo.transaction(fn ->
-      with {:ok, queued} <-
-             %Deployment{}
-             |> Deployment.changeset(Map.put(attrs, :site_id, site.id))
-             |> Repo.insert(),
-           {:ok, failed} <-
-             queued
-             |> Deployment.transition_changeset(%{status: "failed", failure_reason: reason})
-             |> Repo.update() do
-        failed
-      else
-        {:error, %Ecto.Changeset{} = cs} -> Repo.rollback(cs)
-      end
-    end)
+    result =
+      Repo.transaction(fn ->
+        with {:ok, queued} <-
+               %Deployment{}
+               |> Deployment.changeset(Map.put(attrs, :site_id, site.id))
+               |> Repo.insert(),
+             {:ok, failed} <-
+               queued
+               |> Deployment.transition_changeset(%{status: "failed", failure_reason: reason})
+               |> Repo.update() do
+          failed
+        else
+          {:error, %Ecto.Changeset{} = cs} -> Repo.rollback(cs)
+        end
+      end)
+
+    # notifications (wave 28 S6): a born-failed row is exactly the person-facing
+    # case — a push landed and can never build. POST-transaction, so a lost
+    # redelivery race (rolled back) emails nobody. No edge guard is needed: the
+    # row did not exist a moment ago, so this is always an edge.
+    with {:ok, %Deployment{} = failed} <- result do
+      dispatch_deployment_failed(failed.site_id, failed.failure_reason)
+    end
+
+    result
   end
 
   @doc """
@@ -6156,7 +6192,22 @@ defmodule BarkparkCloud.Registry do
         {:error, :not_found}
 
       _uuid ->
-        do_transition_deployment_fenced(deployment_id, worker_id, observed_epoch, attrs)
+        # notifications (wave 28 S6): the dispatch is POST-transaction on purpose.
+        # `do_transition_deployment_fenced/4` runs the whole write inside
+        # `Repo.transaction`, so a dispatch placed inside would email BEFORE
+        # commit and phantom-email whenever a later clause rolls back. It is also
+        # EDGE-triggered on the PRIOR status — `Sites.Deploy.record_stage/2`
+        # re-drives this same writer on every stage report and
+        # `status_for_stage/2` carries "failed" forward unchanged, so failed →
+        # failed rewrites are routine and must not re-alert.
+        case do_transition_deployment_fenced(deployment_id, worker_id, observed_epoch, attrs) do
+          {:ok, {prior_status, %Deployment{} = updated}} ->
+            maybe_dispatch_deployment_failed(prior_status, updated)
+            {:ok, updated}
+
+          {:error, reason} ->
+            {:error, reason}
+        end
     end
   end
 
@@ -6181,7 +6232,10 @@ defmodule BarkparkCloud.Registry do
             Repo.rollback(:illegal_transition)
           else
             case d |> Deployment.transition_changeset(attrs) |> Repo.update() do
-              {:ok, updated} -> updated
+              # The PRIOR status rides out with the row so the public wrapper can
+              # edge-trigger its alert. Unwrapped there — callers still see
+              # `{:ok, %Deployment{}}`.
+              {:ok, updated} -> {d.status, updated}
               {:error, cs} -> Repo.rollback(cs)
             end
           end
@@ -6446,19 +6500,19 @@ defmodule BarkparkCloud.Registry do
     # exactly, so without the kind guard the sweep terminally fails every static
     # deploy within 60s — mislabelled with artifact/GitHub copy that names
     # neither its cause nor its cure.
-    {container_failed, _} =
+    {container_failed, container_rows} =
       from(d in Deployment,
         join: s in Site,
         on: s.id == d.site_id,
         where:
           d.status == "queued" and s.kind == "container" and is_nil(d.artifact_url) and
-            is_nil(s.github_repo)
+            is_nil(s.github_repo),
+        select: {d.id, d.site_id}
       )
       |> Repo.update_all(
         set: [
           status: "failed",
-          failure_reason:
-            "no build source (upload an artifact via `bp deploy` or connect a GitHub repo)",
+          failure_reason: @no_build_source_reason,
           updated_at: now
         ]
       )
@@ -6470,17 +6524,17 @@ defmodule BarkparkCloud.Registry do
     # NOTHING (0a excludes it by kind) and spins `queued` forever: the exact
     # eternal-spinner disease the reaper exists to cure. The reason names the
     # cure the user can actually run.
-    {static_failed, _} =
+    {static_failed, static_rows} =
       from(d in Deployment,
         join: s in Site,
         on: s.id == d.site_id,
-        where: d.status == "queued" and s.kind == "static" and is_nil(s.bootstrap_dataset)
+        where: d.status == "queued" and s.kind == "static" and is_nil(s.bootstrap_dataset),
+        select: {d.id, d.site_id}
       )
       |> Repo.update_all(
         set: [
           status: "failed",
-          failure_reason:
-            "no content binding (create the site with `--dataset <workspace>/<project>/<dataset>`)",
+          failure_reason: @no_content_binding_reason,
           updated_at: now
         ]
       )
@@ -6489,16 +6543,17 @@ defmodule BarkparkCloud.Registry do
 
     # (i) Over budget: fail it (don't requeue). Run before the requeue pass so an
     # exhausted row terminates — the requeue pass's status guard then skips it.
-    {failed, _} =
+    {failed, failed_rows} =
       from(d in Deployment,
         where:
           d.status == "building" and d.claimed_at < ^stale_before and
-            d.claim_epoch >= ^max_claims
+            d.claim_epoch >= ^max_claims,
+        select: {d.id, d.site_id}
       )
       |> Repo.update_all(
         set: [
           status: "failed",
-          failure_reason: "exceeded max deploy claim attempts (stale builder lease)",
+          failure_reason: @stale_builder_reason,
           claim_worker: nil,
           claimed_at: nil,
           updated_at: now
@@ -6522,17 +6577,17 @@ defmodule BarkparkCloud.Registry do
     # exhausts its budget; without this it would be re-released every sweep and
     # never fail (the eternal-spinner class this reaper exists to kill). Run
     # before the release pass so an exhausted row terminates instead of releasing.
-    {pushing_failed, _} =
+    {pushing_failed, pushing_rows} =
       from(d in Deployment,
         where:
           d.status == "pushing" and not is_nil(d.claim_worker) and
-            d.claimed_at < ^stale_before and d.claim_epoch >= ^max_claims
+            d.claimed_at < ^stale_before and d.claim_epoch >= ^max_claims,
+        select: {d.id, d.site_id}
       )
       |> Repo.update_all(
         set: [
           status: "failed",
-          failure_reason:
-            "instance unreachable — deploy could not be delivered; check instance health",
+          failure_reason: @instance_unreachable_reason,
           claim_worker: nil,
           claimed_at: nil,
           updated_at: now
@@ -6551,6 +6606,28 @@ defmodule BarkparkCloud.Registry do
       )
       |> Repo.update_all(set: [claim_worker: nil, claimed_at: nil, updated_at: now])
 
+    # notifications (wave 28 S6): the reaper is the OTHER half of the covering
+    # set. These four passes are bare `Repo.update_all` writes — no changeset, no
+    # callback — so they never touch `transition_deployment_fenced/4`, and a
+    # route-side-only dispatch would silently miss every reaped deployment. The
+    # rows are named via `select:` in the query, NOT the `returning:` option: on
+    # this Ecto (3.14.0) / Postgrex (0.22.2) pair `Repo.update_all(q, sets,
+    # returning: [:id, :site_id])` returns `{n, nil}` — measured — while a `select`
+    # in the query returns the rows for both the plain and the joined shapes.
+    #
+    # Fired after every pass has committed, so a row is already terminal on the
+    # dashboard by the time its alert leaves.
+    [
+      {container_rows, @no_build_source_reason},
+      {static_rows, @no_content_binding_reason},
+      {failed_rows, @stale_builder_reason},
+      {pushing_rows, @instance_unreachable_reason}
+    ]
+    |> Enum.flat_map(fn {rows, reason} ->
+      Enum.map(rows || [], fn {_id, site_id} -> {site_id, reason} end)
+    end)
+    |> dispatch_reaped_deployment_alerts()
+
     %{
       failed: failed,
       requeued: requeued,
@@ -6561,6 +6638,45 @@ defmodule BarkparkCloud.Registry do
   end
 
   ## Helpers
+
+  # notifications (wave 28 S6): fire `:deployment_failed` only on the EDGE into
+  # `failed`. `Sites.Deploy.record_stage/2` re-drives the fenced writer on every
+  # stage report and `status_for_stage/2` carries "failed" forward unchanged, so
+  # a failed row is rewritten as `failed` routinely; without this guard one
+  # broken deploy would email its owner once per stage report.
+  defp maybe_dispatch_deployment_failed("failed", _updated), do: :ok
+
+  defp maybe_dispatch_deployment_failed(_prior, %Deployment{status: "failed"} = updated),
+    do: dispatch_deployment_failed(updated.site_id, updated.failure_reason)
+
+  defp maybe_dispatch_deployment_failed(_prior, _updated), do: :ok
+
+  # Site-keyed, because a Deployment only `belongs_to :site` and the alert's team
+  # lives one hop further out. `Notifications.dispatch_site_event/3` resolves the
+  # team through the site and names the site in the alert; it never raises.
+  defp dispatch_deployment_failed(site_id, failure_reason) do
+    Notifications.dispatch_site_event(site_id, :deployment_failed, %{
+      detail: failure_reason || ""
+    })
+  end
+
+  # The capped fan-out described at `@reap_alert_cap`.
+  defp dispatch_reaped_deployment_alerts([]), do: :ok
+
+  defp dispatch_reaped_deployment_alerts(alerts) do
+    {send_now, dropped} = Enum.split(alerts, @reap_alert_cap)
+
+    Enum.each(send_now, fn {site_id, reason} -> dispatch_deployment_failed(site_id, reason) end)
+
+    if dropped != [] do
+      Logger.warning(
+        "reap_stale_deployments: #{length(dropped)} deployment_failed alerts suppressed " <>
+          "(cap #{@reap_alert_cap}/sweep); the rows are terminal in the console"
+      )
+    end
+
+    :ok
+  end
 
   # Guard a :binary_id PK lookup: a non-UUID id (a malformed path param) makes
   # Repo.get raise Ecto.Query.CastError → an HTTP 500. Returning nil here for a
