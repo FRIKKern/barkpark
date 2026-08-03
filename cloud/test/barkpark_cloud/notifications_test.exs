@@ -306,7 +306,7 @@ defmodule BarkparkCloud.NotificationsTest do
 
       # THE CAUSE, in words a person can act on.
       cause =
-        "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+        "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
 
       assert body =~ cause
 
