@@ -5578,15 +5578,27 @@ async function main() {
     //        so no string a person types into `#new-name` can widen this
     //        screen. That is a real result for a screen that had none, and it
     //        is a refusal, not a fix.
-    //      theater-ready BITES. It is FILED (task-ee662108818d603c), not fixed
-    //        here, and pinned as the ceiling described below.
+    //      theater-ready BIT, and is now FIXED and ASSERTED. W26 measured the
+    //        defect and could only pin it (its fence was this file); W27 landed
+    //        the one-declaration remedy in app.css — `overflow-wrap: anywhere`
+    //        on the pre-existing `.new-ready .mono` head, the same escape
+    //        `.site-meta .mono` already carries — and turned the ceiling into
+    //        the unconditional refusal described below. The 78-char host now
+    //        leaves the page at 320/320 with ZERO boxes over their own client
+    //        width, in both themes.
     //
     //    IT CAN LOSE, AND THAT WAS DRIVEN, NOT ARGUED. Two mutations of the
     //    SHIPPED tree, each applied to app.css, run, and reverted:
     //      `.new-desc { white-space: nowrap }`  → 82 findings, exit 1. It reds
     //        the KIND half of BOTH screens (theater-ready .new-desc 491/214 at
     //        320 with the ordinary 35-char URL; new-launch page 479/320) AND
-    //        breaches the ceiling (622px of cruel drag against the 408px pin).
+    //        drags 622px on the cruel half — measured against W26's 408px pin,
+    //        and refused outright by the 0px rule that replaced it.
+    //      W27 added a third, on the remedy itself: reverting `overflow-wrap:
+    //        anywhere` from `.new-ready .mono` on an otherwise-fixed tree →
+    //        10 findings, exit 1 (4 box refusals per theme naming each pre-fix
+    //        member, plus the drag leg in both themes). Under the subset rule
+    //        this file shipped with, the SAME revert scored 2.
     //      `#new-name { width: 140% }`          → 60 findings, exit 1. It reds
     //        the field-containment assertion specifically (`#new-name` right
     //        edge 352.59 against the card's inner edge 267) — the one question
@@ -5608,27 +5620,43 @@ async function main() {
       const CRUEL_NAME = "a".repeat(NAME_CAP);
       const { SCENARIOS: S26 } = await import("./scenarios.mjs");
 
-      // ── THE DEFECT THIS LEG FOUND, FILED AND PINNED — NOT FIXED HERE ──────
+      // ── THE DEFECT THIS LEG FOUND, AND THE REFUSAL THAT REPLACED IT ───────
       //   The cruel host is not a synthetic string on this screen. Barkpark
       //   itself validates `:slug` at `max: 63` and builds the customer-facing
       //   FQDN as `clean_url(slug) = "https://" <> slug <> ".barkpark.cloud"` —
       //   so `https://<63 chars>.barkpark.cloud`, exactly what is injected
       //   below, is the LONGEST URL the control plane can hand this hero, and
-      //   a person who names their instance with a long slug gets it. Driven at
-      //   320 in both themes it takes documentElement.scrollWidth to 728
-      //   against 320: 408px of the screen every successful signup lands on is
-      //   off-screen sideways, because `.new-ready .mono` carries no wrap
-      //   escape and neither `.new-card` nor `.new-screen` scrolls.
-      //   FILED as task-ee662108818d603c. This slice
-      //   ships NO app.css change (its fence is this file) — so the cruel half
-      //   on theater-ready is pinned as a CEILING rather than certified:
-      //     · the drag may not exceed what was measured, and
-      //     · no box outside the measured set may join it.
-      //   A remedy SHRINKS both and stays green; a regression widens either and
-      //   reds. When the fix lands, drop the ceiling to 0 and delete the
-      //   subset rule — at which point this becomes an ordinary assertion.
-      const READY_CRUEL_DRAG = 408;
-      const READY_CRUEL_BOXES = ["new-body", "new-card card", "new-ready", "new-desc"];
+      //   a person who names their instance with a long slug gets it.
+      //
+      //   W26 DROVE IT AND IT BIT: at 320 in both themes documentElement
+      //   .scrollWidth read 728 against 320 — 408px of the screen every
+      //   successful signup lands on off-screen sideways, the mono run painted
+      //   670.81px into a 214px paragraph (456.81px OUTSIDE it) and 4 boxes per
+      //   theme over their own client width — because `.new-ready .mono`
+      //   carried no wrap escape and neither `.new-card` nor `.new-screen`
+      //   scrolls. W26's fence was this file, so it could only PIN those
+      //   numbers as a ceiling (task-ee662108818d603c).
+      //
+      //   W27 LANDED THE REMEDY AND THE CEILING IS GONE. One declaration in the
+      //   pre-existing `.new-ready .mono` head in app.css — `overflow-wrap:
+      //   anywhere`, the escape `.site-meta .mono` already carries — takes the
+      //   cruel half to page 320/320, drag 0, boxes 0, mono 210.61/214, in both
+      //   themes, while the shipped 35-char host keeps the EXACT rects it had
+      //   (Range widths 109.2|163.81 at 320/360/430, one 273px rect at 390 —
+      //   identical before and after). So the ceiling is now a REFUSAL:
+      //     · the drag must be 0 (READY_CRUEL_DRAG below), and
+      //     · NO box under #new-body may exceed its own client width — an
+      //       unconditional rule, not a subset. The pre-fix four are kept as a
+      //       NAMED BASELINE so a regressing member reads as "the W26 defect is
+      //       back on this box", never as an anonymous stranger.
+      //   Deleting the subset rule instead of replacing it would have removed
+      //   an assertion — the instrument-weakening this epic is chartered
+      //   against. It can lose: see the mutation record above the block.
+      const READY_CRUEL_DRAG = 0;
+      // The four boxes that overflowed PRE-FIX, at 320 in both themes. Never an
+      // allowlist — every entry here is now REQUIRED to be clean; the list
+      // exists only so a red names which W26 box came back.
+      const READY_PREFIX_BOXES = ["new-body", "new-card card", "new-ready", "new-desc"];
 
       // EVERY box under #new-body against its own client width. Form controls
       // and declared scrollers are skipped AND COUNTED — an exclusion that is
@@ -5765,9 +5793,9 @@ async function main() {
         //   kind fixture cannot ask: 35 chars fit in this column at 320 whether
         //   or not anything wraps — which is exactly why a leg driven on the
         //   shipped fixture would have certified this screen.
-        //   It BITES, and the finding is filed rather than fixed (this slice's
-        //   fence is this file). What is asserted here is the CEILING form
-        //   described at the top of the block.
+        //   It BIT on W26's bytes and is FIXED on these. What is asserted here
+        //   is the REFUSAL form described at the top of the block: zero drag,
+        //   zero boxes over their own client width.
         await setViewport(W26_WIDTHS[0]);
         const cr = await evalJs(
           `(function(){` +
@@ -5786,23 +5814,24 @@ async function main() {
         if (cr.hit === 0) {
           fail(D, `theater-ready/${theme}@${W26_WIDTHS[0]} CRUEL: the ${CRUEL_HOST.length}-char host replaced nothing — the cruel half measured no element, so this leg's only falsifiable question was not asked`);
         }
-        // SUBSET, not equality: a remedy that takes boxes OFF this list must
-        // stay green (that is the fix landing), while any box JOINING it is a
-        // new surface the filed defect did not cover and reds.
+        // UNCONDITIONAL, not a subset: EVERY box here is a finding. The
+        // baseline list only decides which SENTENCE a red gets — a W26 member
+        // coming back is a regression of a fixed defect and says so by name; a
+        // stranger is a surface the remedy never covered.
         for (const b of cr.boxes) {
           cruelBox++;
-          if (!READY_CRUEL_BOXES.includes(b.cls)) {
-            fail(D, `theater-ready/${theme}@${W26_WIDTHS[0]} CRUEL .${b.cls}: scrollWidth ${b.sw} > clientWidth ${b.cw} — a box OUTSIDE the filed set [${READY_CRUEL_BOXES.join(", ")}] now overflows under the ${CRUEL_HOST.length}-char host, so the ready hero's spill has spread past what task-ee662108818d603c measured`);
-          }
+          fail(D, READY_PREFIX_BOXES.includes(b.cls)
+            ? `theater-ready/${theme}@${W26_WIDTHS[0]} CRUEL .${b.cls}: scrollWidth ${b.sw} > clientWidth ${b.cw} — the ${CRUEL_HOST.length}-char host pushes a box past its own client width again, and .${b.cls} is one of the four W26 measured pre-fix [${READY_PREFIX_BOXES.join(", ")}]: the wrap escape on .new-ready .mono is gone or has been outranked, and the 408px drag on the screen every successful signup lands on is back`
+            : `theater-ready/${theme}@${W26_WIDTHS[0]} CRUEL .${b.cls}: scrollWidth ${b.sw} > clientWidth ${b.cw} — a box the W26 defect never touched now overflows under the ${CRUEL_HOST.length}-char host, so the ready hero has a spill the .new-ready .mono remedy does not cover`);
         }
         const drag = cr.psw - cr.pcw;
         if (drag > READY_CRUEL_DRAG) {
           cruelPage++;
-          fail(D, `theater-ready/${theme}@${W26_WIDTHS[0]} CRUEL: a ${CRUEL_HOST.length}-char host takes documentElement.scrollWidth to ${cr.psw} against ${cr.pcw} — ${drag}px of drag, WIDER than the ${READY_CRUEL_DRAG}px ceiling filed as task-ee662108818d603c. Widest: ${widestOf(cr)}`);
+          fail(D, `theater-ready/${theme}@${W26_WIDTHS[0]} CRUEL: a ${CRUEL_HOST.length}-char host takes documentElement.scrollWidth to ${cr.psw} against ${cr.pcw} — ${drag}px of drag on the hero every successful signup lands on, against the ${READY_CRUEL_DRAG}px this leg now REFUSES to exceed (W26 measured 408px here and could only pin it; W27 fixed it). Widest: ${widestOf(cr)}`);
         }
         cruelMargin = Math.min(cruelMargin, drag);
         if (cr.mono) { rdCruelMonoOver = Math.max(rdCruelMonoOver, +(cr.mono.w - cr.mono.pcw).toFixed(2)); rdMonoCruel = `${cr.mono.w} painted into the same ${cr.mono.pcw}px box`; }
-        row.push(`cruel@${W26_WIDTHS[0]}:${cr.hit}n run=${cr.longest}c mono ${cr.mono ? `${cr.mono.w}/${cr.mono.pcw}` : "-"} box:${cr.boxes.length} page:${cr.psw}/${cr.pcw}px drag=${drag}px(<=${READY_CRUEL_DRAG} FILED)`);
+        row.push(`cruel@${W26_WIDTHS[0]}:${cr.hit}n run=${cr.longest}c mono ${cr.mono ? `${cr.mono.w}/${cr.mono.pcw}` : "-"} box:${cr.boxes.length} page:${cr.psw}/${cr.pcw}px drag=${drag}px(<=${READY_CRUEL_DRAG} REFUSED)`);
         process.stdout.write(`   theater-ready/${theme}  ${row.join("  ")}\n`);
       }
 
@@ -5941,17 +5970,21 @@ async function main() {
           `${lnKindMargin === Infinity ? "n/a" : lnKindMargin.toFixed(2) + "px"}`,
         );
         okLine(
-          `theater-ready is NOT a refusal — it BITES, and it is FILED, not fixed here (this slice's fence is this ` +
-          `file, so no app.css change ships with it): ${CRUEL_HOST.length} chars of URL — Barkpark's own ` +
-          `validate_length(:slug, max: 63) plus clean_url/1's "https://" <> slug <> ".barkpark.cloud", i.e. the ` +
-          `LONGEST url the control plane can hand this hero — drag the page ${cruelMargin === Infinity ? "n/a" : cruelMargin + "px"} ` +
-          `at ${W26_WIDTHS[0]} and overflow ${cruelBox} box(es) across the two themes — the URL's painted run goes ` +
-          `from ${rdMonoSlack === Infinity ? "n/a" : rdMonoSlack + "px"} INSIDE its paragraph to ${rdCruelMonoOver}px ` +
-          `OUTSIDE it (${rdMonoCruel}) — because .new-ready .mono ` +
-          `carries no wrap escape. Ceiling-pinned as task-ee662108818d603c: the drag may not ` +
-          `exceed ${READY_CRUEL_DRAG}px (${cruelPage} breach(es) this run) and no box outside ` +
-          `[${READY_CRUEL_BOXES.join(", ")}] may join it. A remedy shrinks both and stays green; a regression ` +
-          `widens either and reds`,
+          `theater-ready IS A REFUSAL NOW, and W26's measurement is why it is worth one: ${CRUEL_HOST.length} chars ` +
+          `of URL — Barkpark's own validate_length(:slug, max: 63) plus clean_url/1's "https://" <> slug <> ` +
+          `".barkpark.cloud", i.e. the LONGEST url the control plane can hand this hero — dragged the page 408px at ` +
+          `${W26_WIDTHS[0]}, overflowed 4 boxes per theme and painted the URL's run 456.81px OUTSIDE its own 214px ` +
+          `paragraph on W26's bytes (those three are LITERALS from the pre-fix run, deliberately not read off this ` +
+          `one, which would print 0 and tell the next reader nothing happened here). ON THESE BYTES the same ` +
+          `injection drags ${cruelMargin === Infinity ? "n/a" : cruelMargin + "px"} at ${W26_WIDTHS[0]} and overflows ` +
+          `${cruelBox} box(es) across the two themes, the run painting ${rdMonoCruel} — ${rdCruelMonoOver}px outside ` +
+          `it — because 'overflow-wrap: anywhere' on .new-ready .mono lets a 63-octet DNS label break where nothing ` +
+          `else can, while the shipped ${READY_URL.length}-char host keeps the exact rects it had (it clears its ` +
+          `paragraph by ${rdMonoSlack === Infinity ? "n/a" : rdMonoSlack + "px"} either way). ASSERTED, NOT PINNED: ` +
+          `the drag may not exceed ${READY_CRUEL_DRAG}px (${cruelPage} breach(es) this run) and NO box under ` +
+          `#new-body may exceed its own client width — unconditional, with the four W26 measured pre-fix ` +
+          `[${READY_PREFIX_BOXES.join(", ")}] kept only as a NAMED BASELINE, so a regressing member reads as the ` +
+          `W26 defect returning on that box rather than as an anonymous stranger`,
         );
         okLine(
           `EVERY box under #new-body is measured against its OWN client width, never a pinned selector — the W25 ` +
