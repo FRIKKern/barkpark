@@ -202,6 +202,51 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
     assert_no_email_sent()
   end
 
+  ## 5b. THE CAP — a person-facing SUPPRESSION, so it is measured, not asserted.
+  ##     `@reap_alert_cap` decides that the 26th owner of a cluster-wide incident
+  ##     hears nothing by email. A suppression branch no fixture drives is green
+  ##     by construction; this drives it.
+
+  # Swoosh's test adapter delivers `{:email, %Swoosh.Email{}}` to the test
+  # process, so the mailbox itself is the counter. `assert_email_sent` consumes
+  # one message and cannot answer "how many".
+  defp drain_emails(acc \\ 0) do
+    receive do
+      {:email, _email} -> drain_emails(acc + 1)
+    after
+      100 -> acc
+    end
+  end
+
+  test "a mass reap alerts at most the cap, and LOGS the ones it suppressed" do
+    # One container site with neither an artifact nor a repo: pass (0a) fails
+    # every queued row it owns in a single sweep.
+    {site, _owner} = setup_site()
+    over = 2
+    n = Registry.reap_alert_cap() + over
+
+    # Distinct refs: `deployments_active_site_ref_index` allows one ACTIVE row
+    # per (site, ref), so a mass reap is many refs, not many retries of one.
+    ids =
+      for i <- 1..n do
+        {:ok, d} = Registry.create_deployment(site, %{git_ref: "ref-#{i}"})
+        d.id
+      end
+
+    log =
+      ExUnit.CaptureLog.capture_log(fn ->
+        assert {:ok, %{no_source_failed: ^n}} = perform_job(StaleDeploymentReaper, %{})
+      end)
+
+    # FIRST: every row really is terminal — the console, which is the surface of
+    # record, lost nothing. The cap suppresses the EMAIL, never the truth.
+    for id <- ids, do: assert(Repo.get(Deployment, id).status == "failed")
+
+    assert drain_emails() == Registry.reap_alert_cap()
+    assert log =~ "#{over} deployment_failed alerts suppressed"
+    assert log =~ "the rows are terminal in the console"
+  end
+
   ## 6. THE EMAIL — a classified cause, not raw reaper jargon, and the site named.
 
   test "the alert names the SITE and leads with a classified cause, capture below" do

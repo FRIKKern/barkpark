@@ -2270,6 +2270,15 @@ defmodule BarkparkCloud.Registry do
     Application.get_env(:barkpark_cloud, :max_deploy_claims, @default_max_deploy_claims)
   end
 
+  @doc """
+  How many `deployment_failed` alerts one reaper sweep may send. See
+  `@reap_alert_cap` for why a cap exists at all. Public so the suppression
+  branch can be DRIVEN by a test rather than asserted in a comment — a cap that
+  no fixture crosses is a person-facing suppression nothing measures.
+  """
+  @spec reap_alert_cap() :: pos_integer()
+  def reap_alert_cap, do: @reap_alert_cap
+
   ## Warm pool (dwb-10)
 
   @doc """
