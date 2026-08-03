@@ -72,26 +72,31 @@ defmodule BarkparkCloud.DomainStatusTest do
 
   # ── seam fakes (injected per call via opts) ──
 
-  # A DNS fake from a %{"host" => [ip_tuple, ...]} map: the list on :inet, [] on
-  # :inet6 (resolve_all unions both families and de-dupes), {:ok, []} for an
-  # unmapped host (an un-propagated record).
+  # A DNS fake from a %{"host" => [ip_tuple, ...]} map: the list on :inet, and
+  # `{:error, :nxdomain}` on the family that has no record — WHICH IS WHAT THE
+  # REAL TRANSPORT RETURNS. Re-measured at review on this host:
+  # `:inet.getaddrs(~c"definitely-not-a-real-host-zzz.example", :inet)` and the
+  # same on `:inet6` both return `{:error, :nxdomain}`, and an A-only name
+  # returns it on `:inet6`. A fake that answered `{:ok, []}` for a missing
+  # record would encode a shape production never produces — the device-oracle
+  # trap: a fixture that cannot produce the condition it is meant to police.
   defp dns_map(map) do
     fn charlist, family ->
       case {Map.get(map, to_string(charlist)), family} do
-        {nil, _} -> {:ok, []}
+        {nil, _} -> {:error, :nxdomain}
         {list, :inet} -> {:ok, list}
-        {_list, :inet6} -> {:ok, []}
+        {_list, :inet6} -> {:error, :nxdomain}
       end
     end
   end
 
-  # An inet6-family DNS fake (AAAA-only estates).
+  # An inet6-family DNS fake (AAAA-only estates). Same fidelity rule.
   defp dns_map_inet6(map) do
     fn charlist, family ->
       case {Map.get(map, to_string(charlist)), family} do
-        {nil, _} -> {:ok, []}
+        {nil, _} -> {:error, :nxdomain}
         {list, :inet6} -> {:ok, list}
-        {_list, :inet} -> {:ok, []}
+        {_list, :inet} -> {:error, :nxdomain}
       end
     end
   end
