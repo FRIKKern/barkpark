@@ -1270,15 +1270,68 @@ test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over n
       .replace('const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
         'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });'),
     ['--repo', REPO, '--successor', 'TERMINAL']);
-  assert.equal(sealed.status, SEAL, `pre-fix, an empty roster sealed at exit 0: ${token(sealed.out)}`);
-  assert.match(sealed.out, /^VERDICT: SEAL$/m);
-  assert.match(sealed.out, /Sealed 0 children of/, 'the pre-fix green printed its own fabrication');
-  assert.match(token(sealed.out), /SEAL a=PASS .*orphans=0 .*mode=live/);
+
+  // THIS CONTROL ASSERTS CLAUSE (a) ONLY — NEVER THE OVERALL EXIT CODE. The exit code
+  // is the CONJUNCTION of (a), (b) and (c), and clause (b) reads git three ways per
+  // registered defect (`merge-base --is-ancestor`, `git show --name-only`, `git show`).
+  // `console-harness.yml:239-248` says in its own words that a shallow checkout would
+  // make the predicate "manufacture a false NO SEAL out of a shallow clone" and that
+  // "the test file is hermetic instead" — so binding a clause-(a) control to the exit
+  // code made it hostage to a clause it does not test, and it red in CI (`NO-SEAL
+  // a=PASS b=FAIL c=PASS`) for an environment fact, not a defect. The floor this test
+  // exists to pin is clause (a)'s, so the token's clause-(a) letters are what we read.
+  // The fabrication sentences (`VERDICT: SEAL`, `Sealed 0 children of`) are pushed
+  // INSIDE `if (ok)` at seal-predicate.mjs:1062-1066 — structurally unreachable in ANY
+  // environment where clause (b) fails — so they moved to the fixture-mode sibling
+  // below rather than being deleted.
+  const sealedToken = token(sealed.out);
+  assert.match(sealedToken, /\ba=PASS\b/,
+    `removing the floor makes clause (a) pass over a roster of nobody: ${sealedToken}`);
+  assert.match(sealedToken, /\borphans=0\b/, 'and the arithmetic reads clean over zero rows');
+  assert.match(sealedToken, /\bmode=live\b/, 'this is the LIVE path, not a ledger fixture');
+  assert.match(sealedToken, /\broster=0\b/, 'over a population of nobody');
+  assert.doesNotMatch(sealedToken, /REFUSED reason=EMPTY-ROSTER/,
+    'the floor mutation must actually remove the floor — otherwise this control passes vacuously');
+  assert.doesNotMatch(sealed.out, /the live roster of \S+ is EMPTY/,
+    'the refusal sentence must be gone with the floor it belongs to');
 
   // …and bucket (c) demonstrably cannot stop it: the three gates resolve for an epic
-  // whose roster is empty, and the run says so in its own letters.
+  // whose roster is empty, and the run says so in its own letters. Bucket (c) is pushed
+  // at seal-predicate.mjs:1047-1049, BEFORE `ok` is computed at :1056, so this line is
+  // printed on the NO-SEAL branch too and needs no git history to be reachable.
   assert.match(sealed.out, /in-epic-roster=false/,
     'the gates are fetched by hardcoded id INDEPENDENTLY of --epic, which is why clause (c) is no backstop');
+
+  // AFTER-NOTE FOR cch-w28-s2 (clause-(b) HISTORY-UNAVAILABLE discrimination): when the
+  // predicate learns to tell "this commit is not an ancestor" from "this checkout has no
+  // history to ask", that condition MUST surface as a LETTER in the verdict token at
+  // exit 1 (e.g. `b=HISTORY-UNAVAILABLE`) and NEVER as a process-level exit-2
+  // INFRA-FAULT — an INFRA-FAULT prints `a=UNKNOWN b=UNKNOWN c=UNKNOWN` and would red
+  // every clause-(a) assertion installed above.
+});
+
+// THE FABRICATION SENTENCES, RELOCATED — reachable WITHOUT git history.
+// `Sealed 0 children of …` is the sentence the empty-roster floor exists to prevent, so
+// it must stay pinned somewhere a depth-1 CI clone can reach. The floor is live-only
+// (`if (!fixture && children.length === 0)`), so a ledger fixture with an EMPTY
+// `children` array walks straight into it — and the fixture path stands `landed` in for
+// ancestry, so clause (b) never touches git at all. The one thing this demonstration
+// does NOT carry, relative to the live control above, is `mode=live`: it proves the
+// sentence exists and what it says, not that a live run can print it. The live control
+// above is what pins the live path.
+test('wave 28: the fabrication sentence is reachable over an empty FIXTURE roster', () => {
+  const { status, out } = fixtureRun('terminal-empty-roster.json');
+  assert.equal(status, SEAL, `an empty fixture roster is not stopped by the live-only floor: ${token(out)}`);
+  assert.match(out, /^VERDICT: SEAL$/m);
+  assert.match(out, /Sealed 0 children of cloud-console-hardening-epic: 0 evidence-closed, 0 forwarded by name/,
+    'this is the fabrication the empty-roster floor exists to prevent on the live path');
+  // ANCHORED at the token's head. The predecessor of this assertion read
+  // `/SEAL a=PASS .*orphans=0 .*mode=live/`, which matches the SUBSTRING inside
+  // `NO-SEAL a=PASS` and therefore discriminated SEAL from NO-SEAL not at all.
+  assert.match(token(out), /^VERDICT-TOKEN: SEAL-PREDICATE SEAL a=PASS b=PASS c=PASS orphans=0 /,
+    'a NO-SEAL token can never satisfy this — the verdict word is pinned at a fixed offset');
+  assert.match(token(out), /\broster=0\b.*\bmode=fixture\b|\bmode=fixture\b.*\broster=0\b/,
+    'and the token names both the population it counted and the fact that it read a ledger fixture');
 });
 
 // ── EVERY VERDICT LINE NAMES ITS POPULATION ─────────────────────────────────
