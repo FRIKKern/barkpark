@@ -7889,6 +7889,97 @@ test("S13: domainKindChip maps the two known kinds and passes an unknown through
   assert.equal(hooks.domainKindChip("byo"), "byo");
 });
 
+// ── S13 `unknown`: a rung the control plane could not MEASURE ────────────────
+// The server stopped folding five resolver faults into "no A/AAAA record has
+// propagated yet" + "give it a moment and re-check". The SPA must fold the new
+// state in the SAME commit, or the fix is a no-op PLUS a regression: `unknown`
+// would land in the else-branch and paint the identical WAITING grammar, still
+// show remediation, and keep the 4s poll running against a dead resolver.
+// The envelope below is NOT hand-authored — it is the REAL check/2 output from
+// the shared, drift-gated fixture (its fourth scenario).
+const DOMAIN_RESOLVER_FAULTED = DOMAIN_FIXTURE.resolver_faulted;
+
+test("S13: an unmeasured rung folds to its OWN role — never the waiting grammar", () => {
+  const m = hooks.domainStages(DOMAIN_RESOLVER_FAULTED, 0);
+  const d = m.domains[0];
+  // The server's own shape: the ATTEMPTED rung is unknown, the three it skipped
+  // stay pending (containment) — and NOT ONE of them is promoted to "active",
+  // because nothing behind an unmeasurable rung is in progress.
+  assert.deepEqual([...d.rows.map((r) => r.role)], ["unknown", "pending", "pending", "pending"]);
+  assert.equal(d.overallRole, "unknown");
+  assert.equal(d.overall, "unknown");
+  assert.equal(m.ok, false);
+  // PRE-FIX these were: role "pending" (the waiting grammar), overallRole
+  // "pending", the tls rung promoted to "active" — the console telling the
+  // person to wait for a check nobody made.
+  assert.notEqual(d.rows[0].role, "pending");
+  assert.notEqual(d.overallRole, "pending");
+});
+
+test("S13: an unknown rung shows NO remediation — even if a server sends one", () => {
+  const m = hooks.domainStages(DOMAIN_RESOLVER_FAULTED, 0);
+  const dns = m.domains[0].rows[0];
+  assert.equal(dns.role, "unknown");
+  assert.equal(dns.showRemediation, false);
+  assert.equal(dns.remediation, ""); // the server sends null; the fold coerces it
+  // The honest copy is the EVIDENCE, and it never claims anything about the
+  // person's records.
+  assert.match(dns.evidence, /Could not check whether/);
+  assert.ok(dns.evidence.indexOf("has propagated yet") === -1);
+  // Defense in depth: a stale/rogue server that DOES attach advice to an
+  // unmeasured rung still renders none — advice about a check nobody made is
+  // the defect itself.
+  const rogue = hooks.domainStageRows([
+    { stage: "dns_found", label: "DNS resolves", status: "unknown", evidence: "lookup failed", remediation: "Give it a moment and re-check." },
+  ]);
+  assert.equal(rogue[0].role, "unknown");
+  assert.equal(rogue[0].showRemediation, false);
+  const html = hooks.domainChecklistHtml(hooks.domainStages(DOMAIN_RESOLVER_FAULTED, 0), {});
+  assert.ok(html.indexOf("dom-note") === -1, "an unknown-fronted host renders no amber advice note");
+  assert.match(html, /dom-rung--unknown/);
+});
+
+test("S13: an unmeasurable host is TERMINAL — the 4s poll stops asking a dead resolver", () => {
+  const m = hooks.domainStages(DOMAIN_RESOLVER_FAULTED, 0);
+  assert.equal(m.terminal, true);
+  // PRE-FIX: false — every trailing skipped-pending rung kept the mount polling
+  // every 4s forever against a resolver that cannot answer.
+  // The narrowness guard: an unknown rung settles ONLY its own host. A second,
+  // still-issuing host in the same envelope keeps the whole model polling.
+  const mixed = hooks.domainStages({
+    ok: false,
+    domains: [
+      DOMAIN_RESOLVER_FAULTED.domains[0],
+      DOMAIN_PENDING.domains[0],
+    ],
+  }, 0);
+  assert.equal(mixed.terminal, false);
+  assert.equal(mixed.domains[0].overallRole, "unknown");
+  assert.equal(mixed.domains[1].overallRole, "pending");
+});
+
+test("S13: the status→role map is a CLOSED ENUM — an unrecognised status never lands in a known bucket", () => {
+  const rows = hooks.domainStageRows([
+    { stage: "dns_found", status: "ok" },
+    { stage: "points_here", status: "quantum" },     // a status this SPA has never heard of
+    { stage: "tls", status: "" },                    // absent status
+    { stage: "serving", status: "PENDING" },         // case is NOT normalised — not the enum value
+  ]);
+  // None of them silently becomes ok / failed / proxied / pending / active.
+  assert.deepEqual([...rows.slice(1).map((r) => r.role)], ["unknown", "unknown", "unknown"]);
+  // The raw status is preserved verbatim for display (the CLI's statusDash
+  // discipline: pass it through scrubbed, never guess what it meant).
+  assert.deepEqual([...rows.slice(1).map((r) => r.status)], ["quantum", "", "PENDING"]);
+  // And the same closed enum governs the roll-up.
+  const roll = (overall) => hooks.domainStages({ domains: [{ host: "h", overall: overall, stages: [] }] }, 0).domains[0].overallRole;
+  assert.equal(roll("ok"), "ok");
+  assert.equal(roll("failed"), "failed");
+  assert.equal(roll("pending"), "pending");
+  assert.equal(roll("unknown"), "unknown");
+  assert.equal(roll("sideways"), "unknown");
+  assert.equal(roll(""), "unknown");
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // S12 (azure-hetzner hosting): the Metrics tab — metricsSeries fold + the
 // string-returning SVG sparkline. Consumers NEVER compute; they render the

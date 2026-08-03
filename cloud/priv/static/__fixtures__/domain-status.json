@@ -89,6 +89,51 @@
     },
     "ok": false
   },
+  "resolver_faulted": {
+    "checked_at": "2026-07-09T10:00:00Z",
+    "domains": [
+      {
+        "host": "blog-22222222.barkpark.cloud",
+        "kind": "platform",
+        "overall": "unknown",
+        "stages": [
+          {
+            "evidence": "Could not check whether blog-22222222.barkpark.cloud resolves — this control plane's DNS lookup failed (timed out). This is not a verdict on your records.",
+            "label": "DNS resolves",
+            "remediation": null,
+            "stage": "dns_found",
+            "status": "unknown"
+          },
+          {
+            "evidence": "Not checked yet — an earlier step couldn't be checked.",
+            "label": "Points to this instance",
+            "remediation": null,
+            "stage": "points_here",
+            "status": "pending"
+          },
+          {
+            "evidence": "Not checked yet — an earlier step couldn't be checked.",
+            "label": "TLS certificate",
+            "remediation": null,
+            "stage": "tls",
+            "status": "pending"
+          },
+          {
+            "evidence": "Not checked yet — an earlier step couldn't be checked.",
+            "label": "Serving traffic",
+            "remediation": null,
+            "stage": "serving",
+            "status": "pending"
+          }
+        ]
+      }
+    ],
+    "instance": {
+      "host": "91.99.1.2",
+      "id": "11111111-2222-3333-4444-555555555555"
+    },
+    "ok": false
+  },
   "serving_failed": {
     "checked_at": "2026-07-09T10:00:00Z",
     "domains": [

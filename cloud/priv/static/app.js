@@ -9473,16 +9473,29 @@
   // fold, node-pinned in __app.test.mjs; the DOM mounts + 4s poll are
   // browser-verified. Rendered in the v4 rung-pill grammar (.dom-*).
 
-  // Fold one host's stage array into display rows. Roles: ok/failed pass
-  // through; `proxied` (the CF-orange-cloud informational classification of
-  // points_here — a MODE, never a fault) passes through as its own settled
-  // role; a pending rung is "pending" (waiting) EXCEPT the first pending rung
-  // after at least one settled-forward rung, which becomes "active" (the front
-  // currently being established) — the checklist shows honest motion (the
-  // markNextStep idiom). showRemediation is true ONLY under a failed/waiting
-  // rung that carries a server remediation string (server-owned copy, rendered
-  // verbatim — the SPA never invents fix text; a proxied rung is informational
-  // and never carries one).
+  // Fold one host's stage array into display rows. The status→role map is a
+  // CLOSED ENUM (gr-p3): ok/failed/proxied/pending pass through; `proxied` (the
+  // CF-orange-cloud informational classification of points_here — a MODE, never
+  // a fault) is its own settled role; `unknown` — a rung the CONTROL PLANE
+  // ATTEMPTED and could not measure (its DNS lookup faulted) — is its own role
+  // too, and so is anything the server sends that we do not recognise. An
+  // unrecognised status must NEVER fall into the waiting bucket: "pending" is
+  // the SPA promising the person this turns green on its own, which is exactly
+  // the lie the server-side `unknown` state exists to stop (the Go CLI already
+  // gets this right — cloud_domain_cmd.go domainStageToken defaults to
+  // statusDash, "passes through scrubbed (never a guess)").
+  //
+  // A pending rung is "pending" (waiting) EXCEPT the first pending rung after at
+  // least one settled-forward rung, which becomes "active" (the front currently
+  // being established) — the checklist shows honest motion (the markNextStep
+  // idiom). An `unknown` rung STOPS that promotion: nothing downstream of a
+  // check we could not make may claim to be in progress.
+  //
+  // showRemediation is true ONLY under a failed/waiting rung that carries a
+  // server remediation string (server-owned copy, rendered verbatim — the SPA
+  // never invents fix text; a proxied rung is informational, and an `unknown`
+  // rung deliberately carries none — advice about a check nobody made is the
+  // defect, so the SPA refuses to render one even if a stale server sends it).
   function domainStageRows(stages) {
     stages = Array.isArray(stages) ? stages : [];
     var rows = [], seenOk = false, sawActive = false;
@@ -9491,8 +9504,12 @@
       var status = typeof s.status === "string" ? s.status : "";
       var role = status === "ok" ? "ok"
         : status === "failed" ? "failed"
-        : status === "proxied" ? "proxied" : "pending";
+        : status === "proxied" ? "proxied"
+        : status === "pending" ? "pending" : "unknown";
       if (role === "ok" || role === "proxied") seenOk = true;
+      // An unmeasurable rung ends the active front — the rungs behind it were
+      // skipped, and calling one of them "in progress" would invent motion.
+      if (role === "unknown") sawActive = true;
       if (role === "pending" && seenOk && !sawActive) { role = "active"; sawActive = true; }
       var remediation = typeof s.remediation === "string" ? s.remediation : "";
       var label = (typeof s.label === "string" && s.label) ? s.label
@@ -9504,7 +9521,7 @@
         status: status,
         evidence: typeof s.evidence === "string" ? s.evidence : "",
         remediation: remediation,
-        showRemediation: role !== "ok" && role !== "proxied" && !!remediation,
+        showRemediation: role !== "ok" && role !== "proxied" && role !== "unknown" && !!remediation,
       });
     }
     return rows;
@@ -9513,7 +9530,8 @@
   // The canonical fold: the domain-status envelope → a render-ready model. Each
   // host carries its rolled-up overall (role-mapped) + its rung rows. `terminal`
   // is true when nothing more can change on its own — every host's rungs are all
-  // ok-or-failed, EXCEPT a failed SERVING rung (see below) — and the DOM mount
+  // ok-or-failed (EXCEPT a failed SERVING rung, see below), or the host carries
+  // an `unknown` rung the control plane could not measure — and the DOM mount
   // stops polling there. `empty` (no attached domains) keeps the original single
   // Domain rail row.
   function domainStages(payload, now) {
@@ -9522,7 +9540,11 @@
     var out = domains.map(function (d) {
       d = d || {};
       var overall = typeof d.overall === "string" ? d.overall : "";
-      var overallRole = overall === "ok" ? "ok" : overall === "failed" ? "failed" : "pending";
+      // The SAME closed enum as the rung roles: an unmeasured (or unrecognised)
+      // roll-up is "unknown", never the waiting grammar.
+      var overallRole = overall === "ok" ? "ok"
+        : overall === "failed" ? "failed"
+        : overall === "pending" ? "pending" : "unknown";
       return {
         host: typeof d.host === "string" ? d.host : "",
         kind: typeof d.kind === "string" ? d.kind : "",
@@ -9532,6 +9554,12 @@
       };
     });
     var terminal = out.every(function (d) {
+      // A rung the control plane could not MEASURE settles the whole host: every
+      // rung behind it was skipped, so re-asking every 4s just re-asks a
+      // question the resolver cannot answer — the checklist would sit there
+      // spinning while the person reads "we could not check". Stop, and let a
+      // navigation / re-render re-arm the check.
+      if (d.rows.some(function (r) { return r.role === "unknown"; })) return true;
       return d.rows.every(function (r) {
         // A failed SERVING rung stays NON-terminal: tls:ok + serving:failed is a
         // modeled state (the domain + cert are wired, the app behind them is
