@@ -1125,4 +1125,189 @@ defmodule BarkparkWeb.MutateControllerTest do
       refute Map.has_key?(body, "warnings")
     end
   end
+
+  # ── cch-w28 / D307+D331: the filing-law door guard at the birth seat ──────
+  #
+  # Standing Law 0 says a row filed under `cloud-console-hardening-epic`
+  # declares WHICH SURFACE it is about. Wave 27 proved by hand that the law can
+  # hold; this is the door that makes it hold without a person watching, and
+  # these tests exist to prove the door can BOTH refuse and pass — a guard that
+  # cannot lose is a sentence with an exit code.
+  #
+  # Every refusal test below FAILS against the pre-guard tree (verified by
+  # reverting the two `with`-chain lines in `writer.ex` and re-running): the
+  # refusals return 200 / 201 and the rows persist.
+  describe "filing-law door guard (cch-w28, D307/D331)" do
+    @epic "cloud-console-hardening-epic"
+
+    test "an OFF-VOCABULARY surface on a create under the epic is REFUSED 422", %{conn: conn} do
+      resp = file_row(conn, "cchw28-offvocab", %{"surface" => "dashboard"})
+
+      assert resp.status == 422
+      error = Jason.decode!(resp.resp_body)["error"]
+      assert error["code"] == "validation_failed"
+
+      # The refusal TEACHES: it names the closed vocabulary and the escape.
+      assert [message] = error["details"]["surface"]
+      assert message =~ ~s("console")
+      assert message =~ ~s("instrument")
+      assert message =~ ~s("ledger")
+
+      # Side-effect-free: the refused row was never filed.
+      assert missing?("cchw28-offvocab")
+    end
+
+    test "EXACT CASE: a differently-cased term is off-vocabulary too", %{conn: conn} do
+      resp = file_row(conn, "cchw28-cased", %{"surface" => "Console"})
+
+      assert resp.status == 422
+      assert missing?("cchw28-cased")
+    end
+
+    test "each of the three sanctioned terms PASSES and reads back from storage",
+         %{conn: conn} do
+      for term <- ~w(console instrument ledger) do
+        resp = file_row(conn, "cchw28-ok-#{term}", %{"surface" => term})
+
+        assert resp.status == 200
+        assert task_content("cchw28-ok-#{term}")["surface"] == term
+      end
+    end
+
+    test "an ABSENT surface is WARNED, not refused — the backfill is not producible",
+         %{conn: conn} do
+      # 5 of 56 live orphans carry a surface; arming presence today would refuse
+      # 91% of legitimate filings. This is the deliberate soft tier.
+      resp = file_row(conn, "cchw28-absent", %{})
+
+      assert resp.status == 200
+      content = task_content("cchw28-absent")
+      assert content["parent_id"] == @epic
+      refute Map.has_key?(content, "surface")
+    end
+
+    test "a BLANK surface takes the warn tier, not the refusal tier", %{conn: conn} do
+      resp = file_row(conn, "cchw28-blank", %{"surface" => "   "})
+
+      assert resp.status == 200
+      assert task_content("cchw28-blank")["surface"] == "   "
+    end
+
+    test "THE SCOPING: the same off-vocabulary term passes outside the epic", %{conn: conn} do
+      # The load-bearing leg. Without it this guard is a filing law armed over
+      # the WHOLE roster and every task fixture in the repository 422s.
+      resp =
+        create_row(conn, "cchw28-other-epic", %{
+          "parent_id" => "some-other-epic",
+          "surface" => "dashboard"
+        })
+
+      assert resp.status == 200
+      assert task_content("cchw28-other-epic")["surface"] == "dashboard"
+
+      resp = create_row(conn, "cchw28-no-parent", %{"surface" => "dashboard"})
+      assert resp.status == 200
+      assert task_content("cchw28-no-parent")["surface"] == "dashboard"
+    end
+
+    test "a `drafts.`-prefixed parent_id cannot dodge the guard", %{conn: conn} do
+      resp =
+        create_row(conn, "cchw28-draft-parent", %{
+          "parent_id" => "drafts." <> @epic,
+          "surface" => "dashboard"
+        })
+
+      assert resp.status == 422
+      assert missing?("cchw28-draft-parent")
+    end
+
+    test "the guard is a BIRTH guard: an UPDATE to a live epic row is untouched",
+         %{conn: conn} do
+      assert file_row(conn, "cchw28-live", %{"surface" => "console"}).status == 200
+
+      # A patch that puts an off-vocabulary term on an EXISTING row is not this
+      # guard's business — `prev_doc` is non-nil, so it head-matches away. Said
+      # out loud because it is the guard's honest residual harm.
+      resp =
+        mutate(conn, [
+          %{
+            "patch" => %{
+              "id" => "cchw28-live",
+              "type" => "task",
+              "set" => %{"surface" => "dashboard"}
+            }
+          }
+        ])
+
+      assert resp.status == 200
+      assert task_content("cchw28-live")["surface"] == "dashboard"
+    end
+
+    # ── THE UPSERT BYPASS (do_upsert_document's own INSERT branch) ──────────
+    #
+    # `POST /api/documents/task` (LegacyController.create) reaches
+    # `Content.upsert_document`, whose insert branch called NEITHER birth guard.
+    # Measured on the pre-guard tree: 201 for an epic filing with an
+    # off-vocabulary surface. This is that window, closed.
+
+    test "the LEGACY create door refuses an off-vocabulary epic filing (was 201)",
+         %{conn: conn} do
+      resp = legacy_file(conn, "cchw28-legacy-offvocab", %{"surface" => "dashboard"})
+
+      refute resp.status == 201
+      assert resp.status == 422
+      assert Jason.decode!(resp.resp_body)["error"]["code"] == "validation_failed"
+    end
+
+    test "the LEGACY create door still files a sanctioned and an absent surface",
+         %{conn: conn} do
+      assert legacy_file(conn, "cchw28-legacy-ok", %{"surface" => "ledger"}).status == 201
+      assert legacy_file(conn, "cchw28-legacy-absent", %{}).status == 201
+    end
+
+    # ── fixtures ───────────────────────────────────────────────────────────
+
+    defp create_row(conn, id, content_extra) do
+      mutate(conn, [
+        %{
+          "create" => %{
+            "_id" => id,
+            "_type" => "task",
+            "title" => "Filing-law fixture #{id}",
+            "content" =>
+              Map.merge(
+                %{"kind" => "task", "lifecycle_status" => "open", "priority" => 1},
+                content_extra
+              )
+          }
+        }
+      ])
+    end
+
+    defp file_row(conn, id, content_extra),
+      do: create_row(conn, id, Map.put(content_extra, "parent_id", @epic))
+
+    # The legacy door folds every non-reserved top-level key into `content`,
+    # and hardcodes dataset "production" — so this fixture reads back through
+    # that dataset, not "test".
+    defp legacy_file(conn, id, content_extra) do
+      body =
+        Map.merge(
+          %{
+            "id" => id,
+            "title" => "Filing-law fixture #{id}",
+            "kind" => "task",
+            "lifecycle_status" => "open",
+            "priority" => 1,
+            "parent_id" => @epic
+          },
+          content_extra
+        )
+
+      conn |> authed() |> post("/api/documents/task", Jason.encode!(body))
+    end
+
+    defp missing?(id),
+      do: match?({:error, _}, Content.get_document("drafts.#{id}", "task", "test"))
+  end
 end
