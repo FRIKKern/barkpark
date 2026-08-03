@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   import Ecto.Query, only: [from: 2]
 
+  alias BarkparkCloud.FailureCopy
   alias BarkparkCloud.Registry
   alias BarkparkCloud.Registry.{Barkpark, Deployment, Site, SiteArtifact}
   alias BarkparkCloud.Repo
@@ -86,6 +87,49 @@ defmodule BarkparkCloud.Sites.Deploy do
   @doc "The six visible deploy stages, in order."
   @spec stages() :: [String.t()]
   def stages, do: @stages
+
+  @doc """
+  The display fold for ONE stage's `detail` — the single hop every channel that
+  paints a stage detail to a person goes through (cch-w27-s2).
+
+  Two arms, two separate obligations, deliberately not one:
+
+    * **`failed` → `FailureCopy.humanize/1`.** `Sites.Deploy.fail/2` writes the
+      identical reason to `failure_reason` AND `detail`, and
+      `Web.Router.deployment_json/1` humanizes only the first. The rail a person
+      is WATCHING (`.deploy-rail-fail`, fed from the failed stage's `detail`) and
+      the settled row that replaces it seconds later therefore named two
+      different causes off ONE string: the rail said `FATAL: 401 Unauthorized …`
+      while the row said "The hosting provider rejected our credentials." Same
+      event, same minute, two stories — the exact shape wave 26 S3 closed in the
+      `provision_failed` email (charter D310).
+
+      The RAW CAPTURE IS NOT DESTROYED, which is what D310's "both, not either"
+      requires. It survives verbatim (scrubbed) one element away, in the SAME
+      view: `console_entry/1` folds it into `line` ("BUILD failed — <detail>"),
+      and `app.js` `deployConsoleHtml` renders `line` — the build console is
+      open by default while a deploy is active, i.e. exactly when the rail is on
+      screen. The class goes where a person LOOKS FIRST; the capture stays where
+      they look NEXT. This is why `humanize/1` is right HERE and wrong on
+      `merge_provision_steps` / `merge_provision_console`, where it would replace
+      the only copy of the narration that exists.
+
+    * **anything else → `FailureCopy.scrub/1`.** A stage detail is a REMOTE
+      capture (an ssh stderr fold, a provider body, a build log line), so it is
+      redacted at every display boundary. `broadcast_stage/2` shipped it RAW:
+      driven on a detail carrying `Authorization: Bearer <token>`, the HTTP
+      console entry returned `Bearer [redacted]` while the SSE frame for the
+      same bytes carried the live credential. Same bytes, two channels, one
+      redacted.
+
+  `humanize/1` is `classify |> scrub`, so the `failed` arm is scrubbed too — the
+  secret boundary is total across both arms, and neither arm weakens the other.
+  Non-binary details (a stage the box narrated without one) pass through
+  unchanged. The stored row keeps the raw bytes for ops, as always.
+  """
+  @spec stage_caption(term(), term()) :: term()
+  def stage_caption("failed", detail), do: FailureCopy.humanize(detail)
+  def stage_caption(_status, detail), do: FailureCopy.scrub(detail)
 
   ## ---------------------------------------------------------------------------
   ## Mint
@@ -862,6 +906,16 @@ defmodule BarkparkCloud.Sites.Deploy do
   # broadcast — the payload names WHICH deployment moved to WHICH stage, and the
   # dashboard reads the authoritative deployment on the next fetch; the rail folds
   # this signal in place. A nil/blank team is a no-op in Events.broadcast.
+  #
+  # cch-w27-s2: `detail` rides through `stage_caption/2` — the SAME display fold
+  # `Web.Router.deployment_json/1` applies to the console entry this stage also
+  # writes. Until now this payload shipped `stage.detail` RAW, which made this the
+  # ONE channel that both (a) redacted nothing, so an ssh capture carrying a
+  # bearer token reached the browser live while the HTTP twin of the same bytes
+  # returned `Bearer [redacted]`, and (b) classified nothing, so the live rail and
+  # the settled row named two different causes for one failure. `Events.broadcast`
+  # forwards the payload verbatim to every SSE frame, so this call site is the
+  # only place either could be fixed.
   defp broadcast_stage(ctx, stage) do
     BarkparkCloud.Events.broadcast(ctx.site.team_id, "site.deploy.stage", %{
       site_id: ctx.site.id,
@@ -869,7 +923,7 @@ defmodule BarkparkCloud.Sites.Deploy do
       deployment_id: ctx.id,
       stage: stage.name,
       status: stage.status,
-      detail: stage.detail
+      detail: stage_caption(stage.status, stage.detail)
     })
   end
 

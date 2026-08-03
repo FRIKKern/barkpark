@@ -94,8 +94,17 @@ set -euo pipefail
 # covers every change to the scanning logic itself; what remains uncovered is a
 # new api/test fixture that the scanner would newly flag. That residue is named
 # here rather than left for a reader to discover.
+#
+# deploy/site-deploy.sh — cch-w27-s2. `sites_deploy_stage_caption_test.exs`
+# DERIVES its corpus from the box engine rather than typing it: it reads the
+# FATAL line `build_failure_reason()` greps first and asserts the preview fixture
+# in `scenarios.mjs` still equals it. That is deliberate (a hand-authored failure
+# string is how a rail guard ends up green by construction), and it makes the
+# engine a real dependency of the Cloud suite — an edit to that line must re-run
+# this suite, or the fixture and its producer drift apart behind a green check.
 CLOUD_PATHS='cloud/**
 .github/workflows/cloud.yml
+deploy/site-deploy.sh
 internal/cli/cloud/providers_capabilities.json
 js/packages/create-barkpark-app/templates/**
 scripts/async_env_seam_scan.exs
@@ -116,9 +125,11 @@ scripts/cloud-path-escape-check.test.sh'
 # literal's REAL target is itself covered by the declared set.
 CLOUD_ESCAPE_EXEMPT='docker-compose.yml	shape 2 — notifications_platform_admin_env_test.exs:189 reads Path.join(__DIR__, "../../docker-compose.yml"), which is cloud/docker-compose.yml (covered by cloud/**). The repo-root file of the same name is reached only by the `cloud/` cwd base, and that base does not apply to a __DIR__-anchored literal.'
 
-# The census floor. The measured population is 4 resolved repo-root reads: the
-# two cross-tree reads above, the vendored-template directory, and the one
-# EXEMPT phantom above; the floor is 4. Its job is to catch a NEUTERED SCANNER:
+# The census floor. The measured population is 5 resolved repo-root reads: the
+# two cross-tree reads above, the vendored-template directory, the one EXEMPT
+# phantom above, and (cch-w27-s2) the box engine `deploy/site-deploy.sh` that
+# `sites_deploy_stage_caption_test.exs` derives its failure corpus from; the
+# floor is 5. Its job is to catch a NEUTERED SCANNER:
 # a regex or find that silently stopped matching would otherwise report "0
 # uncovered reads" and exit 0 — clean-looking, and completely blind.
 #
@@ -130,7 +141,7 @@ CLOUD_ESCAPE_EXEMPT='docker-compose.yml	shape 2 — notifications_platform_admin
 # It is a CONSTANT on purpose. An env-var override would be a one-line CI bypass
 # of the only check that can tell "clean" from "blind", and the harness asserts
 # that setting CLOUD_ESCAPE_MIN changes nothing.
-CLOUD_ESCAPE_MIN=4
+CLOUD_ESCAPE_MIN=5
 
 # CLOUD_PATH_ESCAPE_ROOT retargets the scan at a synthetic fixture tree; the
 # harness is its only caller. It cannot weaken a real run — pointing it at the
