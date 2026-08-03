@@ -5216,7 +5216,15 @@
   function instanceCardStats(meters) {
     return OVERVIEW_CARD_STATS.map(function (h) {
       var d = usageMeterDisplay(fleetHeadlineSpec(h), (meters || {})[h.key]);
-      return { k: h.label, v: d.unmetered ? "—" : d.value, warn: d.state === "warn" || d.state === "over" };
+      // The strip has room for a glyph, not a sentence — so the two unmetered
+      // states get two glyphs (w29). "—" is the designed "we do not measure
+      // this"; "?" (amber, via d.state) is "we tried and could not", which is
+      // what the em dash used to swallow. The Usage tab carries the reason.
+      return {
+        k: h.label,
+        v: d.unavailable ? "?" : d.unmetered ? "—" : d.value,
+        warn: d.state === "warn" || d.state === "over"
+      };
     });
   }
   // Pure: one v4 instance card — name, status pill, infra axes, provider mark,
@@ -16202,16 +16210,40 @@
     return String(value); // count
   }
 
+  // Pure: the sentence for a meter whose read was ATTEMPTED and FAILED. The
+  // envelope's typed `unavailable_reason` (Usage.instance_meter/2) is the ONLY
+  // thing that tells "we could not measure this" apart from "we do not measure
+  // this" — both degrade to value "unmetered", so without it a crash renders as
+  // a deliberate future. An unrecognised reason still says the honest half.
+  function usageUnavailableText(reason) {
+    if (reason === "exception") return "the read crashed";
+    if (reason === "deadline_exceeded") return "the read timed out";
+    if (reason === "unreachable") return "the instance was unreachable";
+    if (reason === "bad_shape") return "the instance answered in an unexpected shape";
+    if (reason === "too_many_datasets") return "too many datasets to tally";
+    return "the read failed";
+  }
+
   // Pure: the display model for ONE meter. `value === "unmetered"` (or any
   // non-number) renders the designed "Not yet metered" state — never a fake
   // zero, never an error. `measured_at` nil renders as a LIVE read ("live"),
   // NOT an error (acceptance criterion 2); a present measured_at renders
   // "as of <relTime>". The seats meter's pending_invitations rides along.
+  //
+  // The unmetered state SPLITS in two (w29): a meter carrying the envelope's
+  // `unavailable_reason` was measured and FAILED — it reads "Could not measure"
+  // with the reason as its sub, and tints warn, because telling a person their
+  // crashed meter is "Not yet metered" asserts a deliberate future for a
+  // failure. A meter with no reason keeps the designed empty state verbatim.
   function usageMeterDisplay(spec, meter, history) {
     meter = meter || {};
     var unmetered = meter.value === "unmetered" || typeof meter.value !== "number";
-    var value = unmetered ? "Not yet metered" : c10FmtValue(spec.fmt, meter.value);
-    var freshness = unmetered ? "" : (meter.measured_at ? "as of " + relTime(meter.measured_at) : "live");
+    var reason = (typeof meter.unavailable_reason === "string" && meter.unavailable_reason) ? meter.unavailable_reason : "";
+    var unavailable = unmetered && reason !== "";
+    var value = unmetered ? (unavailable ? "Could not measure" : "Not yet metered") : c10FmtValue(spec.fmt, meter.value);
+    var freshness = unmetered
+      ? (unavailable ? usageUnavailableText(reason) : "")
+      : (meter.measured_at ? "as of " + relTime(meter.measured_at) : "live");
     var pending = spec.key === "seats" && typeof meter.pending_invitations === "number" && meter.pending_invitations > 0
       ? meter.pending_invitations + " pending invitation" + (meter.pending_invitations === 1 ? "" : "s")
       : "";
@@ -16232,6 +16264,10 @@
       var warn = typeof meter.warn_at === "number" && meter.value >= meter.warn_at;
       state = over ? "over" : warn ? "warn" : "ok";
     }
+    // A failed read is a WARN state on every surface that reads `state` (the
+    // card tint and the Overview strip's stat pair) — nothing was measured, so
+    // there is no threshold to compute, but the row must not read neutral.
+    if (unavailable) state = "warn";
     // OC7 — the quota bar model. A bar is drawn ONLY when a real ceiling is
     // present (numeric quota > 0) AND the meter reports a real number; a nil/zero
     // quota is an honest "unlimited" — no bar, no fake ceiling. cpu/ram/disk carry
@@ -16253,7 +16289,7 @@
     var spark = (Array.isArray(history) && history.some(function (v) { return typeof v === "number" && isFinite(v); }))
       ? history.slice()
       : null;
-    return { key: spec.key, label: spec.label, unmetered: unmetered, value: value, freshness: freshness, pending: pending, state: state, bar: bar, spark: spark };
+    return { key: spec.key, label: spec.label, unmetered: unmetered, unavailable: unavailable, value: value, freshness: freshness, pending: pending, state: state, bar: bar, spark: spark };
   }
 
   function usageMeterHtml(spec, meter, history) {
