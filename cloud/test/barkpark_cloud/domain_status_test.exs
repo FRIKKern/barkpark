@@ -441,26 +441,75 @@ defmodule BarkparkCloud.DomainStatusTest do
 
   # ── an unreachable resolver is `unknown`, never a guess about the operator ──
   #
-  # The defect these pin: `resolve_all/2` folded FIVE resolver faults (raise,
-  # exit, {:error, :timeout}, {:error, :nxdomain}, no nameservers) into an empty
+  # The defect these pin: `resolve_all/2` folded every resolver fault (raise,
+  # exit, {:error, :timeout}, no nameservers) into an empty
   # address list, byte-identical to a GENUINE empty answer — so the control plane
   # told the person "No A/AAAA record for <host> has propagated yet." with
   # "give it a moment and re-check" attached, about a lookup it never made.
 
-  # The five fault modes, each a seam that cannot answer. The last three are
+  # The four fault modes, each a seam that cannot ANSWER. The last two are
   # RETURNED errors; the first two are a raise and an exit through safe_call/1.
+  # `:nxdomain` is deliberately NOT here — it is an answer, and its own describe
+  # block above pins it as one.
   defp fault_seams do
     [
       {"raise", fn _charlist, _family -> raise "resolver down" end},
       {"exit", fn _charlist, _family -> exit(:killed) end},
       {"timeout", fn _charlist, _family -> {:error, :timeout} end},
-      {"nxdomain", fn _charlist, _family -> {:error, :nxdomain} end},
       {"no nameservers", fn _charlist, _family -> {:error, :no_nameservers} end}
     ]
   end
 
+  # REVIEW DECISION (wave 28, superseding the letter of D332): `:nxdomain` is an
+  # ANSWER, not a fault. Re-measured on the real transport —
+  # `:inet.getaddrs(~c"no-such-host.example", :inet)` and the same on `:inet6`
+  # BOTH return `{:error, :nxdomain}` — which is precisely what a freshly
+  # attached, still-propagating domain looks like. Classified as a fault it
+  # would turn the MOST COMMON waiting state into "we could not check" and strip
+  # its propagation advice: one lie swapped for another in the rung this slice
+  # exists to make honest. This test is the guard on that classification.
+  describe "DomainStatus.check/2 — an authoritative NXDOMAIN is a measurement" do
+    test "nxdomain on BOTH families reads as propagation-pending, with its advice intact" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      dom = platform(DomainStatus.check(bp, dns: fn _c, _f -> {:error, :nxdomain} end))
+      dns = stage(dom, "dns_found")
+
+      assert dns.status == "pending"
+      assert dns.evidence =~ "has propagated yet"
+      refute dns.evidence =~ "Could not check whether"
+      assert is_binary(dns.remediation) and dns.remediation =~ "propagate"
+      assert dom.overall == "pending"
+
+      # BYTE-IDENTICAL to the empty-list answer: both are the same measurement.
+      assert dns == stage(platform(DomainStatus.check(bp, dns: dns_map(%{}))), "dns_found")
+    end
+
+    test "a REAL fault alongside nxdomain still reads unknown (nxdomain is not a fault mask)" do
+      {_u, team} = user_with_team()
+      bp = live_barkpark(team)
+
+      dom =
+        platform(
+          DomainStatus.check(bp,
+            dns: fn _c, family ->
+              case family do
+                :inet -> {:error, :nxdomain}
+                :inet6 -> {:error, :timeout}
+              end
+            end
+          )
+        )
+
+      assert stage(dom, "dns_found").status == "unknown"
+      assert stage(dom, "dns_found").evidence =~ "timed out"
+      assert dom.overall == "unknown"
+    end
+  end
+
   describe "DomainStatus.check/2 — resolver fault is unknown, not a propagation guess" do
-    test "all five fault modes are unknown and NAME the fault; a genuine empty answer stays pending" do
+    test "all four fault modes are unknown and NAME the fault; a genuine empty answer stays pending" do
       {_u, team} = user_with_team()
       bp = live_barkpark(team)
 
@@ -508,10 +557,9 @@ defmodule BarkparkCloud.DomainStatusTest do
         end
 
       assert length(Enum.uniq(evidence)) == length(evidence),
-             "the five fault modes collapsed back into one string: #{inspect(evidence)}"
+             "the four fault modes collapsed back into one string: #{inspect(evidence)}"
 
       assert Enum.any?(evidence, &(&1 =~ "timed out"))
-      assert Enum.any?(evidence, &(&1 =~ "no such host"))
       assert Enum.any?(evidence, &(&1 =~ "no nameservers configured"))
       assert Enum.any?(evidence, &(&1 =~ "resolver down"))
       assert Enum.any?(evidence, &(&1 =~ "exit"))
@@ -664,8 +712,9 @@ defmodule BarkparkCloud.DomainStatusTest do
           dns: fn charlist, family ->
             case {to_string(charlist), family} do
               {^fqdn, :inet} -> {:ok, [{203, 0, 113, 10}]}
-              # inet6 is unavailable on this box — we still measured what we needed.
-              {_, :inet6} -> {:error, :nxdomain}
+              # The inet6 lookup genuinely FAULTS (a timeout, not an answer) —
+              # we still measured what we needed on the other family.
+              {_, :inet6} -> {:error, :timeout}
               _ -> {:ok, []}
             end
           end,

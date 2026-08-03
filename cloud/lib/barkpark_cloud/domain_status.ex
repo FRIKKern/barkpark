@@ -573,25 +573,34 @@ defmodule BarkparkCloud.DomainStatus do
   # return de-duplicated address STRINGS — DISCRIMINATED, never collapsed:
   #
   #   * `{:ok, addrs}` — at least one family answered with addresses.
-  #   * `{:ok, []}`    — every family answered, and the answer was empty. This is
-  #     a MEASUREMENT: the record genuinely hasn't propagated.
+  #   * `{:ok, []}`    — every family answered, and the answer was empty (an
+  #     empty list, or an authoritative `:nxdomain`). This is a MEASUREMENT: the
+  #     record genuinely hasn't propagated.
   #   * `{:error, reason}` — nothing answered and at least one family faulted
-  #     (a raise, an exit, an `{:error, _}` return, a nameserver-less box, or an
-  #     off-contract return value). This is the ABSENCE of a measurement.
+  #     (a raise, an exit, a timeout, a nameserver-less box, or an off-contract
+  #     return value). This is the ABSENCE of a measurement.
   #
   # A fault on ONE family while the other answers is still `{:ok, addrs}` — we
   # measured the thing we needed to measure. Never raises (`safe_call/1`).
   #
-  # OPEN QUESTION, recorded rather than silently decided (task-3fbfff8c97b50c8f,
-  # priority 0 — the LEAD's call, not this slice's): charter D332 lists
-  # `{:error, :nxdomain}` among the resolver FAULTS, and this classifies it as
-  # one. But the REAL transport returns `{:error, :nxdomain}` on BOTH families
-  # for a name that simply does not resolve yet — measured:
-  # `:inet.getaddrs(~c"no-such-host.example", :inet | :inet6)` → `{:error,
-  # :nxdomain}` — so in production the ordinary still-propagating domain reaches
-  # this function as an ERROR, not as `{:ok, []}`. `{:ok, []}` is largely a
-  # test-fake shape. Read literally, that turns the most common waiting state
-  # into `unknown`. Not re-decided here: the ruling is the lead's.
+  # `:nxdomain` IS AN ANSWER, NOT A FAULT — decided at review, superseding the
+  # letter of charter D332 (which listed it among the faults). The builder
+  # measured the transport and filed the contradiction rather than deciding it
+  # (task-3fbfff8c97b50c8f): `:inet.getaddrs(~c"no-such-host.example", :inet)`
+  # and the same on `:inet6` BOTH return `{:error, :nxdomain}`, re-measured at
+  # review on this host. That is exactly what a freshly-attached, still-
+  # propagating domain looks like through the real resolver — so classifying it
+  # as a fault would turn the MOST COMMON waiting state into "we could not
+  # check", strip its propagation advice, and replace one lie with another in
+  # the same rung this slice exists to make honest. `{:ok, []}` would otherwise
+  # be a shape only the test fakes can produce, which is the wave's own fourth
+  # standing clause (a fixture that cannot produce the production condition).
+  #
+  # NXDOMAIN means the resolver ANSWERED: this name does not exist. That is a
+  # measurement, and its honest rendering is `pending` + "hasn't propagated
+  # yet". A FAULT is the absence of an answer: a raise, an exit, a timeout, a
+  # nameserver-less box, an off-contract return.
+  @answered_empty [:nxdomain]
 
   defp resolve_all(host, dns_fun) do
     charlist = to_charlist(host)
@@ -600,6 +609,7 @@ defmodule BarkparkCloud.DomainStatus do
       Enum.map([:inet, :inet6], fn family ->
         case safe_call(fn -> dns_fun.(charlist, family) end) do
           {:ok, list} when is_list(list) -> {:ok, list}
+          {:error, reason} when reason in @answered_empty -> {:ok, []}
           {:error, reason} -> {:error, reason}
           other -> {:error, {:unexpected_resolver_result, other}}
         end
