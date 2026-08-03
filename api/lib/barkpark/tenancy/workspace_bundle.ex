@@ -315,6 +315,10 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   """
   @spec import_bundle_file(Path.t(), keyword()) ::
           {:ok, stats()} | {:error, {:workspace_slug_conflict, map()} | term()}
+  # `dir` is derived from Plug's server-chosen upload path plus a unique suffix,
+  # and Archive validates every tar member before extraction. No manifest member
+  # can choose the directory removed by the `after` clause.
+  # sobelow_skip ["Traversal.FileModule"]
   def import_bundle_file(bundle_path, opts \\ []) when is_binary(bundle_path) do
     mode = import_mode!(opts)
     dir = Path.join(Path.dirname(bundle_path), "members-#{System.unique_integer([:positive])}")
@@ -1045,9 +1049,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # Provably EMPTY (PDS-D9): zero documents AND zero media_files. Anything
   # populated is refused, never silently replaced — fail-closed.
   defp empty_shell?(ws_id) do
-    scalar!("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [ws_id]) == 0 and
-      scalar!("SELECT count(*) FROM media_files WHERE workspace_id = $1::text::uuid", [ws_id]) ==
-        0
+    document_count =
+      Repo.query!("SELECT count(*) FROM documents WHERE workspace_id = $1::text::uuid", [ws_id]).rows
+      |> hd()
+      |> hd()
+
+    media_count =
+      Repo.query!("SELECT count(*) FROM media_files WHERE workspace_id = $1::text::uuid", [ws_id]).rows
+      |> hd()
+      |> hd()
+
+    document_count == 0 and media_count == 0
   end
 
   # ── COPY sources: a binary dump or a member file on disk ─────────────────────
@@ -1060,12 +1072,17 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # wire protocol does anyway).
   @copy_chunk_bytes 65_536
 
+  # File-backed members are paths returned by Archive.unpack_to_dir/2 after its
+  # separator/type traversal gate; callers cannot supply an arbitrary path here.
+  # sobelow_skip ["Traversal.FileModule"]
   defp copy_source({:file, path}), do: File.stream!(path, @copy_chunk_bytes)
   defp copy_source(dump) when is_binary(dump), do: [dump]
 
   # Free the member the MOMENT it is in Postgres. Peak transient disk is what
   # this slice trades BEAM peak for, so holding every extracted member until the
   # import finishes would make the scratch as large as the whole bundle again.
+  # The same Archive traversal gate proves this is an extracted member path.
+  # sobelow_skip ["Traversal.FileModule"]
   defp release_member({:file, path}), do: File.rm(path)
   defp release_member(dump) when is_binary(dump), do: :ok
 
@@ -1100,6 +1117,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
 
   # Direct COPY FROM STDIN into the real table (clean target). Postgres
   # re-generates any generated column absent from the column list.
+  # Every interpolated identifier is double-quoted by qi/1; COPY data remains a
+  # protocol stream and never enters the SQL text.
+  # sobelow_skip ["SQL.Stream"]
   defp copy_into(qualified_table, col_list, dump) do
     stream =
       Ecto.Adapters.SQL.stream(Repo, "COPY #{qualified_table} (#{col_list}) FROM STDIN", [])
@@ -1111,6 +1131,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # INSERT … SELECT … ON CONFLICT DO NOTHING so a shared, non-workspace-unique
   # row (e.g. authoring_exemptions (doc_id, dataset)) is a no-op instead of a
   # crash. COPY-to-temp does the text→type casting for free.
+  # `table`, every column, and the generated temp name are identifier-quoted by
+  # qi/1; none of the streamed COPY bytes are interpolated into SQL.
+  # sobelow_skip ["SQL.Query", "SQL.Stream"]
   defp insert_on_conflict(table, col_list, dump) do
     tmp = "_bp_imp_#{:erlang.unique_integer([:positive])}"
 
@@ -1140,6 +1163,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
   # back to all columns only for a PK-less table, which would have no arbiter
   # index; fail loudly rather than guess). Degenerate all-key tables have
   # nothing to update → DO NOTHING against the same arbiter.
+  # All manifest identifiers pass through qi/1, including the conflict arbiter
+  # and update targets; `action` is assembled only from fixed SQL tokens.
+  # sobelow_skip ["SQL.Query", "SQL.Stream"]
   defp merge_upsert(table, cols, order_cols, dump)
        when is_list(order_cols) and order_cols != [] do
     col_list = cols |> Enum.map(&qi/1) |> Enum.join(", ")
@@ -1184,8 +1210,6 @@ defmodule Barkpark.Tenancy.WorkspaceBundle do
         "merge import needs a non-empty order_columns arbiter for #{inspect(table)}, " <>
           "got #{inspect(order_cols)} — re-export the bundle with a current manifest"
   end
-
-  defp scalar!(sql, params), do: Repo.query!(sql, params).rows |> hd() |> hd()
 
   # ── SQL identifier / hashing helpers ─────────────────────────────────────────
 

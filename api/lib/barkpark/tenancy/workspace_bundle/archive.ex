@@ -243,6 +243,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   filesystem, so a long device name cannot wrap the columns apart).
   """
   @spec free_space(Path.t()) :: {:ok, non_neg_integer()} | {:error, atom()}
+  # `df` is resolved by System.find_executable/1 and every argument is passed as
+  # a separate argv element; no shell parses `dir` or any caller-controlled text.
+  # sobelow_skip ["CI.System"]
   def free_space(dir) do
     case System.find_executable("df") do
       nil ->
@@ -403,6 +406,9 @@ defmodule Barkpark.Tenancy.WorkspaceBundle.Archive do
   a symlink member is how a tar escapes a cwd even with clean names.
   """
   @spec unpack_to_dir(Path.t(), Path.t()) :: {map(), %{optional(String.t()) => Path.t()}}
+  # `manifest_path` is the fixed manifest filename under the caller-owned
+  # scratch directory. All archive member names are validated before extraction.
+  # sobelow_skip ["Traversal.FileModule"]
   def unpack_to_dir(bundle_path, dir) when is_binary(bundle_path) and is_binary(dir) do
     members = Enum.map(table!(bundle_path), &classify_member!(&1, bundle_path))
 
