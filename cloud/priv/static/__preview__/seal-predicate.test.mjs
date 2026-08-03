@@ -25,7 +25,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -224,14 +224,20 @@ test('clause (a) still reds: a resolvable successor does not forgive unnamed res
 });
 
 // ── THE GUARD ARM, exercised WITHOUT --guard-cmd ────────────────────────────
-// Pointing --repo at an empty directory makes the committed guard unreachable; the
-// clause must fail CLOSED, because unmeasured is never cleared.
+// A committed guard that is not there makes the clause fail CLOSED, because unmeasured
+// is never cleared.
+//
+// WAVE 27 REPLACED THE MECHANISM AND KEPT THE INTENT, AND SAYING WHY IS THE POINT.
+// Until this edit the case pointed `--repo` at an EMPTY DIRECTORY — which is now an
+// INFRA FAULT by construction, because an unreadable root cannot tell "this guard was
+// never committed" from "you handed me the wrong tree", and for eight waves it printed
+// the first sentence for the second condition. The property under test is unchanged and
+// its two assertion targets are byte-identical; only the fixture moved, from a root the
+// program cannot read to one it CAN read and which simply does not carry the guards.
+// `synthRepo()` supplies the workflow and the required-checks record, so rung 2 resolves
+// and the ONLY thing missing is the pair of rung-1 guard files.
 test('without --guard-cmd, an uncommitted guard fails closed rather than passing', () => {
-  const empty = tmp('seal-pred-norepo-');
-  // RAW fixture on purpose: with no repo there is no workflow either, so this also
-  // pins that rung 2 reports the MISSING WORKFLOW rather than reaching for branch
-  // protection to explain it.
-  const { status, out } = run(['--ledger', FIX('sealable.json'), '--repo', empty]);
+  const { status, out } = run(['--ledger', FIX('sealable.json'), '--repo', synthRepo({})]);
   assert.equal(status, NO_SEAL);
   assert.match(out, /is NOT COMMITTED — the fix is unmeasured/);
   assert.match(out, /VERDICT-TOKEN: SEAL-PREDICATE NO-SEAL a=PASS b=FAIL/);
@@ -1138,4 +1144,167 @@ test('wave 11: --ladder-only is still bound by R0 and R1 — no stub, no empty r
     ['--ladder-only', '--repo', REPO]);
   assert.equal(emptied.status, NO_SEAL, 'R1 still refuses an empty register on the reading path too');
   assert.match(token(emptied.out), /REFUSED reason=EMPTY-DEFECT-REGISTER/);
+});
+
+// ═══ WAVE 27 — A POPULATION IT COULD NOT READ IS NOT ONE IT READ AND FOUND CLEAN ═══
+//
+// Two defects, one discipline. Both were live on origin/main, both were measured before
+// the fix, and both had already corrupted a wave's primary finding:
+//
+//   1. FALSE FINDINGS ON AN UNREADABLE ROOT. Five clause-(b) legs resolve under --repo
+//      and each reports its own miss as a DEFECT sentence, so a root that is merely the
+//      WRONG DIRECTORY produced six verbatim "commit … is not an ancestor of
+//      origin/main" lines at exit 0.
+//   2. FAIL-OPEN ON AN EMPTY ROSTER, which is worse in kind. Clause (a) had no
+//      cardinality floor, so an epic id that resolved to NOTHING sealed at exit 0.
+//
+// Every case below drives the SAME run to both polarities by mutation, so none of them
+// is green by construction: the fixed arm refuses, and the arm with the refusal removed
+// reproduces the exact pre-fix output.
+
+// A root shaped like a `git archive` extraction: the committed structural files are
+// there and readable, and there is no `.git` anywhere. `synthRepo()` already builds
+// exactly that, which is also why the twelve rung-2 leg cases above had to stay on the
+// fixture path — they drive this same non-git shape on purpose.
+const archiveShapedRoot = () => synthRepo({});
+
+test('wave 27: an EMPTY --repo is INFRA FAULT with a named code, never an unmeasured defect', () => {
+  const empty = tmp('seal-pred-norepo-');
+  const { status, out } = run(['--ledger', FIX('sealable.json'), '--repo', empty]);
+  assert.equal(status, INFRA, 'a wrong root must not be reported through the verdict code');
+  assert.match(out, /INFRA FAULT at /);
+  assert.match(out, /carries no .github\/workflows\/cloud\.yml, so it is not a checkout of this repository/);
+  assert.match(token(out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=UNREADABLE-REPO-ROOT/,
+    'the code is APPENDED AFTER epic=, so the clause letters keep their existing run');
+  assert.ok(token(out).includes(`repo=${empty}`), 'the token names the root it refused to read');
+  // The whole point: not one defect-shaped ROW is rendered for a wrong-root condition.
+  // Asserted against the ladder's own rendering, never against vocabulary — the refusal
+  // deliberately QUOTES the three sentences it prevents, and banning the words would
+  // force that explanation out of the one message that has to carry it.
+  assert.doesNotMatch(out, /^ {2}[✗◐✓·] CCH-D/m, 'no register entry may be rendered at all');
+  assert.doesNotMatch(out, /^CLAUSE \(b\)/m, 'the clause-(b) section is not reached, let alone reported');
+  assert.doesNotMatch(out, /VERDICT: NO SEAL/, 'an infra fault is never a verdict');
+});
+
+test('wave 27: a git-archive root on the LIVE path refuses instead of inventing six findings', () => {
+  const root = archiveShapedRoot();
+  // `--ladder-only` is a LIVE path (no --ledger) and makes no network call, so this is
+  // the honest hermetic reproduction of the run that corrupted two waves.
+  const { status, out } = run(['--ladder-only', '--repo', root]);
+  assert.equal(status, INFRA);
+  assert.match(out, /is not the top level of a git work tree/);
+  assert.match(token(out), /code=REPO-NOT-A-GIT-WORK-TREE/);
+  // Counted over RENDERED ladder rows, not over vocabulary: the refusal quotes the
+  // sentence it prevents, and that explanation must stay in the message.
+  assert.equal(out.split('\n').filter((l) => / is not an ancestor of origin\/main$/.test(l)).length, 0,
+    'an ancestry claim is about the PRODUCT and may not be derived from a fact about the DIRECTORY');
+  assert.doesNotMatch(out, /^ {2}[✗◐✓·] CCH-D/m, 'no register entry may be rendered at all');
+  assert.doesNotMatch(out, /LADDER-ONLY/, 'no reading may be printed off a read that never happened');
+
+  // MUTATION CONTROL — remove ONLY the git leg and the identical run reproduces the
+  // pre-fix output exactly: six false ancestry sentences, every entry flagged, exit 0.
+  const unguarded = mutatedRun(
+    (src) => src.replace('if (!top || realpathSync(top) !== realpathSync(REPO))', 'if (false)'),
+    ['--ladder-only', '--repo', root]);
+  assert.equal(unguarded.status, SEAL, 'pre-fix, a wrong root read clean at exit 0 — that is the defect');
+  const invented = unguarded.out.split('\n').filter((l) => / is not an ancestor of origin\/main$/.test(l));
+  assert.equal(invented.length, 6,
+    `pre-fix, every registered defect was reported unlanded because the DIRECTORY had no .git, got ${invented.length}`);
+  assert.match(token(unguarded.out), /LADDER-ONLY/);
+});
+
+test('wave 27: the root guard reads a LINKED WORKTREE, where `.git` is a FILE, not a directory', () => {
+  const dotGit = statSync(join(REPO, '.git'));
+  const { status, out } = ladderOnlyRun();
+  assert.equal(status, SEAL, `the live path must resolve a real checkout, worktree or not: ${token(out)}`);
+  assert.match(token(out), /head=[0-9a-f]{7,}/, 'leg 2 resolved a HEAD, so the work-tree read succeeded');
+  assert.doesNotMatch(out, /is not the top level of a git work tree/);
+
+  // THE TRAP, PINNED IN CODE RATHER THAN IN A SENTENCE. The obvious root check is
+  // `statSync('.git').isDirectory()`; in a LINKED WORKTREE `.git` is a ~75-byte FILE
+  // pointing at the real gitdir, so that shape refuses every worktree — and this epic
+  // runs nearly all of its proofs from worktrees, which would have made the fix the
+  // next instrument manufacturing false findings. The guard must ask GIT, never the
+  // filesystem, and this file may not contain the refuted shape.
+  const code = readFileSync(PREDICATE, 'utf8').split('\n').filter((l) => !/^\s*\/\//.test(l)).join('\n');
+  assert.doesNotMatch(code, /isDirectory\(\)/,
+    'no root check may stat `.git` — `.git` is a FILE in every linked worktree');
+  assert.match(code, /'rev-parse', '--show-toplevel'/,
+    'the work-tree read goes through git itself, which is what makes a worktree readable');
+  if (dotGit.isFile())
+    assert.ok(dotGit.size > 0,
+      `this run IS from a linked worktree (.git is a ${dotGit.size}-byte file) and the guard read it fine`);
+});
+
+// ── CLAUSE (a) FAILS OPEN OVER AN EMPTY ROSTER ──────────────────────────────
+// The live shape, measured before the fix: `--epic cloud-console-hardening-epicc` (one
+// doubled letter) exited 0 with `VERDICT: SEAL a=PASS b=PASS c=PASS orphans=0
+// … mode=live`, no stub and no waiver, and printed "Sealed 0 children of
+// cloud-console-hardening-epicc". Reproduced here WITHOUT the network by standing an
+// empty array in for the live roster fetch — the same population that typo produced.
+const emptyLiveRoster = (src) => {
+  const out = src.replace('const children = fixture ? fixture.children : fetchRoster(EPIC);',
+    'const children = fixture ? fixture.children : [];');
+  assert.notEqual(out, src, 'the empty-live-roster mutation must actually apply');
+  return out;
+};
+
+test('wave 27: a LIVE run over an EMPTY roster REFUSES instead of sealing over nobody', () => {
+  const refused = mutatedRun(emptyLiveRoster, ['--repo', REPO, '--successor', 'TERMINAL']);
+  assert.equal(refused.status, NO_SEAL, 'a roster of nobody must not exit 0');
+  assert.match(token(refused.out), /REFUSED reason=EMPTY-ROSTER a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
+  assert.match(refused.out, /the live roster of \S+ is EMPTY/);
+  assert.match(refused.out, /orphans=0 is arithmetic, not evidence/);
+  assert.match(refused.out, /after the roster read, before any clause was evaluated/,
+    'the refusal must say it was reached AFTER reading the roster — it is a post-condition read, not a flag');
+  assert.doesNotMatch(refused.out, /VERDICT: SEAL$/m);
+  assert.doesNotMatch(refused.out, /Sealed 0 children of/, 'the fabrication sentence must be unreachable');
+
+  // MUTATION CONTROL — remove ONLY the floor and the identical run seals over zero
+  // children, prints its own fabrication, and reports a=PASS. (The gate fetch is stubbed
+  // so the control stays hermetic; if any of the three mutations failed to apply the
+  // assertions below red rather than passing vacuously.)
+  const sealed = mutatedRun(
+    (src) => emptyLiveRoster(src)
+      .replace('if (!fixture && children.length === 0)', 'if (false && children.length === 0)')
+      .replace('const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
+        'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });'),
+    ['--repo', REPO, '--successor', 'TERMINAL']);
+  assert.equal(sealed.status, SEAL, `pre-fix, an empty roster sealed at exit 0: ${token(sealed.out)}`);
+  assert.match(sealed.out, /^VERDICT: SEAL$/m);
+  assert.match(sealed.out, /Sealed 0 children of/, 'the pre-fix green printed its own fabrication');
+  assert.match(token(sealed.out), /SEAL a=PASS .*orphans=0 .*mode=live/);
+
+  // …and bucket (c) demonstrably cannot stop it: the three gates resolve for an epic
+  // whose roster is empty, and the run says so in its own letters.
+  assert.match(sealed.out, /in-epic-roster=false/,
+    'the gates are fetched by hardcoded id INDEPENDENTLY of --epic, which is why clause (c) is no backstop');
+});
+
+// ── EVERY VERDICT LINE NAMES ITS POPULATION ─────────────────────────────────
+// `orphans=0` is a ratio with an unstated denominator: it reads identically over a
+// 123-row roster with every row forwarded and over a roster of nobody. And this
+// predicate is PROVEN checkout-sensitive — the same command printed b=FAIL from a stale
+// primary checkout and b=PASS from a clean worktree — so a seal run that does not name
+// its tree is unquotable.
+test('wave 27: the verdict token names the roster it counted and the tree it read', () => {
+  // The LIVE verdict path, reached hermetically through the control mutation above.
+  const live = mutatedRun(
+    (src) => emptyLiveRoster(src)
+      .replace('if (!fixture && children.length === 0)', 'if (false && children.length === 0)')
+      .replace('const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
+        'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });'),
+    ['--repo', REPO, '--successor', 'TERMINAL']);
+  assert.match(token(live.out), /roster=0 repo=\S+ head=[0-9a-f]{7,}/,
+    'a live verdict states its population AND the tree it was taken from');
+
+  // The FIXTURE path states the population too, and is honest that it read no tree:
+  // `head=NOT-READ`, because the fixture path stands `landed` in for ancestry and
+  // therefore never resolves a work tree at all.
+  const { out } = fixtureRun('sealable.json');
+  assert.match(token(out), /mode=fixture stubbed=2 waived=0 roster=3 repo=\S+ head=NOT-READ/);
+
+  // A --ladder-only reading names its tree as well — it always did name `repo=`, and
+  // now names the sha too, so two readings from two checkouts are distinguishable.
+  assert.match(token(ladderOnlyRun().out), /mode=live repo=\S+ head=[0-9a-f]{7,}/);
 });

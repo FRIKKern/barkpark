@@ -185,6 +185,33 @@
 //   that catches that drift, and this one names it rather than pretending to cover it.
 //
 // ---------------------------------------------------------------------------
+// WHY TWO REFUSALS WERE ADDED IN WAVE 27, AND WHY THEY ARE ONE DISCIPLINE
+//
+// Both are the same sentence in two places: A POPULATION THIS PROGRAM COULD NOT READ IS
+// NOT A POPULATION IT READ AND FOUND CLEAN.
+//
+//   UNREADABLE-REPO-ROOT / REPO-NOT-A-GIT-WORK-TREE (infra, exit 2)
+//     Five clause-(b) legs resolve paths under `--repo`, and each reports its own miss
+//     as a DEFECT sentence. A `git archive` extraction therefore produced six verbatim
+//     "commit <sha> is not an ancestor of origin/main" lines — all false, all about a
+//     directory rather than the product — at exit 0. Two consecutive waves quoted
+//     output of that shape as this epic's primary finding. `assertReadableRepoRoot`
+//     below fires BEFORE every clause and every refusal. See its own block for why the
+//     git leg is live-path-only and why it never stats `.git`.
+//
+//   EMPTY-ROSTER (refusal, NO SEAL)
+//     Clause (a) had no cardinality floor: `--epic cloud-console-hardening-epicc` — one
+//     doubled letter — exited 0, `VERDICT: SEAL`, `a=PASS b=PASS c=PASS orphans=0`,
+//     mode=live, over a roster of NOBODY, and printed "Sealed 0 children of
+//     cloud-console-hardening-epicc". Clause (b) has refused an empty register since
+//     wave 6 (R1); this is the identical rule finally pointed at clause (a)'s own
+//     population.
+//
+// Neither changes a FROZEN INPUT and neither lowers a bar. `PERMANENT_HUMAN_GATES` and
+// `KNOWN_DEFECTS` are byte-identical: a refusal turns a FALSE verdict into an honest
+// infra fault, which is the opposite of re-deriving a rule after seeing a result.
+//
+// ---------------------------------------------------------------------------
 //   --epic <id>        the epic under judgement (default: cloud-console-hardening-epic)
 //   --ledger <file>    inject a ledger fixture instead of live HTTP (mutation proofs only)
 //   --successor <id>   the successor epic's task id, or the literal TERMINAL
@@ -197,7 +224,7 @@
 //                      non-zero ONLY on an INFRA FAULT.
 
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync } from 'node:fs';
 
 const argv = process.argv.slice(2);
 const arg = (n) => { const i = argv.indexOf(n); return i === -1 ? null : argv[i + 1]; };
@@ -333,7 +360,16 @@ const KNOWN_DEFECTS = [
 // EXIT TRIAD, ported from tooling/grip/seal.mjs (read, never modified — that file
 // is out of fence). `Infra` is never a verdict: nothing was measured, so nothing is
 // claimed. `Refusal` IS a verdict — NO SEAL — reached before any clause could pass.
-class Infra extends Error {}
+//
+// `Infra` carries an OPTIONAL machine-readable `code`, added in wave 27 for the same
+// reason `Refusal` has always had one: an infra fault whose only distinguishing mark is
+// a paragraph of English cannot be told apart by anything that reads the token line, so
+// "you pointed me at the wrong tree" and "your ledger fixture is unreadable" were one
+// undifferentiated exit 2. Legacy throws pass no code and print `code=UNSPECIFIED`
+// rather than being retrofitted with a guess.
+class Infra extends Error {
+  constructor(message, code = null) { super(message); this.code = code; }
+}
 class Refusal extends Error {
   constructor(code, message, stage = 'before any clause was evaluated') {
     super(message);
@@ -717,13 +753,13 @@ function pushLadder(L, ladder) {
 // and its token spells out which letters were never read. See the D83 boundary in
 // the header: manufacturing a successor to force a verdict is forbidden; reading the
 // ladder without claiming one is exactly how you avoid having to.
-function ladderOnly(fixture, guardOverride, stamp) {
+function ladderOnly(fixture, guardOverride, stamp, head) {
   const L = [];
   const waivers = new Set(fixture ? (fixture.unmeasuredWaivers || []) : []);
   const ladder = evaluateLadder(fixture, guardOverride, waivers);
 
   L.push(`=== SEAL PREDICATE — LADDER-ONLY READING, NO VERDICT — epic ${EPIC} ===`);
-  L.push(`read at ${stamp}  (repo ${REPO})`);
+  L.push(`read at ${stamp}  (repo ${REPO}${head ? ` @ ${head}` : ''})`);
   L.push('This run evaluates CLAUSE (b) ONLY. Clause (a) and bucket (c) were NOT READ:');
   L.push('no roster was fetched, no successor was named, no gate was resolved. Nothing');
   L.push('here is a seal verdict, and this output carries no token that could be quoted');
@@ -764,9 +800,85 @@ function ladderOnly(fixture, guardOverride, stamp) {
   L.push('     console-harness.yml. Registering the Console gate moves no line above.');
   L.push('     Clause (b) is blind to it, and this reading will not let anyone say');
   L.push('     otherwise.');
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} repo=${REPO}`);
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE LADDER-ONLY b-rungs=rung1:${byRung[1]},rung2:${byRung[2]},rung3:${byRung[3]} b-clean=${clean}/${ladder.length} a=NOT-READ c=NOT-READ epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} repo=${REPO} head=${head || 'NOT-READ'}`);
   console.log(L.join('\n'));
   return 0;
+}
+
+// ---------------------------------------------------------------------------
+// PROVENANCE — IS `--repo` A ROOT THIS PROGRAM CAN READ AT ALL?
+//
+// FIVE clause-(b) legs resolve against REPO — ancestry, guard existence, `measured_by`,
+// the workflow file, and the Leg A/B/C aggregator — and every one of them reports its
+// own miss as a DEFECT SENTENCE. Point this program at a `git archive` extraction and
+// it prints, verbatim and six times over, `commit <sha> is not an ancestor of
+// origin/main`. Not one of those sentences is true: the tree simply has no `.git`, and
+// the ancestry `catch` at the top of `verifyCommit` swallows not-a-git-repo, no
+// origin/main, a shallow clone and an unknown sha into one identical claim about the
+// PRODUCT. Measured on a real extraction before this guard existed: six ✗ rows,
+// rung1=2 rung2=4 rung3=0, exit 0. Two consecutive waves quoted output of that shape
+// as this epic's primary finding.
+//
+// A wrong root is an INFRA FAULT and never a verdict — nothing was measured, so nothing
+// is claimed. Exactly the discipline Leg A already applies one clause over when
+// `enforced !== true`.
+//
+// TWO LEGS, each the narrowest read that can tell "wrong tree" from "real gap":
+//
+//   LEG 1, ALWAYS — `.github/workflows/cloud.yml` exists under REPO. It is the landmark
+//     every rung-2 entry in the register names, so a root without it cannot answer the
+//     question rung 2 asks; `--repo <empty dir>` is a wrong root, not an unmeasured
+//     defect. `.github/required-checks.json` is deliberately NOT also required here:
+//     Leg A already refuses on its absence with a MORE precise sentence, and demanding
+//     it up here would replace that precision with this blunter one.
+//
+//   LEG 2, LIVE PATH ONLY — REPO is the top level of a git work tree. Only the live
+//     path asserts ANCESTRY; the fixture path stands `landed` in for it, and this
+//     file's own rung-2 leg suite legitimately drives a SYNTHETIC, non-git root
+//     through the fixture path. Requiring a work tree on both paths would red twelve
+//     tests that are measuring something else entirely — and relaxing the refusal to
+//     save them would put the defect straight back.
+//
+//     `git rev-parse --show-toplevel`, NEVER a `.git` stat. In a LINKED WORKTREE `.git`
+//     is a ~75-byte FILE, so `statSync('.git').isDirectory()` refuses every worktree —
+//     and this epic runs nearly all of its proofs from worktrees, which would make the
+//     fix itself the next instrument manufacturing false findings. Both sides are
+//     realpath'd because `/tmp` is a symlink to `/private/tmp` on macOS and a raw
+//     string compare would refuse a correct root there.
+//
+// Returns the resolved HEAD sha on the live path (for the verdict token's `head=`), or
+// null on the fixture path, where there is no tree to name.
+function assertReadableRepoRoot(ledgerPath) {
+  if (!existsSync(`${REPO}/.github/workflows/cloud.yml`))
+    throw new Infra(
+      `--repo ${REPO} carries no .github/workflows/cloud.yml, so it is not a checkout of this repository. `
+      + 'Five clause-(b) legs resolve their paths under --repo and each reports its own miss as a defect sentence, '
+      + 'so continuing from here would print INVENTED findings — "commit … is not an ancestor of origin/main", '
+      + '"guard … is NOT COMMITTED", "measured_by names … and NONE of them exist" — for a pure wrong-root '
+      + 'condition. Nothing is asserted about clause (b).',
+      'UNREADABLE-REPO-ROOT');
+
+  if (ledgerPath) return null;
+
+  let top = null;
+  try {
+    top = execFileSync('git', ['-C', REPO, 'rev-parse', '--show-toplevel'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch { top = null; }
+  if (!top || realpathSync(top) !== realpathSync(REPO))
+    throw new Infra(
+      `--repo ${REPO} is not the top level of a git work tree (${top ? `git reports the top level as ${top}` : 'git could not resolve one'}). `
+      + `A LIVE run asserts that ${KNOWN_DEFECTS.length} registered commits are ANCESTORS of origin/main, and that read is a git `
+      + 'operation: without a work tree the ancestry check fails for every entry and prints "commit … is not an '
+      + 'ancestor of origin/main" — a claim about the PRODUCT derived from a fact about the DIRECTORY. Measured on '
+      + 'a `git archive` extraction: six such sentences, all false. Nothing is asserted about clause (b). A ledger '
+      + 'fixture (--ledger) stands `landed` in for ancestry and is not subject to this leg.',
+      'REPO-NOT-A-GIT-WORK-TREE');
+
+  try {
+    return execFileSync('git', ['-C', REPO, 'rev-parse', '--short', 'HEAD'],
+      { encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch { return null; }
 }
 
 // ---------------------------------------------------------------------------
@@ -782,8 +894,12 @@ function main() {
     catch (e) { throw new Infra(`--ledger ${ledgerPath}: ${String(e.message).slice(0, 90)}`); }
   }
 
+  // BEFORE any clause, any refusal and any roster: is the tree under --repo one this
+  // program can read at all? A wrong root is an infra fault, not a finding.
+  const HEAD = assertReadableRepoRoot(ledgerPath);
+
   L.push(`=== SEAL PREDICATE — epic ${EPIC} ===`);
-  L.push(`read at ${STAMP}${fixture ? '  (LEDGER FIXTURE — not live)' : '  (live ledger)'}`);
+  L.push(`read at ${STAMP}${fixture ? '  (LEDGER FIXTURE — not live)' : '  (live ledger)'}  (repo ${REPO}${HEAD ? ` @ ${HEAD}` : ''})`);
 
   // ── REFUSALS. Evaluated BEFORE the roster is read, so nothing downstream can
   // print an unresolvable id as a forwarding address. ────────────────────────
@@ -804,7 +920,7 @@ function main() {
   // certifies a stub), and BEFORE every successor refusal below. Those four refusals
   // exist to protect a VERDICT, and a reading claims none, so requiring a successor
   // to read the ladder is what made the ladder unreadable for four waves.
-  if (LADDER_ONLY) return ladderOnly(fixture, guardOverride, STAMP);
+  if (LADDER_ONLY) return ladderOnly(fixture, guardOverride, STAMP, HEAD);
 
   // Trimmed BEFORE R4 compares it: `--successor " cloud-console-hardening-epic"` must
   // not slip past the self-successor refusal on a space.
@@ -841,7 +957,40 @@ function main() {
 
   // ── from here the successor is real (or TERMINAL), and may be named ─────────
   const children = fixture ? fixture.children : fetchRoster(EPIC);
-  if (!Array.isArray(children)) throw new Infra('roster is not an array of documents');
+  if (!Array.isArray(children)) throw new Infra('roster is not an array of documents', 'ROSTER-NOT-AN-ARRAY');
+
+  // ── CLAUSE (a)'s CARDINALITY FLOOR — THE FAIL-OPEN, AND IT IS THE WORSE HALF.
+  //
+  // Everything below counts residue WITHIN the roster, and nothing anywhere asked
+  // whether the roster is a roster at all. With `ok = orphans.length === 0 && …`, an
+  // epic id that resolves to NOTHING scores a perfect clause (a) by having no rows left
+  // to fail on. Measured before this refusal existed: `--epic
+  // cloud-console-hardening-epicc` — one doubled letter — exited 0 with `VERDICT: SEAL`,
+  // `a=PASS b=PASS c=PASS orphans=0 … mode=live`, no stub and no waiver, and printed its
+  // own fabrication in the SCOPE paragraph: "Sealed 0 children of
+  // cloud-console-hardening-epicc".
+  //
+  // BUCKET (c) CANNOT STOP IT, which is why this has to be its own refusal: the three
+  // permanent human gates are fetched by hardcoded `_id` INDEPENDENTLY of --epic, so
+  // they resolve for any epic string whatsoever. The run even prints
+  // `in-epic-roster=false` on all three and acts on none of it.
+  //
+  // This is R1 (EMPTY-DEFECT-REGISTER) applied to the population it was written for and
+  // never pointed at: an unrun clause is not a passed clause. Clause (b) has had that
+  // floor since wave 6; clause (a) has never had one.
+  //
+  // LIVE ONLY. A ledger fixture may legitimately carry any roster it likes — the fixture
+  // path certifies this program's own logic, never an epic — and applying the floor
+  // there would turn a mutation control into a refusal.
+  //
+  // THE FLOOR IS ONE, NOT SOME LARGER "implausibly short" NUMBER. Any N above one is a
+  // threshold nobody can derive, and a bar re-derived after seeing a result is not a
+  // bar. Zero-versus-nonzero is the only cardinality claim this program can defend from
+  // its own inputs.
+  if (!fixture && children.length === 0)
+    throw new Refusal('EMPTY-ROSTER',
+      `the live roster of ${EPIC} is EMPTY — zero children of any lifecycle_status. Clause (a) certifies that residue has a forwarding address, and over zero rows it cannot fail: orphans=0 is arithmetic, not evidence. An epic with no children is either a typo in --epic or a ledger this program could not read, and both are indistinguishable from a clean sweep once the count reaches the verdict line. Bucket (c) does not catch it either: the permanent human gates are fetched by hardcoded id INDEPENDENTLY of --epic, so they resolve for any epic string at all. An unrun clause is not a passed clause.`,
+      'after the roster read, before any clause was evaluated');
 
   // The successor's own roster is the ONLY thing that makes a forwarding address "named".
   // TERMINAL claims there is nothing to forward, so it consults no roster at all.
@@ -937,7 +1086,14 @@ function main() {
     if (gateMissing.length) L.push(`  - ${gateMissing.length} hardcoded human gate(s) failed to resolve (bucket c)`);
     L.push('  This is an acceptable, pre-committed outcome. The named successor is the honest handoff.');
   }
-  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${orphans.length === 0 ? 'PASS' : 'FAIL'} b=${defectFails.length === 0 ? 'PASS' : 'FAIL'} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount}`);
+  // EVERY VERDICT LINE NAMES ITS POPULATION. `orphans=0` is a ratio with an unstated
+  // denominator: it reads identically over a 123-row roster with every row forwarded
+  // and over a roster of nobody. `roster=` states the denominator; `repo=`/`head=` state
+  // the tree the clause-(b) legs actually read, which this predicate was proven to be
+  // sensitive to (the same command printed b=FAIL from a stale primary checkout and
+  // b=PASS from a clean worktree). No future wave can quote a seal run without also
+  // quoting the tree and the population it was taken from.
+  L.push(`VERDICT-TOKEN: SEAL-PREDICATE ${ok ? 'SEAL' : 'NO-SEAL'} a=${orphans.length === 0 ? 'PASS' : 'FAIL'} b=${defectFails.length === 0 ? 'PASS' : 'FAIL'} c=${gateMissing.length === 0 ? 'PASS' : 'FAIL'} orphans=${orphans.length} considering=${considering.length} successor=${SUCCESSOR} epic=${EPIC} mode=${fixture ? 'fixture' : 'live'} stubbed=${stubbedCount} waived=${waivedCount} roster=${children.length} repo=${REPO} head=${HEAD || 'NOT-READ'}`);
   console.log(L.join('\n'));
   return ok ? 0 : 1;
 }
@@ -955,13 +1111,16 @@ try {
     console.log('VERDICT: NO SEAL — REFUSED');
     console.log('  Nothing was certified. This is a pre-committed outcome: a predicate that prints an');
     console.log('  honest sentence and still exits 0 is the same defect as one that lies.');
-    console.log(`VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=${e.code} a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED epic=${EPIC}`);
+    // `repo=` is APPENDED AFTER `epic=` on both tokens below, never inserted before the
+    // clause letters: readers (and this file's own tests) anchor on the
+    // `a=… b=… c=… epic=…` run, and widening it in the middle breaks them for no gain.
+    console.log(`VERDICT-TOKEN: SEAL-PREDICATE REFUSED reason=${e.code} a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED epic=${EPIC} repo=${REPO}`);
     code = 1;
   } else {
     console.log(`INFRA FAULT at ${stamp}: ${e instanceof Infra ? e.message : `unexpected ${e.name}: ${e.message}`}`);
     console.log('  This is NOT a verdict. Nothing was measured, so nothing is claimed — the whole point');
     console.log('  of a third exit code is that this can never be read as NO SEAL.');
-    console.log(`VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=${EPIC}`);
+    console.log(`VERDICT-TOKEN: SEAL-PREDICATE INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=${EPIC} code=${(e instanceof Infra && e.code) || 'UNSPECIFIED'} repo=${REPO}`);
     code = 2;
   }
 }
