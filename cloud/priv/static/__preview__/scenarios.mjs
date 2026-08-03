@@ -1436,6 +1436,71 @@ const siteStatesDeployments = [stLive, stCrash, stCrashCruel, stBlocked, stCance
 const siteStatesSite = Object.assign({}, webSite, {
   current_deployment_id: stLive.id,
 });
+// ── cch-w26-bl-deploy-row-siblings-unwrapped (charter D322): THE PREVIEW
+//    HOSTNAME IS PRODUCED, NEVER TYPED ───────────────────────────────────────
+//
+// THE SHAPE THIS FILE CARRIED WAS ONE PRODUCTION CANNOT ISSUE. The committed
+// fixture read `draft-nav--acme-web.preview.barkpark.cloud`: branch FIRST, site
+// slug SECOND, and a `.preview.` label that no producer emits. The real host is
+// `Registry.preview_host_for/2` = `preview_slug_for/2` <> "." <>
+// `Barkpark.base_domain()`, i.e. `<site_slug>--<branch_slug>-<hash>` <>
+// ".barkpark.cloud" — SLUG FIRST, no `.preview.` label. A fixture with the
+// halves swapped is not a cosmetic error: it puts the BREAKABLE hyphen-rich
+// slug where the producer puts the branch part, so any geometry measured on it
+// is geometry of a string the control plane never sends.
+//
+// THE TWO CAPS ARE NOT THE SAME CAP, and this is the whole premise of the leg
+// that measures these rows (overflow-guard.mjs, W27-deploy-ref-branch-bounded):
+//   preview_host IS BOUNDED — `preview_slug_for/2`
+//     (cloud/lib/barkpark_cloud/registry.ex) clamps the DNS label to 63 by
+//     giving the branch part only `63 - len(base) - 9` characters, so the host
+//     can never exceed 63 + len(".barkpark.cloud") = 78.
+//   THE BRANCH BESIDE IT IS UNCAPPED — `cloud/lib/barkpark_cloud/registry/
+//     deployment.ex` declares ZERO `validate_length` on `:branch`, and the
+//     webhook path writes `branch_from_ref("refs/heads/" <> branch)` verbatim,
+//     whatever GitHub sent. `previewRow()` (app.js) renders that raw branch in
+//     `.deploy-ref` on the SAME LINE as the bounded host.
+//
+// THE ALGORITHM IS MIRRORED HERE, NOT ITS OUTPUT PASTED — the clamp arithmetic
+// is the part that decides whether 78 is reachable, so it stays live. Only the
+// 6-hex digest is pinned (SubtleCrypto is async and node:crypto is not
+// available to the browser that also loads this file). Both digests below are
+// the real `:crypto.hash(:sha256, branch) |> Base.encode16(:lower) |>
+// binary_part(0, 6)`.
+//
+// RE-DERIVE (all four numbers this file states):
+//   grep -n 'def preview_slug_for' -A 22 cloud/lib/barkpark_cloud/registry.ex
+//   node -e 'const c=require("crypto");for(const b of ["draft/nav","renovate_lockfile_maintenance_all_ecosystems_2026_08_03_retry_after_registry_timeout"])console.log(b, c.createHash("sha256").update(b).digest("hex").slice(0,6))'
+//   node -e 'import("./cloud/priv/static/__preview__/scenarios.mjs").then(m=>console.log(m.PREVIEW_CRUEL_BRANCH.length, m.PREVIEW_CRUEL_HOST.length))'
+export function previewSlugFor(siteSlug, branch, sha6) {
+  const base = siteSlug.slice(0, 40);
+  const branchRoom = Math.max(63 - base.length - 9, 1);
+  const branchSlug = branch
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "")
+    .slice(0, branchRoom)
+    .replace(/^-+|-+$/g, "");
+  const branchPart = branchSlug === "" ? sha6 : branchSlug + "-" + sha6;
+  return base + "--" + branchPart;
+}
+export function previewHostFor(siteSlug, branch, sha6) {
+  return previewSlugFor(siteSlug, branch, sha6) + ".barkpark.cloud";
+}
+// THE CRUEL BRANCH — 84 characters, ONE unbreakable run. Nothing invented: a
+// branch name is whatever a person (or their bot) pushed, and this is the shape
+// a Renovate-style lockfile branch takes on a repo that spells its branch
+// segments with underscores. Underscores matter: `-` and `/` are line-break
+// opportunities in CSS, `_` is not, so a hyphenated branch of the same length
+// wraps on its own and would have made this fixture green by construction.
+export const PREVIEW_CRUEL_BRANCH =
+  "renovate_lockfile_maintenance_all_ecosystems_2026_08_03_retry_after_registry_timeout";
+// 78 chars — the MAXIMUM host the control plane can issue, produced by the
+// mirror above from THIS scenario's own site slug ("acme-web"). It is derived
+// from the site under view on purpose: a foreign 40-char slug would reach the
+// same 78 while modelling a host production could not issue for this site,
+// which is the exact class of error the shape correction above fixes.
+export const PREVIEW_CRUEL_HOST = previewHostFor("acme-web", PREVIEW_CRUEL_BRANCH, "453169");
 const previewLiveRow = deployment({
   id: "5b2c1e00-0000-4000-8000-0000000000f6",
   status: "live",
@@ -1443,8 +1508,8 @@ const previewLiveRow = deployment({
   branch: "draft/nav",
   git_ref: "b7e21c94a5f18e2d6c4b0a9f8e7d6c5b4a392817",
   trigger: "manual",
-  preview_host: "draft-nav--acme-web.preview.barkpark.cloud",
-  preview_url: "https://draft-nav--acme-web.preview.barkpark.cloud",
+  preview_host: previewHostFor("acme-web", "draft/nav", "cee407"),
+  preview_url: "https://" + previewHostFor("acme-web", "draft/nav", "cee407"),
   became_live_at: tMinus(18000),
   inserted_at: tMinus(18052),
   updated_at: tMinus(18000),
@@ -1460,7 +1525,26 @@ const previewFailedRow = deployment({
   inserted_at: tMinus(9000),
   updated_at: tMinus(8981),
 });
-const siteStatesPreviews = [previewLiveRow, previewFailedRow];
+// THE CRUEL PREVIEW ROW. It is ADDED, never substituted: `previewLiveRow` and
+// `previewFailedRow` above are the KIND controls — a 9-char branch and a
+// 41-char host — and a remedy that bought the cruel row by shredding ordinary
+// prose has to red somewhere. It is LIVE rather than failed on purpose: a
+// failed preview row paints a `.deploy-fail` panel, and adding a third of those
+// would have changed the population W26-deploy-fail-clip counts.
+const previewCruelRow = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000f9",
+  status: "live",
+  environment: "preview",
+  branch: PREVIEW_CRUEL_BRANCH,
+  git_ref: "a4f0d81c72b6935e0d1c8a47f6b3e2905c7d1a8b",
+  trigger: "manual",
+  preview_host: PREVIEW_CRUEL_HOST,
+  preview_url: "https://" + PREVIEW_CRUEL_HOST,
+  became_live_at: tMinus(3600),
+  inserted_at: tMinus(3661),
+  updated_at: tMinus(3600),
+});
+const siteStatesPreviews = [previewCruelRow, previewLiveRow, previewFailedRow];
 // The site domain-status envelope (DomainStatus.check(%Site{})): a CF-proxied
 // apex (points_here classified `proxied` — informational, GR27) and a www
 // whose TLS is still issuing, with the server-owned remediation verbatim.
