@@ -325,7 +325,8 @@ defmodule Barkpark.PdsDoorCensusTest do
 
     assert rc == 0
 
-    assert out =~ "the class vocabulary is 6 (D637's five plus HUMAN-GATE) and 'FENCE' is not one",
+    assert out =~
+             "the class vocabulary is 6 (D637's five plus HUMAN-GATE) and 'FENCE' is not one",
            "the vocabulary arm is gone. Three classes cannot express CONTENT-RED or " <>
              "RED-BY-DESIGN-REPORTER, and 'the fence' was never an available answer.\n#{out}"
   end
