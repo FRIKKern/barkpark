@@ -191,6 +191,7 @@ const DEFECTS = [
   "GR108-tablet-topbar-overflow",
   "GR109-attention-row-dead-rule",
   "GR115-bpconsole-dead-rule",
+  "W27-deploy-ref-branch-bounded",
   "W12-narrow-viewport-truth",
   "W13-detail-route-band",
   "W25-deploy-rail-fail-wrap",
@@ -1537,6 +1538,344 @@ async function main() {
           `stays GREEN at 900 — the parent-only remedy, green by construction to any page-level guard. Heights are ` +
           `printed per cell and deliberately unpinned — a pixel pin on a wrapped string is a claim about that ` +
           `string at that width`,
+        );
+      }
+    }
+
+    // ── cch-w26-bl-deploy-row-siblings-unwrapped (charter D322): THE BRANCH
+    //    NAME A PERSON CHOSE — the DOM SIBLING of the panel W26-deploy-fail-clip
+    //    fixed, swallowed by the same card at every width. ────────────────────
+    //
+    //    THE PERSON: they pushed a branch, the console built a preview for it,
+    //    and the row that is supposed to say WHICH BRANCH silently drops the
+    //    tail of its name. No scrollbar, no page scroll, no selection: the
+    //    glyphs are simply not painted. On the preview card that is the only
+    //    place the branch is ever spelled out.
+    //
+    //    THE TWO STRINGS ON THAT LINE ARE NOT THE SAME RISK, and the row this
+    //    slice came from named the wrong one. `previewRow()` (app.js) writes
+    //    `<div class="deploy-ref">` <> raw branch <> " → " <> `.preview-url`:
+    //      THE HOST IS BOUNDED. `Registry.preview_slug_for/2`
+    //        (cloud/lib/barkpark_cloud/registry.ex) clamps the DNS label to 63,
+    //        so `preview_host_for/2` can never exceed 78 characters — and it is
+    //        hyphen-rich, i.e. full of break opportunities.
+    //      THE BRANCH IS UNCAPPED. `cloud/lib/barkpark_cloud/registry/
+    //        deployment.ex` declares ZERO `validate_length` on `:branch`, and
+    //        the webhook path writes `branch_from_ref("refs/heads/" <> branch)`
+    //        verbatim — whatever GitHub sent.
+    //    MEASURED BY THIS LEG on origin/main's CSS with the fixture below, 52
+    //    findings over 20 cells: `.deploy-ref`'s own box loses pixels at 10 of
+    //    10 widths in BOTH themes (464px at 320, still 48px at 1440), the
+    //    clipper and the glyphs at 8 of 10 (worst 388.2px at 320 — at 720 and
+    //    1440 the run overruns the row without filling the card). `.preview-url`
+    //    ALONE sat INSIDE the card edge in all 20 pre-fix cells: on this fixture
+    //    the hostname is not the defect at all. (The filing quotes 692.41px and
+    //    "url at 2 of 10" from the decide-phase probe — a different fixture,
+    //    kept here as provenance, never re-quoted as this leg's measurement.)
+    //    Hence one declaration on the PARENT: `overflow-wrap` inherits and
+    //    `.deploy-ref .mono` sets only `font-family`, so a single
+    //    `overflow-wrap: anywhere` on `.deploy-ref` reaches the branch span AND
+    //    the link inside it and SUBSUMES the url fix. THE MIRROR-IMAGE REMEDY IS
+    //    THIS LEG'S NEGATIVE CONTROL, driven rather than argued: the same
+    //    declaration on `.preview-url` INSTEAD reds at 92 findings — all 52
+    //    still standing, plus 40 from assertion (6), which is what a link
+    //    styled past a parent that never got the value looks like.
+    //
+    //    GREEN BY CONSTRUCTION TWICE OVER, WHICH IS WHY THIS LEG EXISTS:
+    //      · THE SELECTOR AXIS. `git grep -c 'deploy-ref\|preview-url'
+    //        origin/main -- cloud/priv/static/__preview__ .github` exits 1 with
+    //        NO OUTPUT: not one committed instrument's selector could reach
+    //        either element. Even a cruel corpus could not have caught this.
+    //      · THE FIXTURE AXIS. The only preview host committed before this slice
+    //        was 42 characters — negative at all ten widths — AND it was the
+    //        wrong SHAPE (`draft-nav--acme-web.preview.…`: branch first, plus a
+    //        `.preview.` label no producer emits). The corpus is corrected in
+    //        scenarios.mjs and the cruel row is DERIVED from the producer.
+    //
+    //    THE SIGNALS THAT CAN LOSE, all three the shape W26-deploy-fail-clip
+    //    proved out one sibling over — and NOT `documentElement`, which reads
+    //    clean at every one of these widths because a clip is content thrown
+    //    away rather than a page pushed sideways:
+    //      (a) THE CLIPPER — `overflow-x != visible` AND `scrollWidth >
+    //          clientWidth` on the ancestor found by WALKING UP, never a pinned
+    //          selector, so a remedy that moves the clip elsewhere is caught.
+    //      (b) THE GLYPHS — the maximum right edge of every painted text rect
+    //          (Range.getClientRects) against the clipper's CONTENT edge. This
+    //          is the number a person loses. An element rect is already clipped
+    //          to its parent, so a rect-based sentinel is green by construction.
+    //      (c) THE ELEMENT'S OWN BOX — `scrollWidth > clientWidth` on
+    //          `.deploy-ref` itself, which goes green the moment the clip moves
+    //          up a level and is therefore not a spare for (a).
+    //
+    //    THE KIND CONTROL RIDES THE SAME ROUTE: the 9-char `draft/nav` preview
+    //    with its 41-char host, asserted present and asserted SHORT in every
+    //    cell. A remedy that bought the cruel branch by shredding ordinary
+    //    prose reds on it, and a fixture that drifted kind reds instead of
+    //    printing a green table about nothing.
+    //
+    //    HONEST SCOPE — THIS LEG PAYS 2 OF THE 4 SELECTORS ITS ROW NAMED.
+    //    `.deploy-ref` and the `.preview-url` inside it are measured here. The
+    //    row also named `.deploy-meta` and `deployDetailHtml`'s caption:
+    //      `.deploy-meta` on a preview row is `["preview", trigger label,
+    //        duration, when]` — four bounded/enum strings, no person-controlled
+    //        token, so no fixture in this corpus can make it clip. Filed rather
+    //        than asserted, because "cannot be cruel" is a claim about today's
+    //        `previewRow()` and wants its own measured row if a producer ever
+    //        adds a token to it.
+    //      `deployDetailHtml`'s caption renders `d.detail` — the builder's own
+    //        stage detail, unbounded, the same producer family as the rail's
+    //        cruel string — but only while the row is ACTIVE, and it is a
+    //        DIFFERENT element that `overflow-wrap: anywhere` on `.deploy-ref`
+    //        does not reach. Paying it means a second declaration and a fourth
+    //        preview fixture; it is FILED, not silently counted here.
+    //
+    //    VERTICAL COST IS REPORTED, NEVER PINNED. The wrap is what makes an
+    //    84-character branch readable and its honest cost is a taller row (97.5
+    //    → 195px at 320 on this fixture). A pixel pin on a wrapped string is a
+    //    claim about THAT string at THAT width, and this epic has already
+    //    deleted one of those.
+    if (requested.includes("W27-deploy-ref-branch-bounded")) {
+      const D = "W27-deploy-ref-branch-bounded";
+      // BLOCK-SCOPED (D247). The same ten widths the sibling leg carries — the
+      // branch defect is present at ALL of them (the ≤768 single-column
+      // collapse widens the main column but the 84-char run outgrows it too),
+      // so unlike that leg there are no clean shoulders to name here. 1440 is
+      // kept because a remedy that only works below the desktop breakpoint
+      // must still red somewhere.
+      const REF_WIDTHS = [320, 390, 720, 769, 900, 1000, 1024, 1042, 1043, 1440];
+      const { SCENARIOS, PREVIEW_CRUEL_BRANCH, PREVIEW_CRUEL_HOST } = await import("./scenarios.mjs");
+      const sc = SCENARIOS["site-states"];
+      // The route is DERIVED from the fixture, never transcribed: a pasted uuid
+      // rots silently into "the sites list rendered instead".
+      if (!sc || !sc.deepLink || !sc.data || !Array.isArray(sc.data.previews) || sc.data.previews.length < 2) {
+        return die(`${D}: SCENARIOS["site-states"] no longer carries a deepLink and at least two previews — the cruel branch and its control cannot both be reached, so nothing was measured`);
+      }
+      // The control is READ OUT OF THE FIXTURE, not typed here: the shortest
+      // branch on the card that is not the cruel one. If the fixture stopped
+      // carrying an ordinary preview this leg refuses rather than measuring the
+      // cruel row twice and calling one of them a control.
+      const KIND_BRANCH = sc.data.previews
+        .map((p) => p.branch)
+        .filter((b) => b && b !== PREVIEW_CRUEL_BRANCH)
+        .sort((a, b) => a.length - b.length)[0];
+      if (!KIND_BRANCH) {
+        return die(`${D}: SCENARIOS["site-states"] carries no ORDINARY preview branch beside the cruel one — the control half of this leg would have measured nothing`);
+      }
+      // ANTI-VACUITY AT THE SOURCE, before a browser is even asked: a fixture
+      // that drifted kind, or a host that stopped being the producer's shape,
+      // makes every number below meaningless.
+      if (PREVIEW_CRUEL_BRANCH.length < 40 || /[\s\-/]/.test(PREVIEW_CRUEL_BRANCH)) {
+        return die(`${D}: PREVIEW_CRUEL_BRANCH is ${PREVIEW_CRUEL_BRANCH.length} chars and carries a break opportunity — the fixture went KIND at the source, so a green run would be green by construction`);
+      }
+      if (!PREVIEW_CRUEL_HOST.startsWith("acme-web--") || PREVIEW_CRUEL_HOST.length !== 78) {
+        return die(`${D}: PREVIEW_CRUEL_HOST is "${PREVIEW_CRUEL_HOST}" (${PREVIEW_CRUEL_HOST.length} chars) — it is no longer the producer's <site_slug>--<branch_slug>-<hash>.barkpark.cloud at the 78-char cap, so the bounded half of this leg's premise is unproven`);
+      }
+      process.stdout.write(
+        `\n${D} — site-states x ${REF_WIDTHS.length} widths x 2 themes (${REF_WIDTHS.length * 2} cells; every ` +
+        `.deploy-ref on the page against the CLIPPER it actually sits in, glyph rects and clipper scrollWidth, ` +
+        `never documentElement — no committed instrument's selector reached this element before this leg: ` +
+        `git grep -c 'deploy-ref|preview-url' origin/main -- cloud/priv/static/__preview__ .github exits 1 with ` +
+        `no output). Cruel branch ${PREVIEW_CRUEL_BRANCH.length} chars / host ${PREVIEW_CRUEL_HOST.length} ` +
+        `(the producer's cap), KIND control "${KIND_BRANCH}" ${KIND_BRANCH.length}. h= is the row height, ` +
+        `REPORTED — the wrap costs vertical room and no pixel is pinned\n`,
+      );
+      let cells = 0, refs = 0, cruelSeen = 0, kindSeen = 0, clipped = 0, spilled = 0, pageOver = 0;
+      for (const theme of ["light", "dark"]) {
+        // Enter at the WIDEST width — the previews card mounts once, from the
+        // previews fetch; entering narrow would measure a layout the mount
+        // never saw.
+        await setViewport(REF_WIDTHS[REF_WIDTHS.length - 1]);
+        await nav(
+          `${BASE}/?scen=site-states&theme=${theme}${sc.deepLink}`,
+          `document.querySelector('.previews .deploy-ref') && (function(){var v=document.querySelector('section.view:not([hidden])');return v && v.id==='view-site';})()`,
+        );
+        const row = [];
+        for (const width of REF_WIDTHS) {
+          await setViewport(width);
+          const m = await evalJs(
+            `(function(){var d=document.documentElement;` +
+            `var v=document.querySelector('section.view:not([hidden])');` +
+            // THE CLIPPER IS FOUND, NOT NAMED (W26-deploy-fail-clip's walk,
+            // unchanged): the first ancestor whose overflow-x is not visible is
+            // the element doing the swallowing, whatever it is called today.
+            `function clipperOf(el){var p=el.parentElement;while(p&&p!==document.documentElement){` +
+            `  var cs=getComputedStyle(p);if(cs.overflowX!=='visible')return p;p=p.parentElement;}return null;}` +
+            // THE GLYPHS, not the box: Range.getClientRects over every text node
+            // in the ref line. An element rect is already clipped to its parent.
+            `function glyphRight(el){var max=null;var w=document.createTreeWalker(el,NodeFilter.SHOW_TEXT,null),n;` +
+            `  while((n=w.nextNode())){if(!(n.nodeValue||'').trim())continue;var r=document.createRange();r.selectNodeContents(n);` +
+            `    var rs=r.getClientRects();for(var i=0;i<rs.length;i++){if(rs[i].width>0&&(max===null||rs[i].right>max))max=rs[i].right;}}` +
+            `  return max;}` +
+            `var out={sw:d.scrollWidth,cw:d.clientWidth,view:v?v.id:'none',theme:d.getAttribute('data-theme'),refs:[]};` +
+            // EVERY .deploy-ref in the PREVIEWS card, never a pinned one (D228):
+            // querySelector singular cannot tell a card that rendered nothing
+            // from a card of clean rows. Scoped to `.previews` because the
+            // production ladder's own refs are a different subject (short shas)
+            // and shouting about them here would bury this row's branch.
+            `[].slice.call(document.querySelectorAll('.previews .deploy-ref')).forEach(function(f){` +
+            `  var cs=getComputedStyle(f);var t=(f.textContent||'');` +
+            // THE BRANCH IS THE FIRST `.mono` SPAN, read on its own. Splitting
+            // the WHOLE line on whitespace pools the branch with the 78-char
+            // host and makes the KIND control read as "drifted cruel" on the
+            // strength of a string this leg does not claim is cruel.
+            `  var bs=f.querySelector('.mono');var bt=bs?(bs.textContent||''):'';` +
+            `  var runs=bt.split(/\\s+/).map(function(w){return w.length;});` +
+            // THE LINK IS INLINE, so scrollWidth/clientWidth are both 0 on it —
+            // a `sw > cw` question there is VACUOUS. Its rects are the only
+            // thing that can answer where the hostname actually paints.
+            `  var u=f.querySelector('.preview-url');var ur=null;` +
+            `  if(u){var urs=u.getClientRects();for(var j=0;j<urs.length;j++){if(urs[j].width>0&&(ur===null||urs[j].right>ur))ur=urs[j].right;}}` +
+            `  var rec={t:t,bt:bt,len:t.length,run:runs.length?Math.max.apply(null,runs):0,ow:cs.overflowWrap,wb:cs.wordBreak,` +
+            `    h:+f.getBoundingClientRect().height.toFixed(2),bsw:f.scrollWidth,bcw:f.clientWidth,` +
+            `    ur:ur===null?null:+ur.toFixed(2),ulost:null,uow:u?getComputedStyle(u).overflowWrap:null,` +
+            `    gr:null,cl:null,clsw:0,clcw:0,clov:'',edge:null,lost:null,rect:+f.getBoundingClientRect().right.toFixed(2)};` +
+            `  var g=glyphRight(f);if(g!==null)rec.gr=+g.toFixed(2);` +
+            `  var cl=clipperOf(f);` +
+            `  if(cl){var r=cl.getBoundingClientRect();rec.cl=(cl.className||cl.tagName||'?').toString().slice(0,40);` +
+            `    rec.clsw=cl.scrollWidth;rec.clcw=cl.clientWidth;rec.clov=getComputedStyle(cl).overflowX;` +
+            `    rec.edge=+(r.left+cl.clientLeft+cl.clientWidth).toFixed(2);` +
+            `    if(rec.gr!==null)rec.lost=+(rec.gr-rec.edge).toFixed(2);` +
+            `    if(rec.ur!==null)rec.ulost=+(rec.ur-rec.edge).toFixed(2);}` +
+            `  out.refs.push(rec);});` +
+            `return out;})()`,
+          );
+          cells++;
+          // (1) THE ROUTE. Without this the whole table is phantom.
+          if (m.view !== "view-site") {
+            fail(D, `site-states/${theme}@${width}: rendered section.view "${m.view}", asked for "view-site" — the hash did not route, so nothing below this line measures a preview row`);
+            row.push(`${width}:?`);
+            continue;
+          }
+          if (m.theme !== theme) fail(D, `site-states/${theme}@${width}: data-theme is "${m.theme}" — the theme did not apply`);
+          // (2) AUDITED: an absent row is not a clean row. A fixture that
+          // stopped carrying previews would take the whole card with it and
+          // this leg would print a perfect table about nothing.
+          if (m.refs.length === 0) {
+            fail(D, `site-states/${theme}@${width}: zero .previews .deploy-ref rendered — the branch previews card is not on the page, so nothing was measured. This is not a pass.`);
+            row.push(`${width}:0ref`);
+            continue;
+          }
+          let cruelHere = 0, kindHere = 0, worst = null;
+          // ONE VOICE PER CLIPPER. Three preview rows share the previews card,
+          // so an unguarded loop shouts the same clipped card three times and
+          // buries WHICH row filled it.
+          const clippersSaid = new Set();
+          for (const b of m.refs) {
+            refs++;
+            const isCruel = b.bt === PREVIEW_CRUEL_BRANCH;
+            const isKind = b.bt === KIND_BRANCH;
+            if (isCruel) { cruelSeen++; cruelHere++; }
+            if (isKind) { kindSeen++; kindHere++; }
+            // (3) ANTI-VACUITY, SECOND ORDER: a cruel row whose branch is not
+            // actually cruel proves nothing, and a control that drifted cruel
+            // stops being a control. Asserted against the FIXTURE's own
+            // strings — this leg pins no length of its own.
+            if (isCruel && b.run < 40) {
+              fail(D, `site-states/${theme}@${width} .deploy-ref: the cruel row's longest unbreakable run is ${b.run} chars — the fixture went KIND, so a green here would be green by construction`);
+            }
+            if (isKind && b.run > 20) {
+              fail(D, `site-states/${theme}@${width} .deploy-ref: the control's longest run is ${b.run} chars — it has drifted cruel and can no longer answer "did the remedy shred ordinary prose"`);
+            }
+            // (4) THE CLIPPER. Every ref must sit in one, or the walk found
+            // nothing and (a) measured nothing.
+            if (!b.cl) {
+              fail(D, `site-states/${theme}@${width} .deploy-ref (${b.len} chars): no clipping ancestor found — the walk that finds the element doing the swallowing returned nothing, so the clipper assertion measured nothing`);
+              continue;
+            }
+            if (b.clov !== "visible" && b.clsw > b.clcw && !clippersSaid.has(b.cl)) {
+              clippersSaid.add(b.cl);
+              clipped++;
+              const filler = m.refs.filter((x) => x.cl === b.cl).sort((x, y) => (y.lost ?? -1e9) - (x.lost ?? -1e9))[0];
+              fail(D, `site-states/${theme}@${width} .${b.cl}: overflow-x:${b.clov} AND scrollWidth ${b.clsw} > clientWidth ${b.clcw} — ${b.clsw - b.clcw}px of a branch name a person chose is inside a box that clips it, with no scrollbar and no page scroll (widest ref inside it: ${filler.len} chars, longest run ${filler.run}, overflow-wrap:${filler.ow}, word-break:${filler.wb})`);
+            }
+            // (5) THE ELEMENT'S OWN BOX. NOT a spare for the clipper — it goes
+            // green the moment a remedy moves the clip up a level — and NOT a
+            // spare for the glyphs, which are the pixels a person loses.
+            if (b.bsw > b.bcw) {
+              spilled++;
+              fail(D, `site-states/${theme}@${width} .deploy-ref (${b.len} chars): scrollWidth ${b.bsw} > clientWidth ${b.bcw} — ${b.bsw - b.bcw}px of the branch line paints outside its own box (overflow-wrap:${b.ow}, word-break:${b.wb})`);
+            }
+            // (6) THE LINK INSIDE IT — the BOUNDED half of the line, measured
+            // separately so "one declaration on the parent SUBSUMES the url
+            // fix" is a MEASUREMENT and not a sentence about inheritance.
+            // `.preview-url` is an inline `<a>`, so scrollWidth and clientWidth
+            // are BOTH 0 on it and a `sw > cw` question there is vacuous —
+            // hence its client rects against the same clipper edge. The second
+            // half is the inheritance itself: `.deploy-ref .mono` sets only
+            // font-family, so the link's computed overflow-wrap must EQUAL the
+            // row's, or the parent declaration never reached the hostname.
+            if (b.uow !== null && b.uow !== b.ow) {
+              fail(D, `site-states/${theme}@${width} .preview-url: computed overflow-wrap "${b.uow}" while its .deploy-ref parent computes "${b.ow}" — the value did not inherit, so a declaration on the parent does NOT reach the hostname and the url half is unfixed`);
+            }
+            if (b.ulost !== null && b.ulost > 0.5) {
+              spilled++;
+              fail(D, `site-states/${theme}@${width} .preview-url (host capped at ${PREVIEW_CRUEL_HOST.length} chars by preview_slug_for/2): its rects reach x=${b.ur} while .${b.cl}'s content edge sits at ${b.edge} — ${b.ulost}px of the preview hostname a person would click is painted outside the card`);
+            }
+            // (7) THE GLYPHS. The pixels a person actually loses. Half a pixel
+            // of tolerance: sub-pixel text metrics are not a defect.
+            if (b.gr === null) {
+              fail(D, `site-states/${theme}@${width} .deploy-ref: the row painted no text rects at all — the branch is not on screen, so the glyph half measured nothing`);
+              continue;
+            }
+            if (b.lost !== null && b.lost > 0.5) {
+              spilled++;
+              if (worst === null || b.lost > worst) worst = b.lost;
+              fail(D, `site-states/${theme}@${width} .deploy-ref (${b.len} chars): glyphs reach x=${b.gr} while .${b.cl}'s content edge sits at ${b.edge} — ${b.lost}px of WHICH BRANCH THIS PREVIEW IS is painted outside the card and clipped away silently. The row's own border box reads ${b.rect} (inside the edge), which is why a rect-based test is green here`);
+            }
+          }
+          // (8) BOTH FAMILIES MUST BE ON SCREEN IN EVERY CELL. A cell that lost
+          // the cruel row would print a clean number about the control alone.
+          if (cruelHere === 0) {
+            fail(D, `site-states/${theme}@${width}: the cruel ${PREVIEW_CRUEL_BRANCH.length}-char branch is not among the ${m.refs.length} preview ref(s) on the page — the defect's own fixture is missing, so this cell asserted nothing about it`);
+          }
+          if (kindHere === 0) {
+            fail(D, `site-states/${theme}@${width}: the ${KIND_BRANCH.length}-char KIND control branch is not on the page — a remedy that shreds ordinary prose would pass this cell unmeasured`);
+          }
+          // THE PAGE IS PRINTED, NEVER ASSERTED: on the defective tree it reads
+          // clean at every one of these widths, which is the whole reason this
+          // leg measures rows.
+          if (m.sw > m.cw) pageOver++;
+          const cruel = m.refs.find((b) => b.bt === PREVIEW_CRUEL_BRANCH) || m.refs[0];
+          const kind = m.refs.find((b) => b.bt === KIND_BRANCH);
+          row.push(
+            `${width}:page ${m.sw}/${m.cw} cruel lost${cruel.lost === null ? "?" : cruel.lost} sw/cw ${cruel.bsw}/${cruel.bcw} urlLost${cruel.ulost === null ? "?" : cruel.ulost} h${cruel.h}` +
+            (kind ? ` kind lost${kind.lost === null ? "?" : kind.lost} h${kind.h}` : " kind:absent") +
+            (worst !== null ? ` WORST ${worst}px` : ""),
+          );
+        }
+        process.stdout.write(`   site-states/${theme}  ${row.join("  ")}\n`);
+      }
+      if (!failures.some((f) => f.defect === D)) {
+        okLine(
+          `${cells} / ${cells} cells clean across ${REF_WIDTHS.join("/")} in both themes (${refs} .previews ` +
+          `.deploy-ref row(s) measured — EVERY one on the card, not a pinned selector; ${cruelSeen} carried the ` +
+          `cruel ${PREVIEW_CRUEL_BRANCH.length}-char branch beside its ${PREVIEW_CRUEL_HOST.length}-char producer-` +
+          `capped host, ${kindSeen} the "${KIND_BRANCH}" control), ${clipped} clipper(s) holding more than they ` +
+          `show, ${spilled} box(es) painting glyphs past their own edge`,
+        );
+        okLine(
+          `THE SELECTOR AXIS IS CLOSED BY THIS LEG: before it, git grep -c 'deploy-ref|preview-url' origin/main ` +
+          `-- cloud/priv/static/__preview__ .github exited 1 with NO OUTPUT — no committed instrument could reach ` +
+          `either element, so the whole corpus was green by construction here no matter how cruel its fixtures. ` +
+          `The fixture axis was shut in the same commit: the only preview host in the tree was 42 chars (negative ` +
+          `at all ten widths) AND the wrong shape (branch first, a .preview. label no producer emits)`,
+        );
+        okLine(
+          `THE HOST IS BOUNDED AND THE BRANCH IS NOT, which is why the remedy sits on the PARENT: preview_slug_for/2 ` +
+          `clamps the DNS label to 63 (host <= 78) while registry/deployment.ex declares no validate_length on ` +
+          `:branch. DRIVEN ON THIS TREE, this fixture, this runner — 52 findings pre-fix: the ROW'S OWN BOX lost ` +
+          `pixels at 10 of 10 widths in both themes (worst 464px at 320, 48px still at 1440), the CLIPPER at 8 of ` +
+          `10 and the GLYPHS at 8 of 10 (worst 388.2px at 320; 720 and 1440 clip inside the row without filling ` +
+          `the card). .preview-url's OWN rects sat INSIDE the card edge in all 20 pre-fix cells — on this fixture ` +
+          `the hostname is not the defect, the branch is, which is the whole reason the declaration is on the ` +
+          `parent and not on the link. One overflow-wrap: anywhere on .deploy-ref reaches both, because it ` +
+          `INHERITS and .deploy-ref .mono sets only font-family — assertion (6) MEASURES that (link computed value ` +
+          `== row computed value, per cell) rather than asserting it in prose, and the mirror-image remedy on ` +
+          `.preview-url alone was driven as the negative control: 92 findings — all 52 standing plus 40 from (6). Heights are ` +
+          `printed per cell and deliberately unpinned (the cruel row goes 97.5 -> 156px at 320 and 58.5 -> 117px ` +
+          `at 900 — the wrap's honest cost). THIS LEG PAYS 2 OF THE 4 SELECTORS ITS ROW NAMED: .deploy-meta (four ` +
+          `bounded/enum strings on a preview row) and deployDetailHtml's caption (unbounded, but ACTIVE-only and a ` +
+          `different element) are FILED, not counted here`,
         );
       }
     }
