@@ -142,7 +142,7 @@ The novice persona (AMENDMENT 3 rule 1). **Jargon is a defect.**
 |---|---|---|
 | Case | sentence case, verbs first | Title Case Buttons |
 | Failures | human sentences | raw codes |
-| — example | "Hetzner ran out of server capacity" | `SERVER_LIMIT_EXCEEDED` |
+| — example | "A capacity or quota limit was reached…" | `SERVER_LIMIT_EXCEEDED` |
 | Time | relative ("2h ago"), absolute on hover | raw timestamps |
 | Durations | "2h 1m" (`fmtDur` learns hours) | "121m 8s" (today's `fmtDur`, `app.js:3765`, caps at minutes) |
 | Log vocabulary | "launched an instance" | `barkpark.launched` |
