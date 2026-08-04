@@ -35,10 +35,16 @@ defmodule Barkpark.PdsElixirCensusTest do
   PDS-D633/D625 run -- illustrative, that run only; the census now DERIVES the
   floor (9 x its own `user cpu`) on its output's one volatile line, so re-read it
   there rather than quoting this paragraph. Either way `--selftest` is
-  disqualified on price, not on merit. The three arms below cost 28,09 s and
-  28,31 s of CPU per rider run over two metered trials (load1 1,70 -> 1,97; see
-  `@moduletag timeout`) and buy the same thing the selftest's cheap arms buy: the
-  census runs, it can red, and it refuses garbage ARGV.
+  disqualified on price, not on merit. The arms below buy the same thing the
+  selftest's cheap arms buy: the census runs, it can red — twice, on two different
+  arms — and it refuses garbage ARGV.
+
+  THE PRICE MOVED WHEN THE FOURTH ARM LANDED, AND THE OLD FIGURE IS NOT REUSED.
+  `28,09 s / 28,31 s of CPU per rider run` was metered over TWO trials of THREE
+  arms and does not describe four. What was measured here (wave 47, ExUnit's own
+  `Finished in` line, one trial each, wall not CPU): 28,9 s for the three arms,
+  42,0 s for the four. The added arm is one more full census run over `api/lib`.
+  Re-meter before quoting either number for anything else.
 
   ## Why the assertions are on prose, never on numbers
 
@@ -93,6 +99,17 @@ defmodule Barkpark.PdsElixirCensusTest do
   # CLASSIFICATION-TOTAL check reds. Everything else in the run is untouched.
   @mutant_from "classified = Enum.map(routed" <> ", &classify(&1, index))"
   @mutant_to "classified = tl(Enum.map(routed, &classify(&1, index)))"
+
+  # THE SECOND MUTANT (PDS-D678, wave 47). Until this wave the census printed
+  # `DRIFT vs PDS-D448 (advisory — printed, never enforced)` with FIVE of its
+  # eight population rows drifted, on every run, at exit 0. Those rows were
+  # re-derived by run and the block is now ARMED (`D448-DRIFT-REFUSES`), so this
+  # arm rides the required Elixir gate for the same reason the one above does:
+  # an enforcement nothing executes is the shape this case exists to refuse.
+  # ONE TOKEN, ON THE RECORDED SIDE: the mutation moves the committed BASELINE,
+  # never the tree, so it cannot be confused with an honest lens correction.
+  @baseline_from "unrouted: " <> "23"
+  @baseline_to "unrouted: 24"
 
   setup_all do
     census = Path.expand(@census_rel, __DIR__)
@@ -167,6 +184,29 @@ defmodule Barkpark.PdsElixirCensusTest do
              "is the shape this epic exists to stop. Output:\n#{out}"
   end
 
+  test "the population baseline REFUSES: a perturbed literal exits 1 with FAIL  D448-DRIFT-REFUSES",
+       ctx do
+    {out, rc} = mutate_and_run(ctx, @baseline_from, @baseline_to)
+
+    assert rc == 1,
+           "a census whose committed population baseline no longer matches the tree exited #{rc}. " <>
+             "That is the pre-wave-47 behaviour: five of eight rows printed DRIFT at exit 0 for " <>
+             "four waves, which is a gate whose green costs nothing.\n#{out}"
+
+    assert out =~ "FAIL  D448-DRIFT-REFUSES",
+           "the mutant exited 1 without naming the arm — the exit code did not descend from the " <>
+             "baseline check. Output:\n#{out}"
+
+    assert out =~ "unrouted baseline 24 derived 23",
+           "the refusal named no row and no pair of numbers. A verdict that does not say WHICH " <>
+             "population moved cannot be repaired by re-derivation. Output:\n#{out}"
+
+    assert out =~ "RE-DERIVE, never re-type",
+           "the refusal shipped without the repair instruction, so the cheapest fix a reader can " <>
+             "see is editing the literal until it matches — the defect, wearing the guard's " <>
+             "name. Output:\n#{out}"
+  end
+
   test "the census REFUSES an unknown flag — ARGV-STRICT, not a shrug", ctx do
     {out, rc} =
       System.cmd(ctx.elixir, [ctx.census, "--not-a-real-flag"],
@@ -180,5 +220,37 @@ defmodule Barkpark.PdsElixirCensusTest do
 
     assert out =~ "REFUSED: UNKNOWN ARGUMENT", out
     assert out =~ "unknown argument", out
+  end
+
+  # ONE ANCHORED EDIT, WRITTEN OUTSIDE THE TREE AND RUN FROM THE ROOT. The
+  # exactly-once assertion is the same guard the census's own selftest applies to
+  # every mutation anchor: at 0 the demo proves nothing, above 1 the mutant
+  # rewrites a site nobody reasoned about. `cd: ctx.root` is load-bearing — the
+  # corpus glob is CWD-relative, and a mutant run from its own tmp dir censuses an
+  # empty tree and exits 2 (REFUSED: TRUNCATED CORPUS), which is not the rc under
+  # test. Kept as a helper so a second arm cannot drift from the first one's setup.
+  defp mutate_and_run(ctx, from, to) do
+    source = File.read!(ctx.census)
+    occurrences = length(String.split(source, from)) - 1
+
+    assert occurrences == 1,
+           "the mutation anchor #{inspect(from)} occurs #{occurrences}x in the census " <>
+             "(expected exactly 1). At 0 this fail-demo proves nothing; above 1 the mutant " <>
+             "would rewrite a site this demo never reasoned about. Re-anchor it on a live " <>
+             "single-occurrence site rather than deleting the demo."
+
+    dir =
+      Path.join(
+        System.tmp_dir!(),
+        "pds-elixir-census-mutant-#{System.unique_integer([:positive])}"
+      )
+
+    File.mkdir_p!(dir)
+    on_exit(fn -> File.rm_rf!(dir) end)
+
+    mutant = Path.join(dir, "pds-elixir-receipt-census.exs")
+    File.write!(mutant, String.replace(source, from, to, global: false))
+
+    System.cmd(ctx.elixir, [mutant], cd: ctx.root, stderr_to_stdout: true)
   end
 end

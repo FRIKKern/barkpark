@@ -44,7 +44,12 @@
 # the ruling stands (PDS-D454): Elixir stays honest-and-unguarded until the write-routed
 # sites are bucketed. What it DOES fail on is its own integrity — a truncated corpus, a
 # lens that loses occurrences, a partition that does not add up, or a delegate chain it
-# can no longer follow. Those exit non-zero. A number that merely drifted prints DRIFT.
+# can no longer follow. Those exit non-zero. IT IS STILL NOT A FLOOR OVER THE POPULATION
+# — D454 stands, no site count has to be under a threshold to pass — but since wave 47 it
+# is not silent about its own numbers either: the eight population rows are pinned to a
+# baseline RE-DERIVED BY RUN at wave 47 (@rederived, PDS-D678), and a row that moves off it
+# exits 1 on D448-DRIFT-REFUSES instead of printing DRIFT at exit 0 forever. The repair is
+# to RE-DERIVE and amend the baseline with its lens in the same commit, never to re-type it.
 #
 # THE LENS, STATED (PDS-D448a). This census is AST-based and depends on NO regex engine
 # and, specifically, on NO word-boundary support: on this host Apple git 2.39.5's POSIX
@@ -117,8 +122,10 @@ defmodule PDS.Census do
 
   # ---------------------------------------------------------------- constants
 
-  # Recorded by PDS-D448 (wave 33 survey). Printed as DRIFT lines, never enforced —
-  # a number-shaped pin is the defect this epic keeps filing, not the guard.
+  # Recorded by PDS-D448 (wave 33 survey). THE HISTORICAL RECORD, KEPT VERBATIM — it is
+  # what wave 33 measured with wave 33's lens, and report_split/1 and report_depth_sweep/2
+  # both quote it to say TRUE things about that lens. Nothing here is edited when a number
+  # moves; the comparison the census enforces lives in @rederived below.
   @recorded %{
     textual: 103,
     ast: 95,
@@ -128,6 +135,61 @@ defmodule PDS.Census do
     write: 64,
     read: 17,
     unrouted: 10
+  }
+
+  # THE BASELINE THE CENSUS REFUSES TO DIFFER FROM (PDS-D678, wave 47). For four waves the
+  # block below printed `advisory — printed, never enforced` while FIVE of these eight rows
+  # read DRIFT on every run, including `unrouted` off by 130 %. An instrument that measures
+  # its own charter as false and cannot red is a gate whose green costs nothing. Both legal
+  # endings were taken, per row and in this order: RE-DERIVE-AND-AMEND, then REFUSE.
+  #
+  # RE-DERIVED AT WAVE 47 (5 rows) — the wave-33 literal did not descend from this tree
+  # under this lens, so the literal was re-taken by run, never transcribed:
+  #
+  #   textual   103 -> 104   same lens, the tree moved. `ok: true` occurrences by
+  #                          :binary.matches/2 over the 804-file corpus; the partition
+  #                          LENS-LOSES-NOTHING (104 == ast 95 + phantom 9) holds on it.
+  #   phantom     8 ->   9   the same move seen from the other side: textual 104 minus the
+  #                          95 AST-literal pairs. One new prose/`@doc` occurrence.
+  #   write      64 ->  54   NOT tree drift — A DIFFERENT LENS, and the census already
+  #   read       17 ->  14   measures why. `transaction` was removed from @write_verbs
+  #   unrouted   10 ->  23   (PDS wave 34: it opens a transaction, it moves no row) and the
+  #                          clause-collapse fix landed; report_depth_sweep/2 prints
+  #                          54/14/23 at depth 6 and IDENTICALLY at 7,8,9,10,12 — the route
+  #                          relation's closure. 64/17/10 is at no depth in that table. It
+  #                          is what a deeper (or hand-followed) route sees; both are
+  #                          honest, and QUOTING EITHER WITHOUT ITS LENS IS THE LIE
+  #                          (PDS-D448a). So the lens is stated with the number, here and
+  #                          in the printed block.
+  #
+  # INHERITED UNCHANGED (3 rows): ast 95, consumer 4, emitted 91 read `==` in the same run
+  # that produced the five re-derivations and are copied across untouched. A block widened
+  # until everything matches is a green that costs nothing (the fourth law) — so the arm
+  # derives the inherited/re-derived split from @recorded at runtime and PRINTS it, and
+  # nothing above may be edited to make a red go away.
+  #
+  # THE LENS AND THE ENGINE THIS BASELINE WAS TAKEN WITH (PDS-D448a):
+  #   lens    build-free AST (`Code.string_to_quoted`), substring counts via
+  #           :binary.matches/2 (no regex engine, no `\b`), route depth @max_depth = 6,
+  #           @write_verbs without `transaction`, corpus `api/lib/**/*.ex` = 804 files
+  #   engine  Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · darwin arm64 (printed live by
+  #           report_engine/0 on every run, so a re-derivation on another engine says so)
+  #   command elixir scripts/pds-elixir-receipt-census.exs   (run from the repo root)
+  #   at      2026-08-04, tree 49345a98c, rc=0, `CENSUS OK`
+  #
+  # AND THEN: REFUSE. All eight rows are ARMED — D448-DRIFT-REFUSES in the integrity block
+  # exits 1 on any mismatch, so the next drift cannot ship green. THE REPAIR IS NOT "EDIT
+  # THE NUMBER": re-run the command above, and amend the row here WITH the lens, the engine
+  # and the run that produced it, in the SAME commit as the change that moved it.
+  @rederived %{
+    textual: 104,
+    ast: 95,
+    phantom: 9,
+    consumer: 4,
+    emitted: 91,
+    write: 54,
+    read: 14,
+    unrouted: 23
   }
 
   # Route-bearing sentinels. A carriers-only corpus (the files that literally hold an
@@ -6288,8 +6350,8 @@ defmodule PDS.Census do
       argv: [],
       mut: nil,
       exit: 0,
-      expect: ["CENSUS OK", "PASS  ROSTER-VERDICT-FRESH"],
-      proves: "the arm is GREEN on the unmodified repo, so each red below is its mutation and not a tree that was already failing"
+      expect: ["CENSUS OK", "PASS  ROSTER-VERDICT-FRESH", "PASS  D448-DRIFT-REFUSES"],
+      proves: "the arm is GREEN on the unmodified repo, so each red below is its mutation and not a tree that was already failing (the population baseline rides this same case: it is in scope over the repo corpus and nowhere else)"
     },
     %{
       name: "ROSTER-DEF-FP-MOVED",
@@ -6511,6 +6573,45 @@ defmodule PDS.Census do
       expect: ["naive > UNION — the addition would OVERCOUNT by"],
       refute: ["[naive == UNION"],
       proves: "PROVEN-BACKED is ONE Enum.count over ONE MapSet.union and not leg_a + leg_b: a def already carried by leg B is injected into leg A, so the legs now share member(s), the naive addition rises above the union and the union HOLDS. Replace that union with an addition and this case reds, because the addition can only ever print `naive == UNION`"
+    },
+    # THE POPULATION BASELINE STOPS BEING ADVISORY (PDS-D678, wave 47), AND THE CORPUS IS
+    # THE REPO FOR THE SAME REASON THE ROSTER CASES USE IT: baseline_checks/2 is scoped by
+    # register_scope/1, so over the synthetic tree the arm is not in the checks list at all
+    # and a mutant there would run a check that returned [] before and [] after — the
+    # unmutatability PDS-D541 named, wearing a new arm's name.
+    #
+    # IT ASSERTS NO POPULATION COUNT IT DOES NOT HAVE TO. The mutation moves the BASELINE
+    # (a literal in this file), never the tree, and the expected prose names the row and
+    # both sides of the comparison it broke. An honest lens correction moves `derived`, and
+    # then this arm is SUPPOSED to red — that is the whole point of the wave-47 ending, and
+    # the FAIL sentence carries the re-derivation command so the repair is one run.
+    %{
+      name: "D448-BASELINE-REFUSES",
+      corpus: :repo,
+      argv: [],
+      mut: {"unrouted: " <> "23", "unrouted: 24"},
+      exit: 1,
+      expect: [
+        "FAIL  D448-DRIFT-REFUSES",
+        "unrouted baseline 24 derived 23",
+        "RE-DERIVE, never re-type",
+        "unrouted       recorded   24  derived   23  DRIFT"
+      ],
+      proves: "a population row that no longer descends from the tree EXITS 1 by name instead of printing DRIFT at exit 0 forever — the four-wave-old advisory block, armed. The mutation perturbs the RECORDED side, which is the only side a selftest can move without touching api/lib"
+    },
+    %{
+      name: "D448-REFUSAL-IS-THE-ARM",
+      corpus: :repo,
+      argv: [],
+      # THE SAME PERTURBATION, WITH THE ENFORCEMENT REMOVED. Without this case the case
+      # above proves only that SOMETHING reds; this one shows the exit code descends from
+      # baseline_checks/2 and nothing else — drop the arm from the checks list and the
+      # identical drift prints at exit 0, which is exactly what this file did until wave 47.
+      mut: {"++ baseline_checks(drift_rows, " <> "classified)", "++ []"},
+      exit: 0,
+      expect: ["CENSUS OK", "recorded  104  derived  104  =="],
+      refute: ["D448-DRIFT-REFUSES"],
+      proves: "with the arm removed the census returns to its pre-wave-47 behaviour — green, with the block still printing — so the red above is produced by this arm and not by a neighbouring check the mutation happened to disturb"
     }
   ]
 
@@ -7058,6 +7159,20 @@ defmodule PDS.Census do
     classified_n = Enum.count(classified, fn s -> elem(s.shape, 0) != "UNCLASSIFIED" end)
     unclassified_n = Enum.count(classified, fn s -> elem(s.shape, 0) == "UNCLASSIFIED" end)
 
+    # THE EIGHT POPULATION ROWS, DERIVED ONCE AND READ TWICE — by the arm that refuses a
+    # drift and by the block that prints them. Two lists would be two lenses wearing one
+    # name, which is the defect this file exists to refuse.
+    drift_rows = [
+      {"textual", textual, :textual},
+      {"ast-literal", length(ast_sites), :ast},
+      {"phantom", length(phantoms), :phantom},
+      {"consumer", length(consumers), :consumer},
+      {"emitted", length(emitted), :emitted},
+      {"write-routed", Enum.count(classified, & &1.write?), :write},
+      {"read-routed", Enum.count(classified, &(not &1.write? and &1.read?)), :read},
+      {"unrouted", Enum.count(classified, &(not &1.write? and not &1.read?)), :unrouted}
+    ]
+
     # EVERY ARM RENDERS ITS OWN FAIL SENTENCE. One `why` for both branches is how a RED
     # line prints a true-reading sentence — the shipped form printed `FAIL CORPUS-INTACT 3
     # files >= 600`, which is a lie wearing the word FAIL. DELEGATE-REACHES-WRITE already
@@ -7099,7 +7214,8 @@ defmodule PDS.Census do
     ] ++
         routed_checks(routed) ++
         register_checks(classified, parsed) ++
-        roster_freshness_checks(classified, parsed) ++ falsifier_check(falsifiers)
+        roster_freshness_checks(classified, parsed) ++
+        falsifier_check(falsifiers) ++ baseline_checks(drift_rows, classified)
 
     p("INTEGRITY (these can go RED — the population numbers cannot; they are not a gate)")
     p(String.duplicate("-", 78))
@@ -7109,16 +7225,15 @@ defmodule PDS.Census do
     end)
 
     p("")
-    p("DRIFT vs PDS-D448 (advisory — printed, never enforced)")
+    p("DRIFT vs THE WAVE-47 RE-DERIVED BASELINE (ARMED — a DRIFT line here exits 1)")
     p(String.duplicate("-", 78))
-    drift("textual", textual, :textual)
-    drift("ast-literal", length(ast_sites), :ast)
-    drift("phantom", length(phantoms), :phantom)
-    drift("consumer", length(consumers), :consumer)
-    drift("emitted", length(emitted), :emitted)
-    drift("write-routed", Enum.count(classified, & &1.write?), :write)
-    drift("read-routed", Enum.count(classified, &(not &1.write? and &1.read?)), :read)
-    drift("unrouted", Enum.count(classified, &(not &1.write? and not &1.read?)), :unrouted)
+    p("  lens: build-free AST, substring counts (no regex engine), route depth #{@max_depth},")
+    p("  `transaction` NOT a write verb · engine printed above · re-derive with")
+    p("  `elixir scripts/pds-elixir-receipt-census.exs` from the repo root and amend")
+    p("  @rederived WITH the lens and the engine in the same commit (PDS-D448a, PDS-D678).")
+    p("  #{length(rederived_rows())} row(s) re-derived at wave 47, #{8 - length(rederived_rows())} inherited from PDS-D448's wave-33 figures.")
+    p("")
+    Enum.each(drift_rows, fn {label, got, key} -> drift(label, got, key) end)
     p("")
     # STILL EXACTLY ONE LINE, AND IT SAYS SO. PDS-D605's fixture recipe reads this census
     # as "byte-identical except the volatile line", and it named that line by its old
@@ -7615,9 +7730,44 @@ defmodule PDS.Census do
   end
 
   defp drift(label, got, key) do
-    want = @recorded[key]
+    want = @rederived[key]
     tag = if got == want, do: "==", else: "DRIFT"
     p("  #{String.pad_trailing(label, 14)} recorded #{String.pad_leading(to_string(want), 4)}  derived #{String.pad_leading(to_string(got), 4)}  #{tag}")
+  end
+
+  # WHICH ROWS WAVE 47 RE-DERIVED, DERIVED — never a sentence saying "five". The split is
+  # @rederived against the wave-33 record, so widening one to match the other SHRINKS this
+  # number in the printed block instead of hiding in prose (the fourth law, made visible).
+  defp rederived_rows, do: for({k, v} <- @rederived, v != @recorded[k], do: k)
+
+  # THE REFUSAL (PDS-D678). Scoped to the real corpus by the same predicate the register
+  # arms use: the selftest's synthetic tree carries a filler population that matches no
+  # baseline, so an unconditional arm would red the selftest on its own commit. That is
+  # why the cases proving this arm CAN go red census the REPO (`corpus: :repo`) — an arm
+  # proven only where it is scoped out is proven nowhere (PDS-D541).
+  defp baseline_checks(drift_rows, classified) do
+    case register_scope(classified) do
+      :scoped_out -> []
+      :real -> [baseline_check(drift_rows)]
+    end
+  end
+
+  defp baseline_check(drift_rows) do
+    drifted = Enum.filter(drift_rows, fn {_label, got, key} -> got != @rederived[key] end)
+    n_rederived = length(rederived_rows())
+
+    why =
+      if drifted == [] do
+        "#{length(drift_rows)} population row(s) equal the wave-47 re-derived baseline — #{n_rederived} re-derived at wave 47, #{length(drift_rows) - n_rederived} inherited unchanged from PDS-D448. EVERY ROW ARMED: the block below can no longer print DRIFT at exit 0"
+      else
+        "#{length(drifted)} population row(s) DRIFTED off the wave-47 baseline: " <>
+          Enum.map_join(drifted, " · ", fn {label, got, key} ->
+            "#{label} baseline #{@rederived[key]} derived #{got}"
+          end) <>
+          " — RE-DERIVE, never re-type: run `elixir scripts/pds-elixir-receipt-census.exs` from the repo root and amend @rederived WITH the lens, the engine and the run in the SAME commit as the change that moved it (PDS-D448a). Editing the literal blind buys a green that costs nothing"
+      end
+
+    {"D448-DRIFT-REFUSES", drifted == [], why}
   end
 
   defp row(label, got, _raw, key) do
