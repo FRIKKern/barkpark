@@ -356,7 +356,10 @@ defmodule Barkpark.PdsDoorCensusTest do
       "  pds-fx-shut.sh: ORPHANED PRICE — the price ledger carries a row for it, " <>
         "but this run classed it ENVIRONMENT, not THROUGH."
 
-    assert Enum.filter([orphan_price_line], &String.match?(&1, ~r/^\s+pds-\S+\s+\S+\s+\S+\s+PRICE\s/)) ==
+    assert Enum.filter(
+             [orphan_price_line],
+             &String.match?(&1, ~r/^\s+pds-\S+\s+\S+\s+\S+\s+PRICE\s/)
+           ) ==
              [],
            "the ORPHANED PRICE error line is captured by this test's own PRICE-row filter, so " <>
              "an error message would be asserted against as though it were a row of the price " <>
@@ -386,7 +389,8 @@ defmodule Barkpark.PdsDoorCensusTest do
     # remedy prints five lines here and silently drops the sixth, which is the
     # one worth printing.
     band_counts =
-      for class <- ~w(PRICE ENVIRONMENT NOT-YET-BUILT CONTENT-RED RED-BY-DESIGN-REPORTER HUMAN-GATE) do
+      for class <-
+            ~w(PRICE ENVIRONMENT NOT-YET-BUILT CONTENT-RED RED-BY-DESIGN-REPORTER HUMAN-GATE) do
         case Regex.run(~r/^\s+#{Regex.escape(class)}\s+:\s+(\d+) of (\d+)\s*$/m, out) do
           [_, n, m] ->
             assert String.to_integer(m) == total,
