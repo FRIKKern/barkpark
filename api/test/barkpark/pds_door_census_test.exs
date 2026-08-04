@@ -31,9 +31,9 @@ defmodule Barkpark.PdsDoorCensusTest do
   the census resolves `elixir-path-escape-check.sh` relative to its own
   `BASH_SOURCE` — a copy in `tmp` would have no ratchet to execute for leg B.
 
-  `--check` runs ONCE, in `setup_all`, and every case reads that one output:
-  its own price column says the run costs ~3.3 s CPU, and an instrument that
-  prints a price is not exempt from paying one.
+  `--check` runs ONCE, in `setup_all`, and every case reads that one output: its
+  own price column says the run costs ~1.1 s CPU at load1 3.26 (it read 3.3 s at
+  load1 41.63 — not comparable, PDS-D656), and a price printed here is paid.
 
   ## Why the fraud arm is mandatory
 
@@ -278,6 +278,25 @@ defmodule Barkpark.PdsDoorCensusTest do
     assert String.to_integer(total) >= 19,
            "the population fell below origin/main's 19 scripts/pds-*.{sh,exs} programs — the " <>
              "enumerator is broken, not the repo tidy.\n#{out}"
+
+    # THE DOOR COUNT HAS A FLOOR, and it is the only assertion in this repository
+    # that can see it fall. Everything above is SELF-CONSISTENCY: the count agrees
+    # with the named list, the named list agrees with the table, this instrument
+    # is in it. Replayed against a real census output whose THROUGH count had
+    # fallen to 3 of 20, EVERY ONE OF THEM PASSED — 3 named, 3 table rows, own row
+    # THROUGH, 2 PRICE rows, population 20. A set that agrees with itself agrees
+    # with itself just as well after a door is lost.
+    #
+    # 4 is where main stands: pds-door-census.sh, pds-elixir-receipt-census.exs,
+    # pds-record-parity.test.sh, pds-status-only-residue.exs. RAISE this number
+    # when a slice wires another door; a slice that has to LOWER it is removing a
+    # door from a required gate, which is a decision, not a diff.
+    assert String.to_integer(through) >= 4,
+           "the THROUGH door count fell to #{through}. Nothing else here can see that: every " <>
+             "other assertion in this case is self-consistency, and a smaller set is still " <>
+             "consistent with itself. Either a door stopped being gated, or a shape check " <>
+             "re-classified one — a malformed price is a fact about the LEDGER and must never " <>
+             "move a fact about the WIRING (PDS-D667).\n#{out}"
   end
 
   test "it PRINTS the D633 meter blind-spot sentence — never as prose a copy-paste can drop",
