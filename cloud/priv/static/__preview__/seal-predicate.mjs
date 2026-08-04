@@ -579,12 +579,16 @@ const gitProbe = (args) => {
 let _walkCache = null;
 function walkTruncation() {
   if (_walkCache) return _walkCache;
-  const set = (state, reason, graft = null) => (_walkCache = { state, reason, graft });
+  // `shallowStore` is a BOOLEAN, not a sentence. `graftList()` needs to know whether a
+  // graft list can exist at all, and keying that on the prose of `reason` would couple a
+  // control path to a string anyone may reword. `null` = the store never answered.
+  const set = (state, reason, graft = null, shallowStore = null) =>
+    (_walkCache = { state, reason, graft, shallowStore });
 
   const store = gitProbe(['rev-parse', '--is-shallow-repository']);
   if (store.rc !== 0)
     return set('unknown', `\`git rev-parse --is-shallow-repository\` exited ${store.rc}, so this checkout will not say whether its walk is whole`);
-  if (store.out === 'false') return set('complete', 'the store is not shallow at all');
+  if (store.out === 'false') return set('complete', 'the store is not shallow at all', null, false);
   if (store.out !== 'true')
     return set('unknown', `\`git rev-parse --is-shallow-repository\` answered '${store.out || '<nothing>'}', which is neither true nor false`);
 
@@ -592,24 +596,24 @@ function walkTruncation() {
   // graft lies on HEAD's OWN history.
   const common = gitProbe(['rev-parse', '--git-common-dir']);
   if (common.rc !== 0 || !common.out)
-    return set('unknown', 'the store is shallow but `git rev-parse --git-common-dir` answered nothing, so the graft list cannot be located');
+    return set('unknown', 'the store is shallow but `git rev-parse --git-common-dir` answered nothing, so the graft list cannot be located', null, true);
   const dir = common.out.startsWith('/') ? common.out : `${REPO}/${common.out}`;
   const grafts = `${dir.replace(/\/$/, '')}/shallow`;
   if (!existsSync(grafts))
-    return set('unknown', `the store is shallow but the graft list ${grafts} is missing or unreadable, so no graft can be tested against HEAD`);
+    return set('unknown', `the store is shallow but the graft list ${grafts} is missing or unreadable, so no graft can be tested against HEAD`, null, true);
   let list;
   try { list = readFileSync(grafts, 'utf8'); }
-  catch { return set('unknown', `the store is shallow but the graft list ${grafts} could not be read, so no graft can be tested against HEAD`); }
+  catch { return set('unknown', `the store is shallow but the graft list ${grafts} could not be read, so no graft can be tested against HEAD`, null, true); }
 
   for (const line of list.split('\n')) {
     const g = line.trim();
     if (!g || g.startsWith('#')) continue;
     const r = gitProbe(['merge-base', '--is-ancestor', g, 'HEAD']);
-    if (r.rc === 0) return set('truncated', `graft ${g} lies on HEAD's own history, so this walk stops early`, g);
+    if (r.rc === 0) return set('truncated', `graft ${g} lies on HEAD's own history, so this walk stops early`, g, true);
     if (r.rc === 1) continue;               // a real answer: this graft is off HEAD's history
-    return set('unknown', `graft ${g} could not be tested against HEAD (git merge-base --is-ancestor exit ${r.rc})`, g);
+    return set('unknown', `graft ${g} could not be tested against HEAD (git merge-base --is-ancestor exit ${r.rc})`, g, true);
   }
-  return set('complete', `store-shallow, but no graft in ${grafts} lies on HEAD's history`);
+  return set('complete', `store-shallow, but no graft in ${grafts} lies on HEAD's history`, null, true);
 }
 
 // The graft shas themselves, full-length, for the diff-integrity probe. [] when the
@@ -617,7 +621,7 @@ function walkTruncation() {
 // unreadable graft list, and reporting it twice would double-count one condition.
 function graftList() {
   const w = walkTruncation();
-  if (w.state === 'complete' && w.reason === 'the store is not shallow at all') return [];
+  if (w.shallowStore === false) return [];
   const common = gitProbe(['rev-parse', '--git-common-dir']);
   if (common.rc !== 0 || !common.out) return [];
   const dir = common.out.startsWith('/') ? common.out : `${REPO}/${common.out}`;
