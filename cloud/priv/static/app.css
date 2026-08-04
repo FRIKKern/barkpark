@@ -5901,6 +5901,25 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .dom-rung--failed { color: var(--danger); background: var(--danger-soft); border-color: hsl(var(--danger-hsl) / 0.3); }
 .dom-rung--active { color: var(--info); background: var(--info-soft); border-color: hsl(var(--info-hsl) / 0.3); }
 .dom-rung--proxied { color: var(--info); background: hsl(var(--info-hsl) / 0.08); border-color: hsl(var(--info-hsl) / 0.25); }
+/* A rung the control plane ATTEMPTED and could not measure. It must not look
+   like a rung we are still waiting on (the default muted pill): amber, and a
+   DASHED border — the shape says "no reading taken", not "in flight". Same
+   warn-strong-on-warn-soft pairing .dom-note already carries (tokens only). */
+.dom-rung--unknown {
+  color: var(--warn-strong);
+  background: var(--warn-soft);
+  border-color: hsl(var(--warn-hsl) / 0.3);
+  border-style: dashed;
+}
+/* The way back from a stopped checklist: the control the 4s poll no longer is. */
+.dom-recheck {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-top: 12px;
+}
+.dom-recheck-note { font-size: var(--text-xs); color: var(--dim); }
 /* The server's remediation line — amber note, rendered verbatim (the SPA never
    invents fix text). */
 .dom-note {

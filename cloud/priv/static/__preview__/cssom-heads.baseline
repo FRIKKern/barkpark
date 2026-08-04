@@ -508,4 +508,19 @@
 # taken from the tool's own failure text: "BASELINE MISMATCH: 1286 authored rule heads,
 # sidecar baseline is 7 (+1279)". Exactly one bare integer confirmed afterwards.
 # authored rule heads 1286 == CSSOM style rules 1286, MISSES 0, PARITY PASS.
-1286
+# cch-w29 (task-1daff7bc1bf46ceb, the unmeasurable-domain-rung slice). THREE new rule
+# heads, all in the .dom-* domain-checklist block: `.dom-rung--unknown` (a rung the
+# control plane could not MEASURE had NO paint rule at all — it was pixel-identical to a
+# rung we are still waiting on), plus `.dom-recheck` / `.dom-recheck-note` (the re-check
+# footer a terminal unmeasurable rail now carries, because the 4s poll deliberately stops
+# there and left the person no way back short of a navigation). 1286 -> 1289.
+# MEASURED, NOT REASONED: cssom-parity.mjs run against the edited tree, number taken from
+# the tool's own failure text — "BASELINE MISMATCH: 1289 authored rule heads, sidecar
+# baseline is 1286 (+3)" — with `authored rule heads 1289 == CSSOM style rules 1289,
+# MISSES 0` on the same run, which is what makes this an unrecorded ADD rather than a
+# parity defect. Chrome/150.0.7871.187, node v22.22.0, app.css sha256 cae689418a3f…
+# HONEST CAVEAT: this bump was taken against origin/main + THIS slice alone. If another
+# wave-29 slice also adds a rule head, the merged total is NOT 1289 and must be
+# re-measured — never added up from two deltas (this file's own D302 lesson).
+# authored rule heads 1289 == CSSOM style rules 1289, MISSES 0, PARITY PASS.
+1289

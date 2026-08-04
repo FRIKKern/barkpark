@@ -7980,6 +7980,140 @@ test("S13: the status→role map is a CLOSED ENUM — an unrecognised status nev
   assert.equal(roll(""), "unknown");
 });
 
+// ── cch-w29: the RENDER layer of an unmeasurable rung ───────────────────────
+// cch-w28-s7 gave `unknown` its own role in the pure fold and stopped there
+// (D326 anchor discipline), so domainRungChip still fell through to the waiting
+// dot and the word "waiting". Three channels lied and the fourth was inert; the
+// one existing assertion pinned only the class, which was never broken.
+//
+// EVERY ASSERTION BELOW IS A POSITIVE STRING PIN. The pre-fix criterion was a
+// NEGATIVE ("the state word is not 'waiting'"), which the mutation state →
+// "done" satisfies while telling a screen-reader user an UNMEASURABLE rung is
+// FINISHED — a worse lie that shipped green.
+
+test("cch-w29: an unmeasurable rung's ACCESSIBLE NAME says we could not check it", () => {
+  const m = hooks.domainStages(DOMAIN_RESOLVER_FAULTED, 0);
+  const chip = hooks.domainRungChip(m.domains[0].rows[0]);
+  // The exact words a screen reader speaks. PRE-FIX: "DNS resolves — waiting".
+  assert.match(chip, /aria-label="DNS resolves — could not check"/);
+  // ABLE TO LOSE against the two known mutations, positively:
+  //   state → "waiting" (the shipped defect) and state → "done" (the mutation
+  //   the old negative criterion accepted) both break the line above.
+  assert.ok(chip.indexOf('aria-label="DNS resolves — waiting"') === -1);
+  assert.ok(chip.indexOf('aria-label="DNS resolves — done"') === -1);
+});
+
+test("cch-w29: an unmeasurable rung's GLYPH is its own — not the waiting dot, not the settled circle", () => {
+  const m = hooks.domainStages(DOMAIN_RESOLVER_FAULTED, 0);
+  const chip = hooks.domainRungChip(m.domains[0].rows[0]);
+  assert.match(chip, /<span class="dom-rung-glyph" aria-hidden="true">&#63;<\/span>/);
+  // The two glyphs it must never wear: `&middot;` (a rung we ARE waiting on)
+  // and `&#9679;` (reserved for the settled ok/proxied rungs).
+  assert.ok(chip.indexOf("&middot;") === -1);
+  assert.ok(chip.indexOf("&#9679;") === -1);
+  // The neighbouring arms keep their glyphs — this is an added arm, not a
+  // re-map (a settled rung must still read as settled).
+  const ok = hooks.domainRungChip({ label: "TLS certificate", role: "ok", evidence: "" });
+  assert.match(ok, /aria-hidden="true">&#9679;</);
+  assert.match(ok, /aria-label="TLS certificate — done"/);
+});
+
+test("cch-w29: the rungs BEHIND an unmeasurable one say 'not checked', never 'waiting'", () => {
+  // The server's own evidence for these three reads "Not checked yet — an
+  // earlier step couldn't be checked", while the chip announced "waiting" —
+  // the console promising motion on a host nothing is measuring.
+  const m = hooks.domainStages(DOMAIN_RESOLVER_FAULTED, 0);
+  const html = hooks.domainChecklistHtml(m, {});
+  assert.match(html, /aria-label="Points to this instance — not checked"/);
+  assert.match(html, /aria-label="TLS certificate — not checked"/);
+  assert.match(html, /aria-label="Serving traffic — not checked"/);
+  assert.ok(html.indexOf(" — waiting\"") === -1, "no rung on an unmeasurable host announces waiting");
+  // Containment: a genuinely-pending host (nothing unknown) KEEPS the waiting
+  // grammar — that one really is queued, and this must not become a blanket
+  // rename.
+  const pending = hooks.domainChecklistHtml(hooks.domainStages(DOMAIN_PENDING, 0), {});
+  assert.match(pending, / — waiting"/);
+});
+
+test("cch-w29: .dom-rung--unknown is PAINTED — an unmeasurable pill is not pixel-identical to a waiting one", () => {
+  const css = fs.readFileSync(new URL("./app.css", import.meta.url), "utf8");
+  const rule = css.match(/\.dom-rung--unknown\s*\{([^}]*)\}/);
+  assert.ok(rule, "app.css must carry a `.dom-rung--unknown` rule (it carried NONE — grep -c was 0)");
+  // Tokens only: a raw colour here reds design/emit-fence.test.mjs' neighbours.
+  assert.ok(!/#[0-9a-fA-F]{3,8}\b/.test(rule[1]), "the unknown rung paints from tokens, never a raw hex");
+  assert.match(rule[1], /var\(--warn/);
+  // And it differs from the default (waiting) .dom-rung base pill.
+  const base = css.match(/\n\.dom-rung\s*\{([^}]*)\}/);
+  assert.ok(base, "app.css must still carry the base `.dom-rung` rule");
+  assert.notEqual(rule[1].trim(), base[1].trim());
+});
+
+test("cch-w29: a TERMINAL unmeasurable rail offers a re-check — derived in the pure fold", () => {
+  const m = hooks.domainStages(DOMAIN_RESOLVER_FAULTED, 0);
+  assert.equal(m.terminal, true);
+  assert.equal(m.recheckable, true);
+  const html = hooks.domainChecklistHtml(m, {});
+  assert.match(html, /<button class="btn btn-sm" type="button" data-dom-recheck>Check again<\/button>/);
+  assert.match(html, /stopped updating on their own/);
+
+  // Only when the poll actually stopped for a reason a retry can fix:
+  //  - a still-issuing host is NON-terminal (the 4s poll IS the affordance)
+  const mid = hooks.domainStages(DOMAIN_PENDING, 0);
+  assert.equal(mid.recheckable, false);
+  assert.ok(hooks.domainChecklistHtml(mid, {}).indexOf("data-dom-recheck") === -1);
+  //  - a fully-settled host is terminal but has nothing left to re-ask
+  const done = hooks.domainStages(DOMAIN_FIXTURE.all_serving, 0);
+  assert.equal(done.terminal, true);
+  assert.equal(done.recheckable, false);
+  assert.ok(hooks.domainChecklistHtml(done, {}).indexOf("data-dom-recheck") === -1);
+  //  - and the EMPTY early return stays the bare rail row: a re-check over a
+  //    host with no attached domains is an affordance for nothing.
+  const empty = hooks.domainStages({ ok: true, domains: [] }, 0);
+  assert.equal(empty.empty, true);
+  assert.ok(hooks.domainChecklistHtml(empty, { custom_host: "" }).indexOf("data-dom-recheck") === -1);
+});
+
+test("cch-w29: BOTH mounts re-bind the re-check after their innerHTML paint", () => {
+  // app.js has no delegated dispatcher and both mounts repaint with
+  // `innerHTML` (which destroys listeners), so a bind that happens once at boot
+  // is a dead control. Pin that each mount queries the button AFTER its own
+  // paint and calls ITS OWN loader.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  for (const [mount, loader] of [["loadInstanceDomains", "loadInstanceDomains"], ["loadSiteDomains", "loadSiteDomains"]]) {
+    const body = src.slice(src.indexOf("function " + mount + "("));
+    const paint = body.indexOf("b.innerHTML");
+    const bind = body.indexOf('b.querySelector("[data-dom-recheck]")');
+    assert.ok(paint !== -1 && bind !== -1, mount + " must paint and then bind the re-check");
+    assert.ok(bind > paint, mount + " binds [data-dom-recheck] BEFORE its paint — innerHTML would drop it");
+    const handler = body.slice(bind, bind + 400);
+    assert.ok(handler.indexOf('addEventListener("click"') !== -1, mount + "'s re-check must be clickable");
+    assert.ok(handler.indexOf(loader + "(") !== -1, mount + "'s re-check must re-run " + loader);
+  }
+});
+
+test("cch-w29 (review): a re-check that FAILED restores its own button — never a dead 'Checking…'", () => {
+  // The click disables the button and relabels it "Checking…", and BOTH mounts
+  // return early on 404/error WITHOUT repainting. Unrestored, the only way back
+  // from a terminal unmeasurable rail sat permanently disabled announcing work
+  // nobody was doing — this epic's own defect class, one control over.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const helper = src.slice(src.indexOf("function restoreDomainRecheck("));
+  assert.ok(helper.indexOf("again.disabled = false") !== -1, "the helper must re-enable the button");
+  assert.ok(helper.indexOf('again.textContent = "Check again"') !== -1, "and restore its ORIGINAL label, not leave 'Checking…'");
+  assert.ok(helper.indexOf(".dom-recheck-note") !== -1, "and say what happened, rather than silently reverting");
+  for (const mount of ["loadInstanceDomains", "loadSiteDomains"]) {
+    const body = src.slice(src.indexOf("function " + mount + "("));
+    const bail = body.indexOf("if (!r.ok || !r.data)");
+    const paint = body.indexOf("b.innerHTML");
+    assert.ok(bail !== -1, mount + " must still bail on 404/error");
+    assert.ok(bail < paint, mount + "'s bail must precede its paint");
+    assert.ok(
+      body.slice(bail, paint).indexOf("restoreDomainRecheck(b)") !== -1,
+      mount + " returns early on 404/error without restoring the re-check it disabled",
+    );
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // S12 (azure-hetzner hosting): the Metrics tab — metricsSeries fold + the
 // string-returning SVG sparkline. Consumers NEVER compute; they render the
