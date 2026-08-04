@@ -258,20 +258,29 @@ jobs:
       #     guards — cloud/priv/static/__app.test.mjs and design/emit-fence.test.mjs
       #     — really spawn and their stdout is really matched against `guardExpect`.
       #
-      #   * NOT hermetic w.r.t. the NETWORK. One test spawns the predicate with no
-      #     `--ledger`, which `curl`s ${BP_SERVER:-https://guerrilla.barkpark.cloud}
-      #     for the live roster. Measured on a full clone: the whole suite passes
-      #     (59 tests, 59 pass at 3a32373b8 — a count that WILL drift, so run the
-      #     file rather than trust this number); re-run with
-      #     `BP_SERVER=http://127.0.0.1:1` and exactly one test reds —
-      #     `not ok 56 - wave 11: --ladder-only reaches the ladder the live refusals
-      #     never can`, `2 !== 1` at seal-predicate.test.mjs:1080 — because that
-      #     live spawn returns INFRA(2) where the assertion demands NO_SEAL(1). A
-      #     sentinel `curl` first on PATH fires exactly ONCE across the suite, in
-      #     that same test. So this step, and therefore the REQUIRED `Console gate`
-      #     that aggregates this job, is only as available as the ledger server:
-      #     read a SOLITARY red at test 56 as "the ledger was unreachable", and any
-      #     other red as a real defect.
+      #   * HERMETIC W.R.T. THE NETWORK — as of wave 30, and only w.r.t. the network.
+      #     Until then the wave-11 control spawned the predicate with no `--ledger`,
+      #     which `curl`s ${BP_SERVER:-https://guerrilla.barkpark.cloud} for the live
+      #     roster — ANONYMOUSLY, since BP_TOKEN is unset here. This step, and so the
+      #     REQUIRED `Console gate` that aggregates this job, was therefore only as
+      #     available as a host this repo does not own, and its outage surfaced as a
+      #     bare exit-code mismatch (`2 !== 1`) naming neither the network nor the
+      #     ledger. That control now stubs the roster IN SOURCE on the live branch,
+      #     and the suite makes NO network call at all: run it with a `curl` shim
+      #     first on PATH and the shim never fires, or with
+      #     `BP_SERVER=http://127.0.0.1:1` and it stays green.
+      #
+      #     THE OUTAGE RED HAS ITS OWN NAMED HOME NOW: `wave 30: a ledger this program
+      #     could not REACH is an INFRA FAULT that says so by name` drives a refusing
+      #     `curl` shim and asserts `code=LEDGER-UNREACHABLE` at exit 2, next to the
+      #     wave-29 test that pins `code=LEDGER-UNREADABLE` for an HTTP error body. So
+      #     ANY red in this step is now a real defect — none of them mean "the ledger
+      #     was unreachable". Counts and line numbers are deliberately not restated
+      #     here (the old text drifted to `59 tests` and line `1080` against a suite
+      #     that had moved on): run the file, read its own tally.
+      #
+      #     STILL NOT HERMETIC W.R.T. GIT. The suite passes `--repo <repo root>` and
+      #     the predicate reads real history through it — see the depth-1 note above.
       #
       # It passes `--repo <the real repo root>`, which is why the console path
       # set reaches .github/workflows/cloud.yml, design/emit-fence.test.mjs and

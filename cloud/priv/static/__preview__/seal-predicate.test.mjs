@@ -1083,11 +1083,56 @@ test('wave 11: --ladder-only does NOT swallow an INFRA FAULT into a clean read',
   assert.doesNotMatch(out, /MEASURED-ELSEWHERE/);
 });
 
+// ── THE LIVE ROSTER, STUBBED IN SOURCE ──────────────────────────────────────
+// Until wave 30 the control below was the ONE test in this whole file that reached
+// the NETWORK: `run(['--repo', REPO, '--successor', 'TERMINAL'])` fetched the live
+// roster of this epic from ${BP_SERVER:-https://guerrilla.barkpark.cloud}, and
+// ANONYMOUSLY — `Authorization: Bearer undefined`, since BP_TOKEN is unset in CI. So
+// the REQUIRED `Console gate` context, which aggregates this suite, was green only
+// while a host this repo does not own was up AND served this epic's roster to an
+// unauthenticated caller. With the network dead the suite read `pass 73 / fail 1` and
+// the sole red was `not ok 56` saying `2 !== 1` — an exit-code mismatch naming
+// neither guerrilla, nor the network, nor the ledger.
+//
+// AND IT WAS SELF-TERMINATING INDEPENDENT OF AVAILABILITY: this test passes only while
+// the foreign roster still HOLDS residue. The day this epic seals, the TERMINAL claim
+// stops being refuted, the run walks on to bucket (c)'s gate fetches and exits 2 — a
+// red on a healthy network with a healthy predicate.
+//
+// `--ledger` IS NOT THE FIX. `mode=${fixture ? 'fixture' : 'live'}` rides only the
+// LADDER-ONLY and SEAL/NO-SEAL tokens; the REFUSED token carries no `mode=` field at
+// all, so a fixture-backed run here would be BYTE-INDISTINGUISHABLE from a live one
+// while taking the other branch — and this test's entire stated point is a claim ABOUT
+// the live path. The roster is therefore stubbed IN SOURCE with `fixture` still null,
+// exactly as `emptyLiveRoster` above does. One open row plus one done row is the
+// smallest population that refutes a TERMINAL claim on the live branch: the open row
+// is the residue, the done row proves the refusal counted a population rather than a
+// constant.
+//
+// HERMETIC HERE SCOPES TO THE NETWORK AND NOTHING WIDER. This run still reads real git
+// history through `--repo REPO` (filed as cch-w28-followup-seal-suite-depth1-coupling).
+const stubbedLiveRoster = (src) => {
+  const from = 'const children = fixture ? fixture.children : fetchRoster(EPIC);';
+  // ASSERTED PRESENT BEFORE IT IS REPLACED. `String.prototype.replace` on an anchor that
+  // has drifted is a SILENT no-op, and `mutatedRun`'s own `assert.notEqual(out, src)`
+  // only proves SOMETHING changed — which the day this line is reworded would leave the
+  // test back on the network with nothing saying so.
+  assert.ok(src.includes(from), `mutation anchor has drifted out of the predicate: ${from}`);
+  return src.replace(from,
+    'const children = fixture ? fixture.children : ['
+    + '{ _id: "stub-open-row", lifecycle_status: "open", parent_id: EPIC }, '
+    + '{ _id: "stub-done-row", lifecycle_status: "done", parent_id: EPIC }];');
+};
+
 test('wave 11: --ladder-only reaches the ladder the live refusals never can', () => {
   // The control. The SAME tree, minus the flag, refuses upstream of the ladder and
-  // reports every clause UNEVALUATED. That contrast IS this slice.
-  const refused = run(['--repo', REPO, '--successor', 'TERMINAL']);
+  // reports every clause UNEVALUATED. That contrast IS this slice. The roster is
+  // stubbed in source (see above) so the refusal is driven on the LIVE branch without
+  // a network call.
+  const refused = mutatedRun(stubbedLiveRoster, ['--repo', REPO, '--successor', 'TERMINAL']);
   assert.equal(refused.status, NO_SEAL);
+  assert.match(refused.out, /1 live row\(s\) \[stub-open-row\]/,
+    'the refusal must have counted the STUBBED live roster — that is what proves the live branch ran');
   assert.match(token(refused.out),
     /REFUSED reason=TERMINAL-CLAIM-REFUTED a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
   assert.doesNotMatch(refused.out, /CLAUSE \(b\)/,
@@ -1687,4 +1732,34 @@ test('wave 29: a curl failure NAMES the HTTP status and the request_id it had al
   assert.match(token(out), /code=LEDGER-UNREADABLE/);
   assert.doesNotMatch(out, /unexpected TypeError/,
     'the pre-fix shape: a bare TypeError naming neither the status nor the request_id');
+});
+
+test('wave 30: a ledger this program could not REACH is an INFRA FAULT that says so by name', () => {
+  // THE OUTAGE RED, ASSERTED FOR THE FIRST TIME. Before this test `LEDGER-UNREACHABLE`
+  // appeared nowhere in this file: the behaviour was exercised only as a side effect of
+  // the wave-11 control's live spawn, and it surfaced as `not ok 56 … 2 !== 1` — a bare
+  // exit-code mismatch naming neither the network nor the ledger, which is exactly the
+  // shape of red a human cannot triage. Now that the control is hermetic, this is where
+  // an unreachable ledger is measured, and it is measured on purpose.
+  //
+  // A `curl` that cannot connect exits non-zero WITHOUT a body, so there is no HTTP
+  // status to name — that is what separates UNREACHABLE from the 403's UNREADABLE above.
+  // Exit 7 is curl's own "failed to connect to host"; any non-zero reproduces the arm.
+  const shimDir = tmp('seal-pred-curl-dead-');
+  writeFileSync(join(shimDir, 'curl'), '#!/bin/sh\nexit 7\n');
+  spawnSync('chmod', ['+x', join(shimDir, 'curl')]);
+  const r = spawnSync('node', [PREDICATE, '--repo', REPO, '--successor', 'TERMINAL'],
+    { encoding: 'utf8', timeout: 120000, env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}` } });
+  const out = `${r.stdout}${r.stderr}`;
+  // THE CODE AND THE EXIT STATUS, NEVER THE DIAGNOSTIC SENTENCE. `curl failed: …` is
+  // truncated at 90 chars and cuts off mid-flag, so its bytes are a moving target;
+  // the token's `code=` field and the exit code are the contract.
+  assert.equal(r.status, INFRA, 'an unreachable ledger is an infra fault, never a verdict');
+  assert.match(token(out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ .*code=LEDGER-UNREACHABLE/);
+  assert.match(out, /INFRA FAULT at /);
+  assert.doesNotMatch(token(out), /code=LEDGER-UNREADABLE/,
+    'a ledger that never answered must not be reported as one that answered unreadably');
+  assert.doesNotMatch(out, /VERDICT: SEAL/, 'nothing may be sealed off a roster that was never fetched');
+  assert.doesNotMatch(token(out), /\ba=(PASS|FAIL)\b/,
+    'no clause letter may be asserted off a read that did not happen');
 });
