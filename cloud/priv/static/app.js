@@ -10318,8 +10318,18 @@
   //
   // A cancelled row with nothing to say is NOT a refusal — silence stays
   // correct there (an operator-cancelled build invents no copy).
+  //
+  // AND `detail` ALONE IS NOT A REFUSAL EITHER (review). The OTHER writer of a
+  // cancelled row — Registry.cancel_preview/2, which supersedes an in-flight
+  // preview — changes `status` and `console` and touches NEITHER
+  // `failure_reason` NOR `detail`, so the row keeps whatever stage caption
+  // Sites.Deploy last wrote: "Uploading bundle", or on a cancelled live row
+  // "live at https://…". Keying on `detail` would paint those in the amber
+  // failure panel as if a decision had been explained — a stage caption
+  // re-cast as a reason, which is the defect class this slice exists to close,
+  // one row over. `failure_reason` is written on the refusal path ONLY.
   function deployIsRefusal(d, st) {
-    return (st || "") === "cancelled" && !!(d && (d.failure_reason || d.detail));
+    return (st || "") === "cancelled" && !!(d && d.failure_reason);
   }
 
   // The ONE sentence a refused row speaks. Both server channels carry the same

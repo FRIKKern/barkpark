@@ -11770,8 +11770,22 @@ test("cch-w28-bl: the fixture's refusal copy IS the server's @refusal_detail (dr
 
 test("cch-w28-bl: deployIsRefusal — cancelled WITH copy, never cancelled alone, never a live/failed row", () => {
   assert.equal(hooks.deployIsRefusal(refusedRow(), "cancelled"), true);
-  assert.equal(hooks.deployIsRefusal(refusedRow({ failure_reason: null }), "cancelled"), true, "detail alone still speaks");
   assert.equal(hooks.deployIsRefusal({ status: "cancelled" }, "cancelled"), false, "nothing to say is not a refusal");
+  // REVIEW ADJUDICATION — `detail` ALONE IS NOT A REFUSAL. The other writer of
+  // a cancelled row, Registry.cancel_preview/2, changes only status + console:
+  // the row keeps whatever stage caption Sites.Deploy last wrote. Painting that
+  // in the amber panel would re-cast a progress line as an explained decision —
+  // and on a cancelled LIVE row it would read "live at https://…" inside a
+  // failure panel. `failure_reason` is written on the refusal path only.
+  assert.equal(
+    hooks.deployIsRefusal(refusedRow({ failure_reason: null, detail: "Uploading bundle" }), "cancelled"),
+    false, "a superseded preview's stale stage caption is not a refusal");
+  assert.equal(
+    hooks.deployIsRefusal(refusedRow({ failure_reason: null, detail: "live at https://p.acme.dev" }), "cancelled"),
+    false, "…and a cancelled LIVE row's caption is not a failure reason");
+  const stale = hooks.deployRow(refusedRow({ failure_reason: null, detail: "Uploading bundle" }), null);
+  assert.doesNotMatch(stale, /deploy-fail/, "no amber panel over a stage caption");
+  assert.doesNotMatch(stale, /Uploading bundle/, "and the caption is not promoted into the row");
   assert.equal(hooks.deployIsRefusal(refusedRow({ status: "failed" }), "failed"), false, "a crash is not a refusal");
   assert.equal(hooks.deployIsRefusal(refusedRow({ status: "live" }), "live"), false);
   // One voice: both channels carry identical bytes, so the copy is picked once.
@@ -11814,10 +11828,14 @@ test("cch-w28-bl: deployDetailHtml — the terminal gate stops swallowing a refu
   assert.match(twoVoiceRow, /uploaded 3 days ago/);
   // Duplicate channels (what refuse/1 writes TODAY) → the panel already spoke.
   assert.equal(hooks.deployDetailHtml(refusedRow(), "cancelled"), "", "no double-print");
+  // REVIEW ADJUDICATION (see deployIsRefusal): a cancelled row carrying ONLY a
+  // detail is not a refusal — Registry.cancel_preview/2 leaves a stale stage
+  // caption behind on every superseded preview, and neither channel should
+  // promote it. Both the caption AND the panel stay silent.
   assert.equal(hooks.deployDetailHtml(refusedRow({ failure_reason: null }), "cancelled"), "",
-    "detail-only: the panel carries it, so the caption stays quiet");
-  assert.match(hooks.deployRow(refusedRow({ failure_reason: null }), null), /bp cloud site deploy/,
-    "…and the remedy still reaches the person through the panel");
+    "detail-only: not a refusal, so the caption stays quiet");
+  assert.doesNotMatch(hooks.deployRow(refusedRow({ failure_reason: null }), null), /deploy-fail/,
+    "…and no panel is invented for a row the server never gave a reason");
   // A cancelled row with nothing to say still says nothing.
   assert.equal(hooks.deployDetailHtml({ status: "cancelled" }, "cancelled"), "");
   // A crash's terminal detail is unchanged (failed rows speak through the panel).
