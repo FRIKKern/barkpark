@@ -43,7 +43,11 @@ defmodule BarkparkCloud.Notifications.SafeUrlTest do
     end
   end
 
-  describe "check/1 allows legitimate public provider URLs" do
+  # Named for what it covers now: the resolve-then-check path in BOTH directions
+  # (a public hostname passes, a rebinding hostname does not) plus the IP-literal
+  # short-circuit. The old name said "allows legitimate public provider URLs",
+  # which stopped being true the moment the seam let this file assert a refusal.
+  describe "the resolve-then-check path" do
     # These drive the HOSTNAME path (resolve-then-check) through the `:resolver`
     # seam instead of real DNS. Asking discord.com and hooks.slack.com for their
     # A records made a merge-blocking CI context depend on a third party's
