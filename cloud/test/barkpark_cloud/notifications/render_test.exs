@@ -63,7 +63,15 @@ defmodule BarkparkCloud.Notifications.RenderTest do
       assert title == "Provisioning failed"
       assert severity == :error
       assert body =~ "Provisioning failed for acme."
-      assert body =~ "Hetzner ran out of server capacity for this size."
+      # PINNED BY DERIVATION, NOT BY LITERAL (review, cross-slice). The capacity
+      # arm's sentence is being narrowed in the same wave — `humanize/1` is the
+      # authority on its exact bytes, and quoting them here would red this file
+      # the moment the sibling slice lands. What this leg owes is that the CLASS
+      # reached chat and the raw provider jargon did not; both survive any
+      # rewording of the arm.
+      assert body =~ "capacity"
+      refute body =~ "SERVER_LIMIT_EXCEEDED"
+      refute body =~ "CreateWithFallback"
       assert body == "Provisioning failed for acme.\n\n#{FailureCopy.humanize(@provision_reason)}"
     end
 
