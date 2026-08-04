@@ -1230,6 +1230,97 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-04 — wave 29 REVIEW — 8/8 round-1 slices built, gated, reviewed, PUSHED and PR'd. Grade A
+
+**THE DISCRIMINATION IS FINISHED.** `cch-w28-s2` round 2 replaced the single ancestry `try/catch` with
+FIVE probes read separately — REF, OBJECT, WALK (ported from `scripts/pds-record-parity.sh:261
+walk_truncation()`, that file untouched), ANCESTRY, and a fifth nobody named: DIFF INTEGRITY, because a
+graft boundary has no parent and `git show --name-only` renders the whole tree as additions (measured
+7535 paths vs a real 5), which would have fixed the false FAIL and left a **false PASS** standing in its
+place. The exit contract was NOT re-opened (D335): the VERDICT path emits `b=HISTORY-UNAVAILABLE` at
+exit 1 with (a) and (c) still evaluated and printed; the READ path keeps **exit 0** and carries the
+condition in LETTERS (`b-unavailable=N/M`, immediately after `b-clean=`). Re-proved by the reviewer in a
+pristine `git clone --depth 1 --branch main`: token `b-clean=0/6 b-unavailable=6/6`, rc 0, and
+`grep -c "is not an ancestor of origin/main"` = **0** — the six verbatim false sentences wave 28
+measured are gone. Suite 74/74 in the worktree AND in that clone.
+
+**THE FOUR-CONTEXT MERGE LANE WAS RE-DERIVED, NOT TRUSTED.** `gh api .../branches/main/protection`
+returns exactly `["Elixir gate","PR references an active task","Cloud gate","Console gate"]` with
+`enforce_admins.enabled true`, `strict false`. Console gate and Cloud gate BLOCK. Nothing under
+`.github/` was touched by any slice; `required-checks.json` is byte-unchanged and the drift stays closed.
+
+**AND THE FIRST BLOCKING GATE THAT ASKED A THIRD PARTY FOR PERMISSION TO MERGE STOPPED ASKING.**
+`safe_url_test.exs` drove `SafeUrl.check/1` at discord.com and hooks.slack.com over real DNS; found by
+crippling the resolver, not by grep. `check/2` gains an optional `:resolver` (default `&:inet.getaddrs/2`,
+so every production caller is byte-identical) and the hostname leg runs on a fixture. Green 10/0 under
+`ERL_INETRC {lookup,[file]}`. The seam is an affordance nothing guards in production — filed as
+`cch-w29-bl-safe-url-resolver-seam-unguarded`, NOT left as a sentence.
+
+**SHIPPED (final branch = the `-r` branch in every row; the lead merges, and closes each row's
+merge-gated criterion on merge):**
+
+| Slice | Final branch | PR |
+|---|---|---|
+| `cch-w28-s2-history-unavailable-discrimination` | `…the-seal-predicate-tells-i-could-not-loo-0-r` | #9455 |
+| `cch-w29-s2-cloud-gate-stops-resolving-discord-com` | `…a-merge-blocking-gate-stops-asking-disco-1-r` | #9458 |
+| `cch-w29-s3-overflow-guard-cue-predicate-is-blind-to-overflow` | `…the-overflow-guard-certifies-0-identitie-2-r` | #9459 |
+| `task-1daff7bc1bf46ceb` (domain rung + re-check) | `…an-unmeasurable-domain-rung-stops-tellin-3-r` | #9460 |
+| `cch-w28-bl-usage-meters-say-unmetered-…` | `…a-usage-meter-that-crashed-stops-reading-4-r` | #9461 |
+| `cch-w28-bl-auto-deploy-refusal-has-no-event-at-all` | `…a-publish-that-was-refused-stops-renderi-5-r` | #9462 |
+| `cch-w26-bl-deployment-failed-email-still-unhumanized` | `…one-failure-two-stories-the-email-reader-6-r` | #9463 |
+| `cch-w28-bl-capacity-arm-blames-hetzner-for-azure` | `…the-capacity-arm-names-one-provider-and--7-r` | #9464 |
+
+**THE RATIO HELD AT FIVE PERSON-FACING ROWS**, not four: a crashed usage meter reading as the product's
+own words for a deliberate non-measurement; a refused publish rendering as a bare "Cancelled" pill while
+the console already held the `--prebuilt` remedy and threw it away at three sites; an unmeasurable DNS
+rung announcing "waiting" to a screen reader on a host nothing was measuring; a chat alert telling the
+same person a cause-free story the inbox had already explained; and a capacity arm naming a provider AND
+a resource its own bare-substring predicate can tell neither of.
+
+**REVIEWER FIXES, all in place, all gate-proven, none a redesign.** (1) `graftList()` matched
+`walkTruncation().reason` against a literal sentence — a control path coupled to prose; it reads a
+`shallowStore` boolean now. (2) **The overflow guard's cue predicate reads the X AXIS, not the
+shorthand.** `overflow-x: visible; overflow-y: clip` is a legal pair the spec does not blockify, so it
+serialises as `"visible clip"`; probed both ways with a 101-char email and an ancestor clip, the shipped
+shorthand test printed `OVERFLOW GUARD PASS` with **ZERO** name findings over **469px** of a spilled
+identity (rc 0), while the axis test reds at 22 findings. That is clause 5 of the standing test firing
+inside the fix for clause 5. (3) A domain re-check that FAILED restored nothing — both mounts bail on
+404/error without repainting, so the only way back sat disabled reading "Checking…" forever;
+mutation-proven 803/1 → 804/0. (4) **A stale stage caption is not a refusal**: `Registry.cancel_preview/2`
+changes only `status` + `console`, so a superseded preview keeps "Uploading bundle" — or, on a cancelled
+live row, "live at https://…" — and the shipped `detail`-keyed predicate would have painted it inside the
+amber FAILURE panel. Keyed on `failure_reason` now; the detail-only test legs adjudicated, not deleted.
+(5) The Overview strip's `"?"` carries a sentence (`title` + `aria-label`), not a bare glyph.
+(6) `event_email.ex`'s claim that "`Render.render/2` never reads it" became false in this very wave —
+corrected in place, which closes `cch-w29-bl-event-email-scrub-comment-stale`. (7) `cloud/DESIGN.md`
+stopped quoting the retired capacity literal as the shipped sentence.
+
+**ONE CROSS-SLICE LANDMINE CAUGHT AND DEFUSED:** `render_test.exs` quoted `"Hetzner ran out of server
+capacity for this size."` while the capacity-arm slice retires that literal IN THE SAME WAVE — green
+apart, **red together**. The leg now pins the class by derivation (`humanize/1` owns its bytes) and
+asserts what it actually owes. Proved by an actual merge of the two `-r` branches: **158/0**. The three
+app.js slices were merged the same way: **814/0**, smoke 102, `cssom-parity` PARITY PASS at the bumped
+baseline **1289**, `__css_check` 0 errors.
+
+**LEDGER:** all 8 slice tasks published, claimed, criteria stamped as the builders worked, only the
+merge-gated row open on each — the reviewer re-pulsed every one with its FINAL branch and PR, because
+every now-line named the pre-review branch. Four discovered-not-taken rows were filed by builders
+(`cch-w29-bl-cli-usage-shows-crashed-vs-unmetered`, `cch-w29-bl-refused-auto-deploy-emits-no-event`,
+`cch-w29-bl-event-email-scrub-comment-stale`, `task-79aa75e4be7a0067`) and one by the reviewer. No task
+outside this wave was touched.
+
+**WHAT THE NEXT WAVE MUST KNOW.** (i) `.preview-url` is DONE and must not be rebuilt (wave 28's smoke
+killed it; #9357's `.deploy-ref { overflow-wrap: anywhere }` covers it by inheritance). (ii) The D307
+guard's promotion — the `surface` ENUM plus the BACKFILL of open rows — is still the unpaid half, and
+the scoping leg is a DESIGN BOUNDARY (46 tests / 1 failure on deletion, not the 23 the criterion
+predicted), never load-bearing. (iii) `cch-w22-s7`'s remainder is still adjudicated-against-origin/main
+rather than rebuilt. (iv) The seal predicate's `NO-MERGE-BASE` corroborator rests on ONE measured
+corroboration — a genuinely disjoint history degrades to HISTORY-UNAVAILABLE rather than an honest
+"not an ancestor". Fail-closed, but a behavioural claim, and the flip-risk row of this wave: an
+INDEPENDENT second reviewer is warranted on #9455 before merge. (v) Nobody has clicked the domain
+re-check in a browser; its guard reads bytes, not behaviour.
+
+
 ### 2026-08-03 — wave 28 REVIEW — 7/7 round-1 slices built, gated, reviewed, PUSHED and PR'd. Grade A−
 
 **THE ENVIRONMENT QUESTION WAS DECIDED AND #9356 IS GREEN WITHOUT WEAKENING WHAT WAS RED.** Option (b),
