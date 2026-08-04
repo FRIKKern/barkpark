@@ -12322,9 +12322,21 @@ function elixirSourceFiles(dir) {
 // module-qualified `Notifications.dispatch_event(...)` form and would have
 // reported four confident FALSE orphans. Backticked lines are prose (e.g.
 // health/staleness_worker.ex's moduledoc quotes its own call).
+//
+// REVIEW FIX (wave 30): the exclusion is NAMED, not a blanket `^\s*defp?`. A
+// blanket def-rejection was measured blind to Elixir's most common function
+// shape — `def notify(team), do: dispatch_event(team, :quota_exceeded, %{})` —
+// and cloud/lib carries 805 one-line `def …, do:` forms, so the idiom is live,
+// not hypothetical. Mutation-proved both ways: that exact one-liner passed BOTH
+// arms under the blanket rule (a producer the census cannot see) and reds arm
+// (b) under this one. The blanket rule was worse than a miss — paired with a
+// console row it would have reported a confident FALSE ORPHAN for a producer
+// that exists. Only a definition OF one of the four idioms is skipped.
+const NOTIF_IDIOM_NAMES = "dispatch_event|dispatch_site_event|dispatch_barkpark_event|enqueue_channel";
 function isProducerLine(line) {
   if (/^\s*#/.test(line)) return false;
-  if (/^\s*(defp?|@spec|@doc)\b/.test(line)) return false;
+  if (/^\s*(@spec|@doc)\b/.test(line)) return false;
+  if (new RegExp(`^\\s*defp?\\s+(${NOTIF_IDIOM_NAMES})\\b`).test(line)) return false;
   if (line.includes("`")) return false;
   return true;
 }
@@ -12433,8 +12445,19 @@ test("cch-w30-s1 census: the string-shaped `test` counts, and billing.ex's decoy
   const all = [...sites.values()].flat();
   assert.deepEqual(all.filter((s) => s.includes("billing.ex")), [],
     "billing.ex's same-named private helper is a decoy, not a notification producer");
-  assert.deepEqual(all.filter((s) => s.endsWith("notifications.ex:875")), [],
-    "the enqueue_channel DEFINITION is not a call site");
+  // The definition line is DERIVED, never a hardcoded `notifications.ex:875`.
+  // A pinned ordinal decays in the SILENT direction: the file shifts, the pin
+  // stops naming the definition, and the assertion passes while measuring
+  // nothing. Locating the definition first means this stays a real question.
+  const notifSrc = fs.readFileSync(path.join(CLOUD_LIB_DIR, "barkpark_cloud/notifications.ex"), "utf8");
+  const defLines = notifSrc.split("\n")
+    .map((line, i) => (new RegExp(`^\\s*defp?\\s+(${NOTIF_IDIOM_NAMES})\\b`).test(line) ? i + 1 : 0))
+    .filter(Boolean);
+  assert.ok(defLines.length >= 1, "notifications.ex must still DEFINE at least one dispatch idiom");
+  for (const ln of defLines) {
+    assert.deepEqual(all.filter((s) => s === `cloud/lib/barkpark_cloud/notifications.ex:${ln}`), [],
+      `notifications.ex:${ln} DEFINES an idiom — a definition is not a call site`);
+  }
 });
 
 // ── email section + page composition (GR33 plain-member law) ─────────────────

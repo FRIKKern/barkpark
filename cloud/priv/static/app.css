@@ -2378,8 +2378,11 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
   font-size: var(--text-xs);
   border-bottom: 1px solid var(--border);
 }
-/* The final row (the always-send "test" label + its spanning cell) sits on the
-   card's own bottom edge, so it drops its hairline to avoid a double border. */
+/* The final row (the LAST always-send label + its spanning cell) sits on the
+   card's own bottom edge, so it drops its hairline to avoid a double border.
+   There are now TWO always-send rows ("Test", then "Trial ending" — wave 30
+   S1), and `-n + 2` is still exactly right: only the bottom one loses its
+   hairline, and the one above keeps the separator it should have. */
 .set-matrix-grid > *:nth-last-child(-n + 2) { border-bottom: none; }
 .set-matrix-legend { font-size: var(--text-xs); margin-top: var(--space-2); }
 .set-matrix-ack { font-size: var(--text-sm); margin-top: var(--space-2); min-height: 1em; }
