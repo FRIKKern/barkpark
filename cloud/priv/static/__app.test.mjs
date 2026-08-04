@@ -8091,6 +8091,29 @@ test("cch-w29: BOTH mounts re-bind the re-check after their innerHTML paint", ()
   }
 });
 
+test("cch-w29 (review): a re-check that FAILED restores its own button — never a dead 'Checking…'", () => {
+  // The click disables the button and relabels it "Checking…", and BOTH mounts
+  // return early on 404/error WITHOUT repainting. Unrestored, the only way back
+  // from a terminal unmeasurable rail sat permanently disabled announcing work
+  // nobody was doing — this epic's own defect class, one control over.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const helper = src.slice(src.indexOf("function restoreDomainRecheck("));
+  assert.ok(helper.indexOf("again.disabled = false") !== -1, "the helper must re-enable the button");
+  assert.ok(helper.indexOf('again.textContent = "Check again"') !== -1, "and restore its ORIGINAL label, not leave 'Checking…'");
+  assert.ok(helper.indexOf(".dom-recheck-note") !== -1, "and say what happened, rather than silently reverting");
+  for (const mount of ["loadInstanceDomains", "loadSiteDomains"]) {
+    const body = src.slice(src.indexOf("function " + mount + "("));
+    const bail = body.indexOf("if (!r.ok || !r.data)");
+    const paint = body.indexOf("b.innerHTML");
+    assert.ok(bail !== -1, mount + " must still bail on 404/error");
+    assert.ok(bail < paint, mount + "'s bail must precede its paint");
+    assert.ok(
+      body.slice(bail, paint).indexOf("restoreDomainRecheck(b)") !== -1,
+      mount + " returns early on 404/error without restoring the re-check it disabled",
+    );
+  }
+});
+
 // ─────────────────────────────────────────────────────────────────────────────
 // S12 (azure-hetzner hosting): the Metrics tab — metricsSeries fold + the
 // string-returning SVG sparkline. Consumers NEVER compute; they render the

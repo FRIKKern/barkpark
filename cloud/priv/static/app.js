@@ -9706,6 +9706,20 @@
   var domainSeq = 0;
   var domainPollTimer = null;
 
+  // A re-check that did not come back must not eat its own control. Both mounts
+  // return early on 404/error WITHOUT repainting, so the button they disabled on
+  // click stays disabled reading "Checking…" — a control announcing work nobody
+  // is doing, on the exact rail this slice exists to make honest. Restores the
+  // button and swaps the note for what actually happened.
+  function restoreDomainRecheck(b) {
+    var again = b && b.querySelector && b.querySelector("[data-dom-recheck]");
+    if (!again) return;
+    again.disabled = false;
+    again.textContent = "Check again";
+    var note = b.querySelector(".dom-recheck-note");
+    if (note) note.textContent = "That re-check didn’t go through — nothing above has changed.";
+  }
+
   // The thin DOM mount: fetch the checklist, paint it, and poll every 4s (the
   // /new idiom) while any rung is still pending/active. A 404 (route not
   // deployed yet) / error / non-live box keeps the static Domain rail row —
@@ -9720,7 +9734,12 @@
       if (seq !== domainSeq) return; // a newer load owns the slot
       var b = $("#instance-domains");
       if (!b) return;
-      if (!r.ok || !r.data) return; // keep the static Domain row on 404/error
+      // Keep the static Domain row on 404/error — but NOT a dead button. The
+      // re-check disables itself and reads "Checking…" on click, and this early
+      // return paints nothing, so a failed re-check used to leave the only way
+      // back permanently disabled announcing work nobody is doing. Restore it
+      // and say what happened, which is the same rule the rung below obeys.
+      if (!r.ok || !r.data) { restoreDomainRecheck(b); return; }
       var model = domainStages(r.data, Date.now());
       b.innerHTML = domainChecklistHtml(model, bp);
       // innerHTML destroys listeners and app.js has no delegated dispatcher, so
@@ -9761,7 +9780,9 @@
       if (seq !== domainSeq) return; // a newer load owns the slot
       var b = $("#site-domains");
       if (!b) return;
-      if (!r.ok || !r.data) return; // leave the section empty on 404/error
+      // Same rule as loadInstanceDomains: leave the section as it stands on
+      // 404/error, but never leave a re-check stuck saying "Checking…".
+      if (!r.ok || !r.data) { restoreDomainRecheck(b); return; }
       var model = domainStages(r.data, Date.now());
       if (model.empty) { b.innerHTML = ""; return; }
       b.innerHTML = '<div class="deploys-head"><h2>Domains</h2></div>' +
