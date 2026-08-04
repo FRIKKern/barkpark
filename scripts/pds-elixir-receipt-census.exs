@@ -6595,7 +6595,7 @@ defmodule PDS.Census do
         "FAIL  D448-DRIFT-REFUSES",
         "unrouted baseline 24 derived 23",
         "RE-DERIVE, never re-type",
-        "unrouted       recorded   24  derived   23  DRIFT"
+        "unrouted       baseline   24  derived   23  DRIFT"
       ],
       proves: "a population row that no longer descends from the tree EXITS 1 by name instead of printing DRIFT at exit 0 forever — the four-wave-old advisory block, armed. The mutation perturbs the RECORDED side, which is the only side a selftest can move without touching api/lib"
     },
@@ -6609,7 +6609,7 @@ defmodule PDS.Census do
       # identical drift prints at exit 0, which is exactly what this file did until wave 47.
       mut: {"++ baseline_checks(drift_rows, " <> "classified)", "++ []"},
       exit: 0,
-      expect: ["CENSUS OK", "recorded  104  derived  104  =="],
+      expect: ["CENSUS OK", "baseline  104  derived  104  =="],
       refute: ["D448-DRIFT-REFUSES"],
       proves: "with the arm removed the census returns to its pre-wave-47 behaviour — green, with the block still printing — so the red above is produced by this arm and not by a neighbouring check the mutation happened to disturb"
     }
@@ -7231,7 +7231,7 @@ defmodule PDS.Census do
     p("  `transaction` NOT a write verb · engine printed above · re-derive with")
     p("  `elixir scripts/pds-elixir-receipt-census.exs` from the repo root and amend")
     p("  @rederived WITH the lens and the engine in the same commit (PDS-D448a, PDS-D678).")
-    p("  #{length(rederived_rows())} row(s) re-derived at wave 47, #{8 - length(rederived_rows())} inherited from PDS-D448's wave-33 figures.")
+    p("  #{length(rederived_rows())} row(s) re-derived at wave 47, #{map_size(@rederived) - length(rederived_rows())} inherited from PDS-D448's wave-33 figures.")
     p("")
     Enum.each(drift_rows, fn {label, got, key} -> drift(label, got, key) end)
     p("")
@@ -7732,7 +7732,10 @@ defmodule PDS.Census do
   defp drift(label, got, key) do
     want = @rederived[key]
     tag = if got == want, do: "==", else: "DRIFT"
-    p("  #{String.pad_trailing(label, 14)} recorded #{String.pad_leading(to_string(want), 4)}  derived #{String.pad_leading(to_string(got), 4)}  #{tag}")
+    # `baseline`, NEVER `recorded`: `recorded` is @recorded — PDS-D448's wave-33 figures, which
+    # `row/4` below still quotes by that name. This block compares against @rederived, and one
+    # word naming two different constants in one output is the pointer defect this epic files.
+    p("  #{String.pad_trailing(label, 14)} baseline #{String.pad_leading(to_string(want), 4)}  derived #{String.pad_leading(to_string(got), 4)}  #{tag}")
   end
 
   # WHICH ROWS WAVE 47 RE-DERIVED, DERIVED — never a sentence saying "five". The split is
