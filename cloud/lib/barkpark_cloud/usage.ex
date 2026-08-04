@@ -148,6 +148,12 @@ defmodule BarkparkCloud.Usage do
 
   @unmetered "unmetered"
 
+  # The typed reasons a meter read can FAIL — the vocabulary `within_deadline/2`
+  # and the fan-outs already mint, carried through to the surfaces instead of
+  # being flattened into the deliberate "not metered" state. Anything outside
+  # this set normalises to "unknown" (never a raw internal atom on the wire).
+  @unavailable_reasons ~w(exception deadline_exceeded unreachable bad_shape too_many_datasets)
+
   # The trailing window `history/2` reads — matches the sampler's 14-day
   # `usage_samples` retention (AgentRetentionWorker prune), so the sparkline is
   # never asking for rows that were pruned away.
@@ -201,13 +207,47 @@ defmodule BarkparkCloud.Usage do
 
   # ── Meter builders ──────────────────────────────────────────────────────────
 
-  # An instance inventory count: a landed `{:ok, n}` is the number; a failure,
-  # an explicit `:unmetered`, or an absent input all degrade to "unmetered" with
-  # the source still named (never a fake zero on an unreachable box).
+  # An instance inventory count. A landed `{:ok, n}` is the number; everything
+  # else degrades to "unmetered" with the source still named (never a fake zero
+  # on an unreachable box) — but NOT into one identical map, because the inputs
+  # mean two OPPOSITE things:
+  #
+  #   * `:unmetered` / an absent input — nobody attempted a read (the box is not
+  #     live, or carries no admin token). "Not yet metered" is the honest word.
+  #   * `{:error, reason}` / a shape we cannot trust — the read WAS attempted and
+  #     it FAILED. `within_deadline/2` already mints `{:error, :exception}` for a
+  #     real raise, distinct from `{:error, :deadline_exceeded}`; the fan-outs add
+  #     `:unreachable`, `:bad_shape`, `:too_many_datasets`. This clause used to
+  #     throw all of that away, so a CRASHED meter rendered in the product's own
+  #     words for a DELIBERATE non-measurement. The typed reason now rides along
+  #     as `:unavailable_reason` so every surface can say "we could not measure
+  #     this" instead.
+  #
+  # `:unavailable_reason` is a CONDITIONAL key (the `seats` meter's
+  # `:pending_invitations` precedent): a meter that measured fine, or one that is
+  # deliberately unmetered, does not carry it at all.
   defp instance_meter({:ok, n}, source) when is_integer(n) and n >= 0,
     do: meter(n, source, nil)
 
-  defp instance_meter(_other, source), do: meter(@unmetered, source, nil)
+  defp instance_meter(:unmetered, source), do: meter(@unmetered, source, nil)
+  defp instance_meter(nil, source), do: meter(@unmetered, source, nil)
+  defp instance_meter({:error, reason}, source), do: unavailable_meter(source, reason)
+  defp instance_meter(_other, source), do: unavailable_meter(source, :bad_shape)
+
+  # A meter whose read was attempted and failed: value still degrades to
+  # "unmetered" (never a fake zero) with the TYPED reason attached. The reason is
+  # normalised to a known string so the envelope can never leak an arbitrary
+  # internal atom to the browser — an unrecognised one is honestly "unknown".
+  defp unavailable_meter(source, reason) do
+    Map.put(meter(@unmetered, source, nil), :unavailable_reason, unavailable_reason(reason))
+  end
+
+  defp unavailable_reason(reason) when is_atom(reason) do
+    name = Atom.to_string(reason)
+    if name in @unavailable_reasons, do: name, else: "unknown"
+  end
+
+  defp unavailable_reason(_), do: "unknown"
 
   # DB size in bytes, from the agent's latest health beat. The agent reports `-1`
   # verbatim until the PGSizeBytes probe lands (report.go:170/194/246), so a bare

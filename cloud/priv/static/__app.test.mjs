@@ -6493,6 +6493,95 @@ test("C10: usageMeterDisplay — 'unmetered' renders the designed empty state, n
   assert.equal(missing.value, "Not yet metered");
 });
 
+// ── w29: a CRASHED meter is not a deliberate non-measurement ────────────────
+// The envelope degrades BOTH to value "unmetered" (never a fake zero). Before
+// the typed `unavailable_reason` landed, a real raise inside the usage fan-out
+// rendered byte-identically to "we deliberately do not measure this" — the
+// product's own words for a chosen future, printed over a failure. These pin
+// the discrimination end to end, and they CAN LOSE: collapse the two arms back
+// into one and every assertion below reds.
+test("w29: usageMeterDisplay — a failed read reads 'Could not measure', not 'Not yet metered'", () => {
+  const deliberate = hooks.usageMeterDisplay(usageSpec("webhooks"), { value: "unmetered", source: "instance.webhooks" });
+  const crashed = hooks.usageMeterDisplay(usageSpec("webhooks"), { value: "unmetered", source: "instance.webhooks", unavailable_reason: "exception" });
+
+  // The two strings, side by side — this is the whole slice.
+  assert.equal(deliberate.value, "Not yet metered");
+  assert.equal(crashed.value, "Could not measure");
+  assert.notEqual(crashed.value, deliberate.value);
+
+  // The crashed meter says WHY; the deliberate one has nothing to say.
+  assert.equal(deliberate.freshness, "");
+  assert.equal(crashed.freshness, "the read crashed");
+
+  // Both are still honest about the number itself (no fake zero, no bar).
+  assert.equal(crashed.unmetered, true);
+  assert.equal(crashed.bar, null);
+  assert.equal(crashed.unavailable, true);
+  assert.equal(deliberate.unavailable, false);
+
+  // A failed read is not neutral chrome — it tints, the deliberate one does not.
+  assert.equal(crashed.state, "warn");
+  assert.equal(deliberate.state, null);
+});
+
+test("w29: usageMeterDisplay — every typed reason gets its own sentence; a timeout is not a crash", () => {
+  const say = (reason) => hooks.usageMeterDisplay(usageSpec("documents"), { value: "unmetered", unavailable_reason: reason }).freshness;
+  assert.equal(say("exception"), "the read crashed");
+  assert.equal(say("deadline_exceeded"), "the read timed out");
+  assert.equal(say("unreachable"), "the instance was unreachable");
+  assert.equal(say("bad_shape"), "the instance answered in an unexpected shape");
+  assert.equal(say("too_many_datasets"), "too many datasets to tally");
+  assert.notEqual(say("exception"), say("deadline_exceeded"));
+  // An unknown reason still says the honest half — never the deliberate copy.
+  assert.equal(say("unknown"), "the read failed");
+  assert.equal(hooks.usageMeterDisplay(usageSpec("documents"), { value: "unmetered", unavailable_reason: "unknown" }).value, "Could not measure");
+  // A reason on a meter that MEASURED changes nothing (the number wins).
+  const metered = hooks.usageMeterDisplay(usageSpec("documents"), { value: 7, unavailable_reason: "exception" });
+  assert.equal(metered.value, "7");
+  assert.equal(metered.unavailable, false);
+});
+
+test("w29: usageMeterHtml — the rendered card differs, and a browser person can see which", () => {
+  const deliberate = hooks.usageMeterHtml(usageSpec("webhooks"), { value: "unmetered", source: "instance.webhooks" });
+  const crashed = hooks.usageMeterHtml(usageSpec("webhooks"), { value: "unmetered", source: "instance.webhooks", unavailable_reason: "unreachable" });
+  assert.notEqual(crashed, deliberate);
+  assert.match(crashed, /Could not measure/);
+  assert.match(crashed, /the instance was unreachable/);
+  assert.ok(!crashed.includes("Not yet metered"), "a failed read must never wear the deliberate copy");
+  assert.match(crashed, /usage-card usage-card--warn/);
+  assert.match(deliberate, /Not yet metered/);
+  assert.match(deliberate, /usage-card usage-card--ok/);
+});
+
+test("w29: instanceCardStats — the Overview strip stops painting one em dash for two truths", () => {
+  const stat = (meters) => hooks.instanceCardStats(meters).find((s) => s.k === "DOCS");
+  const deliberate = stat({ documents: { value: "unmetered" } });
+  const crashed = stat({ documents: { value: "unmetered", unavailable_reason: "exception" } });
+  assert.equal(deliberate.v, "—");
+  assert.equal(deliberate.warn, false);
+  assert.notEqual(crashed.v, deliberate.v);
+  assert.equal(crashed.v, "?");
+  assert.equal(crashed.warn, true);
+  // A real number is untouched by any of this.
+  assert.equal(stat({ documents: { value: 12 } }).v, "12");
+});
+
+test("w29 (review): the strip's '?' carries a SENTENCE, not just a glyph", () => {
+  const stat = (meters) => hooks.instanceCardStats(meters).find((s) => s.k === "DOCS");
+  const crashed = stat({ documents: { value: "unmetered", unavailable_reason: "exception" } });
+  // "?" alone is punctuation — a screen reader says "DOCS, question mark". The
+  // hint is the same sentence the Usage tab prints, and it reaches the markup.
+  assert.equal(crashed.hint, "Could not measure — the read crashed");
+  assert.equal(stat({ documents: { value: "unmetered" } }).hint, "");
+  assert.equal(stat({ documents: { value: 12 } }).hint, "");
+  const html = hooks.instanceCardHtml({ id: "bp_1", name: "acme" }, { stats: hooks.instanceCardStats({ documents: { value: "unmetered", unavailable_reason: "deadline_exceeded" } }) });
+  assert.match(html, /title="Could not measure — the read timed out"/);
+  assert.match(html, /aria-label="DOCS: Could not measure — the read timed out"/);
+  // …and a healthy strip carries neither attribute.
+  const plain = hooks.instanceCardHtml({ id: "bp_1", name: "acme" }, { stats: hooks.instanceCardStats({ documents: { value: 12 } }) });
+  assert.ok(plain.indexOf("Could not measure") === -1);
+});
+
 test("C10: usageMeterDisplay — measured_at nil is a LIVE read, present is 'as of'", () => {
   const live = hooks.usageMeterDisplay(usageSpec("documents"), { value: 12, measured_at: null });
   assert.equal(live.freshness, "live"); // nil ≠ error (acceptance criterion 2)

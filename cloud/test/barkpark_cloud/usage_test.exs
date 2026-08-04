@@ -253,6 +253,67 @@ defmodule BarkparkCloud.UsageTest do
     end
   end
 
+  # w29 — a meter that COULD NOT be measured must not wear the product's word for
+  # a meter we deliberately DO NOT measure. Both still degrade to "unmetered"
+  # (never a fake zero); the typed reason is what tells them apart.
+  describe "instance inventory meters — a FAILED read is not a deliberate non-measurement" do
+    test "a real raise is NOT equal to a deliberate :unmetered — the whole map differs" do
+      crash = crashed_read(fn -> raise "the documents fan-out blew up" end)
+      assert crash == {:error, :exception}
+
+      crashed = meters(%{documents: crash}).documents
+      deliberate = meters(%{documents: :unmetered}).documents
+
+      # THE assertion this slice exists for. On the pre-fix bytes these two maps
+      # were byte-identical in every field, so `!=` was FALSE.
+      assert crashed != deliberate
+
+      # …and both are still honest about the number itself.
+      assert crashed.value == "unmetered"
+      assert deliberate.value == "unmetered"
+      assert crashed.source == "instance.documents"
+      assert deliberate.source == "instance.documents"
+
+      # The discriminator is the typed reason, present on ONE of them only.
+      assert crashed.unavailable_reason == "exception"
+      refute Map.has_key?(deliberate, :unavailable_reason)
+    end
+
+    test "every failure reason the gatherer can mint survives to the envelope, distinctly" do
+      for reason <- [:exception, :deadline_exceeded, :unreachable, :bad_shape, :too_many_datasets] do
+        m = meters(%{webhooks: {:error, reason}})
+        assert m.webhooks.value == "unmetered"
+        assert m.webhooks.unavailable_reason == Atom.to_string(reason)
+      end
+
+      # A timeout and a crash are different answers, not one degraded map.
+      assert meters(%{webhooks: {:error, :deadline_exceeded}}).webhooks !=
+               meters(%{webhooks: {:error, :exception}}).webhooks
+    end
+
+    test "an unrecognised reason normalises to \"unknown\" — no raw internal atom on the wire" do
+      m = meters(%{datasets: {:error, :dataset_fetch_failed}})
+      assert m.datasets.unavailable_reason == "unknown"
+      assert is_binary(m.datasets.unavailable_reason)
+    end
+
+    test "a shape we cannot trust is a FAILED read, not a deliberate one" do
+      # `{:ok, "4"}` / a bare number are inputs no gatherer should produce — we
+      # could not measure, so say so rather than claim we chose not to.
+      assert meters(%{webhooks: {:ok, "4"}}).webhooks.unavailable_reason == "bad_shape"
+      assert meters(%{documents: 5}).documents.unavailable_reason == "bad_shape"
+    end
+
+    test "a meter that MEASURED, or one deliberately unmetered, carries no reason at all" do
+      m = meters(%{webhooks: {:ok, 4}, documents: :unmetered, datasets: nil})
+      refute Map.has_key?(m.webhooks, :unavailable_reason)
+      refute Map.has_key?(m.documents, :unavailable_reason)
+      # An ABSENT input is nobody attempting a read, not a failure.
+      refute Map.has_key?(m.datasets, :unavailable_reason)
+      refute Map.has_key?(meters(%{}).webhooks, :unavailable_reason)
+    end
+  end
+
   describe "telemetry meters — db_size + disk, with snapshot time" do
     test "db_size + disk render the value and carry the health-beat measured_at" do
       m = meters(%{telemetry: telemetry()})
@@ -413,6 +474,20 @@ defmodule BarkparkCloud.UsageTest do
       assert m.documents.value == "unmetered"
       assert m.datasets.value == "unmetered"
     end
+  end
+
+  # The crash value EXACTLY as `within_deadline/2` mints it: a REAL raise inside
+  # a task, rescued to `{:error, :exception}`. Nothing is hand-written — if that
+  # rescue arm ever stops producing the tuple, this helper stops too.
+  defp crashed_read(fun) do
+    Task.async(fn ->
+      try do
+        fun.()
+      rescue
+        _ -> {:error, :exception}
+      end
+    end)
+    |> Task.await()
   end
 
   # The instances meter's derived warn_at for a given resolved ceiling.

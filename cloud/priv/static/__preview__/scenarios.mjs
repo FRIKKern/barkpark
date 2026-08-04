@@ -1058,7 +1058,13 @@ const quotaBarsUsage = {
     seats: m(8, { quota: 10, warn_at: 8, source: "control-plane.team_members", pending_invitations: 1 }), // warn — at warn_at
     documents: m(1240, { quota: 1000, warn_at: 900, source: "instance.documents" }),                       // over — recovery action
     datasets: m(4, { source: "instance.datasets" }),                // metered but unlimited (quota nil) → bar-less
-    webhooks: m("unmetered", { source: "instance.webhooks" }),
+    // w29 — the two UNMETERED states, side by side in one shot: webhooks was
+    // MEASURED AND THE READ CRASHED (`unavailable_reason`, so it reads "Could
+    // not measure · the read crashed" and tints warn), while db_size / p95_ms /
+    // api_requests / bandwidth below are the DELIBERATE non-measurements that
+    // still read "Not yet metered". Before the reason field existed these two
+    // truths rendered byte-identically.
+    webhooks: m("unmetered", { source: "instance.webhooks", unavailable_reason: "exception" }),
     db_size: m("unmetered", { source: "telemetry.pg_size_bytes" }),
     disk: m(58, { quota: 100, warn_at: 70, over_at: 90, source: "telemetry.disk_used_percent", measured_at: T }), // healthy 0-100 bar
     // Machine meters (OC23/OC26): cpu OVER its red line (94 ≥ 90, bar not full),
