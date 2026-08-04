@@ -876,6 +876,33 @@ defmodule BarkparkCloud.AccountsTest do
       assert row, "the PAT row must remain for audit"
       refute is_nil(row.revoked_at)
     end
+
+    test "a PAT cannot be minted without a team — the revoke filter's own precondition" do
+      # cch-w30-s6 review. `revoke_team_pats/2` is scoped `team_id == ^tid`
+      # (team-scoped on purpose: a user_id-only sweep would cross tenants), so a
+      # PAT row with a NULL team_id is INVISIBLE to it and would outlive the
+      # membership it was minted under — the very defect this slice fixes,
+      # reintroduced through the back door.
+      #
+      # The column is nullable (session rows legitimately leave it NULL) and the
+      # only thing binding PATs to a team was one cond branch at POST /v1/tokens
+      # (`is_nil(current_team)` → 422). That is a property of a ROUTE, not of the
+      # row: a second minting call site would have produced credentials nothing
+      # could revoke. The changeset now refuses, so the precondition holds for
+      # every caller present and future.
+      {user, _team} = user_with_team()
+
+      cs =
+        UserToken.pat_changeset(%UserToken{}, %{
+          token_hash: :crypto.strong_rand_bytes(32),
+          name: "teamless",
+          abilities: ["read"],
+          user_id: user.id
+        })
+
+      refute cs.valid?, "a PAT with no team_id must not be mintable"
+      assert %{team_id: ["can't be blank"]} = errors_on(cs)
+    end
   end
 
   describe "verify_personal_access_token/1" do
