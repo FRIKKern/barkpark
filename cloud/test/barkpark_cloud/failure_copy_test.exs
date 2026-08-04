@@ -46,13 +46,56 @@ defmodule BarkparkCloud.FailureCopyTest do
 
   test "capacity/quota jargon → human capacity copy (all casings)" do
     capacity =
-      "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+      "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
 
     assert FailureCopy.humanize("server type unavailable (SERVER_LIMIT_EXCEEDED)") == capacity
     assert FailureCopy.humanize("resource_unavailable: cx22 in fsn1") == capacity
     assert FailureCopy.humanize("account quota exceeded for servers") == capacity
     # lower-cased provider code still matches.
     assert FailureCopy.humanize("server_limit_exceeded") == capacity
+  end
+
+  # THE ARM'S PREDICATE CANNOT TELL A PROVIDER OR A RESOURCE, SO ITS COPY MUST
+  # NOT ASSERT EITHER (wave 29). The clause at `failure_copy.ex` is a bare
+  # substring test on `quota` / `server_limit_exceeded` / `resource_unavailable`
+  # over a downcased string, and `humanize/1` is ARITY 1 — no call site passes a
+  # provider, so nothing downstream of the predicate knows which one failed.
+  #
+  # THE DERIVABLE CRUELTY, DRIVEN THROUGH THE REAL CLASSIFIER: the DNS clause is
+  # VERB-anchored (`hetzner dns <upsert|change-ttl|delete|resolve|list>` /
+  # `hcloud zone rrset <…>`), so a zone-quota capture that carries NO producer
+  # verb misses it and falls to the capacity arm. Before this wave it was
+  # answered with "Hetzner ran out of SERVER capacity for this size. Try again
+  # shortly or contact support." — right provider, WRONG resource, and a remedy
+  # ("try again shortly") that cannot clear a zone ceiling. Restore that literal
+  # and every refute below goes red.
+  test "a verb-less zone-quota capture is not told it ran out of SERVER capacity" do
+    raw = "hetzner dns: zone quota reached for this account"
+
+    out = FailureCopy.humanize(raw)
+
+    # It really does reach this arm — @dns_step is verb-anchored and misses it.
+    assert out ==
+             "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
+
+    # The two things the predicate cannot know are the two things it no longer says.
+    refute out =~ ~r/ran out of server capacity/i
+    refute out =~ ~r/\bHetzner\b/
+    refute out =~ ~r/\bAzure\b/
+  end
+
+  test "an Azure capture with no Azure-specific token lands on the same provider-neutral copy" do
+    # `humanize/1` has no provider argument at any of its four call sites, so an
+    # Azure-origin bare-quota capture is INDISTINGUISHABLE from a Hetzner one
+    # here. (No Azure producer in this tree emits a bare-quota string today —
+    # `grep -rni 'quota|exceed' internal/cli/cloud/azure/` returns zero across
+    # source, tests and all 18 fixtures — which is exactly why the fix rests on
+    # the resource-blindness the tree CAN produce, not on an Azure input nobody
+    # can make. This case pins the seam, not a live producer.)
+    out = FailureCopy.humanize("public IP address quota reached for this subscription")
+
+    refute out =~ ~r/\bHetzner\b/
+    refute out =~ ~r/ran out of server capacity/i
   end
 
   test "auth/token jargon → human credentials copy" do
@@ -101,7 +144,7 @@ defmodule BarkparkCloud.FailureCopyTest do
     assert FailureCopy.humanize(
              ~s|hcloud server create "acme-dns-site-ac4e1f2a": exit status 1: resource_unavailable|
            ) ==
-             "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+             "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
   end
 
   test "the atomic ip-read-back sub-error is a NETWORK failure, not a domain one" do
@@ -223,7 +266,8 @@ defmodule BarkparkCloud.FailureCopyTest do
 
     assert FailureCopy.humanize(raw) == raw
 
-    refute FailureCopy.humanize(raw) =~ "Hetzner ran out of server capacity"
+    refute FailureCopy.humanize(raw) =~
+             "A capacity or quota limit was reached at the hosting provider"
   end
 
   test "a PATH TRAVERSAL through ../timeout/ is NOT rewritten as a network timeout" do
@@ -249,7 +293,7 @@ defmodule BarkparkCloud.FailureCopyTest do
     ]
 
     canned = [
-      "Hetzner ran out of server capacity",
+      "A capacity or quota limit was reached at the hosting provider",
       "A network step timed out",
       "The hosting provider rejected our credentials",
       "Securing the domain failed"
@@ -290,7 +334,7 @@ defmodule BarkparkCloud.FailureCopyTest do
     # The two clauses the colliding slugs above stole. A reason with no typed code
     # and no box-refusal prefix keeps the pre-W11 behaviour exactly.
     assert FailureCopy.humanize("account quota exceeded for servers") ==
-             "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+             "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
 
     assert FailureCopy.humanize("dial tcp: i/o timeout") ==
              "A network step timed out. Retry usually fixes this."
@@ -343,11 +387,29 @@ defmodule BarkparkCloud.FailureCopyTest do
     assert FailureCopy.humanize(rbac) == rbac
   end
 
-  test "the azure classes do not steal the Hetzner capacity string" do
+  test "the generic capacity arm does not swallow the azure family-quota arm" do
+    # THE DISCRIMINATION SURVIVES THE NARROWING (wave 29). Making the generic
+    # copy provider- and resource-neutral must not start answering the strings
+    # the family arm answers PRECISELY: a quota capture that carries `family` or
+    # `vcpu` still gets the exact Portal path, not the neutral sentence.
+    family =
+      "Your Azure subscription's vCPU quota for this VM family is exhausted. In the Azure Portal → Subscriptions → your subscription → Usage + quotas, filter to the family and choose Request increase, then retry."
+
+    for raw <- [
+          "QuotaExceeded: no vCPUs left",
+          "quota reached for the standardDSv3 family",
+          "operation failed: quota exceeded (vcpu)"
+        ] do
+      assert FailureCopy.humanize(raw) == family, "swallowed by the generic arm: #{raw}"
+      refute FailureCopy.humanize(raw) =~ "A capacity or quota limit was reached"
+    end
+  end
+
+  test "the azure classes do not steal the generic capacity string" do
     # Hetzner's spaced 'account quota exceeded' still reads as capacity, NOT the
     # azure family-quota copy (no 'quotaexceeded'/'family'/'vcpu' token).
     assert FailureCopy.humanize("account quota exceeded for servers") ==
-             "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+             "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
   end
 
   ## THE FALLBACK-LADDER AGGREGATE IS CLASSIFIED PER SUB-ERROR (wave 25 S1).
@@ -356,7 +418,7 @@ defmodule BarkparkCloud.FailureCopyTest do
   ## substring scan of the whole concatenation fires on any token ANY candidate
   ## mentioned, on the header's own literal `failed`, and on the user's own slug.
 
-  @capacity "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+  @capacity "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
   @dns_copy "Securing the domain failed on the provider side."
   @network "A network step timed out. Retry usually fixes this."
   @auth "The hosting provider rejected our credentials. We're on it — try again shortly."
@@ -825,7 +887,7 @@ defmodule BarkparkCloud.FailureCopyTest do
       refute out =~ "sk-live-9aB3xQ7zLm"
 
       # NOT rewritten into a class sentence.
-      refute out =~ "Hetzner ran out of server capacity"
+      refute out =~ "A capacity or quota limit was reached at the hosting provider"
     end
 
     test "matched class copy is unchanged by the scrub (every arm returns a literal)" do
@@ -833,7 +895,7 @@ defmodule BarkparkCloud.FailureCopyTest do
                "This didn't finish after several attempts. Try again in a moment."
 
       assert FailureCopy.humanize("SERVER_LIMIT_EXCEEDED") ==
-               "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+               "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
     end
 
     test "nil and non-binaries still pass through" do

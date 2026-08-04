@@ -708,7 +708,8 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
   ## entry name (`Barkpark.Sites.PrebuiltArtifact` — E_ABSOLUTE_PATH,
   ## E_PATH_TRAVERSAL, E_BAD_NAME, E_UNSAFE_PARENT x3, E_WRITE_FAILED x2), so the
   ## refusal on a site whose content includes `/quota/index.html` rendered here as
-  ## "Hetzner ran out of server capacity", and a `../timeout/` PATH TRAVERSAL — a
+  ## the capacity class (then "Hetzner ran out of server capacity", now the
+  ## provider-neutral copy), and a `../timeout/` PATH TRAVERSAL — a
   ## security event — as "A network step timed out." The SAME response already
   ## carried the honest bytes in `detail` (`Sites.Deploy.fail/2` writes the
   ## identical string to both columns; only `failure_reason` was humanized), so the
@@ -760,7 +761,9 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
 
       assert dep["failure_reason"] =~ "E_ABSOLUTE_PATH"
       assert dep["failure_reason"] =~ "/quota/index.html"
-      refute dep["failure_reason"] =~ "Hetzner ran out of server capacity"
+
+      refute dep["failure_reason"] =~
+               "A capacity or quota limit was reached at the hosting provider"
     end
 
     test "a PATH TRAVERSAL is never rendered as a network timeout" do
@@ -833,7 +836,7 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       # name — which is why the token list can never be made safe.
       cases = [
         {"E_ABSOLUTE_PATH", ~s(entry "/quota/index.html" is an absolute path — refused),
-         "Hetzner ran out of server capacity"},
+         "A capacity or quota limit was reached at the hosting provider"},
         {"E_ABSOLUTE_PATH", ~s(entry "/timeout.html" is an absolute path — refused),
          "A network step timed out"},
         {"E_ABSOLUTE_PATH", ~s(entry "/unauthorized.html" is an absolute path — refused),
@@ -911,7 +914,7 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       dep = rendered_deployment(site, d, token)
 
       assert dep["failure_reason"] ==
-               "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+               "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
     end
   end
 

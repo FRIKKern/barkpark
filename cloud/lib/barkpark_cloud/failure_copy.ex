@@ -460,7 +460,9 @@ defmodule BarkparkCloud.FailureCopy do
 
       # DNS: a domain/zone step failed on the provider. Checked BEFORE capacity
       # so a DNS step that failed on a zone quota reads as a domain problem, not
-      # a server-capacity one.
+      # a server-capacity one — but ONLY for the verb-anchored producers below.
+      # A zone-quota capture that carries no producer verb still falls to the
+      # capacity arm, which is why that arm's copy names no resource.
       #
       # Keyed on the producer's REAL vocabulary (see the moduledoc). The three
       # tokens this clause used to carry — `zone create`, `dns zone`,
@@ -470,12 +472,23 @@ defmodule BarkparkCloud.FailureCopy do
       Regex.match?(@dns_step, down) ->
         "Securing the domain failed on the provider side."
 
-      # Capacity / quota: Hetzner has no server of this type free, or the account
-      # hit a resource ceiling (`SERVER_LIMIT_EXCEEDED`, `resource_unavailable`).
+      # Capacity / quota: a resource ceiling somewhere on the provider side
+      # (`SERVER_LIMIT_EXCEEDED`, `resource_unavailable`, or a bare `quota`).
+      #
+      # THE COPY NAMES NEITHER A PROVIDER NOR A RESOURCE, BECAUSE THIS PREDICATE
+      # CAN DISTINGUISH NEITHER. It is a bare substring test over a string, and
+      # `humanize/1` is arity 1 — there is no provider argument anywhere in the
+      # seam, so every caller's Hetzner AND Azure captures land here alike. The
+      # resource is just as blind: the DNS clause above is VERB-anchored (wave
+      # 25 narrowed it, correctly), so a verb-less zone-quota capture such as
+      # `hetzner dns: zone quota reached for this account` reaches THIS arm. The
+      # copy it used to get — "Hetzner ran out of SERVER capacity for this size"
+      # — named the right provider, the wrong resource and the wrong remedy: a
+      # zone ceiling is not cleared by waiting for a server to free up.
       String.contains?(down, "quota") or
         String.contains?(down, "server_limit_exceeded") or
           String.contains?(down, "resource_unavailable") ->
-        "Hetzner ran out of server capacity for this size. Try again shortly or contact support."
+        "A capacity or quota limit was reached at the hosting provider — it may be servers, addresses, DNS zones or another resource. Try again shortly, or check your account's limits with the provider."
 
       # Auth / token: the provider rejected our stored credentials.
       String.contains?(down, "unauthorized") or String.contains?(down, "invalid token") ->
