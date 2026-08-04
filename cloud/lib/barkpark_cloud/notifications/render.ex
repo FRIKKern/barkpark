@@ -64,9 +64,6 @@ defmodule BarkparkCloud.Notifications.Render do
       "deployment_failed" ->
         {"Deployment failed", "A deployment for #{site} failed.#{cause(payload)}", :error}
 
-      "deployment_succeeded" ->
-        {"Deployment succeeded", "A deployment for #{site} went live.", :info}
-
       "agent_unreachable" ->
         {"Site unreachable", "#{site} stopped responding to health checks.", :warning}
 
@@ -76,12 +73,6 @@ defmodule BarkparkCloud.Notifications.Render do
       "subscription_past_due" ->
         {"Subscription past due",
          "Your subscription is past due — hosted instances may be suspended.", :warning}
-
-      "member_invited" ->
-        {"Team member invited", "A new member was invited to #{site}.", :info}
-
-      "token_expiring" ->
-        {"API token expiring", "An API token for #{site} is expiring soon.", :warning}
 
       "test" ->
         {"Test notification",

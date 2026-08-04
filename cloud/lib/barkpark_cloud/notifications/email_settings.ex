@@ -40,9 +40,20 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
 
   # The per-event toggle columns, in one list so the dispatcher and the
   # changeset share a single source of truth.
-  @events ~w(provision_succeeded provision_failed deployment_succeeded
+  #
+  # WAVE 30 S1 — SIX, NOT NINE. `deployment_succeeded`, `member_invited` and
+  # `token_expiring` were toggles for events NOTHING in `cloud/lib` dispatches;
+  # the console rendered all three as promises, and `token_expiring` defaulted
+  # ON. They are dropped (migration
+  # `20260804123000_drop_producerless_notification_events`) rather than wired:
+  # `dispatch_event/3` fans to `team_member_emails/1`, so a token-expiry
+  # producer would mail one user's credential schedule to the whole team. The
+  # missing alerts are filed as feature work, not left standing as offers.
+  # Every atom here MUST have a producer — `__app.test.mjs`'s bidirectional
+  # notification census reds the Console gate otherwise.
+  @events ~w(provision_succeeded provision_failed
              deployment_failed agent_reachable agent_unreachable
-             subscription_past_due member_invited token_expiring)a
+             subscription_past_due)a
 
   schema "email_notification_settings" do
     field :transport, :string, default: "instance"
@@ -59,13 +70,10 @@ defmodule BarkparkCloud.Notifications.EmailSettings do
 
     field :provision_succeeded, :boolean, default: false
     field :provision_failed, :boolean, default: true
-    field :deployment_succeeded, :boolean, default: false
     field :deployment_failed, :boolean, default: true
     field :agent_reachable, :boolean, default: false
     field :agent_unreachable, :boolean, default: true
     field :subscription_past_due, :boolean, default: true
-    field :member_invited, :boolean, default: false
-    field :token_expiring, :boolean, default: true
 
     field :last_test_sent_at, :utc_datetime_usec
 

@@ -89,8 +89,8 @@ defmodule BarkparkCloud.Notifications.RenderTest do
     end
 
     test "the non-failure events are untouched by the cause seam" do
-      assert {_, "A deployment for acme went live.", :info} =
-               Render.render("deployment_succeeded", %{"site" => "acme", "detail" => "ignored"})
+      assert {_, "acme finished provisioning and is live.", :info} =
+               Render.render("provision_succeeded", %{"site" => "acme", "detail" => "ignored"})
 
       assert {_, "acme stopped responding to health checks.", :warning} =
                Render.render("agent_unreachable", %{"site" => "acme"})
