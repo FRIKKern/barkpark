@@ -5223,6 +5223,12 @@
       return {
         k: h.label,
         v: d.unavailable ? "?" : d.unmetered ? "—" : d.value,
+        // A bare "?" is a glyph, and a glyph on its own is the thing this epic
+        // refuses. The reason the Usage tab prints in full rides along as a
+        // hint so the strip is hoverable and the accessible name is a sentence
+        // rather than a punctuation mark. Empty on every other state — the
+        // designed "—" and a real number need no explaining.
+        hint: d.unavailable ? "Could not measure — " + d.freshness : "",
         warn: d.state === "warn" || d.state === "over"
       };
     });
@@ -5242,7 +5248,9 @@
     var statsHtml = stats.map(function (st) {
       return '<div class="instance-card-stat">' +
         '<span class="instance-card-stat-k">' + esc(st.k) + "</span>" +
-        '<span class="instance-card-stat-v' + (st.warn ? " is-warn" : "") + '">' + esc(st.v) + "</span>" +
+        '<span class="instance-card-stat-v' + (st.warn ? " is-warn" : "") + '"' +
+          (st.hint ? ' title="' + esc(st.hint) + '" aria-label="' + esc(st.k + ": " + st.hint) + '"' : "") +
+          ">" + esc(st.v) + "</span>" +
       "</div>";
     }).join("");
     var studio = attentionCanStudio(bp)

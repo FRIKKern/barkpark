@@ -6566,6 +6566,22 @@ test("w29: instanceCardStats — the Overview strip stops painting one em dash f
   assert.equal(stat({ documents: { value: 12 } }).v, "12");
 });
 
+test("w29 (review): the strip's '?' carries a SENTENCE, not just a glyph", () => {
+  const stat = (meters) => hooks.instanceCardStats(meters).find((s) => s.k === "DOCS");
+  const crashed = stat({ documents: { value: "unmetered", unavailable_reason: "exception" } });
+  // "?" alone is punctuation — a screen reader says "DOCS, question mark". The
+  // hint is the same sentence the Usage tab prints, and it reaches the markup.
+  assert.equal(crashed.hint, "Could not measure — the read crashed");
+  assert.equal(stat({ documents: { value: "unmetered" } }).hint, "");
+  assert.equal(stat({ documents: { value: 12 } }).hint, "");
+  const html = hooks.instanceCardHtml({ id: "bp_1", name: "acme" }, { stats: hooks.instanceCardStats({ documents: { value: "unmetered", unavailable_reason: "deadline_exceeded" } }) });
+  assert.match(html, /title="Could not measure — the read timed out"/);
+  assert.match(html, /aria-label="DOCS: Could not measure — the read timed out"/);
+  // …and a healthy strip carries neither attribute.
+  const plain = hooks.instanceCardHtml({ id: "bp_1", name: "acme" }, { stats: hooks.instanceCardStats({ documents: { value: 12 } }) });
+  assert.ok(plain.indexOf("Could not measure") === -1);
+});
+
 test("C10: usageMeterDisplay — measured_at nil is a LIVE read, present is 'as of'", () => {
   const live = hooks.usageMeterDisplay(usageSpec("documents"), { value: 12, measured_at: null });
   assert.equal(live.freshness, "live"); // nil ≠ error (acceptance criterion 2)
