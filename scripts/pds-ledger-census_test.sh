@@ -83,6 +83,17 @@ paper() {
   { printf 'HTTP %s\n' "$status"; printf '%s' "$body"; } > "$dir/paper-$slug.http"
 }
 
+# `drafts_page <dir> <index> <status> <json>` cans the SECOND lens --
+# GET /v1/data/query?...&perspective=drafts. It is keyed on its own filename, so
+# a fixture that cans NO drafts page models a source that does not offer the
+# lens (reported UNREAD), and one that cans page 0 and then stops is still a
+# TRUNCATED READ and still fails closed.
+drafts_page() {
+  local dir=$1 index=$2 status=$3 body=$4
+  mkdir -p "$dir"
+  { printf 'HTTP %s\n' "$status"; printf '%s' "$body"; } > "$dir/drafts-page-$index.http"
+}
+
 # A well-formed page envelope.
 envelope() {
   local count=$1 offset=$2 limit=$3 docs=$4
@@ -109,6 +120,53 @@ build_healthy() {
   p1+="$(row unrelated 'null' open open 'not under the root at all. REOPEN: foxtrot')"
   page "$dir" 0 200 "$(envelope 4 0 4 "$p0")"
   page "$dir" 1 200 "$(envelope 3 4 4 "$p1")"
+}
+
+# A well-formed page envelope for the SECOND lens. The perspective it echoes is
+# a PARAMETER, because the interesting failure is a source that answers
+# `published` to a `perspective=drafts` request -- which is what the API does to
+# an anonymous or public-read caller, silently.
+drafts_envelope() {
+  local count=$1 offset=$2 limit=$3 perspective=$4 docs=$5
+  printf '{"result":{"count":%s,"offset":%s,"limit":%s,"perspective":"%s","documents":[%s]}}' \
+    "$count" "$offset" "$limit" "$perspective" "$docs"
+}
+
+# THE BLIND-SPOT CORPUS. The healthy board plus TWO rows that carry the epic's
+# slug prefix and hang off a foreign parent -- one LIVE (work this epic owns and
+# cannot see) and one DONE (bookkeeping). The live one's parent is a PARAMETER:
+# the same fixture built with a parent INSIDE the closure is the mutation that
+# proves the arm is derived from the corpus and not from a name someone typed.
+build_blind() {
+  local dir=$1 stray_parent=$2
+  local p1 p2
+  build_healthy "$dir"
+  p1="$(row deep-a '"kid-a"' open open 'deep a reason four. REOPEN: delta'),"
+  p1+="$(row deep-b '"kid-b"' cancelled closed 'deep b reason five. REOPEN: echo'),"
+  p1+="$(row unrelated 'null' open open 'not under the root at all. REOPEN: foxtrot'),"
+  p1+="$(row pds-stray-open "$stray_parent" open open 'stray row six. REOPEN: golf')"
+  p2="$(row pds-stray-done '"foreign-epic"' done closed 'stray row seven. REOPEN: hotel')"
+  page "$dir" 1 200 "$(envelope 4 4 4 "$p1")"
+  page "$dir" 2 200 "$(envelope 1 8 4 "$p2")"
+}
+
+# THE DRAFTS LENS, CANNED. Four rows, one of each kind the split must tell
+# apart, plus one OUT OF SCOPE row that must never be named:
+#   drafts.pds-hidden-x  -> no published twin           = HIDDEN WORK
+#   drafts.kid-b         -> published twin is `done`    = PHANTOM (edit shadow)
+#   drafts.kid-a         -> published twin is `open`    = already in the denominator
+#   drafts.foreign       -> parent outside the closure  = not this epic's at all
+# The second page is EMPTY and present on purpose: the drafts read pages exactly
+# like the published one, and a short page is what ends it.
+build_blind_drafts() {
+  local dir=$1
+  local d0
+  d0="$(row drafts.pds-hidden-x '"kid-a"' open open 'never published at all. REOPEN: india'),"
+  d0+="$(row drafts.kid-b "\"$ROOT_SLUG\"" open open 'edit shadow of a DONE row. REOPEN: juliet'),"
+  d0+="$(row drafts.kid-a "\"$ROOT_SLUG\"" open open 'edit shadow of a LIVE row. REOPEN: kilo'),"
+  d0+="$(row drafts.foreign 'null' open open 'another epic entirely. REOPEN: lima')"
+  drafts_page "$dir" 0 200 "$(drafts_envelope 4 0 4 drafts "$d0")"
+  drafts_page "$dir" 1 200 "$(drafts_envelope 0 4 4 drafts '')"
 }
 
 # THE HOSTILE WORKING DIRECTORY. `plant_stray <path> <module>` writes a stray
@@ -939,8 +997,19 @@ expect_output_contains "shape C reads 0 on a healthy board" \
 expect_output_contains "the arm prints the LENS it read, derived from the response" \
   "lens        /v1/data/query perspective:published" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
-expect_output_contains "and says plainly that it undercounts drafts BY CONSTRUCTION" \
-  "UNDERCOUNTS DRAFTS" \
+# THE CAVEAT IS AMENDED, NOT RETIRED (wave 47). It still says the two lenses
+# disagree BY CONSTRUCTION -- that part was never in doubt -- but the DIRECTION
+# it implied was wrong, and the amendment carries the measurement that settles
+# it: shape A 24 -> 27, the +3 being edit shadows of `done` rows. Both halves are
+# pinned, so retiring either one reds.
+expect_output_contains "the caveat still says the lenses DISAGREE by construction" \
+  "the two lenses DISAGREE by construction" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and it now carries the MEASURED direction, not an implication" \
+  "shape A 24 -> 27" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and refuses to quote B/C as verified (0 on both lenses)" \
+  "UNDISCRIMINATED" \
   run --page-limit 4 --fixture-dir "$HEALTHY"
 expect_output_contains "the lens is machine-readable in --json" '"lens_perspective": "published"' \
   run --page-limit 4 --fixture-dir "$HEALTHY" --json
@@ -1130,6 +1199,149 @@ expect_stdout_only_contains "and so does the certifying verdict" \
 echo
 
 # =============================================================================
+# THE DENOMINATOR AND THE REFUSAL (wave 47). A census that prints one number and
+# names nothing outside it is a claim about a population it never looked outside
+# of. Two arms, both DERIVED, both mutation-proven here over FIXTURES -- never
+# against the live board, whose numbers move while this wave files rows.
+#
+# THE MUTATION IS THE PROOF. `pds-stray-open` is ONE row built twice: once
+# parented OUTSIDE the closure (it must be named as a blind spot) and once
+# INSIDE it (it must vanish from the block and land in the closure instead). An
+# arm that printed a transcribed name would pass the first and fail the second.
+# =============================================================================
+echo "denominator + blind spots — derived, named, and mutation-proven"
+BLIND_OUT="$TMP/blind-outside"
+build_blind "$BLIND_OUT" '"foreign-epic"'
+build_blind_drafts "$BLIND_OUT"
+
+# THE DENOMINATOR NAMES ITS LENS AND ITS INSTANT. `open` is 2 here (kid-a,
+# deep-a) -- COUNTED, and printed beside the rule that counted it.
+expect_output_contains "the denominator is printed with its LENS named" \
+  "open rows in the closure             2   lens: published + lifecycle_status == \`open\` (case-exact)" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and it refuses the two rejected keys by name" \
+  "NOT live/non-terminal" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and it carries the command that re-derives it" \
+  "re-derive   bash scripts/pds-ledger-census.sh" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+# THE GUARD THIS INSTRUMENT HAS, NOT THE ONE A READER WOULD ASSUME. Measured:
+# `echo scripts/pds-ledger-census.sh | bash scripts/elixir-path-escape-check.sh
+# --match test` answers false; the same command answers true for
+# scripts/pds-door-census.sh. So CI never runs these checks.
+expect_output_contains "the UNGATED limit is printed, not left to be assumed" \
+  "The REQUIRED Elixir" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+
+# ARM 1 -- OUTSIDE THE CLOSURE, BY NAME.
+expect_output_contains "a PDS-slugged row on a foreign parent is NAMED" \
+  "pds-stray-open   (open, parent foreign-epic)" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and a TERMINAL one outside is counted APART, not as hidden work" \
+  "+ 1 terminal row(s) outside the closure" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and the slug-prefix heuristic is declared as one" \
+  "LIMIT: keyed on a SLUG PREFIX" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+
+# THE MUTATION. The SAME row, re-parented INSIDE the closure: it must leave the
+# block entirely and be counted by it instead.
+BLIND_IN="$TMP/blind-inside"
+build_blind "$BLIND_IN" '"kid-a"'
+build_blind_drafts "$BLIND_IN"
+expect_output_lacks "re-parented INSIDE the closure, it is no longer a blind spot" \
+  "pds-stray-open   (open, parent" \
+  run --page-limit 4 --fixture-dir "$BLIND_IN"
+expect_output_contains "it is COUNTED instead -- the closure grew by one" \
+  "closure     6 descendants" \
+  run --page-limit 4 --fixture-dir "$BLIND_IN"
+expect_output_contains "and the denominator grew with it" \
+  "open rows in the closure             3" \
+  run --page-limit 4 --fixture-dir "$BLIND_IN"
+expect_output_contains "with arm 1 now empty, and saying so" \
+  "(1) OUTSIDE THE CLOSURE      0" \
+  run --page-limit 4 --fixture-dir "$BLIND_IN"
+
+# ARM 2 -- THE DRAFTS LENS, SPLIT. A never-published row is HIDDEN WORK; a draft
+# whose published twin is finished is an EDIT SHADOW. Summing them overcounts,
+# which is exactly how 379 was reached on the live board.
+expect_output_contains "a never-published draft is named as HIDDEN WORK" \
+  "drafts.pds-hidden-x   (no published twin)" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "a draft over a DONE twin is named a PHANTOM, with the twin" \
+  "drafts.kid-b   (published twin: done)" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and phantoms are called edit shadows, not work" \
+  "an EDIT SHADOW, never hidden work. Adding these to the denominator OVERCOUNTS." \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "a draft over a LIVE twin is neither -- it is already counted" \
+  "drafts.kid-a   (published twin: open)" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_lacks "a draft OUTSIDE the closure is not this epic's blind spot" \
+  "drafts.foreign" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+# THE ARITHMETIC IS THE WHOLE POINT: the honest total adds the never-published
+# row and NOT the phantom. If the split collapsed, this line would read 4.
+expect_output_contains "the honest total adds hidden work and NOT the phantom" \
+  "honest total                         3   = 2 + 1 never-published open row(s) below" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "and the overcount is shown as the overcount it is" \
+  "OVERCOUNT if phantoms added          4   1 phantom(s) are edit shadows" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "clause 7's drafts delta is MEASURED on this run, not asserted" \
+  "THIS RUN: drafts-lens delta  A +0  B +0  C +0" \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+expect_output_contains "the blind spots are machine-readable in --json" \
+  '"id": "drafts.pds-hidden-x"' \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT" --json
+
+# THE UNREAD STATE IS AN ABSENCE, NEVER A ZERO. Two ways to lose the lens, and
+# both must SAY so: a source that cans no drafts page at all, and one that
+# answers `published` to a perspective=drafts request -- which is precisely what
+# the API does to an anonymous or public-read caller, silently.
+expect_output_contains "no drafts fixture at all is UNREAD, not zero" \
+  "(2) NEVER PUBLISHED      UNREAD   source offers no drafts perspective" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+expect_output_contains "and the honest total is then UNMEASURED, not printed anyway" \
+  "honest total                     UNMEASURED" \
+  run --page-limit 4 --fixture-dir "$HEALTHY"
+IGNORED="$TMP/blind-lens-ignored"
+build_blind "$IGNORED" '"foreign-epic"'
+drafts_page "$IGNORED" 0 200 "$(drafts_envelope 1 0 4 published "$(row drafts.pds-hidden-x '"kid-a"' open open 'pinned to published. REOPEN: mike')")"
+expect_output_contains "a source that IGNORES the lens is UNREAD, never counted as 0" \
+  "the lens was IGNORED, so the never-published class is UNMEASURED, not zero" \
+  run --page-limit 4 --fixture-dir "$IGNORED"
+expect_output_lacks "and the row it did serve is NOT reported as hidden work" \
+  "drafts.pds-hidden-x   (no published twin)" \
+  run --page-limit 4 --fixture-dir "$IGNORED"
+
+# THE SOFTENING IS SCOPED TO THE FIRST PAGE AND TO NOTHING ELSE. A drafts read
+# that starts and then stops is a TRUNCATED READ and still fails closed -- the
+# same discipline the published read has always had.
+TRUNCDRAFTS="$TMP/blind-drafts-truncated"
+build_blind "$TRUNCDRAFTS" '"foreign-epic"'
+drafts_page "$TRUNCDRAFTS" 0 200 "$(drafts_envelope 4 0 4 drafts "$(row drafts.pds-hidden-x '"kid-a"' open open 'one. REOPEN: november'),$(row drafts.kid-b "\"$ROOT_SLUG\"" open open 'two. REOPEN: oscar'),$(row drafts.kid-a "\"$ROOT_SLUG\"" open open 'three. REOPEN: papa'),$(row drafts.foreign 'null' open open 'four. REOPEN: quebec')")"
+expect_status_matching "a TRUNCATED drafts read still fails closed" 2 \
+  "that is a truncated read, not a smaller board" \
+  run --page-limit 4 --fixture-dir "$TRUNCDRAFTS"
+# ...and so does a drafts page that errors. A 500 on the second lens is not an
+# absence, and smoothing it over is the defect this whole file refuses.
+FIVEDRAFTS="$TMP/blind-drafts-500"
+build_blind "$FIVEDRAFTS" '"foreign-epic"'
+drafts_page "$FIVEDRAFTS" 0 500 '{"ok":false}'
+expect_status_matching "a 500 on the drafts read is never an absence" 2 \
+  "a non-2xx is never a leaf" \
+  run --page-limit 4 --fixture-dir "$FIVEDRAFTS"
+
+# THE PAGER'S OWN BLIND SPOT IS STATED, NOT FIXED. Explicit offsets over a
+# mutating key can skip a row, and a second walk reading through the same pager
+# inherits the skip -- so agreement between them is not a proof.
+expect_output_contains "the census states the blind spot it did NOT fix" \
+  "Two such walks AGREEING does not rule it out." \
+  run --page-limit 4 --fixture-dir "$BLIND_OUT"
+echo
+
+# =============================================================================
 # THE PAGED READ HAS A TOTAL ORDER. Without one, explicit offsets page the
 # server's default `desc: updated_at` — a MUTATING key. A concurrent write
 # teleports its row to index 0 and shifts every row between; the duplicate half
@@ -1236,6 +1448,42 @@ INCOHERENT (exit 4, and the payload is still non-empty: the predicate is a pure
 function computed BEFORE the single emit site precisely so that stays true). The
 payload carries `round_done` and `round_done_failures`, so a consumer never has
 to scrape a text stream for a verdict.
+
+THE DENOMINATOR IS DERIVED AND THE REFUSAL IS NAMED (wave 47). The open count
+is printed with the lens that produced it (published + `lifecycle_status` ==
+`open`, case-exact, transitive slug-keyed closure), the instant it was taken and
+the command that re-derives it -- no literal is pinned, because this board moves
+while the wave reading it files rows. Beside it, the BLIND SPOTS block names
+what that count cannot see: rows carrying the epic's slug prefix whose parent
+chain never reaches the root (unreachable at ANY depth), and -- through a SECOND
+paged read at `perspective=drafts` -- `open` drafts in scope of the root, SPLIT
+by their published twin. The split is the finding: a draft with no twin is
+HIDDEN WORK and joins the honest total, a draft whose twin is TERMINAL is an
+EDIT SHADOW and joining it OVERCOUNTS (this is exactly how 379 was reached on
+the live board where 376 was honest). Both arms are mutation-proven here: ONE
+fixture row, `pds-stray-open`, is built twice -- parented outside the closure it
+is NAMED, re-parented inside it the block is empty and the closure grew by one.
+The drafts lens has an UNREAD state that is an ABSENCE and never a zero: a
+source that cans no drafts page, and a source that answers `published` to a
+`perspective=drafts` request (what the API silently does to an anonymous or
+public-read caller) both print UNMEASURED. The softening stops there -- a drafts
+read that truncates mid-lens, or answers 500, still fails closed.
+
+CLAUSE 7's DRAFTS CAVEAT IS AMENDED, NOT RETIRED, and the amendment carries the
+measurement that settles it: shape A 24 -> 27 over a drafts-inclusive read, the
++3 being edit shadows of `done` rows, so the published read does not UNDERCOUNT
+shape A -- the drafts read MANUFACTURES three false lapses. Shapes B and C were
+0 on BOTH lenses and are named UNDISCRIMINATED rather than quoted as agreement.
+The per-run delta is scored by the SAME `lapse_shapes()` the published closure
+is scored by, so it is a property of the lens and not of two key sets that
+drifted apart.
+
+THE GUARD IS PRINTED, INCLUDING WHAT IT IS NOT. `echo scripts/pds-ledger-census.sh
+| bash scripts/elixir-path-escape-check.sh --match test` answers `false` while
+the same command answers `true` for scripts/pds-door-census.sh: the required
+Elixir gate does NOT dispatch this path, so every check in this file is
+local-only and the census says so in its own output rather than letting a reader
+assume CI coverage.
 
 THE PAGED READ HAS A TOTAL ORDER: `order=_createdAt:asc`, reported back as
 `page_order` so the discipline can be read rather than believed. Both traps are
