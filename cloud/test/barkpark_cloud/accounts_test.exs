@@ -778,7 +778,10 @@ defmodule BarkparkCloud.AccountsTest do
       assert Enum.all?(rows, &(&1.context == "session"))
     end
 
-    test "member removal (delete_user_session_tokens) preserves the user's PATs" do
+    # The session eviction PRIMITIVE never touches PATs. Membership removal
+    # itself does end them, but through the separate, team-scoped
+    # `revoke_team_pats/2` step — see the describe block below.
+    test "delete_user_session_tokens/1 alone preserves the user's PATs" do
       {user, team} = user_with_team()
 
       {:ok, pat_plain, _} =
@@ -797,6 +800,108 @@ defmodule BarkparkCloud.AccountsTest do
       # The PAT's row id is not a session → :not_found (no cross-context revoke).
       assert {:error, :not_found} = Accounts.revoke_user_session(user, pat.id)
       refute Repo.get(UserToken, pat.id).revoked_at
+    end
+  end
+
+  describe "membership changes revoke team-scoped PATs (cch-w30-s6)" do
+    test "remove_member/2 revokes every PAT the ex-member held on THAT team" do
+      {_owner, team} = user_with_team()
+      user = user_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "admin")
+      other_team = team_fixture()
+      {:ok, _} = Accounts.add_member(other_team, user, "admin")
+
+      {:ok, here, _} =
+        Accounts.create_personal_access_token(user, team, %{name: "here", abilities: ["read"]})
+
+      {:ok, elsewhere, _} =
+        Accounts.create_personal_access_token(user, other_team, %{
+          name: "elsewhere",
+          abilities: ["read"]
+        })
+
+      assert {:ok, :removed} = Accounts.remove_member(team, user)
+
+      assert Accounts.verify_personal_access_token(here) == nil
+      # Team-scoped: the other team's credential is NOT collateral.
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(elsewhere)
+    end
+
+    test "update_member_role/3 demotion revokes only the PATs the new role could not mint" do
+      {owner, team} = user_with_team()
+      admin = user_fixture()
+      {:ok, _} = Accounts.add_member(team, admin, "admin")
+      # Keep the owner around so the last-owner guard is not what we measure.
+      assert Accounts.team_role(owner, team) == "owner"
+
+      {:ok, deploy, _} =
+        Accounts.create_personal_access_token(admin, team, %{
+          name: "deploy",
+          abilities: ["deploy"]
+        })
+
+      {:ok, read, _} =
+        Accounts.create_personal_access_token(admin, team, %{name: "read", abilities: ["read"]})
+
+      assert {:ok, %TeamMembership{role: "member"}} =
+               Accounts.update_member_role(team, admin, "member")
+
+      assert Accounts.verify_personal_access_token(deploy) == nil
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(read)
+    end
+
+    test "a promotion (member -> admin) revokes nothing" do
+      {_owner, team} = user_with_team()
+      member = user_fixture()
+      {:ok, _} = Accounts.add_member(team, member, "member")
+
+      {:ok, read, _} =
+        Accounts.create_personal_access_token(member, team, %{name: "read", abilities: ["read"]})
+
+      assert {:ok, %TeamMembership{role: "admin"}} =
+               Accounts.update_member_role(team, member, "admin")
+
+      assert {%User{}, %UserToken{}} = Accounts.verify_personal_access_token(read)
+    end
+
+    test "revoked PAT rows survive as tombstones (stamped, never deleted)" do
+      {_owner, team} = user_with_team()
+      user = user_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "member")
+      {:ok, _plain, pat} = Accounts.create_personal_access_token(user, team, %{name: "audit-me"})
+
+      assert {:ok, :removed} = Accounts.remove_member(team, user)
+
+      row = Repo.get(UserToken, pat.id)
+      assert row, "the PAT row must remain for audit"
+      refute is_nil(row.revoked_at)
+    end
+
+    test "a PAT cannot be minted without a team — the revoke filter's own precondition" do
+      # cch-w30-s6 review. `revoke_team_pats/2` is scoped `team_id == ^tid`
+      # (team-scoped on purpose: a user_id-only sweep would cross tenants), so a
+      # PAT row with a NULL team_id is INVISIBLE to it and would outlive the
+      # membership it was minted under — the very defect this slice fixes,
+      # reintroduced through the back door.
+      #
+      # The column is nullable (session rows legitimately leave it NULL) and the
+      # only thing binding PATs to a team was one cond branch at POST /v1/tokens
+      # (`is_nil(current_team)` → 422). That is a property of a ROUTE, not of the
+      # row: a second minting call site would have produced credentials nothing
+      # could revoke. The changeset now refuses, so the precondition holds for
+      # every caller present and future.
+      {user, _team} = user_with_team()
+
+      cs =
+        UserToken.pat_changeset(%UserToken{}, %{
+          token_hash: :crypto.strong_rand_bytes(32),
+          name: "teamless",
+          abilities: ["read"],
+          user_id: user.id
+        })
+
+      refute cs.valid?, "a PAT with no team_id must not be mintable"
+      assert %{team_id: ["can't be blank"]} = errors_on(cs)
     end
   end
 
