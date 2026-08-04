@@ -115,6 +115,29 @@
 # credited to its wrapper. Said here rather than left for a reader to discover,
 # because an unstated simplification is how a column starts lying.
 #
+# WHAT THE LEDGER CHECKS ARE FOR (wave 46) — three claims, each measured
+# --------------------------------------------------------------------
+#   1. THE ROT CHECK TESTED EXISTENCE ONLY. It catches a row naming a deleted
+#      file and nothing else. A row asserting that a now-THROUGH instrument is
+#      environment-refused was not merely wrong, it was UNREAD: the cond
+#      short-circuits to THROUGH before the disposition ledger is consulted, so
+#      injecting one left the output BYTE-IDENTICAL, rc=0, stderr empty. Hence
+#      the orphan check, and hence it is UNGATED (PDS-D602: a has-key guard in
+#      front of it is conditionally blind by construction).
+#   2. THE RETIRE SHAPE LEGALIZES TWO ROWS PER BASENAME, and both lookups exit
+#      on their FIRST match. So retirement and the duplicate-key check are ONE
+#      change, never two: shipping retirement alone would widen a hole it also
+#      makes easier to hit. A retired row is exempt from the orphan check, which
+#      is why it must still carry evidence naming what superseded it.
+#   3. THE NAIVE HOIST OF THE PRICE SHAPE CHECK REDS CLEAN MAIN, and does worse
+#      than red: reusing the *CPU=*LOCAL*meter=* pattern rejected the receipt
+#      census's honest UNMEASURED-LOCAL row (rc=1 on an untouched tree), and
+#      setting class='ERROR' inside the THROUGH branch silently dropped the
+#      headline from 4 of 20 to 3 of 20 — it hid a door while reporting a ledger
+#      typo. The answer was NOT an exemption for "no number": the row was
+#      MEASURED (28.73 s CPU across its three gated arms), and the shape check
+#      APPENDS to error_lines and increments errors and NEVER assigns class.
+#
 # USAGE
 #   pds-door-census.sh                 # the census (default) — fail-closed
 #   pds-door-census.sh --selftest      # the fraud + depth arms, no BEAM, no gate
@@ -159,7 +182,16 @@ HUMAN-GATE'
 # whose evidence is empty, or whose class is outside the vocabulary above, is a
 # hard error — a disposition without evidence is the vacuous green this epic
 # exists to remove. Absent rows are UNDISPOSED and red the run.
-PDS_DOOR_DISPOSITIONS='pds-charter-ledger-sweep.sh	CONTENT-RED	by run 2026-08-03: `--check` rc=1 "RED: an UNRESOLVED-CLAIM ARRIVAL is a charter claim nobody has adjudicated" (59 arrivals); `--selftest` is rc=0 (3 of 3) and no longer hostage to the corpus; blocked on scripts/pds-charter-ledger-adjudication.md, not on price (CPU 3.42 s LOCAL)
+#
+# THE RETIRE SHAPE. A disposition that stopped being true has exactly two legal
+# endings, never a third: DELETE the row, or RETIRE it by prefixing its class
+# `RETIRED-` and REPLACING its evidence with what superseded it. A retired row is
+# invisible to the live path (it can never dispose anything), exempt from the
+# orphan check, and STILL rot-checked for existence and STILL required to carry
+# evidence. `RETIRED-*` is deliberately NOT in the vocabulary above and
+# `class_known` refuses it by an explicit arm, so a retired class can never be
+# smuggled back in as a live one.
+PDS_DOOR_DISPOSITIONS='pds-charter-ledger-sweep.sh	CONTENT-RED	by run 2026-08-04 at 683c2f00a: `--check` rc=1 "RED: an UNRESOLVED-CLAIM ARRIVAL is a charter claim nobody has adjudicated" (71 arrivals — the figure MOVES on every charter merge, because the lens is mined FROM the charter: 41 -> 45 -> 59 -> 71 across four merges, and the row read 59 while the sweep at that same commit printed 71); `--selftest` is rc=0 (3 of 3) and no longer hostage to the corpus; blocked on scripts/pds-charter-ledger-adjudication.md, not on price (CPU 3.42 s LOCAL)
 pds-record-parity.sh	RED-BY-DESIGN-REPORTER	by run 2026-08-03: `--selftest` rc=3 "unknown argument" — the flag does not exist; its only non-vacuous axis resolves task ids against the LIVE ledger and is red by design. A reporter must never carry a required check name.
 pds-window-sentinel.sh	NOT-YET-BUILT	source declares only `watch` and `preflight` verbs (scripts/pds-window-sentinel.sh:48-49); it is a host watcher with no pass/fail selftest to gate on.
 pds-ledger-census_test.sh	PRICE	CPU=33.44+6.89=40.33s LOCAL meter=/usr/bin/time -p around bash -c load1=24.26 2026-08-03 (rc=0, wall 68.24 s) — the SECOND tiering case; ~40 s CPU on a 2-4 vCPU runner needs its own justification.
@@ -179,13 +211,19 @@ pds-idle-sampler.sh	ENVIRONMENT	samples a live host over ssh, twice a minute (sc
 # ---------------------------------------------------------------------------
 # THE PRICE LEDGER — measured prices for rows that ARE through the door.
 # ---------------------------------------------------------------------------
-# `<basename><TAB>CPU=<user>+<sys>=<total>s LOCAL meter=<meter> …`. A THROUGH row
-# with no entry prints `price=UNMEASURED-LOCAL` rather than borrowing a number:
-# an unmeasured price is a missing fact, never a zero.
-PDS_DOOR_PRICES='pds-door-census.sh	CPU=0.91+2.41=3.32s LOCAL meter=/usr/bin/time -p around bash -c load1=41.63 2026-08-03 (--check, rc=0). Its gated arm is --selftest at CPU=0.04+0.12=0.16s; the rider also runs --check once and a one-row mutant once.
+# `<basename><TAB>CPU=<user>+<sys>=<total>s LOCAL meter=<meter> … load1=<n>`. A
+# THROUGH row with NO entry is UNPRICED and REDS, exactly as a non-THROUGH
+# instrument with no disposition row is UNDISPOSED and reds: an unmeasured price
+# is a missing fact, never a zero, and never a silent default either. There is no
+# UNMEASURED-LOCAL escape hatch (PDS-D666) — a legal shape meaning "no number"
+# inside the very predicate whose purpose is that a price descends from a meter
+# is the fraud this column exists to remove. The load1 stamp is REQUIRED
+# (PDS-D656): CPU is not load-independent, so a figure with no load beside it is
+# a number nobody can re-take.
+PDS_DOOR_PRICES='pds-door-census.sh	CPU=0.46+0.61=1.07s LOCAL meter=/usr/bin/time -p around bash -c load1=3.26 2026-08-04 (--check, rc=0; 3 trials gave 1.06/1.04/1.07s). Its gated arm is --selftest at CPU=0.19+0.28=0.47s at the SAME load (3 trials 0.48/0.49/0.47) — this wave added ten LEDGER arms that run the real run_census over a two-instrument fixture tree, which took --selftest up from 0.16s, and a price whose instrument changed underneath it is the exact rot this row is here to prevent. The 2026-08-03 figures (3.32s / 0.16s at load1=41.63) are NOT comparable and are not quoted as a delta: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once.
 pds-status-only-residue.exs	CPU=0.61+0.21=0.82s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 2026-08-03 (--selftest, 15/15 arms)
 pds-record-parity.test.sh	CPU=1.45+3.00=4.45s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 2026-08-03 (76 checks, 0 failures)
-pds-elixir-receipt-census.exs	UNMEASURED-LOCAL (plain+mutant+refusal is the expensive arm; its `--selftest` is separately disqualified at 210 s leaf CPU, and D646 shows even that understates the wall a gate would enforce)'
+pds-elixir-receipt-census.exs	CPU=26.47+2.26=28.73s LOCAL meter=/usr/bin/time -p around bash -c load1=2.93 2026-08-04 — the THREE GATED ARMS SUMMED, each metered separately: plain rc=0 at 11.81+0.94=12.75s, the one-token tl/1 mutant rc=1 at 11.53+0.91=12.44s (the mutant of api/test/barkpark/pds_elixir_census_test.exs:69-70, rebuilt in a tmp dir and run with cwd=repo root), the unknown-flag refusal rc=2 at 3.13+0.41=3.54s. THREE trials at load1 2.13 / 3.43 / 2.93 gave 29.20 / 28.61 / 28.73s total CPU — a 2% spread, so this row is quotable against its own load stamp and NOT against a busier host. Its `--selftest` is a DIFFERENT arm, separately disqualified at 210 s leaf CPU (D646), and is not what the gate runs.'
 
 # ---------------------------------------------------------------------------
 # roots
@@ -584,7 +622,119 @@ EOF
 }
 
 class_known() {
+  # RETIRED-* is refused BY THIS ARM, not merely by absence from the vocabulary.
+  # Absence is a weak guarantee: adding `RETIRED-ENVIRONMENT` to the list above
+  # took a SHUT door to full green (rc=0, ERRORS 0) and only the arm counting the
+  # vocabulary at six noticed. A retired class is a fact about a row that has
+  # STOPPED disposing anything; it must never be able to dispose one again, and
+  # that must not depend on someone remembering to keep it out of a list.
+  case "$1" in
+    RETIRED-*) return 1 ;;
+  esac
   has_line "$PDS_DOOR_CLASSES" "$1"
+}
+
+# The FIRST row for $2 whose class is NOT RETIRED-*. This is the ONLY lookup the
+# live path uses; `ledger_field` remains for the rot check, which must still see
+# retired rows. Here-doc, never a pipe, for the reason above ledger_field.
+live_ledger_field() {
+  # $1 = ledger text, $2 = basename, $3 = field index (2=class, 3=evidence)
+  awk -F'\t' -v b="$2" -v i="$3" '$1 == b && $2 !~ /^RETIRED-/ { print $i; exit }' <<EOF
+$1
+EOF
+}
+
+# ---------------------------------------------------------------------------
+# ORPHANED DISPOSITION — a ledger row nobody reads
+# ---------------------------------------------------------------------------
+# The class cond below short-circuits leg A + leg B to THROUGH (and the leg-A
+# kinds to ERROR, and Code.require_file to IN-BEAM-REQUIRED) BEFORE the
+# disposition ledger is consulted at all. So a row asserting that a now-THROUGH
+# instrument is environment-refused is not merely wrong — it is UNREAD: injecting
+# one left the output byte-identical, rc=0, stderr empty. A ledger nobody reads
+# is how a disposition column drifts back into prose.
+#
+# THIS CHECK IS UNGATED ON PURPOSE. It runs for every row whose class was
+# COMPUTED, with no has-key or membership guard in front of it: PDS-D602 records
+# the sibling census's guarded orphan direction as CONDITIONALLY BLIND — a guard
+# that asks "is this basename in the ledger?" before asking "should it be?"
+# cannot see the case where the answer to the second question is no.
+orphan_error() {
+  # $1 = basename, $2 = the COMPUTED class, $3 = disposition ledger text.
+  # Prints one error line, or nothing. Retired rows are exempt by construction:
+  # live_ledger_field cannot see them.
+  local lclass
+  lclass="$(live_ledger_field "$3" "$1" 2)"
+  [ -n "$lclass" ] || return 0
+  printf '  %s: ORPHANED DISPOSITION — the ledger carries a live %s row for it, but this run COMPUTED %s from the tree. The cond never reads a disposition for a computed row, so this row asserts a refusal nobody consults. Retire it (RETIRED-%s + what superseded it) or delete it.' \
+    "$1" "$lclass" "$2" "$lclass"
+}
+
+# ---------------------------------------------------------------------------
+# PRICE SHAPE — one predicate, applied to EVERY price, THROUGH or PRICE-classed
+# ---------------------------------------------------------------------------
+# SEPARATED AXIS, and this is law (PDS-D667): a shape check APPENDS to
+# error_lines and increments errors, and NEVER assigns class. A malformed price
+# is a fact about the LEDGER; THROUGH is a fact about the WIRING. The naive
+# version of this check set class='ERROR' inside the THROUGH branch and silently
+# dropped the headline from THROUGH 4 of 20 to 3 of 20 — it hid a door while
+# reporting a ledger typo.
+price_shape_error() {
+  # $1 = basename, $2 = the price text. Prints one error line, or nothing.
+  case "$2" in
+    *'CPU='*'LOCAL'*'meter='*) ;;
+    *)
+      printf '  %s: a price must carry CPU=<user>+<sys>=<total>s LOCAL meter=<name> (PDS-D648). It carries: %s' "$1" "$2"
+      return 0
+      ;;
+  esac
+  case "$2" in
+    *'load1='*) ;;
+    *)
+      printf '  %s: a price must carry its own load1=<n> stamp (PDS-D656 — CPU is NOT load-independent; the same byte-identical workload spanned 1.91-3.90 s across wave 45). It carries: %s' "$1" "$2"
+      ;;
+  esac
+}
+
+# ---------------------------------------------------------------------------
+# DUPLICATE KEYS — the first row silently wins
+# ---------------------------------------------------------------------------
+# ledger_field and live_ledger_field both exit on their FIRST match, so a second
+# row for the same basename is silently ignored and the first one decides. The
+# retire shape LEGALIZES two rows per basename, so shipping retirement without
+# this check widens a hole it also makes easier to hit: both, or neither.
+#
+# EACH LEDGER IS SCANNED ON ITS OWN, and each side is de-duplicated BEFORE any
+# union. Concatenating two key streams and then `uniq -d`ing the union
+# DOUBLE-REPORTS one within-ledger duplicate as a phantom cross-ledger collision
+# (ERRORS 2 for one defect). The scan is scoped to the VARIABLE, never to a line
+# range: a line-range scan straddles the comment block between the two literals
+# and reports a COMMENT LINE as a duplicate key.
+ledger_keys() {
+  # $1 = ledger text, $2 = 'live' to skip RETIRED-* rows, else every row
+  awk -F'\t' -v mode="${2:-all}" '
+    $1 == "" { next }
+    mode == "live" && $2 ~ /^RETIRED-/ { next }
+    { print $1 }
+  ' <<EOF
+$1
+EOF
+}
+
+# A retired row must still say what superseded it. Retired rows are skipped by
+# the live path, so they never reach the empty-evidence hard error the live rows
+# are held to — retirement as designed is an unconditional exemption, and an
+# exemption with no evidence attached is a row that says only "not this any
+# more", which is the vacuous green under a different name.
+retired_evidence_errors() {
+  # $1 = disposition ledger text. Prints zero or more error lines.
+  awk -F'\t' '
+    $2 ~ /^RETIRED-/ && $3 == "" {
+      printf "  %s: RETIRED row with EMPTY evidence. Retiring a disposition means REPLACING its evidence with what superseded it, not deleting it — a retired row is exempt from the orphan check, and an exemption nobody justified is the vacuous green under another name.\n", $1
+    }
+  ' <<EOF
+$1
+EOF
 }
 
 # ---------------------------------------------------------------------------
@@ -635,7 +785,7 @@ run_census() {
   echo
 
   # ---- the table -----------------------------------------------------------
-  local b kinds legA legB class evidence price row
+  local b kinds legA legB class evidence price row computed shape_err orphan_err
   local through=0 undisposed=0 errors=0 inbeam=0 dead=0
   local through_names="" undisposed_names="" error_lines=""
 
@@ -652,6 +802,11 @@ run_census() {
     class=''
     evidence=''
     price=''
+    # COMPUTED means: this row's class came from the TREE, not from the ledger.
+    # Only the terminal else reads a class; everything above it derives one, and
+    # every derived row is one the disposition ledger must not be asserting
+    # anything about. The flag is what the orphan check keys on.
+    computed='yes'
 
     # unclassifiable test-side references are ERRORS, never a silent "not gated"
     row=''
@@ -667,8 +822,26 @@ run_census() {
     elif [ "$legA" = 'yes' ] && [ "$legB" = 'true' ]; then
       class='THROUGH'
       price="$(ledger_field "$PDS_DOOR_PRICES" "$b" 2)"
-      [ -n "$price" ] || price='price=UNMEASURED-LOCAL'
-      evidence="$price"
+      if [ -z "$price" ]; then
+        # NO SILENT DEFAULT. The old arm printed `price=UNMEASURED-LOCAL` here,
+        # which made an author's reasoned refusal to price and a row nobody ever
+        # wrote indistinguishable — and deleting a genuinely measured price row
+        # left rc=0, ERRORS 0 and all four counts unmoved.
+        error_lines="$error_lines
+  $b: UNPRICED — THROUGH a required gate with no row in PDS_DOOR_PRICES. An absent price is a missing fact, exactly as an absent disposition is. Measure it (an OS meter around a SHELL, with its load1 stamp) and add the row. FAIL-CLOSED."
+        errors=$((errors + 1))
+        evidence='price=UNPRICED — no row in the price ledger. FAIL-CLOSED.'
+      else
+        # SEPARATED AXIS: the shape verdict never touches $class. A malformed
+        # price reds the run and leaves the door counted as the door it is.
+        shape_err="$(price_shape_error "$b" "$price")"
+        if [ -n "$shape_err" ]; then
+          error_lines="$error_lines
+$shape_err"
+          errors=$((errors + 1))
+        fi
+        evidence="$price"
+      fi
     elif has_line "$kinds" 'IN-BEAM-REQUIRE'; then
       # E3: Code.require_file runs IN the ExUnit BEAM. It is genuinely gated, but
       # it is NOT priceable by an OS meter around a shell, so it never gets a
@@ -679,8 +852,12 @@ run_census() {
       class='DEAD-DECLARATION'
       evidence='declared in ELIXIR_TEST_ONLY_PATHS but executed by no ExUnit case — leg B without leg A. This is the one class no existing gate can see.'
     else
-      class="$(ledger_field "$PDS_DOOR_DISPOSITIONS" "$b" 2)"
-      evidence="$(ledger_field "$PDS_DOOR_DISPOSITIONS" "$b" 3)"
+      # THE ONE BRANCH THAT READS. A retired row is invisible here, so an
+      # instrument whose ONLY row is retired falls to UNDISPOSED and reds — you
+      # cannot retire the only explanation of a shut door.
+      computed='no'
+      class="$(live_ledger_field "$PDS_DOOR_DISPOSITIONS" "$b" 2)"
+      evidence="$(live_ledger_field "$PDS_DOOR_DISPOSITIONS" "$b" 3)"
       if [ -z "$class" ]; then
         class='UNDISPOSED'
         evidence='no ledger row — this instrument has no measured price, no named environment, and no other class. FAIL-CLOSED.'
@@ -693,14 +870,24 @@ run_census() {
   $b: ledger row carries class '$class' with EMPTY evidence."
         class='ERROR'
       elif [ "$class" = 'PRICE' ]; then
-        case "$evidence" in
-          *'CPU='*'LOCAL'*'meter='*) ;;
-          *)
-            error_lines="$error_lines
-  $b: a PRICE row must carry CPU=<user>+<sys>=<total>s LOCAL meter=<name> (PDS-D648). It carries: $evidence"
-            class='ERROR'
-            ;;
-        esac
+        # Same predicate as the THROUGH branch, same separated axis: a PRICE row
+        # with a malformed price is still a PRICE row, and the run still reds.
+        shape_err="$(price_shape_error "$b" "$evidence")"
+        if [ -n "$shape_err" ]; then
+          error_lines="$error_lines
+$shape_err"
+          errors=$((errors + 1))
+        fi
+      fi
+    fi
+
+    # ---- the orphan check, ungated ----------------------------------------
+    if [ "$computed" = 'yes' ]; then
+      orphan_err="$(orphan_error "$b" "$class" "$PDS_DOOR_DISPOSITIONS")"
+      if [ -n "$orphan_err" ]; then
+        error_lines="$error_lines
+$orphan_err"
+        errors=$((errors + 1))
       fi
     fi
 
@@ -746,6 +933,38 @@ EOF
   done <<EOF
 $PDS_DOOR_DISPOSITIONS
 $PDS_DOOR_PRICES
+EOF
+
+  # ---- the ledger must not carry two answers to one question --------------
+  local dk
+  while IFS= read -r dk; do
+    [ -n "$dk" ] || continue
+    error_lines="$error_lines
+  $dk: DUPLICATE DISPOSITION KEY — more than one LIVE (non-retired) row. Both lookups exit on the FIRST match, so the second row is silently ignored and the first one decides; a contradictory row above a true one reclassifies an instrument with nothing printed at all."
+    errors=$((errors + 1))
+  done <<EOF
+$(ledger_keys "$PDS_DOOR_DISPOSITIONS" live | LC_ALL=C sort | uniq -d)
+EOF
+
+  local pk
+  while IFS= read -r pk; do
+    [ -n "$pk" ] || continue
+    error_lines="$error_lines
+  $pk: DUPLICATE PRICE KEY — more than one row in PDS_DOOR_PRICES. The first one silently becomes the price."
+    errors=$((errors + 1))
+  done <<EOF
+$(ledger_keys "$PDS_DOOR_PRICES" all | LC_ALL=C sort | uniq -d)
+EOF
+
+  # ---- a retired row must still say what superseded it --------------------
+  local re
+  while IFS= read -r re; do
+    [ -n "$re" ] || continue
+    error_lines="$error_lines
+$re"
+    errors=$((errors + 1))
+  done <<EOF
+$(retired_evidence_errors "$PDS_DOOR_DISPOSITIONS")
 EOF
 
   echo
@@ -1066,6 +1285,141 @@ EOF
     fail=$((fail + 1))
   fi
   SCAN_ROOT="$saved_root2"
+
+  # ---- THE LEDGER ARMS ----------------------------------------------------
+  # Everything above tests leg A. These test what the LEDGER does, end to end,
+  # through the REAL run_census — over a two-instrument fixture tree so the arms
+  # stay cheap enough to keep --selftest a fraction of a second. Leg B is stubbed
+  # INSIDE a command substitution (it cannot leak into a real run, and the real
+  # leg B answers against declared path sets no fixture name is in), which is the
+  # one thing a fixture tree cannot move. Each arm below REDS when its own repair
+  # is reverted — a repair whose own selftest cannot fail is this epic's law
+  # broken.
+  local croot
+  croot="$tmp/census"
+  mkdir -p "$croot/scripts" "$croot/api/test/barkpark"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$croot/scripts/pds-fx-through.sh"
+  printf '#!/usr/bin/env bash\nexit 0\n' >"$croot/scripts/pds-fx-shut.sh"
+  cat >"$croot/api/test/barkpark/census_door_test.exs" <<'EOF'
+defmodule CensusDoorTest do
+  use ExUnit.Case, async: false
+  @through_rel "../../../scripts/pds-fx-through.sh"
+  test "runs the door" do
+    {_o, 0} = System.cmd("bash", [Path.expand(@through_rel, __DIR__)])
+  end
+end
+EOF
+
+  CENSUS_OUT=''
+  CENSUS_RC=0
+
+  census_run() {
+    # $1 = disposition ledger, $2 = price ledger. Sets CENSUS_OUT / CENSUS_RC.
+    local saved_scan="$SCAN_ROOT" saved_d="$PDS_DOOR_DISPOSITIONS" saved_p="$PDS_DOOR_PRICES"
+    SCAN_ROOT="$croot"
+    PDS_DOOR_DISPOSITIONS="$1"
+    PDS_DOOR_PRICES="$2"
+    # The `if` is what keeps a red census from killing the selftest under set -e.
+    # The patterns are written `(…)` rather than `…)`: an unbalanced `)` inside
+    # `$( … )` ends the substitution early, which is a parse error, not a wrong
+    # answer — but it is a parse error that only fires at RUN time.
+    if CENSUS_OUT="$(
+      leg_b() { case "$1" in (*/pds-fx-through.sh) printf 'true' ;; (*) printf 'false' ;; esac; }
+      run_census 2>&1
+    )"; then CENSUS_RC=0; else CENSUS_RC=$?; fi
+    SCAN_ROOT="$saved_scan"
+    PDS_DOOR_DISPOSITIONS="$saved_d"
+    PDS_DOOR_PRICES="$saved_p"
+  }
+
+  census_arm() {
+    # $1 = label, $2 = expected rc, $3.. = substrings the output MUST contain
+    local label="$1" want="$2" missing='' s
+    shift 2
+    for s in "$@"; do
+      case "$CENSUS_OUT" in
+        *"$s"*) ;;
+        *) missing="$missing [$s]" ;;
+      esac
+    done
+    if [ "$CENSUS_RC" = "$want" ] && [ -z "$missing" ]; then
+      echo "  PASS  $label (rc=$CENSUS_RC)"
+      pass=$((pass + 1))
+    else
+      echo "  FAIL  $label: rc=$CENSUS_RC (wanted $want), missing:$missing"
+      fail=$((fail + 1))
+    fi
+  }
+
+  local d_ok p_ok
+  d_ok="$(printf 'pds-fx-shut.sh\tENVIRONMENT\tfixture: needs a credential it will never have.')"
+  p_ok="$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=/usr/bin/time -p around bash -c load1=1.00 2026-08-04 (fixture)')"
+
+  # CONTROL — the harness itself can be green, so a red arm below means the
+  # defect, not the harness.
+  census_run "$d_ok" "$p_ok"
+  census_arm "LEDGER CONTROL: the fixture census is GREEN" 0 \
+    'THROUGH a required gate : 1 of 2' 'ERRORS                  : 0'
+
+  # ORPHAN — a live row asserting a refusal for an instrument the tree says is
+  # THROUGH. Before this slice it was INVISIBLE: byte-identical output, rc=0.
+  census_run "$(printf '%s\npds-fx-through.sh\tENVIRONMENT\tfixture: contradicts the wiring.' "$d_ok")" "$p_ok"
+  census_arm "ORPHAN FIRES: a live row for a COMPUTED instrument reds, count unmoved" 1 \
+    'ORPHANED DISPOSITION' 'THROUGH a required gate : 1 of 2'
+
+  # RETIREMENT EXEMPTS — the same row, retired, with what superseded it.
+  census_run "$(printf '%s\npds-fx-through.sh\tRETIRED-ENVIRONMENT\tsuperseded 2026-08-04: the door was wired; leg A + leg B now compute THROUGH.' "$d_ok")" "$p_ok"
+  census_arm "RETIREMENT EXEMPTS: a RETIRED- row is invisible to the live path" 0 \
+    'ERRORS                  : 0' 'THROUGH a required gate : 1 of 2'
+
+  # ...AND CANNOT BE ABUSED — this is the direction that is not vacuous. With the
+  # door SHUT, its only row retired, the instrument is UNDISPOSED and the run
+  # reds: you cannot retire the only explanation of a shut door.
+  census_run "$(printf 'pds-fx-shut.sh\tRETIRED-ENVIRONMENT\tsuperseded 2026-08-04: by nothing at all.')" "$p_ok"
+  census_arm "RETIREMENT IS NOT A BYPASS: a retired-only row on a SHUT door reds UNDISPOSED" 1 \
+    'UNDISPOSED              : 1 of 2'
+
+  # A RETIRED ROW MUST STILL SAY WHAT SUPERSEDED IT.
+  census_run "$(printf '%s\npds-fx-through.sh\tRETIRED-ENVIRONMENT\t' "$d_ok")" "$p_ok"
+  census_arm "A RETIRED ROW WITH EMPTY EVIDENCE REDS" 1 \
+    'RETIRED row with EMPTY evidence'
+
+  # TWO LIVE ROWS FOR ONE BASENAME — the first silently wins.
+  census_run "$(printf 'pds-fx-shut.sh\tNOT-YET-BUILT\tfixture: the contradictory row above the true one.\n%s' "$d_ok")" "$p_ok"
+  census_arm "A DUPLICATE LIVE DISPOSITION KEY REDS" 1 \
+    'DUPLICATE DISPOSITION KEY'
+
+  # A THROUGH PRICE OF PROSE. Note the count: the shape verdict never touches it.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tit is free, trust me')"
+  census_arm "A PROSE THROUGH PRICE REDS, and the THROUGH count does NOT move" 1 \
+    'a price must carry CPU=' 'THROUGH a required gate : 1 of 2'
+
+  # A D648-SHAPED PRICE WITH NO LOAD STAMP (PDS-D656).
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tCPU=0.01+0.01=0.02s LOCAL meter=/usr/bin/time -p around bash -c 2026-08-04 (fixture)')"
+  census_arm "A PRICE WITH NO load1= STAMP REDS, and the THROUGH count does NOT move" 1 \
+    'must carry its own load1=<n> stamp' 'THROUGH a required gate : 1 of 2'
+
+  # NO PRICE ROW AT ALL — the deleted silent default.
+  census_run "$d_ok" ''
+  census_arm "AN ABSENT THROUGH PRICE IS UNPRICED and REDS" 1 \
+    'UNPRICED' 'THROUGH a required gate : 1 of 2'
+
+  # THE VOCABULARY BYPASS. class_known must refuse RETIRED-* BY ITS OWN ARM, not
+  # by absence from the list: adding RETIRED-ENVIRONMENT to PDS_DOOR_CLASSES took
+  # a SHUT door to full green, and only the arm counting the vocabulary saw it.
+  local saved_classes
+  saved_classes="$PDS_DOOR_CLASSES"
+  PDS_DOOR_CLASSES="$PDS_DOOR_CLASSES
+RETIRED-ENVIRONMENT"
+  if ! class_known RETIRED-ENVIRONMENT && class_known ENVIRONMENT; then
+    echo "  PASS  class_known REFUSES RETIRED-* even when the vocabulary carries it"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  class_known admitted RETIRED-ENVIRONMENT once it was added to the vocabulary —"
+    echo "        absence from a list is not a guard, and this is the ONLY working bypass"
+    fail=$((fail + 1))
+  fi
+  PDS_DOOR_CLASSES="$saved_classes"
 
   echo
   printf '%s\n' "$BLIND_SPOT"
