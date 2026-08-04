@@ -4084,7 +4084,15 @@ async function main() {
               // `overflow` IS THE THIRD LEG OF THE CUE (cch-w29-s3). `ellipsis`
               // paints only where the box actually clips; the model arm below
               // (`ov:cs.overflow`) has always read it, this arm never did.
-              `      ov:cs.overflow,` +
+              // …and the DECIDING axis is read by name. `overflow` is a
+              // shorthand: `overflow-x: visible; overflow-y: clip` is a legal
+              // pair the spec does NOT blockify, so it serialises as
+              // "visible clip" and a shorthand test for the literal "visible"
+              // would let a box that does not clip HORIZONTALLY — the only axis
+              // a single-line ellipsis cares about — score as a paintable cue.
+              // The shorthand is still collected because it is what a reader
+              // recognises in the failure sentence.
+              `      ov:cs.overflow,ox:cs.overflowX,` +
               `      t:(n.textContent||'').trim().slice(0,40)};}` +
               `  out.rows.push(rec);` +
               `});` +
@@ -4132,10 +4140,13 @@ async function main() {
               // sentence, and so is declaring it beside `overflow: visible`,
               // where the text simply spills past the box in full view of
               // nothing. `pre-wrap` and `pre-line` WRAP, so they are not on the
-              // white-space list; `overflow: visible` is the ONLY computed value
+              // white-space list; `visible` is the ONLY computed overflow value
               // that suppresses the ellipsis, which is why this leg tests for it
-              // by name rather than for "some kind of clip" (cch-w29-s3).
-              const cuePaints = n.te === "ellipsis" && (n.ws === "nowrap" || n.ws === "pre") && n.ov !== "visible";
+              // by name rather than for "some kind of clip" (cch-w29-s3) — and
+              // it tests the X AXIS, because that is the only one a single-line
+              // ellipsis truncates on and the shorthand can legally read
+              // "visible clip" while the horizontal axis does not clip at all.
+              const cuePaints = n.te === "ellipsis" && (n.ws === "nowrap" || n.ws === "pre") && n.ox !== "visible";
               if (n.sw > n.cw && !cuePaints) {
                 clipped++;
                 // THE SENTENCE NAMES THE LEG THAT ACTUALLY FAILED. Blaming
@@ -4144,10 +4155,10 @@ async function main() {
                 // inside the instrument that polices it, so all three computed
                 // values are printed and the trailing clause is chosen by which
                 // leg is the one standing between the reader and a paintable cue.
-                const why = n.ov === "visible"
-                  ? `ellipsis is inert while overflow computes "visible" — the box does not clip, so nothing truncates and nothing paints`
+                const why = n.ox === "visible"
+                  ? `ellipsis is inert while overflow-x computes "visible" — the box does not clip horizontally, so nothing truncates and nothing paints`
                   : `ellipsis is inert unless white-space forbids wrapping`;
-                fail(D, `${scen}/${theme}@${width} row${r.i} \`.set-row-name\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of the identity is hidden with NO cue that can paint (computed white-space "${n.ws}", text-overflow "${n.te}", overflow "${n.ov}"; ${why}). This is WHO the row's Remove button acts on`);
+                fail(D, `${scen}/${theme}@${width} row${r.i} \`.set-row-name\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of the identity is hidden with NO cue that can paint (computed white-space "${n.ws}", text-overflow "${n.te}", overflow "${n.ov}", overflow-x "${n.ox}"; ${why}). This is WHO the row's Remove button acts on`);
               }
             }
             // The cell string carries the NUMBERS, not a verdict glyph: the
