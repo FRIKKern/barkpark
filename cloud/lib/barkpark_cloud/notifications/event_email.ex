@@ -101,8 +101,14 @@ defmodule BarkparkCloud.Notifications.EventEmail do
   # wave 13 S2: SCRUBBED. For the failure events this string is the RAW reason — a remote ssh/
   # provider capture that can carry a credential the control plane never chose to
   # print — and an email leaves our boundary for good. This is the sole reader of
-  # `:detail` in the email channel; `Notifications.Render.render/2` never reads it,
-  # so chat is not a leak channel and is deliberately not touched here.
+  # `:detail` in the email channel.
+  #
+  # WAVE 29 CORRECTION: `Notifications.Render.render/2` DOES read `:detail` now —
+  # the chat arm was telling the same person a cause-free story the inbox already
+  # explained. It reads it through `FailureCopy.humanize/1` (classify |> scrub)
+  # and renders the CLASS ONLY, never the raw capture this line appends, so the
+  # boundary the sentence above protects still holds: the verbatim provider bytes
+  # remain an email-only courtesy for a reader forwarding them to support.
   defp detail(payload) do
     case Map.get(payload, :detail) || Map.get(payload, "detail") do
       d when is_binary(d) and d != "" -> "\n\n#{FailureCopy.scrub(d)}"
