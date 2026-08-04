@@ -905,8 +905,11 @@ defmodule BarkparkCloud.Accounts do
 
   SCOPED to `context == "session"`: a member removal / demotion (the callers)
   must log the user out without incidentally HARD-DELETING their PATs — a
-  programmatic credential is destroyed only by a deliberate `/v1/tokens` revoke,
-  never as a side effect of a role change.
+  programmatic credential is never DESTROYED as a side effect of a role change.
+  The membership-scoped PAT eviction is a SEPARATE, narrower step the same
+  callers take (`revoke_team_pats/2` on removal, `revoke_team_pats_exceeding_role/3`
+  on demotion): it stamps `revoked_at` on the team's rows only, leaving the
+  audit tombstone and every other team's credentials intact.
 
   NOTE: Cloud session tokens are GLOBAL, not per-team (unlike Coolify's
   team-scoped tokens). In the single-team beta, removing a user from their team
@@ -923,6 +926,77 @@ defmodule BarkparkCloud.Accounts do
       |> Repo.delete_all()
 
     {:ok, count}
+  end
+
+  @doc """
+  Revoke (stamp `revoked_at` on) EVERY live PAT `user` holds on `team` — the
+  removal remedy. No membership, no team-scoped credential: the Console's
+  destroy-tier modal promises "Ends <email>'s access to the team immediately",
+  and a PAT that outlives the membership row makes that promise false (it kept
+  reading `GET /v1/barkparks` and writing `POST /v1/fleet/supports` on a team
+  the holder had left).
+
+  TEAM-SCOPED ON PURPOSE (`team_id == team`, never `user_id` alone): a user may
+  hold PATs on several teams, and a blast radius that crossed teams would be a
+  new tenancy defect, not a fix. Returns `{:ok, count}`.
+  """
+  @spec revoke_team_pats(Team.t() | binary(), User.t() | binary()) ::
+          {:ok, non_neg_integer()}
+  def revoke_team_pats(team, user),
+    do: revoke_live_team_pats(team, user, fn _abilities -> true end)
+
+  @doc """
+  Revoke only the PATs `user` holds on `team` whose abilities EXCEED what a
+  holder of `role` could mint TODAY — the demotion remedy, deliberately
+  narrower than `revoke_team_pats/2`.
+
+  A demoted user is still a member, so the read-only PAT they remain entitled
+  to mint keeps working; only the elevated grant they could no longer obtain
+  (`write`/`deploy`/`root`) dies. The predicate is `pat_abilities_allowed?/2` —
+  the same one the mint fence uses — so the surface can never honour a stale
+  grant it would refuse to issue. Returns `{:ok, count}`.
+  """
+  @spec revoke_team_pats_exceeding_role(
+          Team.t() | binary(),
+          User.t() | binary(),
+          String.t() | nil
+        ) ::
+          {:ok, non_neg_integer()}
+  def revoke_team_pats_exceeding_role(team, user, role) do
+    revoke_live_team_pats(team, user, &(not pat_abilities_allowed?(role, &1)))
+  end
+
+  # The shared body: load the user's LIVE PATs on this team, keep the ones
+  # `doomed?` selects (the abilities check is Elixir-side — the ability set is
+  # an array column and the predicate is the mint fence itself), stamp them.
+  defp revoke_live_team_pats(team, user, doomed?) do
+    uid = user_id(user)
+    tid = team_id(team)
+    now = DateTime.truncate(DateTime.utc_now(), :microsecond)
+
+    doomed_ids =
+      from(t in UserToken,
+        where: t.user_id == ^uid,
+        where: t.team_id == ^tid,
+        where: t.context == "pat",
+        where: is_nil(t.revoked_at),
+        select: {t.id, t.abilities}
+      )
+      |> Repo.all()
+      |> Enum.filter(fn {_id, abilities} -> doomed?.(abilities || []) end)
+      |> Enum.map(fn {id, _abilities} -> id end)
+
+    case doomed_ids do
+      [] ->
+        {:ok, 0}
+
+      ids ->
+        {count, _} =
+          from(t in UserToken, where: t.id in ^ids)
+          |> Repo.update_all(set: [revoked_at: now])
+
+        {:ok, count}
+    end
   end
 
   ## Roles — the inert team_memberships.role column put to work.
@@ -1656,6 +1730,10 @@ defmodule BarkparkCloud.Accounts do
       Repo.delete!(membership)
       # Immediate logout — the removed user's session tokens stop working now.
       {:ok, _} = delete_user_session_tokens(user)
+      # …and their PROGRAMMATIC access to THIS team ends with it: an ex-member's
+      # PAT kept authorizing reads and writes on a team they had left. Scoped to
+      # this team — PATs they hold elsewhere are untouched.
+      {:ok, _} = revoke_team_pats(team, user)
       :removed
     end)
   end
@@ -1744,9 +1822,12 @@ defmodule BarkparkCloud.Accounts do
         |> TeamMembership.changeset(%{role: new_role})
         |> Repo.update!()
 
-      # A downgrade out of an elevated grant evicts the user's sessions.
+      # A downgrade out of an elevated grant evicts the user's sessions, and the
+      # elevated PATs minted under the old role — but ONLY those: a plain member
+      # may still hold the read-only PAT they are entitled to mint.
       if was_elevated and new_role == "member" do
         {:ok, _} = delete_user_session_tokens(user)
+        {:ok, _} = revoke_team_pats_exceeding_role(team, user, new_role)
       end
 
       updated
