@@ -8,10 +8,16 @@ defmodule Barkpark.PdsElixirCensusTest do
 
   ## The honest sentence
 
-  3 of 19 instruments run under a required gate, on every PR that could affect
-  them -- NOT on every PR; and record-parity's harness is HERMETIC (zero of its
-  76 checks read a live ledger row), so it gates the ARM's own logic against
-  regression, NOT the epic's record.
+  Some of this epic's instruments run under a required gate, on every PR that
+  could affect THEM -- not on every PR; and record-parity's harness is HERMETIC
+  (zero of its checks read a live ledger row), so it gates the ARM's own logic
+  against regression, NOT the epic's record.
+
+  THE FRACTION IS DELIBERATELY NOT WRITTEN HERE. It used to read "3 of 19", which
+  was true only until #9380 moved the inventory (the door census enters its own
+  denominator by design, and says so). `scripts/pds-door-census.sh --check`
+  DERIVES both numbers on every run; a copy of them in this moduledoc is a figure
+  with no meter behind it, which is the exact defect this case exists to catch.
 
   The second half of that sentence is the part that is easy to drop. This door
   is cheap and real, and it is not a claim that the epic's record is checked on
@@ -25,10 +31,14 @@ defmodule Barkpark.PdsElixirCensusTest do
 
   ## Why `--selftest` is NOT gated here
 
-  Leaf-metered it costs ~210 s USER CPU across 33 port-child invocations
-  (PDS-D633/D625) — disqualified on price, not on merit. The three arms below
-  cost ~23 s wall each and buy the same thing the selftest's cheap arms buy:
-  the census runs, it can red, and it refuses garbage ARGV.
+  Leaf-metered it cost ~210 s USER CPU across 33 port-child invocations on the
+  PDS-D633/D625 run -- illustrative, that run only; the census now DERIVES the
+  floor (9 x its own `user cpu`) on its output's one volatile line, so re-read it
+  there rather than quoting this paragraph. Either way `--selftest` is
+  disqualified on price, not on merit. The three arms below cost 28,09 s and
+  28,31 s of CPU per rider run over two metered trials (load1 1,70 -> 1,97; see
+  `@moduletag timeout`) and buy the same thing the selftest's cheap arms buy: the
+  census runs, it can red, and it refuses garbage ARGV.
 
   ## Why the assertions are on prose, never on numbers
 
@@ -39,18 +49,33 @@ defmodule Barkpark.PdsElixirCensusTest do
 
   ## Why the fail-demo runs with `cd: root`
 
-  The corpus glob is CWD-relative. A mutant executed from its own tmp dir would
-  census an EMPTY tree and exit 0 — a vacuous green dressed as a fail-demo. The
-  mutant runs from the repo root for exactly that reason.
+  The corpus glob is CWD-relative, so a mutant executed from its own tmp dir
+  censuses an EMPTY tree. This comment used to say that exits 0 — "a vacuous
+  green dressed as a fail-demo." BY RUN it exits 2:
+
+      REFUSED: TRUNCATED CORPUS
+        corpus is EMPTY — nothing to census
+      The census does not report zeros it cannot stand behind. Exit 2.
+
+  `cd: root` is STILL load-bearing — this test asserts `rc == 1`, and 2 is not 1,
+  so a tmp-dir mutant reds here either way — but the failure mode it was guarding
+  against stopped existing when the census grew its empty-corpus guard, and the
+  comment did not notice. A rationale that outlives the behaviour it cites is the
+  same defect as a price that outlives its meter.
 
   `async: false`: each arm shells a subprocess that walks the whole `api/lib`
   tree; it has no business racing the async lane.
   """
   use ExUnit.Case, async: false
 
-  # ~23 s wall per arm against ExUnit's 60 s default. Without this the case is a
-  # runner-speed flake rather than a gate. (api/config/test.exs's 45_000 is the
-  # DB checkout timeout — a different thing entirely.)
+  # MEASURED, not guessed (`/usr/bin/time -p` around a shell, 2 trials, load1
+  # stamped 1,70 → 1,97): the arms run 12,12 / 12,07 s wall (plain), 13,70 /
+  # 11,77 s (mutant) and 2,95 / 3,20 s (refusal). On THIS host at THAT load no arm
+  # comes near ExUnit's 60 s default — so this timeout is HEADROOM for a loaded CI
+  # runner, not a measured necessity, and saying so is the point. Earlier prose
+  # here claimed "~23 s wall per arm", and a wave-46 brief claimed a 73,91 s mutant
+  # arm; both are refuted by the run above. Re-meter before quoting either.
+  # (api/config/test.exs's 45_000 is the DB checkout timeout — a different thing.)
   @moduletag timeout: 600_000
 
   # The "../../../scripts/…" STRING LITERAL is load-bearing, not cosmetic:
@@ -123,8 +148,10 @@ defmodule Barkpark.PdsElixirCensusTest do
     mutant = Path.join(mutant_dir, "pds-elixir-receipt-census.exs")
     File.write!(mutant, String.replace(source, @mutant_from, @mutant_to, global: false))
 
-    # `cd: ctx.root` IS LOAD-BEARING: the corpus glob is CWD-relative, so a
-    # mutant run from its own tmp dir would census an empty tree and pass.
+    # `cd: ctx.root` IS LOAD-BEARING: the corpus glob is CWD-relative, so a mutant
+    # run from its own tmp dir censuses an empty tree and exits 2 (REFUSED:
+    # TRUNCATED CORPUS) — not the rc 1 asserted below. See the moduledoc: it is
+    # NOT the "exits 0, vacuous green" this comment used to claim.
     {out, rc} = System.cmd(ctx.elixir, [mutant], cd: ctx.root, stderr_to_stdout: true)
 
     assert rc == 1,
