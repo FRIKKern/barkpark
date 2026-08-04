@@ -155,7 +155,19 @@
     // 403 on the portal/cancel POSTs is an authority answer, NOT a transient
     // failure — this honest copy keeps it from reading as "try again in a moment"
     // (absorbs gr-backlog-portal-retry-sentence).
-    forbidden: "Only the team owner can manage billing."
+    forbidden: "Only the team owner can manage billing.",
+    // cch-w30-s5 — the CRASH slugs the router's Plug.ErrorHandler now sends.
+    // These MUST be registered here: friendly()'s precedence is curated ERRORS →
+    // details → the caller's fallback, so an unregistered slug silently loses to
+    // a fallback written for a validation failure and the person reads "Check
+    // the details and try again." about a fault that was never theirs. The copy
+    // names US as the party at fault and never asks the person to re-check input
+    // they got right.
+    server_error: "Something broke on our side — not your input. Try again in a moment; if it keeps happening, contact support.",
+    malformed_body: "We couldn't read that request — reload the page and try again.",
+    malformed_request: "We couldn't read that request — reload the page and try again.",
+    unsupported_media_type: "We couldn't read that request — reload the page and try again.",
+    request_too_large: "That's too large for us to accept. Try a smaller value or file."
   };
   // Precedence (GR19 fix): curated ERRORS copy → field-level details → the
   // caller's DESIGNED fallback → the humanized slug. (Previously any truthy
@@ -173,6 +185,23 @@
       }
     }
     return fallback || (key ? key.replace(/_/g, " ") : "") || "Something went wrong.";
+  }
+
+  // cch-w30-s5 — a caller's fallback is copy written for a FAILED VALIDATION
+  // ("Check the form and try again."), and it is only honest when the server
+  // actually answered ABOUT THE INPUT. On a 5xx it is a lie: the person's input
+  // was never judged, the control plane fell over. So a server fault swaps in
+  // the server-fault copy while a 4xx keeps the caller's designed sentence.
+  // Belt-and-braces with the router's crash envelope: even if a 5xx arrives
+  // with no parseable body at all (an upstream proxy's HTML error page, say),
+  // the person still reads a true sentence instead of being told to re-check
+  // input they got right. (Named faultCopy, NOT failureCopy — that name is
+  // already a top-level declaration further down, the builder failure_reason
+  // mapper; two `function` declarations in this one IIFE scope would silently
+  // clobber each other.)
+  function faultCopy(status, data, fallback) {
+    if (status >= 500) return friendly(data, ERRORS.server_error);
+    return friendly(data, fallback);
   }
 
   // =========================================================== TOAST primitive
@@ -2107,7 +2136,7 @@
       // dismissing the form. Anything else falls back to friendly()'s copy.
       var copy = remediationCopy(r.data);
       if (copy) showCredRemediation(copy);
-      else toast({ kind: "error", title: "Couldn't verify those credentials", body: friendly(r.data, "Check the details and try again.") });
+      else toast({ kind: "error", title: "Couldn't verify those credentials", body: faultCopy(r.status, r.data, "Check the details and try again.") });
     });
   }
 
@@ -2537,7 +2566,7 @@
       var copy = remediationCopy(r.data);
       if (copy) showCredRemediation(copy);
       else toast({ kind: "error", title: "Couldn't verify those credentials",
-        body: friendly(r.data, "Check the details and try again.") });
+        body: faultCopy(r.status, r.data, "Check the details and try again.") });
     });
   }
 
@@ -3598,7 +3627,7 @@
       } else {
         btn.disabled = false;
         btn.textContent = "Create token";
-        toast({ kind: "error", title: "Couldn't create token", body: friendly(r.data, "Check the form and try again.") });
+        toast({ kind: "error", title: "Couldn't create token", body: faultCopy(r.status, r.data, "Check the form and try again.") });
       }
     });
   }
@@ -9200,7 +9229,10 @@
       var ev = rs[0], au = rs[1];
       if (!ev.ok) {
         box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load the timeline</h2>' +
-          "<p>" + esc(friendly(ev.data, "Check your connection and retry.")) + "</p>" +
+          // A 500 here is OUR fault, not the person's wifi — the connection
+          // sentence survives only for a genuine transport failure (status 0
+          // → network_error) and for 4xx.
+          "<p>" + esc(faultCopy(ev.status, ev.data, "Check your connection and retry.")) + "</p>" +
           '<p><button class="btn btn-sm btn-primary" type="button" data-tlv-retry>Retry</button></p></div>';
         return;
       }
@@ -17112,10 +17144,12 @@
   // Pure: honest copy for a failed invite. The server splits the collision into
   // already_member (they're on the team) vs already_invited (a live invite exists)
   // — both are surfaced truthfully instead of a generic "try again".
-  function inviteFailureCopy(data) {
+  // `status` is optional (older callers passed data alone); when it is a 5xx the
+  // address was never judged, so "Check the address" is dropped (cch-w30-s5).
+  function inviteFailureCopy(data, status) {
     if (data && data.error === "already_member") return "That person is already on your team.";
     if (data && data.error === "already_invited") return "There's already a pending invitation for that address — revoke it first to re-send.";
-    return friendly(data, "Check the address and try again.");
+    return faultCopy(status, data, "Check the address and try again.");
   }
 
   function submitInvite(ctx) {
@@ -17132,7 +17166,7 @@
       } else {
         btn.disabled = false;
         btn.textContent = "Send invitation";
-        toast({ kind: "error", title: "Couldn't send invitation", body: inviteFailureCopy(r.data) });
+        toast({ kind: "error", title: "Couldn't send invitation", body: inviteFailureCopy(r.data, r.status) });
       }
     });
   }
@@ -17311,7 +17345,7 @@
     }
     if (status === 403) return "Only team owners and admins can change environment variables.";
     if (status === 422 && data && data.error === "key_required") return "Enter a key.";
-    return friendly(data, "Check the values and try again.");
+    return faultCopy(status, data, "Check the values and try again.");
   }
 
   function envVarsErrorHtml(status) {
@@ -19632,6 +19666,10 @@
       // line is legal inside an object literal). Only reference helpers
       // declared above -- this object is built once, at eval tail. Sweeps:
       // move this comment only whole, on its own lines. MARK:zone-console-hook-map
+      // cch-w30-s5: the crash-vs-validation copy switch. Node drives it with the
+      // router's real crash envelope so the RENDERED sentence is pinned, not
+      // just the wire bytes.
+      faultCopy: faultCopy,
       // gr-p5-account-2fa (GR54): the account modal body, extracted PURE so its
       // eight lockout-bearing element ids are node-pinned.
       accountModalHtml: accountModalHtml,
