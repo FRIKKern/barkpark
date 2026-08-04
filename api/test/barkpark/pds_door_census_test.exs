@@ -144,6 +144,25 @@ defmodule Barkpark.PdsDoorCensusTest do
     assert out =~ ~r/SELFTEST: (\d+) PASS \/ 0 FAIL of \1 arms/,
            "the selftest's PASS count and arm count disagree, so its verdict does not descend " <>
              "from its arms.\n#{out}"
+
+    # WAVE 47's ARMS, named here for the same reason the fraud arm is: an arm
+    # that can be quietly deleted is an arm the suite cannot miss. Each of these
+    # covers a shape that passed on main in TOTAL SILENCE — rc=0, ERRORS 0, and
+    # a COUNTS block byte-identical to the unmutated run.
+    for arm <- [
+          "ORPHANED PRICE FIRES",
+          "CROSS-LEDGER CONTRADICTION",
+          "A RETIRE COSTUME DOES NOT EXEMPT AN ORPHANED PRICE",
+          "A RETIRED- PRICE IS REFUSED",
+          "AN UNANCHORED PREFIX IN FRONT OF CPU= IS REFUSED",
+          "THE PARTITION PRINTS THE FULL VOCABULARY INCLUDING ZEROES",
+          "THE SUM IS ASSERTED"
+        ] do
+      assert out =~ arm,
+             "the `#{arm}` arm is gone from the selftest. It covers a silence that was live on " <>
+               "main — a price row nobody pays, a retire costume on a price, or a class the " <>
+               "COUNTS block could not see — and without it the repair has no guard.\n#{out}"
+    end
   end
 
   test "--check's EXIT CODE DESCENDS from its own printed UNDISPOSED and ERRORS counts", ctx do
@@ -325,6 +344,24 @@ defmodule Barkpark.PdsDoorCensusTest do
            "fewer than two PRICE rows in the column. PDS-D648's unit ruling is only worth " <>
              "asserting while something is priced.\n#{out}"
 
+    # ZERO DOWNWARD HEADROOM, so the filter's INDEPENDENCE is pinned rather than
+    # left to luck. The filter matches any line whose 4th whitespace token is the
+    # literal `PRICE`, and wave 47 added an error line that begins with a `pds-*`
+    # basename and carries the word PRICE — worded `<basename>: ORPHANED PRICE —`
+    # precisely so its 4th token is the em dash and not `PRICE`. Had it been
+    # worded `PRICE ORPHAN PRICE row unread`, this filter would have swallowed it
+    # into `price_rows` and the CPU= assertion below would have reddened on a
+    # message that is not a price row at all.
+    orphan_price_line =
+      "  pds-fx-shut.sh: ORPHANED PRICE — the price ledger carries a row for it, " <>
+        "but this run classed it ENVIRONMENT, not THROUGH."
+
+    assert Enum.filter([orphan_price_line], &String.match?(&1, ~r/^\s+pds-\S+\s+\S+\s+\S+\s+PRICE\s/)) ==
+             [],
+           "the ORPHANED PRICE error line is captured by this test's own PRICE-row filter, so " <>
+             "an error message would be asserted against as though it were a row of the price " <>
+             "column. Re-word the message so its 4th whitespace token is not the literal PRICE."
+
     for row <- price_rows do
       assert row =~ ~r/CPU=[\d.]+\+[\d.]+=[\d.]+s LOCAL meter=/,
              "a PRICE row quotes something other than CPU=user+sys=total LOCAL with the meter " <>
@@ -336,6 +373,74 @@ defmodule Barkpark.PdsDoorCensusTest do
              "a PRICE row quotes a wall figure as the price. Wall belongs in the column only " <>
                "as an explicitly non-quotable note.\nRow: #{row}"
     end
+  end
+
+  test "the COUNTS block ACCOUNTS FOR every row of the column, zeroes included", ctx do
+    out = ctx.check_out
+
+    [_, _through, total] = Regex.run(~r/THROUGH a required gate\s+:\s+(\d+) of (\d+)/, out)
+    total = String.to_integer(total)
+
+    # EVERY declared class, INCLUDING THE ONES AT ZERO. HUMAN-GATE is at zero
+    # right now and the charter records that as a live finding — a `uniq -c`
+    # remedy prints five lines here and silently drops the sixth, which is the
+    # one worth printing.
+    band_counts =
+      for class <- ~w(PRICE ENVIRONMENT NOT-YET-BUILT CONTENT-RED RED-BY-DESIGN-REPORTER HUMAN-GATE) do
+        case Regex.run(~r/^\s+#{Regex.escape(class)}\s+:\s+(\d+) of (\d+)\s*$/m, out) do
+          [_, n, m] ->
+            assert String.to_integer(m) == total,
+                   "the #{class} band prints a denominator of #{m} against a population of " <>
+                     "#{total} — two denominators in one block.\n#{out}"
+
+            {class, String.to_integer(n)}
+
+          nil ->
+            flunk("the COUNTS block printed no line for the declared class #{class}.\n#{out}")
+        end
+      end
+
+    assert {"HUMAN-GATE", 0} in band_counts,
+           "HUMAN-GATE is no longer printed at zero. If a door was placed behind a human gate, " <>
+             "raise this on purpose; if the line vanished because the class emptied, the block " <>
+             "went back to hiding the fact the charter records.\n#{out}"
+
+    accounted =
+      case Regex.run(~r/ACCOUNTED FOR\s+:\s+(\d+) of (\d+)/, out) do
+        [_, n, m] -> {String.to_integer(n), String.to_integer(m)}
+        nil -> flunk("the COUNTS block printed no `ACCOUNTED FOR` line at all.\n#{out}")
+      end
+
+    assert accounted == {total, total},
+           "the census accounted for #{elem(accounted, 0)} of #{total} rows. Every row lands in " <>
+             "exactly one declared band; a row in none is a class the COUNTS block cannot see, " <>
+             "which is the silence the partition replaced.\n#{out}"
+
+    # AND THE SUM IS A DERIVATION, not a transcription: the printed ACCOUNTED FOR
+    # must equal the printed bands added up, the four computed ones included.
+    computed_sum =
+      for label <- [
+            "THROUGH a required gate",
+            "IN-BEAM-REQUIRED",
+            "DEAD-DECLARATION",
+            "UNDISPOSED",
+            "ERROR rows"
+          ],
+          reduce: 0 do
+        acc -> acc + counted!(out, Regex.escape(label))
+      end
+
+    ledger_sum = band_counts |> Enum.map(&elem(&1, 1)) |> Enum.sum()
+
+    assert computed_sum + ledger_sum == elem(accounted, 0),
+           "the printed band lines add up to #{computed_sum + ledger_sum} but the census printed " <>
+             "ACCOUNTED FOR #{elem(accounted, 0)}. The total does not descend from the lines " <>
+             "above it, which makes it a transcription.\n#{out}"
+
+    assert out =~ "RESIDUAL (in no declared band): none",
+           "the census printed a residual band. A row whose class is in neither " <>
+             "PDS_DOOR_CLASSES nor PDS_DOOR_COMPUTED_BANDS is unaccountable by construction — " <>
+             "fix the class or declare the band, never the count.\n#{out}"
   end
 
   test "the class vocabulary is D637's five plus HUMAN-GATE, and 'the fence' is not one", ctx do
