@@ -1423,6 +1423,35 @@ const stCancelled = deployment({
   inserted_at: tMinus(172800),
   updated_at: tMinus(172740),
 });
+// cch-w28-bl: THE REFUSAL SENTENCE, byte-identical to
+// `Sites.AutoDeployWorker`'s @refusal_detail (auto_deploy_worker.ex:162). It
+// reaches the browser UNTRANSFORMED — FailureCopy.humanize/1 is the identity on
+// it and no classifier token matches — so the fixture is allowed to carry the
+// server's own bytes, and MUST carry exactly those bytes. This is the only copy
+// of the string outside the Elixir module; __app.test.mjs pins the two together
+// by reading the .ex file, so a reworded refusal reds the console gate instead
+// of quietly leaving this fixture asserting a sentence nobody ships.
+export const REFUSAL_DETAIL =
+  "refused: this site's live release was uploaded (prebuilt), so a content publish must not trigger a box rebuild — it would replace bytes this fleet cannot reproduce. Ship new bytes with `bp cloud site deploy <site> --prebuilt <dir>`.";
+
+// cch-w28-bl: THE REFUSED AUTO-DEPLOY — the row the corpus could not express.
+// A content editor publishes; the auto-deploy DECLINES because the live release
+// is uploaded bytes the fleet cannot reproduce; refuse/1 mints this row. It is
+// `cancelled`, NOT `failed` (so every `st === "failed"` render gate misses it),
+// `trigger: "content-auto"` (nobody pressed anything), `source: "prebuilt"`
+// (what was PROTECTED, not what was built), and it carries the same actionable
+// sentence in BOTH channels — which is exactly why the row must say it once.
+const stRefused = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000f6",
+  status: "cancelled",
+  branch: "main",
+  trigger: "content-auto",
+  source: "prebuilt",
+  failure_reason: REFUSAL_DETAIL,
+  detail: REFUSAL_DETAIL,
+  inserted_at: tMinus(3600),
+  updated_at: tMinus(3599),
+});
 const stPrior = deployment({
   id: "5b2c1e00-0000-4000-8000-0000000000f5",
   status: "live",
@@ -1438,7 +1467,11 @@ const stPrior = deployment({
 // single screen carries the 255-char stage-report crash under measurement, the
 // 22-char crash, and the 122-char blocked copy that is this leg's KIND control
 // — one route, the defect and its control in the same paint.
-const siteStatesDeployments = [stLive, stCrash, stCrashCruel, stBlocked, stCancelled, stPrior];
+// cch-w28-bl adds stRefused directly ABOVE the bare stCancelled: the two
+// cancelled rows now sit adjacent, one with something to say and one without,
+// so a screenshot shows the rule (copy → panel, silence → pill only) rather
+// than one specimen of it. Row count for this scenario: 6 → 7.
+const siteStatesDeployments = [stLive, stCrash, stCrashCruel, stBlocked, stRefused, stCancelled, stPrior];
 const siteStatesSite = Object.assign({}, webSite, {
   current_deployment_id: stLive.id,
 });

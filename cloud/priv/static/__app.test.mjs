@@ -11507,10 +11507,23 @@ test("gr-p3: deployFailHtml — the v4 red-bordered panel with dot; blocked keep
 });
 
 test("gr-p3: a cancelled row states its state through the pill, no invented copy", () => {
-  const html = hooks.deployRow({ id: "dc", status: "cancelled", inserted_at: "2026-07-19T10:00:00Z", updated_at: "2026-07-19T10:01:00Z" }, null);
+  // cch-w28-bl ADJUDICATION. This control was written against a cancelled row
+  // that carries NOTHING — no failure_reason, no detail — and it is still
+  // exactly right about that row: with nothing to say, the pill IS the whole
+  // statement and a panel here would be invented copy. What the assertion must
+  // NOT be read as is a licence to drop copy the server DID send; refuse/1's
+  // cancelled row carries a full remedy, and the twin leg below is what stops
+  // this test being satisfied by a blanket discard.
+  const bare = { id: "dc", status: "cancelled", inserted_at: "2026-07-19T10:00:00Z", updated_at: "2026-07-19T10:01:00Z" };
+  const html = hooks.deployRow(bare, null);
   assert.match(html, /dep-pill dep-cancelled/);
   assert.match(html, /Cancelled/);
-  assert.doesNotMatch(html, /deploy-fail/); // cancelled is not a failure panel
+  assert.doesNotMatch(html, /deploy-fail/, "a cancelled row with nothing to say invents no panel");
+  assert.equal(hooks.deployIsRefusal(bare, "cancelled"), false, "silence is not a refusal");
+  // THE TWIN: the same status, the same pill, but the server sent words.
+  const spoken = hooks.deployRow({ ...bare, failure_reason: "refused: … --prebuilt …" }, null);
+  assert.match(spoken, /dep-pill dep-cancelled/, "still a cancelled row");
+  assert.match(spoken, /deploy-fail/, "a cancelled row that HAS something to say says it");
 });
 
 test("cch-w13-s3: the DEPLOY noun has ONE spelling — freshness label and ladder pill agree", () => {
@@ -11927,13 +11940,131 @@ test("gr-p3: previewRow meta carries preview env + provenance + duration; failed
     failure_reason: "npm run build exited 1",
     inserted_at: "2026-07-19T10:00:00Z", updated_at: "2026-07-19T10:00:19Z",
   };
-  const html = hooks.previewRow ? hooks.previewRow(d) : null;
-  if (html !== null) {
-    assert.match(html, /preview/);
-    assert.match(html, /Manual/);
-    assert.match(html, /19s/);
-    assert.match(html, /deploy-fail-dot/);
-  }
+  // cch-w28-bl: previewRow is EXPORTED now, and the `if (html !== null)` skip
+  // that wrapped these four assertions is gone. Until this slice, previewRow
+  // was absent from __bpTestHook, `html` was always null, and this test — named
+  // for previewRow — ran ZERO assertions while counting as a pass: deleting the
+  // entire failure panel from previewRow left the suite green. Assert the hook
+  // exists FIRST, so a future un-export reds by name instead of going quiet.
+  assert.equal(typeof hooks.previewRow, "function", "previewRow must stay reachable — a skipped assertion is not a guard");
+  const html = hooks.previewRow(d);
+  assert.match(html, /preview/);
+  assert.match(html, /Manual/);
+  assert.match(html, /19s/);
+  assert.match(html, /deploy-fail-dot/);
+});
+
+// ── cch-w28-bl · A REFUSED PUBLISH SPEAKS ───────────────────────────────────
+// `Sites.AutoDeployWorker.refuse/1` mints a TERMINAL row at status "cancelled"
+// carrying a full actionable sentence — the `bp cloud site deploy … --prebuilt`
+// remedy — in BOTH failure_reason and detail. Three render sites dropped it:
+// previewRow and deployRow (`st === "failed"` gates) and deployDetailHtml
+// (a `deployIsActive` gate, which a grep for that string never finds). The
+// person saw a bare "Cancelled" pill and no way to learn what to do.
+//
+// Every leg below is RED on the pre-fix bytes: the two row legs match nothing
+// (no panel was rendered at all) and the hook legs fail on typeof.
+
+const { REFUSAL_DETAIL } = await import("./__preview__/scenarios.mjs");
+
+// The refused row exactly as refuse/1 mints it.
+function refusedRow(over) {
+  return {
+    id: "d-refused", status: "cancelled", trigger: "content-auto", source: "prebuilt",
+    failure_reason: REFUSAL_DETAIL, detail: REFUSAL_DETAIL,
+    inserted_at: "2026-08-03T10:00:00Z", updated_at: "2026-08-03T10:00:01Z",
+    ...over,
+  };
+}
+
+test("cch-w28-bl: the fixture's refusal copy IS the server's @refusal_detail (drift pin)", () => {
+  // The sentence lives in ONE place in the repo — the Elixir module. The
+  // fixture is the only other copy, and this leg is why the two cannot drift:
+  // reword the refusal without updating the fixture and the console gate reds.
+  const src = fs.readFileSync(
+    path.join(REPO_ROOT, "cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex"), "utf8");
+  const m = /@refusal_detail\s+"((?:[^"\\]|\\.)*)"/.exec(src);
+  assert.ok(m, "@refusal_detail must still be a single-line string literal in auto_deploy_worker.ex");
+  assert.equal(REFUSAL_DETAIL, m[1], "the fixture's refusal copy has drifted from the server's");
+  // And the remedy is the whole point of carrying it.
+  assert.match(REFUSAL_DETAIL, /bp cloud site deploy/);
+  assert.match(REFUSAL_DETAIL, /--prebuilt/);
+});
+
+test("cch-w28-bl: deployIsRefusal — cancelled WITH copy, never cancelled alone, never a live/failed row", () => {
+  assert.equal(hooks.deployIsRefusal(refusedRow(), "cancelled"), true);
+  assert.equal(hooks.deployIsRefusal({ status: "cancelled" }, "cancelled"), false, "nothing to say is not a refusal");
+  // REVIEW ADJUDICATION — `detail` ALONE IS NOT A REFUSAL. The other writer of
+  // a cancelled row, Registry.cancel_preview/2, changes only status + console:
+  // the row keeps whatever stage caption Sites.Deploy last wrote. Painting that
+  // in the amber panel would re-cast a progress line as an explained decision —
+  // and on a cancelled LIVE row it would read "live at https://…" inside a
+  // failure panel. `failure_reason` is written on the refusal path only.
+  assert.equal(
+    hooks.deployIsRefusal(refusedRow({ failure_reason: null, detail: "Uploading bundle" }), "cancelled"),
+    false, "a superseded preview's stale stage caption is not a refusal");
+  assert.equal(
+    hooks.deployIsRefusal(refusedRow({ failure_reason: null, detail: "live at https://p.acme.dev" }), "cancelled"),
+    false, "…and a cancelled LIVE row's caption is not a failure reason");
+  const stale = hooks.deployRow(refusedRow({ failure_reason: null, detail: "Uploading bundle" }), null);
+  assert.doesNotMatch(stale, /deploy-fail/, "no amber panel over a stage caption");
+  assert.doesNotMatch(stale, /Uploading bundle/, "and the caption is not promoted into the row");
+  assert.equal(hooks.deployIsRefusal(refusedRow({ status: "failed" }), "failed"), false, "a crash is not a refusal");
+  assert.equal(hooks.deployIsRefusal(refusedRow({ status: "live" }), "live"), false);
+  // One voice: both channels carry identical bytes, so the copy is picked once.
+  assert.equal(hooks.deployRefusalCopy(refusedRow()), REFUSAL_DETAIL);
+  assert.equal(hooks.deployRefusalCopy({}), "");
+});
+
+test("cch-w28-bl: deployRow — a refused publish renders the remedy, calm-toned, exactly once", () => {
+  const html = hooks.deployRow(refusedRow(), null);
+  assert.match(html, /dep-pill dep-cancelled/, "still honestly Cancelled");
+  assert.match(html, /class="deploy-fail deploy-fail--blocked"/, "a refusal is a decision, not a crash — amber, not crash-red");
+  assert.match(html, /bp cloud site deploy/, "THE REMEDY reaches the person");
+  assert.match(html, /--prebuilt/);
+  assert.match(html, /&lt;site&gt;/, "the server's angle brackets are escaped, not swallowed");
+  // Said ONCE: failure_reason and detail are byte-identical, so the detail
+  // caption must stay silent rather than print the sentence twice.
+  assert.equal((html.match(/bp cloud site deploy/g) || []).length, 1, "the remedy prints once");
+  assert.doesNotMatch(html, /deploy-detail/, "the detail channel does not echo the panel");
+});
+
+test("cch-w28-bl: previewRow — the twin renders the same refusal (it used to be untestable)", () => {
+  const html = hooks.previewRow(refusedRow({ branch: "main", preview_host: "p.acme.dev" }));
+  assert.match(html, /dep-pill dep-cancelled/);
+  assert.match(html, /class="deploy-fail deploy-fail--blocked"/);
+  assert.match(html, /bp cloud site deploy/);
+  assert.match(html, /--prebuilt/);
+});
+
+test("cch-w28-bl: deployDetailHtml — the terminal gate stops swallowing a refusal's own words", () => {
+  // The shared channel both rows call. Its `deployIsActive` gate discarded
+  // EVERY terminal row's detail; a refusal whose ONLY channel is detail now
+  // speaks through it, while an in-flight row is untouched.
+  // Channels that DIFFER: the panel speaks failure_reason, so the row's second
+  // sentence is no longer thrown away by the terminal gate.
+  const twoVoices = refusedRow({ detail: "the live release was uploaded 3 days ago" });
+  assert.match(hooks.deployDetailHtml(twoVoices, "cancelled"), /uploaded 3 days ago/,
+    "a terminal refusal's distinct detail is no longer discarded");
+  const twoVoiceRow = hooks.deployRow(twoVoices, null);
+  assert.match(twoVoiceRow, /bp cloud site deploy/);
+  assert.match(twoVoiceRow, /uploaded 3 days ago/);
+  // Duplicate channels (what refuse/1 writes TODAY) → the panel already spoke.
+  assert.equal(hooks.deployDetailHtml(refusedRow(), "cancelled"), "", "no double-print");
+  // REVIEW ADJUDICATION (see deployIsRefusal): a cancelled row carrying ONLY a
+  // detail is not a refusal — Registry.cancel_preview/2 leaves a stale stage
+  // caption behind on every superseded preview, and neither channel should
+  // promote it. Both the caption AND the panel stay silent.
+  assert.equal(hooks.deployDetailHtml(refusedRow({ failure_reason: null }), "cancelled"), "",
+    "detail-only: not a refusal, so the caption stays quiet");
+  assert.doesNotMatch(hooks.deployRow(refusedRow({ failure_reason: null }), null), /deploy-fail/,
+    "…and no panel is invented for a row the server never gave a reason");
+  // A cancelled row with nothing to say still says nothing.
+  assert.equal(hooks.deployDetailHtml({ status: "cancelled" }, "cancelled"), "");
+  // A crash's terminal detail is unchanged (failed rows speak through the panel).
+  assert.equal(hooks.deployDetailHtml({ status: "failed", detail: "Pushing image…" }, "failed"), "");
+  // In-flight rows are untouched by this slice.
+  assert.match(hooks.deployDetailHtml({ detail: "Pushing image…", console: ["x"] }, "building"), /Pushing image/);
 });
 
 // ── gr-p4-billing (G-01): owner-honest gate + the button-free read-only card ──
