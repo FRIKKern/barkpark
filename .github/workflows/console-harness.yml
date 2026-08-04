@@ -285,8 +285,38 @@ jobs:
       # It passes `--repo <the real repo root>`, which is why the console path
       # set reaches .github/workflows/cloud.yml, design/emit-fence.test.mjs and
       # cloud/test/barkpark_cloud/web/** — see scripts/console-path-escape-check.sh.
-      - name: Seal predicate tests
-        run: node --test cloud/priv/static/__preview__/seal-predicate.test.mjs
+      # RUN UNDER A RECORDING `curl`, SO THE HERMETIC CLAIM ABOVE IS AN EXIT CODE.
+      #
+      # The paragraph above asserts this suite makes no network call. Wave 30 made
+      # that true; nothing made it STAY true, and a comment that outlives the
+      # property it describes is the exact defect this epic is named for — the
+      # old text drifted to `59 tests` and line `1080` while sitting right here.
+      # So the claim is measured rather than written: a pass-through `curl` first
+      # on PATH records every invocation, and the step fails if the log is not
+      # empty. Pass-through, not refusing, so a red reports WHAT was called
+      # instead of collapsing into a confusing downstream failure.
+      #
+      # This does not disturb the outage test, which installs its own refusing
+      # `curl` ahead of this one for its own spawn: that shim is a hermetic
+      # fixture, not a network call, and it is invisible here by construction.
+      #
+      # Proven able to lose: run with origin/main's copy of the test file and the
+      # log carries 2 calls to guerrilla.barkpark.cloud; on this tree it is 0.
+      - name: Seal predicate tests (no network — recorded, not asserted in prose)
+        run: |
+          set -euo pipefail
+          shim="$(mktemp -d)"
+          log="$shim/curl-calls.log"
+          : > "$log"
+          printf '#!/bin/sh\necho "$*" >> %s\nexec /usr/bin/curl "$@"\n' "$log" > "$shim/curl"
+          chmod +x "$shim/curl"
+          PATH="$shim:$PATH" node --test cloud/priv/static/__preview__/seal-predicate.test.mjs
+          if [ -s "$log" ]; then
+            echo "::error title=Seal predicate suite reached the NETWORK::The Console gate is a required context; a suite that curls a host this repo does not own is green only while that host is up. Calls recorded:"
+            cat "$log"
+            exit 1
+          fi
+          echo "no curl invocations — the suite is hermetic w.r.t. the network"
 
       # THE RESPONSIVE SWEEP'S COVERAGE REFUSAL — the CHEAP leg only.
       #
