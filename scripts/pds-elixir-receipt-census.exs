@@ -7,12 +7,38 @@
 # WHAT THIS IS. A build-free AST census of every `ok: true` / `"ok" => true` success
 # claim under api/lib. It runs under plain `elixir` with NO mix project and NO compile
 # (`Code.string_to_quoted/2` only), so it never boots the app — deliberately, because
-# `mix phx.server` OOMs on this host. THIS FILE — not the `scripts/pds-*` CLASS — is in
-# neither Elixir path set (scripts/elixir-path-escape-check.sh), so it costs no Elixir
-# gate minute. The class-wide version of that sentence was FALSE when it was written:
-# scripts/pds-status-only-residue.exs is declared in ELIXIR_TEST_ONLY_PATHS there, and a
-# pds-* script that an ExUnit case shells is DISPATCHED ON like any other suite input. A
-# receipt that misstates its own gating is the defect this census exists to name.
+# `mix phx.server` OOMs on this host.
+#
+# WHAT IT COSTS THE GATE — AND THE CLAIM THAT USED TO STAND HERE. This header read, up to
+# wave 46: "THIS FILE — not the `scripts/pds-*` CLASS — is in neither Elixir path set
+# (scripts/elixir-path-escape-check.sh), so it costs no Elixir gate minute." That sentence
+# had ALREADY been narrowed once — from the `scripts/pds-*` CLASS to this one FILE, after
+# the class-wide version was caught being false — and the NARROWED version was false too:
+# `scripts/pds-elixir-receipt-census.exs` is declared in ELIXIR_TEST_ONLY_PATHS at
+# scripts/elixir-path-escape-check.sh:100 (the block opens :89), put there by #9333 so a
+# PR touching only this instrument still DISPATCHES the Elixir suite. It costs gate
+# minutes, it is SUPPOSED to, and narrowing a false claim is not the same as checking it.
+# A receipt that misstates its own gating is the defect this census exists to name — and
+# it was naming itself.
+#
+# THE PRICE, FROM A METER (PDS-D605: user CPU, never wall clock).
+# api/test/barkpark/pds_elixir_census_test.exs shells THREE arms on the required `Elixir
+# gate`: plain (rc 0), a one-token `tl/1` mutant (rc 1), an unknown-flag refusal (rc 2).
+# `/usr/bin/time -p` around a SHELL (so the rc survives and the shell's children are
+# charged), two trials, load1 stamped either side — 1,70 → 1,97, a WORKING host, not an
+# idle one, which is part of the reading and not a footnote:
+#   plain    user 11,48 / 11,67 s · sys 0,94 / 0,91 s · real 12,12 / 12,07 s
+#   mutant   user 11,29 / 11,37 s · sys 1,13 / 0,84 s · real 13,70 / 11,77 s
+#   refusal  user  2,85 /  3,10 s · sys 0,40 / 0,42 s · real  2,95 /  3,20 s
+#   PER RUN OF THE RIDER: 28,09 s and 28,31 s of CPU, charged to a gate this file said it
+#   did not touch. The refusal is NOT free — `elixir` compiles this whole script before it
+#   can reject a flag, which is most of that 3 s.
+# EVERY EARLIER MAGNITUDE FOR THESE ARMS IS REFUTED, including the one the wave-46 brief
+# carried: not 51-67 s and not 33,05-35,26 s for the three arms; not 5,4-6,2 s and not
+# 3,85-4,11 s for the refusal; the mutant's WALL is ~12-14 s, not 73,91 s and not
+# 16,20-16,48 s. Four separate recorded prices for one unchanged instrument is the whole
+# argument: RE-TAKE THE MEASUREMENT, NEVER TRANSCRIBE ONE — not from a charter, not from
+# a brief, not from this comment. What survives is the METHOD line above, not the digits.
 #
 # WHAT THIS IS NOT. It is NOT a gate. It ships no floor over the population, because
 # the ruling stands (PDS-D454): Elixir stays honest-and-unguarded until the write-routed
@@ -57,16 +83,24 @@ defmodule PDS.Census do
   @blind_spot [
     "AN OS METER AROUND THIS SCRIPT MEASURES THE PARENT BEAM AND NOTHING ELSE.",
     "`--selftest` fans out to CHILD BEAMs (System.cmd/3, one per case) and the",
-    "wrapper sees none of their cycles. MEASURED, LIKE FOR LIKE: `/usr/bin/time -p`",
-    "around a 33-case `--selftest` reported user 6.05 s — while ONE plain census,",
-    "metered inside its own BEAM, is the ~15 s printed as `user cpu` below. The",
-    "wrapper's figure for all thirty-three children is under HALF the price of ONE",
-    "of them, and nine of the cases run this same 804-file corpus, so ~140 s of",
-    "user CPU is a FLOOR on what those 6.05 s conceal. DO NOT QUOTE A RATIO: real/",
-    "user was 113x on that run and 236x on an earlier one, because `real` counts",
-    "waiting — the load-independent statement is the DIRECTION, and it runs the",
-    "ONE WAY A PRICE COLUMN MUST NOT: it makes an expensive instrument look",
-    "gate-able. There is no outer-meter fallback when the thing wrapped is a BEAM",
+    "wrapper sees none of their cycles. MEASURED, LIKE FOR LIKE, ON ONE NAMED RUN",
+    "(PDS-D633's 33-case `--selftest`): `/usr/bin/time -p` reported user 6.05 s for",
+    "the whole fan-out — ILLUSTRATIVE, that run only. Against it stands ONE plain",
+    "census metered inside its own BEAM, which is the `user cpu` figure printed at",
+    "the END of THIS run. THIS LIST CANNOT NAME THAT FIGURE and no longer pretends",
+    "to: a module attribute is read before the census runs, and every hand-typed",
+    "copy has drifted — 8687 / 12615 / 13199 / 15970 / 17640 / 19815 ms across",
+    "recorded runs, a 2.3x SPREAD, so the `~15 s` that sat here could not have been",
+    "right for more than one of them. The wrapper's figure for all thirty-three",
+    "children came in under HALF the price of ONE of them, and nine of the cases",
+    "census this same corpus, so NINE TIMES this run's own `user cpu` is a FLOOR on",
+    "what those 6.05 s conceal — DERIVED on the `user cpu` line below (kept on that",
+    "one line so the count of volatile lines stays at ONE), never typed here.",
+    "DO NOT QUOTE A RATIO: real/user was 113x on that run and 236x on an earlier",
+    "one, because `real` counts waiting — the load-independent statement is the",
+    "DIRECTION, and it runs the ONE WAY A PRICE COLUMN MUST NOT: it makes an",
+    "expensive instrument look gate-able.",
+    "There is no outer-meter fallback when the thing wrapped is a BEAM",
     "that fans out; a leaf-metered price is the sum over the children, per child.",
     "The `user cpu` figure below is BEAM-INTERNAL and covers THIS process only —",
     "for the plain census, which spawns nobody, that is the whole price."
@@ -7090,7 +7124,13 @@ defmodule PDS.Census do
     # as "byte-identical except the volatile line", and it named that line by its old
     # `wall clock` label — which this run no longer prints. The line names ITSELF volatile
     # so the recipe can be re-derived from the output instead of transcribed from D605.
-    p("user cpu  #{ms} ms  (THE ONE VOLATILE LINE — build-free: no mix project, no compile, no app boot; BEAM-internal, this process only, see `blind spot` above)")
+    #
+    # THE `--selftest` FLOOR RIDES THIS SAME LINE ON PURPOSE. It is 9 x `ms`, so it is
+    # volatile too — and a SECOND volatile line would silently invalidate D605's
+    # "byte-identical except the volatile line" recipe. Deriving it here instead of
+    # hand-typing it into @blind_spot is the substance of PDS-D633; keeping it on this
+    # line is what stops that fix from breaking a neighbouring one.
+    p("user cpu  #{ms} ms  (THE ONE VOLATILE LINE — build-free: no mix project, no compile, no app boot; BEAM-internal, this process only, see `blind spot` above · DERIVED: 9 x #{ms} = #{9 * ms} ms is the FLOOR on the child-BEAM cycles an outer meter around `--selftest` cannot see)")
 
     if Enum.all?(checks, &elem(&1, 1)) do
       p("CENSUS OK")
