@@ -52,9 +52,20 @@ A PR targeting `main` must clear:
    **unresolvable = a loud red**, never grandfathered. A guard that cannot tell
    must fail, not wave the PR through: the two-state version reported SUCCESS
    having skipped every downstream step;
-   **hotfix lane** — a `hotfix!` label passes AND auto-files an override
-   task (needs the `BARKPARK_TASK_TOKEN` secret; without it the lane still
-   passes but logs that the record was not filed);
+   **hotfix lane — DISARMED, and applying the label makes things WORSE** — a
+   `hotfix!` label was designed to pass the gate AND auto-file an override task,
+   because the record is the CONDITION of the bypass. `BARKPARK_TASK_TOKEN` is
+   **not provisioned** (repo secrets are `BREAKGLASS_TOKEN CP_HOST
+   DEPLOY_SSH_KEY GUERRILLA_HOST HETZNER_DNS_TOKEN NPM_TOKEN`), so
+   `hotfix_record` **exits 1** — and it is the only step that still runs once
+   the lane engages, since every evaluating step carries `if: … hotfix != '1'`.
+   The label itself **does exist**, so applying it today converts a
+   merge-blocking required context from "evaluate the PR" into a guaranteed
+   red. It **reds**; it does not pass. `scripts/pr-task-gate.test.sh` pins that
+   red (`ok hotfix record: no token REDS (exit 1)`), and even with the token the
+   lane is circular during a guerrilla outage: it files its record on the same
+   ledger that is down. **The armed override is break-glass** — see
+   [Break-glass](#break-glass-the-armed-override), below;
    **lapsed-claim rule — "live when this PR opened"** (charter D58; the
    `LAPSE_GRACE_SECONDS` wall-clock grace it replaced is GONE, and there is no
    tunable left to set). The claim lease (~45min) is shorter than PR dwell, so
@@ -120,12 +131,14 @@ require — `Test (Elixir 1.18.1 / OTP 27.0)` is a job underneath it.
 
 **`main` IS protected — as of 2026-07-28.** The long-standing "no branch
 protection" reading (verified 2026-06-21, re-checked 2026-07-01) is **dead**;
-do not plan from it. Re-derived 2026-07-29:
+do not plan from it. Re-derived 2026-08-04 (the two-context body this block
+printed until then was stale — `Cloud gate` and `Console gate` became required
+after it was written):
 
 ```
 $ gh api repos/FRIKKern/barkpark/branches/main/protection \
     -q '{contexts:.required_status_checks.contexts,strict:.required_status_checks.strict,enforce_admins:.enforce_admins.enabled}'
-{"contexts":["Elixir gate","PR references an active task"],"enforce_admins":true,"strict":false}
+{"contexts":["Elixir gate","PR references an active task","Cloud gate","Console gate"],"enforce_admins":true,"strict":false}
 $ gh api repos/FRIKKern/barkpark/rulesets -q 'length'   # 0
 ```
 
@@ -135,7 +148,9 @@ anyone who checks only `/rulesets` gets an accurate empty list and the wrong
 conclusion. `.github/required-checks.json` on `origin/main` now carries
 `"enforced": true` (it is applied state, no longer a proposal).
 
-Exactly **two** contexts are required, and everything else on a PR is advisory:
+Exactly **four** contexts are required — `Elixir gate`, `PR references an active
+task`, `Cloud gate`, `Console gate`, byte-matching the four `app_id: 15368`
+entries in `.github/required-checks.json` — and everything else on a PR is advisory:
 `mix-prod-compile`, `validation-perf` and `format` do not block (PR #123 merged
 with `format` red), and `plugin-node` matters only when the PR touches
 `api/priv/plugins/**`. `strict: false` means a PR is not forced to be
@@ -394,10 +409,38 @@ gh api repos/:owner/:repo/branches/main/protection --jq '.enforce_admins.enabled
 
 Two human-provisioned prerequisites before flipping it on:
 - **`BARKPARK_TASK_TOKEN`** repo secret — a guerrilla write token, so the
-  `hotfix!` lane can auto-file its override task. Without it the lane still
-  passes (logs a warning); the token only closes the record-keeping gap.
+  `hotfix!` lane can auto-file its override task. It is **not provisioned**, and
+  without it the lane **reds**: `hotfix_record` exits 1, and because every
+  evaluating step carries `if: … hotfix != '1'` that failing step is the only
+  one left, so the label turns a required context into a guaranteed red. The
+  token is not a record-keeping nicety — it is what the lane needs to exist at
+  all. Provisioning it is a lead call (a guerrilla WRITE credential in CI), and
+  even then the lane cannot rescue a guerrilla outage, because it writes its
+  record to guerrilla.
 - Optionally `BARKPARK_LEDGER_BASE` repo **variable** to point the gate at a
   different ledger instance (defaults to `https://guerrilla.barkpark.cloud`).
+
+## Break-glass — the armed override
+
+When a required context must be lowered, the mechanism that actually works is
+**not** the `hotfix!` lane (see above: it reds). It is `scripts/breakglass.sh`,
+run by a repo admin from a checkout:
+
+```
+scripts/breakglass.sh --open  --reason "…" --task <task-id> [--total]
+# … merge …
+scripts/breakglass.sh --close --reason "…" --task <task-id>
+```
+
+It refuses without both `--reason` and `--task`, writes an attributable record
+to `docs/ops/break-glass-log.md` and reads it back off disk **before** it
+touches protection (a crash leaves a record with no open glass — a false
+positive, which is recoverable; the reverse ordering would leave a silent open).
+`--open` without `--total` drops only `enforce_admins`, so required checks still
+apply to non-admins. `.github/workflows/breakglass-watch.yml` polls live
+protection every 30 minutes on `BREAKGLASS_TOKEN` and hard-fails on a credential
+fault, so an unarmed watcher cannot read as "all clear". `scripts/breakglass.sh
+--status` and `scripts/breakglass.test.sh` are the read-only entry points.
 
 ## Local pre-merge check
 
