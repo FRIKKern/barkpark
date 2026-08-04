@@ -11,8 +11,17 @@ defmodule Barkpark.PdsRecordParityTest do
 
   3 of 19 instruments run under a required gate, on every PR that could affect
   them -- NOT on every PR; and record-parity's harness is HERMETIC (zero of its
-  76 checks read a live ledger row), so it gates the ARM's own logic against
-  regression, NOT the epic's record.
+  checks read a live ledger row, and none reads the epic's real charter either),
+  so it gates the ARM's own logic against regression, NOT the epic's record.
+
+  THE CHARTER EXCLUSION IS DELIBERATE, NOT AN OVERSIGHT. Axis A's uniqueness leg
+  carries a baseline of the D-numbers the charter defines twice, and that
+  baseline goes stale the moment a wave lands a new collision -- which it does
+  roughly every wave, because a wave's REVIEW block and the next wave's DECIDE
+  block allocate from one next-number pointer. A stale baseline that RED A
+  REQUIRED GATE would be "repaired" by deleting the baseline inside a day. So
+  the staleness finding stays a hand-run verb and this gate protects the arm's
+  logic instead.
 
   That second clause is the whole caveat and it is not a footnote. The harness
   runs in a `mktemp -d` that is not even a git repo, with no `gh`, no network to
@@ -24,11 +33,13 @@ defmodule Barkpark.PdsRecordParityTest do
 
   ## Why the assertion is on prose, never on the check count
 
-  The harness's verdict is `PASS  <N> checks, 0 failures`. `N` is 76 today and
-  moves every time somebody adds an honest fixture — the most likely innocent
-  reason for this case to red. `pds-w28-census-check-count-citations-stale` is
-  the standing lesson: counts move, prose is the contract. The regex below
-  accepts any count and pins only `PASS` and `0 failures`.
+  The harness's verdict is `PASS  <N> checks, 0 failures`. `N` is 108 today (it
+  was 76 before the wave-47 citation-resolver repair added the heading-lens and
+  uniqueness arms) and moves every time somebody adds an honest fixture — the
+  most likely innocent reason for this case to red.
+  `pds-w28-census-check-count-citations-stale` is the standing lesson: counts
+  move, prose is the contract. The regex below accepts any count and pins only
+  `PASS` and `0 failures`.
 
   ## Why `bash …` and not `sh` or an exec
 
@@ -86,5 +97,34 @@ defmodule Barkpark.PdsRecordParityTest do
     assert out =~ ~r/PASS\s+\d+ checks, 0 failures/,
            "the harness exited 0 without printing its own verdict line — an exit code alone is " <>
              "not a receipt (the epic's law since wave 22). Output:\n#{out}"
+  end
+
+  # A `PASS N checks` line is a claim about a harness, not about WHICH arms that
+  # harness still has. Deleting a whole fixture section lowers N and keeps the
+  # verdict line word-for-word identical — and N is deliberately unpinned above,
+  # for good reasons that also make that deletion invisible. So the two arms
+  # added by the wave-47 repair are named here, on the harness's own prose:
+  # a section header and two fixture labels, all of them strings the harness
+  # prints only when the arm actually ran.
+  @wave47_arms [
+    {"AXIS A — the uniqueness leg (one D-number, one finding)",
+     "the uniqueness leg's fixture section"},
+    {"a D defined ONLY as a heading RESOLVES",
+     "the heading-form resolution fixture (the six false reds of wave 47)"},
+    {"REVERTING the heading lens does NOT disturb the uniqueness leg",
+     "the independence proof between the two new legs"}
+  ]
+
+  test "the harness still RUNS the wave-47 citation-resolver arms", ctx do
+    {out, rc} = System.cmd(ctx.bash, [ctx.harness], cd: ctx.root, stderr_to_stdout: true)
+
+    assert rc == 0, "the harness must be green before its coverage can be asserted.\n#{out}"
+
+    for {needle, what} <- @wave47_arms do
+      assert String.contains?(out, needle),
+             "the harness no longer runs #{what}. It went green WITHOUT it, which is exactly " <>
+               "the shape this arm exists to refuse: a pass that stopped descending from the " <>
+               "measurement it claims. Missing line: #{inspect(needle)}"
+    end
   end
 end

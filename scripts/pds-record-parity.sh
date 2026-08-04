@@ -30,18 +30,37 @@
 # slices whose rows are still open. It is red today, on real rows, by name. A
 # green here would be news.
 #
-# ── THREE RULINGS THIS ARM HONOURS, EACH ONE MEASURED ─────────────────────────
+# ── FIVE RULINGS THIS ARM HONOURS, EACH ONE MEASURED ──────────────────────────
 #
-# (1) THE STRICT D-DEFINITION TEST KEYS ON THE CHARTER'S BOLD-LEAD BULLET FORM,
-#     NEVER ON A MARKDOWN HEADING.
-#     The charter defines its decisions as `- **PDS-D123** …` bullets. Keying
-#     the "is this D defined?" test on a markdown HEADING measures the charter's
-#     markdown dialect instead of its record: the charter defines essentially no
-#     D as a heading, so a heading lens reports the overwhelming majority of
-#     cited ids as UNRESOLVED and the arm's red becomes an artifact of its own
-#     lens rather than a finding about the corpus. `--heading-lens` exists ONLY
-#     so that claim can be re-derived on demand (and by the selftest) — running
-#     it is how you SEE the artifact, never how you gate on it.
+# (1) THE D-DEFINITION TEST KEYS ON THE UNION OF THE TWO FORMS THE CHARTER
+#     ACTUALLY DEFINES DECISIONS IN — BOLD-LEAD BULLET **AND** OWN-LINE HEADING.
+#
+#     SUPERSEDED, AND KEPT VERBATIM SO THE DRIFT IS LEGIBLE — this ruling used to
+#     read: "The charter defines its decisions as `- **PDS-D123** …` bullets.
+#     Keying the 'is this D defined?' test on a markdown HEADING measures the
+#     charter's markdown dialect instead of its record: THE CHARTER DEFINES
+#     ESSENTIALLY NO D AS A HEADING, so a heading lens reports the overwhelming
+#     majority of cited ids as UNRESOLVED and the arm's red becomes an artifact
+#     of its own lens rather than a finding about the corpus."
+#
+#     IT NOW READS: the charter defines its decisions in TWO forms, and the
+#     resolution lens is their UNION. The bold-lead bullet is still the majority
+#     form (652 distinct numbers), but since wave 44 the charter also opens a
+#     decision as its own heading — `### PDS-D643 — TITLE.` — and 24 numbers,
+#     D643 through D673, are defined THAT WAY AND ONLY THAT WAY. The sentence in
+#     capitals above was true when it was written and is false today.
+#     WHAT THE DRIFT COST, MEASURED: over the 216 distinct PDS-D cited in
+#     `git log origin/main` at 49345a98c, the bold-lead-only lens printed
+#     `unresolved: 6` — D644 D649 D656 D661 D666 D667 — and every one of the six
+#     is defined, as a heading (D656 at charter :12813, D667 at :13409). An arm
+#     built to catch phantom citations was MANUFACTURING them, and because it is
+#     advisory (zero hits for `pds-record-parity` under `.github/`) nothing ever
+#     forced the correction. A lens is a measurement of the corpus or it is a
+#     measurement of itself; this one had quietly become the second.
+#     `--heading-lens` still exists and is still NOT the gate: it is the LOOSE
+#     lens (any heading MENTIONING a D anywhere in its text), it loses every
+#     bullet-defined number, and running it is how you SEE a lens artifact —
+#     never how you gate on one.
 #
 # (2) EPIC ROOTS ARE ADVISORY, NEVER REDDING.
 #     A divergent row whose parent_id is null is an EPIC ROOT, and an epic root
@@ -97,6 +116,55 @@
 #     ledger and touches no history, so a top-level guard would UNCHECK
 #     `--axis b` on every shallow CI checkout for no reason at all.
 #
+# (5) "RESOLVED" IS A CLAIM ABOUT A LAW, AND A LAW THAT NAMES TWO FINDINGS IS
+#     NOT ONE LAW. THE ARM MEASURES UNIQUENESS INSTEAD OF ASSUMING IT.
+#     Until this wave the definition set was built with `… | sort -u`, so a
+#     number defined TWICE read as resolved and the arm said so. It was blind to
+#     duplicates BY CONSTRUCTION: it never counted, so it could never notice.
+#     PDS-D664 names two unrelated findings — :2654 "A REPAIRED PREDICATE CARRIES
+#     ITS OLD DEFECT FOR EXACTLY ONE LINE" and :13311 "THE CLASS PREDICATE DOES
+#     NOT EXIST AND WILL NOT BE INVENTED THIS WAVE" — and a citation of D664
+#     resolved happily against whichever one the sort happened to keep. That is
+#     a success claim that descends from no measurement of the thing claimed.
+#
+#     TWO GRAMMARS, AND THE ASYMMETRY IS DELIBERATE AND MEASURED:
+#       RESOLUTION is PERMISSIVE (bold-lead ∪ heading, no title separator
+#       required). Under-matching here manufactures phantom UNRESOLVED reds —
+#       that is defect (1) above, six of them.
+#       UNIQUENESS is STRICT: a TITLED definition, `**PDS-D### —` or
+#       `### PDS-D### —`, the number followed by the em-dash that opens its
+#       title. Over-matching here manufactures phantom collisions, because the
+#       bare bold `**PDS-D399**` is how the charter CITES a decision inside
+#       another decision's body. Measured on the 13,698-line charter: the
+#       permissive grammar scores 65 "duplicated" numbers, the titled grammar
+#       scores 20. 45 of that gap is bare-bold citations, not second findings.
+#
+#     THE BASELINE IS PINNED BY NUMBER, NEVER BY LINE. `cite-by-line forever` is
+#     REFUTED on this epic's own record: tooling/grip/ledger/pds-w30-charter-
+#     coverage-rederivation.md:14 pins the D399 pair at :6503/:6586; today they
+#     are at :8625/:8708 and the charter has gone 6,888 → 13,698 lines. Lines are
+#     PRINTED (so a reader can go look) and pinned NOWHERE.
+#     The baseline is two-sided: an UNBASELINED duplicate reds, and a baselined
+#     duplicate that has VANISHED reds too. A one-sided baseline decays into a
+#     suppression list that nobody can ever prove is still describing the corpus.
+#
+#     THE MECHANISM, RECORDED BECAUSE THE SYMPTOM ALONE TEACHES NOTHING: every
+#     genuine pair is one occurrence in a wave's REVIEW block and one in the NEXT
+#     wave's DECIDE block. D664 :2654 sits under `### Wave 45 … REVIEWED`, its
+#     twin :13311 under `## WAVE 46 … (decided 2026-08-04)`; D553–D556 are w38
+#     REVIEW vs WAVE 39 DECIDE; D570–D573 are w39 REVIEW vs WAVE 40 DECIDE. The
+#     reviewer and the decider allocate from ONE next-number pointer with no
+#     arbiter between them, so this recurs EVERY wave — including the wave that
+#     is reading this line.
+#     THREE SHAPES A NAIVE GREP GETS WRONG, HANDLED BY NAME AND NOT BY THRESHOLD:
+#     D559 is NOT a duplicate (:11859 is an inline parenthetical inside another
+#     decision's body — "(CORRECTED wave 39, PDS-D559 — this entry read …)" — and
+#     only :12003 defines it); D145 and D146 are BENIGN RESTATEMENTS of one
+#     finding each, D146's two headings identical but for the bullet marker.
+#     A threshold ("allow up to N duplicates") would have swallowed all three
+#     silently along with every real collision. Names are auditable; a number is
+#     not.
+#
 # ── REUSE, DO NOT REWRITE ─────────────────────────────────────────────────────
 #
 # The task-id extractor is `scripts/pr-task-gate.sh --extract-task-id` — this
@@ -139,8 +207,10 @@
 #
 # ── EXIT CODES ────────────────────────────────────────────────────────────────
 #   0  PARITY    — every axis checked, nothing divergent
-#   1  DIVERGENT — at least one leaf slice merged over an open row, or a cited
-#                  D that the charter does not define
+#   1  DIVERGENT — at least one leaf slice merged over an open row, a cited
+#                  D that the charter does not define, or a D-number defined
+#                  twice that the pinned baseline does not already carry (and
+#                  the mirror: a baselined pair that has vanished)
 #   2  UNCHECKED — the arm could not look (no gh, no credentials, ledger down,
 #                  no charter, a TRUNCATED commit walk) OR it REFUSED to run
 #                  vacuously (grace >= span)
@@ -166,6 +236,30 @@ LIMIT="${PDS_RECORD_PARITY_LIMIT:-400}"
 # everything and is refused outright by the assertion below.
 GRACE_HOURS="${PDS_RECORD_PARITY_GRACE_HOURS:-6}"
 CHARTER="${PDS_RECORD_PARITY_CHARTER:-.claude/workflows/bp-pds-charter.md}"
+
+# ── the uniqueness baseline (ruling 5) ────────────────────────────────────────
+# NUMBERS, never lines. Measured on 2026-08-04 at 49345a98c over the 13,698-line
+# charter with the TITLED-DEFINITION grammar (see uniqueness_leg): 696 titled
+# definitions over 676 distinct numbers, 20 of which are defined twice.
+#
+# GENUINE — 18 numbers where ONE token names TWO UNRELATED FINDINGS. Every one is
+# a wave-REVIEW block colliding with the NEXT wave's DECIDE block, both allocating
+# from one next-number pointer with no arbiter. Left standing because renumbering
+# them would break citations already shipped in Go (`PDS-D400` appears nine times
+# in internal/cli/, `PDS-D399` six) — the honest move is to SEE them, not to hide
+# them and not to rewrite history around them.
+DUP_BASELINE_GENUINE="397 398 399 400 492 493 494 495 553 554 555 556 570 571 572 573 664 665"
+# BENIGN — one finding restated, not two. D146's two headings are identical but
+# for the leading bullet marker; D145's second is the same finding re-worded.
+DUP_BASELINE_BENIGN="145 146"
+# NOT A DEFINITION AT ALL — a naive `PDS-D### —` grep counts 21 numbers; this
+# grammar counts 20. The gap is D559, whose :11859 occurrence is an inline
+# parenthetical INSIDE another decision's body. Named, not thresholded.
+DUP_NONDEF_BY_NAME="559"
+# The baseline describes THIS charter. Applied only when the charter under test
+# is the epic's own; any other charter (a fixture, a fork) gets no excuses, since
+# nobody has measured it.
+BASELINED_CHARTER_BASENAME="bp-pds-charter.md"
 COMMITS_FILE=""          # axis A corpus override (fixtures); default = git log
 FIXTURE_DIR=""           # hermetic transport for BOTH gh and the ledger
 HEADING_LENS=0           # lens artifact demonstrator; never the gate
@@ -307,6 +401,163 @@ walk_truncation() {
   return 0
 }
 
+# ── AXIS A, UNIQUENESS LEG — one D-number, one finding (ruling 5) ─────────────
+#
+# `resolved` used to be an assertion with no measurement under it: the definition
+# set was `sort -u`'d, so a number defined twice was indistinguishable from a
+# number defined once and a citation resolved against whichever copy survived the
+# sort. This leg does the counting the claim always presupposed.
+in_list() { # in_list <needle> <space-separated list>
+  case " $2 " in *" $1 "*) return 0 ;; *) return 1 ;; esac
+}
+
+uniqueness_leg() { # uniqueness_leg <cites-file>
+  local cites="$1"
+  local occ="$WORKDIR/titled-occ" dups="$WORKDIR/dups"
+  local baselined=0
+
+  # THE TITLED-DEFINITION GRAMMAR. Anchored at line start, and the number must be
+  # followed by ` —`, the em dash that opens a decision's title. The anchor is
+  # what makes the FIRST PDS-D on the line the defined one, so a title that goes
+  # on to cite other decisions cannot be misattributed by a greedy match.
+  # `[ \t]` and NOT `[[:space:]]`: mawk before 1.3.4 does not implement POSIX
+  # character classes and matches NOTHING for them — silently, which here would
+  # mean `titled: 0` and a uniqueness leg that greens because it parsed nothing.
+  # The selftest pins a non-zero titled count for exactly that reason.
+  awk '
+    match($0, /^[ \t]*([-*][ \t]+)?\*\*PDS-D[0-9]+ —/) ||
+    match($0, /^#+[ \t]+PDS-D[0-9]+ —/) {
+      if (match($0, /PDS-D[0-9]+/)) print substr($0, RSTART, RLENGTH), NR
+    }
+  ' "$CHARTER" > "$occ"
+
+  # number, count, " :line :line …"
+  awk '{ n[$1]++; at[$1] = at[$1] " :" $2 }
+       END { for (k in n) if (n[k] > 1) print k, n[k] at[k] }' "$occ" \
+    | sort -k1.6n > "$dups"
+
+  local n_occ n_distinct n_dup
+  n_occ="$(wc -l < "$occ" | tr -d ' ')"
+  n_distinct="$(awk '{print $1}' "$occ" | sort -u | wc -l | tr -d ' ')"
+  n_dup="$(wc -l < "$dups" | tr -d ' ')"
+
+  case "$(basename -- "$CHARTER")" in
+    "$BASELINED_CHARTER_BASENAME") baselined=1 ;;
+  esac
+
+  echo "  ── uniqueness leg: one D-number, one finding ─────────────────────────"
+  echo "  grammar:    TITLED DEFINITION — \`**PDS-D### —\` or \`### PDS-D### —\`."
+  echo "              Strict on purpose: the bare bold \`**PDS-D399**\` is how the"
+  echo "              charter CITES a decision, not how it defines one."
+  echo "  titled:     ${n_occ} definitions over ${n_distinct} distinct PDS-D"
+  echo "  duplicated: ${n_dup} number(s) defined more than once"
+  if [ "$baselined" -eq 1 ]; then
+    echo "  baseline:   PINNED for $(basename -- "$CHARTER") — 18 genuine + 2 benign, BY NUMBER."
+    echo "              Lines are printed, never pinned: cite-by-line is refuted on"
+    echo "              this epic's own record (D399 was :6503/:6586, is :8625/:8708)."
+  else
+    echo "  baseline:   NONE — $(basename -- "$CHARTER") is not the charter the baseline was"
+    echo "              measured on, so no duplicate in it is excused. Nobody measured it."
+  fi
+
+  local num count lines n unexpected=0 benign=0 genuine=0
+  while read -r num count lines; do
+    n="${num#PDS-D}"
+    if [ "$baselined" -eq 1 ] && in_list "$n" "$DUP_BASELINE_BENIGN"; then
+      benign=$((benign + 1))
+      echo "    BENIGN-RESTATEMENT   ${num} ${lines} — one finding restated, not two (baselined)"
+    elif [ "$baselined" -eq 1 ] && in_list "$n" "$DUP_BASELINE_GENUINE"; then
+      genuine=$((genuine + 1))
+      echo "    DUPLICATE-DEFINITION ${num} ${lines} — ${count} unrelated findings under one number (baselined)"
+    else
+      unexpected=$((unexpected + 1))
+      echo "    DUPLICATE-DEFINITION ${num} ${lines} — ${count} definitions, NOT IN THE BASELINE"
+    fi
+  done < "$dups"
+
+  # THE MIRROR SIDE. A baseline that only ever forgives is a suppression list
+  # nobody can prove still describes the corpus; a pair that has been resolved
+  # must be un-pinned, and the arm says which one.
+  local vanished=0
+  if [ "$baselined" -eq 1 ]; then
+    for n in $DUP_BASELINE_GENUINE $DUP_BASELINE_BENIGN; do
+      if ! grep -q "^PDS-D${n} " "$dups"; then
+        vanished=$((vanished + 1))
+        echo "    STALE-BASELINE       PDS-D${n} — baselined as duplicated, but the charter now"
+        echo "                         defines it once. Drop it from the baseline."
+      fi
+    done
+  fi
+
+  # THE THREE SHAPES A NAIVE GREP GETS WRONG, HANDLED BY NAME. A naive
+  # `PDS-D### —` grep counts occurrences ANYWHERE on a line, including inside
+  # another decision's prose. The gap between the two counts is re-derived on
+  # every run and every number in it must be named, or the arm says so.
+  local naive="$WORKDIR/naive-dups"
+  grep -oE 'PDS-D[0-9]{3} —' "$CHARTER" | sed 's/ —$//' | sort | uniq -c \
+    | awk '$1 > 1 { print $2 }' | sort -k1.6n > "$naive"
+  echo "  naive grep: $(wc -l < "$naive" | tr -d ' ') number(s) — the unanchored \`PDS-D### —\` count, for contrast only"
+  local nn
+  while read -r num; do
+    grep -q "^${num} " "$dups" && continue
+    nn="${num#PDS-D}"
+    if in_list "$nn" "$DUP_NONDEF_BY_NAME"; then
+      echo "    NOT-A-DUPLICATE      ${num} — the second occurrence is an inline parenthetical"
+      echo "                         inside another decision's body, not a definition (named)"
+    else
+      echo "    UNNAMED-NAIVE-ONLY   ${num} — a naive grep counts it, the titled grammar does"
+      echo "                         not. Classify it by name; not scored (the naive grep is"
+      echo "                         a contrast, never the law)."
+    fi
+  done < "$naive"
+
+  # WHAT A CITATION OF A DUPLICATED NUMBER ACTUALLY RESOLVES TO: nothing single.
+  # Reported, not scored — the scored quantity is the duplicate set itself, and
+  # scoring the same defect twice would just double-count one measurement.
+  local amb="$WORKDIR/ambiguous"
+  awk '{print $1}' "$dups" | sort > "$WORKDIR/dupnums"
+  comm -12 "$cites" "$WORKDIR/dupnums" > "$amb"
+  # The headline count must equal the number of lines under it. A benign
+  # restatement is CITED-BUT-UNAMBIGUOUS — it resolves to one finding stated
+  # twice — so it is counted separately rather than folded in and left unprinted.
+  local n_amb=0 n_amb_benign=0
+  while read -r num; do
+    n="${num#PDS-D}"
+    if [ "$baselined" -eq 1 ] && in_list "$n" "$DUP_BASELINE_BENIGN"; then
+      n_amb_benign=$((n_amb_benign + 1))
+    else
+      n_amb=$((n_amb + 1))
+    fi
+  done < "$amb"
+  echo "  ambiguous:  ${n_amb} cited number(s) resolve to more than one FINDING"
+  echo "              (+${n_amb_benign} cited number(s) defined twice but naming ONE finding)"
+  while read -r num; do
+    n="${num#PDS-D}"
+    if [ "$baselined" -eq 1 ] && in_list "$n" "$DUP_BASELINE_BENIGN"; then continue; fi
+    lines="$(awk -v k="$num" '$1 == k { $1=""; $2=""; print }' "$dups" | sed 's/^  *//')"
+    echo "    AMBIGUOUS-CITATION   ${num} ${lines} — the commit corpus cites it; the charter"
+    echo "                         answers with two findings. Reported, not scored."
+  done < "$amb"
+
+  if [ "$n_dup" -gt 0 ] || [ "$vanished" -gt 0 ]; then
+    echo "  MECHANISM: a duplicate is not bad luck. Every genuine pair is ONE occurrence"
+    echo "             in a wave's REVIEW block and ONE in the NEXT wave's DECIDE block —"
+    echo "             D664 :2654 under \`### Wave 45 … REVIEWED\` vs :13311 under \`## WAVE 46\`"
+    echo "             … DECIDED; D553–D556 w38 REVIEW vs WAVE 39 DECIDE; D570–D573 w39"
+    echo "             REVIEW vs WAVE 40 DECIDE. The reviewer and the decider allocate from"
+    echo "             ONE next-number pointer with no arbiter, so it recurs EVERY wave,"
+    echo "             including this one. Fix the pointer, not the symptom."
+  fi
+
+  if [ "$unexpected" -gt 0 ] || [ "$vanished" -gt 0 ]; then
+    echo "  DIVERGENT: ${unexpected} unbaselined duplicate(s), ${vanished} stale baseline entrie(s)."
+    echo "             The baseline is two-sided on purpose — it must keep descending from"
+    echo "             a measurement of the charter as it is, not as it was."
+    raise 1
+  fi
+  return 0
+}
+
 # ══ AXIS A — a commit may not cite an authority that does not exist ═══════════
 axis_a() {
   echo
@@ -324,14 +575,26 @@ axis_a() {
   local defs="$WORKDIR/defs" cites="$WORKDIR/cites" unresolved="$WORKDIR/unresolved" lens
 
   if [ "$HEADING_LENS" -eq 1 ]; then
-    lens="HEADING (lens-artifact demonstrator — NOT the gate)"
+    # The LOOSE heading lens: any heading that MENTIONS a D anywhere in its text.
+    # It loses every bullet-defined number and is kept only to demonstrate what a
+    # lens artifact looks like. Never the gate. See ruling (1).
+    lens="LOOSE HEADING (lens-artifact demonstrator — NOT the gate)"
     grep -oE '^#+[[:space:]].*PDS-D[0-9]+' "$CHARTER" | grep -oE 'PDS-D[0-9]+' | sort -u > "$defs"
   else
-    # THE STRICT FORM: a bold lead at the start of a line, optionally bulleted.
-    #   **PDS-D123** …    - **PDS-D123** …    * **PDS-D123** …
-    lens="BOLD-LEAD BULLET (the form the charter actually defines D's in)"
-    grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+' "$CHARTER" \
-      | grep -oE 'PDS-D[0-9]+' | sort -u > "$defs"
+    # THE UNION OF THE TWO FORMS THE CHARTER DEFINES DECISIONS IN (ruling 1):
+    #   a bold lead at the start of a line, optionally bulleted —
+    #     **PDS-D123** …    - **PDS-D123** …    * **PDS-D123** …
+    #   and a heading whose text OPENS with the number —
+    #     ### PDS-D643 — TITLE.
+    # The heading arm anchors on the number at the START of the heading text, so
+    # a heading that merely mentions a D in passing ("## WAVE 46 … (PDS-D640)")
+    # is a reference and is not counted. That distinction is the whole difference
+    # between this lens and --heading-lens.
+    lens="DEFINITION FORMS — bold-lead bullet UNION own-line heading"
+    {
+      grep -oE '^[[:space:]]*([-*][[:space:]]+)?\*\*PDS-D[0-9]+' "$CHARTER"
+      grep -oE '^#+[[:space:]]+PDS-D[0-9]+([[:space:]]|$)' "$CHARTER" # revert-marker: heading-arm
+    } | grep -oE 'PDS-D[0-9]+' | sort -u > "$defs"
   fi
 
   if [ -n "$COMMITS_FILE" ]; then
@@ -392,13 +655,18 @@ axis_a() {
   if [ "$n_unres" -gt 0 ]; then
     sed 's/^/    UNRESOLVED-CITATION /' "$unresolved"
     if [ "$HEADING_LENS" -eq 1 ]; then
-      echo "  ADVISORY: this run used the HEADING lens, which measures the charter's"
+      echo "  ADVISORY: this run used the LOOSE HEADING lens, which measures the charter's"
       echo "            markdown dialect, not its record. Its red is a LENS ARTIFACT."
       echo "            Not folded into the exit code — re-run without --heading-lens."
-      return 0
+    else
+      raise 1
     fi
-    raise 1
   fi
+
+  # The uniqueness leg is a property of the CHARTER, not of the resolution lens,
+  # so it runs under --heading-lens too and its verdict is its own. The two legs
+  # are independent by construction: breaking one cannot green or red the other.
+  uniqueness_leg "$cites"
   return 0
 }
 
