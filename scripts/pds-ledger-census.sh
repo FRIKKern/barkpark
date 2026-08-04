@@ -1301,14 +1301,29 @@ def render_blind_spots(report, root):
     shadows = blind.get("draft_shadows_of_live") or []
     unread = blind.get("drafts_lens") != "read"
 
+    # `LIVE`, NEVER `open`, IS THE WORD FOR ARM 1. A row outside the closure is
+    # kept when its lifecycle is non-terminal, which is a WIDER set than the
+    # denominator's own case-exact `open` -- it also holds `considering`,
+    # `blocked` and `in_progress`. Calling all of them "open rows the
+    # denominator cannot see" would over-claim in exactly the direction this
+    # epic files against: `considering` PRECEDES open and is excluded from the
+    # denominator ON PURPOSE, so it is not a row the denominator MISSED. Both
+    # numbers are therefore derived and printed, and every row prints its own
+    # lifecycle beside it.
+    outside_open = [e for e in outside_live
+                    if (e.get("lifecycle_status") or "") == LIFECYCLE_OPEN]
+
     out = []
-    out.append("BLIND SPOTS -- open rows this denominator CANNOT see, by name (not a count)")
+    out.append("BLIND SPOTS -- live rows this denominator CANNOT see, by name (not a count)")
     if unread:
-        out.append("  total       %d NAMED + the drafts lens UNREAD (never-published class UNMEASURED)"
-                   % len(outside_live))
+        out.append("  total       %d NAMED (%d of them `%s`) + the drafts lens UNREAD "
+                   "(never-published class UNMEASURED)"
+                   % (len(outside_live), len(outside_open), LIFECYCLE_OPEN))
     else:
-        out.append("  total       %d open row(s) named below and counted by NO closure anchored at %s"
-                   % (len(outside_live) + len(never), root))
+        out.append("  total       %d live row(s) named below and counted by NO closure anchored "
+                   "at %s -- %d of them `%s`, the denominator's own lens"
+                   % (len(outside_live) + len(never), root,
+                      len(outside_open) + len(never), LIFECYCLE_OPEN))
     out.append("  (1) OUTSIDE THE CLOSURE  %5d   slug carries `%s`, parent chain never reaches the root"
                % (len(outside_live), blind.get("epic_slug_prefix", EPIC_SLUG_PREFIX)))
     out.append("      unreachable at ANY depth, under any key -- a deeper walk does not find these")
