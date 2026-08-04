@@ -4081,6 +4081,18 @@ async function main() {
               `  var n=r.getElementsByClassName('set-row-name')[0];` +
               `  if(n){var cs=getComputedStyle(n);` +
               `    rec.name={sw:n.scrollWidth,cw:n.clientWidth,ws:cs.whiteSpace,te:cs.textOverflow,` +
+              // `overflow` IS THE THIRD LEG OF THE CUE (cch-w29-s3). `ellipsis`
+              // paints only where the box actually clips; the model arm below
+              // (`ov:cs.overflow`) has always read it, this arm never did.
+              // …and the DECIDING axis is read by name. `overflow` is a
+              // shorthand: `overflow-x: visible; overflow-y: clip` is a legal
+              // pair the spec does NOT blockify, so it serialises as
+              // "visible clip" and a shorthand test for the literal "visible"
+              // would let a box that does not clip HORIZONTALLY — the only axis
+              // a single-line ellipsis cares about — score as a paintable cue.
+              // The shorthand is still collected because it is what a reader
+              // recognises in the failure sentence.
+              `      ov:cs.overflow,ox:cs.overflowX,` +
               `      t:(n.textContent||'').trim().slice(0,40)};}` +
               `  out.rows.push(rec);` +
               `});` +
@@ -4122,14 +4134,31 @@ async function main() {
               }
               const n = r.name;
               if (!n) continue;
-              // A CUE THAT CAN ACTUALLY PAINT. `text-overflow` is inert unless
-              // the line is forbidden to wrap — declaring `ellipsis` beside
-              // `white-space: normal` is a sentence, not a cue.
-              // `pre-wrap` and `pre-line` WRAP, so they are not on this list.
-              const cuePaints = n.te === "ellipsis" && (n.ws === "nowrap" || n.ws === "pre");
+              // A CUE THAT CAN ACTUALLY PAINT, ON ALL THREE LEGS. `text-overflow`
+              // is inert unless the line is forbidden to wrap AND the box itself
+              // clips — declaring `ellipsis` beside `white-space: normal` is a
+              // sentence, and so is declaring it beside `overflow: visible`,
+              // where the text simply spills past the box in full view of
+              // nothing. `pre-wrap` and `pre-line` WRAP, so they are not on the
+              // white-space list; `visible` is the ONLY computed overflow value
+              // that suppresses the ellipsis, which is why this leg tests for it
+              // by name rather than for "some kind of clip" (cch-w29-s3) — and
+              // it tests the X AXIS, because that is the only one a single-line
+              // ellipsis truncates on and the shorthand can legally read
+              // "visible clip" while the horizontal axis does not clip at all.
+              const cuePaints = n.te === "ellipsis" && (n.ws === "nowrap" || n.ws === "pre") && n.ox !== "visible";
               if (n.sw > n.cw && !cuePaints) {
                 clipped++;
-                fail(D, `${scen}/${theme}@${width} row${r.i} \`.set-row-name\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of the identity is hidden with NO cue that can paint (computed white-space "${n.ws}", text-overflow "${n.te}"; ellipsis is inert unless white-space forbids wrapping). This is WHO the row's Remove button acts on`);
+                // THE SENTENCE NAMES THE LEG THAT ACTUALLY FAILED. Blaming
+                // white-space for an `overflow: visible` cause would put this
+                // epic's own defect class — a person told the wrong reason —
+                // inside the instrument that polices it, so all three computed
+                // values are printed and the trailing clause is chosen by which
+                // leg is the one standing between the reader and a paintable cue.
+                const why = n.ox === "visible"
+                  ? `ellipsis is inert while overflow-x computes "visible" — the box does not clip horizontally, so nothing truncates and nothing paints`
+                  : `ellipsis is inert unless white-space forbids wrapping`;
+                fail(D, `${scen}/${theme}@${width} row${r.i} \`.set-row-name\` "${n.t}": scrollWidth ${n.sw} > clientWidth ${n.cw} — ${n.sw - n.cw}px of the identity is hidden with NO cue that can paint (computed white-space "${n.ws}", text-overflow "${n.te}", overflow "${n.ov}", overflow-x "${n.ox}"; ${why}). This is WHO the row's Remove button acts on`);
               }
             }
             // The cell string carries the NUMBERS, not a verdict glyph: the
