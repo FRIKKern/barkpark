@@ -2576,6 +2576,67 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 47 2026-08-04 — REVIEWED AND PUSHED, grade A — 6 of 6 round-1 slices green, 6 PRs open, 2 round-≥2 slices deferred BY DESIGN (paper `pds-wave-47-2026-08-04`)
+
+**THE WAVE'S OWN HEADLINE.** The direction that opened this wave — an ANCHORED / DRIFTED / UNANCHORED
+currency axis over the open board — was REFUTED by its own survey and CUT at Decide (D677), and what
+replaced it is six slices that each take one Barkpark assertion that had stopped descending from a
+measurement and give it an ending. Three of them are the epic's own instruments turning the epic's
+law on themselves. **Every branch is pushed and every PR is open** — the failure mode six previous
+waves ended in did not recur here.
+
+**WHAT LANDED (6 PRs, all pushed, none merged — the lead merges).**
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `pds-w47-door-census-silences` | `…the-door-census-stops-being-silent-about-0-r` | #9524 | Two silences closed in one commit with the blocking rider. The price ledger gains its orphan direction, keyed on `class != THROUGH` (not `computed == yes`, which leaves the cross-ledger contradiction silent); RETIRED- is refused on both sides and the `CPU=` glob is ANCHORED, because main's floating glob printed a retire costume as a live price. The COUNTS block went from accounting for 4 rows of 20 to the full eleven-band partition, summed and ASSERTED. `--selftest` 24 → 33 arms; the census's own price re-taken in the same PR against an untouched-main export metered in the same window (+95%, measured, not the briefed ~+44%). Reviewer fixed: the rider was unformatted and would have red the format gate. |
+| `pds-w47-d448-drift-refuses` | `…the-receipt-census-stops-printing-five-f-1-r` | #9525 | Five of eight population literals had read DRIFT on every run for four waves under a banner declaring the block `advisory — printed, never enforced`. Both endings taken per row: `@rederived` holds the eight quantities re-taken BY RUN with lens, engine, command and tree beside them (`@recorded` kept VERBATIM, so the edit is an ADD and not a three-site lift), and `D448-DRIFT-REFUSES` exits 1 on any mismatch with the re-derivation command inside the FAIL sentence. The write/read/unrouted trio is a DIFFERENT LENS and the depth sweep proves it. Charter amended in the same PR at PDS-D448b. Reviewer fixed: the block printed the column word `recorded` while comparing against `@rederived`, so one word named two constants in one output. |
+| `pds-w47-citation-resolver-repair` | `…the-citation-resolver-learns-the-heading-2` | #9526 | The epic's own citation resolver had stopped descending from what it measured, twice. Its header ruled that the charter defines essentially no D as a heading — false today for D643–D673 — and it printed six FALSE unresolved citations over the real corpus, all six defined as headings. And `sort -u` made it blind to duplicates by construction, so a citation resolved against whichever of two findings the sort kept. Union lens (unresolved 6 → 0, defined 652 → 676) plus a strict-grammar uniqueness leg with a TWO-SIDED baseline pinned by NUMBER, never by line. Reviewer changed nothing. |
+| `pds-w47-ledger-denominator-and-blind-spots` | `…the-board-census-fixes-its-denominator-a-3-r` | #9527 | The open-PDS denominator had five circulating answers. Settled by one field, `lifecycle_status == "open"`, case-exact, DERIVED every run and printed with its lens, its instant and its re-derivation command — no literal threshold anywhere, because the board moves while the wave reading it files rows. Beside it a blind-spot block that NAMES rather than counts: rows outside any root-anchored closure, and a second `perspective=drafts` read split into never-published vs PHANTOM edit shadows. The drafts lens has an honest UNREAD state instead of a fabricated zero. Reviewer fixed: the block said `open` where the arm keeps every non-terminal row, which would have reported a `considering` row as one the denominator missed. |
+| `pds-w47-n1-adjudication` | `…the-seventeen-one-criterion-from-done-ro-4` | #9528 | The throughput half of the wish, sized honestly. All seventeen N−1 rows adjudicated; two closed on evidence in hand, five bought BY RUN (never by re-reading a builder's transcript), ten left open and named with what each still owes, four re-scoped as misfiled. Nothing closed — the seal is the lead's. The PR-resolution recipe is committed: `content.github.issue` is the mirrored ISSUE, so the charter's task-to-PR tables are the only working resolver. Reviewer changed nothing. |
+| `pds-w47-interaction-receipt-pin` | `…the-interaction-receipt-is-pinned-where--5-r` | #9529 | The repaired four-way receipt was pinned only at the module seam: zero tests anywhere asserted `recorded`, no test posted to the media endpoint at all, and the 422/500 arms had never executed on any host. Twelve HTTP cases on both twins, the happy path backed by `Repo.get` on the returned id. Its evidence is the contrast: a callee-confined revert fabricates an event id for a lost write while the gated receipt census still prints `CENSUS OK`. Reviewer fixed a HIGH-FLIP-RISK citation — see below. |
+
+**THE FLIP-RISK RE-DERIVATION, AND IT MOVED.** Slice 6 was flagged HIGH-FLIP-RISK on reachability at
+Decide. The reviewer re-walked the enclosing `scope` blocks independently rather than re-reading the
+builder's reasoning, and the citation was wrong even though the conclusion was right: the moduledoc
+named `router.ex:2190` and `:2416` while describing the pipelines `[:api, :api_grant_read]` and `:api`.
+Those two lines are the workspace-scoped mirror on `pipe_through(:scoped_api)`, whose full paths carry
+both slugs and which nothing in the file dispatches to. The routes under test are `:1655` and `:2111`.
+**The lesson generalises: a reachability claim must cite the route the request resolves to, and a
+duplicated controller action across a flat route and a scoped mirror is exactly where that goes wrong
+silently.** A genuinely independent second reviewer is still warranted on this slice before merge, and
+on `pds-w47-measure-and-host-axis` (provenance) when it is dispatched.
+
+**THE LEDGER, AUDITED.** All six built tasks: `in_progress`, evidence stamped as the work happened,
+the merge-gated criterion left OPEN for the lead, `wave_paper` and `parent_id` set. The two deferred
+slices sit `open` at 0/N with no claim, correctly. One honest MISS is preserved rather than papered
+over (`pds-w47-ledger-denominator-and-blind-spots` criterion 0, whose live triple no longer exists).
+`pds-w33-bl-catchall-success-clauses` was NOT falsely stamped: three `--miss` notes and a
+`disposition_reason` recommending close-as-superseded, which is the right ending for a row with no PR
+of its own. One omission was found and fixed by the reviewer: `pds-w46-price-ledger-orphan-direction`
+sat at 2/4 while slice 1 built exactly its remaining two criteria — both are now stamped from the
+reviewer's own re-run, with UNMERGED stated in the evidence and the row left open for the lead.
+
+**WHAT THE LEAD MUST KNOW BEFORE MERGING.** (1) Seven N−1 rows were stamped by passing the CLI's
+`--merge-gated` override as a worker, not as the lead. Nothing was closed and every override is
+recorded verbatim, but if you disagree with a re-derivation, re-open the criterion rather than trust
+the flip. (2) #9525 touches this charter at ~:9894, far from PR #9509's append-only tail; the wave-47
+citation resolver was run against #9509's head charter and greens, and the `PDS-D448b` bullet mints no
+duplicate under the titled grammar. (3) The merge-gated criterion on all six rows is criterion 8 or 10
+and is yours to close.
+
+**THE SHARPEST RESIDUAL, AND IT IS THE WISH'S OWN SENTENCE.** Merging #9525 gives the receipt census a
+fourth gated arm, and the door census's price row for it still reads `the THREE GATED ARMS SUMMED` —
+a price that stops descending from its instrument the moment the other PR lands, silently, at rc=0.
+It is filed (`task-869b52af6f4e4153`) rather than smuggled into either PR, because re-pricing it needs
+a metered run on a quiet host and the two PRs are separately gated. That is the honest ending here;
+it is also proof the epic still generates this defect faster than any single wave pays it.
+
+**NEXT WAVE.** Merge round 1 (#9524–#9529) in any order — the file sets are disjoint. Then dispatch
+`pds-w47-measure-and-host-axis` (round 2) once #9524 is on main, since it edits the same file and the
+same rider; then `pds-w47-price-column-retake` (round 3) once round 2 is on main, because it uses
+`--measure` and hand-taking those two condemned figures is precisely the fraud this epic files.
+
 ### Wave 46 2026-08-04 — REVIEWED AND PUSHED, grade A — 3 of 3 round-1 slices green, 3 PRs open, 3 round-≥2 slices deferred BY DESIGN (paper `pds-wave-46-2026-08-03`)
 
 **WHAT LANDED (3 PRs, all pushed, none merged — the lead merges).**
