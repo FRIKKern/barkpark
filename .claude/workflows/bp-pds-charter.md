@@ -2576,6 +2576,69 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 46 2026-08-04 — REVIEWED AND PUSHED, grade A — 3 of 3 round-1 slices green, 3 PRs open, 3 round-≥2 slices deferred BY DESIGN (paper `pds-wave-46-2026-08-03`)
+
+**WHAT LANDED (3 PRs, all pushed, none merged — the lead merges).**
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `pds-w45-census-ledger-integrity` | `…the-refusal-becomes-a-measurement-and-th-0` | #9475 | The ledger stops lying by silence: ungated orphan check, the retire shape, per-ledger duplicate-key scan, the separated-axis price shape check, the silent `UNMEASURED-LOCAL` default DELETED, the receipt census's row MEASURED at 28.73 s CPU, `--selftest` 14 → 24 arms. Reviewer changed nothing. |
+| `pds-w45-bl-sweep-adjudication-frozen-blob` | `…the-sweep-s-adjudication-is-keyed-on-a-f-1` | #9476 | All 71 charter-sweep arrivals adjudicated at TWO frozen blob shas, never a count. Vintage split derived in-process (14 retroactive / 57 new), both live-drift channels in the lens named with their mechanism. Reviewer changed nothing. |
+| `pds-w45-bl-receipt-census-self-claims` | `…the-receipt-census-asserts-it-costs-no-g-2` | #9477 | The false self-gating claim is corrected against `elixir-path-escape-check.sh:100`, and the price comes from a meter (28,09 / 28,31 s CPU, load1 stamped either side). `@blind_spot`'s two hand-typed constants are gone; the `--selftest` floor is DERIVED at run time on the existing volatile line. Reviewer changed nothing. |
+
+**PDS-D674 — A PRICE INSIDE THE INSTRUMENT WHOSE SUBJECT IS PRICES MUST BE RE-TAKEN IN THE SAME COMMIT THAT MOVES IT.**
+Slice 1's criterion said `--check` may differ in exactly TWO ledger rows. It differs in THREE, and the
+third is the census's OWN price row: adding ten LEDGER arms took `--selftest` from 0.16 s to 0.47 s, so
+leaving the row would have shipped a knowingly-stale price inside the one instrument whose entire
+purpose is that a price descends from a meter it drove. The builder refused to flip the criterion,
+stamped an honest `--miss` with the full accounting, and let the lead adjudicate. **The rule: a slice
+that changes an instrument's cost owes that instrument's own price row a re-measurement at ONE load
+stamp in the SAME commit — and a criterion written before the slice existed does not get to forbid it.**
+Corollary, and it is PDS-D656 applied to oneself: the old 3.32 s / 0.16 s figures were taken at load1
+41.63 and the new ones at load1 3.26, so **no delta was quoted** — a price is comparable only against
+its own load stamp, and refusing to subtract two incomparable numbers is the honest move, not a gap.
+
+**PDS-D675 — A SEPARATED AXIS IS PROVEN BY MUTATING THE REAL LEDGER, NOT BY THE SELFTEST'S FIXTURE.**
+Review re-derived slice 1's central claim independently, outside its selftest: the mutant census copied
+into `scripts/` under a NON-`pds-` name (so `REPO_ROOT` and leg B still resolve and the population stays
+20), then three real-ledger mutations. Duplicate PRICE key → ERRORS **1**. Duplicate live DISPOSITION
+key → ERRORS **1**. `pds-record-parity.test.sh` forced to a live `ENVIRONMENT` row → ERRORS **1**,
+naming both classes. **In all three reds the THROUGH headline stayed 4 of 20** — the shape verdict never
+touched `$class` under mutation, not merely under fixture. A copy of the census run from `/tmp` with
+`PDS_DOOR_CENSUS_ROOT` set is NOT a control: `BASH_SOURCE` drives the ratchet path, leg B goes false for
+every row, and the run reports THROUGH 0 of 20 / ERRORS 21. That collapse is the harness, not the code.
+
+**PDS-D676 — THE CENSUS'S `CONTENT-RED` ROW SURVIVES ITS OWN ADJUDICATION, AND ONLY BECAUSE THE CHARTER GREW.**
+Slices 1 and 2 look like they contradict each other: slice 1 corrects the sweep's disposition evidence
+to `rc=1 (71 arrivals)` while slice 2 adjudicates all 71, which takes the sweep to rc=0. Review PROVED
+the resolution by run rather than reasoning about it — overlaying #9466's 402-line charter append onto
+slice 2's branch and re-running the sweep gives **rc=1, arrivals 6, misclassified 0, stale adjudication
+rows 0**. So the row stays true on main, none of the 105 prior or 71 new rows is dropped by the new
+prose (the line-free fingerprint holds under a 402-line append), and the six new arrivals are all
+dispatch-table rows the next wave can clear cheaply. **The transient is real though: if slice 2 merges
+BEFORE #9466, the `CONTENT-RED` evidence is momentarily false and nothing can see it** — the census
+never re-takes a disposition's run. That is item 2 of wave 46's wish, still owed.
+
+**WHAT STALLED — nothing. Three slices were DEFERRED BY DESIGN** under the sequenced-rounds law:
+`pds-w45-price-provenance` (round 2, after slice 1 — same file, on top), `pds-w44-hetzner-offline-door`
+(round 3, after rounds 1 AND 2 — it needs `--measure` and the retire shape), `pds-w45-bl-ledger-census-lazy-urllib`
+(round 4, after round 2 — it is round 2's only non-vacuous live PRICE-STALE proof). Their tasks are
+open, unclaimed, 0/N met, and honestly so.
+
+**WHAT THE NEXT WAVE TAKES.** Merge round 1 — the three PRs are file-disjoint — and merge **#9466 with
+or before #9476** so the sweep's disposition evidence never passes through a false window. Then dispatch
+STRICTLY in dependency order, re-deriving every anchor at each merged base (slice 1 alone moved ~390
+lines in `pds-door-census.sh`): round 2 `pds-w45-price-provenance` → round 3 `pds-w44-hetzner-offline-door`
+(BOTH LEGS OR NEITHER — slice 1's orphan check and deleted price default now make a one-legged version
+red its own commit, which is the intended forcing function) → round 4 `pds-w45-bl-ledger-census-lazy-urllib`.
+Then the holes wave 46 named and did not close: the PRICE ledger has no orphan direction
+(`pds-w46-price-ledger-orphan-direction`), four shipped load1 stamps are implausible next to this host's
+2.1–3.4 and a comma-locale `tr -d ,` reproduces exactly that inflation (`pds-w46-load-stamp-provenance-doubt`),
+the sweep's idiom lens fires retroactively on 14 measured rows (`pds-w46-sweep-idiom-exclusion-lens-repair`),
+a `RETIRED-` row whose evidence is whitespace still buys its exemption free
+(`pds-w46-retired-evidence-whitespace-passes`), and `HUMAN-GATE` remains an untested arm of a six-class
+vocabulary only five of which any row exercises.
+
 ### Wave 45 2026-08-03 — REVIEWED AND PUSHED, grade A — 5 of 5 round-1 slices green, 5 PRs open, 3 round-≥2 slices deferred BY DESIGN (paper `pds-wave-45-2026-08-03`)
 
 **WHAT LANDED (5 PRs, all pushed, none merged — the lead merges).**
@@ -13229,5 +13292,407 @@ lead's manual step.
 **FABLE WAS UNAVAILABLE THIS WAVE.** Every slice, including three that are genuinely hard on the
 difficulty axis (2, 6, 7), is built at `opus@medium`. That is a recorded constraint, not a judgment that
 these slices are routine.
+
+CHARTER PR: docs-only, `Task: task-2ac1f95237c4a8e5`.
+
+## WAVE 46 — A PRICE THAT CANNOT BE COMPARED IS NOT A PRICE (decided 2026-08-04, paper `pds-wave-46-2026-08-03`)
+
+Base: `origin/main` **683c2f00a**. Every anchor below was re-derived there by `git show`, never from the
+primary checkout (which is L3, 408 commits stale, and does not contain `scripts/pds-door-census.sh` at
+all — a surveyor who greps it gets "no such file", which reads exactly like the slice being fictional).
+
+**ROUND 0 IS A NO-OP AND THE STRATEGY MEMO'S HEADLINE IS DEAD.** Strategize declared a PREMISE-SMOKE
+FAILURE — "D656–D663 DO NOT EXIST ON ORIGIN/MAIN … STEP 0 OF THE WAVE IS MERGING #9412". It was true when
+written and is false now. All six wave-45 PRs merged: #9442 `c012e5a7c`, #9433 `b2fdee63f`, #9434
+`774167d26`, #9438 `be527b601`, #9441 `55f43b45c`, charter #9412 `683c2f00a`. D656 through D663 are on
+main at `:12750`, `:12814`, `:12860`, `:12898`, `:12976`, `:13018`, `:13061`, `:13100`. Wave 46 starts at
+round 1.
+
+### PDS-D664 — THE CLASS PREDICATE DOES NOT EXIST AND WILL NOT BE INVENTED THIS WAVE. THE *ROUTING* PREDICATE DOES EXIST, IS MECHANICAL, AND IS ENFORCED BY NOTHING.
+
+The wish and the strategy both located a tiering threshold in `(4.45 s, 8.91 s]` and asked slice (b) to
+state it. **That interval is an artefact of silently dropping the fourth door from a set of four**, and no
+threshold at any value reproduces this column. Proven from the artifact, four independent ways:
+
+1. **THE CLASSES ARE NOT SEPARABLE BY COST, AND WERE NOT AT THE MOMENT THEY WERE ASSIGNED.** This charter
+   at `:2834` prices `pds-elixir-receipt-census.exs` **THROUGH** at *~37 s plain+mutant+refusal* in the
+   same sentence that rules `pds-scratch-target_test.sh` **PRICE at 4.30 s**. `max(THROUGH) = 37.0 >
+   min(PRICE) = 4.30`. A separating threshold does not exist and never did.
+2. **THE ONE OUT-OF-SAMPLE NUMBER REFUTES EVERY THRESHOLD.** `pds-charter-ledger-sweep.sh` is class
+   `CONTENT-RED` carrying `CPU 3.42 s LOCAL` (`pds-door-census.sh:162`) — **cheaper than the 4.45 s row
+   that IS through**, and still not through. Any threshold in `(4.45, 8.91]` must explain 3.42 and cannot.
+3. **THE UNSUPERVISED CUT LANDS ON THE WRONG SIDE.** Sorted literals `0.16 0.82 3.32 4.45 8.91 40.33`;
+   consecutive ratios `5.13× 4.05× 1.34× 2.00× 4.53×`. The largest upper gap is `8.91→40.33`, which puts
+   **8.91 — an actual PRICE row — on the THROUGH side**. The `4.45→8.91` seam the wish leans on is the
+   second-*smallest* gap in the set.
+4. **THE BOUNDARY IS NOT REPRODUCIBLE AND NEITHER IS THE ORDERING.** A quiet-host re-take (8 passes,
+   load1 2.48–9.33) reproduces five of six literals load-corrected and **fails the sixth by 13–18×**:
+   `pds-scratch-target_test.sh` measures **0.49–0.69 s CPU**, not 8.91, and 0.90 s even under a synthetic
+   load1 ≈ 32. At rest the highest THROUGH price is 1.73–2.82 and the lowest class-PRICE refusal is
+   19.18–22.36 — **the interval is ≈(2.8, 19.2], a 7× gap containing not one observation**, and
+   `pds-scratch-target_test.sh` moves from rank 5 of 6 to rank 2 of 6, crossing three THROUGH rows. The
+   digest's "the ORDERING is stable; the BOUNDARY is not" is refuted in **both** halves.
+
+**RULING: `--measure` DERIVES ROUTING AND REFUSES THE CLASS, LOUDLY, AT A DISTINCT EXIT CODE 4
+(`REFUSED-NO-PREDICATE`).** A recorded rule-out is the wish's own explicitly accepted outcome; a silent
+hand ruling is not. The refusal must print the candidate rows, name the missing predicate, and state the
+four refutations above so the next wave inherits the reasoning rather than the number.
+
+**AND THE ROUTING HALF IS SETTLED WITH NO NUMBER AT ALL.** A `--route-probe` calling the census's *own*
+`instruments`/`classify_refs`/`leg_b`/`ledger_field` over all twenty rows produced **20 of 20 agreement,
+ZERO mismatches**: `legA=yes && legB=true → PDS_DOOR_PRICES` (4 rows), everything else →
+`PDS_DOOR_DISPOSITIONS` (16 rows), disjoint, no duplicate keys, nothing unplaced. **But the agreement is a
+human artifact, not an invariant** — moving a THROUGH row's real measured price into the disposition
+ledger as class `PRICE` leaves the census at **rc=0, ERRORS 0, stderr 0 bytes**, silently degrading the row
+to `price=UNMEASURED-LOCAL`. The cond is a **SIX-arm chain** (`:658-705`), not `legA && legB`: three ERROR
+arms precede THROUGH, and `IN-BEAM-REQUIRE` / `DEAD-DECLARATION` route to **neither** ledger. All five are
+0-count today, so a `--measure` written against today's table alone is undefined the first time any fires.
+**It must REFUSE for those five arms, not route.**
+
+*Why: a class whose predicate does not exist cannot descend from its substitution (D663), and PDS-D221 is
+the precedent — but cite it correctly. D221's "none may be invented at the close" scopes to the RSS
+control leg at **n = 1**; the same decision **derives** 1048.16 MiB from **390** samples. It is authority
+by analogy on sample size, not a general prohibition on thresholds. Cited any other way, the refusal
+becomes the phantom-citation class this epic files.*
+
+### PDS-D665 — `--measure` IS A RE-PRICER, NOT A ROUTER. THE "WHICH LEDGER" HOLE IS OUTSIDE SLICE (b)'s OWN SCOPE FENCE, AND WAS BEFORE THE STRATEGY NAMED IT.
+
+The strategy's central addition — "`--measure` must decide WHICH LEDGER and therefore must state a
+tiering ruling" — is fenced out by the filed task itself. `pds-w45-price-provenance`'s SCOPE FENCE reads
+*"do not add or remove any instrument's ledger row (the hetzner slice owns that). Correcting a stale price
+VALUE via `--measure` is in scope and free"*, and criterion 12 requires `--measure` **"does not change any
+row's class"**. Sixteen criteria; not one mentions choosing a ledger. For a re-price the row's ledger is
+read off the existing row — **no derivation needed at all**. Validating that placement belongs to slice
+(a)'s orphan check; authoring the one new row belongs to slice (c). Neither needs a threshold. The
+strategy invented a hole its own slice had already fenced out.
+
+### PDS-D666 — `UNMEASURED-LOCAL` IS MEASURABLE IN 35 SECONDS, AND MEASURING IT DISSOLVES THE TRAP D659 RECORDED. D659's REMEDY IS SUPERSEDED.
+
+D659 records that a naive hoist of the THROUGH shape validator reusing `*CPU=*LOCAL*meter=*` **REDS CLEAN
+MAIN** because the receipt census's honest `UNMEASURED-LOCAL` price fails the pattern, and prescribes an
+`UNMEASURED-LOCAL*` exemption inside the price grammar. **Both halves are re-measured and the remedy is
+wrong.**
+
+The red reproduces exactly (rc=1, ERRORS 1, and — recorded here for the first time — the headline
+**silently drops from `4 of 20` to `3 of 20`**, because `class='ERROR'` inside the THROUGH branch
+*re-classifies the instrument*). But the three gated arms cost **33.05–35.26 s CPU**, not the 51–67 s the
+backlog row asserts, measured twice with the calibration burn interleaved and load1 stamped both sides:
+plain rc=0 at 15.95/13.77, one-token `tl/1` mutant rc=1 at 15.46/15.17, unknown-flag refusal rc=2 at
+3.85/4.11. **The number was already in this charter at `:2834` (~37 s), within 5% — the ledger said
+UNMEASURED while the epic's own memory carried the measurement.**
+
+With a measured, load-stamped, D648-shaped row installed, **the same naive hoist runs rc=0 with the entire
+COUNTS block byte-identical to baseline and `--selftest` 14 PASS / 0 FAIL**. So:
+
+**RULING: MEASURE THE ROW, THEN HOIST THE EXISTING VALIDATOR UNCHANGED. NO `UNMEASURED-LOCAL` EXEMPTION IS
+ADDED.** An exemption is a legal shape meaning "no number" inside the very predicate whose purpose is that
+a price descends from a meter — a permanent, load-bearing hole bought to protect a row whose measurement
+costs 35 seconds. `pds-w45-census-ledger-integrity` criterion 7 ("the exemption is PROVEN NECESSARY:
+removing it REDS AN UNTOUCHED CLEAN TREE") is therefore **UNSTAMPABLE the moment the row is measured — it
+demands evidence from a state unreachable from the slice's own base — and is RETIRED**; criterion 9 is
+rewritten from "migrate the reason string into the enforced shape" to "replace the refusal with the
+measurement". Its scope fence (C12: no row *added or removed*) permits changing this row's text.
+
+**THE ASYMMETRY UNDERNEATH, and it is the finding.** Deleting *any* THROUGH row's price — the honest
+refusal or a genuinely measured one — is **completely invisible**: rc=0, ERRORS 0, all four counts
+unchanged, empty stderr, because `:670` does `[ -n "$price" ] || price='price=UNMEASURED-LOCAL'`. The
+disposition branch fails **closed** four ways (absent class, unknown class, empty evidence, bad PRICE
+shape); the price branch fails **open**. The one accidental discriminator is inverted — the *empty* case
+carries a `price=` prefix the honest row does not, an artifact of two unrelated string literals that no
+code compares and no test pins. **Delete the fallback: a THROUGH instrument with no price row is
+`UNPRICED` and reds, exactly as a non-THROUGH instrument with no disposition row is `UNDISPOSED` and reds.**
+
+**HARD ORDERING CONSEQUENCE, PROVEN BY RUN:** once that lands, **slice (c) cannot merge without a price
+row** — its new hetzner door computes THROUGH, carries no `PDS_DOOR_PRICES` entry, and reds the required
+context on its own commit. (a) → (b) → (c) stops being preferred and becomes mechanically enforced.
+
+### PDS-D667 — A SHAPE CHECK MUST NOT RE-CLASSIFY, AND NOTHING IN THIS REPOSITORY CAN SEE THE HEADLINE DOOR COUNT FALL.
+
+Two independent verifiers reproduced the same regression and neither the charter nor the rider records it.
+D659 captured the naive hoist's **red**; it missed that the hoist moves `THROUGH 4 of 20 → 3 of 20`. An
+author who repairs the rc by any means that does not restore the row gets full green with the census's own
+headline permanently one lower.
+
+**THE RIDER CANNOT CATCH IT.** `api/test/barkpark/pds_door_census_test.exs` has **no floor on the THROUGH
+count**: its only THROUGH assertions are self-consistency (`:255` count == named list, `:274` named ==
+table rows) plus `:278` `total >= 19`. Replayed against the 3-of-20 output, **every one passes** — 3 named,
+3 table rows, own row THROUGH, 2 PRICE rows, population 20. Proven a second way: inserting a cond arm that
+takes one genuinely-THROUGH instrument to a plausible disposition gives `3 of 20`, `UNDISPOSED 0`,
+`ERRORS 0`, census **rc=0**, rider **8 tests / 0 failures**. The number fell in total silence.
+
+**RULING, both halves in slice (a):**
+1. **THE SEPARATED-AXIS FORM IS LAW.** A malformed price is a fact about the **ledger**; THROUGH is a fact
+   about the **wiring**. A shape check appends to `error_lines` and increments `errors`; it never assigns
+   `class`. Proven: clean main byte-identical rc=0, mutant rc=1 with `ERRORS 1` and **`THROUGH … : 4 of 20`
+   unchanged**.
+2. **THE RIDER GAINS AN EXPLICIT THROUGH-COUNT FLOOR** in the same commit (the rider is on a *blocking*
+   required context — a rider edit is part of the same commit or the merge reds). Without it the next
+   predicate anyone writes re-opens the identical hole.
+
+**AND THE DISCIPLINE THIS GENERALISES TO — GREEN-ON-MAIN FIRST, BY RUN, WITH THE COUNTS DIFFED.** Every
+shape predicate this epic adds must be shown green on an **UNTOUCHED** main with all four counts
+byte-identical to baseline **before** it is shown red against a mutant. A check that reds is annoying; one
+that moves the census's own headline is the failure this epic exists to remove — and it passes
+"reds-against-a-mutant" trivially.
+
+### PDS-D668 — THE CONTENT KEY IS PER-INSTRUMENT, WITH TWO EXCEPTIONS: THE CENSUS'S OWN ELISION, AND ONE FORK CLOSURE.
+
+The strategy's landmine — *"the elided-ledger-block key hashes everything else, so EVERY EDIT TO THE
+CENSUS'S EXECUTABLE BODY TURNS ALL SIX PRICES PRICE-STALE AT ONCE"* — is refuted by the filed slice's own
+BUILD 2: **"Each priced row carries the content key OF THE INSTRUMENT IT PRICES."** A census body edit
+stales exactly **one** row, the census's own, and the elision exists solely to solve that self-reference —
+one pass, a fixed point by construction, the way a self-checksumming format zeroes its checksum field
+before hashing. `--measure`'s only write target lies strictly inside `PDS_DOOR_DISPOSITIONS` (`:162-177`)
+or `PDS_DOOR_PRICES` (`:185-188`), so the key is invariant under its own recording. Cost: **0.07 s CPU,
++2.0 % of `--check`** (wave 45's +1.9 % CONFIRMED) for the 3-fork shape; the naive 21-fork per-file loop is
+0.46 s = **+13.3 %** (its +14 % CONFIRMED).
+
+**BUT A PER-FILE KEY MISSES THE LARGEST PRICE IN THE LEDGER.** `pds-ledger-census_test.sh`'s 40.33 s is
+produced almost entirely by forking `scripts/pds-ledger-census.sh` ~150 times (`:34`
+`CENSUS="$HERE/pds-ledger-census.sh"`). Slice (f) cuts that instrument's cost by a measured **31–35 %** and
+**changes zero bytes of the file the row names** — so under a per-file key the row stays **PRICE-FRESH
+while its number is wrong by a third**. That is this wave's own lie, one column over.
+
+**RULING: the key for `pds-ledger-census_test.sh` covers its FORK CLOSURE
+`{pds-ledger-census_test.sh, pds-ledger-census.sh}`.** It is free — BUILD 1 already specifies one `shasum`
+over the glob, which emits one line per file in a single fork, so a closure key is two of the lines it
+already has. Additionally, the census's own key covers `(elided body) ‖ digest(INSTRUMENT_LIST)`: its
+price is the price of a scan over the whole tree, and no hash of the census file, elided or not, covers
+that input — the row can otherwise go **stale by omission** as the repo grows.
+
+**AND THE LIMIT, WHICH BELONGS IN THE REFUSAL, NOT THE MARKETING.** `scripts/pds-scratch-target_test.sh`
+last changed at `6f4ca7904` (2026-07-28), a **week before** its 8.91 s stamp (2026-08-03). The bytes are
+unchanged. **A content key would have certified that unreproducible number FRESH in perpetuity.** The
+wish's sentence — *a price lies when it does not descend from a meter the instrument itself drove* — is
+**satisfied** by 8.91 and it is **still a lie**. Content-freshness is orthogonal to price truth; the only
+predicate that catches this class is re-measurement, which the arithmetic below prices out of `--check`.
+Slice (b) states this in its refusal text as a named residual, or it ships a key overclaiming what it
+proves. `--measure` also takes **N ≥ 3 trials and emits the observed spread**, because a single point
+carries no evidence that its load stamp is provenance rather than a correction factor.
+
+### PDS-D669 — `--measure --all` IS FIRST-CLASS AND IS NEVER GATED; AND THE METER TRAP THAT WOULD MAKE ITS TOTAL A FABRICATION.
+
+`--measure --all` had **no acceptance criterion anywhere** in `pds-w45-price-provenance`'s sixteen —
+criterion 10 covers `--measure <basename>` alone — while the strategy calls the one-command re-take
+load-bearing. **It is added.** Measured as one command: **165.78 s wall / 65.92 s CPU**, arms reconciling
+to 0.07 s of wrapper, of which **70 % of CPU and 76 % of wall is a single arm**
+(`pds-ledger-census_test.sh`) that slice (f) cuts by a third.
+
+**IT MUST NEVER BE GATED.** 66 s CPU is 19× the census's own `--check`. Verify-by-re-measurement inside
+`--check` would cost **≥ 58 s** — above the 8.91 s row already disposed class PRICE — so the census would
+dispose *itself* out of its own door. The wish's disqualifier is arithmetic, not taste. `--check` verifies
+a price by **comparing a recorded key against a recomputed key** (0.07 s) and never runs a door; only
+`--measure` runs doors, and it never calls `--check`. That single rule also kills the recursion: the
+census's gated arm is `--selftest`, and `run_census()` is called from exactly one site (`:1092`, under
+`--check`), so `--measure pds-door-census.sh` forks one `--selftest` and terminates. A depth guard
+(`PDS_DOOR_MEASURE_DEPTH`) makes the rule falsifiable rather than a comment. **A `--measure` living in a
+separate file is also ruled out**: the mode dispatch at `:1088` is unguarded, so `source`-ing the census
+runs a full `--check` (69 lines) before the sourcing script's own first statement.
+
+**THE METER TRAP, MUTATION-PROVEN BOTH DIRECTIONS, AND IT ERRS IN THE FORBIDDEN DIRECTION.** `bash` execs
+the final simple command of a `-c` script and **discards the accumulated `RUSAGE_CHILDREN`**. A
+`/usr/bin/time -p` wrapper around a loop whose last statement is the last arm therefore prints **only the
+last arm** — under-reporting an aggregate by ~5×. Proven: arms of 0.85 + 0.84 + 0.42 report an outer
+`user 0,43`; appending a trailing `:` restores `user 2,14`. This is the D633/D646 BEAM-blindness family and
+it **makes an expensive thing look gate-able**. Any `--measure --all` that quotes a wrapper total over a
+shell loop emits a fabricated price. **A trailing no-op is mandatory, and the selftest must contain an arm
+that reds without it.**
+
+**A LOAD-NORMALISED RATIO PRICE IS DEAD.** An interleaved 9-pair probe across load1 12.56 → 68.70 found the
+door's CPU spread **1.043×** and the calibration burn's **1.201×**: the normaliser is **4.3× noisier than
+the thing it normalises**, so `door/burn` republishes a 4.3 %-wide price as a 19.5 %-wide one. There is no
+common factor to cancel — a long-lived arithmetic burn and a fork-heavy shell door share no channel. Ship
+the load stamp and the content key; never a ratio. **And the load stamp is provenance, not correction:**
+`load1` is a lagging one-minute average, and five repeats at a *printed* load1 of 18.68 (spinners already
+killed) all cost 0.49–0.51 s, identical to the load1 = 2.48 figure. A stamp beside a price describes the
+minute *before* the run.
+
+### PDS-D670 — THE SECOND `ELIXIR_TEST_ONLY_PATHS` ENTRY IS UNENFORCEABLE AND IS DROPPED. THE REAL HOLE IS `go-tests.yml`, WHICH IS OUT OF FENCE, AND THE REFUSAL IS RECORDED.
+
+D659 declares slice (c) owes a second `ELIXIR_TEST_ONLY_PATHS` entry for
+`internal/cli/testdata/pds_live_hetzner_*.json`. **It would be a declaration with no instrument behind it —
+the exact defect this epic exists to delete.** Measured:
+
+* **Zero Elixir readers.** `grep -rn 'internal/cli/testdata' api/` on main returns nothing. The readers are
+  `internal/cli/hetzner_live_fixtures_test.go` (Go) and the shell door.
+* **The ratchet is structurally blind.** `list_escapes` scans only `api/lib` + `api/test`, so `--check` can
+  never *demand* the entry. Adding it changes nothing: ratchet still `OK … rc=0`, `--selftest` still
+  `113 passed, 0 failed`. Nothing verifies it and nothing catches its removal — and
+  `elixir-path-escape-check.test.sh` carries no assertion on set membership either.
+* **The contrast, same file, same run:** dropping the new Elixir rider into `api/test` *without* declaring
+  `scripts/pds-live-hetzner-placement-group.sh` **reds at rc=1 naming the path**. That entry is genuinely
+  ratchet-demanded. The asymmetry is the whole finding, and every prior entry this epic added was a
+  SCRIPT path read by string literal.
+* **The fixtures ARE pinned — by three instruments none of which run on a fixture-only PR.** A one-byte
+  append reds `TestPDSLiveFixturesRecordTheirOwnKindAndLength` (byte count), `TestPDSLiveManifestIsMachineEmitted`
+  (sha256_chunked) and `--selftest-offline` (`rc=0 → rc=1`, "the committed manifest is NOT what the emitter
+  produces"). But `go-tests.yml` carries exactly **three** testdata carve-outs — `templates/**`,
+  `internal/pdrender/testdata/**`, `docs/cli/fixtures/**` — and **not** `internal/cli/testdata/**`, and the
+  only workflows whose filters match the fixture (`architecture.yml` advisory, `doc-gates.yml`,
+  `deploy.yml` push-only) run **zero** `go test`. A fixture regen carries no `.go` diff, so nothing runs.
+
+**RULING: slice (c) is FOUR edits across THREE files, not five.** The `internal/cli/testdata/**` entry is
+dropped; the `go-tests.yml` `paths:` fix is **fenced out this wave** (`.github/workflows/**` belongs to
+Cloud Console wave 29) and is **filed**. This is a recorded refusal naming the uncovered instrument, which
+the wish explicitly accepts. **A brief-recipe correction rides with it:** `go test -run LiveFixtures`
+matches only the byte-count test and misses the sha256 pin — `-run PDSLive` (8 tests) is the honest verify
+command, and the shorter form is exactly the comforting wrong answer.
+
+**AND ITEM 4 OF THE WISH IS CONFIRMED, WITH THE PRICE MOVING A FOURTH TIME.** `pds-door-census.sh:167`
+disposes the door ENVIRONMENT citing `--selftest` rc=3, while the script's own header (`:13`) declares
+`--selftest-offline` *"the CREDENTIAL-FREE arm; this is the CI-able gate"*. Measured: `--selftest-offline`
+**rc=0**, `--selftest` **rc=3**. The class is defensible; the evidence names the wrong arm. Its CPU has now
+been reported at **3.79 / 2.98 / 2.15 / 1.91 / 1.31 / 1.23 s** across five waves for a byte-identical
+program. **The stranded row's 2.98 s must be RE-TAKEN, never pasted.**
+
+### PDS-D671 — THE RETIRE SHAPE IS NOT A BYPASS. ITS DOOR-OPEN PROOF IS VACUOUS, ITS EMPTY-EVIDENCE ARM IS AN UNCONDITIONAL EXEMPTION, AND ONE COMMIT IS FORCED.
+
+Proven by run in four directions. Door **shut** with only a retired row → `UNDISPOSED : 1 of 20`, rc=1:
+**you cannot retire the only explanation of a shut door.** Retired row with **empty evidence** → rc=0,
+ERRORS 0: the design's own rule ("replace the evidence with what superseded it") is **unenforced**, because
+retired rows never reach the empty-evidence hard error they were skipped out of. **Retirement as shipped is
+an unconditional exemption from the orphan check the same slice adds** — so a retired row must carry
+non-empty evidence naming what superseded it, or the shape is "a disposition without evidence" wearing a
+prefix.
+
+**THE DOOR-OPEN DIRECTION IS VACUOUS AS A PROOF.** A retired row on an OPEN door is green — but not because
+retirement is honoured: the cond short-circuits to THROUGH before `PDS_DOOR_DISPOSITIONS` is read at all, so
+a **non**-retired contradictory row is equally invisible. Any acceptance evidence quoting only that
+direction proves nothing. **The one working bypass is a VOCABULARY extension** — adding `RETIRED-ENVIRONMENT`
+to `PDS_DOOR_CLASSES` takes a shut door to full green (`rc=0, ERRORS 0`), caught **solely** by `--selftest`'s
+`nclasses -eq 6` arm, which checks a COUNT and three spot-names. Six classes with one swapped for a
+`RETIRED-` prefix would pass. **Add an arm asserting `! class_known RETIRED-*` explicitly.**
+
+**THE DUPE CHECK SHIPS IN THE SAME COMMIT, and the reason is not the one previously recorded.** The
+duplicate-key hole is **pre-existing** — `ledger_field`'s awk `exit`s on first match, so two contradictory
+live rows silently first-win at rc=0 with `--selftest` green. Retirement does not widen it. **It destroys
+its only detector:** a legal retire pair and an illegal duplicate pair are structurally indistinguishable in
+the output — one printed row, ERRORS 0, rc=0, no mention that a second row exists. Before retirement, "two
+rows for one basename" was on-sight wrong in a diff; after, it is on-sight normal. Splitting the other way
+is mechanically broken: a dupe check written on today's semantics reds **every legal retire pair**. Two
+builder traps are recorded because both produced confidently wrong answers: a cross-ledger dupe arm that
+concatenates both key streams before `uniq -d` **double-reports** a within-ledger duplicate as a phantom
+cross-ledger collision (each side must be `sort -u`'d first), and a line-range dupe scan (`sed -n '162,190p'`)
+straddles the comment block between the literals and reports a **comment line** as a duplicate key — scope
+to the two variables, never a line range.
+
+### PDS-D672 — TASK-LEDGER ADJUDICATION: TWO ROWS WITH NO REACHABLE PATH TO GREEN, AND ONE SUPERSEDED BY A CORRECTLY-SCOPED SIBLING ALREADY ON THE BOARD.
+
+* **`pds-w44-lv-verdict-unresolved-spec-arm` — CLOSED, SUPERSEDED.** 0/2 with **no reachable path to 2/2**:
+  C1 pays out only `if declined_live > 0`, and running the receipt census on main prints `declined_live=0`;
+  C2 literally reads *"this task stays closed as SUPERSEDED by PDS-D661"* while the row is `open`. Both
+  criteria are restated in the close write rather than stamped. D661 already rules it out twice over.
+* **`pds-w44-charter-sweep-adjudication` — CLOSED, SUPERSEDED, not re-scoped.** Seven of nine criteria are
+  dead. C5 ("selftest legs 2 and 3 observed passing for the FIRST time, 3 of 3 at rc=0") is **already true
+  on main** (`=== SELFTEST OK: 3 of 3 ===`, rc=0). C6 (the fail-open closed) was discharged by
+  `55f43b45c` (#9441) — `allow_error` count on main is **0**, `bp_json` calls `unchecked()` on nonzero rc,
+  and `bp_probe` ships beside it. C7 demands evidence quoting the **pre-fix** misclassified output, a state
+  unreachable from any base a builder can build on: a builder either fabricates a run or stalls. C1–C4 are
+  duplicated in a strictly better form by **`pds-w45-bl-sweep-adjudication-frozen-blob`** (0/6), which
+  already pins a FROZEN BLOB SHA instead of a count, carries the vintage split, and forbids touching the
+  lens in the same PR. **That row is dispatched; the wave-44 row is closed naming both.**
+* **Wish item 5 is discharged BY A MERGE, not by a reading.** The strategy's refutation #1 quoted #9441's
+  *branch* head as if it were main — a level-skip three surveyors caught independently. It is now moot in
+  the strongest possible way, but the record matters: L3 is not L2.
+* **`pds-w45-census-row-check-evidence` — CLOSED at 1/1, with its evidence CORRECTED.** Its stamped
+  criterion cites "the 59-arrival count"; the sweep at `683c2f00a` measures **71**. Arrivals have now moved
+  **41 → 45 → 59 → 71** across four charter merges, and this wave's own charter PR moves them a fifth time.
+  Closing it uncorrected would seal a false receipt inside an epic whose law is that a receipt descends from
+  a run.
+* **THE STALENESS IS LIVE ON MAIN RIGHT NOW, AND IT IS THIS WAVE'S BEST FIXTURE.** `pds-door-census.sh:162`
+  commits the disposition evidence ``--check`` rc=1 … **(59 arrivals)** while the sweep at that very commit
+  prints **71**. The row went stale **in the merge that landed it** — #9412 grew the charter, and the lens is
+  mined *from* the charter. Slice (a) corrects it in the literal it is already editing.
+* **The zero-criteria population is TWELVE, not the nineteen reported** (11 are pre-existing `pds-bl-*` /
+  `pds-w27` / `pds-w37` backlog; the only wave-4x row is `pds-w44-d605-doc-label-drift`). Filing nineteen
+  children would have manufactured seven rows that do not exist. **And ZERO open PDS rows carry a live claim**
+  — the "three LIVE claims that block re-dispatch" does not exist, measured over all 353 open PDS rows.
+* **`pds-w45-bl-scratch-target-class-refuted` — RE-SCOPED, not dispatched.** Its criterion 2 demands *"a
+  numeric threshold that also explains why the 4.45 s THROUGH row passes and this one does not"* — proven
+  unsatisfiable by D664. Left as written it is the identical unstampable shape; its criterion is rewritten to
+  accept the recorded refusal.
+
+### PDS-D673 — CHARTER SELF-CORRECTIONS, AND WHAT WAVE 46 CUT.
+
+* **PDS-D659's line anchors are DEAD on main** and a builder following them edits unrelated lines. It cites
+  the cond at `:519-540`, the THROUGH branch at `:521-525`, the shape check at `:550-558`, the rot check at
+  `:592-603`, the hetzner row at `:128`, a price row at `:148`. At `683c2f00a` those lines are awk internals,
+  a `printf INLINE-EXEC`, the word `ENVIRONMENT` inside the class list, a comment banner, and a `wc -l`
+  assignment. **THE REAL ANCHORS:** classes `:147-152`, dispositions `:162-177`, prices `:185-188`,
+  `leg_b()` `:540`, `ledger_field()` `:566`, `class_known()` `:586`, `run_census()` `:593`, the cond
+  `:658-705`, the silent price default `:670`, the PRICE shape check `:695-703`, the rot check `:732-749`,
+  the vocabulary selftest arm `:1038`, mode dispatch `:1088-1109`. The apostrophe tripwire D659 records at
+  `:148` fires at **`:185`** (`syntax error near unexpected token ')'`, rc=2). **Every brief citing a D659
+  line number was re-anchored before dispatch, and the rider's `:303/:305/:316` anchors DO still hold** —
+  `api/test/barkpark/pds_door_census_test.exs` is byte-identical between `be527b601` and `683c2f00a`.
+* **`--selftest` has FOURTEEN arms, not eight.** `pds-w45-census-ledger-integrity` says "8 PASS / 0 FAIL"
+  five times; main prints `SELFTEST: 14 PASS / 0 FAIL of 14 arms`. Every criterion phrased against 8 was
+  unmeetable as written and is corrected.
+* **THE RIDER'S PIN MAP, MEASURED PROBE BY PROBE, AND THREE PREDICTIONS WERE WRONG.** Adding a class moves
+  `:124` and `:326` — **not** `:328`, and `:326` is a *message-less* `assert rc == 0`. Raising ERRORS moves
+  `:167` **only**; `:157` is structurally unreachable when `errors > 0` (its else branch asserts `rc != 0`
+  and passes). A fifth table column is **POSITIONAL**: inserted *before* `DISPOSITION` it moves `:237` (with
+  a message blaming leg-A binding, which nothing touched) and `:305`; inserted *after* `DISPOSITION` it
+  moves **ZERO** pins — every column regex anchors on the class token and is blind to everything right of
+  it, **which is exactly where a PRICE-KEY column wants to live.** A second `    -> ` list above the THROUGH
+  line hijacks `:251`'s `Enum.find` and reds at `:255` or `:274` depending on the decoy's length, always
+  blaming a summary that is correct. And the `@moduletag timeout: 300_000` is **per test**, not per module:
+  a fifth `--check` costs 1333 ms and takes the module 3.4 s → 4.3 s, so the risk is not invocation count
+  but a single arm over 300 s, failing as a content-free `ExUnit.TimeoutError`.
+* **Two rider pins have ZERO headroom and sit directly in slices (b) and (c)'s path:** `:305`
+  `length(price_rows) >= 2` counts rows whose class column is literally `PRICE`, and there are **exactly
+  two**; `:229` `harnesses : 3` counts `scripts/pds-*_test.sh` by name alone (so slice (c)'s `.json`
+  fixtures cannot move it, but any new harness can).
+* **THE CENSUS'S OWN PRICE MEASURES THE WRONG ARM RELATIVE TO EVERY OTHER ROW.** `:185` records `--check` at
+  3.32 s and then names the *gated* arm `--selftest` at 0.16 s in the same free-text cell — a 20.75× gap.
+  Every other price row records the gated arm. A `--measure` that "emits the exact ledger row" must record
+  WHICH ARM it drove or the column lies by an order of magnitude; recorded as owed, not cut this wave.
+* **"THROUGH the door" is not "gated in CI."** `git grep -n 'pds-' origin/main -- .github` returns
+  **nothing** — no `pds-*` instrument is referenced by any workflow. THROUGH means an ExUnit binding under
+  `api/test` (leg A). The epic's oldest hole — **no `pds` door has ever executed on a foreign CI runner** —
+  is restated and again not closed: `.github/workflows/**` is Cloud Console wave 29's fence. It is the
+  strongest argument for a foreign-runner slice in wave 47.
+* **`HUMAN-GATE` remains exercised by ZERO rows** (ENVIRONMENT 11, PRICE 2, CONTENT-RED 1, NOT-YET-BUILT 1,
+  RED-BY-DESIGN-REPORTER 1 = 16, plus 4 THROUGH). The wish's own refutation (ii), re-derived.
+* **A STRANDED BOTH-LEGS IMPLEMENTATION OF SLICE (c) WAS RESCUED AND IS NOT RE-USED.** It sits uncommitted
+  in `.claude/worktrees/wf_42737b38-0d2-22` off base `0d1936832`, captured non-destructively to branch
+  `rescue/pds-w44-hetzner-offline-door-wf22` — **TRACKED FILES ONLY**; the ~300-line untracked
+  `api/test/barkpark/pds_hetzner_offline_door_test.exs` is NOT in that commit and dies if anyone cleans the
+  worktree. Read it for what it learned; rebuild at the merged base, because #9434 moved the census under it.
+* **SLICE (a) IS A REBUILD, NOT A RE-LAND.** D659's "THE REPAIRS ARE BUILT AND THE BLAST RADIUS IS ZERO (82
+  insertions / 10 deletions, one file)" exists **only as prose**. `elided-ledger-block` appears in no file
+  under 228 worktrees; `PRICE-STALE` appears nowhere in `scripts/`, `docs/` or `.github/`; there is no
+  `--measure` verb and no hashing of any kind on main. Its four quoted mutation hashes are unreproducible.
+  **Every charter run-proof for slice (a) is an L4 hypothesis to re-measure, never a baseline to match.**
+* **CUT THIS WAVE, DELIBERATELY.** The foreign CI runner (fence). The `go-tests.yml` testdata carve-out
+  (fence, filed). A load-normalised ratio price (dead, D669). A numeric tiering threshold (refused, D664).
+  The census's own wrong-arm price (owed, filed). `--measure`'s N≥3 spread is in; a `class-by-run` predicate
+  ("does the gated arm complete rc=0 credential-free?") is recorded as the successor question — it is what
+  actually distinguishes ENVIRONMENT from PRICE, it is partial (`rc=3` is ambiguous between ENVIRONMENT and
+  RED-BY-DESIGN-REPORTER), and it costs a run per row, which the ≥58 s arithmetic already disqualifies.
+
+### WAVE 46 PLAN — 6 slices, 3 in round 1
+
+| # | slice | round | task | surface |
+|---|---|---|---|---|
+| 1 | The refusal becomes a measurement, and the ledger stops lying by silence | 1 | `pds-w45-census-ledger-integrity` | `scripts/pds-door-census.sh` + its rider |
+| 2 | The sweep's adjudication is keyed on a FROZEN BLOB, never a count | 1 | `pds-w45-bl-sweep-adjudication-frozen-blob` | `scripts/pds-charter-ledger-sweep.sh` + adjudication table |
+| 3 | The receipt census stops asserting it costs no gate minute | 1 | `pds-w45-bl-receipt-census-self-claims` | `scripts/pds-elixir-receipt-census.exs` |
+| 4 | The price column learns to expire — and REFUSES to state a class | 2 (after 1) | `pds-w45-price-provenance` | `scripts/pds-door-census.sh` + its rider |
+| 5 | The hetzner offline arm becomes door 5 of 20 — FOUR edits, THREE files | 3 (after 1, 4) | `pds-w44-hetzner-offline-door` | census ledger + escape-check + new rider |
+| 6 | The first door this epic makes CHEAPER — and slice 4's only live PRICE-STALE proof | 4 (after 4) | `pds-w45-bl-ledger-census-lazy-urllib` | `scripts/pds-ledger-census.sh` + its suite |
+
+**HIGH-FLIP-RISK, declared.** **Slice 1** — whether the separated-axis shape check is genuinely
+green-on-untouched-main with all four counts byte-identical, and whether the measured receipt-census row
+really dissolves D659's exemption rather than merely moving where it hides. **Slice 4** — whether the class
+refusal is a rule-out or an abdication, and whether the content key's fork closure covers what its price
+actually depends on. **Slice 5** — whether BOTH LEGS land in one commit, and whether dropping the
+`ELIXIR_TEST_ONLY_PATHS` entry leaves a hole the recorded refusal does not honestly name. All three warrant
+a genuinely independent second reviewer before merge; this workflow spawns one reviewer, so that dispatch is
+the lead's manual step.
+
+**FABLE WAS UNAVAILABLE THIS WAVE.** Every slice, including three that are genuinely hard on the difficulty
+axis (1, 4, 5), is built at `opus@medium`. That is a recorded constraint, not a judgment that these slices
+are routine.
 
 CHARTER PR: docs-only, `Task: task-2ac1f95237c4a8e5`.
