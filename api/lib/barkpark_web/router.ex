@@ -1553,6 +1553,9 @@ defmodule BarkparkWeb.Router do
     post("/tokens", AuthController, :create_token)
     get("/export", AuthController, :export)
     post("/erase", AuthController, :erase)
+    # Self-service password change, gated on the current password — same
+    # re-auth shape as /erase. See AuthController.change_password/2.
+    patch("/password", AuthController, :change_password)
     post("/mfa/enroll", AuthController, :mfa_enroll)
     post("/mfa/verify", AuthController, :mfa_verify)
     # Present a current factor to make this session step-up-fresh (clears a
