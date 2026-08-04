@@ -2576,6 +2576,69 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 46 2026-08-04 — REVIEWED AND PUSHED, grade A — 3 of 3 round-1 slices green, 3 PRs open, 3 round-≥2 slices deferred BY DESIGN (paper `pds-wave-46-2026-08-03`)
+
+**WHAT LANDED (3 PRs, all pushed, none merged — the lead merges).**
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `pds-w45-census-ledger-integrity` | `…the-refusal-becomes-a-measurement-and-th-0` | #9475 | The ledger stops lying by silence: ungated orphan check, the retire shape, per-ledger duplicate-key scan, the separated-axis price shape check, the silent `UNMEASURED-LOCAL` default DELETED, the receipt census's row MEASURED at 28.73 s CPU, `--selftest` 14 → 24 arms. Reviewer changed nothing. |
+| `pds-w45-bl-sweep-adjudication-frozen-blob` | `…the-sweep-s-adjudication-is-keyed-on-a-f-1` | #9476 | All 71 charter-sweep arrivals adjudicated at TWO frozen blob shas, never a count. Vintage split derived in-process (14 retroactive / 57 new), both live-drift channels in the lens named with their mechanism. Reviewer changed nothing. |
+| `pds-w45-bl-receipt-census-self-claims` | `…the-receipt-census-asserts-it-costs-no-g-2` | #9477 | The false self-gating claim is corrected against `elixir-path-escape-check.sh:100`, and the price comes from a meter (28,09 / 28,31 s CPU, load1 stamped either side). `@blind_spot`'s two hand-typed constants are gone; the `--selftest` floor is DERIVED at run time on the existing volatile line. Reviewer changed nothing. |
+
+**PDS-D674 — A PRICE INSIDE THE INSTRUMENT WHOSE SUBJECT IS PRICES MUST BE RE-TAKEN IN THE SAME COMMIT THAT MOVES IT.**
+Slice 1's criterion said `--check` may differ in exactly TWO ledger rows. It differs in THREE, and the
+third is the census's OWN price row: adding ten LEDGER arms took `--selftest` from 0.16 s to 0.47 s, so
+leaving the row would have shipped a knowingly-stale price inside the one instrument whose entire
+purpose is that a price descends from a meter it drove. The builder refused to flip the criterion,
+stamped an honest `--miss` with the full accounting, and let the lead adjudicate. **The rule: a slice
+that changes an instrument's cost owes that instrument's own price row a re-measurement at ONE load
+stamp in the SAME commit — and a criterion written before the slice existed does not get to forbid it.**
+Corollary, and it is PDS-D656 applied to oneself: the old 3.32 s / 0.16 s figures were taken at load1
+41.63 and the new ones at load1 3.26, so **no delta was quoted** — a price is comparable only against
+its own load stamp, and refusing to subtract two incomparable numbers is the honest move, not a gap.
+
+**PDS-D675 — A SEPARATED AXIS IS PROVEN BY MUTATING THE REAL LEDGER, NOT BY THE SELFTEST'S FIXTURE.**
+Review re-derived slice 1's central claim independently, outside its selftest: the mutant census copied
+into `scripts/` under a NON-`pds-` name (so `REPO_ROOT` and leg B still resolve and the population stays
+20), then three real-ledger mutations. Duplicate PRICE key → ERRORS **1**. Duplicate live DISPOSITION
+key → ERRORS **1**. `pds-record-parity.test.sh` forced to a live `ENVIRONMENT` row → ERRORS **1**,
+naming both classes. **In all three reds the THROUGH headline stayed 4 of 20** — the shape verdict never
+touched `$class` under mutation, not merely under fixture. A copy of the census run from `/tmp` with
+`PDS_DOOR_CENSUS_ROOT` set is NOT a control: `BASH_SOURCE` drives the ratchet path, leg B goes false for
+every row, and the run reports THROUGH 0 of 20 / ERRORS 21. That collapse is the harness, not the code.
+
+**PDS-D676 — THE CENSUS'S `CONTENT-RED` ROW SURVIVES ITS OWN ADJUDICATION, AND ONLY BECAUSE THE CHARTER GREW.**
+Slices 1 and 2 look like they contradict each other: slice 1 corrects the sweep's disposition evidence
+to `rc=1 (71 arrivals)` while slice 2 adjudicates all 71, which takes the sweep to rc=0. Review PROVED
+the resolution by run rather than reasoning about it — overlaying #9466's 402-line charter append onto
+slice 2's branch and re-running the sweep gives **rc=1, arrivals 6, misclassified 0, stale adjudication
+rows 0**. So the row stays true on main, none of the 105 prior or 71 new rows is dropped by the new
+prose (the line-free fingerprint holds under a 402-line append), and the six new arrivals are all
+dispatch-table rows the next wave can clear cheaply. **The transient is real though: if slice 2 merges
+BEFORE #9466, the `CONTENT-RED` evidence is momentarily false and nothing can see it** — the census
+never re-takes a disposition's run. That is item 2 of wave 46's wish, still owed.
+
+**WHAT STALLED — nothing. Three slices were DEFERRED BY DESIGN** under the sequenced-rounds law:
+`pds-w45-price-provenance` (round 2, after slice 1 — same file, on top), `pds-w44-hetzner-offline-door`
+(round 3, after rounds 1 AND 2 — it needs `--measure` and the retire shape), `pds-w45-bl-ledger-census-lazy-urllib`
+(round 4, after round 2 — it is round 2's only non-vacuous live PRICE-STALE proof). Their tasks are
+open, unclaimed, 0/N met, and honestly so.
+
+**WHAT THE NEXT WAVE TAKES.** Merge round 1 — the three PRs are file-disjoint — and merge **#9466 with
+or before #9476** so the sweep's disposition evidence never passes through a false window. Then dispatch
+STRICTLY in dependency order, re-deriving every anchor at each merged base (slice 1 alone moved ~390
+lines in `pds-door-census.sh`): round 2 `pds-w45-price-provenance` → round 3 `pds-w44-hetzner-offline-door`
+(BOTH LEGS OR NEITHER — slice 1's orphan check and deleted price default now make a one-legged version
+red its own commit, which is the intended forcing function) → round 4 `pds-w45-bl-ledger-census-lazy-urllib`.
+Then the holes wave 46 named and did not close: the PRICE ledger has no orphan direction
+(`pds-w46-price-ledger-orphan-direction`), four shipped load1 stamps are implausible next to this host's
+2.1–3.4 and a comma-locale `tr -d ,` reproduces exactly that inflation (`pds-w46-load-stamp-provenance-doubt`),
+the sweep's idiom lens fires retroactively on 14 measured rows (`pds-w46-sweep-idiom-exclusion-lens-repair`),
+a `RETIRED-` row whose evidence is whitespace still buys its exemption free
+(`pds-w46-retired-evidence-whitespace-passes`), and `HUMAN-GATE` remains an untested arm of a six-class
+vocabulary only five of which any row exercises.
+
 ### Wave 45 2026-08-03 — REVIEWED AND PUSHED, grade A — 5 of 5 round-1 slices green, 5 PRs open, 3 round-≥2 slices deferred BY DESIGN (paper `pds-wave-45-2026-08-03`)
 
 **WHAT LANDED (5 PRs, all pushed, none merged — the lead merges).**
