@@ -1201,16 +1201,38 @@ test('wave 27: a git-archive root on the LIVE path refuses instead of inventing 
   assert.doesNotMatch(out, /^ {2}[✗◐✓·] CCH-D/m, 'no register entry may be rendered at all');
   assert.doesNotMatch(out, /LADDER-ONLY/, 'no reading may be printed off a read that never happened');
 
-  // MUTATION CONTROL — remove ONLY the git leg and the identical run reproduces the
-  // pre-fix output exactly: six false ancestry sentences, every entry flagged, exit 0.
+  // MUTATION CONTROL — remove ONLY the root git leg and the identical run reaches the
+  // ladder over a directory with no `.git` at all.
+  //
+  // REWRITTEN IN WAVE 29, AND THE COUNT IS NOT RELAXED. Through wave 28 this control
+  // asserted SIX verbatim `is not an ancestor of origin/main` lines, because that is
+  // exactly what the undiscriminated ancestry leg printed for a directory git could not
+  // read. Wave 29 taught the leg to tell rc 1 (an answer about the PRODUCT) from rc 128 /
+  // missing ref / missing object / truncated walk (an answer about the ENVIRONMENT), so
+  // the same run now answers rc 128 at the REF probe and prints six HISTORY-UNAVAILABLE
+  // sentences instead. The assertion therefore moves to the NEW sentence AT THE SAME
+  // CARDINALITY. Relaxing it to `>= 0`, dropping it, or deleting this test would silently
+  // restore the defect the whole slice exists to remove: today NONE of the five
+  // `ladderOnlyRun` assertions read `b-clean` or counted anything, which is why
+  // origin/main scored 65/65 in a pristine depth-1 clone while printing six false
+  // ancestry sentences. A selector that cannot reach the defect is green by construction
+  // even with a cruel fixture.
   const unguarded = mutatedRun(
     (src) => src.replace('if (!top || realpathSync(top) !== realpathSync(REPO))', 'if (false)'),
     ['--ladder-only', '--repo', root]);
-  assert.equal(unguarded.status, SEAL, 'pre-fix, a wrong root read clean at exit 0 — that is the defect');
+  assert.equal(unguarded.status, SEAL, 'the READ path exits 0 even with an unreadable history — charter D335');
   const invented = unguarded.out.split('\n').filter((l) => / is not an ancestor of origin\/main$/.test(l));
-  assert.equal(invented.length, 6,
-    `pre-fix, every registered defect was reported unlanded because the DIRECTORY had no .git, got ${invented.length}`);
+  assert.equal(invented.length, 0,
+    `not one ancestry claim may be derived from a directory git cannot read, got ${invented.length}`);
+  const unreadable = unguarded.out.split('\n').filter((l) => /^ {8}HISTORY-UNAVAILABLE: commit \S+ — /.test(l));
+  assert.equal(unreadable.length, 6,
+    `every registered defect must be reported UNREADABLE — not unlanded — when the DIRECTORY has no .git, got ${unreadable.length}`);
+  for (const l of unreadable)
+    assert.match(l, /MISSING-REF\b.*\[ref: origin\/main DOES NOT RESOLVE \(rev-parse --verify rc \d+\) \| object: ABSENT \(cat-file -e rc \d+\) \| walk: unknown \(.*\) \| ancestry: NOT RUN/,
+      `each sentence names all four probes and which one answered: ${l}`);
   assert.match(token(unguarded.out), /LADDER-ONLY/);
+  assert.match(token(unguarded.out), / b-clean=0\/6 b-unavailable=6\/6 /,
+    'and the token carries the condition in LETTERS — the count is machine-readable, not buried in prose');
 });
 
 test('wave 27: the root guard reads a LINKED WORKTREE, where `.git` is a FILE, not a directory', () => {
@@ -1368,4 +1390,301 @@ test('wave 27: the verdict token names the roster it counted and the tree it rea
   // A --ladder-only reading names its tree as well — it always did name `repo=`, and
   // now names the sha too, so two readings from two checkouts are distinguishable.
   assert.match(token(ladderOnlyRun().out), /mode=live repo=\S+ head=[0-9a-f]{7,}/);
+});
+
+// ═══ WAVE 29 — "I COULD NOT LOOK" IS NOT "THE THING IS BROKEN" ══════════════
+//
+// Wave 27 fixed that conflation at the ROOT — a `git archive` extraction is refused
+// before any clause runs — and left it standing at the OBJECT. A pristine
+// `git clone --depth 1 --branch main` of this repository is a REAL checkout of a REAL
+// repository: `.github/workflows/cloud.yml` is there, `rev-parse --show-toplevel`
+// answers, and `origin/main` RESOLVES. Only the HISTORY is absent. origin/main scored
+// 65/65 in exactly that clone while printing six verbatim `is not an ancestor of
+// origin/main` sentences, because not one of the five `ladderOnlyRun` assertions above
+// read `b-clean` or counted a single line: A SELECTOR THAT CANNOT REACH THE DEFECT IS
+// GREEN BY CONSTRUCTION EVEN WITH A CRUEL FIXTURE.
+//
+// Every case below drives REAL GIT — `git init` in a temp dir, never a stub — because
+// the four probes ARE git's exit codes and a stub would pin this file's idea of them.
+// Nothing here reaches the network and nothing writes inside the repo.
+
+// A synthetic tree that is BOTH a readable repo root (the wave-27 leg) and a real git
+// work tree, so the clause-(b) history probes are the only thing under test.
+//   originMain:false  — the `pull_request` shape: only refs/remotes/pull/N/merge was ever
+//                       fetched, so `rev-parse --verify --quiet origin/main` answers rc 1,
+//                       the SAME code as an honest "no".
+// Returns { root, base, side } — `base` IS an ancestor of origin/main, `side` is present
+// and genuinely is NOT.
+function synthGitRepo({ originMain = true } = {}) {
+  const root = synthRepo({});
+  const g = (...args) => {
+    const r = spawnSync('git', ['-C', root, ...args], { encoding: 'utf8' });
+    assert.equal(r.status, 0, `git ${args[0]} failed in the synthetic repo: ${r.stderr}`);
+    return (r.stdout || '').trim();
+  };
+  g('init', '-q');
+  g('symbolic-ref', 'HEAD', 'refs/heads/main');
+  g('config', 'user.email', 'seal-predicate@test.invalid');
+  g('config', 'user.name', 'seal predicate test');
+  g('config', 'commit.gpgsign', 'false');
+  // The two rung-1 guards, stood in for the same way `synthRepo` stands in for the
+  // measured_by paths — and DERIVED from the register rather than quoted, so a renamed
+  // guard or a reworded guardExpect cannot leave this rig silently asserting the wrong
+  // thing. Without them both rung-1 entries carry a real `guard … is NOT COMMITTED`
+  // PROBLEM, b reads FAIL, and a test about UNREADABLE HISTORY would be measuring an
+  // absent file instead.
+  const src = readFileSync(PREDICATE, 'utf8');
+  for (const m of src.matchAll(/guard: '([^']+)',\n\s*guardExpect: '([^']+)'/g)) {
+    mkdirSync(join(root, dirname(m[1])), { recursive: true });
+    writeFileSync(join(root, m[1]), `console.log(${JSON.stringify(m[2])});\n`);
+  }
+  g('add', '-A');
+  g('commit', '-qm', 'base');
+  const base = g('rev-parse', 'HEAD');
+  if (originMain) g('update-ref', 'refs/remotes/origin/main', base);
+  // A commit that EXISTS in this store and is NOT reachable from origin/main. It is made
+  // on a detached head so `main` (and therefore origin/main) never moves onto it.
+  g('checkout', '-q', '--detach', base);
+  writeFileSync(join(root, 'side.txt'), 'off main\n');
+  g('add', '-A');
+  g('commit', '-qm', 'side');
+  const side = g('rev-parse', 'HEAD');
+  g('checkout', '-q', 'main');
+  return { root, base, side };
+}
+
+const REGISTERED_SHAS = ['481d6f231', '8fd00b6afb1eca55d3c991f7921ed6ec2b7d77b4',
+  'd157d098c78bc6604d00d84e22d038bdb176ef58', '26acc7a91be0f0352efdb3e89b2017accb786367',
+  '58862f621'];
+// Retarget register entries onto shas that exist in a SYNTHETIC repo. Every anchor is
+// asserted present first, because a rewrite that silently matched nothing is exactly how
+// a mutation control passes vacuously.
+const retarget = (src, map) => {
+  let out = src;
+  for (const [from, to] of map) {
+    assert.ok(out.includes(`commit: '${from}'`), `register anchor has drifted: ${from}`);
+    out = out.split(`commit: '${from}'`).join(`commit: '${to}'`);
+  }
+  return out;
+};
+const unavailableLines = (out) =>
+  out.split('\n').filter((l) => /^ {8}HISTORY-UNAVAILABLE: commit \S+ — /.test(l));
+const ancestryLines = (out) =>
+  out.split('\n').filter((l) => / is not an ancestor of origin\/main$/.test(l));
+
+test('wave 29 SELECTOR: a ladder-only reading is CHECKED for unreadable history, not just for rungs', () => {
+  // THE CLAUSE-5 DEFENCE, and it is why origin/main scored 65/65 in a depth-1 clone.
+  // This assertion reaches `b-unavailable` AND counts the sentences behind it, so the
+  // token and the prose cannot disagree. It is written to hold in EITHER shape — 0/6 in
+  // a checkout with whole history, 6/6 in a depth-1 CI clone — because pinning a value
+  // would red the whole suite in exactly the environment `console-unit` runs in.
+  const { status, out } = ladderOnlyRun();
+  assert.equal(status, SEAL, `the READ path exits 0 in every environment (charter D335): ${token(out)}`);
+  const m = token(out).match(/ b-clean=(\d+)\/(\d+) b-unavailable=(\d+)\/(\d+) a=NOT-READ/);
+  assert.ok(m, `the token must carry b-unavailable immediately after b-clean: ${token(out)}`);
+  const [, clean, total, unread, total2] = m.map(Number);
+  assert.equal(total2, total, 'both b-fields count the same register');
+  assert.equal(total, 6, 'over the six registered defects');
+  assert.equal(unavailableLines(out).length, unread,
+    'the counted per-entry sentences must EQUAL the number in the token — prose and letters cannot disagree');
+  assert.ok(clean + unread <= total, 'an entry read as unavailable is never also counted clean');
+  // …and an unreadable entry is never rendered as an ancestry claim about the product.
+  if (unread > 0) assert.equal(ancestryLines(out).length, 0);
+});
+
+test('wave 29 PROBE 2 (MISSING-OBJECT): a real git repo without the history says so, and exits 0 on the READ path', () => {
+  // The `actions/checkout@v4` PUSH shape, reproduced with real git: origin/main RESOLVES
+  // (wave 27's corollary was half wrong about this — only the OBJECTS are missing) and
+  // every registered sha is absent from the store.
+  const { root } = synthGitRepo({});
+  const { status, out } = run(['--ladder-only', '--repo', root]);
+  assert.equal(status, SEAL, `exit-1-on-read is REFUSED (charter D335): ${token(out)}`);
+  assert.equal(ancestryLines(out).length, 0,
+    'not one ancestry claim may be derived from a store that does not hold the commit');
+  assert.equal(unavailableLines(out).length, 6);
+  for (const l of unavailableLines(out))
+    assert.match(l, /MISSING-OBJECT\b.*\[ref: origin\/main resolves to [0-9a-f]{7,} \| object: ABSENT \(cat-file -e rc \d+\)/,
+      `the sentence names the ref as RESOLVING and the object as absent — the two are different probes: ${l}`);
+  assert.match(token(out), / b-clean=0\/6 b-unavailable=6\/6 /);
+  // Asserted on the TOKEN, never on vocabulary: the reading's own prose explains that its
+  // only non-zero exit is an INFRA FAULT, and banning the words would force that
+  // explanation out of the one place that has to carry it.
+  assert.doesNotMatch(token(out), /INFRA-FAULT/, 'a per-defect condition is never a process-level fault');
+});
+
+test('wave 29 PROBE 1 (MISSING-REF): the pull_request shape has no origin/main, and rc 1 there is not an answer', () => {
+  // `rev-parse --verify --quiet origin/main` answers rc 1 — the SAME code an honest "no"
+  // uses everywhere else in git. Keying on the code alone is how this leg stayed broken.
+  const { root } = synthGitRepo({ originMain: false });
+  const { status, out } = run(['--ladder-only', '--repo', root]);
+  assert.equal(status, SEAL);
+  assert.equal(ancestryLines(out).length, 0);
+  assert.equal(unavailableLines(out).length, 6);
+  for (const l of unavailableLines(out))
+    assert.match(l, /MISSING-REF\b.*\[ref: origin\/main DOES NOT RESOLVE \(rev-parse --verify rc \d+\)/, l);
+  assert.match(token(out), / b-unavailable=6\/6 /);
+});
+
+test('wave 29 ANTI-VACUITY: a sha that is PRESENT and genuinely NOT an ancestor still gets ONE honest sentence', () => {
+  // THE FIX MUST NOT SWALLOW THE TRUE ANSWER. Five entries are retargeted onto a commit
+  // that IS an ancestor of origin/main and one onto a commit that is present and is NOT.
+  // All four probes are clean for that one, so its rc 1 is a claim about the PRODUCT —
+  // and it must still be made, exactly once, with zero HISTORY-UNAVAILABLE lines anywhere.
+  const { root, base, side } = synthGitRepo({});
+  const map = REGISTERED_SHAS.map((s) => [s, s === '58862f621' ? side : base]);
+  const { status, out } = mutatedRun((src) => retarget(src, map), ['--ladder-only', '--repo', root]);
+  assert.equal(status, SEAL, `the READ path still exits 0: ${token(out)}`);
+  assert.equal(unavailableLines(out).length, 0,
+    'a store that HOLDS the commit and CAN walk to origin/main has nothing unavailable about it');
+  assert.equal(ancestryLines(out).length, 1,
+    'exactly one honest product sentence, for the one entry whose commit really is off main');
+  assert.match(out, new RegExp(`commit ${side} is not an ancestor of origin/main`));
+  assert.match(token(out), / b-unavailable=0\/6 /);
+});
+
+test('wave 29 THE VERDICT PATH: HISTORY-UNAVAILABLE is a LETTER at exit 1, never an exit-2 INFRA-FAULT', () => {
+  // CHARTER D335, and cch-w28-s1's clause-(a) tripwire is armed on it: an INFRA-FAULT
+  // prints `a=UNKNOWN b=UNKNOWN c=UNKNOWN` at rc 2 and throws away two clause readings
+  // that were perfectly available. The degrade is PER-DEFECT: b carries its own letter,
+  // (a) and (c) are still evaluated and still printed, and the exit code is 1.
+  const { root } = synthGitRepo({});
+  const must = (s, from, to) => { assert.ok(s.includes(from), `anchor drifted: ${from}`); return s.replace(from, to); };
+  const mut = (src) => must(
+    must(src, 'const children = fixture ? fixture.children : fetchRoster(EPIC);',
+      'const children = fixture ? fixture.children : [{ _id: "x", lifecycle_status: "done" }];'),
+    'const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
+    'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });');
+  const { status, out } = mutatedRun(mut, ['--repo', root, '--successor', 'TERMINAL']);
+  assert.equal(status, NO_SEAL, `a per-defect unreadable history costs exit 1, not exit 2: ${token(out)}`);
+  assert.match(token(out), /SEAL-PREDICATE NO-SEAL a=PASS b=HISTORY-UNAVAILABLE c=PASS /,
+    'b carries its OWN letter while (a) and (c) carry REAL letters — the degrade is per-defect');
+  assert.doesNotMatch(token(out), /INFRA-FAULT/);
+  assert.doesNotMatch(token(out), /a=UNKNOWN/, 'exactly the shape cch-w28-s1 is armed to red');
+  assert.match(token(out), / b-unavailable=6\/6$/,
+    'the count is appended AFTER head=, so the clause letters keep their existing run');
+  assert.match(out, /could NOT BE READ from this checkout \(clause b, HISTORY-UNAVAILABLE\)/);
+  assert.match(out, /THIS IS NOT A DEFECT CLAIM/);
+  assert.match(out, /git fetch --unshallow/, 'and the reader is told how to get an answer');
+  assert.match(out, /^BUCKET \(c\) permanent human gates$/m, 'bucket (c) was still evaluated and printed');
+});
+
+test('wave 29: a checkout with WHOLE history is BYTE-IDENTICAL to the undiscriminated run', () => {
+  // The discrimination must cost NOTHING where there is nothing to discriminate. Both
+  // arms run the same live verdict path over the same tree; the only difference is the
+  // ancestry leg. `b-unavailable=` is appended ONLY when non-zero for exactly this
+  // reason — a new field on every green would make every previously-quoted token
+  // unmatchable for a condition that did not occur.
+  const roster = (src) => src.replace('const children = fixture ? fixture.children : fetchRoster(EPIC);',
+    'const children = fixture ? fixture.children : [{ _id: "x", lifecycle_status: "done" }];');
+  const stubGate = (src) => src.replace('const fetchById = (id) => q([[\'filter[_id]\', id]]).result.documents[0] || null;',
+    'const fetchById = (id) => ({ _id: id, lifecycle_status: \'open\', parent_id: \'stub\' });');
+  const now = mutatedRun((s) => stubGate(roster(s)), ['--repo', REPO, '--successor', 'TERMINAL']);
+  // The undiscriminated ancestry leg, restored verbatim on top of everything else.
+  const before = mutatedRun((s) => {
+    const patched = stubGate(roster(s));
+    const restored = patched.replace(
+      /  const probe = historyProbe\(commit\);\n[\s\S]*?if \(probe\.verdict === 'not-ancestor'\)[^\n]*\n/,
+      "  try { execFileSync('git', ['-C', REPO, 'merge-base', '--is-ancestor', commit, 'origin/main'], { stdio: 'ignore' }); }\n"
+      + "  catch { problems.push(`commit ${commit} is not an ancestor of origin/main`); return null; }\n");
+    assert.notEqual(restored, patched, 'the un-discrimination must actually apply');
+    return restored;
+  }, ['--repo', REPO, '--successor', 'TERMINAL']);
+  // In a checkout WITHOUT whole history the two arms are honest in different ways and the
+  // comparison is meaningless — skip rather than pin CI to a shape it does not have.
+  if (/b-unavailable=/.test(token(now.out))) return;
+  assert.equal(now.status, before.status, 'same exit code');
+  assert.equal(token(now.out), token(before.out),
+    'over a whole history the discrimination changes not one byte of the verdict token');
+  assert.match(token(now.out), /\bb=PASS\b/);
+});
+
+// ── THE THREE CLAUSE-(a)/(c) DEFECTS IN THE SAME FILE, WITHIN ~15 LINES ─────
+// Same disease as the ancestry leg: a population this program could not read, reported as
+// one it read and found clean.
+
+// A canned ledger page, so these stay hermetic. `q` is the single HTTP site, so standing
+// a page in for it drives fetchRoster and fetchById at once.
+// The real `q` body is left intact behind a dead name rather than deleted: a mutation
+// that has to delete a whole function body is a mutation that drifts the day the body
+// changes shape.
+const cannedPage = (n) => 'function q(params) { return { result: { documents: Array.from({ length: '
+  + n + ' }, (_, i) => ({ _id: "row-" + i, lifecycle_status: "done", parent_id: "cloud-console-hardening-epic" })) } }; }\n'
+  + 'function _unused_real_q(params) {';
+
+test('wave 29 TRUNCATION FALSE SEAL: a FULL page of roster is REFUSED, not counted', () => {
+  // DRIVEN, EXIT 0, one number. `result.count` is the PAGE SIZE; the response carries no
+  // total and no hasMore, so a page that is FULL cannot be told from one that is COMPLETE.
+  // Measured on origin/main: lower the limit and the predicate prints `VERDICT: SEAL
+  // orphans=0` at rc 0 over a roster of 288 carrying 57 orphans.
+  const must = (s, from, to) => { assert.ok(s.includes(from), `anchor drifted: ${from}`); return s.replace(from, to); };
+  const shrink = (s) => must(must(s, 'function q(params) {', cannedPage(3)),
+    'const ROSTER_PAGE_LIMIT = 500;', 'const ROSTER_PAGE_LIMIT = 3;');
+
+  const refused = mutatedRun(shrink, ['--repo', REPO, '--successor', 'TERMINAL']);
+  assert.equal(refused.status, INFRA, 'a roster this program could not read whole is an infra fault, never a verdict');
+  assert.match(token(refused.out), /INFRA-FAULT a=UNKNOWN b=UNKNOWN c=UNKNOWN epic=\S+ code=ROSTER-TRUNCATED/);
+  assert.match(refused.out, /came back FULL — 3 rows against a page limit of 3/);
+  assert.doesNotMatch(refused.out, /VERDICT: SEAL/);
+
+  // THE CONTROL — the identical run with ONLY the fullness check removed COUNTS the
+  // truncated page as the population and reports clause (a) clean over it.
+  //
+  // READ ON THE CLAUSE-(a) LETTERS, NEVER ON THE EXIT CODE. The exit code is the
+  // CONJUNCTION of (a), (b) and (c), and clause (b) reads git per registered defect — so
+  // in a depth-1 checkout this arm exits 1 with `b=HISTORY-UNAVAILABLE` for an
+  // ENVIRONMENT fact and a control bound to `status === SEAL` reds there while passing on
+  // a full clone. That is the same hostage-taking the wave-27 empty-roster control above
+  // documents in its own comment, and `console-unit` runs at depth-1 on every push to
+  // main. The floor this test pins is clause (a)'s, so clause (a)'s letters are what it
+  // reads. (`VERDICT: SEAL` is pushed INSIDE `if (ok)` and is therefore structurally
+  // unreachable wherever clause (b) is not clean — it cannot be asserted here either.)
+  const counted = mutatedRun((s) => must(shrink(s), 'if (docs.length >= ROSTER_PAGE_LIMIT)', 'if (false)'),
+    ['--repo', REPO, '--successor', 'TERMINAL']);
+  assert.notEqual(counted.status, INFRA, 'pre-fix the truncated page was never refused — it was counted');
+  assert.match(token(counted.out), /\ba=PASS\b/,
+    `pre-fix, clause (a) read clean over a roster it had silently truncated: ${token(counted.out)}`);
+  assert.match(token(counted.out), /\borphans=0\b/, 'orphans=0 over a page, reported as if over a population');
+  assert.match(token(counted.out), /\broster=3\b/, 'and it printed the PAGE SIZE as if it were the population');
+  assert.doesNotMatch(token(counted.out), /code=ROSTER-TRUNCATED/,
+    'the fullness mutation must actually remove the refusal — otherwise this control passes vacuously');
+  assert.doesNotMatch(counted.out, /came back FULL/);
+});
+
+test('wave 29: bucket (c) REFUSES an empty gate table instead of certifying c=PASS over zero gates', () => {
+  const empty = (s) => {
+    const out = s.replace(/^const PERMANENT_HUMAN_GATES = \{[\s\S]*?^\};$/m, 'const PERMANENT_HUMAN_GATES = {};');
+    assert.notEqual(out, s, 'the gate-table mutation must actually apply');
+    return out;
+  };
+  const emptied = mutatedRun(empty, ['--repo', REPO, '--successor', 'TERMINAL']);
+  assert.equal(emptied.status, NO_SEAL);
+  assert.match(token(emptied.out), /REFUSED reason=EMPTY-GATE-TABLE a=UNEVALUATED b=UNEVALUATED c=UNEVALUATED/);
+  assert.match(emptied.out, /would print no row at all and still certify c=PASS over zero gates/);
+  assert.doesNotMatch(token(emptied.out), /\bc=PASS\b/, 'the letter this refusal exists to prevent may not be printed');
+
+  // A reading claims nothing about bucket (c) — it prints c=NOT-READ in its own letters —
+  // so the floor sits AFTER the --ladder-only divert and must not refuse a reading.
+  const reading = mutatedRun(empty, ['--ladder-only', '--repo', REPO]);
+  assert.equal(reading.status, SEAL);
+  assert.match(token(reading.out), /LADDER-ONLY .* c=NOT-READ/);
+});
+
+test('wave 29: a curl failure NAMES the HTTP status and the request_id it had already parsed', () => {
+  // `curl -sG` carries no --fail, so an error body parsed FINE and `.result.documents`
+  // then threw a bare `TypeError: Cannot read properties of undefined (reading
+  // 'documents')` at code=UNSPECIFIED. It failed closed — and told the reader nothing.
+  const shimDir = tmp('seal-pred-curl-');
+  writeFileSync(join(shimDir, 'curl'),
+    '#!/bin/sh\nprintf \'{"error":{"code":"unauthorized","message":"token expired"},"request_id":"req_abc123"}\\n403\\n\'\n');
+  spawnSync('chmod', ['+x', join(shimDir, 'curl')]);
+  const r = spawnSync('node', [PREDICATE, '--repo', REPO, '--successor', 'TERMINAL'],
+    { encoding: 'utf8', timeout: 120000, env: { ...process.env, PATH: `${shimDir}:${process.env.PATH}` } });
+  const out = `${r.stdout}${r.stderr}`;
+  assert.equal(r.status, INFRA, 'an unreadable ledger is an infra fault, never a verdict');
+  assert.match(out, /the ledger answered HTTP 403/);
+  assert.match(out, /error\.code=unauthorized/);
+  assert.match(out, /request_id=req_abc123/);
+  assert.match(token(out), /code=LEDGER-UNREADABLE/);
+  assert.doesNotMatch(out, /unexpected TypeError/,
+    'the pre-fix shape: a bare TypeError naming neither the status nor the request_id');
 });
