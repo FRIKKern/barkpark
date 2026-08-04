@@ -117,6 +117,7 @@ cloud/test/barkpark_cloud/web/**
 .github/workflows/console-harness.yml
 deploy/lib/site-deploy-common.sh
 deploy/site-deploy-node.sh
+cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex
 scripts/console-path-escape-check.sh
 scripts/console-path-escape-check.test.sh'
 
