@@ -93,7 +93,18 @@
   }
 
   // ----------------------------------------------------------- API helper
-  // Returns { ok, status, data }. On 401 (when authed) we clear + bounce.
+  // Returns { ok, status, data, text, transport }. On 401 (when authed) we
+  // clear + bounce.
+  //
+  // cch-w31-s4 — the envelope is ADDITIVE, by construction. `ok`, `status` and
+  // `data` keep their EXACT prior values (a non-JSON body still arrives as an
+  // empty `data` object; a transport failure is still status 0 with
+  // data.error === "network_error"), so every one of the 137 consumers — the
+  // status === 0 branches, the network_error string branches, and all the bare
+  // `.data` reads — is untouched. What is new is only what used to be THROWN
+  // AWAY: `text` carries the bytes of a non-JSON body (an upstream proxy's HTML
+  // 502 page used to vanish into `{}` and nobody was told a body existed), and
+  // `transport` names WHY a request never got an answer.
   function api(method, path, body, opts) {
     opts = opts || {};
     var headers = { "Accept": "application/json" };
@@ -111,19 +122,57 @@
       body: body == null ? undefined : JSON.stringify(body)
     }).then(function (res) {
       var ct = res.headers.get("content-type") || "";
-      var parse = ct.indexOf("application/json") !== -1
-        ? res.json().catch(function () { return {}; })
-        : Promise.resolve({});
-      return parse.then(function (data) {
+      var parse;
+      if (ct.indexOf("application/json") !== -1) {
+        parse = res.json().then(function (d) { return { data: d, text: null }; },
+                                function () { return { data: {}, text: null }; });
+      } else if (typeof res.text === "function") {
+        // NON-JSON body. `data` STAYS {} — that is the value every consumer
+        // already reads — but the bytes ride alongside as `text` instead of
+        // being dropped on the floor.
+        parse = res.text().then(function (t) { return { data: {}, text: t }; },
+                                function () { return { data: {}, text: null }; });
+      } else {
+        parse = Promise.resolve({ data: {}, text: null });
+      }
+      return parse.then(function (body) {
         if (res.status === 401 && !opts.noAuth && !opts.noBounce) {
           clearSession();
           render();
         }
-        return { ok: res.ok, status: res.status, data: data };
+        return { ok: res.ok, status: res.status, data: body.data, text: body.text, transport: null };
       });
-    }).catch(function () {
-      return { ok: false, status: 0, data: { error: "network_error" } };
+    }).catch(function (err) {
+      return { ok: false, status: 0, data: { error: "network_error" }, text: null, transport: transportClass(err) };
     });
+  }
+
+  // cch-w31-s4 — THE HONEST CEILING IS THREE CLASSES, and refusing a fourth is
+  // part of the fix. A browser collapses DNS failure, connection refused, a TLS
+  // error and a dead network into ONE indistinguishable TypeError: `fetch`
+  // rejects with no status, no code and no trustworthy cause, so a console that
+  // told the person "DNS is down" (rather than "your network is down") would be
+  // inventing a fact it cannot have — the exact sin this slice exists to stop.
+  // We name only what we can actually prove:
+  //   aborted     — WE cancelled it (err.name === "AbortError")
+  //   offline     — the browser itself says so (navigator.onLine === false)
+  //   unreachable — everything else, deliberately UNSPLIT
+  // (app.js ships zero AbortController today, so `aborted` is a shape the
+  // vocabulary reserves rather than one it currently produces.)
+  function transportClass(err) {
+    if (err && err.name === "AbortError") return "aborted";
+    if (typeof navigator !== "undefined" && navigator && navigator.onLine === false) return "offline";
+    return "unreachable";
+  }
+
+  var TRANSPORT_COPY = {
+    aborted: "That request was cancelled before it finished — try it again.",
+    offline: "You're offline — reconnect, then retry."
+  };
+  // Total over junk and over the unsplit class: anything we cannot name falls
+  // back to the one sentence that is always true when status is 0.
+  function transportCopy(transport) {
+    return TRANSPORT_COPY[transport] || ERRORS.network_error;
   }
 
   // ----------------------------------------------------------- error copy
@@ -199,8 +248,30 @@
   // already a top-level declaration further down, the builder failure_reason
   // mapper; two `function` declarations in this one IIFE scope would silently
   // clobber each other.)
-  function faultCopy(status, data, fallback) {
+  // cch-w31-s4 — plus a status === 0 arm. api() uses status 0 for "the request
+  // never got an answer at all", and a caller's fallback is copy about the
+  // INPUT, so it is exactly as much of a lie there as it is on a 5xx: nothing
+  // was judged. The optional `transport` narrows the sentence to the three
+  // classes transportClass() can honestly prove; omit it and the always-true
+  // network sentence is used.
+  //
+  // REVIEW FIX (wave 31): a NAMED transport class must win over the generic
+  // slug, and it did not. api() ALWAYS sets data.error = "network_error" on a
+  // transport failure, and friendly() resolves that key out of ERRORS before it
+  // ever looks at its fallback — so `friendly(data, transportCopy(transport))`
+  // returned "Network error — is the control plane running?" for every class,
+  // and "You're offline" / "That request was cancelled" were unreachable on the
+  // one code path that can supply them. (The tests passed only because they fed
+  // `{}`, a shape api() never produces.) A class we can PROVE is more specific
+  // than a slug that only says "no answer arrived", so it is consulted first;
+  // the unsplit `unreachable` class has no specific copy and still falls
+  // through to friendly(), which keeps the slug's sentence.
+  function faultCopy(status, data, fallback, transport) {
     if (status >= 500) return friendly(data, ERRORS.server_error);
+    if (status === 0) {
+      if (TRANSPORT_COPY[transport]) return TRANSPORT_COPY[transport];
+      return friendly(data, transportCopy(transport));
+    }
     return friendly(data, fallback);
   }
 
@@ -5018,6 +5089,18 @@
   // Last fetched fleet, reused by the instance drill-down (avoids a second
   // round-trip on row click). Cleared after a launch so it refetches.
   var fleetCache = null;
+  // cch-w31-s4 — the fault the failed fetch carried, retained beside the cache
+  // in the same module-scope idiom (and cleared the moment a fetch succeeds).
+  // ensureFleet() resolves to a list-or-null, so the STATUS died one frame above
+  // every render site and the only sentence a caller could write was "Check your
+  // connection and retry." — a lie about a 500. Shape: {status, data, transport},
+  // i.e. exactly what faultCopy() needs. Widening the resolved value instead
+  // would have rewritten six call sites (4742/5725/9898/10074/11952/18327) for a
+  // fault only one of them reads. Staleness is not reachable: the only reader
+  // runs inside ensureFleet()'s own .then on the !list branch, and that branch
+  // is only taken on the network path, which writes fleetFault every time (null
+  // on success). A cache hit resolves truthy and never reads it.
+  var fleetFault = null;
   function ensureFleet() {
     if (fleetCache) return Promise.resolve(fleetCache);
     return api("GET", "/v1/barkparks").then(function (r) {
@@ -5030,8 +5113,11 @@
       // would make every consumer treat live instances as "not found" forever.
       if (r.ok && r.data && r.data.barkparks) {
         fleetCache = r.data.barkparks;
+        fleetFault = null;
         return fleetCache;
       }
+      // Retain WHY before the list-or-null collapse throws it away.
+      fleetFault = { status: r.status, data: r.data, transport: r.transport };
       return null;
     });
   }
@@ -5726,9 +5812,14 @@
       if (seq !== instanceLoadSeq) return; // a newer load owns the view
       if (!list) {
         // Fleet fetch failed — distinct from "the id isn't in a real list".
+        // cch-w31-s4: WHICH failure decides the sentence. ensureFleet() retains
+        // the fault, so a control-plane 500 no longer reads as the person's
+        // connection; the connection sentence stays the honest fallback for a
+        // fault we genuinely cannot name.
         setBreadcrumb(null);
+        var fleetErr = fleetFault || {};
         box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load this instance</h2>' +
-          '<p>Check your connection and retry.</p>' +
+          "<p>" + esc(faultCopy(fleetErr.status, fleetErr.data, "Check your connection and retry.", fleetErr.transport)) + "</p>" +
           '<p><button class="btn btn-primary btn-sm" id="inst-load-retry" type="button">Retry</button></p></div>';
         var retry = $("#inst-load-retry");
         if (retry) retry.addEventListener("click", function () { loadInstance(id, tab); });
@@ -8293,7 +8384,18 @@
   // delete/replay). The proxy relays instance validation as
   // upstream_error{status, detail:<instance envelope>}; dig the first field
   // error out of that so the form/toast is specific, not generic.
-  function webhookMutationError(data) {
+  //
+  // cch-w31-s4 — `status` is the RESPONSE status (r.status at every call site,
+  // which used to have it in scope and throw it away). It is optional and only
+  // ever reaches the TERMINAL sentence: every specific branch below still wins,
+  // so a proxied 502 that carries a real instance validation error still reads
+  // as that field error. What it fixes is the fall-through. Every branch except
+  // the network_error one keys on err.code / err.detail, which are `undefined`
+  // on the FLAT string envelope a control-plane crash sends — so a router 500
+  // {error:"server_error"}, a 500 with a request_id, an empty HTML-502 body and
+  // a bad_gateway ALL fell through to "Please check the details and try again."
+  // about input that was never judged.
+  function webhookMutationError(data, status) {
     data = data || {};
     var err = data.error || {};
     // api()'s fetch-catch shape is { error: "network_error" } (a STRING, the
@@ -8318,7 +8420,15 @@
       }
       if (e2.message) return String(e2.message);
     }
-    return "Please check the details and try again.";
+    // Nothing above matched, so this envelope said nothing about the INPUT.
+    // Route the terminal sentence through the same 5xx/transport switch every
+    // other crash path uses: only a real 4xx answer keeps the check-the-details
+    // copy. `err` may be a flat slug string, which friendly() reads off `error`.
+    // (One line on purpose: the census guard in __app.test.mjs reads the LINE a
+    // blaming fallback sits on and demands faultCopy( on it, so wrapping this
+    // call would hide the fix from the guard that is supposed to catch it.)
+    var flat = typeof err === "string" ? { error: err } : data;
+    return faultCopy(status, flat, "Please check the details and try again.");
   }
 
   // The proxy path for a webhook capability under a dataset. `suffix` is "" for
@@ -8461,7 +8571,7 @@
     api("POST", whPath(bp, "/" + encodeURIComponent(wh.id) + "/test-send", ds), {}).then(function (r) {
       restore();
       if (!r.ok) {
-        toast({ kind: "error", title: "Couldn't send the test", body: webhookMutationError(r.data) });
+        toast({ kind: "error", title: "Couldn't send the test", body: webhookMutationError(r.data, r.status) });
         return;
       }
       var delivery = r.data && r.data.data && r.data.data.delivery;
@@ -8518,7 +8628,7 @@
       // Title stays failure-agnostic: the body (webhookMutationError) says
       // WHY — unreachable, needs-update, validation — the title must not
       // claim "unreachable" for a validation reply.
-      toast({ kind: "error", title: target ? "Couldn't enable the webhook" : "Couldn't disable the webhook", body: webhookMutationError(r.data) });
+      toast({ kind: "error", title: target ? "Couldn't enable the webhook" : "Couldn't disable the webhook", body: webhookMutationError(r.data, r.status) });
     });
   }
 
@@ -8537,7 +8647,7 @@
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = "Rotate secret"; }
-      toast({ kind: "error", title: "Couldn't rotate the secret", body: webhookMutationError(r.data) });
+      toast({ kind: "error", title: "Couldn't rotate the secret", body: webhookMutationError(r.data, r.status) });
     });
   }
 
@@ -8668,7 +8778,7 @@
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = "Save changes"; }
-      if (errEl) { errEl.hidden = false; errEl.textContent = webhookMutationError(r.data); }
+      if (errEl) { errEl.hidden = false; errEl.textContent = webhookMutationError(r.data, r.status); }
     });
   }
 
@@ -8694,7 +8804,7 @@
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = "Create webhook"; }
-      if (errEl) { errEl.hidden = false; errEl.textContent = webhookMutationError(r.data); }
+      if (errEl) { errEl.hidden = false; errEl.textContent = webhookMutationError(r.data, r.status); }
     });
   }
 
@@ -8737,7 +8847,7 @@
       }
       if (btn) { btn.disabled = false; btn.textContent = "Delete webhook"; }
       var errEl = $("#wh-del-error");
-      if (errEl) { errEl.hidden = false; errEl.textContent = webhookMutationError(r.data); }
+      if (errEl) { errEl.hidden = false; errEl.textContent = webhookMutationError(r.data, r.status); }
     });
   }
 
@@ -8799,7 +8909,7 @@
         return;
       }
       if (btn) { btn.disabled = false; btn.textContent = "Replay"; }
-      toast({ kind: "error", title: "Couldn't replay", body: webhookMutationError(r.data) });
+      toast({ kind: "error", title: "Couldn't replay", body: webhookMutationError(r.data, r.status) });
     });
   }
 
@@ -12581,15 +12691,20 @@
     // (via the launch gate) block them. `subLoaded` true means we still have the
     // server's last real answer, so we fall through and render it below.
     if (subError && !subLoaded) {
+      // cch-w31-s4: the retained fault decides the sentence — a control-plane
+      // 500 here is not the person's connection, and telling them it is sends
+      // them to reboot a router over our crash.
+      var subErr = subErrorFault || {};
       box.innerHTML =
         '<div class="empty-state"><h2>Couldn\'t load your plan</h2>' +
-          "<p>Check your connection and retry.</p>" +
+          "<p>" + esc(faultCopy(subErr.status, subErr.data, "Check your connection and retry.", subErr.transport)) + "</p>" +
           '<p><button class="btn btn-primary btn-sm" id="sub-retry" type="button">Retry</button></p></div>';
       showBillingSection("#billing-manage-section", false);
       showBillingSection("#billing-cancel-section", false);
       var rb = $("#sub-retry");
       if (rb) rb.addEventListener("click", function () {
         subError = false;
+        subErrorFault = null; // cleared in lockstep — a stale fault must never outlive its flag
         renderBilling();
       });
       return;
@@ -13127,18 +13242,26 @@
   // to the free-plan upsell / launch gate on a blip. Mirrors ensureFleet, which
   // only caches on success.
   var subError = false;
+  // cch-w31-s4 — the bare boolean above says THAT it failed and nothing else,
+  // so the retry card could only say "Check your connection and retry." even
+  // when the control plane had just crashed. This retains the fault beside it
+  // ({status, data, transport} — exactly faultCopy()'s arguments) and is cleared
+  // in lockstep with subError everywhere it is reset.
+  var subErrorFault = null;
 
   function loadSubscription() {
     return api("GET", "/v1/subscription").then(function (r) {
       if (r.ok) {
         subLoaded = true;
         subError = false;
+        subErrorFault = null;
         subCache = (r.data && r.data.subscription) || null;
       } else {
         // Keep the prior cache untouched; surface a retry instead of a
         // free-looking null. `subLoaded` stays as-is (false on a cold first
         // load → the UI shows a retry, not the upsell).
         subError = true;
+        subErrorFault = { status: r.status, data: r.data, transport: r.transport };
       }
       paintWorkspacePlan(); // the sidebar plan chip follows the real answer
       renderBillingChip();  // GR20: the topbar trial/past-due chip follows too
@@ -17923,6 +18046,7 @@
       subCache = null;
       subLoaded = false;
       subError = false;
+      subErrorFault = null;
       // cch-w1-refetch-storm: the Overview's own snapshot is per-account. Left
       // standing, a scoped tick racing the next sign-in could repaint the new
       // account's Overview from the previous one's fleet/usage/fold. Cleared
@@ -19127,7 +19251,13 @@
   // {error:{code|message}} — friendly() reads it; the transport-level 0/401/403
   // get their own steer).
   function offloadFileErrorCopy(status, data) {
-    if (status === 0) return "Couldn't reach the Barkpark — check its address and try again.";
+    // REVIEW FIX (wave 31): status 0 means NO ANSWER ARRIVED — the browser
+    // cannot tell a wrong address from a dead box from a dead network (the
+    // three collapse into one TypeError; see transportClass). "check its
+    // address" named ONE of the three as the cause and told the person to go
+    // fix it, which is the same lie this slice removed from the control-plane
+    // paths. State the fact, name the possibilities, order nobody around.
+    if (status === 0) return "Couldn't reach the Barkpark — it may be offline, or its address may be wrong.";
     if (status === 401 || status === 403) return "The app token was rejected — reload and try again.";
     return friendly(data, "Couldn't file the order — please try again.");
   }
@@ -19706,6 +19836,11 @@
       // router's real crash envelope so the RENDERED sentence is pinned, not
       // just the wire bytes.
       faultCopy: faultCopy,
+      // cch-w31-s4: the transport vocabulary api() now attaches, and the copy
+      // it maps to. Exported so the THREE-class ceiling is pinned in node — a
+      // fourth class (a DNS-vs-network promise the browser cannot support) reds
+      // the census test rather than shipping as a confident lie.
+      transportClass: transportClass, transportCopy: transportCopy,
       // gr-p5-account-2fa (GR54): the account modal body, extracted PURE so its
       // eight lockout-bearing element ids are node-pinned.
       accountModalHtml: accountModalHtml,
