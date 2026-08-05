@@ -2576,6 +2576,80 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 48 2026-08-05 — REVIEWED AND PUSHED, grade A — 7 of 7 round-1 slices green, 7 PRs open (#9598–#9604), 1 round-2 slice deferred BY DESIGN (paper `pds-wave-48-2026-08-05`)
+
+**THE WAVE'S OWN HEADLINE.** Seven slices, each taking one Barkpark verb, receipt, class, gate or
+price that had stopped descending from a measurement and giving it an ending — and the wave found the
+defect class *in its own output*. Two slices, both individually correct, composed back into the exact
+lie the wave set out to kill. **All seven branches are pushed and all seven PRs are open.**
+
+**WHAT LANDED (7 PRs, all pushed, none merged — the lead merges).**
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `pds-w47-measure-and-host-axis` | `…measure-is-built-the-price-grammar-gains-0` | #9598 | The price column stops being typed. `--measure` meters a door with the `times` BUILTIN as the metering shell's final command, making D669's exec-discard trap structurally unreachable rather than avoided by a deletable no-op. Never gated, falsifiably: a depth guard refuses a meter inside a meter, and a witness makes "`--check` never invokes `--measure`" a fact a run can DISPROVE — two independent mechanisms, so one edit cannot defeat both. `LC_ALL=C` pins meter AND summer as two removable variables, and the summer is fail-closed on radix in both directions. **NO FOREIGN PRICE WAS TAKEN**, and the refusal is written into the header naming the measured citation surface. Two rows RE-METERED, not re-worded — including one that priced THREE arms while its rider ran FOUR. Selftest 33 → 43 arms. Reviewer changed nothing. |
+| `pds-bl-w47-find-event-launders-the-honest-status` | `…the-next-js-proxy-launders-the-api-s-hon-1-r` | #9599 | Two bare `await fetch(...)` expression statements discarded the Response, and fetch does not reject on 4xx/5xx, so the API's honest 422/500 was laundered into `{ok:true}` one hop out — never reaching the catch, never logged. Six exits now route through one helper, so `recorded` cannot be produced except by passing a measured value. The third lie class (parsed but no write attempted) is filed nowhere else and got its own falsifier. First route-handler test in `web/` — zero of 39 files covered any of the five routes. Reviewer fixed the cross-slice seam (below) and pinned WHAT was sent, not merely that something was. |
+| `task-pds-correction-receipt-surfaces-status` | `…the-correction-receipt-collapses-five-ou-2` | #9600 | `correction/2` destructured away the `status:` key D496 shipped, so all five outcomes rendered the identical 51 bytes — **a lost write and a genuine record were byte-identical on the wire.** No crash existed; the defect was pure laundering at the boundary. Seven HTTP tests assert all five outcomes with row counts read back, plus one that resets the table between them and asserts no two receipts are equal. The `:error` arm is driven by a genuinely request-reachable fault (a NUL byte reaching a `:string` column), not a mock. Mutation-proven twice. Reviewer changed nothing. |
+| `pds-w48-react-reference-error-collapse` | `…a-published-npm-component-renders-nothin-3` | #9601 | A published npm component rendered NOTHING on a 500 — 401/403/429/5xx collapsed into the same `null` as a genuine 404, and `notFound` defaults to null. The two derived-fetcher branches are repaired ASYMMETRICALLY because they fail differently; `err.code`, never `instanceof`. The design deviation is a MEASUREMENT, not a preference: under React 19 a consumer ErrorBoundary catches neither a throw in the render resumed after `use()` nor a rejected promise passed to it — both hang forever even with a boundary present, so "rethrow for the consumer's error.tsx" is not an option React offers. Reviewer mutation-proved both branches independently (8 and 6 reds). |
+| `pds-w48-cli-count-and-birth-receipts` | `…two-bp-receipts-assert-from-the-request--4-r` | #9602 | Two A3 sites. `bp migrate` counted `len(batch)` with the response discarded on 2xx; it now counts the server's `results` array, and an unreadable body is an ERROR, not a full count. `bp task create` read the birth lifecycle out of the REQUEST map the CLI itself had defaulted — tautological by construction, which is why no test could have caught it. **No glyph sweep**: a shipped behavioral registry already encodes this law, so the cheap fix was ENROLLMENT. Reviewer added the falsifier the registry structurally cannot carry (below). |
+| `pds-w48-deploy-banner-descends-from-health` | `…every-curl-installed-barkpark-prints-bar-5-r` | #9603 | Every curl-installed Barkpark printed "Barkpark is running!" after 30 FAILED probes, exit 0 — run-proven at the real 30 iterations, 61s, `go:embed`ed into `bp`. The banner now branches on the measurement and exits 1, with the refusal placed at the very END so the once-only admin token still prints. The probe port is re-read from the `.env` the service actually sources. First harness for `deploy.sh` in the repo. Reviewer defused a time bomb, wired the harness into CI, and made a non-numeric port refuse. |
+| `pds-w48-meter-rot-and-duplicate-rate-table` | `…the-one-price-ledger-with-a-fast-self-pr-6-r` | #9604 | **The inverted control D683 asked for.** A meter that is fast (0.065s), self-proving, non-vacuous and correct on every envelope it walked — and rotted anyway, printing 34 against a doc saying 24, because zero of 43 workflows call it. THE INSTRUMENT IS NOT THE MECHANISM; BEING RUN IS. Three fail-open paths closed in the EXIT CODE. The higher-blast-radius half: `tally_wf.py` dropped an unrated model's DOLLARS while counting its tokens, at rc=0 — 62.5% of true spend missing on a two-model transcript, and `/papers/epic-cycle-research-program-abcde` names that file as ITS cost axis. Reviewer closed the population assertion's own fail-open. |
+
+**THE WAVE UNDID ITS OWN WORK AT ONE SEAM, AND THAT IS THIS WAVE'S REAL LESSON.** The correction slice
+deliberately keeps HTTP 200 for a LOST write and moves the news into the body as
+`{ok:false, status:"error", recorded:false}`. The find-event proxy read only `res.ok`. So the repaired
+upstream said "I recorded nothing" and the repaired proxy **overwrote it with `recorded:true`** — the
+identical defect, one layer up, manufactured by two correct slices of the same wave landing together.
+Neither builder could have seen it; each verified their own hop. The proxy now reads the upstream's
+explicit `recorded:false`, deliberately asymmetric: an unreadable 2xx body stays `true`, because
+manufacturing a false out of OUR parse failure is the same fabrication reversed. **Generalises: when a
+wave moves a fact OFF the status line and INTO the body, every hop that reads the status line is now
+lying, and the hop and the endpoint are usually different slices.** Merge #9599 and #9600 together.
+
+**THE FLIP-RISK RE-DERIVATION, AND IT HELD.** Slice 1 was flagged HIGH-FLIP-RISK on foreign-price
+provenance. The reviewer re-derived it independently rather than re-reading the builder: anon GitHub
+logs probed live → HTTP 403; the run JSON → 200 carrying wall only;
+`git grep -nE 'nproc|loadavg|uptime|/usr/bin/time' origin/main -- .github` EMPTY; `ci.yml:141
+retention-days: 14` confirmed. The refusal stands on measurement. A genuinely independent SECOND
+reviewer is still warranted before merge.
+
+**THREE THINGS THE REVIEWER FOUND THAT THE GATES COULD NOT.** (1) The deploy harness's "permanent
+CONTROL" was a TIME BOMB: it read `origin/main:deploy.sh` and then applied three MANDATORY
+substitutions that the slice itself REMOVES, so the first time the fix reached main the harness would
+FATAL and red forever — a permanent red produced by the fix succeeding. Pinned to the revision that
+carries the defect. **A control has to name the artifact it is a control FOR, and that artifact does
+not move.** (2) The success-claim registry proves `written` VARIES with the response but
+**structurally cannot** pin the checkmark — both halves of its pair vary, so both still differ if the
+✓ prints unconditionally; forcing the short-write branch off left the whole registry green over
+`✓ post 1/2`. (3) `meter.py`'s new population assertion was keyed to an exact-argument match, so
+`verify tooling/scaffy-duels/` walked the same 34 envelopes and silently dropped the drift check —
+a CI job on the parent path would have carried the gate's name and none of its force.
+
+**THE LEDGER, AUDITED.** All seven built tasks: `in_progress`, evidence stamped as the work happened,
+the merge-gated criterion left OPEN for the lead, `wave_paper` and `parent_id` set. The deferred slice
+sits `open` at 0/9 with no claim, correctly. Honest misses are preserved, not papered over. Three
+builders could not file follow-ups because `/v1/data/mutate` was degraded mid-wave and said so on
+their now-lines rather than dropping the residual: two are now filed and published
+(`pds-w49-meter-ci-decision`, `pds-w49-meter-per-model-recompute`), one was RESOLVED by the reviewer
+(the deploy harness is now wired into CI), and one turned out to be a confirmed duplicate of the
+already-filed deferred slice — a draft was raised and WITHDRAWN rather than left to pollute the board.
+No task outside this wave was touched.
+
+**WHAT THE LEAD MUST KNOW BEFORE MERGING.** (1) **#9599 and #9600 are a pair** — merging the API half
+alone re-launders its own honest `ok:false`. (2) #9601 re-baselines a gzip budget 22.5 → 22.75 KB
+(+0.98%, inside the 2% bar); the builder stamped it an honest MISS, not a pass, and it is the lead's
+ruling — note the new cap leaves ~50 bytes of headroom, so the trap is one change away from recurring.
+(3) #9603 changes `deploy.sh`'s exit code, which is the point, but `bp setup`'s ssh caller was not read
+(out of scope). (4) #9602 changes `bp task create`'s visible receipt against any server that does not
+echo `results[].document`; guerrilla and prod do. (5) The merge-gated criterion on all seven rows is
+yours to close.
+
+**NEXT WAVE.** Merge round 1 (#9598–#9604) — the file sets are disjoint EXCEPT the #9599/#9600 pair,
+which must land together. Then dispatch `pds-w47-price-column-retake` (round 2) once #9598 is on main,
+since it uses `--measure` and hand-taking those two condemned figures is precisely the fraud this epic
+files. The strongest direction after that is the seam this wave discovered: sweep every hop that reads
+a status line for a fact the endpoint has since moved into the body.
+
 ### Wave 47 2026-08-04 — REVIEWED AND PUSHED, grade A — 6 of 6 round-1 slices green, 6 PRs open, 2 round-≥2 slices deferred BY DESIGN (paper `pds-wave-47-2026-08-04`)
 
 **THE WAVE'S OWN HEADLINE.** The direction that opened this wave — an ANCHORED / DRIFTED / UNANCHORED
