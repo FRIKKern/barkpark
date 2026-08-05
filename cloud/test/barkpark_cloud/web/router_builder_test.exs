@@ -111,7 +111,10 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       # Force an ordering — the schema's inserted_at is microsecond-precision
       # but two inserts in a row may share the same microsecond. Bump.
       Process.sleep(2)
-      {:ok, _d2} = Registry.create_deployment(site, %{git_ref: "newer"})
+      # A SECOND SITE: deploy-truth W1 re-keyed the active index onto
+      # (site_id, environment), so two builds can only be queued at once on two
+      # different sites. The claim is global, so the ordering claim still holds.
+      {:ok, _d2} = Registry.create_deployment(site_fixture(team), %{git_ref: "newer"})
 
       conn = call(:post, "/v1/builder/claim", %{worker_id: "builder-A"}, @worker_token)
       assert conn.status == 200
@@ -133,13 +136,13 @@ defmodule BarkparkCloud.Web.RouterBuilderTest do
       {_user, team} = user_team()
       site = site_fixture(team)
 
-      # 5 queued deployments, 8 workers racing. Each a distinct git_ref — the
-      # dwb-18 partial unique index permits only one active build per (site,
-      # git_ref), and these are five separate commits.
+      # 5 queued deployments, 8 workers racing. One per SITE: deploy-truth W1
+      # re-keyed the active index onto (site_id, environment), so a site has at
+      # most one build in flight — five concurrent builds means five sites.
       _ds =
-        for _ <- 1..5 do
+        for s <- [site | for(_ <- 1..4, do: site_fixture(team))] do
           {:ok, d} =
-            Registry.create_deployment(site, %{
+            Registry.create_deployment(s, %{
               git_ref: "ref-#{System.unique_integer([:positive])}"
             })
 

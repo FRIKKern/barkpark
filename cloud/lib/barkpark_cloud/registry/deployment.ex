@@ -22,7 +22,18 @@ defmodule BarkparkCloud.Registry.Deployment do
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @statuses ~w(queued building pushing live failed cancelled)
+  # deploy-truth W1 (charter D9): `deferred` is a FIRST-CLASS COUNTED outcome, not
+  # a quieter word for `failed`. The box refuses a second concurrent deploy for a
+  # slug with a 409 `already_running`; before this status that refusal was written
+  # `failed` — terminal, outside every recovery pass, and the single largest
+  # failure class on the fleet (8,830 of 17,171 failed rows, 8,818 of them
+  # content-auto). A `deferred` row says the same thing HONESTLY — this build did
+  # not happen — while naming the reason as transient and carrying the promise
+  # that a rebuild has been re-queued. It is terminal FOR THIS ROW (the retry is a
+  # new row), which is why it is NOT in the active-deployment partial index: a
+  # deferred row that blocked the very rebuild it promised would re-open the drop
+  # it exists to close.
+  @statuses ~w(queued building pushing live failed cancelled deferred)
 
   # gh-6: which slot this deployment targets. "production" (the default — every
   # pre-gh-6 row + every push to the connected branch) drives the Site's live
@@ -70,13 +81,18 @@ defmodule BarkparkCloud.Registry.Deployment do
   # queued → failed is a legitimate edge: a queued row can fail *validation*
   # before any build claim — the reaper terminates a no-build-source row (no
   # artifact AND no connected repo) it can prove will never build.
+  #
+  # `deferred` (deploy-truth W1) is reachable from any pre-terminal status and is
+  # itself terminal: the box said "busy", so THIS row never builds — the rebuild
+  # it promises is a NEW row minted by the re-fired debounce job.
   @transitions %{
-    "queued" => ["building", "failed", "cancelled"],
-    "building" => ["pushing", "failed", "cancelled"],
-    "pushing" => ["live", "failed", "cancelled"],
+    "queued" => ["building", "failed", "cancelled", "deferred"],
+    "building" => ["pushing", "failed", "cancelled", "deferred"],
+    "pushing" => ["live", "failed", "cancelled", "deferred"],
     "live" => [],
     "failed" => [],
-    "cancelled" => []
+    "cancelled" => [],
+    "deferred" => []
   }
 
   schema "deployments" do
@@ -264,9 +280,23 @@ defmodule BarkparkCloud.Registry.Deployment do
     # a second active build of the same commit) surfaces as a changeset error the
     # router turns into a 200 duplicate — never a raised Ecto.ConstraintError.
     |> unique_constraint(:delivery_id, name: :deployments_delivery_id_index)
+    # deploy-truth W1 (charter D10): the RE-KEYED active index, which REPLACED
+    # dwb-18's `deployments_active_site_ref_index`. That one keyed on `git_ref`,
+    # which is NULL on 26,395 of 26,423 rows — and a btree unique treats NULLs as
+    # DISTINCT, so it never once deduplicated a content-auto deploy.
+    # `(site_id, environment)` keys on columns that are always present: at most
+    # ONE active production build per site, which strictly implies the old
+    # per-commit guarantee it retired. Without this declaration the losing INSERT
+    # would raise Ecto.ConstraintError instead of returning a changeset the
+    # caller can turn into a coalesce.
+    #
+    # Declared on `:git_ref` — the field dwb-18's index used — deliberately: the
+    # callers that already turn "a build is in flight" into a 409 (the promote
+    # route's `git_ref_conflict?/1`) keep working unchanged, and the message says
+    # what the new key actually enforces.
     |> unique_constraint(:git_ref,
-      name: :deployments_active_site_ref_index,
-      message: "active deployment already exists"
+      name: :deployments_active_site_env_index,
+      message: "a build for this site is already in progress"
     )
   end
 

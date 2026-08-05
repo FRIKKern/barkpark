@@ -61,9 +61,10 @@ defmodule BarkparkCloud.Web.RouterAgentRuntimeTest do
   # A queued deployment that the builder has built and transitioned to `pushing`
   # (the agent's pickup state). Returns the row.
   defp pushing_deployment(site) do
-    # Unique git_ref per row: the dwb-18 partial unique index (dwb-18) allows at
-    # most one active deployment per (site, git_ref), and these claim-race
-    # fixtures stand up several active rows at once (each a distinct commit).
+    # Unique git_ref per row. deploy-truth W1 re-keyed the active index onto
+    # (site_id, environment) — at most ONE active build per SITE — so a fixture
+    # that needs several active rows at once stands them up on SIBLING sites of
+    # the same box, which is how the fleet reaches that state too.
     ref = "ref-#{System.unique_integer([:positive])}"
     {:ok, d} = Registry.create_deployment(site, %{git_ref: ref})
     {:ok, d} = Registry.transition_deployment(d, %{status: "pushing", image_tag: "site-x-1"})
@@ -91,10 +92,11 @@ defmodule BarkparkCloud.Web.RouterAgentRuntimeTest do
 
   describe "GET /v1/agent/pending" do
     test "lists pushing deployments for this barkpark only" do
-      {token, _bp, site} = agent_setup()
+      {token, bp, site} = agent_setup()
       _d_pushing = pushing_deployment(site)
-      # A queued deployment shouldn't show — not yet built.
-      {:ok, _queued} = Registry.create_deployment(site, %{git_ref: "old"})
+      # A queued deployment shouldn't show — not yet built. On a SIBLING site:
+      # one active build per site (deploy-truth W1).
+      {:ok, _queued} = Registry.create_deployment(site_fixture(bp), %{git_ref: "old"})
 
       conn = call(:get, "/v1/agent/pending", nil, token)
       assert conn.status == 200
@@ -132,10 +134,10 @@ defmodule BarkparkCloud.Web.RouterAgentRuntimeTest do
 
   describe "POST /v1/agent/deployments/claim" do
     test "atomic claim of the oldest pushing deployment on this box" do
-      {token, _bp, site} = agent_setup()
+      {token, bp, site} = agent_setup()
       d1 = pushing_deployment(site)
       Process.sleep(2)
-      _d2 = pushing_deployment(site)
+      _d2 = pushing_deployment(site_fixture(bp))
 
       conn = call(:post, "/v1/agent/deployments/claim", %{worker_id: "agent-A"}, token)
       assert conn.status == 200
@@ -173,8 +175,9 @@ defmodule BarkparkCloud.Web.RouterAgentRuntimeTest do
       # both credentials authorize the claim and the race is preserved.
       {:ok, token2, _} = Registry.mint_agent_token(bp, "runtime-b")
 
-      # 4 pushing deployments, 6 racing claims (2 from each token).
-      _ds = for _ <- 1..4, do: pushing_deployment(site)
+      # 4 pushing deployments, 6 racing claims (2 from each token). One per site
+      # (deploy-truth W1), all on this box, which is what the claim is scoped to.
+      _ds = [site | for(_ <- 1..3, do: site_fixture(bp))] |> Enum.map(&pushing_deployment/1)
 
       results =
         1..6
