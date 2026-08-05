@@ -1466,6 +1466,62 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-05 — wave 32 REVIEW (round 1 shipped, grade A−)
+
+Five round-1 slices built, reviewed, gate-green and **PUSHED WITH PRs** — #9655 (s1 chat rail),
+#9656 (s2 withhold row), #9657 (s3 route-table census), #9658 (s4 gate-honesty clause), #9659
+(s5 legacy backfill). Two round-2 slices deferred BY DESIGN under the sequenced-rounds law:
+`cch-w32-r2-notifications-withhold-branches` (needs s1+s2 merged) and
+`cch-w31-s8-member-self-scoped-delivery-read` (needs s2+s5 merged).
+
+**What landed.** `trial_expiring` now reaches chat through `@chat_always_send` alone, with a NAMED
+`:warning` render arm built from `:days`; `general` is deleted from `@always_send`; the test button
+returns `202 {ok:true, queued:n}` and the console toast names no destination when `queued` is 0.
+A fourth delivery status `suppressed` makes the reap cap's silent withhold a row the withheld-from
+person can read, at one-row-per-member grain, with `last_error` clamped to the union of the failure
+and withhold vocabularies. The router's route table stops advertising tiers the code does not
+enforce — **eight** cells, not the briefed three, all `@moduledoc`-only. Three `console-harness.yml`
+comments stop calling a REQUIRED `Console gate` advisory, behind a clause that derives both sides
+from the committed spec. Four production rows stop publishing a Vault-sealed SMTP relay IPv4.
+
+**THE REVIEW FINDING THAT MATTERS, and the law it argues for.** The five slice gates were all green
+and the full cloud suite on the integration merge was **2837 tests, 1 failure**. s1's new describe
+block did `Application.put_env(:barkpark_cloud, :notifications_http_client, …)` inside an
+`async: true` module, which the repo's own standing ratchet (`async_global_seam_guard_test.exs`)
+reds on — and a four-file slice gate is structurally incapable of seeing a ratchet that scans both
+trees. The swap was pure redundancy (`config/test.exs:25` already points that seam at
+`FakeHttpClient`, whose state is per-process) and was removed. **A narrow gate cannot see a
+repo-wide ratchet: the reviewer must run the full suite on the integration merge, every wave.**
+
+**The second review finding is a cross-slice one, and it is the argument for reviewing the wave
+rather than the slice.** s5's backfill allowlists `DeliveryReason`'s failure sentences; s2 invents a
+withhold vocabulary that is deliberately disjoint from it; both auto-deploy independently on
+`cloud/**`. An s2-first merge lets a reap sweep write real withheld rows BEFORE s5's migration runs,
+and s5 would have flattened each into "The delivery failed…" — a fresh lie manufactured by two
+correct slices meeting. Fixed on s5 with `AND status <> 'suppressed'`, a SQL literal (not a
+`Withhold.labels/0` call) so the file stays correct on a tree without that module, mutation-proved.
+
+Also fixed at review: s2 was cut at `142cbbf5a` and `#9615` had since rewritten the same mass-reap
+fixture (deploy-truth W1 re-keyed the active index onto `(site_id, environment)`) — rebased, both
+edits kept, they are additive. `mix format` on three files across s2 and s5. All five branches are
+rebased onto `2154e695f`; final integration merge is **2837 tests, 0 failures**, JS **845/0**,
+`required-checks-verify.sh` **VERIFY_RC=0** with **18/18** selftest probes.
+
+**Ledger.** Honest across all five, which is not the norm: every builder stamped as they worked,
+left `lifecycle: in_progress`, and left the merge-gated criterion open for the lead. s5's builder
+stamped criterion 4 an explicit MISS rather than flipping it, because builders do not open PRs —
+paid at review and stamped with the PR body as evidence. Two follow-ups filed
+(`cch-withhold-fanout-write-amplification`, `cch-advisory-prose-clause-blind-to-docs`) on top of the
+three builders filed.
+
+**What the next wave takes.** Merge round 1 in any order EXCEPT that s5 (#9659) is a migration on an
+auto-deploying surface — order it deliberately. Then dispatch the two deferred slices as their deps
+land: `cch-w32-r2-notifications-withhold-branches` once #9655 and #9656 are in,
+`cch-w31-s8-member-self-scoped-delivery-read` once #9656 and #9659 are in. s8 carries a
+HIGH-FLIP-RISK authz/tenancy judgment and warrants a genuinely independent second reviewer before
+merge — a manual lead dispatch. Paper: `cch-wave-32-2026-08-05`.
+
+
 ### 2026-08-05 — wave 32 DECIDE (build in flight)
 
 The first wave in 32 to take a SUBSYSTEM rather than a scatter. Sixteen survey reports and eleven verifiers
