@@ -13568,6 +13568,14 @@ test("cch-w30-s5: no crash-path caller re-blames the input behind faultCopy's ba
     "Check the form and try again.",
     "Check the address and try again.",
     "Check the values and try again.",
+    // cch-w31-s4 — the two sentences the survey found STILL bare. Each one is
+    // added in the same change as its fix, and each REDS this test on its own:
+    // the connection sentence sat at the fleet + billing degradation cards with
+    // the status thrown away one frame up, and the details sentence was
+    // webhookMutationError's terminal fall-through, which a flat crash envelope
+    // reached every single time.
+    "Check your connection and retry.",
+    "Please check the details and try again.",
   ]) {
     const idx = [...src.matchAll(new RegExp(fallback.replace(/\./g, "\\."), "g"))].map((m) => m.index);
     assert.ok(idx.length > 0, "fallback still present: " + fallback);
@@ -13581,4 +13589,140 @@ test("cch-w30-s5: no crash-path caller re-blames the input behind faultCopy's ba
   }
   // The instance-timeline site blamed the USER'S NETWORK for a server 500.
   assert.match(src, /faultCopy\(ev\.status, ev\.data, "Check your connection and retry\."\)/);
+});
+
+// ── cch-w31-s4: a control-plane 500 must not tell the person to check THEIR details ──
+//
+// cch-w30-s5 fixed the named copy helpers. The three sentences below were the
+// ones still standing, and every one of them failed for the SAME structural
+// reason: the response status existed exactly one frame above the sentence and
+// was thrown away before any copy could be chosen. So these tests drive the
+// real helpers with the real crash envelopes, and pin the seams that carry the
+// status down — not just the sentences.
+
+test("cch-w31-s4: webhookMutationError never blames the person for a control-plane crash", () => {
+  // The four shapes a crash actually arrives as. Before this slice EVERY one of
+  // them returned "Please check the details and try again." — the flat envelope
+  // has no err.code and no err.detail, so every branch fell through.
+  const cases = [
+    ["router 500", 500, { error: "server_error" }],
+    ["500 + request_id", 500, { error: "server_error", request_id: "0a1b2c3d4e5f6071" }],
+    ["empty body (HTML 502)", 502, {}],
+    ["bad_gateway", 502, { error: "bad_gateway" }],
+  ];
+  for (const [label, status, data] of cases) {
+    const copy = hooks.webhookMutationError(data, status);
+    assert.ok(!/check the details/i.test(copy),
+      label + " still tells the person to check their details: " + copy);
+    assert.match(copy, /broke on our side/i, label + " must name US as the party at fault");
+  }
+  // A transport failure is not the person's input either — and it is not a 5xx,
+  // so it must come out of the status-0 arm, not the server-fault arm.
+  assert.match(hooks.webhookMutationError({ error: "network_error" }, 0), /[Nn]etwork error/);
+  assert.ok(!/check the details/i.test(hooks.webhookMutationError({}, 0)));
+});
+
+test("cch-w31-s4: webhookMutationError's specific branches still win over the status switch", () => {
+  // The status is consulted ONLY at the terminal fall-through. A proxied 502
+  // that carries a real instance validation error must still read as that field
+  // error — swallowing it into generic crash copy would be a different lie.
+  assert.equal(
+    hooks.webhookMutationError({ error: { code: "upstream_error", status: 422, detail: { error: { details: { url: ["must be https"] } } } } }, 502),
+    "url must be https");
+  assert.equal(hooks.webhookMutationError({ ok: false, error: { code: "instance_unreachable" }, reachable: false }, 502),
+    "Couldn't reach the instance — the change is unconfirmed.");
+  assert.match(hooks.webhookMutationError({ error: { code: "capability_unavailable" } }, 501), /needs an update/i);
+  // A REAL 4xx answer about the input keeps the copy that was written for it.
+  assert.equal(hooks.webhookMutationError({}, 422), "Please check the details and try again.");
+  // No status at all (an un-migrated caller) degrades to exactly the old
+  // behaviour rather than inventing a fault class.
+  assert.equal(hooks.webhookMutationError({}), "Please check the details and try again.");
+});
+
+test("cch-w31-s4: every webhookMutationError call site passes the status it already had", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const calls = [...src.matchAll(/webhookMutationError\(([^)]*)\)/g)]
+    .map((m) => m[1].trim())
+    .filter((a) => a !== "data, status"); // the declaration itself
+  assert.equal(calls.length, 7, "the seven mutation call sites (found " + calls.length + ")");
+  for (const args of calls) {
+    assert.equal(args, "r.data, r.status", "a call site still discards the status: " + args);
+  }
+});
+
+test("cch-w31-s4: faultCopy has a status-0 arm, capped at THREE honest transport classes", () => {
+  const fb = "Check your connection and retry.";
+  // status 0 = the request never got an answer, so a fallback written about the
+  // INPUT is as much a lie as it is on a 5xx.
+  assert.match(hooks.faultCopy(0, {}, fb), /[Nn]etwork error/);
+  assert.ok(!/check your connection and retry/i.test(hooks.faultCopy(0, {}, fb)));
+  assert.match(hooks.faultCopy(0, {}, fb, "offline"), /offline/i);
+  assert.match(hooks.faultCopy(0, {}, fb, "aborted"), /cancelled/i);
+  assert.match(hooks.faultCopy(0, {}, fb, "unreachable"), /[Nn]etwork error/);
+  // The status-0 arm must not disturb the arms cch-w30-s5 pinned.
+  assert.match(hooks.faultCopy(500, { error: "server_error" }, fb), /broke on our side/i);
+  assert.equal(hooks.faultCopy(422, {}, "Check the values and try again."), "Check the values and try again.");
+});
+
+test("cch-w31-s4: the transport vocabulary REFUSES a DNS-vs-network promise", () => {
+  // Three classes, and no fourth. A browser collapses DNS failure, refused,
+  // TLS and offline into one indistinguishable TypeError, so a fourth class
+  // would be this console inventing a fact it cannot have — the exact failure
+  // mode the wave exists to stop. If someone adds one, this reds.
+  assert.equal(hooks.transportClass({ name: "AbortError" }), "aborted");
+  assert.equal(hooks.transportClass(new TypeError("Failed to fetch")), "unreachable");
+  assert.equal(hooks.transportClass(undefined), "unreachable");
+  const classes = new Set([
+    hooks.transportClass({ name: "AbortError" }),
+    hooks.transportClass(new TypeError("Failed to fetch")),
+    hooks.transportClass({ name: "TypeError", message: "NetworkError when attempting to fetch resource." }),
+    hooks.transportClass({ message: "getaddrinfo ENOTFOUND api.example" }),
+  ]);
+  assert.deepEqual([...classes].sort(), ["aborted", "unreachable"],
+    "a DNS-shaped message must NOT earn its own class");
+  // Copy is total: an unknown class degrades to the sentence that is always
+  // true at status 0 rather than to silence.
+  assert.match(hooks.transportCopy("who_knows"), /[Nn]etwork error/);
+  assert.match(hooks.transportCopy(undefined), /[Nn]etwork error/);
+  // …and the refusal is stated in the source, not just in a commit message.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  assert.match(src, /indistinguishable TypeError/);
+});
+
+test("cch-w31-s4: api()'s envelope is ADDITIVE — status 0 and network_error survive verbatim", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // The transport-failure sentinel every consumer branches on, byte-for-byte.
+  assert.match(src, /\{ ok: false, status: 0, data: \{ error: "network_error" \}/);
+  // The four hand-rolled status === 0 branches and both live network_error
+  // string branches are still there — the envelope added fields, it repurposed
+  // nothing. (Five code branches now: the four originals plus faultCopy's own
+  // arm, which is what lets the four retire at the seam later.)
+  const zeroBranches = [...src.matchAll(/^\s*if \(status === 0\)/gm)];
+  assert.equal(zeroBranches.length, 5,
+    "the four original status-0 branches plus faultCopy's arm (found " + zeroBranches.length + ")");
+  assert.ok([...src.matchAll(/err === "network_error"/g)].length >= 2);
+  // A non-JSON body still hands consumers an EMPTY data object (all 354 .data
+  // reads unchanged) — the bytes now ride alongside as `text` instead of
+  // vanishing, which is the whole of the addition.
+  assert.match(src, /return \{ data: \{\}, text: t \};/);
+  assert.match(src, /return \{ ok: res\.ok, status: res\.status, data: body\.data, text: body\.text, transport: null \};/);
+});
+
+test("cch-w31-s4: the fleet and subscription caches RETAIN the fault they used to discard", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  // ensureFleet(): the list-or-null collapse now writes the fault beside it…
+  const ensure = src.slice(src.indexOf("function ensureFleet()"));
+  const ensureBody = ensure.slice(0, ensure.indexOf("\n  }"));
+  assert.match(ensureBody, /fleetFault = \{ status: r\.status, data: r\.data, transport: r\.transport \}/);
+  assert.match(ensureBody, /fleetFault = null/, "a success must clear the retained fault");
+  // …and loadSubscription()'s bare boolean gained the same companion.
+  const load = src.slice(src.indexOf("function loadSubscription()"));
+  const loadBody = load.slice(0, load.indexOf("\n  }"));
+  assert.match(loadBody, /subErrorFault = \{ status: r\.status, data: r\.data, transport: r\.transport \}/);
+  assert.match(loadBody, /subErrorFault = null/, "a success must clear the retained fault");
+  // The flag and its fault are reset in lockstep EVERYWHERE — a stale fault
+  // outliving its flag would put last hour's 500 on this minute's retry card.
+  assert.equal([...src.matchAll(/subError = false/g)].length,
+    [...src.matchAll(/subErrorFault = null/g)].length,
+    "every subError reset must clear subErrorFault too");
 });
