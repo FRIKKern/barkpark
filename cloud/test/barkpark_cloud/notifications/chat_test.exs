@@ -336,20 +336,16 @@ defmodule BarkparkCloud.Notifications.ChatTest do
   # The payload assertion above proves the flag is carried; this proves it is
   # SAID. Drives the same Oban args a worker would through `deliver_chat/4` into
   # the fake transport and reads the bytes Slack would have received.
+  # WAVE 32 REVIEW: this describe block opened with a `setup` that did
+  # `Application.put_env(:barkpark_cloud, :notifications_http_client,
+  # FakeHttpClient)` inside an `async: true` module. That write is node-global,
+  # so `async_global_seam_guard_test.exs` — a standing ratchet over both trees —
+  # reds on it, and the Cloud gate would have caught what a four-file slice gate
+  # could not see. It was also pure redundancy: `config/test.exs:25` already
+  # points the seam at `FakeHttpClient` for the whole test env, and the fake
+  # keeps its programmed responses in the CALLING PROCESS's dictionary, so it is
+  # parallel-safe with no swap at all. Removed rather than annotated.
   describe "a muted team's test discloses the mute on the wire" do
-    setup do
-      prev = Application.get_env(:barkpark_cloud, :notifications_http_client)
-      Application.put_env(:barkpark_cloud, :notifications_http_client, FakeHttpClient)
-
-      on_exit(fn ->
-        if prev,
-          do: Application.put_env(:barkpark_cloud, :notifications_http_client, prev),
-          else: Application.delete_env(:barkpark_cloud, :notifications_http_client)
-      end)
-
-      :ok
-    end
-
     test "the old 'the channel works' sentence is NOT what a muted team receives" do
       team = team_with_member()
 
