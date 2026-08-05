@@ -188,4 +188,59 @@ defmodule BarkparkCloud.Workers.TrialExpiryWorkerTest do
     # The pending teardown was cancelled — the now-paying box survives.
     assert deprovision_jobs(bp.id) == []
   end
+
+  ## 7. cch-w32-s1 — the notice reaches a SLACK-ONLY team, end to end
+  ##
+  ## Everything above proves the notice is DECIDED and that a Delivery row lands
+  ## for the email arm. None of it could see that a team which runs on Slack got
+  ## nothing at all: `channels_for_event/2` selected zero chat channels for
+  ## `trial_expiring`, so the hourly dispatch fanned out to 0 jobs. This is the
+  ## producer end of charter D359, driven through the REAL worker rather than
+  ## through `dispatch_event/3` directly.
+
+  test "the T-3 notice fans out to a Slack-only team's chat channel" do
+    {team, _sub} = trial_team(2 * 86_400)
+
+    {:ok, _} =
+      BarkparkCloud.Notifications.put_channel(team, "slack", true, %{
+        "url" => "https://hooks.slack.com/x"
+      })
+
+    assert {:ok, %{noticed_3d: 1}} = perform_job(TrialExpiryWorker, %{})
+
+    assert_enqueued(
+      worker: BarkparkCloud.Workers.ChatNotificationWorker,
+      args: %{channel_type: "slack", event: "trial_expiring"}
+    )
+
+    # The `days` integer the render arm is built from rides along — the arm reads
+    # ONLY this, never the first-party `detail` sentence next to it.
+    assert [%{args: %{"payload" => payload}}] =
+             all_enqueued(worker: BarkparkCloud.Workers.ChatNotificationWorker)
+
+    assert payload["days"] == 3
+
+    assert {"Trial ending", body, :warning} =
+             BarkparkCloud.Notifications.Render.render("trial_expiring", payload)
+
+    assert body =~ "Your free trial ends in 3 days"
+  end
+
+  test "a muted team gets NEITHER the email nor the chat notice" do
+    {team, _sub} = trial_team(2 * 86_400)
+
+    {:ok, _} =
+      BarkparkCloud.Notifications.put_channel(team, "slack", true, %{
+        "url" => "https://hooks.slack.com/x"
+      })
+
+    {:ok, _} = BarkparkCloud.Notifications.update_settings(team, %{"alerts_enabled" => false})
+
+    # The worker still CLAIMS the notice (the stamp is the idempotency key, not a
+    # delivery receipt) — what must not happen is a delivery.
+    assert {:ok, %{noticed_3d: 1}} = perform_job(TrialExpiryWorker, %{})
+
+    assert notice_count(team.id) == 0
+    refute_enqueued(worker: BarkparkCloud.Workers.ChatNotificationWorker)
+  end
 end

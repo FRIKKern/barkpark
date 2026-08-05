@@ -2817,11 +2817,18 @@
   // the always-send bypass is a deliberate documented exception (dwb-13) that
   // still honours `alerts_enabled`, so inventing a column would silently change
   // delivery semantics instead of describing them.
+  //
+  // cch-w32-s1: wave 30 gave the row an honest sentence for a rail that was
+  // EMAIL-ONLY — a Slack-only team was never told its trial ends. It now also
+  // fans to every enabled chat channel (`Notifications.@chat_always_send`,
+  // charter D359), so the consequence line says so. Still a row, still no
+  // column: the per-event route write is refused for always-send events, and
+  // rendering a checkbox the server ignores is the exact lie D342(d) forbids.
   var NOTIF_ALWAYS_SEND = [
     ["test", "Test",
      "Always sent to every enabled channel — fire one with “Send test”."],
     ["trial_expiring", "Trial ending",
-     "Always sent — no per-event toggle; mutable only via the master email switch above."]
+     "Always sent to every enabled channel — email and chat alike; no per-event toggle, silenced only by the master alerts switch above."]
   ];
 
   // The email transport single-select (GR34: pill()/`.seg` segmented control).
@@ -3015,6 +3022,14 @@
   // The email-delivery card. Admin: a buffered form (transport seg + from + SMTP)
   // with its own save-row → PUT /settings. Member: a read-only definition list —
   // no inputs, no save-row, no affordances (GR33 plain-member law).
+  //
+  // cch-w32-s1: the `alerts_enabled` switch was labelled "Email alerts" in BOTH
+  // places this function renders it (the member <dd> and the admin checkbox),
+  // and both were false: `enqueue_chat/3`'s `alerts_enabled: false` clause kills
+  // Slack, Discord, Telegram, Pushover and every webhook too. It is the master
+  // switch for the whole rail, so both copies now name the whole rail. (The
+  // surface already contained the honest word once, in the always-send row's
+  // "master … switch"; that row now agrees with these two.)
   function notifEmailSectionHtml(s, canManage) {
     s = s || {};
     var transport = s.transport || "instance";
@@ -3023,7 +3038,7 @@
         '<h3 class="set-h">Email delivery</h3>' +
         '<p class="set-purpose">Your team\'s alert email. Only team admins can change these settings.</p>' +
         '<dl class="set-readonly">' +
-          "<div><dt>Email alerts</dt><dd>" + (s.alerts_enabled === false ? "Off" : "On") + "</dd></div>" +
+          "<div><dt>All alerts (email and chat)</dt><dd>" + (s.alerts_enabled === false ? "Off" : "On") + "</dd></div>" +
           "<div><dt>Transport</dt><dd>" + esc(notifTransportLabel(transport)) + "</dd></div>" +
           "<div><dt>From address</dt><dd>" + esc(s.from_address || "—") + "</dd></div>" +
         "</dl></section>";
@@ -3040,7 +3055,7 @@
       '<h3 class="set-h">Email delivery</h3>' +
       '<p class="set-purpose">The transport your team\'s alert email is sent over, and who it comes from.</p>' +
       '<div class="field"><label class="set-toggle"><input type="checkbox" id="notif-alerts"' +
-        (s.alerts_enabled !== false ? " checked" : "") + "> Email alerts enabled</label></div>" +
+        (s.alerts_enabled !== false ? " checked" : "") + "> All alerts enabled (email and chat channels)</label></div>" +
       '<div class="field"><span class="label">Transport</span>' + notifTransportSegHtml(transport) + "</div>" +
       '<div class="field"><label class="label" for="notif-from-addr">From address</label>' +
         '<input class="form-input" id="notif-from-addr" type="email" value="' + esc(s.from_address || "") + '" placeholder="noreply@barkpark.cloud"></div>' +
@@ -3528,10 +3543,50 @@
     }
   }
 
+  // cch-w32-s1: the toast for a chat test, as a PURE function of the response so
+  // it can be pinned in node. It used to say "Test queued / Sent to <type>." on
+  // ANY 2xx — including the three measured zero-reach cases, where nothing was
+  // sent anywhere and the sentence named a destination that received nothing.
+  // The server now returns `queued`, the count of channels actually reached:
+  //
+  //   queued > 0  → success, naming the destination it really queued for
+  //   queued == 0 → a WARNING that names no destination (the request was
+  //                 accepted; nothing was sent, and that is the fact)
+  //   not a 2xx   → the error toast, unchanged
+  //
+  // The mute is NOT reported here as a failure — a muted team's test still
+  // fires by design (it is a transport probe), and the message that lands in
+  // the channel discloses the mute itself (`Render.render/2`'s `test` arm). The
+  // toast repeats it so the person pressing the button learns it without
+  // switching to Slack. `alerts_enabled` comes from the settings the page
+  // already holds, never invented here.
+  function notifChatTestToast(r, type, alertsEnabled) {
+    if (!(r && (r.ok || r.status === 202))) {
+      return { kind: "error", title: "Couldn't send test", body: friendly(r && r.data, "Try again shortly.") };
+    }
+    var queued = r.data && typeof r.data.queued === "number" ? r.data.queued : null;
+    var muted = alertsEnabled === false
+      ? " Alerts are switched off, so no real notification would be delivered."
+      : "";
+    if (queued === 0) {
+      return {
+        // `info`, not an invented `warning`: the toast primitive's vocabulary is
+        // success|error|info and app.css styles only those two glyphs, so a
+        // fourth kind would render an unstyled toast. Nothing failed here —
+        // there was simply nothing to send to, and the title says exactly that.
+        kind: "info",
+        title: "Nothing to send to",
+        body: "No enabled, configured channel matched this test — nothing was queued." + muted
+      };
+    }
+    var where = queued === null ? type : (queued === 1 ? type : queued + " channels");
+    return { kind: "success", title: "Test queued", body: "Sent to " + where + "." + muted };
+  }
+
   function sendChatTest(type) {
+    var alertsEnabled = notifCache ? notifCache.alerts_enabled : undefined;
     api("POST", "/v1/notifications/test", { channel: type }).then(function (r) {
-      if (r.ok || r.status === 202) toast({ kind: "success", title: "Test queued", body: "Sent to " + type + "." });
-      else toast({ kind: "error", title: "Couldn't send test", body: friendly(r.data, "Try again shortly.") });
+      toast(notifChatTestToast(r, type, alertsEnabled));
     });
   }
 
@@ -20032,6 +20087,10 @@
       notifDeliveriesBodyHtml: notifDeliveriesBodyHtml, notifDeliveryFilterState: notifDeliveryFilter,
       notifDeliveryPage: NOTIF_DELIVERY_PAGE,
       notifMemberAdminNoticeHtml: notifMemberAdminNoticeHtml, notifPageHtml: notifPageHtml,
+      // cch-w32-s1: the chat-test toast, pulled out of the fetch callback so the
+      // zero-reach case is pinnable. `sendChatTest` was the surface that said
+      // "Sent to slack." over a fan-out that reached nobody.
+      notifChatTestToast: notifChatTestToast,
       // MVP-0 Personal Dev Fleet (PDF-D84/D87/D88/D92): the fleet card, the
       // add-support flow, the SUPPORT step vocabulary (additive — the SERVER
       // tables above stay byte-locked), presence chips off the main's roster,

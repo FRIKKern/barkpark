@@ -247,4 +247,121 @@ defmodule BarkparkCloud.Notifications.RenderTest do
       assert decoded["title"] == "Deployment failed"
     end
   end
+
+  # ── cch-w32-s1: the trial teardown gets a NAMED arm ────────────────────────
+  #
+  # `trial_expiring` had no arm. Routed to chat it would have fallen to the
+  # catch-all — "Event: trial_expiring for acme." at `:info`, which Discord
+  # renders GREEN — for a message whose subject is an instance being torn down.
+  describe "trial_expiring is rendered, not fallen through" do
+    test "days=3 reads as a plural window at :warning" do
+      {title, body, severity} =
+        Render.render("trial_expiring", %{"name" => "acme", "days" => 3})
+
+      assert title == "Trial ending"
+      assert severity == :warning
+
+      assert body ==
+               "Your free trial ends in 3 days — acme is torn down automatically when it ends."
+    end
+
+    test "days=1 reads as a singular day" do
+      {_title, body, severity} =
+        Render.render("trial_expiring", %{"name" => "acme", "days" => 1})
+
+      assert severity == :warning
+      assert body =~ "ends in 1 day —"
+      refute body =~ "1 days"
+    end
+
+    test "it is NOT the generic fallback (which would ship :info — Discord green)" do
+      {title, body, severity} =
+        Render.render("trial_expiring", %{"name" => "acme", "days" => 3})
+
+      refute title == "Barkpark Cloud"
+      refute body =~ "Event: trial_expiring"
+      refute severity == :info
+    end
+
+    test "the body is built from :days ALONE — never :detail, never through humanize/1" do
+      # The producer supplies BOTH. `detail` is control-plane-authored prose, and
+      # `FailureCopy.humanize/1` is `classify() |> scrub()` — a failure taxonomy
+      # plus a credential redactor. There is nothing to classify and nothing to
+      # scrub here, and a future `@scrub_rules` pattern would silently rewrite
+      # customer copy. So the arm must ignore `detail` entirely.
+      detail =
+        "Your Barkpark free trial ends in 3 days. Upgrade to keep your instance running — " <>
+          "it's torn down automatically when the trial ends."
+
+      {_t, with_detail, _s} =
+        Render.render("trial_expiring", %{"name" => "acme", "days" => 3, "detail" => detail})
+
+      {_t, without_detail, _s} =
+        Render.render("trial_expiring", %{"name" => "acme", "days" => 3})
+
+      assert with_detail == without_detail,
+             "the presence of :detail must not change one byte of the trial body"
+
+      refute with_detail =~ "Upgrade to keep your instance running"
+    end
+
+    test "a missing or nonsense day count degrades to a readable window, never 'in  days'" do
+      for payload <- [
+            %{"name" => "acme"},
+            %{"name" => "acme", "days" => nil},
+            %{"name" => "acme", "days" => "soonish"}
+          ] do
+        {_t, body, severity} = Render.render("trial_expiring", payload)
+        assert body == "Your free trial ends soon — acme is torn down automatically when it ends."
+        assert severity == :warning
+      end
+    end
+
+    test "atom keys work too — the payload is an Oban args map on one path and a struct-ish map on the other" do
+      {_t, body, _s} = Render.render("trial_expiring", %{name: "acme", days: 2})
+      assert body =~ "in 2 days"
+    end
+  end
+
+  # ── cch-w32-s1: the test message discloses a muted team ────────────────────
+  #
+  # `send_test_chat/2` deliberately fires while `alerts_enabled` is false — it is
+  # a TRANSPORT probe, and refusing would destroy the only instrument separating
+  # "my webhook URL is wrong" from "I muted alerts three weeks ago". So the mute
+  # travels with the message instead of blocking it.
+  describe "the test event tells the truth about the master switch" do
+    test "an unmuted team gets the plain confirmation, unchanged" do
+      {title, body, severity} = Render.render("test", %{})
+
+      assert title == "Test notification"
+      assert severity == :info
+
+      assert body ==
+               "This is a test from Barkpark Cloud. If you can read this, the channel works."
+    end
+
+    test "a muted team is told the channel works AND that nothing real will arrive" do
+      {title, body, severity} = Render.render("test", %{"alerts_muted" => true})
+
+      assert title == "Test notification"
+      assert severity == :warning
+      assert body =~ "The channel works"
+      assert body =~ "alerts are currently OFF for this team"
+      assert body =~ "no real notification will be delivered"
+
+      refute body =~ "If you can read this, the channel works.",
+             "the unqualified sentence is exactly the yes this slice stopped answering"
+    end
+
+    test "the flag is read strictly — false, absent and a stray string all mean NOT muted" do
+      for payload <- [%{}, %{"alerts_muted" => false}, %{"alerts_muted" => "true"}] do
+        {_t, body, severity} = Render.render("test", payload)
+        assert severity == :info
+        assert body =~ "If you can read this"
+      end
+
+      {_t, _b, severity} = Render.render("test", %{alerts_muted: true})
+      assert severity == :warning, "the atom-keyed payload is the in-process path"
+    end
+  end
 end

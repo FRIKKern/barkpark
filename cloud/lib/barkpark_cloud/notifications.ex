@@ -56,7 +56,13 @@ defmodule BarkparkCloud.Notifications do
   # `trial_expiring` (dwb-13) is on the allowlist: a trial-ending heads-up is
   # important enough to bypass the per-event opt-in toggle, but it still honours
   # `alerts_enabled` (a team that muted everything won't get it).
-  @always_send ~w(test general trial_expiring)a
+  #
+  # cch-w32-s1 (charter D360): `general` is GONE. It had zero producers, zero
+  # render arms and zero console rows — a name on an allowlist is not a
+  # mechanism, and wave 30's migration 20260804123000 set the precedent that a
+  # producerless event name is DELETED, never wired. Wiring it would have
+  # manufactured exactly the promise-with-no-mechanism this epic exists to kill.
+  @always_send ~w(test trial_expiring)a
 
   # Seconds a team must wait between "send test" presses (Coolify's 10s/team).
   @test_rate_limit_seconds 10
@@ -72,7 +78,24 @@ defmodule BarkparkCloud.Notifications do
                       subscription_past_due)
 
   # Events that ignore `event_routes` and always fan to every enabled chat channel.
-  @chat_always_send ~w(test)
+  #
+  # cch-w32-s1 (charter D359): `trial_expiring` is routed to chat HERE and
+  # nowhere else. A Slack-only team was never told its trial ends and its
+  # instance is torn down: the worker really dispatches the event hourly and the
+  # EMAIL arm works, but `channels_for_event/2` selected zero chat channels.
+  # Settled by a four-variant run:
+  #
+  #   * widening `@chat_events` alone delivers ZERO jobs (`routed_types/3`
+  #     returns [] for an event that is neither routed nor `@chat_default_on`)
+  #     and newly accepts a per-event route WRITE that did not exist before;
+  #   * `@chat_default_on` delivers, but it creates an API-reachable per-event
+  #     mute with no checkbox behind it — the column charter D342(d) forbids
+  #     ("DISCLOSE, never column-ise");
+  #   * `@chat_always_send` short-circuits BEFORE `routed_types/3`, so it needs
+  #     no vocabulary change, it refuses the opt-out route write, and it still
+  #     honours `alerts_enabled` (the false clause precedes it at
+  #     `should_send?/2` and `enqueue_chat/3`).
+  @chat_always_send ~w(test trial_expiring)
 
   ## ── Settings ─────────────────────────────────────────────────────────────
 
@@ -199,7 +222,14 @@ defmodule BarkparkCloud.Notifications do
         event_routes: s.event_routes || %{},
         chat_events: @chat_events,
         channel_types: chat_channel_types(),
-        chat_default_on: @chat_default_on
+        chat_default_on: @chat_default_on,
+        # cch-w32-s1: the always-send half of the chat vocabulary. Without it an
+        # SDK/CLI/agent reading this view sees `chat_events` only and cannot
+        # learn that `trial_expiring` reaches chat at all — the event is
+        # deliberately absent from `chat_events` (it takes no route), so the
+        # view has to state it separately or the vocabulary reads as smaller
+        # than it is.
+        chat_always_send: @chat_always_send
       },
       event_view
     )
@@ -755,9 +785,9 @@ defmodule BarkparkCloud.Notifications do
   @doc """
   The enabled chat channels that should receive `event` for this `settings` row —
   the port of Coolify's `getEnabledChannels`. Public so selection is directly
-  testable. The `@chat_always_send` events (`test`) fan to every enabled channel;
-  otherwise a channel is selected only when enabled AND routed (explicit route, or
-  the default-on fallback for failure events).
+  testable. The `@chat_always_send` events (`test`, `trial_expiring`) fan to
+  every enabled channel; otherwise a channel is selected only when enabled AND
+  routed (explicit route, or the default-on fallback for failure events).
   """
   @spec channels_for_event(EmailSettings.t(), String.t()) :: [ChannelConfig.t()]
   def channels_for_event(%EmailSettings{channels: channels} = settings, event) do
@@ -774,18 +804,42 @@ defmodule BarkparkCloud.Notifications do
   @doc """
   Fire the always-send `test` chat event. With no `channel_type`, fans to every
   enabled chat channel (the "Send test" button); with one, targets exactly that
-  channel. Enqueues one Oban job per selected channel; returns `:ok`.
+  channel. Enqueues one Oban job per selected channel and returns `{:ok, n}`
+  where `n` is the number of channels it actually reached.
+
+  cch-w32-s1 — TWO THINGS THIS USED TO GET WRONG.
+
+  It returned a bare `:ok` having reached ZERO channels in three measured ways
+  (no channels at all; only a disabled channel; a `channel_type` matching
+  nothing), and its only caller rendered an unconditional `202 {ok: true}` — so
+  a fan-out to nobody reported as accepted to the console, to `bp`, to curl.
+  The count is the honest answer, and a `queued: 0` is a visible one.
+
+  And it deliberately BYPASSES `enqueue_chat/3`'s `alerts_enabled: false`
+  clause, which is correct and stays: this is a TRANSPORT probe (does the
+  credential/URL work), not a POLICY probe. Refusing while muted would destroy
+  the only instrument separating "my webhook URL is wrong" from "I muted alerts
+  three weeks ago", and would read as "your channel is broken" — a new lie for
+  an old one. `deliver_test/2`, the EMAIL test, bypasses `alerts_enabled` the
+  same way. So the mute is not a refusal here; it TRAVELS WITH THE MESSAGE:
+  the payload carries `alerts_muted`, and `Render.render/2`'s `test` arm
+  discloses it on the wire.
   """
-  @spec send_test_chat(Team.t() | binary(), String.t() | nil) :: :ok
+  @spec send_test_chat(Team.t() | binary(), String.t() | nil) ::
+          {:ok, non_neg_integer()}
   def send_test_chat(team, channel_type \\ nil) do
     settings = get_or_create_settings(team)
+    payload = %{alerts_muted: settings.alerts_enabled == false}
 
-    settings
-    |> channels_for_event("test")
-    |> Enum.filter(fn cfg -> is_nil(channel_type) or cfg.type == channel_type end)
-    |> Enum.each(&enqueue_channel(settings.team_id, &1, "test", %{}))
+    queued =
+      settings
+      |> channels_for_event("test")
+      |> Enum.filter(fn cfg -> is_nil(channel_type) or cfg.type == channel_type end)
+      |> Enum.count(fn cfg ->
+        match?({:ok, _}, enqueue_channel(settings.team_id, cfg, "test", payload))
+      end)
 
-    :ok
+    {:ok, queued}
   end
 
   @doc """
@@ -879,8 +933,24 @@ defmodule BarkparkCloud.Notifications do
   defp enqueue_chat(%EmailSettings{alerts_enabled: false}, _event, _payload), do: :ok
 
   defp enqueue_chat(%EmailSettings{} = settings, event, payload) do
-    for cfg <- channels_for_event(settings, event) do
-      enqueue_channel(settings.team_id, cfg, event, payload)
+    selected = channels_for_event(settings, event)
+
+    failed =
+      Enum.count(selected, fn cfg ->
+        not match?({:ok, _}, enqueue_channel(settings.team_id, cfg, event, payload))
+      end)
+
+    # cch-w32-s1: a decided-but-never-enqueued notification reaches nobody, with
+    # no delivery row and (until now) no log at all — the enqueue result was
+    # discarded inside a bare `for`. `enqueue_channel/4` logs each failure with
+    # its team/channel/event; this second line states the SHAPE of the fan-out,
+    # so "3 channels selected, 1 never enqueued" is readable as one fact rather
+    # than reconstructed from three scattered lines.
+    if failed > 0 do
+      Logger.error(
+        "Notifications: chat fan-out for #{event} enqueued " <>
+          "#{length(selected) - failed}/#{length(selected)} channels (team #{settings.team_id})"
+      )
     end
 
     :ok
@@ -888,10 +958,33 @@ defmodule BarkparkCloud.Notifications do
 
   # Enqueue one channel's delivery. Args are JSON-safe (no plaintext creds — the
   # worker reloads + decrypts the channel by type at perform time).
+  #
+  # Returns `{:ok, job}` / `{:error, reason}` so every caller can ACCOUNT for the
+  # insert. It used to end `|> Oban.insert()` inside a bare `for` with the result
+  # dropped on the floor, which made a failed insert indistinguishable from a
+  # delivered notification at every level above it.
   defp enqueue_channel(team_id, %ChannelConfig{type: type}, event, payload) do
     %{team_id: team_id, channel_type: type, event: event, payload: json_safe(payload)}
     |> ChatNotificationWorker.new()
     |> Oban.insert()
+    |> case do
+      {:ok, %Oban.Job{}} = ok ->
+        ok
+
+      other ->
+        reason =
+          case other do
+            {:error, reason} -> reason
+            other -> other
+          end
+
+        Logger.error(
+          "Notifications: chat enqueue FAILED for team #{team_id} channel #{type} " <>
+            "event #{event}: #{inspect(reason)}"
+        )
+
+        {:error, reason}
+    end
   end
 
   # dispatch_event payloads carry atom keys/values; Oban args must be JSON-safe.

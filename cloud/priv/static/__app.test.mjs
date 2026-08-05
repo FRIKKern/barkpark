@@ -12280,8 +12280,16 @@ test("cch-w30-s1: trial_expiring is DISCLOSED as an always-send row, never faked
   // It is dispatched in production (workers/trial_expiry_worker.ex) and sat on
   // @always_send with no column, no row and no way to see it. Now it is stated.
   assert.match(html, /Trial ending/, "the always-send trial alert is named on the surface");
-  assert.match(html, /Always sent — no per-event toggle; mutable only via the master email switch/,
-    "…and the row states the ONLY control that governs it");
+  // cch-w32-s1: the row's sentence used to say "mutable only via the master
+  // EMAIL switch" — true of a rail that reached email only, and it reached email
+  // only because the chat routing never selected a channel for it. Now it fans
+  // to chat too (@chat_always_send, D359), so the row says what it does.
+  assert.match(html, /Always sent to every enabled channel — email and chat alike/,
+    "the row states the rail it actually rides");
+  assert.match(html, /silenced only by the master alerts switch above/,
+    "…and the ONLY control that governs it");
+  assert.doesNotMatch(html, /master email switch/,
+    "the email-only description is the thing this wave fixed — it must not survive");
   assert.doesNotMatch(html, /data-event="trial_expiring"/,
     "an always-send event must never render a checkbox the server would ignore");
 });
@@ -12460,6 +12468,177 @@ test("cch-w30-s1 census: the string-shaped `test` counts, and billing.ex's decoy
   }
 });
 
+// ── cch-w32-s1 — SIDE C: THE CHAT-VOCABULARY CENSUS ─────────────────────────
+//
+// Sides A and B answer "does the console and the control plane agree about
+// which alerts EXIST". Side C answers the question that let a Slack-only team
+// go un-told that its trial ended and its instance was torn down: of the events
+// that exist, which ones can actually REACH a chat channel, and does each of
+// those have something honest to say when it gets there?
+//
+// THE D341 CARVE-OUT, STATED BECAUSE THE CHARTER REQUIRES IT. D341 ends "A
+// reviewer who sees an `.ex` file on side A must reject the diff" — side A is
+// the JAVASCRIPT on purpose, because an Elixir-vs-Elixir census is provably
+// blind to a console-only lie. Side C is `.ex`-vs-`.ex` BY NECESSITY: the chat
+// routing vocabulary and the render arms exist nowhere but Elixir, and there is
+// no console literal to compare them against. It ADDS a third side; it does not
+// replace or weaken either JS-sided arm, both of which still run above.
+//
+// TWO LIMITS, WRITTEN DOWN RATHER THAN OVER-CLAIMED:
+//   (i)  arm C1 is only as complete as the four producer idioms side B parses.
+//        `Push.enqueue_chat_blocked_fanout/2` emits `"event" => "chat_blocked"`
+//        through a FIFTH idiom none of them sees — it is named in the consent
+//        list below WITH its reason, and that consent is itself checked, so it
+//        cannot quietly outlive its subject.
+//   (ii) arm C2 checks that a NAMED render arm EXISTS, not that it says
+//        anything true. A one-line stub satisfies it. What it forecloses is the
+//        silent fall-through to the generic `Event: <name> for <site>.` at
+//        `:info` — which is how a teardown warning would have shipped GREEN in
+//        Discord.
+//
+// No AST (charter D45). Regex over source, the same instrument class as sides A
+// and B.
+const CLOUD_NOTIF_EX = path.join(CLOUD_LIB_DIR, "barkpark_cloud/notifications.ex");
+const CLOUD_RENDER_EX = path.join(CLOUD_LIB_DIR, "barkpark_cloud/notifications/render.ex");
+const CLOUD_EMAIL_SETTINGS_EX = path.join(CLOUD_LIB_DIR, "barkpark_cloud/notifications/email_settings.ex");
+const CLOUD_PUSH_EX = path.join(CLOUD_LIB_DIR, "barkpark_cloud/push.ex");
+
+// Events reachable through a producer idiom that are NOT part of the chat
+// universe, each with the reason it is out. A NAMED list: an unexplained
+// exclusion is how a census quietly stops measuring the thing it was built for.
+const NOTIF_CHAT_UNIVERSE_CONSENT = [
+  {
+    event: "chat_blocked",
+    file: "cloud/lib/barkpark_cloud/push.ex",
+    // The MOBILE PUSH rail, not the team-chat rail: it fans a verified
+    // instance-side webhook to a team's registered DEVICE tokens through
+    // PushDeliveryWorker, never to Slack/Discord/Telegram/Pushover/webhook
+    // channels, and it never consults `event_routes` or `Render.render/2`.
+    reason: "mobile push fan-out (PushDeliveryWorker), not a chat channel event",
+  },
+];
+
+// A `~w(...)` module attribute, across however many lines it wraps. The `a`
+// sigil modifier (atoms) is accepted and stripped — `@events ~w(…)a` and
+// `@chat_always_send ~w(…)` are the same shape to a reader and must be to this.
+function elixirWordAttr(src, name) {
+  const m = new RegExp(`@${name}\\s+~w\\(([^)]*)\\)a?`).exec(src);
+  assert.ok(m, `${name} must still be a ~w() attribute — the parser went blind`);
+  return m[1].split(/\s+/).filter(Boolean);
+}
+
+// THE DERIVED CHAT VOCABULARY = `@chat_events` ∪ `@chat_always_send`.
+//
+// `@chat_events` is parsed THROUGH ITS DERIVATION, never as a re-typed copy:
+// the source says `Enum.map(EmailSettings.events(), &Atom.to_string/1) ++
+// ["test"]`, so this reads `EmailSettings.@events` and appends the literal
+// tail. A re-typed copy would drift from the schema the moment a column landed,
+// and the assertion below is what refuses one.
+//
+// The UNION half is not a convenience either: `trial_expiring` reaches chat
+// through `@chat_always_send` ALONE (charter D359 — it takes no route, so it is
+// deliberately absent from `@chat_events`). A census that parsed `@chat_events`
+// alone would red on the CORRECT tree, which is the worst failure a guard has.
+function chatVocabulary() {
+  const notifSrc = fs.readFileSync(CLOUD_NOTIF_EX, "utf8");
+  const settingsSrc = fs.readFileSync(CLOUD_EMAIL_SETTINGS_EX, "utf8");
+
+  const derivation = /@chat_events\s+Enum\.map\(EmailSettings\.events\(\),\s*&Atom\.to_string\/1\)\s*\+\+\s*\[([^\]]*)\]/
+    .exec(notifSrc);
+  assert.ok(derivation,
+    "@chat_events must still be DERIVED from EmailSettings.events/0 — if it became a " +
+    "re-typed literal, this census would be comparing a copy against itself");
+
+  const tail = [...derivation[1].matchAll(/"([a-z_]+)"/g)].map((m) => m[1]);
+  const events = elixirWordAttr(settingsSrc, "events");
+  const alwaysSend = elixirWordAttr(notifSrc, "chat_always_send");
+  const defaultOn = elixirWordAttr(notifSrc, "chat_default_on");
+
+  return {
+    events,
+    tail,
+    alwaysSend,
+    defaultOn,
+    vocabulary: new Set([...events, ...tail, ...alwaysSend]),
+  };
+}
+
+// The NAMED arms of `Render.render/2` — the quoted `case event do` clauses only.
+// Scoped to that case block so an unrelated string match elsewhere in the file
+// cannot invent an arm, and the trailing `other ->` catch-all is excluded by
+// shape (it carries no quotes) rather than by name.
+function renderArms() {
+  const src = fs.readFileSync(CLOUD_RENDER_EX, "utf8");
+  const start = src.indexOf("case event do");
+  assert.ok(start > 0, "render.ex must still dispatch on `case event do`");
+  const body = src.slice(start);
+  const end = body.search(/\n\s{6}other\s*->/);
+  assert.ok(end > 0, "render.ex must still carry a catch-all arm — its absence would crash on a new event");
+  return [...body.slice(0, end).matchAll(/^\s{6}"([a-z_]+)"\s*->/gm)].map((m) => m[1]);
+}
+
+test("cch-w32-s1 census: side C parses the chat vocabulary out of its DERIVATION", () => {
+  const { events, tail, alwaysSend, defaultOn, vocabulary } = chatVocabulary();
+  const arms = renderArms();
+  console.log("chat vocabulary:", [...vocabulary].sort().join(" "));
+  console.log("render arms:", arms.slice().sort().join(" "));
+  // Parse-blindness floors — lower bounds, never population pins. A regex that
+  // stopped matching would otherwise make every arm below vacuously true: an
+  // empty vocabulary has no unrendered names and no stray routing entries.
+  assert.ok(events.length >= 6, `EmailSettings.@events parsed ${events.length} names — the parser went blind`);
+  assert.ok(tail.length >= 1, `the @chat_events tail parsed ${tail.length} names — the parser went blind`);
+  assert.ok(alwaysSend.length >= 1, `@chat_always_send parsed ${alwaysSend.length} names — the parser went blind`);
+  assert.ok(defaultOn.length >= 4, `@chat_default_on parsed ${defaultOn.length} names — the parser went blind`);
+  assert.ok(arms.length >= 6, `render.ex parsed ${arms.length} named arms — the parser went blind`);
+  assert.ok(vocabulary.has("provision_failed"),
+    "the derivation chain (notifications.ex → EmailSettings.@events) must reach the real schema names");
+});
+
+test("cch-w32-s1 census ARM (C1): every chat-reachable producer is in the chat vocabulary", () => {
+  const { sites } = notifProducerCensus();
+  const { vocabulary } = chatVocabulary();
+  const consented = new Set(NOTIF_CHAT_UNIVERSE_CONSENT.map((c) => c.event));
+  const unreachable = [...sites.keys()].filter((ev) => !vocabulary.has(ev) && !consented.has(ev)).sort();
+  assert.deepEqual(unreachable, [],
+    "cloud/lib dispatches an event that can NEVER reach a chat channel — a Slack-only " +
+    "team is simply never told. Add it to @chat_events (routable) or @chat_always_send " +
+    "(unconditional), or name it in NOTIF_CHAT_UNIVERSE_CONSENT with the reason it is " +
+    "out of the chat universe (this is the arm that caught trial_expiring)");
+});
+
+test("cch-w32-s1 census ARM (C2): every name in the chat vocabulary has a NAMED render arm", () => {
+  const { vocabulary } = chatVocabulary();
+  const arms = new Set(renderArms());
+  const generic = [...vocabulary].filter((ev) => !arms.has(ev)).sort();
+  assert.deepEqual(generic, [],
+    "a chat-reachable event falls through to render.ex's catch-all, which ships " +
+    '"Event: <name> for <site>." at :info — Discord renders that GREEN, so a teardown ' +
+    "warning would arrive looking like good news. Give it a named arm");
+});
+
+test("cch-w32-s1 census ARM (C3): the routing sets are subsets of the vocabulary", () => {
+  const { vocabulary, alwaysSend, defaultOn } = chatVocabulary();
+  const strays = [...new Set([...alwaysSend, ...defaultOn])].filter((ev) => !vocabulary.has(ev)).sort();
+  assert.deepEqual(strays, [],
+    "@chat_default_on / @chat_always_send name an event outside the chat vocabulary — " +
+    "a routing rule for a name nothing else knows about is a rule that fires for nobody");
+});
+
+test("cch-w32-s1 census: the consent list still describes something real", () => {
+  for (const c of NOTIF_CHAT_UNIVERSE_CONSENT) {
+    const src = fs.readFileSync(path.join(REPO_ROOT, c.file), "utf8");
+    assert.ok(new RegExp(`"event"\\s*=>\\s*"${c.event}"`).test(src),
+      `${c.file} no longer emits "${c.event}" — the consent entry outlived its subject. ` +
+      "Delete it: a standing exclusion nobody re-reads is how a census stops measuring");
+    assert.ok(c.reason && c.reason.length > 20, `${c.event} must carry a REASON, not a bare name`);
+  }
+  // The fifth idiom is invisible to side B's four regexes BY DESIGN, and this is
+  // where that is stated. If it ever became visible, C1 would red on it and the
+  // consent list is what answers.
+  assert.ok(NOTIF_CHAT_UNIVERSE_CONSENT.some((c) => c.event === "chat_blocked"),
+    "push.ex's chat_blocked fan-out is the fifth producer idiom — it must be named somewhere");
+});
+
 // ── email section + page composition (GR33 plain-member law) ─────────────────
 
 test("G-04 notifEmailSectionHtml: admin gets a save-row + seg; member is read-only", () => {
@@ -12476,6 +12655,83 @@ test("G-04 notifEmailSectionHtml: admin gets a save-row + seg; member is read-on
   assert.doesNotMatch(member, /notif-email-save/, "member email section has NO save button");
   assert.doesNotMatch(member, /form-input/, "member email section has NO inputs");
   assert.match(member, /a@acme\.com/, "the read-only view still shows the value");
+});
+
+// ── cch-w32-s1: the master switch names the rail it actually governs ─────────
+//
+// `alerts_enabled` was rendered as "Email alerts" in BOTH places — the member
+// read-only <dd> and the admin checkbox label — while `enqueue_chat/3`'s
+// `alerts_enabled: false` clause silently kills Slack, Discord, Telegram,
+// Pushover and every webhook as well. Two copies, one lie, pinned in both
+// directions so a half-fix (one copy corrected, one left) reds.
+test("cch-w32-s1: the alerts switch is described as governing email AND chat, in both copies", () => {
+  const s = { transport: "instance", alerts_enabled: true, from_address: "a@acme.com" };
+
+  const member = hooks.notifEmailSectionHtml(s, false);
+  assert.match(member, /All alerts \(email and chat\)/,
+    "the member view names the whole rail the switch governs");
+  assert.doesNotMatch(member, /<dt>Email alerts<\/dt>/,
+    "the email-only label is the defect — it must not survive in the member view");
+
+  const admin = hooks.notifEmailSectionHtml(s, true);
+  assert.match(admin, /All alerts enabled \(email and chat channels\)/,
+    "the admin checkbox names the whole rail too");
+  assert.doesNotMatch(admin, /Email alerts enabled/,
+    "the email-only label must not survive in the admin form either");
+
+  // Still the same switch, still round-tripping the same boolean — the copy
+  // changed, the control did not.
+  assert.match(admin, /id="notif-alerts"[^>]* checked/, "an enabled team's box is checked");
+  assert.doesNotMatch(
+    hooks.notifEmailSectionHtml({ alerts_enabled: false }, true),
+    /id="notif-alerts"[^>]* checked/,
+    "a muted team's box is not");
+});
+
+// ── cch-w32-s1: the test button stops answering yes when the answer is no ────
+//
+// `sendChatTest` said "Test queued / Sent to <type>." on ANY 2xx. The server
+// reached zero channels in three measured ways (no channels; only a disabled
+// channel; a channel_type matching nothing) and still returned 202, so the
+// toast named a destination that received nothing. `queued` is now the count.
+test("cch-w32-s1 notifChatTestToast: a zero-reach fan-out names no destination", () => {
+  const t = hooks.notifChatTestToast({ ok: true, status: 202, data: { ok: true, queued: 0 } }, "slack", true);
+  assert.equal(t.kind, "info");
+  assert.doesNotMatch(t.title + " " + t.body, /slack/i,
+    "nothing was sent to slack, so the toast must not say slack");
+  assert.match(t.body, /nothing was queued/i, "it says what actually happened");
+});
+
+test("cch-w32-s1 notifChatTestToast: a real fan-out still names where it went", () => {
+  const one = hooks.notifChatTestToast({ ok: true, status: 202, data: { queued: 1 } }, "discord", true);
+  assert.equal(one.kind, "success");
+  assert.match(one.body, /Sent to discord\./);
+
+  const many = hooks.notifChatTestToast({ ok: true, status: 202, data: { queued: 3 } }, null, true);
+  assert.match(many.body, /Sent to 3 channels\./,
+    "a fan-out to every channel reports the count, not a single type it did not target");
+});
+
+test("cch-w32-s1 notifChatTestToast: a muted team is told the test proves the channel, not the alerts", () => {
+  const t = hooks.notifChatTestToast({ ok: true, status: 202, data: { queued: 1 } }, "slack", false);
+  assert.equal(t.kind, "success", "the test really did fire — it is a transport probe, not a policy probe");
+  assert.match(t.body, /Sent to slack\./);
+  assert.match(t.body, /Alerts are switched off/,
+    "…and the button whose job is answering 'will I be told?' discloses that the answer is no");
+
+  const zero = hooks.notifChatTestToast({ ok: true, status: 202, data: { queued: 0 } }, "slack", false);
+  assert.match(zero.body, /Alerts are switched off/, "the disclosure survives the zero-reach case too");
+});
+
+test("cch-w32-s1 notifChatTestToast: a non-2xx is still an honest error", () => {
+  const t = hooks.notifChatTestToast({ ok: false, status: 429, data: { error: "rate_limited" } }, "slack", true);
+  assert.equal(t.kind, "error");
+  assert.match(t.title, /Couldn't send test/);
+  // An older server that has not learned `queued` yet must not be reported as a
+  // zero-reach: an absent count is unknown, not zero.
+  const legacy = hooks.notifChatTestToast({ ok: true, status: 202, data: { ok: true } }, "slack", true);
+  assert.equal(legacy.kind, "success");
+  assert.match(legacy.body, /Sent to slack\./);
 });
 
 test("G-04 notifPageHtml: admin composes every section; member gets read-only + honest notice", () => {
