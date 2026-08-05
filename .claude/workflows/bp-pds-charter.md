@@ -9892,6 +9892,29 @@ finds the epic's own instrument inside it.
   under-reports 100 % while exiting clean. `ugrep` is not installed on this host at all, so the
   digest's "4 instead of 98" could not be reproduced; the disease is the same and the instance is
   stronger. **Every census this epic ships must state the engine it was measured with.**
+- **PDS-D448b — FIVE OF D448'S EIGHT LITERALS ARE AMENDED, RE-DERIVED BY RUN, AND THE CENSUS NOW
+  REFUSES THE NEXT DRIFT** (wave 47, `pds-w47-d448-drift-refuses`, executing PDS-D678). D448's figures
+  above are KEPT as the wave-33 record and are not repealed; what follows is the same eight quantities
+  re-taken today, and it is the baseline `scripts/pds-elixir-receipt-census.exs` now enforces
+  (`@rederived`, arm `D448-DRIFT-REFUSES`, exit 1 on any mismatch — it printed `advisory — printed,
+  never enforced` for four waves while five rows read DRIFT on every run).
+  **COMMAND** — `elixir scripts/pds-elixir-receipt-census.exs`, run from the repo root, rc=0,
+  `CENSUS OK`, at tree `49345a98c`, 2026-08-04.
+  **LENS** (PDS-D448a — quote the lens with the number or the number lies): build-free AST
+  (`Code.string_to_quoted`), substring counting via `:binary.matches/2` and NO regex engine, route
+  depth `@max_depth` = 6, `transaction` NOT a write verb (PDS wave 34), corpus `api/lib/**/*.ex` = 804
+  files. **ENGINE**: Elixir 1.19.5 · Erlang/OTP 28 (erts 16.3.1) · aarch64-apple-darwin24.6.0
+  (printed live by the run, never transcribed).
+  **THE AMENDED FIGURES**: textual **103 → 104**, phantom **8 → 9** (same lens, the tree moved; the
+  pair still partitions — `LENS-LOSES-NOTHING` proves 104 == ast 95 + phantom 9), write-routed
+  **64 → 54**, read-routed **17 → 14**, unrouted **10 → 23**. **The write/read/unrouted trio is NOT
+  tree drift — it is a DIFFERENT LENS**, and the census measures it: the depth sweep prints 54/14/23 at
+  depth 6 and IDENTICALLY at 7, 8, 9, 10, 12 (the route relation's closure), while 64/17/10 appears at
+  no depth in that table. D448's `64 write / 17 read / 10 unrouted` is what a deeper (or hand-followed)
+  route sees; both are honest and neither may be quoted without its lens. **UNCHANGED, AND NOT TO BE
+  WIDENED**: ast-literal **95**, consumer **4**, emitted **91** read `==` in the same run and are
+  carried across untouched — the census derives the 5-re-derived / 3-inherited split at runtime and
+  prints it, so widening one to match the other shrinks a printed number instead of hiding in prose.
 - **PDS-D449 — THE GO APPARATUS PORTS IN FOUR ARMS AND BREAKS IN THE FIFTH, AND THE BREAK IS
   ARCHITECTURAL, NOT SYNTACTIC.** Answered by PORTING AND RUNNING, as the wish demanded, not by
   reasoning. Arms A1–A4 port: `Code.string_to_quoted` is build-free, needs no mix project and dodges
