@@ -2928,8 +2928,20 @@
 
   // The semantic tone of a delivery — sent→ok, failed→danger, pending→info, with
   // an http_status override (2xx→ok, 4xx/5xx→danger) mirroring the webhook grammar.
+  //
+  // suppressed→muted (wave 32 S2): a withheld alert is neither in flight nor a
+  // transport failure, and rendering it as either is the lie this row exists to
+  // end — "Pending"/info reads "still on its way" for something that was thrown
+  // away, "danger" blames a destination that was never contacted. `--muted` has
+  // no rule of its own on purpose: the base `.wh-del-status` pill IS the neutral
+  // treatment, so this needs no new CSS and cannot drift from one.
+  //
+  // The status branch is checked BEFORE the http_status override for suppressed
+  // rows only in effect — nothing ever writes an http_status on a row it did not
+  // send, so the ordering below is left byte-identical for every other status.
   function notifDeliveryTone(d) {
     d = d || {};
+    if (String(d.status || "").toLowerCase() === "suppressed") return "muted";
     if (d.http_status != null) {
       var code = Number(d.http_status);
       if (code >= 200 && code < 300) return "ok";
@@ -2943,9 +2955,11 @@
   }
 
   // The status-pill label: an http_status reads "200 OK" / "HTTP 500"; otherwise
-  // the capitalized delivery status (pending|sent|failed).
+  // the capitalized delivery status (pending|sent|failed|suppressed). "Withheld"
+  // is the word a person understands — "Suppressed" is our jargon for it.
   function notifDeliveryStatusLabel(d) {
     d = d || {};
+    if (String(d.status || "").toLowerCase() === "suppressed") return "Withheld";
     if (d.http_status != null) {
       var n = Number(d.http_status);
       return (n >= 200 && n < 300) ? n + " OK" : "HTTP " + n;
@@ -3151,11 +3165,16 @@
     { value: "pushover", label: "Pushover" },
     { value: "webhook", label: "Webhook" }
   ];
+  // The status axis IS the server's `Delivery.@statuses`, in reading order, plus
+  // the null "any". `suppressed` renders as "Withheld" here for the same reason
+  // the pill does — the chip and the pill must say the same word or the filter
+  // reads as a different concept from the row it finds.
   var NOTIF_DELIVERY_STATUSES = [
     { value: null, label: "Any result" },
     { value: "sent", label: "Sent" },
     { value: "failed", label: "Failed" },
-    { value: "pending", label: "Pending" }
+    { value: "pending", label: "Pending" },
+    { value: "suppressed", label: "Withheld" }
   ];
   var notifDeliveryFilter = { channel: null, status: null, event: null };
   var notifDeliveryRows = null; // the accumulated FILTERED page list
@@ -20031,6 +20050,12 @@
       notifDeliveryFiltersHtml: notifDeliveryFiltersHtml, notifDeliveryChipHtml: notifDeliveryChipHtml,
       notifDeliveriesBodyHtml: notifDeliveriesBodyHtml, notifDeliveryFilterState: notifDeliveryFilter,
       notifDeliveryPage: NOTIF_DELIVERY_PAGE,
+      // wave 32 S2: the status axis, exported so a test can pin it by EQUALITY
+      // against the server's `Delivery.statuses/0`. An inclusion loop (what the
+      // harness had) is green in both drift directions and pins nothing.
+      notifDeliveryStatusValues: NOTIF_DELIVERY_STATUSES
+        .map(function (s) { return s.value; })
+        .filter(function (v) { return v != null; }),
       notifMemberAdminNoticeHtml: notifMemberAdminNoticeHtml, notifPageHtml: notifPageHtml,
       // MVP-0 Personal Dev Fleet (PDF-D84/D87/D88/D92): the fleet card, the
       // add-support flow, the SUPPORT step vocabulary (additive — the SERVER

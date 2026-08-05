@@ -28,6 +28,7 @@ defmodule BarkparkCloud.Registry do
   alias BarkparkCloud.Billing
   alias BarkparkCloud.Billing.Subscription
   alias BarkparkCloud.Notifications
+  alias BarkparkCloud.Notifications.Withhold
 
   alias BarkparkCloud.Registry.{
     AgentEvent,
@@ -6716,13 +6717,43 @@ defmodule BarkparkCloud.Registry do
     Enum.each(send_now, fn {site_id, reason} -> dispatch_deployment_failed(site_id, reason) end)
 
     if dropped != [] do
+      # The Logger line stays — operators read logs during an incident — but it is
+      # no longer the ONLY trace. Wave 32 S2: the cap decided, on the owner's
+      # behalf, that they would not hear about their own failed deployment, and
+      # that decision is now a `suppressed` row on the delivery log they can read.
       Logger.warning(
         "reap_stale_deployments: #{length(dropped)} deployment_failed alerts suppressed " <>
           "(cap #{@reap_alert_cap}/sweep); the rows are terminal in the console"
       )
+
+      record_withheld_reap_alerts(dropped)
     end
 
     :ok
+  end
+
+  # Site → team is OURS to resolve (a Deployment only `belongs_to :site`), so the
+  # hop happens here and `Notifications.Withhold` receives an already-resolved
+  # team_id. One batched lookup, not one per dropped alert — a mass reap is
+  # exactly the moment not to fire N queries. A since-deleted site simply has no
+  # team and drops out of the map.
+  defp record_withheld_reap_alerts(dropped) do
+    site_ids = dropped |> Enum.map(fn {site_id, _reason} -> site_id end) |> Enum.uniq()
+
+    teams_by_site =
+      from(s in Site, where: s.id in ^site_ids, select: {s.id, s.team_id})
+      |> Repo.all()
+      |> Map.new()
+
+    Enum.each(dropped, fn {site_id, _reason} ->
+      case Map.get(teams_by_site, site_id) do
+        team_id when is_binary(team_id) ->
+          Withhold.record(team_id, "deployment_failed", :reap_alert_cap)
+
+        _absent ->
+          :ok
+      end
+    end)
   end
 
   # Guard a :binary_id PK lookup: a non-UUID id (a malformed path param) makes

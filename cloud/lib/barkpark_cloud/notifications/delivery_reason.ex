@@ -44,9 +44,16 @@ defmodule BarkparkCloud.Notifications.DeliveryReason do
   The raw term still goes to `Logger` at the call sites — operator
   debuggability is not the thing we are taking away, PUBLICATION is.
 
-  `classes/0` is the exported vocabulary: other surfaces (the suppressed /
-  withheld reasons in wave 31 S7) name their reasons from THIS list so the
-  console never grows a second, drifting set of failure words.
+  `classes/0` is the exported vocabulary of FAILURE — every one of its nine
+  labels describes a send that was ATTEMPTED and did not arrive ("The destination
+  refused the connection", "The destination did not respond in time").
+
+  CORRECTION (wave 32 S2): an earlier draft of this doc claimed the suppressed /
+  withheld reasons would name themselves from THIS list. They cannot — nothing
+  here can honestly say "we never tried". `status: "suppressed"` rows draw on
+  `Notifications.Withhold`'s own small vocabulary instead, and
+  `Delivery.changeset/2` clamps `last_error` to the UNION of the two sets in one
+  place, so the console still cannot grow a third, drifting set of words.
   """
 
   @classes [

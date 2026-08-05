@@ -9,14 +9,31 @@ defmodule BarkparkCloud.Notifications.Delivery do
   v1 sends synchronously and stamps `status` ("sent" | "failed") immediately. The
   `attempts` / `last_error` shape is the future retry seam: when cloud/ gains
   Oban a worker re-drives `status: "failed"` rows with backoff.
+
+  ## `suppressed` — the log of DECISIONS, not only of ATTEMPTS (wave 32 S2)
+
+  `pending | sent | failed` can only describe a send that was ATTEMPTED, because
+  both writers run after the transport returns. A branch that DECIDES not to send
+  — the reaper's `@reap_alert_cap` tail — was therefore unrepresentable, and the
+  26th owner of a cluster-wide incident read a log that said nothing at all.
+  `suppressed` is that fourth outcome: the alert existed, we withheld it, and the
+  row says so. It costs one word and NO migration —
+  `notification_deliveries.status` is `character varying(255)` with no CHECK and
+  no PG enum, and both `delivery_json/1` consumers project `status` verbatim.
+
+  A `suppressed` row is written by `Notifications.Withhold` ONLY, one row per
+  team member with that member's own address as `recipient`, so "was I notified?"
+  is answerable by the person who was not.
   """
   use Ecto.Schema
   import Ecto.Changeset
 
+  alias BarkparkCloud.Notifications.DeliveryReason
+
   @primary_key {:id, :binary_id, autogenerate: true}
   @foreign_key_type :binary_id
 
-  @statuses ~w(pending sent failed)
+  @statuses ~w(pending sent failed suppressed)
   @kinds ~w(alert transactional)
   # notifications-chat widened this beyond email to the chat egress channels.
   @channels ~w(email discord slack telegram pushover webhook)
@@ -62,6 +79,51 @@ defmodule BarkparkCloud.Notifications.Delivery do
     |> validate_inclusion(:status, @statuses)
     |> validate_inclusion(:kind, @kinds)
     |> validate_inclusion(:channel, @channels)
+    |> validate_publishable_last_error()
     |> assoc_constraint(:team)
   end
+
+  # `last_error` is PUBLISHED — `Web.Router.delivery_json/1` serves it to every
+  # team admin and `app.js` renders it VERBATIM — so the field is clamped to the
+  # sentences this system is willing to say out loud, and a raw transport term
+  # (which carries the SMTP relay host, see `DeliveryReason`) cannot be stored
+  # even by a caller that forgets to classify.
+  #
+  # `validate_change`, NOT `validate_inclusion`: `DeliveryReason.label({:http_status,
+  # n})` interpolates an unbounded integer family, so a flat member-of-list check
+  # would reject every real chat-failure row.
+  #
+  # TWO VOCABULARIES, named together here so they cannot drift apart:
+  #
+  #   1. FAILURE reasons — `DeliveryReason`, every arm of which describes an
+  #      attempted-and-failed send ("The destination refused the connection").
+  #   2. WITHHOLD reasons — `Notifications.Withhold`, for `status: "suppressed"`
+  #      rows, where nothing was attempted at all. None of (1) can honestly say
+  #      that, which is exactly why (2) exists as a separate set.
+  #
+  # `Withhold.labels/0` is called at RUNTIME on purpose: `Withhold` builds a
+  # `%Delivery{}` struct and so compile-depends on this module; a compile-time
+  # attribute here would close that cycle.
+  defp validate_publishable_last_error(changeset) do
+    validate_change(changeset, :last_error, fn :last_error, value ->
+      if publishable_last_error?(value) do
+        []
+      else
+        [last_error: "must be a classified delivery reason, not a raw transport term"]
+      end
+    end)
+  end
+
+  @failure_labels Enum.map(DeliveryReason.classes(), &DeliveryReason.label/1)
+  # The one unbounded arm of vocabulary (1): the integer HTTP status is the only
+  # value `DeliveryReason` ever lets escape.
+  @http_status_label ~r/^The channel rejected the message \(HTTP \d+\)\.$/
+
+  defp publishable_last_error?(value) when is_binary(value) do
+    value in @failure_labels or
+      value in BarkparkCloud.Notifications.Withhold.labels() or
+      Regex.match?(@http_status_label, value)
+  end
+
+  defp publishable_last_error?(_value), do: false
 end

@@ -12196,6 +12196,52 @@ test("G-04 notifDeliveryStatusLabel: http code → '204 OK'/'HTTP 500', else the
   assert.equal(hooks.notifDeliveryStatusLabel({ status: "pending" }), "Pending");
 });
 
+// ── wave 32 S2: `suppressed` — a WITHHELD alert, on both delivery surfaces ───
+//
+// Before this, a suppressed row rendered `wh-del-status--info` / "Pending": a
+// blue pill reading "still on its way" for an alert the reaper threw away. Both
+// the team delivery log and the operator fleet-digest card build their rows with
+// notifDeliveryRowHtml, so ONE tone/label fix covers both surfaces.
+
+test("W32-S2 a suppressed delivery reads as WITHHELD — never in-flight, never a transport failure", () => {
+  assert.equal(hooks.notifDeliveryTone({ status: "suppressed" }), "muted",
+    "info is the exact lie: it says the alert is still on its way");
+  assert.equal(hooks.notifDeliveryStatusLabel({ status: "suppressed" }), "Withheld");
+  // A withheld row was never sent, so a stray http_status must not repaint it as
+  // a destination failure — the decision outranks the transport field.
+  assert.equal(hooks.notifDeliveryTone({ status: "suppressed", http_status: 500 }), "muted");
+  assert.equal(hooks.notifDeliveryStatusLabel({ status: "suppressed", http_status: 500 }), "Withheld");
+
+  const row = hooks.notifDeliveryRowHtml({
+    recipient: "owner@acme.com", event: "deployment_failed", channel: "email",
+    status: "suppressed", attempts: 0,
+    last_error: "Withheld: too many deployment alerts in one sweep, so this one was not sent.",
+    inserted_at: "2026-08-05T10:00:00Z",
+  });
+  assert.match(row, /wh-del-status--muted/);
+  assert.match(row, /Withheld/);
+  assert.ok(!/wh-del-status--info/.test(row) && !/wh-del-status--danger/.test(row));
+  // The reason is on the row, so the person reads WHY, not just that nothing came.
+  assert.match(row, /too many deployment alerts in one sweep/);
+  // The SAME builder feeds the operator fleet-digest card, so that surface is
+  // covered by construction — this pins the shared entry point.
+  assert.equal(typeof hooks.notifDeliveryRowHtml, "function");
+});
+
+test("W32-S2 the delivery status vocabulary is pinned by EQUALITY, so drift in EITHER direction reds", () => {
+  // The counterpart pin lives in cloud/test/barkpark_cloud/notifications/withhold_test.exs
+  // (`assert Delivery.statuses() == ~w(pending sent failed suppressed)`). An
+  // INCLUSION loop — which is all this harness had — is green when the server
+  // grows a status the console cannot render AND when the console invents one
+  // the server would reject. Equality is the only shape that loses both ways.
+  assert.deepEqual([...hooks.notifDeliveryStatusValues].sort(),
+    ["failed", "pending", "sent", "suppressed"],
+    "the filter axis must be EXACTLY the server's Delivery.@statuses — no more, no less");
+  // Chip order is a reading order, not the contract; the labels are, because a
+  // chip whose word differs from the pill's reads as a different concept.
+  assert.deepEqual([...hooks.notifDeliveryStatusValues], ["sent", "failed", "pending", "suppressed"]);
+});
+
 test("G-04 notifDeliveryRowHtml: recipient + toned pill + meta + verbatim error", () => {
   const row = hooks.notifDeliveryRowHtml({
     recipient: "alerts@acme.com", event: "provision_failed", channel: "email",
@@ -12687,7 +12733,7 @@ test("GR79: the filter chips are static per-branch class literals in the shared 
   for (const v of ["email", "discord", "slack", "telegram", "pushover", "webhook"]) {
     assert.ok(html.includes('data-notif-del-value="' + v + '"'), "channel " + v + " is a real @channels member");
   }
-  for (const v of ["sent", "failed", "pending"]) {
+  for (const v of ["sent", "failed", "pending", "suppressed"]) {
     assert.ok(html.includes('data-notif-del-value="' + v + '"'), "status " + v + " is a real @statuses member");
   }
   // event is FREE TEXT server-side, so it must not be faked as a closed chip row.
