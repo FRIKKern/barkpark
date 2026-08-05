@@ -1,7 +1,7 @@
 import { DesktopOnly } from "@/components/desktop-only";
 import { GraphLanding } from "@/components/graph-landing";
 import { MapLanding } from "@/components/map-landing";
-import { fetchCorpusGraph } from "@/lib/graph";
+import { corpusStatusMarker, fetchCorpusGraph } from "@/lib/graph";
 import { fetchListings } from "@/lib/listings";
 
 /**
@@ -77,17 +77,27 @@ async function MapFinderLanding() {
 
 /** The default Barkpark docs demo: an interactive graph of the docs corpus. */
 async function GraphFinderLanding() {
-  const { nodes, edges, rootId, truncated, truncationReason } =
-    await fetchCorpusGraph();
+  const graph = await fetchCorpusGraph();
+  const { nodes, edges, rootId, truncated, truncationReason } = graph;
   // bp-doc-id HEALTH marker (content-truth): the graph's anchor node id proves
   // the SSR rendered a real corpus. `rootId` prefers the highest-degree real
   // node; fall back to the first real (non-phantom) node id. Empty corpus →
   // empty marker → the deploy gate fails closed (charter D72 / fail-closed).
   const docId = rootId ?? nodes.find((n) => !n.phantom)?.doc_id ?? "";
+  // bp-corpus-status HEALTH marker (cause-truth): emitted ONLY when the marker
+  // above is empty, naming the upstream condition that emptied it (`graph 403:
+  // …`, `graph 401: …`, `graph 0: …`, or the honest "read OK, nothing to
+  // anchor"). It does NOT rescue the deploy — bp-doc-id stays empty and
+  // `deploy/site-deploy-node.sh` still refuses to switch — it makes the refusal
+  // legible, so the recorded failure_reason names the cause, not the symptom.
+  const corpusStatus = corpusStatusMarker(graph, docId);
 
   return (
     <>
       <meta name="bp-doc-id" content={docId} />
+      {corpusStatus !== "" && (
+        <meta name="bp-corpus-status" content={corpusStatus} />
+      )}
       {/* Desktop: the graph fills the pane. The layout's <section> is a definite-
           height flex child, so `h-full` here resolves to a real pixel height —
           the renderer's canvas needs that to size itself (no layout shift). The

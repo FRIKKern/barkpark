@@ -4,6 +4,7 @@ import { DATASET } from "@/lib/config";
 import { bpAll } from "@/lib/bp-tags";
 import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
+import { corpusStatusMarkerValue } from "@/lib/markers";
 
 /**
  * The corpus graph for the landing — the one place that talks to Barkpark's
@@ -71,6 +72,27 @@ export interface CorpusGraph {
   /** Upstream truncation cause ("node_budget", "per_type_cap", or
    * "per_type_cap+node_budget"), null when not truncated. */
   truncationReason: string | null;
+  /** The upstream HTTP status when the corpus could NOT be read (0 for a
+   * network/timeout/parse failure), null when the read SUCCEEDED — including a
+   * read that succeeded and returned an empty corpus. This is the status the
+   * landing used to destroy: an unreadable corpus and an empty one both left an
+   * empty `bp-doc-id` and the deploy row could not tell them apart. */
+  upstreamStatus: number | null;
+  /** The failure in the shared shape `graph <status>: <message>` — byte-identical
+   * in wording to the astro edition's throw (`templates/astro-search-starter/
+   * src/lib/bp.ts`), so ONE classifier covers both templates. null on success. */
+  upstreamReason: string | null;
+}
+
+/** A corpus read that failed, carrying the upstream status out of the fetch
+ * layer so the degraded landing can still RECORD which condition stopped it. */
+export class CorpusUnavailableError extends Error {
+  readonly status: number;
+  constructor(status: number, message: string) {
+    super(`graph ${status}: ${message}`);
+    this.name = "CorpusUnavailableError";
+    this.status = status;
+  }
 }
 
 /* ── upstream parsing ───────────────────────────────────────────────────── */
@@ -171,9 +193,14 @@ async function rawCorpusGraph(): Promise<CorpusGraph> {
     json = (await bpFetchJson(url)) as UpstreamGraph;
   } catch (e) {
     if (e instanceof BpUpstreamError) {
-      throw new Error(`graph ${e.status}: ${humanUpstreamMessage(e)}`);
+      throw new CorpusUnavailableError(e.status, humanUpstreamMessage(e));
     }
-    throw e;
+    // Network/timeout/parse: status 0, but the message still names the cause —
+    // a row that says "graph 0: fetch failed" is legible, an empty one is not.
+    throw new CorpusUnavailableError(
+      0,
+      e instanceof Error ? e.message : String(e),
+    );
   }
 
   const nodes = (json.nodes ?? [])
@@ -191,7 +218,15 @@ async function rawCorpusGraph(): Promise<CorpusGraph> {
   const truncated = json.truncated === true;
   const truncationReason = truncated ? (str(json.truncation_reason) ?? null) : null;
 
-  return { nodes, edges, rootId: computeRootId(nodes, edges), truncated, truncationReason };
+  return {
+    nodes,
+    edges,
+    rootId: computeRootId(nodes, edges),
+    truncated,
+    truncationReason,
+    upstreamStatus: null,
+    upstreamReason: null,
+  };
 }
 
 /** Cached variant — 5-min revalidate, tagged GRAPH_TAG + the dataset `_all`
@@ -201,11 +236,30 @@ const cachedGraph = unstable_cache(rawCorpusGraph, ["corpus-graph", DATASET], {
   tags: [GRAPH_TAG, bpAll()],
 });
 
+/** Classify anything thrown out of the fetch path into (status, reason). */
+function corpusFailure(e: unknown): { status: number; reason: string } {
+  if (e instanceof CorpusUnavailableError) {
+    // `message` is already the shared `graph <status>: <message>` shape.
+    return { status: e.status, reason: e.message };
+  }
+  const msg = e instanceof Error ? e.message : String(e);
+  return { status: 0, reason: `graph 0: ${msg}` };
+}
+
 /**
  * Fetch the corpus graph for the landing. Never throws — a hard upstream
  * failure degrades to an empty graph (the landing shows the renderer's own
- * empty state rather than crashing the Server Component). The detail of any
- * failure is swallowed here on purpose: the landing is a non-critical surface.
+ * empty state rather than crashing the Server Component), because the landing
+ * is a non-critical SURFACE.
+ *
+ * It is NOT a non-critical FACT, though: the failure detail used to be
+ * destroyed here, so a build that could not read its corpus emitted an empty
+ * `bp-doc-id` and the deploy engine could only record the symptom ("marker is
+ * empty") for at least seven distinct causes — a 403 from a public-read token,
+ * a 401 with no token, a wrong host, a transient 5xx, a genuinely empty corpus,
+ * … all one illegible row. So the status is now CARRIED out of the catch on
+ * `upstreamStatus`/`upstreamReason`; the landing still degrades, the deploy row
+ * finally names the cause (see `corpusStatusMarker`).
  */
 export async function fetchCorpusGraph(): Promise<CorpusGraph> {
   try {
@@ -216,7 +270,42 @@ export async function fetchCorpusGraph(): Promise<CorpusGraph> {
     // the landing empty for the whole revalidate window; the next cache
     // revalidation re-populates from the live API once it's healthy.
     return await rawCorpusGraph();
-  } catch {
-    return { nodes: [], edges: [], rootId: null, truncated: false, truncationReason: null };
+  } catch (e) {
+    const { status, reason } = corpusFailure(e);
+    return {
+      nodes: [],
+      edges: [],
+      rootId: null,
+      truncated: false,
+      truncationReason: null,
+      upstreamStatus: status,
+      upstreamReason: reason,
+    };
   }
+}
+
+/**
+ * The value of the `bp-corpus-status` HEALTH marker — the upstream condition to
+ * RECORD when the SSR could not anchor a content document, and "" when it could
+ * (a healthy render has nothing to record).
+ *
+ * This deliberately does NOT fabricate a doc id to make HEALTH pass: the deploy
+ * gate failing closed on an empty `bp-doc-id` is the one part of this story that
+ * always behaved correctly (site-spawner D72), and it must keep refusing. All
+ * this adds is WHY it refused — `deploy/site-deploy-node.sh` reads this marker
+ * into HEALTH_DETAIL, so the recorded failure_reason distinguishes a 403 from a
+ * 401, from a wrong host, from a genuinely empty corpus.
+ *
+ * The VALUE SHAPING itself lives in `lib/markers.ts`, beside the other three
+ * deploy markers and free of `server-only` / `next/cache` — this module cannot
+ * be loaded by `node --test`, so an implementation kept here could only ever be
+ * proved by a shell fixture that hard-codes the very text it is checking. This
+ * is the thin adapter; `markers.corpusStatusMarkerValue` is the behaviour, and
+ * `lib/markers.corpus-status.test.ts` pins it.
+ */
+export function corpusStatusMarker(graph: CorpusGraph, docId: string): string {
+  return corpusStatusMarkerValue(
+    { upstreamReason: graph.upstreamReason, nodeCount: graph.nodes.length },
+    docId,
+  );
 }

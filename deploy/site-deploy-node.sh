@@ -25,8 +25,11 @@
 #          poll ITS port to a >=10s deadline (a running process, not a static
 #          file — do not trust Next's "Ready" log line, boot-to-first-200 lags),
 #          assert HTTP 200 AND bp-build-id == BUILD_ID + bp-content-rev / bp-doc-id
-#          non-empty BY VALUE (meta_value, D26). On failure: stop the just-booted
-#          slot, NEVER touch the live slot or Caddy, exit 14 (fail closed).
+#          non-empty BY VALUE (meta_value, D26). An empty bp-doc-id still REFUSES;
+#          the optional bp-corpus-status marker names the upstream condition that
+#          emptied it (403 / 401 / wrong host / genuinely empty corpus) so the
+#          recorded failure_reason is a diagnosis, not a symptom. On failure: stop
+#          the just-booted slot, NEVER touch the live slot or Caddy, exit 14.
 #   SWITCH (D66) marker-anchored per-site reverse_proxy PORT re-flip — replace the
 #          `reverse_proxy localhost:<port>` inside THIS site's Caddy marker block
 #          in place (NOT instance-deploy.sh's whole-file global sed, which was
@@ -401,10 +404,16 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     log "HEALTH: $HEALTH_DETAIL"; return 1
   fi
 
-  local got_build got_rev got_doc
+  local got_build got_rev got_doc got_corpus
   got_build="$(meta_value "$body" bp-build-id)"
   got_rev="$(meta_value "$body" bp-content-rev)"
   got_doc="$(meta_value "$body" bp-doc-id)"
+  # bp-corpus-status (cause-truth): the template emits it ONLY when it could not
+  # anchor a content document, carrying the upstream condition that stopped it
+  # ("graph 403: …", "graph 401: …", "graph 200: corpus read OK but carried 0
+  # node(s)…"). Read it BEFORE the body is deleted — it is what turns the empty
+  # bp-doc-id refusal below from a symptom into a diagnosis.
+  got_corpus="$(meta_value "$body" bp-corpus-status)"
   rm -f "$body"
   if [ "$got_build" != "$bid" ]; then
     stop_slot "$slot"
@@ -423,7 +432,16 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   fi
   if [ -z "$got_doc" ]; then
     stop_slot "$slot"
-    HEALTH_DETAIL="bp-doc-id marker is empty — the SSR rendered no content document"
+    # STILL REFUSES — fail-closed on an empty bp-doc-id is correct (D72) and is
+    # NOT relaxed here. What changes is legibility: when the build recorded WHY
+    # it could not read its corpus, that cause rides the failure_reason, so a
+    # 403 (public-read token), a 401 (no token), a wrong host and a genuinely
+    # empty corpus stop collapsing into one illegible row.
+    if [ -n "$got_corpus" ]; then
+      HEALTH_DETAIL="bp-doc-id marker is empty — the SSR could not read a content document: $got_corpus"
+    else
+      HEALTH_DETAIL="bp-doc-id marker is empty — the SSR rendered no content document (no bp-corpus-status marker: this build predates the corpus-status contract, so the upstream cause went unrecorded)"
+    fi
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
   HEALTH_DETAIL="200 + bp-build-id=$got_build bp-content-rev=$got_rev bp-doc-id=$got_doc (slot $slot :$port)"
@@ -611,8 +629,15 @@ if [ -f ./.fail-build ]; then
   echo "FATAL: 401 Unauthorized from https://guerrilla.barkpark.cloud/w/acme/p/blog — the site read token is invalid" >&2
   exit 1
 fi
-bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"
+bid="${BARKPARK_BUILD_ID:-}"; rev="${BARKPARK_CONTENT_REV:-}"; doc="doc-42"; corpus=""
 [ -f ./.lie ] && { bid=TOTALLY-WRONG; rev=""; }
+# An SSR that could NOT read its corpus: empty bp-doc-id (the gate must still
+# refuse) PLUS the bp-corpus-status marker naming the upstream condition — the
+# exact bytes templates/search-starter emits via lib/graph.corpusStatusMarker.
+[ -f ./.no-corpus ] && { doc=""; corpus="graph 403: public-read tokens may only read published public documents"; }
+# The legacy shape: empty bp-doc-id and NO status marker (a template built before
+# the corpus-status contract) — the gate must refuse AND say the cause is unknown.
+[ -f ./.no-corpus-legacy ] && { doc=""; corpus=""; }
 mkdir -p .next/standalone .next/static public
 printf '// fake next standalone server\n' > .next/standalone/server.js
 {
@@ -620,6 +645,9 @@ printf '// fake next standalone server\n' > .next/standalone/server.js
   printf '<meta name="bp-build-id" content="%s">\n' "$bid"
   printf '<meta name="bp-content-rev" content="%s">\n' "$rev"
   printf '<meta name="bp-doc-id" content="%s">\n' "$doc"
+  # Emitted ONLY when there is something to record — same conditional the
+  # template uses (a healthy render carries no bp-corpus-status at all).
+  [ -n "$corpus" ] && printf '<meta name="bp-corpus-status" content="%s">\n' "$corpus"
   printf '</head><body><h1>SSR</h1></body></html>\n'
 } > .next/standalone/index.html
 printf 'chunk\n' > .next/static/chunk.js
@@ -674,6 +702,9 @@ FAKENPM
   }
   saw()   { grep -q "^BPSTAGE name=$1 status=$2 build_id=$3" "$TD/out.log"; }
   nosaw() { ! grep -q "^BPSTAGE name=$1 " "$TD/out.log"; }
+  # "this run's log says nothing of the kind" — the negative half of a reason
+  # assertion (a diagnosis must not be invented when nothing was recorded).
+  no_log_match() { ! grep -q "$1" "$TD/out.log"; }
   cf_port() { awk -v m="BARKPARK_SITE_ROUTE:selftest" 'index($0,m){i=1} i&&match($0,/localhost:[0-9]+/){p=substr($0,RSTART+10,RLENGTH-10);print p;exit}' "$CF"; }
 
   echo "[selftest] e2e: first deploy boots slot a, gates it, arms Caddy to :A, walks six stages"
@@ -752,6 +783,36 @@ FAKENPM
   # shellcheck disable=SC2016  # $PATH must expand inside sh -c at run time, not now
   check "the just-booted bad slot is stopped" \
     sh -c '! env PATH="'"$FAKEBIN"':$PATH" systemctl is-active --quiet barkpark-site@selftest__b'
+
+  echo "[selftest] e2e: an UNREADABLE CORPUS fails HEALTH and the reason NAMES the upstream condition (403), not just the empty marker"
+  before_port="$(cf_port)"
+  : > "$SRC/.no-corpus"
+  rc="$(E2E_REV=rev-3b e2e_deploy n3b)"
+  rm -f "$SRC/.no-corpus"
+  check "unreadable-corpus build exit 14"  [ "$rc" = 14 ]
+  check "HEALTH failed"                    saw HEALTH failed n3b
+  check "the reason names the UPSTREAM 403, read out of bp-corpus-status" \
+    grep -q 'bp-doc-id marker is empty .* graph 403: public-read tokens may only read published public documents' "$TD/out.log"
+  # Dual-channel, same contract as the lying build: the cause must ride the plain
+  # human log too, because the run-level reason_tail is the copy the user sees.
+  check "the cause ALSO rides the plain human log (dual-channel)" \
+    grep -q '\[site-deploy-node .*HEALTH: bp-doc-id marker is empty .* graph 403: ' "$TD/out.log"
+  check "no SWITCH stage line at all"      nosaw SWITCH
+  check "Caddy upstream did NOT move (the gate STILL fails closed)" [ "$(cf_port)" = "$before_port" ]
+  check "the corpus-less release is purged" [ ! -d "$N_SITE/releases/n3b" ]
+
+  echo "[selftest] e2e: an empty bp-doc-id with NO status marker still refuses, and SAYS the cause went unrecorded"
+  before_port="$(cf_port)"
+  : > "$SRC/.no-corpus-legacy"
+  rc="$(E2E_REV=rev-3c e2e_deploy n3c)"
+  rm -f "$SRC/.no-corpus-legacy"
+  check "legacy empty-marker build exit 14" [ "$rc" = 14 ]
+  check "HEALTH failed"                     saw HEALTH failed n3c
+  check "the reason admits the cause is UNRECORDED (never invents one)" \
+    grep -q 'no bp-corpus-status marker: this build predates the corpus-status contract' "$TD/out.log"
+  check "it does NOT claim a 403"           no_log_match 'graph 403'
+  check "no SWITCH stage line at all"       nosaw SWITCH
+  check "Caddy upstream did NOT move"       [ "$(cf_port)" = "$before_port" ]
 
   echo "[selftest] e2e: a BUILD failure carries its 401 reason on STDOUT, exit 12, no flip"
   : > "$SRC/.fail-build"
