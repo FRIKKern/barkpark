@@ -303,4 +303,139 @@ defmodule BarkparkCloud.Web.RouterPatTest do
       assert call(:get, "/v1/barkparks", nil, read_token).status == 200
     end
   end
+
+  ## Membership changes end the team-scoped credential (cch-w30-s6)
+
+  describe "membership changes and team-scoped PATs" do
+    # An owner + a second user holding `role` on the same team, with a session
+    # for the owner and a main Barkpark to hang supports off.
+    # Returns {owner_session, team, other_user, main_barkpark}.
+    defp team_with_second_member(role) do
+      {_owner, team, owner_session} = logged_in()
+      other = user_fixture()
+      {:ok, _} = Accounts.add_member(team, other, role)
+
+      {:ok, main} =
+        Registry.register_barkpark(team, %{
+          name: "Main",
+          slug: "main-#{System.unique_integer([:positive])}"
+        })
+
+      {owner_session, team, other, main}
+    end
+
+    defp register_support(token, main) do
+      call(
+        :post,
+        "/v1/fleet/supports",
+        %{name: "Support #{System.unique_integer([:positive])}", parent_id: main.id},
+        token
+      )
+    end
+
+    test "REMOVAL kills the ex-member's team PAT on read AND write routes" do
+      {owner_session, team, other, main} = team_with_second_member("admin")
+
+      {:ok, read_token, _} =
+        Accounts.create_personal_access_token(other, team, %{name: "ro-key", abilities: ["read"]})
+
+      {:ok, deploy_token, _} =
+        Accounts.create_personal_access_token(other, team, %{
+          name: "deploy-key",
+          abilities: ["deploy"]
+        })
+
+      # Both credentials work while the membership stands.
+      assert call(:get, "/v1/barkparks", nil, read_token).status == 200
+      assert register_support(deploy_token, main).status == 201
+
+      removed =
+        call(:delete, "/v1/teams/#{team.id}/members/#{other.id}", nil, owner_session)
+
+      assert removed.status == 200
+      assert Accounts.team_role(other, team) == nil
+
+      # The modal's promise — "Ends <email>'s access to the team immediately" —
+      # is now true of the programmatic surface too. 401, not 403: the
+      # credential itself is revoked, not merely under-powered.
+      assert call(:get, "/v1/barkparks", nil, read_token).status == 401
+      assert register_support(deploy_token, main).status == 401
+    end
+
+    test "DEMOTION kills the elevated PAT but KEEPS the read PAT a member may still hold" do
+      {owner_session, team, other, main} = team_with_second_member("admin")
+
+      {:ok, deploy_token, _} =
+        Accounts.create_personal_access_token(other, team, %{
+          name: "deploy-key",
+          abilities: ["deploy"]
+        })
+
+      {:ok, read_token, _} =
+        Accounts.create_personal_access_token(other, team, %{name: "ro-key", abilities: ["read"]})
+
+      assert register_support(deploy_token, main).status == 201
+      assert call(:get, "/v1/barkparks", nil, read_token).status == 200
+
+      demoted =
+        call(
+          :patch,
+          "/v1/teams/#{team.id}/members/#{other.id}",
+          %{role: "member"},
+          owner_session
+        )
+
+      assert demoted.status == 200
+      assert decode(demoted)["member"]["role"] == "member"
+
+      # The grant they could no longer MINT is gone…
+      assert {:error, :forbidden} =
+               Accounts.create_personal_access_token(other, team, %{
+                 name: "re-mint",
+                 abilities: ["deploy"]
+               })
+
+      assert register_support(deploy_token, main).status == 401
+
+      # …and the read PAT a plain member IS entitled to hold still works.
+      # Over-revocation here would be a new defect, not a stricter fix.
+      assert call(:get, "/v1/barkparks", nil, read_token).status == 200
+    end
+
+    test "the revoke is TEAM-SCOPED: a PAT on another team survives the removal" do
+      {owner_session, team, other, main} = team_with_second_member("admin")
+
+      other_team = team_fixture()
+      {:ok, _} = Accounts.add_member(other_team, other, "admin")
+
+      {:ok, elsewhere_main} =
+        Registry.register_barkpark(other_team, %{
+          name: "Elsewhere",
+          slug: "elsewhere-#{System.unique_integer([:positive])}"
+        })
+
+      {:ok, here_token, _} =
+        Accounts.create_personal_access_token(other, team, %{
+          name: "here",
+          abilities: ["deploy"]
+        })
+
+      {:ok, elsewhere_token, _} =
+        Accounts.create_personal_access_token(other, other_team, %{
+          name: "elsewhere",
+          abilities: ["deploy"]
+        })
+
+      assert call(:delete, "/v1/teams/#{team.id}/members/#{other.id}", nil, owner_session).status ==
+               200
+
+      # The team they left is closed…
+      assert register_support(here_token, main).status == 401
+
+      # …the team they still belong to is untouched. Dropping the `team_id`
+      # clause from the revoke turns this 201 into a 401 — cross-tenant blast
+      # radius, the defect this scoping exists to avoid.
+      assert register_support(elsewhere_token, elsewhere_main).status == 201
+    end
+  end
 end

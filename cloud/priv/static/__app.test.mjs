@@ -12154,7 +12154,7 @@ test("G-04 notifCellState: a chat_default_on failure event fans to enabled chann
   // A disabled channel can't receive — off, even for a default-on event.
   assert.equal(hooks.notifCellState(s, "provision_failed", "slack").on, false);
   // A non-default event with no route is simply off.
-  assert.equal(hooks.notifCellState(s, "deployment_succeeded", "discord").on, false);
+  assert.equal(hooks.notifCellState(s, "provision_succeeded", "discord").on, false);
 });
 
 // ── notifEventChannels: the PUT /events body over the materialized set ───────
@@ -12176,7 +12176,7 @@ test("G-04 notifEventChannels: an explicitly-routed event edits its stored list"
   assert.deepEqual([...hooks.notifEventChannels(s, "deployment_failed", "slack", true)].sort(), ["discord", "slack"]);
   assert.deepEqual([...hooks.notifEventChannels(s, "deployment_failed", "discord", false)], []);
   // A non-default event with no route starts empty.
-  assert.deepEqual([...hooks.notifEventChannels(s, "member_invited", "discord", true)], ["discord"]);
+  assert.deepEqual([...hooks.notifEventChannels(s, "agent_reachable", "discord", true)], ["discord"]);
 });
 
 // ── delivery-log grammar ─────────────────────────────────────────────────────
@@ -12259,6 +12259,205 @@ test("G-04 notifMatrixSectionHtml: 6 columns, dashed defaults, honest always-sen
   assert.doesNotMatch(html, /data-event="test"/, "the test row is NOT a lying toggle");
   // A disabled/absent chat channel column is flagged off in its header.
   assert.match(html, /set-matrix-off/);
+});
+
+test("cch-w30-s1: the matrix offers SIX toggles — the three producerless ones are gone", () => {
+  const s = { channels: [], event_routes: {}, chat_default_on: [] };
+  const html = hooks.notifMatrixSectionHtml(s);
+  // Six toggle rows × six columns = 36 cells, and not one of them names an
+  // event nothing can send. A regressed row would fail the census below too;
+  // this leg is the person-facing half — what the page actually draws.
+  assert.equal((html.match(/set-matrix-cell/g) || []).length, 36, "6 events × 6 channels");
+  for (const dead of ["deployment_succeeded", "member_invited", "token_expiring"]) {
+    assert.doesNotMatch(html, new RegExp(`data-event="${dead}"`),
+      `${dead} has no producer in cloud/lib — it must not be offered as a toggle`);
+  }
+});
+
+test("cch-w30-s1: trial_expiring is DISCLOSED as an always-send row, never faked as a toggle", () => {
+  const s = { channels: [], event_routes: {}, chat_default_on: [] };
+  const html = hooks.notifMatrixSectionHtml(s);
+  // It is dispatched in production (workers/trial_expiry_worker.ex) and sat on
+  // @always_send with no column, no row and no way to see it. Now it is stated.
+  assert.match(html, /Trial ending/, "the always-send trial alert is named on the surface");
+  assert.match(html, /Always sent — no per-event toggle; mutable only via the master email switch/,
+    "…and the row states the ONLY control that governs it");
+  assert.doesNotMatch(html, /data-event="trial_expiring"/,
+    "an always-send event must never render a checkbox the server would ignore");
+});
+
+// ── cch-w30-s1 — THE BIDIRECTIONAL NOTIFICATION CENSUS ───────────────────────
+//
+// The wave's signature guard. It answers ONE question in BOTH directions:
+// does every alert the console OFFERS have something that can send it, and does
+// every alert the control plane SENDS appear on the console at all?
+//
+// SIDE A IS THE JAVASCRIPT, NOT THE ELIXIR — and that is the whole design, not
+// a convenience. The cheap variant of this guard reads `EmailSettings.@events`
+// on both sides; it was measured here and is PROVABLY BLIND to the class this
+// epic exists to kill: inject a row into app.js ALONE and an Elixir-vs-Elixir
+// census stays green, because app.js is outside its universe. A console-only
+// lie is exactly the lie a console-only census must be able to see. A reviewer
+// who finds `@events` on side A of this block should reject the diff.
+//
+// SIDE B IS THE CALL SITES, one regex per idiom, over source text. No AST
+// (charter D45: regex-over-source measured EXACT for this repo, AST valueless),
+// and no import of the Elixir vocabulary — a producer is a place that actually
+// dispatches, never a list that claims to.
+const CLOUD_LIB_DIR = path.join(REPO_ROOT, "cloud/lib");
+
+function elixirSourceFiles(dir) {
+  const out = [];
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory()) out.push(...elixirSourceFiles(full));
+    else if (ent.name.endsWith(".ex")) out.push(full);
+  }
+  return out.sort();
+}
+
+// A line that DEFINES one of these helpers, @spec's it, or merely talks about it
+// in a docstring is not a producer. Definitions are excluded by shape rather
+// than by a lookbehind on the call: the prototype's lookbehind ALSO rejected the
+// module-qualified `Notifications.dispatch_event(...)` form and would have
+// reported four confident FALSE orphans. Backticked lines are prose (e.g.
+// health/staleness_worker.ex's moduledoc quotes its own call).
+//
+// REVIEW FIX (wave 30): the exclusion is NAMED, not a blanket `^\s*defp?`. A
+// blanket def-rejection was measured blind to Elixir's most common function
+// shape — `def notify(team), do: dispatch_event(team, :quota_exceeded, %{})` —
+// and cloud/lib carries 805 one-line `def …, do:` forms, so the idiom is live,
+// not hypothetical. Mutation-proved both ways: that exact one-liner passed BOTH
+// arms under the blanket rule (a producer the census cannot see) and reds arm
+// (b) under this one. The blanket rule was worse than a miss — paired with a
+// console row it would have reported a confident FALSE ORPHAN for a producer
+// that exists. Only a definition OF one of the four idioms is skipped.
+const NOTIF_IDIOM_NAMES = "dispatch_event|dispatch_site_event|dispatch_barkpark_event|enqueue_channel";
+function isProducerLine(line) {
+  if (/^\s*#/.test(line)) return false;
+  if (/^\s*(@spec|@doc)\b/.test(line)) return false;
+  if (new RegExp(`^\\s*defp?\\s+(${NOTIF_IDIOM_NAMES})\\b`).test(line)) return false;
+  if (line.includes("`")) return false;
+  return true;
+}
+
+// The four idioms, EACH WITH ITS OWN FLOOR.
+//
+// The floor is an ANTI-BLINDNESS SENTINEL, never a population pin: it is a
+// LOWER bound set below today's count, so adding producers is free and a regex
+// that silently stopped matching reds instead of reporting a confident "0
+// orphans". Per-idiom and not aggregate on purpose — one aggregate floor stays
+// satisfied while a single idiom goes to zero, which is precisely how a census
+// keeps passing after the thing it measures moved. (An EXACT pin is the other
+// failure mode: `pds-bl-census-exact-pins-tax-growth` is the filed instance of
+// a pinned count aging into a tax on every new call site.)
+//
+// `enqueue_channel` is the STRING-shaped idiom and omitting it is worse than
+// the miss it replaces: notifications.ex sends the always-send `test` event
+// through it, so a census blind to strings would ACCUSE a working mechanism.
+const NOTIF_PRODUCER_IDIOMS = [
+  { name: "dispatch_event", floor: 2, re: /\bdispatch_event\(\s*[^,()]*,\s*:([a-z_]+)/g },
+  { name: "dispatch_site_event", floor: 1, re: /\bdispatch_site_event\(\s*[^,()]*,\s*:([a-z_]+)/g },
+  { name: "dispatch_barkpark_event", floor: 2, re: /\bdispatch_barkpark_event\(\s*[^,()]*,\s*:([a-z_]+)/g },
+  { name: "enqueue_channel", floor: 1, re: /\benqueue_channel\(\s*[^,()]*,\s*[^,()]*,\s*"([a-z_]+)"/g },
+];
+
+// {event -> [file:line …]} plus the per-idiom tally, in one walk.
+function notifProducerCensus() {
+  const sites = new Map();
+  const perIdiom = Object.fromEntries(NOTIF_PRODUCER_IDIOMS.map((i) => [i.name, 0]));
+  for (const file of elixirSourceFiles(CLOUD_LIB_DIR)) {
+    const rel = path.relative(REPO_ROOT, file);
+    const lines = fs.readFileSync(file, "utf8").split("\n");
+    lines.forEach((line, i) => {
+      if (!isProducerLine(line)) return;
+      for (const idiom of NOTIF_PRODUCER_IDIOMS) {
+        idiom.re.lastIndex = 0;
+        let m;
+        while ((m = idiom.re.exec(line)) !== null) {
+          perIdiom[idiom.name] += 1;
+          if (!sites.has(m[1])) sites.set(m[1], []);
+          sites.get(m[1]).push(`${rel}:${i + 1}`);
+        }
+      }
+    });
+  }
+  return { sites, perIdiom };
+}
+
+// Side A, parsed out of the SHIPPED javascript.
+function jsLiteralEvents(name) {
+  const block = new RegExp(`var ${name} = \\[([\\s\\S]*?)\\n  \\];`).exec(APP_SRC);
+  assert.ok(block, `${name} must still be a literal array in app.js`);
+  return [...block[1].matchAll(/\["([a-z_]+)"/g)].map((m) => m[1]);
+}
+
+test("cch-w30-s1 census: side A parses out of the JAVASCRIPT (never the Elixir)", () => {
+  const offered = jsLiteralEvents("NOTIF_EVENTS");
+  const always = jsLiteralEvents("NOTIF_ALWAYS_SEND");
+  // Parse-blindness floors: a regex that stopped matching would otherwise make
+  // both arms below vacuously true — zero offers are trivially all-producible.
+  assert.ok(offered.length >= 4, `NOTIF_EVENTS parsed ${offered.length} rows — the parser went blind`);
+  assert.ok(always.length >= 2, `NOTIF_ALWAYS_SEND parsed ${always.length} rows — the parser went blind`);
+  assert.ok(offered.includes("provision_failed") && always.includes("trial_expiring"),
+    "the parsed sets must be the real ones, not an accidental match");
+});
+
+test("cch-w30-s1 census ARM (a): every event the console OFFERS has a producer in cloud/lib", () => {
+  const { sites } = notifProducerCensus();
+  const orphans = jsLiteralEvents("NOTIF_EVENTS").filter((ev) => !sites.has(ev));
+  assert.deepEqual(orphans, [],
+    "the console offers a toggle for an event NOTHING in cloud/lib dispatches — " +
+    "either delete the row or land a producer; a checkbox is a promise");
+});
+
+test("cch-w30-s1 census ARM (b): every event the control plane SENDS appears on the console", () => {
+  const { sites } = notifProducerCensus();
+  const surfaced = new Set(jsLiteralEvents("NOTIF_EVENTS").concat(jsLiteralEvents("NOTIF_ALWAYS_SEND")));
+  const invisible = [...sites.keys()].filter((ev) => !surfaced.has(ev)).sort();
+  assert.deepEqual(invisible, [],
+    "cloud/lib dispatches an event the console never names — add a toggle row, " +
+    "or an honest NOTIF_ALWAYS_SEND row if it bypasses the per-event gate " +
+    "(this is the arm that caught trial_expiring)");
+});
+
+test("cch-w30-s1 census: each idiom carries its OWN blindness floor (a lower bound, not a pin)", () => {
+  const { perIdiom } = notifProducerCensus();
+  for (const idiom of NOTIF_PRODUCER_IDIOMS) {
+    assert.ok(perIdiom[idiom.name] >= idiom.floor,
+      `${idiom.name}: ${perIdiom[idiom.name]} call sites, floor ${idiom.floor} — ` +
+      "this idiom either vanished or the regex stopped seeing it; a census that " +
+      "sees nothing reports no orphans, which looks identical to clean");
+  }
+});
+
+test("cch-w30-s1 census: the string-shaped `test` counts, and billing.ex's decoy does not", () => {
+  const { sites } = notifProducerCensus();
+  // The evidence line — the census states what it found rather than only what
+  // it concluded, so a reader can check the verdict instead of trusting it.
+  console.log("notification producers:", [...sites.keys()].sort().join(" "));
+  assert.ok(sites.has("test"),
+    "notifications.ex enqueues the always-send `test` event as a STRING — a census " +
+    "blind to that idiom falsely accuses a mechanism that works");
+  // billing.ex defines an unrelated PRIVATE dispatch_event/2 for Stripe webhook
+  // routing that carries no event atom at all. Counting it would invent a
+  // producer for whatever word happened to follow.
+  const all = [...sites.values()].flat();
+  assert.deepEqual(all.filter((s) => s.includes("billing.ex")), [],
+    "billing.ex's same-named private helper is a decoy, not a notification producer");
+  // The definition line is DERIVED, never a hardcoded `notifications.ex:875`.
+  // A pinned ordinal decays in the SILENT direction: the file shifts, the pin
+  // stops naming the definition, and the assertion passes while measuring
+  // nothing. Locating the definition first means this stays a real question.
+  const notifSrc = fs.readFileSync(path.join(CLOUD_LIB_DIR, "barkpark_cloud/notifications.ex"), "utf8");
+  const defLines = notifSrc.split("\n")
+    .map((line, i) => (new RegExp(`^\\s*defp?\\s+(${NOTIF_IDIOM_NAMES})\\b`).test(line) ? i + 1 : 0))
+    .filter(Boolean);
+  assert.ok(defLines.length >= 1, "notifications.ex must still DEFINE at least one dispatch idiom");
+  for (const ln of defLines) {
+    assert.deepEqual(all.filter((s) => s === `cloud/lib/barkpark_cloud/notifications.ex:${ln}`), [],
+      `notifications.ex:${ln} DEFINES an idiom — a definition is not a call site`);
+  }
 });
 
 // ── email section + page composition (GR33 plain-member law) ─────────────────

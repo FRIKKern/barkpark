@@ -1615,13 +1615,20 @@ const siteStatesDomains = {
 
 // ── G-04 notifications (the crown) ───────────────────────────────────────────
 // Backend-true settings_view: transport + masked SMTP secrets ("********" when
-// set), the 9 per-event email booleans, the chat half (channels report only
+// set), the 6 per-event email booleans, the chat half (channels report only
 // {type, enabled, configured} — credentials are NEVER echoed), event_routes, and
-// the server-owned vocabulary (chat_events = 9 + "test", channel_types = the 5
+// the server-owned vocabulary (chat_events = 6 + "test", channel_types = the 5
 // ChannelConfig types, chat_default_on = the 4 failure events).
+//
+// SIX, NOT NINE (wave 30 S1). `deployment_succeeded`, `member_invited` and
+// `token_expiring` were dropped from `EmailSettings` end to end — no column, no
+// producer, no toggle. A fixture that still seeded them was claiming to be
+// backend-true while describing a backend that no longer exists, which is the
+// exact shape this wave exists to remove; `__app.test.mjs`'s bidirectional
+// census guards app.js but has no reach into this file, so it stayed green.
 const NOTIF_EVENT_KEYS = [
-  "provision_succeeded", "provision_failed", "deployment_succeeded", "deployment_failed",
-  "agent_reachable", "agent_unreachable", "subscription_past_due", "member_invited", "token_expiring",
+  "provision_succeeded", "provision_failed", "deployment_failed",
+  "agent_reachable", "agent_unreachable", "subscription_past_due",
 ];
 const NOTIF_CHAT_EVENTS = NOTIF_EVENT_KEYS.concat(["test"]);
 const NOTIF_CHANNEL_TYPES = ["discord", "slack", "telegram", "pushover", "webhook"];
@@ -1660,9 +1667,9 @@ const notifConfigured = notifSettings({
   event_routes: {
     provision_failed: ["discord", "slack"],
     deployment_failed: ["discord"],
-    deployment_succeeded: ["slack"],
+    provision_succeeded: ["slack"],
   },
-  deployment_succeeded: true, // a customized email boolean
+  provision_succeeded: true, // a customized email boolean
 });
 const notifEmpty = notifSettings({});
 // delivery_json rows: recipient/event/channel/kind/status/attempts/last_error/
@@ -1671,7 +1678,7 @@ const notifEmpty = notifSettings({});
 const notifDeliveries = [
   { id: "del_5", recipient: "alerts@acme.com", event: "provision_failed", channel: "email", kind: "alert", status: "failed", attempts: 3, last_error: "smtp 550 mailbox unavailable", http_status: null, inserted_at: tMinus(120) },
   { id: "del_4", recipient: "discord", event: "deployment_failed", channel: "discord", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: 204, inserted_at: tMinus(600) },
-  { id: "del_3", recipient: "alerts@acme.com", event: "deployment_succeeded", channel: "email", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: null, inserted_at: tMinus(4000) },
+  { id: "del_3", recipient: "alerts@acme.com", event: "provision_succeeded", channel: "email", kind: "alert", status: "sent", attempts: 1, last_error: null, http_status: null, inserted_at: tMinus(4000) },
   { id: "del_2", recipient: "slack", event: "provision_failed", channel: "slack", kind: "alert", status: "pending", attempts: 0, last_error: null, http_status: null, inserted_at: tMinus(4200) },
   { id: "del_1", recipient: "alerts@acme.com", event: "subscription_past_due", channel: "email", kind: "transactional", status: "sent", attempts: 1, last_error: null, http_status: 200, inserted_at: tMinus(90000) },
 ];

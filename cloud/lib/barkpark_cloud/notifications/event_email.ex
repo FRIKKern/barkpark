@@ -55,9 +55,6 @@ defmodule BarkparkCloud.Notifications.EventEmail do
       {"Your Barkpark failed to provision",
        "#{name(payload)} failed to provision.#{cause_then_capture(payload)}"}
 
-  defp render(:deployment_succeeded, payload),
-    do: {"Deployment succeeded", "A deployment for #{name(payload)} succeeded."}
-
   # wave 28 S6: `deployment_failed` renders through `cause_then_capture/1`, NOT
   # `detail/1`. Its `:detail` is the deployment's `failure_reason` — reaper prose
   # like "exceeded max deploy claim attempts (stale builder lease)" — which
@@ -84,12 +81,6 @@ defmodule BarkparkCloud.Notifications.EventEmail do
 
   defp render(:trial_expiring, payload),
     do: {"Your Barkpark free trial is ending soon", "#{detail(payload)}"}
-
-  defp render(:member_invited, payload),
-    do: {"A new member joined your team", "#{detail(payload)}"}
-
-  defp render(:token_expiring, payload),
-    do: {"An API token is expiring soon", "#{detail(payload)}"}
 
   defp render(event, payload),
     do: {"Barkpark Cloud notification", "Event: #{event}.#{detail(payload)}"}
