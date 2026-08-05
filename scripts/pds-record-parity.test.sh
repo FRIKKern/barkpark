@@ -169,27 +169,160 @@ printf 'fix(x): do a thing per PDS-D1 and PDS-D2\n\nfeat(y): PDS-D3\n' > "$CM_OK
 CM_BAD="$TMP/commits-bad.txt"
 printf 'fix(x): PDS-D1\n\nfeat(y): cites PDS-D777 which nothing defines\n' > "$CM_BAD"
 
+CM_HEAD="$TMP/commits-heading.txt"
+printf 'fix(z): per PDS-D404, which the charter defines as a HEADING and nothing else\n' > "$CM_HEAD"
+
 run 0 "axis A greens when every cited D resolves" -- --axis a --charter "$CH" --commits-file "$CM_OK"
-says "defined:    3 distinct PDS-D" "axis A counts only the three DEFINED forms (bullet, asterisk, bare bold)"
+says "defined:    4 distinct PDS-D" "the union lens counts BOTH definition forms — three bold leads and one own-line heading"
 says "unresolved: 0" "axis A reports zero unresolved"
 says_not "PDS-D999" "a D merely MENTIONED in charter prose is not counted as defined"
+
+# RULING 1, THE REGRESSION THAT SHIPPED SIX FALSE REDS. Before this wave the
+# gate lens was bold-lead ONLY, and the charter had grown 24 numbers (D643–D673)
+# defined as `### PDS-D### —` headings and nothing else. Six of them were cited
+# in merged commits and the arm called all six phantom citations. This fixture
+# is that exact shape: a D defined ONLY as a heading, cited by a commit.
+run 0 "a D defined ONLY as a heading RESOLVES" -- --axis a --charter "$CH" --commits-file "$CM_HEAD"
+says "unresolved: 0" "the heading-only definition resolves the citation"
+says_not "UNRESOLVED-CITATION PDS-D404" "the arm no longer manufactures a phantom citation out of its own lens"
 
 # THE RED SIDE. Without this the arm could hardcode `unresolved: 0`.
 run 1 "axis A REDS on a commit citing an undefined D" -- --axis a --charter "$CH" --commits-file "$CM_BAD"
 says "UNRESOLVED-CITATION PDS-D777" "the red names the offending citation"
 
-# RULING 1 — the heading lens is a LENS ARTIFACT, and the arm says so instead
-# of gating on it. The fixture charter defines PDS-D1/2/3 as bullets and only
-# PDS-D404 as a heading, so the heading lens loses all three real definitions.
+# The heading arm of the union must be ANCHORED at the start of the heading
+# text. A heading that merely MENTIONS a D in passing — the charter's wave
+# banners do this constantly — is a reference, not a definition, and counting it
+# would turn the repair into the opposite lie: every mentioned D "defined".
+CH_MENTION="$TMP/charter-heading-mention.md"
+cat > "$CH_MENTION" <<'EOF'
+# A charter
+
+## WAVE 46 — A TITLE THAT MENTIONS PDS-D640 IN PASSING
+
+- **PDS-D1** the only real definition here.
+EOF
+CM_MENTION="$TMP/commits-mention.txt"
+printf 'fix(x): PDS-D640\n' > "$CM_MENTION"
+run 1 "a D merely MENTIONED inside a heading is NOT defined" -- --axis a --charter "$CH_MENTION" --commits-file "$CM_MENTION"
+says "UNRESOLVED-CITATION PDS-D640" "the union lens anchors on the number at the START of the heading text"
+
+# RULING 1 — the LOOSE heading lens is a LENS ARTIFACT, and the arm says so
+# instead of gating on it. The fixture charter defines PDS-D1/2/3 as bullets and
+# only PDS-D404 as a heading, so the loose lens loses all three bullet forms.
 run 0 "--heading-lens does NOT fold its red into the exit code" -- --axis a --charter "$CH" --commits-file "$CM_OK" --heading-lens
-says "defined:    1 distinct PDS-D" "the heading lens sees only the one heading-defined D"
-says "unresolved: 3" "the heading lens reports every bullet-defined D as unresolved"
-says "LENS ARTIFACT" "the heading lens labels its own red as an artifact"
+says "defined:    1 distinct PDS-D" "the loose heading lens sees only the one heading-defined D"
+says "unresolved: 3" "the loose heading lens reports every bullet-defined D as unresolved"
+says "LENS ARTIFACT" "the loose heading lens labels its own red as an artifact"
 
 # A missing charter is UNCHECKED, never a pass — an arm that cannot read the
 # charter has resolved exactly zero citations.
 run 2 "a missing charter lands in UNCHECKED, never a silent PASS" -- --axis a --charter "$TMP/no-such-charter.md" --commits-file "$CM_OK"
 says "UNCHECKED: charter not found" "the UNCHECKED names the missing charter"
+
+echo
+
+# ══ AXIS A, UNIQUENESS LEG — one D-number, one finding ═══════════════════════
+#
+# The old definition set was `sort -u`'d, so a number defined TWICE read as
+# resolved and the arm could not have noticed if it tried: it never counted.
+# PDS-D664 names two unrelated findings on the live charter and a citation of it
+# resolved against whichever copy the sort kept — a resolution certified against
+# the wrong law.
+#
+# DELIBERATELY HERMETIC — these fixtures never read the epic's real charter.
+# The pinned baseline goes stale the moment a wave lands a new collision (the
+# mechanism recurs EVERY wave), and a stale baseline that RED A REQUIRED GATE
+# would be "fixed" by deleting the baseline within the day. Staleness is a
+# hand-run finding on purpose. What CI must protect is the arm's LOGIC, which is
+# what these fixtures pin.
+echo "AXIS A — the uniqueness leg (one D-number, one finding)"
+
+CHD="$TMP/charter-dups.md"
+cat > "$CHD" <<'EOF'
+# A charter that allocated one number twice
+
+### Wave 1 2026-01-01 — REVIEWED
+
+### PDS-D110 — THE FIRST FINDING, ALLOCATED BY THE REVIEWER.
+
+- **PDS-D111 — A SECOND, SINGLY-DEFINED FINDING.** Its body goes on to cite
+  **PDS-D111** and **PDS-D111** again, because a decision's body cites decisions.
+  A permissive grammar would score those bare bolds as re-definitions.
+
+## WAVE 2 2026-01-02 — DECIDED
+
+### PDS-D110 — A COMPLETELY UNRELATED FINDING, ALLOCATED BY THE DECIDER.
+
+- **PDS-D112 — THE ONLY DEFINITION OF ONE-TWELVE.** This entry admits it at
+  `:660` (CORRECTED, PDS-D112 — this entry read `:410-411`, which is an
+  unrelated row), an inline parenthetical that is NOT a definition.
+EOF
+
+CM_DUP="$TMP/commits-dup.txt"
+printf 'fix(x): per PDS-D110\n\nfeat(y): per PDS-D111 and PDS-D112\n' > "$CM_DUP"
+
+# THE RED SIDE FIRST: an unbaselined duplicate is DIVERGENT, by name, with both
+# lines printed. A foreign charter gets no excuses — nobody measured it.
+run 1 "an UNBASELINED duplicate definition is DIVERGENT" -- --axis a --charter "$CHD" --commits-file "$CM_DUP"
+# A NON-ZERO titled count, asserted before anything is concluded from it. The
+# grammar lives in an awk pattern, and an awk that cannot parse it (mawk before
+# 1.3.4 silently matches nothing for POSIX character classes) would report
+# `titled: 0 / duplicated: 0` and GREEN — a vacuous pass from a leg that read
+# nothing. Pinning the count makes that host a loud red instead of a quiet one.
+says "titled:     4 definitions over 3 distinct PDS-D" "the titled grammar actually PARSED the charter (a zero here would green vacuously)"
+says "duplicated: 1 number(s) defined more than once" "the leg COUNTS definitions instead of sort -u'ing them away"
+says "DUPLICATE-DEFINITION PDS-D110 :5 :13" "the duplicate is named WITH both line numbers"
+says "NOT IN THE BASELINE" "an unmeasured charter's duplicate is not excused"
+says "baseline:   NONE" "the arm says plainly that this charter carries no measured baseline"
+
+# THE FALSE-POSITIVE SIDE, which is the whole reason the uniqueness grammar is
+# STRICTER than the resolution grammar: `**PDS-D111**` inside a body is how the
+# charter CITES a decision. Counting it would have scored 65 collisions on the
+# live charter where 20 exist.
+says_not "DUPLICATE-DEFINITION PDS-D111" "a bare-bold CITATION inside a body is not a second definition"
+
+# THE D559 SHAPE, BY NAME AND NOT BY THRESHOLD: an inline parenthetical
+# `(CORRECTED …, PDS-D112 — …)` inside another decision's body. A naive
+# `PDS-D### —` grep counts it; the titled grammar does not; and the arm
+# re-derives that gap on every run and refuses to leave a member of it silent.
+says_not "DUPLICATE-DEFINITION PDS-D112" "an inline parenthetical is not a definition (the D559 shape)"
+says "UNNAMED-NAIVE-ONLY   PDS-D112" "the naive-vs-titled gap is re-derived per run and every member of it is surfaced"
+
+# THE MECHANISM IS PRINTED, not just the symptom — a reader of a future
+# duplicate has to be able to learn where duplicates come from.
+says "REVIEW block and ONE in the NEXT wave's DECIDE block" "the arm records the allocation defect, not merely its symptom"
+
+# A CITATION OF A DUPLICATED NUMBER RESOLVES TO NOTHING SINGLE, and the arm says
+# so rather than quietly picking whichever definition survived a sort.
+says "AMBIGUOUS-CITATION   PDS-D110" "a citation of a doubly-defined number is reported as ambiguous"
+says_not "AMBIGUOUS-CITATION   PDS-D111" "a singly-defined cited number is not called ambiguous"
+
+# THE GREEN SIDE: strip the second allocation and the leg goes quiet. Without
+# this the leg could be hardcoded to red on any charter at all.
+CHD_OK="$TMP/charter-dups-fixed.md"
+sed '12,13d' "$CHD" > "$CHD_OK"          # drop the decider's second allocation
+grep -c 'PDS-D110 —' "$CHD_OK" | grep -qx 1 \
+  || harness_fail "charter-dups-fixed.md must define PDS-D110 exactly once, or its green proves nothing"
+run 0 "the same charter with ONE allocation of PDS-D110 is PARITY" -- --axis a --charter "$CHD_OK" --commits-file "$CM_DUP"
+says "duplicated: 0 number(s) defined more than once" "the leg reports zero when the charter allocates each number once"
+says_not "DUPLICATE-DEFINITION" "nothing is named when nothing collides"
+
+# THE BASELINE IS TWO-SIDED. A baseline that only ever FORGIVES decays into a
+# suppression list nobody can prove still describes the corpus, so a baselined
+# pair that has VANISHED reds too, by name. The fixture is named exactly
+# `bp-pds-charter.md` because that basename is what arms the baseline.
+BLDIR="$TMP/baselined"; mkdir -p "$BLDIR"
+cat > "$BLDIR/bp-pds-charter.md" <<'EOF'
+# A charter carrying the baselined basename and none of the baselined pairs
+
+- **PDS-D1 — ONE FINDING, DEFINED ONCE.**
+EOF
+CM_BL="$TMP/commits-baselined.txt"
+printf 'fix(x): PDS-D1\n' > "$CM_BL"
+run 1 "a baselined pair that VANISHED is DIVERGENT (a stale baseline is a lie too)" -- --axis a --charter "$BLDIR/bp-pds-charter.md" --commits-file "$CM_BL"
+says "STALE-BASELINE       PDS-D399" "the stale entry is named, so the baseline can be repaired instead of guessed at"
+says "baseline:   PINNED for bp-pds-charter.md" "the baseline arms on the charter it was measured on"
 
 echo
 
@@ -534,6 +667,69 @@ if command -v gh >/dev/null 2>&1; then
       printf '      | %s\n' "$OUT" | head -10 ;;
   esac
 fi
+
+# ══ THE TWO NEW MECHANISMS, REVERTED ONE AT A TIME ═══════════════════════════
+#
+# A fixture that passes against the SHIPPED arm proves the arm passes. It does
+# not prove the arm's new code is what makes it pass — a fixture can be green
+# because the mechanism works or because the mechanism is irrelevant to it, and
+# those look identical from the outside. So each mechanism is REVERTED in a copy
+# and re-run, and the harness asserts BOTH sides:
+#   the reverted mechanism's fixture RED, and
+#   the OTHER mechanism's fixture UNCHANGED.
+# That second half is the one that matters: if reverting the heading lens also
+# moved the uniqueness verdict, the two legs would be entangled and neither
+# fixture would be evidence about the leg it names.
+echo
+echo "REVERT — each new mechanism is load-bearing, and independently so"
+
+mutant() { # mutant <dir> <sed-expr…> — a copy of the arm with one leg reverted
+  local dir="$1"; shift
+  mkdir -p "$dir/scripts"
+  sed "$@" "$ARM" > "$dir/scripts/pds-record-parity.sh"
+}
+
+# REVERT 1 — drop the heading arm of the union lens, i.e. go back to the
+# bold-lead-only lens that shipped six false reds on the live charter.
+# The heading arm carries an end-of-line `revert-marker` comment for exactly this
+# purpose: a sed pattern that tried to match the regex ITSELF would need every
+# bracket escaped twice and would silently match nothing the day the regex is
+# reformatted — which is a fixture that greens by failing to mutate. The marker
+# is asserted present BEFORE the mutant is trusted, so a deleted marker is a
+# loud FIXTURE PRECONDITION failure, never a quiet pass.
+NOHEAD="$TMP/mutant-nohead"
+mutant "$NOHEAD" '/# revert-marker: heading-arm$/d'
+if grep -q '# revert-marker: heading-arm' "$NOHEAD/scripts/pds-record-parity.sh"; then
+  harness_fail "the NOHEAD mutant still contains the heading arm — the revert did not take, so its red would prove nothing"
+else
+  run_at "$NOHEAD/scripts/pds-record-parity.sh" 1 \
+    "REVERTING the heading lens REDS the heading-only citation" -- --axis a --charter "$CH" --commits-file "$CM_HEAD"
+  says "UNRESOLVED-CITATION PDS-D404" "the reverted lens manufactures exactly the phantom citation the repair removed"
+fi
+
+# …and reverting it leaves the uniqueness verdict EXACTLY where it was.
+run_at "$NOHEAD/scripts/pds-record-parity.sh" 1 \
+  "REVERTING the heading lens does NOT disturb the uniqueness leg" -- --axis a --charter "$CHD" --commits-file "$CM_DUP"
+says "DUPLICATE-DEFINITION PDS-D110 :5 :13" "the uniqueness leg is unmoved by a resolution-lens revert"
+
+# REVERT 2 — blind the uniqueness leg the way it was blind before this wave:
+# the old code `sort -u`'d the definition set, so no count above one could ever
+# be observed. `n[k] > 1` becomes a threshold nothing can reach.
+NOUNIQ="$TMP/mutant-nouniq"
+mutant "$NOUNIQ" 's/if (n\[k\] > 1)/if (n[k] > 99999)/'
+if grep -q 'n\[k\] > 99999' "$NOUNIQ/scripts/pds-record-parity.sh"; then
+  run_at "$NOUNIQ/scripts/pds-record-parity.sh" 0 \
+    "REVERTING the uniqueness leg GREENS the duplicated charter (the old blindness)" -- --axis a --charter "$CHD" --commits-file "$CM_DUP"
+  says "duplicated: 0 number(s) defined more than once" "the blinded leg reports zero over a charter that allocates PDS-D110 twice"
+  says_not "DUPLICATE-DEFINITION" "the blinded leg names nothing — which is precisely what shipped before this wave"
+else
+  harness_fail "the NOUNIQ mutant did not take — its green would prove nothing"
+fi
+
+# …and blinding it leaves the resolution verdict EXACTLY where it was.
+run_at "$NOUNIQ/scripts/pds-record-parity.sh" 0 \
+  "REVERTING the uniqueness leg does NOT disturb the heading lens" -- --axis a --charter "$CH" --commits-file "$CM_HEAD"
+says "unresolved: 0" "the heading-only citation still resolves with the uniqueness leg blinded"
 
 # ── the arm's own hygiene ───────────────────────────────────────────────────
 echo
