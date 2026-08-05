@@ -77,7 +77,8 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
              |> Repo.insert()
 
     # The team-scoped delivery surface — the route's own reader.
-    assert [%Delivery{status: "suppressed", recipient: ^email}] = Notifications.list_deliveries(team)
+    assert [%Delivery{status: "suppressed", recipient: ^email}] =
+             Notifications.list_deliveries(team)
 
     # ...and the status filter the console's new chip sends.
     assert [%Delivery{status: "suppressed"}] =
@@ -180,7 +181,9 @@ defmodule BarkparkCloud.Notifications.WithholdTest do
   end
 
   test "an arbitrary RAW transport term is REJECTED — the leak this clamp exists to stop" do
-    raw = "{:retries_exceeded, {:network_failure, ~c\"relay.example.invalid\", {:error, :nxdomain}}}"
+    raw =
+      "{:retries_exceeded, {:network_failure, ~c\"relay.example.invalid\", {:error, :nxdomain}}}"
+
     cs = last_error_changeset(raw)
 
     refute cs.valid?

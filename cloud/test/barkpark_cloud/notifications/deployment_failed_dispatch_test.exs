@@ -237,7 +237,10 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
     m = System.unique_integer([:positive])
 
     {:ok, second} =
-      Accounts.register_user(%{email: "second-#{m}@example.com", password: "correct-horse-battery"})
+      Accounts.register_user(%{
+        email: "second-#{m}@example.com",
+        password: "correct-horse-battery"
+      })
 
     {:ok, _} = Accounts.add_member(team, second, "member")
     members = [owner.email, second.email]
