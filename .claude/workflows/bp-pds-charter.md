@@ -2576,6 +2576,80 @@ wave produced, because **no wave has ever measured this engine at all.**
 
 ## Wave log
 
+### Wave 48 2026-08-05 — REVIEWED AND PUSHED, grade A — 7 of 7 round-1 slices green, 7 PRs open (#9598–#9604), 1 round-2 slice deferred BY DESIGN (paper `pds-wave-48-2026-08-05`)
+
+**THE WAVE'S OWN HEADLINE.** Seven slices, each taking one Barkpark verb, receipt, class, gate or
+price that had stopped descending from a measurement and giving it an ending — and the wave found the
+defect class *in its own output*. Two slices, both individually correct, composed back into the exact
+lie the wave set out to kill. **All seven branches are pushed and all seven PRs are open.**
+
+**WHAT LANDED (7 PRs, all pushed, none merged — the lead merges).**
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `pds-w47-measure-and-host-axis` | `…measure-is-built-the-price-grammar-gains-0` | #9598 | The price column stops being typed. `--measure` meters a door with the `times` BUILTIN as the metering shell's final command, making D669's exec-discard trap structurally unreachable rather than avoided by a deletable no-op. Never gated, falsifiably: a depth guard refuses a meter inside a meter, and a witness makes "`--check` never invokes `--measure`" a fact a run can DISPROVE — two independent mechanisms, so one edit cannot defeat both. `LC_ALL=C` pins meter AND summer as two removable variables, and the summer is fail-closed on radix in both directions. **NO FOREIGN PRICE WAS TAKEN**, and the refusal is written into the header naming the measured citation surface. Two rows RE-METERED, not re-worded — including one that priced THREE arms while its rider ran FOUR. Selftest 33 → 43 arms. Reviewer changed nothing. |
+| `pds-bl-w47-find-event-launders-the-honest-status` | `…the-next-js-proxy-launders-the-api-s-hon-1-r` | #9599 | Two bare `await fetch(...)` expression statements discarded the Response, and fetch does not reject on 4xx/5xx, so the API's honest 422/500 was laundered into `{ok:true}` one hop out — never reaching the catch, never logged. Six exits now route through one helper, so `recorded` cannot be produced except by passing a measured value. The third lie class (parsed but no write attempted) is filed nowhere else and got its own falsifier. First route-handler test in `web/` — zero of 39 files covered any of the five routes. Reviewer fixed the cross-slice seam (below) and pinned WHAT was sent, not merely that something was. |
+| `task-pds-correction-receipt-surfaces-status` | `…the-correction-receipt-collapses-five-ou-2` | #9600 | `correction/2` destructured away the `status:` key D496 shipped, so all five outcomes rendered the identical 51 bytes — **a lost write and a genuine record were byte-identical on the wire.** No crash existed; the defect was pure laundering at the boundary. Seven HTTP tests assert all five outcomes with row counts read back, plus one that resets the table between them and asserts no two receipts are equal. The `:error` arm is driven by a genuinely request-reachable fault (a NUL byte reaching a `:string` column), not a mock. Mutation-proven twice. Reviewer changed nothing. |
+| `pds-w48-react-reference-error-collapse` | `…a-published-npm-component-renders-nothin-3` | #9601 | A published npm component rendered NOTHING on a 500 — 401/403/429/5xx collapsed into the same `null` as a genuine 404, and `notFound` defaults to null. The two derived-fetcher branches are repaired ASYMMETRICALLY because they fail differently; `err.code`, never `instanceof`. The design deviation is a MEASUREMENT, not a preference: under React 19 a consumer ErrorBoundary catches neither a throw in the render resumed after `use()` nor a rejected promise passed to it — both hang forever even with a boundary present, so "rethrow for the consumer's error.tsx" is not an option React offers. Reviewer mutation-proved both branches independently (8 and 6 reds). |
+| `pds-w48-cli-count-and-birth-receipts` | `…two-bp-receipts-assert-from-the-request--4-r` | #9602 | Two A3 sites. `bp migrate` counted `len(batch)` with the response discarded on 2xx; it now counts the server's `results` array, and an unreadable body is an ERROR, not a full count. `bp task create` read the birth lifecycle out of the REQUEST map the CLI itself had defaulted — tautological by construction, which is why no test could have caught it. **No glyph sweep**: a shipped behavioral registry already encodes this law, so the cheap fix was ENROLLMENT. Reviewer added the falsifier the registry structurally cannot carry (below). |
+| `pds-w48-deploy-banner-descends-from-health` | `…every-curl-installed-barkpark-prints-bar-5-r` | #9603 | Every curl-installed Barkpark printed "Barkpark is running!" after 30 FAILED probes, exit 0 — run-proven at the real 30 iterations, 61s, `go:embed`ed into `bp`. The banner now branches on the measurement and exits 1, with the refusal placed at the very END so the once-only admin token still prints. The probe port is re-read from the `.env` the service actually sources. First harness for `deploy.sh` in the repo. Reviewer defused a time bomb, wired the harness into CI, and made a non-numeric port refuse. |
+| `pds-w48-meter-rot-and-duplicate-rate-table` | `…the-one-price-ledger-with-a-fast-self-pr-6-r` | #9604 | **The inverted control D683 asked for.** A meter that is fast (0.065s), self-proving, non-vacuous and correct on every envelope it walked — and rotted anyway, printing 34 against a doc saying 24, because zero of 43 workflows call it. THE INSTRUMENT IS NOT THE MECHANISM; BEING RUN IS. Three fail-open paths closed in the EXIT CODE. The higher-blast-radius half: `tally_wf.py` dropped an unrated model's DOLLARS while counting its tokens, at rc=0 — 62.5% of true spend missing on a two-model transcript, and `/papers/epic-cycle-research-program-abcde` names that file as ITS cost axis. Reviewer closed the population assertion's own fail-open. |
+
+**THE WAVE UNDID ITS OWN WORK AT ONE SEAM, AND THAT IS THIS WAVE'S REAL LESSON.** The correction slice
+deliberately keeps HTTP 200 for a LOST write and moves the news into the body as
+`{ok:false, status:"error", recorded:false}`. The find-event proxy read only `res.ok`. So the repaired
+upstream said "I recorded nothing" and the repaired proxy **overwrote it with `recorded:true`** — the
+identical defect, one layer up, manufactured by two correct slices of the same wave landing together.
+Neither builder could have seen it; each verified their own hop. The proxy now reads the upstream's
+explicit `recorded:false`, deliberately asymmetric: an unreadable 2xx body stays `true`, because
+manufacturing a false out of OUR parse failure is the same fabrication reversed. **Generalises: when a
+wave moves a fact OFF the status line and INTO the body, every hop that reads the status line is now
+lying, and the hop and the endpoint are usually different slices.** Merge #9599 and #9600 together.
+
+**THE FLIP-RISK RE-DERIVATION, AND IT HELD.** Slice 1 was flagged HIGH-FLIP-RISK on foreign-price
+provenance. The reviewer re-derived it independently rather than re-reading the builder: anon GitHub
+logs probed live → HTTP 403; the run JSON → 200 carrying wall only;
+`git grep -nE 'nproc|loadavg|uptime|/usr/bin/time' origin/main -- .github` EMPTY; `ci.yml:141
+retention-days: 14` confirmed. The refusal stands on measurement. A genuinely independent SECOND
+reviewer is still warranted before merge.
+
+**THREE THINGS THE REVIEWER FOUND THAT THE GATES COULD NOT.** (1) The deploy harness's "permanent
+CONTROL" was a TIME BOMB: it read `origin/main:deploy.sh` and then applied three MANDATORY
+substitutions that the slice itself REMOVES, so the first time the fix reached main the harness would
+FATAL and red forever — a permanent red produced by the fix succeeding. Pinned to the revision that
+carries the defect. **A control has to name the artifact it is a control FOR, and that artifact does
+not move.** (2) The success-claim registry proves `written` VARIES with the response but
+**structurally cannot** pin the checkmark — both halves of its pair vary, so both still differ if the
+✓ prints unconditionally; forcing the short-write branch off left the whole registry green over
+`✓ post 1/2`. (3) `meter.py`'s new population assertion was keyed to an exact-argument match, so
+`verify tooling/scaffy-duels/` walked the same 34 envelopes and silently dropped the drift check —
+a CI job on the parent path would have carried the gate's name and none of its force.
+
+**THE LEDGER, AUDITED.** All seven built tasks: `in_progress`, evidence stamped as the work happened,
+the merge-gated criterion left OPEN for the lead, `wave_paper` and `parent_id` set. The deferred slice
+sits `open` at 0/9 with no claim, correctly. Honest misses are preserved, not papered over. Three
+builders could not file follow-ups because `/v1/data/mutate` was degraded mid-wave and said so on
+their now-lines rather than dropping the residual: two are now filed and published
+(`pds-w49-meter-ci-decision`, `pds-w49-meter-per-model-recompute`), one was RESOLVED by the reviewer
+(the deploy harness is now wired into CI), and one turned out to be a confirmed duplicate of the
+already-filed deferred slice — a draft was raised and WITHDRAWN rather than left to pollute the board.
+No task outside this wave was touched.
+
+**WHAT THE LEAD MUST KNOW BEFORE MERGING.** (1) **#9599 and #9600 are a pair** — merging the API half
+alone re-launders its own honest `ok:false`. (2) #9601 re-baselines a gzip budget 22.5 → 22.75 KB
+(+0.98%, inside the 2% bar); the builder stamped it an honest MISS, not a pass, and it is the lead's
+ruling — note the new cap leaves ~50 bytes of headroom, so the trap is one change away from recurring.
+(3) #9603 changes `deploy.sh`'s exit code, which is the point, but `bp setup`'s ssh caller was not read
+(out of scope). (4) #9602 changes `bp task create`'s visible receipt against any server that does not
+echo `results[].document`; guerrilla and prod do. (5) The merge-gated criterion on all seven rows is
+yours to close.
+
+**NEXT WAVE.** Merge round 1 (#9598–#9604) — the file sets are disjoint EXCEPT the #9599/#9600 pair,
+which must land together. Then dispatch `pds-w47-price-column-retake` (round 2) once #9598 is on main,
+since it uses `--measure` and hand-taking those two condemned figures is precisely the fraud this epic
+files. The strongest direction after that is the seam this wave discovered: sweep every hop that reads
+a status line for a fact the endpoint has since moved into the body.
+
 ### Wave 47 2026-08-04 — REVIEWED AND PUSHED, grade A — 6 of 6 round-1 slices green, 6 PRs open, 2 round-≥2 slices deferred BY DESIGN (paper `pds-wave-47-2026-08-04`)
 
 **THE WAVE'S OWN HEADLINE.** The direction that opened this wave — an ANCHORED / DRIFTED / UNANCHORED
@@ -4561,6 +4635,16 @@ reviewer on the final state, plus a FOUR-WAY TRIAL MERGE onto `origin/main` fcd3
 clean, compiled (`go test -c -o /dev/null ./internal/cli/` exit 0, `go build ./...` exit 0) and
 passed the full `internal/cli` suite together (`ok 28.250s`). Census invariants unmoved on the merge
 result: `TOTAL=50 NON_LITERAL=2 KEYS=52 OPAQUE_CALLERS=0 KINDS=13`.
+
+> **NAMING NOTE, ADDED BY WAVE 48 AND NORMATIVE FOR EVERY `OPAQUE_CALLERS` MENTION ABOVE `:10439`.**
+> The census key was RENAMED `OPAQUE_CALLERS` → `OPAQUE_ACTION_CALLERS`. Eight charter lines mention the
+> old token (on `origin/main` 2026-08-05: `:4563 :4591 :4630 :4757 :9178 :10118 :10131 :10439`); only the
+> last marks itself as pre-rename. **All seven earlier mentions are PRE-RENAME HISTORY** — they record what
+> the instrument printed at the time, and a grep for `OPAQUE_CALLERS` against today's code will find
+> nothing. This one note annotates all seven; it does not rewrite the historical records, because the
+> charter is memory and a record edited to match today stops being a record. This discharges the substance
+> of `pds-bl-charter-says-opaque-callers`; whether that row closes on a note rather than seven inline
+> edits is the lead's call, and the wave does not close it itself.
 
 | slice | final branch | PR | what it actually does |
 |---|---|---|---|
@@ -13878,11 +13962,21 @@ unrelated findings — `:2654` "A REPAIRED PREDICATE CARRIES ITS OLD DEFECT FOR 
 citation of D664 to the bold-lead form, which is the finding the citing task does NOT mean. **The gate
 certifies resolution against the wrong law.** That is this wave's own sentence, inside the epic.
 
-### PDS-D680 — NINETEEN D-NUMBERS NAME TWO FINDINGS EACH, THE MECHANISM IS AN UNOWNED POINTER, AND IT RECURS EVERY WAVE INCLUDING THIS ONE.
+### PDS-D680 — EIGHTEEN D-NUMBERS NAME TWO FINDINGS EACH, THE MECHANISM IS AN UNOWNED POINTER, AND IT RECURS EVERY WAVE INCLUDING THIS ONE.
+
+> **AMENDED BY WAVE 48 (PDS-D689).** This decision's own prose said "19 genuine collisions, 17 numbers" —
+> two different figures for one quantity, and neither derivable from the 21 it quotes. `21 − 1` (D559, a
+> false positive) `− 2` (D145/D146, benign) `= 18`, which is exactly what the instrument shipped in this
+> same wave already says in two places: `scripts/pds-record-parity.sh:251 DUP_BASELINE_GENUINE` lists 18
+> numbers, and the arbiter task's criterion 3 reads "The existing 18 baselined pairs are NOT renumbered".
+> Re-measured on `origin/main` 2026-08-05 by the strict titled grammar: **20 duplicated, 18 genuine + 2
+> benign, byte-exact against the baseline, zero unexpected, zero stale.** The heading and the sentence below
+> are corrected to 18. A count in charter prose that does not match the instrument shipped alongside it is
+> the exact defect this epic exists to kill, and it was sitting inside the decision that named the problem.
 
 `grep -oE 'PDS-D[0-9]{3} —' | sort | uniq -c | awk '$1>1'` returns **21**. Hand-classified: **D559 is a FALSE
 positive** (`:11859` is an inline parenthetical INSIDE another decision's body); **D145/D146 are BENIGN
-restatements** (D146's two headings are byte-identical). So **19 genuine collisions**, 17 numbers where one
+restatements** (D146's two headings are byte-identical). So **18 genuine collisions** — 18 numbers where one
 token names two unrelated findings. A naive uniqueness grep — which is exactly what
 `pds-bl-charter-d399-duplicate-identifier` proposes — ships with a known false red on day one.
 
@@ -14150,3 +14244,291 @@ Backlog filed this wave: `pds-bl-w47-find-event-launders-the-honest-status`,
 unanswered question. **ONE DEBT CARRIED FORWARD AND NAMED**: `api/test/barkpark/pds_door_census_test.exs`
 has still never been executed under `mix test` on any host — a standalone `elixir` runner gave 8 tests /
 0 failures, which is not the same thing. Slice 1's first criterion pays it.
+
+## WAVE 48 — THE HONESTY MUST SURVIVE THE HOP (decided 2026-08-05, paper `pds-wave-48-2026-08-05`)
+
+Allocation re-derived, not inherited: the maximum PDS-D in use on `origin/main` 467f7e283 was **688** —
+708 titled definitions over 688 distinct numbers, `unresolved: 0` over 219 cited numbers, max cited in
+3000 commits 678, zero PDS-D tokens in any open PR. **Wave 48 allocates from D689.** The only tokens above
+688 anywhere in the tree are `PDS-D777`/`PDS-D999`, synthetic fixtures inside `pds-record-parity.test.sh`.
+
+Wave 47 allocated ZERO numbers in its REVIEW block — so D680's law did not so much survive a wave as go
+unexercised. The arbiter (`pds-d-number-allocation-arbiter`) is still published, unclaimed, 0/4. Nothing in
+the repo would stop the collision recurring; one wave went by without testing it.
+
+### PDS-D689 — THE FIRST FOREIGN PRICE IS REFUSED, BECAUSE NOTHING A STRANGER CAN OPEN CARRIES A CPU FIGURE.
+
+Wave 47 wrote criterion 7 of `pds-w47-measure-and-host-axis` to demand a foreign price citing "the run URL,
+the run-id, the head sha, the derived cpu count and the load stamp", with "evidence quotes the metered line
+from the runner log". An independent second read MEASURED every leg of that against live GitHub on
+`FRIKKern/barkpark`, and the criterion is **unbuildable as written — not rot-prone, unverifiable the day it
+merges**:
+
+- **The stranger-access worry was REFUTED and it does not help.** The repo is public: unauthenticated
+  `GET /actions/runs/{id}` and `/actions/jobs/{id}` both return **200 at 100 days** old, and
+  `/runs/{id}/jobs` still carries per-step wall timings at 100 days. Budget 60 req/hr unauth.
+- **But logs are 403 TO A STRANGER AT EVERY AGE** — 403 on a 23-day run AND on a 100-day run. Not rot: a
+  closed door from minute zero. The anonymous WEB path is closed too — the per-step log URL the anon job
+  page itself embeds returns **404** to an anonymous fetch, plain and browser-shaped.
+- **And the log rots for the maintainer at ~90 days**: authenticated logs are **410 Gone** at 99–100 days,
+  200 at 77 days. Artifacts are worse — anon zip download **401**, `expires_at` +90d default, and
+  `ci.yml:141` pins `retention-days: 14`.
+- **NOTHING STRANGER-READABLE CONTAINS A CPU PRICE.** The durable anon surfaces carry WALL timings only, and
+  PDS-D648 forbids wall outright (`pds-door-census.sh:61`, "Never wall"). Worse:
+  `git grep -nE 'nproc|loadavg|uptime|/usr/bin/time' origin/main -- .github` is **EMPTY** — no workflow
+  emits a host measurement at all today, so the meter output would have to land in the one place a stranger
+  cannot read.
+- **And the row would be born in the class D683 proved rots.** A FOREIGN row taken once inside a PR's gate
+  is re-taken by NOTHING. The only mechanism that makes a price descend is a gate that re-takes it, and
+  that is exactly what D669 forbids for `--measure`.
+
+**RULING: wave 48 ships `--measure`, ships the `LOCAL`|`FOREIGN` grammar with its three-direction refusal
+arm, and ships NO FOREIGN ROW, on the record.** Criterion 7 is REWRITTEN from a citation demand into a
+refusal-with-reason. Arithmetically this changes zero rows: `git grep FOREIGN origin/main -- scripts` finds
+no price row, and all six priced rows on main are LOCAL. If a foreign row is ever wanted, the only
+stranger-available path is **REPRODUCTION, not citation** — publish the exact `--measure` invocation so
+anyone can re-take it on their own `ubuntu-latest` runner. That is a different criterion for a later wave.
+
+### PDS-D690 — THE RUN ID AND THE HEAD SHA ARE THE ONLY DURABLE RE-OPENERS; A JOB ID SILENTLY LOSES ITS STEPS AT 90 DAYS.
+
+Measured on six runs across a 100-day ladder. **DURABLE + ANONYMOUS**: the run id (run JSON keeps
+`head_sha`, `event`, `run_started_at`, `conclusion`, `html_url` at the oldest run this repo has) and the
+run's jobs LIST, which still carries steps and per-step wall timings at 100 days. **ROTS SILENTLY**: the JOB
+ID as a standalone citation — `/actions/jobs/{id}` drops `steps` to `[]` past ~90 days (0 steps at 99d and
+100d; 14/12/6/6/10/5 at 77d…23d) **while `/runs/{id}/jobs` for the SAME job still returns 13 and 9**. So a
+row citing only a job id loses its step detail with no error and no warning. **STRONGEST**: the head sha —
+a git object, durable forever, re-derivable offline. **DIES**: logs (403 forever to a stranger, 410 at 90d
+to anyone) and artifacts (401 to a stranger, 14d here).
+
+Corroborated by a committed instance already on the fuse: `tooling/grip/fixtures/evidence-corpus.json:4053`
+cites "step timings" from run 29261030044. It re-opens today and **stops re-opening around 2026-10-11**.
+The identical figure taken from the JOB envelope would survive. **LAW: a price whose re-opener reads
+`.steps`, a log, or an artifact is a dated cheque. Cite the run id and the head sha, and take the number
+from the job envelope or from a figure committed into the repo beside them.**
+
+### PDS-D691 — `LC_ALL=C` MUST PIN THE WHOLE RECIPE, BECAUSE HALF-PINNING FAILS SILENTLY TO ZERO.
+
+The pin is not cosmetic: on this host (`LANG=nb_NO.UTF-8`) `/usr/bin/time -p` prints `real 0,15` unpinned
+and `real 0.14` under `LC_ALL=C`; `uptime` behaves identically. **But it is load-bearing in BOTH directions,
+and half-pinning is the trap**: `awk` silently truncates the WRONG separator to zero — default-locale awk
+on `0.53 0.72` prints `0`, and `LC_ALL=C` awk on `0,53 0,72` prints `0`. Each parses only its own
+separator. `bc` is loud instead (`Parse error`). And the charter's documented `tr -d ,` mechanism reproduces
+exactly: `3364` where truth is `33.64`, a 100x inflation that also **destroys the decimal point**.
+
+**LAW: `LC_ALL=C` pins the meter AND every arithmetic step that consumes it, or the new failure mode is a
+silent `0` that reds nothing.** `--measure`'s selftest carries the mutant.
+
+### PDS-D692 — THE THREE-ARMS RESIDUAL IS A STALE PRICE THAT MUST BE RE-METERED, NOT A PROSE EDIT AND NOT A GATE HOLE.
+
+`scripts/pds-door-census.sh:286` prices "the **THREE GATED ARMS SUMMED**" at `CPU=26.47+2.26=28.73s` for a
+rider that carries **FOUR** arms on the same tree (`pds_elixir_census_test.exs` `:135 :145 :187 :210`).
+Both candidate fixes on offer are wrong:
+
+- **"Add the arm to the gate" is a NO-OP.** No workflow names the census at all; it rides the plain
+  `mix test` at `elixir.yml:455`. The rider's only module attribute is `@moduletag timeout: 600_000` — no
+  excludable tag — and none of `test_helper`'s ten excludes can reach it. `scripts/pds-elixir-receipt-census.exs`
+  sits in `ELIXIR_TEST_ONLY_PATHS` (`elixir-path-escape-check.sh:100`), so a census-only PR still dispatches
+  the job. **CI already runs four.**
+- **"Update the prose" DROPS A NUMBER.** The rider's own moduledoc (`:42-47`) records `28,9 s` wall for
+  three arms vs `42,0 s` for four — "The added arm is one more full census run over `api/lib`". The `28.73s`
+  figure is a number whose instrument grew ~45% underneath it.
+
+**RULING: the residual folds into round 2 as a MEASUREMENT taken by `--measure`, never as a text edit.**
+A prose-only fix is invisible to both instruments — PROVEN BY MUTATION: changing the row to "the SEVENTEEN
+GATED ARMS SUMMED" leaves the census `rc=0, UNDISPOSED 0 of 20, ERRORS 0` and the rider `9 tests, 0 failures`.
+
+**AND A UNIT CONFLICT THE WAVE MUST CARRY, MEASURED FOR THE FIRST TIME.** `/usr/bin/time -p` around
+`mix test` reports `1.81–1.94 s` of CPU for a run whose own port children cost **≈4.8 s** (`--check` 1.29 s
+once, `--selftest` 1.11 s twice, plus a mutant `--check`) — a **~2.6x under-report**, because the work is in
+port children the meter around the BEAM cannot see. D633's blindness, concrete. Wall for that rider is
+5.63/5.88/6.06 s at load1 4.07→5.88. **A price row obeying D648's CPU mandate for a port-child-heavy rider
+prints ~1.9 s for a ~5.9 s thing — "makes an expensive thing look gate-able", the exact direction D633
+warns about.** `--measure` must meter the WALL for port-child riders and say which unit it used, or it
+inherits the blindness.
+
+### PDS-D693 — PDS-D688'S DEFERRAL PREMISE WAS A HOST FACT WEARING A REPO'S CLOTHES, AND THREE DIFFERENT PARTIAL INSTALLS HAVE NOW BEEN MISTAKEN FOR REPO DEFECTS.
+
+D688 deferred the find-event repair because "both of web/'s local gates are RED on untouched origin/main".
+**Four independent measurements refute it.** From a genuine clean room (`git worktree add --detach`,
+`pnpm install --frozen-lockfile --ignore-scripts`, js core+react build, web install):
+`typecheck rc=0 with ZERO diagnostics`, `tests 288/288/0`, `lint rc=0`. CI agrees: run 30628247583 concluded
+**success** on `web/ typecheck + unit tests + lint`, and `git log 577f50be..origin/main -- web/` is EMPTY,
+so that green describes today's main.
+
+**THE HOST STATES, ALL THREE, so the next person stops re-discovering them:**
+1. `web/node_modules` EMPTY (0 entries) → TS2307/TS2503/TS2580 — what D688 saw.
+2. `pnpm install --frozen-lockfile` **exits 1** on darwin-arm64 at sharp's postinstall ("Please add
+   node-addon-api"), aborting BEFORE bin-linking, leaving `node_modules/.bin` absent → every gate fails
+   with `sh: tsc: command not found`. The lockfile DOES carry `@img/sharp-darwin-arm64@0.34.5`; CI is
+   ubuntu and never hits it.
+3. `@barkpark/react` is materialised as a store COPY, not a symlink — building it AFTER the web install
+   leaves `dist` absent and typecheck reds TS2307 on four files.
+
+**THE MANDATORY `web/` PREAMBLE, four steps, and every `web/` slice states it or its builder reports a red
+that isn't one:** `pnpm --dir js install --frozen-lockfile` → `pnpm --dir js --filter @barkpark/core build`
+→ `pnpm --dir js --filter @barkpark/react build` → `pnpm --dir web install --frozen-lockfile
+--ignore-scripts`. **D688's LAW STANDS; only its application to `web/` was wrong** — a gate that is red
+because of THIS host is not a red surface, and the obligation D688 created is to establish the gate, which
+a clean room now does. **LEG C is a preamble, not a slice.**
+
+**AND THE GATE IS NOT MERGE-BLOCKING, WHICH IS ITS OWN FINDING.** `web-checks` (`ci.yml:148`) is a real
+gate with no `continue-on-error` — but `ci.yml` carries a workflow-level `on: paths:` filter on BOTH
+triggers, which is verbatim the S4 disqualifier in `required-checks.json`: a paths-filtered workflow emits
+NO check run on a PR that misses the paths, and a required context that is ABSENT reports "expected"
+forever. Proven, not argued: the 35 check runs on main head 467f7e28 do not include the name at all, and
+`grep -i web` over `required-checks.json` returns NOTHING — it is not required and not even in the 24-row
+exclusions list, because the generator has never SEEN it. Filed, not built this wave.
+
+### PDS-D694 — THE SHIPPED-REFUSAL ENUMERATION IS EXHAUSTED AT n=1; THE LAW RE-POINTS AT THE DESCENT AND THE POPULATION IS AN ORDER OF MAGNITUDE LARGER.
+
+Wave 48's direction proposed enumerating the epic's own committed refusals and following each one hop to
+its caller. **The matrix was built across four consumer surfaces and it came back 20 cells: 3 BINDS,
+2 LAUNDERS, 15 NO CALLER.** D2/D9/D10 have exactly one consumer (the bp CLI) and it binds all three at a
+uniform, well-commented status guard; D12's consumer is a browser `<img>` that cannot bind by construction;
+D687's only caller launders. **The sharpest attack on the direction LANDED: enumerating shipped refusals
+yields find-event and nothing else.**
+
+**But the epic's LAW was never "refusals must be bound" — it is "a receipt lies when its value does not
+descend from the write return".** Re-pointing at THAT keeps the enumeration's whole virtue (no lens, no
+precision problem, a fully listable population) and grows the yield:
+
+| site | the lie |
+|---|---|
+| `web/app/api/find-event/route.ts` | `{ok:true}` at BOTH exits; `await fetch` unbound at `:54`/`:65`, and **`fetch` does not reject on 4xx/5xx**, so the honest 422/500 never even reaches the `catch` at `:73` |
+| `api/.../search_controller.ex` `correction/2` `:352-366` | hard-matches `{:ok, %{promoted: _}}` with NO honest-failure ending — the floor below find-event on the same hop |
+| `js/packages/react/src/Reference.tsx` `:150 :168 :176` | 401/403/429/500/502/503 collapse into the same `null` as a genuine 404, rendering NOTHING, in a published npm package with no 5xx test |
+| `internal/cli/migrate_cmd.go:382` | `written += len(batch)` — the REQUEST — with `respBody` bound and discarded on 2xx |
+| `internal/cli/tasks_create_cmd.go:120` | `born := body["lifecycle_status"]` — the request map — under a comment claiming "the body value the server accepted" |
+| `deploy.sh:318` | "Barkpark is running!" after a 30-attempt health loop with NO else branch, `go:embed`ed into `bp` |
+| `tooling/scaffy-duels/METER.md` | "24/24" over a corpus that is now 34, and NO CI workflow invokes the instrument |
+
+**LAW: the population for a hop audit is the SET OF ASSERTIONS, not the set of refusals. A refusal with no
+caller is not a hop; an assertion with a caller is.**
+
+**AND THE ENUMERATION'S BLIND SPOT IS NAMED RATHER THAN LEFT FOR WAVE 49**: it was structurally blind to
+endpoints that never EARNED a refusal. `correction/2` was invisible to it, is filed TWICE
+(`task-pds-correction-receipt-surfaces-status`, `pds-bl-record-correction-third-lie`), and neither row was
+ever dispatched. **The epic saw it, filed it twice, and built neither** — that is a stronger form of the
+blindness than "we never looked".
+
+### PDS-D695 — THE HONEST BEST-EFFORT SHAPE IS A UNIFORM 200 WITH A DESCENDING FIELD, AND THE REASON IS `res.ok`, NOT "BEST EFFORT".
+
+`400` for an unparsable body would ALSO descend from a measurement, so "honest vs dishonest" does not decide
+the status. **What decides it: if the status line carries the receipt for ONE exit and not the other five, a
+caller that checks `res.ok` sees RED for a malformed body and GREEN for an upstream 500 — the exact
+inversion this epic exists to kill.** Uniform 200 with a single `recorded` field is the only shape where one
+field answers all exits identically.
+
+And the repair PORTS A SIBLING'S PATTERN rather than arguing a manifesto: `web/app/api/find/route.ts:56-59`
+already returns 200 with a `message` DERIVED from the caught error, eleven lines from a launder of the same
+law at `:27-29`. Corroborating: the moduledoc's own defence ("a recording failure never blocks the user")
+justifies the STATUS and the non-throwing, and **does not reach the FIELD at all** — a field the sole caller
+never binds cannot block anything.
+
+**SIX EXITS, NOT TWO, AND A THIRD LIE CLASS FILED NOWHERE.** Both backlog rows describe two lying exits.
+There are six, in three classes: upstream non-2xx; upstream unreachable; and **the body parsed but NO WRITE
+WAS EVER ATTEMPTED** (`kind:"sideways"`, `kind:"correction"` with no `to`, `kind:"click"` with no
+`queryEventId`) — today identical `{ok:true}` to a recorded signal. A criterion written from either existing
+row's text drops that class silently.
+
+### PDS-D696 — AN HONEST FIELD WITH NO CONSUMER AND NO TEST IS INERT; THE TEST PLUS CI IS THE CONSUMER, AND THE CRITERION SAYS SO.
+
+`web/components/finder.tsx:49` is `void fetch(...).catch(() => {})` with `keepalive: true` — the browser is
+NOT the consumer and **should not be**: it cannot act on a dropped analytics signal, and a `console.debug`
+would be decoration. Repairing `finder.tsx` is the wrong fix and a criterion must forbid it explicitly or a
+builder will do it.
+
+**What makes the field non-inert is the test plus the gate**: `ci.yml` triggers on `web/**` and `web-checks`
+runs typecheck + test + lint, so a regression to a laundered green now reds a check run. The honest claim is
+that the field is **ENFORCED, not consumed** — and the criterion must say enforced, because claiming a
+consumer that does not exist would be this epic's own disease one level out.
+
+The harness is real cost the plan had not budgeted: **zero of the 39 files in `web/__tests__/` tests any of
+the five routes**, so there is no route-handler pattern to copy. It must be invented — import the `POST`
+export directly, stub `fetch` — and it needs two bundler-only resolutions replayed in the SHARED
+`__tests__/support/server-only-loader.mjs` (`@/` tsconfig paths with a `.ts` extension; `next/server` →
+`next/server.js`, because next's package.json has **no `exports` map at all**). That file is a collision
+fence for the whole wave.
+
+### PDS-D697 — THE INSTRUMENT IS NOT THE MECHANISM; BEING RUN IS. `METER.md` IS THE INVERTED CONTROL D683 ASKED FOR, AND IT ROTTED ANYWAY.
+
+`tooling/scaffy-duels/METER.md` is an eighth adjacent price ledger and the cleanest possible control: the
+instrument EXISTS, runs `verify` in **0.065 s**, is NON-VACUOUS by its own self-test (which deliberately
+proves a 1.25x-trap fixture reds), and is CORRECT on its frozen population. **And it is rotten now**: it
+prints `34 envelopes — 34 exact` while the doc says "24/24". The population grew 24 → 34 across six commits
+and the literal did not follow. `grep -rn meter .github/workflows/` returns **rc=1 over 41 workflow files** —
+zero gates call it. The epic's own 19-instrument price roster has never enumerated it
+(`git show origin/main:scripts/pds-door-census.sh | grep -c scaffy` → **0**).
+
+**That isolates the variable this epic has been circling: a fast, self-proving, non-vacuous instrument still
+rotted, purely because nothing RAN it.** The instrument is not the mechanism.
+
+Three further measurements the slice must carry:
+- **The median is not wrong; the COST-WEIGHTED picture INVERTS.** Over the original 24 the shares reproduce
+  `58.8 / 32.5 / 7.9` **byte-exactly**; over all 34 they are `55.0 / 36.8 / 9.5` (3.8pp median movement, not
+  material). But by DOLLARS: 24 envelopes ($17.08) = writes 46.9 / reads 43.5; **34 envelopes ($66.40) =
+  writes 24.2 / READS 66.4.** METER.md's top lever ("fewer spawns") is derived from short warm-worktree
+  duels and does not describe where the money goes on long sessions. **Publish a PAIR of statistics with
+  each population size stamped — a criterion pinning "58.8%" alone repeats D656 one ledger over.** The
+  `~$0.55 spawn floor` survives (median 24 = $0.5451, 34 = $0.5857).
+- **`rate_for()` is fail-closed on ONE path and fail-open on THREE**, mutation-proven: an unknown model in a
+  TWO-model envelope with cost TRIPLED → `1 identity-only`, rc=0; `modelUsage` deleted with cost x10 → rc=0;
+  an envelope nested one directory deeper → never walked (`cmd_verify` globs one level).
+- **THE HIGHER-BLAST-RADIUS HALF IS THE DUPLICATE.** `tally_wf.py:28-41` carries a SECOND rate table
+  "mirrored from meter.py (not imported)", with the same missing `claude-opus-5` prefix and WORSE handling:
+  `no_rate.add(model); continue` — tokens counted, **DOLLARS SILENTLY DROPPED**, rc always 0. Proven on a
+  two-model transcript: `total_usd_computed: 0.345` with the whole opus half missing. And
+  `/papers/epic-cycle-research-program-abcde` names `tally_wf.py` as **its cost axis**. A slice that fixes
+  only `meter.py` leaves the research programme's cost axis under-reporting opus spend to zero.
+
+### PDS-D698 — `pds-w46-load-stamp-provenance-doubt` IS REFUTED ON BOTH LEGS, AND THE PREMISE WAS THE EPIC'S OWN QUIET-HOST LAW READ BACKWARDS.
+
+The four suspect stamps are `load1=41.63 / 79.23 / 24.26 / 26.44`. **Leg 1 — the proposed mechanism cannot
+produce them**: `tr -d ,` DESTROYS the decimal point (yields `3364`, an integer); all four carry a dot and
+two decimals, so none is a `tr -d ,` artifact. **Leg 2 — "implausible next to this host's 2.1–3.4" is a
+QUIET-HOST premise.** Sampled live under wave load on a 10-CPU host: `47.43 / 46.84 / 46.84 / 45.97 / 45.89`
+sustained over 20 s. 24.26, 26.44 and 41.63 are directly bracketed by a live measurement; **79.23 is within
+1.7x of one and is the weaker rule-out — say so rather than closing all four with one sentence.** The row's
+own criterion 2 admits "a recorded rule-out with a reason is an acceptable outcome". Round 2 records it.
+
+### PDS-D699 — THE FIND-EVENT ROW IS FILED TWICE, TWELVE WAVES APART; WAVE 48 EXERCISES D680'S COLLISION PATH INSTEAD OF DESCRIBING IT.
+
+`pds-bl-w36-find-event-fourth-lie` (wave 36, priority 2, published, unclaimed) and
+`pds-bl-w47-find-event-launders-the-honest-status` (wave 47) name the SAME file and the SAME defect. Two open
+rows, one bug. D680's arbiter has never been exercised (wave 47's review allocated nothing, so the collision
+path was never walked and the arbiter is still 0/4). **Wave 48 FOLDS them: the w47 row is the slice, and the
+w36 row is folded into it — carrying forward the one axis on which w36 is BETTER, its criterion 3 demanding
+a repo-wide sweep of `web/app/api/**/route.ts` with the number stated.** That sweep is now cheap and its
+answer is known: **FIVE routes** (not the three a glob reported — `ls-tree` finds `admin/reindex` and
+`barkpark/webhook`), of which `admin/reindex` BINDS (transient→503, upstream→its real status, else→502) and
+`barkpark/webhook` BINDS on status. **A criterion written against "the 5 web routes" would send a builder to
+repair four things that are already honest.** A fully-enumerable population that was itself undercounted is
+this epic's own shape, twice in one wave.
+
+### The wave 48 plan — 8 slices, two rounds, outward
+
+Fable was unavailable this wave; every slice builds on Opus. Round-1 slices have DISJOINT file sets. The
+round-2 slice does NOT dispatch beside its dependency and carries an `AFTER <task_id> MERGES` line as the
+first line of its brief.
+
+| # | round | task | surface | why it is here |
+|---|---|---|---|---|
+| 1 | 1 | `pds-w47-measure-and-host-axis` | `pds-door-census.sh` + rider | D689 + D691 + D692 + D698. **HIGH-FLIP-RISK: foreign-price provenance** — criterion 7 REWRITTEN to a refusal |
+| 2 | 2 | `pds-w47-price-column-retake` | `pds-door-census.sh` + rider | D683. AFTER #1 merges |
+| 3 | 1 | `pds-bl-w47-find-event-launders-the-honest-status` | `web/app/api/find-event/` + new harness | D694 + D695 + D696 + D699; folds `pds-bl-w36-find-event-fourth-lie` |
+| 4 | 1 | `task-pds-correction-receipt-surfaces-status` | `search_controller.ex` + new test | D694 — the floor below #3 on the same hop; folds `pds-bl-record-correction-third-lie` |
+| 5 | 1 | `pds-w48-react-reference-error-collapse` | `js/packages/react/` | D694 — a published npm package renders NOTHING on a 500 |
+| 6 | 1 | `pds-w48-cli-count-and-birth-receipts` | `internal/cli/` + registry | D694 — enrollment in a gate that already exists |
+| 7 | 1 | `pds-w48-deploy-banner-descends-from-health` | `deploy.sh` + embedded twin + harness | D694 — the highest-stakes sentence in the product |
+| 8 | 1 | `pds-w48-meter-rot-and-duplicate-rate-table` | `tooling/scaffy-duels/` | D697 — the inverted control, and the research programme's cost axis |
+
+**COVERAGE**: every dispatched surveyor and every dispatched verifier reported; no coverage deficit in
+either round. No slice below rests on an unanswered question. **DEBTS PAID THIS WAVE, NOT CARRIED**: wave
+47's carried debt — "`pds_door_census_test.exs` has never been executed under `mix test`" — is
+**DISCHARGED**: CI run 30914991596 on PR #9524's head ran the full `mix test` to completion
+(`27 doctests, 13465 tests, 0 failures, 48 excluded`, 635.3s) with the rider's path in the dispatcher's
+changed-path set and the Test job concluding SUCCESS, and an independent local run from a fresh
+`origin/main` worktree gave `9 tests, 0 failures`. The rider declares **NINE** tests, not the eight carried
+forward. **DEBT CARRIED FORWARD AND NAMED**: `pds-w25-round-open`'s "every free close by content" conjunct
+is unpaid — its 12 cited shas are all ancestors of `origin/main`, but ancestry is not content, and PDS-D353
+records that two `pds-bl-scratch-pointer-*` rows re-check as "still broken" at their cited line.
