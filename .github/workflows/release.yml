@@ -75,6 +75,11 @@ jobs:
           fi
 
       - name: Fail loudly if NPM_TOKEN is missing
+        # PRESENCE ONLY. This step proves the secret is set; it proves NOTHING
+        # about whether the registry still accepts it. A revoked, expired or
+        # typo'd token passes this check unchanged — the byte count is a
+        # measurement of a string, not of authorization. The real measurement
+        # is the `npm whoami` preflight below; do not treat this step as one.
         working-directory: ${{ github.workspace }}
         env:
           # Intentionally reference the secret here — GitHub masks it in logs;
@@ -85,7 +90,7 @@ jobs:
             echo "::error title=Missing NPM_TOKEN::repository secret NPM_TOKEN is not set — release cannot proceed"
             exit 1
           fi
-          echo "NPM_TOKEN present ($(printf %s "${NPM_TOKEN}" | wc -c) bytes)."
+          echo "NPM_TOKEN present ($(printf %s "${NPM_TOKEN}" | wc -c) bytes) — presence only, NOT proof of authorization."
 
       - name: Checkout
         uses: actions/checkout@v4
@@ -109,6 +114,34 @@ jobs:
           node-version: "20"
           registry-url: "https://registry.npmjs.org"
 
+      - name: npm identity preflight (MEASURES the token)
+        # WHY THIS EXISTS. Until this step landed, both of the workflow's green
+        # receipts about NPM_TOKEN survived a revoked token:
+        #   1. the "NPM_TOKEN present (N bytes)" step above measures a string;
+        #   2. the dry-run publish does not touch auth at all — measured
+        #      2026-08-05 in a scratch dir with
+        #      `//registry.npmjs.org/:_authToken=npm_BOGUSBOGUS`,
+        #      `npm publish --dry-run --access public --tag preview` exited 0
+        #      and printed `+ @barkpark/react@1.0.0-preview.99`, while
+        #      `npm whoami` in that SAME directory returned E401 Unauthorized.
+        # `npm whoami` is therefore the cheapest call that actually asks the
+        # registry whether this credential is still alive, and it fails closed.
+        #
+        # DO NOT substitute `npm access list packages @barkpark` here: it prints
+        # a read-write map to an entirely unauthenticated caller (the same bytes
+        # `curl -s https://registry.npmjs.org/-/org/barkpark/package` returns
+        # with zero credentials), so it is a receipt that descends from nothing.
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          if ! WHO="$(npm whoami 2>&1)"; then
+            echo "$WHO"
+            echo "::error title=NPM_TOKEN rejected by the registry::npm whoami failed — the token is missing, expired or revoked. Rotate NPM_TOKEN before releasing."
+            exit 1
+          fi
+          echo "npm whoami -> ${WHO} (registry accepted the token)"
+
       - name: Install pnpm
         uses: pnpm/action-setup@v4
         with:
@@ -116,6 +149,29 @@ jobs:
 
       - name: Install workspace dependencies
         run: pnpm install --frozen-lockfile
+
+      - name: Capture pre-release workspace versions
+        # First half of the publish-set assertion (see "Assert the published set
+        # equals the release plan" below). Snapshot every publishable package's
+        # version BEFORE `changeset version` rewrites them, so the plan can be
+        # derived by difference rather than asserted by hand.
+        run: |
+          set -euo pipefail
+          cat > "${RUNNER_TEMP}/scan-versions.cjs" <<'EOF'
+          const fs = require("fs");
+          const dirs = ["docs", ...fs.readdirSync("packages").map((d) => "packages/" + d)];
+          const out = {};
+          for (const d of dirs) {
+            const p = d + "/package.json";
+            if (!fs.existsSync(p)) continue;
+            const j = JSON.parse(fs.readFileSync(p, "utf8"));
+            if (j.private || !j.name || !j.version) continue;
+            out[j.name] = j.version;
+          }
+          fs.writeFileSync(process.env.OUT, JSON.stringify(out, null, 2));
+          EOF
+          OUT="${RUNNER_TEMP}/versions-before.json" node "${RUNNER_TEMP}/scan-versions.cjs"
+          cat "${RUNNER_TEMP}/versions-before.json"
 
       - name: Changesets version
         # Consume pending .changeset/*.md files into package.json version bumps
@@ -137,6 +193,27 @@ jobs:
           pnpm changeset version
           pnpm install --lockfile-only
 
+      - name: Derive the release plan
+        # Second half of the publish-set assertion. The plan is exactly the set
+        # of packages whose version `changeset version` just moved — derived,
+        # never hand-listed.
+        run: |
+          set -euo pipefail
+          OUT="${RUNNER_TEMP}/versions-after.json" node "${RUNNER_TEMP}/scan-versions.cjs"
+          node -e '
+            const fs = require("fs");
+            const before = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/versions-before.json", "utf8"));
+            const after = JSON.parse(fs.readFileSync(process.env.RUNNER_TEMP + "/versions-after.json", "utf8"));
+            const plan = {};
+            for (const [name, version] of Object.entries(after)) {
+              if (before[name] !== version) plan[name] = version;
+            }
+            fs.writeFileSync(process.env.RUNNER_TEMP + "/release-plan.json", JSON.stringify(plan, null, 2));
+            const entries = Object.entries(plan);
+            console.log("release plan (" + entries.length + " package(s)):");
+            for (const [n, v] of entries) console.log("  " + n + "@" + v);
+          '
+
       - name: Build all packages
         run: pnpm -r build
 
@@ -155,10 +232,15 @@ jobs:
       - name: Publish (dry-run)
         if: steps.mode.outputs.dry_run == 'true'
         env:
-          # Provide auth even for dry-run so the auth path itself is exercised.
+          # Auth is provided for parity with the real leg only. It is NOT
+          # exercised here: `npm publish --dry-run` never contacts the auth
+          # path — measured 2026-08-05, a bogus token dry-runs green (see the
+          # "npm identity preflight" step, which is where the token is actually
+          # measured).
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
           NPM_CONFIG_PROVENANCE: "true"
         run: |
+          set -euo pipefail
           echo "::notice title=Dry-run mode::no npm writes will occur"
           # `changeset publish` does not support --dry-run. pnpm's recursive
           # publish does: it resolves workspace:* / workspace:^ protocols in
@@ -170,7 +252,7 @@ jobs:
           # dry-run equivalent must not pass an explicit --tag or pre-mode
           # rejects with "Releasing under custom tag is not allowed in pre
           # mode". The dist_tag workflow input is reserved for post-pre-exit.
-          pnpm publish -r --dry-run --access public --no-git-checks
+          pnpm publish -r --dry-run --access public --no-git-checks 2>&1 | tee "${RUNNER_TEMP}/publish.log"
 
       - name: Publish (REAL — emits to npm)
         if: steps.mode.outputs.dry_run != 'true'
@@ -192,7 +274,53 @@ jobs:
           # auto-applies the dist-tag; passing --tag explicitly fails with
           # "Releasing under custom tag is not allowed in pre mode". When
           # pre-mode is exited, restore --tag "${{ steps.mode.outputs.dist_tag }}".
-          pnpm changeset publish
+          pnpm changeset publish 2>&1 | tee "${RUNNER_TEMP}/publish.log"
+
+      - name: Assert the published set equals the release plan
+        # WHY THIS EXISTS. `changeset publish` SKIPS a package whose version is
+        # already on npm and still exits 0, and the pnpm dry-run leg does not
+        # even name it. Measured 2026-08-05 on a versioned tree: the exact
+        # dry-run command above returned rc=0 across 67 lines with three
+        # `+ pkg@version` lines and ZERO occurrences of "nextjs" or
+        # "create-barkpark" anywhere in the output, while the release plan had
+        # bumped five packages. A green release that shipped 3 of 5 is exactly
+        # the receipt this step refuses to hand out: the plan is the
+        # measurement, and the publish output must match it in BOTH directions.
+        run: |
+          set -euo pipefail
+          node -e '
+            const fs = require("fs");
+            const tmp = process.env.RUNNER_TEMP;
+            const plan = JSON.parse(fs.readFileSync(tmp + "/release-plan.json", "utf8"));
+            const log = fs.readFileSync(tmp + "/publish.log", "utf8");
+            // Both publish surfaces announce one package per line:
+            //   pnpm publish -r --dry-run  ->  "+ @barkpark/core@1.0.0-preview.4"
+            //   changeset publish          ->  "🦋  @barkpark/core@1.0.0-preview.4"
+            // Anything with extra words on the line (warnings, "info npm info
+            // <pkg>") is deliberately NOT matched.
+            const published = new Set();
+            for (const raw of log.split("\n")) {
+              const line = raw.replace(/\r/g, "").trim();
+              const m = line.match(/^(?:\+|🦋)\s+(@[^@\s\/]+\/[^@\s]+|[^@\s\/]+)@(\S+)$/u);
+              if (m) published.add(m[1] + "@" + m[2]);
+            }
+            const planned = new Set(Object.entries(plan).map(([n, v]) => n + "@" + v));
+            const missing = [...planned].filter((x) => !published.has(x)).sort();
+            const extra = [...published].filter((x) => !planned.has(x)).sort();
+            console.log("planned:   " + ([...planned].sort().join(", ") || "(none)"));
+            console.log("published: " + ([...published].sort().join(", ") || "(none)"));
+            if (missing.length === 0 && extra.length === 0) {
+              console.log("published set == release plan (" + planned.size + " package(s))");
+              process.exit(0);
+            }
+            if (missing.length) {
+              console.log("::error title=Packages the plan bumped but publish never reported::" + missing.join(", "));
+            }
+            if (extra.length) {
+              console.log("::error title=Packages published that the plan did not bump::" + extra.join(", "));
+            }
+            process.exit(1);
+          '
 
       - name: Summary
         if: always()
