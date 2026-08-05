@@ -1093,32 +1093,43 @@ defmodule BarkparkCloud.Sites.Deploy do
             detail: detail
           })
 
-        case BarkparkCloud.Sites.AutoDeployWorker.enqueue(site.id) do
-          {:ok, _job} ->
-            Logger.info(
-              "site deploy deferred for site #{site.id} (#{prior + 1} in a row): box busy — rebuild re-queued"
-            )
+        outcome =
+          case BarkparkCloud.Sites.AutoDeployWorker.enqueue(site.id) do
+            {:ok, _job} ->
+              Logger.info(
+                "site deploy deferred for site #{site.id} (#{prior + 1} in a row): box busy — rebuild re-queued"
+              )
 
-          {:error, enqueue_error} ->
-            # The promise could not be made. Say so ON THE ROW rather than
-            # leaving a `deferred` status that means nothing.
-            Logger.error(
-              "site deploy deferral could not re-queue the rebuild for site #{site.id}: #{inspect(enqueue_error)}"
-            )
+              {:ok, :deferred}
 
-            _ =
-              Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
-                failure_reason:
-                  reason <>
-                    " — and the rebuild could NOT be re-queued; publish again to retry",
-                detail:
-                  reason <>
-                    " — and the rebuild could NOT be re-queued; publish again to retry"
-              })
-        end
+            {:error, enqueue_error} ->
+              # THE PROMISE COULD NOT BE MADE, so this is not a deferral — it is
+              # the lost publish this wave exists to refuse, and it must be
+              # reported as one. Two things happen, and neither is optional:
+              # the row says so in its own words rather than wearing a
+              # `deferred` status that means nothing, and the OUTCOME is an
+              # error so the Oban job retries instead of recording success.
+              # `defer_behind_running_build/2` already ruled it this way; a
+              # deferral that silently succeeded on one path and failed the job
+              # on the other would be two different meanings of one word.
+              Logger.error(
+                "site deploy deferral could not re-queue the rebuild for site #{site.id}: #{inspect(enqueue_error)}"
+              )
+
+              broken =
+                reason <> " — and the rebuild could NOT be re-queued; publish again to retry"
+
+              _ =
+                Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
+                  failure_reason: broken,
+                  detail: broken
+                })
+
+              {:error, {:deferral_requeue_failed, enqueue_error}}
+          end
 
         BarkparkCloud.Events.broadcast(site.team_id, "deployments")
-        {:ok, :deferred}
+        outcome
     end
   end
 
