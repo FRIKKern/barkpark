@@ -19,7 +19,7 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
 
   alias BarkparkCloud.{Accounts, Registry}
   alias BarkparkCloud.Registry.Vault
-  alias BarkparkCloud.Sites.{AutoDeployWorker, Deploy}
+  alias BarkparkCloud.Sites.{AutoDeployWorker, Deploy, FakeBoxRelay}
 
   @instance_url "https://acme.barkpark.cloud"
   @worker "BarkparkCloud.Sites.AutoDeployWorker"
@@ -78,7 +78,7 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
     assert marker.source == "prebuilt"
 
     site
-    |> Ecto.Changeset.change(current_deployment_id: marker.id)
+    |> Ecto.Changeset.change(current_deployment_id: went_live(marker).id)
     |> Repo.update!()
   end
 
@@ -87,12 +87,44 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
     assert marker.source == "box-build"
 
     site
-    |> Ecto.Changeset.change(current_deployment_id: marker.id)
+    |> Ecto.Changeset.change(current_deployment_id: went_live(marker).id)
     |> Repo.update!()
+  end
+
+  # A site's CURRENT release is a build that FINISHED — and since deploy-truth W1
+  # re-keyed the active-deployment index on (site_id, environment), a marker left
+  # `queued` would also (correctly) block the very auto-deploy these tests are
+  # about. Walk it to `live`, the way the driver does.
+  defp went_live(deployment) do
+    Enum.reduce(~w(building pushing live), deployment, fn status, d ->
+      {:ok, next} = Registry.transition_deployment(d, %{status: status})
+      next
+    end)
+  end
+
+  # Move a row out of the ACTIVE set: one build in flight per site.
+  defp settle(deployment) do
+    {:ok, settled} = Registry.transition_deployment(deployment, %{status: "failed"})
+    settled
   end
 
   defp content_autos(site) do
     Registry.list_deployments(site, 20) |> Enum.filter(&(&1.trigger == "content-auto"))
+  end
+
+  # The box refuses a second concurrent deploy for a slug: 409 `already_running`,
+  # NESTED, which is the shape `SiteDeployController` actually sends.
+  defp program_busy_box(site) do
+    FakeBoxRelay.program(
+      start:
+        {:ok, 409,
+         %{
+           "error" => %{
+             "code" => "already_running",
+             "message" => "a deploy for site '#{site.slug}' is already running"
+           }
+         }}
+    )
   end
 
   defp pending_jobs(site_id) do
@@ -174,6 +206,9 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       # A manual deploy of this exact content fixes the baseline build_id.
       assert {:ok, manual} = Deploy.enqueue(site, bp)
       assert manual.trigger == "manual"
+      # It is only a build_id baseline here; settle it so the auto-deploy below
+      # is not (correctly) refused as a second concurrent build.
+      settle(manual)
 
       # The debounced job fires. In test the deploy STARTER is the no-op (config),
       # so no box is touched — but the row is minted synchronously by enqueue.
@@ -279,6 +314,135 @@ defmodule BarkparkCloud.Sites.AutoDeployWorkerTest do
       assert manual.status == "queued"
       assert manual.trigger == "manual"
     end
+  end
+
+  # deploy-truth W1 (charter D9) — THE PUBLISH IS NO LONGER LOST.
+  #
+  # The old `drive/2` was `:ok = Deploy.start(deployment); :ok` against a starter
+  # that returned a literal `:ok` no matter what happened. Production's proof:
+  # 11,868 completed `site_deploy` jobs and ZERO retryable/discarded ones, while
+  # 8,830 deploys (51.4% of every failed row) were refused by a busy box and died
+  # terminal-`failed` with nothing to re-drive them. 4,058 of those sites saw no
+  # later build at all.
+  describe "a busy box is a COUNTED deferral that RE-FIRES (charter D9)" do
+    test "the worker OBSERVES a box 409 instead of returning :ok blind" do
+      {_bp, site} = setup_site()
+
+      # Drive the deploy synchronously in THIS process so the outcome can travel
+      # back to the worker at all (production spawns; the seam is process-local
+      # so an async test never swaps it for another).
+      Process.put(:site_deploy_starter, Deploy.SyncStarter)
+      program_busy_box(site)
+
+      # BY VALUE: the job records the deferral. The pre-W1 code returned a bare
+      # `:ok` here — indistinguishable from a build that went live.
+      assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+
+      # A COUNTED row in its own bucket — not a failure, not a dropped row.
+      assert [row] = content_autos(site)
+      assert row.status == "deferred"
+      assert row.failure_reason =~ "already_running"
+      assert row.failure_reason =~ "re-queued"
+    end
+
+    test "NO PUBLISH LOST: a publish during an in-flight build is provably rebuilt afterwards" do
+      {bp, site} = setup_site()
+
+      # A build is IN FLIGHT: the row is claimed and building, exactly as it is
+      # while the box runs `npm ci && npm run build` for two to four minutes.
+      {:ok, in_flight} = Deploy.enqueue(site, bp, true, "content-auto")
+      {:ok, in_flight} = Registry.claim_deployment(in_flight.id, "worker-1")
+      assert in_flight.status == "building"
+
+      # The publish lands mid-build. Before this slice: a second row minted, the
+      # box answered 409, the row died `failed`, and nothing re-enqueued it —
+      # this content never reached live.
+      assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+
+      # No second concurrent build was minted (the re-keyed index refuses it) and
+      # the in-flight build was NOT disturbed.
+      assert Registry.get_deployment(in_flight.id).status == "building"
+
+      # THE PROOF, as a real Oban row: a trailing rebuild is pending.
+      assert [trailing] = pending_jobs(site.id)
+
+      # The in-flight build finishes…
+      {:ok, _} =
+        Registry.transition_deployment(Registry.get_deployment(in_flight.id), %{
+          status: "pushing"
+        })
+
+      {:ok, _} =
+        Registry.transition_deployment(Registry.get_deployment(in_flight.id), %{status: "live"})
+
+      # …and the trailing job then mints a REAL rebuild carrying the publish that
+      # was deferred. This is the whole slice in one assertion.
+      assert :ok = perform_job(AutoDeployWorker, trailing.args)
+
+      rebuilt =
+        content_autos(site)
+        |> Enum.reject(&(&1.id == in_flight.id))
+
+      assert [%{status: "queued", trigger: "content-auto"} = fresh] = rebuilt
+      refute fresh.build_id == in_flight.build_id
+    end
+
+    test "RETRY ACCOUNTING: six consecutive busy boxes never DISCARD the rebuild" do
+      {_bp, site} = setup_site()
+
+      Process.put(:site_deploy_starter, Deploy.SyncStarter)
+      program_busy_box(site)
+
+      # `max_attempts` is 3. A naive `{:snooze, n}` increments `attempt` against
+      # it, so the FOURTH busy box would discard the job — the silent drop this
+      # wave refuses. The deferral mints a FRESH debounced job instead, which
+      # carries no attempt history at all, so six rounds are still six rounds.
+      for round <- 1..5 do
+        assert {:ok, :deferred} = perform_job(AutoDeployWorker, %{"site_id" => site.id}),
+               "round #{round} must defer, never discard"
+
+        # …and each round leaves exactly ONE pending rebuild (the site_id unique
+        # collapses repeats) whose attempt count is untouched.
+        assert [job] = pending_jobs(site.id)
+        assert job.attempt == 0
+        assert job.state in ["available", "scheduled"]
+      end
+
+      # Every round is ON THE RECORD: five counted deferrals, none discarded,
+      # none quietly relabelled a success.
+      assert Enum.count(content_autos(site), &(&1.status == "deferred")) == 5
+
+      # The chain is bounded, not infinite: a box still refusing after the cap is
+      # not busy but stuck, and the row says so terminally.
+      assert {:ok, :failed} = perform_job(AutoDeployWorker, %{"site_id" => site.id})
+      assert [stuck] = Enum.filter(content_autos(site), &(&1.status == "failed"))
+      assert stuck.failure_reason =~ "stuck"
+    end
+
+    test "a spawn that never happened is NOT reported as success" do
+      {bp, site} = setup_site()
+      {:ok, deployment} = Deploy.enqueue(site, bp, true, "content-auto")
+
+      # The supervisor refused the child: nothing is building and nothing
+      # recorded it. The row is still `queued`, so an Oban retry (and, failing
+      # that, the stale-deployment reaper) can still pick it up.
+      Process.put(:site_deploy_starter, __MODULE__.RefusingStarter)
+
+      assert {:error, :max_children} = Deploy.start_reported(deployment)
+      assert Registry.get_deployment(deployment.id).status == "queued"
+
+      # …and the fire-and-forget wrapper still answers `:ok` for the call sites
+      # that match on it (the deploy route, the template sweep).
+      assert :ok = Deploy.start(deployment)
+    end
+  end
+
+  defmodule RefusingStarter do
+    @moduledoc false
+    @behaviour BarkparkCloud.Sites.Deploy.Starter
+
+    @impl true
+    def start(_deployment_id), do: {:error, :max_children}
   end
 
   describe "debounce window (D44 amendment: 60s default, env-overridable, floored)" do

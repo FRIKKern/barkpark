@@ -78,6 +78,27 @@ defmodule BarkparkCloud.SitesDeployTest do
 
   defp all_stages, do: Deploy.stages()
 
+  # Move a row out of the ACTIVE set. deploy-truth W1 re-keyed the active-
+  # deployment index onto (site_id, environment), so at most ONE queued/building/
+  # pushing production build per site can exist — a test that wants a second one
+  # must settle the first, exactly as the fleet does.
+  defp settle(%Deployment{} = d) do
+    {:ok, settled} = Registry.transition_deployment(d, %{status: "failed"})
+    settled
+  end
+
+  # The debounced rebuild a deferral promises — a REAL Oban row, not a log line.
+  defp pending_auto_deploy_jobs(site_id) do
+    Repo.all(
+      from(j in Oban.Job,
+        where:
+          j.worker == "BarkparkCloud.Sites.AutoDeployWorker" and
+            fragment("?->>'site_id' = ?", j.args, ^site_id) and
+            j.state in ["available", "scheduled"]
+      )
+    )
+  end
+
   ## ---------------------------------------------------------------------------
 
   describe "enqueue/2" do
@@ -119,7 +140,11 @@ defmodule BarkparkCloud.SitesDeployTest do
       # The tripwire: same code+content+config is STILL a no-op by default.
       assert {:duplicate, ^d1} = Deploy.enqueue(site, bp)
 
-      # …but a forced deploy of that same content is a real, distinct build.
+      # …but a forced deploy of that same content is a real, distinct build once
+      # the previous one is no longer in flight. (deploy-truth W1: settling d1 is
+      # required now that at most ONE active build per site can exist — see the
+      # active-index describe below.)
+      settle(d1)
       assert {:ok, forced} = Deploy.enqueue(site, bp, true)
       refute forced.id == d1.id
       refute forced.build_id == d1.build_id
@@ -128,8 +153,58 @@ defmodule BarkparkCloud.SitesDeployTest do
 
       # Two forced deploys are each distinct too (a fresh nonce every time) — so a
       # rollback proof can stand up two live builds to flip between.
+      settle(forced)
       assert {:ok, forced2} = Deploy.enqueue(site, bp, true)
       refute forced2.build_id == forced.build_id
+    end
+  end
+
+  # deploy-truth W1 (charter D10) — THE DEDUP INDEX, WHICH HAD NEVER RUN.
+  #
+  # `deployments_active_site_ref_index` was UNIQUE (site_id, git_ref) over the
+  # active statuses. On production `git_ref` is NULL on 26,395 of 26,423 rows
+  # (and on 8,830 of 8,830 rows a busy box refused), and a btree unique treats
+  # NULLs as DISTINCT — so it had never once refused a duplicate active deploy.
+  # Two builds for the same site could always be in flight at once, and the box
+  # answered the second one 409.
+  describe "the ACTIVE-deployment index, re-keyed on (site_id, environment)" do
+    test "two concurrent NULL-git_ref actives for one site are REFUSED (they both inserted before)" do
+      {bp, site} = setup_site()
+
+      assert {:ok, first} = Deploy.enqueue(site, bp)
+      assert is_nil(first.git_ref)
+      assert first.status == "queued"
+
+      # The DB itself refuses — not an app-level check. A distinct build_id rules
+      # the (site_id, build_id) index out, and git_ref is NULL on both rows, so
+      # under the old key this INSERT succeeded and two builds raced.
+      assert {:error, %Ecto.Changeset{} = cs} =
+               Registry.create_deployment(site, %{
+                 build_id: "deadbeefdeadbeef",
+                 trigger: "content-auto"
+               })
+
+      assert {"a build for this site is already in progress", _} = cs.errors[:git_ref]
+
+      # And the enqueue path turns that refusal into a COALESCE, never a lost
+      # publish: the caller is handed the row already in flight.
+      assert {:duplicate, ^first} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert [_only_one] = Registry.list_deployments(site, 10)
+    end
+
+    test "the key is per SITE, not per commit — and a settled row frees the slot" do
+      {bp, site} = setup_site()
+      other = static_site(bp)
+
+      assert {:ok, mine} = Deploy.enqueue(site, bp)
+      # A different site is unaffected (the index is keyed on site_id).
+      assert {:ok, _theirs} = Deploy.enqueue(other, bp)
+
+      # `deferred` is deliberately NOT in the active literal: a deferral must not
+      # block the rebuild it promises.
+      {:ok, _} = Registry.transition_deployment(mine, %{status: "deferred"})
+      assert {:ok, next} = Deploy.enqueue(site, bp, true, "content-auto")
+      refute next.id == mine.id
     end
   end
 
@@ -228,9 +303,14 @@ defmodule BarkparkCloud.SitesDeployTest do
         )
       )
 
+      # (deploy-truth W1: one active build per site, so each mint settles before
+      # the next — three builds in flight at once is exactly what the re-keyed
+      # index now refuses.)
+      settle(d1)
       assert {:ok, d2} = Deploy.enqueue(site, bp)
       refute d2.content_rev == d1.content_rev
       refute d2.build_id == d1.build_id
+      settle(d2)
 
       # …and so does a brand-new published document of the bound type, even if the
       # activity window has rolled past every event.
@@ -562,14 +642,128 @@ defmodule BarkparkCloud.SitesDeployTest do
       assert final.failure_reason =~ bp.slug
     end
 
-    test "the box's own refusal travels intact (never a generic 'deploy failed')" do
+    # deploy-truth W1 (charter D9). This test used to program the FLAT body
+    # `%{"error" => "…"}` — a shape the real box has never sent — and assert the
+    # row died `failed`. Both halves were wrong about production:
+    #
+    #   * `SiteDeployController` answers a busy slug `409` with a NESTED
+    #     `%{error: %{code: "already_running", message: …}}`, which is what the
+    #     relay decodes and what the driver must read;
+    #   * writing that terminal-`failed` is the single largest failure class on
+    #     the fleet (8,830 of 17,171 failed rows). `failed` is outside every
+    #     recovery pass and nothing re-enqueued, so the publish was simply lost.
+    #
+    # It is now a COUNTED `deferred` row that carries the box's own words AND a
+    # re-fired rebuild.
+    test "a BUSY box (409 already_running) defers the row and RE-QUEUES the rebuild, box words intact" do
       {bp, site} = setup_site()
       {:ok, d} = Deploy.enqueue(site, bp)
 
-      FakeBoxRelay.program(start: {:ok, 409, %{"error" => "a deploy is already running"}})
+      # The nested shape the box actually sends.
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{
+             "error" => %{
+               "code" => "already_running",
+               "message" => "a deploy for site '#{site.slug}' is already running"
+             }
+           }}
+      )
+
+      assert {:ok, :deferred} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      # COUNTED, not quietly dropped and not relabelled a success: the row is a
+      # first-class `deferred` that a ledger can bucket on its own.
+      assert row.status == "deferred"
+      # The box's own words still travel — code AND message.
+      assert row.failure_reason =~ "already_running"
+      assert row.failure_reason =~ "is already running"
+      # …plus the promise that makes `deferred` different from `failed`.
+      assert row.failure_reason =~ "re-queued"
+      assert row.detail == row.failure_reason
+
+      # THE RE-FIRE, as a real Oban row: a debounced rebuild for THIS site is
+      # pending. Nothing about the old path enqueued anything at all.
+      assert [job] = pending_auto_deploy_jobs(site.id)
+      assert job.args == %{"site_id" => site.id}
+
+      # And the deferred row is NOT active, so it cannot block the very rebuild
+      # it promised: a fresh build for this site still mints.
+      assert {:ok, next} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert next.status == "queued"
+      refute next.id == d.id
+    end
+
+    test "a busy box that never frees up stops deferring and FAILS honestly rather than looping forever" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+      )
+
+      # Six rounds of a box that is not busy but STUCK. Five defer (each minting
+      # its own counted row + re-firing the rebuild); the sixth calls it what it
+      # is. A chain that re-fired forever would be an infinite loop wearing a
+      # counted status.
+      outcomes =
+        for _ <- 1..6 do
+          {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+          {:ok, outcome} = Deploy.run(d.id)
+          {outcome, Repo.get(Deployment, d.id)}
+        end
+
+      assert Enum.map(outcomes, &elem(&1, 0)) ==
+               [:deferred, :deferred, :deferred, :deferred, :deferred, :failed]
+
+      {:failed, last} = List.last(outcomes)
+      assert last.status == "failed"
+      assert last.failure_reason =~ "stuck"
+
+      # Every round is still ON THE RECORD — the failure count was never driven
+      # down by making refusals stop being recorded.
+      rows = Registry.list_deployments(site, 20)
+      assert Enum.count(rows, &(&1.status == "deferred")) == 5
+      assert Enum.count(rows, &(&1.status == "failed")) == 1
+    end
+
+    test "a PREBUILT deploy is never deferred — it fails honestly, since the rebuild path would refuse it" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+      )
 
       assert {:ok, :failed} = Deploy.run(d.id)
-      assert Repo.get(Deployment, d.id).failure_reason =~ "a deploy is already running"
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "failed"
+      # No false promise: the debounced rebuild refuses prebuilt sites outright
+      # (it would overwrite bytes this fleet cannot reproduce), so the row must
+      # name the human action instead.
+      assert row.failure_reason =~ "re-run the upload"
+      assert pending_auto_deploy_jobs(site.id) == []
+    end
+
+    test "a NON-409 refusal is still terminal — the deferral is scoped to the box's one transient no" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 400,
+           %{"error" => %{"code" => "E_NO_INDEX", "message" => "the archive has no index.html"}}}
+      )
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "failed"
+      assert row.failure_reason =~ "E_NO_INDEX"
+      assert pending_auto_deploy_jobs(site.id) == []
     end
 
     test "the driver CLAIMS the row and heartbeats it, so the stale reaper can still recover an orphan" do
@@ -687,8 +881,14 @@ defmodule BarkparkCloud.SitesDeployTest do
     test "blocks on the real flip, then repoints the site at the build that is now live" do
       {bp, site} = setup_site()
 
-      # Two builds: the previous good one, and the one currently live.
+      # Two builds: the previous good one, and the one currently live. The
+      # previous one is SETTLED (it finished — that is what makes it previous),
+      # which is also what the re-keyed active index requires: one build in
+      # flight per site at a time.
       {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "live"})
       {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
       {:ok, site} = Registry.set_site_current_deployment(site, live.id)
 
@@ -1086,7 +1286,10 @@ defmodule BarkparkCloud.SitesDeployTest do
       {bp, site} = setup_site()
 
       {:ok, p1} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+      # One active build per site (deploy-truth W1) — settle before the next mint.
+      settle(p1)
       {:ok, p2} = Deploy.enqueue(site, bp, false, "manual", nil, "prebuilt")
+      settle(p2)
 
       refute p1.build_id == p2.build_id
       assert p1.source == "prebuilt"

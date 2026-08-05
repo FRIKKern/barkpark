@@ -74,8 +74,19 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
     {:ok, marker} = Deploy.enqueue(site, bp, true, "manual")
 
     site
-    |> Ecto.Changeset.change(current_deployment_id: marker.id)
+    |> Ecto.Changeset.change(current_deployment_id: went_live(marker).id)
     |> Repo.update!()
+  end
+
+  # A site's CURRENT release is a build that FINISHED. deploy-truth W1 re-keyed
+  # the active-deployment index onto (site_id, environment), so a marker left
+  # `queued` would also (correctly) refuse the very sweep these tests exercise —
+  # one build in flight per site.
+  defp went_live(deployment) do
+    Enum.reduce(~w(building pushing live), deployment, fn status, d ->
+      {:ok, next} = Registry.transition_deployment(d, %{status: status})
+      next
+    end)
   end
 
   # Mark the site deployed with a PREBUILT current release — bytes uploaded from
@@ -85,7 +96,7 @@ defmodule BarkparkCloud.Sites.TemplateFreshnessWorkerTest do
     assert marker.source == "prebuilt"
 
     site
-    |> Ecto.Changeset.change(current_deployment_id: marker.id)
+    |> Ecto.Changeset.change(current_deployment_id: went_live(marker).id)
     |> Repo.update!()
   end
 

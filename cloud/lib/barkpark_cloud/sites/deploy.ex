@@ -200,15 +200,55 @@ defmodule BarkparkCloud.Sites.Deploy do
         {:ok, deployment}
 
       {:error, %Ecto.Changeset{} = cs} ->
-        # A repeat build_id: this exact build already exists. Recover it as a
-        # no-op rather than surfacing a constraint error — a re-deploy of
-        # unchanged content IS a no-op, and the script agrees (PLAN exits 0 when
-        # build_id is already live).
-        case build_id_conflict?(cs) && Registry.find_deployment_by_build_id(site.id, build_id) do
-          %Deployment{} = existing -> {:duplicate, existing}
-          _ -> {:error, cs}
+        recover_conflict(cs, site, build_id)
+    end
+  end
+
+  # A unique conflict on create. TWO indexes can refuse this INSERT and Postgres
+  # reports only ONE of them, in an order the app must not depend on — so both
+  # recoveries are tried by LOOKUP, not by trusting which constraint name came
+  # back:
+  #
+  #   * a repeat `build_id`: this exact build already exists. Recover it as a
+  #     no-op — a re-deploy of unchanged content IS a no-op, and the script
+  #     agrees (PLAN exits 0 when build_id is already live).
+  #   * an ACTIVE build for this site (deploy-truth W1, charter D10): the re-keyed
+  #     `(site_id, environment)` index refuses a second concurrent production
+  #     build. Recover the row already in flight as the duplicate. The caller then
+  #     coalesces onto it (a still-`queued` row will read the new content when it
+  #     starts) or defers behind it (`AutoDeployWorker` re-fires the debounce), so
+  #     the publish is never lost — and the box is never asked to run a second
+  #     deploy it would only answer 409.
+  defp recover_conflict(%Ecto.Changeset{} = cs, %Site{} = site, build_id) do
+    case Registry.find_deployment_by_build_id(site.id, build_id) do
+      %Deployment{} = existing ->
+        {:duplicate, existing}
+
+      nil ->
+        case active_production_deployment(site.id) do
+          %Deployment{} = active -> {:duplicate, active}
+          nil -> {:error, cs}
         end
     end
+  end
+
+  @doc """
+  The site's ONE active production deployment (`queued` / `building` / `pushing`),
+  or nil — the row the re-keyed `deployments_active_site_env_index` (charter D10)
+  now guarantees is unique. Public because the deferral path needs to name WHAT
+  the new build is waiting behind.
+  """
+  @spec active_production_deployment(binary()) :: Deployment.t() | nil
+  def active_production_deployment(site_id) when is_binary(site_id) do
+    Repo.one(
+      from(d in Deployment,
+        where:
+          d.site_id == ^site_id and d.environment == "production" and
+            d.status in ["queued", "building", "pushing"],
+        order_by: [desc: d.inserted_at],
+        limit: 1
+      )
+    )
   end
 
   @doc """
@@ -503,13 +543,6 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   defp published_events(_body, _doc_type), do: []
 
-  defp build_id_conflict?(%Ecto.Changeset{errors: errors}) do
-    Enum.any?(errors, fn
-      {:build_id, {_msg, opts}} -> opts[:constraint] == :unique
-      _ -> false
-    end)
-  end
-
   ## ---------------------------------------------------------------------------
   ## Drive
   ## ---------------------------------------------------------------------------
@@ -521,7 +554,38 @@ defmodule BarkparkCloud.Sites.Deploy do
   drive `run/1` synchronously and deterministically instead of racing a Task.
   """
   @spec start(Deployment.t()) :: :ok
-  def start(%Deployment{id: id}), do: starter().start(id)
+  def start(%Deployment{} = deployment) do
+    _ = start_reported(deployment)
+    :ok
+  end
+
+  @doc """
+  `start/1`, but the outcome TRAVELS (deploy-truth W1, charter D9).
+
+  The old seam was spec'd `:: :ok` and the production starter returned a LITERAL
+  `:ok` after `Task.Supervisor.start_child` — it discarded the spawn result AND
+  the run outcome, so `AutoDeployWorker` could only ever observe success. In
+  three weeks that blindness recorded 11,868 completed `site_deploy` jobs and
+  ZERO retryable/discarded ones while 8,830 deploys were refused by a busy box.
+
+  Returns what actually happened, as far as the starter can know it:
+
+    * `{:ok, :started}` — the supervised driver was spawned (production; the
+      build's own outcome lands on the row, and a busy box is deferred + re-fired
+      by `run/1` itself);
+    * `{:ok, :live | :failed | :deferred}` — a SYNCHRONOUS starter drove the run
+      to its settled state and is handing it back;
+    * `{:error, reason}` — the driver never started (the supervisor refused the
+      child, or the row could not be claimed). Nothing recorded the build, so the
+      caller MUST NOT treat this as success.
+
+  `start/1` is kept as the fire-and-forget wrapper because several call sites
+  match `:ok = Deploy.start(row)`; new callers that can act on the outcome should
+  use this.
+  """
+  @spec start_reported(Deployment.t()) ::
+          {:ok, :started | :live | :failed | :deferred} | {:error, term()}
+  def start_reported(%Deployment{id: id}), do: starter().start(id)
 
   @doc """
   Drive ONE deployment end to end, synchronously: claim the row, start the run on
@@ -529,12 +593,14 @@ defmodule BarkparkCloud.Sites.Deploy do
   (with the site's live pointer flipped in the SAME transaction) or `failed` (with
   the box's real reason — never an invented one).
 
-  Returns `{:ok, :live}`, `{:ok, :failed}`, or `{:error, reason}` when the row
-  could not even be claimed (already claimed / gone). Never raises: a crash here
-  would leave a claimed row, which the reaper sweeps — but an honest `failed` with
-  the reason is strictly better, so every outbound error is mapped to one.
+  Returns `{:ok, :live}`, `{:ok, :failed}`, `{:ok, :deferred}` (the box was busy —
+  this row is settled and a rebuild has been re-queued), or `{:error, reason}`
+  when the row could not even be claimed (already claimed / gone). Never raises: a
+  crash here would leave a claimed row, which the reaper sweeps — but an honest
+  `failed` with the reason is strictly better, so every outbound error is mapped
+  to one.
   """
-  @spec run(binary()) :: {:ok, :live | :failed} | {:error, term()}
+  @spec run(binary()) :: {:ok, :live | :failed | :deferred} | {:error, term()}
   def run(deployment_id) when is_binary(deployment_id) do
     with %Deployment{} = deployment <- Registry.get_deployment(deployment_id),
          %Site{} = site <- Registry.get_site(deployment.site_id),
@@ -578,6 +644,15 @@ defmodule BarkparkCloud.Sites.Deploy do
           :ok -> poll(ctx, deployment.build_id, poll_max(), poll_grace())
           {:error, reason} -> fail(ctx, reason)
         end
+
+      # THE BUSY BOX (deploy-truth W1, charter D9). 409 is the box's ONE
+      # transient refusal: `SiteDeployController` answers it exactly when a run
+      # for this slug is already in flight (`already_running`). Writing that
+      # terminal-`failed` is what lost 8,830 publishes — the row was outside
+      # every recovery pass and nothing re-enqueued. It becomes a COUNTED
+      # `deferred` row plus a re-fired debounce instead.
+      {:ok, 409, body} ->
+        defer(ctx, deployment, box_refusal(409, body))
 
       {:ok, status, body} ->
         fail(ctx, box_refusal(status, body))
@@ -961,6 +1036,112 @@ defmodule BarkparkCloud.Sites.Deploy do
       {:error, reason} ->
         {:error, reason}
     end
+  end
+
+  # How many CONSECUTIVE deferrals a site may collect before the chain is called
+  # what it is. Each deferral costs one re-fired debounce job (~60s apart) and one
+  # box call, and a normal build finishes in 2-4 minutes, so a healthy trailing
+  # rebuild defers once or twice. A box that is still busy after this many rounds
+  # is not "busy" — it is stuck, and a chain that re-fires forever would be a
+  # silent infinite loop wearing a counted status. The last one FAILS, honestly
+  # and terminally, naming the box.
+  @max_consecutive_deferrals 6
+
+  # A BOX-BUSY DEFERRAL (charter D9). Not a failure, not a drop — a settled row
+  # that says "this build did not happen, and here is the rebuild that will".
+  #
+  # Two things must both be true or this is worse than the terminal `failed` it
+  # replaces: the row must be COUNTED (it is — `deferred` is a first-class status
+  # the deployment stream prints), and the rebuild must actually RE-FIRE. The
+  # re-fire is the debounced `AutoDeployWorker` job: it is the fleet's only
+  # coalescing rebuild path, it re-reads the site's CURRENT content when it runs
+  # (so it carries the publish that was refused, not a stale snapshot), and its
+  # `site_id` unique collapses N deferrals of the same site onto ONE pending job.
+  #
+  # It is a NEW Oban job, deliberately NOT `{:snooze, n}` on the running one:
+  # snooze increments `attempt` against `max_attempts: 3`, so three busy boxes
+  # would DISCARD the job — the exact silent drop this wave exists to refuse.
+  #
+  # A PREBUILT deploy is never deferred: its bytes live on the control plane's
+  # own row, the debounce path refuses prebuilt sites outright (it would rebuild
+  # from source and overwrite bytes this fleet cannot reproduce), so promising a
+  # rebuild we will not perform would be a lie. It fails honestly instead.
+  defp defer(ctx, %Deployment{} = deployment, reason) do
+    site = ctx.site
+    prior = consecutive_deferrals(site)
+
+    cond do
+      Deployment.prebuilt?(deployment) ->
+        fail(ctx, reason <> " — re-run the upload once the in-flight deploy finishes")
+
+      prior >= @max_consecutive_deferrals - 1 ->
+        fail(
+          ctx,
+          reason <>
+            " — and it has now refused #{prior + 1} rebuilds in a row for this site, so the instance is not busy but stuck; check its deploy runner"
+        )
+
+      true ->
+        detail =
+          reason <>
+            " — deferred: a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
+
+        _ =
+          Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
+            status: "deferred",
+            failure_reason: detail,
+            detail: detail
+          })
+
+        outcome =
+          case BarkparkCloud.Sites.AutoDeployWorker.enqueue(site.id) do
+            {:ok, _job} ->
+              Logger.info(
+                "site deploy deferred for site #{site.id} (#{prior + 1} in a row): box busy — rebuild re-queued"
+              )
+
+              {:ok, :deferred}
+
+            {:error, enqueue_error} ->
+              # THE PROMISE COULD NOT BE MADE, so this is not a deferral — it is
+              # the lost publish this wave exists to refuse, and it must be
+              # reported as one. Two things happen, and neither is optional:
+              # the row says so in its own words rather than wearing a
+              # `deferred` status that means nothing, and the OUTCOME is an
+              # error so the Oban job retries instead of recording success.
+              # `defer_behind_running_build/2` already ruled it this way; a
+              # deferral that silently succeeded on one path and failed the job
+              # on the other would be two different meanings of one word.
+              Logger.error(
+                "site deploy deferral could not re-queue the rebuild for site #{site.id}: #{inspect(enqueue_error)}"
+              )
+
+              broken =
+                reason <> " — and the rebuild could NOT be re-queued; publish again to retry"
+
+              _ =
+                Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
+                  failure_reason: broken,
+                  detail: broken
+                })
+
+              {:error, {:deferral_requeue_failed, enqueue_error}}
+          end
+
+        BarkparkCloud.Events.broadcast(site.team_id, "deployments")
+        outcome
+    end
+  end
+
+  # Deferrals at the HEAD of this site's stream, i.e. how many rounds the current
+  # busy-box chain has already run. Any other terminal status ends the count — a
+  # deferral chain is by construction unbroken (each round mints exactly one row).
+  defp consecutive_deferrals(%Site{} = site) do
+    site
+    |> Registry.list_deployments(@max_consecutive_deferrals + 2, environment: "production")
+    |> Enum.drop_while(&(&1.status in ["queued", "building", "pushing"]))
+    |> Enum.take_while(&(&1.status == "deferred"))
+    |> length()
   end
 
   defp fail(ctx, reason) do
@@ -1483,13 +1664,18 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   ## Config seams.
 
-  defp starter,
-    do:
+  # The starter seam. A PROCESS-LOCAL override wins over the node-global app env
+  # so an `async: true` test can drive the run synchronously (SyncStarter) without
+  # swapping the starter out from under every other test running at that instant
+  # — the same reasoning `NoopStarter` documents for its process-dictionary trace.
+  defp starter do
+    Process.get(:site_deploy_starter) ||
       Application.get_env(
         :barkpark_cloud,
         :site_deploy_starter,
         BarkparkCloud.Sites.Deploy.TaskStarter
       )
+  end
 
   defp poll_ms, do: Application.get_env(:barkpark_cloud, :site_deploy_poll_ms, 2_000)
   defp poll_max, do: Application.get_env(:barkpark_cloud, :site_deploy_poll_max, 450)
@@ -1511,8 +1697,16 @@ defmodule BarkparkCloud.Sites.Deploy.Starter do
   implementations, because "spawn a Task" is exactly the kind of thing that makes a
   test race: prod spawns supervised (`TaskStarter`), test drives `Deploy.run/1`
   synchronously and asserts the settled row (`NoopStarter`).
+
+  deploy-truth W1 (charter D9): the callback REPORTS. It used to be spec'd `:: :ok`
+  and the production implementation returned a literal `:ok` after spawning, so a
+  caller could not distinguish "the driver is running" from "the supervisor
+  refused the child" from "the box said no". `{:ok, :started}` is the honest
+  answer for an asynchronous starter; a synchronous one hands back the settled
+  outcome; `{:error, reason}` means nothing is building and nothing recorded it.
   """
-  @callback start(binary()) :: :ok
+  @callback start(binary()) ::
+              {:ok, :started | :live | :failed | :deferred} | {:error, term()}
 end
 
 defmodule BarkparkCloud.Sites.Deploy.TaskStarter do
@@ -1529,17 +1723,53 @@ defmodule BarkparkCloud.Sites.Deploy.TaskStarter do
 
   @impl true
   def start(deployment_id) do
-    Task.Supervisor.start_child(BarkparkCloud.SiteDeploySupervisor, fn ->
-      try do
-        BarkparkCloud.Sites.Deploy.run(deployment_id)
-      rescue
-        e ->
-          Logger.error("site deploy driver crashed for #{deployment_id}: #{Exception.message(e)}")
-      end
-    end)
+    result =
+      Task.Supervisor.start_child(BarkparkCloud.SiteDeploySupervisor, fn ->
+        try do
+          BarkparkCloud.Sites.Deploy.run(deployment_id)
+        rescue
+          e ->
+            Logger.error(
+              "site deploy driver crashed for #{deployment_id}: #{Exception.message(e)}"
+            )
+        end
+      end)
 
-    :ok
+    # deploy-truth W1: the SPAWN result travels. It used to be discarded and a
+    # literal `:ok` returned, so a supervisor that refused the child (max_children,
+    # a dead supervisor) left the row `queued` forever with every caller told the
+    # build had started. The BUILD's own outcome still lands on the row — a
+    # supervised Task cannot report it synchronously — and a busy box is deferred
+    # and re-fired by `Deploy.run/1` itself.
+    case result do
+      {:ok, _pid} ->
+        {:ok, :started}
+
+      other ->
+        Logger.error(
+          "site deploy driver could not be spawned for #{deployment_id}: #{inspect(other)}"
+        )
+
+        {:error, other}
+    end
   end
+end
+
+defmodule BarkparkCloud.Sites.Deploy.SyncStarter do
+  @moduledoc """
+  The SYNCHRONOUS starter: runs the driver in the calling process and hands back
+  its settled outcome (`{:ok, :live | :failed | :deferred}` / `{:error, reason}`).
+
+  It exists so a test can prove what a CALLER of `Deploy.start_reported/1`
+  observes — the whole point of deploy-truth W1 is that `AutoDeployWorker` no
+  longer flies blind, and a starter that spawns cannot demonstrate that. Select it
+  per-process with `Process.put(:site_deploy_starter, __MODULE__)`; the seam is
+  process-local so an `async: true` test never swaps it for another.
+  """
+  @behaviour BarkparkCloud.Sites.Deploy.Starter
+
+  @impl true
+  def start(deployment_id), do: BarkparkCloud.Sites.Deploy.run(deployment_id)
 end
 
 defmodule BarkparkCloud.Sites.Deploy.NoopStarter do
@@ -1572,6 +1802,8 @@ defmodule BarkparkCloud.Sites.Deploy.NoopStarter do
       artifact_present: not is_nil(BarkparkCloud.Sites.Deploy.artifact_for(deployment_id))
     })
 
-    :ok
+    # It stands in for the PRODUCTION spawn, so it reports what a successful spawn
+    # reports: the driver is on its way, the outcome will land on the row.
+    {:ok, :started}
   end
 end

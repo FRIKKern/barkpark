@@ -225,11 +225,24 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
     over = 2
     n = Registry.reap_alert_cap() + over
 
-    # Distinct refs: `deployments_active_site_ref_index` allows one ACTIVE row
-    # per (site, ref), so a mass reap is many refs, not many retries of one.
+    # One queued row per SITE: deploy-truth W1 re-keyed the active index onto
+    # (site_id, environment), so a mass reap is many SITES on the box, not many
+    # concurrent builds of one site (which the DB now refuses outright).
+    bp = Registry.get_barkpark(site.barkpark_id)
+
     ids =
       for i <- 1..n do
-        {:ok, d} = Registry.create_deployment(site, %{git_ref: "ref-#{i}"})
+        site_i =
+          if i == 1 do
+            site
+          else
+            {:ok, s} =
+              Registry.create_site(bp, %{name: "Shop #{i}-#{n}", slug: "shop-#{i}-#{n}"})
+
+            s
+          end
+
+        {:ok, d} = Registry.create_deployment(site_i, %{git_ref: "ref-#{i}"})
         d.id
       end
 

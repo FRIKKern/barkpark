@@ -219,20 +219,100 @@ defmodule BarkparkCloud.Sites.AutoDeployWorker do
     # suspenders against a republish whose content_rev happened not to change).
     case Deploy.enqueue(site, bp, true, "content-auto") do
       {:ok, deployment} ->
-        :ok = Deploy.start(deployment)
-        :ok
+        start_and_report(site, deployment)
 
-      # force should never dedup (fresh nonce every run) — but if it somehow does,
-      # re-drive the existing row rather than dropping the rebuild.
+      # force should never dedup on build_id (fresh nonce every run). What DOES
+      # land here since the active-deployment re-key (deploy-truth W1, charter
+      # D10) is the site's row already in flight: `(site_id, environment)` now
+      # refuses a second concurrent production build, so this publish coalesces
+      # onto it. Re-driving is right either way — a still-`queued` row reads the
+      # NEW content when it starts, and an already-building one answers
+      # `:not_queued`, which defers below instead of dropping the publish.
+      {:duplicate, %Deployment{status: "queued"} = deployment} ->
+        start_and_report(site, deployment)
+
+      # The row it coalesced onto is ALREADY BUILDING (or settled). Driving it
+      # again would either lose the claim race or re-run a finished build, and
+      # the content this publish carries would never be read — so defer HERE,
+      # where it is knowable. In production the starter is asynchronous, so a
+      # claim failure discovered inside the spawned driver could never travel
+      # back to this job; this is the arm that actually fires.
       {:duplicate, deployment} ->
-        :ok = Deploy.start(deployment)
-        :ok
+        defer_behind_running_build(site, deployment)
 
       # A transient enqueue failure (e.g. the box's content-rev read) — let Oban
       # retry within max_attempts rather than silently swallow the publish.
       {:error, reason} ->
         Logger.warning(
           "auto-deploy enqueue failed for site #{site.id}: #{inspect(reason)} — retrying"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  # THE OUTCOME IS INSPECTED (deploy-truth W1, charter D9). This used to be
+  # `:ok = Deploy.start(deployment); :ok` — a match against a starter that
+  # returned a literal `:ok` no matter what happened, which is why production's
+  # `site_deploy` queue holds 11,868 completed jobs and ZERO retryable ones while
+  # 8,830 deploys were refused by a busy box.
+  defp start_and_report(site, deployment) do
+    case Deploy.start_reported(deployment) do
+      # Production: the supervised driver is running. Its outcome settles on the
+      # row (and a busy box defers + re-fires from inside the run).
+      {:ok, :started} ->
+        :ok
+
+      # A synchronous driver ran to a settled state. `:failed` is RECORDED on the
+      # row with the box's own reason — returning an Oban error would retry a
+      # build that just failed for a reason a retry cannot change — but the value
+      # travels so the job record says which it was.
+      {:ok, outcome} when outcome in [:live, :failed, :deferred] ->
+        {:ok, outcome}
+
+      # The row is already claimed — the site is mid-build. THIS is the publish
+      # that used to be lost: it minted a second row, the box answered 409, and
+      # the row died terminal-`failed` with nothing to re-drive it. Re-fire the
+      # debounce instead: the trailing job re-reads the site's CURRENT content
+      # after the in-flight build finishes.
+      {:error, :not_queued} ->
+        defer_behind_running_build(site, deployment)
+
+      # The driver never started and nothing recorded the build. The row is still
+      # `queued`, so a retry (and, failing that, the stale-deployment reaper) can
+      # still pick it up — never report success.
+      {:error, reason} ->
+        Logger.warning(
+          "auto-deploy could not start the driver for site #{site.id}: #{inspect(reason)} — retrying"
+        )
+
+        {:error, reason}
+    end
+  end
+
+  # A COUNTED, RE-FIRING deferral (charter D9) for the case where the control
+  # plane refuses the second build itself rather than letting the box refuse it.
+  #
+  # There is no new row to mark `deferred` here — the active-deployment index
+  # (correctly) refused to mint one, and the row in flight is a real build that
+  # must not be relabelled. The promise is the re-queued job, so a re-queue that
+  # FAILS must not be reported as success: it becomes an Oban error, which retries.
+  #
+  # NOT `{:snooze, n}`: snooze increments `attempt` against `max_attempts: 3`, so
+  # three busy rounds would DISCARD the job. A fresh debounced job carries no
+  # attempt history at all, and its `site_id` unique collapses repeats onto one.
+  defp defer_behind_running_build(site, %Deployment{} = in_flight) do
+    case enqueue(site.id) do
+      {:ok, _job} ->
+        Logger.info(
+          "auto-deploy deferred for site #{site.id}: deployment #{in_flight.id} is already #{in_flight.status} — rebuild re-queued"
+        )
+
+        {:ok, :deferred}
+
+      {:error, reason} ->
+        Logger.warning(
+          "auto-deploy could not re-queue the deferred rebuild for site #{site.id}: #{inspect(reason)} — retrying"
         )
 
         {:error, reason}

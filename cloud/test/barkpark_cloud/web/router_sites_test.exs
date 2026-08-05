@@ -440,7 +440,11 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
-      {:ok, _d1} = Registry.create_deployment(site, %{git_ref: "a"})
+      # Settled between mints: deploy-truth W1 re-keyed the active index onto
+      # (site_id, environment), so a site's HISTORY has many rows but only ever
+      # one build in flight.
+      {:ok, d1} = Registry.create_deployment(site, %{git_ref: "a"})
+      {:ok, _} = Registry.transition_deployment(d1, %{status: "failed"})
       {:ok, _d2} = Registry.create_deployment(site, %{git_ref: "b"})
       token = login_token(user)
 
@@ -453,8 +457,12 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       {user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, site} = Registry.create_site(bp, %{name: "X", slug: "x"})
-      {:ok, _d1} = Registry.create_deployment(site, %{git_ref: "a"})
-      {:ok, _d2} = Registry.create_deployment(site, %{git_ref: "b"})
+      # One build in flight per site (deploy-truth W1) — settle as we go.
+      for ref <- ~w(a b) do
+        {:ok, d} = Registry.create_deployment(site, %{git_ref: ref})
+        {:ok, _} = Registry.transition_deployment(d, %{status: "failed"})
+      end
+
       {:ok, _d3} = Registry.create_deployment(site, %{git_ref: "c"})
       token = login_token(user)
 
@@ -676,7 +684,11 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       {:ok, d} = Sites.Deploy.enqueue(site, bp)
       FakeBoxRelay.program(start: {:ok, 409, %{"error" => "another deploy holds the lock"}})
 
-      assert {:ok, :failed} = Sites.Deploy.run(d.id)
+      # deploy-truth W1: a 409 is the box's ONE transient refusal, so the row
+      # settles `deferred` (with a re-queued rebuild) rather than terminal-
+      # `failed`. What this test guards is unchanged: the FLAT body's words still
+      # travel intact.
+      assert {:ok, :deferred} = Sites.Deploy.run(d.id)
       assert Registry.get_deployment(d.id).failure_reason =~ "another deploy holds the lock"
     end
 
@@ -1657,7 +1669,13 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       site = static_site(bp)
       token = login_token(user)
 
+      # The previous build FINISHED — that is what makes it previous, and what
+      # the re-keyed active index (deploy-truth W1) requires: one build in
+      # flight per site.
       {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "live"})
       {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
       {:ok, site} = Registry.set_site_current_deployment(site, live.id)
 
@@ -1756,7 +1774,13 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       site = node_site(bp)
       token = login_token(user)
 
+      # The previous build FINISHED — that is what makes it previous, and what
+      # the re-keyed active index (deploy-truth W1) requires: one build in
+      # flight per site.
       {:ok, prev} = Registry.create_deployment(site, %{build_id: "prevbuild0000001"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "building"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "pushing"})
+      {:ok, prev} = Registry.transition_deployment(prev, %{status: "live"})
       {:ok, live} = Registry.create_deployment(site, %{build_id: "livebuild0000001"})
       {:ok, site} = Registry.set_site_current_deployment(site, live.id)
 
@@ -2013,12 +2037,27 @@ defmodule BarkparkCloud.Web.RouterSitesTest do
       token = login_token(user)
 
       first = call(:post, "/v1/sites/#{site.id}/deploy", %{source: "prebuilt"}, token)
+
+      # deploy-truth W1 (charter D10): while the first mint is still in flight,
+      # a second one COALESCES onto it (200 with that row) instead of standing up
+      # a second concurrent build the box would only answer 409. The uploader
+      # follows the returned build_id, so its bytes still reach the row it was
+      # handed — nothing is silently discarded.
+      coalesced = call(:post, "/v1/sites/#{site.id}/deploy", %{source: "prebuilt"}, token)
+      assert coalesced.status == 200
+
+      assert json_body(coalesced)["deployment"]["id"] ==
+               json_body(first)["deployment"]["id"]
+
+      # Once that build settles, the slot is free and the NEXT prebuilt mint is a
+      # genuinely distinct row — two different dists must never hash to one
+      # build_id, so a prebuilt mint stays non-idempotent by construction.
+      {:ok, _} =
+        Registry.get_deployment(json_body(first)["deployment"]["id"])
+        |> Registry.transition_deployment(%{status: "failed"})
+
       second = call(:post, "/v1/sites/#{site.id}/deploy", %{source: "prebuilt"}, token)
 
-      # The {:duplicate, _} arm answers 200 with the OLD row, mints nothing, and
-      # — because record_audit lives only in the {:ok, _} arm — leaves ZERO trace
-      # of the swallowed upload. Two different dists MUST NOT hash to one
-      # build_id, so a prebuilt mint is non-idempotent by construction.
       assert first.status == 201
       assert second.status == 201
 
