@@ -48,4 +48,7 @@ export type {
   RefInput,
   ResolvedDoc,
   BarkparkReferenceClient,
+  // What the derived `client={…}` fetcher throws for a non-404 non-ok response
+  // (match on `code`, not `instanceof`).
+  BarkparkReferenceFetchError,
 } from './Reference'
