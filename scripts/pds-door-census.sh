@@ -138,6 +138,30 @@
 #      MEASURED (28.73 s CPU across its three gated arms), and the shape check
 #      APPENDS to error_lines and increments errors and NEVER assigns class.
 #
+# THE TWO SILENCES CLOSED IN WAVE 47 — both re-proven on a clean origin/main
+# --------------------------------------------------------------------------
+#   1. THE PRICE LEDGER HAD NO ORPHAN DIRECTION. Wave 46 built one for the
+#      DISPOSITION ledger and stopped there. A price row naming an instrument
+#      that is not THROUGH passed in TOTAL silence: rc=0, ERRORS 0, and a diff of
+#      the whole run against the unmutated one produced NO OUTPUT. The key is
+#      `class != THROUGH`, NOT the obvious symmetry `computed == yes`, because
+#      the case that decides it is computed='no' — see orphaned_price_error.
+#      And RETIRED- is refused here on BOTH sides: the lookup reads through
+#      `ledger_field` so a retire costume is not an exemption, and
+#      `price_shape_error`'s globs are ANCHORED so the costume cannot pass the
+#      shape arms either. The ruling sits above PDS_DOOR_PRICES.
+#   2. THE COUNTS BLOCK ACCOUNTED FOR 4 ROWS OF 20. It printed the four COMPUTED
+#      bands and none of the six LEDGER classes, so flipping an instrument from
+#      NOT-YET-BUILT to CONTENT-RED moved EXACTLY ONE line of the output — the
+#      table row — leaving the counts byte-identical and rc=0 both ways, inside
+#      a block headed "derived from the rows above, never transcribed". The
+#      derivation was honest; the COVERAGE was 20%. The partition now prints the
+#      whole vocabulary INCLUDING ZEROES, sums it, and ASSERTS the sum.
+#      CONTENT-RED still does not red the run, and that is a DECLARED ruling
+#      (the exit contract above is scoped to DISPOSABILITY, PDS-D637 made
+#      CONTENT-RED a REASON A DOOR IS NOT THROUGH, and the rider pins rc as a
+#      DESCENT from the counts): disposed != healthy.
+#
 # USAGE
 #   pds-door-census.sh                 # the census (default) — fail-closed
 #   pds-door-census.sh --selftest      # the fraud + depth arms, no BEAM, no gate
@@ -173,6 +197,22 @@ NOT-YET-BUILT
 CONTENT-RED
 RED-BY-DESIGN-REPORTER
 HUMAN-GATE'
+
+# The bands a row can land in WITHOUT a ledger row — derived from the tree by the
+# cond in run_census. Declared here beside the ledger vocabulary because the two
+# lists TOGETHER are the whole partition: every row of the column ends in exactly
+# one of these eleven names, and the COUNTS block below asserts that sum against
+# the population rather than printing four of the bands and going quiet about the
+# rest. Until wave 47 the block accounted for 4 rows of 20 — the four computed
+# bands — so flipping an instrument from NOT-YET-BUILT to CONTENT-RED moved
+# EXACTLY ONE line of the whole output (its table row) and left the counts
+# byte-identical: the flagship instrument could not tell "one instrument is RED
+# right now" from "one instrument was never built" anywhere a reader looks.
+PDS_DOOR_COMPUTED_BANDS='THROUGH
+IN-BEAM-REQUIRED
+DEAD-DECLARATION
+UNDISPOSED
+ERROR'
 
 # ---------------------------------------------------------------------------
 # THE DISPOSITION LEDGER — why a non-THROUGH instrument is not through.
@@ -220,7 +260,27 @@ pds-idle-sampler.sh	ENVIRONMENT	samples a live host over ssh, twice a minute (sc
 # is the fraud this column exists to remove. The load1 stamp is REQUIRED
 # (PDS-D656): CPU is not load-independent, so a figure with no load beside it is
 # a number nobody can re-take.
-PDS_DOOR_PRICES='pds-door-census.sh	CPU=0.46+0.61=1.07s LOCAL meter=/usr/bin/time -p around bash -c load1=3.26 2026-08-04 (--check, rc=0; 3 trials gave 1.06/1.04/1.07s). Its gated arm is --selftest at CPU=0.19+0.28=0.47s at the SAME load (3 trials 0.48/0.49/0.47) — this wave added ten LEDGER arms that run the real run_census over a two-instrument fixture tree, which took --selftest up from 0.16s, and a price whose instrument changed underneath it is the exact rot this row is here to prevent. The 2026-08-03 figures (3.32s / 0.16s at load1=41.63) are NOT comparable and are not quoted as a delta: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once.
+#
+# A PRICE HAS EXACTLY ONE LEGAL ENDING: DELETE THE ROW. The disposition ledger's
+# retire shape does NOT exist here and must never be imported, because the two
+# ledgers do not have the same columns: a disposition row carries a CLASS in
+# field 2, so `RETIRED-<CLASS>` is a legal value there; THIS ledger's field 2 IS
+# THE PRICE. There is nothing to prefix. A price is not a refusal that needs
+# superseding evidence attached to it — its supersession IS a new measurement,
+# and a new measurement REPLACES field 2 in place. `RETIRED-CPU=…` is therefore
+# refused by `price_shape_error` on its own explicit arm, and the CPU= glob is
+# ANCHORED at the start of the field rather than floating: until wave 47 the
+# globs were `*'CPU='*'LOCAL'*'meter='*`, so `RETIRED-CPU=0.01+0.01=0.02s LOCAL
+# meter=… load1=1.00` passed EVERY shape arm while `ledger_field` handed that
+# same text to the THROUGH branch and printed it as a LIVE price — a working
+# price wearing a costume, silent on main, rc=0, ERRORS 0.
+#
+# AND A PRICE ROW FOR AN INSTRUMENT THAT IS NOT THROUGH IS AN ORPHAN. This
+# ledger is read at exactly ONE site, inside the THROUGH branch, so a row naming
+# any other instrument is a price nobody pays and nothing reads —
+# `orphaned_price_error` below is what makes that say so instead of passing in
+# total silence.
+PDS_DOOR_PRICES='pds-door-census.sh	CPU=0.51+0.72=1.23s LOCAL meter=/usr/bin/time -p around bash -c load1=5.26 2026-08-04 (--check, rc=0; 3 trials gave 1.24/1.22/1.23s). Its gated arm is --selftest at CPU=0.41+0.66=1.07s at load1=5.54 (5 trials 1.10/1.08/1.05/1.04/1.07 — a 5.7% spread across stamps 5.54-5.57, which is what makes the figure quotable against its own stamp rather than against the host). RE-TAKEN IN THIS PR BECAUSE THE INSTRUMENT CHANGED UNDERNEATH IT: wave 47 took --selftest from 24 arms to 33, seven of the nine running the real run_census over the two-instrument fixture tree, and a price whose instrument changed underneath it is the exact rot this row exists to prevent. THE DELTA IS MEASURED, NOT ESTIMATED, and only because both sides were metered in the SAME window: the untouched origin/main export (49345a98c) ran its --selftest at 0.54/0.58/0.53s at load1 5.26-5.37, so the nine new arms cost +95% of the gated arm — nearly double, not the ~+44% this slice was briefed with. The earlier 1.07s/0.47s at load1=3.26 and the 3.32s/0.16s at load1=41.63 are NOT comparable and are quoted as neither a delta nor a baseline: PDS-D656 — a price is quotable only against its own load stamp. The rider also runs --check once and a one-row mutant once.
 pds-status-only-residue.exs	CPU=0.61+0.21=0.82s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 2026-08-03 (--selftest, 15/15 arms)
 pds-record-parity.test.sh	CPU=1.45+3.00=4.45s LOCAL meter=/usr/bin/time -p around bash -c load1=26.44 2026-08-03 (76 checks, 0 failures)
 pds-elixir-receipt-census.exs	CPU=26.47+2.26=28.73s LOCAL meter=/usr/bin/time -p around bash -c load1=2.93 2026-08-04 — the THREE GATED ARMS SUMMED, each metered separately: plain rc=0 at 11.81+0.94=12.75s, the one-token tl/1 mutant rc=1 at 11.53+0.91=12.44s (the mutant of api/test/barkpark/pds_elixir_census_test.exs:69-70, rebuilt in a tmp dir and run with cwd=repo root), the unknown-flag refusal rc=2 at 3.13+0.41=3.54s. THREE trials at load1 2.13 / 3.43 / 2.93 gave 29.20 / 28.61 / 28.73s total CPU — a 2% spread, so this row is quotable against its own load stamp and NOT against a busier host. Its `--selftest` is a DIFFERENT arm, separately disqualified at 210 s leaf CPU (D646), and is not what the gate runs.'
@@ -645,6 +705,50 @@ EOF
 }
 
 # ---------------------------------------------------------------------------
+# THE PARTITION — every row of the column lands in exactly one printed band
+# ---------------------------------------------------------------------------
+# Ported from scripts/pds-elixir-receipt-census.exs's report_derivation_partition/2
+# ("THE PARTITION, PRINTED IN FULL", built by pds-w40-derivation-partition): the
+# full vocabulary is printed INCLUDING ZEROES, the printed lines are SUMMED, and
+# the sum is checked against the population. A `uniq -c` over the observed
+# classes would have been shorter and wrong — it omits the classes at zero, and
+# HUMAN-GATE is at zero right now, which the charter records as a LIVE FINDING.
+# A band that vanishes when it empties hides exactly the fact worth printing.
+class_tally_count() {
+  # $1 = the newline-separated per-row class list, $2 = the band name.
+  # An exact-line count, never a substring: `ERROR` must not also count
+  # `RED-BY-DESIGN-REPORTER`, and `PRICE` must not count itself twice.
+  # An `if`, never `[ … ] && n=…`: a trailing AND-list whose test fails leaves the
+  # loop with a non-zero status, and this whole file runs under `set -e`.
+  local l n=0
+  while IFS= read -r l; do
+    if [ "$l" = "$2" ]; then n=$((n + 1)); fi
+  done <<EOF
+$1
+EOF
+  printf '%s' "$n"
+}
+
+# The RESIDUAL BAND, stated rather than assumed away: every class this run
+# produced that is in NEITHER declared list. On a healthy tree it is empty, and
+# an empty residual is the only thing that makes the printed sum a derivation
+# rather than a coincidence.
+unaccounted_classes() {
+  # $1 = the per-row class list. Prints the offending class names, deduped.
+  local l
+  {
+    while IFS= read -r l; do
+      [ -n "$l" ] || continue
+      if has_line "$PDS_DOOR_CLASSES" "$l"; then continue; fi
+      if has_line "$PDS_DOOR_COMPUTED_BANDS" "$l"; then continue; fi
+      printf '%s\n' "$l"
+    done <<EOF
+$1
+EOF
+  } | LC_ALL=C sort -u
+}
+
+# ---------------------------------------------------------------------------
 # ORPHANED DISPOSITION — a ledger row nobody reads
 # ---------------------------------------------------------------------------
 # The class cond below short-circuits leg A + leg B to THROUGH (and the leg-A
@@ -671,6 +775,47 @@ orphan_error() {
 }
 
 # ---------------------------------------------------------------------------
+# ORPHANED PRICE — a price row nobody pays
+# ---------------------------------------------------------------------------
+# The disposition ledger's orphan direction (above) has a mirror image that went
+# unbuilt for four waves: PDS_DOOR_PRICES is read at EXACTLY ONE site, inside the
+# THROUGH branch, so a price row naming an instrument this run did not compute
+# THROUGH is read by nothing at all. Appending one for `pds-secret-scan.sh`
+# (class ENVIRONMENT) left `--check` at rc=0, ERRORS 0, and the COUNTS block
+# BYTE-IDENTICAL — the same total silence the disposition orphan check was built
+# to end, in the other ledger.
+#
+# THE KEY IS `class != THROUGH`, NOT `computed == yes`, and the case that decides
+# it is the CROSS-LEDGER CONTRADICTION: an instrument disposed PRICE carries its
+# price in its DISPOSITION evidence (field 3, shape-checked in the else branch)
+# with computed='no', so a SECOND and CONTRADICTING figure in PDS_DOOR_PRICES is
+# two ledgers naming one price. `ledger_keys` refuses a cross-ledger union by
+# deliberate design (a union double-reports one within-ledger duplicate), so
+# nothing else in this instrument can see it. A `computed == yes` key — the
+# obvious symmetry with orphan_error — ships a half-fix that leaves exactly that
+# case silent: planting 19.98s against pds-scratch-target_test.sh's own 8.91s is
+# rc=0 under it and rc=1 under this one.
+#
+# UNGATED, for PDS-D602's reason: no has-key or membership guard runs in front of
+# it. A guard that asks "is this basename priced?" before asking "should it be?"
+# is conditionally blind by construction.
+#
+# `ledger_field`, NEVER `live_ledger_field`: the price ledger has no retire shape
+# (see the ruling above PDS_DOOR_PRICES), and looking this up through the
+# retirement-aware helper would silently make `RETIRED-` an EXEMPTION from the
+# orphan check in a ledger where it is not even a legal value.
+orphaned_price_error() {
+  # $1 = basename, $2 = this run's class for it, $3 = price ledger text.
+  # Prints one error line, or nothing. NEVER assigns class (PDS-D667).
+  local p
+  [ "$2" != 'THROUGH' ] || return 0
+  p="$(ledger_field "$3" "$1" 2)"
+  [ -n "$p" ] || return 0
+  printf '  %s: ORPHANED PRICE — the price ledger carries a row for it, but this run classed it %s, not THROUGH. PDS_DOOR_PRICES is read at exactly one site, inside the THROUGH branch, so this row is a price nobody pays and nothing reads. If its class is PRICE the row is worse than unread: the disposition evidence carries that price too, and two ledgers naming one price is a contradiction neither duplicate-key scan can see (each is scoped to its own ledger by design). DELETE THE ROW; a price has no other legal ending. It carries: %s' \
+    "$1" "$2" "$p"
+}
+
+# ---------------------------------------------------------------------------
 # PRICE SHAPE — one predicate, applied to EVERY price, THROUGH or PRICE-classed
 # ---------------------------------------------------------------------------
 # SEPARATED AXIS, and this is law (PDS-D667): a shape check APPENDS to
@@ -681,8 +826,21 @@ orphan_error() {
 # reporting a ledger typo.
 price_shape_error() {
   # $1 = basename, $2 = the price text. Prints one error line, or nothing.
+  #
+  # RETIRED- ON ITS OWN ARM, not merely by falling off the anchored glob below:
+  # the retire shape is a DISPOSITION shape, and importing it here silently turns
+  # a live price into one — see the ruling above PDS_DOOR_PRICES. The arm is
+  # separate so the message names the ruling rather than reading as a typo.
   case "$2" in
-    *'CPU='*'LOCAL'*'meter='*) ;;
+    RETIRED-*)
+      printf '  %s: a price cannot be RETIRED. The retire shape belongs to the DISPOSITION ledger, whose field 2 is a CLASS; this ledger'"'"'s field 2 is THE PRICE, so there is nothing to prefix. A price has exactly ONE legal ending: DELETE THE ROW (its supersession is a new measurement, which replaces field 2 in place). It carries: %s' "$1" "$2"
+      return 0
+      ;;
+  esac
+  # ANCHORED AT THE START, never floating: the old leading `*` admitted ANY
+  # prefix in front of CPU=, which is how the retire costume walked through.
+  case "$2" in
+    'CPU='*'LOCAL'*'meter='*) ;;
     *)
       printf '  %s: a price must carry CPU=<user>+<sys>=<total>s LOCAL meter=<name> (PDS-D648). It carries: %s' "$1" "$2"
       return 0
@@ -786,8 +944,9 @@ run_census() {
 
   # ---- the table -----------------------------------------------------------
   local b kinds legA legB class evidence price row computed shape_err orphan_err
-  local through=0 undisposed=0 errors=0 inbeam=0 dead=0
-  local through_names="" undisposed_names="" error_lines=""
+  local orphan_price_err
+  local through=0 undisposed=0 errors=0 inbeam=0 dead=0 error_rows=0
+  local through_names="" undisposed_names="" error_lines="" class_tally=""
 
   echo "THE COLUMN"
   printf '  %-38s %-6s %-6s %-22s %s\n' INSTRUMENT LEG-A LEG-B DISPOSITION DETAIL
@@ -897,6 +1056,21 @@ $orphan_err"
       class='ERROR'
     fi
 
+    # ---- the orphaned-price check, ungated, keyed on class != THROUGH ------
+    # Runs for EVERY instrument with no has-key guard (PDS-D602), and after the
+    # leg-B arm above so it reads the class this run actually landed on.
+    orphan_price_err="$(orphaned_price_error "$b" "$class" "$PDS_DOOR_PRICES")"
+    if [ -n "$orphan_price_err" ]; then
+      error_lines="$error_lines
+$orphan_price_err"
+      errors=$((errors + 1))
+    fi
+
+    # THE ROW'S FINAL CLASS, recorded for the partition below. Every row lands in
+    # exactly one band; a class that lands in NONE is what the residual names.
+    class_tally="$class_tally
+$class"
+
     case "$class" in
       THROUGH)
         through=$((through + 1))
@@ -908,7 +1082,13 @@ $orphan_err"
         undisposed=$((undisposed + 1))
         undisposed_names="$undisposed_names $b"
         ;;
-      ERROR) errors=$((errors + 1)) ;;
+      ERROR)
+        errors=$((errors + 1))
+        # A SEPARATE COUNTER, because ERRORS is not a row count: it also carries
+        # shape errors, orphan errors, stale rows and duplicate keys, none of
+        # which are rows of the column. The partition sums ROWS.
+        error_rows=$((error_rows + 1))
+        ;;
     esac
 
     printf '  %-38s %-6s %-6s %-22s %s\n' "$b" "$legA" "$legB" "$class" "$evidence"
@@ -967,6 +1147,43 @@ $re"
 $(retired_evidence_errors "$PDS_DOOR_DISPOSITIONS")
 EOF
 
+  # ---- the partition, computed BEFORE the block prints ---------------------
+  # ERRORS is printed last and must carry the shortfall verdict, so the sum is
+  # taken here rather than inside the echoes below.
+  # ACCOUNTED FOR is summed from the SAME tally the residual is derived from —
+  # never from the four running counters beside it. Two sources would let the sum
+  # and the residual disagree, and a partition whose two halves disagree is the
+  # transcription this block's header refuses.
+  local cname cn accounted residual ledger_lines
+  accounted=0
+  while IFS= read -r cname; do
+    [ -n "$cname" ] || continue
+    accounted=$((accounted + $(class_tally_count "$class_tally" "$cname")))
+  done <<EOF
+$PDS_DOOR_COMPUTED_BANDS
+EOF
+  ledger_lines=''
+  while IFS= read -r cname; do
+    [ -n "$cname" ] || continue
+    cn="$(class_tally_count "$class_tally" "$cname")"
+    ledger_lines="$ledger_lines
+$(printf '    %-24s: %s of %s' "$cname" "$cn" "$total")"
+    accounted=$((accounted + cn))
+  done <<EOF
+$PDS_DOOR_CLASSES
+EOF
+
+  residual="$(unaccounted_classes "$class_tally")"
+
+  # ASSERTED, NOT MERELY PRINTED — a printed sum nobody checks is a number, not
+  # a verdict, and it reds the run through error_lines like every other finding
+  # here rather than through a class assignment (PDS-D667).
+  if [ "$accounted" -ne "$total" ]; then
+    error_lines="$error_lines
+  PARTITION SHORTFALL — the printed bands account for $accounted of $total rows. Every row of the column must land in exactly one of PDS_DOOR_CLASSES or PDS_DOOR_COMPUTED_BANDS; a row in neither is a class the COUNTS block cannot see, which is the silence this partition replaced. Unaccounted class(es): $(printf '%s' "$residual" | tr '\n' ' ')"
+    errors=$((errors + 1))
+  fi
+
   echo
   echo "COUNTS — derived from the rows above, never transcribed"
   echo "  THROUGH a required gate : $through of $total  ($DENOMINATOR_CONVENTION)"
@@ -974,6 +1191,16 @@ EOF
   echo "  IN-BEAM-REQUIRED        : $inbeam of $total  (gated; not priceable by an OS meter)"
   echo "  DEAD-DECLARATION        : $dead of $total"
   echo "  UNDISPOSED              : $undisposed of $total"
+  echo "  ERROR rows              : $error_rows of $total  (rows the classifier could not classify)"
+  echo "  BY LEDGER CLASS — the FULL declared vocabulary, INCLUDING the ones at zero:"
+  printf '%s\n' "$ledger_lines" | sed '/^$/d'
+  echo "  ACCOUNTED FOR           : $accounted of $total  (the eleven bands above, summed and asserted)"
+  if [ -n "$residual" ]; then
+    echo "  RESIDUAL (in no declared band):"
+    printf '%s\n' "$residual" | sed 's/^/    /'
+  else
+    echo "  RESIDUAL (in no declared band): none"
+  fi
   echo "  ERRORS                  : $errors"
   echo
   echo "WHAT THE DOORS DO AND DO NOT PROVE (PDS-D637): a green door gates the ARM'S OWN LOGIC"
@@ -1403,6 +1630,100 @@ EOF
   census_run "$d_ok" ''
   census_arm "AN ABSENT THROUGH PRICE IS UNPRICED and REDS" 1 \
     'UNPRICED' 'THROUGH a required gate : 1 of 2'
+
+  # ---- THE PRICE-LEDGER ORPHAN DIRECTION (wave 47) ------------------------
+  # A price row for an instrument that is NOT THROUGH. Before this slice it was
+  # invisible in exactly the way the disposition orphan was: rc=0, ERRORS 0, and
+  # a COUNTS diff producing no output at all.
+  census_run "$d_ok" "$(printf '%s\npds-fx-shut.sh\tCPU=9.99+9.99=19.98s LOCAL meter=/usr/bin/time -p around bash -c load1=1.00 2026-08-04 (fixture: a price nobody pays)' "$p_ok")"
+  census_arm "ORPHANED PRICE FIRES: a price row for a non-THROUGH instrument reds, count unmoved" 1 \
+    'ORPHANED PRICE' 'pds-fx-shut.sh' 'THROUGH a required gate : 1 of 2'
+
+  # THE CROSS-LEDGER CONTRADICTION, which is why the key is `class != THROUGH`
+  # and NOT `computed == yes`: this row is computed='no' (it came from the
+  # disposition ledger's terminal else branch), so a computed-keyed predicate
+  # would skip it and leave two ledgers naming one price silent.
+  census_run \
+    "$(printf 'pds-fx-shut.sh\tPRICE\tCPU=0.01+0.01=0.02s LOCAL meter=/usr/bin/time -p around bash -c load1=1.00 2026-08-04 (fixture: its OWN figure)')" \
+    "$(printf '%s\npds-fx-shut.sh\tCPU=9.99+9.99=19.98s LOCAL meter=/usr/bin/time -p around bash -c load1=1.00 2026-08-04 (fixture: a SECOND, contradicting figure)' "$p_ok")"
+  census_arm "CROSS-LEDGER CONTRADICTION: a PRICE-classed row (computed=no) with a second figure reds" 1 \
+    'ORPHANED PRICE' 'classed it PRICE, not THROUGH'
+
+  # THE RETIRE COSTUME ON AN ORPHAN. This row never reaches price_shape_error at
+  # all (its instrument is shut, so no shape check runs on it) — only the orphan
+  # lookup can see it, and only because it reads through `ledger_field`. Swapping
+  # that one token for `live_ledger_field` takes this arm silent, which is
+  # retirement becoming an EXEMPTION in a ledger that has no retire shape.
+  census_run "$d_ok" "$(printf '%s\npds-fx-shut.sh\tRETIRED-CPU=0.01+0.01=0.02s LOCAL meter=/usr/bin/time -p around bash -c load1=1.00 2026-08-04 (fixture)' "$p_ok")"
+  census_arm "A RETIRE COSTUME DOES NOT EXEMPT AN ORPHANED PRICE (ledger_field, not live_)" 1 \
+    'ORPHANED PRICE' 'pds-fx-shut.sh'
+
+  # RETIRED- IN THE PRICE LEDGER, on a genuinely THROUGH row. On main this passed
+  # EVERY shape arm — the globs floated — and was printed as a LIVE price.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\tRETIRED-CPU=0.01+0.01=0.02s LOCAL meter=/usr/bin/time -p around bash -c load1=1.00 2026-08-04 (fixture)')"
+  census_arm "A RETIRED- PRICE IS REFUSED, and the THROUGH count does NOT move" 1 \
+    'a price cannot be RETIRED' 'THROUGH a required gate : 1 of 2'
+
+  # THE ANCHOR ITSELF, said without the word RETIRED: any prefix at all in front
+  # of CPU= is refused now, so the repair is the anchor and not a RETIRED- filter.
+  census_run "$d_ok" "$(printf 'pds-fx-through.sh\troughly CPU=0.01+0.01=0.02s LOCAL meter=/usr/bin/time -p around bash -c load1=1.00 2026-08-04 (fixture)')"
+  census_arm "AN UNANCHORED PREFIX IN FRONT OF CPU= IS REFUSED" 1 \
+    'a price must carry CPU=' 'THROUGH a required gate : 1 of 2'
+
+  # ---- THE PARTITION (wave 47) --------------------------------------------
+  # The full vocabulary, INCLUDING the classes at zero, plus the summed and
+  # asserted ACCOUNTED FOR line. HUMAN-GATE at zero is the arm that matters: a
+  # `uniq -c` remedy prints five lines here and hides the sixth.
+  census_run "$d_ok" "$p_ok"
+  census_arm "THE PARTITION PRINTS THE FULL VOCABULARY INCLUDING ZEROES, and sums to the population" 0 \
+    'BY LEDGER CLASS' 'HUMAN-GATE              : 0 of 2' 'ENVIRONMENT             : 1 of 2' \
+    'ACCOUNTED FOR           : 2 of 2' 'RESIDUAL (in no declared band): none'
+
+  # AND THE SUM IS ASSERTED, not merely printed. Reached by shrinking the
+  # DECLARED band list rather than by inventing a class — a class outside the
+  # vocabulary cannot be smuggled through a fixture ledger (class_known refuses
+  # it into ERROR, which is itself a declared band), so the honest way to make a
+  # row land in no band is to take a band away. rc must FOLLOW.
+  local saved_bands
+  saved_bands="$PDS_DOOR_COMPUTED_BANDS"
+  PDS_DOOR_COMPUTED_BANDS='IN-BEAM-REQUIRED
+DEAD-DECLARATION
+UNDISPOSED
+ERROR'
+  census_run "$d_ok" "$p_ok"
+  PDS_DOOR_COMPUTED_BANDS="$saved_bands"
+  census_arm "THE SUM IS ASSERTED: a row in no declared band reds and is NAMED" 1 \
+    'PARTITION SHORTFALL' 'ACCOUNTED FOR           : 1 of 2' 'Unaccounted class(es): THROUGH'
+
+  # AND THE RESIDUAL DETECTOR ITSELF, called directly — the shortfall it names
+  # cannot be reached through a fixture ledger (every ledger class it could carry
+  # is by definition IN the vocabulary), so it is exercised the way class_known
+  # is: on a synthetic tally.
+  local resid_bad resid_ok
+  resid_bad="$(unaccounted_classes "$(printf 'THROUGH\nENVIRONMENT\nUNDECLARED-BAND\nHUMAN-GATE')")"
+  resid_ok="$(unaccounted_classes "$(printf 'THROUGH\nENVIRONMENT\nERROR\nUNDISPOSED\nPRICE')")"
+  if [ "$resid_bad" = 'UNDECLARED-BAND' ] && [ -z "$resid_ok" ]; then
+    echo "  PASS  the residual band names a class in NEITHER declared list, and is empty otherwise"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  the residual band reported [$resid_bad] for a tally carrying UNDECLARED-BAND"
+    echo "        and [$resid_ok] for a wholly-declared one — a partition whose residual cannot"
+    echo "        fire is a sum that agrees with itself"
+    fail=$((fail + 1))
+  fi
+
+  # EXACT-LINE COUNTING, never a substring: the tally is counted with `[ = ]` per
+  # line, so a band name that is a prefix of another cannot inflate it.
+  local tally_n tally_zero
+  tally_n="$(class_tally_count "$(printf 'PRICE\nPRICE-ADJACENT\nPRICE')" PRICE)"
+  tally_zero="$(class_tally_count "$(printf 'THROUGH\nERROR')" HUMAN-GATE)"
+  if [ "$tally_n" = '2' ] && [ "$tally_zero" = '0' ]; then
+    echo "  PASS  the class tally counts EXACT lines (PRICE=2 beside a PRICE-ADJACENT row) and returns 0, not blank"
+    pass=$((pass + 1))
+  else
+    echo "  FAIL  the class tally counted PRICE=$tally_n (wanted 2) / HUMAN-GATE=$tally_zero (wanted 0)"
+    fail=$((fail + 1))
+  fi
 
   # THE VOCABULARY BYPASS. class_known must refuse RETIRED-* BY ITS OWN ARM, not
   # by absence from the list: adding RETIRED-ENVIRONMENT to PDS_DOOR_CLASSES took
