@@ -199,18 +199,31 @@ def cmd_verify(paths):
     print(f"meter.py: {total} envelopes — {summary}")
 
     # The population assertion: only the canonical corpus has a published figure.
-    if os.path.realpath(CORPUS_DIR) in walked_dirs:
+    #
+    # IT IS KEYED TO THE CORPUS, NOT TO THE ARGUMENT. Matching `walked_dirs`
+    # against CORPUS_DIR exactly was a fail-open the assertion itself
+    # introduced: `verify tooling/scaffy-duels/` walks the same 34 envelopes
+    # recursively, and the drift check silently did not apply — a CI job wired
+    # to the parent path would have carried the gate's name and none of its
+    # force. So the trigger is "did this run cover the corpus", and the COUNT
+    # asserted is the corpus's own, taken independently of what was asked for.
+    if os.path.isdir(CORPUS_DIR) and any(
+        d == os.path.realpath(CORPUS_DIR) or os.path.realpath(CORPUS_DIR).startswith(d + os.sep)
+        for d in walked_dirs
+    ):
+        corpus_files, _ = _collect([CORPUS_DIR])
+        n_corpus = len(corpus_files)
         declared, why = declared_population()
         if declared is None:
             errs.append(f"population unassertable: {why}")
-        elif declared != total:
+        elif declared != n_corpus:
             errs.append(
-                f"population drift: walked {total} envelopes, METER.md publishes {declared} "
-                f"(delta {total - declared:+d}) — the doc's figures were computed over a "
-                f"different corpus than the one on disk"
+                f"population drift: the corpus holds {n_corpus} envelopes, METER.md publishes "
+                f"{declared} (delta {n_corpus - declared:+d}) — the doc's figures were computed "
+                f"over a different corpus than the one on disk"
             )
         else:
-            print(f"meter.py: population {total} — matches METER.md")
+            print(f"meter.py: population {n_corpus} — matches METER.md")
 
     if counts.get("exact", 0) != total:
         errs.append(
@@ -313,10 +326,31 @@ def cmd_self_test():
         n, why = declared_population()
         assert n is not None, f"METER.md publishes no assertable population: {why}"
 
+    # THE POPULATION ASSERTION MUST FIRE FROM AN ANCESTOR PATH TOO. Keying it to
+    # an exact CORPUS_DIR argument was a fail-open: `verify tooling/scaffy-duels/`
+    # walks the same envelopes and the drift check quietly did not apply, so a CI
+    # job wired to the parent would have carried the gate's name and none of its
+    # force. Proven by RUNNING both paths, not by reading the condition.
+    if os.path.isdir(CORPUS_DIR):
+        import io
+        import contextlib
+
+        for label, arg in (("corpus", CORPUS_DIR), ("ancestor", HERE)):
+            buf = io.StringIO()
+            with contextlib.redirect_stdout(buf):
+                rc = cmd_verify([arg])
+            out = buf.getvalue()
+            assert rc == 0, f"{label} path did not verify clean: {out}"
+            assert "matches METER.md" in out, (
+                f"the population assertion did NOT fire when verify was given the {label} "
+                f"path ({arg}) — that is the fail-open, back:\n{out}"
+            )
+
     parity = _assert_tally_table_parity()
     print(
         "meter.py: self-test OK (greens on faithful, reds on 1.25x-trap fixture; "
         "two-model / modelUsage-less / nested-envelope paths all refuse; "
+        "the population assertion fires from the corpus path AND an ancestor; "
         f"METER.md declares {n}; {parity})"
     )
     return 0
@@ -326,8 +360,14 @@ if __name__ == "__main__":
     args = sys.argv[1:]
     if args[:1] in (["--self-test"], ["self-test"]):
         sys.exit(cmd_self_test())
-    if args[:1] == ["verify"] and len(args) > 1:
-        sys.exit(cmd_verify(args[1:]))
+    if args[:1] == ["verify"]:
+        if len(args) > 1:
+            sys.exit(cmd_verify(args[1:]))
+        # Naming it "unknown command 'verify'" would send the reader hunting for
+        # a verb that exists; the fault is the missing path.
+        print("meter.py: `verify` needs at least one path", file=sys.stderr)
+        print(__doc__, file=sys.stderr)
+        sys.exit(2)
     if args:
         print(f"meter.py: unknown command {args[0]!r} — expected `verify <path>` or `--self-test`", file=sys.stderr)
     print(__doc__, file=sys.stderr)
