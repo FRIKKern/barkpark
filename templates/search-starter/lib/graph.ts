@@ -4,6 +4,7 @@ import { DATASET } from "@/lib/config";
 import { bpAll } from "@/lib/bp-tags";
 import { PUBLIC_API_URL } from "@/lib/bp-env";
 import { bpFetchJson, BpUpstreamError, humanUpstreamMessage } from "@/lib/bp-fetch";
+import { corpusStatusMarkerValue } from "@/lib/markers";
 
 /**
  * The corpus graph for the landing — the one place that talks to Barkpark's
@@ -283,19 +284,6 @@ export async function fetchCorpusGraph(): Promise<CorpusGraph> {
   }
 }
 
-/** Marker values are read back out of served HTML by a shell `sed` on
- * `content="…"` (`deploy/lib/site-deploy-common.sh` meta_value), so keep the
- * value single-line and quote/angle-free, and bounded so one upstream error
- * body cannot bloat the SSR head. */
-const MARKER_MAX = 200;
-function sanitizeMarker(text: string): string {
-  const flat = text.replace(/[\r\n\t]+/g, " ").replace(/["'<>]/g, "").trim();
-  const collapsed = flat.replace(/\s{2,}/g, " ");
-  return collapsed.length > MARKER_MAX
-    ? `${collapsed.slice(0, MARKER_MAX - 1)}…`
-    : collapsed;
-}
-
 /**
  * The value of the `bp-corpus-status` HEALTH marker — the upstream condition to
  * RECORD when the SSR could not anchor a content document, and "" when it could
@@ -307,13 +295,17 @@ function sanitizeMarker(text: string): string {
  * this adds is WHY it refused — `deploy/site-deploy-node.sh` reads this marker
  * into HEALTH_DETAIL, so the recorded failure_reason distinguishes a 403 from a
  * 401, from a wrong host, from a genuinely empty corpus.
+ *
+ * The VALUE SHAPING itself lives in `lib/markers.ts`, beside the other three
+ * deploy markers and free of `server-only` / `next/cache` — this module cannot
+ * be loaded by `node --test`, so an implementation kept here could only ever be
+ * proved by a shell fixture that hard-codes the very text it is checking. This
+ * is the thin adapter; `markers.corpusStatusMarkerValue` is the behaviour, and
+ * `lib/markers.corpus-status.test.ts` pins it.
  */
 export function corpusStatusMarker(graph: CorpusGraph, docId: string): string {
-  if (docId !== "") return "";
-  if (graph.upstreamReason) return sanitizeMarker(graph.upstreamReason);
-  // The read SUCCEEDED — this is the honest "there was nothing to anchor" case
-  // (empty corpus, or a corpus of nothing but phantom nodes).
-  return sanitizeMarker(
-    `graph 200: corpus read OK but carried ${graph.nodes.length} node(s), none usable as a content anchor`,
+  return corpusStatusMarkerValue(
+    { upstreamReason: graph.upstreamReason, nodeCount: graph.nodes.length },
+    docId,
   );
 }
