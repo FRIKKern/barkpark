@@ -69,12 +69,56 @@ export interface BarkparkReferenceProps {
   children: (doc: ResolvedDoc) => ReactNode
   /** Rendered under `<Suspense>` while the fetcher resolves. */
   fallback?: ReactNode
-  /** Rendered when the fetcher returns `null` or when depth is exceeded. */
+  /**
+   * Rendered when the fetcher returns `null` (the document does not exist) or
+   * when depth is exceeded. NOT rendered when the fetch fails — a 401/403/429/
+   * 5xx is a failure to answer, not an answer of "missing"; see `errorFallback`.
+   */
   notFound?: ReactNode
+  /**
+   * Rendered when the fetcher rejects — a failed fetch is NOT a missing
+   * document, so `notFound` is never used for one.
+   *
+   * Supplying it is what puts the failure on screen. Omitting it is not a
+   * silent blank either: the error is reported to `onError`, or, when no
+   * `onError` is given, logged via `console.error`. The error is deliberately
+   * NOT rethrown — under React 19 a throw from inside `use()`/`<Suspense>`
+   * reaches no error boundary and the subtree never settles (measured), which
+   * would be worse than the blank it replaces.
+   */
+  errorFallback?: ReactNode
+  /**
+   * Invoked when the fetcher rejects, before `errorFallback` renders. Receives
+   * the rejection value and the id being resolved. Supplying it replaces the
+   * default `console.error` receipt.
+   */
+  onError?: (err: unknown, id: DocId) => void
   /** Invoked when an id is re-entered via a parent chain. */
   onCycle?: (id: DocId) => void
   /** Invoked when the depth cap is reached. */
   onMaxDepth?: (id: DocId, depth: number) => void
+}
+
+/**
+ * What the derived `client={…}` fetcher throws for a non-ok response that is
+ * not a 404. The `fetchRaw` branch only ever holds a `Response` — no core error
+ * object exists on that path — so the status is carried here instead.
+ *
+ * Match on `code`, never `instanceof`: pnpm hoist can produce duplicate module
+ * copies (the same rule `@barkpark/core`'s taxonomy states in errors.ts:1-7).
+ */
+export interface BarkparkReferenceFetchError extends Error {
+  code: 'BarkparkReferenceFetchError'
+  status: number
+  url: string
+}
+
+function fetchError(status: number, url: string): BarkparkReferenceFetchError {
+  return Object.assign(new Error(`HTTP ${status} for ${url}`), {
+    code: 'BarkparkReferenceFetchError' as const,
+    status,
+    url,
+  })
 }
 
 // Masterplan says WeakSet<DocId>, but DocId is a string → Set<string>.
@@ -147,8 +191,13 @@ function resolveFetcher(
     return async (id) => {
       try {
         return (await docFn<ResolvedDoc>(type, id)) ?? null
-      } catch {
-        return null
+      } catch (err) {
+        // Only "this document does not exist" is a miss. core's own taxonomy
+        // says so (BarkparkNotFoundError's JSDoc: "client.doc(...) swallows this
+        // to return null"); an auth/rate-limit/5xx failure is not an answer.
+        // `code`, not instanceof — errors.ts:1-7: pnpm hoist breaks instanceof.
+        if ((err as { code?: string } | null)?.code === 'BarkparkNotFoundError') return null
+        throw err
       }
     }
   }
@@ -159,27 +208,33 @@ function resolveFetcher(
     const fetchRaw = client.fetchRaw
     const config = client.config
     return async (id) => {
-      try {
-        const res = await fetchRaw<unknown>(buildDocPath(config, id, type))
-        // The real core client's fetchRaw returns a raw Response; unwrap the
-        // `/v1/data/doc` envelope ({ result: doc, ... }). A stub that returns
-        // an already-parsed object is passed through untouched.
-        if (res instanceof Response) {
-          if (!res.ok) return null
-          const body = (await res.json()) as {
-            result?: ResolvedDoc
-            data?: ResolvedDoc
-          } | null
-          return (body?.result ?? body?.data ?? body ?? null) as ResolvedDoc | null
+      const path = buildDocPath(config, id, type)
+      const res = await fetchRaw<unknown>(path)
+      // The real core client's fetchRaw returns a raw Response; unwrap the
+      // `/v1/data/doc` envelope ({ result: doc, ... }). A stub that returns
+      // an already-parsed object is passed through untouched.
+      if (res instanceof Response) {
+        // Only a 404 means "no such document". Every other non-ok status is a
+        // failure to answer and must not be laundered into `notFound` — this
+        // branch holds no core error object, so the status is thrown typed.
+        if (!res.ok) {
+          if (res.status === 404) return null
+          throw fetchError(res.status, path)
         }
-        return (res ?? null) as ResolvedDoc | null
-      } catch {
-        return null
+        const body = (await res.json()) as {
+          result?: ResolvedDoc
+          data?: ResolvedDoc
+        } | null
+        return (body?.result ?? body?.data ?? body ?? null) as ResolvedDoc | null
       }
+      return (res ?? null) as ResolvedDoc | null
     }
   }
   throw new Error('<BarkparkReference /> requires a `fetcher` prop or a `client` with `fetchRaw` or `doc`')
 }
+
+/** Settled result of one fetch — a rejection is data here, never a thrown promise. */
+type Outcome = { doc: ResolvedDoc | null } | { error: unknown }
 
 function AsyncResolve(props: {
   id: DocId
@@ -187,12 +242,33 @@ function AsyncResolve(props: {
   nextCtx: RefContextValue
   render: (doc: ResolvedDoc) => ReactNode
   notFound: ReactNode
+  errorFallback: ReactNode
+  // Explicitly `| undefined`: the prop is passed through unconditionally and
+  // the package builds with `exactOptionalPropertyTypes`.
+  onError?: ((err: unknown, id: DocId) => void) | undefined
 }): ReactElement {
-  const { id, fetcher, nextCtx, render, notFound } = props
-  const promise = useMemo(() => fetcher(id), [id, fetcher])
-  const doc = use(promise)
-  if (doc == null) return createElement(Fragment, null, notFound)
-  return createElement(BarkparkReferenceContext.Provider, { value: nextCtx }, render(doc))
+  const { id, fetcher, nextCtx, render, notFound, errorFallback, onError } = props
+  // Land the rejection as a VALUE instead of letting it reach `use()`. Measured
+  // under React 19: neither a rejected promise passed to use() nor a throw in
+  // the render that resumes after use() reaches an error boundary — the subtree
+  // simply never settles. So the failure has to stay inside this component.
+  const promise = useMemo(
+    () =>
+      fetcher(id).then(
+        (doc): Outcome => ({ doc }),
+        (error: unknown): Outcome => ({ error }),
+      ),
+    [id, fetcher],
+  )
+  const outcome = use(promise)
+  if ('error' in outcome) {
+    // Always leave a receipt — a failed fetch is never reported as "missing".
+    if (onError) onError(outcome.error, id)
+    else console.error(`BarkparkReference: ${id} failed; pass errorFallback/onError`, outcome.error)
+    return createElement(Fragment, null, errorFallback)
+  }
+  if (outcome.doc == null) return createElement(Fragment, null, notFound)
+  return createElement(BarkparkReferenceContext.Provider, { value: nextCtx }, render(outcome.doc))
 }
 
 /**
@@ -220,6 +296,8 @@ export function BarkparkReference(props: BarkparkReferenceProps): ReactElement |
     children,
     fallback = null,
     notFound = null,
+    errorFallback = null,
+    onError,
     onCycle,
     onMaxDepth,
   } = props
@@ -292,6 +370,8 @@ export function BarkparkReference(props: BarkparkReferenceProps): ReactElement |
       nextCtx,
       render: children,
       notFound,
+      errorFallback,
+      onError,
     }),
   )
 }

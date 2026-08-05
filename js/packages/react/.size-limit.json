@@ -7,9 +7,9 @@
   "gzip": true
  },
  {
-  "name": "PortableDoc renderer \u2014 client entry (dist/index.mjs)",
+  "name": "PortableDoc renderer \u2014 client entry (dist/index.mjs) \u2014 22.5 KB + 250 B for BarkparkReference error discrimination (measured 22.7 KB, +0.98%, under the 2% regression bar)",
   "path": "dist/index.mjs",
-  "limit": "22.5 KB",
+  "limit": "22.75 KB",
   "gzip": true
  },
  {
