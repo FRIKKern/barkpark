@@ -329,6 +329,66 @@ defmodule BarkparkCloud.DeployLedgerTest do
       refute Enum.any?(census.classes, &(&1.class == "GITHUB_PUSH_UNBUILDABLE"))
     end
 
+    # THE CROSS-SLICE PROOF. W1 S3 turns a box-busy 409 into a `deferred` row
+    # instead of a terminal `failed` one — 51.4% of the fleet's failed rows
+    # changing status in one merge. If the ledger answered `nil` for that status
+    # (the "did not fail" default), the failure rate would halve because rows
+    # STOPPED BEING COUNTED, which is the one outcome this epic's charter
+    # forbids outright. This test is that tripwire: the mass must be visibly
+    # RELOCATED, never deleted.
+    test "a DEFERRAL is relocated, not deleted: out of the numerator, still in volume, on its own line",
+         %{site: site} do
+      from = ~U[2026-07-26 00:00:00Z]
+      to = ~U[2026-07-27 00:00:00Z]
+
+      # 6 genuine failures…
+      for i <- 1..6 do
+        deployment!(site, %{
+          stage: "HEALTH",
+          failure_reason: @doc_id,
+          inserted_at: DateTime.add(from, i, :second)
+        })
+      end
+
+      # …and 14 box-busy rows that, post-S3, settle `deferred`.
+      for i <- 1..14 do
+        deployment!(site, %{
+          status: "deferred",
+          stage: "PLAN",
+          failure_reason: @r409_bare,
+          inserted_at: DateTime.add(from, 100 + i, :second)
+        })
+      end
+
+      census = DeployLedger.census(from, to)
+
+      # STILL COUNTED: a deferral was a real attempt against a real box, so it
+      # stays in the denominator. A census that dropped it would report 6/6 =
+      # 100% and call a halved fleet healthy.
+      assert census.volume == 20
+      # NOT A FAILURE: the box said "not now" and a rebuild was re-queued.
+      assert census.failed == 6
+      assert census.failure_rate.numerator == 6
+      assert census.failure_rate.sample == 20
+
+      # VISIBLE, on its own line, with a label that says what happened.
+      assert [%{class: "BOX_BUSY_DEFERRED", count: 14}] =
+               Enum.map(census.deferred, &Map.take(&1, [:class, :count]))
+
+      assert DeployLedger.label("BOX_BUSY_DEFERRED") =~ "re-queued"
+
+      # …and NOT smuggled into the failure taxonomy under another name.
+      refute Enum.any?(census.classes, &(&1.class == "BOX_BUSY_DEFERRED"))
+      refute Enum.any?(census.classes, &(&1.class == "BOX_BUSY_409"))
+
+      # The per-site row tells the same story, so a site whose 409s became
+      # deferrals cannot read as a site that got healthy.
+      assert [row] = census.sites
+      assert row.volume == 20
+      assert row.failed == 6
+      assert row.deferred == 14
+    end
+
     test "counts per class and per site, with an unrecognised reason visibly in UNCLASSIFIED", %{
       team: team,
       site: site

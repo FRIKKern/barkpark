@@ -98,6 +98,23 @@ defmodule BarkparkCloud.DeployLedger do
   # them in by iterating the taxonomy.
   @not_attempted_classes ["GITHUB_PUSH_UNBUILDABLE"]
 
+  # Rows that WERE attempted and did not fail — and did not succeed either.
+  #
+  # THE CROSS-SLICE HOLE THIS CLOSES. deploy-reliability W1 S3 makes a box-busy
+  # 409 settle as a first-class `deferred` row instead of a terminal `failed`
+  # one. That is 8,830 of 17,171 failed rows — 51.4%, the largest class on the
+  # fleet — changing status. Without an arm for it here, `classify/1` answers
+  # `nil` (the "did not fail" default) and those rows become INVISIBLE to the
+  # census: the failure rate would fall by half and the ledger would not be able
+  # to say where they went. A number that improves because a row stopped being
+  # counted is precisely the vacuous green this epic was chartered to refuse.
+  #
+  # So a deferral is COUNTED, in its own cohort: inside `volume` (it was a real
+  # attempt against a real box), outside the failure numerator (the box's answer
+  # was "not now", and a rebuild was re-queued), and reported as its own line so
+  # the 409 mass is visibly RELOCATED rather than silently deleted.
+  @deferred_classes ["BOX_BUSY_DEFERRED"]
+
   @labels %{
     "BOX_BUSY_409" => "the box was already deploying (HTTP 409)",
     "DOC_ID_EMPTY" => "HEALTH gate: the bp-doc-id marker was empty",
@@ -113,7 +130,8 @@ defmodule BarkparkCloud.DeployLedger do
     "STALE_LEASE" => "the builder lease went stale",
     "PROCESS_DIED" => "the deploy process died abnormally",
     "UNCLASSIFIED" => "not yet named by the ledger",
-    "GITHUB_PUSH_UNBUILDABLE" => "GitHub push builds are not available yet"
+    "GITHUB_PUSH_UNBUILDABLE" => "GitHub push builds are not available yet",
+    "BOX_BUSY_DEFERRED" => "the box was busy; the rebuild was re-queued, not lost"
   }
 
   # Below this many ATTEMPTED rows a percentage is noise, not a measurement: at
@@ -141,6 +159,14 @@ defmodule BarkparkCloud.DeployLedger do
   @spec not_attempted?(class() | nil) :: boolean()
   def not_attempted?(class), do: class in @not_attempted_classes
 
+  @doc "Classes for rows that were attempted, deferred, and re-queued — never in the failure numerator."
+  @spec deferred_classes() :: [class()]
+  def deferred_classes, do: @deferred_classes
+
+  @doc "Whether `class` names a DEFERRAL: counted in volume, never counted as a failure."
+  @spec deferred?(class() | nil) :: boolean()
+  def deferred?(class), do: class in @deferred_classes
+
   @doc """
   The failure class of a deployment row, or `nil` when the row did not fail.
 
@@ -150,6 +176,13 @@ defmodule BarkparkCloud.DeployLedger do
   @spec classify(Deployment.t() | map() | nil) :: class() | nil
   def classify(%{status: "failed"} = row),
     do: classify(Map.get(row, :stage), Map.get(row, :failure_reason))
+
+  # A DEFERRAL is not a failure and not a nil — see `@deferred_classes`. Today
+  # the busy box is the only thing that defers a row (`Sites.Deploy.defer/3`
+  # fires on a 409 and nothing else), so the class names that cause outright
+  # rather than pretending to a generality the producer does not have. A second
+  # deferral cause would have to be named here, which is the point.
+  def classify(%{status: "deferred"}), do: "BOX_BUSY_DEFERRED"
 
   def classify(%{status: _other}), do: nil
   def classify(nil), do: nil
@@ -260,6 +293,11 @@ defmodule BarkparkCloud.DeployLedger do
   The fleet census over a PINNED `inserted_at` window: counts per class, counts
   per site, and the failure rate WITH its denominator.
 
+  Three cohorts, and the split is load-bearing: `classes` (settled failures, the
+  numerator), `deferred` (attempted, refused by a busy box, re-queued — inside
+  `volume`, outside the numerator, reported on its own line), and
+  `not_attempted` (never a deploy at all, outside both).
+
   Both bounds are required and explicit — a floating "now minus 24h" cannot be
   compared against itself a week later, and comparing two unpinned windows is
   how a volume collapse is read as a repair (D3). The window is half-open:
@@ -299,15 +337,23 @@ defmodule BarkparkCloud.DeployLedger do
 
     {not_attempted, attempted} = Enum.split_with(classified, &not_attempted?(&1.class))
 
+    # THREE cohorts, not two. `deferred` rows stay INSIDE volume — they were real
+    # attempts against a real box — but outside the failure numerator, and they
+    # get their own reported line so the 409 mass W1 S3 relocates is visibly
+    # relocated rather than silently deleted (see `@deferred_classes`).
+    {deferred, settled} = Enum.split_with(attempted, &deferred?(&1.class))
+    failed_rows = Enum.filter(settled, & &1.class)
+
     volume = total(attempted)
-    failed = attempted |> Enum.filter(& &1.class) |> total()
+    failed = total(failed_rows)
 
     %{
       window: %{from: from, to: to},
       volume: volume,
       failed: failed,
       failure_rate: rate(failed, volume),
-      classes: class_rows(attempted, failed),
+      classes: class_rows(failed_rows, failed),
+      deferred: class_rows(deferred, volume),
       not_attempted: class_rows(not_attempted, total(not_attempted)),
       sites: site_rows(attempted, site_limit),
       min_sample: @min_sample
@@ -406,13 +452,18 @@ defmodule BarkparkCloud.DeployLedger do
     |> Enum.group_by(& &1.site_id)
     |> Enum.map(fn {site_id, rows} ->
       volume = total(rows)
-      failed_rows = Enum.filter(rows, & &1.class)
+      # Same three-cohort split as the fleet totals: a deferral is in the site's
+      # volume and out of its failure count, and is reported beside it so a site
+      # whose 409s became deferrals does not read as a site that got healthy.
+      {deferred, settled} = Enum.split_with(rows, &deferred?(&1.class))
+      failed_rows = Enum.filter(settled, & &1.class)
       failed = total(failed_rows)
 
       %{
         site_id: site_id,
         volume: volume,
         failed: failed,
+        deferred: total(deferred),
         failure_rate: rate(failed, volume),
         top_class: top_class(failed_rows)
       }
