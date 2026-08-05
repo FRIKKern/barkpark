@@ -1042,4 +1042,175 @@ defmodule BarkparkCloud.RegistryTest do
       assert_raise Postgrex.Error, fn -> Repo.update!(cs) end
     end
   end
+
+  # deploy-reliability W1 s4: the content-webhook registrar must send the box's
+  # `types` DOC-TYPE FILTER. Every site-autodeploy row on guerrilla carried the
+  # empty array — the box's MATCH-EVERYTHING sentinel — so all five spawned sites
+  # rebuilt on every mutation in a shared dataset, 90.3% of which were `task`
+  # writes from this repo's own bp ledger.
+  describe "content-webhook registration: doc-type filter (deploy-reliability W1 s4)" do
+    alias BarkparkCloud.StudioLinkFakeHttpClient
+    alias BarkparkCloud.Registry.Vault
+
+    defp live_bp(team) do
+      n = System.unique_integer([:positive])
+      {:ok, bp} = Registry.register_barkpark(team, %{name: "BP #{n}", slug: "bp-#{n}"})
+
+      bp
+      |> Ecto.Changeset.change(
+        url: "https://acme.barkpark.cloud",
+        git_commit: "abc123",
+        admin_token_encrypted: Vault.encrypt("instance-admin-token")
+      )
+      |> Repo.update!()
+    end
+
+    defp bound_site(bp, attrs \\ %{}) do
+      n = System.unique_integer([:positive])
+
+      {:ok, site} =
+        Registry.create_site(
+          bp,
+          Enum.into(attrs, %{
+            name: "Blog #{n}",
+            slug: "blog-#{n}",
+            kind: "static",
+            framework: "astro",
+            bootstrap_workspace: "acme",
+            bootstrap_project: "blog",
+            bootstrap_dataset: "production",
+            read_token: "bpt_read_#{n}"
+          })
+        )
+
+      site
+    end
+
+    defp webhook_write(method) do
+      StudioLinkFakeHttpClient.requests()
+      |> Enum.find(fn r ->
+        r.method == method and String.contains?(r.url, "/v1/webhooks/production")
+      end)
+    end
+
+    test "the CREATE registration carries the site's own doc_type as the box `types` filter" do
+      bp = team_fixture() |> live_bp()
+      StudioLinkFakeHttpClient.program([])
+
+      site = bound_site(bp, %{doc_type: "paper"})
+      assert site.doc_type == "paper"
+
+      post = webhook_write(:post)
+      assert post, "expected a POST /v1/webhooks/production registration call"
+
+      payload = Jason.decode!(post.body)
+
+      # THE DEFECT: this key was absent entirely, so the box stored `{}` and the
+      # row matched every document type in the dataset.
+      assert payload["types"] == ["paper"],
+             "the registration must filter to the type this site's build actually reads"
+    end
+
+    test "the RECONCILE (PUT) body carries types too — a later doc_type change REPAIRS the stale array" do
+      bp = team_fixture() |> live_bp()
+      StudioLinkFakeHttpClient.program([])
+
+      site = bound_site(bp, %{doc_type: "paper"})
+      hook_id = Ecto.UUID.generate()
+
+      # The operator re-points the site at a different type between deploys.
+      {:ok, site} = Registry.update_site_settings(site, %{doc_type: "post"})
+
+      # Second pass: the box now reports the row this site already registered, so
+      # the reconciler takes the PUT branch.
+      StudioLinkFakeHttpClient.program(%{
+        "/v1/webhooks/production" =>
+          {:ok,
+           %{
+             status: 200,
+             body:
+               Jason.encode!(%{
+                 "webhooks" => [%{"id" => hook_id, "name" => "site-autodeploy-#{site.id}"}]
+               })
+           }},
+        "/v1/webhooks/production/#{hook_id}" => {:ok, %{status: 200, body: "{}"}}
+      })
+
+      assert :ok = Registry.ensure_content_webhook(bp, site)
+
+      put = webhook_write(:put)
+      assert put, "expected a PUT update of the EXISTING webhook row"
+
+      # `Webhooks.update_webhook/2` on the box casts only the keys PRESENT in the
+      # body: a types omitted here survives untouched, which would leave this row
+      # filtered on "paper" forever. The filter lives in the SHARED body for
+      # exactly this reason.
+      assert Jason.decode!(put.body)["types"] == ["post"],
+             "reconciliation must REPAIR a stale types array, not only seed it"
+    end
+
+    test "a site with a blank doc_type registers `[]` — the box's match-everything sentinel, never a wrong filter" do
+      bp = team_fixture() |> live_bp()
+      StudioLinkFakeHttpClient.program([])
+
+      site = bound_site(bp)
+      # A row with no usable binding (the column is NOT NULL, so blank is the
+      # only shape this takes). Filtering such a site to a guessed type would
+      # silently stop its real rebuilds, so the fallback is today's unfiltered
+      # behaviour — the box's own match-everything sentinel.
+      site = site |> Ecto.Changeset.change(doc_type: "") |> Repo.update!()
+
+      hook_id = Ecto.UUID.generate()
+
+      StudioLinkFakeHttpClient.program(%{
+        "/v1/webhooks/production" =>
+          {:ok,
+           %{
+             status: 200,
+             body:
+               Jason.encode!(%{
+                 "webhooks" => [%{"id" => hook_id, "name" => "site-autodeploy-#{site.id}"}]
+               })
+           }},
+        "/v1/webhooks/production/#{hook_id}" => {:ok, %{status: 200, body: "{}"}}
+      })
+
+      assert :ok = Registry.ensure_content_webhook(bp, site)
+      assert Jason.decode!(webhook_write(:put).body)["types"] == []
+    end
+
+    test "the filter FILTERS: under the box's own selection predicate, `paper` matches and `task` does not" do
+      bp = team_fixture() |> live_bp()
+      StudioLinkFakeHttpClient.program([])
+
+      _site = bound_site(bp, %{doc_type: "paper"})
+      types = Jason.decode!(webhook_write(:post).body)["types"]
+
+      # This is the box's selection predicate verbatim from
+      # api/lib/barkpark/webhooks.ex:197 (`active_webhooks_for/4`):
+      #
+      #   fragment("? = '{}' OR ? @> ARRAY[?]::varchar[]", w.types, w.types, ^type)
+      #
+      # evaluated in Postgres against the array THIS registrar sends. It answers
+      # the only question the control plane controls: does the value we register
+      # select a paper mutation and reject a task mutation? (The box-side
+      # dispatch itself is covered by api/test/barkpark/webhooks_test.exs.)
+      selects? = fn type ->
+        %{rows: [[result]]} =
+          Repo.query!(
+            "SELECT ($1::varchar[] = '{}') OR ($1::varchar[] @> ARRAY[$2]::varchar[])",
+            [types, type]
+          )
+
+        result
+      end
+
+      assert selects?.("paper"), "a paper mutation must still rebuild the site"
+
+      refute selects?.("task"),
+             "a task mutation must NOT rebuild the site — 90.3% of deliveries were task writes"
+
+      refute selects?.("post")
+    end
+  end
 end

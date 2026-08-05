@@ -4503,9 +4503,34 @@ defmodule BarkparkCloud.Registry do
       # to fix. On POST the box defaults to active anyway; on PUT false→true it
       # zeroes the failure streak and clears the auto-disable stamps in the same
       # write. `secret` rides along for the POST branch; the box drops it on PUT.
+      #
+      # `types` is the DOC-TYPE FILTER the box already honours and nobody set
+      # (Webhooks.active_webhooks_for/4 matches `types = '{}' OR types @> [type]`
+      # — an EMPTY array means MATCH EVERYTHING). Every site-autodeploy row on
+      # guerrilla carried `{}`, so all five sites rebuilt on EVERY mutation in a
+      # shared dataset: of 75,922 deliveries since 2026-07-26, 68,523 (90.3%)
+      # were `task` writes — this repo's own bp ledger rebuilding five demo
+      # websites — against 7,109 (9.4%) papers. Sending the site's OWN doc_type
+      # (the type its build actually reads, baked into BARKPARK_DOC_TYPE) cuts
+      # enqueues ~80-88%, which is also the 409 fix: build p90 is 15.0s under
+      # 20 deploys/hr but 144.8s over 120/hr against a 60s debounce, so the
+      # collision is a self-inflicted congestion collapse fuelled by task noise.
+      #
+      # It lives in the SHARED body, not just the POST branch, deliberately:
+      # `Webhooks.update_webhook/2` casts only the keys PRESENT in the body, so
+      # a types omitted from the PUT survives untouched — which would leave a
+      # site whose doc_type LATER CHANGES filtered on its old type forever.
+      # Reconciliation must repair the array, not just seed it.
+      #
+      # The honest cost: the flagship templates also fetch /v1/graph for a
+      # DECORATIVE all-types background, so `task` nodes really are part of that
+      # corpus and it becomes eventually-stale (the hourly TemplateFreshnessWorker
+      # covers the drift). The site's PRIMARY corpus — allDocs at env.docType and
+      # the search seed — stays exactly as fresh.
       body = %{
         name: name,
         events: ["publish", "unpublish", "delete"],
+        types: content_webhook_types(site),
         url: url,
         secret: secret,
         active: true
@@ -4588,6 +4613,19 @@ defmodule BarkparkCloud.Registry do
   # registration, reconciliation and deregistration must agree byte-for-byte or
   # the "find by name" lookup silently misses and duplicates instead.
   defp content_webhook_name(%Site{id: id}), do: "site-autodeploy-#{id}"
+
+  # The doc-type filter for this site's box webhook: exactly the ONE type its
+  # build reads. A site with no doc_type (a row predating the column) falls back
+  # to `[]` — the box's MATCH-EVERYTHING sentinel, i.e. today's behaviour — so a
+  # missing binding can never silently filter a site's real content away.
+  defp content_webhook_types(%Site{doc_type: type}) when is_binary(type) do
+    case String.trim(type) do
+      "" -> []
+      t -> [t]
+    end
+  end
+
+  defp content_webhook_types(%Site{}), do: []
 
   # Look `name` up in the box's webhook list for `dataset`.
   #
