@@ -217,6 +217,28 @@ defmodule BarkparkCloud.Web.Router do
   here (or drop the stale one) when you change a route.
   """
   use Plug.Router
+
+  # THE CRASH PATH IS A ROUTE TOO (cch-w30-s5). Without this, an uncaught raise
+  # or a body Plug.Parsers refuses answers with ZERO BYTES and NO content-type —
+  # measured against a booted control plane on origin/main: a malformed JSON body
+  # → `400 size_download=0 content_type=[]`, a `text/plain` content-type → 415
+  # same, a 20 MB body → 413 same. The STATUS was always right (Bandit honours
+  # `Plug.Exception.plug_status`, so a guard asserting `status == 500` would be
+  # green by construction); the lie was the empty body, because `api()` in
+  # app.js parses a response ONLY when its content-type contains
+  # `application/json` and substitutes `{}` otherwise — so every crash reached
+  # the SPA as `{ok:false, data:{}}` and `friendly()` fell through to the
+  # caller's fallback copy, which was written for a VALIDATION failure. The
+  # person then read "Check the details and try again." about a server fault
+  # they had no part in.
+  #
+  # `use Plug.ErrorHandler` must come after `use Plug.Router` (it overrides the
+  # `call/2` Plug.Router generates, wrapping the WHOLE pipeline — including the
+  # `Plug.Parsers` plug below, which runs BEFORE `:dispatch`, so a parse fault
+  # needs no route defect at all). It re-raises after responding, so Bandit
+  # still logs the crash; the response is already committed, so nothing is sent
+  # twice. See `handle_errors/2` below for the envelope.
+  use Plug.ErrorHandler
   require Logger
 
   alias BarkparkCloud.{
@@ -7706,6 +7728,81 @@ defmodule BarkparkCloud.Web.Router do
   match _ do
     json(conn, 404, %{error: "not_found"})
   end
+
+  ## Crash path → the SAME flat JSON envelope every other route answers with
+
+  # The one handler for everything that RAISES instead of returning a conn:
+  # an uncaught error inside a route, and the `Plug.Parsers` faults that fire
+  # before `:dispatch` ever runs (unreadable body → 400, content-type we don't
+  # parse → 415, body over the limit → 413).
+  #
+  # Three things have to be true together, or the person still reads copy that
+  # blames them (all three measured by RUNNING app.js's real `friendly()`, not
+  # by reading it):
+  #
+  #   1. FLAT `%{error: "<slug>"}`. Cloud's envelope is flat and the SPA keys on
+  #      `data.error` as a STRING (app.js `friendly()`); api/'s NESTED
+  #      `%{error: %{code: …}}` shape would read as no slug at all and fall
+  #      straight back to the blaming fallback.
+  #   2. A slug the SPA's `ERRORS` map knows. Precedence there is curated copy →
+  #      `details` → the caller's fallback → the humanized slug, so an
+  #      UNREGISTERED slug loses to the caller's fallback — shipping
+  #      `%{error: "internal_error"}` alone would have changed nothing on screen.
+  #   3. `content-type: application/json`, or `api()` throws the body away
+  #      before `friendly()` can ever see it.
+  #
+  # The status is whatever `Plug.Exception` already says (400/413/415/500) — it
+  # was never the broken part, so it is preserved rather than flattened to 500.
+  @impl Plug.ErrorHandler
+  def handle_errors(conn, %{kind: kind, reason: reason}) do
+    status = conn.status || 500
+    request_id = request_id(conn)
+
+    # A 5xx is OURS and belongs at :error; a 4xx parse fault is the caller
+    # sending something we don't accept — real, worth seeing, but not a page.
+    level = if status >= 500, do: :error, else: :warning
+
+    Logger.log(
+      level,
+      "crash_envelope request_id=#{request_id} status=#{status} " <>
+        "method=#{conn.method} path=#{conn.request_path} kind=#{inspect(kind)}"
+    )
+
+    conn
+    |> put_resp_header("x-request-id", request_id)
+    |> json(status, %{error: crash_slug(reason, status), request_id: request_id})
+  end
+
+  # Distinct slugs for the faults a person can actually provoke, so the console
+  # can say something true and specific ("that was too large") instead of one
+  # undifferentiated apology. Anything else splits on status: a 5xx is OURS to
+  # own, a residual 4xx is a malformed request but still not a form the person
+  # filled in wrong.
+  defp crash_slug(%Plug.Parsers.ParseError{}, _status), do: "malformed_body"
+
+  defp crash_slug(%Plug.Parsers.UnsupportedMediaTypeError{}, _status),
+    do: "unsupported_media_type"
+
+  defp crash_slug(%Plug.Parsers.RequestTooLargeError{}, _status), do: "request_too_large"
+  defp crash_slug(_reason, status) when status >= 500, do: "server_error"
+  defp crash_slug(_reason, _status), do: "malformed_request"
+
+  # Echo the front's request id when Caddy sent one, otherwise mint one, so the
+  # id the person can read off the screen is the id in our logs.
+  # The incoming value is REFLECTED into a response header and a JSON body, so
+  # it is accepted only as a bounded, boring token — never trusted verbatim.
+  # Anything else (or nothing) gets a freshly minted id.
+  defp request_id(conn) do
+    case get_req_header(conn, "x-request-id") do
+      [id | _] when is_binary(id) ->
+        if id =~ ~r/\A[A-Za-z0-9._-]{1,200}\z/, do: id, else: mint_request_id()
+
+      _ ->
+        mint_request_id()
+    end
+  end
+
+  defp mint_request_id, do: Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
 
   ## Health surface helpers (health-status)
 

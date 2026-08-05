@@ -13484,3 +13484,101 @@ test("cch-w28-s8: a never-deployed site row states 'Not deployed'; a deployed ro
   assert.ok(liveRow.includes(hooks.freshnessBadge(deployed)),
     "the deployed row's freshness badge is freshnessBadge's output, unmodified");
 });
+
+// ── cch-w30-s5: a control-plane CRASH must not render as the person's mistake ──
+//
+// The wire bytes are only half the fix. api() hands a crash to callers as
+// {ok:false, status:5xx, data:<envelope>} and friendly()'s precedence is
+// curated ERRORS → details → THE CALLER'S FALLBACK → humanized slug. So a
+// server-fault slug that is not registered in ERRORS loses to a fallback
+// written for a validation failure, and the person still reads "Check the
+// details and try again." about a fault that was never theirs. These tests
+// drive the REAL friendly()/faultCopy() with the REAL envelope the router now
+// sends and pin the RENDERED SENTENCE.
+
+test("cch-w30-s5: every crash slug the router can send is registered in ERRORS", () => {
+  // CENSUS, not a hand list: side A is parsed out of the router's own
+  // crash_slug/2 clauses, so adding a slug there without adding copy here reds.
+  const router = fs.readFileSync(
+    new URL("../../lib/barkpark_cloud/web/router.ex", import.meta.url), "utf8");
+  const slugs = [...router.matchAll(/defp crash_slug\([\s\S]*?do:\s*"([a-z_]+)"/g)]
+    .map((m) => m[1]);
+  assert.ok(slugs.length >= 5, "the router declares crash slugs (found " + slugs.length + ")");
+  for (const slug of slugs) {
+    const copy = hooks.friendly({ error: slug }, "Check the details and try again.");
+    assert.notEqual(copy, "Check the details and try again.",
+      slug + " is unregistered in ERRORS, so it loses to the blaming fallback");
+    assert.notEqual(copy, slug.replace(/_/g, " "),
+      slug + " renders as a humanized slug, not curated copy");
+    assert.ok(!/check the (details|form|values|address)/i.test(copy),
+      slug + " must not tell the person to re-check input they got right");
+  }
+});
+
+test("cch-w30-s5: the router's own 500 envelope renders server-fault copy", () => {
+  // Byte-for-byte the shape handle_errors/2 sends: FLAT error + request_id.
+  const envelope = { error: "server_error", request_id: "0a1b2c3d4e5f6071" };
+  assert.match(hooks.friendly(envelope, "Check the form and try again."),
+    /broke on our side/i);
+  // The nested api/-style shape would read as NO slug at all and fall straight
+  // back to the blaming copy — this is why the envelope must stay flat.
+  const nested = { error: { code: "server_error" } };
+  assert.equal(hooks.friendly(nested, "Check the form and try again."),
+    "Check the form and try again.");
+});
+
+test("cch-w30-s5: faultCopy swaps the validation fallback out on a 5xx only", () => {
+  const fb = "Check the details and try again.";
+  // 5xx WITH the envelope → curated server copy.
+  assert.match(hooks.faultCopy(500, { error: "server_error" }, fb), /broke on our side/i);
+  // 5xx with NO parseable body at all (an upstream proxy's HTML page): still
+  // never blames the input.
+  assert.match(hooks.faultCopy(502, {}, fb), /broke on our side/i);
+  assert.ok(!/check the details/i.test(hooks.faultCopy(502, {}, fb)));
+  // 4xx is a real answer ABOUT the input — the caller's designed copy survives.
+  assert.equal(hooks.faultCopy(422, {}, fb), fb);
+  assert.equal(hooks.faultCopy(409, { error: "unknown_slug" }, fb), fb);
+  // A genuine transport failure keeps connection-specific copy (api() returns
+  // status 0 with the network_error slug).
+  assert.match(hooks.faultCopy(0, { error: "network_error" }, "Check your connection and retry."),
+    /Network error/i);
+  // 413 is a real answer about what was sent, and it names the true cause.
+  assert.match(hooks.faultCopy(413, { error: "request_too_large" }, fb), /too large/i);
+});
+
+test("cch-w30-s5: the two named copy helpers stop blaming the person on a 5xx", () => {
+  // invite: "Check the address and try again." was a lie on a 500.
+  assert.match(hooks.inviteFailureCopy({ error: "server_error" }, 500), /broke on our side/i);
+  assert.ok(!/check the address/i.test(hooks.inviteFailureCopy({}, 500)));
+  // …and the 4xx answers it was written for are untouched.
+  assert.match(hooks.inviteFailureCopy({ error: "already_member" }, 409), /already on your team/i);
+  assert.match(hooks.inviteFailureCopy({}, 422), /Check the address/i);
+  // env-var write: "Check the values and try again." was a lie on a 500.
+  assert.match(hooks.envVarWriteFailureCopy(500, { error: "server_error" }), /broke on our side/i);
+  assert.ok(!/check the values/i.test(hooks.envVarWriteFailureCopy(500, {})));
+  assert.match(hooks.envVarWriteFailureCopy(422, {}), /Check the values/i);
+});
+
+test("cch-w30-s5: no crash-path caller re-blames the input behind faultCopy's back", () => {
+  // The six fallbacks the survey caught. Each MUST now be routed through
+  // faultCopy — a future edit that reverts one to a bare friendly() reds here.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  for (const fallback of [
+    "Check the details and try again.",
+    "Check the form and try again.",
+    "Check the address and try again.",
+    "Check the values and try again.",
+  ]) {
+    const idx = [...src.matchAll(new RegExp(fallback.replace(/\./g, "\\."), "g"))].map((m) => m.index);
+    assert.ok(idx.length > 0, "fallback still present: " + fallback);
+    for (const i of idx) {
+      const line = src.slice(src.lastIndexOf("\n", i) + 1, src.indexOf("\n", i));
+      if (!line.trimStart().startsWith("//")) {
+        assert.ok(line.includes("faultCopy("),
+          "a blaming fallback is reachable without the 5xx switch: " + line.trim());
+      }
+    }
+  }
+  // The instance-timeline site blamed the USER'S NETWORK for a server 500.
+  assert.match(src, /faultCopy\(ev\.status, ev\.data, "Check your connection and retry\."\)/);
+});
