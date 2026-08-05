@@ -226,6 +226,23 @@ var claimDispositions = []claimDisposition{
 
 	// ── tasks_stamp_cmd.go — the ledger row the store actually holds ────────
 	{Name: "renderStampVerdict", Identity: []string{"Criterion"}, Post: []string{"Met", "Evidence"}},
+
+	// ── migrate_cmd.go — the count is the LENGTH of what the server returned ─
+	// The transaction id is the thing the write cannot change about itself, so
+	// it is the identity; the post-condition is how many results came back, and
+	// @len is precisely the axis (one result for a two-document batch IS the
+	// short write the old `written += len(batch)` could not see).
+	{Name: "migrateTypeReceipt", Identity: []string{"transactionId"}, Post: []string{"results@len"}},
+
+	// ── tasks_create_cmd.go — the birth receipt reads the PERSISTED record ───
+	// The id and the draft flag are what the create asked for and got back; the
+	// claim under test is the lifecycle the row was BORN with, which the CLI
+	// itself defaults into the request — so it is the one path that must move.
+	{
+		Name:     "renderTaskCreated",
+		Identity: []string{"results.#0.document._id", "results.#0.document._draft"},
+		Post:     []string{"results.#0.document.lifecycle_status"},
+	},
 }
 
 func dispositionsByName(t *testing.T) map[string]claimDisposition {

@@ -371,7 +371,10 @@ func migrateExecute(out *writer, machineOut bool, plan migratePlan) int {
 				end = len(docs)
 			}
 			batch := docs[start:end]
-			if werr := migrateWriteBatch(plan.to, plan.dataset, batch); werr != nil {
+			// The count descends from the WRITE RETURN, never from len(batch):
+			// migrateWriteBatch reads how many results the server handed back.
+			confirmed, werr := migrateWriteBatch(plan.to, plan.dataset, batch)
+			if werr != nil {
 				msg := fmt.Sprintf("write %s batch [%d:%d]: %v", tc.Type, start, end, werr)
 				migrateErrors = append(migrateErrors, msg)
 				if !machineOut {
@@ -379,13 +382,13 @@ func migrateExecute(out *writer, machineOut bool, plan migratePlan) int {
 				}
 				continue
 			}
-			written += len(batch)
+			written += confirmed
 		}
 
 		migrated = append(migrated, migrateTypeCount{Type: tc.Type, Count: written})
 		totalMigrated += written
 		if !machineOut {
-			out.outf("  ✓ %-24s %d/%d", tc.Type, written, len(docs))
+			out.outf("%s", migrateTypeReceipt(tc.Type, written, len(docs)))
 		}
 	}
 
@@ -456,12 +459,47 @@ func migrateSchemas(out *writer, machineOut bool, plan migratePlan) (int, []stri
 	return count, errs
 }
 
+// migrateTypeReceipt renders one type's migration line. Both numbers it prints
+// are measurements: `written` is the count of results the SERVER returned for
+// the batches (see migrateBatchWritten), `total` is how many documents the
+// source handed us. When they disagree the line refuses the checkmark and says
+// how many writes went unconfirmed — a receipt that printed ✓ over a short
+// write would be claiming a post-condition nothing measured (PDS-D313 class A3).
+func migrateTypeReceipt(typ string, written, total int) string {
+	if written != total {
+		return fmt.Sprintf("  ! %-24s %d/%d — the server confirmed %d write results for the %d documents sent",
+			typ, written, total, written, total)
+	}
+	return fmt.Sprintf("  ✓ %-24s %d/%d", typ, written, total)
+}
+
+// migrateBatchWritten reads how many documents the server said it wrote out of
+// a 2xx /v1/data/mutate response. `results` carries exactly one entry per
+// applied mutation (Content.Mutations.do_apply_mutations maps the batch 1:1
+// through Enum.map_reduce), so its LENGTH is the measurement; len(docs) is only
+// what we asked for. A response we cannot read is an error, not a full count:
+// "we could not tell" must never be reported as "all of them landed".
+func migrateBatchWritten(respBody []byte) (int, error) {
+	var parsed struct {
+		Results []json.RawMessage `json:"results"`
+	}
+	if err := json.Unmarshal(respBody, &parsed); err != nil {
+		return 0, fmt.Errorf("write accepted but its response did not parse, so the number written is unknown: %w", err)
+	}
+	if parsed.Results == nil {
+		return 0, fmt.Errorf("write accepted but the response carried no results array, so the number written is unknown")
+	}
+	return len(parsed.Results), nil
+}
+
 // migrateWriteBatch writes a batch of raw source documents to the target as
 // createOrReplace mutations. Each source document JSON object becomes the body
 // of a createOrReplace op verbatim, so _id/_type and every field round-trip.
-func migrateWriteBatch(ep migrateEndpoint, dataset string, docs []json.RawMessage) error {
+// It returns the number of writes the SERVER confirmed — the length of the
+// `results` array it handed back, not the length of the batch we sent.
+func migrateWriteBatch(ep migrateEndpoint, dataset string, docs []json.RawMessage) (int, error) {
 	if len(docs) == 0 {
-		return nil
+		return 0, nil
 	}
 	mutations := make([]map[string]json.RawMessage, 0, len(docs))
 	for _, d := range docs {
@@ -470,7 +508,7 @@ func migrateWriteBatch(ep migrateEndpoint, dataset string, docs []json.RawMessag
 	bodyMap := map[string]any{"mutations": mutations}
 	body, merr := json.Marshal(bodyMap)
 	if merr != nil {
-		return merr
+		return 0, merr
 	}
 
 	u := ep.scopedURL("/v1/data/mutate/" + url.PathEscape(dataset))
@@ -478,13 +516,13 @@ func migrateWriteBatch(ep migrateEndpoint, dataset string, docs []json.RawMessag
 	headers["Content-Type"] = "application/json"
 	status, respBody, err := doRequest("POST", u, headers, body)
 	if err != nil {
-		return err
+		return 0, err
 	}
 	if status < 200 || status >= 300 {
 		ae := classifyError(status, respBody)
-		return fmt.Errorf("status %d: %s", status, ae.errorMessage())
+		return 0, fmt.Errorf("status %d: %s", status, ae.errorMessage())
 	}
-	return nil
+	return migrateBatchWritten(respBody)
 }
 
 // migratePlanJSON projects a plan (and, on execute, the result) onto the JSON
