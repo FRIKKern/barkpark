@@ -640,4 +640,259 @@ defmodule BarkparkWeb.GraphControllerTest do
       assert missing in phantoms, "the referenced-but-absent target lost its phantom node"
     end
   end
+
+  # ── /v1/graph for the PUBLIC-READ tier ────────────────────────────────────
+  #
+  # Three properties, end-to-end through the REAL router (so the PublicRead
+  # mount on `:require_token` is part of what is proven, not assumed):
+  #
+  #   1. the route is ADMITTED for a public-read token (it used to 403, which
+  #      shipped statically-built sites with an empty corpus), and admission does
+  #      not 500 on the missing `:type` path segment;
+  #   2. its corpus honours schema VISIBILITY per caller — a private type's
+  #      titles never reach that tier, while an admin token still sees them;
+  #   3. the graph SIBLINGS and every non-graph read stay denied.
+  describe "GET /v1/graph — public-read tier" do
+    @public_read_token "barkpark-test-graph-public-read"
+
+    setup %{scope: scope} do
+      {:ok, _} =
+        Auth.create_token(@public_read_token, "test-graph-public-read", @dataset, ["public-read"])
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "weapon", "title" => "Weapon", "visibility" => "private", "fields" => []},
+          @dataset,
+          scope
+        )
+
+      :ok
+    end
+
+    defp public_read(conn) do
+      conn
+      |> put_req_header("authorization", "Bearer " <> @public_read_token)
+      |> put_req_header("content-type", "application/json")
+    end
+
+    defp titles(body), do: Enum.map(body["nodes"], & &1["title"])
+
+    defp publish!(type, doc_id, title, scope) do
+      {:ok, _} =
+        Content.create_document(
+          type,
+          %{"doc_id" => doc_id, "title" => title, "content" => %{}},
+          @dataset,
+          scope
+        )
+
+      {:ok, doc} = Content.publish_document(doc_id, type, @dataset, scope)
+      doc
+    end
+
+    defp corpus_body!(conn, authfun) do
+      resp = conn |> authfun.() |> get("/v1/graph?dataset=#{@dataset}")
+      assert resp.status == 200
+      Jason.decode!(resp.resp_body)
+    end
+
+    test "the route is admitted (200, not 403 and not a 500 on the missing :type segment)",
+         %{conn: conn} do
+      resp = conn |> public_read() |> get("/v1/graph?dataset=#{@dataset}")
+
+      assert resp.status == 200,
+             "public-read got #{resp.status} on /v1/graph: #{resp.resp_body}"
+
+      assert Jason.decode!(resp.resp_body)["ok"] == true
+    end
+
+    test "MUTATION PROOF: a published private-type title is absent for public-read, present for admin, and gone from both after delete",
+         %{conn: conn, scope: scope} do
+      secret_id = uniq("weapon")
+      secret_title = "SECRET-#{secret_id}"
+      public_id = uniq("open-post")
+      public_title = "OPEN-#{public_id}"
+
+      publish!("weapon", secret_id, secret_title, scope)
+      publish!("post", public_id, public_title, scope)
+
+      pub = corpus_body!(conn, &public_read/1)
+      adm = corpus_body!(conn, &authed/1)
+
+      # The private type is invisible to the public tier — by title AND by node.
+      refute secret_title in titles(pub)
+      refute MapSet.member?(node_ids(pub), secret_id)
+      refute Enum.any?(pub["nodes"], &(&1["type"] == "weapon"))
+      # …while the public type it was published alongside still comes through,
+      # so this is a visibility filter and not an empty response.
+      assert public_title in titles(pub)
+
+      # The admin tier is unchanged: it sees both.
+      assert secret_title in titles(adm)
+      assert public_title in titles(adm)
+
+      # Delete → the title is gone from BOTH tiers (the corpus is read at read
+      # time, never from a cached or hardcoded type list).
+      {:ok, _} = Content.delete_document(secret_id, "weapon", @dataset, scope)
+
+      pub_after = corpus_body!(conn, &public_read/1)
+      adm_after = corpus_body!(conn, &authed/1)
+
+      refute secret_title in titles(pub_after)
+      refute secret_title in titles(adm_after)
+      assert Enum.count(pub_after["nodes"], &(&1["title"] == secret_title)) == 0
+      assert Enum.count(adm_after["nodes"], &(&1["title"] == secret_title)) == 0
+    end
+
+    test "types= cannot re-open a private type for public-read", %{conn: conn, scope: scope} do
+      secret_id = uniq("weapon-explicit")
+      publish!("weapon", secret_id, "SECRET-#{secret_id}", scope)
+
+      resp = conn |> public_read() |> get("/v1/graph?dataset=#{@dataset}&types=weapon")
+
+      # Unknown-to-this-caller type → the existing 400 contract, never a 200
+      # carrying the private corpus.
+      assert resp.status == 400
+      body = Jason.decode!(resp.resp_body)
+      assert body["ok"] == false
+      refute body["nodes"]
+    end
+
+    test "a schema flipped to public becomes visible on the NEXT read (read-time, not hardcoded)",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("weapon-flip")
+      title = "FLIP-#{doc_id}"
+      publish!("weapon", doc_id, title, scope)
+
+      refute title in titles(corpus_body!(conn, &public_read/1))
+
+      {:ok, _} =
+        Content.upsert_schema(
+          %{"name" => "weapon", "title" => "Weapon", "visibility" => "public", "fields" => []},
+          @dataset,
+          scope
+        )
+
+      assert title in titles(corpus_body!(conn, &public_read/1))
+    end
+
+    test "the graph SIBLINGS and non-graph reads stay denied for public-read", %{conn: conn} do
+      for path <- [
+            "/v1/graph/orphans",
+            "/v1/graph/dangling",
+            "/v1/graph/some-doc-id",
+            "/v1/graph/some-doc-id/tasks",
+            "/v1/data/export/#{@dataset}",
+            "/v1/data/analytics/#{@dataset}",
+            "/v1/data/revision/#{@dataset}/some-doc-id",
+            "/v1/data/history/#{@dataset}/post/some-doc-id"
+          ] do
+        resp = conn |> public_read() |> get(path)
+
+        assert resp.status == 403,
+               "#{path} returned #{resp.status} for a public-read token — expected 403"
+      end
+    end
+
+    test "an admin token is unaffected by the tier filter (every type still visible)",
+         %{conn: conn, scope: scope} do
+      doc_id = uniq("weapon-admin")
+      title = "ADMIN-#{doc_id}"
+      publish!("weapon", doc_id, title, scope)
+
+      assert title in titles(corpus_body!(conn, &authed/1))
+    end
+  end
+
+  # ── the admission cap (the BOX bound, not the payload bound) ──────────────
+  #
+  # `graph_corpus/2` holds a pool connection for the whole derivation; concurrent
+  # site builds exhausted POOL_SIZE=10 and 500-ed unrelated requests. The cap
+  # sheds beyond N concurrent derivations rather than queueing on the pool.
+  #
+  # This test FAILS WITHOUT THE BOUND: with no cap the second request is a plain
+  # 200, so the 503 assertion is the bound's tripwire.
+  describe "GET /v1/graph admission cap" do
+    test "beyond the concurrency cap the request is shed 503 + Retry-After, and recovers on release",
+         %{conn: conn, scope: scope} do
+      previous = Application.fetch_env(:barkpark, :graph_corpus_max_concurrency)
+      Application.put_env(:barkpark, :graph_corpus_max_concurrency, 1)
+
+      on_exit(fn ->
+        case previous do
+          {:ok, v} -> Application.put_env(:barkpark, :graph_corpus_max_concurrency, v)
+          :error -> Application.delete_env(:barkpark, :graph_corpus_max_concurrency)
+        end
+      end)
+
+      mk_published_post!(uniq("cap-shed"), scope)
+
+      # Hold the single slot from the test process, exactly as an in-flight
+      # derivation would.
+      {:ok, slot} = BarkparkWeb.TasksController.__acquire_graph_corpus_slot_for_test__()
+
+      shed = conn |> authed() |> get("/v1/graph?dataset=#{@dataset}")
+      assert shed.status == 503
+      body = Jason.decode!(shed.resp_body)
+      assert body["ok"] == false
+      assert body["reason"] == "graph_corpus_busy"
+      assert Plug.Conn.get_resp_header(shed, "retry-after") == ["1"]
+
+      # Releasing the slot restores service on the very next request — the cap
+      # sheds load, it does not latch the route off.
+      BarkparkWeb.TasksController.__release_graph_corpus_slot_for_test__(slot)
+
+      ok = conn |> authed() |> get("/v1/graph?dataset=#{@dataset}")
+      assert ok.status == 200
+      assert Jason.decode!(ok.resp_body)["ok"] == true
+    end
+
+    # THE BOUND MUST OUTLIVE THE REQUESTS IT BOUNDS. An ETS table is owned by
+    # the process that created it and dies with it, so a lazily-created slot
+    # table would be owned by whichever request arrived first — and would be
+    # destroyed the instant that request finished. Under concurrency that is
+    # not merely a reset bound: a sibling still holding a slot would raise
+    # ArgumentError on insert/delete, turning the guard against 500s into a
+    # source of them. The table is therefore created in
+    # `Barkpark.Application.start/2`.
+    #
+    # FAILS WITHOUT THE FIX: with only lazy creation the table's owner here is
+    # either the (now dead) task — `:ets.whereis/1` ⇒ `:undefined` — or this
+    # very test process, both of which this test rejects.
+    test "the slot table outlives the process that used it (owned at boot, not by a request)" do
+      table = :barkpark_graph_corpus_slots
+
+      task =
+        Task.async(fn ->
+          {:ok, slot} = BarkparkWeb.TasksController.__acquire_graph_corpus_slot_for_test__()
+          BarkparkWeb.TasksController.__release_graph_corpus_slot_for_test__(slot)
+          self()
+        end)
+
+      task_pid = Task.await(task)
+      refute Process.alive?(task_pid)
+
+      assert :ets.whereis(table) != :undefined,
+             "the slot table died with the request process that used it"
+
+      owner = :ets.info(table, :owner)
+      assert Process.alive?(owner)
+      refute owner == self(), "the slot table is owned by a transient caller, not by the app"
+      refute owner == task_pid
+    end
+
+    test "under the cap, back-to-back derivations all succeed (no slot leak)", %{
+      conn: conn,
+      scope: scope
+    } do
+      mk_published_post!(uniq("cap-noleak"), scope)
+
+      for _ <- 1..5 do
+        resp = conn |> authed() |> get("/v1/graph?dataset=#{@dataset}")
+
+        assert resp.status == 200,
+               "a slot leaked: a sequential request was shed with #{resp.status}"
+      end
+    end
+  end
 end

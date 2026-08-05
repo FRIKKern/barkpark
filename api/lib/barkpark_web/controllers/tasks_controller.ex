@@ -1048,7 +1048,55 @@ defmodule BarkparkWeb.TasksController do
   @graph_corpus_node_budget 2000
   @graph_corpus_per_type_limit 1000
 
+  # THIRD ceiling, and the only one that protects the BOX rather than the
+  # payload: a CONCURRENT-DERIVATION CAP.
+  #
+  # One corpus derivation is cheap in statements and expensive in wall time (it
+  # holds a pool connection across every type's document page). During the
+  # 2026-07-28 storm `graph_corpus/2` was the top application crash frame in
+  # guerrilla's journal — 9,566 frames that day — because concurrent static-site
+  # builds each asked for the whole corpus at once, exhausted `POOL_SIZE=10`
+  # (config/runtime.exs) and 500-ed UNRELATED requests ("Sent 500 in 32003ms").
+  # Denying the route to public-read tokens accidentally shed that load; this
+  # slice re-admits the route, so the shedding has to become deliberate.
+  #
+  # Beyond the cap the request is REFUSED FAST (503 + Retry-After) instead of
+  # queueing on the DB pool: a shed request costs one ETS lookup, a queued one
+  # costs a connection every other route also needs. Slots are ETS rows keyed by
+  # a ref and carrying {owner_pid, deadline}; every acquire first sweeps rows
+  # whose owner died or whose deadline passed, so a slot cannot leak even if a
+  # request process is killed mid-derivation (`after` covers the ordinary exits).
+  #
+  # Saturation races resolve toward REFUSAL, never toward over-admission: two
+  # racers can both see the table over cap and both back out. At saturation
+  # shedding is the intended behaviour, so a spurious 503 is the safe error.
+  @graph_corpus_slots :barkpark_graph_corpus_slots
+  @graph_corpus_max_concurrency 4
+  @graph_corpus_slot_ttl_ms 60_000
+
   def graph_corpus(conn, params) do
+    case acquire_graph_corpus_slot() do
+      {:ok, slot} ->
+        try do
+          derive_graph_corpus(conn, params)
+        after
+          release_graph_corpus_slot(slot)
+        end
+
+      :busy ->
+        conn
+        |> put_resp_header("retry-after", "1")
+        |> put_status(:service_unavailable)
+        |> json(%{
+          ok: false,
+          reason: "graph_corpus_busy",
+          message:
+            "too many concurrent /v1/graph derivations (limit #{graph_corpus_max_concurrency()}); retry shortly"
+        })
+    end
+  end
+
+  defp derive_graph_corpus(conn, params) do
     dataset = request_dataset(conn)
     per_type_limit = graph_corpus_per_type_limit()
 
@@ -1064,7 +1112,7 @@ defmodule BarkparkWeb.TasksController do
     # edge fold below as a prefetch. `extract_edges/2` used to re-read this same
     # invariant list once PER DOCUMENT — 4096 identical queries on the live
     # corpus, the dominant cost behind a measured 34s first paint.
-    schemas = Content.list_schemas(dataset, opts)
+    schemas = Content.list_schemas(dataset, opts) |> visible_schemas(conn)
     all_types = Enum.map(schemas, & &1.name)
 
     case parse_graph_types(params["types"], all_types) do
@@ -1183,6 +1231,125 @@ defmodule BarkparkWeb.TasksController do
   defp graph_truncation_reason(true, false), do: "per_type_cap"
   defp graph_truncation_reason(false, true), do: "node_budget"
   defp graph_truncation_reason(false, false), do: nil
+
+  # ─── corpus visibility, keyed on the CALLER ──────────────────────────────
+  #
+  # The corpus read already pins `perspective: :published` (drafts never leak);
+  # what it did NOT do was honour schema VISIBILITY, so a public-read token got
+  # the titles of every private type in the dataset — 33 of 39 on the live
+  # instance, and a freshly published private-type document showed up within
+  # seconds. Site-spawner D6 clamps that tier to "published perspective + public
+  # -visibility schemas"; this is the second half.
+  #
+  # KEYED, not unconditional: every other principal (Studio session, read/write/
+  # admin token, and `FinderLive`, which derives its own payload off this same
+  # shape) keeps seeing every type. The tier test is
+  # `PublicRead.public_read_token?/1` — the plug's own definition, not a copy.
+  #
+  # Derived at READ TIME from `Content.Schema.public_type_names/1` over the
+  # schema rows this request already loaded (no extra query, no hardcoded type
+  # list): flip a schema to private and the very next corpus read drops it.
+  #
+  # Phantom nodes are deliberately NOT filtered. A phantom is a referenced-but-
+  # absent id with `title == id`, and a public document's reference field already
+  # exposes that same id through the allowed `GET /v1/data/doc` route — so
+  # dropping them would cost the dangling-edge signal without closing anything.
+  defp visible_schemas(schemas, conn) do
+    if BarkparkWeb.Plugs.PublicRead.public_read_token?(conn) do
+      allowed = MapSet.new(Barkpark.Content.Schema.public_type_names(schemas))
+      Enum.filter(schemas, &MapSet.member?(allowed, &1.name))
+    else
+      schemas
+    end
+  end
+
+  # ─── corpus admission cap (see the @graph_corpus_max_concurrency comment) ──
+
+  defp acquire_graph_corpus_slot do
+    ensure_graph_corpus_slots()
+    sweep_graph_corpus_slots()
+
+    ref = make_ref()
+    deadline = System.monotonic_time(:millisecond) + @graph_corpus_slot_ttl_ms
+    :ets.insert(@graph_corpus_slots, {ref, self(), deadline})
+
+    if :ets.info(@graph_corpus_slots, :size) > graph_corpus_max_concurrency() do
+      :ets.delete(@graph_corpus_slots, ref)
+      :busy
+    else
+      {:ok, ref}
+    end
+  rescue
+    # The table is created at application boot and never deleted, so this arm is
+    # unreachable in a running system. It exists so that a bookkeeping accident
+    # can never become a 500 on a read route: with no table there is no bound,
+    # and an UNBOUNDED corpus derivation is the failure this cap was built to
+    # prevent — so the safe answer is to shed, exactly as saturation races do.
+    ArgumentError -> :busy
+  end
+
+  defp release_graph_corpus_slot(ref) do
+    :ets.delete(@graph_corpus_slots, ref)
+  rescue
+    # Runs from an `after` clause, i.e. AFTER the response was sent. Raising
+    # here would crash the request process for a slot that no longer exists.
+    ArgumentError -> :ok
+  end
+
+  # Reap slots whose owner died (a killed request process never runs `after`) or
+  # whose deadline passed. Keeps the table bounded by the cap under all exits.
+  defp sweep_graph_corpus_slots do
+    now = System.monotonic_time(:millisecond)
+
+    for {ref, pid, deadline} <- :ets.tab2list(@graph_corpus_slots),
+        deadline <= now or not Process.alive?(pid) do
+      :ets.delete(@graph_corpus_slots, ref)
+    end
+
+    :ok
+  end
+
+  @doc """
+  Create the `/v1/graph` admission-cap slot table, owned by the caller.
+
+  Called ONCE from `Barkpark.Application.start/2` so the table's owner is the
+  application process rather than whichever request happened to arrive first —
+  a bound whose bookkeeping dies with a request is not a bound. Idempotent: a
+  second call (a re-boot in the test VM) is a no-op, and the rows are slots, so
+  nothing is lost by NOT clearing them.
+  """
+  def init_graph_corpus_slots, do: ensure_graph_corpus_slots()
+
+  defp ensure_graph_corpus_slots do
+    case :ets.whereis(@graph_corpus_slots) do
+      :undefined ->
+        try do
+          :ets.new(@graph_corpus_slots, [:named_table, :public, :set, read_concurrency: true])
+        rescue
+          # Lost the create race to a concurrent request — the table exists.
+          ArgumentError -> :ok
+        end
+
+      _ref ->
+        :ok
+    end
+  end
+
+  defp graph_corpus_max_concurrency,
+    do:
+      Application.get_env(
+        :barkpark,
+        :graph_corpus_max_concurrency,
+        @graph_corpus_max_concurrency
+      )
+
+  @doc false
+  # Test seam: hold a real slot from the test process so the admission cap can be
+  # driven deterministically (no sleeping, no spawned load).
+  def __acquire_graph_corpus_slot_for_test__, do: acquire_graph_corpus_slot()
+
+  @doc false
+  def __release_graph_corpus_slot_for_test__(ref), do: release_graph_corpus_slot(ref)
 
   defp graph_corpus_node_budget,
     do: Application.get_env(:barkpark, :graph_corpus_node_budget, @graph_corpus_node_budget)

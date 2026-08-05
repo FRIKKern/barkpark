@@ -9,6 +9,17 @@ defmodule Barkpark.Application do
 
   @impl true
   def start(_type, _args) do
+    # The /v1/graph admission-cap slot table, created HERE and nowhere else that
+    # matters. It is a CONCURRENCY BOUND, not a cache: the rows are the slots
+    # currently held, so the table must outlive every request that holds one.
+    # Created lazily from a request process it would be owned by that process
+    # and destroyed the moment the request finished — under exactly the
+    # concurrent load the cap exists to shed, in-flight slots would be forgotten
+    # (the bound silently resets) and a sibling's `:ets.insert`/`:ets.delete`
+    # would raise ArgumentError, i.e. a 500 from the guard against 500s. This
+    # process lives as long as the application, so the bound does too.
+    BarkparkWeb.TasksController.init_graph_corpus_slots()
+
     # Goal barkpark-G1, task s2: ask the Plugins.Registry for every plugin-
     # contributed child spec BEFORE constructing the supervision tree. The
     # call is a pure function — Registry.collect_workers/1 does NOT depend
