@@ -52,7 +52,36 @@ export async function allDocs(): Promise<DocRow[]> {
   return (rows || []) as DocRow[]
 }
 
-/** The graph corpus, baked at build into a static JSON the island fetches. */
+/** Pull a human message out of an API `{error: string | {message,code}}` body,
+ * else fall back to the HTTP reason phrase — mirrors the Next edition's
+ * `humanUpstreamMessage` so both templates say the SAME thing about the same
+ * upstream answer. */
+function upstreamMessage(body: string, res: Response): string {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    parsed = null
+  }
+  if (parsed && typeof parsed === 'object' && 'error' in parsed) {
+    const e = (parsed as { error: unknown }).error
+    if (typeof e === 'string' && e.trim() !== '') return e.trim()
+    if (e && typeof e === 'object') {
+      const o = e as { message?: unknown; code?: unknown }
+      if (typeof o.message === 'string' && o.message.trim() !== '') return o.message.trim()
+      if (typeof o.code === 'string' && o.code.trim() !== '') return o.code.trim()
+    }
+  }
+  return res.statusText || 'corpus fetch failed'
+}
+
+/** The graph corpus, baked at build into a static JSON the island fetches.
+ *
+ * THROWS on a bad upstream answer, on purpose: a static build with no corpus is
+ * a failed build, not a degraded page. The message shape is `graph <status>:
+ * <message>` — IDENTICAL to the Next edition's `CorpusUnavailableError` /
+ * `bp-corpus-status` marker, so one deploy-log classifier sees ONE class of
+ * failure across both flagship templates instead of two dialects of it. */
 export async function graphCorpus(): Promise<unknown> {
   // /v1/graph is a FLAT route — derive the bare origin (the managed path may
   // hand us a SCOPED apiUrl, and scoped+flat 404s; same live-caught class as
@@ -60,7 +89,10 @@ export async function graphCorpus(): Promise<unknown> {
   const res = await fetch(`${new URL(env.apiUrl).origin}/v1/graph?dataset=${encodeURIComponent(env.dataset)}`, {
     headers: env.token ? { authorization: `Bearer ${env.token}` } : {},
   })
-  if (!res.ok) throw new Error(`graph corpus fetch failed: ${res.status}`)
+  if (!res.ok) {
+    const body = await res.text().catch(() => '')
+    throw new Error(`graph ${res.status}: ${upstreamMessage(body, res)}`)
+  }
   return res.json()
 }
 
