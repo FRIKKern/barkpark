@@ -29,7 +29,17 @@
 # are a DEADLOCK — a third state, exit 3, distinct from pass and fail. Extra
 # rendered names are tolerated: new advisory checks land constantly.
 #
-# EXIT CODES   0 = agree · 1 = drift / cannot read · 3 = DEADLOCK · 4 = RE-RUN
+# AND A FOURTH SURFACE: WHAT THE WORKFLOWS TELL THE BUILDER (cch-w32-s4)
+#
+# A required context is only half a contract; the other half is what a builder
+# reading the workflow believes about their red. console-harness.yml said in
+# three places that `Console gate` was "ADVISORY today" for two waves after it
+# became required — a comment that rots is a gate lying about itself. So the
+# committed spec's context names are now also checked against the prose of every
+# workflow: see advisory_prose_check below, including its two stated limits.
+#
+# EXIT CODES   0 = agree · 1 = drift / prose contradicts the spec / cannot read
+#              3 = DEADLOCK · 4 = RE-RUN
 #
 # 4 is returned by --deadlock, the mode a caller points at a SPECIFIC head (the
 # merge verb's pre-flight). --full and --ci SAMPLE an arbitrary settled head, so
@@ -64,6 +74,10 @@ RUNS_FILE=""
 HEAD_SHA=""
 MODE="full"
 QUIET=0
+# The directory the advisory-prose clause scans. Overridable ONLY so the
+# selftest can point the identical clause at fixture workflows; every real
+# invocation reads the committed tree.
+WORKFLOWS_DIR="$REPO_ROOT/.github/workflows"
 
 fail() { echo "FAIL: $*" >&2; exit 1; }
 say()  { [ "$QUIET" -eq 1 ] || echo "$*"; }
@@ -288,7 +302,7 @@ EOF
     # would make the merge verb refuse a head GitHub would happily merge, which
     # is a lie in the opposite direction inside an epic about honest gates. The
     # states below share one property `skipped` does not: GitHub blocks on them
-    # AND nothing re-reports them on its own. Probe 16/16 pins this both ways.
+    # AND nothing re-reports them on its own. Probe 16/18 pins this both ways.
     case "$concl" in
       cancelled|timed_out|stale|action_required)
         cancelled="$cancelled$ctx (concluded $concl)
@@ -310,6 +324,121 @@ EOF
   return 0
 }
 
+# ── the advisory-prose clause ────────────────────────────────────────────────
+# THE DEFECT THIS EXISTS FOR (cch-w32-s4). console-harness.yml told a builder,
+# in three separate comments, that `Console gate` "is ADVISORY today — the live
+# required set is `Elixir gate` and `PR references an active task`". Live
+# protection had required FOUR contexts since 2026-08-03, `Console gate` among
+# them. The comment was not wrong when written; it rotted, because it had
+# re-enumerated a set that lives somewhere else. A builder who read it would
+# have shipped a red believing the merge was still open to them — a gate layer
+# telling a builder something it cannot support, which is this epic's thesis
+# pointed at itself.
+#
+# THE CLAUSE. NEITHER SIDE IS HAND-ENUMERATED. The context names come from the
+# committed spec (`.github/required-checks.json`), the prose comes from a scan
+# of every `*.yml` under .github/workflows. Adding a context to the spec
+# therefore widens the guard on its own, and removing one narrows it — the
+# guard tracks the spec, never a frozen string (probes 17 and 18 prove exactly
+# that pair).
+#
+# THE LENS, pinned so a reader knows what it does and does not see. Per workflow
+# file, comment markers are stripped and lines are joined into one stream, so a
+# claim spread over three wrapped comment lines still matches. For each
+# occurrence of a required context name, the NEXT $PROSE_WINDOW characters are
+# searched for a disclaimer. Directional on purpose: "`Console gate` … is
+# ADVISORY" matches, while "…is ADVISORY … the required set is `Elixir gate`"
+# does not blame `Elixir gate` for a sentence that named it as REQUIRED.
+#
+# TWO HONEST LIMITS, named rather than papered over:
+#
+#   (i) IT IS A REGEX OVER PARAPHRASABLE PROSE. It catches the phrasings listed
+#       in PROSE_DISCLAIMERS below and nothing else; "you can merge over this
+#       one" or "cosmetic for now" sail straight past. It is also proximity, not
+#       attribution — a required context named within the window of somebody
+#       else's disclaimer is flagged, and the fix is to reword, not to widen the
+#       window. Treat it as a tripwire on the phrasing that actually rotted
+#       here, not as a proof that every comment is true.
+#
+#  (ii) IT COMPOSES WITH, AND DOES NOT DUPLICATE, THE LIVE-VS-SPEC HALF. This
+#       clause proves only that no workflow's prose CONTRADICTS the committed
+#       spec. That the spec matches live branch protection is compare_protection
+#       above, and that the required names actually render is deadlock_check.
+#       Alone, this clause would happily certify prose that agrees with a spec
+#       which itself disagrees with GitHub — which is why it runs beside them in
+#       the same modes rather than instead of them.
+PROSE_WINDOW=200
+# Ordered loosest-last; matched case-insensitively against the joined stream.
+PROSE_DISCLAIMERS='advisory|non-?blocking|not blocking|does not block|does not by itself block|do(es)? not block|doesn.?t block|will not block|won.?t block|never blocks|blocks nothing|not (a )?required|non-?required|not enforced'
+
+advisory_prose_check() {
+  [ -d "$WORKFLOWS_DIR" ] \
+    || fail "cannot read $WORKFLOWS_DIR — the advisory-prose clause has nothing to scan (a failure, never a skip)"
+  local files
+  files="$(find "$WORKFLOWS_DIR" -maxdepth 1 -name '*.yml' | sort)"
+  [ -n "$files" ] \
+    || fail "no *.yml under $WORKFLOWS_DIR — scanning zero files is the vacuous pass this guard exists to refuse"
+
+  local tmp ctxfile nctx nfiles out
+  tmp="$(mktemp -d)"
+  ctxfile="$tmp/contexts.txt"
+  jq -r '.protection.required_status_checks.checks[].context' "$SPEC" > "$ctxfile"
+  nctx="$(grep -c . "$ctxfile" || true)"
+  nfiles="$(printf '%s\n' "$files" | grep -c . || true)"
+
+  out="$(printf '%s\n' "$files" | tr '\n' '\0' | xargs -0 awk \
+    -v CTXFILE="$ctxfile" -v WINDOW="$PROSE_WINDOW" -v DISC="$PROSE_DISCLAIMERS" '
+    function flushfile(   i, j, p, abs, start, ctxlc, streamlc, hay, exc, ln) {
+      if (fname == "") return
+      streamlc = tolower(stream)
+      for (i = 1; i <= nctx; i++) {
+        ctxlc = tolower(ctx[i])
+        start = 1
+        while ((p = index(substr(streamlc, start), ctxlc)) > 0) {
+          abs = start + p - 1
+          hay = substr(streamlc, abs + length(ctxlc), WINDOW)
+          if (hay ~ DISC) {
+            exc = substr(stream, abs, length(ctxlc) + WINDOW)
+            gsub(/\|/, " ", exc)
+            ln = 1
+            for (j = 1; j <= nmark; j++) if (markoff[j] <= abs) ln = markline[j]
+            printf "%s|%d|%s|%s\n", fname, ln, ctx[i], exc
+            break
+          }
+          start = abs + 1
+        }
+      }
+    }
+    BEGIN {
+      while ((getline c < CTXFILE) > 0) if (length(c) > 0) ctx[++nctx] = c
+    }
+    FNR == 1 { flushfile(); fname = FILENAME; stream = ""; nmark = 0 }
+    {
+      line = $0
+      sub(/^[[:space:]]*#[[:space:]]?/, "", line)
+      gsub(/[[:space:]]+/, " ", line)
+      nmark++; markoff[nmark] = length(stream) + 1; markline[nmark] = FNR
+      stream = stream line " "
+    }
+    END { flushfile() }
+  ' 2>&1)" || { rm -rf "$tmp"; fail "advisory-prose scan could not run: $out"; }
+  rm -rf "$tmp"
+
+  if [ -n "$out" ]; then
+    echo "FAIL: a workflow describes a REQUIRED context as advisory / non-blocking." >&2
+    echo "      The committed spec ($SPEC) says these contexts BLOCK the merge." >&2
+    printf '%s\n' "$out" | while IFS='|' read -r f l c e; do
+      echo "      $f:$l  claims \"$c\" is not blocking" >&2
+      echo "        … ${e} …" >&2
+    done
+    echo "      Fix the PROSE, not the spec — unless the context genuinely should stop being required," >&2
+    echo "      in which case regenerate the spec and this clause narrows with it." >&2
+    return 1
+  fi
+  say "  ok     no workflow calls any of the $nctx required context(s) advisory ($nfiles workflow file(s) scanned)"
+  return 0
+}
+
 # ── modes ────────────────────────────────────────────────────────────────────
 run_full() {
   read_spec
@@ -326,6 +455,8 @@ run_full() {
     say "  The deadlock detector below still runs against a real PR head. From the"
     say "  commit that flips enforced to true, an unreadable or absent protection"
     say "  config is a hard failure here."
+    say "── advisory-prose clause (spec-derived names × workflow prose) ──"
+    advisory_prose_check || return 1
     local drc0=0
     deadlock_check "${HEAD_SHA:-$(recent_pr_head)}" || drc0=$?
     [ "$drc0" -eq 3 ] && return 3
@@ -337,6 +468,8 @@ run_full() {
   actual="$(live_protection)"
   say "── live protection vs committed spec ──"
   compare_protection "$actual" || rc=1
+  say "── advisory-prose clause (spec-derived names × workflow prose) ──"
+  advisory_prose_check || rc=1
   say "── deadlock detector ──"
   local sha="${HEAD_SHA:-$(recent_pr_head)}"
   local drc=0
@@ -348,7 +481,7 @@ run_full() {
   # ranked. DEADLOCK (3) is reserved for "live and spec agree, and the names
   # still never render" — the state no refusal message can tell you (D38).
   if [ "$rc" -ne 0 ]; then
-    echo "FAIL: live config and the committed spec disagree." >&2
+    echo "FAIL: the committed spec is contradicted — by live config, by workflow prose, or both (see above)." >&2
     return 1
   fi
   [ "$drc" -eq 3 ] && return 3
@@ -367,6 +500,9 @@ run_ci() {
   local drc=0
   deadlock_check "$sha" || drc=$?
   [ "$drc" -eq 3 ] || [ "$drc" -eq 4 ] || [ "$drc" -eq 0 ] || rc=1
+
+  say "── advisory-prose clause (spec-derived names × workflow prose) ──"
+  advisory_prose_check || rc=1
 
   if [ "$(spec_enforced)" = "true" ]; then
     say "── enforced=true: live protection must match ──"
@@ -481,49 +617,49 @@ JSON
 
   echo "── verify selftest: every clause proven by mutation ──"
 
-  probe "1/16 honest read-back passes" 0 \
+  probe "1/18 honest read-back passes" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks[0].context = "Elixir gat"' "$good_spec" > "$tmp/typo.json"
-  probe "2/16 a typo'd context reds (GitHub accepts it; we must not)" 1 \
+  probe "2/18 a typo'd context reds (GitHub accepts it; we must not)" 1 \
     --spec "$tmp/typo.json" --readback "$good_rb" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = null' "$good_rb" > "$tmp/nullapp.json"
-  probe "3/16 app_id:null where the spec pins an id is HARD" 1 \
+  probe "3/18 app_id:null where the spec pins an id is HARD" 1 \
     --spec "$good_spec" --readback "$tmp/nullapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.checks[0].app_id = 8329' "$good_rb" > "$tmp/wrongapp.json"
-  probe "4/16 a wrong app_id reds" 1 \
+  probe "4/18 a wrong app_id reds" 1 \
     --spec "$good_spec" --readback "$tmp/wrongapp.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.enforce_admins.enabled = false' "$good_rb" > "$tmp/breakglass.json"
-  probe "5/16 a left-open break-glass (enforce_admins false) reds" 1 \
+  probe "5/18 a left-open break-glass (enforce_admins false) reds" 1 \
     --spec "$good_spec" --readback "$tmp/breakglass.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_linear_history.enabled = true' "$good_rb" > "$tmp/oob.json"
-  probe "6/16 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
+  probe "6/18 out-of-band required_linear_history=true reds (the PUT does not converge it — D41)" 1 \
     --spec "$good_spec" --readback "$tmp/oob.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '. + {"required_deployments": {"enabled": true}}' "$good_rb" > "$tmp/extra.json"
-  probe "7/16 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
+  probe "7/18 a read-back key the spec never mentions reds (FULL-object diff)" 1 \
     --spec "$good_spec" --readback "$tmp/extra.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.required_status_checks.strict = true' "$good_rb" > "$tmp/strict.json"
-  probe "8/16 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
+  probe "8/18 strict:true reds (it would serialise this fleet's parallel merges)" 1 \
     --spec "$good_spec" --readback "$tmp/strict.json" --runs "$good_runs" --sha probe || rc=1
 
   jq '.protection.required_status_checks.checks += [{"context":"No workflow emits me","app_id":15368}]' "$good_spec" > "$tmp/deadspec.json"
-  probe "9/16 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
+  probe "9/18 a spec context no workflow emits is DEADLOCK — a third state, at N=3 where the refusal message names nothing" 3 \
     --spec "$tmp/deadspec.json" --readback "$good_rb" --runs "$good_runs" --sha probe --deadlock || rc=1
 
-  probe "10/16 an unreadable protection read-back FAILS (never skips)" 1 \
+  probe "10/18 an unreadable protection read-back FAILS (never skips)" 1 \
     --spec "$good_spec" --readback "$tmp/does-not-exist.json" --runs "$good_runs" --sha probe || rc=1
 
-  probe "11/16 an unreadable check-run feed FAILS (never skips)" 1 \
+  probe "11/18 an unreadable check-run feed FAILS (never skips)" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/no-runs.json" --sha probe || rc=1
 
   echo '{ "check_runs": [] }' > "$tmp/emptyruns.json"
-  probe "12/16 an EMPTY check-run feed FAILS — agreement against nothing is the vacuous pass this epic exists for" 1 \
+  probe "12/18 an EMPTY check-run feed FAILS — agreement against nothing is the vacuous pass this epic exists for" 1 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/emptyruns.json" --sha probe || rc=1
 
   # 13 & 14 are the D56 clause: the detector used to match on `cut -f1` and
@@ -533,7 +669,7 @@ JSON
   # 13 must be 4 and 14 must be 0, and reverting the clause makes 13 return 0.
   jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "cancelled"' \
     "$good_runs" > "$tmp/cancelledruns.json"
-  probe "13/16 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
+  probe "13/18 a required context whose LATEST run concluded cancelled is RE-RUN, not green (D56; returned exit 0 before this clause)" 4 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --deadlock || rc=1
 
   # The mirror clause: cancellation on a NON-required check is none of our
@@ -541,13 +677,13 @@ JSON
   # checks are cancelled by concurrency groups all day.
   jq '(.check_runs[] | select(.name == "Boundary gate (advisory)") | .conclusion) = "cancelled"' \
     "$good_runs" > "$tmp/advcancelled.json"
-  probe "14/16 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
+  probe "14/18 a cancelled ADVISORY check does NOT trip RE-RUN (the clause must be scoped to the required set)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/advcancelled.json" --sha probe --deadlock || rc=1
 
   # The caller-scope clause above, proven rather than asserted: --ci must NOT
   # turn a cancelled run on an arbitrary sampled head into a red, while
   # --deadlock (13/15) still exits 4 on the identical input.
-  probe "15/16 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
+  probe "15/18 --ci does NOT red on a cancelled required context (it samples a FOREIGN settled head; the merge verb asks --deadlock about its OWN head)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/cancelledruns.json" --sha probe --ci || rc=1
 
   # 16 pins the scope of the RE-RUN set from the other side. GitHub counts a
@@ -558,8 +694,40 @@ JSON
   # out and pinned the removal here, so re-adding it reds this probe.
   jq '(.check_runs[] | select(.name == "PR references an active task" and .started_at == "2026-07-28T02:00:00Z") | .conclusion) = "skipped"' \
     "$good_runs" > "$tmp/skippedruns.json"
-  probe "16/16 a required context concluding SKIPPED is NOT RE-RUN (GitHub treats skipped as satisfying; refusing it would be a false stall)" 0 \
+  probe "16/18 a required context concluding SKIPPED is NOT RE-RUN (GitHub treats skipped as satisfying; refusing it would be a false stall)" 0 \
     --spec "$good_spec" --readback "$good_rb" --runs "$tmp/skippedruns.json" --sha probe --deadlock || rc=1
+
+  # 17 & 18 are the cch-w32-s4 clause, and they are ONE mutation proven from
+  # both sides with the SAME fixture workflow. The fixture reproduces the exact
+  # defect console-harness.yml carried: a disclaimer about a required context,
+  # wrapped across comment lines so a single-line grep would miss it.
+  mkdir -p "$tmp/wf"
+  cat > "$tmp/wf/fixture.yml" <<'YML'
+name: Fixture
+on: [pull_request]
+jobs:
+  probe:
+    # HONEST SCOPE: `Elixir gate`, the aggregator this job reaches branch
+    # protection through, is ADVISORY today — its red is visible but it does
+    # not by itself block a merge.
+    runs-on: ubuntu-latest
+    steps:
+      - run: 'true'
+YML
+  probe "17/18 a workflow calling a SPEC'D context advisory reds (the defect this clause exists for; claim wrapped over 3 comment lines, so a line-wise grep would miss it)" 1 \
+    --spec "$good_spec" --readback "$good_rb" --runs "$good_runs" --sha probe --workflows "$tmp/wf" || rc=1
+
+  # The mirror, and the whole point: the guard tracks the SPEC, not a frozen
+  # string. Drop `Elixir gate` from the required set (spec and read-back
+  # together, so the live-vs-spec half stays honest) and the IDENTICAL sentence
+  # in the IDENTICAL file becomes a true statement — and goes green. A guard
+  # that stayed red here would be pinning a phrase, not a fact.
+  jq 'del(.protection.required_status_checks.checks[] | select(.context == "Elixir gate"))' "$good_spec" > "$tmp/noelixir_spec.json"
+  jq '.required_status_checks.contexts = ["PR references an active task"]
+      | .required_status_checks.checks = [{"context":"PR references an active task","app_id":15368}]' \
+    "$good_rb" > "$tmp/noelixir_rb.json"
+  probe "18/18 the SAME claim in the SAME file goes GREEN once that context leaves the spec (the clause tracks the committed set, not a frozen string)" 0 \
+    --spec "$tmp/noelixir_spec.json" --readback "$tmp/noelixir_rb.json" --runs "$good_runs" --sha probe --workflows "$tmp/wf" || rc=1
 
   rm -rf "$tmp"
   echo
@@ -579,6 +747,7 @@ main() {
       --readback) READBACK_FILE="$2"; shift 2 ;;
       --runs) RUNS_FILE="$2"; shift 2 ;;
       --sha) HEAD_SHA="$2"; shift 2 ;;
+      --workflows) WORKFLOWS_DIR="$2"; shift 2 ;;
       --deadlock) MODE="deadlock"; shift ;;
       --ci) MODE="ci"; shift ;;
       --selftest) MODE="selftest"; shift ;;

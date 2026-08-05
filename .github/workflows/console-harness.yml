@@ -347,12 +347,15 @@ jobs:
       # DISAPPEARS, and the sweep exits 0 over a breakpoint nobody covers —
       # measured, and pinned in breakpoint-sweep.test.mjs).
       #
-      # HONEST SCOPE: `Console gate`, the aggregator this job reaches branch
-      # protection through, is ADVISORY today — the live required set is
-      # `Elixir gate` and `PR references an active task`. This step RUNS on
-      # every console-touching PR and its red is visible; it does not by itself
-      # block a merge. Nothing is registered here and
-      # .github/required-checks.json is untouched.
+      # HONEST SCOPE: `Console gate`, the aggregator this step reaches branch
+      # protection through, is a REQUIRED context on `main` — a red here BLOCKS
+      # the merge, and has done since 2026-08-03. This comment used to say the
+      # opposite, and kept saying it for the two waves after it stopped being
+      # true, because it re-enumerated the required set in prose. So it does not
+      # anymore: `.github/required-checks.json` is the single committed source
+      # of truth for what protection enforces, and
+      # scripts/required-checks-verify.sh reds when a workflow's prose
+      # contradicts that file. Nothing is registered here.
       - name: Responsive sweep — breakpoint/screen coverage refusal
         run: node cloud/priv/static/__preview__/breakpoint-sweep.mjs
 
@@ -478,10 +481,13 @@ jobs:
   # for such a job even when it failed, laundering the lie into `Console gate`.
   #
   # HONEST SCOPE: `Console gate`, which this job reaches branch protection
-  # through, is ADVISORY today — the live required set is `Elixir gate` and
-  # `PR references an active task`. This job RUNS on every console-touching PR
-  # and its red is visible; it does not by itself block a merge. Nothing is
-  # registered here and .github/required-checks.json is untouched.
+  # through, is a REQUIRED context on `main` — a red here BLOCKS the merge, and
+  # has done since 2026-08-03. This comment used to say the opposite, having
+  # re-enumerated the required set in prose that then rotted, so it does not
+  # anymore: `.github/required-checks.json` is the single committed source of
+  # truth for what protection enforces, and scripts/required-checks-verify.sh
+  # reds when a workflow's prose contradicts that file. Nothing is registered
+  # here.
   tier-floor-render:
     name: Billing tier floor (rendered)
     needs: changes
@@ -545,11 +551,13 @@ jobs:
   # this wiring — it stays an independent filed row.
   #
   # HONEST SCOPE: `Console gate`, the aggregator this job reaches branch
-  # protection through, is ADVISORY today — the live required set is
-  # `Elixir gate` and `PR references an active task`. This job RUNS on every
-  # console-touching PR and its red is visible; it does not by itself block a
-  # merge. Nothing is registered here and .github/required-checks.json is
-  # untouched.
+  # protection through, is a REQUIRED context on `main` — a red here BLOCKS the
+  # merge, and has done since 2026-08-03. This comment used to say the opposite,
+  # having re-enumerated the required set in prose that then rotted, so it does
+  # not anymore: `.github/required-checks.json` is the single committed source
+  # of truth for what protection enforces, and
+  # scripts/required-checks-verify.sh reds when a workflow's prose contradicts
+  # that file. Nothing is registered here.
   overflow-guard:
     name: Overflow guard (rendered)
     needs: changes
