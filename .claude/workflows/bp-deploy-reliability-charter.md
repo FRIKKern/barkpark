@@ -178,3 +178,69 @@ provisioning-path humanization (`task-3b59e1ea682c03a1`, `cchi-w26-bl-two-unhuma
 ## Wave log
 
 <!-- one row per wave: date · wave paper · slices merged · the number that moved -->
+
+### Wave 2026-08-05 — founding wave · Paper `deploy-truth-wave-1-2026-08-05` · grade **A−**
+
+**Five of six slices built, reviewed, gate-green, pushed and PR'd. Nothing merged yet — the lead merges.**
+The sixth (`dr-w1-s6`, the CLI reader) was deferred to round 2 BY DESIGN, behind s2's census route.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| Graph visibility + bound + readmit | `dr-w1-s1-graph-visibility-bound-readmit` | `…schema-visibility-i-0-r` | [#9613](https://github.com/FRIKKern/barkpark/pull/9613) | 52 tests, 0 failures |
+| The fleet deploy ledger | `dr-w1-s2-fleet-ledger-classifier` | `…a-named-taxonomy-1-r` | [#9614](https://github.com/FRIKKern/barkpark/pull/9614) | 119 tests, 0 failures · full cloud suite 2782/0 |
+| 409 deferral + index re-key (**MIGRATION**) | `dr-w1-s3-409-deferral-index-rekey` | `…counted-deferra-2-r` | [#9615](https://github.com/FRIKKern/barkpark/pull/9615) | 69 tests, 0 failures · full cloud suite 2758/0 |
+| Webhook doc-type filter | `dr-w1-s4-webhook-doctype-filter` | `…on-every-b-3` (unchanged) | [#9616](https://github.com/FRIKKern/barkpark/pull/9616) | 84 tests, 0 failures · full cloud suite 2753/0 |
+| The swallow records the cause | `dr-w1-s5-swallow-records-upstream-status` | `…read-its-corpus-reco-4-r` | [#9617](https://github.com/FRIKKern/barkpark/pull/9617) | selftest 137/137 · typecheck clean · 14 tests, 0 failures |
+
+**What landed.** All three clauses of the wish are addressed, unevenly and honestly so.
+REPAIR: the 403 root cause (54% of failures, one plug's allowlist) is closed with the visibility half D6
+always mandated plus a named concurrency bound, because re-admitting an unbounded corpus derivation is what
+made `graph_corpus` guerrilla's top crash frame. The 409 class (51.4% of failed rows) stops being a terminal
+`failed` and becomes a counted deferral that re-fires, and the dedup index is re-keyed onto columns that are
+actually present — `git_ref` was NULL on 26,395 of 26,423 rows, so a btree unique treated every one as
+distinct and the index had never deduplicated anything. The webhook doc-type filter is the wave's cheapest
+lever: 90.3% of deliveries were this repo's own `bp task` writes rebuilding five sites that render only papers.
+DIAGNOSE: a build that cannot read its corpus now records WHICH upstream condition stopped it, so seven causes
+stop collapsing into one illegible row. NOTICE: the ledger exists as a classifier, a rate that refuses to print
+below n=200, and an operator census route.
+
+**What did NOT land, and must be said plainly.** Nothing is merged, so the AFTER number does not exist yet —
+this wave shipped the instrument and the repairs, not the proof that the rate moved. The five live webhook rows
+on guerrilla still carry `types = {}` (no sanctioned mutation path from the sandbox). Nothing RENDERS the ledger:
+the console and `bp cloud site status` still show the humanized reason only, which is exactly the "notice"
+half of the wish, and it is the deferred slice.
+
+**Review fixes made in place** (five commits on the `-r` branches):
+1. **s1** — the admission cap's ETS table was created by whichever request arrived first, so ETS made that
+   request its OWNER and destroyed the table when it finished. Under exactly the concurrency the cap exists to
+   shed, slots were forgotten and siblings raised `ArgumentError`: a 500 from the guard against 500s. Now
+   created at application boot, pinned by a mutation-proved test.
+2. **s2** — two committed router fences (the moduledoc route table, the head-fence GET census) that the new
+   route tripped and the slice did not move. Both would have reddened the Cloud gate on merge.
+3. **s2 × s3, the wave's most important fix** — s3 relocates 8,830 rows from `failed` to `deferred`;
+   s2's classifier had no arm for that status and answered `nil`, so those rows would have become INVISIBLE
+   and the headline failure rate would have HALVED because rows stopped being counted. That is the vacuous
+   green this charter forbids in writing, and it would have been the wave's headline number. The census now
+   has three cohorts and a deferral is visibly relocated, never deleted.
+4. **s3** — the two deferral paths disagreed: one returned an error on a failed re-queue so Oban retried, the
+   other recorded SUCCESS for a publish that was at that moment lost. Made consistent.
+5. **s5** — the `bp-corpus-status` marker is an interface the deploy row reads back, and its only proof was a
+   shell fixture that HARD-CODES the text, i.e. the assertion ran in the wrong direction. Value shaping moved
+   to the dependency-free `lib/markers.ts` and pinned by six mutation-proved tests.
+
+**Ledger.** All five slice tasks sit `in_progress` with merge-gated criteria correctly left open for the lead.
+One overclaim corrected: `dr-w1-s3` criterion #2 asserted the slice-2 ledger buckets the deferral, which was
+not true and not proved — now true only because of review fix (3), and stamped saying so. Three criteria the
+builders could not close because builders do not push (two PR-body criteria, one astro-shape verification)
+were stamped against the PRs opened here. Two follow-ups filed: `dr-bl-deferral-requeue-failure-untested`,
+`dr-bl-map-landing-empty-marker`.
+
+**Merge order matters, and is not optional this wave.** s2 at or before s1 (so the before/after rate is
+measurable, and so the deferral bucket exists before s3 relocates into it) → s1 → **s3 ALONE** (the only
+migration; `cloud/**` auto-deploys and the post-merge hook migrates) → s4 → s5 after s1.
+**s1 is HIGH-FLIP-RISK and a genuinely independent second security reviewer is owed before merge (D17).**
+
+**Next wave takes:** dispatch `dr-w1-s6` the moment s2 merges — the ledger has no human reader and that is
+half the wish. Then the AFTER measurement as a rate with volume over a pinned window, the live webhook-row
+repair (`dr-w1-s4-followup-repair-live-webhook-types`), and `dr-bl-scoped-search-private-leak` (priority 0 —
+a LIVE leak wider than the one this wave closed, and it should reach the same security reviewer).
