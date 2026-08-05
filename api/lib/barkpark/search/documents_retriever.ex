@@ -342,15 +342,16 @@ defmodule Barkpark.Search.DocumentsRetriever do
   # `d.type in []` ⇒ WHERE false ⇒ empty results/count/facets (fail closed).
   # The Indx indexer applies the same predicate at index time
   # (IndexerWorker.schema_public?/1) — one invariant, two enforcement points.
+  #
+  # The derivation itself now lives in `Content.Schema.public_type_names/2` so
+  # the corpus graph (`TasksController.graph_corpus/2`) restricts its type list
+  # through the SAME predicate rather than a second hand-rolled copy — the gap
+  # this comment used to name as filed-separately.
   defp public_type_names(scope, opts) do
-    scope
-    |> Barkpark.Content.list_schemas(
+    Barkpark.Content.Schema.public_type_names(scope,
       workspace_id: Keyword.get(opts, :workspace_id),
       project_id: Keyword.get(opts, :project_id)
     )
-    |> Enum.filter(&(&1.visibility == "public"))
-    |> Enum.map(& &1.name)
-    |> Enum.filter(&(is_binary(&1) and &1 != ""))
   end
 
   # Mirror of Content.scope_to_dataset for the search read path (barkpark-y9ee).
