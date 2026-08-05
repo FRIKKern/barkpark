@@ -128,8 +128,17 @@ defmodule BarkparkCloud.Web.RouterHeadFenceCensusTest do
   # no nonce spent. So a bare HEAD of either is inert and no `side_effecting_get?/1`
   # clause is owed. Session and public are unchanged, which is the reassuring
   # half: no existing route silently changed auth class.
-  @baseline_total 64
-  @baseline_session 45
+  # 2026-08-05: 65 / 46 / 7 / 12. deploy-reliability W1 S2 added ONE
+  # session-authenticated GET, `/v1/operator/deploy-ledger/census`. RULED NOT
+  # SIDE-EFFECTING by reading the whole path: `Auth.require_platform_operator/2`
+  # only reads the session and the operator allowlist, and the handler is
+  # `DeployLedger.parse_window/2` (pure string parsing) then
+  # `DeployLedger.census/3`, which is a single grouped `Repo.all` and an
+  # in-memory fold — no row minted, no credential burned, no nonce spent. So a
+  # bare HEAD of it is inert and no `side_effecting_get?/1` clause is owed.
+  # agent_or_worker and public are unchanged: no existing route changed class.
+  @baseline_total 65
+  @baseline_session 46
   @baseline_machine 7
   @baseline_public 12
 
