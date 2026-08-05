@@ -1398,6 +1398,45 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-05 — wave 31 REVIEW — 5/5 round-1 slices built, gated, reviewed, PUSHED and PR'd. Grade A−
+
+**THE MIRROR OF WAVE 30 WAS PAID: the mechanism that acts and does not disclose.** A failed delivery
+was publishing the SMTP relay host the system masks to `********` even from the owner — gen_smtp's
+`host_failure()` names `smtp_host()` in every arm and `record_delivery/5` stored `inspect(why)` raw
+into a column every team admin reads. `Notifications.DeliveryReason` closes that at the WRITE seam with
+a total classifier and a constant-sentence vocabulary; the raw term still reaches the operator log
+(#9591). An owner demoted to admin kept every elevated PAT because a role LITERAL gated an
+already-derived revoker; the fix is one rank drop and a 7-test census over `roles() x abilities()`
+(#9593). A control-plane 500 stopped telling the person to check their own details at the three live
+blaming sentences, fixed at the cache-helper seam rather than the render site (#9594). The escape
+ratchet stopped certifying a tree it could not see: one call frame down, one naming convention, one
+bare word, and a floor that could not fire (#9592). Four paid-but-open ledger rows closed with
+receipts, three draft twins discarded as worth ZERO, and the two criteria-less rows — invisible to
+every met/total instrument in BOTH directions — adjudicated by reading (#9595).
+
+**WHAT REVIEW FOUND, AND IT IS THE WAVE'S OWN LESSON POINTED AT ITSELF.** S4 shipped a three-class
+transport vocabulary that was INERT on the only envelope that can reach it: `api()` always sets
+`data.error = "network_error"`, and `friendly()` resolves that slug out of `ERRORS` before it reads any
+fallback, so *"You're offline"* and *"That request was cancelled"* were unreachable and all three
+classes collapsed to one sentence. The guard could not catch it because it asserted against `{}` — a
+shape `api()` never produces. **A guard fed a convenient input is not a guard.** Both are fixed on
+`…-3-r`, and the repaired test reds by name when the fix is reverted. Add to the guard-class bar:
+**the census must be driven with the envelope the producer actually emits, not one that makes the
+assertion easy.** Also fixed: `offloadFileErrorCopy`'s status-0 branch still blamed the person's
+address for a failure the browser cannot attribute.
+
+**WHAT THE NEXT WAVE MUST KNOW.** (1) DISPATCH ORDER IS LAW: merge round 1 (#9591-#9595) first, then
+s6 (`cch-w31-s6-trial-expiring-chat-unroutable`, needs s1+s4), then s7
+(`cch-w30-bl-silent-withholds-have-no-person-facing-trace`, needs s1+s6 and IMPORTS
+`DeliveryReason.classes/0`), then s8 (`cch-w31-s8-member-self-scoped-delivery-read`, needs s1+s7 —
+shipping it before s1 would WIDEN the proved leak from admins to every member). (2) TWO SLICES WARRANT
+AN INDEPENDENT SECOND READ before merge, and the reviewer re-derived both first-hand rather than
+re-reading the builders: s1 (egress) and s3 (authz — **session tokens in Cloud are GLOBAL, so an owner
+demoted in ONE team is now logged out of EVERY team**). (3) THE SEAM S1 DID NOT CLOSE: a THIRD future
+write site could still put a raw term in `last_error`. The structural fix is a changeset-level
+inclusion check in `delivery.ex` — which s7 owns, so s7 should take it. (4) `walk-up` is floored AT its
+population of 1: a real, named false-red surface the lead may prefer at 0.
+
 ### 2026-08-04 — wave 30 REVIEW — 5/5 round-1 slices built, gated, reviewed, PUSHED and PR'd. Grade A
 
 **THE WAVE SHIPPED A GUARD CLASS, NOT FIVE GUARDS.** The frame — *an affordance with no mechanism is a
