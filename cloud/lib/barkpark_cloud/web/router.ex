@@ -247,6 +247,7 @@ defmodule BarkparkCloud.Web.Router do
     Azure,
     Billing,
     Cloudflare,
+    DeployLedger,
     DeviceAuth,
     DomainOwnership,
     DomainStatus,
@@ -3392,6 +3393,39 @@ defmodule BarkparkCloud.Web.Router do
     end
   end
 
+  # GET /v1/operator/deploy-ledger/census?from=&to= → 200 <census> — the
+  # cross-site deploy ledger: counts per failure class, counts per site, and the
+  # failure rate WITH its denominator, over a PINNED inserted_at window
+  # (deploy-reliability W1 S2).
+  #
+  # COUNTS, not rows: one grouped query folds ~1,400 (site, stage, reason) groups
+  # instead of the 26,000 rows a caller would otherwise pull over 13 per-site
+  # round trips. `Registry.latest_deployment_status_map/1` is deliberately NOT
+  # widened to carry this — it is LIMIT-1-per-site by construction, so it can
+  # express freshness but never a rate, and bp-search-template D24 froze its
+  # four-key select as an honesty law. This is built beside it.
+  #
+  # `from` and `to` are REQUIRED (422 otherwise). There is no default window on
+  # purpose: daily volume fell 2,766 → 332 over six days, so an unpinned
+  # "now minus" window silently compares two different populations and reports a
+  # volume collapse as a repair. Below `DeployLedger.min_sample/0` attempted rows
+  # the rate node REFUSES a percentage and says so instead.
+  get "/v1/operator/deploy-ledger/census" do
+    conn = Auth.require_platform_operator(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      case DeployLedger.parse_window(conn.query_params["from"], conn.query_params["to"]) do
+        {:ok, from, to} ->
+          json(conn, 200, DeployLedger.census(from, to))
+
+        {:error, detail} ->
+          json(conn, 422, %{error: "invalid_window", detail: detail})
+      end
+    end
+  end
+
   # GET /v1/operator/deliveries → 200 {deliveries: [<delivery_json>]} — the
   # FLEET-DIGEST send log (team_id nil, event fleet_digest), newest first. These
   # rows are structurally invisible to the team-scoped /v1/notifications/
@@ -6309,17 +6343,45 @@ defmodule BarkparkCloud.Web.Router do
     end)
   end
 
-  # GET /v1/sites/:id/deployments → 200 {deployments: [...]} newest first.
-  # Bounded by ?limit= (default 100, capped at 200) — a busy repo accrues one
-  # Deployment row per push plus duplicates on redelivery, so newest-first + cap
-  # returns exactly the rows a dashboard poll needs.
+  # GET /v1/sites/:id/deployments → 200 {deployments: [...], next_cursor} newest
+  # first. Bounded by ?limit= (default 100, capped at 200) — a busy repo accrues
+  # one Deployment row per push plus duplicates on redelivery, so newest-first +
+  # cap returns exactly the rows a dashboard poll needs.
+  #
+  # deploy-reliability W1 S2: and by ?before=<next_cursor> for everything BEHIND
+  # that cap. `Registry.list_deployments/3` has no offset clause, so `offset`,
+  # `page` and `cursor` were all silently ignored — `?offset=200` returned the
+  # byte-identical first row — and on the five hot sites 200 rows is a 51-hour
+  # window, i.e. nothing outside the database could audit the ledger's own
+  # numbers. `DeployLedger.list_page/2` is a KEYSET read on
+  # (inserted_at, id) DESC, so a row inserted mid-pagination cannot duplicate or
+  # skip a later page the way an offset would. An unparseable cursor is a 422,
+  # never a silent page one.
   get "/v1/sites/:id/deployments" do
     with_team_site(conn, fn site ->
       limit = parse_limit(conn.query_params["limit"], 100, 200)
+
       # gh-6: production-only — branch previews are surfaced distinctly at
       # GET /v1/sites/:id/previews so the dashboard keeps the two apart.
-      deployments = Registry.list_deployments(site, limit, environment: "production")
-      json(conn, 200, %{deployments: Enum.map(deployments, &deployment_json/1)})
+      opts = [
+        limit: limit,
+        environment: "production",
+        before: conn.query_params["before"] || conn.query_params["cursor"]
+      ]
+
+      case DeployLedger.list_page(site, opts) do
+        {:ok, %{deployments: deployments, next_cursor: next_cursor}} ->
+          json(conn, 200, %{
+            deployments: Enum.map(deployments, &deployment_json/1),
+            next_cursor: next_cursor
+          })
+
+        {:error, :invalid_cursor} ->
+          json(conn, 422, %{
+            error: "invalid_cursor",
+            detail: "before must be a next_cursor returned by a previous page"
+          })
+      end
     end)
   end
 
@@ -10312,6 +10374,25 @@ defmodule BarkparkCloud.Web.Router do
       # while an `E_ABSOLUTE_PATH` on "/quota/index.html" rendered here as
       # "Hetzner ran out of server capacity".
       failure_reason: FailureCopy.humanize(d.failure_reason),
+      # deploy-reliability W1 S2: the HONEST pair beside the prose.
+      #
+      #   * `failure_class` — the ledger's NAMED class for this row
+      #     (`DeployLedger.classify/1`), computed from `stage` + the RAW column,
+      #     never from the humanized string above: `humanize/1` is a display fold
+      #     that maps many distinct causes onto one sentence, so counting it
+      #     groups by prose and prose collapses causes. `nil` on any non-failed
+      #     row.
+      #   * `failure_reason_raw` — the capture WITHOUT the humanize rewrite, so a
+      #     reader can see what the box actually said when the prose above is the
+      #     generic arm. Raw of the REWRITE, never raw of the SECRETS:
+      #     `humanize/1` is this payload's scrub carrier (`classify |> scrub`), so
+      #     an unscrubbed twin field beside it would ship the credential the
+      #     neighbouring field just redacted — exactly the leak shape
+      #     task-4f363dc65ac43203 names ("an eighth channel added later ships
+      #     unscrubbed and nothing reds"). Scrubbed, then ANSI-stripped: 1,366 of
+      #     17,395 failed rows carry real 0x1B bytes from the build PTY.
+      failure_class: DeployLedger.classify(d),
+      failure_reason_raw: d.failure_reason |> FailureCopy.scrub() |> FailureCopy.strip_ansi(),
       became_live_at: d.became_live_at,
       # gh-6: branch-preview identity. `environment` is "production"|"preview";
       # for a preview, `branch` + `preview_host` + `preview_url` describe the

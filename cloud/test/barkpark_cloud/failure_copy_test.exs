@@ -903,6 +903,61 @@ defmodule BarkparkCloud.FailureCopyTest do
       assert FailureCopy.humanize(42) == 42
     end
   end
+
+  describe "strip_ansi/1 — the terminal bytes nothing was removing" do
+    # A VERBATIM astro capture from the control plane (2026-08-05): a
+    # `BUILD failed (exit 12)` reason with real 0x1B bytes, exactly as the build
+    # PTY wrote them. 1,366 of 17,395 failed rows carry these, and until this
+    # helper NOTHING stripped them: not this module, not the CLI's siteFailure,
+    # not the console's failureCopy(). They render as literal `[31m[1m`.
+    @astro_build_12 "BUILD failed (exit 12): \e[31m\e[1m04:34:24\e[22m [ERROR] [build]\e[39m Caught error rendering /graph.json: Error: graph corpus fetch failed: 403"
+
+    test "a real astro BUILD-exit-12 reason emerges with no escape bytes and its words intact" do
+      # The bytes are genuinely there in the fixture — a test over a fixture that
+      # merely contains the four-character text `\\x1B` proves nothing (the
+      # literal text appears in ZERO rows; the bytes appear in 1,366).
+      assert String.contains?(@astro_build_12, "\e")
+
+      out = FailureCopy.strip_ansi(@astro_build_12)
+
+      refute String.contains?(out, "\e")
+      refute out =~ ~r/\[\d+m/
+
+      assert out ==
+               "BUILD failed (exit 12): 04:34:24 [ERROR] [build] Caught error rendering /graph.json: Error: graph corpus fetch failed: 403"
+    end
+
+    test "strips CSI, OSC and bare two-byte escapes; leaves ordinary brackets alone" do
+      assert FailureCopy.strip_ansi("\e[2Kclearing") == "clearing"
+      assert FailureCopy.strip_ansi("\e]0;title\atext") == "text"
+      assert FailureCopy.strip_ansi("a\e=b") == "ab"
+
+      # A square bracket is not an escape. Build logs are full of them.
+      assert FailureCopy.strip_ansi("[ERROR] [build] step [3/7] failed") ==
+               "[ERROR] [build] step [3/7] failed"
+    end
+
+    test "idempotent, and nil / non-binaries pass through" do
+      once = FailureCopy.strip_ansi(@astro_build_12)
+      assert FailureCopy.strip_ansi(once) == once
+      assert FailureCopy.strip_ansi(nil) == nil
+      assert FailureCopy.strip_ansi(42) == 42
+      assert FailureCopy.strip_ansi("") == ""
+    end
+
+    test "humanize/1 strips LAST, so the classifier still sees the raw prefix" do
+      # The escape run sits between the producer's template and the text, so
+      # stripping before classification would change what the cond reads.
+      out = FailureCopy.humanize(@astro_build_12)
+      refute String.contains?(out, "\e")
+      assert out =~ "BUILD failed (exit 12)"
+    end
+
+    test "a class-sentence arm is untouched by the strip" do
+      assert FailureCopy.humanize("exceeded max provision attempts (3)") ==
+               "This didn't finish after several attempts. Try again in a moment."
+    end
+  end
 end
 
 defmodule BarkparkCloud.FailureCopyDeploymentDetailTest do
