@@ -70,7 +70,8 @@ defmodule BarkparkCloud.Notifications.LegacyLastErrorBackfillTest do
       legacy_id = insert_delivery(@legacy_smtp)
 
       classified =
-        for label <- @migration.constant_labels() ++ ["The channel rejected the message (HTTP 429)."] do
+        for label <-
+              @migration.constant_labels() ++ ["The channel rejected the message (HTTP 429)."] do
           {insert_delivery(label), label}
         end
 
@@ -86,6 +87,33 @@ defmodule BarkparkCloud.Notifications.LegacyLastErrorBackfillTest do
 
       # And only the one legacy row was touched at all.
       assert rewritten == 1
+    end
+
+    # WAVE 32 REVIEW. S2 lands `status: "suppressed"` in this same wave, and a
+    # withheld row's `last_error` is a WITHHOLD sentence — outside the failure
+    # vocabulary this predicate allowlists, and therefore legacy-looking to it.
+    # The two PRs auto-deploy independently, so if S2 merges first a reap sweep
+    # can write real withhold rows before this migration ever runs. Flattening
+    # one to "The delivery failed…" would be a fresh lie on the surface this
+    # wave built to stop lying. The seed below is a byte copy of
+    # `Withhold.label(:reap_alert_cap)` on purpose: this file must stay correct
+    # on a tree where that module does not exist yet.
+    test "never touches a WITHHELD row, whatever its sentence says" do
+      withheld_id =
+        insert_delivery(
+          "Withheld: too many deployment alerts in one sweep, so this one was not sent. " <>
+            "The deployment itself is failed in the console.",
+          "suppressed"
+        )
+
+      legacy_id = insert_delivery(@legacy_smtp)
+
+      assert {:ok, 1} = run_backfill()
+      assert last_error(legacy_id) == @unknown_label
+
+      assert last_error(withheld_id) =~ "too many deployment alerts in one sweep",
+             "the withhold reason was flattened into a failure sentence — a suppressed " <>
+               "row never attempted a send, so no DeliveryReason label can describe it"
     end
 
     test "leaves a null last_error null" do
@@ -130,7 +158,7 @@ defmodule BarkparkCloud.Notifications.LegacyLastErrorBackfillTest do
     end
   end
 
-  defp insert_delivery(last_error) do
+  defp insert_delivery(last_error, status \\ "failed") do
     id = Ecto.UUID.generate()
     now = DateTime.utc_now()
 
@@ -139,9 +167,9 @@ defmodule BarkparkCloud.Notifications.LegacyLastErrorBackfillTest do
       INSERT INTO notification_deliveries
         (id, team_id, recipient, event, channel, kind, status, attempts, last_error,
          inserted_at, updated_at)
-      VALUES ($1, NULL, $2, $3, 'email', 'alert', 'failed', 1, $4, $5, $5)
+      VALUES ($1, NULL, $2, $3, 'email', 'alert', $6, 1, $4, $5, $5)
       """,
-      [Ecto.UUID.dump!(id), "member@example.test", "provision_failed", last_error, now]
+      [Ecto.UUID.dump!(id), "member@example.test", "provision_failed", last_error, now, status]
     )
 
     id

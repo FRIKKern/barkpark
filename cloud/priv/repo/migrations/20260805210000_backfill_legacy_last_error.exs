@@ -35,6 +35,22 @@ defmodule BarkparkCloud.Repo.Migrations.BackfillLegacyLastError do
   that is not constant — `{:http_status, code}`, whose integer interpolates — is
   matched by a LIKE pattern derived from `label/1` itself with a probe integer.
 
+  ## The one carve-out: `status <> 'suppressed'` (wave 32 REVIEW)
+
+  Wave 32 S2 lands a FOURTH delivery status in the same wave as this migration,
+  and a `suppressed` row's `last_error` is a WITHHOLD sentence
+  (`Notifications.Withhold.labels/0`) — a vocabulary `DeliveryReason` cannot
+  contain, because every one of its nine labels describes an attempted-and-failed
+  send. The two PRs auto-deploy independently: if S2 merges first, a reap sweep
+  can write real withhold rows BEFORE this migration runs, and the allowlist
+  above — correct about failure sentences, blind to withhold ones — would flatten
+  each of them to "The delivery failed…", a NEW lie on the exact surface wave 32
+  built to stop lying. Excluding the status is merge-order-independent and loses
+  nothing: no row written before wave 32 can carry a status that did not exist,
+  so every legacy row is still inside this predicate's population. It is a SQL
+  literal rather than a `Withhold.labels/0` call on purpose — this file must be
+  correct on a tree where that module does not exist yet.
+
   ## Scale
 
   Four rows. A plain in-transaction `UPDATE` finishes instantly; there is no
@@ -93,6 +109,7 @@ defmodule BarkparkCloud.Repo.Migrations.BackfillLegacyLastError do
     UPDATE notification_deliveries
        SET last_error = $1
      WHERE last_error IS NOT NULL
+       AND status <> 'suppressed'
        AND last_error NOT IN (#{placeholders})
        AND last_error NOT LIKE #{like_placeholder} ESCAPE '\\'
     """
