@@ -274,6 +274,37 @@ defmodule BarkparkCloud.FailureCopy do
 
   def scrub(other), do: other
 
+  # A terminal control sequence: ESC (0x1B) followed by either a CSI parameter
+  # run terminated by a final byte (`\e[31m`, `\e[22m`, `\e[2K`), an OSC string
+  # terminated by BEL or ST, or a bare two-byte escape. Anchored on the REAL
+  # 0x1B byte — the literal four-character text `\x1B` appears in zero rows; the
+  # bytes appear in 1,366.
+  # Ordered: OSC first (it swallows a payload), then CSI, then a bare two-byte
+  # escape as the fallback — PCRE alternation is ordered, so the specific arms
+  # always win over the catch-all.
+  @ansi ~r/\x1B(?:\][^\x07\x1B]*(?:\x07|\x1B\\)|\[[0-?]*[ -\/]*[@-~]|[ -~])/
+
+  @doc """
+  Strip terminal control sequences from a string bound for a person's screen, an
+  inbox, or a JSON payload.
+
+  Remote build output is captured from a PTY, so an Astro `BUILD failed (exit 12)`
+  reason arrives as `\\e[31m\\e[1m04:34:24\\e[22m [ERROR] …`. 1,366 of 17,395 failed
+  rows carry real 0x1B bytes (verified with `position(chr(27) in failure_reason)`)
+  and NOTHING stripped them anywhere — not this module, not the CLI's
+  `siteFailure`, not the console's `failureCopy()`. They render as `[31m[1m` in
+  a browser, as raw colour in a terminal that then keeps that colour, and as
+  mojibake in an email.
+
+  Applied at the display boundary only, beside `scrub/1`: the stored row keeps
+  the raw bytes so ops recovery from the DB and the logs is unaffected.
+  Non-binaries pass through unchanged. Idempotent.
+  """
+  @spec strip_ansi(term()) :: term()
+  def strip_ansi(text) when is_binary(text), do: Regex.replace(@ansi, text, "")
+
+  def strip_ansi(other), do: other
+
   @doc """
   Map a raw internal deploy/provision failure string to human-facing copy, with
   secret-shaped substrings redacted.
@@ -282,11 +313,19 @@ defmodule BarkparkCloud.FailureCopy do
   moduledoc for why either change is a live regression. Passes `nil` and
   non-binary reasons through unchanged; unrecognized reasons pass through
   scrubbed.
+
+  deploy-reliability W1 S2: `strip_ansi/1` runs LAST, after the scrub, for the
+  same ordering reason the scrub runs after `classify/1` — the classifier's
+  prefixes are anchored on the producer's template and an escape run can sit
+  between the prefix and the text (`BUILD failed (exit 12): \\e[22m`), so
+  stripping first would change what the classifier reads. Stripping last only
+  ever removes bytes no reader wanted.
   """
   @spec humanize(term()) :: term()
   def humanize(nil), do: nil
 
-  def humanize(reason) when is_binary(reason), do: reason |> classify() |> scrub()
+  def humanize(reason) when is_binary(reason),
+    do: reason |> classify() |> scrub() |> strip_ansi()
 
   def humanize(other), do: other
 
