@@ -8804,9 +8804,20 @@ defmodule BarkparkCloud.Web.Router do
   end
 
   # One delivery-log row for GET /v1/notifications/deliveries. Mirrors audit_json/1:
-  # the durable send record flattened to its observable fields. Nothing here is a
-  # secret — recipient / event / channel / status / last_error are all non-sensitive
-  # routing labels (the encrypted transport credentials never live on a Delivery).
+  # the durable send record flattened to its observable fields.
+  #
+  # `last_error` USED TO BE the one field here that was not safe (wave 31 S1).
+  # This comment claimed it was "a non-sensitive routing label"; it was in fact
+  # `inspect/1` of the raw transport term, and gen_smtp names the SMTP relay host
+  # in every arm of `host_failure()` — so a DNS failure published, verbatim to
+  # every team admin, the relay host that `Notifications.settings_view/1` masks
+  # to "********" even for the owner. It is safe NOW, and only because
+  # `Notifications.DeliveryReason` classifies at the WRITE seam: `last_error`
+  # carries a constant sentence from a closed vocabulary (the sole interpolated
+  # value being an integer HTTP status), never a raw capture. The encrypted
+  # transport credentials still never live on a Delivery. If a future write site
+  # puts a raw term in this column, this row leaks again — the guard is
+  # `test/barkpark_cloud/notifications/delivery_reason_test.exs`, not this fence.
   defp delivery_json(d) do
     %{
       id: d.id,

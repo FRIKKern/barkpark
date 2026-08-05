@@ -42,6 +42,7 @@ defmodule BarkparkCloud.Notifications do
     ChannelConfig,
     Channels,
     Delivery,
+    DeliveryReason,
     DigestEmail,
     EmailSettings,
     EventEmail,
@@ -632,11 +633,26 @@ defmodule BarkparkCloud.Notifications do
 
   # Persist one send outcome. status/attempts/last_error follow the webhook
   # delivery precedent. A failed INSERT here is itself logged (never raised).
+  #
+  # `last_error` carries a CLASSIFIED label from `DeliveryReason`'s closed
+  # vocabulary, never the raw transport term: gen_smtp's `host_failure()` names
+  # the SMTP relay host in every arm, and this column is published verbatim to
+  # every team admin (`Web.Router.delivery_json/1` → `app.js`) while the relay
+  # host itself is Vault-sealed and masked even from the owner. The raw term
+  # still goes to the operator log below — publication is what we take away,
+  # not debuggability.
   defp record_delivery(team_id, recipient, event, kind, result) do
     {status, last_error} =
       case result do
-        {:ok, _} -> {"sent", nil}
-        {:error, why} -> {"failed", inspect(why)}
+        {:ok, _} ->
+          {"sent", nil}
+
+        {:error, why} ->
+          Logger.warning(
+            "Notifications: #{kind} #{event} send failed: #{inspect(why, limit: :infinity)}"
+          )
+
+          {"failed", DeliveryReason.summarize(why)}
       end
 
     %Delivery{}
@@ -803,7 +819,7 @@ defmodule BarkparkCloud.Notifications do
       post_chat(team_id, type, event, url, body, headers)
     else
       {:error, reason} ->
-        log_chat_delivery(team_id, type, event, "failed", nil, inspect(reason))
+        log_chat_delivery(team_id, type, event, "failed", nil, reason)
         {:cancel, reason}
     end
   end
@@ -832,15 +848,15 @@ defmodule BarkparkCloud.Notifications do
 
       {:ok, %{status: status}} when status in 400..499 ->
         # 4xx is terminal — a bad URL / revoked token won't fix itself on retry.
-        log_chat_delivery(team_id, type, event, "failed", status, "http #{status}")
+        log_chat_delivery(team_id, type, event, "failed", status, {:http_status, status})
         {:cancel, {:http_4xx, status}}
 
       {:ok, %{status: status}} ->
-        log_chat_delivery(team_id, type, event, "failed", status, "http #{status}")
+        log_chat_delivery(team_id, type, event, "failed", status, {:http_status, status})
         {:error, {:http_status, status}}
 
       {:error, reason} ->
-        log_chat_delivery(team_id, type, event, "failed", nil, inspect(reason))
+        log_chat_delivery(team_id, type, event, "failed", nil, reason)
         {:error, reason}
     end
   end
@@ -894,7 +910,21 @@ defmodule BarkparkCloud.Notifications do
 
   # Best-effort chat delivery log into the shared notification_deliveries table.
   # A failed insert here is swallowed — a delivery LOG must never break a delivery.
-  defp log_chat_delivery(team_id, type, event, status, http_status, last_error) do
+  #
+  # `reason` is the RAW transport term (or nil on success); the classification to
+  # `DeliveryReason`'s closed vocabulary happens HERE, at the write seam, so no
+  # caller can route around it. `:httpc`'s `{:failed_connect, [{:to_address,
+  # {host, port}}, …]}` names the destination host and port — that term goes to
+  # the operator log, never to the published row.
+  defp log_chat_delivery(team_id, type, event, status, http_status, reason) do
+    if reason != nil do
+      Logger.warning(
+        "Notifications: chat #{type} #{event} failed: #{inspect(reason, limit: :infinity)}"
+      )
+    end
+
+    last_error = DeliveryReason.summarize(reason)
+
     %Delivery{}
     |> Delivery.changeset(%{
       team_id: team_id,
