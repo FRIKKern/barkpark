@@ -17,10 +17,17 @@
 # the console harness actually reads. It reads well outside cloud/priv/static:
 # the seal-predicate tests pass `--repo <the real repo root>`, so the predicate
 # readFileSync's .github/workflows/cloud.yml, SPAWNS design/emit-fence.test.mjs,
-# and existsSync's five cloud/test/barkpark_cloud/web/*_test.exs files. Measured:
-# deleting cloud.yml's `paths:` key reds 7 of 31 harness tests, moving
-# emit-fence.test.mjs reds 1 of 31, moving one measured_by file reds 6 of 31 —
+# and existsSync's five cloud/test/barkpark_cloud/web/*_test.exs files. Measured
+# when wave 9 cut this: deleting cloud.yml's `paths:` key reds 7 seal-predicate
+# tests, moving emit-fence.test.mjs reds 1, moving one measured_by file reds 6 —
 # and NONE of those three families was declared in the old filters.
+#
+# NO DENOMINATOR HERE, ON PURPOSE. Those three counts used to be written "7 of
+# 31 / 1 of 31 / 6 of 31"; seal-predicate.test.mjs carries 75 `test(` calls now,
+# so the denominator was wrong by more than a factor of two and had been for
+# several waves. It is the same rotting integer this file already banned from
+# its own error message — cite the derivation, not the number
+# (`grep -c 'test(' cloud/priv/static/__preview__/seal-predicate.test.mjs`).
 #
 # So: this script re-derives the read census from the working tree on every run
 # and FAILS when a resolved repo-root read is not covered by the declared set
@@ -29,22 +36,33 @@
 #
 # HOW A READ IS RESOLVED
 # ----------------------
-# Two families, because the console harness reads in two idioms:
+# SIX IDIOMS, each tagged in the census so it can carry its own floor. They are
+# spelled out in `file_lits`; the shapes are:
 #
-#   1. `path.join(REPO_ROOT, "…")` — the literal idiom
-#      (cloud/priv/static/__app.test.mjs:5369-5370 reads the two Go goldens).
+#   literal-join  `path.join(REPO_ROOT, "…")` / `join(REPO, '…')`
+#   ident-join    `join(<anyIdentifier>, "…")` — the same call shape with a root
+#                 variable this file does not get to name (the frontier file
+#                 spells it `repoRoot`, camelCase).
+#   data-table    seal-predicate.mjs never writes its reads as literals at the
+#                 read site: it interpolates them out of KNOWN_DEFECTS rows
+#                 (`${REPO}/${d.guard}`, `${REPO}/${d.measured_in_ci.workflow}`).
+#                 A scanner that only looked at read sites would see a template
+#                 and report the tree clean — the exact blind pass this ratchet
+#                 exists to prevent. So the census WALKS THE TABLE.
+#   measured-by   the same table's `measured_by: [ … ]` arrays, walked line-wise
+#                 because they wrap.
+#   template      a bare `` `${REPO}/some/path` `` with no comma and no quotes.
+#   walk-up       a `"../…"` literal, resolved against the reading file's own
+#                 directory.
 #
-#   2. THE DATA TABLE. seal-predicate.mjs never writes its reads as literals at
-#      the read site: it interpolates them out of KNOWN_DEFECTS rows
-#      (`${REPO}/${d.guard}`, `${REPO}/${p}` over measured_by,
-#      `${REPO}/${d.measured_in_ci.workflow}`). A scanner that only looked at
-#      read sites would see a template and report the tree clean — the exact
-#      blind pass this ratchet exists to prevent. So the census WALKS THE TABLE
-#      and treats `guard:`, `workflow:` and every `measured_by:` entry as a read.
+# AND THE SOURCE SET IS TWO LEVELS, NOT ONE. `find cloud/priv/static` alone made
+# a read expressed one call frame down — inside a file the harness SPAWNS —
+# structurally invisible; see the recursion note in `list_escapes`.
 #
 # Anything landing inside cloud/priv/static is the harness's own tree, not an
-# escape. Anything outside it AND existing on disk is a repo-root read the
-# dispatcher must cover.
+# escape. Anything outside it that exists on disk AS A REGULAR FILE is a
+# repo-root read the dispatcher must cover (a directory literal is a walk root,
+# not a read — the ruling is in `scan_files`).
 #
 # The existence filter is what keeps the mutation fixtures out of the census
 # (seal-predicate.test.mjs carries a deliberately-nonexistent
@@ -59,6 +77,7 @@
 #   console-path-escape-check.sh                 # the ratchet (CI + the gate)
 #   console-path-escape-check.sh --selftest      # run the harness
 #   console-path-escape-check.sh --list-escapes  # print the resolved census
+#   console-path-escape-check.sh --print-floors  # print the per-idiom floors
 #   console-path-escape-check.sh --print-set console
 #   console-path-escape-check.sh --match console      # changed paths on stdin
 #                                                     # -> prints true|false
@@ -141,17 +160,61 @@ scripts/console-path-escape-check.test.sh'
 # new cross-tree read is to declare it above, not to exempt it.
 CONSOLE_ESCAPE_EXEMPT=''
 
-# The census floor. The measured population is 9 resolved repo-root reads; a
-# floor of 4 is generous. Its job is to catch a NEUTERED SCANNER: a regex that
-# silently stopped matching the data table would otherwise report "0 uncovered
-# reads" and exit 0 — clean-looking, and completely blind. That is not
-# hypothetical here: the whole point of the table walk is that the reads are
-# INTERPOLATED, so the scanner is one regex away from seeing nothing.
+# THE CENSUS FLOOR, PER IDIOM — and the "per idiom" is the whole point.
+#
+# This used to be ONE whole-population number (`CONSOLE_ESCAPE_MIN=4`) over a
+# SIX-idiom scanner, and a whole-population floor cannot fire on the failure its
+# own comment names. Measured on origin/main at 467f7e283: neutering EXACTLY the
+# data-table walk — the `(guard|workflow)` grep and the `measured_by` awk
+# trigger, the precise regression the floor existed for — collapsed the census
+# 15 -> 9 and STILL EXITED 0. A 40% blinding passed green, because the surviving
+# idioms alone cleared 4. The harness could not catch it either: its floor case
+# only ever exercised a TOTAL collapse (a one-read fixture), so it certified a
+# floor that could not fire.
+#
+# So each idiom now carries its OWN lower bound, and one idiom going to zero
+# reds on its own. Bounds are LOWER BOUNDS, never equalities: an exact pin taxes
+# every slice that adds a read (the lesson filed as
+# `pds-bl-census-exact-pins-tax-growth`), while a floor only ever taxes
+# SHRINKING, which is exactly the direction that means "blind".
+#
+# ONLY REGULAR-FILE ROWS REACH THIS TABLE — see the `[ -f ]` ruling in
+# scan_files. That is load-bearing for the floor specifically: a naive per-idiom
+# floor is satisfiable by a row that names no file. Measured: blind the
+# literal-join regex to dotted filenames and that family collapses 6 -> 1 with
+# the survivor being the DIRECTORY `cloud/lib` — bound held, scanner blind.
+#
+# Live population when these bounds were set (`--list-escapes | cut -f1,3 |
+# sort -u`, 14 distinct paths): literal-join 5, ident-join 5, measured-by 5,
+# data-table 2, template 2, walk-up 1.
+#   * literal-join / ident-join / measured-by are bounded at 3 of 5 — real
+#     headroom, since a slice that retires one read should not have to touch
+#     this table.
+#   * data-table and template are bounded at 1 of 2. Both are small by nature
+#     (one KNOWN_DEFECTS table, one rung-2 read) and both are exactly the
+#     interpolated shapes a regex change silently kills.
+#   * WALK-UP IS BOUNDED AT 1 OF 1, ITS FULL POPULATION, DELIBERATELY. Its one
+#     live read is `new URL("../../lib/barkpark_cloud/web/router.ex", …)` at
+#     __app.test.mjs:13503. Nobody reaches out of cloud/priv/static this way on
+#     purpose, so this idiom going to zero is far more likely to be a broken
+#     regex than a deliberate refactor. The price is honest and named: rewriting
+#     that ONE line into another idiom reds this gate. That red is correct in
+#     shape and cheap to clear — lower the bound here in the same commit that
+#     moved the read.
+#
+# The table is also the IDIOM INVENTORY: a tag emitted by file_lits that is not
+# listed here is an error, so adding a seventh idiom cannot quietly ship without
+# a floor.
 #
 # It is a CONSTANT on purpose. An env-var override would be a one-line CI bypass
 # of the only check that can tell "clean" from "blind", and the harness asserts
-# that setting CONSOLE_ESCAPE_MIN changes nothing.
-CONSOLE_ESCAPE_MIN=4
+# that setting CONSOLE_ESCAPE_IDIOM_MIN changes nothing.
+CONSOLE_ESCAPE_IDIOM_MIN='literal-join	3
+ident-join	3
+measured-by	3
+data-table	1
+template	1
+walk-up	1'
 
 # The harness's own tree. Reads landing here are not escapes.
 CONSOLE_HOME='cloud/priv/static'
@@ -241,53 +304,81 @@ EOF
 # ---------------------------------------------------------------------------
 # the census
 # ---------------------------------------------------------------------------
-# Prints one resolved repo-root path per line, `<path><TAB><source-file>`.
-list_escapes() {
-  local f lit resolved lits sources d
-  # WORKING TREE enumeration (D31) — `find`, never `git ls-files`. An untracked
-  # .mjs on disk is code the harness will run, so it is code this ratchet must
-  # see.
-  sources="$(cd -- "$REPO_ROOT" && find "$CONSOLE_HOME" -type f \( -name '*.mjs' -o -name '*.js' \) 2>/dev/null | LC_ALL=C sort)"
+# Every extractor's output is TAGGED with the idiom that produced it, and the
+# tag rides all the way to the printed row. Two things depend on it and neither
+# works without it:
+#   * the BARE-WORD rule below (only a provably repo-rooted idiom may admit a
+#     literal that carries no `/`), and
+#   * the PER-IDIOM FLOOR (an aggregate floor cannot tell "one idiom went
+#     blind" from "the tree shrank").
+tag_lits() {
+  sed -E "s/.*['\"]([^'\"]*)['\"][[:space:]]*\$/\1/" | awk -v k="$1" '{ print k "\t" $0 }'
+}
+
+# All the literals one file carries, as `<idiom><TAB><literal>` lines.
+file_lits() {
+  local p="$REPO_ROOT/$1"
+  #  (1) the literal idiom: path.join(REPO_ROOT, "…") / join(REPO, '…')
+  { grep -Eoh "(REPO_ROOT|REPO)[[:space:]]*,[[:space:]]*['\"][^'\"]*['\"]" "$p" || true; } \
+    | tag_lits literal-join
+  #  (1b) THE GENERIC JOIN IDIOM: `join(<anyIdentifier>, "…")`. (1) is spelled
+  #      against ONE naming convention — `(REPO_ROOT|REPO)`, case-sensitive —
+  #      so the scanner's vocabulary was coupled to how cloud/priv/static
+  #      happens to name its root variable. Measured: design/emit-fence.test.mjs
+  #      names it `repoRoot` (camelCase), and `path.join(repoRootLocal, "…")`
+  #      dropped into a DIRECTLY scanned file was invisible with everything else
+  #      in place. The base identifier is not knowable statically, so this idiom
+  #      is deliberately over-inclusive on the read side and paid for on the
+  #      filter side: it may NOT admit bare words (see the bare-word rule), and
+  #      whatever it does resolve still has to exist on disk as a regular file.
+  { grep -Eoh "join[[:space:]]*\([[:space:]]*[A-Za-z_\$][A-Za-z0-9_\$]*[[:space:]]*,[[:space:]]*['\"][^'\"]*['\"]" "$p" || true; } \
+    | tag_lits ident-join
+  #  (2) the DATA TABLE: guard: '…' | workflow: '…'
+  { grep -Eoh "(guard|workflow)[[:space:]]*:[[:space:]]*['\"][^'\"]*['\"]" "$p" || true; } \
+    | tag_lits data-table
+  #  (2b) THE TEMPLATE-LITERAL IDIOM: `${REPO}/some/path`. Not a variant of
+  #      (1) — that one matches a `join(REPO, "…")` CALL, and this one is a
+  #      backtick string with no comma and no quotes anywhere near it, so
+  #      the (1) grep cannot see it. seal-predicate.mjs reads
+  #      `${REPO}/.github/required-checks.json` in exactly this shape (its
+  #      rung-2 leg A), and the two are written by DIFFERENT slices, which
+  #      is precisely how a census goes quietly blind: each half looks
+  #      complete on its own branch. The static prefix is emitted bare —
+  #      the quoted-literal sed in tag_lits leaves a line it cannot match alone.
+  { grep -Eoh '\$\{(REPO_ROOT|REPO)\}/[^`'"'"'"[:space:],)]*' "$p" \
+      | sed -E 's/^\$\{(REPO_ROOT|REPO)\}\///' || true; } \
+    | tag_lits template
+  #  (3) the walk-up idiom: any `"../…"` literal, resolved against the
+  #      reading file's own directory. Nothing in the tree uses it today
+  #      (the idioms above are how the harness is written), but it is
+  #      the obvious next way to reach out of cloud/priv/static, and a
+  #      census that only saw yesterday's idioms is one refactor from
+  #      blind.
+  { grep -Eoh "['\"]\.\./[^'\"]*['\"]" "$p" || true; } | tag_lits walk-up
+  #  (4) measured_by: [ … ] — an ARRAY, frequently spanning several lines.
+  #      Walked with a tiny state machine so a row whose entries are wrapped
+  #      (seal-predicate.mjs:173-176) is not silently half-read. The state
+  #      machine prints WHOLE LINES, so it also drags in prose that happens to
+  #      sit inside the array; that is why it may not admit bare words either.
+  { awk '
+      /measured_by[[:space:]]*:/ { inarr = 1 }
+      inarr { print }
+      inarr && /]/ { inarr = 0 }
+    ' "$p" | grep -Eoh "['\"][^'\"]*['\"]" || true; } | tag_lits measured-by
+}
+
+# Scan a newline-separated list of repo-relative files.
+# Prints `<resolved-path><TAB><source-file><TAB><idiom>` per resolved read.
+scan_files() {
+  local f lit resolved tagged idiom line d
   while IFS= read -r f; do
     [ -n "$f" ] || continue
-    #  (1) the literal idiom: path.join(REPO_ROOT, "…") / join(REPO, '…')
-    #  (2) the DATA TABLE: guard: '…' | workflow: '…' | measured_by entries
-    # Both funnel into the same quoted-literal extraction below, so one
-    # existence filter and one coverage check cover every idiom.
-    lits="$(
-      {
-        grep -Eoh "(REPO_ROOT|REPO)[[:space:]]*,[[:space:]]*['\"][^'\"]*['\"]" "$REPO_ROOT/$f" || true
-        grep -Eoh "(guard|workflow)[[:space:]]*:[[:space:]]*['\"][^'\"]*['\"]" "$REPO_ROOT/$f" || true
-        #  (2b) THE TEMPLATE-LITERAL IDIOM: `${REPO}/some/path`. Not a variant of
-        #      (1) — that one matches a `join(REPO, "…")` CALL, and this one is a
-        #      backtick string with no comma and no quotes anywhere near it, so
-        #      the (1) grep cannot see it. seal-predicate.mjs reads
-        #      `${REPO}/.github/required-checks.json` in exactly this shape (its
-        #      rung-2 leg A), and the two are written by DIFFERENT slices, which
-        #      is precisely how a census goes quietly blind: each half looks
-        #      complete on its own branch. The static prefix is emitted bare —
-        #      the quoted-literal sed below leaves a line it cannot match alone.
-        grep -Eoh '\$\{(REPO_ROOT|REPO)\}/[^`'"'"'"[:space:],)]*' "$REPO_ROOT/$f" \
-          | sed -E 's/^\$\{(REPO_ROOT|REPO)\}\///' || true
-        #  (3) the walk-up idiom: any `"../…"` literal, resolved against the
-        #      reading file's own directory. Nothing in the tree uses it today
-        #      (the two idioms above are how the harness is written), but it is
-        #      the obvious next way to reach out of cloud/priv/static, and a
-        #      census that only saw yesterday's idioms is one refactor from
-        #      blind.
-        grep -Eoh "['\"]\.\./[^'\"]*['\"]" "$REPO_ROOT/$f" || true
-        # measured_by: [ … ] — an ARRAY, frequently spanning several lines.
-        # Walked with a tiny state machine so a row whose entries are wrapped
-        # (seal-predicate.mjs:173-176) is not silently half-read.
-        awk '
-          /measured_by[[:space:]]*:/ { inarr = 1 }
-          inarr { print }
-          inarr && /]/ { inarr = 0 }
-        ' "$REPO_ROOT/$f" | grep -Eoh "['\"][^'\"]*['\"]" || true
-      } | sed -E "s/.*['\"]([^'\"]*)['\"][[:space:]]*\$/\1/"
-    )"
-    [ -n "$lits" ] || continue
-    while IFS= read -r lit; do
+    [ -f "$REPO_ROOT/$f" ] || continue
+    tagged="$(file_lits "$f")"
+    [ -n "$tagged" ] || continue
+    while IFS= read -r line; do
+      idiom="${line%%	*}"
+      lit="${line#*	}"
       # `"…/#{x}"`-style splices and wildcards: keep the static prefix only.
       lit="${lit%%\$\{*}"
       case "$lit" in
@@ -297,11 +388,39 @@ list_escapes() {
           ;;
       esac
       [ -n "$lit" ] || continue
-      # repo-relative only: an absolute path or a bare word is not a repo read.
       case "$lit" in
+        # An absolute path is not a repo-relative read, and a literal carrying a
+        # space is prose, not a path.
         /* | *' '*) continue ;;
         */*) ;;
-        *) continue ;;
+        *)
+          # THE BARE-WORD RULE. A literal with no `/` used to be dropped
+          # outright, which made a read of ANY repo-root top-level file —
+          # Makefile, README.md, mix.lock, package.json — structurally
+          # unrepresentable: the census could not have named it if it tried.
+          # Measured on origin/main: `path.join(REPO_ROOT, "Makefile")` dropped
+          # into a DIRECTLY scanned file, with Makefile present at 17536 bytes,
+          # left the run at 15 reads / RC=0 and a census count of 0 for it.
+          #
+          # Bare words are admitted ONLY from the idioms whose base is provably
+          # the repo root in the source text itself — `join(REPO_ROOT, …)`,
+          # `${REPO}/…`, and the data table (whose values are interpolated as
+          # `${REPO}/${d.guard}` by construction). They are NOT admitted from
+          # `ident-join` (the base is an unknown identifier — usually a temp dir,
+          # so `join(dir, "index.html")` is not a repo read) nor from
+          # `measured-by` (its line-wise array walk over-captures prose).
+          case "$idiom" in
+            literal-join | template | data-table) ;;
+            *) continue ;;
+          esac
+          # `.git` IS NOT A READ, AND ADMITTING IT WOULD MAKE THIS RATCHET
+          # ANSWER DIFFERENTLY IN CI AND LOCALLY. It is a DIRECTORY in a normal
+          # clone (dropped by the regular-file filter below) but a regular FILE
+          # in a git worktree, which is exactly where this gate's local runs
+          # happen — so it would red on a developer's machine and pass in
+          # Actions. It is VCS metadata, never a dispatchable input.
+          case "$lit" in .git | .git/*) continue ;; esac
+          ;;
       esac
       # A walk-up literal is relative to the file that carries it; a bare
       # repo-relative literal (the data table's idiom) is already anchored.
@@ -315,16 +434,75 @@ list_escapes() {
       [ -n "$resolved" ] || continue
       # inside the harness's own tree is not an escape
       case "$resolved" in "$CONSOLE_HOME" | "$CONSOLE_HOME"/*) continue ;; esac
-      # Only reads that can actually happen: a literal resolving to nothing on
-      # disk is a mutation fixture, not a dependency.
-      [ -e "$REPO_ROOT/$resolved" ] || continue
-      printf '%s\t%s\n' "$resolved" "${f#./}"
+      # ONLY REGULAR FILES — and this is a RULING, not a tightening for its own
+      # sake. It used to be `[ -e ]`, which admitted DIRECTORY rows, and a
+      # directory row is a walk ROOT, not a read: `cloud/lib` enters from
+      # __app.test.mjs's notification census, which walks every `.ex` beneath it.
+      # Two things go wrong if such a row counts.
+      #   (a) IT MAKES THE PER-IDIOM FLOOR SATISFIABLE BY A ROW THAT NAMES NO
+      #       FILE. Measured: blinding the literal-join regex to dotted
+      #       filenames collapses that family 6 -> 1, and the survivor is
+      #       `cloud/lib` — the floor holds while the scanner sees zero files.
+      #       A floor a blind scanner can satisfy is not a floor.
+      #   (b) IT REDS THE RATCHET ON `design`. design/emit-fence.test.mjs:61 is
+      #       `cpSync(join(repoRoot, "design"), …)`, and the generic join idiom
+      #       above resolves it the moment the recursion opens that file.
+      #       `--match console` answers FALSE for `design`, because the declared
+      #       set names the exact file `design/emit-fence.test.mjs`, not
+      #       `design/**`. THE RULING: it is a directory copy, not a file read;
+      #       the file inside `design` the harness actually depends on is
+      #       `design/emit-fence.test.mjs`, which is separately declared AND
+      #       separately in the census via the data table. Widening dispatch to
+      #       `design/**` would buy nothing and cost every design edit a console
+      #       harness run.
+      # Coverage loses nothing by this: a directory's files that are genuinely
+      # read appear as their own file rows (cloud/lib survives in the census as
+      # router.ex and auto_deploy_worker.ex), so deleting `cloud/lib/**` from
+      # the declared set still reds.
+      # A literal resolving to nothing on disk stays out for the original
+      # reason: it is a mutation fixture, asserted on, never read.
+      [ -f "$REPO_ROOT/$resolved" ] || continue
+      printf '%s\t%s\t%s\n' "$resolved" "${f#./}" "$idiom"
     done <<EOF
-$lits
+$tagged
 EOF
   done <<EOF
-$sources
+$1
 EOF
+}
+
+# Prints `<path><TAB><source-file><TAB><idiom>` per resolved repo-root read.
+list_escapes() {
+  local sources rows frontier more
+  # WORKING TREE enumeration (D31) — `find`, never `git ls-files`. An untracked
+  # .mjs on disk is code the harness will run, so it is code this ratchet must
+  # see.
+  sources="$(cd -- "$REPO_ROOT" && find "$CONSOLE_HOME" -type f \( -name '*.mjs' -o -name '*.js' \) 2>/dev/null | LC_ALL=C sort)"
+  rows="$(scan_files "$sources")"
+  # ── BOUNDED ONE-LEVEL RECURSION ───────────────────────────────────────────
+  # The source set above is `find cloud/priv/static`, so a read expressed one
+  # call frame down — inside a file the harness SPAWNS but that does not live in
+  # the harness's own tree — was structurally invisible. Measured on
+  # origin/main with the ONLY variable being which file carried it: the
+  # identical `join(REPO_ROOT, "api/mix.exs")` gave 15 reads / RC=0 / unnamed
+  # inside design/emit-fence.test.mjs (declared in CONSOLE_PATHS, never
+  # scanned) and 16 / `UNCOVERED repo-root read: api/mix.exs` / RC=1 inside the
+  # directly-scanned cloud/priv/static/__app.test.mjs.
+  #
+  # So: the `.mjs`/`.js` files the FIRST pass already resolved are opened, and
+  # the same extraction runs on them. DEPTH IS EXACTLY ONE and that is a
+  # deliberate bound, not a TODO — the frontier is one file today
+  # (design/emit-fence.test.mjs, reached through the data table's `guard:`), an
+  # unbounded crawl would walk the whole repo through node_modules-shaped edges,
+  # and a second level cannot be dispatched on anyway without also declaring
+  # every file it names. A read two frames down is out of this census's reach BY
+  # DECLARATION; it is not an oversight.
+  frontier="$(printf '%s\n' "$rows" | cut -f1 | { grep -E '\.(mjs|js)$' || true; } | LC_ALL=C sort -u)"
+  if [ -n "$frontier" ]; then
+    more="$(scan_files "$frontier")"
+    if [ -n "$more" ]; then rows="$(printf '%s\n%s' "$rows" "$more")"; fi
+  fi
+  printf '%s\n' "$rows" | sed '/^$/d'
 }
 
 is_exempt() {
@@ -364,6 +542,15 @@ case "$mode" in
     exit 0
     ;;
 
+  --print-floors)
+    # `<idiom><TAB><lower bound>`. Exists so the harness can DERIVE what a
+    # healthy population looks like instead of hard-coding an integer that
+    # rots — the same D41 lesson that took the population number out of the
+    # runtime error message below.
+    printf '%s\n' "$CONSOLE_ESCAPE_IDIOM_MIN"
+    exit 0
+    ;;
+
   --list-escapes)
     # Collected first, then printed: piping the function directly segfaults
     # bash 3.2 (macOS) when its body carries process substitutions.
@@ -380,7 +567,7 @@ case "$mode" in
 
   *)
     echo "console-path-escape-check: unknown argument '$mode'" >&2
-    echo "usage: $0 [--check|--selftest|--list-escapes|--print-set SET|--match SET]" >&2
+    echo "usage: $0 [--check|--selftest|--list-escapes|--print-floors|--print-set SET|--match SET]" >&2
     exit 2
     ;;
 esac
@@ -395,17 +582,46 @@ count="$(printf '%s\n' "$paths" | sed '/^$/d' | wc -l | tr -d ' ')"
 echo "console-path-escape-check: scanning \$REPO_ROOT=$REPO_ROOT"
 echo "console-path-escape-check: $count distinct repo-root read(s) resolved from $CONSOLE_HOME"
 
-# FAIL-CLOSED on a neutered scanner. "Nothing found" is never good news here.
-if [ "$count" -lt "$CONSOLE_ESCAPE_MIN" ]; then
-  echo "::error::console-path-escape-check: only $count repo-root read(s) found, floor is $CONSOLE_ESCAPE_MIN." >&2
+# FAIL-CLOSED on a neutered scanner, ONE IDIOM AT A TIME. "Nothing found" is
+# never good news here, and neither is "nothing found THROUGH ONE DOOR" —
+# that is precisely what an aggregate floor cannot see.
+by_idiom="$(printf '%s\n' "$census" | cut -f1,3 | sed '/^$/d' | sort -u)"
+thin=0
+while IFS= read -r row; do
+  [ -n "$row" ] || continue
+  idiom="${row%%	*}"
+  floor="${row##*	}"
+  got="$(printf '%s\n' "$by_idiom" | awk -F'\t' -v k="$idiom" '$2 == k' | wc -l | tr -d ' ')"
+  echo "console-path-escape-check:   idiom $idiom: $got read(s) (floor $floor)"
+  if [ "$got" -lt "$floor" ]; then
+    thin=$((thin + 1))
+    echo "::error::console-path-escape-check: idiom '$idiom' resolved only $got repo-root read(s), floor is $floor." >&2
+  fi
+done <<EOF
+$CONSOLE_ESCAPE_IDIOM_MIN
+EOF
+
+# The table is the idiom inventory: a tag the scanner emits but the floor table
+# does not list would ship with NO floor at all — a new door, unguarded.
+while IFS= read -r idiom; do
+  [ -n "$idiom" ] || continue
+  if ! printf '%s\n' "$CONSOLE_ESCAPE_IDIOM_MIN" | awk -F'\t' -v k="$idiom" '$1 == k { f = 1 } END { exit !f }'; then
+    thin=$((thin + 1))
+    echo "::error::console-path-escape-check: idiom '$idiom' has no entry in CONSOLE_ESCAPE_IDIOM_MIN — a scanner door with no floor." >&2
+  fi
+done <<EOF
+$(printf '%s\n' "$by_idiom" | cut -f2 | sort -u)
+EOF
+
+if [ "$thin" -gt 0 ]; then
   # NO POPULATION NUMBER HERE. This message used to read "the measured
-  # population is 9"; it was 12 by the time anyone read it again, because every
+  # population is <N>"; N was stale by 6 the next time anyone read it, because every
   # slice that adds a declared read moves it. A rotting integer inside the
   # guard that exists to catch rot is the epic's own D41 lesson pointed at
   # itself — cite the derivation, never the number.
   echo "  The SCANNER is broken, not the repo clean — the live population is the" >&2
-  echo "  'distinct repo-root read(s) resolved' line printed just above." >&2
-  echo "  Check the grep/awk in list_escapes before touching the floor." >&2
+  echo "  per-idiom breakdown printed just above." >&2
+  echo "  Check that idiom's grep/awk in file_lits before touching the floor." >&2
   exit 1
 fi
 
