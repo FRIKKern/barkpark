@@ -59,7 +59,7 @@ defmodule BarkparkCloud.Web.Router do
       POST    /v1/agent/results    agent     ack command results
       GET     /v1/barkparks        user      the team's registered Barkparks (+provision_status)
       GET     /v1/audit            admin     the team's append-only audit trail (keyset-paginated; ?actor_user_id= / ?action_prefix= narrow it)
-      DELETE  /v1/barkparks/:id    user      remove an instance (deregister; live box → 409)
+      DELETE  /v1/barkparks/:id    admin     remove an instance (deregister; live box → 409)
       GET     /v1/barkparks/:id/events user  the instance's agent-event history (team-scoped)
       GET     /v1/barkparks/:id/telemetry user  the instance's latest health report, normalized (team-scoped)
       GET     /v1/barkparks/:id/metrics user  a window of health beats as cpu/mem/disk/load series (team-scoped)
@@ -67,7 +67,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/barkparks/:id/usage/history user  usage-meter series over the trailing 14d of samples, for sparklines (team-scoped)
       GET     /v1/usage/summary    user      cross-instance usage-meter rollup for the team
       GET     /v1/barkparks/:id/domain-status user  per-domain, per-stage DNS/TLS/serving checklist (team-scoped)
-      POST    /v1/barkparks/:id/retry user   re-enqueue a FAILED provision
+      POST    /v1/barkparks/:id/retry admin  re-enqueue a FAILED provision
       GET     /v1/barkparks/:id/credentials admin  reveal the per-instance admin token (team-admin only)
       POST    /v1/barkparks/:id/studio-link user   one-click Studio entry → {url} (single-use 60s ticket)
       POST    /v1/barkparks/:id/app-token user  mint a member-reachable, workspace-bound data-plane token (mobile D4; JIT MEMBER; admin token stays server-side)
@@ -103,10 +103,10 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/operator/deliveries operator  notification delivery log (console read)
       GET     /v1/operator/warm-pool operator  warm-pool status (console read)
       GET     /v1/operator/deploy-ledger/census operator  fleet deploy ledger: class + site counts and the failure rate WITH its denominator, over a pinned window
-      PATCH   /v1/admin/barkparks/:id/channel admin  set one box's release channel
+      PATCH   /v1/admin/barkparks/:id/channel worker set one box's release channel
       GET     /v1/templates        —         PUBLIC deploy-button catalog (title/desc/env-keys/repo) (dwb-6)
       GET     /v1/providers        user      the team's connected cloud providers
-      POST    /v1/providers        user      connect a cloud provider
+      POST    /v1/providers        admin     connect a cloud provider
       DELETE  /v1/providers/:kind  admin     disconnect a cloud provider
       GET     /v1/providers/:kind/catalog user  a provider's allowlisted action catalog
       GET     /v1/providers/:kind/overview user  a provider's server-side estate snapshot
@@ -115,17 +115,17 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/hetzner/overview admin     server-side Hetzner estate snapshot (token never reaches the browser)
       GET     /v1/github/installation      user  the team's GitHub connection state (no secrets)
       POST    /v1/github/installations     admin record a GitHub App install (require_team_admin; 503 if unconfigured)
-      DELETE  /v1/github/installation      user  disconnect GitHub (404 if none)
+      DELETE  /v1/github/installation      admin disconnect GitHub (require_team_admin; 404 if none)
       GET     /v1/github/repos             user  the installation's repos (the "Import Git Repository" picker)
       POST    /v1/github/repos             admin create a repo from a template + push app files (deploy button)
       GET     /v1/env-vars         user      the team's env vars (masked, values NEVER returned)
       POST    /v1/env-vars         user      create/update an env var (owner/admin)
       DELETE  /v1/env-vars/:id     user      delete an env var (owner/admin)
       GET     /v1/notifications/settings  user the team's email-notification settings (secrets masked)
-      PUT     /v1/notifications/settings  user update transport / per-event toggles / SMTP secrets
+      PUT     /v1/notifications/settings  admin  update transport / per-event toggles / SMTP secrets
       PUT     /v1/notifications/channels admin  update per-channel transport settings
       PUT     /v1/notifications/events admin  update per-event notification toggles
-      POST    /v1/notifications/test      user send a rate-limited test email
+      POST    /v1/notifications/test      admin  send a rate-limited test email
       GET     /v1/notifications/deliveries admin the team's durable notification delivery log (newest first; ?channel/?status/?event/?before narrow it)
       GET     /v1/tokens           user(s)   list the caller's Personal Access Tokens
       POST    /v1/tokens           user(s)   mint a PAT → {token: <plaintext ONCE>, pat}
@@ -138,7 +138,7 @@ defmodule BarkparkCloud.Web.Router do
       DELETE  /v1/teams/:id/members/:user_id admin  remove a member from the team
       GET     /v1/invitations/:token —         preview an invitation by token (public accept page)
       POST    /v1/invitations/accept user    accept an invitation (join the team)
-      POST    /v1/billing/checkout user      open a hosted Checkout Session → {checkout_url}
+      POST    /v1/billing/checkout owner     open a hosted Checkout Session → {checkout_url}
       POST    /v1/billing/webhook  —*        Stripe events (signature-verified, raw body)
       POST    /v1/billing/portal   owner     open the Stripe billing portal → {portal_url}
       POST    /v1/billing/cancel   owner     cancel the active subscription (period-end)
