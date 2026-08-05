@@ -14,10 +14,19 @@
 # rather than silently testing nothing.
 #
 # The cases:
-#   (a) CONTROL, pre-fix: the same slice taken from `git show origin/main:...`
-#       prints the banner and exits 0 over a dead port. This is what "reds
-#       before the fix" means, kept permanently: if the assertions below ever
-#       stop distinguishing old from new, THIS case fails loudly.
+#   (a) CONTROL, pre-fix: the same slice taken from a PINNED REVISION prints
+#       the banner and exits 0 over a dead port. This is what "reds before the
+#       fix" means, kept permanently: if the assertions below ever stop
+#       distinguishing old from new, THIS case fails loudly.
+#
+#       THE REVISION IS PINNED, NOT `origin/main` — that was a time bomb. The
+#       control rewrites the pre-fix slice with three mandatory substitutions
+#       ("localhost:4000", "seq 1 30", "sleep 2"), all of which this very slice
+#       REMOVES from deploy.sh. So the first time the fix reached main,
+#       `origin/main:deploy.sh` would no longer match, retarget_prefix_control
+#       would FATAL, and the whole harness would exit 1 on every subsequent
+#       run — a permanent red produced by the fix succeeding. A control has to
+#       name the artifact it is a control FOR, and that artifact does not move.
 #   (b) UNHEALTHY: dead port -> honest failure banner naming the port probed
 #       and journalctl, and a NON-ZERO exit.
 #   (c) HEALTHY: a server answering 200 -> "Ready!", today's banner, exit 0.
@@ -127,8 +136,15 @@ printf 'PORT=4000\n' > "$TMP/app/.env"
 DEAD_PORT="$(free_port)"   # nothing bound: free_port closed the socket
 
 # ── (a) CONTROL — the pre-fix script lies over a dead port ───────────────────
-echo "== (a) control: origin/main deploy.sh, dead port =="
-if git -C "$ROOT" show origin/main:deploy.sh > "$TMP/prefix-deploy.sh" 2>/dev/null; then
+#
+# PREFIX_REV is the last revision in which deploy.sh carried the defect: the
+# 30-probe loop whose result nothing read. It is a fixed point in history, so
+# this case keeps proving the same thing after the fix merges. Do NOT replace it
+# with a branch name — see the header. Repointing it is only correct if the
+# defect is re-introduced and re-fixed, which would be a new revision to pin.
+PREFIX_REV="${PREFIX_REV:-5a7aa8616a0c84cb7bd9447847ea207f1e37bc76}"
+echo "== (a) control: deploy.sh at $PREFIX_REV (pre-fix), dead port =="
+if git -C "$ROOT" show "$PREFIX_REV:deploy.sh" > "$TMP/prefix-deploy.sh" 2>/dev/null; then
   slice "$TMP/prefix-deploy.sh" "$TMP/prefix.sh"
   retarget_prefix_control "$TMP/prefix.sh" "$DEAD_PORT" || exit 1
   PATH="$FAKE:$PATH" bash "$TMP/prefix.sh" > "$TMP/a.out" 2>&1
@@ -139,7 +155,9 @@ if git -C "$ROOT" show origin/main:deploy.sh > "$TMP/prefix-deploy.sh" 2>/dev/nu
     'grep -q "Barkpark is running!" "$TMP/a.out"'
   check "(a) pre-fix exited 0 over a dead API — the defect" "[ $a_rc -eq 0 ]"
 else
-  fail "(a) could not read origin/main:deploy.sh (fetch origin first)"
+  # Fail-closed, and name the likely cause: a shallow clone (CI's default
+  # fetch-depth: 1) cannot reach a pinned historical revision.
+  fail "(a) could not read $PREFIX_REV:deploy.sh — shallow clone? (needs fetch-depth: 0)"
 fi
 
 # ── (b) UNHEALTHY — the current script refuses ───────────────────────────────

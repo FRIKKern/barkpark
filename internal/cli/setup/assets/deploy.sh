@@ -47,6 +47,17 @@ PHX_SCHEME="${PHX_SCHEME:-https}"
 # service listens elsewhere fails on a HEALTHY box, which would turn the
 # honest "not answering" banner below into a new lie.
 APP_PORT="${PORT:-4000}"
+# A port that is not a number is REFUSED, never carried. It would otherwise
+# reach `ufw allow <junk>/tcp` and the probe URL, where a broken firewall rule
+# and a probe that can never succeed produce the "NOT ANSWERING" banner on a
+# box whose only fault is a typo — the honest banner made dishonest by its own
+# input. Same rule for the .env re-read below.
+case "$APP_PORT" in
+  '' | *[!0-9]*)
+    echo "deploy.sh: PORT must be a number, got: $APP_PORT" >&2
+    exit 2
+    ;;
+esac
 # Health-probe shape. Overridable so scripts/deploy-health-banner.test.sh can
 # drive the REAL loop without waiting out 60s per case.
 HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-30}"
@@ -196,9 +207,22 @@ done
 # EXISTING install we keep the file's secrets (and its PORT), so the value we
 # computed from the environment above may not be what boots. Everything after
 # this line (firewall, health probe, printed URLs) descends from this one read.
-_env_port="$(sed -n 's/^PORT=//p' "$APP_DIR/.env" | tail -n1 | tr -d '[:space:]')"
+# Quotes are stripped as well as whitespace: deploy.sh only ever writes a bare
+# value, but a hand-edited `PORT="5000"` is a real shape, and carrying the
+# quotes into `ufw allow "5000"/tcp` breaks the rule silently.
+_env_port="$(sed -n 's/^PORT=//p' "$APP_DIR/.env" | tail -n1 | tr -d '[:space:]"'"'")"
 if [ -n "$_env_port" ]; then
-  APP_PORT="$_env_port"
+  case "$_env_port" in
+    *[!0-9]*)
+      # Do NOT carry it. Everything downstream — firewall rule, probe URL,
+      # printed URLs — would then descend from a value that cannot be a port,
+      # and the failure would surface as a false "NOT ANSWERING" banner rather
+      # than as the .env defect it is.
+      echo "deploy.sh: PORT in $APP_DIR/.env is not a number ($_env_port); fix it before deploying." >&2
+      exit 2
+      ;;
+    *) APP_PORT="$_env_port" ;;
+  esac
 fi
 
 # Persist the plugin whitelist ONLY when the caller set it (bp setup threads it

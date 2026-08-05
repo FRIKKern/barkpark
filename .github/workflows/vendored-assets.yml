@@ -15,11 +15,15 @@ on:
     paths:
       - "deploy.sh"
       - "internal/cli/setup/assets/**"
+      - "scripts/deploy-health-banner.test.sh"
+      - ".github/workflows/vendored-assets.yml"
   push:
     branches: [main]
     paths:
       - "deploy.sh"
       - "internal/cli/setup/assets/**"
+      - "scripts/deploy-health-banner.test.sh"
+      - ".github/workflows/vendored-assets.yml"
 
 jobs:
   check:
@@ -27,5 +31,23 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The harness below reads deploy.sh at a PINNED historical revision
+          # for its pre-fix control; the default depth-1 clone cannot reach it.
+          fetch-depth: 0
       - name: cli-assets-check
         run: make cli-assets-check
+      # PDS wave 48. deploy.sh's closing banner used to print "Barkpark is
+      # running!" after 30 FAILED health probes — the measurement was taken and
+      # thrown away. scripts/deploy-health-banner.test.sh is that defect's
+      # falsifier, and it carries a permanent CONTROL case that runs the same
+      # slice from `git show origin/main:deploy.sh` and asserts the OLD code
+      # lies, so it stays defect-sensitive rather than decaying into a tautology.
+      #
+      # IT RUNS HERE BECAUSE AN UNEXECUTED HARNESS IS THE EXACT DEFECT CLASS
+      # THIS WAVE HUNTS, one level out: an honest check nobody runs asserts
+      # nothing. This job is the only thing on deploy.sh's path, so the harness
+      # belongs on it. `fetch-depth: 0` is required — the control case reaches
+      # for origin/main's deploy.sh and cannot run against a shallow clone.
+      - name: deploy.sh health-banner harness
+        run: bash scripts/deploy-health-banner.test.sh
