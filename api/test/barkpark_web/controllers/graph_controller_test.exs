@@ -847,6 +847,40 @@ defmodule BarkparkWeb.GraphControllerTest do
       assert Jason.decode!(ok.resp_body)["ok"] == true
     end
 
+    # THE BOUND MUST OUTLIVE THE REQUESTS IT BOUNDS. An ETS table is owned by
+    # the process that created it and dies with it, so a lazily-created slot
+    # table would be owned by whichever request arrived first — and would be
+    # destroyed the instant that request finished. Under concurrency that is
+    # not merely a reset bound: a sibling still holding a slot would raise
+    # ArgumentError on insert/delete, turning the guard against 500s into a
+    # source of them. The table is therefore created in
+    # `Barkpark.Application.start/2`.
+    #
+    # FAILS WITHOUT THE FIX: with only lazy creation the table's owner here is
+    # either the (now dead) task — `:ets.whereis/1` ⇒ `:undefined` — or this
+    # very test process, both of which this test rejects.
+    test "the slot table outlives the process that used it (owned at boot, not by a request)" do
+      table = :barkpark_graph_corpus_slots
+
+      task =
+        Task.async(fn ->
+          {:ok, slot} = BarkparkWeb.TasksController.__acquire_graph_corpus_slot_for_test__()
+          BarkparkWeb.TasksController.__release_graph_corpus_slot_for_test__(slot)
+          self()
+        end)
+
+      task_pid = Task.await(task)
+      refute Process.alive?(task_pid)
+
+      assert :ets.whereis(table) != :undefined,
+             "the slot table died with the request process that used it"
+
+      owner = :ets.info(table, :owner)
+      assert Process.alive?(owner)
+      refute owner == self(), "the slot table is owned by a transient caller, not by the app"
+      refute owner == task_pid
+    end
+
     test "under the cap, back-to-back derivations all succeed (no slot leak)", %{
       conn: conn,
       scope: scope

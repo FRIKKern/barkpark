@@ -1279,9 +1279,22 @@ defmodule BarkparkWeb.TasksController do
     else
       {:ok, ref}
     end
+  rescue
+    # The table is created at application boot and never deleted, so this arm is
+    # unreachable in a running system. It exists so that a bookkeeping accident
+    # can never become a 500 on a read route: with no table there is no bound,
+    # and an UNBOUNDED corpus derivation is the failure this cap was built to
+    # prevent — so the safe answer is to shed, exactly as saturation races do.
+    ArgumentError -> :busy
   end
 
-  defp release_graph_corpus_slot(ref), do: :ets.delete(@graph_corpus_slots, ref)
+  defp release_graph_corpus_slot(ref) do
+    :ets.delete(@graph_corpus_slots, ref)
+  rescue
+    # Runs from an `after` clause, i.e. AFTER the response was sent. Raising
+    # here would crash the request process for a slot that no longer exists.
+    ArgumentError -> :ok
+  end
 
   # Reap slots whose owner died (a killed request process never runs `after`) or
   # whose deadline passed. Keeps the table bounded by the cap under all exits.
@@ -1295,6 +1308,17 @@ defmodule BarkparkWeb.TasksController do
 
     :ok
   end
+
+  @doc """
+  Create the `/v1/graph` admission-cap slot table, owned by the caller.
+
+  Called ONCE from `Barkpark.Application.start/2` so the table's owner is the
+  application process rather than whichever request happened to arrive first —
+  a bound whose bookkeeping dies with a request is not a bound. Idempotent: a
+  second call (a re-boot in the test VM) is a no-op, and the rows are slots, so
+  nothing is lost by NOT clearing them.
+  """
+  def init_graph_corpus_slots, do: ensure_graph_corpus_slots()
 
   defp ensure_graph_corpus_slots do
     case :ets.whereis(@graph_corpus_slots) do
