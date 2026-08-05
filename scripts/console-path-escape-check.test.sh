@@ -49,27 +49,40 @@ TMPROOT="$(mktemp -d "${TMPDIR:-/tmp}/console-path-escape-test.XXXXXX")"
 cleanup() { rm -rf "$TMPROOT"; }
 trap cleanup EXIT
 
-# Build a synthetic mini-repo whose console tree reads known repo-root paths,
-# in BOTH idioms the real harness uses: the literal `path.join(REPO_ROOT, "…")`
-# and the interpolated DATA TABLE (guard / measured_by / measured_in_ci).
+# Build a synthetic mini-repo whose console tree reads known repo-root paths in
+# EVERY idiom the scanner carries — literal-join, ident-join, data-table,
+# measured-by, template and walk-up.
+#
+# ALL SIX, AND THAT IS A REQUIREMENT NOW, NOT TIDINESS. The floor became
+# PER-IDIOM (see CONSOLE_ESCAPE_IDIOM_MIN), so a fixture missing an idiom reds
+# on the floor before the coverage loop ever runs — and every coverage case
+# built on this fixture would then be asserting on output the run never
+# reached. The old fixture carried three idioms and would have done exactly
+# that. Each read below is COVERED by the declared set, so the fixture's
+# baseline verdict is clean and a mutation case reds for its own reason only.
 make_fixture() {
   local root="$1"
   mkdir -p "$root/cloud/priv/static/__preview__" \
     "$root/internal/taskboard/testdata" "$root/internal/pdrender/testdata" \
-    "$root/.github/workflows" "$root/design" \
+    "$root/.github/workflows" "$root/design" "$root/deploy/lib" \
     "$root/cloud/test/barkpark_cloud/web"
   : >"$root/internal/taskboard/testdata/styleguide_lifecycle.txt"
   : >"$root/internal/pdrender/testdata/styleguide_tokens.txt"
   : >"$root/.github/workflows/cloud.yml"
+  : >"$root/.github/required-checks.json"
   : >"$root/design/emit-fence.test.mjs"
+  : >"$root/deploy/site-deploy-node.sh"
+  : >"$root/deploy/lib/site-deploy-common.sh"
   : >"$root/cloud/test/barkpark_cloud/web/router_test.exs"
   : >"$root/cloud/test/barkpark_cloud/web/router_oauth_test.exs"
-  # Six covered reads — comfortably over the floor of 4 so the coverage cases
-  # exercise coverage, not the floor.
+  : >"$root/cloud/test/barkpark_cloud/web/router_sse_ticket_test.exs"
   cat >"$root/cloud/priv/static/__app.test.mjs" <<'JS'
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
 const LIFECYCLE_FIXTURE = path.join(REPO_ROOT, "internal/taskboard/testdata/styleguide_lifecycle.txt");
 const TOKENS_FIXTURE = path.join(REPO_ROOT, "internal/pdrender/testdata/styleguide_tokens.txt");
+const NODE_DEPLOY = path.join(REPO_ROOT, "deploy/site-deploy-node.sh");
+// the walk-up idiom, resolved against this file's own directory
+const COMMON = new URL("../../../deploy/lib/site-deploy-common.sh", import.meta.url);
 JS
   cat >"$root/cloud/priv/static/__preview__/seal-predicate.mjs" <<'JS'
 const KNOWN_DEFECTS = [
@@ -82,6 +95,7 @@ const KNOWN_DEFECTS = [
     id: 'b',
     measured_by: [
       'cloud/test/barkpark_cloud/web/router_oauth_test.exs',
+      'cloud/test/barkpark_cloud/web/router_sse_ticket_test.exs',
       'cloud/test/barkpark_cloud/web/router_DELETED_test.exs',
     ],
     measured_in_ci: { workflow: '.github/workflows/cloud.yml', job: 'test', paths: 'cloud/**' },
@@ -89,6 +103,8 @@ const KNOWN_DEFECTS = [
   { id: 'c', guard: 'design/emit-fence.test.mjs' },
 ];
 const guardPath = `${REPO}/${d.guard}`;
+// the template-literal idiom, the shape the rung-2 leg A read is written in
+const REQUIRED = readFileSync(`${REPO}/.github/required-checks.json`, 'utf8');
 JS
 }
 
@@ -106,19 +122,55 @@ else
 fi
 # The count is the anti-vacuity signal: a run that says "0 reads" is a broken
 # scanner, and this case would notice it even if the floor were removed.
+#
+# NO HARD-CODED POPULATION HERE. This assertion used to read `-ge 8` under a
+# label claiming the measured population was 9 — a PASSING test whose own name
+# contradicted the number the run printed (15), and a threshold so far under the
+# live population that the census could have lost SEVEN reads and still said ok.
+# The number is gone from every site in both files now. Both halves are
+# now DERIVED, and neither can rot:
+#   (a) --check's count must agree with --list-escapes' own distinct count. Two
+#       modes, one census; if they disagree, one of them is lying.
+#   (b) every idiom the script declares a floor for must actually clear that
+#       floor in --list-escapes. Computed from --list-escapes and --print-floors,
+#       so it does not just re-read --check's arithmetic back to itself.
 n="$(printf '%s' "$out" | sed -n 's/^console-path-escape-check: \([0-9]*\) distinct.*/\1/p')"
-if [ "${n:-0}" -ge 8 ]; then
-  ok "resolved $n repo-root reads (measured population is 9)"
+listed="$("$SCRIPT" --list-escapes | cut -f1 | sed '/^$/d' | sort -u | wc -l | tr -d ' ')"
+if [ "${n:-0}" = "$listed" ] && [ "${n:-0}" -gt 0 ]; then
+  ok "--check's count ($n) agrees with --list-escapes' distinct census"
 else
-  no "resolved only ${n:-0} repo-root reads — scanner is under-matching"
+  no "--check says ${n:-0} reads, --list-escapes says $listed — the two modes disagree"
+fi
+census_tagged="$("$SCRIPT" --list-escapes | cut -f1,3 | sed '/^$/d' | sort -u)"
+floors="$("$SCRIPT" --print-floors)"
+thin_idioms=0
+while IFS= read -r frow; do
+  [ -n "$frow" ] || continue
+  fidiom="${frow%%	*}"
+  fmin="${frow##*	}"
+  fgot="$(printf '%s\n' "$census_tagged" | awk -F'\t' -v k="$fidiom" '$2 == k' | wc -l | tr -d ' ')"
+  if [ "$fgot" -ge "$fmin" ]; then
+    ok "idiom $fidiom is live: $fgot read(s), floor $fmin"
+  else
+    no "idiom $fidiom resolved $fgot read(s) but its floor is $fmin — this idiom is blind"
+    thin_idioms=$((thin_idioms + 1))
+  fi
+done <<<"$floors"
+if [ "$thin_idioms" -eq 0 ]; then
+  ok "every declared idiom clears its own floor on the real tree"
+else
+  no "$thin_idioms idiom(s) are under their floor"
 fi
 echo
 
 # ── case 2: the census carries the three families NOBODY had declared ───────
 # These are the reads the old workflow-level filters missed entirely: the seal
 # predicate's tests pass `--repo <the real repo root>`, so the predicate reaches
-# all three. Deleting cloud.yml's paths key reds 7 of 31 harness tests; moving
-# emit-fence.test.mjs reds 1; moving a measured_by file reds 6.
+# all three. Measured when wave 9 cut this: deleting cloud.yml's paths key reds
+# 7 seal-predicate tests, moving emit-fence.test.mjs reds 1, moving a
+# measured_by file reds 6. NO DENOMINATOR — those counts were written "of 31"
+# and seal-predicate.test.mjs carries 75 `test(` calls now, so the denominator
+# was wrong by more than a factor of two. Cite the derivation, not the number.
 echo "case 2: the census carries the three previously-undeclared families"
 census="$("$SCRIPT" --list-escapes | cut -f1 | sort -u)"
 for want in .github/workflows/cloud.yml design/emit-fence.test.mjs \
@@ -302,6 +354,144 @@ else
 fi
 echo
 
+# ── case 4b: THE SOURCE SET — three independent blind legs ─────────────────
+# Each of these was PROVED ALONE on origin/main with a control, because each one
+# alone leaves the others' probes green and a builder who fixed only the first
+# would have concluded the fix failed.
+echo "case 4b: the three source-set blind legs"
+
+# LEG 1 — RECURSION. The scan is `find cloud/priv/static`, so a read expressed
+# one call frame down, inside a file the harness SPAWNS, was structurally
+# invisible. Measured on origin/main with the ONLY variable being which file
+# carried it: the identical `join(REPO_ROOT, "api/mix.exs")` gave 15 reads /
+# RC=0 / unnamed inside design/emit-fence.test.mjs (declared, never scanned) and
+# 16 / UNCOVERED / RC=1 inside the directly-scanned __app.test.mjs.
+FXR="$TMPROOT/recurse"
+make_fixture "$FXR"
+mkdir -p "$FXR/faraway"
+: >"$FXR/faraway/nested.json"
+# design/emit-fence.test.mjs is a FRONTIER file: it is resolved by the data
+# table's `guard:` and it is not under cloud/priv/static, so only the recursion
+# can open it. Its root variable is camelCase on purpose — that is how the real
+# one is written.
+cat >"$FXR/design/emit-fence.test.mjs" <<'JS'
+const repoRoot = join(here, "..");
+const NESTED = readFileSync(join(repoRoot, "faraway/nested.json"), "utf8");
+JS
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXR" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a read one call frame down"
+else
+  no "PASSED with an uncovered read inside a declared-but-unscanned input"
+fi
+if has "$out" "UNCOVERED repo-root read: faraway/nested.json"; then
+  ok "names the read the recursion found"
+else
+  no "the frontier file's read is invisible: $out"
+fi
+# ATTRIBUTION IS THE PROOF IT CAME THROUGH THE RECURSION: no file under
+# cloud/priv/static carries this literal, so only the second pass could name it.
+if has "$out" "read from: design/emit-fence.test.mjs"; then
+  ok "attributes it to the FRONTIER file, not to the console tree"
+else
+  no "did not attribute the recursed read to the frontier file: $out"
+fi
+# …and DEPTH IS BOUNDED AT ONE, which is a declared limit, not an oversight. A
+# read TWO frames down must NOT be resolved — if it were, this census would
+# crawl the repo through whatever the frontier happens to import.
+mkdir -p "$FXR/second"
+: >"$FXR/second/deep.json"
+cat >"$FXR/design/second-level.mjs" <<'JS'
+const DEEP = readFileSync(join(repoRoot, "second/deep.json"), "utf8");
+JS
+cat >>"$FXR/design/emit-fence.test.mjs" <<'JS'
+const LEVEL2 = join(repoRoot, "design/second-level.mjs");
+JS
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXR" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if has "$out" "UNCOVERED repo-root read: second/deep.json"; then
+  no "depth is UNBOUNDED — a level-2 read was resolved"
+else
+  ok "depth stops at one level (the level-2 read is out of reach by declaration)"
+fi
+
+# LEG 2 — IDIOM, proved ALONE with no recursion in play. The shipped regex was
+# `(REPO_ROOT|REPO)`, case-sensitive, so the scanner's vocabulary was coupled to
+# how one file names its root variable. Measured on origin/main:
+# `path.join(repoRootLocal, "api/mix.exs")` in a DIRECTLY scanned file was
+# invisible at 15 reads / RC=0.
+FXI="$TMPROOT/idiom"
+make_fixture "$FXI"
+mkdir -p "$FXI/elsewhere"
+: >"$FXI/elsewhere/camel.json"
+cat >"$FXI/cloud/priv/static/camel.test.mjs" <<'JS'
+const repoRootLocal = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const CAMEL = path.join(repoRootLocal, "elsewhere/camel.json");
+JS
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXI" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a camelCase root identifier"
+else
+  no "PASSED with a join(<ident>, …) read — the idiom vocabulary is still coupled to one file"
+fi
+if has "$out" "UNCOVERED repo-root read: elsewhere/camel.json"; then
+  ok "the generic join idiom names the read"
+else
+  no "the generic join idiom did not resolve it: $out"
+fi
+
+# LEG 3 — BARE WORD. Any literal without a `/` used to be dropped outright, so a
+# read of ANY repo-root top-level file was structurally unrepresentable: the
+# census could not have named Makefile / README.md / mix.lock if it tried.
+FXB="$TMPROOT/bareword"
+make_fixture "$FXB"
+: >"$FXB/TOPLEVEL.md"
+cat >"$FXB/cloud/priv/static/bare.test.mjs" <<'JS'
+const TOP = path.join(REPO_ROOT, "TOPLEVEL.md");
+JS
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXB" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) on a bare-word repo-root read"
+else
+  no "PASSED with an undeclared top-level file read — bare words are still unrepresentable"
+fi
+if has "$out" "UNCOVERED repo-root read: TOPLEVEL.md"; then
+  ok "names the top-level file"
+else
+  no "the bare-word read never entered the census: $out"
+fi
+# …AND THE BARE-WORD RULE HAS A CEILING, which is the half that keeps it usable:
+# a bare word is admitted only from an idiom whose base is PROVABLY the repo
+# root. `join(<unknownIdent>, "TOPLEVEL.md")` is usually a temp dir, not a repo
+# read, so it must NOT enter.
+rm -f "$FXB/cloud/priv/static/bare.test.mjs"
+cat >"$FXB/cloud/priv/static/bare.test.mjs" <<'JS'
+const tmp = mkdtempSync(join(tmpdir(), "x-"));
+const TOP = path.join(tmp, "TOPLEVEL.md");
+JS
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXB" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "a bare word joined to an UNKNOWN identifier is not a repo read (exit 0)"
+else
+  no "the bare-word rule over-fires on join(<unknownIdent>, 'x'): $out"
+fi
+# …and `.git` never enters, in EITHER checkout shape. It is a directory in a
+# clone but a regular FILE in a git worktree, which is where this gate's local
+# runs happen — admitting it would make the ratchet red locally and pass in
+# Actions.
+rm -f "$FXB/cloud/priv/static/bare.test.mjs"
+printf 'gitdir: /somewhere/else\n' >"$FXB/.git"
+cat >"$FXB/cloud/priv/static/bare.test.mjs" <<'JS'
+const G = spawnSync("git", ["-C", REPO_ROOT, ".git", "rev-parse"]);
+JS
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FXB" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok ".git is not a read even when it is a regular file (the worktree shape)"
+else
+  no ".git entered the census — this gate would red locally and pass in CI: $out"
+fi
+rm -f "$FXB/.git"
+echo
+
 # ── case 5: a neutered scanner reds on the floor, never reports clean ───────
 echo "case 5: the min-escapes floor catches a neutered scanner"
 FX3="$TMPROOT/thin"
@@ -321,12 +511,71 @@ if has "$out" "SCANNER is broken, not the repo clean"; then
 else
   no "wrong diagnosis: $out"
 fi
+# …and it names WHICH idiom went blind, which is the whole reason the floor is
+# per-idiom: "the population is thin" does not tell you where to look.
+if has "$out" "idiom 'data-table' resolved only 0"; then
+  ok "names the idiom that resolved nothing"
+else
+  no "did not name the blind idiom: $out"
+fi
 # and the floor is NOT overridable outside the harness
-out="$(CONSOLE_PATH_ESCAPE_ROOT="$FX3" CONSOLE_ESCAPE_MIN=1 "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FX3" CONSOLE_ESCAPE_IDIOM_MIN='literal-join	0' "$SCRIPT" 2>&1)" && rc=0 || rc=$?
 if [ "$rc" -ne 0 ]; then
-  ok "CONSOLE_ESCAPE_MIN in the environment cannot lower the floor"
+  ok "CONSOLE_ESCAPE_IDIOM_MIN in the environment cannot lower the floor"
 else
   no "the floor was lowered by an env var — that is a one-line CI bypass"
+fi
+echo
+
+# ── case 5b: THE FLOOR IS FILE-AWARE ────────────────────────────────────────
+# A per-idiom floor is only as honest as what counts toward it. `[ -e ]` used to
+# admit DIRECTORY rows, and a directory row names no file: blind the
+# literal-join regex to dotted filenames on the real tree and that family
+# collapses 6 -> 1 with the survivor being the directory `cloud/lib` — bound
+# held, scanner blind. So a population made ENTIRELY of directory rows must red,
+# not pass.
+echo "case 5b: a directory-only population cannot satisfy a floor"
+FX4="$TMPROOT/dironly"
+make_fixture "$FX4"
+# Every read this file expresses resolves to a DIRECTORY that really exists and
+# really is dispatched on (cloud/lib/** is declared), so nothing here is an
+# uncovered-read red — the only thing that can red is the floor.
+mkdir -p "$FX4/cloud/lib/barkpark_cloud/sites" "$FX4/cloud/lib/barkpark_cloud/web"
+rm -f "$FX4/cloud/priv/static/__app.test.mjs"
+cat >"$FX4/cloud/priv/static/__app.test.mjs" <<'JS'
+const A = path.join(REPO_ROOT, "cloud/lib");
+const B = path.join(REPO_ROOT, "cloud/lib/barkpark_cloud");
+const C = path.join(REPO_ROOT, "cloud/lib/barkpark_cloud/sites");
+const D = path.join(REPO_ROOT, "cloud/lib/barkpark_cloud/web");
+JS
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FX4" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -ne 0 ]; then
+  ok "exit $rc (non-zero) — four directory rows do not satisfy the literal-join floor"
+else
+  no "PASSED on a directory-only population — the floor counts rows that name no file"
+fi
+if has "$out" "idiom 'literal-join' resolved only 0"; then
+  ok "the directory rows contributed ZERO to the idiom's count"
+else
+  no "directory rows were counted toward the floor: $out"
+fi
+# …and the same rows, pointed at FILES, clear the floor — so the case above
+# reds for file-awareness, not because the fixture is broken.
+: >"$FX4/cloud/lib/barkpark_cloud/router.ex"
+: >"$FX4/cloud/lib/barkpark_cloud/sites/worker.ex"
+: >"$FX4/cloud/lib/barkpark_cloud/web/plug.ex"
+cat >"$FX4/cloud/priv/static/__app.test.mjs" <<'JS'
+const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../../..");
+const A = path.join(REPO_ROOT, "cloud/lib/barkpark_cloud/router.ex");
+const B = path.join(REPO_ROOT, "cloud/lib/barkpark_cloud/sites/worker.ex");
+const C = path.join(REPO_ROOT, "cloud/lib/barkpark_cloud/web/plug.ex");
+const COMMON = new URL("../../../deploy/lib/site-deploy-common.sh", import.meta.url);
+JS
+out="$(CONSOLE_PATH_ESCAPE_ROOT="$FX4" "$SCRIPT" 2>&1)" && rc=0 || rc=$?
+if [ "$rc" -eq 0 ]; then
+  ok "the same three rows as FILES clear the floor (exit 0) — the control"
+else
+  no "the file control did not pass, so case 5b proves nothing: $out"
 fi
 echo
 
