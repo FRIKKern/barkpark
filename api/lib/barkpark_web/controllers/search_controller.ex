@@ -357,10 +357,27 @@ defmodule BarkparkWeb.SearchController do
       workspace_id: workspace_id(conn)
     ]
 
-    {:ok, %{promoted: promoted, distinct_sessions: distinct}} =
+    # `record_correction/3` answers five causally different outcomes that all
+    # carry `promoted: false, distinct_sessions: 0`, so the counters alone
+    # cannot tell a written correction from a lost one. `status:` is the
+    # discriminator; surfacing it is the whole receipt. `recorded:` restates
+    # the post-condition the caller asked about, exactly as the interaction
+    # receipt above does.
+    #
+    # The HTTP status stays 200 for all five (PDS-D695): this endpoint is a
+    # fire-and-forget signal every caller already treats as non-blocking, and
+    # inverting `res.ok` for a lost write would break callers that never
+    # branched on it — the honest field, not the transport, carries the news.
+    {:ok, %{status: status, promoted: promoted, distinct_sessions: distinct}} =
       SearchIntelligence.record_correction(dataset, params, record_opts)
 
-    json(conn, %{ok: true, promoted: promoted, distinctSessions: distinct})
+    json(conn, %{
+      ok: status != :error,
+      status: Atom.to_string(status),
+      recorded: status == :recorded,
+      promoted: promoted,
+      distinctSessions: distinct
+    })
   end
 
   # Per-type schema resolver for field-visibility redaction. Returns a closure
