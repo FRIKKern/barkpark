@@ -254,9 +254,24 @@
   // was judged. The optional `transport` narrows the sentence to the three
   // classes transportClass() can honestly prove; omit it and the always-true
   // network sentence is used.
+  //
+  // REVIEW FIX (wave 31): a NAMED transport class must win over the generic
+  // slug, and it did not. api() ALWAYS sets data.error = "network_error" on a
+  // transport failure, and friendly() resolves that key out of ERRORS before it
+  // ever looks at its fallback — so `friendly(data, transportCopy(transport))`
+  // returned "Network error — is the control plane running?" for every class,
+  // and "You're offline" / "That request was cancelled" were unreachable on the
+  // one code path that can supply them. (The tests passed only because they fed
+  // `{}`, a shape api() never produces.) A class we can PROVE is more specific
+  // than a slug that only says "no answer arrived", so it is consulted first;
+  // the unsplit `unreachable` class has no specific copy and still falls
+  // through to friendly(), which keeps the slug's sentence.
   function faultCopy(status, data, fallback, transport) {
     if (status >= 500) return friendly(data, ERRORS.server_error);
-    if (status === 0) return friendly(data, transportCopy(transport));
+    if (status === 0) {
+      if (TRANSPORT_COPY[transport]) return TRANSPORT_COPY[transport];
+      return friendly(data, transportCopy(transport));
+    }
     return friendly(data, fallback);
   }
 
@@ -19236,7 +19251,13 @@
   // {error:{code|message}} — friendly() reads it; the transport-level 0/401/403
   // get their own steer).
   function offloadFileErrorCopy(status, data) {
-    if (status === 0) return "Couldn't reach the Barkpark — check its address and try again.";
+    // REVIEW FIX (wave 31): status 0 means NO ANSWER ARRIVED — the browser
+    // cannot tell a wrong address from a dead box from a dead network (the
+    // three collapse into one TypeError; see transportClass). "check its
+    // address" named ONE of the three as the cause and told the person to go
+    // fix it, which is the same lie this slice removed from the control-plane
+    // paths. State the fact, name the possibilities, order nobody around.
+    if (status === 0) return "Couldn't reach the Barkpark — it may be offline, or its address may be wrong.";
     if (status === 401 || status === 403) return "The app token was rejected — reload and try again.";
     return friendly(data, "Couldn't file the order — please try again.");
   }

@@ -13656,6 +13656,24 @@ test("cch-w31-s4: faultCopy has a status-0 arm, capped at THREE honest transport
   // INPUT is as much a lie as it is on a 5xx.
   assert.match(hooks.faultCopy(0, {}, fb), /[Nn]etwork error/);
   assert.ok(!/check your connection and retry/i.test(hooks.faultCopy(0, {}, fb)));
+  // THE ENVELOPE api() ACTUALLY PRODUCES, not a convenient one. Every transport
+  // failure arrives as `{ error: "network_error" }` — never `{}` — and
+  // friendly() resolves that slug out of ERRORS before it reads any fallback.
+  // Asserting the transport classes against `{}` was vacuous: it proved a shape
+  // this console never emits, while the shape it does emit collapsed all three
+  // classes to one generic sentence. (Review fix, wave 31.)
+  const wire = { error: "network_error" };
+  assert.match(hooks.faultCopy(0, wire, fb, "offline"), /offline/i);
+  assert.match(hooks.faultCopy(0, wire, fb, "aborted"), /cancelled/i);
+  assert.match(hooks.faultCopy(0, wire, fb, "unreachable"), /[Nn]etwork error/);
+  assert.ok(!/check your connection and retry/i.test(hooks.faultCopy(0, wire, fb, "offline")));
+  // …and the classes must be DISTINGUISHABLE on that envelope, or the
+  // vocabulary is decoration: three classes, three sentences.
+  assert.equal(
+    new Set(["offline", "aborted", "unreachable"].map((t) => hooks.faultCopy(0, wire, fb, t))).size,
+    3,
+    "the transport classes collapse to one sentence on api()'s real envelope",
+  );
   assert.match(hooks.faultCopy(0, {}, fb, "offline"), /offline/i);
   assert.match(hooks.faultCopy(0, {}, fb, "aborted"), /cancelled/i);
   assert.match(hooks.faultCopy(0, {}, fb, "unreachable"), /[Nn]etwork error/);
