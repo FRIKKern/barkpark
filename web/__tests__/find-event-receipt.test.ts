@@ -94,6 +94,23 @@ function upstreamAnswers(status: number): void {
   }) as typeof fetch;
 }
 
+/**
+ * Stub upstream: a 2xx carrying a verbatim body — the 200-with-bad-news case.
+ * `body: null` is the genuinely body-less answer (204 rejects any body at all,
+ * even an empty string — constructing one throws).
+ */
+function upstreamAnswersBody(status: number, body: unknown): void {
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    capture(input, init);
+    const payload =
+      body === null ? null : typeof body === "string" ? body : JSON.stringify(body);
+    return new Response(payload, {
+      status,
+      headers: { "Content-Type": "application/json" },
+    });
+  }) as typeof fetch;
+}
+
 /** Stub upstream: record the call, then reject the way a dead host does. */
 function upstreamUnreachable(): void {
   globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
@@ -210,6 +227,80 @@ test("exit 3 — upstream 500: recorded:false and the reason names the status", 
   assert.equal(status, 200);
   assert.equal(body.recorded, false, "a 500 is not a recorded write");
   assert.match(String(body.reason), /500/);
+});
+
+/* ── 3b. a 2xx that recorded NOTHING — the cross-slice seam ─────────────── */
+
+/**
+ * BOTH upstream endpoints answer 200 for outcomes that wrote nothing, and put
+ * the news in the BODY rather than on the status line:
+ *
+ *   /v1/data/search/…/interaction  → 200 {ok:true, recorded:false,
+ *                                          reason:"recording_disabled"}
+ *   /v1/data/search/…/correction   → 200 for ALL FIVE outcomes, a lost write
+ *                                          included: {ok:false,
+ *                                          status:"error", recorded:false}
+ *
+ * A proxy reading only `res.ok` overwrites that honest `recorded:false` with a
+ * `true` of its own making — this route's original defect, re-entering one
+ * layer up. These arms are its falsifiers, and they carry the upstream bodies
+ * VERBATIM so they red if either endpoint's shape and this hop drift apart.
+ */
+
+test("exit 3b — upstream 200 with recorded:false is NOT relaid as a recorded write", async () => {
+  upstreamAnswersBody(200, {
+    ok: true,
+    recorded: false,
+    reason: "recording_disabled",
+  });
+  const { status, body } = await receiptOf(post(CLICK));
+
+  assert.equal(status, 200);
+  assert.equal(
+    body.recorded,
+    false,
+    "a switched-off recorder answers 2xx and records nothing — relaying true would " +
+      "re-launder the honest field the upstream went out of its way to send",
+  );
+  assert.match(String(body.reason), /recording_disabled/);
+});
+
+test("exit 3b — a LOST correction write (200, ok:false) is not relaid as recorded", async () => {
+  // The correction endpoint's :error receipt, verbatim: a write that raised and
+  // was swallowed, reported honestly on a 200 because the endpoint is
+  // fire-and-forget. This is the one that costs a real signal.
+  upstreamAnswersBody(200, {
+    ok: false,
+    status: "error",
+    recorded: false,
+    promoted: false,
+    distinctSessions: 0,
+  });
+  const { status, body } = await receiptOf(post(CORRECTION));
+
+  assert.equal(status, 200);
+  assert.equal(body.recorded, false, "a lost write is not a recorded write");
+  assert.match(String(body.reason), /error/);
+});
+
+test("exit 3b — a 2xx whose body says recorded:true, or says nothing, stays true", async () => {
+  // The upstream's own success shape must not be downgraded…
+  upstreamAnswersBody(200, { ok: true, recorded: true, interactionEventId: "e1" });
+  assert.equal((await receiptOf(post(CLICK))).body.recorded, true);
+
+  // …and neither must a 2xx we cannot parse. Inventing `recorded:false` out of
+  // OUR parse failure is the same fabrication in the opposite direction: the
+  // upstream said 2xx and said nothing against it.
+  upstreamAnswersBody(200, "not json at all");
+  assert.equal(
+    (await receiptOf(post(CLICK))).body.recorded,
+    true,
+    "an unreadable 2xx body contradicts nothing — do not manufacture a failure",
+  );
+
+  // A genuinely body-less 2xx, the same way.
+  upstreamAnswersBody(204, null);
+  assert.equal((await receiptOf(post(CLICK))).body.recorded, true);
 });
 
 /* ── 4. the network failed ─────────────────────────────────────────────── */

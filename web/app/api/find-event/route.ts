@@ -50,6 +50,32 @@ interface FindEventReceipt {
  * not parse and GREEN for an upstream 500 — the inversion this shape exists to
  * prevent. `app/api/find/route.ts` answers 200-with-a-derived-field the same way.
  */
+/** The shape the upstream signal endpoints answer with, as far as we read it. */
+interface UpstreamReceipt {
+  recorded?: boolean;
+  status?: string;
+  reason?: string;
+}
+
+/**
+ * The upstream's own receipt, or null when it did not send a readable one.
+ *
+ * Null is deliberately NOT treated as a failure: an endpoint that answers 2xx
+ * with an empty or unparsable body has told us nothing that contradicts the
+ * write, and inventing a `recorded:false` from our own parse failure would be
+ * the same fabrication in the opposite direction. Only an explicit
+ * `recorded:false` downgrades the receipt.
+ */
+async function readReceipt(res: Response): Promise<UpstreamReceipt | null> {
+  try {
+    const body: unknown = await res.json();
+    if (body && typeof body === "object") return body as UpstreamReceipt;
+  } catch {
+    // No readable body — see above.
+  }
+  return null;
+}
+
 function recordingReceipt(recorded: boolean, reason?: string): NextResponse {
   const receipt: FindEventReceipt = { ok: true, recorded };
   if (reason) receipt.reason = reason;
@@ -120,6 +146,24 @@ export async function POST(request: Request): Promise<NextResponse> {
     if (!res.ok) {
       console.error(`find-event upstream refused ${kind}: HTTP ${res.status}`);
       return recordingReceipt(false, `upstream responded ${res.status}`);
+    }
+    // A 2xx IS NOT THE WHOLE ANSWER. Both upstream endpoints deliberately
+    // answer 200 for outcomes that recorded nothing, and they say so in the
+    // BODY: `/interaction` returns `{ok:true, recorded:false,
+    // reason:"recording_disabled"}`, and `/correction` returns 200 for all
+    // five of its outcomes — including a LOST WRITE, as
+    // `{ok:false, status:"error", recorded:false}`.
+    //
+    // Reading only `res.ok` would therefore overwrite the upstream's honest
+    // `recorded:false` with a `true` of our own making — the same laundering
+    // this route was repaired to stop, re-entering one layer up because the
+    // upstream moved its news off the status line and into the body. The
+    // receipt descends from the strongest thing the upstream actually said.
+    const upstream = await readReceipt(res);
+    if (upstream && upstream.recorded === false) {
+      const why = upstream.status ?? upstream.reason ?? "no reason given";
+      console.error(`find-event upstream recorded nothing for ${kind}: ${why}`);
+      return recordingReceipt(false, `upstream recorded nothing: ${why}`);
     }
     return recordingReceipt(true);
   } catch (err) {
