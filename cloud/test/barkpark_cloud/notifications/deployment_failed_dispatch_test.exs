@@ -21,7 +21,7 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
   use Oban.Testing, repo: BarkparkCloud.Repo
   import Swoosh.TestAssertions
 
-  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.{Accounts, Notifications, Registry}
   alias BarkparkCloud.Registry.Deployment
   alias BarkparkCloud.Workers.StaleDeploymentReaper
 
@@ -218,10 +218,10 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
     end
   end
 
-  test "a mass reap alerts at most the cap, and LOGS the ones it suppressed" do
+  test "a mass reap alerts at most the cap, and RECORDS the ones it suppressed" do
     # One container site with neither an artifact nor a repo: pass (0a) fails
     # every queued row it owns in a single sweep.
-    {site, _owner} = setup_site()
+    {site, owner} = setup_site()
     over = 2
     n = Registry.reap_alert_cap() + over
 
@@ -229,6 +229,21 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
     # (site_id, environment), so a mass reap is many SITES on the box, not many
     # concurrent builds of one site (which the DB now refuses outright).
     bp = Registry.get_barkpark(site.barkpark_id)
+
+    # A SECOND member, so the withheld-row grain is measured as a product and not
+    # as a coincidence: a withheld alert is withheld from every person who would
+    # have received it, each under their own address.
+    team = Accounts.get_team(site.team_id)
+    m = System.unique_integer([:positive])
+
+    {:ok, second} =
+      Accounts.register_user(%{
+        email: "second-#{m}@example.com",
+        password: "correct-horse-battery"
+      })
+
+    {:ok, _} = Accounts.add_member(team, second, "member")
+    members = [owner.email, second.email]
 
     ids =
       for i <- 1..n do
@@ -246,18 +261,46 @@ defmodule BarkparkCloud.Notifications.DeploymentFailedDispatchTest do
         d.id
       end
 
-    log =
-      ExUnit.CaptureLog.capture_log(fn ->
-        assert {:ok, %{no_source_failed: ^n}} = perform_job(StaleDeploymentReaper, %{})
-      end)
+    ExUnit.CaptureLog.capture_log(fn ->
+      assert {:ok, %{no_source_failed: ^n}} = perform_job(StaleDeploymentReaper, %{})
+    end)
 
     # FIRST: every row really is terminal — the console, which is the surface of
     # record, lost nothing. The cap suppresses the EMAIL, never the truth.
     for id <- ids, do: assert(Repo.get(Deployment, id).status == "failed")
 
-    assert drain_emails() == Registry.reap_alert_cap()
-    assert log =~ "#{over} deployment_failed alerts suppressed"
-    assert log =~ "the rows are terminal in the console"
+    # Both members are alerted for each of the first `cap` deployments.
+    assert drain_emails() == Registry.reap_alert_cap() * length(members)
+
+    # THE REWRITE (wave 32 S2). This test used to end on two `log =~` substrings —
+    # it PINNED the falsehood that a server-side Logger line is how the owner
+    # learns their alert was thrown away. It is not: the owner reads the console,
+    # not our logs, and the whole value of an alert is that nobody is looking.
+    # The cap stays (charter D349(g), resolved in favour of TRACING); the trace is
+    # now a row the owner can read, on the surface that answers "was I notified?".
+    suppressed = Notifications.list_deliveries(team, status: "suppressed", limit: 500)
+
+    assert length(suppressed) == over * length(members),
+           "the #{over} withheld alerts left no trace on the delivery log for " <>
+             "#{length(members)} members — got #{length(suppressed)} suppressed rows"
+
+    for row <- suppressed do
+      assert row.recipient in members,
+             "a suppressed row must name the PERSON it was withheld from, not a marker"
+
+      assert row.event == "deployment_failed"
+      assert row.last_error =~ "too many deployment alerts in one sweep"
+    end
+
+    # ...and EVERY member, not just the first: the row a person cannot find is
+    # the same silence this slice exists to end.
+    assert suppressed |> Enum.map(& &1.recipient) |> Enum.uniq() |> Enum.sort() ==
+             Enum.sort(members)
+
+    # The sent alerts are still on the same log, and the two outcomes are
+    # distinguishable — a filter that cannot separate them is not a filter.
+    assert length(Notifications.list_deliveries(team, status: "sent", limit: 500)) ==
+             Registry.reap_alert_cap() * length(members)
   end
 
   ## 6. THE EMAIL — a classified cause, not raw reaper jargon, and the site named.
