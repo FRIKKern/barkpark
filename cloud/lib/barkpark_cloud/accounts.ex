@@ -1784,10 +1784,12 @@ defmodule BarkparkCloud.Accounts do
 
   @doc """
   Change `user`'s role in `team` to `new_role`, guarding the last-owner
-  invariant on a downgrade away from owner. On a downgrade from an admin/owner
-  grant to `member`, the user's sessions are also evicted so a demoted user
-  loses elevated access immediately (mirrors Coolify revoking tokens on a role
-  change). `{:ok, %TeamMembership{}}` | `{:error, :invalid_role | :not_found | :last_owner}`.
+  invariant on a downgrade away from owner. On ANY demotion — a drop in
+  `TeamMembership.rank/1`, owner→admin included — the user's sessions are
+  evicted and the PATs the new role could no longer mint are revoked, so a
+  demoted user loses elevated access immediately (mirrors Coolify revoking
+  tokens on a role change).
+  `{:ok, %TeamMembership{}}` | `{:error, :invalid_role | :not_found | :last_owner}`.
 
   The UNAUTHORIZED primitive — the member-management route calls the actor-aware
   `update_member_role_as/4`.
@@ -1808,7 +1810,14 @@ defmodule BarkparkCloud.Accounts do
   end
 
   defp do_update_role(team, %TeamMembership{role: current_role} = membership, user, new_role) do
-    was_elevated = TeamMembership.admin?(current_role)
+    # A DEMOTION is a RANK DROP, derived from the ladder that ranks the roles —
+    # never a named role. The old equality-against-a-role-literal gate was right
+    # only while `pat_abilities_allowed?/2` happened to collapse owner and
+    # admin: split those two and the remedy would silently stop running on an
+    # owner→admin demotion while the elevated PATs stayed alive. Derived, the
+    # gate cannot go stale — when the two roles ARE equivalent the revoker's
+    # own predicate simply selects zero rows.
+    demoted? = TeamMembership.rank(new_role) < TeamMembership.rank(current_role)
 
     Repo.transaction(fn ->
       # Demoting the last owner: last-owner guard UNDER A LOCK (TOCTOU). Lock the
@@ -1822,10 +1831,10 @@ defmodule BarkparkCloud.Accounts do
         |> TeamMembership.changeset(%{role: new_role})
         |> Repo.update!()
 
-      # A downgrade out of an elevated grant evicts the user's sessions, and the
-      # elevated PATs minted under the old role — but ONLY those: a plain member
-      # may still hold the read-only PAT they are entitled to mint.
-      if was_elevated and new_role == "member" do
+      # A demotion evicts the user's sessions, and the PATs minted under the
+      # old role that the new role could not mint — but ONLY those: a plain
+      # member may still hold the read-only PAT they are entitled to mint.
+      if demoted? do
         {:ok, _} = delete_user_session_tokens(user)
         {:ok, _} = revoke_team_pats_exceeding_role(team, user, new_role)
       end
