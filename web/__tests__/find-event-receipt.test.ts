@@ -22,6 +22,12 @@
  * called — because "we did not even try" and "we tried and it failed" are
  * different facts and only one of them is a client bug.
  *
+ * The routing arms below assert WHAT was sent, not merely that something was:
+ * a `recorded:true` that descends from a write to the WRONG endpoint, or from
+ * one that dropped `X-BP-SEARCH-CLIENT` (the header the upstream attributes
+ * sessions by, for anti-gaming), is a receipt that measured the wrong thing.
+ * Counting calls alone would pass every one of those regressions.
+ *
  * This is the first route-handler test in web/; two bundler-only resolutions
  * (`@/…` and `next/server`) are replayed in `support/server-only-loader.mjs`.
  *
@@ -42,8 +48,32 @@ interface Receipt {
 }
 
 const realFetch = globalThis.fetch;
+
+/** One upstream write attempt, captured whole — url, headers AND payload. */
+interface Attempt {
+  url: string;
+  headers: Record<string, string>;
+  payload: Record<string, unknown>;
+}
+
 /** Every upstream call this route made during the test — the write attempts. */
-let calls: string[] = [];
+let calls: Attempt[] = [];
+
+function capture(input: RequestInfo | URL, init?: RequestInit): void {
+  const headers: Record<string, string> = {};
+  for (const [k, v] of Object.entries(
+    (init?.headers ?? {}) as Record<string, string>,
+  )) {
+    headers[k.toLowerCase()] = v;
+  }
+  let payload: Record<string, unknown> = {};
+  try {
+    payload = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+  } catch {
+    payload = { unparsable: String(init?.body) };
+  }
+  calls.push({ url: String(input), headers, payload });
+}
 
 beforeEach(() => {
   calls = [];
@@ -55,8 +85,8 @@ afterEach(() => {
 
 /** Stub upstream: record the call, then answer with `status`. */
 function upstreamAnswers(status: number): void {
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    calls.push(String(input));
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    capture(input, init);
     return new Response(JSON.stringify({ ok: status < 400 }), {
       status,
       headers: { "Content-Type": "application/json" },
@@ -66,16 +96,16 @@ function upstreamAnswers(status: number): void {
 
 /** Stub upstream: record the call, then reject the way a dead host does. */
 function upstreamUnreachable(): void {
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    calls.push(String(input));
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    capture(input, init);
     throw new TypeError("fetch failed");
   }) as typeof fetch;
 }
 
 /** Stub upstream that must never be reached — any call is itself the failure. */
 function upstreamForbidden(): void {
-  globalThis.fetch = (async (input: RequestInfo | URL) => {
-    calls.push(String(input));
+  globalThis.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
+    capture(input, init);
     return new Response("{}", { status: 200 });
   }) as typeof fetch;
 }
@@ -93,6 +123,13 @@ const CLICK = JSON.stringify({
   queryEventId: "qe_1",
   objectId: "doc_1",
   position: 3,
+  sid: "sid_1",
+});
+
+const CORRECTION = JSON.stringify({
+  kind: "correction",
+  from: "helo",
+  to: "hello",
   sid: "sid_1",
 });
 
@@ -114,6 +151,37 @@ test("exit 1 — upstream 2xx: the receipt records the write that happened", asy
   assert.equal(body.ok, true);
   assert.equal(body.recorded, true, "a 2xx write must be recorded:true");
   assert.equal(calls.length, 1, "the click must reach the interaction endpoint");
+  assert.match(
+    calls[0].url,
+    /\/v1\/data\/search\/[^/]+\/interaction$/,
+    "a click must be written to the INTERACTION endpoint — a recorded:true that " +
+      "descends from a write to the wrong endpoint measured the wrong thing",
+  );
+  assert.deepEqual(
+    calls[0].payload,
+    { queryEventId: "qe_1", objectId: "doc_1", position: 3 },
+    "the click payload must carry the event, the object and the position",
+  );
+  assert.equal(
+    calls[0].headers["x-bp-search-client"],
+    "sid_1",
+    "the session header the upstream attributes by (anti-gaming) must survive the hop",
+  );
+});
+
+test("exit 1 — a correction is written to the CORRECTION endpoint, not the click one", async () => {
+  upstreamAnswers(200);
+  const { body } = await receiptOf(post(CORRECTION));
+
+  assert.equal(body.recorded, true);
+  assert.equal(calls.length, 1);
+  assert.match(
+    calls[0].url,
+    /\/v1\/data\/search\/[^/]+\/correction$/,
+    "the two signals must not be able to swap endpoints under a refactor",
+  );
+  assert.deepEqual(calls[0].payload, { from: "helo", to: "hello" });
+  assert.equal(calls[0].headers["x-bp-search-client"], "sid_1");
 });
 
 /* ── 2/3. the upstream refused — the honest status must survive the hop ── */

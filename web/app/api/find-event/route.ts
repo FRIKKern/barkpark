@@ -95,9 +95,15 @@ export async function POST(request: Request): Promise<NextResponse> {
     url = `${API_URL}/v1/data/search/${DATASET}/interaction`;
     payload = { queryEventId, objectId, position };
   } else {
+    // `kind` is caller-supplied and only TYPED as a union — at runtime it can
+    // be anything, so it is clamped before it rides back out in the receipt.
+    // Reflecting an unbounded request field verbatim is how a diagnostic
+    // string becomes an amplification surface.
+    const named =
+      typeof kind === "string" ? JSON.stringify(kind.slice(0, 32)) : "absent";
     return recordingReceipt(
       false,
-      `unroutable signal (kind=${kind ?? "absent"}): no upstream write was attempted`,
+      `unroutable signal (kind=${named}): no upstream write was attempted`,
     );
   }
 
