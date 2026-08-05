@@ -114,17 +114,51 @@ func TestParseTaskCreateArgs_Errors(t *testing.T) {
 	}
 }
 
-// tlv-s6 (TLV charter D14): the create receipt echoes the lifecycle_status the
-// task was born with — a birth-as-considering must be visible, never silently
-// assumed "open". Runs the real runTaskCreate against a stub mutate endpoint.
-func TestRunTaskCreateReceiptEchoesBornLifecycle(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		if strings.Contains(req.URL.Path, "/v1/data/mutate") {
-			io.WriteString(rw, `{"results":[{"id":"drafts.task-9"}]}`)
+// taskCreateStubMutate is a mutate endpoint that behaves like the real one on
+// the axis these tests exercise: it PERSISTS the create op and echoes the
+// stored record back as results[].document, the way
+// Content.Mutations does with Envelope.render. The receipt reads its claims off
+// that document (PDS wave 48), so a stub that returned a bare id would be
+// testing a receipt with nothing to read.
+func taskCreateStubMutate(t *testing.T, docID string) *httptest.Server {
+	t.Helper()
+	return httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		if !strings.Contains(req.URL.Path, "/v1/data/mutate") {
+			rw.WriteHeader(http.StatusNotFound)
 			return
 		}
-		rw.WriteHeader(http.StatusNotFound)
+		var body struct {
+			Mutations []map[string]map[string]any `json:"mutations"`
+		}
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil || len(body.Mutations) == 0 {
+			rw.WriteHeader(http.StatusBadRequest)
+			return
+		}
+		op := body.Mutations[0]
+		document := map[string]any{"_id": docID, "_draft": true}
+		if create, ok := op["create"]; ok {
+			for k, v := range create {
+				document[k] = v
+			}
+			document["_id"] = docID
+			document["_draft"] = true
+		}
+		if _, ok := op["publish"]; ok {
+			document["_id"] = strings.TrimPrefix(docID, "drafts.")
+			document["_draft"] = false
+		}
+		result := map[string]any{"id": document["_id"], "document": document}
+		json.NewEncoder(rw).Encode(map[string]any{"results": []any{result}})
 	}))
+}
+
+// tlv-s6 (TLV charter D14): the create receipt names the lifecycle_status the
+// task was born with — a birth-as-considering must be visible, never silently
+// assumed "open". PDS wave 48: the value descends from the record the server
+// PERSISTED, not from the request map. Runs the real runTaskCreate against a
+// stub mutate endpoint.
+func TestRunTaskCreateReceiptEchoesBornLifecycle(t *testing.T) {
+	ts := taskCreateStubMutate(t, "drafts.task-9")
 	defer ts.Close()
 
 	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
@@ -165,9 +199,7 @@ func TestRunTaskCreateReceiptEchoesBornLifecycle(t *testing.T) {
 
 // The human (non-machine) receipt line names the born lifecycle too.
 func TestRunTaskCreateHumanReceiptNamesLifecycle(t *testing.T) {
-	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
-		io.WriteString(rw, `{"results":[{"id":"drafts.task-3"}]}`)
-	}))
+	ts := taskCreateStubMutate(t, "drafts.task-3")
 	defer ts.Close()
 
 	var so, se bytes.Buffer
@@ -179,6 +211,51 @@ func TestRunTaskCreateHumanReceiptNamesLifecycle(t *testing.T) {
 	}
 	if got := so.String(); !strings.Contains(got, "lifecycle considering") {
 		t.Fatalf("human receipt %q does not name the born lifecycle", got)
+	}
+}
+
+// PDS wave 48. THE DIVERGENCE THE OLD RECEIPT COULD NOT PRINT: the request asks
+// for lifecycle_status=open and the server stores "blocked". The receipt must
+// name what the server STORED — the old `born := body["lifecycle_status"]` read
+// the request map the CLI had defaulted "open" into, so it printed "open" here
+// and no test could ever have caught it.
+func TestRunTaskCreateReceiptNamesTheStoredLifecycleNotTheRequested(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		io.WriteString(rw, `{"results":[{"id":"drafts.task-11","document":{"_id":"drafts.task-11","_draft":true,"lifecycle_status":"blocked"}}]}`)
+	}))
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+	if code := runTaskCreate(w, globals{yes: true}, ctx, []string{"a task"}); code != exitOK {
+		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+	}
+	if got := so.String(); !strings.Contains(got, "lifecycle blocked") {
+		t.Fatalf("receipt %q does not name the STORED lifecycle — it is still speaking for the request", got)
+	}
+}
+
+// A server that echoes no document cannot back the claim, so the receipt says
+// so instead of filling the gap in from what was sent.
+func TestRunTaskCreateReceiptRefusesWhatTheServerDidNotEcho(t *testing.T) {
+	ts := httptest.NewServer(http.HandlerFunc(func(rw http.ResponseWriter, req *http.Request) {
+		io.WriteString(rw, `{"results":[{"id":"drafts.task-12"}]}`)
+	}))
+	defer ts.Close()
+
+	var so, se bytes.Buffer
+	w := &writer{stdout: &so, stderr: &se, output: "table"}
+	ctx := manifest.Context{Server: ts.URL, Dataset: "production", Token: "tok"}
+	if code := runTaskCreate(w, globals{yes: true}, ctx, []string{"a task"}); code != exitOK {
+		t.Fatalf("runTaskCreate exit = %d, stderr: %s", code, se.String())
+	}
+	got := so.String()
+	if strings.Contains(got, "lifecycle open") {
+		t.Fatalf("receipt %q claims a lifecycle the server never echoed", got)
+	}
+	if !strings.Contains(got, "unknown") || !strings.Contains(got, "unconfirmed") {
+		t.Fatalf("receipt %q does not say what it could not confirm", got)
 	}
 }
 
