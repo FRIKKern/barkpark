@@ -107,6 +107,19 @@ set -euo pipefail
 # working. Declaring here covers BOTH halves at once: `--match console` is what
 # console-harness.yml's `changes` dispatcher runs, so one list drives dispatch
 # and coverage and the two cannot drift apart.
+#
+# `cloud/lib/**` IS THE WHOLE DIRECTORY, AND IT HAS TO BE (wave 30 S1). The
+# bidirectional notification census in `__app.test.mjs` walks EVERY `.ex` file
+# under `cloud/lib` to find the call sites that dispatch an alert — its universe
+# is "the control plane", not a file list, because the defect it catches is a
+# producer that does not exist ANYWHERE. Declaring the directory is therefore the
+# narrowest HONEST declaration: name one file and adding a producer in a second
+# file would neither re-run the harness nor be covered, which is the exact
+# green-by-construction shape this ratchet exists to kill. The cost is real and
+# accepted — the console harness now runs on any control-plane edit — and it is
+# the same bill the `deploy/` entries above pay for the same reason. The
+# `auto_deploy_worker.ex` line is left standing: it is subsumed here, but it
+# documents its own read at the point that made it.
 CONSOLE_PATHS='cloud/priv/static/**
 internal/taskboard/testdata/styleguide_lifecycle.txt
 internal/pdrender/testdata/styleguide_tokens.txt
@@ -118,6 +131,7 @@ cloud/test/barkpark_cloud/web/**
 deploy/lib/site-deploy-common.sh
 deploy/site-deploy-node.sh
 cloud/lib/barkpark_cloud/sites/auto_deploy_worker.ex
+cloud/lib/**
 scripts/console-path-escape-check.sh
 scripts/console-path-escape-check.test.sh'
 

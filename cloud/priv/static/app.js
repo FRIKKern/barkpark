@@ -2672,23 +2672,56 @@
   // delivery log is read-only. Everything below is backend-true: chat credentials
   // are write-only (the server echoes only `configured:bool`), the four failure
   // events render their `chat_default_on` fan-out as an honest default (never as an
-  // explicit choice), and the always-send `test` event is stated, never faked as a
+  // explicit choice), and the always-send events are stated, never faked as a
   // toggle. Reads are member-visible; every write is admin-gated — a plain member
   // sees the email settings READ-ONLY with no save-rows and no admin affordances.
 
   // The per-event alert toggles, in display order. Labels mirror the server's
   // EmailSettings columns 1:1 (Notifications.@chat_events minus the always-send
-  // "test", which the matrix renders as its own honest info row).
+  // events, which the matrix renders as their own honest info rows).
+  //
+  // WAVE 30 S1 — SIX ROWS, NOT NINE. `deployment_succeeded`, `member_invited`
+  // and `token_expiring` shipped as toggles with ZERO producers anywhere in
+  // cloud/lib: nothing could ever send them, and `token_expiring` was DEFAULT
+  // ON, so a person who never opened this page read a checked box promising a
+  // warning before an API token lapsed. The verdict was REMOVE, not "wire the
+  // producer" — `dispatch_event/3` fans to every team member
+  // (notifications.ex `team_member_emails/1`) while a token belongs to ONE
+  // user, so the obvious producer would convert a missing alert into a
+  // cross-member credential disclosure. The invitee already gets a REAL email
+  // (`Transactional.deliver_invite/1`), and the deployment-success terminal is
+  // written by `Sites.Deploy.settle_live/2`, which legally re-reports live.
+  // Every row below is bidirectionally census-pinned in __app.test.mjs: offer a
+  // seventh and the Console gate reds until a producer exists.
   var NOTIF_EVENTS = [
     ["provision_failed", "Provisioning failed"],
     ["provision_succeeded", "Provisioning succeeded"],
     ["deployment_failed", "Deployment failed"],
-    ["deployment_succeeded", "Deployment succeeded"],
     ["agent_unreachable", "Instance unreachable"],
     ["agent_reachable", "Instance reachable again"],
-    ["subscription_past_due", "Subscription past due"],
-    ["member_invited", "Member invited"],
-    ["token_expiring", "API token expiring"]
+    ["subscription_past_due", "Subscription past due"]
+  ];
+
+  // The ALWAYS-SEND events: dispatched, never toggleable, and therefore stated
+  // rather than faked as a checkbox. `[event, label, consequence]`.
+  //
+  // Machine-readable ON PURPOSE — this literal is side A's other half in the
+  // notification census (__app.test.mjs), which requires every event dispatched
+  // in cloud/lib to appear on this surface as a toggle row OR here. It is one
+  // literal rather than a bare name list plus a separate label table precisely
+  // so the names a person reads and the names the census parses cannot drift.
+  //
+  // `trial_expiring` is the row this fixed: it is dispatched in production
+  // (`workers/trial_expiry_worker.ex`) and sat on `Notifications.@always_send`
+  // with NO column, NO row and NO way to see it. It gets a row, not a column —
+  // the always-send bypass is a deliberate documented exception (dwb-13) that
+  // still honours `alerts_enabled`, so inventing a column would silently change
+  // delivery semantics instead of describing them.
+  var NOTIF_ALWAYS_SEND = [
+    ["test", "Test",
+     "Always sent to every enabled channel — fire one with “Send test”."],
+    ["trial_expiring", "Trial ending",
+     "Always sent — no per-event toggle; mutable only via the master email switch above."]
   ];
 
   // The email transport single-select (GR34: pill()/`.seg` segmented control).
@@ -2967,8 +3000,9 @@
   }
 
   // The event×channel routing matrix — a LIVE grid (no save-row; each cell writes
-  // on toggle). Columns = email + 5 chat channels; rows = the 9 events; the
-  // always-send `test` row is stated, never a lying toggle.
+  // on toggle). Columns = email + 5 chat channels; rows = the six producible
+  // events; the always-send events are STATED as their own info rows, never
+  // faked as toggles nothing reads.
   function notifMatrixSectionHtml(s) {
     var cols = notifMatrixColumns();
     var head = '<div class="set-matrix-corner"></div>' + cols.map(function (c) {
@@ -2979,12 +3013,14 @@
       return '<div class="set-matrix-event">' + esc(pair[1]) + "</div>" +
         cols.map(function (c) { return notifMatrixCellHtml(s, pair[0], c); }).join("");
     }).join("");
-    var testRow = '<div class="set-matrix-event">Test</div>' +
-      '<div class="set-matrix-testcell dim">Always sent to every enabled channel &mdash; fire one with &ldquo;Send test&rdquo;.</div>';
+    var alwaysRows = NOTIF_ALWAYS_SEND.map(function (row) {
+      return '<div class="set-matrix-event">' + esc(row[1]) + "</div>" +
+        '<div class="set-matrix-testcell dim">' + esc(row[2]) + "</div>";
+    }).join("");
     return '<section class="set-section">' +
       '<h3 class="set-h">Event routing</h3>' +
       '<p class="set-purpose">Which channels each event notifies. Failure events fan to every enabled channel by default; changes save the instant you toggle.</p>' +
-      '<div class="set-matrix"><div class="set-matrix-grid" id="notif-matrix">' + head + rows + testRow + "</div></div>" +
+      '<div class="set-matrix"><div class="set-matrix-grid" id="notif-matrix">' + head + rows + alwaysRows + "</div></div>" +
       '<div class="set-matrix-legend dim">Dashed cells are on by default for failure events until you customize them.</div>' +
       '<div class="set-matrix-ack dim" id="notif-matrix-ack" aria-live="polite"></div>' +
       "</section>";
