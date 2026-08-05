@@ -4521,7 +4521,15 @@ defmodule BarkparkCloud.Web.Router do
   # notifications-chat: when the body carries `{"channel": "<type>"|null}` (or
   # `{"target": "chat"}`), this instead fires the always-send `test` CHAT event to
   # the enabled chat channels (all, or just `channel`), enqueuing one Oban job each
-  # → 202. `channel: null` with `target: "chat"` fans to every enabled channel.
+  # → 202 {ok: true, queued: <n>}. `channel: null` with `target: "chat"` fans to
+  # every enabled channel.
+  #
+  # cch-w32-s1: `queued` is the COUNT OF CHANNELS ACTUALLY REACHED, and it can be
+  # 0 — no channels, only a disabled channel, or a `channel` matching nothing.
+  # This route used to render an unconditional `{ok: true}` over a bare `:ok`, so
+  # a fan-out to nobody read as accepted to the console, to `bp` and to curl
+  # alike. `ok: true` still means "the request was accepted"; `queued` is the
+  # separate question of whether anything was sent, and the console reads it.
   post "/v1/notifications/test" do
     conn = Auth.require_team_admin(conn, [])
 
@@ -4530,10 +4538,10 @@ defmodule BarkparkCloud.Web.Router do
         conn
 
       chat_test?(conn.body_params) ->
-        :ok =
+        {:ok, queued} =
           Notifications.send_test_chat(conn.assigns.current_team, conn.body_params["channel"])
 
-        json(conn, 202, %{ok: true})
+        json(conn, 202, %{ok: true, queued: queued})
 
       true ->
         test_email(conn)

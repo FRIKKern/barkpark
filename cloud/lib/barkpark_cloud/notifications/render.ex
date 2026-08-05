@@ -32,6 +32,17 @@ defmodule BarkparkCloud.Notifications.Render do
   email's own `detail/1` has applied since wave 13 S2. `event_email.ex`'s comment
   that "`Render.render/2` never reads it" described the pre-wave-29 tree; the
   scrub boundary it protects is upheld here, not crossed.
+
+  ## The trial teardown is a NAMED arm (cch-w32-s1)
+
+  `trial_expiring` is dispatched hourly in production and, as of charter D359,
+  fans to chat through `Notifications.@chat_always_send`. Without a named arm it
+  would fall to the catch-all below and ship "Event: trial_expiring for acme."
+  at `:info` — which Discord renders GREEN — for a message whose subject is an
+  instance being torn down. It renders at `:warning`. NOTE THE LIMIT so nobody
+  over-claims it: Pushover escalates priority only on `:error`, so `:warning`
+  raises no Pushover priority; what it buys is the Discord/severity colour and
+  an honest classification.
   """
 
   alias BarkparkCloud.FailureCopy
@@ -74,13 +85,53 @@ defmodule BarkparkCloud.Notifications.Render do
         {"Subscription past due",
          "Your subscription is past due — hosted instances may be suspended.", :warning}
 
+      "trial_expiring" ->
+        {"Trial ending",
+         "Your free trial ends #{trial_window(payload)} — #{site} is torn down " <>
+           "automatically when it ends.", :warning}
+
       "test" ->
-        {"Test notification",
-         "This is a test from Barkpark Cloud. If you can read this, the channel works.", :info}
+        if muted?(payload) do
+          {"Test notification",
+           "This is a test from Barkpark Cloud. The channel works — but alerts are " <>
+             "currently OFF for this team, so no real notification will be delivered " <>
+             "until they are switched back on.", :warning}
+        else
+          {"Test notification",
+           "This is a test from Barkpark Cloud. If you can read this, the channel works.", :info}
+        end
 
       other ->
         {"Barkpark Cloud", "Event: #{other} for #{site}.", :info}
     end
+  end
+
+  # cch-w32-s1 — the trial window, BUILT FROM THE INTEGER, never from `:detail`.
+  #
+  # `TrialExpiryWorker` supplies both a `days` integer and a first-party `detail`
+  # sentence, and this arm reads only the integer. `detail` would have to travel
+  # through `cause/1`, i.e. `FailureCopy.humanize/1` = `classify() |> scrub()` —
+  # a FAILURE taxonomy plus a credential redactor. There is nothing to classify
+  # in control-plane-authored prose and nothing to scrub in an integer, and a
+  # future `@scrub_rules` pattern would then silently rewrite customer copy.
+  # (Measured: `humanize/1` is a no-op on that sentence today, so this is design
+  # hygiene, not a live bug.) The payload is the Oban args map, so the key is
+  # read under both a string and an atom; a missing/odd value degrades to "soon"
+  # rather than rendering "in  days".
+  defp trial_window(payload) do
+    case Map.get(payload, "days") || Map.get(payload, :days) do
+      1 -> "in 1 day"
+      d when is_integer(d) and d > 1 -> "in #{d} days"
+      _ -> "soon"
+    end
+  end
+
+  # cch-w32-s1 — did the test fan out from a MUTED team? `send_test_chat/2` is a
+  # transport probe and fires regardless of `alerts_enabled`, which is right; it
+  # sets this flag so the message itself can say so, instead of the one button
+  # whose job is to answer "will I be told?" answering an unqualified yes.
+  defp muted?(payload) do
+    Map.get(payload, "alerts_muted") == true or Map.get(payload, :alerts_muted) == true
   end
 
   # The failure's HUMAN cause as its own paragraph, or "" when the trigger site
