@@ -332,7 +332,8 @@ defmodule Barkpark.PdsDoorCensusTest do
              "only part a price column has to know.\n#{out}"
   end
 
-  test "every PRICE row carries CPU (user+sys) labelled LOCAL with the meter named", ctx do
+  test "every PRICE row carries CPU (user+sys) labelled LOCAL or FOREIGN with the meter named",
+       ctx do
     out = ctx.check_out
 
     price_rows =
@@ -365,12 +366,20 @@ defmodule Barkpark.PdsDoorCensusTest do
              "an error message would be asserted against as though it were a row of the price " <>
              "column. Re-word the message so its 4th whitespace token is not the literal PRICE."
 
+    # THE HOST AXIS HAS TWO LEGAL VALUES SINCE WAVE 48, AND THIS REGEX IS THE
+    # HALF OF THE PIN THAT LIVES ON THE REQUIRED GATE. It is deliberately NOT
+    # `\S+` in that slot: the census's own `price_shape_error` refuses a price
+    # wearing neither token, and a rider that accepted anything there would let
+    # a widened-into-a-hole grammar ride green. The dot-radix `[\d.]+` is the
+    # other half — it is what rejects the PDS-D691 comma fabrication
+    # (`CPU=0+1=1,00s`), which every substring glob in the census accepts.
     for row <- price_rows do
-      assert row =~ ~r/CPU=[\d.]+\+[\d.]+=[\d.]+s LOCAL meter=/,
-             "a PRICE row quotes something other than CPU=user+sys=total LOCAL with the meter " <>
-               "named. Wall is not a property of the door on a shared host (a fixed workload " <>
-               "swung 5.8x at constant load), and user alone understates the hetzner door 2.1x " <>
-               "because sys exceeds user.\nRow: #{row}"
+      assert row =~ ~r/CPU=[\d.]+\+[\d.]+=[\d.]+s (?:LOCAL|FOREIGN) meter=/,
+             "a PRICE row quotes something other than CPU=user+sys=total, LOCAL or FOREIGN, with " <>
+               "the meter named. Wall is not a property of the door on a shared host (a fixed " <>
+               "workload swung 5.8x at constant load), user alone understates the hetzner door " <>
+               "2.1x because sys exceeds user, and a CPU second with no host axis beside it is " <>
+               "not comparable to anything.\nRow: #{row}"
 
       refute row =~ ~r/\bwall\b.*=/,
              "a PRICE row quotes a wall figure as the price. Wall belongs in the column only " <>
