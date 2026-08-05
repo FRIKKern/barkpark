@@ -41,6 +41,16 @@ if [ -z "${DOMAIN:-}" ]; then
   exit 2
 fi
 PHX_SCHEME="${PHX_SCHEME:-https}"
+# The port the service binds to. Written into .env below, which api/start.sh
+# sources — so this single value drives the systemd unit, the firewall, the
+# health probe and every URL we print. A probe hardcoded to 4000 while the
+# service listens elsewhere fails on a HEALTHY box, which would turn the
+# honest "not answering" banner below into a new lie.
+APP_PORT="${PORT:-4000}"
+# Health-probe shape. Overridable so scripts/deploy-health-banner.test.sh can
+# drive the REAL loop without waiting out 60s per case.
+HEALTH_ATTEMPTS="${HEALTH_ATTEMPTS:-30}"
+HEALTH_INTERVAL="${HEALTH_INTERVAL:-2}"
 
 echo "============================================"
 echo "  Barkpark — Server Setup"
@@ -153,7 +163,7 @@ BARKPARK_KEK=$KEK
 BARKPARK_RELEASE_CAPTURE_HMAC_SECRET=$RELEASE_CAPTURE_HMAC
 PHX_HOST=$DOMAIN
 PHX_SCHEME=$PHX_SCHEME
-PORT=4000
+PORT=$APP_PORT
 MIX_ENV=prod
 ENVEOF
 else
@@ -180,6 +190,16 @@ for _var in BARKPARK_CLOAK_KEY PREVIEW_JWT_SECRET BARKPARK_KEK BARKPARK_RELEASE_
     echo "${_var}=$_val" >> "$APP_DIR/.env"
   fi
 done
+
+# Re-derive the port from the .env that is actually on disk — the file
+# api/start.sh sources, i.e. the same source the service binds to. On an
+# EXISTING install we keep the file's secrets (and its PORT), so the value we
+# computed from the environment above may not be what boots. Everything after
+# this line (firewall, health probe, printed URLs) descends from this one read.
+_env_port="$(sed -n 's/^PORT=//p' "$APP_DIR/.env" | tail -n1 | tr -d '[:space:]')"
+if [ -n "$_env_port" ]; then
+  APP_PORT="$_env_port"
+fi
 
 # Persist the plugin whitelist ONLY when the caller set it (bp setup threads it
 # through the ssh env prefix). Set-ness is tested with ${VAR+x} — NEVER
@@ -255,17 +275,25 @@ echo ">> Firewall..."
 ufw allow 22/tcp
 ufw allow 80/tcp
 ufw allow 443/tcp
-ufw allow 4000/tcp
+ufw allow "$APP_PORT"/tcp
 ufw --force enable
 
 # ── 11. Wait for healthy ────────────────────────────────────────────────────
-echo ">> Waiting for API..."
-for i in $(seq 1 30); do
-  if curl -s "http://localhost:4000/api/schemas" > /dev/null 2>&1; then
-    echo "   Ready!"
+# HEALTHY is the measurement this whole script's closing banner descends from.
+# It used to be taken and discarded: 30 failed probes fell through silently and
+# the "Barkpark is running!" banner printed unconditionally, exit 0. Never let
+# the banner outrun the probe again.
+echo ">> Waiting for API on localhost:$APP_PORT..."
+HEALTHY=0
+for i in $(seq 1 "$HEALTH_ATTEMPTS"); do
+  # -f so a non-2xx (a booting or crashed endpoint answering 500) is NOT read
+  # as healthy: the measurement is a good answer, not merely an open socket.
+  if curl -fs "http://localhost:$APP_PORT/api/schemas" > /dev/null 2>&1; then
+    echo "   Ready! (probe $i/$HEALTH_ATTEMPTS)"
+    HEALTHY=1
     break
   fi
-  sleep 2
+  sleep "$HEALTH_INTERVAL"
 done
 
 # ── 12. TLS (Caddy) ──────────────────────────────────────────────────────────
@@ -285,7 +313,7 @@ if [ "$PHX_SCHEME" = "https" ] && printf '%s' "$DOMAIN" | grep -q '[a-zA-Z]'; th
     apt-get update -qq && apt-get install -y -qq caddy
     cat > /etc/caddy/Caddyfile <<CADDYEOF
 $DOMAIN {
-	reverse_proxy localhost:4000
+	reverse_proxy localhost:$APP_PORT
 	handle_errors {
 		header Retry-After "15"
 		respond 503 {
@@ -315,15 +343,33 @@ fi
 IP=$(hostname -I | awk '{print $1}')
 echo ""
 echo "============================================"
-echo "  Barkpark is running!"
+if [ "$HEALTHY" = "1" ]; then
+  echo "  Barkpark is running!"
+else
+  echo "  Barkpark is INSTALLED but NOT ANSWERING"
+fi
 echo "============================================"
 echo ""
+if [ "$HEALTHY" != "1" ]; then
+  echo "  The API never answered http://localhost:$APP_PORT/api/schemas —"
+  echo "  $HEALTH_ATTEMPTS probes over ~$((HEALTH_ATTEMPTS * HEALTH_INTERVAL))s, every one failed."
+  echo "  Packages, database, secrets and the systemd unit ARE installed; the"
+  echo "  URLs below are where Barkpark will answer once the service comes up."
+  echo ""
+  echo "  Diagnose on this box:"
+  echo "    journalctl -u barkpark -n 200 --no-pager"
+  echo "    systemctl status barkpark"
+  echo "    curl -v http://localhost:$APP_PORT/api/schemas"
+  echo ""
+  echo "  Port checked: $APP_PORT (from PORT= in $APP_DIR/.env)"
+  echo ""
+fi
 if [ -n "$TLS_READY" ]; then
   echo "  Live:   https://$DOMAIN/studio   (after DNS for $DOMAIN points at $IP)"
   echo "  API:    https://$DOMAIN/api/schemas"
 else
-  echo "  Studio: http://$IP:4000/studio"
-  echo "  API:    http://$IP:4000/api/documents/post"
+  echo "  Studio: http://$IP:$APP_PORT/studio"
+  echo "  API:    http://$IP:$APP_PORT/api/documents/post"
 fi
 echo ""
 if [ -n "$ADMIN_TOKEN" ]; then
@@ -334,7 +380,7 @@ if [ -n "$ADMIN_TOKEN" ]; then
   if [ -n "$TLS_READY" ]; then
     echo "    bp setup --target connect --server https://$DOMAIN --token $ADMIN_TOKEN"
   else
-    echo "    bp setup --target connect --server http://$IP:4000 --token $ADMIN_TOKEN"
+    echo "    bp setup --target connect --server http://$IP:$APP_PORT --token $ADMIN_TOKEN"
   fi
   echo ""
 fi
@@ -348,3 +394,13 @@ echo ""
 echo "  Update from GitHub:"
 echo "    cd $APP_DIR && git pull && make rebuild"
 echo ""
+
+# The exit code descends from the measurement too. The failure path still
+# prints the admin token first — it is seeded into the database and shown
+# ONCE, so exiting before it would destroy the operator's only credential —
+# and only then refuses. A deploy that leaves the API dead is a failed deploy;
+# `bash -s < deploy.sh` in a provisioning script must be able to see that.
+if [ "$HEALTHY" != "1" ]; then
+  echo "  Deploy FAILED: the API is not answering on port $APP_PORT (see diagnostics above)." >&2
+  exit 1
+fi
