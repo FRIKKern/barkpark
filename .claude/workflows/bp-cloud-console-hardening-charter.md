@@ -1740,6 +1740,62 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-06 — wave 36 REVIEW (round 1 shipped, five PRs open, grade A)
+
+Five round-1 slices built, all green, **all five pushed and PR'd**. Round 2 (`cch-w36-s5`,
+`cch-w36-s6`) was NOT built, by design — the sequenced-rounds law: s5 waits on s1's merge (its census
+must pin post-fix reality) and s6 waits on `cch-w35-s4`'s merge (they amend literally adjacent
+if-statements in a thirty-line function).
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| The 403 stops being a billing sentence | `cch-w35-s4-forbidden-evidence-beats-the-global-slug` | `…billing-sentence-0` | [#9847](https://github.com/FRIKKern/barkpark/pull/9847) | none — the fence and its inertness sweep hold as built |
+| The launch paywall stops advertising a refused door | `cch-w36-s1-crown-launch-authority-seam` | `…advertising-a-d-1-r` | [#9848](https://github.com/FRIKKern/barkpark/pull/9848) | the deferred `/v1/me` repaint no longer clobbers a screen the person left; tier-button label restore |
+| The protection census stops reddening on its own write-up | `cch-w36-s2-protection-census-quoted-pattern-fence` | `…census-stops-redden-2-r` | [#9849](https://github.com/FRIKKern/barkpark/pull/9849) | mutation 5 — the ledger-scoped rival is RUN, not described |
+| The console stops rendering an owner as a member | `cch-w36-s3-me-cache-has-an-unknown-state` | `…an-owner-as--3-r` | [#9850](https://github.com/FRIKKern/barkpark/pull/9850) | `submitToken` honours the picker it actually rendered |
+| The operator refusal names its authority | `cch-w36-s4-operator-refusal-names-its-authority` | `…a-voice-and-fo-4-r` | [#9851](https://github.com/FRIKKern/barkpark/pull/9851) | the SIXTH billing-sentence site (`operatorConfirmBrake`'s `ctl.fail`) taken, not filed |
+
+**WHAT LANDED.** The crown was executed rather than argued: `go_live`'s bare 403 now names
+`required: "admin", scope: "team"` through a public `Auth.forbidden/2`, and the two un-predicated plan
+grids stop offering a checkout door the server has already decided to refuse — with a THREE-valued
+predicate, because `unknown` is not `blocked` and the `/new` flow never loads `/v1/me`. Alongside it:
+an evidence-carrying 403 stops reading as a billing sentence at four call sites; `/v1/me` gains a
+FAILED state so an owner whose read blipped is no longer told, as fact, that members can only mint
+read tokens; the operator bounce stops being silent and four operator cards stop calling a determined
+403 "the roll-up didn't answer"; and the epic's own merge-half guard stops reddening on the ledgers
+that document it.
+
+**THE MERGE-TRUTH PROOF, run at review and worth keeping.** All four console slices were merged
+together into one scratch integration branch: **914 unit tests / 0 fail, 103 smoke scenarios, sweep
+green**. Exactly ONE conflict, in `__app.test.mjs`, where `cch-w35-s4` and `cch-w36-s3` both append at
+EOF — git's region cuts through `cch-w36-s3`'s recording-DOM helper, so a naive "keep both" produces a
+SyntaxError. **Resolution: keep the ours block, close its last test with `});`, then the theirs block
+whole.** With `cch-w36-s2` also merged and charter PR `#9802`'s ten ledgers AND its charter edits
+applied on top, `required-checks.test.sh --hermetic` still ends **119 passed, 0 failed** — the fence
+survives this wave's own write-ups, which was its whole point.
+
+**WHAT DID NOT LAND, AND WHY.** (1) `cch-w36-s2`'s criterion 12 demands the run end "116 passed, 0
+failed" — unsatisfiable, because criterion 7 of the SAME task mandates two new mutation clauses. The
+builder kept the clauses and reported the discrepancy rather than deleting the "can lose" proof; the
+reviewer added a third clause and the run ends 119/0. **The lock is zero failures, never a clause
+count** — reconcile that wording. A server-side patch of the criterion text was attempted and refused
+(`validation_failed` on publishing a claimed task's draft), so the reconciliation lives in the
+criterion's attempt note, the PR body and the wave Paper. (2) The backlog row the builder could not
+file through five mutate timeouts, `cch-w36-bl-census-fence-quoted-arg-evasion`, is now FILED AND
+PUBLISHED — note that `bp task create` fails with a bare "unknown error" on long titles; create short,
+then `bp doc patch` the real title/description/criteria. (3) `cch-w35-s4` criterion 4 stays MISSED by
+design: the owner-gated billing writes now read the owner ROLE sentence, not the owner BILLING one,
+because the same label gates team deletion. **The lead should rule on that copy.**
+
+**WHAT THE NEXT WAVE MUST TAKE.** Merge round 1 in dependency order, then dispatch `cch-w36-s6` (needs
+`cch-w35-s4` merged) and `cch-w36-s5` (needs `cch-w36-s1` merged) — both briefs are already perfected
+and both are exactly the wish's shape. After them, the visible frontier is the ELEVEN remaining
+`meCache` read sites with no unknown arm (`cch-w36-bl-mecache-unknown-arms-remaining`) and the
+un-awaited `loadMe` race (D144 item 1): `meState()` now exists, so those are mechanical rather than a
+design question — and until they are done, an owner with a failed `/v1/me` still meets surfaces that
+fail closed in silence.
+
+
 ### 2026-08-06 — wave 35 CLOSED, wave 36 DECIDED (all six wave-35 PRs merged)
 
 **Wave 35 finished while wave 36 was being planned.** The three PRs the lead was holding on reds all
