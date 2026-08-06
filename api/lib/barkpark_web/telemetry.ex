@@ -75,6 +75,38 @@ defmodule BarkparkWeb.Telemetry do
         unit: {:byte, :kilobyte},
         description: "Total BEAM memory — watch for a monotonic climb (leak → OOM)."
       ),
+      # Q: "WHICH subsystem is growing?" — the total above says a leak exists but
+      # not where it lives. telemetry_poller's default vm measurement already
+      # emits the full nine-key `:erlang.memory()` map on [:vm, :memory] every
+      # 10s; only the subscription was narrow. These four break the total down
+      # into the answers that change what you do: processes (a leaking GenServer
+      # state / mailbox), binary (the classic refc-binary leak), ets (an
+      # unbounded cache table), code (module churn / hot-loading).
+      #
+      # UNIT DISCIPLINE (charter D64): every BEAM gauge here carries
+      # `unit: {:byte, :kilobyte}` to match `vm.memory.total` above.
+      # TelemetryMetricsPrometheus.Core scales the value but keeps the
+      # event-derived NAME, so these render unsuffixed (`vm_memory_processes`,
+      # not `..._kilobytes`) — an unsuffixed BYTE gauge sitting beside these
+      # unsuffixed KILOBYTE ones is exactly how a 1024x unit error renders as a
+      # phantom memory leak. Same unit or an explicit `_bytes` suffix, never
+      # neither.
+      last_value("vm.memory.processes",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory held by processes — climbs on leaking state or mailboxes."
+      ),
+      last_value("vm.memory.binary",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory in refc binaries — the classic binary leak."
+      ),
+      last_value("vm.memory.ets",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory in ETS tables — climbs on an unbounded cache."
+      ),
+      last_value("vm.memory.code",
+        unit: {:byte, :kilobyte},
+        description: "BEAM memory holding loaded code — climbs on module churn."
+      ),
       # Q: "is the scheduler backing up?" — run-queue length is the twin health
       # signal to memory; a sustained non-zero backlog means the box is overloaded
       # before latency alone makes it obvious.

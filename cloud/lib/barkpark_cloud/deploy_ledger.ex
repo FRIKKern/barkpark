@@ -315,13 +315,15 @@ defmodule BarkparkCloud.DeployLedger do
       refusal_code(reason) != "409" ->
         "DEFERRED_UNCLASSIFIED"
 
-      deferral_code(reason) == "box_at_capacity" ->
+      deferral_code(reason) == {:code, "box_at_capacity"} ->
         "BOX_AT_CAPACITY_DEFERRED"
 
       # `already_running` — and the BARE 409 with no code at all, which is D7's
       # 43%: a codeless 409 predates the concurrent-build cap entirely, so the
-      # only thing it can be is the busy slug.
-      deferral_code(reason) in [nil, "already_running"] ->
+      # only thing it can be is the busy slug. `:none` is that codeless 409 and
+      # NOT `:prose`: a box that sent unreadable words did say something, and
+      # folding it in here would absorb an unnamed cause into the busy bucket.
+      deferral_code(reason) in [:none, {:code, "already_running"}] ->
         "BOX_BUSY_DEFERRED"
 
       true ->
@@ -337,14 +339,64 @@ defmodule BarkparkCloud.DeployLedger do
   # The box's own refusal CODE out of a deferral reason: what follows the anchored
   # 409 prefix, up to the driver's own ` — ` suffix separator (the stored reason
   # carries `… — deferred: a rebuild carrying this content has been re-queued …`
-  # after the box's words). `nil` when the box named no code at all.
+  # after the box's words).
+  #
+  # THREE answers, not two, because "the box named no code" and "the box sent
+  # words this module cannot read as a code" are different facts with opposite
+  # consequences (dr-w4 S6):
+  #
+  #   `:none`         the anchored 409 carried no detail at all — D7's 43%, which
+  #                   predates the cap and can only be the busy slug.
+  #   `{:code, c}`    the box named a machine-readable code.
+  #   `:prose`        there IS a detail, and its first segment is not a code —
+  #                   an unnamed cause, which must rise in the tail rather than
+  #                   inherit `:none`'s busy-slug fallback.
   @deferral_prefix ~r/^the instance refused the deploy \((?:HTTP )?409\):\s*(.+)$/s
 
+  # `Sites.Deploy.box_refusal/3` stamps the box's request id AFTER the detail —
+  # `"#{base} [box request_id: #{rid}]"` — while `refusal_detail/1` returns the
+  # BARE code when the envelope carries no message. On a code-only refusal the
+  # stamp therefore lands INSIDE the first ` — ` segment, and the code read out
+  # of it was `box_at_capacity [box request_id: F9tPXq2A]`, which matches
+  # nothing. That break is not theoretical and not confined to the cap: it hits
+  # `already_running` too, shipping since W1, where a DEFERRED_UNCLASSIFIED row
+  # falls back to the generic chain bound and accuses a healthy runner of
+  # "refusing this site persistently for a cause the ledger cannot name". So the
+  # stamp comes off before the split — it is a provenance annotation, never part
+  # of the box's words.
+  @request_id_stamp ~r/\s*\[box request_id: [^\]]*\]/
+
+  # A CODE is a bare snake_case token, exactly as `refusal_detail/1` emits one
+  # (`err["code"]`, trimmed). Requiring the shape is what stops the opposite
+  # spoof: a CODELESS envelope (`%{"error" => %{"message" => "…"}}`, no `code`
+  # key) whose prose merely BEGINS with a code word used to be promoted to a
+  # capacity refusal with no code involved anywhere — the classifier was reading
+  # the first ` — `-delimited segment of arbitrary prose. This stays on the RAW
+  # column (see the moduledoc); moving the taxonomy onto a structured field is a
+  # design decision above a classifier's pay grade.
+  #
+  # It is a NARROW close, and honestly so: a codeless message that is byte-for-byte
+  # `box_at_capacity — <prose>` is indistinguishable from `code — message` in the
+  # persisted string, and no rule over that column can tell them apart.
+  @code_token ~r/^[a-z][a-z0-9_]*$/
+
+  @spec deferral_code(String.t()) :: {:code, String.t()} | :prose | :none
   defp deferral_code(reason) do
     case Regex.run(@deferral_prefix, reason) do
-      [_, detail] -> detail |> String.split(" — ") |> hd() |> String.trim()
-      nil -> nil
+      [_, detail] ->
+        detail
+        |> String.replace(@request_id_stamp, "")
+        |> String.split(" — ")
+        |> hd()
+        |> code_or_prose()
+
+      nil ->
+        :none
     end
+  end
+
+  defp code_or_prose(segment) do
+    if Regex.match?(@code_token, segment), do: {:code, segment}, else: :prose
   end
 
   defp health_gate?(reason) do
