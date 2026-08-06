@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-04",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-28-2026-08-03::email_gmail"],
+  "verdict": "blocked",
+  "direct_answer": "The exact Paper source and revision are proven, and preview or local-MIME proxies expose concrete geometry and semantic failures. No real Gmail delivery receipt exists, so none of the six required Gmail cells can pass.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+    "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+    "authority_status": "found"
+  },
+  "observations": {
+    "source_identity": {
+      "status": "found",
+      "blocks": 237,
+      "canonical_blocks_sha256": "697b972c5ea8eddd21348bdafe0a0e408d16b13962bc575463acc6efff9d688f"
+    },
+    "authored_carriers": {
+      "top_level_blocks": 237,
+      "nonempty_carriers": 134,
+      "empty_paragraphs": 103,
+      "headings": 43,
+      "paragraphs": 156,
+      "lists": 7,
+      "tables": 18,
+      "callouts": 13,
+      "table_header_cells": 57,
+      "table_body_cells": 466,
+      "marks": 67,
+      "authored_links": 0
+    },
+    "required_cells": {
+      "real_delivered_gmail_rendering": "BLOCKED: 0/2 CCH28 Gmail cells at widths 390 and 320; no account, session, delivery, or receipt",
+      "narrow_geometry": "BLOCKED: 0/2 delivered Gmail widths; proxy achieved client width 980 rather than 390 or 320 and overflowed both profiles",
+      "structural_semantics": "BLOCKED: 0/2 delivered cells; proxy retained 18/18 tables but passed 0/4 table semantic cells, 0/13 callout semantics per profile, and 0/67 mark semantics per profile",
+      "reading_order": "BLOCKED: no Gmail proof; proxy DOM comparison preserved 536/536 carriers across all profiles and 268/268 narrow carriers",
+      "link_and_label_behavior": "partial: source authors zero links, so Gmail link rewriting is not exercisable; proxy callout semantic labels are 0/13 per profile",
+      "source_message_identity": "BLOCKED: 0/2 Gmail receipts with delivery Message-ID; production returns HTML only; synthetic E06 identity was never delivered"
+    },
+    "proxy_geometry": {
+      "width_390": {"client_width": 980, "scroll_width": 1045, "overflow": true},
+      "width_320": {"client_width": 980, "scroll_width": 1046, "overflow": true}
+    },
+    "proxy_semantics": {
+      "tables_retained": "18/18 per profile",
+      "table_semantic_cells": "0/4",
+      "callout_semantics": "0/13 per profile; 0/52 across four profiles",
+      "mark_semantics": "0/67 per profile; 0/268 across four profiles",
+      "ordered_carriers": "536/536 all profiles; 268/268 narrow profiles"
+    }
+  },
+  "inferences": [
+    "The unit cannot pass until real Gmail deliveries at both required widths produce receipts binding Message-ID to the exact Paper slug and revision.",
+    "The delivery harness must wrap the exact production renderer output rather than substitute a separately generated body.",
+    "Because this Paper has zero authored links, link behavior needs explicit zero-denominator adjudication or a separate revision-pinned hostile control."
+  ],
+  "recommended_repair_seams": [
+    "Fetch exact revision-pinned HTML, construct a multipart message with source identity, deliver to Gmail, capture at 390 and 320, and emit the required delivery receipt.",
+    "Repair narrow containment, table headers, callout roles or labels, and authored strong/code semantics at the shared email render seam.",
+    "Never credit the E06 independently generated MIME body as production identity; require byte-equivalent canonical body proof."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "10 related CCH28 tasks queried for Gmail proof"],
+    "papers": ["cloud-console-hardening-wave-28-2026-08-03@49c1534d9fb76d0d9adc7b97f25ec471", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/source-denominators.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/semantic-order.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/geometry.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/semantics.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/unavailable-clients.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/CCH28.eml",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/fixtures/delivered-mail-clients.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/reports/blocked-cells.json",
+      "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex",
+      "api/lib/barkpark_web/controllers/bulldocs_email_html.ex",
+      "api/test/barkpark_web/controllers/bulldocs_email_controller_test.exs"
+    ]
+  },
+  "risks": [
+    "There is no Gmail client version, mailbox receipt, real 390/320 capture, or assistive-technology session.",
+    "The preview overflows both narrow proxy profiles and loses table, callout, and mark semantics.",
+    "The 103 empty paragraphs require explicit intent adjudication before any repair.",
+    "Generic link-policy tests cannot prove this exact zero-link revision."
+  ],
+  "unvisited_scope": [
+    "Any Gmail mailbox or Gmail UI",
+    "Any sent or delivered message and provider receipt",
+    "Real 390px and 320px Gmail captures and client version",
+    "VoiceOver, NVDA, or equivalent assistive-technology session",
+    "Other Papers and the other 35 repair-wave units"
+  ],
+  "evidence": {
+    "commands": [
+      "read-only task, cycle, paper, doc, and history calls",
+      "canonical source/block SHA-256 and denominator census",
+      "existing immutable geometry, semantic, reading-order, and unavailable-client artifacts",
+      "targeted repository evidence and credential scans"
+    ]
+  },
+  "credential_scan": {
+    "status": "clean",
+    "values_revealed": 0,
+    "high_confidence_matches": 0
+  },
+  "mutations": {
+    "repo_files_changed_by_surveyor": 0,
+    "barkpark_mutations": 0,
+    "mailbox_mutations": 0,
+    "mail_sent": 0
+  }
+}
