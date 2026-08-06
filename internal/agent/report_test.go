@@ -63,14 +63,14 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 		DiskProbe:   func() (int, error) { return 42, nil },
 		CPUProbe:    func() (int, error) { return 73, nil },
 		MemProbe:    func() (int, error) { return 61, nil },
-		LoadProbe:   func() (float64, error) { return 1.25, nil },
+		LoadProbe:   func() (float64, float64, error) { return 1.25, 1.89, nil },
 		PGSizeProbe: func() (int64, error) { return 1234567, nil },
 		SwapProbe:   func() (int, int64, error) { return 99, 2147479552, nil },
 		BeamProbe:   func() (int64, int64, error) { return 1602224128, 1233125376, nil },
 		PGTopRelationsProbe: func() ([]RelationSize, error) {
 			return []RelationSize{{Name: "mutation_events", Bytes: 1510000000}}, nil
 		},
-		ReqStatsProbe: func() (float64, int, error) { return 12.5, 87, nil },
+		ReqStatsProbe: func() (float64, int, float64, error) { return 12.5, 87, 0.22, nil },
 		BackupProbe:   func() (bool, string, error) { return true, "last backup 2h ago", nil },
 
 		HealthBaseURL: "https://server.example.com",
@@ -103,6 +103,9 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 	if r.Load1 != 1.25 {
 		t.Errorf("Load1 = %v, want 1.25", r.Load1)
 	}
+	if r.Load15 != 1.89 {
+		t.Errorf("Load15 = %v, want 1.89 (the sustain signal, D67)", r.Load15)
+	}
 	if r.PGSizeBytes != 1234567 {
 		t.Errorf("PGSizeBytes = %d, want 1234567", r.PGSizeBytes)
 	}
@@ -120,6 +123,9 @@ func TestGatherReportFromInjectedProbes(t *testing.T) {
 	}
 	if r.P95Ms != 87 {
 		t.Errorf("P95Ms = %d, want 87", r.P95Ms)
+	}
+	if r.Err5xxPerS != 0.22 {
+		t.Errorf("Err5xxPerS = %v, want 0.22", r.Err5xxPerS)
 	}
 	if !r.BackupOK || r.BackupDetail != "last backup 2h ago" {
 		t.Errorf("Backup = (%v, %q), want (true, last backup 2h ago)", r.BackupOK, r.BackupDetail)
@@ -160,6 +166,9 @@ func TestGatherReportHonestUnknowns(t *testing.T) {
 	if r.Load1 != -1 {
 		t.Errorf("Load1 = %v, want -1 (no probe)", r.Load1)
 	}
+	if r.Load15 != -1 {
+		t.Errorf("Load15 = %v, want -1 (no probe — never a fake idle 0)", r.Load15)
+	}
 	if r.PGSizeBytes != -1 {
 		t.Errorf("PGSizeBytes = %d, want -1 (no probe)", r.PGSizeBytes)
 	}
@@ -168,6 +177,9 @@ func TestGatherReportHonestUnknowns(t *testing.T) {
 	}
 	if r.P95Ms != -1 {
 		t.Errorf("P95Ms = %d, want -1 (no probe)", r.P95Ms)
+	}
+	if r.Err5xxPerS != -1 {
+		t.Errorf("Err5xxPerS = %v, want -1 (no probe — 'unmeasured', not 'no errors')", r.Err5xxPerS)
 	}
 	if r.SwapUsedPercent != -1 || r.SwapTotalBytes != -1 {
 		t.Errorf("swap = (%d, %d), want both -1 (no probe)", r.SwapUsedPercent, r.SwapTotalBytes)
@@ -203,11 +215,44 @@ func TestGatherReportHealthGateDown(t *testing.T) {
 // fail-soft: a CPU probe that errors leaves CPUUsedPercent at the -1 sentinel
 // while a wired memory/load probe still lands its reading. A partial box phones
 // home whatever it can prove.
+// TestGatherReportLoadPairFailsAsOneUnit proves the two load averages land
+// TOGETHER or not at all: one read of /proc/loadavg produces both, so a failing
+// probe must leave BOTH at the -1 sentinel rather than a real load1 beside a
+// fabricated load15 — which would read as a box that is busy now but has been
+// quiet for fifteen minutes, the exact opposite of the truth the sustain fence
+// is looking for.
+func TestGatherReportLoadPairFailsAsOneUnit(t *testing.T) {
+	rErr := gatherReport(ReportConfig{
+		LoadProbe: func() (float64, float64, error) { return 0, 0, errors.New("no /proc/loadavg") },
+	})
+	if rErr.Load1 != -1 || rErr.Load15 != -1 {
+		t.Errorf("load = (%v, %v), want both -1 (probe errored)", rErr.Load1, rErr.Load15)
+	}
+
+	// A genuinely idle box reads 0 — real data, distinct from the sentinel.
+	rIdle := gatherReport(ReportConfig{
+		LoadProbe: func() (float64, float64, error) { return 0, 0, nil },
+	})
+	if rIdle.Load1 != 0 || rIdle.Load15 != 0 {
+		t.Errorf("load = (%v, %v), want (0, 0) — idle is real, not the -1 sentinel",
+			rIdle.Load1, rIdle.Load15)
+	}
+
+	// The live shape this field exists for: quiet right now, sustained-busy for
+	// the last fifteen minutes. Only load15 can say it.
+	rSustained := gatherReport(ReportConfig{
+		LoadProbe: func() (float64, float64, error) { return 0.64, 1.89, nil },
+	})
+	if rSustained.Load1 != 0.64 || rSustained.Load15 != 1.89 {
+		t.Errorf("load = (%v, %v), want (0.64, 1.89)", rSustained.Load1, rSustained.Load15)
+	}
+}
+
 func TestGatherReportVitalsFailSoft(t *testing.T) {
 	r := gatherReport(ReportConfig{
 		CPUProbe:  func() (int, error) { return 0, errors.New("no /proc/stat") },
 		MemProbe:  func() (int, error) { return 55, nil },
-		LoadProbe: func() (float64, error) { return 0.5, nil },
+		LoadProbe: func() (float64, float64, error) { return 0.5, 0.75, nil },
 	})
 
 	if r.CPUUsedPercent != -1 {
@@ -234,7 +279,7 @@ func TestGatherReportVitalsFailSoft(t *testing.T) {
 func TestGatherReportReqStatsWiring(t *testing.T) {
 	// Probe error → both sentinels.
 	rErr := gatherReport(ReportConfig{
-		ReqStatsProbe: func() (float64, int, error) { return 0, 0, errors.New("404") },
+		ReqStatsProbe: func() (float64, int, float64, error) { return 0, 0, 0, errors.New("404") },
 	})
 	if rErr.ReqPerS != -1 {
 		t.Errorf("ReqPerS = %v, want -1 (probe errored, not a fake 0)", rErr.ReqPerS)
@@ -245,7 +290,7 @@ func TestGatherReportReqStatsWiring(t *testing.T) {
 
 	// Success with null p95 → req/s lands, p95 stays the -1 sentinel.
 	rNull := gatherReport(ReportConfig{
-		ReqStatsProbe: func() (float64, int, error) { return 3.0, -1, nil },
+		ReqStatsProbe: func() (float64, int, float64, error) { return 3.0, -1, -1, nil },
 	})
 	if rNull.ReqPerS != 3.0 {
 		t.Errorf("ReqPerS = %v, want 3.0", rNull.ReqPerS)
@@ -256,7 +301,7 @@ func TestGatherReportReqStatsWiring(t *testing.T) {
 
 	// A real 0 req/s (idle box) is data, not the sentinel.
 	rIdle := gatherReport(ReportConfig{
-		ReqStatsProbe: func() (float64, int, error) { return 0, 0, nil },
+		ReqStatsProbe: func() (float64, int, float64, error) { return 0, 0, 0, nil },
 	})
 	if rIdle.ReqPerS != 0 {
 		t.Errorf("ReqPerS = %v, want 0 (idle is real, not the -1 sentinel)", rIdle.ReqPerS)
@@ -287,7 +332,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		if probe == nil {
 			t.Fatal("probe is nil, want a wired probe")
 		}
-		rps, p95, err := probe()
+		rps, p95, _, err := probe()
 		if err != nil {
 			t.Fatalf("probe error: %v", err)
 		}
@@ -308,7 +353,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		rps, p95, err := NewReqStatsProbe(srv.URL, "", nil)()
+		rps, p95, _, err := NewReqStatsProbe(srv.URL, "", nil)()
 		if err != nil {
 			t.Fatalf("probe error: %v", err)
 		}
@@ -320,13 +365,61 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		}
 	})
 
+	t.Run("err_5xx_per_s: real rate lands, null and ABSENT both → -1", func(t *testing.T) {
+		// A live 5xx rate lands verbatim, all the way into the Report.
+		srvLive := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 12.0, "p95_ms": 90, "err_5xx_per_s": 0.22, "window_s": 60}`))
+		}))
+		defer srvLive.Close()
+		r := gatherReport(ReportConfig{ReqStatsProbe: NewReqStatsProbe(srvLive.URL, "", nil)})
+		if r.Err5xxPerS != 0.22 {
+			t.Errorf("Err5xxPerS = %v, want 0.22 (a live rate on a box called healthy)", r.Err5xxPerS)
+		}
+
+		// An EMPTY window reports null — not zero errors, no samples at all.
+		srvNull := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 0.0, "p95_ms": null, "err_5xx_per_s": null, "window_s": 60}`))
+		}))
+		defer srvNull.Close()
+		if _, _, e5, err := NewReqStatsProbe(srvNull.URL, "", nil)(); err != nil || e5 != -1 {
+			t.Errorf("(err5xx, err) = (%v, %v), want (-1, nil) on a null window", e5, err)
+		}
+
+		// VERSION SKEW: an instance built before this field omits the key
+		// entirely. That must read -1 (unmeasured), never 0 — otherwise every
+		// stale instance in the fleet starts claiming a perfect error rate.
+		srvOld := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 9.0, "p95_ms": 40, "window_s": 60}`))
+		}))
+		defer srvOld.Close()
+		rps, _, e5, err := NewReqStatsProbe(srvOld.URL, "", nil)()
+		if err != nil {
+			t.Fatalf("probe error: %v", err)
+		}
+		if rps != 9.0 {
+			t.Errorf("req/s = %v, want 9.0 (the fields it DOES have still land)", rps)
+		}
+		if e5 != -1 {
+			t.Errorf("err5xx = %v, want -1 (key absent — unmeasured, not 'no errors')", e5)
+		}
+
+		// A genuine 0.0 (measured window, no 5xx) is data and must survive.
+		srvZero := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+			w.Write([]byte(`{"req_per_s": 5.0, "p95_ms": 12, "err_5xx_per_s": 0.0, "window_s": 60}`))
+		}))
+		defer srvZero.Close()
+		if _, _, e5, _ := NewReqStatsProbe(srvZero.URL, "", nil)(); e5 != 0 {
+			t.Errorf("err5xx = %v, want 0 (measured clean window, not the -1 sentinel)", e5)
+		}
+	})
+
 	t.Run("404 (old instance) → error, sentinels via gatherReport", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
 			http.Error(w, "not found", http.StatusNotFound)
 		}))
 		defer srv.Close()
 
-		rps, p95, err := NewReqStatsProbe(srv.URL, "", nil)()
+		rps, p95, _, err := NewReqStatsProbe(srv.URL, "", nil)()
 		if err == nil {
 			t.Fatal("err = nil, want a non-nil error on 404")
 		}
@@ -345,7 +438,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}))
 		defer srv.Close()
-		if _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
+		if _, _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
 			t.Error("err = nil, want a non-nil error on 500")
 		}
 	})
@@ -355,7 +448,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 			w.Write([]byte(`not json`))
 		}))
 		defer srv.Close()
-		if _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
+		if _, _, _, err := NewReqStatsProbe(srv.URL, "", nil)(); err == nil {
 			t.Error("err = nil, want a non-nil error on an undecodable body")
 		}
 	})
@@ -365,7 +458,7 @@ func TestNewReqStatsProbeHTTP(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
 		url := srv.URL
 		srv.Close()
-		if _, _, err := NewReqStatsProbe(url, "", nil)(); err == nil {
+		if _, _, _, err := NewReqStatsProbe(url, "", nil)(); err == nil {
 			t.Error("err = nil, want a transport error against a closed server")
 		}
 	})

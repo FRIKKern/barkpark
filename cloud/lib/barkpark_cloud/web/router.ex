@@ -478,6 +478,8 @@ defmodule BarkparkCloud.Web.Router do
     cpu_cores: nil,
     mem_used_percent: nil,
     load1: nil,
+    load15: nil,
+    err_5xx_per_s: nil,
     disk_used_percent: nil,
     swap_used_percent: nil,
     swap_total_bytes: nil,
@@ -8759,6 +8761,20 @@ defmodule BarkparkCloud.Web.Router do
       cpu_cores: measured_or_nil(Map.get(payload, "cpu_cores")),
       mem_used_percent: measured_or_nil(Map.get(payload, "mem_used_percent")),
       load1: measured_or_nil(Map.get(payload, "load1")),
+      # The SUSTAIN signal (charter D67), and the reason the fence is evaluatable
+      # from this payload at all: this row is ONE beat
+      # (`latest_health_payload_map/1` is a DISTINCT ON … ORDER BY inserted_at
+      # DESC), so a "2 of the last 3 beats" rule has no window to read here.
+      # load15 is a 15-minute kernel EWMA — sustained, and delivered as one
+      # scalar. `load1` stays for the reason string's present-tense colour: a box
+      # can read load1 0.64/core (idle-looking) while load15 reads 1.89/core.
+      load15: measured_or_nil(Map.get(payload, "load15")),
+      # 5xx per second off the instance's own 60s ring (D75). Same law as every
+      # vital above: an absent key (an agent predating the field) and the -1
+      # sentinel (probe unwired, instance too old, or an EMPTY window) both
+      # render nil. A fabricated 0 here would read "this box is serving no
+      # errors" about a box nobody measured — the most reassuring lie available.
+      err_5xx_per_s: measured_or_nil(Map.get(payload, "err_5xx_per_s")),
       disk_used_percent: measured_or_nil(Map.get(payload, "disk_used_percent")),
       swap_used_percent: measured_or_nil(Map.get(payload, "swap_used_percent")),
       swap_total_bytes: measured_or_nil(Map.get(payload, "swap_total_bytes")),

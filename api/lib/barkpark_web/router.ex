@@ -1600,10 +1600,16 @@ defmodule BarkparkWeb.Router do
     get("/capabilities", CapabilitiesController, :index)
   end
 
-  # ── Instance machine meter: rolling req/s + p95 window (cloud-console W5) ──
+  # ── Instance machine meter: rolling req/s + p95 + 5xx window (cloud-console
+  # W5; 5xx added dr-w5-s2) ──
   # Authed with the SAME Bearer-token seam the agent health gate probes
-  # (`RequireToken`); never unauthenticated. Contract pinned by charter OC24:
-  # {"req_per_s": float, "p95_ms": int|null, "window_s": int}.
+  # (`RequireToken`); never unauthenticated. Contract pinned by charter OC24 and
+  # widened by D75:
+  # {"req_per_s": float, "p95_ms": int|null, "err_5xx_per_s": float|null,
+  #  "window_s": int}.
+  # Both nullable keys are `null` — never 0 — on an empty window: the agent maps
+  # a null (or an absent key, from an instance that predates it) to its -1
+  # unmeasured sentinel, and the control plane renders that unmetered.
   scope "/v1", BarkparkWeb do
     pipe_through(:cycle_api)
 
