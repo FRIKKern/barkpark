@@ -1592,7 +1592,7 @@ const EXPECTATIONS = {
     },
   },
 
-  // ── gr-p3 D-04: the timeline coalescing grammar (tail-append, OC9) ──────────
+  // ── cch-w38-s1: the instance rail as a plain MEMBER ────────────────────────
   // cch-w38-s1: the SAME screen, as a plain MEMBER.
   // The BEFORE frame (browser-measured on origin/main, chrome-devtools against
   // serve.mjs): {"port":"4187","meRole":"member","decommission":{"disabled":
@@ -1622,6 +1622,7 @@ const EXPECTATIONS = {
     },
   },
 
+  // ── gr-p3 D-04: the timeline coalescing grammar (tail-append, OC9) ──────────
   "timeline-coalesced": {
     what: "the coalescing grammar folds the health burst to ONE worst-verdict row with Show all/Collapse",
     check(reg, hooks) {
