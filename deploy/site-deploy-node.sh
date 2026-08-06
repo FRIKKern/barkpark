@@ -118,7 +118,7 @@ SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
 BP_LOG_TAG="site-deploy-node"
 
 # Shared primitives (charter D61): emit/BPSTAGE, valid_slug/valid_build_id,
-# meta_value, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy.sh
+# meta_value, build_failure_reason, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy.sh
 # sources the SAME file — the two engines cannot drift on the wire protocol, the
 # marker reader, or the one shared Caddyfile lock.
 # shellcheck source=deploy/lib/site-deploy-common.sh
@@ -343,8 +343,42 @@ flip_caddy_node_port() { # <new-port>
 # asserts the served bytes carry THIS build's markers by value. On any failure it
 # stops the just-booted slot and NEVER touches the live slot or Caddy. Sets
 # HEALTH_DETAIL either way (rides the BPSTAGE line).
+#
+# SLOW IS NOT BROKEN (D27). The probe budget below is TWO-PHASE, because a single
+# per-attempt ceiling made the gate report the same thing for a site that renders
+# in 48s as for a site that never renders at all. Under an 8s ceiling curl aborts
+# mid-render and reports the last COMPLETED hop — a 308 — so a merely-slow site
+# burned all 20 attempts and exited 14 with "returned 308 (want 200)", which is a
+# false diagnosis: the site was serving, just not inside the ceiling.
+#
+# MEASURED, and the CONTROL is what carries the claim (never the seconds alone —
+# the absolute figure was first taken at load average 13.45, so it is a reading of
+# the box under wave load as much as of the site): on ONE box, SECONDS APART, the
+# sibling node slots first-200 in ~1.3s while search-capstone takes ~48s — a ~37x
+# within-host ratio. The LIVE, previously-GREEN capstone release behaves the same
+# (308/8.4s, 308/8.0s, 308/8.0s under the ceiling; 200/48.1s without it), so the
+# latency is site-specific and PRE-EXISTING; the provisioning repair EXPOSES it,
+# it did not cause it.
+#
+# So: FAST attempts at the tight ceiling (a healthy slot passes on the first
+# sub-second one), then ONE PATIENT attempt whose ceiling is ~2x the worst render
+# actually observed. A 200 that only lands on the patient attempt is a DIFFERENT,
+# honest outcome — the gate PASSES it (the bytes are there and the markers are
+# still asserted by value) and says SLOW, with the measured seconds and the
+# multiple of the fast ceiling in the detail, so a slow site is VISIBLE instead of
+# either silently failing or silently passing. Never-200 stays exit 14 and now
+# says never-200 in those words. The TOTAL budget does not grow: worst case
+# 8*(8+0.5) + 90 = 158s, under the 170s the flat 20-attempt loop already spent.
 # ---------------------------------------------------------------------------
+# Dev/self-test knobs ONLY (same contract as BUILD_GATE_*): DeployRunner writes an
+# explicit env allowlist into the transient unit, so nothing ambient can reach the
+# engine on the real path. To change the box's behaviour, change the defaults.
+HEALTH_FAST_ATTEMPTS="${BARKPARK_SITE_HEALTH_ATTEMPTS:-8}"
+HEALTH_FAST_MAX="${BARKPARK_SITE_HEALTH_FAST_MAX:-8}"       # ~6x a healthy 1.3s first render
+HEALTH_PATIENT_MAX="${BARKPARK_SITE_HEALTH_PATIENT_MAX:-90}" # ~2x the worst (48s) observed live
 HEALTH_DETAIL=""
+HEALTH_SLOW=0        # 1 = served 200, but only past the fast ceiling
+HEALTH_SECONDS=""    # curl %{time_total} of the attempt that answered
 health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
   HEALTH_DETAIL=""
   local slot="$1" bid="$2" port inst path
@@ -376,32 +410,49 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     log "HEALTH: $HEALTH_DETAIL"; return 1
   fi
 
-  local body code=000 i curl_rc=0 t_total=""
+  local body code=000 i curl_rc=0 t_total="" out fast_code=000
+  HEALTH_SLOW=0; HEALTH_SECONDS=""
   body="$(mktemp "${TMPDIR:-/tmp}/site-node-health.XXXXXX")"
-  # 20 attempts, 8s ceiling each, >=20s wall minimum (D65 raised for SSR): a
-  # force-dynamic SSR page fetches content per request, and a 2s per-attempt
-  # ceiling made EVERY probe abort mid-render — curl then reports the last
-  # COMPLETED hop, so a basePath site read as an eternal 308 (proven live:
-  # search-capstone b-…-stw1d "308 within 12s" while the slot rendered 200 in
-  # ~1s when probed without the ceiling; HEALTH burned 60x2s = 131s, and the
-  # "12s deadline" comment was a lie in node mode). The overall bound stays
-  # finite: worst case 20*(8+0.5)s = 170s, and a healthy slot passes on the
-  # first sub-second attempt.
-  for i in $(seq 1 20); do
+  # PHASE 1 — the fast poll. A force-dynamic SSR page fetches content per request,
+  # so the ceiling is generous by static standards (D65 raised it from 2s, which
+  # made EVERY probe abort mid-render and read as an eternal 308: search-capstone
+  # b-…-stw1d "308 within 12s" while the slot rendered 200 in ~1s unthrottled).
+  # A healthy slot answers on the first sub-second attempt.
+  for i in $(seq 1 "$HEALTH_FAST_ATTEMPTS"); do
     # -L --max-redirs 2: canonicalization is framework-owned. Next with a baked
     # basePath 308s `${basePath}/` -> `${basePath}` (proven live: search-capstone
     # b-…-stw1c HEALTH read 308 at /sites/<slug>/), while a plain static server
     # 301s bare -> slashed. Follow up to 2 loopback hops and gate on the FINAL
     # code — the marker-by-value assertion below still proves the served bytes.
-    out="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time 8 "http://127.0.0.1:$port$path" 2>/dev/null)"; curl_rc=$?
+    out="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_FAST_MAX" "http://127.0.0.1:$port$path" 2>/dev/null)"; curl_rc=$?
     code="${out%% *}"; t_total="${out##* }"; [ -n "$code" ] || code=000
     [ "$code" = 200 ] && break
     sleep 0.5
   done
+  HEALTH_SECONDS="$t_total"
+  # PHASE 2 — the patient attempt. The fast poll never saw a 200; that is the
+  # state where SLOW and BROKEN are indistinguishable, so ASK ONCE MORE without
+  # the tight ceiling instead of guessing. Whatever this returns is a fact about
+  # the site, not about the ceiling.
+  if [ "$code" != 200 ]; then
+    fast_code="$code"
+    log "HEALTH: no 200 in $HEALTH_FAST_ATTEMPTS attempts at the ${HEALTH_FAST_MAX}s ceiling (last: $fast_code) — one patient probe at ${HEALTH_PATIENT_MAX}s to tell a SLOW site from a BROKEN one"
+    out="$(curl -sL --max-redirs 2 -o "$body" -w '%{http_code} %{time_total}' --connect-timeout 2 --max-time "$HEALTH_PATIENT_MAX" "http://127.0.0.1:$port$path" 2>/dev/null)"; curl_rc=$?
+    code="${out%% *}"; t_total="${out##* }"; [ -n "$code" ] || code=000
+    HEALTH_SECONDS="$t_total"
+    i=$((i + 1))
+    [ "$code" = 200 ] && HEALTH_SLOW=1
+  fi
   if [ "$code" != 200 ]; then
     rm -f "$body"; stop_slot "$slot"
-    HEALTH_DETAIL="slot $slot on :$port returned $code (want 200) at $path after $i attempts (last: curl exit $curl_rc, ${t_total}s) — boot failed, live slot untouched"
+    HEALTH_DETAIL="slot $slot on :$port returned $code (want 200) at $path — NEVER served 200: $HEALTH_FAST_ATTEMPTS attempts at the ${HEALTH_FAST_MAX}s ceiling (last $fast_code) AND a patient ${HEALTH_PATIENT_MAX}s probe (${HEALTH_SECONDS}s, curl exit $curl_rc) — BROKEN, not slow; live slot untouched"
     log "HEALTH: $HEALTH_DETAIL"; return 1
+  fi
+  if [ "$HEALTH_SLOW" = 1 ]; then
+    # It SERVES. It is just slow — and that is a site defect (a cold SSR render
+    # this far past its siblings on the same box), not a boot failure. Say so
+    # loudly on both channels; the markers below are still asserted by value.
+    log "HEALTH: SLOW — slot $slot on :$port served 200 only on the patient probe, after ${HEALTH_SECONDS}s (past the ${HEALTH_FAST_MAX}s per-attempt ceiling; a healthy slot on this box first-200s in ~1.3s). Gating it as healthy: it renders, and refusing it would be a false 'boot failed'."
   fi
 
   local got_build got_rev got_doc got_corpus
@@ -444,7 +495,14 @@ health_gate_node() { # <slot> <build_id> -> 0 healthy, 1 not
     fi
     log "HEALTH: $HEALTH_DETAIL — refusing to switch"; return 1
   fi
-  HEALTH_DETAIL="200 + bp-build-id=$got_build bp-content-rev=$got_rev bp-doc-id=$got_doc (slot $slot :$port)"
+  # The observed latency ALWAYS rides the detail — a stdout-only caller cannot
+  # ask the box afterwards, and "how long did it take to render" is the one
+  # number that separates a site that is degrading from one that is fine.
+  if [ "$HEALTH_SLOW" = 1 ]; then
+    HEALTH_DETAIL="200 in ${HEALTH_SECONDS}s — SLOW: no 200 inside the ${HEALTH_FAST_MAX}s per-attempt ceiling, only on the patient ${HEALTH_PATIENT_MAX}s probe (a healthy slot on this box first-200s in ~1.3s) — serving, not broken + bp-build-id=$got_build bp-content-rev=$got_rev bp-doc-id=$got_doc (slot $slot :$port)"
+  else
+    HEALTH_DETAIL="200 in ${HEALTH_SECONDS}s + bp-build-id=$got_build bp-content-rev=$got_rev bp-doc-id=$got_doc (slot $slot :$port)"
+  fi
   log "HEALTH: $HEALTH_DETAIL"
   return 0
 }
@@ -594,7 +652,18 @@ case "\$verb" in
     port="\$(grep -E '^PORT=' "\$envf" | cut -d= -f2)"
     rel="\$(grep -E '^RELEASE_DIR=' "\$envf" | cut -d= -f2-)"
     [ -n "\$port" ] && [ -d "\$rel" ] || exit 1
-    python3 -m http.server "\$port" --bind 127.0.0.1 --directory "\$rel" >/dev/null 2>&1 &
+    # A slot that is SLOW or BROKEN on purpose (the SLOW-vs-BROKEN health cases)
+    # ships a sentinel INSIDE its release: .slow-serve holds a per-request delay
+    # in seconds, .broken-serve an HTTP status it always answers with. Everything
+    # else gets the plain fast file server, byte-identical to before.
+    if [ -f "\$rel/.slow-serve" ] || [ -f "\$rel/.broken-serve" ]; then
+      delay=0; status=200
+      [ -f "\$rel/.slow-serve" ]   && delay="\$(cat "\$rel/.slow-serve")"
+      [ -f "\$rel/.broken-serve" ] && status="\$(cat "\$rel/.broken-serve")"
+      python3 "$TD/probe-server.py" "\$port" "\$rel" "\$delay" "\$status" >/dev/null 2>&1 &
+    else
+      python3 -m http.server "\$port" --bind 127.0.0.1 --directory "\$rel" >/dev/null 2>&1 &
+    fi
     echo \$! > "\$pidf"; exit 0;;
   stop)
     [ -f "\$pidf" ] && { kill "\$(cat "\$pidf")" 2>/dev/null; rm -f "\$pidf"; }; exit 0;;
@@ -603,6 +672,28 @@ case "\$verb" in
 esac
 exit 0
 SYSCTL
+  # The deliberately-slow / deliberately-broken slot server. A real SSR page that
+  # takes 48s to render and a slot that never answers 200 are INDISTINGUISHABLE to
+  # a probe with one ceiling — this is how both are driven offline, in seconds.
+  cat > "$TD/probe-server.py" <<'PROBESRV'
+import http.server, sys, time
+port, root, delay, status = int(sys.argv[1]), sys.argv[2], float(sys.argv[3]), int(sys.argv[4])
+class H(http.server.SimpleHTTPRequestHandler):
+    def __init__(self, *a, **kw):
+        super().__init__(*a, directory=root, **kw)
+    def log_message(self, *a):
+        pass
+    def do_GET(self):
+        if delay:
+            time.sleep(delay)
+        if status != 200:
+            self.send_response(status)
+            self.send_header("Content-Length", "0")
+            self.end_headers()
+            return
+        super().do_GET()
+http.server.HTTPServer(("127.0.0.1", port), H).serve_forever()
+PROBESRV
   # Fake npm: `ci` no-ops; `run build` emits a Next standalone layout carrying the
   # markers the health gate asserts. Lie/fail switches ride in FILES in the source
   # dir (cwd is the one channel the env scrub cannot close).
@@ -652,6 +743,13 @@ printf '// fake next standalone server\n' > .next/standalone/server.js
 } > .next/standalone/index.html
 printf 'chunk\n' > .next/static/chunk.js
 printf 'robots\n' > public/robots.txt
+# Carry the slot-behaviour sentinels INTO the release (STAGE's `cp -a src/.`
+# copies dotfiles), so the fake systemctl can boot a slot that is slow, or one
+# that never answers 200, without touching the engine's own code path.
+rm -f .next/standalone/.slow-serve .next/standalone/.broken-serve
+[ -f ./.slow-serve ]   && cp ./.slow-serve   .next/standalone/.slow-serve
+[ -f ./.broken-serve ] && cp ./.broken-serve .next/standalone/.broken-serve
+true
 # basePath mode: an app built with basePath=/sites/<slug> serves its marker page
 # UNDER that prefix even on the raw node port — so also emit the index there, so
 # the real health_gate_node probing /sites/<slug>/ gets 200 + markers.
@@ -926,6 +1024,80 @@ FAKENPM
     grep -qF 'handle @bare_basepath' "$CF"
   check "marker-only did NOT arm handle_path" \
     sh -c "! grep -qF 'handle_path /sites/basepath/*' '$CF'"
+
+  # -------------------------------------------------------------------------
+  # SLOW IS NOT BROKEN (D27). Both halves are DRIVEN here, on their own slug and
+  # ports, with the ceilings scaled down (a 2s "slow" render against a 1s fast
+  # ceiling is the same shape as a 48s render against 8s) so the proof costs
+  # seconds, not minutes. What must differ is the OUTCOME, not the wording alone:
+  # one deploys, one refuses.
+  # -------------------------------------------------------------------------
+  sl_deploy() { # <slug> <build_id> <lock> <port-a> <port-b> [patient-max] -> exit code
+    env PATH="$FAKEBIN:$PATH" SITE_SLUG="$1" BUILD_ID="$2" CONTENT_REV=sl-rev \
+      SITE_SRC="$SRC" SITE_PORT_A="$4" SITE_PORT_B="$5" \
+      BARKPARK_SITES_DIR="$TD/sites" BARKPARK_SLOT_ENV_DIR="$SENV" BARKPARK_CADDYFILE="$CF" \
+      BARKPARK_SITE_DEPLOY_LOCK="$TD/$3.lock" BARKPARK_CADDYFILE_LOCK="$TD/caddyfile.lock" \
+      BARKPARK_NODE_LINK="$TD/barkpark-node" BARKPARK_SITE_NO_CAP=1 \
+      BARKPARK_SITE_HEALTH_ATTEMPTS=2 BARKPARK_SITE_HEALTH_FAST_MAX=1 \
+      BARKPARK_SITE_HEALTH_PATIENT_MAX="${6:-20}" \
+      bash "$SELF" > "$TD/out.log" 2> "$TD/err.log"; echo $?
+  }
+
+  echo "[selftest] e2e: a SLOW site (serves 200, past the per-attempt ceiling) is gated HEALTHY and SAYS it is slow"
+  printf '2\n' > "$SRC/.slow-serve"
+  rc="$(sl_deploy slowsite sl1 slowsite "$(free_port)" "$(free_port)")"
+  rm -f "$SRC/.slow-serve"
+  check "slow deploy exit 0 (it renders — refusing it would be a false 'boot failed')" [ "$rc" = 0 ]
+  check "HEALTH ok"                            saw HEALTH ok sl1
+  check "SWITCH ok (a slow site still goes live)" saw SWITCH ok sl1
+  check "the stage detail SAYS SLOW"           grep -q '^BPSTAGE name=HEALTH status=ok .*SLOW:' "$TD/out.log"
+  check "the stage detail carries the OBSERVED latency in seconds" \
+    grep -qE '^BPSTAGE name=HEALTH status=ok build_id=sl1 detail="200 in [0-9]+\.[0-9]+s' "$TD/out.log"
+  check "it names the ceiling it exceeded, not just 'slow'" \
+    grep -q 'no 200 inside the 1s per-attempt ceiling' "$TD/out.log"
+  check "the SLOW verdict ALSO rides the plain human log (dual-channel)" \
+    grep -q '\[site-deploy-node .*HEALTH: SLOW —' "$TD/out.log"
+  check "it did NOT report the site as never-serving"  no_log_match 'NEVER served 200'
+
+  echo "[selftest] e2e: a BROKEN site (never 200, even unthrottled) is refused — a DIFFERENT outcome, in different words"
+  printf '503\n' > "$SRC/.broken-serve"
+  rc="$(sl_deploy brokesite br1 brokesite "$(free_port)" "$(free_port)")"
+  rm -f "$SRC/.broken-serve"
+  check "broken deploy exit 14 (HEALTH refused)"  [ "$rc" = 14 ]
+  check "HEALTH failed"                           saw HEALTH failed br1
+  check "the detail says NEVER served 200"        grep -q 'NEVER served 200' "$TD/out.log"
+  check "the detail calls it BROKEN, not slow"    grep -q 'BROKEN, not slow' "$TD/out.log"
+  check "it records the patient probe's own reading too" \
+    grep -q 'AND a patient 20s probe' "$TD/out.log"
+  check "it did NOT claim the site was merely slow" \
+    sh -c "! grep -q 'HEALTH: SLOW —' '$TD/out.log'"
+  check "no SWITCH stage line at all"             nosaw SWITCH
+  check "the broken release is purged"            [ ! -d "$TD/sites/brokesite/releases/br1" ]
+
+  echo "[selftest] e2e: MUTATION PROOF — take the patient headroom away and the SAME slow site is misdiagnosed as broken"
+  # This is the bug, reproduced on demand: with the patient ceiling collapsed to
+  # the fast one (1s — what a single-ceiling gate is), the site that just deployed
+  # green is refused, and refused with the BROKEN wording. The distinction is
+  # therefore load-bearing, not decorative.
+  printf '2\n' > "$SRC/.slow-serve"
+  rc="$(sl_deploy slowsite2 sl2 slowsite2 "$(free_port)" "$(free_port)" 1)"
+  rm -f "$SRC/.slow-serve"
+  check "MUTANT: no headroom -> the identical slow site exits 14"  [ "$rc" = 14 ]
+  check "MUTANT: and it is called BROKEN, which is the false diagnosis being fixed" \
+    grep -q 'BROKEN, not slow' "$TD/out.log"
+
+  echo "[selftest] build_failure_reason resolves from the SHARED lib in THIS engine too"
+  # The lift's whole point: one copy, both engines. If it ever gets re-forked into
+  # an engine, the Console harness reds; if it goes MISSING from the lib, this
+  # does. Pinned against the same RECORDED 30,993-byte Turbopack failure.
+  N_FIXLOG="$(cd "$(dirname "$SELF")" && pwd)/testdata/capstone-turbopack-build-fail.txt"
+  check "the recorded producer is committed"     [ -f "$N_FIXLOG" ]
+  has_fn() { type "$1" >/dev/null 2>&1; }
+  check "the node engine can call the shared extractor" has_fn build_failure_reason
+  if [ -f "$N_FIXLOG" ]; then
+    check "it yields the SAME line the static engine yields (no per-engine drift)" \
+      [ "$(build_failure_reason "$N_FIXLOG")" = "Error: Turbopack build failed with 29 errors:" ]
+  fi
 
   echo "[selftest] rollback preflight is read-only + typed"
   # Fresh site with no previous -> not_supported / no_previous.
@@ -1430,14 +1602,9 @@ else
 fi
 
 # ---- BUILD -----------------------------------------------------------------
-build_failure_reason() { # <build-log>
-  local f="$1" r
-  r="$(grep -a 'FATAL' "$f" 2>/dev/null | tail -1)"
-  [ -n "$r" ] || r="$(grep -aE 'npm ERR!|[Ee]rror:' "$f" 2>/dev/null | grep -av 'complete log of this run' | tail -1)"
-  [ -n "$r" ] || r="$(grep -av '^[[:space:]]*$' "$f" 2>/dev/null | tail -1)"
-  [ -n "$r" ] || r="npm ci / npm run build failed with no output"
-  printf '%s' "$r"
-}
+# build_failure_reason() (the `BUILD failed` detail's producer) lives in
+# lib/site-deploy-common.sh, sourced above — ONE copy, shared with the static
+# engine, which is the only way a repair to it reaches BOTH runtime targets.
 
 if [ "$SKIP_BUILD" = 0 ]; then
   emit BUILD started

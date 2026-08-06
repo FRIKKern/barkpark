@@ -275,6 +275,23 @@
     return friendly(data, fallback);
   }
 
+  // cch-w34-s1 — THE COPY FOR A READ THAT FAILED, and why it is not bare
+  // friendly()/faultCopy(). The shared ERRORS map keys the GENERIC `forbidden`
+  // slug to "Only the team owner can manage billing." (grep -n 'forbidden:' in
+  // the ERRORS object above friendly()) — copy written for
+  // the billing writes, which is the only place that slug used to surface. But
+  // friendly()'s precedence is curated ERRORS → details → the caller's fallback,
+  // so a 403 on a READ (the sites list, the token list) renders a sentence about
+  // a screen the person is not even on, and no caller-supplied fallback can win.
+  // An authority answer on a read gets a READ-SCOPED sentence; every other
+  // status keeps faultCopy's honest classification (5xx = our fault, status 0 =
+  // the named transport class, 4xx = the caller's designed fallback).
+  function readFailureCopy(r, forbiddenCopy, fallback) {
+    var data = r && r.data;
+    if (data && data.error === "forbidden") return forbiddenCopy;
+    return faultCopy(r ? r.status : 0, data, fallback, r && r.transport);
+  }
+
   // cch-w31-s4 follow-up — THE READER for the bytes api() started keeping.
   // api() retains a non-JSON body as `text` while `data` stays {}, so
   // faultCopy() can only reach for the always-true server-fault sentence. The
@@ -3750,8 +3767,28 @@
     if (!box) return;
     box.innerHTML = '<div class="loading">Loading tokens&hellip;</div>';
     api("GET", "/v1/tokens").then(function (r) {
-      var list = (r.ok && r.data && r.data.tokens) || [];
-      renderTokenList(list);
+      // cch-w34-s1 (charter D382) — A FAILED READ IS NOT AN EMPTY ONE, and this
+      // is the security-relevant instance of it: folding `r.ok` into the list
+      // default painted "No API tokens yet" plus a Create-token button on a
+      // failed /v1/tokens, which a person reads as "my PATs were revoked". The
+      // arm is hoisted above renderTokenList so the empty state can only ever
+      // describe a list the server actually sent, and the copy says out loud
+      // that nothing has changed.
+      if (!r.ok) {
+        box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load your tokens</h2><p>' +
+          esc(readFailureCopy(
+            r,
+            "You don't have access to this team's API tokens.",
+            "We couldn't read your tokens just now — try again in a moment."
+          )) +
+          // The reassurance is UNCONDITIONAL, not part of the classified
+          // sentence: whatever went wrong, a failed READ cannot have changed a
+          // token, and "did my PATs just get revoked?" is the exact question
+          // this screen used to answer wrongly.
+          '</p><p class="dim">Nothing was changed — your existing tokens haven\'t moved.</p></div>';
+        return;
+      }
+      renderTokenList((r.data && r.data.tokens) || []);
     });
   }
 
@@ -4971,6 +5008,90 @@
     var launch = $("#scope-launch");
     if (launch) launch.addEventListener("click", function () { toggleScopeMenu(false); openLaunchModal(); });
   }
+  // ---- team picker (sidebar) — the workspace switcher's OWN menu.
+  // Paints from meCache.teams, which /v1/me already returns for exactly this
+  // purpose ("EVERY membership, so the SPA's team switcher can render"). No new
+  // fetch. If /v1/me has not landed yet the menu says LOADING rather than
+  // rendering an empty list — an empty list tells a member of four teams they
+  // belong to none, which is absence reported as a determinate answer.
+  function renderTeamMenu() {
+    var menu = $("#team-menu");
+    if (!menu) return;
+    var teams = (meCache && meCache.teams) || [];
+    var activeId = (meCache && meCache.team && meCache.team.id) || "";
+    var q = ((($("#team-menu-q") || {}).value) || "").toLowerCase();
+
+    var body;
+    if (!meCache) {
+      body = '<div class="team-empty">Loading teams…</div>';
+    } else {
+      var shown = teams.filter(function (t) {
+        return !q || String(t.name || "").toLowerCase().indexOf(q) !== -1;
+      });
+      body = shown.map(function (t) {
+        var on = t.id === activeId;
+        return '<button type="button" class="team-item" role="menuitem" data-team="' + esc(t.id) + '">' +
+          '<span class="team-avatar" aria-hidden="true">' + esc(String(t.name || "?").slice(0, 1).toUpperCase()) + "</span>" +
+          '<span class="team-name">' + esc(t.name || t.slug || t.id) + "</span>" +
+          '<span class="team-role">' + esc(t.role || "") + "</span>" +
+          (on ? '<span class="team-check" aria-label="Current team">\u2713</span>' : "") +
+          "</button>";
+      }).join("");
+      if (!body) {
+        body = '<div class="team-empty">' +
+          (teams.length ? "No team matches \u201c" + esc(q) + "\u201d" : "No teams yet") + "</div>";
+      }
+    }
+
+    menu.innerHTML =
+      '<div class="team-search"><input id="team-menu-q" type="text" placeholder="Find team…" ' +
+      'autocomplete="off" spellcheck="false" value="' + esc(q) + '" aria-label="Find team"></div>' +
+      '<div class="team-list">' + body + "</div>" +
+      '<button type="button" class="team-item team-foot" id="team-create">' +
+      '<span class="team-avatar" aria-hidden="true">+</span>' +
+      '<span class="team-name">Create team<span class="team-sub">Collaborate in a shared workspace</span></span>' +
+      "</button>";
+
+    var q0 = $("#team-menu-q");
+    if (q0) q0.addEventListener("input", function () {
+      renderTeamMenu();
+      var again = $("#team-menu-q");
+      if (again) { again.focus(); again.setSelectionRange(again.value.length, again.value.length); }
+    });
+
+    Array.prototype.forEach.call(menu.querySelectorAll("[data-team]"), function (el) {
+      el.addEventListener("click", function () {
+        var id = el.getAttribute("data-team");
+        if (!id || id === activeId) { toggleTeamMenu(false); return; }
+        // The same contract the account modal's <select> used: pin the team,
+        // then a FULL reload, because every cache (fleet, subscription,
+        // members) is team-scoped and must repopulate.
+        localStorage.setItem("bp.active-team", id);
+        location.reload();
+      });
+    });
+
+    var create = $("#team-create");
+    if (create) create.addEventListener("click", function () {
+      toggleTeamMenu(false);
+      openAccountModal(); // team creation lives on the account sheet today
+    });
+  }
+
+  function toggleTeamMenu(force) {
+    var menu = $("#team-menu");
+    var btn = $("#ws-switch");
+    if (!menu) return;
+    var open = force != null ? force : !!menu.hidden;
+    menu.hidden = !open;
+    if (btn) btn.setAttribute("aria-expanded", String(open));
+    if (open) {
+      renderTeamMenu();
+      var q = $("#team-menu-q");
+      if (q) q.focus();
+    }
+  }
+
   function toggleScopeMenu(force) {
     var menu = $("#scope-menu");
     var btn = $("#scope-switch");
@@ -4995,7 +5116,7 @@
   // ------------------------------------------------ status + attention (pure)
   // classifyBp collapses the fleet fields GET /v1/barkparks already returns
   // (provision/deprovision status, suspended, health_status, agent_status,
-  // update_state) into exactly ONE of the eight ranked states of charter
+  // update_state, last_seen_at) into exactly ONE of the nine ranked states of charter
   // decision 15 — the single attention-order spec. Both statusOf (the pill) and
   // attentionRank/bucketOf (the queue + rollup) derive from it, so the pill's
   // colour and the queue's order can never disagree. This is the JS twin of
@@ -5017,17 +5138,31 @@
     if (bp.deprovision_status === "failed") return "removal_failed"; // 1
     if (!host && bp.provision_status === "failed") return "failed";  // 2
     if (bp.suspended && !removing) return "suspended";              // 3
+    // cch-w34-s6: a box the control plane has NEVER received a byte from is not
+    // "degraded" — degraded is the grammar of a box that WAS online and left.
+    // health_status/agent_status are CACHED last-reported columns; with
+    // last_seen_at null they were never measured, so they cannot rank this box.
+    // This arm is checked BEFORE degraded because unknown is a different state,
+    // not a lesser one; the ladder below is where its urgency is expressed.
+    if (live && bp.last_seen_at == null) return "unreported";      // 5
     if (live && !healthy) return "degraded";                       // 4
-    if (live && bp.update_state === "behind") return "behind";     // 5
-    if (removing) return "removing";                              // 6
-    if (!host) return "provisioning";                            // 7 (rank-2 already excluded)
-    return "ok";                                                // 8
+    if (live && bp.update_state === "behind") return "behind";     // 6
+    if (removing) return "removing";                              // 7
+    if (!host) return "provisioning";                            // 8 (rank-2 already excluded)
+    return "ok";                                                // 9
   }
 
-  // The rank number per decision 15 (1 = most urgent … 8 = ok).
+  // The rank number per decision 15 (1 = most urgent … 9 = ok). cch-w34-s6 adds
+  // `unreported` and the EXPLICIT ordering clause charter D332(b) requires:
+  // failed > unknown > pending > ok. A measured failure (removal_failed, failed,
+  // suspended, degraded) outranks the UNKNOWN state, which in turn outranks
+  // every pending/in-flight state (behind, removing, provisioning) and ok.
+  // The eight pre-existing kinds keep their RELATIVE order, so this ladder still
+  // agrees with the Go twin (cloud_status_cmd.go statusOf) on every shared kind.
   var ATTENTION_RANK = {
     removal_failed: 1, failed: 2, suspended: 3, degraded: 4,
-    behind: 5, removing: 6, provisioning: 7, ok: 8,
+    unreported: 5,
+    behind: 6, removing: 7, provisioning: 8, ok: 9,
   };
   function attentionRank(bp) { return ATTENTION_RANK[classifyBp(bp)]; }
 
@@ -5041,10 +5176,12 @@
     return an < bn ? -1 : an > bn ? 1 : 0;
   }
 
-  // Buckets (decision 15): attention = ranks 1–5, in-flight = 6–7, healthy = 8.
+  // Buckets (decision 15): attention = ranks 1–6, in-flight = 7–8, healthy = 9.
+  // `unreported` (5) sits in ATTENTION: a box we have never heard from is a box
+  // to look at, and it was already counted there when it read "degraded".
   function bucketOf(bp) {
     var r = attentionRank(bp);
-    return r <= 5 ? "attention" : r <= 7 ? "inflight" : "healthy";
+    return r <= 6 ? "attention" : r <= 8 ? "inflight" : "healthy";
   }
 
   // Pure rollup of a fleet list into the three bucket counts + total.
@@ -5064,23 +5201,76 @@
   // danger|neutral) mapping to the --ok/--info/--warn/--danger token contract,
   // a primary label, and a secondary detail string. Replaces the multi-badge
   // soup; the health/agent/update breakdown lives only in the drill-down rail.
+  // cch-w34-s6: `unreachable_count` is the sweep's OWN count of health checks
+  // that did not answer (GET /v1/barkparks has shipped it since cch-w34-s2, and
+  // the console read it zero times). Rendered as EVIDENCE ONLY — a number the
+  // control plane measured, never advice about what to do with it (D332(d)).
+  // "" when the field is absent (an older CP) or zero: silence, not "0 missed".
+  function missedChecksText(bp) {
+    bp = bp || {};
+    var n = bp.unreachable_count;
+    if (typeof n !== "number" || !isFinite(n) || n <= 0) return "";
+    return Math.floor(n) + (Math.floor(n) === 1 ? " missed check" : " missed checks");
+  }
+
+  // The evidence line for a box that has never reported: how long it has existed
+  // and how many checks the sweep counted as missed. Both are measurements the
+  // control plane already holds; neither is a remediation. "" when we hold
+  // neither (a row with no inserted_at and no count — the label stands alone).
+  function neverReportedEvidence(bp) {
+    bp = bp || {};
+    var parts = [];
+    var age = bp.inserted_at ? relTime(bp.inserted_at) : "—";
+    if (age !== "—") parts.push("Created " + age);
+    var missed = missedChecksText(bp);
+    if (missed) parts.push(missed);
+    return parts.join(" · ");
+  }
+
+  // "Reported 5m ago" / "Never reported · Created 38d ago · 3 missed checks" —
+  // the Activity rail's last-contact line. Deliberately the same idiom as
+  // lastCheckedText ("Never checked"): an absent stamp is a STATE with a name,
+  // never a bare "—" beside an absolute creation date that reads as freshness.
+  function lastSeenText(bp) {
+    bp = bp || {};
+    if (bp.last_seen_at != null) {
+      var rel = relTime(bp.last_seen_at);
+      if (rel !== "—") return "Reported " + rel;
+    }
+    var ev = neverReportedEvidence(bp);
+    return ev ? "Never reported · " + ev : "Never reported";
+  }
+
   function statusOf(bp) {
     bp = bp || {};
     var kind = classifyBp(bp);
     if (kind === "removal_failed") return { role: "danger", label: "Removal failed", detail: bp.deprovision_error || "Teardown failed — retry removal" };
     if (kind === "failed") return { role: "danger", label: "Failed", detail: bp.provision_error || "Provisioning failed" };
     if (kind === "suspended") return { role: "danger", label: "Suspended", detail: bp.suspended_reason || "Suspended for billing" };
+    // cch-w34-s6: a box we have NEVER heard from gets its own word. It reaches
+    // the neutral role that statusOf has always declared and never could render
+    // — the console's own "Unknown" state, finally produced by the only thing
+    // that is genuinely unknown. Evidence only, no next step (D332(d)).
+    if (kind === "unreported") return { role: "neutral", label: "Never reported", detail: neverReportedEvidence(bp) };
     if (kind === "degraded") {
       var parts = [];
       if ((bp.health_status || "unknown") !== "up") parts.push("Health " + (bp.health_status || "unknown"));
       if ((bp.agent_status || "offline") !== "online") parts.push("Agent " + (bp.agent_status || "offline"));
+      var missed = missedChecksText(bp);
+      if (missed) parts.push(missed);
       return { role: "warn", label: "Degraded", detail: parts.join(" · ") || "Needs attention" };
     }
     if (kind === "behind") return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
     if (kind === "removing") return { role: "info", label: "Removing", detail: "Tearing down the server" };
     if (kind === "provisioning") return { role: "info", label: "Provisioning", detail: "Setting up the server" };
     if (kind === "ok") return { role: "ok", label: "Healthy", detail: bp.version ? "v" + String(bp.version).replace(/^v/, "") : "Online" };
-    return { role: "neutral", label: "Unknown", detail: "" };
+    // Unreachable while classifyBp stays total over the nine kinds of
+    // ATTENTION_RANK — and the CLOSED-ENUM test pins exactly that (charter D33).
+    // It is deliberately NOT the calm "Unknown" it used to be: a tail that
+    // announces the calmest word over an unhandled — and therefore possibly the
+    // most severe — state is the defect this wave exists to remove. A new kind
+    // that reaches here reds the enum test and reads as unhandled on screen.
+    return { role: "warn", label: "Unclassified", detail: "No console state for '" + kind + "'" };
   }
 
   // The single .status-pill component — one dot + label + optional detail,
@@ -6258,7 +6448,14 @@
     opts = opts || {};
     var lc = instanceLifecycle(bp);
     var hasHost = !!bp.host;
-    var health = bp.health_status || "unknown";
+    // cch-w34-s6: health_status is a CACHED last-reported column. For a box the
+    // control plane has never heard from (classifyBp → "unreported") it was
+    // never measured, and legacy rows still carry a literal "up" written at
+    // adoption/provision time (cch-w34-s2 fixed the WRITERS; it shipped no
+    // backfill, so those rows survive). The rail names the absence instead of
+    // reprinting a green word beside "Never reported".
+    var neverReported = classifyBp(bp) === "unreported";
+    var health = neverReported ? "never reported" : (bp.health_status || "unknown");
     var agent = bp.agent_status || "offline";
 
     // A4: the provision→live moment folds the timeline into the ready panel.
@@ -6342,7 +6539,10 @@
           '<div class="rail-group"><div class="rail-group-label">Platform</div>' +
             '<div id="instance-domains">' + railRow("Domain", bp.custom_host || "—") + "</div></div>" +
           railGroup("Activity",
-            railRowPlain("Last seen", fmtWhen(bp.last_seen_at)) +
+            // cch-w34-s6: the Activity rail no longer prints a bare "—" for a
+            // box that has never reported. lastSeenText names the state and its
+            // evidence (age since creation, missed checks the sweep counted).
+            railRowPlain("Last seen", lastSeenText(bp)) +
             railRowPlain("Created", fmtWhen(bp.inserted_at))) +
         "</aside>" +
       "</div>";
@@ -7799,12 +7999,31 @@
       if (staleGuard(reqId, instanceSitesReq)) return;
       var box = $("#instance-sites");
       if (!box) return;
-      var all = (r.ok && r.data && r.data.sites) || [];
+      // cch-w34-s1 (charter D382) — A FAILED READ IS NOT AN EMPTY ONE. This arm
+      // is HOISTED ABOVE the emptiness check on purpose: the "No sites yet"
+      // copy below is an ASSERTION about this instance, and it may only ever
+      // describe an answer we actually received. Folding `r.ok` into the `all`
+      // default (as this did) made a 500 and a 403 render byte-identically to a
+      // genuine 200-with-zero-sites, and nothing in the harness could see it.
+      if (!r.ok) {
+        box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load sites</h2><p>' +
+          esc(readFailureCopy(
+            r,
+            "You don't have access to the sites on this instance.",
+            "We couldn't read this instance's sites — try again in a moment."
+          )) + "</p></div>";
+        return;
+      }
+      var all = (r.data && r.data.sites) || [];
       var sites = all.filter(function (s) { return String(s.barkpark_id) === String(bp.id); });
       if (!sites.length) {
-        // A4/D60: pre-host (provisioning / provision-failed) the timeline is the
-        // primary surface — a "No sites yet" box beside it is just noise, so stay
-        // quiet until the box is up.
+        // THE RULE cch-w34-s1 RATIFIES: errors always speak, a genuinely-empty
+        // result stays quiet pre-host. Pre-host (provisioning / provision-failed)
+        // the timeline is the primary surface and a "No sites yet" box beside it
+        // is just noise — so a TRUE empty stays silent there, and only there.
+        // This MUST stay a `bp.host` ternary: folding `r.ok` into it instead
+        // renders correct error copy while silently starting to assert "No sites
+        // yet" pre-host on a 200 — measured, with all 862 harness tests green.
         box.innerHTML = bp.host
           ? '<div class="empty-state"><h2>No sites yet</h2>' +
             "<p>Sites hosted on this instance will appear here.</p></div>"
@@ -13364,7 +13583,6 @@
     setText($("#acct-name"), who);
     setText($("#acct-email"), email || "");
     setText($("#acct-avatar"), (who[0] || "B").toUpperCase());
-    renderTeamSwitcher(team);
   }
 
   // The workspace switcher's plan chip — the team's current plan, hidden until
@@ -13379,35 +13597,13 @@
     chip.hidden = false;
   }
 
-  // Team switcher (multi-team accounts): a <select> replaces the static team
-  // name when /v1/me lists more than one membership. Choosing a team pins it
-  // in localStorage (api() sends it as x-barkpark-team) and reloads — a full
-  // reload is deliberate: every cache (fleet, subscription, members) is
-  // team-scoped and must repopulate.
-  function renderTeamSwitcher(active) {
-    var host = $("#account-team");
-    var teams = (meCache && meCache.teams) || [];
-    if (!host || teams.length < 2) return;
-    var activeId = (active && active.id) || "";
-    var sel = document.createElement("select");
-    sel.id = "team-switcher";
-    sel.setAttribute("aria-label", "Switch team");
-    sel.style.cssText =
-      "background:transparent;border:none;color:inherit;font:inherit;cursor:pointer;max-width:160px";
-    teams.forEach(function (t) {
-      var o = document.createElement("option");
-      o.value = t.id;
-      o.textContent = t.name + " (" + t.role + ")";
-      if (t.id === activeId) o.selected = true;
-      sel.appendChild(o);
-    });
-    sel.addEventListener("change", function () {
-      localStorage.setItem("bp.active-team", sel.value);
-      location.reload();
-    });
-    host.textContent = "";
-    host.appendChild(sel);
-  }
+  // NO NATIVE <select> HERE, DELIBERATELY. A `renderTeamSwitcher` used to swap
+  // #account-team for a bare <select> whenever /v1/me listed 2+ memberships —
+  // so the chip's CENTRE opened an OS dropdown while its CARET opened the
+  // styled team picker. One control, two different menus, decided by which
+  // pixel you hit. The picker (renderTeamMenu/toggleTeamMenu) is now the only
+  // way to change team, and #account-team stays plain text so the whole chip is
+  // one target. Re-adding a <select> here would restore the split.
 
   function loadMe() {
     setAccountChip(null, null); // immediate placeholder
@@ -15239,10 +15435,23 @@
     return newStepsHtml(rows || []) + fail;
   }
 
-  // Console body lines (shared with the timeline shell). Empty → a calm caption.
-  function consoleTail(lines) {
+  // Console body lines (shared with the timeline shell). Empty → a calm caption
+  // — but WHICH caption depends on whether the job can still speak.
+  // cch-w34-s6: "No console output yet." promises more output. Production
+  // carries provision_jobs that ENDED (3 succeeded, 1 failed) with a completely
+  // empty console; for those the word "yet" is a promise nothing will keep.
+  // opts.terminal (the job has stopped) splits the copy. It names what the
+  // record holds and stops there — no remediation, no next step (D332(d)).
+  // Absent opts → the pending caption, i.e. the pre-existing behaviour.
+  function consoleTail(lines, opts) {
     var arr = lines || [];
-    if (!arr.length) return '<div class="bp-console-line bp-console-empty">No console output yet.</div>';
+    if (!arr.length) {
+      return '<div class="bp-console-line bp-console-empty">' +
+        ((opts && opts.terminal)
+          ? "No console output was recorded."
+          : "No console output yet.") +
+        "</div>";
+    }
     return arr.map(function (e) {
       e = e || {};
       var ts = newFmtConsoleTime(e.at);
@@ -15253,12 +15462,12 @@
   }
 
   // The collapsible dark console shell (uses the --console-* tokens).
-  function timelineConsoleHtml(lines, collapsed) {
+  function timelineConsoleHtml(lines, collapsed, opts) {
     return '<div class="bp-console' + (collapsed ? " is-collapsed" : "") + '">' +
       '<button type="button" class="bp-console-toggle" data-tl-console-toggle aria-expanded="' + (collapsed ? "false" : "true") + '">' +
         '<span class="bp-console-caret" aria-hidden="true"></span>Console' +
       "</button>" +
-      '<div class="bp-console-body"' + (collapsed ? " hidden" : "") + ">" + consoleTail(lines) + "</div>" +
+      '<div class="bp-console-body"' + (collapsed ? " hidden" : "") + ">" + consoleTail(lines, opts) + "</div>" +
     "</div>";
   }
 
@@ -15422,7 +15631,10 @@
         provisionOverallHtml(rows) +
         timelineHtml(rows, { failed: failed, failureDetail: bp && bp.provision_error }) +
         retry +
-        timelineConsoleHtml((bp && bp.provision_console) || [], !!opts.consoleCollapsed) +
+        // cch-w34-s6: a provision job that is no longer running gets the
+        // terminal empty caption — the console will not fill in later.
+        timelineConsoleHtml((bp && bp.provision_console) || [], !!opts.consoleCollapsed,
+          { terminal: !isProvisioning(bp) }) +
       "</section>";
   }
 
@@ -15525,7 +15737,7 @@
       st.consoleSig = csig;
       var body = section.querySelector(".bp-console-body");
       if (body) {
-        body.innerHTML = consoleTail((bp && bp.provision_console) || []);
+        body.innerHTML = consoleTail((bp && bp.provision_console) || [], { terminal: !isProvisioning(bp) });
         if (instanceConsoleStick && !instanceConsoleCollapsed) body.scrollTop = body.scrollHeight;
       }
     }
@@ -18704,11 +18916,17 @@
     var bpPicker = $("#bp-theme-picker");
     if (bpPicker) bpPicker.addEventListener("change", function () { selectBpTheme(bpPicker.value); });
     $("#acct-btn").addEventListener("click", openAccountModal);
-    // v4 sidebar: the workspace switcher opens the same Account modal (team +
-    // sessions live there); Find/⌘K opens the EXISTING command palette (never a
-    // fork — reuses openCommandPalette's #modal-root machinery).
+    // v4 sidebar: the workspace switcher opens the TEAM PICKER. It used to open
+    // the Account modal, which made this control and the footer account button
+    // two doors onto one room — and this one wears a switcher caret, so it
+    // PROMISED a workspace switch and delivered a settings sheet. The account
+    // still lives on #acct-btn; only the promise this control makes is honoured
+    // here. Find/⌘K opens the EXISTING command palette (never a fork).
     var wsSwitch = $("#ws-switch");
-    if (wsSwitch) wsSwitch.addEventListener("click", openAccountModal);
+    if (wsSwitch) wsSwitch.addEventListener("click", function (e) {
+      e.stopPropagation();
+      toggleTeamMenu();
+    });
     var navFind = $("#nav-find");
     if (navFind) navFind.addEventListener("click", openCommandPalette);
     // v4 topbar: the instance-scope dropdown (a fleet jumper over the router).
@@ -18722,6 +18940,23 @@
       var menu = $("#scope-menu");
       if (menu && !menu.hidden && !(e.target.closest && e.target.closest(".topbar-scope"))) {
         toggleScopeMenu(false);
+      }
+      // Same contract for the team picker: any click outside its wrapper.
+      var tm = $("#team-menu");
+      if (tm && !tm.hidden && !(e.target.closest && e.target.closest(".ws-switch-wrap"))) {
+        toggleTeamMenu(false);
+      }
+    });
+    // Escape closes the team picker and returns focus to the control that
+    // opened it — a menu with no keyboard way out is the accessibility half of
+    // the same lie.
+    document.addEventListener("keydown", function (e) {
+      if (e.key !== "Escape") return;
+      var tm = $("#team-menu");
+      if (tm && !tm.hidden) {
+        toggleTeamMenu(false);
+        var btn = $("#ws-switch");
+        if (btn) btn.focus();
       }
     });
 
@@ -19729,6 +19964,13 @@
       handleLiveEvent: handleLiveEvent, currentView: currentView,
       loadOverview: loadOverview, invalidateFleet: invalidateFleet,
       applyRoute: applyRoute,
+      // cch-w34-s1 — the two loaders whose failed read used to render as an
+      // empty one. Impure (they fetch and paint), like the three above: the
+      // collapse was invisible to a pure-helper-only harness precisely because
+      // it lives in the fetch callback, so these are DRIVEN with a stubbed
+      // fetch and a recording-innerHTML DOM rather than asserted from markup.
+      loadInstanceSites: loadInstanceSites, loadTokens: loadTokens,
+      readFailureCopy: readFailureCopy,
       overviewScopes: { full: OVERVIEW_FULL, fleet: OVERVIEW_FLEET, onboarding: OVERVIEW_ONBOARDING },
       overviewData: overviewData, // stable object identity — the harness resets its fields
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
@@ -19826,6 +20068,11 @@
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
       classifyBp: classifyBp, statusOf: statusOf,
+      // cch-w34-s6: the never-reported renderers + the closed state enum the
+      // harness asserts statusOf is total over.
+      lastSeenText: lastSeenText, missedChecksText: missedChecksText,
+      neverReportedEvidence: neverReportedEvidence,
+      attentionKinds: Object.keys(ATTENTION_RANK),
       attentionRank: attentionRank, attentionCompare: attentionCompare,
       bucketOf: bucketOf, fleetSummary: fleetSummary, filterFleet: filterFleet,
       // gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview pure helpers — greeting,

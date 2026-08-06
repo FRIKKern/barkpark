@@ -523,4 +523,19 @@
 # wave-29 slice also adds a rule head, the merged total is NOT 1289 and must be
 # re-measured — never added up from two deltas (this file's own D302 lesson).
 # authored rule heads 1289 == CSSOM style rules 1289, MISSES 0, PARITY PASS.
-1289
+#
+# Re-measured 2026-08-06: 1304 authored heads, MISSES 0 — the +15 are the team
+# picker's own rules (.ws-switch-wrap/.team-menu/.team-item/…), added when the
+# sidebar workspace switcher stopped opening the account modal and grew its own
+# menu. MISSES 0 is what makes this an unrecorded ADD rather than a parity
+# defect — the distinction this ratchet's own failure text tells you to confirm
+# before bumping, and it was confirmed by run, not assumed.
+#
+# Re-measured 2026-08-06 after merging origin/main: 1305 authored heads,
+# MISSES 0 — the +1 is this slice's own never-reported rule. The baseline was
+# 1289 when this branch was cut and reached 1304 on main via the sidebar team
+# picker (#9775/#9777), so this is the ONE-HOLDER-PER-ROUND collision resolved
+# the prescribed way: merge main first, RE-RUN parity, and record the number the
+# run printed — never arithmetic over two deltas. MISSES 0 confirmed FIRST,
+# which is what makes it an unrecorded ADD rather than a parity defect.
+1305

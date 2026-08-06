@@ -1396,9 +1396,38 @@ type SiteDeployment struct {
 	RuntimeTarget string      `json:"runtime_target,omitempty"`
 	Port          int         `json:"port,omitempty"`
 	FailureReason string      `json:"failure_reason"`
-	BecameLiveAt  string      `json:"became_live_at"`
-	InsertedAt    string      `json:"inserted_at"`
-	UpdatedAt     string      `json:"updated_at"`
+	// deploy-reliability W2: the ledger's own vocabulary for a failed row, which
+	// this struct did NOT declare — so `git grep failure_class -- internal/`
+	// returned zero while the control plane had been shipping both keys from its
+	// SOLE base serializer for a whole wave. json.Unmarshal drops unmodelled keys
+	// silently, so a decoder that never names them cannot report them.
+	//
+	//   * FailureClass is DeployLedger.classify/1 — the NAMED cause, computed from
+	//     stage + the raw column. Empty on every non-failed row.
+	//   * FailureReasonRaw is what the box actually said (scrubbed + ANSI-stripped
+	//     server-side), for when FailureReason is the humanizer's generic arm.
+	FailureClass     string `json:"failure_class,omitempty"`
+	FailureReasonRaw string `json:"failure_reason_raw,omitempty"`
+	// gh-6 identity: "production" | "preview", and the branch a preview was built
+	// from. Declared for the same drops-unknown-keys reason as the pair above.
+	Environment  string `json:"environment,omitempty"`
+	Branch       string `json:"branch,omitempty"`
+	BuildLogURL  string `json:"build_log_url,omitempty"`
+	BecameLiveAt string `json:"became_live_at"`
+	InsertedAt   string `json:"inserted_at"`
+	UpdatedAt    string `json:"updated_at"`
+}
+
+// SiteDeploymentPage is one keyset page of a site's deployments, newest first —
+// the WIDE twin of ListDeployments, which decodes the narrow `Deployment` and
+// therefore cannot see failure_class, stage, trigger or the runtime fields.
+//
+// NextCursor is the `before=` token for the page BEHIND this one, and it is the
+// half wave 1 S2 shipped that no client kept: without it a walk stops at the
+// server's 200-row cap and reports a FLOOR as a total.
+type SiteDeploymentPage struct {
+	Deployments []SiteDeployment `json:"deployments"`
+	NextCursor  string           `json:"next_cursor"`
 }
 
 // SiteDeploymentTerminal reports whether a deploy status is final. The status enum
@@ -1647,6 +1676,42 @@ func (c *Client) SpawnSiteDeployment(ctx context.Context, id, deploymentID strin
 		return SiteDeployment{}, fmt.Errorf("decode deployment response: %w", err)
 	}
 	return out.Deployment, nil
+}
+
+// ListSpawnSiteDeployments reads a site's deployments newest-first via
+// GET /v1/sites/:id/deployments (Bearer) into the WIDE SiteDeployment, so a
+// caller can see the failure_class the control plane computes. ListDeployments
+// hits the same route but decodes the narrow `Deployment`, sends no bounds and
+// throws next_cursor away; both exist because the narrow one is the older
+// `bp sites` contract and widening it in place would reshape that verb's output.
+//
+// limit ≤ 0 sends no `limit` (the server's default 100 applies; it caps at 200).
+// before is a next_cursor from a previous page — anything else is a 422 from the
+// server, never a silent page one.
+func (c *Client) ListSpawnSiteDeployments(ctx context.Context, siteID string, limit int, before string) (SiteDeploymentPage, error) {
+	path := "/v1/sites/" + esc(siteID) + "/deployments"
+	q := url.Values{}
+	if limit > 0 {
+		q.Set("limit", fmt.Sprintf("%d", limit))
+	}
+	if b := strings.TrimSpace(before); b != "" {
+		q.Set("before", b)
+	}
+	if len(q) > 0 {
+		path += "?" + q.Encode()
+	}
+	status, body, err := c.do(ctx, "GET", path, true, nil)
+	if err != nil {
+		return SiteDeploymentPage{}, err
+	}
+	if !ok(status) {
+		return SiteDeploymentPage{}, cloudError(status, body)
+	}
+	var page SiteDeploymentPage
+	if err := json.Unmarshal(body, &page); err != nil {
+		return SiteDeploymentPage{}, fmt.Errorf("decode deployments response: %w", err)
+	}
+	return page, nil
 }
 
 // RollbackSpawnSite flips a spawned site back to its previous good build via

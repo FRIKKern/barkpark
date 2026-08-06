@@ -15,7 +15,10 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"os"
 	"os/exec"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,6 +60,11 @@ type Report struct {
 	// PGSizeBytes is the Postgres database size from the injected probe. -1 when
 	// not wired/failed.
 	PGSizeBytes int64 `json:"pg_size_bytes"`
+	// PGTopRelations names the biggest consumers inside that total (top 10 by
+	// pg_total_relation_size). nil — a JSON null, never an empty list — when the
+	// probe was not wired or failed: "we did not measure" is a different fact
+	// from "we measured and the database has no relations".
+	PGTopRelations []RelationSize `json:"pg_top_relations"`
 
 	// Vitals — the host's live resource pressure, gathered every beat behind the
 	// same injectable-probe seam as disk (Linux /proc readers in production).
@@ -70,6 +78,27 @@ type Report struct {
 	MemUsedPercent int `json:"mem_used_percent"`
 	// Load1 is the 1-minute load average. -1 when the probe was not wired/failed.
 	Load1 float64 `json:"load1"`
+
+	// SwapUsedPercent is swap consumption (0..100) and SwapTotalBytes is the
+	// configured swap size. They travel as a PAIR because a bare percent cannot
+	// carry three distinct states: (0, 0) is a swapless box — measured, and the
+	// answer is none; (0, >0) is configured-but-idle; (-1, -1) is "could not
+	// measure". The control-plane normalizer passes numbers through verbatim and
+	// defers interpretation to the view, so the disambiguating total must travel
+	// WITH the percent or the consumer cannot tell those apart.
+	//
+	// This is the vital the shipped mem_used_percent hides: MemAvailable clears
+	// the floor precisely BECAUSE the BEAM has been paged out, so a box at 99.9%
+	// swap can report a comfortable 58% memory.
+	SwapUsedPercent int   `json:"swap_used_percent"`
+	SwapTotalBytes  int64 `json:"swap_total_bytes"`
+
+	// BeamPSSBytes and BeamSwapBytes are the BEAM's OWN footprint (Pss + Swap
+	// from /proc/<beam pid>/smaps_rollup) — the single largest consumer on a
+	// Barkpark box and the process the kernel OOM-kills. Both -1 when the probe
+	// was not wired, no beam.smp was found, or the rollup was unreadable.
+	BeamPSSBytes  int64 `json:"beam_pss_bytes"`
+	BeamSwapBytes int64 `json:"beam_swap_bytes"`
 
 	// ReqPerS is the instance's recent requests-per-second, read from the
 	// instance RequestStats route over the SAME base+token seam as the health
@@ -90,6 +119,14 @@ type Report struct {
 	// / TLS / capabilities / studio / postgres-via-api …) so the control plane
 	// can record the granular event stream, not just the roll-up.
 	Health []setup.CheckResult `json:"health_checks"`
+}
+
+// RelationSize is one named consumer of the database total: a relation and the
+// bytes it occupies including indexes and TOAST (pg_total_relation_size). A
+// named breakdown is what turns "3.2 GiB" into a diagnosis.
+type RelationSize struct {
+	Name  string `json:"name"`
+	Bytes int64  `json:"bytes"`
 }
 
 // CommandRunner runs a single resolved argv and returns combined output. It is
@@ -114,11 +151,20 @@ var execRunnerTimeout = 5 * time.Minute
 // gitProbe.git above) are untouched, so a hung approved command surfaces as an
 // honest "timed out after ..." error instead of wedging the agent.
 func (ExecRunner) Run(name string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), execRunnerTimeout)
+	return runBounded(execRunnerTimeout, name, args...)
+}
+
+// runBounded is the one place a shell-out gets its lifetime. EVERY caller picks
+// its own deadline: approved queue commands get the generous execRunnerTimeout,
+// per-beat probes get a short one (pgProbeTimeout). A probe that can run for
+// five minutes is the three-hour runaway again one layer down — the lesson of
+// that incident was an unbounded LIFETIME, not an expensive command.
+func runBounded(timeout time.Duration, name string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 	out, err := exec.CommandContext(ctx, name, args...).CombinedOutput()
 	if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-		return string(out), fmt.Errorf("timed out after %s: %s %s", execRunnerTimeout, name, strings.Join(args, " "))
+		return string(out), fmt.Errorf("timed out after %s: %s %s", timeout, name, strings.Join(args, " "))
 	}
 	return string(out), err
 }
@@ -184,8 +230,24 @@ type ReportConfig struct {
 	// lands req/s but keeps P95Ms=-1 (see NewReqStatsProbe). Wire the production
 	// implementation with NewReqStatsProbe(base, token, rootCAs).
 	ReqStatsProbe func() (reqPerS float64, p95Ms int, err error)
+	// SwapProbe returns (used percent 0..100, total swap bytes). nil → BOTH swap
+	// fields keep the -1 sentinel. Gathered fail-soft as ONE unit like
+	// ReqStatsProbe, not independently like CPU/Mem: a percent landed against an
+	// unknown total is meaningless, so an error leaves both sentinels.
+	SwapProbe func() (pct int, totalBytes int64, err error)
+	// BeamProbe returns the BEAM's (PSS, swap) bytes. nil or an error → BOTH
+	// BeamPSSBytes and BeamSwapBytes keep -1; the two are one measurement of one
+	// process and never half-land.
+	BeamProbe func() (pssBytes int64, swapBytes int64, err error)
 	// PGSizeProbe returns the Postgres DB size in bytes. nil → PGSizeBytes=-1.
+	// Wire the production implementation with NewPGSizeProbe(checkout).
 	PGSizeProbe func() (int64, error)
+	// PGTopRelationsProbe returns the top relations by total size. nil or an
+	// error → PGTopRelations stays nil (unmeasured). It is SEPARATE from
+	// PGSizeProbe on purpose: its cost scales with relation count, so a box with
+	// thousands of partitions may lose the breakdown while still reporting the
+	// cheap total. Wire it with NewPGTopRelationsProbe(checkout).
+	PGTopRelationsProbe func() ([]RelationSize, error)
 	// BackupProbe returns (ok, human-detail). nil → BackupOK=false, detail noted.
 	BackupProbe func() (bool, string, error)
 
@@ -214,6 +276,10 @@ func gatherReport(cfg ReportConfig) Report {
 		Load1:           -1,
 		ReqPerS:         -1,
 		P95Ms:           -1,
+		SwapUsedPercent: -1,
+		SwapTotalBytes:  -1,
+		BeamPSSBytes:    -1,
+		BeamSwapBytes:   -1,
 	}
 
 	// Git signals (deployed commit + dirty tree).
@@ -257,10 +323,35 @@ func gatherReport(cfg ReportConfig) Report {
 		}
 	}
 
+	// Swap. Fail-soft as ONE unit: an error leaves both sentinels, because a
+	// percent without its companion total cannot be interpreted. A swapless box
+	// is NOT an error — it lands (0, 0), which is a measurement.
+	if cfg.SwapProbe != nil {
+		if pct, total, err := cfg.SwapProbe(); err == nil {
+			r.SwapUsedPercent = pct
+			r.SwapTotalBytes = total
+		}
+	}
+
+	// The BEAM's own footprint (PSS + swap), one process, one measurement.
+	if cfg.BeamProbe != nil {
+		if pss, sw, err := cfg.BeamProbe(); err == nil {
+			r.BeamPSSBytes = pss
+			r.BeamSwapBytes = sw
+		}
+	}
+
 	// Postgres size.
 	if cfg.PGSizeProbe != nil {
 		if sz, err := cfg.PGSizeProbe(); err == nil {
 			r.PGSizeBytes = sz
+		}
+	}
+
+	// Postgres top consumers by name — independently fail-soft from the total.
+	if cfg.PGTopRelationsProbe != nil {
+		if rows, err := cfg.PGTopRelationsProbe(); err == nil {
+			r.PGTopRelations = rows
 		}
 	}
 
@@ -368,4 +459,191 @@ func NewReqStatsProbe(base, token string, rootCAs *x509.CertPool) func() (float6
 		}
 		return body.ReqPerS, p95, nil
 	}
+}
+
+// pgProbeTimeout bounds each psql shell-out. It is deliberately short and
+// deliberately NOT execRunnerTimeout: the approved-command runner may take five
+// minutes for a rebuild, but a per-beat space probe that takes five minutes IS
+// the runaway-diagnostic incident again. Unexported so a test can lower it.
+var pgProbeTimeout = 5 * time.Second
+
+// pgStatementTimeout is the server-side twin of pgProbeTimeout: it stops the
+// QUERY inside Postgres rather than only killing the client, so a psql we walk
+// away from cannot leave a backend churning. The top-relations query's cost
+// scales with RELATION count (a box with thousands of partitions), which is why
+// it is bounded on both sides as well as by LIMIT.
+const pgStatementTimeout = "3000ms"
+
+// pgSizeSQL asks for the whole database's on-disk size — the number the usage
+// meter has always rendered "unmetered" because this probe was never wired.
+const pgSizeSQL = "SET statement_timeout = '" + pgStatementTimeout + "'; " +
+	"SELECT pg_database_size(current_database());"
+
+// pgTopRelationsSQL names the biggest consumers inside that total. LIMIT 10 and
+// the statement_timeout are both load-bearing bounds, not decoration.
+const pgTopRelationsSQL = "SET statement_timeout = '" + pgStatementTimeout + "'; " +
+	"SELECT c.relname, pg_total_relation_size(c.oid) " +
+	"FROM pg_class c JOIN pg_namespace n ON n.oid = c.relnamespace " +
+	"WHERE c.relkind IN ('r','m','p') " +
+	"AND n.nspname NOT IN ('pg_catalog','information_schema') " +
+	"ORDER BY 2 DESC LIMIT 10;"
+
+// pgTopRelationsLimit mirrors the LIMIT in pgTopRelationsSQL and is enforced
+// again client-side: a probe payload must stay bounded even if the query text
+// is ever edited without the parser being told.
+const pgTopRelationsLimit = 10
+
+// probeRunner is the shell-out seam the Postgres probes use. Production passes
+// a runBounded closure carrying pgProbeTimeout; tests pass a fake so the psql
+// contract (argv, parsing, failure paths) is provable without a live database.
+type probeRunner func(name string, args ...string) (string, error)
+
+// boundedPGRunner is the production probeRunner: psql under pgProbeTimeout.
+func boundedPGRunner(name string, args ...string) (string, error) {
+	return runBounded(pgProbeTimeout, name, args...)
+}
+
+// pgDatabaseURL reads DATABASE_URL out of <checkout>/.env and returns it in a
+// form psql accepts.
+//
+// Two facts make this necessary, both verified on a live box: the agent runs as
+// root, and a bare `psql` as root fails with "role root does not exist", so the
+// connection string must come from somewhere — and Barkpark stores it as an
+// Ecto URL whose `ecto://` scheme libpq does not understand, so the scheme is
+// rewritten to `postgres://`. An unreadable .env or a missing DATABASE_URL is
+// an ERROR, never a fallback to a default connection: the field must stay at
+// its -1 sentinel rather than report a number measured against some other
+// database.
+func pgDatabaseURL(checkout string) (string, error) {
+	if checkout == "" {
+		return "", errors.New("pg: no checkout configured")
+	}
+	path := filepath.Join(checkout, ".env")
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return "", fmt.Errorf("pg: read %s: %w", path, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		line = strings.TrimSpace(line)
+		line = strings.TrimPrefix(line, "export ")
+		key, val, ok := strings.Cut(line, "=")
+		if !ok || strings.TrimSpace(key) != "DATABASE_URL" {
+			continue
+		}
+		val = strings.TrimSpace(val)
+		val = strings.Trim(val, `"'`)
+		if val == "" {
+			continue
+		}
+		// Ecto's scheme is not libpq's; everything after it is identical.
+		if rest, found := strings.CutPrefix(val, "ecto://"); found {
+			val = "postgres://" + rest
+		}
+		return val, nil
+	}
+	return "", fmt.Errorf("pg: no DATABASE_URL in %s", path)
+}
+
+// psqlArgs builds the argv for a single-shot, machine-readable psql query:
+// -A unaligned, -t tuples only, -q quiet, -F| explicit field separator, and
+// ON_ERROR_STOP so a failed SET does not silently yield a partial answer.
+func psqlArgs(url, sql string) []string {
+	return []string{url, "-v", "ON_ERROR_STOP=1", "-A", "-t", "-q", "-F", "|", "-c", sql}
+}
+
+// NewPGSizeProbe builds the production PGSizeProbe: psql against the checkout's
+// own DATABASE_URL, bounded by pgProbeTimeout. checkout=="" returns nil
+// (unwired), mirroring NewReqStatsProbe. Every failure path — no .env, no
+// DATABASE_URL, no psql binary, a timeout, an unparseable answer — returns an
+// error so PGSizeBytes stays -1. A box without psql reports exactly what it
+// reports today; it never reports a faked zero.
+func NewPGSizeProbe(checkout string) func() (int64, error) {
+	return newPGSizeProbeWith(boundedPGRunner, checkout)
+}
+
+func newPGSizeProbeWith(run probeRunner, checkout string) func() (int64, error) {
+	if checkout == "" {
+		return nil
+	}
+	return func() (int64, error) {
+		url, err := pgDatabaseURL(checkout)
+		if err != nil {
+			return -1, err
+		}
+		out, err := run("psql", psqlArgs(url, pgSizeSQL)...)
+		if err != nil {
+			return -1, fmt.Errorf("pg size: %w: %s", err, strings.TrimSpace(out))
+		}
+		return parsePGSize(out)
+	}
+}
+
+// parsePGSize reads the single integer psql prints for pg_database_size.
+func parsePGSize(out string) (int64, error) {
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		n, err := strconv.ParseInt(line, 10, 64)
+		if err != nil {
+			return -1, fmt.Errorf("pg size: unparseable %q", line)
+		}
+		return n, nil
+	}
+	return -1, errors.New("pg size: empty result")
+}
+
+// NewPGTopRelationsProbe builds the production PGTopRelationsProbe: the top 10
+// relations by pg_total_relation_size, same seam and same bound as the total.
+// checkout=="" returns nil (unwired); every failure returns an error so
+// PGTopRelations stays nil rather than an invented empty list.
+func NewPGTopRelationsProbe(checkout string) func() ([]RelationSize, error) {
+	return newPGTopRelationsProbeWith(boundedPGRunner, checkout)
+}
+
+func newPGTopRelationsProbeWith(run probeRunner, checkout string) func() ([]RelationSize, error) {
+	if checkout == "" {
+		return nil
+	}
+	return func() ([]RelationSize, error) {
+		url, err := pgDatabaseURL(checkout)
+		if err != nil {
+			return nil, err
+		}
+		out, err := run("psql", psqlArgs(url, pgTopRelationsSQL)...)
+		if err != nil {
+			return nil, fmt.Errorf("pg top relations: %w: %s", err, strings.TrimSpace(out))
+		}
+		return parsePGTopRelations(out)
+	}
+}
+
+// parsePGTopRelations turns psql's "name|bytes" lines into RelationSize rows,
+// re-applying pgTopRelationsLimit client-side so the beat payload stays bounded
+// no matter what the query returned.
+func parsePGTopRelations(out string) ([]RelationSize, error) {
+	var rows []RelationSize
+	for _, line := range strings.Split(out, "\n") {
+		line = strings.TrimSpace(line)
+		if line == "" {
+			continue
+		}
+		name, sizeStr, ok := strings.Cut(line, "|")
+		if !ok {
+			return nil, fmt.Errorf("pg top relations: unparseable %q", line)
+		}
+		n, err := strconv.ParseInt(strings.TrimSpace(sizeStr), 10, 64)
+		if err != nil {
+			return nil, fmt.Errorf("pg top relations: unparseable size in %q", line)
+		}
+		rows = append(rows, RelationSize{Name: strings.TrimSpace(name), Bytes: n})
+		if len(rows) == pgTopRelationsLimit {
+			break
+		}
+	}
+	if len(rows) == 0 {
+		return nil, errors.New("pg top relations: empty result")
+	}
+	return rows, nil
 }

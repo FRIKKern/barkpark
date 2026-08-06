@@ -119,7 +119,7 @@ set -uo pipefail
 SELF="${BASH_SOURCE[0]}"   # --self-test re-executes THIS script as the subject
 
 # Shared primitives (charter D61): emit/BPSTAGE, valid_slug/valid_build_id,
-# meta_value, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy-node.sh
+# meta_value, build_failure_reason, BUILD_ALLOW, setup_caddy_lock/with_caddy_lock, log. site-deploy-node.sh
 # sources the SAME file so neither engine drifts on the wire protocol or the lock.
 # shellcheck source=deploy/lib/site-deploy-common.sh
 . "$(cd "$(dirname "$SELF")" && pwd)/lib/site-deploy-common.sh"
@@ -614,6 +614,39 @@ if [ "$MODE" = selftest ]; then
   check "minified: first marker"             [ "$(meta_value "$MV" bp-build-id)" = x1 ]
   check "minified: middle marker"            [ "$(meta_value "$MV" bp-content-rev)" = x2 ]
   check "minified: last marker"              [ "$(meta_value "$MV" bp-doc-id)" = x3 ]
+
+  # -------------------------------------------------------------------------
+  # build_failure_reason — the ONE shared extractor (it used to be duplicated in
+  # both engines), pinned against a RECORDED REAL producer, never a hand-written
+  # fixture: deploy/testdata/capstone-turbopack-build-fail.txt is the literal
+  # 30,993 bytes of a live search-capstone Turbopack failure, captured off
+  # guerrilla (.txt, not .log, only because .gitignore drops *.log — the bytes
+  # are the raw log, unedited, md5 6fc6a06b39b0d6b5b46d933c9dbb6579). The tier counts below are MEASUREMENTS of those bytes — they are
+  # what says a fifth grep tier would be a guess, and they red the moment someone
+  # "improves" the predicates against a log nobody recorded.
+  # -------------------------------------------------------------------------
+  echo "[selftest] build_failure_reason picks the right line out of a RECORDED real Turbopack failure"
+  FIXLOG="$(cd "$(dirname "$SELF")" && pwd)/testdata/capstone-turbopack-build-fail.txt"
+  check "the recorded producer is committed (not hand-written)" [ -f "$FIXLOG" ]
+  if [ -f "$FIXLOG" ]; then
+    check "it is the captured 30,993 bytes, unedited" \
+      [ "$(wc -c < "$FIXLOG" | tr -d ' ')" = 30993 ]
+    check "tier 1 (FATAL) does not fire — a Turbopack failure carries none" \
+      [ "$(grep -ac 'FATAL' "$FIXLOG" 2>/dev/null || true)" = 0 ]
+    check "tier 2 matches EXACTLY ONE line in 30,993 bytes (not a tail -1 accident)" \
+      [ "$(grep -aE 'npm ERR!|[Ee]rror:' "$FIXLOG" | grep -av 'complete log of this run' | wc -l | tr -d ' ')" = 1 ]
+    check "the extractor yields that line — the Turbopack header, which names the count" \
+      [ "$(build_failure_reason "$FIXLOG")" = "Error: Turbopack build failed with 29 errors:" ]
+    # The tier BELOW it would have been strictly worse: a stack frame with no
+    # subject. This is the check that says the ORDER is load-bearing.
+    check "tier 3 (last non-blank) would have been strictly worse" \
+      [ "$(grep -av '^[[:space:]]*$' "$FIXLOG" | tail -1)" != "Error: Turbopack build failed with 29 errors:" ]
+  fi
+  EMPTYLOG="$TD/empty-build.log"; : > "$EMPTYLOG"
+  check "a build that printed NOTHING falls through to the honest fallback (never empty)" \
+    [ "$(build_failure_reason "$EMPTYLOG")" = "npm ci / npm run build failed with no output" ]
+  check "a missing log file is the same honest fallback, not a shell error" \
+    [ "$(build_failure_reason "$TD/no-such-build.log")" = "npm ci / npm run build failed with no output" ]
 
   # -------------------------------------------------------------------------
   # TEARDOWN — --teardown excises ONLY this slug's marker-guarded Caddy block
@@ -1932,18 +1965,11 @@ esac
 # (cwd + the exported BARKPARK_* build vars below); NO secret rides any child
 # argv.  cwd is inherited into the child, so we cd first.
 
-# The most useful line of a failed build, for the BUILD failed stage line.  The
-# real reason (`FATAL: 401 Unauthorized … the site read token is invalid`) used
-# to go to STDERR while the generic "BUILD failed" went to stdout — a stdout-only
-# orchestrator could never tell the user WHY.
-build_failure_reason() { # <build-log>
-  local f="$1" r
-  r="$(grep -a 'FATAL' "$f" 2>/dev/null | tail -1)"
-  [ -n "$r" ] || r="$(grep -aE 'npm ERR!|[Ee]rror:' "$f" 2>/dev/null | grep -av 'complete log of this run' | tail -1)"
-  [ -n "$r" ] || r="$(grep -av '^[[:space:]]*$' "$f" 2>/dev/null | tail -1)"
-  [ -n "$r" ] || r="npm ci / npm run build failed with no output"
-  printf '%s' "$r"
-}
+# The most useful line of a failed build, for the BUILD failed stage line, comes
+# from build_failure_reason() — ONE copy, in lib/site-deploy-common.sh (sourced
+# above), shared with the node engine. It used to be duplicated here byte for
+# byte, which meant every repair to the reason had to be made twice or the
+# DEFAULT (static) engine silently kept the old, narrower one.
 
 if [ "$PLAN_MODE" = build ]; then
   emit BUILD started

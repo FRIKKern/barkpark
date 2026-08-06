@@ -1205,14 +1205,23 @@ test("gr-p5-session-provenance: the session row shows origin only when the serve
     "the origin must be escaped");
 });
 
-test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct-btn, #ws-switch, palette act-account", () => {
-  // openAccountModal has exactly three entry points. A recomposition that
-  // renames the function or drops a listener leaves the account unreachable.
+test("gr-p5-account: the account is reachable from #acct-btn and the palette — and #ws-switch is NOT one of its doors", () => {
+  // openAccountModal keeps its entry points; a recomposition that renames the
+  // function or drops a listener leaves the account unreachable.
+  //
+  // THE THIRD DOOR IS DELIBERATELY GONE. #ws-switch used to open this same
+  // modal, so the sidebar's workspace control and its footer account button
+  // were two doors onto one room — and the top one wears a switcher caret, so
+  // it PROMISED a workspace switch and delivered a settings sheet. It now owns
+  // the team picker. This asserts the separation in BOTH directions: re-point
+  // #ws-switch at openAccountModal and the old defect reds here.
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
   assert.ok(src.includes('$("#acct-btn").addEventListener("click", openAccountModal)'),
     "the sidebar account button must open the account modal");
-  assert.ok(/wsSwitch\.addEventListener\("click", openAccountModal\)/.test(src),
-    "the workspace switcher must open the account modal");
+  assert.ok(!/wsSwitch\.addEventListener\("click", openAccountModal\)/.test(src),
+    "#ws-switch must NOT open the account modal — it owns the team picker");
+  assert.ok(/wsSwitch\.addEventListener\("click",[\s\S]{0,160}toggleTeamMenu\(\)/.test(src),
+    "#ws-switch must open the team picker");
   // The palette id is LAW (the label is free) — no conditional guard here: a
   // missing hook must red this test, never silently skip it.
   assert.equal(typeof hooks.paletteActionItems, "function",
@@ -1220,6 +1229,56 @@ test("gr-p5-account: the three OUTSIDE contracts still reach the modal — #acct
   assert.ok(hooks.paletteActionItems().some((i) => i.id === "act-account"),
     "the command palette must keep the act-account action id");
 });
+
+test("team picker: the chip is ONE control — no native <select> may re-appear inside it", () => {
+  // THE DEFECT THIS PINS, reported by the owner with screenshots: the chip's
+  // CENTRE opened a bare OS <select> while its CARET opened the styled picker.
+  // Two different menus on one control, chosen by which pixel you hit. The
+  // <select> came from renderTeamSwitcher, which swapped #account-team's text
+  // for a control whenever /v1/me listed 2+ memberships — so it only appeared
+  // for exactly the users who needed the switcher to be good.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  assert.ok(!/function renderTeamSwitcher\s*\(/.test(src),
+    "renderTeamSwitcher must not come back — the picker is the only switch seam");
+  assert.ok(!/sel\.id = "team-switcher"/.test(src),
+    "no native <select> may be mounted as the team switcher");
+
+  // And nothing may replace the chip's label with a control: #account-team is
+  // plain text so the WHOLE chip is one target for the picker.
+  const chip = appRegion(src, "function setAccountChip(", "\n  }\n");
+  assert.ok(!/createElement\("select"\)/.test(chip),
+    "the account chip must not build a control into its own label");
+});
+
+test("team picker: reads the real /v1/me shape, marks the active team, and says LOADING rather than empty", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  assert.ok(/function renderTeamMenu\(/.test(src) && /function toggleTeamMenu\(/.test(src),
+    "the team picker must exist as its own renderer + toggle");
+
+  // It must read the PRODUCER's envelope — /v1/me returns `teams` for exactly
+  // this purpose — not a second fetch and not a hand-built map.
+  assert.ok(/meCache && meCache\.teams/.test(src),
+    "the picker must read teams from the /v1/me cache");
+  assert.ok(/meCache && meCache\.team && meCache\.team\.id/.test(src),
+    "the active team must come from /v1/me's current team, not from localStorage alone");
+
+  // A LOADING state DISTINCT from an empty one. Rendering an empty list while
+  // /v1/me is in flight tells a member of four teams they belong to none —
+  // absence rendered as a determinate answer.
+  assert.ok(/if \(!meCache\)[\s\S]{0,240}Loading teams/.test(src),
+    "an unloaded /v1/me must render as LOADING, never as an empty team list");
+
+  // Switching pins the team and does a FULL reload — every cache is team-scoped.
+  assert.ok(/localStorage\.setItem\("bp\.active-team", id\)[\s\S]{0,160}location\.reload\(\)/.test(src),
+    "choosing a team must pin bp.active-team and reload");
+
+  // Dismissable by keyboard, not only by mouse.
+  assert.ok(/e\.key !== "Escape"[\s\S]{0,320}toggleTeamMenu\(false\)/.test(src),
+    "Escape must close the team picker");
+});
+
 
 test("gr-p5-account: hostile identity values are ESCAPED, never injected", () => {
   // Every string in the identity band is server-supplied. Drive the real fold,
@@ -2688,18 +2747,25 @@ test("parseHash carries the fleet bucket filter; a bad suffix degrades to all", 
 
 // ── statusOf: one semantic role per state, across the whole ladder (D15) ─────
 
+// cch-w34-s6: every host-set fixture below now carries last_seen_at, because a
+// live box that has REPORTED is what these cases describe. The control plane's
+// serializer always sends the field (router.ex barkpark_json), and a null value
+// is now its own state ("Never reported") rather than a silent "Degraded".
+const SEEN = "2026-08-06T09:00:00Z";
+
 test("statusOf collapses every fleet state into one {role,label} (D15 ordering)", () => {
   const cases = [
     [{ deprovision_status: "failed" }, "danger", "Removal failed"],
     [{ provision_status: "failed" }, "danger", "Failed"],                        // no host
     [{ host: "h", suspended: true }, "danger", "Suspended"],
-    [{ host: "h", health_status: "down", agent_status: "online" }, "warn", "Degraded"],
-    [{ host: "h", health_status: "up", agent_status: "offline" }, "warn", "Degraded"],
-    [{ host: "h", health_status: "up", agent_status: "online", update_state: "behind" }, "info", "Update available"],
+    [{ host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" }, "warn", "Degraded"],
+    [{ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "offline" }, "warn", "Degraded"],
+    [{ host: "h", last_seen_at: null, health_status: "up", agent_status: "offline" }, "neutral", "Never reported"],
+    [{ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" }, "info", "Update available"],
     [{ deprovision_status: "pending" }, "info", "Removing"],
     [{ deprovision_status: "claimed" }, "info", "Removing"],
     [{}, "info", "Provisioning"],                                                // no host, nothing failed
-    [{ host: "h", health_status: "up", agent_status: "online" }, "ok", "Healthy"],
+    [{ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" }, "ok", "Healthy"],
   ];
   for (const [bp, role, label] of cases) {
     const s = hooks.statusOf(bp);
@@ -2720,9 +2786,9 @@ test("statusOf: 'not removing' qualifier — a suspended box mid-teardown reads 
 // "ok" — it must read Degraded, exactly as the CLI does.
 test("classifyBp: a host-set box ignores a failed provision job, ranks on health (Go parity)", () => {
   // host up + healthy, failed latest provision → still ok (the box is serving)
-  assert.equal(hooks.classifyBp({ host: "h", provision_status: "failed", health_status: "up", agent_status: "online" }), "ok");
+  assert.equal(hooks.classifyBp({ host: "h", last_seen_at: SEEN, provision_status: "failed", health_status: "up", agent_status: "online" }), "ok");
   // host up + UNHEALTHY, failed latest provision → degraded, NOT a false-green ok
-  assert.equal(hooks.classifyBp({ host: "h", provision_status: "failed", health_status: "down", agent_status: "online" }), "degraded");
+  assert.equal(hooks.classifyBp({ host: "h", last_seen_at: SEEN, provision_status: "failed", health_status: "down", agent_status: "online" }), "degraded");
   // no host + failed provision is still the terminal "failed" (rank 2)
   assert.equal(hooks.classifyBp({ provision_status: "failed" }), "failed");
 });
@@ -2730,15 +2796,16 @@ test("classifyBp: a host-set box ignores a failed provision job, ranks on health
 // ── attentionRank ordering + tiebreak vs a mixed fixture (D15) ──────────────
 
 const MIXED = [
-  { name: "healthy-b", host: "h", health_status: "up", agent_status: "online" },       // ok (8)
-  { name: "removing-x", deprovision_status: "claimed" },                               // removing (6)
+  { name: "healthy-b", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },       // ok (9)
+  { name: "removing-x", deprovision_status: "claimed" },                               // removing (7)
   { name: "gone-fail", deprovision_status: "failed" },                                 // removal_failed (1)
-  { name: "Alpha-degraded", host: "h", health_status: "down", agent_status: "online" },// degraded (4)
-  { name: "prov", },                                                                    // provisioning (7)
+  { name: "Alpha-degraded", host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },// degraded (4)
+  { name: "prov", },                                                                    // provisioning (8)
   { name: "susp", host: "h", suspended: true },                                        // suspended (3)
-  { name: "behind-1", host: "h", health_status: "up", agent_status: "online", update_state: "behind" }, // behind (5)
+  { name: "behind-1", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" }, // behind (6)
   { name: "prov-fail", provision_status: "failed" },                                   // failed (2)
-  { name: "healthy-a", host: "h", health_status: "up", agent_status: "online" },       // ok (8), tiebreak before healthy-b
+  { name: "never-said", host: "h", last_seen_at: null, health_status: "up", agent_status: "offline" }, // unreported (5)
+  { name: "healthy-a", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },       // ok (9), tiebreak before healthy-b
 ];
 
 test("attentionRank matches the D15 ladder for each state", () => {
@@ -2747,10 +2814,31 @@ test("attentionRank matches the D15 ladder for each state", () => {
   assert.equal(rankByName["prov-fail"], 2);
   assert.equal(rankByName["susp"], 3);
   assert.equal(rankByName["Alpha-degraded"], 4);
-  assert.equal(rankByName["behind-1"], 5);
-  assert.equal(rankByName["removing-x"], 6);
-  assert.equal(rankByName["prov"], 7);
-  assert.equal(rankByName["healthy-a"], 8);
+  assert.equal(rankByName["never-said"], 5);
+  assert.equal(rankByName["behind-1"], 6);
+  assert.equal(rankByName["removing-x"], 7);
+  assert.equal(rankByName["prov"], 8);
+  assert.equal(rankByName["healthy-a"], 9);
+});
+
+// cch-w34-s6 (charter D332(b)), stated as an ORDERING, not just as numbers:
+// measured failure > unknown > pending > ok. If a future edit slides
+// `unreported` below the pending states, this reds regardless of renumbering.
+test("cch-w34-s6: the unknown state ranks below every measured failure and above every pending state", () => {
+  const rank = (bp) => hooks.attentionRank(bp);
+  const unreported = { host: "h", last_seen_at: null };
+  for (const failure of [
+    { deprovision_status: "failed" },
+    { provision_status: "failed" },
+    { host: "h", suspended: true },
+    { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+  ]) assert.ok(rank(failure) < rank(unreported), "a measured failure outranks unknown: " + JSON.stringify(failure));
+  for (const pending of [
+    { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" },
+    { deprovision_status: "pending" },
+    {},
+    { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
+  ]) assert.ok(rank(unreported) < rank(pending), "unknown outranks pending/ok: " + JSON.stringify(pending));
 });
 
 test("attentionCompare sorts most-urgent-first, tiebreak name ascending case-insensitive", () => {
@@ -2760,30 +2848,32 @@ test("attentionCompare sorts most-urgent-first, tiebreak name ascending case-ins
     "prov-fail",      // 2
     "susp",           // 3
     "Alpha-degraded", // 4
-    "behind-1",       // 5
-    "removing-x",     // 6
-    "prov",           // 7
-    "healthy-a",      // 8, tiebreak: "healthy-a" < "healthy-b"
-    "healthy-b",      // 8
+    "never-said",     // 5
+    "behind-1",       // 6
+    "removing-x",     // 7
+    "prov",           // 8
+    "healthy-a",      // 9, tiebreak: "healthy-a" < "healthy-b"
+    "healthy-b",      // 9
   ]);
 });
 
 // ── bucketOf / fleetSummary / filterFleet ───────────────────────────────────
 
-test("bucketOf maps ranks 1–5 → attention, 6–7 → inflight, 8 → healthy", () => {
+test("bucketOf maps ranks 1–6 → attention, 7–8 → inflight, 9 → healthy", () => {
   assert.equal(hooks.bucketOf({ deprovision_status: "failed" }), "attention"); // 1
-  assert.equal(hooks.bucketOf({ host: "h", health_status: "down" }), "attention"); // 4
-  assert.equal(hooks.bucketOf({ deprovision_status: "pending" }), "inflight"); // 6
-  assert.equal(hooks.bucketOf({}), "inflight"); // 7 provisioning
-  assert.equal(hooks.bucketOf({ host: "h", health_status: "up", agent_status: "online" }), "healthy"); // 8
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "down" }), "attention"); // 4
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: null }), "attention"); // 5 unreported
+  assert.equal(hooks.bucketOf({ deprovision_status: "pending" }), "inflight"); // 7
+  assert.equal(hooks.bucketOf({}), "inflight"); // 8 provisioning
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" }), "healthy"); // 9
 });
 
 test("fleetSummary counts buckets — mixed, empty, and all-healthy", () => {
   const s = hooks.fleetSummary(MIXED);
-  assert.equal(s.total, 9);
-  assert.equal(s.attention, 5); // removal_failed, failed, suspended, degraded, behind (ranks 1–5)
-  assert.equal(s.inflight, 2);  // removing, provisioning (ranks 6–7)
-  assert.equal(s.healthy, 2);   // healthy-a, healthy-b (rank 8)
+  assert.equal(s.total, 10);
+  assert.equal(s.attention, 6); // removal_failed, failed, suspended, degraded, unreported, behind (ranks 1–6)
+  assert.equal(s.inflight, 2);  // removing, provisioning (ranks 7–8)
+  assert.equal(s.healthy, 2);   // healthy-a, healthy-b (rank 9)
   assert.equal(s.attention + s.inflight + s.healthy, s.total);
 
   // Spread sandbox-realm returns into the test realm before deepEqual (the
@@ -2792,15 +2882,15 @@ test("fleetSummary counts buckets — mixed, empty, and all-healthy", () => {
   assert.deepEqual({ ...hooks.fleetSummary(null) }, { attention: 0, inflight: 0, healthy: 0, total: 0 });
 
   const allHealthy = [
-    { name: "a", host: "h", health_status: "up", agent_status: "online" },
-    { name: "b", host: "h", health_status: "up", agent_status: "online" },
+    { name: "a", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
+    { name: "b", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
   ];
   assert.deepEqual({ ...hooks.fleetSummary(allHealthy) }, { attention: 0, inflight: 0, healthy: 2, total: 2 });
 });
 
 test("filterFleet returns exactly one bucket; null bucket → the whole list (copied)", () => {
   const attention = hooks.filterFleet(MIXED, "attention").map((b) => b.name).sort();
-  assert.deepEqual(attention, ["Alpha-degraded", "behind-1", "gone-fail", "prov-fail", "susp"].sort());
+  assert.deepEqual(attention, ["Alpha-degraded", "behind-1", "gone-fail", "never-said", "prov-fail", "susp"].sort());
   assert.equal(hooks.filterFleet(MIXED, "inflight").length, 2);
   assert.equal(hooks.filterFleet(MIXED, "healthy").length, 2);
   const all = hooks.filterFleet(MIXED, null);
@@ -2814,6 +2904,191 @@ test("filterFleet returns exactly one bucket; null bucket → the whole list (co
 test("esc escapes all five HTML metacharacters", () => {
   assert.equal(hooks.esc("<&\"'>"), "&lt;&amp;&quot;&#39;&gt;");
   assert.equal(hooks.esc(null), "");
+});
+
+// ── cch-w34-s6: the console says "never reported" ────────────────────────────
+//
+// Production (2026-08-06) carried 3 of 8 barkparks with last_seen_at NULL — the
+// oldest inserted 38 days earlier. The pill read "Degraded · Agent offline" (the
+// grammar of a box that WAS online and left) and the rail read "Health: Up"
+// beside "Last seen: —". cch-w34-s2 fixed the two WRITERS that produced the
+// green health value; it shipped no backfill, so legacy rows still carry it.
+// This slice gives the state its own word, and renders the evidence the
+// serializer has been sending and the console read zero times.
+//
+// The production row shape, verbatim in the fields that decide the state.
+const NEVER_REPORTED = {
+  id: "bp-never", name: "Gyldendal", host: "5.75.169.183", url: "https://x.barkpark.cloud",
+  health_status: "up", agent_status: "offline", last_seen_at: null,
+  inserted_at: new Date(Date.now() - 38 * 24 * 3600 * 1000).toISOString(),
+  unreachable_count: 3, unreachable_notification_sent: true,
+  provider: "hetzner", region: "fsn1", server_type: "cx22", provision_status: "succeeded",
+};
+
+test("cch-w34-s6: a box we have never heard from is its own state, not 'Degraded'", () => {
+  assert.equal(hooks.classifyBp(NEVER_REPORTED), "unreported");
+  const s = hooks.statusOf(NEVER_REPORTED);
+  assert.equal(s.label, "Never reported");
+  assert.equal(s.role, "neutral");
+  assert.doesNotMatch(s.label + " " + s.detail, /Degraded|Agent offline/);
+  // and the fleet row's pill carries it (statusPill's only inputs are statusOf)
+  const row = hooks.fleetRow(NEVER_REPORTED);
+  assert.match(row, /status-pill--neutral/);
+  assert.match(row, /status-pill-label">Never reported</);
+  assert.doesNotMatch(row, /Degraded/);
+});
+
+test("cch-w34-s6: the instance rail stops printing 'Health: Up' and a bare '—' for it", () => {
+  const html = hooks.instanceOverviewHtml(NEVER_REPORTED, {});
+  // the Activity row is lastSeenText, not fmtWhen's em dash
+  assert.match(html, /Last seen<\/span><span class="v plain">Never reported/);
+  // the Runtime row no longer reprints the cached green word
+  assert.doesNotMatch(html, /Health<\/span><span class="v">Up</);
+  assert.match(html, /Health<\/span><span class="v">Never reported</);
+  // a box that HAS reported keeps a real relative freshness line
+  const seen = { ...NEVER_REPORTED, last_seen_at: new Date(Date.now() - 120000).toISOString(), agent_status: "online" };
+  assert.match(hooks.instanceOverviewHtml(seen, {}), /Last seen<\/span><span class="v plain">Reported 2m ago</);
+  assert.match(hooks.instanceOverviewHtml(seen, {}), /Health<\/span><span class="v">Up</);
+});
+
+test("cch-w34-s6: lastSeenText names the state and its age; missedChecksText renders unreachable_count", () => {
+  // the renderer this slice adds, by name
+  assert.equal(typeof hooks.lastSeenText, "function");
+  assert.equal(typeof hooks.missedChecksText, "function");
+  assert.equal(typeof hooks.neverReportedEvidence, "function");
+  const line = hooks.lastSeenText(NEVER_REPORTED);
+  assert.match(line, /^Never reported · Created 38d ago · 3 missed checks$/);
+  // the evidence the serializer has shipped since cch-w34-s2 and the console
+  // read ZERO times before this slice.
+  assert.equal(hooks.missedChecksText({ unreachable_count: 3 }), "3 missed checks");
+  assert.equal(hooks.missedChecksText({ unreachable_count: 1 }), "1 missed check");
+  // absent / zero / non-numeric → silence, never "0 missed checks"
+  assert.equal(hooks.missedChecksText({}), "");
+  assert.equal(hooks.missedChecksText({ unreachable_count: 0 }), "");
+  assert.equal(hooks.missedChecksText({ unreachable_count: null }), "");
+  assert.equal(hooks.missedChecksText(null), "");
+  // a row with nothing to show still names the state, never a bare dangling "·"
+  assert.equal(hooks.lastSeenText({ host: "h" }), "Never reported");
+  assert.equal(hooks.lastSeenText({ host: "h", last_seen_at: "not-a-date" }), "Never reported");
+});
+
+test("cch-w34-s6: a box that HAS reported still surfaces its missed-check count", () => {
+  // unreachable_count is evidence on the degraded axis too — the sweep counted
+  // these, and before this slice no surface in the console said so.
+  const lost = { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "offline", unreachable_count: 7 };
+  const s = hooks.statusOf(lost);
+  assert.equal(s.label, "Degraded");
+  assert.match(s.detail, /Health down · Agent offline · 7 missed checks/);
+  // and stays silent when the counter is zero
+  assert.equal(hooks.statusOf({ ...lost, unreachable_count: 0 }).detail, "Health down · Agent offline");
+});
+
+test("cch-w34-s6: the unknown state names EVIDENCE ONLY — no remediation, no next step (D332(d))", () => {
+  const s = hooks.statusOf(NEVER_REPORTED);
+  const copy = s.label + " " + s.detail + " " + hooks.lastSeenText(NEVER_REPORTED);
+  // no imperative, no advice, no support escalation — the charter's line.
+  assert.doesNotMatch(copy, /retry|try again|check the|contact|restart|reinstall|run |ssh|should|make sure|verify/i);
+});
+
+test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls through to a calm label", () => {
+  // charter D33: a MAP[state] || "…" tail announces the CALMEST word over the
+  // most severe state. The enum is pinned, and every member has an explicit arm.
+  const KINDS = ["removal_failed", "failed", "suspended", "degraded", "unreported",
+    "behind", "removing", "provisioning", "ok"];
+  assert.deepEqual([...hooks.attentionKinds].sort(), KINDS.slice().sort(),
+    "a new fleet state was added without a statusOf arm (or one was removed)");
+  const REP = {
+    removal_failed: { deprovision_status: "failed" },
+    failed: { provision_status: "failed" },
+    suspended: { host: "h", suspended: true },
+    degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    unreported: { host: "h", last_seen_at: null },
+    behind: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" },
+    removing: { deprovision_status: "pending" },
+    provisioning: {},
+    ok: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
+  };
+  for (const kind of KINDS) {
+    assert.equal(hooks.classifyBp(REP[kind]), kind, kind + " must be reachable");
+    const s = hooks.statusOf(REP[kind]);
+    // THE MUTATION THIS CATCHES: delete an arm from statusOf and its kind lands
+    // on the fallthrough, which is loud ("Unclassified", warn) — never calm.
+    assert.notEqual(s.label, "Unclassified", kind + " has no explicit statusOf arm");
+    assert.ok(["ok", "info", "warn", "danger", "neutral"].includes(s.role), kind + " role");
+  }
+});
+
+test("cch-w34-s6: the console's 'Unknown' neutral role is now REACHED, and the tail is not calm", () => {
+  // Before this slice statusOf ended on an unreachable `{role:"neutral",
+  // label:"Unknown"}` — a state the console declared and could never produce.
+  // The neutral role is now produced by the only genuinely unknown thing.
+  assert.equal(hooks.statusOf(NEVER_REPORTED).role, "neutral");
+  const roles = new Set([...hooks.attentionKinds].map((k) => k));
+  assert.ok(roles.has("unreported"));
+});
+
+// ── cch-w34-s6 (2): the provision console stops promising output to a job that
+// ── already ended. Production provision_jobs: 3 succeeded + 1 failed with a
+// ── completely empty console. "yet" is a promise nothing will keep.
+
+test("cch-w34-s6: consoleTail splits the empty caption on the job's terminal state", () => {
+  assert.match(hooks.consoleTail([]), /No console output yet\./);            // pending, unchanged
+  assert.match(hooks.consoleTail([], { terminal: false }), /No console output yet\./);
+  const done = hooks.consoleTail([], { terminal: true });
+  assert.match(done, /No console output was recorded\./);
+  assert.doesNotMatch(done, /yet/);
+  // lines always win over either caption
+  assert.match(hooks.consoleTail([{ line: "activate: build complete", at: null }], { terminal: true }),
+    /activate: build complete/);
+});
+
+test("cch-w34-s6: a FAILED provision with an empty console no longer says 'yet'", () => {
+  const failed = { id: "b", provision_status: "failed", host: null, provision_console: [] };
+  const html = hooks.instanceTimelineHtml(failed, Date.now(), {});
+  assert.match(html, /No console output was recorded\./);
+  assert.doesNotMatch(html, /No console output yet\./);
+  // a SUCCEEDED job (host set) is terminal too
+  const succeeded = { id: "b", provision_status: "succeeded", host: "h", provision_console: [] };
+  assert.match(hooks.instanceTimelineHtml(succeeded, Date.now(), {}), /No console output was recorded\./);
+  // a job still running keeps the pending caption — it really may fill in
+  const running = { id: "b", provision_status: "claimed", host: null, provision_console: [] };
+  assert.match(hooks.instanceTimelineHtml(running, Date.now(), {}), /No console output yet\./);
+});
+
+// ── cch-w34-s6 (3): pin wave 33's mid-stage narration arm against the shape
+// ── production actually produces (charter D384: 96.3% of console entries carry
+// ── a status; the arm is already paid for 3,019 rows and was unpinned here).
+
+test("cch-w34-s6: a failed deploy whose last entry is {stage:'HEALTH',status:'running'} discloses the cut", () => {
+  const d = {
+    id: "dep-health", status: "failed",
+    console: [
+      { line: "PLAN: resolved", at: null, stage: "PLAN", status: "done" },
+      { line: "BUILD: image pushed", at: null, stage: "BUILD", status: "done" },
+      { line: "HEALTH running", at: null, stage: "HEALTH", status: "running" },
+    ],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.match(html, /narration ended mid-HEALTH/);
+  // and the count still reads the REAL number of entries, never inflated
+  assert.match(html, /deploy-console-count">3 lines/);
+});
+
+test("cch-w34-s6: the n=1 statusless-terminal shape records what it renders TODAY", () => {
+  // One production row ends on a plain {line, at} with NO status key. Absent
+  // status is SILENCE, so no cut is claimed — asserted so a future change to
+  // that arm is VISIBLE rather than silent.
+  const d = {
+    id: "dep-statusless", status: "failed",
+    console: [
+      { line: "PLAN: resolved", at: null, stage: "PLAN", status: "done" },
+      { line: "activate: build complete — handing off to release", at: null },
+    ],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.doesNotMatch(html, /narration ended/);
+  assert.match(html, /deploy-console-count">2 lines/);
+  assert.match(html, /activate: build complete/);
 });
 
 // ── dwb-18: queued (unclaimed) deploy gets an honest pre-claim state ─────────
@@ -10141,9 +10416,17 @@ test("cch-w25-s3: the rail fixture's cut is DERIVED from emit(), and reds when t
 
 test("cch-w25-s3: both producers still exist and still emit an unhumanised stage detail", () => {
   const node = fs.readFileSync(DEPLOY_NODE_SH, "utf8");
+  const common = fs.readFileSync(DEPLOY_COMMON_SH, "utf8");
   // The cruel string's stem is a `build_failure_reason` line: the LAST
-  // npm/Error line out of the build log, forwarded verbatim.
-  assert.ok(/build_failure_reason\(\) \{/.test(node), "build_failure_reason is the fixture's stem producer");
+  // npm/Error line out of the build log, forwarded verbatim. It lives in the
+  // SHARED lib now (one copy, both engines — it used to be duplicated byte for
+  // byte in site-deploy.sh and site-deploy-node.sh), so this assertion reads the
+  // lib and thereby covers BOTH runtime targets, including the DEFAULT (static)
+  // one, which is not itself a path this harness reads.
+  assert.ok(/build_failure_reason\(\) \{/.test(common),
+    "build_failure_reason is the fixture's stem producer, and it lives in deploy/lib/site-deploy-common.sh");
+  assert.ok(!/build_failure_reason\(\) \{/.test(node),
+    "build_failure_reason must exist ONCE — a re-forked copy in an engine is how the two targets drifted before");
   assert.ok(/emit BUILD failed "\$reason"/.test(node),
     "BUILD failed must still forward build_failure_reason's raw line — the moment it is humanised, this box stops " +
     "being a place a machine string can land and the fixture should be re-derived");
@@ -10601,8 +10884,11 @@ test("cch-w12-s1: an identity change WITHOUT a reload drops the cached actor axi
   assert.ok(invite.includes("activityActors = null") && invite.includes("activityActorsTried = false"),
     "an accepted invite changes the roster the Who axis is derived from");
   // NOT at the team switcher: it does location.reload(), which kills every
-  // module variable — a reset there would be a fix for a non-bug.
-  const switcher = appRegion(src, 'sel.id = "team-switcher"', "host.textContent = \"\";");
+  // module variable — a reset there would be a fix for a non-bug. The seam MOVED
+  // (the native <select> is gone; the styled team picker owns the switch now),
+  // so this re-anchors on the picker's own handler rather than deleting an
+  // invariant that still holds.
+  const switcher = appRegion(src, 'var id = el.getAttribute("data-team");', "    });");
   assert.ok(switcher.includes("location.reload()"), "the switcher still reloads");
   assert.ok(!switcher.includes("activityActors"), "no reset belongs at a seam that reloads the document");
 });
@@ -10971,10 +11257,10 @@ test("overviewSlotsModel: denominator is the REAL team quota, never hardcoded", 
 });
 
 test("attentionReason: the real status detail, with the v4 'Needs a look.' fallback", () => {
-  const degraded = { host: "h", health_status: "down", agent_status: "offline", provision_status: "succeeded" };
+  const degraded = { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "offline", provision_status: "succeeded" };
   assert.match(hooks.attentionReason(degraded), /Health down|Agent offline/);
   // An 'ok' box carries a detail too (never the fallback), but a stateless one falls back.
-  assert.equal(hooks.attentionReason({ host: "h", health_status: "up", agent_status: "online", update_state: "current" }).length > 0, true);
+  assert.equal(hooks.attentionReason({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "current" }).length > 0, true);
 });
 
 test("attentionCanStudio: live boxes only (host set, not suspended, not tearing down)", () => {
@@ -11013,7 +11299,7 @@ test("instanceCardStats: four stats, over/warn meter tints its value amber", () 
 });
 
 test("instanceCardHtml: v4 anatomy — status accent, mono url, sparkline frame, Open Studio; suspended → GR17 card banner", () => {
-  const live = { id: "b1", name: "Production", host: "prod.barkpark.cloud", url: "prod.barkpark.cloud", health_status: "up", agent_status: "online", update_state: "current", version: "0.9.2", provision_status: "succeeded" };
+  const live = { id: "b1", name: "Production", host: "prod.barkpark.cloud", url: "prod.barkpark.cloud", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "current", version: "0.9.2", provision_status: "succeeded" };
   const html = hooks.instanceCardHtml(live, { stats: hooks.instanceCardStats(null) });
   assert.match(html, /instance-card instance-card--ok/);
   assert.match(html, /instance-card-name[^>]*>Production</);
@@ -11096,6 +11382,8 @@ const fleetBp = (over) => Object.assign({
   id: "i1", name: "Production", slug: "production",
   url: "production.barkpark.cloud", host: "production.barkpark.cloud",
   health_status: "up", agent_status: "online", version: "0.9.2",
+  // cch-w34-s6: a reporting box carries last_seen_at; null is now its own state.
+  last_seen_at: SEEN,
   update_state: "current", update_running_release: "0.9.2", update_latest_release: "0.9.2",
   region: "fsn1", server_type: "cx22", channel: "prod",
   autoupdate_enabled: true, autoupdate_paused: false, pinned_release: null,
@@ -11230,7 +11518,7 @@ test("GR24: the header helpers are exported", () => {
 const GR24_LIVE = {
   id: "b-1", name: "Gyldendal", slug: "gyldendal", host: "5.75.169.183",
   url: "https://gyldendal-506f035e.barkpark.cloud",
-  health_status: "up", agent_status: "online", version: "0.2.25",
+  health_status: "up", agent_status: "online", version: "0.2.25", last_seen_at: SEEN,
   git_commit: "c801681aa00", provider: "hetzner", region: "fsn1", server_type: "cx22",
   update_state: "current", provision_status: "succeeded",
 };
@@ -14355,4 +14643,206 @@ test("cch-w31-s4 follow-up: with no recovered body the card gains NOTHING — no
   assert.match(offline, /offline/i);
   // Total over an absent fault (the seam passes fleetFault, which can be null).
   assert.match(hooks.fleetLoadErrorHtml(null), /Couldn't load this instance/);
+});
+
+// ── cch-w34-s1 · A FAILED READ IS NOT AN EMPTY ONE ─────────────────────────
+// The wave-34 law (charter D382), driven rather than read. Both loaders folded
+// `r.ok` into a value-coalescing default — `(r.ok && r.data && r.data.X) || []`
+// — so a 500 and a 403 produced the SAME value as a genuine 200-with-nothing,
+// and the person read a determinate assertion the console never received:
+// "No sites yet" on the instance workspace, "No API tokens yet" beside a
+// Create-token button on the tokens page.
+//
+// Why these are DRIVEN and not asserted from markup: the collapse lives inside
+// the fetch callback, which is exactly why nothing in this harness could see it
+// (loadInstanceSites was mentioned five times, every one of them an assertion
+// that its slot exists in the static HTML). fakeDom() is unusable here — its
+// innerHTML setter regex-extracts class names and THROWS THE MARKUP AWAY, so it
+// cannot assert copy. These use a recording-innerHTML stub, on the
+// driveBootOAuth precedent above (swap the sandbox globals, drive, restore).
+
+// A DOM whose innerHTML assignments are KEPT verbatim, keyed by element id. The
+// whole point is the bytes: a census can prove the fold is gone, only rendered
+// copy can prove what the person actually reads.
+function recordingDom(ids) {
+  const els = {};
+  for (const id of ids) {
+    els[id] = {
+      id,
+      _html: "",
+      writes: [],
+      get innerHTML() { return this._html; },
+      set innerHTML(v) { this._html = String(v); this.writes.push(String(v)); },
+      onclick: null,
+      addEventListener() {},
+      querySelectorAll() { return []; },
+      querySelector() { return null; },
+      getAttribute() { return null; },
+    };
+  }
+  return {
+    els,
+    document: {
+      querySelector(sel) { return els[String(sel).replace(/^#/, "")] || null; },
+      getElementById(id) { return els[id] || null; },
+      querySelectorAll() { return []; },
+      createElement: () => ({ ...inertEl }),
+    },
+  };
+}
+
+// Swap fetch + document, run one loader to completion, restore. api() resolves
+// on a microtask chain, so draining the queue settles the paint.
+async function driveLoader(run, { status, payload, ids }) {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document };
+  const dom = recordingDom(ids);
+  const fetch = fetchStub(status, payload);
+  sandbox.fetch = fetch;
+  sandbox.document = dom.document;
+  try {
+    run();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally {
+    Object.assign(sandbox, saved);
+  }
+  return { dom, fetch, html: () => dom.els[ids[0]].innerHTML };
+}
+
+const SITES_IDS = ["instance-sites", "site-new-btn"];
+const driveSites = (status, payload, bp) =>
+  driveLoader(() => hooks.loadInstanceSites(bp), { status, payload, ids: SITES_IDS });
+
+test("cch-w34-s1: both collapsing loaders are hookable (RED on origin/main, where neither is exported)", () => {
+  assert.equal(typeof hooks.loadInstanceSites, "function", "loadInstanceSites must be drivable");
+  assert.equal(typeof hooks.loadTokens, "function", "loadTokens must be drivable");
+  assert.equal(typeof hooks.readFailureCopy, "function", "readFailureCopy must be drivable");
+});
+
+// ── the 3x2 matrix the fix was measured on: {200-empty, 500, 403} x {host, no host}
+
+test("cch-w34-s1: a 500 on /v1/sites SPEAKS — it never renders 'No sites yet'", async () => {
+  for (const bp of [{ id: "bp-1", host: "one.barkpark.cloud" }, { id: "bp-1", host: null }]) {
+    const { html } = await driveSites(500, { error: "server_error" }, bp);
+    assert.match(html(), /Couldn't load sites/, "the failure must be stated, host or no host");
+    assert.ok(html().indexOf("No sites yet") === -1,
+      "a failed read must never be painted as an empty one");
+    assert.match(html(), /broke on our side/, "a 5xx names US as the party at fault");
+  }
+});
+
+test("cch-w34-s1: a 403 on /v1/sites does NOT render the billing sentence", async () => {
+  // The shared ERRORS map (grep -n 'forbidden:' app.js, inside the ERRORS
+  // object above friendly()) keys the GENERIC `forbidden` slug to "Only the team owner can
+  // manage billing." — friendly()'s curated copy beats any caller fallback, so
+  // bare friendly(r.data) would answer a sites read with billing copy.
+  for (const bp of [{ id: "bp-1", host: "one.barkpark.cloud" }, { id: "bp-1", host: null }]) {
+    const { html } = await driveSites(403, { error: "forbidden" }, bp);
+    assert.match(html(), /Couldn't load sites/);
+    assert.ok(html().indexOf("Only the team owner can manage billing.") === -1,
+      "a sites 403 must not render copy about the billing screen");
+    assert.match(html(), /access to the sites on this instance/);
+    assert.ok(html().indexOf("No sites yet") === -1);
+  }
+});
+
+test("cch-w34-s1: THE PRE-HOST QUIET SURVIVES — a 200 with zero sites and no host paints nothing", async () => {
+  // The high-flip-risk judgment of this slice. The tempting one-liner (turn the
+  // `bp.host` ternary into an `r.ok` ternary) renders correct error copy AND
+  // silently starts asserting "No sites yet" on a pre-host instance — measured,
+  // with every other test in this file still green. This is the assertion that
+  // notices.
+  const quiet = await driveSites(200, { sites: [] }, { id: "bp-1", host: null });
+  assert.equal(quiet.html(), "", "pre-host, a genuine empty stays SILENT — the timeline is the surface");
+
+  const loud = await driveSites(200, { sites: [] }, { id: "bp-1", host: "one.barkpark.cloud" });
+  assert.match(loud.html(), /No sites yet/, "once the box is up, a genuine empty says so");
+  assert.ok(loud.html().indexOf("Couldn't load sites") === -1);
+});
+
+test("cch-w34-s1: a 200 carrying sites still renders rows, and only this instance's", async () => {
+  const { html } = await driveSites(200, {
+    sites: [
+      { id: "s-1", name: "alpha", slug: "alpha", barkpark_id: "bp-1" },
+      { id: "s-2", name: "beta", slug: "beta", barkpark_id: "bp-OTHER" },
+    ],
+  }, { id: "bp-1", host: "one.barkpark.cloud" });
+  assert.match(html(), /alpha/);
+  assert.ok(html().indexOf("beta") === -1, "the barkpark_id filter is untouched by this fix");
+  assert.ok(html().indexOf("empty-state") === -1);
+});
+
+// ── loadTokens: the security-relevant twin
+
+const driveTokens = (status, payload) =>
+  driveLoader(() => hooks.loadTokens(), { status, payload, ids: ["token-list"] });
+
+test("cch-w34-s1: a failed /v1/tokens no longer paints 'No API tokens yet' beside a Create-token CTA", async () => {
+  const { dom } = await driveTokens(500, { error: "server_error" });
+  const html = dom.els["token-list"].innerHTML;
+  assert.match(html, /Couldn't load your tokens/);
+  assert.ok(html.indexOf("No API tokens yet") === -1,
+    "a person must never read 'no tokens' about a list we failed to fetch");
+  assert.ok(html.indexOf("token-add-empty") === -1, "and must not be offered the empty-state CTA");
+  assert.match(html, /broke on our side/, "a 5xx names US as the party at fault");
+  assert.match(html, /Nothing was changed/,
+    "the reassurance is UNCONDITIONAL — a failed read cannot have revoked a token");
+  // The loading state was painted first and replaced — the error is the LAST word.
+  assert.match(dom.els["token-list"].writes[0], /Loading tokens/);
+});
+
+test("cch-w34-s1: a tokens 403 is an authority answer, not billing copy", async () => {
+  const { dom } = await driveTokens(403, { error: "forbidden" });
+  const html = dom.els["token-list"].innerHTML;
+  assert.ok(html.indexOf("Only the team owner can manage billing.") === -1);
+  // esc()'d at the seam, so the apostrophe arrives as an entity.
+  assert.match(html, /access to this team&#39;s API tokens/);
+  assert.ok(html.indexOf("No API tokens yet") === -1);
+  assert.match(html, /Nothing was changed/);
+});
+
+test("cch-w34-s1: a genuine 200 with zero tokens still says 'No API tokens yet'", async () => {
+  const { dom } = await driveTokens(200, { tokens: [] });
+  const html = dom.els["token-list"].innerHTML;
+  assert.match(html, /No API tokens yet/, "an honest empty must keep speaking");
+  assert.match(html, /token-add-empty/, "and keep its Create-token affordance");
+});
+
+test("cch-w34-s1: a 200 carrying tokens renders the rows", async () => {
+  const { dom } = await driveTokens(200, {
+    tokens: [{ id: "t-1", name: "ci-deploy", abilities: ["deploy"] }],
+  });
+  const html = dom.els["token-list"].innerHTML;
+  assert.match(html, /ci-deploy/);
+  assert.ok(html.indexOf("No API tokens yet") === -1);
+});
+
+// ── the copy seam itself
+
+test("cch-w34-s1: readFailureCopy overrides ONLY the generic forbidden slug", () => {
+  const f = hooks.readFailureCopy;
+  assert.equal(f({ ok: false, status: 403, data: { error: "forbidden" } }, "SCOPED", "FB"), "SCOPED");
+  // Everything else keeps faultCopy's honest classification.
+  assert.match(f({ ok: false, status: 500, data: { error: "server_error" } }, "SCOPED", "FB"), /broke on our side/);
+  assert.equal(f({ ok: false, status: 404, data: { error: "not_a_registered_slug" } }, "SCOPED", "FB"), "FB");
+  assert.match(f({ ok: false, status: 0, data: { error: "network_error" }, transport: "offline" }, "SCOPED", "FB"), /offline/i);
+  // A 403 that is genuinely ABOUT billing keeps its own slug's copy — the
+  // override is keyed on the generic slug, not on the status.
+  assert.match(f({ ok: false, status: 403, data: { error: "billing_not_configured" } }, "SCOPED", "FB"), /Billing isn't set up/);
+});
+
+// ── the census is part of the gate, and it must be able to lose ────────────
+
+test("cch-w34-s1: the absence-as-answer census runs clean against the shipped app.js", () => {
+  const censusPath = fileURLToPath(new URL("./__unknown_census.mjs", import.meta.url));
+  const r = spawnSync(process.execPath, [censusPath], { encoding: "utf8" });
+  assert.equal(r.status, 0, "the census must equal its pin:\n" + r.stdout + r.stderr);
+  assert.match(r.stdout, /OK: the absence-as-answer set equals its 5-site pin\./);
+  // The five positive controls are PRESENT and unflagged — that is the proof it
+  // discriminates rather than counting `|| []` idioms.
+  assert.match(r.stdout, /controls present : presenceChip lifecyclePill catalogViewState metricsAgeText freshnessModel/);
+  assert.match(r.stdout, /controls flagged : \(none\)/);
+  assert.match(r.stdout, /controls missing : \(none\)/);
+  // Neither fixed loader may still be in the population.
+  assert.ok(r.stdout.indexOf("loadInstanceSites") === -1);
+  assert.ok(r.stdout.indexOf("loadTokens") === -1);
 });

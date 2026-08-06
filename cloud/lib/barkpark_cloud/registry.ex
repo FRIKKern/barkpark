@@ -269,8 +269,13 @@ defmodule BarkparkCloud.Registry do
   @doc """
   ADOPT an already-running box as a managed row (the standalone → SaaS-tenant
   path, `bp cloud hetzner instance adopt`): one registered row with `host` and
-  `health_status: "up"` in a single transaction, optionally landing the
+  `health_status: "unknown"` in a single transaction, optionally landing the
   instance's admin token (Vault-encrypted here, like `succeed_job/3`).
+
+  The health value is `"unknown"`, NOT `"up"`: adoption records an operator's
+  intent, not a measurement — no agent report has arrived, so `last_seen_at`
+  stays NULL and there is nothing to call healthy. The row goes green the first
+  time `POST /v1/agent/report` lands (`record_agent_report/2`).
 
   Rides `register_barkpark/2`, so the per-plan instance quota and the
   slug/url unique constraints all apply — an adopted instance is a first-class
@@ -284,7 +289,7 @@ defmodule BarkparkCloud.Registry do
     Repo.transaction(fn ->
       with {:ok, bp} <- register_barkpark(team, attrs),
            live_attrs =
-             %{host: Map.get(attrs, :host) || Map.get(attrs, "host"), health_status: "up"}
+             %{host: Map.get(attrs, :host) || Map.get(attrs, "host"), health_status: "unknown"}
              |> maybe_put_admin_token(admin_token),
            {:ok, live} <- bp |> Barkpark.health_changeset(live_attrs) |> Repo.update() do
         live
@@ -717,22 +722,33 @@ defmodule BarkparkCloud.Registry do
 
   @doc """
   Barkparks that are CANDIDATES for a staleness flip — the worker's per-tick
-  scan. A row qualifies when ALL hold:
+  scan. Two gates apply to EVERY row:
 
     * `mode ∈ managed/byo` — instances WE operate (a `self_hosted` box is the
       Team's own responsibility, never alerted on);
-    * `agent_status == "online"` — an already-flipped `offline` row is excluded,
-      which IS the natural backoff (a silent box leaves the candidate set after
-      one flip and is never re-incremented or re-alerted — Barkpark has no
-      active-probe channel to re-test it; the agent re-arms it via the report
-      path);
     * the team has an `active` Subscription — Coolify's `stripe_invoice_paid`
-      gate; we don't monitor (or alert on) an unpaid fleet;
-    * the last heartbeat is older than `threshold`, OR the row has NEVER reported
-      (`last_seen_at IS NULL`) and was created before `threshold` (so a wedged
-      never-online instance is still caught).
+      gate; we don't monitor (or alert on) an unpaid fleet.
 
-  Returns full `%Barkpark{}` structs, oldest-silent first.
+  On top of those, a row qualifies through exactly ONE of two arms:
+
+    * WENT SILENT — `agent_status == "online"` and the last heartbeat is older
+      than `threshold`. Once the worker flips the row `offline` it leaves this
+      arm, which IS the natural backoff (never re-incremented, never re-alerted
+      — Barkpark has no active-probe channel to re-test it; the agent re-arms it
+      via the report path).
+    * NEVER REPORTED — `last_seen_at IS NULL` and the row was created before
+      `threshold`: a box we provisioned or adopted whose agent has never sent a
+      byte. This arm deliberately does NOT require `agent_status == "online"`,
+      because nothing in `cloud/lib` writes `"online"` without co-writing
+      `last_seen_at` in the same changeset (the only producer is the
+      `POST /v1/agent/report` handler) — requiring it made the arm unreachable
+      and the promise in this docstring untrue. Its backoff is the alert latch
+      instead of the status flip: once `unreachable_notification_sent` is set the
+      row leaves the candidate set, exactly one alert per never-reported box.
+
+  Returns full `%Barkpark{}` structs, longest-silent first — never-reported rows
+  sort ahead of rows with a stale heartbeat (`asc_nulls_first`), since a box that
+  has never answered has been silent since it was created.
   """
   @spec stale_online_barkparks(DateTime.t()) :: [Barkpark.t()]
   def stale_online_barkparks(%DateTime{} = threshold) do
@@ -740,11 +756,12 @@ defmodule BarkparkCloud.Registry do
       join: s in Subscription,
       on: s.team_id == b.team_id and s.status == "active",
       where: b.mode in ["managed", "byo"],
-      where: b.agent_status == "online",
       where:
-        (not is_nil(b.last_seen_at) and b.last_seen_at < ^threshold) or
-          (is_nil(b.last_seen_at) and b.inserted_at < ^threshold),
-      order_by: [asc: b.last_seen_at]
+        (b.agent_status == "online" and not is_nil(b.last_seen_at) and
+           b.last_seen_at < ^threshold) or
+          (is_nil(b.last_seen_at) and b.inserted_at < ^threshold and
+             b.unreachable_notification_sent == false),
+      order_by: [asc_nulls_first: b.last_seen_at]
     )
     |> Repo.all()
   end
@@ -1477,7 +1494,11 @@ defmodule BarkparkCloud.Registry do
   end
 
   # The barkpark-side half of a successful provision, run INSIDE succeed_job's
-  # transaction: flip the owning barkpark to up at `ip`. A missing barkpark row
+  # transaction: land the provisioned `ip` on the owning barkpark. The health
+  # value is "unknown", NOT "up": a successful provision means the machine was
+  # created, not that anything answered — no agent report has arrived and
+  # `last_seen_at` is still NULL. The row goes green on the first
+  # `POST /v1/agent/report` (`record_agent_report/2`). A missing barkpark row
   # (the FK is on_delete: :delete_all, so this is the deleted-mid-provision edge)
   # is treated as a no-op success — there is nothing to flip and the job flip
   # should still stand.
@@ -1493,7 +1514,7 @@ defmodule BarkparkCloud.Registry do
         {:ok, nil}
 
       %Barkpark{} = barkpark ->
-        %{health_status: "up", host: ip, agent_status: "offline"}
+        %{health_status: "unknown", host: ip, agent_status: "offline"}
         |> maybe_put_admin_token(admin_token)
         |> maybe_put_bootstrap(bootstrap)
         |> maybe_put_fleet_token_id(barkpark, token_id)
@@ -6078,12 +6099,13 @@ defmodule BarkparkCloud.Registry do
   disclosure rides in the separate `console_line_meta/1` — changing the /1
   return shape would break this with-chain silently.
 
-  KNOWN DEFECT, filed as `cch-deployment-detail-column-overflow` and pinned by a
-  test in `registry_test.exs`: the shared cap is 2 KB but this column is
-  varchar(255), so a caption of 256..2_000 characters is neither rejected nor
-  trimmed to fit — it reaches `Repo.update/1` and RAISES a
-  `Postgrex.Error 22001`, contradicting the "never affects the build's outcome"
-  promise above. Do not read that promise as covering a long caption yet.
+  cch-w34-s5: the column is now `:text`
+  (`priv/repo/migrations/20260806110000_deployment_detail_to_text.exs`), so the
+  2 KB validator is the ONLY bound and the "never affects the build's outcome"
+  promise above holds for a caption of any length. It did not before: the column
+  was varchar(255) while the shared cap was 2 KB, so a caption of 256..2_000
+  characters raised `Postgrex.Error 22001` inside `Repo.update/1` — reachable
+  from a long `git_ref`, whose builder caption runs +23 characters over the ref.
 
   Returns `{:ok, deployment}`, `{:error, :not_found}` for an unknown id, or
   `{:error, :invalid}` for a missing/blank line (the router 422s it).

@@ -8621,6 +8621,14 @@ defmodule BarkparkCloud.Web.Router do
       version: bp.version,
       git_commit: bp.git_commit,
       last_seen_at: bp.last_seen_at,
+      # Reachability bookkeeping (health-status) — the raw counters behind the
+      # health axis, so a client can state the EVIDENCE ("N consecutive missed
+      # heartbeat windows", "the one unreachable alert has been sent") instead of
+      # inferring it from `health_status` alone. Facts only: `unreachable_count`
+      # is the consecutive-miss counter the StalenessWorker bumps per tick, and
+      # `unreachable_notification_sent` is the once-per-outage alert latch.
+      unreachable_count: bp.unreachable_count,
+      unreachable_notification_sent: bp.unreachable_notification_sent,
       team_id: bp.team_id,
       # Provider-neutral hosting (charter Decision 9): the cloud this box lives on
       # (the SPA fleet provider-chip) + the launch placement/size. Identity only —

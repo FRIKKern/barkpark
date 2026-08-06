@@ -249,6 +249,117 @@ defmodule BarkparkCloud.RegistryTest do
     end
   end
 
+  describe "health honesty — a row is never green before anything reported (cch-w34-s2)" do
+    test "adopt_barkpark/3 lands health_status \"unknown\", not \"up\"" do
+      team = team_fixture()
+
+      assert {:ok, bp} =
+               Registry.adopt_barkpark(team, %{
+                 name: "Adopted",
+                 slug: "adopted-#{System.unique_integer([:positive])}",
+                 host: "203.0.113.77"
+               })
+
+      assert bp.host == "203.0.113.77"
+      # Adoption is an operator's intent, not a measurement: no agent report has
+      # arrived, so there is nothing to call healthy.
+      assert bp.health_status == "unknown"
+      assert is_nil(bp.last_seen_at)
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.health_status == "unknown"
+      assert is_nil(reloaded.last_seen_at)
+    end
+
+    test "succeed_job/2 lands health_status \"unknown\", not \"up\"" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+
+      assert {:ok, _job} = Registry.succeed_job(job.id, "203.0.113.51")
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.host == "203.0.113.51"
+      # A successful provision means the machine was CREATED — not that anything
+      # answered. The row goes green on the first agent report.
+      assert reloaded.health_status == "unknown"
+      assert reloaded.agent_status == "offline"
+      assert is_nil(reloaded.last_seen_at)
+    end
+
+    test "the first agent report is what turns the row green" do
+      team = team_fixture()
+      bp = barkpark_fixture(team)
+      {:ok, job} = Registry.enqueue_provision_job(bp)
+      {:ok, _} = Registry.succeed_job(job.id, "203.0.113.52")
+
+      seen = DateTime.utc_now() |> DateTime.truncate(:microsecond)
+
+      assert {:ok, _} =
+               Registry.record_agent_report(Registry.get_barkpark(bp.id), %{
+                 health_status: "up",
+                 agent_status: "online",
+                 last_seen_at: seen
+               })
+
+      reloaded = Registry.get_barkpark(bp.id)
+      assert reloaded.health_status == "up"
+      refute is_nil(reloaded.last_seen_at)
+    end
+  end
+
+  describe "agent_status \"online\" always co-writes last_seen_at (cch-w34-s2 guard)" do
+    # The never-reported arm of stale_online_barkparks/1 was unreachable for as
+    # long as the query ALSO required agent_status == "online", because no
+    # cloud/lib path can produce `online AND last_seen_at IS NULL`: the sole
+    # producer is the POST /v1/agent/report handler, which stamps last_seen_at in
+    # the same changeset. That invariant is now load-bearing in the OTHER
+    # direction (the arm is keyed on last_seen_at alone), so pin it: a new writer
+    # of "online" that forgets last_seen_at would resurrect a row the sweep can
+    # never see going stale.
+    @lib_root Path.expand("../../lib/barkpark_cloud", __DIR__)
+
+    test "every cloud/lib write of agent_status \"online\" co-writes last_seen_at" do
+      offenders =
+        @lib_root
+        |> Path.join("**/*.ex")
+        |> Path.wildcard()
+        |> Enum.flat_map(fn path ->
+          source = File.read!(path)
+
+          source
+          |> String.split("\n")
+          |> Enum.with_index(1)
+          |> Enum.filter(fn {line, _n} ->
+            String.contains?(line, ~s(agent_status: "online")) or
+              String.contains?(line, ~s("agent_status" => "online"))
+          end)
+          |> Enum.reject(fn {_line, n} -> co_writes_last_seen_at?(source, n) end)
+          |> Enum.map(fn {line, n} ->
+            "#{Path.relative_to(path, @lib_root)}:#{n}: #{String.trim(line)}"
+          end)
+        end)
+
+      assert offenders == [],
+             """
+             A cloud/lib path writes agent_status "online" without co-writing
+             last_seen_at in the same map. That makes `online AND last_seen_at IS
+             NULL` producible again — a row the staleness sweep's went-silent arm
+             will never flip, because it has no heartbeat to age out.
+
+             #{Enum.join(offenders, "\n")}
+             """
+    end
+
+    # `last_seen_at` counts as co-written when it appears within the same map
+    # literal — in practice within a few lines either side of the online write.
+    defp co_writes_last_seen_at?(source, line_no) do
+      lines = String.split(source, "\n")
+      window = Enum.slice(lines, max(line_no - 8, 0), 16)
+      Enum.any?(window, &String.contains?(&1, "last_seen_at"))
+    end
+  end
+
   describe "record_event/3 + recent_events/2" do
     test "appends events and returns them newest-first" do
       team = team_fixture()
@@ -1025,25 +1136,32 @@ defmodule BarkparkCloud.RegistryTest do
       assert Repo.get(Deployment, d.id).detail == d.detail
     end
 
-    # cch-w33-s3, FOUND WHILE BUILDING, NOT FIXED HERE — filed as
-    # `cch-deployment-detail-column-overflow`.
-    #
-    # This pins a DEFECT, deliberately. The shared validator truncates at 2 KB,
-    # but `deployments.detail` is an Ecto :string — varchar(255)
-    # (priv/repo/migrations/20260703100000_add_detail_to_deployments.exs:14). So
-    # a caption of 256..2_000 chars is neither rejected NOR truncated to fit: it
-    # reaches Repo.update and RAISES, out of a function whose @doc promises
-    # best-effort telemetry that never affects the build's outcome, through a
-    # route that documents only 200/404/422. The fix is a column migration or a
-    # detail-specific cap — both outside this slice's file set.
-    #
-    # WHEN THAT TASK LANDS: delete this test and assert the truncation instead.
-    test "cch-w33-s3: a caption ABOVE the column limit currently RAISES (see cch-deployment-detail-column-overflow)" do
+    # cch-w34-s5: the replacement the pinning test asked for. Its predecessor
+    # ("a caption ABOVE the column limit currently RAISES") certified the defect:
+    # the shared validator truncated at 2 KB while the column was varchar(255),
+    # so 256..2_000 chars raised Postgrex.Error 22001 inside Repo.update — out of
+    # a function whose @doc promises telemetry that never affects the build's
+    # outcome. `modify :detail, :text` (migration 20260806110000) makes the 2 KB
+    # validator the ONLY bound, so the same input now TRUNCATES AND STORES.
+    test "cch-w34-s5: a caption above the shared 2 KB cap truncates and STORES rather than raising" do
       d = detail_deployment_fixture(team_fixture())
 
-      assert_raise Postgrex.Error, ~r/22001|too long/, fn ->
-        Registry.set_deployment_detail(d.id, String.duplicate("y", 5_000))
-      end
+      assert {:ok, d} = Registry.set_deployment_detail(d.id, String.duplicate("y", 5_000))
+      assert String.length(d.detail) == 2_000
+      assert Repo.get(Deployment, d.id).detail == d.detail
+    end
+
+    # cch-w34-s5: the band the old column silently owned — 256..2_000 — is now
+    # stored WHOLE, not truncated at 255 and not raised. This is the assertion a
+    # detail-specific 255 cap would have failed, which is why the remedy was the
+    # column and not a second cap.
+    test "cch-w34-s5: a caption between the old column width and the shared cap round-trips WHOLE" do
+      d = detail_deployment_fixture(team_fixture())
+
+      caption = String.duplicate("z", 300)
+      assert {:ok, d} = Registry.set_deployment_detail(d.id, caption)
+      assert d.detail == caption
+      assert Repo.get(Deployment, d.id).detail == caption
     end
   end
 

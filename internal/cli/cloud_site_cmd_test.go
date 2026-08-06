@@ -51,6 +51,12 @@ type siteCP struct {
 	getResp    fakeResp
 	rollResp   fakeResp
 	deleteResp fakeResp
+	// GET /v1/sites/:id/deployments — the newest-first LIST `status` reads to
+	// learn whether the live pointer is also the last thing that happened.
+	// listQuery records the raw query so a test can prove the bound was sent.
+	listResp  fakeResp
+	listHits  int
+	listQuery string
 	// PATCH /v1/sites/:id — `bp cloud site settings` (search-template W8/W10).
 	patchResp fakeResp
 	patchBody []byte
@@ -100,6 +106,19 @@ func (cp *siteCP) serve() *httptest.Server {
 		case r.Method == "GET" && strings.HasPrefix(path, "/v1/sites/"+testSiteID+"/deployments/"):
 			cp.pollHits++
 			cp.write(w, cp.pollResp)
+		// The LIST route (no trailing slash) — `bp cloud site status`'s second read.
+		// The poll case above matches ".../deployments/" WITH the slash, so before
+		// this case a bare list GET fell to the default arm and t.Fatal'd every
+		// status test. Default body is an empty page, which is what a site with no
+		// deployments returns and what every pre-existing test wants.
+		case r.Method == "GET" && path == "/v1/sites/"+testSiteID+"/deployments":
+			cp.listHits++
+			cp.listQuery = r.URL.RawQuery
+			if cp.listResp.body == "" && cp.listResp.status == 0 {
+				cp.write(w, fakeResp{200, `{"deployments":[],"next_cursor":null}`})
+				break
+			}
+			cp.write(w, cp.listResp)
 		case r.Method == "POST" && path == "/v1/sites/"+testSiteID+"/rollback":
 			cp.write(w, cp.rollResp)
 		case r.Method == "DELETE" && path == "/v1/sites/"+testSiteID:
@@ -1142,23 +1161,203 @@ func TestRunCloudSiteStatus(t *testing.T) {
 // TestRunCloudSiteStatusShowsStageDetail proves the status table is as honest as the
 // live stream: the per-stage detail is on the stage bar, and a failed deployment's
 // reason is in the header — so a user who missed the stream can still see WHY.
+//
+// deploy-reliability W2 — THE FIXTURE MOVED, THE RENDERER DID NOT. This test used
+// to hand-feed `"current_deployment":{"status":"failed"}`, a payload the control
+// plane can NEVER emit: the current pointer has three writers and all three are
+// gated on status "live", and "live" is terminal in the transition table. So the
+// header's failure arm was exercised only by a shape reality does not produce. The
+// failed row now sits where a real one sits — the newest row of the deployments
+// LIST — and the live pointer keeps the stage bar it really carries. Same
+// renderers, reachable input.
 func TestRunCloudSiteStatusShowsStageDetail(t *testing.T) {
 	cp := newSiteCP(t)
 	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
-		`"current_deployment":{"id":"dep-1","status":"failed","stage":"HEALTH","stages":[` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[` +
 		`{"name":"BUILD","status":"done","detail":"astro build in 1.7s"},` +
-		`{"name":"HEALTH","status":"failed","detail":"probe got 500 on / (marker bp-build-id absent)"}]}}}`}
+		`{"name":"HEALTH","status":"done","detail":"probe got 200 on /"}]}}}`}
+	// The newest row: a LATER deploy that died at HEALTH. The list serializer emits
+	// no stages and no url — only the base deployment fields — so this fixture
+	// carries exactly what the route really returns.
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-2","site_id":"` + testSiteID + `","status":"failed","stage":"HEALTH",` +
+		`"failure_reason":"probe got 500 on / (marker bp-build-id absent)",` +
+		`"failure_reason_raw":"health probe: 500 on / after 30s","failure_class":"HEALTH_GATE_FAILED",` +
+		`"environment":"production","inserted_at":"2026-08-06T01:00:00Z"}],"next_cursor":null}`}
 	cp.serve()
 	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
 	if code != exitOK {
 		t.Fatalf("exit=%d want 0\n%s", code, stderr)
 	}
-	if !strings.Contains(stdout, "astro build in 1.7s") || !strings.Contains(stdout, "probe got 500 on /") {
+	if !strings.Contains(stdout, "astro build in 1.7s") {
 		t.Fatalf("status stage bar must carry the per-stage detail:\n%s", stdout)
 	}
 	// The header owes the reader the reason for a deployment that never went live.
-	if !strings.Contains(stdout, "reason") {
+	if !strings.Contains(stdout, "reason") || !strings.Contains(stdout, "probe got 500 on /") {
 		t.Fatalf("status header must show the failure reason:\n%s", stdout)
+	}
+}
+
+// TestRunCloudSiteStatusFlagsFailedNewestDeployment is the lie this slice kills, in
+// the ONLY shape the control plane can actually produce: the site row's live
+// pointer is a serene `live` deployment, and the newest ledger row — the thing that
+// happened LAST — is a failure. Before the second read, `status` printed a bare
+// "live" and nothing else; a person checking on a site whose every deploy had been
+// failing for days saw a green word.
+func TestRunCloudSiteStatusFlagsFailedNewestDeployment(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production","url":"https://acme.barkpark.cloud/sites/blog/",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-9","site_id":"` + testSiteID + `","status":"failed","stage":"BUILD",` +
+		`"failure_reason":"the build command exited non-zero — nothing was switched","failure_reason_raw":"BUILD failed (exit 1): npm ERR! code ELIFECYCLE",` +
+		`"failure_class":"BUILD_FAILED","environment":"production"}],"next_cursor":null}`}
+	cp.serve()
+
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0\n%s", code, stderr)
+	}
+	// The bound really went on the wire — one row is all this read needs.
+	if cp.listHits != 1 {
+		t.Fatalf("status must read the deployments list exactly once, got %d hits", cp.listHits)
+	}
+	if !strings.Contains(cp.listQuery, "limit=1") {
+		t.Fatalf("status must bound the newest-deployment read, query=%q", cp.listQuery)
+	}
+	// The header no longer says a bare "live" and nothing else.
+	for _, want := range []string{"NEWEST deploy FAILED", "dep-9", "BUILD_FAILED", "the build command exited non-zero"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("status header must carry %q over a failed newest deployment:\n%s", want, stdout)
+		}
+	}
+	// The live pointer is still named — the older build IS what visitors see.
+	if !strings.Contains(stdout, "dep-1") {
+		t.Fatalf("status must still name the live deployment:\n%s", stdout)
+	}
+
+	jstdout, _, jcode := runSite(t, "json", "status", testSiteID)
+	if jcode != exitOK {
+		t.Fatalf("status -o json exit=%d want 0", jcode)
+	}
+	var env struct {
+		Deployment struct {
+			ID     string `json:"id"`
+			Status string `json:"status"`
+		} `json:"deployment"`
+		Latest struct {
+			ID               string `json:"id"`
+			Status           string `json:"status"`
+			FailureClass     string `json:"failure_class"`
+			FailureReasonRaw string `json:"failure_reason_raw"`
+		} `json:"latest_deployment"`
+		Staleness struct {
+			LiveIsLatest       bool   `json:"live_is_latest"`
+			LatestFailed       bool   `json:"latest_failed"`
+			LiveDeploymentID   string `json:"live_deployment_id"`
+			LatestDeploymentID string `json:"latest_deployment_id"`
+			FailureClass       string `json:"failure_class"`
+		} `json:"staleness"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	// `deployment` keeps its meaning — the LIVE pointer — so no existing reader moves.
+	if env.Deployment.ID != "dep-1" || env.Deployment.Status != "live" {
+		t.Fatalf("`deployment` must stay the live-pointer contract: %+v\n%s", env.Deployment, jstdout)
+	}
+	if env.Latest.ID != "dep-9" || env.Latest.Status != "failed" {
+		t.Fatalf("`latest_deployment` must carry the newest row: %+v\n%s", env.Latest, jstdout)
+	}
+	if env.Latest.FailureClass != "BUILD_FAILED" || env.Latest.FailureReasonRaw != "BUILD failed (exit 1): npm ERR! code ELIFECYCLE" {
+		t.Fatalf("the wide decode dropped the ledger's failure pair: %+v\n%s", env.Latest, jstdout)
+	}
+	if env.Staleness.LiveIsLatest || !env.Staleness.LatestFailed {
+		t.Fatalf("staleness must say the live build is NOT the newest and the newest failed: %+v\n%s", env.Staleness, jstdout)
+	}
+	if env.Staleness.LiveDeploymentID != "dep-1" || env.Staleness.LatestDeploymentID != "dep-9" || env.Staleness.FailureClass != "BUILD_FAILED" {
+		t.Fatalf("staleness node incomplete: %+v\n%s", env.Staleness, jstdout)
+	}
+}
+
+// TestRunCloudSiteStatusLiveIsNewest is the other half of the same truth: when the
+// live pointer IS the newest row, the header gains nothing and says "live" — the
+// staleness machinery must not manufacture an alarm out of agreement.
+func TestRunCloudSiteStatusLiveIsNewest(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-7","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-7","site_id":"` + testSiteID + `","status":"live","environment":"production"}],"next_cursor":null}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0", code)
+	}
+	if strings.Contains(stdout, "FAILED") || strings.Contains(stdout, "newest deployment") {
+		t.Fatalf("a site whose live build IS the newest must not be flagged stale:\n%s", stdout)
+	}
+
+	jstdout, _, _ := runSite(t, "json", "status", testSiteID)
+	var env struct {
+		Staleness struct {
+			LiveIsLatest bool `json:"live_is_latest"`
+			LatestFailed bool `json:"latest_failed"`
+		} `json:"staleness"`
+	}
+	if err := json.Unmarshal([]byte(jstdout), &env); err != nil {
+		t.Fatalf("status json not parseable: %v\n%s", err, jstdout)
+	}
+	if !env.Staleness.LiveIsLatest || env.Staleness.LatestFailed {
+		t.Fatalf("staleness must report agreement: %+v\n%s", env.Staleness, jstdout)
+	}
+}
+
+// TestRunCloudSiteStatusNewestReadFails proves the degradation is HONEST rather
+// than silent: a control plane that will not answer the list leaves the live
+// pointer true, so the verb still exits 0 and prints the header — but it says out
+// loud that the staleness check did not run, and it emits NO staleness node
+// (absent means unknown, never "in sync").
+func TestRunCloudSiteStatusNewestReadFails(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production",` +
+		`"current_deployment":{"id":"dep-1","status":"live","stage":"RETIRE","stages":[{"name":"PLAN","status":"done"}]}}}`}
+	cp.listResp = fakeResp{500, `{"error":"boom"}`}
+	cp.serve()
+	stdout, stderr, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("a failed secondary read must not fail the verb, exit=%d", code)
+	}
+	if !strings.Contains(stderr, "newest deployment") {
+		t.Fatalf("the unread staleness check must be stated, not hidden:\n%s", stderr)
+	}
+	if !strings.Contains(stdout, "live") {
+		t.Fatalf("the live pointer is still true and must still print:\n%s", stdout)
+	}
+
+	jstdout, _, _ := runSite(t, "json", "status", testSiteID)
+	if strings.Contains(jstdout, "staleness") {
+		t.Fatalf("an unread comparison must emit no staleness node:\n%s", jstdout)
+	}
+}
+
+// TestRunCloudSiteStatusNeverLive covers the twin lie: a site with no live pointer
+// at all whose only deploy failed. "no deployment yet — kick the first build" is
+// wrong there; the build was kicked, and it died.
+func TestRunCloudSiteStatusNeverLive(t *testing.T) {
+	cp := newSiteCP(t)
+	cp.getResp = fakeResp{200, `{"site":{"id":"` + testSiteID + `","name":"blog","slug":"blog","kind":"static","framework":"astro","workspace":"acme","project":"blog","dataset":"production"}}`}
+	cp.listResp = fakeResp{200, `{"deployments":[{"id":"dep-1","site_id":"` + testSiteID + `","status":"failed","stage":"BUILD",` +
+		`"failure_reason":"the build command exited non-zero — nothing was switched","failure_class":"BUILD_FAILED"}],"next_cursor":null}`}
+	cp.serve()
+	stdout, _, code := runSite(t, "table", "status", testSiteID)
+	if code != exitOK {
+		t.Fatalf("exit=%d want 0", code)
+	}
+	if strings.Contains(stdout, "no deployment yet") {
+		t.Fatalf("a site whose deploy FAILED has not 'no deployment yet':\n%s", stdout)
+	}
+	for _, want := range []string{"never went live", "BUILD_FAILED", "the build command exited non-zero"} {
+		if !strings.Contains(stdout, want) {
+			t.Fatalf("status must say %q:\n%s", want, stdout)
+		}
 	}
 }
 

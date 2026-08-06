@@ -12,11 +12,16 @@ name: bp-graph-drift
 # never fire it. The trigger list below therefore names all four literal copies
 # plus this script and this workflow.
 #
-# ADVISORY, honestly labelled: this repo has no branch protection
-# (branches/main/protection -> 404 "Branch not protected", /rulesets -> []), so
-# there is no required-check list to register against and no workflow here gates
-# a merge. This job REDS THE PR PAGE. Repo-wide protection is tracked separately
-# (stw10-backlog-branch-protection).
+# ADVISORY, honestly labelled — and the ORIGINAL ground for that label is DEAD.
+# It read "there is nothing to register against", true only while protection was
+# a 404. Since 2026-07-28T22:42:10Z main IS protected, with enforce_admins: true
+# and a required-context list committed at .github/required-checks.json. This
+# workflow is simply not on that list, so it REDS THE PR PAGE and gates nothing.
+# (`/rulesets` -> [] is TRUE and is the wrong reading: protection here is
+# classic branch protection, not a ruleset.) Putting a check ON that list is a
+# repo-settings decision taken through scripts/required-checks-*.sh — never a
+# side effect of this file. Names are deliberately not repeated here: the spec
+# file is the one source, and required-checks-verify.sh reads prose near them.
 
 on:
   push:

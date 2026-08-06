@@ -538,16 +538,22 @@ test("A BREAKPOINT THE STYLESHEET DROPS IS REFUSED — the hole cch-w15-bl-lega-
 // deploy-rail STAGE entry — is the 102nd scenario and the 77th residue entry,
 // and the sweep exited 2 while this test exited 1 on 101/76. The numbers below
 // are `scenarioReport`'s, re-read after the entry landed.
-test("the census reconciles: 102 scenarios, 25 distinct covered by 26 cells, 77 residue over 13 families", () => {
+// cch-w34-s6 REVIEW moved it a fourth time: `overview-never-reported` — the
+// first fixture for the never-reported state the slice made reachable — is the
+// 103rd scenario and the 78th residue entry. It refused exactly as designed:
+// this test exited 1 on 102/77 before these four numbers were re-read from
+// `scenarioReport`, which is the literal doing its job on a REVIEW edit rather
+// than a builder one.
+test("the census reconciles: 103 scenarios, 25 distinct covered by 26 cells, 78 residue over 13 families", () => {
   const r = scenarioReport({ scenarios: SCENARIOS });
   assert.equal(r.total, SCENARIO_NAMES.length);
-  assert.equal(r.total, 102);
+  assert.equal(r.total, 103);
   assert.equal(r.cells, 26);
   assert.equal(r.distinctCovered, 25, "mixed-fleet is used twice — 26 cells cover 25 DISTINCT scenarios");
-  assert.equal(r.residue, 77, "77 is the RESIDUE, not the census");
+  assert.equal(r.residue, 78, "78 is the RESIDUE, not the census");
   assert.equal(r.families, 13);
   assert.equal(r.ok, true);
-  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 77, "the COMMITTED literal, counted from the committed bytes");
+  assert.equal(Object.keys(SCENARIO_RESIDUE).length, 78, "the COMMITTED literal, counted from the committed bytes");
 });
 
 test("familyOf reads the artifact: pathname, else the deepLink head, else no-deeplink", () => {

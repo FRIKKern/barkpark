@@ -95,8 +95,12 @@ defmodule BarkparkCloud.Notifications.Delivery do
   #
   # TWO VOCABULARIES, named together here so they cannot drift apart:
   #
-  #   1. FAILURE reasons — `DeliveryReason`, every arm of which describes an
-  #      attempted-and-failed send ("The destination refused the connection").
+  #   1. FAILURE reasons — `DeliveryReason`, every arm of which describes a send
+  #      this system TRIED to make and that did not arrive ("The destination
+  #      refused the connection"). Wave 35 S3 sharpened the boundary rather than
+  #      moving it: `:not_configured` says the send "never started", because the
+  #      transport refused to open a socket at all — still a send this system
+  #      attempted, so still a `failed` row, never a withheld one.
   #   2. WITHHOLD reasons — `Notifications.Withhold`, for `status: "suppressed"`
   #      rows, where nothing was attempted at all. None of (1) can honestly say
   #      that, which is exactly why (2) exists as a separate set.

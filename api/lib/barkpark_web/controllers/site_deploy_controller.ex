@@ -37,6 +37,11 @@ defmodule BarkparkWeb.SiteDeployController do
     * **500** `runner_start_failed` — the feature IS enabled but the command
       could not spawn (missing script, bad cd). Distinct from 503: telling an
       admin to set an env var they already set would be actively wrong.
+    * **500** `site_provision_failed` — the site's SOURCE could not be
+      materialized, so the build never started. Carries a scrubbed `reason`
+      (the failed action + path). Distinct from `runner_start_failed`, which it
+      used to be silently folded into: the two have different operators and
+      different fixes.
 
   `GET /v1/admin/site-deploy?slug=<slug>` returns the run status for one slug:
   state, the six parsed `stages` (retained separately from the log ring, so a
@@ -104,6 +109,26 @@ defmodule BarkparkWeb.SiteDeployController do
         # has a symlink in it" from "the box is broken", and must never read a
         # refusal as a licence to let the box build the site instead.
         bad_request(conn, code, message)
+
+      {:error, {:provision_failed, reason}} ->
+        # The site's SOURCE could not be materialized, so the build never
+        # started. This used to collapse into `runner_start_failed` after a bare
+        # Logger.warning — which is why a `%File.Error{}` that explained 63% of
+        # this fleet's failures reached journald and nothing else, across 25
+        # consecutive attempts on one site. It is now its own code carrying the
+        # scrubbed reason (the failed action AND path), so a caller can tell
+        # "your box cannot write the sites dir" from "the runner would not
+        # spawn". It is NOT a stage: site-spawner D34 keeps PROVISION a silent
+        # pre-BUILD step, and the six stage names are untouched.
+        conn
+        |> put_status(:internal_server_error)
+        |> json(%{
+          error: %{
+            code: "site_provision_failed",
+            message: "site source could not be provisioned — the deploy never started",
+            reason: reason
+          }
+        })
 
       {:error, :start_failed} ->
         conn

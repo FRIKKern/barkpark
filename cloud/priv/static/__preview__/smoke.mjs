@@ -1378,6 +1378,25 @@ const EXPECTATIONS = {
       assert.ok(grid.includes("instance-card--warn"), "the degraded card carries the amber accent");
     },
   },
+  // cch-w34-s6 (REVIEW ADDITION). Every string below is DERIVED FROM THE
+  // FIXTURE, and the EXCLUSIONS are the load-bearing half: the row carries
+  // `health_status: "up"`, so a console that reprints its cached column would
+  // pass an includes-only check and still be telling the lie the slice removed.
+  "overview-never-reported": {
+    what: "a box the control plane has never heard from reads Never reported — never the cached green Up",
+    check(reg) {
+      const grid = (reg.get("overview-instances") || {}).innerHTML || "";
+      assert.ok(grid.includes("Never reported"), "the never-reported box names the absence as a STATE");
+      assert.ok(grid.includes("38d ago"), "…with the age since creation as evidence");
+      assert.ok(grid.includes("3 missed checks"), "…and the sweep's own unreachable_count, finally read");
+      assert.ok(grid.includes("instance-card--neutral"), "the card reaches the neutral accent (rule added at review)");
+      assert.ok(!grid.includes("Unclassified"), "the loud fallthrough is NOT how this state renders");
+      // The kind control is in the same DOM: a fix that neutered the pill for
+      // everyone would take Healthy down with it.
+      assert.ok(grid.includes("Healthy"), "the reporting box beside it still reads Healthy");
+      assert.ok(!/Never reported[^<]*<[^>]*>[^<]*v0\.9\.2/.test(grid), "no version is invented for a box that never reported");
+    },
+  },
   "overview-past-due": {
     what: "GR17 overview dunning banner + the suspended instance-card banner, verbatim, no runway",
     check(reg) {
