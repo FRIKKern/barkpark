@@ -8005,9 +8005,16 @@
             operatorRefresh();
             return;
           }
-          ctl.fail(friendly(r.data, "Please try again."), "Try again", function () {
-            operatorConfirmBrake("halt");
-          });
+          // REVIEW (cch-w36-s4-r): the SIXTH billing-sentence site, and the one
+          // the console's own Halt button actually takes — a 403 here printed
+          // "Only the team owner can manage billing." inside a danger confirm
+          // dialog about the fleet. Same call-site guard as fleetRolloutAction,
+          // using the classifier this commit already ships.
+          var haltFault = operatorReadFault(r);
+          ctl.fail(haltFault && haltFault.text ? haltFault.text : friendly(r.data, "Please try again."),
+            "Try again", function () {
+              operatorConfirmBrake("halt");
+            });
         });
       },
     });

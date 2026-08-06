@@ -2386,6 +2386,26 @@ test("cch-w36-s4: a failed halt/resume stops printing the billing sentence over 
     "the curated map is untouched — the fix is at the call site");
 });
 
+test("cch-w36-s4-r: the Halt confirm dialog's OWN failure arm stops printing the billing sentence too", () => {
+  // The builder enumerated ONE call site (fleetRolloutAction) and filed this
+  // sixth one as backlog. It is the path the console's own Halt button takes —
+  // operatorConfirmBrake("halt") does NOT go through fleetRolloutAction — so a
+  // 403 rendered "Only the team owner can manage billing." inside a DANGER
+  // confirm dialog about the whole fleet. Fixed in review with the classifier
+  // this same commit ships; pinned here so a revert reds.
+  const brake = APP_SRC.match(/function operatorConfirmBrake\(verb\) \{[\s\S]*?\n  \}\n/)[0];
+  assert.match(brake, /var haltFault = operatorReadFault\(r\);/,
+    "the confirm dialog's failure arm classifies the fault before it speaks");
+  assert.match(brake, /haltFault && haltFault\.text \? haltFault\.text : friendly\(r\.data, "Please try again\."\)/,
+    "a nameable fault speaks; every other class keeps friendly()");
+  assert.equal((brake.match(/ctl\.fail\(friendly\(/g) || []).length, 0,
+    "the unguarded ctl.fail(friendly(…)) shape is gone");
+  // And the sentence it now shows is the authority one, not billing.
+  const shown = hooks.operatorReadFault({ ok: false, status: 403, data: { error: "forbidden" } }).text;
+  assert.match(shown, /platform_operator/);
+  assert.doesNotMatch(shown, /billing/i);
+});
+
 // ── GR49 anti-drift source guards (the console is the SOLE brake control) ────
 
 test("gr-p5 GR49: ONE route literal, ONE action emitter, ZERO worker-gated probes", () => {
