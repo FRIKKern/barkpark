@@ -5032,7 +5032,7 @@
   // ------------------------------------------------ status + attention (pure)
   // classifyBp collapses the fleet fields GET /v1/barkparks already returns
   // (provision/deprovision status, suspended, health_status, agent_status,
-  // update_state) into exactly ONE of the eight ranked states of charter
+  // update_state, last_seen_at) into exactly ONE of the nine ranked states of charter
   // decision 15 — the single attention-order spec. Both statusOf (the pill) and
   // attentionRank/bucketOf (the queue + rollup) derive from it, so the pill's
   // colour and the queue's order can never disagree. This is the JS twin of
@@ -5054,17 +5054,31 @@
     if (bp.deprovision_status === "failed") return "removal_failed"; // 1
     if (!host && bp.provision_status === "failed") return "failed";  // 2
     if (bp.suspended && !removing) return "suspended";              // 3
+    // cch-w34-s6: a box the control plane has NEVER received a byte from is not
+    // "degraded" — degraded is the grammar of a box that WAS online and left.
+    // health_status/agent_status are CACHED last-reported columns; with
+    // last_seen_at null they were never measured, so they cannot rank this box.
+    // This arm is checked BEFORE degraded because unknown is a different state,
+    // not a lesser one; the ladder below is where its urgency is expressed.
+    if (live && bp.last_seen_at == null) return "unreported";      // 5
     if (live && !healthy) return "degraded";                       // 4
-    if (live && bp.update_state === "behind") return "behind";     // 5
-    if (removing) return "removing";                              // 6
-    if (!host) return "provisioning";                            // 7 (rank-2 already excluded)
-    return "ok";                                                // 8
+    if (live && bp.update_state === "behind") return "behind";     // 6
+    if (removing) return "removing";                              // 7
+    if (!host) return "provisioning";                            // 8 (rank-2 already excluded)
+    return "ok";                                                // 9
   }
 
-  // The rank number per decision 15 (1 = most urgent … 8 = ok).
+  // The rank number per decision 15 (1 = most urgent … 9 = ok). cch-w34-s6 adds
+  // `unreported` and the EXPLICIT ordering clause charter D332(b) requires:
+  // failed > unknown > pending > ok. A measured failure (removal_failed, failed,
+  // suspended, degraded) outranks the UNKNOWN state, which in turn outranks
+  // every pending/in-flight state (behind, removing, provisioning) and ok.
+  // The eight pre-existing kinds keep their RELATIVE order, so this ladder still
+  // agrees with the Go twin (cloud_status_cmd.go statusOf) on every shared kind.
   var ATTENTION_RANK = {
     removal_failed: 1, failed: 2, suspended: 3, degraded: 4,
-    behind: 5, removing: 6, provisioning: 7, ok: 8,
+    unreported: 5,
+    behind: 6, removing: 7, provisioning: 8, ok: 9,
   };
   function attentionRank(bp) { return ATTENTION_RANK[classifyBp(bp)]; }
 
@@ -5078,10 +5092,12 @@
     return an < bn ? -1 : an > bn ? 1 : 0;
   }
 
-  // Buckets (decision 15): attention = ranks 1–5, in-flight = 6–7, healthy = 8.
+  // Buckets (decision 15): attention = ranks 1–6, in-flight = 7–8, healthy = 9.
+  // `unreported` (5) sits in ATTENTION: a box we have never heard from is a box
+  // to look at, and it was already counted there when it read "degraded".
   function bucketOf(bp) {
     var r = attentionRank(bp);
-    return r <= 5 ? "attention" : r <= 7 ? "inflight" : "healthy";
+    return r <= 6 ? "attention" : r <= 8 ? "inflight" : "healthy";
   }
 
   // Pure rollup of a fleet list into the three bucket counts + total.
@@ -5101,23 +5117,76 @@
   // danger|neutral) mapping to the --ok/--info/--warn/--danger token contract,
   // a primary label, and a secondary detail string. Replaces the multi-badge
   // soup; the health/agent/update breakdown lives only in the drill-down rail.
+  // cch-w34-s6: `unreachable_count` is the sweep's OWN count of health checks
+  // that did not answer (GET /v1/barkparks has shipped it since cch-w34-s2, and
+  // the console read it zero times). Rendered as EVIDENCE ONLY — a number the
+  // control plane measured, never advice about what to do with it (D332(d)).
+  // "" when the field is absent (an older CP) or zero: silence, not "0 missed".
+  function missedChecksText(bp) {
+    bp = bp || {};
+    var n = bp.unreachable_count;
+    if (typeof n !== "number" || !isFinite(n) || n <= 0) return "";
+    return Math.floor(n) + (Math.floor(n) === 1 ? " missed check" : " missed checks");
+  }
+
+  // The evidence line for a box that has never reported: how long it has existed
+  // and how many checks the sweep counted as missed. Both are measurements the
+  // control plane already holds; neither is a remediation. "" when we hold
+  // neither (a row with no inserted_at and no count — the label stands alone).
+  function neverReportedEvidence(bp) {
+    bp = bp || {};
+    var parts = [];
+    var age = bp.inserted_at ? relTime(bp.inserted_at) : "—";
+    if (age !== "—") parts.push("Created " + age);
+    var missed = missedChecksText(bp);
+    if (missed) parts.push(missed);
+    return parts.join(" · ");
+  }
+
+  // "Reported 5m ago" / "Never reported · Created 38d ago · 3 missed checks" —
+  // the Activity rail's last-contact line. Deliberately the same idiom as
+  // lastCheckedText ("Never checked"): an absent stamp is a STATE with a name,
+  // never a bare "—" beside an absolute creation date that reads as freshness.
+  function lastSeenText(bp) {
+    bp = bp || {};
+    if (bp.last_seen_at != null) {
+      var rel = relTime(bp.last_seen_at);
+      if (rel !== "—") return "Reported " + rel;
+    }
+    var ev = neverReportedEvidence(bp);
+    return ev ? "Never reported · " + ev : "Never reported";
+  }
+
   function statusOf(bp) {
     bp = bp || {};
     var kind = classifyBp(bp);
     if (kind === "removal_failed") return { role: "danger", label: "Removal failed", detail: bp.deprovision_error || "Teardown failed — retry removal" };
     if (kind === "failed") return { role: "danger", label: "Failed", detail: bp.provision_error || "Provisioning failed" };
     if (kind === "suspended") return { role: "danger", label: "Suspended", detail: bp.suspended_reason || "Suspended for billing" };
+    // cch-w34-s6: a box we have NEVER heard from gets its own word. It reaches
+    // the neutral role that statusOf has always declared and never could render
+    // — the console's own "Unknown" state, finally produced by the only thing
+    // that is genuinely unknown. Evidence only, no next step (D332(d)).
+    if (kind === "unreported") return { role: "neutral", label: "Never reported", detail: neverReportedEvidence(bp) };
     if (kind === "degraded") {
       var parts = [];
       if ((bp.health_status || "unknown") !== "up") parts.push("Health " + (bp.health_status || "unknown"));
       if ((bp.agent_status || "offline") !== "online") parts.push("Agent " + (bp.agent_status || "offline"));
+      var missed = missedChecksText(bp);
+      if (missed) parts.push(missed);
       return { role: "warn", label: "Degraded", detail: parts.join(" · ") || "Needs attention" };
     }
     if (kind === "behind") return { role: "info", label: "Update available", detail: bp.update_latest_release ? "→ " + vRel(bp.update_latest_release) : "A newer release is available" };
     if (kind === "removing") return { role: "info", label: "Removing", detail: "Tearing down the server" };
     if (kind === "provisioning") return { role: "info", label: "Provisioning", detail: "Setting up the server" };
     if (kind === "ok") return { role: "ok", label: "Healthy", detail: bp.version ? "v" + String(bp.version).replace(/^v/, "") : "Online" };
-    return { role: "neutral", label: "Unknown", detail: "" };
+    // Unreachable while classifyBp stays total over the nine kinds of
+    // ATTENTION_RANK — and the CLOSED-ENUM test pins exactly that (charter D33).
+    // It is deliberately NOT the calm "Unknown" it used to be: a tail that
+    // announces the calmest word over an unhandled — and therefore possibly the
+    // most severe — state is the defect this wave exists to remove. A new kind
+    // that reaches here reds the enum test and reads as unhandled on screen.
+    return { role: "warn", label: "Unclassified", detail: "No console state for '" + kind + "'" };
   }
 
   // The single .status-pill component — one dot + label + optional detail,
@@ -6295,7 +6364,14 @@
     opts = opts || {};
     var lc = instanceLifecycle(bp);
     var hasHost = !!bp.host;
-    var health = bp.health_status || "unknown";
+    // cch-w34-s6: health_status is a CACHED last-reported column. For a box the
+    // control plane has never heard from (classifyBp → "unreported") it was
+    // never measured, and legacy rows still carry a literal "up" written at
+    // adoption/provision time (cch-w34-s2 fixed the WRITERS; it shipped no
+    // backfill, so those rows survive). The rail names the absence instead of
+    // reprinting a green word beside "Never reported".
+    var neverReported = classifyBp(bp) === "unreported";
+    var health = neverReported ? "never reported" : (bp.health_status || "unknown");
     var agent = bp.agent_status || "offline";
 
     // A4: the provision→live moment folds the timeline into the ready panel.
@@ -6379,7 +6455,10 @@
           '<div class="rail-group"><div class="rail-group-label">Platform</div>' +
             '<div id="instance-domains">' + railRow("Domain", bp.custom_host || "—") + "</div></div>" +
           railGroup("Activity",
-            railRowPlain("Last seen", fmtWhen(bp.last_seen_at)) +
+            // cch-w34-s6: the Activity rail no longer prints a bare "—" for a
+            // box that has never reported. lastSeenText names the state and its
+            // evidence (age since creation, missed checks the sweep counted).
+            railRowPlain("Last seen", lastSeenText(bp)) +
             railRowPlain("Created", fmtWhen(bp.inserted_at))) +
         "</aside>" +
       "</div>";
@@ -15295,10 +15374,23 @@
     return newStepsHtml(rows || []) + fail;
   }
 
-  // Console body lines (shared with the timeline shell). Empty → a calm caption.
-  function consoleTail(lines) {
+  // Console body lines (shared with the timeline shell). Empty → a calm caption
+  // — but WHICH caption depends on whether the job can still speak.
+  // cch-w34-s6: "No console output yet." promises more output. Production
+  // carries provision_jobs that ENDED (3 succeeded, 1 failed) with a completely
+  // empty console; for those the word "yet" is a promise nothing will keep.
+  // opts.terminal (the job has stopped) splits the copy. It names what the
+  // record holds and stops there — no remediation, no next step (D332(d)).
+  // Absent opts → the pending caption, i.e. the pre-existing behaviour.
+  function consoleTail(lines, opts) {
     var arr = lines || [];
-    if (!arr.length) return '<div class="bp-console-line bp-console-empty">No console output yet.</div>';
+    if (!arr.length) {
+      return '<div class="bp-console-line bp-console-empty">' +
+        ((opts && opts.terminal)
+          ? "No console output was recorded."
+          : "No console output yet.") +
+        "</div>";
+    }
     return arr.map(function (e) {
       e = e || {};
       var ts = newFmtConsoleTime(e.at);
@@ -15309,12 +15401,12 @@
   }
 
   // The collapsible dark console shell (uses the --console-* tokens).
-  function timelineConsoleHtml(lines, collapsed) {
+  function timelineConsoleHtml(lines, collapsed, opts) {
     return '<div class="bp-console' + (collapsed ? " is-collapsed" : "") + '">' +
       '<button type="button" class="bp-console-toggle" data-tl-console-toggle aria-expanded="' + (collapsed ? "false" : "true") + '">' +
         '<span class="bp-console-caret" aria-hidden="true"></span>Console' +
       "</button>" +
-      '<div class="bp-console-body"' + (collapsed ? " hidden" : "") + ">" + consoleTail(lines) + "</div>" +
+      '<div class="bp-console-body"' + (collapsed ? " hidden" : "") + ">" + consoleTail(lines, opts) + "</div>" +
     "</div>";
   }
 
@@ -15478,7 +15570,10 @@
         provisionOverallHtml(rows) +
         timelineHtml(rows, { failed: failed, failureDetail: bp && bp.provision_error }) +
         retry +
-        timelineConsoleHtml((bp && bp.provision_console) || [], !!opts.consoleCollapsed) +
+        // cch-w34-s6: a provision job that is no longer running gets the
+        // terminal empty caption — the console will not fill in later.
+        timelineConsoleHtml((bp && bp.provision_console) || [], !!opts.consoleCollapsed,
+          { terminal: !isProvisioning(bp) }) +
       "</section>";
   }
 
@@ -15581,7 +15676,7 @@
       st.consoleSig = csig;
       var body = section.querySelector(".bp-console-body");
       if (body) {
-        body.innerHTML = consoleTail((bp && bp.provision_console) || []);
+        body.innerHTML = consoleTail((bp && bp.provision_console) || [], { terminal: !isProvisioning(bp) });
         if (instanceConsoleStick && !instanceConsoleCollapsed) body.scrollTop = body.scrollHeight;
       }
     }
@@ -19889,6 +19984,11 @@
       // IA reshape + attention-rollup pure helpers (charter decisions 6 + 15).
       legacyRoute: legacyRoute, parseFleetFilter: parseFleetFilter,
       classifyBp: classifyBp, statusOf: statusOf,
+      // cch-w34-s6: the never-reported renderers + the closed state enum the
+      // harness asserts statusOf is total over.
+      lastSeenText: lastSeenText, missedChecksText: missedChecksText,
+      neverReportedEvidence: neverReportedEvidence,
+      attentionKinds: Object.keys(ATTENTION_RANK),
       attentionRank: attentionRank, attentionCompare: attentionCompare,
       bucketOf: bucketOf, fleetSummary: fleetSummary, filterFleet: filterFleet,
       // gr-p2 HOME TRIAGE (C-01/C-02): the v4 Overview pure helpers — greeting,

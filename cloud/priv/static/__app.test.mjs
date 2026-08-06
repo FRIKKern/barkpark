@@ -2688,18 +2688,25 @@ test("parseHash carries the fleet bucket filter; a bad suffix degrades to all", 
 
 // ── statusOf: one semantic role per state, across the whole ladder (D15) ─────
 
+// cch-w34-s6: every host-set fixture below now carries last_seen_at, because a
+// live box that has REPORTED is what these cases describe. The control plane's
+// serializer always sends the field (router.ex barkpark_json), and a null value
+// is now its own state ("Never reported") rather than a silent "Degraded".
+const SEEN = "2026-08-06T09:00:00Z";
+
 test("statusOf collapses every fleet state into one {role,label} (D15 ordering)", () => {
   const cases = [
     [{ deprovision_status: "failed" }, "danger", "Removal failed"],
     [{ provision_status: "failed" }, "danger", "Failed"],                        // no host
     [{ host: "h", suspended: true }, "danger", "Suspended"],
-    [{ host: "h", health_status: "down", agent_status: "online" }, "warn", "Degraded"],
-    [{ host: "h", health_status: "up", agent_status: "offline" }, "warn", "Degraded"],
-    [{ host: "h", health_status: "up", agent_status: "online", update_state: "behind" }, "info", "Update available"],
+    [{ host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" }, "warn", "Degraded"],
+    [{ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "offline" }, "warn", "Degraded"],
+    [{ host: "h", last_seen_at: null, health_status: "up", agent_status: "offline" }, "neutral", "Never reported"],
+    [{ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" }, "info", "Update available"],
     [{ deprovision_status: "pending" }, "info", "Removing"],
     [{ deprovision_status: "claimed" }, "info", "Removing"],
     [{}, "info", "Provisioning"],                                                // no host, nothing failed
-    [{ host: "h", health_status: "up", agent_status: "online" }, "ok", "Healthy"],
+    [{ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" }, "ok", "Healthy"],
   ];
   for (const [bp, role, label] of cases) {
     const s = hooks.statusOf(bp);
@@ -2720,9 +2727,9 @@ test("statusOf: 'not removing' qualifier — a suspended box mid-teardown reads 
 // "ok" — it must read Degraded, exactly as the CLI does.
 test("classifyBp: a host-set box ignores a failed provision job, ranks on health (Go parity)", () => {
   // host up + healthy, failed latest provision → still ok (the box is serving)
-  assert.equal(hooks.classifyBp({ host: "h", provision_status: "failed", health_status: "up", agent_status: "online" }), "ok");
+  assert.equal(hooks.classifyBp({ host: "h", last_seen_at: SEEN, provision_status: "failed", health_status: "up", agent_status: "online" }), "ok");
   // host up + UNHEALTHY, failed latest provision → degraded, NOT a false-green ok
-  assert.equal(hooks.classifyBp({ host: "h", provision_status: "failed", health_status: "down", agent_status: "online" }), "degraded");
+  assert.equal(hooks.classifyBp({ host: "h", last_seen_at: SEEN, provision_status: "failed", health_status: "down", agent_status: "online" }), "degraded");
   // no host + failed provision is still the terminal "failed" (rank 2)
   assert.equal(hooks.classifyBp({ provision_status: "failed" }), "failed");
 });
@@ -2730,15 +2737,16 @@ test("classifyBp: a host-set box ignores a failed provision job, ranks on health
 // ── attentionRank ordering + tiebreak vs a mixed fixture (D15) ──────────────
 
 const MIXED = [
-  { name: "healthy-b", host: "h", health_status: "up", agent_status: "online" },       // ok (8)
-  { name: "removing-x", deprovision_status: "claimed" },                               // removing (6)
+  { name: "healthy-b", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },       // ok (9)
+  { name: "removing-x", deprovision_status: "claimed" },                               // removing (7)
   { name: "gone-fail", deprovision_status: "failed" },                                 // removal_failed (1)
-  { name: "Alpha-degraded", host: "h", health_status: "down", agent_status: "online" },// degraded (4)
-  { name: "prov", },                                                                    // provisioning (7)
+  { name: "Alpha-degraded", host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },// degraded (4)
+  { name: "prov", },                                                                    // provisioning (8)
   { name: "susp", host: "h", suspended: true },                                        // suspended (3)
-  { name: "behind-1", host: "h", health_status: "up", agent_status: "online", update_state: "behind" }, // behind (5)
+  { name: "behind-1", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" }, // behind (6)
   { name: "prov-fail", provision_status: "failed" },                                   // failed (2)
-  { name: "healthy-a", host: "h", health_status: "up", agent_status: "online" },       // ok (8), tiebreak before healthy-b
+  { name: "never-said", host: "h", last_seen_at: null, health_status: "up", agent_status: "offline" }, // unreported (5)
+  { name: "healthy-a", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },       // ok (9), tiebreak before healthy-b
 ];
 
 test("attentionRank matches the D15 ladder for each state", () => {
@@ -2747,10 +2755,31 @@ test("attentionRank matches the D15 ladder for each state", () => {
   assert.equal(rankByName["prov-fail"], 2);
   assert.equal(rankByName["susp"], 3);
   assert.equal(rankByName["Alpha-degraded"], 4);
-  assert.equal(rankByName["behind-1"], 5);
-  assert.equal(rankByName["removing-x"], 6);
-  assert.equal(rankByName["prov"], 7);
-  assert.equal(rankByName["healthy-a"], 8);
+  assert.equal(rankByName["never-said"], 5);
+  assert.equal(rankByName["behind-1"], 6);
+  assert.equal(rankByName["removing-x"], 7);
+  assert.equal(rankByName["prov"], 8);
+  assert.equal(rankByName["healthy-a"], 9);
+});
+
+// cch-w34-s6 (charter D332(b)), stated as an ORDERING, not just as numbers:
+// measured failure > unknown > pending > ok. If a future edit slides
+// `unreported` below the pending states, this reds regardless of renumbering.
+test("cch-w34-s6: the unknown state ranks below every measured failure and above every pending state", () => {
+  const rank = (bp) => hooks.attentionRank(bp);
+  const unreported = { host: "h", last_seen_at: null };
+  for (const failure of [
+    { deprovision_status: "failed" },
+    { provision_status: "failed" },
+    { host: "h", suspended: true },
+    { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+  ]) assert.ok(rank(failure) < rank(unreported), "a measured failure outranks unknown: " + JSON.stringify(failure));
+  for (const pending of [
+    { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" },
+    { deprovision_status: "pending" },
+    {},
+    { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
+  ]) assert.ok(rank(unreported) < rank(pending), "unknown outranks pending/ok: " + JSON.stringify(pending));
 });
 
 test("attentionCompare sorts most-urgent-first, tiebreak name ascending case-insensitive", () => {
@@ -2760,30 +2789,32 @@ test("attentionCompare sorts most-urgent-first, tiebreak name ascending case-ins
     "prov-fail",      // 2
     "susp",           // 3
     "Alpha-degraded", // 4
-    "behind-1",       // 5
-    "removing-x",     // 6
-    "prov",           // 7
-    "healthy-a",      // 8, tiebreak: "healthy-a" < "healthy-b"
-    "healthy-b",      // 8
+    "never-said",     // 5
+    "behind-1",       // 6
+    "removing-x",     // 7
+    "prov",           // 8
+    "healthy-a",      // 9, tiebreak: "healthy-a" < "healthy-b"
+    "healthy-b",      // 9
   ]);
 });
 
 // ── bucketOf / fleetSummary / filterFleet ───────────────────────────────────
 
-test("bucketOf maps ranks 1–5 → attention, 6–7 → inflight, 8 → healthy", () => {
+test("bucketOf maps ranks 1–6 → attention, 7–8 → inflight, 9 → healthy", () => {
   assert.equal(hooks.bucketOf({ deprovision_status: "failed" }), "attention"); // 1
-  assert.equal(hooks.bucketOf({ host: "h", health_status: "down" }), "attention"); // 4
-  assert.equal(hooks.bucketOf({ deprovision_status: "pending" }), "inflight"); // 6
-  assert.equal(hooks.bucketOf({}), "inflight"); // 7 provisioning
-  assert.equal(hooks.bucketOf({ host: "h", health_status: "up", agent_status: "online" }), "healthy"); // 8
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "down" }), "attention"); // 4
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: null }), "attention"); // 5 unreported
+  assert.equal(hooks.bucketOf({ deprovision_status: "pending" }), "inflight"); // 7
+  assert.equal(hooks.bucketOf({}), "inflight"); // 8 provisioning
+  assert.equal(hooks.bucketOf({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" }), "healthy"); // 9
 });
 
 test("fleetSummary counts buckets — mixed, empty, and all-healthy", () => {
   const s = hooks.fleetSummary(MIXED);
-  assert.equal(s.total, 9);
-  assert.equal(s.attention, 5); // removal_failed, failed, suspended, degraded, behind (ranks 1–5)
-  assert.equal(s.inflight, 2);  // removing, provisioning (ranks 6–7)
-  assert.equal(s.healthy, 2);   // healthy-a, healthy-b (rank 8)
+  assert.equal(s.total, 10);
+  assert.equal(s.attention, 6); // removal_failed, failed, suspended, degraded, unreported, behind (ranks 1–6)
+  assert.equal(s.inflight, 2);  // removing, provisioning (ranks 7–8)
+  assert.equal(s.healthy, 2);   // healthy-a, healthy-b (rank 9)
   assert.equal(s.attention + s.inflight + s.healthy, s.total);
 
   // Spread sandbox-realm returns into the test realm before deepEqual (the
@@ -2792,15 +2823,15 @@ test("fleetSummary counts buckets — mixed, empty, and all-healthy", () => {
   assert.deepEqual({ ...hooks.fleetSummary(null) }, { attention: 0, inflight: 0, healthy: 0, total: 0 });
 
   const allHealthy = [
-    { name: "a", host: "h", health_status: "up", agent_status: "online" },
-    { name: "b", host: "h", health_status: "up", agent_status: "online" },
+    { name: "a", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
+    { name: "b", host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
   ];
   assert.deepEqual({ ...hooks.fleetSummary(allHealthy) }, { attention: 0, inflight: 0, healthy: 2, total: 2 });
 });
 
 test("filterFleet returns exactly one bucket; null bucket → the whole list (copied)", () => {
   const attention = hooks.filterFleet(MIXED, "attention").map((b) => b.name).sort();
-  assert.deepEqual(attention, ["Alpha-degraded", "behind-1", "gone-fail", "prov-fail", "susp"].sort());
+  assert.deepEqual(attention, ["Alpha-degraded", "behind-1", "gone-fail", "never-said", "prov-fail", "susp"].sort());
   assert.equal(hooks.filterFleet(MIXED, "inflight").length, 2);
   assert.equal(hooks.filterFleet(MIXED, "healthy").length, 2);
   const all = hooks.filterFleet(MIXED, null);
@@ -2814,6 +2845,191 @@ test("filterFleet returns exactly one bucket; null bucket → the whole list (co
 test("esc escapes all five HTML metacharacters", () => {
   assert.equal(hooks.esc("<&\"'>"), "&lt;&amp;&quot;&#39;&gt;");
   assert.equal(hooks.esc(null), "");
+});
+
+// ── cch-w34-s6: the console says "never reported" ────────────────────────────
+//
+// Production (2026-08-06) carried 3 of 8 barkparks with last_seen_at NULL — the
+// oldest inserted 38 days earlier. The pill read "Degraded · Agent offline" (the
+// grammar of a box that WAS online and left) and the rail read "Health: Up"
+// beside "Last seen: —". cch-w34-s2 fixed the two WRITERS that produced the
+// green health value; it shipped no backfill, so legacy rows still carry it.
+// This slice gives the state its own word, and renders the evidence the
+// serializer has been sending and the console read zero times.
+//
+// The production row shape, verbatim in the fields that decide the state.
+const NEVER_REPORTED = {
+  id: "bp-never", name: "Gyldendal", host: "5.75.169.183", url: "https://x.barkpark.cloud",
+  health_status: "up", agent_status: "offline", last_seen_at: null,
+  inserted_at: new Date(Date.now() - 38 * 24 * 3600 * 1000).toISOString(),
+  unreachable_count: 3, unreachable_notification_sent: true,
+  provider: "hetzner", region: "fsn1", server_type: "cx22", provision_status: "succeeded",
+};
+
+test("cch-w34-s6: a box we have never heard from is its own state, not 'Degraded'", () => {
+  assert.equal(hooks.classifyBp(NEVER_REPORTED), "unreported");
+  const s = hooks.statusOf(NEVER_REPORTED);
+  assert.equal(s.label, "Never reported");
+  assert.equal(s.role, "neutral");
+  assert.doesNotMatch(s.label + " " + s.detail, /Degraded|Agent offline/);
+  // and the fleet row's pill carries it (statusPill's only inputs are statusOf)
+  const row = hooks.fleetRow(NEVER_REPORTED);
+  assert.match(row, /status-pill--neutral/);
+  assert.match(row, /status-pill-label">Never reported</);
+  assert.doesNotMatch(row, /Degraded/);
+});
+
+test("cch-w34-s6: the instance rail stops printing 'Health: Up' and a bare '—' for it", () => {
+  const html = hooks.instanceOverviewHtml(NEVER_REPORTED, {});
+  // the Activity row is lastSeenText, not fmtWhen's em dash
+  assert.match(html, /Last seen<\/span><span class="v plain">Never reported/);
+  // the Runtime row no longer reprints the cached green word
+  assert.doesNotMatch(html, /Health<\/span><span class="v">Up</);
+  assert.match(html, /Health<\/span><span class="v">Never reported</);
+  // a box that HAS reported keeps a real relative freshness line
+  const seen = { ...NEVER_REPORTED, last_seen_at: new Date(Date.now() - 120000).toISOString(), agent_status: "online" };
+  assert.match(hooks.instanceOverviewHtml(seen, {}), /Last seen<\/span><span class="v plain">Reported 2m ago</);
+  assert.match(hooks.instanceOverviewHtml(seen, {}), /Health<\/span><span class="v">Up</);
+});
+
+test("cch-w34-s6: lastSeenText names the state and its age; missedChecksText renders unreachable_count", () => {
+  // the renderer this slice adds, by name
+  assert.equal(typeof hooks.lastSeenText, "function");
+  assert.equal(typeof hooks.missedChecksText, "function");
+  assert.equal(typeof hooks.neverReportedEvidence, "function");
+  const line = hooks.lastSeenText(NEVER_REPORTED);
+  assert.match(line, /^Never reported · Created 38d ago · 3 missed checks$/);
+  // the evidence the serializer has shipped since cch-w34-s2 and the console
+  // read ZERO times before this slice.
+  assert.equal(hooks.missedChecksText({ unreachable_count: 3 }), "3 missed checks");
+  assert.equal(hooks.missedChecksText({ unreachable_count: 1 }), "1 missed check");
+  // absent / zero / non-numeric → silence, never "0 missed checks"
+  assert.equal(hooks.missedChecksText({}), "");
+  assert.equal(hooks.missedChecksText({ unreachable_count: 0 }), "");
+  assert.equal(hooks.missedChecksText({ unreachable_count: null }), "");
+  assert.equal(hooks.missedChecksText(null), "");
+  // a row with nothing to show still names the state, never a bare dangling "·"
+  assert.equal(hooks.lastSeenText({ host: "h" }), "Never reported");
+  assert.equal(hooks.lastSeenText({ host: "h", last_seen_at: "not-a-date" }), "Never reported");
+});
+
+test("cch-w34-s6: a box that HAS reported still surfaces its missed-check count", () => {
+  // unreachable_count is evidence on the degraded axis too — the sweep counted
+  // these, and before this slice no surface in the console said so.
+  const lost = { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "offline", unreachable_count: 7 };
+  const s = hooks.statusOf(lost);
+  assert.equal(s.label, "Degraded");
+  assert.match(s.detail, /Health down · Agent offline · 7 missed checks/);
+  // and stays silent when the counter is zero
+  assert.equal(hooks.statusOf({ ...lost, unreachable_count: 0 }).detail, "Health down · Agent offline");
+});
+
+test("cch-w34-s6: the unknown state names EVIDENCE ONLY — no remediation, no next step (D332(d))", () => {
+  const s = hooks.statusOf(NEVER_REPORTED);
+  const copy = s.label + " " + s.detail + " " + hooks.lastSeenText(NEVER_REPORTED);
+  // no imperative, no advice, no support escalation — the charter's line.
+  assert.doesNotMatch(copy, /retry|try again|check the|contact|restart|reinstall|run |ssh|should|make sure|verify/i);
+});
+
+test("cch-w34-s6: statusOf is total over the CLOSED state enum — nothing falls through to a calm label", () => {
+  // charter D33: a MAP[state] || "…" tail announces the CALMEST word over the
+  // most severe state. The enum is pinned, and every member has an explicit arm.
+  const KINDS = ["removal_failed", "failed", "suspended", "degraded", "unreported",
+    "behind", "removing", "provisioning", "ok"];
+  assert.deepEqual([...hooks.attentionKinds].sort(), KINDS.slice().sort(),
+    "a new fleet state was added without a statusOf arm (or one was removed)");
+  const REP = {
+    removal_failed: { deprovision_status: "failed" },
+    failed: { provision_status: "failed" },
+    suspended: { host: "h", suspended: true },
+    degraded: { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "online" },
+    unreported: { host: "h", last_seen_at: null },
+    behind: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "behind" },
+    removing: { deprovision_status: "pending" },
+    provisioning: {},
+    ok: { host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online" },
+  };
+  for (const kind of KINDS) {
+    assert.equal(hooks.classifyBp(REP[kind]), kind, kind + " must be reachable");
+    const s = hooks.statusOf(REP[kind]);
+    // THE MUTATION THIS CATCHES: delete an arm from statusOf and its kind lands
+    // on the fallthrough, which is loud ("Unclassified", warn) — never calm.
+    assert.notEqual(s.label, "Unclassified", kind + " has no explicit statusOf arm");
+    assert.ok(["ok", "info", "warn", "danger", "neutral"].includes(s.role), kind + " role");
+  }
+});
+
+test("cch-w34-s6: the console's 'Unknown' neutral role is now REACHED, and the tail is not calm", () => {
+  // Before this slice statusOf ended on an unreachable `{role:"neutral",
+  // label:"Unknown"}` — a state the console declared and could never produce.
+  // The neutral role is now produced by the only genuinely unknown thing.
+  assert.equal(hooks.statusOf(NEVER_REPORTED).role, "neutral");
+  const roles = new Set([...hooks.attentionKinds].map((k) => k));
+  assert.ok(roles.has("unreported"));
+});
+
+// ── cch-w34-s6 (2): the provision console stops promising output to a job that
+// ── already ended. Production provision_jobs: 3 succeeded + 1 failed with a
+// ── completely empty console. "yet" is a promise nothing will keep.
+
+test("cch-w34-s6: consoleTail splits the empty caption on the job's terminal state", () => {
+  assert.match(hooks.consoleTail([]), /No console output yet\./);            // pending, unchanged
+  assert.match(hooks.consoleTail([], { terminal: false }), /No console output yet\./);
+  const done = hooks.consoleTail([], { terminal: true });
+  assert.match(done, /No console output was recorded\./);
+  assert.doesNotMatch(done, /yet/);
+  // lines always win over either caption
+  assert.match(hooks.consoleTail([{ line: "activate: build complete", at: null }], { terminal: true }),
+    /activate: build complete/);
+});
+
+test("cch-w34-s6: a FAILED provision with an empty console no longer says 'yet'", () => {
+  const failed = { id: "b", provision_status: "failed", host: null, provision_console: [] };
+  const html = hooks.instanceTimelineHtml(failed, Date.now(), {});
+  assert.match(html, /No console output was recorded\./);
+  assert.doesNotMatch(html, /No console output yet\./);
+  // a SUCCEEDED job (host set) is terminal too
+  const succeeded = { id: "b", provision_status: "succeeded", host: "h", provision_console: [] };
+  assert.match(hooks.instanceTimelineHtml(succeeded, Date.now(), {}), /No console output was recorded\./);
+  // a job still running keeps the pending caption — it really may fill in
+  const running = { id: "b", provision_status: "claimed", host: null, provision_console: [] };
+  assert.match(hooks.instanceTimelineHtml(running, Date.now(), {}), /No console output yet\./);
+});
+
+// ── cch-w34-s6 (3): pin wave 33's mid-stage narration arm against the shape
+// ── production actually produces (charter D384: 96.3% of console entries carry
+// ── a status; the arm is already paid for 3,019 rows and was unpinned here).
+
+test("cch-w34-s6: a failed deploy whose last entry is {stage:'HEALTH',status:'running'} discloses the cut", () => {
+  const d = {
+    id: "dep-health", status: "failed",
+    console: [
+      { line: "PLAN: resolved", at: null, stage: "PLAN", status: "done" },
+      { line: "BUILD: image pushed", at: null, stage: "BUILD", status: "done" },
+      { line: "HEALTH running", at: null, stage: "HEALTH", status: "running" },
+    ],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.match(html, /narration ended mid-HEALTH/);
+  // and the count still reads the REAL number of entries, never inflated
+  assert.match(html, /deploy-console-count">3 lines/);
+});
+
+test("cch-w34-s6: the n=1 statusless-terminal shape records what it renders TODAY", () => {
+  // One production row ends on a plain {line, at} with NO status key. Absent
+  // status is SILENCE, so no cut is claimed — asserted so a future change to
+  // that arm is VISIBLE rather than silent.
+  const d = {
+    id: "dep-statusless", status: "failed",
+    console: [
+      { line: "PLAN: resolved", at: null, stage: "PLAN", status: "done" },
+      { line: "activate: build complete — handing off to release", at: null },
+    ],
+  };
+  const html = hooks.deployConsoleHtml(d, hooks.deployIsActive("failed"));
+  assert.doesNotMatch(html, /narration ended/);
+  assert.match(html, /deploy-console-count">2 lines/);
+  assert.match(html, /activate: build complete/);
 });
 
 // ── dwb-18: queued (unclaimed) deploy gets an honest pre-claim state ─────────
@@ -10979,10 +11195,10 @@ test("overviewSlotsModel: denominator is the REAL team quota, never hardcoded", 
 });
 
 test("attentionReason: the real status detail, with the v4 'Needs a look.' fallback", () => {
-  const degraded = { host: "h", health_status: "down", agent_status: "offline", provision_status: "succeeded" };
+  const degraded = { host: "h", last_seen_at: SEEN, health_status: "down", agent_status: "offline", provision_status: "succeeded" };
   assert.match(hooks.attentionReason(degraded), /Health down|Agent offline/);
   // An 'ok' box carries a detail too (never the fallback), but a stateless one falls back.
-  assert.equal(hooks.attentionReason({ host: "h", health_status: "up", agent_status: "online", update_state: "current" }).length > 0, true);
+  assert.equal(hooks.attentionReason({ host: "h", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "current" }).length > 0, true);
 });
 
 test("attentionCanStudio: live boxes only (host set, not suspended, not tearing down)", () => {
@@ -11021,7 +11237,7 @@ test("instanceCardStats: four stats, over/warn meter tints its value amber", () 
 });
 
 test("instanceCardHtml: v4 anatomy — status accent, mono url, sparkline frame, Open Studio; suspended → GR17 card banner", () => {
-  const live = { id: "b1", name: "Production", host: "prod.barkpark.cloud", url: "prod.barkpark.cloud", health_status: "up", agent_status: "online", update_state: "current", version: "0.9.2", provision_status: "succeeded" };
+  const live = { id: "b1", name: "Production", host: "prod.barkpark.cloud", url: "prod.barkpark.cloud", last_seen_at: SEEN, health_status: "up", agent_status: "online", update_state: "current", version: "0.9.2", provision_status: "succeeded" };
   const html = hooks.instanceCardHtml(live, { stats: hooks.instanceCardStats(null) });
   assert.match(html, /instance-card instance-card--ok/);
   assert.match(html, /instance-card-name[^>]*>Production</);
@@ -11104,6 +11320,8 @@ const fleetBp = (over) => Object.assign({
   id: "i1", name: "Production", slug: "production",
   url: "production.barkpark.cloud", host: "production.barkpark.cloud",
   health_status: "up", agent_status: "online", version: "0.9.2",
+  // cch-w34-s6: a reporting box carries last_seen_at; null is now its own state.
+  last_seen_at: SEEN,
   update_state: "current", update_running_release: "0.9.2", update_latest_release: "0.9.2",
   region: "fsn1", server_type: "cx22", channel: "prod",
   autoupdate_enabled: true, autoupdate_paused: false, pinned_release: null,
@@ -11238,7 +11456,7 @@ test("GR24: the header helpers are exported", () => {
 const GR24_LIVE = {
   id: "b-1", name: "Gyldendal", slug: "gyldendal", host: "5.75.169.183",
   url: "https://gyldendal-506f035e.barkpark.cloud",
-  health_status: "up", agent_status: "online", version: "0.2.25",
+  health_status: "up", agent_status: "online", version: "0.2.25", last_seen_at: SEEN,
   git_commit: "c801681aa00", provider: "hetzner", region: "fsn1", server_type: "cx22",
   update_state: "current", provision_status: "succeeded",
 };
