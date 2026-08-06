@@ -1,0 +1,50 @@
+{
+  "capture_seconds": [
+    {
+      "fixture_id": null,
+      "probe": "cycle_show",
+      "seconds": 0.254385
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "doc_get",
+      "seconds": 0.230522
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "paper_json",
+      "seconds": 0.220458
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "doc_get",
+      "seconds": 0.223226
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "paper_json",
+      "seconds": 0.196157
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "doc_get",
+      "seconds": 0.21073
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "paper_json",
+      "seconds": 0.182647
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "doc_get",
+      "seconds": 0.206404
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "paper_json",
+      "seconds": 0.181053
+    }
+  ],
+  "wall_seconds": 2.208467
+}

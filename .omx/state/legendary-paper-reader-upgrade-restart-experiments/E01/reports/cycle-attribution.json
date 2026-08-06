@@ -1,0 +1,37 @@
+{
+  "assignment_attribution": {
+    "assignment_id": "restart-experiment-01",
+    "cycle_assignment_id": "f5556476-4677-4f31-ab90-d7bf5b9134ee",
+    "cycle_wave_id": "8a94f6db-1be6-4bbf-ba49-7f3aeed0e737",
+    "inventory_digest": "227c9defff49f185dc5e580f731ab2419da17fc2dc5cf2304a664e4b230f7ccc",
+    "snapshot_digest": "ff80dabc04570e7adc99416251d9bd19dfb90d5a2d7c1d30ceedca7a422b8118",
+    "unit_ids": []
+  },
+  "authority": {
+    "canonical_origin": "https://guerrilla.barkpark.cloud",
+    "connection": {
+      "connected_cloud_url": "https://barkpark.cloud",
+      "execution_location": "remote",
+      "project": {
+        "id": "e5153f64-fd55-4bfa-89fe-b8046886463b",
+        "slug": "default"
+      },
+      "server_origin": "https://guerrilla.barkpark.cloud",
+      "workspace": {
+        "id": "03e3d6d9-d123-4557-9c06-ae4382a20626",
+        "slug": "default"
+      }
+    },
+    "correction_of_digest": null,
+    "correction_of_wave_revision": null,
+    "epic_id": "task-a768c69e659add58",
+    "kind": "barkpark_cycle_fleet",
+    "project_id": "e5153f64-fd55-4bfa-89fe-b8046886463b",
+    "project_slug": "default",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-restart",
+    "wave_revision": "8a94f6db-1be6-4bbf-ba49-7f3aeed0e737",
+    "workspace_id": "03e3d6d9-d123-4557-9c06-ae4382a20626",
+    "workspace_slug": "default"
+  },
+  "schema_version": "legendary-paper-restart-e01-cycle-attribution/v1"
+}

@@ -1,0 +1,10 @@
+{
+  "byte_identical": true,
+  "replay_sha256": "8560d06564745f6816fcc3a849740f8ed8f5d29dd43d20fcdb106ca8fbfab767",
+  "runs": 2,
+  "schema_version": "legendary-paper-restart-e01-reproducibility/v1",
+  "seconds": [
+    0.034404,
+    0.039462
+  ]
+}

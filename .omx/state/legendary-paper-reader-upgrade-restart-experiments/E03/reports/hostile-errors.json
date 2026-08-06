@@ -1,0 +1,65 @@
+{
+  "not_induced": [
+    {
+      "class": "500",
+      "reason": "No external fault was induced against the campaign server.",
+      "status": "BLOCKED_SAFETY"
+    },
+    {
+      "class": "timeout",
+      "reason": "A client-local synthetic timeout would not prove deployed error semantics.",
+      "status": "BLOCKED_NO_SAFE_SERVER_FAULT"
+    }
+  ],
+  "rows": [
+    {
+      "control_byte_leak": false,
+      "name": "error-missing-paper",
+      "request_id_present": true,
+      "status_or_exit": 4,
+      "transport": "command",
+      "typed_code": "not_found"
+    },
+    {
+      "control_byte_leak": false,
+      "name": "error-invalid-perspective",
+      "request_id_present": false,
+      "status_or_exit": 2,
+      "transport": "command",
+      "typed_code": "local_usage"
+    },
+    {
+      "control_byte_leak": false,
+      "name": "error-invalid-width",
+      "request_id_present": false,
+      "status_or_exit": 0,
+      "transport": "command",
+      "typed_code": null
+    },
+    {
+      "control_byte_leak": false,
+      "name": "error-406-missing-source",
+      "request_id_present": true,
+      "status_or_exit": 406,
+      "transport": "http",
+      "typed_code": "internal_error"
+    },
+    {
+      "control_byte_leak": false,
+      "name": "error-405-source-post",
+      "request_id_present": true,
+      "status_or_exit": 404,
+      "transport": "http",
+      "typed_code": "not_found"
+    },
+    {
+      "control_byte_leak": false,
+      "name": "error-anon-protected-task",
+      "request_id_present": true,
+      "status_or_exit": 404,
+      "transport": "http",
+      "typed_code": "not_found"
+    }
+  ],
+  "schema_version": "restart-e03-hostile-errors/v1"
+}

@@ -1,0 +1,39 @@
+{
+  "gates": {
+    "authored_loss": {
+      "comparison_denominator": 3472,
+      "observed_missing_block_comparisons": 1454,
+      "observed_visible_block_comparisons": 2018,
+      "status": "FAIL",
+      "threshold": 0
+    },
+    "control_byte_leaks": {
+      "observed": 0,
+      "status": "PASS",
+      "threshold": 0
+    },
+    "display_overflow": {
+      "observed_overflow_lines": 0,
+      "status": "PASS",
+      "threshold": 0
+    },
+    "false_not_found": {
+      "observed": 1,
+      "status": "FAIL",
+      "threshold": 0
+    },
+    "identity_conflation": {
+      "basis": "Document _rev, history UUIDs, validators, Cycle assignment UUID, and wave UUID are separately typed.",
+      "observed": 0,
+      "status": "PASS",
+      "threshold": 0
+    },
+    "silent_failures": {
+      "basis": "Related secondary read suppresses failures; width 0 is silently accepted as the default width.",
+      "observed": 2,
+      "status": "FAIL",
+      "threshold": 0
+    }
+  },
+  "schema_version": "restart-e03-hard-gates/v1"
+}

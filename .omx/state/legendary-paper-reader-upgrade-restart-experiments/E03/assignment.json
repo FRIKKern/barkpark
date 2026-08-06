@@ -1,0 +1,44 @@
+{
+  "agent_type": "legendary-experimenter",
+  "assignment_id": "restart-experiment-03",
+  "candidate_ids": [],
+  "cycle_assignment_id": "6a716097-1b44-4775-8e8e-46b5d1a1a5b1",
+  "cycle_wave_id": "8a94f6db-1be6-4bbf-ba49-7f3aeed0e737",
+  "epic_id": "task-a768c69e659add58",
+  "inventory_digest": "227c9defff49f185dc5e580f731ab2419da17fc2dc5cf2304a664e4b230f7ccc",
+  "manifest": "docs/cli/fixtures/full-manifest.json",
+  "papers": [
+    {
+      "fixture_id": "CCH29",
+      "revision": "18768b0a14c2eead927181c4a0e37c18",
+      "slug": "cloud-console-hardening-wave-29-2026-08-03"
+    },
+    {
+      "fixture_id": "PDS45",
+      "revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "slug": "pds-wave-45-2026-08-03"
+    },
+    {
+      "fixture_id": "CCH28",
+      "revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "slug": "cloud-console-hardening-wave-28-2026-08-03"
+    },
+    {
+      "fixture_id": "PDS44",
+      "revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "slug": "pds-wave-44-2026-08-03"
+    }
+  ],
+  "round": "baseline",
+  "schema_version": "legendary-restart-experiment-assignment/v1",
+  "server": "guerrilla",
+  "snapshot_digest": "57abd1799868a17ed54d1bd15718a74fbaf306b8ddd25521abf5437108d00719",
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-restart",
+  "wave_revision": "8a94f6db-1be6-4bbf-ba49-7f3aeed0e737",
+  "widths": [
+    20,
+    40,
+    80,
+    120
+  ]
+}

@@ -1,0 +1,243 @@
+{
+  "commands": [
+    {
+      "argv": [
+        "bp",
+        "-s",
+        "guerrilla",
+        "cycle",
+        "show",
+        "task-a768c69e659add58",
+        "legendary-paper-reader-upgrade-wave-2026-08-06-restart",
+        "-o",
+        "json"
+      ],
+      "attempts": [
+        {
+          "exit": 0,
+          "ordinal": 1,
+          "seconds": 0.254372,
+          "stderr_bytes": 0,
+          "stdout_bytes": 123269
+        }
+      ],
+      "class": "read_only",
+      "fixture_id": null,
+      "probe": "cycle_show"
+    },
+    {
+      "argv": [
+        "bp",
+        "-s",
+        "guerrilla",
+        "doc",
+        "get",
+        "paper",
+        "cloud-console-hardening-wave-28-2026-08-03",
+        "--perspective",
+        "published",
+        "-o",
+        "json"
+      ],
+      "attempts": [
+        {
+          "exit": 0,
+          "ordinal": 1,
+          "seconds": 0.230514,
+          "stderr_bytes": 0,
+          "stdout_bytes": 558569
+        }
+      ],
+      "class": "read_only",
+      "fixture_id": "CCH28",
+      "probe": "doc_get"
+    },
+    {
+      "argv": [
+        "bp",
+        "-s",
+        "guerrilla",
+        "paper",
+        "view",
+        "cloud-console-hardening-wave-28-2026-08-03",
+        "--perspective",
+        "published",
+        "-o",
+        "json"
+      ],
+      "attempts": [
+        {
+          "exit": 0,
+          "ordinal": 1,
+          "seconds": 0.220452,
+          "stderr_bytes": 0,
+          "stdout_bytes": 558569
+        }
+      ],
+      "class": "read_only",
+      "fixture_id": "CCH28",
+      "probe": "paper_json"
+    },
+    {
+      "argv": [
+        "bp",
+        "-s",
+        "guerrilla",
+        "doc",
+        "get",
+        "paper",
+        "cloud-console-hardening-wave-29-2026-08-03",
+        "--perspective",
+        "published",
+        "-o",
+        "json"
+      ],
+      "attempts": [
+        {
+          "exit": 0,
+          "ordinal": 1,
+          "seconds": 0.22322,
+          "stderr_bytes": 0,
+          "stdout_bytes": 431200
+        }
+      ],
+      "class": "read_only",
+      "fixture_id": "CCH29",
+      "probe": "doc_get"
+    },
+    {
+      "argv": [
+        "bp",
+        "-s",
+        "guerrilla",
+        "paper",
+        "view",
+        "cloud-console-hardening-wave-29-2026-08-03",
+        "--perspective",
+        "published",
+        "-o",
+        "json"
+      ],
+      "attempts": [
+        {
+          "exit": 0,
+          "ordinal": 1,
+          "seconds": 0.19615,
+          "stderr_bytes": 0,
+          "stdout_bytes": 431200
+        }
+      ],
+      "class": "read_only",
+      "fixture_id": "CCH29",
+      "probe": "paper_json"
+    },
+    {
+      "argv": [
+        "bp",
+        "-s",
+        "guerrilla",
+        "doc",
+        "get",
+        "paper",
+        "pds-wave-44-2026-08-03",
+        "--perspective",
+        "published",
+        "-o",
+        "json"
+      ],
+      "attempts": [
+        {
+          "exit": 0,
+          "ordinal": 1,
+          "seconds": 0.210723,
+          "stderr_bytes": 0,
+          "stdout_bytes": 328256
+        }
+      ],
+      "class": "read_only",
+      "fixture_id": "PDS44",
+      "probe": "doc_get"
+    },
+    {
+      "argv": [
+        "bp",
+        "-s",
+        "guerrilla",
+        "paper",
+        "view",
+        "pds-wave-44-2026-08-03",
+        "--perspective",
+        "published",
+        "-o",
+        "json"
+      ],
+      "attempts": [
+        {
+          "exit": 0,
+          "ordinal": 1,
+          "seconds": 0.18264,
+          "stderr_bytes": 0,
+          "stdout_bytes": 328256
+        }
+      ],
+      "class": "read_only",
+      "fixture_id": "PDS44",
+      "probe": "paper_json"
+    },
+    {
+      "argv": [
+        "bp",
+        "-s",
+        "guerrilla",
+        "doc",
+        "get",
+        "paper",
+        "pds-wave-45-2026-08-03",
+        "--perspective",
+        "published",
+        "-o",
+        "json"
+      ],
+      "attempts": [
+        {
+          "exit": 0,
+          "ordinal": 1,
+          "seconds": 0.206395,
+          "stderr_bytes": 0,
+          "stdout_bytes": 392184
+        }
+      ],
+      "class": "read_only",
+      "fixture_id": "PDS45",
+      "probe": "doc_get"
+    },
+    {
+      "argv": [
+        "bp",
+        "-s",
+        "guerrilla",
+        "paper",
+        "view",
+        "pds-wave-45-2026-08-03",
+        "--perspective",
+        "published",
+        "-o",
+        "json"
+      ],
+      "attempts": [
+        {
+          "exit": 0,
+          "ordinal": 1,
+          "seconds": 0.181046,
+          "stderr_bytes": 0,
+          "stdout_bytes": 392184
+        }
+      ],
+      "class": "read_only",
+      "fixture_id": "PDS45",
+      "probe": "paper_json"
+    }
+  ],
+  "schema_version": "read-only-command-log/v1",
+  "write_commands": 0
+}

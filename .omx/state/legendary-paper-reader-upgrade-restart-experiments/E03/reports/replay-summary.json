@@ -1,0 +1,24 @@
+{
+  "artifact_set_sha256_identical": true,
+  "byte_identical": true,
+  "output_sha256_identical": true,
+  "runs": [
+    {
+      "artifact_set_sha256": "35b7a9d356bc2a884ba33e2f3d894b16689855fa9a09b37566aa1db721e6406f",
+      "bytes": 214,
+      "run": 1,
+      "seconds": 0.045058,
+      "sha256": "6560b649b8906bfeb0a27e8aba6ce559a9808f1d4867d968de189eec769e4003",
+      "status": "PASS"
+    },
+    {
+      "artifact_set_sha256": "35b7a9d356bc2a884ba33e2f3d894b16689855fa9a09b37566aa1db721e6406f",
+      "bytes": 214,
+      "run": 2,
+      "seconds": 0.041755,
+      "sha256": "6560b649b8906bfeb0a27e8aba6ce559a9808f1d4867d968de189eec769e4003",
+      "status": "PASS"
+    }
+  ],
+  "schema_version": "restart-e03-replay-summary/v1"
+}

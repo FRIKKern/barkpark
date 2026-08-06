@@ -1,0 +1,1 @@
+{"files_scanned":89,"finding_count":0,"findings":[],"patterns":["authorization_value","cookie_value","github_token","jwt","openai_token"],"schema_version":"legendary-restart-e02-token-scan/v1","verdict":"PASS"}

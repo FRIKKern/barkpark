@@ -1,0 +1,26 @@
+{
+  "canonicalizer_failures": [],
+  "observations": [
+    {
+      "code": "DIALECT_LEGACY_HEADER",
+      "count": 113,
+      "meaning": "authored table header cells use header rather than head"
+    },
+    {
+      "code": "AUTHOR_INTENT_HEADERLESS",
+      "count": 11,
+      "meaning": "tables encode no header intent; inference is forbidden"
+    },
+    {
+      "code": "NESTED_PARAGRAPH_LIST",
+      "count": 11,
+      "meaning": "paragraph-wrapped list items require shape-preserving handling"
+    },
+    {
+      "code": "MIXED_MARK_RECORD",
+      "count": 388,
+      "meaning": "authored mark records are denominator-bound and may use multiple encodings"
+    }
+  ],
+  "schema_version": "legendary-paper-restart-e01-taxonomy/v1"
+}

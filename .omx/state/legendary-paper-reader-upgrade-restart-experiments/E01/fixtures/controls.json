@@ -1,0 +1,437 @@
+{
+  "controls": [
+    {
+      "block": {
+        "header": [
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "#"
+              }
+            ]
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "the wish"
+              }
+            ]
+          },
+          {
+            "content": [
+              {
+                "type": "text",
+                "value": "measured on origin/main dfdc31db9, 2026-08-03T12:35Z"
+              }
+            ]
+          }
+        ],
+        "id": "w28b010",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "1"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "#9356 is red because console-harness.yml checks out at fetch-depth:1; decide (a) fetch-depth:0 or (b) restructure the control"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "CONFIRMED and ENLARGED. Depth-1 clone of this repo: origin/main RESOLVES as a ref, but every registered commit is rc 128 “Not a valid object name”. The #9356 predicate passes BOTH of its new refusal legs there and prints six false ancestry sentences at b=FAIL. The binary is false — the fix is the DISCRIMINATION, and it makes both (a) and (b) correct rather than either being a workaround."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "2"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "the D307 door guard is now a wave, not a slice; budget for a `surface` ENUM and a BACKFILL"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "CONFIRMED as filed: cchi-w27-bl-d307-create-time-door-guard, open, 0/5, parent cch-instruments-epic, files [api/lib/barkpark/content/mutations.ex]. apply_mutations is public (mutations.ex:31) and reachable non-admin through MutateController → POST /v1/data/mutate/:dataset (router.ex:2322). The BACKFILL is a ledger write, not code — wave 27 proved the lead's hands are the right instrument for that class."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "3"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "re-derive orphans with the fixed instrument, from a real git tree, quoting UTC stamp + tree sha + RESOLVED ROOT"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "DONE, in this Paper. 2026-08-03T12:35:45Z · tree dfdc31db96b85b66515a1cba3f92a9e9bd81b09b · root <scratchpad>/wt-w28 → NO-SEAL a=FAIL b=PASS c=PASS orphans=57 considering=1 residue=60 (live 59). Wave 27's debrief read 62; five rows have left since."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "4"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "person-facing residue: .preview-url deploy-row siblings; the desktop band; the render-path bypass remainder"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "ONE PREMISE FAILS SMOKE. `.preview-url` is a DOM CHILD of `.deploy-ref` (app.js:10289 emits `<div class=\"deploy-ref\">branch → <a class=\"preview-url mono\">`), and #9357 landed `.deploy-ref { overflow-wrap: anywhere }` at app.css:1847 — whose own committed comment at :1841-1843 says it covers `.preview-url` inside it by inheritance. The next silent clip is NOT there. The desktop band is D323, a measured negative, correctly closed."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "5"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "cch-w22-s7 was split and five criteria stamped by D325; finish or close the remainder against origin/main's bytes"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "D325 is explicit: stamp C6/C7/C8/C12/C14, DROP C9 (its symbol `cuePaints` has zero occurrences under cloud/ and its second anchor file does not exist), close C15/C16 `n/a — split`. This is a LEDGER action for the lead at Decide, not a builder slice. `bp task get cch-w22-s7` returns nothing under that id — resolving the real id is survey work."
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      "expected_header_cells": 3,
+      "id": "authored-legacy-header",
+      "paper": "CCH28"
+    },
+    {
+      "block": {
+        "id": "b117",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Assignment"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Verdict"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "The decisive line"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "#9332 order defect"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "PROVEN, and non-vacuous"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Deleting `readonly_posture?(assigns) -> false` takes the suite 14 tests / 0 failures to 14 tests / 4 failures, and the failures name persisted bytes: `left: %{\"amount\" => \"ESCALATED\"}`"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "#9332's suspected OWN defect (dropped CallerContext)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "REFUTED, twice independently"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "`derive/1`'s principals is the closed two-element list `[api_token, current_user]` and the PR does not touch it - a %CallerContext{} can never reach `loadable_principal?/1`"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Grant grade safe?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "REFUTED - a LIVE bypass on main"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "A doc-scoped write grant wrote a DIFFERENT doc: `left: {true, %{\"amount\" => \"ESCALATED\", \"currency\" => \"NOK\"}}`"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Ops.commit/3 a second bypass?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "REFUTED - it funnels"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "`ops.ex:391-403` ends in `send_ops(socket,[op])`; probe green rc=0, RED under guard mutation with `%{\"fmt\" => \"checkbox\", \"v\" => false}`"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Stranded fold never had a builder"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "REFUTED at the code level"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Row is 6/11 with run-quoted evidence; the diff is +273/-34, RESIDUAL 32 to 0, `sum 322 == population 322`, `CENSUS OK`"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "D633's 210 s a gate budget?"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "REFUTED"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "`--selftest` exceeds 600 s WALL; one meter read `real 1662,98 / user 7,05` - a 236x understatement"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Ledger-census door 20-23 s / 107 checks"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "REFUTED by run"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "42.6-45.0 s CPU (49.3 s hermetic), and 144 checks in all four runs"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Two-leg AGREEMENT check"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "REFUTED as a design"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "MUT-1 is ALREADY RED on main via `--check`; a one-line COMMENT plus the forced declaration buys a fraudulent THROUGH"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "python3 receipt (D638 row)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "STRUCK"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Ratchet exits rc=0 with python3 absent, not 127; the first repro was confounded by a PATH strip that also lost `dirname` and `cut`"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Sheet-grid palette 2.72:1"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "REFUTED as a defect"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "#5b9dff vs WHITE = 2.72 (the assertion's own number); vs the real dark bg = 7.27. The harness reads --bg ordinally"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Door count on landed main"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "1 of 19 was stale; it is 3"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "#9333 merged mid-round; denominator is 19 (17 .sh + 2 .exs), and 43 is a glob error"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Owning doc for the inventory"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT-FOUND, and that is the finding"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "`success-claim-census.md` read in full: 286 lines, ZERO instrument inventory. No doc owns this fact-topic"
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      "expected_header_cells": 0,
+      "id": "genuinely-headerless-author-intent",
+      "paper": "PDS44"
+    },
+    {
+      "id": "string-mark",
+      "node": {
+        "marks": [
+          "strong"
+        ],
+        "type": "text",
+        "value": "four separate times inside this survey itself"
+      },
+      "paper": "CCH28"
+    },
+    {
+      "id": "object-mark",
+      "node": {
+        "marks": [
+          {
+            "type": "strong"
+          }
+        ],
+        "type": "text",
+        "value": "a723ec0dd"
+      },
+      "paper": "PDS45"
+    }
+  ],
+  "schema_version": "legendary-paper-restart-e01-controls/v1"
+}

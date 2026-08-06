@@ -1,0 +1,25 @@
+{
+  "all_equal": true,
+  "allowed_methods": [
+    "CLI_READ",
+    "GET",
+    "POST"
+  ],
+  "external_writes_attempted": 0,
+  "note": "POST was only to a GET-only public source route to observe 405; no write route was invoked.",
+  "schema_version": "restart-e03-zero-external-mutation/v1",
+  "source_identity_before_after": {
+    "post": {
+      "CCH28": "72e246bea0648c256b0667436f38a680cd4454743c6b259a99d0678712e8f92a",
+      "CCH29": "d5ca959bca06279251a2e2e498a6979efcbdb24ffcfdbe423f2ba26e60cb6e81",
+      "PDS44": "2c0b65b64ad255a7645a94dd9ad2fed3b38d54bb93709b28efc52011fdfb6d6b",
+      "PDS45": "56e12ae87ee42e6a08150250fafad03d192d8d7f591b49de89d7a28bed2a6066"
+    },
+    "pre": {
+      "CCH28": "72e246bea0648c256b0667436f38a680cd4454743c6b259a99d0678712e8f92a",
+      "CCH29": "d5ca959bca06279251a2e2e498a6979efcbdb24ffcfdbe423f2ba26e60cb6e81",
+      "PDS44": "2c0b65b64ad255a7645a94dd9ad2fed3b38d54bb93709b28efc52011fdfb6d6b",
+      "PDS45": "56e12ae87ee42e6a08150250fafad03d192d8d7f591b49de89d7a28bed2a6066"
+    }
+  }
+}

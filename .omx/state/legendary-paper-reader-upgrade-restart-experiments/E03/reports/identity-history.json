@@ -1,0 +1,91 @@
+{
+  "cycle_assignment_id": "6a716097-1b44-4775-8e8e-46b5d1a1a5b1",
+  "cycle_wave_id": "8a94f6db-1be6-4bbf-ba49-7f3aeed0e737",
+  "papers": [
+    {
+      "document_revision": "18768b0a14c2eead927181c4a0e37c18",
+      "fixture_id": "CCH29",
+      "history_ids": [
+        "eed97c1b-e395-40ef-aee5-be408329ec81",
+        "34d524af-439d-44ef-b92e-59df1031a591",
+        "5a172c3a-6ba3-4844-ac4a-2ef68ba1fdab",
+        "e9b0f5ec-6ea5-40c1-9bfb-3805346c8e83",
+        "3fd83de0-9038-41e1-8497-990bbddb0fc8",
+        "2c14af2c-becf-41dc-9e39-81b1b5579964",
+        "fe36ceea-505a-4982-8c57-f6546d71b8f2",
+        "112cc93a-ab59-4829-b6cc-2f48f530c078",
+        "7b048726-5d19-4977-8b12-c8e3b4356bda",
+        "ae5d04b7-afa0-491f-8e37-f86cee43a752",
+        "04b8c8e1-fde7-4f91-9d3d-0883d70429d8",
+        "2606d8de-42a8-4ece-8280-f90731681d12",
+        "bb576e3f-3323-4777-91df-50a7599cfad9",
+        "04eddef6-9134-4936-8642-2dfd63d0e93b"
+      ],
+      "reported_count": 14,
+      "requested_limit": 1,
+      "returned": 14
+    },
+    {
+      "document_revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "fixture_id": "PDS45",
+      "history_ids": [
+        "4afe0099-26af-40eb-8943-f6935c16c29d",
+        "996d3960-6c66-4164-8798-b136b924f62d",
+        "8ec7cfa9-584d-4d79-9323-5b19e5506907",
+        "81b3feab-7544-42d2-887c-57d3301f8cee",
+        "7cacf32a-30b7-4880-8cb1-56e532b86dca",
+        "d39c9bae-2a03-410a-aa01-2069cad35783",
+        "d33423a1-bb5c-4854-8f37-c537d915e650",
+        "0b751c65-300c-435d-a1f1-6f45df4691f5",
+        "e994489b-f948-4647-9124-e9ce57d99167",
+        "18b624f2-19b5-4070-83f6-c79c788bd02f"
+      ],
+      "reported_count": 10,
+      "requested_limit": 1,
+      "returned": 10
+    },
+    {
+      "document_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "fixture_id": "CCH28",
+      "history_ids": [
+        "7c1135de-733c-4325-aea6-31b9dbbda4d1",
+        "160034d7-c8e6-468b-a9e3-20cc41c0a04e",
+        "fc71fc46-8805-4897-836d-24dbb5e5866a",
+        "ae06a80e-8f1b-4c49-b614-d166337587dd",
+        "57b26c5b-94c8-4a80-85a0-c55c00419055",
+        "7fac0fcd-34bd-42c7-9536-90d50aca1627",
+        "092f2910-08ee-4203-8d23-00037cced9ca",
+        "2eb3f8de-81ee-4f4a-924d-efa63d2fd395",
+        "6aac1693-d692-4e57-b6b6-1d7115ce7d86",
+        "ffa34ac8-9dd6-4a38-a1bd-394a0fdb4266",
+        "2b099f2a-ddfe-4981-97b8-47cac0110d47",
+        "7b1c4e69-779d-4935-828c-e6a143728840"
+      ],
+      "reported_count": 12,
+      "requested_limit": 1,
+      "returned": 12
+    },
+    {
+      "document_revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "fixture_id": "PDS44",
+      "history_ids": [
+        "344fe5ee-c8a0-4bb9-8b5e-17a3562992d5",
+        "166356a8-894b-47e9-96da-3d580981b2af",
+        "c97cd98b-667d-4e9e-8964-1ee7a9aa1c6a",
+        "1742aadd-ff12-4be8-8155-3721aa9d0a53",
+        "cc0aef93-6d8a-409c-9e78-3277ed28dfa0",
+        "db768ce2-30e3-441b-9a14-30ce85dd6ebb",
+        "d55d8322-3a4a-432a-a7a0-5fe3ce3908d1",
+        "97cb6aec-36ee-496b-be97-c43bd03a5909",
+        "6b965396-cbec-4765-8206-c54831d4684c",
+        "6eae7fbb-27e5-48a0-9bdf-4ded1a529d76",
+        "84b71303-c97f-44bc-a6d1-5b3944731db3",
+        "ed13954d-e8fd-463d-8d22-42d4007417fd"
+      ],
+      "reported_count": 12,
+      "requested_limit": 1,
+      "returned": 12
+    }
+  ],
+  "schema_version": "restart-e03-identity-history/v1"
+}

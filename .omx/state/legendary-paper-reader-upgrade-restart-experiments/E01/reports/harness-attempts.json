@@ -1,0 +1,20 @@
+{
+  "attempts": [
+    {
+      "disposition": "discarded_nonterminal_rebuild_attempt",
+      "exit": 4,
+      "ordinal": 1,
+      "scope": "one bp read during a pre-final rebuild; exact probe was not retained and is not inferred",
+      "stderr_bytes": 0,
+      "terminal": false
+    },
+    {
+      "disposition": "accepted_final_build",
+      "ordinal": 2,
+      "scope": "nine final read-only bp commands; per-command attempts are in reports/commands.json",
+      "terminal": true
+    }
+  ],
+  "failed_attempts_erased": false,
+  "schema_version": "legendary-paper-restart-e01-harness-attempts/v1"
+}

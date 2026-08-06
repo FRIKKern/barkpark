@@ -1,0 +1,20 @@
+{
+  "assignment_id": "restart-experiment-01",
+  "assignment_uuid": "f5556476-4677-4f31-ab90-d7bf5b9134ee",
+  "epic_task_id": "task-a768c69e659add58",
+  "inventory_digest": "227c9defff49f185dc5e580f731ab2419da17fc2dc5cf2304a664e4b230f7ccc",
+  "manifest": "docs/cli/fixtures/full-manifest.json",
+  "papers": [
+    {"fixture_id": "CCH28", "slug": "cloud-console-hardening-wave-28-2026-08-03", "revision": "49c1534d9fb76d0d9adc7b97f25ec471", "blocks": 237},
+    {"fixture_id": "CCH29", "slug": "cloud-console-hardening-wave-29-2026-08-03", "revision": "18768b0a14c2eead927181c4a0e37c18", "blocks": 252},
+    {"fixture_id": "PDS44", "slug": "pds-wave-44-2026-08-03", "revision": "8bbd5d874a1b697f1e4e437c473f8e52", "blocks": 99},
+    {"fixture_id": "PDS45", "slug": "pds-wave-45-2026-08-03", "revision": "b992fd8aaa028b0dab30a8da76f077fd", "blocks": 227}
+  ],
+  "plan_digest": "9997fc50db5f1b83f1f53e33bd45dd111b2b06402b07a78b0673d2048f299e45",
+  "round": "baseline",
+  "schema_version": "legendary-paper-restart-experiment-assignment/v1",
+  "server": "guerrilla",
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-restart",
+  "wave_revision": "8a94f6db-1be6-4bbf-ba49-7f3aeed0e737",
+  "write_boundary": ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E01"
+}

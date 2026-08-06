@@ -1,0 +1,23 @@
+{
+  "allowed_bp_verbs": [
+    "cycle show",
+    "doc get",
+    "paper view"
+  ],
+  "bp_commands": 9,
+  "bp_write_commands": 0,
+  "git_after": {
+    "head": "d6df2c4d71d255f6c9fdc3b527ce9675b4f57b80",
+    "tracked_status_bytes": 0,
+    "tracked_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "git_before": {
+    "head": "d6df2c4d71d255f6c9fdc3b527ce9675b4f57b80",
+    "tracked_status_bytes": 0,
+    "tracked_status_sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855"
+  },
+  "git_unchanged": true,
+  "production_mutations": 0,
+  "schema_version": "zero-external-mutation-proof/v1",
+  "task_paper_cycle_mutations": 0
+}

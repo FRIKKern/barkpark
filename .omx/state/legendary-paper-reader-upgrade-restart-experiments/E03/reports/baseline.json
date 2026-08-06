@@ -1,0 +1,51 @@
+{
+  "blocked": [
+    "real interactive TUI state recovery",
+    "safe deployed 500 induction",
+    "safe deployed timeout induction"
+  ],
+  "denominators_match": true,
+  "exact_denominators": {
+    "blocks": 815,
+    "body_cells": 1374,
+    "callouts": 30,
+    "exact_empty_spacers": 381,
+    "headerless_tables": 11,
+    "legacy_header_cells": 113,
+    "marks": 388,
+    "nested_list_items": 11,
+    "nested_list_words": 406,
+    "papers": 4,
+    "tables": 46
+  },
+  "expected_render_cells": 32,
+  "inferences": [
+    "Static rendering does not prove interactive TUI focus, scroll, click, or cursor-state recovery.",
+    "A fail-open Related read cannot distinguish an empty appendix from a suppressed transport or decode failure."
+  ],
+  "observations": [
+    "Four exact published revisions remained byte-identical before and after the read-only probe run.",
+    "The 32 width/profile cells produced 0 display-overflow lines and 1454/3472 block-local missing-text comparisons.",
+    "Related was separately captured in 32/32 render cells.",
+    "History limit=1 returned more than one record for 4/4 Papers.",
+    "The static Paper viewer help has no outline, pager, history, or state-recovery flag.",
+    "POST to an existing GET-only Paper source route returned typed not_found instead of a method error; an invalid width of 0 exited successfully."
+  ],
+  "observed_denominators": {
+    "blocks": 815,
+    "body_cells": 1374,
+    "callouts": 30,
+    "exact_empty_spacers": 381,
+    "headerless_tables": 11,
+    "legacy_header_cells": 113,
+    "marks": 388,
+    "nested_list_items": 11,
+    "nested_list_words": 406,
+    "papers": 4,
+    "tables": 46
+  },
+  "preferences": [],
+  "render_cells": 32,
+  "round": "baseline",
+  "schema_version": "restart-e03-baseline/v1"
+}

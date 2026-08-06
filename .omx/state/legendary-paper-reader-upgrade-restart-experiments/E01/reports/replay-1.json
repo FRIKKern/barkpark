@@ -1,0 +1,17 @@
+{
+  "artifact_set_sha256": "4c6bed078b71f6280233a57214b25e4446877e9ce900d0d6fe2bb443bea1b4e4",
+  "assignment_id": "restart-experiment-01",
+  "assignment_uuid": "f5556476-4677-4f31-ab90-d7bf5b9134ee",
+  "check_count": 141,
+  "hard_gates": {
+    "authored_loss": 0,
+    "blocks": 815,
+    "headers": 113,
+    "invented_headers": 0,
+    "marks": 388,
+    "table_body_cells": 1374
+  },
+  "round": "baseline",
+  "status": "PASS",
+  "verdict": "BASELINE_CANONICALIZER_PASS"
+}

@@ -1,0 +1,164 @@
+{
+  "fixtures": [
+    {
+      "block": {
+        "id": "w29D015",
+        "items": [
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The wave's stated finished state (\"no merge-blocking job reaches a host this repo does not own\") is UNREACHABLE. \"PR references an active task\" reaches guerrilla BY DESIGN and BY COMMITTED POLICY — pr-task-gate.yml converts exit 2 to exit 1 arguing \"the only alternative to red is a green check that verified nothing\", and merge-gates.md:75 codifies it. A prohibition-shaped ratchet would red that file on landing and its first act would be to be waived."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The lane coupling is THREE of four contexts, not one — and a curl-only census scores Cloud gate CLEAN. Its coupling is a bare hostname inside an ExUnit assert resolved by the BEAM, with no HTTP client, no shell and no \"curl\" token anywhere. The only instrument that found it was crippling the resolver and re-running."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Wave 27's corollary is half wrong. origin/main DOES resolve in `clone --depth 1 --branch main` but does NOT in a real PR checkout (rc 1 — the same code as an honest \"no\"). A remedy keyed on ref resolution fails in a THIRD way."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "cch-w26's headline is refuted: #9407 already humanized the deployment_failed EMAIL, and the live defect moved CHANNEL. render.ex is 67 lines with ZERO occurrences of `detail`, and git grep Render.render over cloud/test returns NOTHING."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The Azure half of the capacity-arm row is NOT DERIVABLE: zero `quota`/`exceed` hits across internal/cli/cloud/azure/ source, tests and all 18 fixtures, and the Elixir Azure client returns atoms only."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      "id": "paragraph-wrapped-list-items",
+      "items": [
+        "The wave's stated finished state (\"no merge-blocking job reaches a host this repo does not own\") is UNREACHABLE. \"PR references an active task\" reaches guerrilla BY DESIGN and BY COMMITTED POLICY — pr-task-gate.yml converts exit 2 to exit 1 arguing \"the only alternative to red is a green check that verified nothing\", and merge-gates.md:75 codifies it. A prohibition-shaped ratchet would red that file on landing and its first act would be to be waived.",
+        "The lane coupling is THREE of four contexts, not one — and a curl-only census scores Cloud gate CLEAN. Its coupling is a bare hostname inside an ExUnit assert resolved by the BEAM, with no HTTP client, no shell and no \"curl\" token anywhere. The only instrument that found it was crippling the resolver and re-running.",
+        "Wave 27's corollary is half wrong. origin/main DOES resolve in `clone --depth 1 --branch main` but does NOT in a real PR checkout (rc 1 — the same code as an honest \"no\"). A remedy keyed on ref resolution fails in a THIRD way.",
+        "cch-w26's headline is refuted: #9407 already humanized the deployment_failed EMAIL, and the live defect moved CHANNEL. render.ex is 67 lines with ZERO occurrences of `detail`, and git grep Render.render over cloud/test returns NOTHING.",
+        "The Azure half of the capacity-arm row is NOT DERIVABLE: zero `quota`/`exceed` hits across internal/cli/cloud/azure/ source, tests and all 18 fixtures, and the Elixir Azure client returns atoms only."
+      ],
+      "paper": "CCH29"
+    },
+    {
+      "block": {
+        "id": "w29D022",
+        "items": [
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "`grep -c dom-rung--unknown cloud/priv/static/app.css` -> 0. An unmeasurable rung is PIXEL-IDENTICAL to a waiting one; the row's escape hatch (\"or an explicit decision that the styling already differs\") is closed by measurement."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "`git grep Render.render -- cloud/test` -> nothing. The chat copy has no guard at all."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "REAL_UNMAPPED occurs exactly ONCE in required-checks.test.sh — as an assignment, never read."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "`grep -rn ladder-only .github/ scripts/ docs/` -> exactly one hit, a prose comment. No job runs the reading, so exit 0 greens nothing."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "`grep -i break.glass docs/ops/merge-gates.md` -> rc 1, no output. The repo's only armed override is undiscoverable from the doc that owns the topic."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Repo-wide, the only reader of a task's content.surface is the guard itself and its own log string. There is no surface field in tasks/schema.ex at all."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      "id": "paragraph-wrapped-list-items",
+      "items": [
+        "`grep -c dom-rung--unknown cloud/priv/static/app.css` -> 0. An unmeasurable rung is PIXEL-IDENTICAL to a waiting one; the row's escape hatch (\"or an explicit decision that the styling already differs\") is closed by measurement.",
+        "`git grep Render.render -- cloud/test` -> nothing. The chat copy has no guard at all.",
+        "REAL_UNMAPPED occurs exactly ONCE in required-checks.test.sh — as an assignment, never read.",
+        "`grep -rn ladder-only .github/ scripts/ docs/` -> exactly one hit, a prose comment. No job runs the reading, so exit 0 greens nothing.",
+        "`grep -i break.glass docs/ops/merge-gates.md` -> rc 1, no output. The repo's only armed override is undiscoverable from the doc that owns the topic.",
+        "Repo-wide, the only reader of a task's content.surface is the guard itself and its own log string. There is no surface field in tasks/schema.ex at all."
+      ],
+      "paper": "CCH29"
+    }
+  ],
+  "observed_not_inferred": true,
+  "schema_version": "legendary-paper-restart-e01-known-bad/v1"
+}
