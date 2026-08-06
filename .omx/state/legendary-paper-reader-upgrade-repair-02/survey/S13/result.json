@@ -1,0 +1,61 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-13",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-29-2026-08-03::email_gmail"],
+  "verdict": "blocked",
+  "hard_gate_result": "fail",
+  "direct_answer": "The published source revision is pinned and countable, but this delivered-Gmail unit cannot pass. No real Gmail delivery receipt, client/version tuple, delivered Message-ID, render capture, or source-to-message provenance record exists. The deployed endpoint is standalone HTML, and E05/E06 are undelivered synthetic candidates. Proxy evidence also shows reading-order, semantics, marks, and narrow-geometry defects.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "9981aa55-2396-4c7b-8872-0a06711ce8c2",
+    "assignment_snapshot_digest": "83787f0a801ce621fa404b71de53e23641e88d489f1707822d6d06dc1cd69837",
+    "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+    "paper_revision": "18768b0a14c2eead927181c4a0e37c18"
+  },
+  "observations": {
+    "source": {"blocks": 252, "unique_block_ids": 252, "nonempty_carriers": 113, "empty_spacers": 139, "canonical_blocks_sha256": "e1cb807591caa511dadb1cc98311812aa364abc624f8da60c24562185b828b21"},
+    "authored_carriers": {"headings": 37, "paragraphs": 187, "tables": 11, "header_cells": 35, "body_cells": 316, "lists": 13, "list_items": 67, "callouts": 4, "marked_runs": 313, "code_marks": 200, "strong_marks": 113, "links": 0},
+    "preview": {"classification": "proxy_only", "http_200": "4/4", "bytes": 121072, "sha256": "dc57c4d6704a97ba7003a06694f126c25f9de3f5c8e64529aa20351a3b36e331", "content_type": "text/html", "message_id": false, "mime_version": false, "viewport": false, "lang": false, "landmarks": 0, "revision_identity": false},
+    "preview_semantics": {"presentation_tables": "11/11", "header_cells": 35, "body_cells": 316, "semantic_callouts": "0/4", "semantic_marks": "0/313", "reading_order_carriers": "111/113", "missing_carriers": ["w29D015", "w29D022"]},
+    "proxy_geometry": {"requested_widths": [390, 320], "observed_client_width": 980, "reflow_client_width": 640, "reflow_scroll_width": 648, "overflow": true},
+    "delivered_clients": {"available_cells": "0/48", "gmail_receipts": 0, "pilot_authorized": false},
+    "synthetic_eml": ["E05 multipart candidate is undelivered", "E06 candidate carries invalid.example identity and is undelivered"]
+  },
+  "required_cell_verdicts": {
+    "real_delivered_gmail": "not_found",
+    "narrow_geometry": "not_found; no real 390/320 capture",
+    "structural_semantics": "not_found; preview proxy fails tables, callouts, and marks",
+    "reading_order": "not_found; preview proxy loses 2/113 carriers",
+    "link_label_behavior": "not_found; exact revision has zero authored links",
+    "source_message_identity": "not_found; no delivered identity or receipt"
+  },
+  "inferences": [
+    "The endpoint proves preview-byte identity only, not that Gmail received or rendered those bytes.",
+    "Real Gmail cells remain unmeasured while proxy failures identify likely repair seams.",
+    "This zero-link fixture cannot positively exercise Gmail link rewriting or activation.",
+    "Synthetic revision headers are candidate design evidence, not delivery provenance."
+  ],
+  "repair_seams": [
+    "Introduce a real mail-producing boundary joining Paper id/revision, canonical digest, MIME digest, provider Message-ID, receipt, delivered bytes, and capture digest.",
+    "Add viewport, language, visible immutable identity, and a receipt-compatible envelope.",
+    "Remove role=presentation from authored data tables and preserve 35 header relationships.",
+    "Expose callout role/label and normalize the 313 string-form marks.",
+    "Preserve missing carriers w29D015 and w29D022 through composition and delivery."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "gp-w3b-email-popup", "revision/Gmail task searches"],
+    "papers": ["cloud-console-hardening-wave-29-2026-08-03@18768b0a14c2eead927181c4a0e37c18", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json", ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/geometry.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/semantics.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/semantic-order.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/fixtures/delivered-mail-clients.json", "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex", "api/lib/barkpark_web/controllers/bulldocs_email_html.ex", "api/lib/barkpark/portable_doc/render.ex", "api/lib/barkpark/portable_doc/render/inline.ex", "api/lib/barkpark/portable_doc/render/walk.ex", "api/lib/barkpark/portable_doc/render/compose.ex"]
+  },
+  "risks": ["Preview may be mistaken for delivery.", "Data tables may lose header relationships.", "All 313 marks are flattened in proxy output.", "Two authored carriers are absent from proxy reading order.", "Zero links make link-policy success vacuous."],
+  "unvisited_scope": ["real Gmail account and delivery provider", "desktop/mobile Gmail capture", "assistive technology in Gmail", "provider logs and delivered raw source", "DKIM/SPF/DMARC", "sending E05/E06 candidates"],
+  "credential_scan": {"status": "clean", "secret_values_found": 0, "values_revealed": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0, "mail_sent": 0}
+}
