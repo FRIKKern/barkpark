@@ -12849,6 +12849,37 @@ test("cch-w31-s8 notifDeliveriesBodyHtml: an empty SELF-scoped log cannot claim 
   }
 });
 
+// REVIEW (wave 33). The builder named this as the slice's weakest point and was
+// right: every test above proves the member's log is BUILT, and none proves it
+// is MOUNTED. `renderNotifications` used to `return` for a member before wiring
+// anything, so re-adding that early return ships a member a permanent "Loading
+// delivery log…" and every assertion above stays green.
+//
+// This is a SOURCE-SHAPE pin, and it is the weaker kind on purpose — the harness
+// exercises pure builders and has no DOM, so a behavioural mount test is not
+// available here (that is browser-verified territory, see the harness CARVE-OUT).
+// It reads the member branch of `renderNotifications` as text and demands the two
+// mount calls appear inside it, ahead of its `return`. It cannot prove they run;
+// it CAN lose to the exact regression it names, which the alternative — nothing —
+// cannot.
+test("cch-w31-s8 renderNotifications: the member branch MOUNTS the log, it does not just render it", () => {
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const fn = src.slice(src.indexOf("function renderNotifications("));
+  assert.ok(fn.length > 0, "renderNotifications not found");
+
+  const branch = fn.slice(fn.indexOf("if (!canManage) {"), fn.indexOf("// Email section:"));
+  assert.ok(branch.length > 0, "the member branch of renderNotifications not found");
+
+  assert.match(branch, /wireNotifDeliveryFilters\(\)/,
+    "a member's filter chips are never wired — the log mounts dead");
+  assert.match(branch, /loadNotifDeliveries\(\)/,
+    "a member's log is never fetched — the shell renders and stays on 'Loading…' forever");
+  assert.ok(
+    branch.indexOf("loadNotifDeliveries()") < branch.indexOf("return"),
+    "the member branch returns before it loads the log",
+  );
+});
+
 test("G-04 notifTransportLabel: the platform transport reads friendly", () => {
   assert.equal(hooks.notifTransportLabel("instance"), "Barkpark platform");
   assert.equal(hooks.notifTransportLabel("smtp"), "SMTP");

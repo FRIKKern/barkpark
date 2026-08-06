@@ -236,6 +236,33 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
       assert body(conn)["error"] == "forbidden"
     end
 
+    # REVIEW (wave 33): the self-scope fence rides an OPTIONAL filter, and an
+    # optional filter's failure mode is to VANISH. `maybe_delivery_recipient/2`
+    # only fences on a non-empty binary, so a member whose stored address is
+    # blank used to fall through to the UNFENCED query and be handed the whole
+    # team's log — the widening this slice exists to bound, failing open. The
+    # router now refuses the read instead. This test writes the blank address
+    # straight to the column (registration validates the field, which is exactly
+    # why the hole was invisible) and asserts BOTH halves: the member is 403, and
+    # the colleague's row is not in the response.
+    test "a member whose address cannot be fenced on is 403 — the self-scope fence fails CLOSED" do
+      {owner, team, _owner_token} = user_with_team()
+      {member, member_token} = member_of(team, "member")
+
+      insert_delivery(team, %{recipient: owner.email, event: "deployment_failed"})
+
+      {1, _} =
+        Repo.update_all(
+          from(u in BarkparkCloud.Accounts.User, where: u.id == ^member.id),
+          set: [email: "   "]
+        )
+
+      conn = call(:get, "/v1/notifications/deliveries", nil, member_token)
+      assert conn.status == 403
+      assert body(conn)["error"] == "forbidden"
+      refute conn.resp_body =~ owner.email
+    end
+
     # `notification_deliveries.recipient` is plain varchar, not citext, and
     # `record_delivery(Map.get(invite, :team_id), invite[:to], "invite", ...)`
     # persists the RAW invite address. A lower-cased equality self-filter returns
@@ -302,7 +329,9 @@ defmodule BarkparkCloud.Web.RouterNotificationsTest do
       {member, _member_token} = member_of(team, "member")
 
       t0 = DateTime.utc_now()
+
       insert_delivery(team, %{recipient: member.email, inserted_at: DateTime.add(t0, -1, :second)})
+
       insert_delivery(team, %{recipient: owner.email, inserted_at: DateTime.add(t0, -2, :second)})
 
       conn = call(:get, "/v1/notifications/deliveries", nil, owner_token)

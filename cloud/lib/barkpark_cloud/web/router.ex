@@ -4619,21 +4619,44 @@ defmodule BarkparkCloud.Web.Router do
       true ->
         user = conn.assigns.current_user
         team = conn.assigns.current_team
+        admin? = Accounts.team_admin?(user, team)
 
-        opts = [
-          limit: min(parse_int(conn.query_params["limit"], 50), 200),
-          channel: conn.query_params["channel"],
-          status: conn.query_params["status"],
-          event: conn.query_params["event"],
-          before: parse_dt(conn.query_params["before"]),
-          before_id: conn.query_params["before_id"],
-          recipient: if(Accounts.team_admin?(user, team), do: nil, else: user.email)
-        ]
+        # THE FENCE MUST FAIL CLOSED, and `list_deliveries/2` cannot make it do
+        # so on its own: `:recipient` is an OPTIONAL filter, so a nil or blank
+        # value there means "no fence" — which is exactly right for the admin
+        # read and exactly WRONG for a member. A non-admin whose account carries
+        # no usable address would therefore fall through to the UNFENCED query
+        # and be handed the whole team's log. The router owns the self-scope
+        # decision, so the router owns its failure mode: no address, no read.
+        cond do
+          not admin? and not self_scopable_address?(user) ->
+            json(conn, 403, %{error: "forbidden"})
 
-        deliveries = Notifications.list_deliveries(team, opts)
-        json(conn, 200, %{deliveries: Enum.map(deliveries, &delivery_json/1)})
+          true ->
+            opts = [
+              limit: min(parse_int(conn.query_params["limit"], 50), 200),
+              channel: conn.query_params["channel"],
+              status: conn.query_params["status"],
+              event: conn.query_params["event"],
+              before: parse_dt(conn.query_params["before"]),
+              before_id: conn.query_params["before_id"],
+              recipient: if(admin?, do: nil, else: user.email)
+            ]
+
+            deliveries = Notifications.list_deliveries(team, opts)
+            json(conn, 200, %{deliveries: Enum.map(deliveries, &delivery_json/1)})
+        end
     end
   end
+
+  # The address a self-scoped read is fenced on must be exactly what
+  # `Notifications.maybe_delivery_recipient/2` will accept as a filter — a
+  # non-empty binary. Anything else (a nil-email account, a blank string) cannot
+  # be fenced, and an unfenceable member read is a 403, never a wider one.
+  defp self_scopable_address?(%{email: email}) when is_binary(email),
+    do: String.trim(email) != ""
+
+  defp self_scopable_address?(_user), do: false
 
   # True when the caller wants a CHAT test rather than the default email test.
   defp chat_test?(params) do
