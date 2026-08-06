@@ -8051,8 +8051,13 @@ defmodule BarkparkCloud.Web.Router do
         Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
           conn
 
+        # cch-w36-s1: NAME THE AUTHORITY. This refusal and the owner-only
+        # billing one were the same three bytes on the wire, so the console
+        # could only guess — and it guessed "plan limit reached". Launching
+        # needs ADMIN on the resolved team; paying needs OWNER. Emitted through
+        # Auth.forbidden/2 so there is one shape, not a second copy.
         true ->
-          conn |> json(403, %{error: "forbidden"}) |> halt()
+          Auth.forbidden(conn, required: "admin", scope: "team")
       end
 
     cond do

@@ -2120,6 +2120,52 @@ defmodule BarkparkCloud.Web.RouterTest do
       assert conn.status == 403
     end
 
+    # cch-w36-s1 — THE CROWN CHAIN, WALKED BY ONE PRINCIPAL. Every leg of this
+    # already had a single-hop test; none of them walked the chain, which is the
+    # only way the contradiction is visible: the 402 hands the admin a
+    # `checkout_path` the SAME admin is then refused at. Two authorities disagree
+    # by design (launch is team-admin, paying is owner) — this pins that they
+    # both SAY which one they wanted.
+    test "cch-w36-s1: an admin with a spent trial walks launch(402) → its own checkout_path(403 owner)" do
+      {_a, team, a_token} = user_with_role("admin")
+      exhaust_trial(team)
+
+      launch = call(:post, "/v1/launch", %{provider: "hetzner", name: "Crown"}, a_token)
+      assert launch.status == 402
+      launch_body = json_body(launch)
+      assert launch_body["error"] == "no_active_subscription"
+      checkout_path = launch_body["checkout_path"]
+      assert checkout_path == "/v1/billing/checkout"
+
+      # The SAME principal knocks on the door the 402 just handed them.
+      checkout = call(:post, checkout_path, %{plan: "supporter"}, a_token)
+      assert checkout.status == 403
+
+      assert json_body(checkout) == %{
+               "error" => "forbidden",
+               "required" => "owner",
+               "scope" => "primary_team"
+             }
+    end
+
+    test "cch-w36-s1: a plain member is refused BEFORE the 402, and the refusal names 'admin'" do
+      # Full-map equality, not a slug check: the whole point is the evidence
+      # BESIDE the slug — without it this body is byte-identical to the
+      # owner-only billing refusal above, and the console guessed "plan limit".
+      {_m, team, m_token} = user_with_role("member")
+      exhaust_trial(team)
+
+      conn = call(:post, "/v1/launch", %{provider: "hetzner", name: "Crown"}, m_token)
+
+      assert conn.status == 403
+
+      assert json_body(conn) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+    end
+
     test "member → DELETE /v1/barkparks/:id ⇒ 403; admin ⇒ 200 removed" do
       {_m, team_m, m_token} = user_with_role("member")
       bp_m = barkpark_fixture(team_m)

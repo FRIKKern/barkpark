@@ -493,13 +493,27 @@ defmodule BarkparkCloud.Web.Auth do
 
   defp unauthorized(conn), do: json_halt(conn, 401, %{error: "unauthorized"})
 
-  # ADDITIVE ONLY. `error: "forbidden"` is the slug 21 assertions across 10 test
-  # files already pin — evidence is merged AROUND it, never over it, so a client
-  # that reads only `error` is unaffected while one that can render a cause has
-  # something to render. No default argument on purpose: an unused default on a
-  # private function is a warning, and the Cloud gate compiles with
-  # --warnings-as-errors.
-  defp forbidden(conn, evidence),
+  @doc """
+  Send a 403 whose body carries the AUTHORITY that was missing, and halt.
+
+  ADDITIVE ONLY. `error: "forbidden"` is the slug 21 assertions across 10 test
+  files already pin — evidence is merged AROUND it, never over it, so a client
+  that reads only `error` is unaffected while one that can render a cause has
+  something to render.
+
+  PUBLIC (cch-w36-s1) because the ONE refusal on the launch→checkout chain is
+  not gated by this module at all: `go_live` gates the session branch INLINE in
+  the router (it must not re-run `require_user/2` and discard the resolved
+  PAT/session assigns), and it used to ship a bare `%{error: "forbidden"}` — the
+  console could not tell that refusal apart from the owner-only billing one. The
+  router now emits its evidence through this seam instead of reaching a private
+  function or growing a second copy of the shape.
+
+  NO DEFAULT ARGUMENT, on purpose: `evidence \\\\ []` reds the Cloud gate, which
+  compiles with `--warnings-as-errors` (charter D396(2)).
+  """
+  @spec forbidden(Plug.Conn.t(), keyword()) :: Plug.Conn.t()
+  def forbidden(conn, evidence),
     do: json_halt(conn, 403, Enum.into(evidence, %{error: "forbidden"}))
 
   defp not_found(conn), do: json_halt(conn, 404, %{error: "not_found"})
