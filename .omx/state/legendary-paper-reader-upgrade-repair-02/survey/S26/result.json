@@ -1,0 +1,80 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-26",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["pds-wave-44-2026-08-03::studio_authenticated"],
+  "verdict": "blocked",
+  "hard_gate_result": "fail",
+  "direct_answer": "The exact PDS44 Paper and revision are pinned, but no authenticated Studio mount was reached. Three fresh requests redirected to login, and archived 320/390 captures are login pages. Focus, scroll, click/Enter, expiry/reconnect, and responsive rendering are unproven. Identity is partial because API and adapters pin the revision while Studio data-rev is a streaming sequence, not immutable Paper identity.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "9a8b94a6-da70-4f6b-9597-a2e0122e5cc7",
+    "assignment_snapshot_digest": "96f45b5b50856b054e277038b1a7f5f4586e0dd84c5501072af3b9f32217fed9",
+    "paper_id": "pds-wave-44-2026-08-03",
+    "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52"
+  },
+  "observations": {
+    "source": {"blocks": 99, "unique_block_ids": 99, "raw_sha256": "4923e1b72da37c384ebc3f7b80ba15a08c9998fde560db0095d349a27457f96d", "canonical_blocks_sha256": "1c10ec4984826b0b12a0111c64b57bfc2c79de3ae576dd40b74e83c9e183bfce"},
+    "authored_carriers": {"headings": 32, "paragraphs": 48, "empty_spacers": 15, "lists": 10, "list_items": 85, "tables": 5, "header_cells": 12, "body_cells": 203, "intentional_headerless_tables": 2, "callouts": 4, "marks": 0, "links": 0, "adapter_carriers": 369},
+    "fresh_reads": {"attempts": 3, "login_redirects": 3, "studio_editor_sentinel": false, "authenticated_session_created": false},
+    "archived_widths": {"320": "login only; nonqualifying", "390": "login only; nonqualifying"},
+    "required_cells": {
+      "authenticated_mount": "not_found",
+      "actual_320": "not_found: login only",
+      "actual_390": "not_found: login only",
+      "focus_scroll": "not_found",
+      "click_enter": "not_found",
+      "expiry_reconnect": "not_found",
+      "immutable_identity": "partial: exact API/adapters; no authenticated DOM carrier"
+    },
+    "implementation": "Responsive ownership, local table scrolling, native button behavior, and expiry/revoke handlers exist statically; runtime reader proof is absent",
+    "identity_seam": "data-rev derives from monotonic streaming paper_rev initialized to zero, not immutable Paper revision"
+  },
+  "inferences": [
+    "The immediate blocker is authenticated reachability, not absence of implementation seams.",
+    "Synthetic adapter identity and login geometry cannot prove authenticated Studio behavior.",
+    "Studio needs a separate immutable Paper revision carrier.",
+    "Open capability-snapshot work is an adjacent authorization risk, not proof for this unit."
+  ],
+  "repair_seams": [
+    "Use a controlled authenticated non-production account to mount the exact immutable Paper.",
+    "Capture DOM, accessibility, geometry, focus, and scroll at 320 and 390 CSS pixels.",
+    "Compare pointer click and Enter transitions.",
+    "Exercise expiry, revoke, disconnect, and reconnect while preserving authorization and identity.",
+    "Expose immutable Paper revision independently of streaming paper_rev."
+  ],
+  "checked": {
+    "papers": ["pds-wave-44-2026-08-03@8bbd5d874a1b697f1e4e437c473f8e52", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "tasks": ["task-a768c69e659add58", "ede60fb9-fe0a-4ebf-861f-ed7e0245d6c6", "ea67e53e-6a07-4d5b-b63a-fd975dbc0711", "9c432246-551c-46fe-a229-d2b80a666963"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/result.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E09/evidence/run-1/interaction-parity.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/reports/blocked-cells.json",
+      "api/lib/barkpark_web/router.ex",
+      "api/lib/barkpark_web/live/studio/studio_live.ex",
+      "api/lib/barkpark_web/live/studio/studio_live/mount.ex",
+      "api/lib/barkpark_web/live/studio/studio_live/components.ex",
+      "api/lib/barkpark_web/studio/pane_builder.ex",
+      "api/lib/barkpark_web/layouts/root.html.heex",
+      "api/assets/paper-surface/paper-surface.css"
+    ]
+  },
+  "risks": [
+    "Static adapter passes may be mistaken for real reader passes.",
+    "Login screenshots have correct pixel dimensions but no Paper surface.",
+    "Streaming data-rev may be mistaken for immutable source identity.",
+    "Expiry and reconnect may diverge from static handler intent.",
+    "Live assignment attribution drops frozen unit_ids."
+  ],
+  "unvisited_scope": ["real authenticated DOM and accessibility tree", "real 320/390 interaction traces", "real expiry/revoke/disconnect/reconnect", "assistive technology", "deployed immutable revision carrier"],
+  "credential_scan": {"status": "clean", "credential_values_reported": 0, "login_submitted": false},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0, "session_state_mutations": 0}
+}
