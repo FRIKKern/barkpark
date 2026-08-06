@@ -888,3 +888,378 @@ last-resort correctness barrier), s7 (the deliberate Go/SPA divergence, which no
 memory fix behind a measurement this wave only makes possible. The 76× HTTP 500 class may or may not fall.
 That is a MEASUREMENT `dr-w2-s8` takes once s1/s2 and wave 2's s2/s3/s6 are merged AND deployed — never a
 promise this wave makes.
+
+---
+
+## Wave 4 decisions (2026-08-06) — Paper `deploy-reliability-wave-4-2026-08-06`
+
+Wave 4 opens the pipe ONCE and pushes all three of the wish's answers down it. Verification refuted
+three inherited premises by run; where it did, the evidence wins and the superseded decision is
+amended HERE rather than silently re-cited.
+
+- **D49 — THE AGENT IS NOT THE BREAK; THE FOLD IS. "Merged is not measuring" was true and is now
+  DISCHARGED — the second break is `normalize/1` + `@vitals`, and it is TWO modules.** *Why:* the
+  restart was performed and the pipe watched end to end. Guerrilla's binary was rebuilt at
+  11:39:45Z but the PROCESS ran from a **deleted inode** for 29 hours
+  (`/proc/3026335/exe -> /usr/local/bin/barkpark-agent (deleted)`, `ExecMainStartTimestamp` 29h
+  older than the file). After `systemctl restart` at 11:45:19Z the cutover is exact and leaves no
+  room for a confounder: `11:44:56Z swap=ABSENT beam_pss=ABSENT pg_top=ABSENT` →
+  `11:45:23Z swap=51 beam_pss=1843045376 pg_top=n=10`. All 20 keys persist at the control plane,
+  and `pg_top_relations` already names `mutation_events` 1.53 GB + `revisions` 1.33 GB = **81.3% of
+  the 3.52 GB database, measured, at the CP, today**. Ingest is confirmed free-form: the router does
+  `Registry.record_event(barkpark, "health", report)` on `conn.body_params` with **no whitelist**, so
+  any later fold is retroactive over the whole retained window. Yet `bp cloud instance top guerrilla`
+  still renders series `['cpu','disk','load','mem']`. `Telemetry.normalize/1` builds a fixed literal
+  envelope; `Metrics.@vitals` is a fixed 4-tuple and `series/1` is `Map.new(@vitals, …)`, so the key
+  set is *definitionally* closed. A repo-wide grep for the four field names across `cloud/` and
+  `internal/cli/` returns **zero hits**. **CONSEQUENCE FOR SLICE ORDER: the fold no longer depends on
+  any agent work.** It can be built and verified against live stored payloads immediately, via
+  `GET /v1/barkparks/:id/events`, which serializes `payload: e.payload` UNFILTERED.
+
+- **D50 — THE DEPLOY DEFECT IS ONE WORD, WITH AN IN-FILE PRECEDENT, AND THE `--health-token` TRAP IS
+  REFUTED.** *Why:* `instance-deploy.sh:821` uses `systemctl enable --now barkpark-agent`, which does
+  **not** re-exec an already-active unit. The correct pattern already exists 30 lines below at
+  `:851-853` for `barkpark-mcp` and states the reason in its own comment verbatim (*"restart (not just
+  enable --now): an already-running unit must pick up the"*). The briefed trap — that the committed
+  unit lost `--health-token` so a bare restart would break the health probe — is **FALSE**: a drop-in
+  ALREADY EXISTS at `/etc/systemd/system/barkpark-agent.service.d/health-token.conf` overriding
+  `ExecStart=`, which is *why* the running cmdline carried the flag. The restart was performed and the
+  post-restart beat reports `service_health {total: 7, pass: 7, failing: []}`. **The slice installs NO
+  drop-in; it changes one word.** *Two hazards recorded, both filed not built:* (a) `--health-token`
+  appears exactly ONCE repo-wide (the flag definition at `cmd/barkpark-agent/main.go:48`) — no unit,
+  provisioner or script ever passes it, so guerrilla is a hand-patched snowflake and every OTHER box
+  runs with an empty health token, making `req_per_s`/`p95` unmetered by construction; (b)
+  `deploy.yml`'s instance filter is `^(api|internal|deploy|connectors|templates)/` and **excludes
+  `cmd/`**, so a `cmd/`-only PR deploys the control plane and never touches guerrilla. That hole is
+  LATENT — it did not cause this incident, because #9784 also touched `internal/agent/report.go`.
+  **AND THE LEAD'S GATE INSTRUMENT IS BROKEN:** `strings … | grep -c '^swap_used_percent$'` returns
+  **0 on a binary that fully contains the field** — Go packs struct tags into one contiguous printable
+  run, so `^…$` anchors never match. Unanchored `strings -n 6 | grep -c` returns 1 on the same binary.
+  Any re-run of that gate must drop the anchors or it reads a false red.
+
+- **D51 — SUPERSEDES D45'S TRIGGER ARM: SWAP CANNOT BE THE FENCE. IT IS NON-SEPARATING, AND IT IS
+  STRUCTURALLY BLIND ON FIVE OF SIX BOXES.** *Why:* D45 survives intact as a *diagnostic* — its real
+  argument, that `mem` tells a reassuring lie while the BEAM is paged out, is still true and still
+  worth shipping. It dies as a *trigger*, on three independent measurements. (1) **Anti-correlation:**
+  a paired 4-minute series on guerrilla ran swap **49.2% → 46.2%** while load1 rose **0.94× → 2.90×
+  per core** — occupancy moved the *wrong way* against pressure. `parseSwapPercent` reads
+  `SwapTotal`/`SwapFree`, an occupancy **stock**, not `si/so` flow; `vmstat 1 3` at 49.2% showed si/so
+  settling to `0 0` with 1.12 GB free RAM. Swap occupancy is a scar, not a vital sign. (2) **No
+  separating band:** the live incident hour ran at **58%** swap while D39/D45 fitted at 95.5%/99.89%
+  and the box idles at 46-49% — any fence low enough to catch the incident fires on an idle guerrilla,
+  and the only viable band is ~9 points wide. (3) **Blind on the fleet:** all six barkparks were
+  ssh'd; **only guerrilla has swap configured**, the other five report `Swap: 0 0 0`. A swap arm is
+  therefore false-positive-free only because it cannot see 5/6 of the fleet.
+
+- **D52 — THE FENCE IS LOAD-PER-CORE, SUSTAINED, AND IT REQUIRES A NEW AGENT FIELD. THE HARDCODED
+  FALLBACK IS REFUSED.** *Why:* over 200 points × 5 reporting boxes (08:27-11:46Z), `load1/cores ≥ 2.0`
+  on **≥2 of the last 3 beats** fires 184/198 on guerrilla and **0/198 on every other box — zero false
+  positives across 800 healthy-box-points**. The healthy ceiling is 1.24× (dooodo) and guerrilla's own
+  floor in-window is 1.56×, so the fence sits 0.76× above anything the fleet did all morning with no
+  overlap. The CPU arm is NOT FP-free (`cpu ≥ 90` fires 2/200 on gyldendal) and is dropped; sustaining
+  2-of-3 costs 5 firings (184 vs 179) and removes single-beat spikes. **The denominator does not exist:
+  the agent `Report` has no `cpu_cores` field**, and `barkpark.server_type` is a nullable *launch pin*,
+  not observed truth — wrong or empty on adopted boxes. So the fence needs `runtime.NumCPU()` on the
+  beat. **The interim `load1 >= 4.0` fallback is REFUSED**: it is numerically identical today ONLY
+  because all six boxes happen to be 2-core, and it is a hardcoded assumption about the fleet's shape
+  that goes silently wrong the first time someone launches a 4-core box. Swap ENRICHES the reason
+  string and never triggers it — `load 5.5 on 2 cores (2.7×) · 1.0G in swap`, and **"none configured"**
+  on the five swapless boxes, never 0%. The reason string must NOT say "CPU": load1 counts
+  uninterruptible-sleep, so an I/O-bound box is honestly *load*, not *CPU*.
+
+- **D53 — `strained` MEANS PRESSURE, NOT SPACE. THE DISK ARM IS DECLINED AND FILED.** *Why:* jarl
+  reports **disk 95% for all 200 points** and ranks `healthy / ok / rank 8` — a real second silent
+  condition, on the wish's clause-1 axis, and adding `disk ≥ 90` to the fence is free. It is declined
+  anyway: it widens one word from pressure to space and makes `strained` mean two things, which is how
+  a vocabulary rots. Space gets its own answer through the space slice's own rendering. jarl's case is
+  filed with its measurement attached, not silently dropped.
+
+- **D54 — AMENDS D42: THE FACTUAL ARM HOLDS VERBATIM, THE RULING ARM IS DEAD — KILLED BY A MERGE, NOT
+  BY AN ARGUMENT.** *Why:* D42's factual arm — *a nil or `-1` vital NEVER produces `strained`* — is
+  kept word for word; it is what makes a stale agent degrade to honest silence rather than a false
+  alarm. Its ruling arm — *"the existing `degraded` arm already covers every box that cannot be read"* —
+  was measured on Go alone and is **false of the console since 2026-08-06T11:46:59Z**, when #9788
+  merged and shipped a ninth SPA state `unreported` at rank 5. The contradiction is LIVE in production:
+  `bp cloud status` calls muscle-1 `degraded / rank 4 / attention` while the deployed console
+  (7 occurrences of `unreported` in `curl https://barkpark.cloud/app.js`, HTTP 200) calls the same box
+  `unreported / rank 5 / "Never reported"`. Two surfaces, contradictory words, about one box, today.
+  D42 must be AMENDED here, not cited, or a builder reads it as licence to leave Go saying `degraded`
+  about a box the console calls "Never reported".
+
+- **D55 — SUPERSEDES D41 ENTIRELY. IT IS REFUTED THREE WAYS AND UNSHIPPABLE AS WRITTEN.** *Why:*
+  (1) **"No gate reds on" is FALSE, proved by mutation in both directions.** A Go-only ninth state reds
+  `cloud_status_cmd_test.go:93` (`fixture has 8 states, code has 9`) AND, on the full package,
+  `:232` (`row 2 = ok-box/ok/rank 9, want rank 8`). A fixture-only ninth state reds the mirror
+  (`fixture has 9 states, code has 8`). D41's parenthetical measured the **node harness**, which is
+  structurally blind — `grep -rn attention_order` returns ZERO hits in any `.mjs`, and the harness
+  asserts `attentionRank`/`bucketOf` against its own inline array. Its cited counts are also not
+  reproducible: origin/main runs **887 tests / 887 pass / 0 fail** (re-run this wave in a clean
+  worktree), not 873/858/15, which was an extraction artifact. (2) **Rank 5 is TAKEN.** #9788 merged
+  and is deployed. (3) **It cannot be Go-only under any reading**, because D52 puts the fence's
+  denominator in `internal/agent` and its input in the fleet payload.
+
+- **D56 — THE RANK-5 RULING, COVERING ALL FOUR CLAIMANTS AND BOTH SURFACES. ORDERING IS BY LAW, NOT BY
+  ARRIVAL.** *Why:* D332(b) — inherited via cch D386 and cited by cch-w34-s6's OWN shipped comment — is
+  `failed > unknown > pending > ok`. `strained` is a **measured** condition; `unreported` is the
+  **unknown**. A measured condition must outrank an unknown one. **THE LADDER IS:**
+  `1 removal_failed · 2 failed · 3 suspended · 4 degraded · 5 strained · 6 unreported · 7 behind ·
+  8 removing · 9 provisioning · 10 ok`, buckets **attention ≤6, in-flight 7-9, healthy 10**.
+  The four claimants resolve: `unreported` is an **incumbent**, not a claimant; `strained` takes 5;
+  `cch-w34-bl-go-twin-unreported` is a **PREREQUISITE, not a competitor** — it is the Go half of
+  `unreported`, in the same function and the same fixture, and without it Go and the shipped console
+  can never agree, so it is FOLDED INTO the same slice; `jpf-w1-queue-age-alarm` stays DEFERRED and
+  must rebase to rank 7+ (it is blocked anyway behind `jpf-w1-push-cp-lane`, whose claim expired
+  2026-07-31). **This requires exactly ONE SPA edit and D31 is AMENDED bilaterally to permit it:** the
+  grant is precisely `ATTENTION_RANK`, `bucketOf`'s two thresholds, and `__app.test.mjs`'s `KINDS`
+  array — roughly five lines, **zero render change**. D31 cedes *"the console render path"* and names
+  `deployConsoleHtml` (app.js:11637) and `deployDetailHtml` (:10763); a rank integer is not a render
+  path. The rejected alternative was `strained` at rank 6, behind `unreported` — refused because it
+  records an accepted D332(b) violation, putting a measured condition below an unknown one, to dodge a
+  five-line edit.
+
+- **D57 — `cloud/priv/static/__fixtures__/attention_order.json` IS OURS, NOT CEDED — AND IT IS ALREADY
+  DRIFTED ON MAIN, WITH A REQUIRED GATE REPORTING GREEN OVER IT.** *Why:* the fixture's **only** machine
+  reader is Go (`cloud_status_cmd_test.go:67`, `table.go:277`, `cloud_verify_cmd_test.go`); zero
+  `.mjs`/`.ex`/`.js` readers exist. Neither cession text names it: D31 names the two `app.js` render
+  functions, and cch's own **D392** states *"The only file both epics open is
+  `cloud/priv/static/__app.test.mjs`."* The jarl-platform charter already records the same fact
+  (*"today Go is the fixture's ONLY asserter"*). So D41's "Go-only" LABEL was wrong while its FILE FENCE
+  was right. **The drift is live: the fixture says 8 states with `behind` at 5; the shipped `app.js`
+  says 9 with `behind` at 6, and nothing catches it** — proved by mutation (making the fixture honest
+  about the console REDS the Go gate, while the node harness stays 887/887/0). **Two mechanical traps
+  the slice must absorb:** (a) **VACUOUS TRUE** — the fixture dispatches `true` into BOTH the Cloud gate
+  and the Console gate (because `cloud/priv/static/**` leads `CONSOLE_PATHS`), so two *required* gates
+  RUN expensive jobs and report green having asserted nothing on it, while `go-tests.yml`'s paths
+  exclude `cloud/**` entirely — a fixture-only PR runs **no Go suite at all**. Any slice touching
+  `__fixtures__/` MUST also touch a `.go` file in the same PR or the only working guard never fires.
+  (b) **THE TONE HOLE** — the guard hard-checks `Glyph`/`Label` non-empty but **not `Tone`**, so a ninth
+  state with `tone:""` on both sides ships fully green and uncoloured. One-line fix at
+  `cloud_status_cmd_test.go:109`, made a criterion of the same slice. **The ladder repair is ONE diff:**
+  fixture-alone reds the Go gate, Go-alone silently re-drifts. There is no partial landing.
+  `cloud/priv/static/__preview__/scenarios.mjs` is a THIRD file in this neighbourhood that neither
+  charter names — its cession status is left OPEN and filed, not decided by a builder.
+
+- **D58 — SPACE RIDES ITS OWN EVENT TYPE AT A SLOWER CADENCE, AND THE PER-SLUG LIST IS CAPPED. THE
+  UNCAPPED SHAPE HAS A MEASURED CLIFF.** *Why:* the wire bytes are a non-issue (a 30-slug beat is 3.1 KB
+  against Plug's 8 MB default, and `Plug.Parsers` sets no `:length`). The cliff is **Postgres's 2032-byte
+  `TOAST_TUPLE_THRESHOLD`** against the *compressed jsonb*. Measured on PG 17.9/pglz with realistic
+  high-entropy slugs, the crossover is **between 20 and 25 site slugs** (20 → 1968 B inline, 25 → 2114 B
+  TOASTed). Past it, a 14-day window per box goes **34 MB → 58 MB** with heap collapsing to 2 MB and
+  TOAST becoming 53 MB, and a 200-point metrics read goes **46 buffers / 3.8 ms → 637 buffers / 9.6 ms**
+  — 13.8× — because `GET /v1/barkparks/:id/metrics` pulls up to 200 payloads per chart. **QUOTE THE
+  ENTROPY NUMBER, NEVER THE TEMPLATE ONE:** with repetitive template slugs pglz is so effective that 30
+  slugs stays inline and the crossover looks like ~100. The comforting number is the wrong one.
+  Guerrilla has 10 sites today — safe, but only by 2×. **RULING, both halves:** (a) space is posted as a
+  **separate event type on a slower cadence**, not on the 60 s health beat — `metrics.ex:80` keeps only
+  health beats, so a space row is never detoasted by a chart render at all; (b) the per-slug list is
+  **capped at top-10 by bytes** (10 slugs = 1685 B compressed, comfortably inline), which is exactly what
+  the wish asks for — *the site you would act on is named*. #9784's own additions cost **+622 B/beat**
+  and **zero measurable retained storage** (34 MB either way), so they need no bound. **And the inherited
+  "`agent_events` has no pruner" premise is STALE:** `AgentRetentionWorker` exists (14 d events, 30 d dead
+  tokens, 14 d usage samples) and is scheduled `{"30 3 * * *"}` at `config.exs:298`, with `runtime.exs`
+  overriding only `:queues` so Cron survives. Azure D30 was resolved by D48. **NOTE THE TWO DATABASES ARE
+  DIFFERENT BOXES:** `mutation_events`/`revisions` are guerrilla's CONTENT db (`Barkpark.Repo`);
+  `agent_events` is the CONTROL-PLANE db (`BarkparkCloud.Repo`). Conflating them aims the footgun at the
+  wrong database.
+
+- **D59 — THE SPACE PROBE'S BOUND IS A LIFETIME BOUND AND ITS ARGV MUST BE DIRECT. `sh -c` BLOWS THE
+  BOUND BY 44× WITH AN INDISTINGUISHABLE ERROR.** *Why:* D47's ruling stands and is re-confirmed —
+  `du -hx -d1 /opt/barkpark/sites` measured **2.03 s cold / 0.36-0.39 s warm** at load 5.49 on 2 cores,
+  a 0.6% duty cycle against a 60 s beat, so the sub-cadence class is unneeded scope. Two corrections to
+  the briefed reasoning, one of which is load-bearing. (1) The premise that `timeout(1)` fails to kill
+  through `sh -c` is **FALSE** — GNU coreutils 9.4 `timeout` puts the command in a new process group and
+  signals the *group* (measured: `timeout` PGID 4044479, grandchild `du` PGID 4044479); only
+  `--foreground` leaks. (2) **The real hazard is Go's `exec.CommandContext`, which is exactly the seam the
+  probe will be written against.** `runBounded` (`internal/agent/report.go:160-168`) kills only
+  `cmd.Process` — no group kill — and then `CombinedOutput()` **blocks in `Wait` until the orphaned
+  grandchild closes the inherited stdout pipe**. Measured with the real `du` and a verbatim copy of
+  `runBounded`: direct argv under a 200 ms bound returned at **200 ms**; `sh -c "…; echo done"` under the
+  same bound returned at **8.77 s — 44× over budget** — and **both returned the identical
+  `err=signal: killed`, so a caller cannot tell the bound was blown.** The rule therefore survives for a
+  sharper reason than the one briefed, and it forbids not just `sh -c` but pipes, `2>&1` redirections and
+  `; echo rc=$?` inside any probe argv. (3) **A killed `du` emits PARTIAL output** — a 3 s bound printed
+  5 site rows then `rc=137`, and the Go direct-argv case returned 82 bytes after its kill — which parses
+  as a perfectly plausible list that is silently missing half the tree. **Any non-zero exit must DISCARD
+  and report unmeasured, never partially land**; under-reporting space is precisely the failure the wish
+  names. (4) The sites root is `BARKPARK_SITES_DIR`, default `/opt/barkpark/sites` — but the agent's own
+  environ carries only `BARKPARK_CONTROL_URL` and `BARKPARK_HEALTH_URL`, so an env-read probe silently
+  falls back on every box. The probe must **report which directory it read**, so a wrong root is visible
+  rather than silent.
+
+- **D60 — THE DOOR SHIPS; `flock -n` MUST NOT. THE CENSUS IS THE SERIALIZED GENSERVER, THE SECOND
+  OPINION IS `/proc/locks`, AND THERE IS A FIFTH FILE THE SLICE DOES NOT LIST.** *Why:* both blockers are
+  gone — **#9727 MERGED 11:31:45Z** (squash `9edfd15a6`, containing #9729), zero conflicts, and its diff
+  does **not** touch the `handle_call({:trigger, …})` cond body, so the capacity check lands on clean
+  ground. **The primary signal is the in-BEAM census**: `trigger` is a single serialized `handle_call`,
+  so the door decision and `start_run` are in one critical section and two concurrent triggers can never
+  both observe zero — it touches no lock and cannot steal. **The second opinion is `/proc/locks`**, a
+  non-destructive read (5 lines, world-readable, the BEAM runs as root) matched by `FLOCK` +
+  `MAJ:MIN:INO` from `File.stat!`; the lock is `/var/lock/barkpark-site-build.lock` (**not** `/run/lock`)
+  with `$BARKPARK_BUILD_GATE_LOCK` and `${TMPDIR:-/tmp}` fallbacks a hardcoded path would miss. **`flock -n`
+  is REFUSED**: on a *free* lock it ACQUIRES, so it can steal from a unit blocked in `flock -w 900`
+  (wakeups are unordered), and it leaks fd 7 by inheritance — three live holders were observed on one
+  build (`bash`, `npm`, `tee`). **And `/proc/locks`' PID is not a liveness signal** — one probe named PID
+  4020570 while `ps` found nothing, because the fd lived on in an inheriting child; key on the entry's
+  PRESENCE. **The in-engine flock SURVIVES as the last-resort correctness barrier**: `build_gate_acquire`
+  fails OPEN in three named cases (no `flock(1)`, undeletable lock dir, unopenable lock file), and in each
+  one nothing is ever written to `/proc/locks`, so the door reads "free" forever. The door is an early
+  honest refusal, never the barrier. **THE FIFTH FILE:** emitting `code: "box_at_capacity"` reds
+  `api/test/barkpark_web/contract/error_code_coverage_test.exs`, which globs the controllers and asserts
+  every literal is in `Errors.known_codes/0 ∪ @offspec_codes`. Proved by membership: `known_codes` has
+  **65 entries and contains neither `box_at_capacity` NOR `already_running` NOR `site_provision_failed`**;
+  #9727 itself had to add `site_provision_failed` to `@offspec_codes` (+7 lines) for exactly this reason.
+  Baseline is green (2 tests, 0 failures), so any red is the slice's own. **That red is CORRECTNESS, never
+  advisory.** *The slice's briefed line anchors are all pre-#9727 and now wrong:* `already_running` is at
+  **91-99** (not 86-94), `trigger/1`'s `@spec` at **285-289** (not 203), the D86/D87 comment at **571-572**
+  (not 407-412), and the trigger cond body at **405-419** with `running_slug?` at **413**.
+
+- **D61 — THE 409 CONTRACT: `code` EXACTLY, AND `message` MUST BE NON-EMPTY. THE SAME BREAK ALREADY HITS
+  `already_running`, THE CLASS SHIPPING SINCE W1.** *Why:* proved by a genuine round trip through
+  `FakeBoxRelay → box_refusal/3 → defer/3 → the PERSISTED `failure_reason` → `DeployLedger.classify/1`,
+  not fixture against fixture. The briefed constraint was wrong: a code with **no** message and **no**
+  request_id classifies CORRECTLY. The real trigger is **code + no message + a stamped `request_id`** —
+  `box_refusal/3` appends `" [box request_id: …]"` AFTER the detail while `refusal_detail/1` returns the
+  bare code when message is nil, so `deferral_code/1`'s `String.split(" — ") |> hd()` yields
+  `box_at_capacity [box request_id: F9tPXq2A]` and the `== "box_at_capacity"` comparison fails →
+  `DEFERRED_UNCLASSIFIED`. **The blast radius is wider than the unbuilt slice: the identical break hits
+  `already_running`** (PROBE-b3 → `DEFERRED_UNCLASSIFIED` instead of `BOX_BUSY_DEFERRED`), which by D43's
+  own logic falls back to the generic chain bound and lands on *"refusing this site persistently for a
+  cause the ledger cannot name"* — the false accusation D43 exists to kill. Fail-before / pass-after was
+  proved with a one-line stamp-strip in `deferral_code/1`, 99/99 green with both existing suites intact.
+  **A second, opposite defect is recorded and NOT in the same slice as the door:** a **CODELESS** body
+  whose `message` merely begins with the code string is SPOOFED into `BOX_AT_CAPACITY_DEFERRED`, because
+  `deferral_code/1` reads the first `" — "`-delimited segment of whatever prose the box sent, never a
+  code. **Ruling: the ledger hardening is its OWN `cloud/` slice**, separate from the `api/` door — they
+  are independent defects on opposite sides of the wire, the ledger one is live TODAY, and splitting them
+  keeps the fences disjoint so both build in round 1. It is LATENT, not firing: the only production 409
+  never calls `put_request_id` and always carries a message.
+
+- **D62 — THE THREE-STATE MECHANISM ALREADY SHIPPED; WAVE 4 EXTENDS IT AND MINTS NO NEW REASON WORD. THE
+  CLI's MISSING THIRD STATE IS ABSORBED, NOT DEFERRED.** *Why:* `Usage.instance_meter/2` +
+  `unavailable_meter/2` already distinguish value / deliberately-unmetered / measured-and-failed, the last
+  via a **conditional** `:unavailable_reason` key normalised against a CLOSED five-word allowlist
+  (`exception deadline_exceeded unreachable bad_shape too_many_datasets`), and the SPA already renders all
+  three ("Could not measure" / "Not yet metered" / the value). **Axis 3 — "none configured" — must NOT
+  reuse that allowlist**: `unavailable_meter/2`'s own docstring says *"the read WAS attempted and it
+  FAILED"*, so minting `none_configured` there would make a failure vocabulary describe a read that
+  SUCCEEDED, and inherit the warn tint and the "Could not measure" headline for a healthy swapless box.
+  **Ruling: axis 3 is carried in DATA, not vocabulary** — `swap_total_bytes == 0` → "none configured"
+  (neutral, no tint, never a percent); `> 0` → "<pct>% of <total>"; both `-1` → falls through to the
+  existing unmetered/unavailable arms. D45's companion field already encodes exactly this, and the agent's
+  own comment names the three states. This needs no enum widening, so D33/D386's closed-enum law costs
+  nothing. **THE CLI IS THE HOLE AND IT IS ABSORBED:** `internal/cli/cloud_usage.go` has zero
+  `unavailable_reason` hits — not because the renderer is wrong but because
+  `internal/cloudclient/client.go`'s `UsageMeter` struct has no field for it, so the reason dies at
+  unmarshal one layer below the renderer (`PendingInvitations *int` with `,omitempty` sits one line above
+  as the exact precedent). Four reasons to absorb rather than defer: the fold must open that struct
+  ANYWAY; `usageStateSeverity` has **no rung for a failed read** (`over_limit 3 > near_limit 2 >
+  unmetered 1 > live 0`) so a crashed headline meter rolls a row up as CALM — the vacuous-green shape the
+  wish exists to kill; two open cch rows describe one defect; and cch's own backlog row asks for a charter
+  widening naming that file, which this decision GRANTS: **`internal/cloudclient/client.go` and
+  `internal/cli/cloud_usage.go` are granted to the fold slice by name.**
+
+- **D63 — THE FLEET-LIST SEAM IS ADDITIVE AND UNCLAIMED, BUT IT IS FIVE CALL SITES AND ONE DELIBERATE
+  AUTHORIZATION WIDENING.** *Why:* nothing pins the serializer's key set — 31 `Map.keys` assertions across
+  `cloud/test/` and **not one targets a barkpark row**; there is no barkpark-row golden fixture and no
+  cloud OpenAPI drift gate; Elixir map patterns are subset matches so the two existing `= row` assertions
+  survive a new key by construction; and the Go decoder is a plain `json.Unmarshal` with
+  `DisallowUnknownFields` appearing only in `internal/manifest` and `internal/template`. `GET /v1/barkparks`
+  already prefetches two DISTINCT ON maps before serializing, so a third is symmetric, and the same N+1 was
+  already found and fixed once in this domain (`usage.ex:541`). **But `barkpark_json` has FIVE call sites,
+  FOUR at arity 1** (router.ex:2078, :2157, :2162, :8196) — boxes that by construction have never beaten —
+  so the change must take pressure as a PARAMETER, and those four sites are exactly the case that must
+  render "unmetered", never 0%. A design that looks pressure up INSIDE the function puts a per-row query on
+  four write paths. **`internal_barkpark_json` (router.ex:8690, NOT :8137) does NOT move in lockstep** — it
+  is `require_worker`, cross-team by design, consumed only by a fleet-ops audit whose struct already ignores
+  ~15 fields; adding pressure there would be a second differently-authed producer for no consumer. Do not
+  touch it. **THE WIDENING, taken deliberately:** the `scope=all` branch is bounded to the caller's own team
+  memberships by an INNER JOIN, so it crosses no tenancy line; but the *default* list is
+  `require_user_or_pat + require_ability("read")` whereas `/metrics` — today's only pressure surface — is
+  `require_user` only, which a PAT fails. So the sub-map newly exposes host pressure to MACHINE principals
+  holding a read-scoped PAT. That is defensible (same team's own box, and arguably what `bp cloud status`
+  in CI wants) but it is a DECISION, not a side effect, and it is recorded here rather than discovered later.
+
+- **D64 — D39's "`:erlang.memory()` CANNOT BE READ" IS STALE FOR THE TOTAL, AND WIDENING THE BREAKDOWN IS
+  ~5 LINES — BUT THE UNIT IS KILOBYTES AND THE NAME DOES NOT SAY SO.** *Why:* the prod BEAM already calls
+  `erlang:memory()` every 10 s — `telemetry_poller_builtin.erl:24-26` executes `[:vm, :memory]` with the
+  FULL nine-key map — and `GET /v1/instance/metrics` already serves one key of it, token-gated, deployed on
+  guerrilla now (401 anon, 200 + 48,213 bytes with a token, `vm_memory_total` moving across scrapes:
+  1,692,796 → 1,684,024 → 1,730,828). `periodic_measurements/0` is EMPTY, so the vm gauges come from the
+  poller's defaults; `telemetry.ex:74` subscribes to exactly ONE of nine. Widening is `last_value` lines in
+  one file — no new route, no epmd, no release, no rpc verb. **THE 1024× TRAP IS ALREADY ARMED:**
+  `unit: {:byte, :kilobyte}` is declared, and `TelemetryMetricsPrometheus.Core` scales the value but keeps
+  the event-derived name, so the wire format is a bare `vm_memory_total` with no `_kilobytes` suffix — the
+  repo's own test says so in a comment. Sanity: 1,730,828 read as KB = 1.65 GiB against beam.smp RSS
+  1,399,404 kB; read as bytes it is 1.7 MB against a 1.33 GB process. Meanwhile the AGENT's convention is
+  BYTES (`beam_pss_bytes`), so whoever scrapes crosses a unit boundary. **RULE: every new BEAM key either
+  carries `unit: {:byte, :kilobyte}` to match its neighbour OR carries an explicit `_bytes` suffix in its
+  name — an unsuffixed byte-valued gauge beside an unsuffixed kilobyte-valued one is how "a 1000× unit
+  error renders as a memory leak" actually happens.** **THE BOUND STAYS PARKED, with a sharper caveat:**
+  1.65 GiB inside-view against D39's measured 2,704 MB (1,528 PSS + 1,176 swap) means `:erlang.memory()`
+  does NOT explain the full anonymous footprint — code/loader/allocator carriers and swapped-out pages sit
+  outside its accounting. A `MemoryHigh` derived from it alone would be set ~1 GB too low. Wave 5 derives
+  the bound from PSS+swap and uses the breakdown for ATTRIBUTION only.
+
+- **D65 — THE CAPABILITIES BLINDNESS IS REAL BUT ITS LEVERAGE CLAIM IS REFUTED; IT IS FILED SUBORDINATE TO
+  THE POOL PARTITION, NOT BUILT.** *Why:* `AssignDefaultScope` (router.ex:43, inside `pipeline :api`) puts
+  **three** uncached DB round-trips in front of every `/v1/*` request — `get_default_project/0` re-invokes
+  `get_default_workspace/0` — including `/v1/capabilities`, whose controller touches no database at all. It
+  is live: 827 `Sent 500` and 732 queue drops in one hour, `/v1/capabilities` the 3rd most-500'd path, and a
+  `bp search` in this very session returned `internal_error`. **But the leverage claim is wrong:**
+  `OptionalToken` runs BEFORE it (router.ex:40 vs :43) and owns 194 crash frames to AssignDefaultScope's 68
+  — 2.85× — and `bp` always sends a Bearer token, so every real `bp` call dies one plug EARLIER. Caching the
+  default pair would leave `bp` exactly as blind. Root cause is `POOL_SIZE` unset (compiled default 10)
+  shared between all HTTP and 29 Oban slots while a single `EdgeProjector` job held a connection for
+  **37.98 s**. That repair is owned by the OPEN `jpf-bl-oban-pool-partition` and is NOT PROMISED here. The
+  cheap plug fix removes ~8.2% of the 500s and zero percent of authed `bp` traffic; it is filed explicitly
+  subordinate, so nobody ships it and reads it as having addressed the class.
+
+- **D66 — NO REQUIRED CONTEXT ASSERTS ON A PURE-GO OR PURE-DEPLOY DIFF, AND EVERY SUCH SLICE MUST SAY SO IN
+  ITS OWN BRIEF.** *Why:* the required set is exactly four contexts (`Elixir gate`, `PR references an active
+  task`, `Cloud gate`, `Console gate`), re-derived live. `internal/**`, `cmd/**` and
+  `deploy/instance-deploy.sh` dispatch **false** on all of them while auto-deploying production. Witnessed on
+  a real merged CODE pr — **#9732**, strictly `internal/**` — where all four required contexts concluded
+  `success` while **13 expensive leaves concluded `skipped`**, and `go vet + test` ran, passed, and is not
+  required (it is structurally unrequirable: a workflow-level `on: paths:` filter means an absent context
+  reports "expected" forever). **RULING: every slice whose file set is pure-Go or pure-deploy carries,
+  verbatim in its task body, the sentence "No required context asserts on this diff — Cloud/Console/Elixir
+  gates all report success by skipping. The blocking evidence for this slice is a live beat read off the
+  control plane, not a green PR."** That extends this epic's own slice-zero discipline to the gate layer.
+
+### Wave 4 plan — 8 slices, 7 in round 1
+
+| # | Slice | Task id | Round | Model | Surface |
+|---|---|---|---|---|---|
+| s1 | The rebuilt agent actually restarts — one word, with the in-file precedent | `dr-w4-s1-agent-release-restarts-the-unit` | 1 | opus | `deploy/instance-deploy.sh` |
+| s2 | The agent measures space by named consumer, and its own core count | `dr-w4-s2-agent-measures-space-and-cores` | 1 | opus | `internal/agent/`, `cmd/barkpark-agent/` |
+| s3 | The fold: the CP and the CLI render swap, db + top relations, and the BEAM — three-state | `dr-w3-s6-cp-cli-render-new-vitals` | 1 | opus | `cloud/lib/barkpark_cloud/{telemetry,metrics,usage}.ex`, `internal/cli/`, `internal/cloudclient/client.go` |
+| s4 | The fleet list carries pressure, prefetched, nil-safe on four write paths | `dr-w4-s4-fleet-list-carries-pressure` | 1 | opus | `cloud/lib/barkpark_cloud/web/router.ex`, `registry.ex` |
+| s5 | The door refuses at capacity with a typed 409 — census, not `flock -n` | `dr-w3-s5-door-refuses-box-at-capacity` | 1 | opus | `api/lib/barkpark/sites/`, `api/lib/barkpark_web/controllers/`, `api/test/.../error_code_coverage_test.exs` |
+| s6 | The deferral code survives the request-id stamp, and stops being spoofable by prose | `dr-w4-s6-deferral-code-survives-the-stamp` | 1 | opus | `cloud/lib/barkpark_cloud/deploy_ledger.ex` |
+| s7 | `:erlang.memory()` names which subsystem grows — D39's parked prerequisite | `dr-w4-s7-beam-memory-breakdown-readable` | 1 | opus | `api/lib/barkpark_web/telemetry.ex` |
+| s8 | `strained` reaches the triage vocabulary at rank 5, and the ladder stops being drifted | `dr-w3-s7-strained-reaches-triage` | 2 (after s2, s4) | opus | `internal/cli/`, `internal/semrole/`, `internal/cloudclient/client.go`, `cloud/priv/static/` |
+
+**Model note:** every slice is `opus` by AVAILABILITY, not by judgment — Fable is unavailable for
+subagents this wave. On difficulty/surface grounds **s8** (cross-surface ladder coupling, a bilateral
+cession amendment, three coordinated pins) and **s5** (the door/unit race) would both have been `fable`.
+The lead should weight review attention there accordingly.
+
+**HIGH-FLIP-RISK slices, owed a genuinely independent second reviewer BEFORE merge — a MANUAL LEAD STEP,
+because this workflow spawns exactly ONE reviewer, and this wave ARRANGES it rather than discovering it at
+Review:** **s5** (the race between the door's census and the unit's own `flock` acquire — the in-engine
+flock MUST survive as the last-resort barrier, and the refusal of `flock -n` is the judgment most likely to
+be re-litigated by a builder who finds it convenient); **s8** (the rank-5 ruling and the D31 bilateral
+amendment — a reachability/ownership judgment across two epics' fences, where being wrong means shipping a
+ladder that contradicts a LIVE production console); **s4** (the PAT authorization widening in D63 — a
+tenancy-adjacent judgment that is defensible but must not be re-derived by the builder).
+
+**What this wave does NOT promise.** `MemoryHigh` stays parked (D39, and D64 sharpens why a naive threshold
+would be ~1 GB too low). The Postgres pool partition stays with `jpf-bl-oban-pool-partition` (D28, D65).
+Journal capping and disk RECLAMATION are not taken — D48 orders capping behind the backfill and D47 shows
+sites' gigabytes are load-bearing build caches whose deletion forces a cold `npm ci` on the box that is
+swapping; **this wave makes space VISIBLE and files what to do about it.** Retention on `mutation_events`
+and `revisions` remains a DATA-LOSS decision outside the fence (D46) — sharpened by verification:
+`revisions` carries `compaction_snapshot` rows that are the durable REVERSIBLE archive for task compaction,
+and `mutation_events.document` is the ONLY surviving copy of 158 adjudication reasons already filed for
+recovery. The 76× HTTP 500 class may or may not fall; that stays a MEASUREMENT `dr-w2-s8` takes, never a
+promise.
