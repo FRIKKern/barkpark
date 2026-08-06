@@ -1337,3 +1337,332 @@ and #9826 merge. (c) The `MemoryHigh` bound, now that #9829 makes attribution re
 the deferral classifier's raw-column ambiguity (a codeless `box_at_capacity — <prose>` is byte-identical to
 `code — message`; only a structured column closes it) and the `unavailable` token painting neutral in
 `semrole.For`.
+
+---
+
+## Wave 5 — the last mile: every instrument reaches a human's eyes
+
+**Wave 5 Paper:** `deploy-reliability-wave-5-2026-08-06`
+
+**SLICE-ZERO, PROVEN BY RUN THIS SESSION, NOT INHERITED.** "Merged is not measuring" is DISCHARGED:
+guerrilla's live beat carries `cpu_cores: 2`, `swap_used_percent`, `beam_pss_bytes`, `beam_swap_bytes`
+and a `top_relations` naming `mutation_events` + `revisions` as 81% of the database. #9823 worked.
+**And the owner's complaint is STILL LIVE, re-measured end to end:** `bp cloud status` returns guerrilla
+`status "ok", rank 8, bucket "healthy"` while, in the same minutes, `load15` reads 1.89–2.02× per core
+against 2 cores, swap is 92.9% full, PSI `memory full avg10` is 6.95, the box answered **6,472 HTTP 500s
+in eight hours**, and `barkpark-slot@blue.service` sits in `failed`. Say it plainly: **the answer to
+"can a human see that box as strained" is still NO, and closing that gap is this wave's whole job.**
+
+## Decisions (wave 5)
+
+- **D67 — AMENDS D52: THE SUSTAIN MECHANISM IS `load15`, NOT A BEAT WINDOW. EVERY OTHER D52 CLAUSE
+  SURVIVES VERBATIM.** *Why:* D52 specified `load1/cores >= 2.0` on `>= 2 of the last 3 beats`, and that
+  shape is **NOT COMPUTABLE FROM WHAT MERGED**. `Registry.latest_health_payload_map/1` is a
+  `DISTINCT ON (barkpark_id) ORDER BY inserted_at DESC` — ONE beat — and `merge_pressure/2` folds exactly
+  that row, so `/v1/barkparks` (the one payload both `bp cloud status` and the SPA read) carries no window
+  at all. k-of-n and latching both need state that is not on the wire. Measured on a fresh 200-point window
+  across all six boxes: **every** candidate shape is FP-free (0/800 healthy-box beats), so false positives
+  cannot discriminate between shapes and the "keep 0 FPs" criterion is vacuous; what discriminates is
+  **flap at the moment the owner looks** — single-beat and 2-of-3 were BOTH DARK at the latest beat
+  (1.99×, under the line by 0.01), with 37 scattered dark beats inside otherwise-strained periods.
+  **THE ANSWER NOBODY NAMED:** `loadProcProbe` (`cmd/barkpark-agent/main.go:317-332`) already does
+  `os.ReadFile("/proc/loadavg")` and `strings.Fields`, then uses `fields[0]` **and throws `fields[1]` and
+  `fields[2]` away**. `load15` IS a sustained measurement — a 15-minute kernel EWMA delivered as ONE
+  scalar — needing no window, no client state, no new route. Live proof, 12 SSH readings, 3 samples 60s
+  apart: at 15:01:02Z guerrilla read load1 **0.64× per core** (dark on any single-beat fence) while its
+  load15 was **1.89×**, 5.9× the busiest healthy box; healthy ceiling is jarl at 0.32×/core against
+  guerrilla's floor of 1.89×. **RULING: the fence is `load15/cores >= 1.75`, evaluated on the LATEST BEAT,
+  with `load1` kept for the reason string's present-tense colour.** Where `load15` is absent (an agent
+  that predates it) the fence FALLS BACK to `load1/cores >= 2.0` — this is not the refused fallback: D52
+  refused a **hardcoded core count**, an assumption about the fleet's shape; a coarser averaging window is
+  a strictly LESS sensitive predicate (163/200 vs 180/180 on the same box) that can under-report and can
+  never over-report, which is the honest direction. **The 1.75× number is derived from a RECONSTRUCTED
+  load15 series (an EWMA of load1, α=exp(-60/900)) and only 12 spot readings are real — the builder MUST
+  re-derive the sweep on real `fields[2]` once the agent reports it, and say so in evidence.**
+
+- **D68 — AMENDS D56 TWICE: THE BUCKET BOUNDARY IS AN INTEGER OFF, AND THE "FIVE LINES, ZERO RENDER
+  CHANGE" SPA GRANT IS WITHDRAWN AS UNSATISFIABLE. `strained` SHIPS GO-ONLY THIS WAVE.** *Why, part one:*
+  D56 set buckets "attention ≤6, in-flight 7-9" over a ladder placing `behind` at 7 — which MOVES `behind`
+  out of attention. Shipped `app.js:5268-5291` has `behind: 6` INSIDE attention (`r <= 6`), the harness
+  comment says so, and the Go fixture `attention_order.json` independently places `behind` in attention.
+  Applying D56 literally was **run** and reds 4 of 914 assertions, two of them the reclassification:
+  `fleetSummary counts buckets` (`__app.test.mjs:3144`) flips `attention 6 → 5`, and `filterFleet`
+  (`:3164`) drops `'behind-1'`. A grant issued *because* it was render-neutral must not reclassify every
+  out-of-date box. *Why, part two:* the grant named `ATTENTION_RANK`, `bucketOf` and `KINDS`, and that set
+  was **proved unsatisfiable by mutation, twice**: rank-map + `bucketOf` alone reds the closed-enum test in
+  the harness's own words ("a new fleet state was added without a statusOf arm"), because
+  `attentionKinds = Object.keys(ATTENTION_RANK)` is deep-equalled against `KINDS`; adding `KINDS` reds it
+  again on `classifyBp` reachability. The measured minimum green diff is **25 changed lines in `app.js`
+  + 13 in `__app.test.mjs`, in six parts**, including a `strainedOf(bp)` helper reading `bp.pressure` — and
+  deployed `app.js` contains **ZERO** occurrences of `pressure`. It **IS** a render change: `statusOf`
+  feeds `statusPill` at six sites, so a `Strained` warn pill appears in the Overview attention queue, the
+  fleet cards, the instance H1 and the command palette. *Why, part three — the fence:* cloud-console-
+  hardening's declared Surface fence is the bare directory **`cloud/`**, which swallows all three SPA
+  files; their charter contains **ZERO** occurrences of `dr-w3`, and their collision census enumerated
+  `dr-w2` rows only; and our own OPEN, HANDED-OVER row `dr-bl-spa-unknown-state-buckets-healthy` already
+  claims `app.js` + `__app.test.mjs` for THEM. So the grant is UNILATERAL in fact. **RULING: the ladder
+  lands in Go, the fixture and the Go tests ONLY. The SPA edit is NOT taken this wave and is not ours to
+  take unilaterally.** The corrected integers stand recorded for whoever lands it: **buckets are
+  attention ≤8, in-flight 9-10, healthy 11**, and **the ladder moves in ONE commit or not at all** — a
+  `classifyBp` kind with no `ATTENTION_RANK` entry yields `undefined`, and `undefined <= 8` is false, so a
+  half-landing buckets a strained box **HEALTHY**, the exact inversion this epic exists to kill.
+  **THE COST, STATED PLAINLY: an owner who looks at the CONSOLE still sees "Healthy · Online" for a
+  strained box.** That is a KNOWN TWO-TIER ladder (Go 11 rungs, SPA 9) and a ceded blindness with a named
+  owner, not an oversight — and it is consistent, because the deployed console's Metrics tab plots exactly
+  four series (`cpu`, `mem`, `disk`, `load`) and carries zero occurrences of `pressure`, `beam_pss`,
+  `top_relations` or `cpu_cores`: **the CLI is where every wave-3/4 instrument is visible, and `bp cloud
+  status` is the command the lead actually ran when he found the box reading "ok".**
+
+- **D69 — AMENDS D53 NARROWLY: THE DISK GETS ITS OWN RUNG `filling`, SOURCED FROM THE METER THAT ALREADY
+  SAYS 95%.** *Why:* D53's ruling that `strained` must not ABSORB space **stands** — merging pressure and
+  space is how a vocabulary rots. But D53 never ruled that space has no rung, and the hole it left is now
+  measured at L1: jarl's root filesystem is `38G / 34G used / **1.9G free** / 95%`, flat at 95 across 200
+  consecutive beats, while a single site image weighs **2.03–2.05 GB** — *jarl is less than one deployment
+  from ENOSPC*, and it has already hit 100% once and taken its CMS down (`jpf-runtime-image-pruning`).
+  In the same minute `bp cloud usage jarl` renders `Disk 95% · **over_limit**` and `bp cloud status` places
+  jarl in the **HEALTHY** bucket beside the genuinely idle boxes. That is not a measurement gap; it is two
+  operator surfaces contradicting each other, with the one an owner opens first being the wrong one.
+  **RULING: `filling` enters the ladder at rank 6, fired from `pressure.disk_used_percent` against the
+  SAME threshold `bp cloud usage` already ships (`usage.ex:239` — quota 100, warn 70, over 90), never a
+  new number.** This also answers the sharpest attack on the wave: `strained` alone would be a vocabulary
+  for a population of ONE (only guerrilla reports `cpu_cores`), whereas `disk_used_percent` is live
+  FLEET-WIDE on the OLD agent, so the ladder fires on **two** boxes the day it lands — guerrilla `strained`,
+  jarl `filling` — with no rollout at all.
+
+  **THE LADDER, FINAL, ELEVEN RUNGS:** `1 removal_failed · 2 failed · 3 suspended · 4 degraded ·
+  5 strained · 6 filling · 7 unreported · 8 behind · 9 removing · 10 provisioning · 11 ok`.
+  Buckets `attention ≤8 · in-flight 9-10 · healthy 11`. This preserves every shipped bucket assignment
+  exactly; only integers move. Go is at **8** rungs today (`attentionRankOrder`, no `unreported`, no
+  `strained`) and the fixture agrees with Go, so this is a **three-rung** Go reconciliation, not a
+  one-rung touch-up.
+
+- **D70 — BINARY PROVENANCE IS PART OF EVERY VITALS CRITERION, AND `make cli-install` DOES NOT FIX IT.**
+  *Why:* the installed `bp` is commit `f59aaf717` (2026-07-31), **31 Go commits behind origin/main**, with
+  `strings | grep -c` = **0** for `pss_bytes`, `swap_bytes`, `top_relations` AND `cpu_cores`. The failure
+  is ASYMMETRIC and both halves were reproduced: `-o json` surfaces re-print `res.Raw` verbatim
+  (`cloud_instance_top_cmd.go:127`), so a stale binary containing **zero bytes** of those names prints
+  them anyway — a criterion phrased "run `bp cloud instance top` and see `top_relations`" **passes on a
+  binary from last year** and proves the control plane, not the CLI. Meanwhile `bp cloud status` has
+  **NO raw path in either direction** — `ListBarkparks` returns `[]Barkpark` with no `Raw` field and
+  `-o json` re-encodes the CLI's own ranked structs — so it verifies **FALSE-RED**: a builder who
+  correctly ships `strained` and checks with the PATH binary sees "healthy" and abandons a correct fix.
+  And `make doctor`'s own printed remedy is not enough: `cli-install` builds from the LOCAL checkout,
+  which is 503 commits behind and has **0** occurrences of `cpu_cores`. **RULING: every vitals criterion
+  carries, verbatim, "BINARY PROVENANCE — this reading was produced by a bp built from the branch under
+  test (`T=$(mktemp -d); git archive <sha> | tar -x -C $T; CC=clang go build -C $T -o $T/bp
+  ./cmd/barkpark`) and the evidence quotes that `<sha>` beside the output; the `bp` on PATH is a lagging
+  release artifact."** A second trap for the same gate: unanchored `strings … | grep -c strained` returns
+  **5**, every hit a substring of `unconstrained` — any presence check must be word-bounded AND
+  mutation-proven.
+
+- **D71 — AMENDS D58's ILLUSTRATION, NOT ITS RULING: THE SPACE AXIS IS HOST-CONSUMER SHAPED, NOT ONLY
+  DB-RELATION SHAPED.** *Why:* D58's headline example — `mutation_events` 1.54 GB + `revisions` 1.34 GB =
+  81% — is a **GUERRILLA** fact. Traced field by field on jarl, the box actually running out of space,
+  `SpaceReport` as designed would name **984.7 MB of 33.84 GiB used — 2.85%**: `journal_bytes` 920.1 MB,
+  `pg_size_bytes` 64.6 MB (the whole relation axis is rounding error there), and `sites_bytes` **-1** with
+  `sites_top` **nil**, because `find / -xdev -maxdepth 4 -type d -name sites` returns **NOTHING** on jarl —
+  the design's only named-consumer axis is structurally dark on that box. What is actually there, named by
+  no field at all: `/var` = **29G of 33.84 GiB**, of which `/var/lib/containerd` **14G** and
+  `/var/lib/barkpark-builder` **11G** (24 `docker save` tarballs at ~471 MB each), with
+  `docker system df` reporting `Images 8 · 14.12GB · RECLAIMABLE 14.12GB (100%)` and 7 of 8 backing
+  `Exited (1)`/`Created` containers from superseded generations. **RULING: the sites probe's ONE root
+  becomes a SHORT LIST of roots (default `["/opt/barkpark/sites", "/var/lib"]`), reusing `duSitesArgs` and
+  `parseDuTree` verbatim — they are sites-specific in nothing but their variable names.** Cost measured on
+  the live box: `du -hx -d1 /var/lib` = **5.609s cold / 3.200s warm** against `duProbeTimeout = 60s`; `/`
+  costs 10.5s and is coarse ("var 29G" is not actionable), so `/var/lib` is the second root, not `/`.
+  **AND D47 GETS A SCOPE STAMP:** its "gigabytes are load-bearing build caches" clause was measured on
+  guerrilla's `/opt/barkpark/sites` (`node_modules` ~2.9G, `.next`), a tree that **does not exist on
+  jarl**; it does NOT transfer to jarl's docker layer, and a builder must not copy it into a refusal to
+  reclaim 14 GB of superseded images. Reclamation still belongs to `jpf-runtime-image-pruning`.
+
+- **D72 — SPACE ROWS SHORTEN THE METRICS WINDOW **TODAY**, AND D58's SEPARATION IS ENFORCED AT WRITE AND AT
+  FOLD BUT NOT AT FETCH.** *Why:* `router.ex:7738` passes `points` ITSELF as the row limit to
+  `Registry.recent_events/2`, which has **no type predicate** (`registry.ex:2724-2734`); `Metrics.build/3`
+  then filters to `type: "health"` but echoes `points: points` from opts, never `length(series)` — so every
+  non-health row inside the fetched N costs one chart point while the envelope keeps claiming N. Proved
+  over the REAL HTTP path using only ALREADY-ALLOWED types, so this is a present-tense defect and not
+  contingent on space landing: `?points=200` over a mixed stream renders **188** while the envelope says
+  **200**; the default 30 renders 29; the health-only control renders 30/30. At the shipped cadence
+  (`DefaultInterval` 60s vs `DefaultSpaceInterval` 15m) space is 1 row in 16 and the arithmetic is exact.
+  The existing `metrics_test.exs` is 14 pure tests over hand-built lists that never touch the DB, so it is
+  **structurally incapable** of catching this and will keep passing. **RULING: the metrics read fetches
+  `points` HEALTH rows, not `points` rows (a `recent_health_events/2` or a `:type` opt — the existing
+  `(barkpark_id, inserted_at)` index still backs it, no new index), and the guard lives in the DB-backed
+  `metrics_route_test.exs` asserting `length(series.cpu) == points` on a mixed-type stream, MUTATION-PROVEN
+  to fail before the fix.** Retention needs **no change** — `AgentRetentionWorker` prunes on `inserted_at`
+  with no type filter, so space rows inherit the 14-day window for free at +6.7% row count; a slice that
+  "adds space retention" is doing nothing.
+
+- **D73 — THE DOOR'S SOBELOW WAIVER IS PROVEN BY CI RUN, #9827 IS UNHELD, AND THE ONE THING STILL OWED IS
+  A HUMAN.** *Why:* the finding was traced, not asserted: `File.read(path)` at `deploy_runner.ex:764` has
+  `path = proc_locks_path()` → `Keyword.get(config(), :proc_locks_path, @default_proc_locks)` → `config/0`
+  = `Application.get_env/3`, with `@default_proc_locks "/proc/locks"` a compile-time attribute. Application
+  config plus a constant — **no request value and no slug anywhere on the path**, which is STRICTLY
+  STRONGER than #9729's five accepted waivers, whose safety rests on a regex-validated slug (i.e. on
+  validation holding) and which merged today. A six-line inline waiver was pushed (`e84880295`) and the
+  gate was **run**: the deciding step goes to `... SCAN COMPLETE ...` with **zero** findings and zero
+  occurrences of `deploy_runner` in a 1,913-line job log; `api/.sobelow-skips` is untouched and
+  **structurally cannot be involved** (0 of its 52 rows anchor anywhere under `lib/barkpark/sites/`, so the
+  line-shift class that burned #9729 has no anchor to shift here); the BLOCKING "does not swallow its own
+  inline waivers" job passes in 15s with the annotation counted AND bound (112 vs 111 coverings by
+  mutation); and the green is EARNED — the fresh-finding guard still reds on a `String.to_atom` planted on
+  this exact tree. **RULING: the waiver stands. #9827 is `MERGEABLE / CLEAN` with ZERO failing checks and
+  all four required contexts green — the hold was doctrine, never branch protection, and the doctrine is
+  now discharged.** What remains is its own criterion: **an independent second review of the door-vs-unit
+  race, which this wave ARRANGES as a MANUAL LEAD STEP.** Two caveats recorded rather than discovered:
+  the same PR adds a `File.stat` in `lock_triple/1` on an env/config-derived path that Sobelow 0.14.1
+  simply does not cover — a detector bump makes it red later, and it is FILED; and the "Required-check
+  spec gate" red on that PR was a **stale merge ref**, cleared by a re-push with no code change
+  (115 passed/1 failed → 119 passed/0 failed), a recurring false-red generator worth naming.
+
+- **D74 — THE AGENT IS BUILT **ONCE**, AT WARM-POOL ARM TIME, AND NEVER AGAIN. BLESSING A RELEASE IS A
+  CATEGORICAL NON-FIX; THE REPAIR IS `scripts/apply-update.sh`.** *Why:* the premise "the new agent exists
+  only where `instance-deploy.sh` ran" is right, and the mechanism is now proved. Only guerrilla has
+  `/opt/barkpark/.slots`; jarl, gyl, dooodo and gyldendal do not, and none has any `barkpark-slot@*` unit —
+  and `instance-deploy.sh:669` is an **unconditional** `mkdir -p "$APP/.slots"` in the forward deploy path,
+  so its absence proves that path has **never completed** there. On all four, the agent binary's mtime
+  equals `/etc/barkpark/agent.token`'s mtime **to the minute** (jarl Jul 30 14:25, gyl Aug 5 12:05, dooodo
+  Jul 24 12:06, gyldendal Jul 9 16:38) — correlated with the PROVISION ARM, not with the box's git
+  checkout. The only two sites in the repo that ever build the agent are `instance-deploy.sh:816-824` and
+  `warmpool.go:618`. **All THREE self-update scripts contain ZERO occurrences of "agent"** —
+  `apply-update.sh`, `deploy-rebuild.sh` AND `self-update.sh` — and `freshen.go:100` invokes
+  `bash scripts/apply-update.sh`, so the survey's proposed patch to `deploy-rebuild.sh` would land on the
+  FALLBACK branch and be skipped on the hot path. `v0.2.25` is dated 2026-07-08, a month before
+  `fc6a74ca2`; all six boxes report `update_state: "current"` and will do so forever while the fence stays
+  dark. **RULING: lift the `[ -f /etc/barkpark/agent.token ]` → `go build ./cmd/barkpark-agent` → reinstall
+  unit → `systemctl restart` block into `scripts/apply-update.sh` (the hot path), and mirror it in
+  `deploy-rebuild.sh` (the fallback) so neither branch strands the binary.** The staleness is STRUCTURAL
+  and RECURRING, not a one-time backfill: without this, every box claimed from the warm pool from now on
+  ships whatever agent existed at pool-fill time. Two traps disarmed for the builder: `command -v go`
+  returns NO_GO over a bare ssh on **every** box including guerrilla (Go is at `/usr/local/go/bin/go`;
+  `instance-deploy.sh:147` exports it) — designing around a non-problem is the likely failure; and gyl +
+  dooodo currently FAIL host-key verification (`known_hosts:53`/`:54`), so any fleet-wide ssh sweep breaks
+  on 2 of 6 until a human reconciles them. **AND THE CP CAN SEE THIS WITHOUT SSH: a box with a FRESH
+  `reported_at` and a NULL `cpu_cores` is definitionally a stale-binary box** — that is the unmetered
+  marker, computable server-side with zero new measurement, and it is what turns honest silence into
+  something an operator SEES rather than infers from an absence.
+
+- **D75 — THE 500 CLASS IS **ONE** CLASS, D28's FRAME RANKING IS REFUTED AT REQUEST LEVEL, AND THE 5xx
+  METER IS A WIDENING OF A RING THAT ALREADY RIDES THE BEAT.** *Why:* over 8 hours of guerrilla's journal
+  (390,158 lines), joining every `Sent 500` to its request_id's request line gives **6,472 distinct 500s**,
+  of which **6,472 — 100.0% — also emit `DBConnection.ConnectionError`** and 4,746 (73.3%) the literal
+  pool-queue-drop text. **There are ZERO non-DB 500s in eight hours**, so a single `db_unavailable` class
+  names the entire population. The family split inverts D28: `/v1/tasks*` is **2,506 (38.7%)** against
+  `/v1/data/*` **245 (3.8%)** — 10.2:1 the other way — and `/v1/graph*` fails **51.60%** of its requests, a
+  surface nothing in this epic has ever named. D28's "753 stack frames in `query_pipeline.ex:190`" is not
+  wrong so much as unattributable: `query_pipeline.ex` appears on 598 journal lines of which **0 carry a
+  request_id**, at ~60 journal lines per 500, so frame counting measures stack depth, not traffic. The
+  running pool is `pool_size=10` with Ecto-default `queue_target=50ms`/`queue_interval=1000ms` — nothing is
+  configured in any env source the unit reads — on a 2-core box with 1,142 of 2,047 MB swap consumed.
+  **AND THE PREMISE "there is no 5xx field on the beat anywhere" IS HALF WRONG, WHICH MAKES THE INSTRUMENT
+  NEARLY FREE:** `BarkparkWeb.RequestStats` is a live 60s ETS ring served at `GET
+  /v1/instance/request-stats` (`router.ex:1616`) and polled every beat into `req_per_s` + `p95_ms`; its
+  handler binds `_meta` — Phoenix hands it the conn, and therefore `conn.status` — **and discards it**,
+  inserting `{key, duration_ms}` with no status. **RULING: widen the existing ring to `{key, duration_ms,
+  status}` + an `err_5xx_per_s` in `compute/4`, one field on the route, one on `Report`, one on the
+  pressure block — do NOT build a second meter.** For guerrilla today that field reads ≈**0.22 5xx/s
+  sustained on a box `bp cloud status` calls healthy**, which is the sentence the wish's DIAGNOSE clause
+  needs and which nothing today can say. **HONEST BOUND (D48):** the ring is 60s and per-slot, it dies on
+  every blue/green flip and reads 0 for the first minute after boot — it answers "is this box answering
+  5xx *right now*", and it can NEVER produce a cumulative "6,472 since Tuesday". That is a different,
+  journal-or-Postgres-backed instrument and is not promised under this slice. The pool repair itself
+  remains `jpf-bl-oban-pool-partition`'s (D28, D65); nothing here licenses raising `POOL_SIZE` on a 2-core
+  box already 1.1 GB into swap.
+
+- **D76 — THE AFTER-MEASUREMENT IS **TAKEN**, AND THE HEADLINE INSTRUMENT IS DARK TO EVERY HUMAN ON PROD.**
+  *Why:* `dr-w2-s8` is unblocked on volume and the number was taken **through the instrument**
+  (`DeployLedger.census/2` on the live node), not by hand. BEFORE (2026-08-05 17:00→21:24Z): volume 565,
+  failed 505, **89.38%**, zero deferrals so both conventions agree. AFTER (21:24Z→2026-08-06 14:16Z, pinned
+  ≥19 min behind wall clock per D34(b), reproducible byte-for-byte 25s apart): volume **1718**, deferred
+  **528**, failed **748** → **43.54% shipped convention / 74.27% old convention**, a **30.7-point spread
+  the convention change itself manufactures**, which is exactly why D34 demands both. **The survey's
+  hand-replicated 746/43.42/74.16 is off by TWO ROWS against both the classifier and the raw `status`
+  column (`failed|748 deferred|528 live|442`) — the epic's own headline was a hand-replication error, and
+  `dr-w3-s3` exists to stop precisely that.** Honesty riders, all measured: the "classifier agrees with
+  `status`" check is exact (748/748, 528/528) but **near-vacuous by construction** — `classify/1`
+  dispatches on `status` first and the class sets are disjoint, so the falsifiable version is the
+  within-status tail (`DEFERRED_UNCLASSIFIED` = 0, `UNCLASSIFIED` = 0, `GITHUB_PUSH_UNBUILDABLE` = 0);
+  `BOX_AT_CAPACITY_DEFERRED` has **never fired in production** (all 528 are `BOX_BUSY_DEFERRED`) because
+  #9827 is unmerged, so any criterion reading capacity deferrals is unsatisfiable until it lands; the
+  per-site split **cannot be delivered as a before/after rate** at this window — every BEFORE per-site
+  cohort is 110-114 rows and `rate/2` REFUSES all six, and clearing 200 per-site needs BEFORE to reach
+  back ~35 hours (`perfect-proof`, 165 rows in ALL history, can NEVER clear it and its refusal must be
+  PRINTED); and the failure mass must be split by cause or the headline over-claims — **144 Turbopack
+  rows belong to `search-capstone` ALONE (a site-source compile error, 19% of the numerator) against 298
+  `BOX_500 internal_error` rows spread over five sites and three stages**, the latter already root-caused
+  as the Postgrex/swap class of D75. Finally the census is a **one-box census** (12 of 13 deploying sites
+  live on guerrilla). **AND THE THESIS BITES ITS OWN HEADLINE:** `GET /v1/operator/deploy-ledger/census`
+  returns **403 `required: platform_operator`** for the configured operator, because `PLATFORM_ADMIN_EMAILS`
+  is **UNSET** in the running `cloud-control_plane_blue-1` container (`runtime.exs:337-340` defaults it to
+  `""`), and `git grep 'deploy-ledger' -- internal/ js/ web/` is **EMPTY** — no CLI, SDK or web reader
+  exists. The epic's own census is a measurement no human can reach. **RULING: the number above is the
+  record; the reachability is a LEAD OPS action (set `PLATFORM_ADMIN_EMAILS`) filed as a backlog row, and
+  a CLI reader is filed behind it — building a reader for a route that 403s for everyone would be theatre.**
+
+- **D77 — `drafts.*` TWINS ARE DISCARDED, NEVER CLOSED AND NEVER PUBLISHED; THIS CHARTER ADOPTS
+  cch D105 + D190 BY REFERENCE.** *Why:* the epic carries **88 children — 78 open + 10 done, ZERO
+  in_progress** — and **11 of the 78 open are `drafts.*` phantoms**, separate DOCUMENTS with their own
+  UUIDs (`drafts.dr-w4-s4…` is `18f8b78c-…` at 0/8 while the published `dr-w4-s4…` is `68c44be7-…`,
+  **done 8/8**), holding stale criteria snapshots. Two of them shadow SHIPPED slices, and they are
+  **CLAIMABLE**: `bp task ready --all` serves 1,952 rows of which **65 are `drafts.*`**, including this
+  epic's own goal row and a done slice, because `queue.ex:105-110` has no publication predicate. The
+  disposition is already ruled twice in another charter and was never imported here — D105: "count
+  `drafts.*` entries as duplicates, never as rows"; D190: "CANCELLED via `bp doc discard-draft`, **never
+  closed** … publishing is the dishonest option (it resurrects finished work); closing them is the second
+  dishonest option (it treats a duplicate as a row and buys a fake row-shrink)". **RULING: adopted
+  verbatim. The honest denominator for this epic is 77 rows, never 88, and never 78 open.** The one
+  genuine orphan — `drafts.task-aa775c3d30287a4b`, which is the OWNER'S WISH restated and has no published
+  twin at any slug — is PUBLISHED, not discarded. Two open rows own the same `/v1/agent/space` route
+  (`task-3b69c3e24bf3d8ca` 13:12:54Z and `task-ca88b8ea571b3470` 14:29:32Z); the older/richer one is kept,
+  the younger one's UNIQUE arm (an agent that has proved its consumer absent must BACK OFF, not repeat a
+  404 ninety-six times a day) is FOLDED IN before it is closed as a dup. And a pattern worth a standing
+  line: **four stale-open rows are blocked forever on "the PR body states X" for a PR that already
+  merged** — a criterion satisfiable only before merge is unsatisfiable after it, and must be written as a
+  post-merge derivation instead.
+
+### Wave 5 plan — 5 slices, 4 in round 1
+
+| # | Slice | Task id | Round | Model | Surface |
+|---|---|---|---|---|---|
+| s1 | The triage ladder lands eleven rungs — `strained`, `filling`, `unreported` reach `bp cloud status` | `dr-w5-s1-ladder-reaches-triage` | 1 | opus | `internal/cli/`, `internal/semrole/`, `internal/cloudclient/client.go`, `cloud/priv/static/__fixtures__/attention_order.json` |
+| s2 | The beat learns the two things the box already measures and throws away — `load15` and its own 5xx rate | `dr-w5-s2-beat-carries-load15-and-5xx` | 1 | opus | `cmd/barkpark-agent/`, `internal/agent/report.go`, `api/lib/barkpark_web/request_stats.ex`, `cloud/.../web/router.ex` (pressure region) |
+| s3 | The control plane lands space — the route, the type, and the window the fetch was silently shortening | `dr-w5-s3-cp-lands-space-and-fixes-the-window` | 1 | opus | `cloud/.../web/router.ex` (agent-route region), `registry/agent_event.ex`, `registry.ex`, `metrics.ex`, `telemetry.ex` |
+| s4 | The agent's binary reaches the fleet — the self-update path rebuilds it | `dr-w5-s4-agent-binary-reaches-the-fleet` | 1 | opus | `scripts/apply-update.sh`, `scripts/deploy-rebuild.sh` |
+| s5 | Space is measured by HOST consumer, so the box at 95% names its own 25 GB | `dr-w5-s5-space-by-host-consumer` | 2 (after s2, s3) | opus | `cmd/barkpark-agent/main.go`, `internal/agent/report.go` |
+
+**Model note:** every slice is `opus` by AVAILABILITY (Fable is unavailable for subagents) *and*, this
+wave, by merit — the SPA grant was withdrawn (D68), so **no slice in this wave is a visually-designed
+surface**. On difficulty grounds **s1** (an eleven-rung reconciliation across three pins plus two fences)
+would still have drawn `fable`; weight review attention there.
+
+**HIGH-FLIP-RISK, owed a genuinely INDEPENDENT second reviewer before merge — a MANUAL LEAD STEP this
+wave ARRANGES rather than discovers:** **s1** (the ladder ordering and the bucket boundary — being wrong
+means shipping a Go ladder that contradicts a LIVE production console, and a half-landing buckets a
+strained box HEALTHY); and **#9827 itself**, whose sole unmet criterion is the door-vs-unit race review
+(D73) — the Sobelow doctrine is discharged, the human is not.
+
+**Sequencing:** s5 is round 2 because it edits the same two files as s2 (`internal/agent/report.go`,
+`cmd/barkpark-agent/main.go`, different structs) AND because its live proof needs s3's route to exist —
+the space POST currently 404s into the void. s1 decodes `load15` and `err_5xx_per_s` as nullable keys that
+s2 emits, which is a WIRE relationship and not a code dependency: absent → nil → honest silence, so both
+build in round 1. s2 and s3 both touch `router.ex` in regions ~7,400 lines apart (`@unmetered_pressure`
+:468-486 and `merge_pressure/2` :8744-8770 vs the agent routes at :1270-1350); each brief states its
+region.
+
+**What this wave does NOT promise.** The CONSOLE still shows a strained box as "Healthy" (D68) — that is a
+stated, owned cost, not an oversight. `MemoryHigh` stays parked, and D64's caveat is now a MEASURED ratio
+rather than a remembered sentence: `vm_memory_total` 560.7 MB against a same-minute `beam_pss` 878.6 MB +
+`beam_swap` 630.3 MB = 1,508.9 MB, a **948 MB / 2.69× gap**, with PSS corroborated against
+`/proc/<pid>/smaps_rollup` inside 2% — so a bound read off `:erlang.memory()` would sit ~2.6× below the
+2.98–3.30 GB anon-rss the kernel has actually been reaping (32 of 32 OOM victims are `beam.smp`, two of
+them today, on a unit with `MemoryHigh=infinity`). The correct input is PSS+swap or, better, the per-slot
+cgroup `MemoryPeak`/`MemorySwapPeak` systemd already keeps — **and a prerequisite nobody had named is now
+filed: the agent's `findBeamPID` returns the LEXICALLY FIRST `/proc` entry named `beam.smp`, so across a
+blue/green cutover (8m30s of overlap today) the `beam_*` series silently changes process, in violation of
+the standing `pds-w11-paired-control-measure` ruling to sample ALL slots and report the MAX.** The pool
+partition stays with `jpf-bl-oban-pool-partition` (D28, D65, D75). Disk RECLAMATION stays with
+`jpf-runtime-image-pruning` — this wave makes jarl's 25 GB VISIBLE and NAMED (D69, D71) and deletes
+nothing. `db_unavailable` on the wire is filed, not built: `errors.ex:205-209` shows a new code drags the
+OpenApi enum plus `error_code_coverage_test.exs`, and `openapi.json` cannot be regenerated locally.
+`/v1/graph` failing 51.6% of its requests is FILED, not absorbed — it is real, it is worse than anything
+this epic tracks, and taking it would cost the wave its last-mile shape.
