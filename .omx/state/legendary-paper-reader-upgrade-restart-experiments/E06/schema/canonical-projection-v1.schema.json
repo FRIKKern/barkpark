@@ -1,0 +1,50 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://barkpark.dev/schemas/paper/canonical-projection/v1",
+  "title": "Barkpark Paper canonical projection v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "projection_version", "identity", "validators", "provenance", "document"],
+  "properties": {
+    "schema_version": {"const": "barkpark.paper.canonical-projection/v1"},
+    "projection_version": {"const": 1},
+    "identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["document_id", "document_revision_id", "release_id", "projection_id", "cache_identity", "cycle_id"],
+      "properties": {
+        "document_id": {"type": "string", "minLength": 1},
+        "document_revision_id": {"type": "string", "minLength": 1},
+        "release_id": {"type": "string", "minLength": 1},
+        "projection_id": {"type": "string", "minLength": 1},
+        "cache_identity": {"type": "string", "minLength": 1},
+        "cycle_id": {"type": "string", "minLength": 1}
+      }
+    },
+    "validators": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["source_etag", "projection_etag", "last_modified", "conditional_contract"],
+      "properties": {
+        "source_etag": {"type": "string", "pattern": "^\\\"raw-sha256:[0-9a-f]{64}\\\"$"},
+        "projection_etag": {"type": "string", "pattern": "^\\\"projection-v1-sha256:[0-9a-f]{64}\\\"$"},
+        "last_modified": {"type": "string", "minLength": 1},
+        "conditional_contract": {"const": "exact If-None-Match => 304 with empty body; stale or absent => 200 with canonical bytes"}
+      }
+    },
+    "provenance": {"type": "object"},
+    "document": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["slug", "revision", "published_id", "type", "authored_metadata", "blocks"],
+      "properties": {
+        "slug": {"type": "string", "minLength": 1},
+        "revision": {"type": "string", "minLength": 1},
+        "published_id": {"type": "string", "minLength": 1},
+        "type": {"const": "paper"},
+        "authored_metadata": {"type": "object"},
+        "blocks": {"type": "array"}
+      }
+    }
+  }
+}

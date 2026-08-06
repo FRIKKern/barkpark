@@ -1,0 +1,21 @@
+{
+  "schema_version": "legendary-paper-restart-experiment-assignment/v1",
+  "assignment_id": "restart-experiment-06",
+  "assignment_uuid": "1ecba0d8-c709-47f5-8bf8-a230d6bef4c2",
+  "agent_type": "legendary-experimenter",
+  "model_reasoning_effort": "medium",
+  "epic_task_id": "task-a768c69e659add58",
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-restart",
+  "wave_revision": "8a94f6db-1be6-4bbf-ba49-7f3aeed0e737",
+  "inventory_digest": "227c9defff49f185dc5e580f731ab2419da17fc2dc5cf2304a664e4b230f7ccc",
+  "plan_digest": "9997fc50db5f1b83f1f53e33bd45dd111b2b06402b07a78b0673d2048f299e45",
+  "round": "diverge",
+  "candidate_kind": "versioned_canonical_projection",
+  "write_boundary": ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06",
+  "papers": [
+    {"fixture_id":"CCH28","slug":"cloud-console-hardening-wave-28-2026-08-03","revision":"49c1534d9fb76d0d9adc7b97f25ec471"},
+    {"fixture_id":"CCH29","slug":"cloud-console-hardening-wave-29-2026-08-03","revision":"18768b0a14c2eead927181c4a0e37c18"},
+    {"fixture_id":"PDS44","slug":"pds-wave-44-2026-08-03","revision":"8bbd5d874a1b697f1e4e437c473f8e52"},
+    {"fixture_id":"PDS45","slug":"pds-wave-45-2026-08-03","revision":"b992fd8aaa028b0dab30a8da76f077fd"}
+  ]
+}
