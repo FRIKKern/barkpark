@@ -1534,6 +1534,223 @@ else
   bad "the committed spec still says 'Security gate' is red on main — it is green on main head 6e53d2782"
 fi
 
+# ═══ 18. the protection-claim census ═════════════════════════════════════════
+
+section "18. no UNPINNED in-repo text still claims this repo's \`main\` is unprotected"
+
+# THE POINT. `main` IS protected — since 2026-07-28T22:42:10Z, with exactly four
+# required contexts (Elixir gate, PR references an active task, Cloud gate,
+# Console gate) and `enforce_admins: true`. Tracked text that still tells an
+# agent the opposite does not just misinform: it retires the merge protocol the
+# rest of this toolchain exists to enforce, and the fleet reads prose long
+# before it reads an API.
+#
+# WHY THIS IS A NEW SIBLING CLAUSE AND NOT A WIDENING OF `advisory_prose_check`
+# (required-checks-verify.sh:374). That clause is anchored on SPEC'D CONTEXT
+# NAMES: it walks the four required names and looks for a disclaimer within 200
+# chars AFTER one of them. A blanket claim about protection AS A WHOLE names no
+# context, so it is not merely unmatched — it is structurally unreachable.
+# Measured: `.github/workflows/bp-graph-drift.yml` already sits INSIDE that
+# clause's scanned directory and carried such a claim while passing. Widening
+# WORKFLOWS_DIR buys nothing; adding a phrasing to PROSE_DISCLAIMERS buys
+# nothing. Hence: its own scan, its own corpus, its own census.
+#
+# THE REGEX SHIPS NARROW, and each dropped term was dropped on a live reading:
+#   `no rulesets`          — TRUE today. `gh api repos/FRIKKern/barkpark/rulesets`
+#                            → `[]`. Protection here is CLASSIC branch protection,
+#                            not a ruleset. docs/ops/merge-gates.md:241 already
+#                            documents this as "a TRUE reading that produces the
+#                            WRONG conclusion" — matching it would red a truth.
+#   `Branch not protected` — GitHub's OWN 404 body, quoted as EXPECTED OUTPUT in
+#                            breakglass.sh:153, breakglass.test.sh:81 and :255,
+#                            breakglass-watch.sh:111 and :139, and
+#                            required-checks-verify.sh:109. Matching it reds the
+#                            break-glass toolchain's own fixtures.
+#   bare `unprotected` /   — in this corpus it means an unprotected export path,
+#   `not protected`          unprotected DB columns, an unprotected PR base, and a
+#                            deliberately-unprotected test fixture. Four senses,
+#                            none of them this one.
+# Measured here on 2026-08-06, over the scan set below: restoring those loose
+# terms takes the census to 89 hits; the claim-shape regex that ships returns 35
+# (32 after the three live offenders were fixed in this same commit). The
+# narrowing is not a convenience — it makes the API-LITERAL class STRUCTURALLY
+# EMPTY rather than allowlisted, and an exemption that does not exist cannot be
+# quietly widened later.
+#
+# `git grep --untracked`, NOT `git grep`. Measured on this repo: a plain
+# `git grep` scores 0 on a NEW untracked file and 1 with the flag. Without it,
+# every future "I proved this guard can fail" mutation planted in a new file is
+# a vacuous green — inside the very guard written to attack vacuous greens.
+# KNOWN PRICE, and it is the right way round: an UNCOMMITTED scratch note in a
+# scanned directory reds the LOCAL run even though CI (which checks out clean)
+# is green. Delete the scratch file or finish the note — do not drop the flag.
+#
+# WHEN THIS SECTION REDS ON A LINE THAT IS FINE (a new dated ledger, a new
+# retraction): read the line, decide its class, and PIN it — the hash is already
+# printed in the UNPINNED row, so paste `<hash>  <class>  <path>:<line>  <why>`
+# into the list below. Never delete a line from the list to silence a STALE row
+# without also confirming the member it pinned was genuinely fixed.
+#
+# THE LIMIT THIS GUARD CANNOT CLOSE, stated here rather than discovered later:
+# THIS IS A PINNED CENSUS, NOT A SEMANTIC DETECTOR. It pins today's members by
+# CONTENT HASH and reds on any NEW instance of the enumerated phrasings — a
+# fresh paraphrase walks straight through it. Measured escape, exit 0:
+# "Nothing in CI mechanically blocks a merge here; the gates are discipline."
+# Nor can literal matching classify: this file's own charter row D106 matches
+# only because it contains the SEARCH PATTERN `grep -c "no branch protection"`,
+# which is not a claim at all. That is exactly why members are PINNED and
+# re-reviewed on edit rather than auto-classified — an edited line loses its pin
+# and comes back for a human reading.
+#
+# THE PIN LIST BELOW IS CLASSIFIED, and the classes are the review contract:
+#   B  a CORRECT dated retraction or correction — the line says the claim is now
+#      false, and quotes it in order to retire it. Green because it is TRUE.
+#   C  a DATED RECORD — a grip ledger recipe or a foreign epic's charter D-row,
+#      true on the day it was measured. Rewriting a record to match today is
+#      falsifying it (same ground as §13's ledger and charter exemptions).
+#   D  NOT A CLAIM ABOUT THIS REPO — a search pattern quoted as a pattern, or a
+#      statement about ANOTHER repo. jarl-gates-live-status:45 is about
+#      FRIKKern/jarl-website and is STILL TRUE of it: that repo's
+#      branches/main/protection returns 404 today. Exempt by SUBJECT, not by pin.
+#   (Class A — a LIVE claim about THIS repo — is not pinnable. The three found
+#   at wave 35 were FIXED in the same commit that added this clause:
+#   .github/workflows/bp-graph-drift.yml:15, scripts/check-bp-graph-drift.sh:27,
+#   and .claude/workflows/bp-search-template-charter.md:103 — the D72 row that
+#   DECIDED both comments, so fixing only the two would leave the rationale
+#   alive to be re-copied. Pinning your own live falsehood is the
+#   "exempted by phrase = disarmed" failure this clause exists to attack.)
+#
+# ONE EXCLUSION, and it is the same one §13 makes for its own ratchet: THIS
+# FILE. It necessarily contains the pattern, the planted canary text and the
+# failure messages, so scanning itself would pin the guard to its own wording
+# and red on every edit to this section. Nothing else in `scripts/` is exempt.
+PROTECTION_CLAIM_RE='(no|No|NO|zero|Zero) branch protection|main is NOT PROTECTED|no CI check in this repo can block a merge'
+PROTECTION_SCAN=(.claude/workflows .github docs scripts tooling/grip/ledger CLAUDE.md
+                 ':!scripts/required-checks.test.sh')
+
+sha12() { # <string> — first 12 hex of its sha256, on Linux CI and stock macOS
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$1" | sha256sum | cut -c1-12
+  else
+    printf '%s' "$1" | shasum -a 256 | cut -c1-12
+  fi
+}
+
+# ONE scan, driven three times (real / new-claim canary / stale-pin canary). The
+# canary runs append a path to the SAME function rather than re-typing the grep.
+protection_claim_hits() { # [extra path…]
+  {
+    ( cd "$REPO_ROOT" && git grep --untracked -lE "$PROTECTION_CLAIM_RE" -- "${PROTECTION_SCAN[@]}" ) || true
+    printf '%s\n' "$@"
+  } \
+    | grep -v '^$' \
+    | ( cd "$REPO_ROOT" && tr '\n' '\0' | xargs -0 grep -nHE "$PROTECTION_CLAIM_RE" 2>/dev/null ) || true
+}
+
+# The census is a SET EQUALITY, never a count. A count gate waves through the
+# commit that fixes one member and ships another; this reports BOTH directions —
+# UNPINNED (a claim nobody has reviewed) and STALE (a pin whose line is gone,
+# i.e. someone fixed a member and left its pin behind to rot).
+#
+# The list lives in a FILE, not in a `"$(cat <<'PINS' … )"` assignment: stock
+# macOS bash 3.2 mis-parses an apostrophe inside a heredoc nested in a quoted
+# command substitution ("unexpected EOF while looking for matching `''"), and
+# this suite must run on the maintainer's laptop as well as on ubuntu CI.
+PROTECTION_PINS="$TMP/protection-pins.txt"
+cat > "$PROTECTION_PINS" <<'PINS'
+604fdeb69db8  C  .claude/workflows/bp-authoring-excellence-charter.md:267   D77 correction absorbed, dated
+e11a1cf18c5b  C  .claude/workflows/bp-chat-tui-charter.md:386               reviewer-enforced ruling, measured then
+2f149e72ca0b  B  .claude/workflows/bp-cloud-console-hardening-charter.md:326  D58 + inline dated retraction
+be0074b37a5c  B  .claude/workflows/bp-cloud-console-hardening-charter.md:332  D64 + inline dated retraction
+965d722b53f6  D  .claude/workflows/bp-cloud-console-hardening-charter.md:375  D106 quotes `grep -c` — a pattern
+ce745c039e38  C  .claude/workflows/bp-cloud-console-hardening-charter.md:1412 wave narrative, dated record
+562eb5d348c9  C  .claude/workflows/bp-cloud-console-hardening-charter.md:4282 wave narrative, dated record
+120ac92d2b12  C  .claude/workflows/bp-cloud-gui-remake-charter.md:113        GR86, measured at its Decide
+7a7329787516  C  .claude/workflows/bp-cloud-gui-remake-charter.md:1294       wave narrative, dated record
+1b56c84f49c0  C  .claude/workflows/bp-connectors-charter.md:541              D87, live-verified at its date
+391861503ed4  C  .claude/workflows/bp-connectors-charter.md:801              D144, re-confirmed at its date
+75ab60a12375  C  .claude/workflows/bp-connectors-charter.md:1243             D266, parenthetical context
+4e66434d7ce9  C  .claude/workflows/bp-enterprise-ready-auth-charter.md:78    merge protocol as decided then
+92fbc3a3a7c2  B  .claude/workflows/bp-felix-pristine-charter.md:2271         says the premise is FALSE
+f4da604f5fe4  B  .claude/workflows/bp-felix-pristine-charter.md:2286         says the claim is now false
+6c7c848eb784  B  .claude/workflows/bp-honest-gates-charter.md:205            quotes a premise that INVERTS
+1a670aa32410  B  .claude/workflows/bp-honest-gates-charter.md:416            quotes what was REWRITTEN away
+6cb651ae08bd  C  .claude/workflows/bp-pd-everything-editable-charter.md:83   dated record
+0465a805d654  C  .claude/workflows/bp-scaffy-charter.md:22                   D9, verified at its date
+84d0cb6c5f00  C  .claude/workflows/bp-search-template-charter.md:96          D65/SR-1, foreign epic's record
+df2a0ce56f7b  C  .claude/workflows/bp-studio-space-priority-charter.md:47    D23, dated record
+271f2d41437a  C  .claude/workflows/bp-studio-space-priority-charter.md:1405  dated record
+43ae16023d04  C  .claude/workflows/bp-studio-space-priority-charter.md:1722  dated record
+e56a9d69eae8  B  .claude/workflows/bp-studio-space-priority-charter.md:2445  D250 STRIKES the old memory
+9dacf1fcfe5d  C  .claude/workflows/bp-studio-structure-polish-charter.md:63  R1, verified at its date
+c1679f421f3e  C  .claude/workflows/bp-truth-grip-charter.md:134              dated record
+a8aa0142eb43  B  docs/ops/merge-gates.md:239                                 "false since 2026-07-28"
+a6fb32e3a3bc  C  tooling/grip/ledger/bpgraph-tripwire-selftest-2026-07-26.md:14        dated recipe ledger
+e16a9d8d62d7  C  tooling/grip/ledger/felix-w23-gate-topology-d75-2026-07-28.md:8       dated recipe ledger
+e1288ba46a68  B  tooling/grip/ledger/felix-w24-wave23-criteria-closes-2026-07-29.md:23 "both are FALSE today"
+af83a4d184e8  D  tooling/grip/ledger/jarl-gates-live-status-2026-07-31.md:45           OTHER REPO, still true of it
+e9afea44318b  C  tooling/grip/ledger/second-review-and-credential-2026-07-26.md:17     dated recipe ledger
+PINS
+
+protection_census_report() { # [extra path…] — emits UNPINNED/STALE lines, or nothing
+  local seen line path rest lineno text h pin note
+  seen="$(mktemp "$TMP/census-seen.XXXXXX")"
+  while IFS= read -r line; do
+    [ -n "$line" ] || continue
+    path="${line%%:*}"; rest="${line#*:}"; lineno="${rest%%:*}"; text="${rest#*:}"
+    h="$(sha12 "$path|$text")"
+    printf '%s\n' "$h" >> "$seen"
+    grep -q "^$h  " "$PROTECTION_PINS" \
+      || printf 'UNPINNED  %s  %s:%s  %s\n' "$h" "$path" "$lineno" "$(printf '%s' "$text" | cut -c1-90)"
+  done <<<"$(protection_claim_hits "$@")"
+  while read -r pin note; do
+    [ -n "$pin" ] || continue
+    grep -qx "$pin" "$seen" || printf 'STALE  %s  %s\n' "$pin" "$note"
+  done < "$PROTECTION_PINS"
+}
+
+CENSUS_OUT="$(protection_census_report)"
+if [ -z "$CENSUS_OUT" ]; then
+  ok "the protection-claim census matches its pin list exactly — no new claim, no pin left rotting"
+else
+  bad "the protection-claim census moved (UNPINNED = a new/edited claim nobody reviewed; STALE = a fixed member whose pin was left behind — drop the pin in the SAME commit):"
+  printf '%s\n' "$CENSUS_OUT" | sed 's/^/       /' >&2
+fi
+
+# MUTATION 1 — a NEW claim in a file the scan covers must come back UNPINNED.
+# The canary is planted in $TMP and fed to the same function as an extra path,
+# which is also what proves the `--untracked` corpus is real rather than decorative.
+CENSUS_CANARY="$TMP/protection-canary.md"
+printf 'note: main has no branch protection, so merge when the gate is green\n' > "$CENSUS_CANARY"
+if grep -q '^UNPINNED.*protection-canary' <<<"$(protection_census_report "$CENSUS_CANARY")"; then
+  ok "…and it FIRES on a planted new claim (mutation-proven able to fail, not a grep that only passes)"
+else
+  bad "the census did not report the planted claim as UNPINNED — it is a grep that can only pass"
+fi
+
+# MUTATION 2 — the arm a `count <= N` gate misses entirely: a member is FIXED but
+# its pin stays. Simulated by adding a pin no line can satisfy, in a subshell so
+# the real list is untouched.
+STALE_PINS="$TMP/protection-pins-stale.txt"
+cp "$PROTECTION_PINS" "$STALE_PINS"
+printf '0000deadbeef  C  fake/planted-pin.md:1  a pin whose member no longer exists\n' >> "$STALE_PINS"
+STALE_OUT="$( PROTECTION_PINS="$STALE_PINS"; protection_census_report )"
+if grep -q '^STALE  0000deadbeef' <<<"$STALE_OUT"; then
+  ok "…and a pin whose line is GONE is reported STALE — fixing a member without dropping its pin reds"
+else
+  bad "a pin with no matching line was not reported STALE — the census is a count gate in disguise"
+fi
+
+# The three wave-35 offenders are FIXED, not pinned. If any of them comes back,
+# the fix was reverted and the census would only say UNPINNED — say it by name.
+for fixed in .github/workflows/bp-graph-drift.yml scripts/check-bp-graph-drift.sh; do
+  if ! ( cd "$REPO_ROOT" && grep -qE "$PROTECTION_CLAIM_RE" "$fixed" ); then
+    ok "$fixed no longer teaches that this repo has no branch protection"
+  else
+    bad "$fixed claims again that main is unprotected — it is protected since 2026-07-28T22:42:10Z"
+  fi
+done
+
 
 if [ "$HERMETIC" -eq 1 ]; then
   section "SKIPPED under --hermetic: §10 and §11's live half (4 clauses, all of them GitHub API reads)"
