@@ -2175,6 +2175,28 @@ export const SCENARIOS = {
       domainStatus: dnsPendingDomain,
     },
   },
+  // ── Instance Overview as a plain MEMBER (cch-w38-s1) ──────────────────────
+  // Byte-identical to `panel-overview` except the /v1/me envelope carries
+  // role:"member" — the first plain-member scenario OUTSIDE GR33's settings
+  // scope, and the fixture that makes the instance band's authority answer
+  // observable at all. On origin/main this screen offered a member a live
+  // Decommission (browser-measured: {"port":"4187","meRole":"member",
+  // "decommission":{"disabled":false,"visible":true},"totalDisabled":0}); the
+  // expectation in smoke.mjs pins the disable-and-explain remedy (D428).
+  "panel-overview-member": {
+    label: "Instance Overview as a plain member — the lifecycle rail refuses up-front, with the server's own sentence",
+    authed: true,
+    deepLink: "#instance/" + IDS.liveInstance,
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }, "member"),
+      barkparks: [liveInstance],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+      capabilities: lifecycleCapabilities,
+      domainStatus: dnsPendingDomain,
+    },
+  },
   // ── Metrics tab — the aligned stat-card grid ──────────────────────────────
   "metrics": {
     label: "Metrics tab — CPU / Memory / Disk / Load cards with area-filled sparklines",

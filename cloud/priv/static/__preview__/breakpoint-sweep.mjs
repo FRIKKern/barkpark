@@ -365,7 +365,7 @@ export function familyOf(scen) {
 // render it. These are REASONS, not an allowlist: the allowlist is the 77
 // name-keyed entries below, which is what makes a 103rd scenario refusable.
 export const RESIDUE_FAMILY_REASONS = {
-  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 21 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
+  "hash:#instance": "The instance detail screen is swept by four cells (panel-overview/timeline/metrics/webhooks). These 22 vary the CONTENT of a panel already rendered at all 15 widths — a new geometry only if the panel's own shape changes, which the four cells would see.",
   "hash:#overview": "#overview is swept by two cells (a populated fleet, a past-due chip). These 9 land there to vary something OTHER than its geometry — sign-in state, first-run emptiness, trial/attention banners, the accent identity — over a grid already walked at all 15 widths.",
   "hash:#site": "The site detail screen is swept by two cells (rollback, states). These 9 vary binding/verify content inside the same .detail-grid. `site-deploy-rail-failed` (cch-w25-s3) is the CRUEL twin of the family: its rail footer holds a 240-char builder error with one unbreakable module path, and content length is overflow-guard's axis, not this sweep's — a fixture built to overflow would red every width of the walk for a reason the walk does not own. It is driven, at 320/390/900 x 2 themes x 2 routes (cruel + kind control), by overflow-guard's W25-deploy-rail-fail-wrap leg.",
   "hash:#settings": "The settings screens are swept by TEN cells across billing/providers/notifications/tokens/members/env. These 7 are member-role and empty-state variants of those same panels.",
@@ -402,16 +402,20 @@ export const RESIDUE_FAMILY_REASONS = {
 // failed` is the 102nd scenario and the 77th residue entry, and this sweep
 // exited 2 with `UNLISTED scenario "site-deploy-rail-failed" (family
 // hash:#site)` until the entry below was written.
+// cch-w38-s1 moved it a fifth time: `panel-overview-member` is the 104th
+// scenario and the 79th residue entry — residue for the same reason its owner
+// twin `panel-overview` is a CELL: it varies the CONTENT of a panel the four
+// instance cells already walk at all 15 widths, not its geometry.
 // cch-w34-s6 REVIEW moved it a fourth time: `overview-never-reported` is the
 // 103rd scenario and the 78th residue entry — residue, not a cell, the same
 // home its sibling `overview-attention` has, so it is rendered and asserted by
 // smoke.mjs without claiming a width walk it does not get.
-// `familyOf` over all 103 gives 15; the two with ZERO residue are `hash:#sites`
-// and `hash:#activity`. 78 is the RESIDUE, not the census.
+// `familyOf` over all 104 gives 15; the two with ZERO residue are `hash:#sites`
+// and `hash:#activity`. 79 is the RESIDUE, not the census.
 // EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED (cch-w18-s4, D213):
 // `scenarioReport({ scenarios: SCENARIOS })` prints
-// {total:103, cells:26, distinctCovered:25, residue:78, families:13, ok:true},
-// `Object.keys(SCENARIO_RESIDUE).length` is 78 and `familyOf` over all 103
+// {total:104, cells:26, distinctCovered:25, residue:79, families:13, ok:true},
+// `Object.keys(SCENARIO_RESIDUE).length` is 79 and `familyOf` over all 104
 // gives 15. The prose said 99/74 while the literal below already held 75 —
 // #8849's `sites-on-instance` moved the census and only the TEST literals
 // (breakpoint-sweep.test.mjs:516-522) were updated. A census that two files
@@ -419,8 +423,9 @@ export const RESIDUE_FAMILY_REASONS = {
 // STALENESS IS FATAL, NEVER A console.log: an entry naming a scenario that no
 // longer exists, or one that has since gained a cell, exits 2.
 export const SCENARIO_RESIDUE = {
-  // hash:#instance — 21
+  // hash:#instance — 22
   "sites-on-instance": "hash:#instance",
+  "panel-overview-member": "hash:#instance",
   "provisioning": "hash:#instance",
   "usage-quota": "hash:#instance",
   "failed": "hash:#instance",

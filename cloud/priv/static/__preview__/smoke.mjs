@@ -1593,6 +1593,35 @@ const EXPECTATIONS = {
   },
 
   // ── gr-p3 D-04: the timeline coalescing grammar (tail-append, OC9) ──────────
+  // cch-w38-s1: the SAME screen, as a plain MEMBER.
+  // The BEFORE frame (browser-measured on origin/main, chrome-devtools against
+  // serve.mjs): {"port":"4187","meRole":"member","decommission":{"disabled":
+  // false,"visible":true},"totalDisabled":0} — a member was offered the
+  // destroy-tier verb the server answers 403. The AFTER contract (D428): the
+  // control is DISABLED and carries the server's OWN sentence, never hidden.
+  // The reason asserted below is FORBIDDEN_ROLE_COPY.admin verbatim — if a
+  // future edit mints fresh copy for this arm, this expectation says so.
+  "panel-overview-member": {
+    what: "a plain member's instance rail refuses the destroy verb UP-FRONT, in the server's own words — no live control, no post-click 403",
+    check(reg) {
+      const card = (reg.get("inst-lifecycle-actions") || {}).innerHTML || "";
+      assert.ok(card.length > 0, "#inst-lifecycle-actions rendered empty");
+      assert.ok(card.includes("Manage this instance via the bp CLI"), "the CLI card still renders in full — the rail is never hidden from a member");
+      // The remedy: a disabled control + the server's own role sentence.
+      assert.ok(card.includes("inst-life-disabled"), "the refused verb renders through the disable-and-explain arm");
+      assert.ok(card.includes("You need the admin role on this team — an admin on this team can grant it."),
+        "the visible reason is the SERVER's sentence (FORBIDDEN_ROLE_COPY.admin), verbatim");
+      assert.ok(card.includes("inst-life-reason"), "the sentence rides the shipped reason span, not new markup");
+      // And the live affordance is GONE: no click hook, no danger button. This
+      // assertion names the attribute the mount binds on, so an added
+      // `disabled` cannot slip past it the way a [^>]* window would.
+      assert.ok(!card.includes('data-life-verb="decommission"'), "no click hook is wired for a verb the server will refuse");
+      assert.ok(!card.includes("btn-danger"), "the destroy-tier styling goes with the destroy-tier affordance");
+      // NOT a checking state: /v1/me answered, and it said member.
+      assert.ok(!card.includes("Checking capabilities"), "an ANSWERED /v1/me is not a checking state");
+    },
+  },
+
   "timeline-coalesced": {
     what: "the coalescing grammar folds the health burst to ONE worst-verdict row with Show all/Collapse",
     check(reg, hooks) {
