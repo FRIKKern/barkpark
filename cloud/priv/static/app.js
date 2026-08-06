@@ -13504,7 +13504,6 @@
     setText($("#acct-name"), who);
     setText($("#acct-email"), email || "");
     setText($("#acct-avatar"), (who[0] || "B").toUpperCase());
-    renderTeamSwitcher(team);
   }
 
   // The workspace switcher's plan chip — the team's current plan, hidden until
@@ -13519,35 +13518,13 @@
     chip.hidden = false;
   }
 
-  // Team switcher (multi-team accounts): a <select> replaces the static team
-  // name when /v1/me lists more than one membership. Choosing a team pins it
-  // in localStorage (api() sends it as x-barkpark-team) and reloads — a full
-  // reload is deliberate: every cache (fleet, subscription, members) is
-  // team-scoped and must repopulate.
-  function renderTeamSwitcher(active) {
-    var host = $("#account-team");
-    var teams = (meCache && meCache.teams) || [];
-    if (!host || teams.length < 2) return;
-    var activeId = (active && active.id) || "";
-    var sel = document.createElement("select");
-    sel.id = "team-switcher";
-    sel.setAttribute("aria-label", "Switch team");
-    sel.style.cssText =
-      "background:transparent;border:none;color:inherit;font:inherit;cursor:pointer;max-width:160px";
-    teams.forEach(function (t) {
-      var o = document.createElement("option");
-      o.value = t.id;
-      o.textContent = t.name + " (" + t.role + ")";
-      if (t.id === activeId) o.selected = true;
-      sel.appendChild(o);
-    });
-    sel.addEventListener("change", function () {
-      localStorage.setItem("bp.active-team", sel.value);
-      location.reload();
-    });
-    host.textContent = "";
-    host.appendChild(sel);
-  }
+  // NO NATIVE <select> HERE, DELIBERATELY. A `renderTeamSwitcher` used to swap
+  // #account-team for a bare <select> whenever /v1/me listed 2+ memberships —
+  // so the chip's CENTRE opened an OS dropdown while its CARET opened the
+  // styled team picker. One control, two different menus, decided by which
+  // pixel you hit. The picker (renderTeamMenu/toggleTeamMenu) is now the only
+  // way to change team, and #account-team stays plain text so the whole chip is
+  // one target. Re-adding a <select> here would restore the split.
 
   function loadMe() {
     setAccountChip(null, null); // immediate placeholder
