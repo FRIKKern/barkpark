@@ -1,0 +1,120 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-21",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": [
+    "pds-wave-44-2026-08-03::email_apple_mail"
+  ],
+  "verdict": "blocked",
+  "direct_answer": "The exact PDS44 Paper revision, source, and authored denominators are proven, and two synthetic MIME projections exist. No delivered PDS44 message exists in the local Apple Mail index or message store, so availability, narrow geometry, structural semantics, reading order, labels, and delivered source identity all remain unproven. Synthetic or HTTP-preview evidence receives no pass.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "e2a4334a-237f-4959-bd7b-8d65054f1b3a",
+    "assignment_snapshot_digest": "ce2120a0af42234b277f65bb895919ed364a219415b051dc619b4bd024e6ec61",
+    "paper_id": "pds-wave-44-2026-08-03",
+    "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52"
+  },
+  "observations": {
+    "source": {
+      "blocks": 99,
+      "unique_block_ids": 99,
+      "raw_sha256": "4923e1b72da37c384ebc3f7b80ba15a08c9998fde560db0095d349a27457f96d",
+      "canonical_blocks_sha256": "1c10ec4984826b0b12a0111c64b57bfc2c79de3ae576dd40b74e83c9e183bfce"
+    },
+    "authored_carriers": {
+      "headings": 32,
+      "paragraphs": 48,
+      "empty_paragraph_scaffolds": 15,
+      "lists": 10,
+      "list_items": 85,
+      "tables": 5,
+      "body_rows": 54,
+      "header_cells": 12,
+      "body_cells": 203,
+      "intentionally_headerless_tables": 2,
+      "callouts": 4,
+      "marks": 0,
+      "links": 0
+    },
+    "apple_mail": {
+      "application": "found and permission-ready",
+      "window": "Inbox (Read Only), off current Space; AX exposes menu chrome only",
+      "mail_index_target_matches": 0,
+      "message_store_target_matches": 0,
+      "delivered_messages": 0,
+      "provider_receipts": 0,
+      "raw_delivered_sources": 0,
+      "render_captures": 0,
+      "qualifying_width_cells": "0/2",
+      "required_categories": "0/6"
+    },
+    "synthetic_mime": {
+      "E05": "proxy only: multipart bytes exist but envelope and revision identity are absent",
+      "E06": "proxy only: revision-bound invalid.example identity exists; never submitted or delivered"
+    },
+    "repository_contract": "Paper email route emits text/html HTTP preview only; no MIME construction, sender invocation, receipt, or delivered-client artifact",
+    "prior_proxy_semantics": "5/5 tables are presentational, 0/12 headers associated, and 0/4 callouts labeled"
+  },
+  "inferences": [
+    "Zero local index and message-body matches proves this host has no local delivered PDS44 receipt, not that no external mailbox contains one.",
+    "E06 proves a synthetic revision-bound projection only, not provider transit, Apple Mail rewriting, or rendering.",
+    "A delivered message based on the current preview likely inherits known table and callout defects, but Apple Mail behavior was not observed."
+  ],
+  "repair_seams": [
+    "Create a production Paper multipart delivery boundary with stable Message-ID and immutable revision provenance.",
+    "Retain submission, provider, delivery, and raw-message receipts.",
+    "Capture the exact delivered message in Apple Mail at both declared narrow widths with VoiceOver evidence.",
+    "Preserve 99-block order and all authored table/list/callout denominators without inventing links."
+  ],
+  "checked": {
+    "tasks": [
+      "task-a768c69e659add58",
+      "task query: title*=Apple Mail",
+      "task query: title*=email"
+    ],
+    "papers": [
+      "pds-wave-44-2026-08-03@8bbd5d874a1b697f1e4e437c473f8e52",
+      "legendary-paper-reader-upgrade-sweep-2026-08-03"
+    ],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E05/generated/adapters/PDS44/email.eml",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/PDS44.eml",
+      "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex",
+      "tooling/grip/ledger/legendary-paper-restart-experiment-02-2026-08-06.md",
+      "tooling/grip/ledger/legendary-paper-survey-57-2026-08-06.md",
+      "tooling/grip/ledger/legendary-paper-survey-60-2026-08-06.md"
+    ],
+    "external_local_store": "Apple Mail Envelope Index and .emlx bodies: target not found"
+  },
+  "risks": [
+    "All six required Apple Mail categories and both width cells remain zero.",
+    "No client render, raw delivered source, provider receipt, dark mode, remote-content, clipping, spam placement, or VoiceOver evidence exists.",
+    "The fixture has no links, so activation and rewriting cannot be proven even after delivery.",
+    "Proxy semantics already fail table associations and callout labels."
+  ],
+  "unvisited_scope": [
+    "real delivered Apple Mail message at both widths",
+    "raw delivered source and provider receipt",
+    "Apple Mail dark mode, remote content, and link activation",
+    "VoiceOver reading order",
+    "Gmail and Outlook"
+  ],
+  "credential_scan": {
+    "status": "clean",
+    "credential_values_reported": 0
+  },
+  "mutations": {
+    "repo_files_changed_by_surveyor": 0,
+    "barkpark_mutations": 0,
+    "mail_sent": 0,
+    "mail_app_foregrounded": 0
+  }
+}
