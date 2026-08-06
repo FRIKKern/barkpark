@@ -1,0 +1,61 @@
+{
+  "schema_version": "legendary-paper-round-01-seal/v1",
+  "round": 1,
+  "status": "SEALED_BASELINE_NOT_A_CANDIDATE",
+  "inventory_digest": "3e480a9fcf44da65a07aa1fcad8e981911006568d23b89ad8891f26a5d96e69e",
+  "experiment_commits": {
+    "E01": "33c09b76681b226e8fe13fb2ea1e63da92a857c1",
+    "E02": "2828a2d9c7916f03276c55051371dd951e0a6ebf",
+    "E03": "73fb244e06ab6b2b0877e86314d1603c339a60fd"
+  },
+  "verification_inputs": [
+    {"experiment": "E01", "path": ".omx/state/legendary-paper-reader-upgrade-experiments/E01/reports/verification.json", "sha256": "22eea7a9d322927d87546dbeda2868384428a3b43952edc35cfc44e7945c4391", "checks": 104, "replays": 4},
+    {"experiment": "E02", "path": ".omx/state/legendary-paper-reader-upgrade-experiments/E02/verification.json", "sha256": "31a069a93a62035bcb4790696846013f21233793a9061a56fde7da44cb714528", "checks": 11, "replays": 4},
+    {"experiment": "E03", "path": ".omx/state/legendary-paper-reader-upgrade-experiments/E03/reports/verification.json", "sha256": "e11756222a2808d15fdda0ebc151cfc5657862d731155580d00300d4557e375c", "checks": 253, "replays": 5}
+  ],
+  "canonical_denominators": {
+    "papers": 4,
+    "blocks": 815,
+    "tables": 46,
+    "authored_legacy_header_cells": 113,
+    "genuinely_headerless_tables": 11,
+    "body_cells": 1374,
+    "callouts": 30,
+    "mark_records": 388,
+    "exact_empty_spacers": 381,
+    "cch29_nested_list_items": 11,
+    "cch29_nested_list_words": 406
+  },
+  "frozen_gates": [
+    {"id": "canonical-accounting", "threshold": "815/815 blocks, 1374/1374 body cells, stable IDs and order", "baseline": "PASS_MACHINE_ONLY"},
+    {"id": "revision-pins", "threshold": "4/4 exact Paper revisions across every exercised reader", "baseline": "PASS_SOURCE_CLI_FAIL_HUMAN_IDENTITY"},
+    {"id": "text-losslessness", "threshold": "100%; no silent missing authored text", "baseline": "FAIL_PUBLIC_813_OF_815"},
+    {"id": "nested-list-losslessness", "threshold": "406/406 CCH29 words", "baseline": "FAIL_PUBLIC_EMAIL_TUI_0_OF_406"},
+    {"id": "table-semantics", "threshold": "113/113 authored header cells and 46/46 semantic data tables", "baseline": "FAIL_0_OF_46_SEMANTIC_TABLES"},
+    {"id": "headerless-intent", "threshold": "11/11 remain explicit unknowns until author intent", "baseline": "QUARANTINED"},
+    {"id": "alias-conflict", "threshold": "0 silent header/head precedence decisions", "baseline": "QUARANTINED"},
+    {"id": "mark-semantics", "threshold": "388/388 preserved", "baseline": "FAIL_0_OF_388_PROVEN_HUMAN_SEMANTICS"},
+    {"id": "callout-semantics", "threshold": "30/30 accessible non-color tone labels", "baseline": "FAIL_0_OF_30_PUBLIC_LABELS"},
+    {"id": "spacer-migration", "threshold": "381/381 accounted; zero unfenced deletion", "baseline": "FAIL_0_OF_4_PAPERS_CLEAN"},
+    {"id": "browser-geometry", "threshold": "public and email 320/390: 16/16 contained", "baseline": "FAIL_PUBLIC_2_OF_8_EMAIL_0_OF_8"},
+    {"id": "terminal-geometry", "threshold": "32/32 cells contained at 20/40/80/120", "baseline": "PASS_CONTAINMENT_FAIL_DENSITY"},
+    {"id": "navigation", "threshold": "outline, bounded paging, history, structured task links", "baseline": "FAIL"},
+    {"id": "contract-provenance", "threshold": "correct negotiation, typed errors, immutable reader identity", "baseline": "FAIL"},
+    {"id": "real-reader-capabilities", "threshold": "authenticated Studio 8/8, real AT 8/8, real mail 24/24", "baseline": "BLOCKED_NOT_PROXY_PASSED"}
+  ],
+  "reconciliations": [
+    "E01 nested-list loss and E02 public parity are consistent: two missing source blocks carry the 406 lost CCH29 words.",
+    "Visible 113/113 header-cell text does not satisfy structural table semantics; all 46 public tables remain presentational.",
+    "Terminal width containment is surface-specific and does not contradict public/email browser overflow.",
+    "Machine source/CLI revision identity is a pass; public, email, and terminal revision carriers remain failures.",
+    "E03 heading scores are repeated render-cell comparisons, not a replacement for the 145 unique canonical headings.",
+    "Transient deployed 5xx observations are time-bound reliability evidence and do not replace decisive response classifications.",
+    "Browser accessibility trees and keyboard focus are observations, not real assistive-technology passes."
+  ],
+  "round_2_candidates": [
+    {"experiment": "E04", "candidate": "write-time-migration", "rule": "revision-fenced canonical migration; quarantine alias conflict and headerless intent"},
+    {"experiment": "E05", "candidate": "shared-read-resolver", "rule": "preserve stored source; normalize every reader through one lossless projection"},
+    {"experiment": "E06", "candidate": "versioned-projection", "rule": "retain source and expose an explicit versioned reader projection with provenance"}
+  ],
+  "stop_condition": "Round 1 is sealed only when all three verification inputs hash-match, denominators reconcile, contradictions are resolved by scope, and no candidate is selected."
+}
