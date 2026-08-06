@@ -16,7 +16,13 @@ cd "$(dirname "$0")/.."
 # `command -v go` finds NOTHING on every box (guerrilla included) even though
 # /usr/local/go/bin/go is installed on all of them. Without this line every
 # `command -v go` guard below silently takes its skip branch.
-export PATH="$HOME/.asdf/shims:/usr/local/go/bin:$PATH"
+#
+# HOME is defaulted rather than referenced bare: this script runs under
+# `set -u`, so an unset HOME (a systemd unit without one, a stripped `env -i`
+# invocation) would abort the ENTIRE deploy at this line — before any work —
+# and the only thing a fallback loses is the asdf shim dir, which the boxes all
+# have at /root/.asdf (deploy-rebuild.sh hardcodes exactly that path).
+export PATH="${HOME:-/root}/.asdf/shims:/usr/local/go/bin:$PATH"
 
 # Rebuild + re-exec the on-box monitoring agent from the just-deployed code.
 # Lifted from deploy/instance-deploy.sh:806-830, which is the ONLY lane that has
