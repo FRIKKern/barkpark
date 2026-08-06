@@ -1,0 +1,36 @@
+{
+  "assignment_id": "experiment-01",
+  "assignment_snapshot_digest": "2470a55801252509f473edd85f1a9a1d47d332ca6e86213f45b81fbc01d2eb89",
+  "candidate_ids": [],
+  "epic_id": "task-a768c69e659add58",
+  "inventory_digest": "3e480a9fcf44da65a07aa1fcad8e981911006568d23b89ad8891f26a5d96e69e",
+  "papers": [
+    {
+      "fixture_id": "CCH29",
+      "revision": "18768b0a14c2eead927181c4a0e37c18",
+      "slug": "cloud-console-hardening-wave-29-2026-08-03"
+    },
+    {
+      "fixture_id": "PDS45",
+      "revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "slug": "pds-wave-45-2026-08-03"
+    },
+    {
+      "fixture_id": "CCH28",
+      "revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "slug": "cloud-console-hardening-wave-28-2026-08-03"
+    },
+    {
+      "fixture_id": "PDS44",
+      "revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "slug": "pds-wave-44-2026-08-03"
+    }
+  ],
+  "round": 1,
+  "round_name": "Baseline",
+  "schema_version": "legendary-paper-e01-assignment/v1",
+  "stop_condition": "Stop when canonical denominators, fixtures, reader captures, taxonomy, thresholds, and stable double-verification are reproducible; do not build a repair candidate.",
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-05",
+  "wave_revision": "a06716c4-2dd5-4bda-b9a9-a484b009abb2",
+  "write_boundary": ".omx/state/legendary-paper-reader-upgrade-experiments/E01"
+}

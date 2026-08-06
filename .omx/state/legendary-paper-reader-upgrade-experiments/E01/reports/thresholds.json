@@ -1,0 +1,45 @@
+{
+  "baseline_not_candidate_acceptance": "Current readers are expected to fail some thresholds; E01 establishes denominators and tripwires, not a winner.",
+  "declared_before_round_2": true,
+  "hard_thresholds": {
+    "alias_conflict_behavior": {
+      "allowed_silent_precedence": 0,
+      "expected": "quarantine"
+    },
+    "body_cell_accounting": {
+      "allowed_loss_or_reorder": 0,
+      "expected": 1374
+    },
+    "canonical_block_accounting": {
+      "allowed_loss": 0,
+      "expected": 815
+    },
+    "cch29_nested_list_words": {
+      "allowed_loss": 0,
+      "expected": 406
+    },
+    "exact_empty_spacer_accounting": {
+      "allowed_unfenced_change": 0,
+      "expected": 381
+    },
+    "genuinely_headerless_table_accounting": {
+      "allowed_implicit_promotion": 0,
+      "expected": 11
+    },
+    "idempotent_verification": {
+      "expected": "two runs return the same artifact_set_sha256"
+    },
+    "legacy_header_cell_accounting": {
+      "allowed_loss": 0,
+      "expected": 113
+    },
+    "mark_record_accounting": {
+      "allowed_silent_loss": 0,
+      "expected": 388
+    },
+    "revision_match": {
+      "expected": "4/4"
+    }
+  },
+  "schema_version": "legendary-paper-e01-thresholds/v1"
+}

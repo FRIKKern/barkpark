@@ -1,0 +1,36 @@
+{
+  "schema_version": "legendary-paper-e01-known-bad/v1",
+  "targets": [
+    {
+      "failure": "Studio and terminal adapters read head but not legacy header.",
+      "id": "legacy-header-reader-drop",
+      "observed_count": 113,
+      "source": "all"
+    },
+    {
+      "failure": "Paragraph-wrapped list items are blank in email and terminal projections.",
+      "id": "nested-list-reader-drop",
+      "observed_items": 11,
+      "observed_words": 406,
+      "source": "CCH29"
+    },
+    {
+      "failure": "String and object mark vocabularies do not retain semantic distinction on every reader.",
+      "id": "mixed-mark-vocabulary",
+      "observed_count": 388,
+      "source": "all"
+    },
+    {
+      "failure": "Exact-empty authored paragraphs inflate source/editing structure.",
+      "id": "empty-spacer-overload",
+      "observed_count": 381,
+      "source": "all"
+    },
+    {
+      "failure": "No header intent is encoded; automatic promotion would be an unsupported guess.",
+      "id": "genuinely-headerless",
+      "observed_tables": 11,
+      "source": "PDS45/PDS44"
+    }
+  ]
+}

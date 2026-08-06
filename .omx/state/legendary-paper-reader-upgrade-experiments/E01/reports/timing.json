@@ -1,0 +1,108 @@
+{
+  "build_wall_seconds": 16.106082,
+  "note": "Timing is observational and excluded from the stable artifact-set hash.",
+  "probe_seconds": [
+    {
+      "fixture_id": "CCH29",
+      "probe": "cli_api",
+      "seconds": 3.421942
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "source",
+      "seconds": 0.345768
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "public",
+      "seconds": 0.519769
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "email",
+      "seconds": 0.333879
+    },
+    {
+      "fixture_id": "CCH29",
+      "probe": "tui80",
+      "seconds": 1.175193
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "cli_api",
+      "seconds": 1.213987
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "source",
+      "seconds": 0.384666
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "public",
+      "seconds": 0.620927
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "email",
+      "seconds": 0.394025
+    },
+    {
+      "fixture_id": "PDS45",
+      "probe": "tui80",
+      "seconds": 1.530969
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "cli_api",
+      "seconds": 1.42573
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "source",
+      "seconds": 0.256092
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "public",
+      "seconds": 0.31403
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "email",
+      "seconds": 0.207399
+    },
+    {
+      "fixture_id": "CCH28",
+      "probe": "tui80",
+      "seconds": 0.777511
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "cli_api",
+      "seconds": 0.722042
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "source",
+      "seconds": 0.192514
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "public",
+      "seconds": 0.428793
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "email",
+      "seconds": 0.355191
+    },
+    {
+      "fixture_id": "PDS44",
+      "probe": "tui80",
+      "seconds": 1.371798
+    }
+  ],
+  "probe_seconds_total": 15.992225,
+  "schema_version": "legendary-paper-e01-timing/v1"
+}

@@ -1,0 +1,241 @@
+{
+  "fixtures": [
+    {
+      "dimension": "header_head",
+      "expected": "preserve legacy header",
+      "id": "header-only",
+      "input": {
+        "header": [
+          "legacy"
+        ],
+        "rows": [
+          [
+            "body"
+          ]
+        ],
+        "type": "table"
+      }
+    },
+    {
+      "dimension": "header_head",
+      "expected": "preserve modern head",
+      "id": "head-only",
+      "input": {
+        "head": [
+          "modern"
+        ],
+        "rows": [
+          [
+            "body"
+          ]
+        ],
+        "type": "table"
+      }
+    },
+    {
+      "dimension": "header_head",
+      "expected": "accept equal aliases",
+      "id": "header-head-equal",
+      "input": {
+        "head": [
+          "same"
+        ],
+        "header": [
+          "same"
+        ],
+        "rows": [
+          [
+            "body"
+          ]
+        ],
+        "type": "table"
+      }
+    },
+    {
+      "dimension": "header_head",
+      "expected": "quarantine conflict; do not pick silently",
+      "id": "header-head-conflict",
+      "input": {
+        "head": [
+          "modern"
+        ],
+        "header": [
+          "legacy"
+        ],
+        "rows": [
+          [
+            "body"
+          ]
+        ],
+        "type": "table"
+      }
+    },
+    {
+      "dimension": "list",
+      "expected_words": 2,
+      "id": "list-flat-inline",
+      "input": {
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "flat words"
+            }
+          ]
+        ],
+        "type": "list"
+      }
+    },
+    {
+      "dimension": "list",
+      "expected_words": 3,
+      "id": "list-paragraph-wrapped",
+      "input": {
+        "items": [
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "nested words survive"
+                }
+              ],
+              "type": "paragraph"
+            }
+          ]
+        ],
+        "type": "list"
+      }
+    },
+    {
+      "dimension": "list",
+      "expected": "explicit degradation, never silent blank for authored text",
+      "id": "list-mixed-malformed",
+      "input": {
+        "items": [
+          null,
+          "scalar",
+          [
+            {
+              "type": "unknown",
+              "value": "opaque"
+            }
+          ]
+        ],
+        "type": "list"
+      }
+    },
+    {
+      "dimension": "mark",
+      "expected": "strong",
+      "id": "mark-string",
+      "input": {
+        "marks": [
+          "strong"
+        ],
+        "type": "text",
+        "value": "strong"
+      }
+    },
+    {
+      "dimension": "mark",
+      "expected": "code",
+      "id": "mark-object",
+      "input": {
+        "marks": [
+          {
+            "type": "code"
+          }
+        ],
+        "type": "text",
+        "value": "code"
+      }
+    },
+    {
+      "dimension": "mark",
+      "expected": "deduplicate supported semantics and quarantine unsupported mark",
+      "id": "mark-mixed-duplicate",
+      "input": {
+        "marks": [
+          "strong",
+          {
+            "type": "strong"
+          },
+          {
+            "type": "unknown"
+          }
+        ],
+        "type": "text",
+        "value": "mixed"
+      }
+    },
+    {
+      "dimension": "tone",
+      "expected": "one documented mapping with explicit unknown degradation",
+      "id": "tone-aliases",
+      "inputs": [
+        "info",
+        "note",
+        "warn",
+        "warning",
+        "error",
+        "danger",
+        null,
+        "unknown"
+      ]
+    },
+    {
+      "dimension": "empty_spacer",
+      "expected_empty": true,
+      "id": "empty-exact",
+      "input": {
+        "content": [],
+        "type": "paragraph"
+      }
+    },
+    {
+      "dimension": "empty_spacer",
+      "expected_empty": true,
+      "id": "empty-whitespace",
+      "input": {
+        "content": [
+          {
+            "type": "text",
+            "value": "  \n\t"
+          }
+        ],
+        "type": "paragraph"
+      }
+    },
+    {
+      "dimension": "empty_spacer",
+      "expected_empty": true,
+      "id": "empty-nbsp",
+      "input": {
+        "content": [
+          {
+            "type": "text",
+            "value": " "
+          }
+        ],
+        "type": "paragraph"
+      }
+    },
+    {
+      "dimension": "empty_spacer",
+      "expected": "not exact-empty; explicit policy required",
+      "id": "empty-zero-width",
+      "input": {
+        "content": [
+          {
+            "type": "text",
+            "value": "​"
+          }
+        ],
+        "type": "paragraph"
+      }
+    }
+  ],
+  "frozen_before_candidate_rounds": true,
+  "schema_version": "legendary-paper-e01-adversarial/v1"
+}

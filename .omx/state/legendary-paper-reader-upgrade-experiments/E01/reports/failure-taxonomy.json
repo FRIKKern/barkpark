@@ -1,0 +1,61 @@
+{
+  "inferences": [
+    "A candidate needs an explicit dual-vocabulary resolver before any source migration can be considered lossless.",
+    "Reader-specific success cannot be inferred from canonical JSON preservation alone."
+  ],
+  "observed": [
+    {
+      "code": "L01_HEADER_ALIAS_DROP",
+      "denominator": 113,
+      "fact": "Live headers are stored as header while these adapters consume head.",
+      "scope": "Studio/TUI/human CLI",
+      "severity": "hard"
+    },
+    {
+      "code": "L02_NESTED_LIST_DROP",
+      "denominator": 406,
+      "fact": "Eleven paragraph-wrapped list items do not survive the current projections.",
+      "scope": "CCH29 public/email/TUI projections",
+      "severity": "hard"
+    },
+    {
+      "code": "L03_MARK_SEMANTIC_DIVERGENCE",
+      "denominator": 388,
+      "fact": "Both string and object mark vocabularies occur; no current human reader preserves all semantic distinctions.",
+      "scope": "cross-reader",
+      "severity": "hard"
+    },
+    {
+      "code": "L04_TONE_DEGRADATION",
+      "denominator": 30,
+      "fact": "Alias, missing, and unknown tones do not share one explicit cross-reader semantic mapping.",
+      "scope": "callouts",
+      "severity": "hard"
+    },
+    {
+      "code": "L05_EMPTY_SPACER_DEBT",
+      "denominator": 381,
+      "fact": "Exact-empty paragraphs are authored source blocks and require revision-fenced handling.",
+      "scope": "canonical source",
+      "severity": "quality"
+    },
+    {
+      "code": "L06_HEADERLESS_INTENT_UNKNOWN",
+      "denominator": 11,
+      "fact": "No header field is authored; promoting a body row would infer intent.",
+      "scope": "11 tables",
+      "severity": "quarantine"
+    },
+    {
+      "code": "L07_ALIAS_CONFLICT",
+      "denominator": 1,
+      "fact": "Conflicting header/head values have no safe silent precedence.",
+      "scope": "adversarial",
+      "severity": "quarantine"
+    }
+  ],
+  "preferences": [
+    "No candidate format or precedence policy is selected by E01."
+  ],
+  "schema_version": "legendary-paper-e01-failure-taxonomy/v1"
+}

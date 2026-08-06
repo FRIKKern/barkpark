@@ -1,0 +1,941 @@
+{
+  "dimensions": {
+    "exact_empty_spacer": {
+      "block": {
+        "content": [],
+        "id": "w29s046",
+        "type": "paragraph"
+      },
+      "expected_empty": true,
+      "source": "CCH29"
+    },
+    "explicit_tone": {
+      "block": {
+        "content": [
+          {
+            "marks": [
+              "strong"
+            ],
+            "type": "text",
+            "value": "THE GATE SLICE MAY BE A NON-DEFECT, AND THE \"FIX\" MAY BE A WEAKENING. "
+          },
+          {
+            "type": "text",
+            "value": "On a dead server the predicate correctly emitted an INFRA FAULT and the test correctly redded. That is an HONEST red. A wave that makes it green has softened a guard and called it hardening — the exact failure this epic exists to catch, committed by the wave that cites the standing test."
+          }
+        ],
+        "id": "w29s035",
+        "tone": "warning",
+        "type": "callout"
+      },
+      "source": "CCH29"
+    },
+    "flat_list": {
+      "block": {
+        "id": "block-17",
+        "items": [
+          [
+            {
+              "type": "text",
+              "value": "STALE PRICE. No content hash, no date arithmetic, no re-measurement. pds-record-parity.test.sh will print CPU=4.45s after someone doubles the harness's work, forever, and nothing reds."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "STALE DISPOSITION EVIDENCE. Five rows cite \"by run 2026-08-03: <cmd> rc=N\". The census never re-takes any of them. A disposition survives its own repair."
+            }
+          ],
+          [
+            {
+              "type": "text",
+              "value": "ORPHANED DISPOSITION. Read the cond at :519-540: legA=yes AND legB=true short-circuits to THROUGH and the ledger is NEVER consulted. A disposition row for a now-THROUGH instrument is silently unread - not an error, not a warning, not printed."
+            }
+          ]
+        ],
+        "style": "bullet",
+        "type": "list"
+      },
+      "expected_item_count": 3,
+      "source": "PDS45"
+    },
+    "genuinely_headerless": {
+      "block": {
+        "id": "block-103",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Surface"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Verdict"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "What it means for the wave"
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "scripts/pds-door-census.sh (835 lines, all branches)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "FOUND - prices/dispositions are string literals at :123-137 / :146-149; single exec at :401; rot check :585-602 existence-only"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "The spine's subject is fully mapped. No further reading needed."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "A --measure verb / meter / hash / date arithmetic"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT FOUND anywhere in executable position"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "New ground. No prior task in Barkpark proposes one (4 separate bp searches)."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "A numeric PRICE threshold in the census"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT FOUND - grep for threshold|tier|budget|CPU_ returns only prose inside the ledger literal"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "'PRICE' is a class with no predicate. An unmade ruling, not a defect to fix silently."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "THROUGH-branch price shape validation"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT FOUND - validator is nested in the terminal else"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Any provenance design must cover the THROUGH branch, not extend the PRICE-class validator."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "HUMAN-GATE class rows / Port.open selftest fixtures"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT FOUND - zero rows, zero arms"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Untested arms inside the instrument. Same shape, two places."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "ROSTER-VERDICT-FRESH (anchor_mfa + def_fp, @key_normaliser, re-key migration rule)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "FOUND SHIPPED in pds-elixir-receipt-census.exs :737-746, :2256-2305"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "A price hash is a PORT, not an invention. Its known blind spot (same-file only) is filed as pds-w39-roster-fresh-callee-blindspot."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Any repo gate that hashes the artifact it makes a claim about"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT FOUND across 8 staleness gates"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "docs-anchors-check.sh:162 is existence-only too. The census inherited a repo-wide pattern; it is not an outlier."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Open PRs touching scripts/pds-* or elixir-path-escape-check.sh"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT FOUND - zero of 13 open PRs"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "No inbound merge-order wait. All four dependency SHAs re-verified as ancestors of origin/main by this digest."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "ELIXIR_TEST_ONLY_PATHS inside .github/workflows/elixir.yml"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT FOUND - it is a shell variable at scripts/elixir-path-escape-check.sh:89; elixir.yml:45 says so and :196-197 shells out"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "THE BRIEF'S PREDICTED .github COLLISION DOES NOT EXIST. The hetzner slice writes zero bytes of .github/."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Console wave 28's declared fence"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "FOUND: 'In fence: cloud/, api/lib/barkpark_web/live/' (charter :121, on an OPEN PR #9384)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "THE REAL COLLISION. #9377's paper.ex lives inside it. Priority 1 is fence-clean ONLY if the repair stays in api/test/."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "A stranded 152-line #9377 verifier probe (untracked, wf_cff43d8b-660-25)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "FOUND on the filesystem, invisible to every git search"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "Reuse it or lose it. A git clean destroys it."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "The worktree branch named pds-review-9377"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "FOUND but EMPTY - clean, 0 commits ahead of origin/main"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "A name that reads like live work. Nobody is reviewing #9377. Do not stand down on it."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": ".claude/workflows/bp-pds-charter.md (D-number bodies)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT REACHED by SIX of the fifteen surveyors"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "The largest coverage hole. D633/D637/D639/D646/D647/D648/D649/D650/D572 were quoted from CODE and TASKS, not read from the charter for coverage."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "ubuntu-latest / any CI runner behaviour for any pds door"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT REACHED - every hermeticity and price proof is macOS-local"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "No pds door has ever executed on a foreign runner. The first CI run is the only real evidence."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "api/test/barkpark/pds_door_census_test.exs (does it PIN the stale price literals?)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT OPENED by anyone"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "If it pins 40.33s, re-pricing reds the Elixir gate and the fix must co-land."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "Whether ANY CI workflow invokes pds-ledger-census_test.sh"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT RE-VERIFIED - two bp tasks assert it is invoked by NO workflow"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "If true, the 40.33 s 'door price' prices a door nobody walks through - wave 43's law with a mirror."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "live_scope.ex / caps.ex / access.ex (the #9377 mechanism story)"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "NOT OPENED - taken from the commit message and the artifact's own moduledoc"
+              }
+            ],
+            [
+              {
+                "type": "text",
+                "value": "The exact circularity the independent review exists to break, still unbroken."
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      "expected_cells": 0,
+      "source": "PDS45"
+    },
+    "legacy_header": {
+      "block": {
+        "header": [
+          {
+            "content": [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "Claim"
+              }
+            ]
+          },
+          {
+            "content": [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "Command"
+              }
+            ]
+          },
+          {
+            "content": [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "Result"
+              }
+            ]
+          }
+        ],
+        "id": "w29s012",
+        "rows": [
+          [
+            [
+              {
+                "type": "text",
+                "value": "Four contexts BLOCK merges"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "gh api repos/{owner}/{repo}/branches/main/protection"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "CONFIRMED"
+              },
+              {
+                "type": "text",
+                "value": " — "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "Elixir gate"
+              },
+              {
+                "type": "text",
+                "value": ", "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "PR references an active task"
+              },
+              {
+                "type": "text",
+                "value": ", "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "Cloud gate"
+              },
+              {
+                "type": "text",
+                "value": ", "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "Console gate"
+              },
+              {
+                "type": "text",
+                "value": "; "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "enforce_admins: true"
+              },
+              {
+                "type": "text",
+                "value": "; identical to the committed spec on context AND app_id (15368)."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "The required "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "Console gate"
+              },
+              {
+                "type": "text",
+                "value": " depends on a foreign host"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "BP_SERVER=http://127.0.0.1:1 node --test cloud/priv/static/__preview__/seal-predicate.test.mjs"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "CONFIRMED, and located to one line."
+              },
+              {
+                "type": "text",
+                "value": " "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "65 tests / 64 pass / not ok 56"
+              },
+              {
+                "type": "text",
+                "value": " — "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "wave 11: --ladder-only reaches the ladder the live refusals never can"
+              },
+              {
+                "type": "text",
+                "value": ", failing at "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "seal-predicate.test.mjs:1090"
+              },
+              {
+                "type": "text",
+                "value": " with "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "2 !== 1"
+              },
+              {
+                "type": "text",
+                "value": ": the control demands NO_SEAL(1) and a dead server yields INFRA(2). The reaching line is "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": ":1089"
+              },
+              {
+                "type": "text",
+                "value": " — "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "run(['--repo', REPO, '--successor', 'TERMINAL'])"
+              },
+              {
+                "type": "text",
+                "value": ", a LIVE run whose roster fetch precedes the TERMINAL refusal."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "That roster read is anonymous"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "curl -G .../v1/data/query/production/task -H \"Authorization: Bearer undefined\""
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "200 in 340ms."
+              },
+              {
+                "type": "text",
+                "value": " CI has no "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "BP_TEST"
+              },
+              {
+                "type": "text",
+                "value": "-scoped secret and does not need one — the gate is green today purely because guerrilla is up and the roster is world-readable. An ACL change reds it as surely as an outage."
+              }
+            ]
+          ],
+          [
+            [
+              {
+                "type": "text",
+                "value": "The "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "unknown"
+              },
+              {
+                "type": "text",
+                "value": " domain rung lies to a screen reader"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "cloud/priv/static/app.js:9598 domainRungChip"
+              },
+              {
+                "type": "text",
+                "value": " vs "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": ":9500 domainStageRows"
+              }
+            ],
+            [
+              {
+                "marks": [
+                  "strong"
+                ],
+                "type": "text",
+                "value": "CONFIRMED, and it is the epic’s exact disease."
+              },
+              {
+                "type": "text",
+                "value": " The pure fold computes an honest "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "unknown"
+              },
+              {
+                "type": "text",
+                "value": " role and its 60-line header explains at length why an unmeasured rung must never fall into the waiting bucket. The RENDER has no "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "unknown"
+              },
+              {
+                "type": "text",
+                "value": " arm: it falls through to "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "&middot;"
+              },
+              {
+                "type": "text",
+                "value": " and "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "state = \"waiting\""
+              },
+              {
+                "type": "text",
+                "value": ", so the "
+              },
+              {
+                "marks": [
+                  "code"
+                ],
+                "type": "text",
+                "value": "aria-label"
+              },
+              {
+                "type": "text",
+                "value": " says \"waiting\" for a check nobody made. The model knows; the screen lies."
+              }
+            ]
+          ]
+        ],
+        "type": "table"
+      },
+      "expected_cells": 3,
+      "source": "CCH29"
+    },
+    "missing_tone": {
+      "block": {
+        "content": [
+          {
+            "type": "text",
+            "value": "STRATEGIZE COMPLETE - the survey fleet is flying. GROUND TRUTH, DERIVED IN-PROCESS at origin/main ab8c86b05 in a detached worktree, never the primary checkout (which is stale at a31faa52d and dirty across eight charters). I ran scripts/pds-door-census.sh myself: rc=0, ERRORS 0, every program disposed. THE HEADLINE THE WISH DID NOT ASK FOR: the census runs in 4.13 s wall / 2.80 s CPU - so it CANNOT have taken the 40.33 s CPU / 68.24 s wall figure it prints. Every price and every disposition-evidence string is a hardcoded literal in PDS_DOOR_PRICES (:146-149) and PDS_DOOR_DISPOSITIONS (:123-137). The CLASS column became an instrument in wave 44. The PRICE column became a shell variable with a date stamp. And the denominator is 20 with 4 doors, not the 19 with 3 that both the wish and the lead notes carry - the census counts itself, and says so at :12-14."
+          }
+        ],
+        "id": "block-3",
+        "type": "callout"
+      },
+      "source": "PDS45"
+    },
+    "nested_list": {
+      "block": {
+        "id": "w29D015",
+        "items": [
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The wave's stated finished state (\"no merge-blocking job reaches a host this repo does not own\") is UNREACHABLE. \"PR references an active task\" reaches guerrilla BY DESIGN and BY COMMITTED POLICY — pr-task-gate.yml converts exit 2 to exit 1 arguing \"the only alternative to red is a green check that verified nothing\", and merge-gates.md:75 codifies it. A prohibition-shaped ratchet would red that file on landing and its first act would be to be waived."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The lane coupling is THREE of four contexts, not one — and a curl-only census scores Cloud gate CLEAN. Its coupling is a bare hostname inside an ExUnit assert resolved by the BEAM, with no HTTP client, no shell and no \"curl\" token anywhere. The only instrument that found it was crippling the resolver and re-running."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "Wave 27's corollary is half wrong. origin/main DOES resolve in `clone --depth 1 --branch main` but does NOT in a real PR checkout (rc 1 — the same code as an honest \"no\"). A remedy keyed on ref resolution fails in a THIRD way."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "cch-w26's headline is refuted: #9407 already humanized the deployment_failed EMAIL, and the live defect moved CHANNEL. render.ex is 67 lines with ZERO occurrences of `detail`, and git grep Render.render over cloud/test returns NOTHING."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ],
+          [
+            {
+              "content": [
+                {
+                  "type": "text",
+                  "value": "The Azure half of the capacity-arm row is NOT DERIVABLE: zero `quota`/`exceed` hits across internal/cli/cloud/azure/ source, tests and all 18 fixtures, and the Elixir Azure client returns atoms only."
+                }
+              ],
+              "type": "paragraph"
+            }
+          ]
+        ],
+        "ordered": false,
+        "type": "list"
+      },
+      "expected_wrapped_items": 5,
+      "source": "CCH29"
+    },
+    "nonempty_paragraph": {
+      "block": {
+        "content": [
+          {
+            "marks": [
+              "strong"
+            ],
+            "type": "text",
+            "value": "Status: SURVEYING."
+          },
+          {
+            "type": "text",
+            "value": " Strategize is closed; 16 Opus surveyors are in flight. Digest appends the survey digest and the verify plan below before any verifier runs; Decide appends the decisions and the wave plan before any builder flies; Review closes this Paper as the debrief."
+          }
+        ],
+        "id": "w29s002",
+        "type": "paragraph"
+      },
+      "expected_empty": false,
+      "source": "CCH29"
+    },
+    "object_mark": {
+      "node": {
+        "marks": [
+          {
+            "type": "strong"
+          }
+        ],
+        "type": "text",
+        "value": "a723ec0dd"
+      },
+      "source": "PDS45"
+    },
+    "string_mark": {
+      "node": {
+        "marks": [
+          "strong"
+        ],
+        "type": "text",
+        "value": "Status: SURVEYING."
+      },
+      "source": "CCH29"
+    }
+  },
+  "schema_version": "legendary-paper-e01-controls/v1"
+}

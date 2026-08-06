@@ -1,0 +1,114 @@
+{
+  "schema_version": "legendary-paper-e01-verification-record/v1",
+  "stable_artifact_set_sha256": "f8dc91ab8fa23a2a5d861f476905c6ef3fd786d4742063ba72143fd807a5bdc8",
+  "hash_manifest_file_sha256": "695bb11edc4356b8c64ae26528edb883b971213be5e044775eacbc14d3d62d72",
+  "runs": [
+    {
+      "actor": "experiment-01",
+      "ordinal": 1,
+      "status": "PASS",
+      "check_count": 104,
+      "artifact_set_sha256": "f8dc91ab8fa23a2a5d861f476905c6ef3fd786d4742063ba72143fd807a5bdc8"
+    },
+    {
+      "actor": "experiment-01",
+      "ordinal": 2,
+      "status": "PASS",
+      "check_count": 104,
+      "artifact_set_sha256": "f8dc91ab8fa23a2a5d861f476905c6ef3fd786d4742063ba72143fd807a5bdc8"
+    },
+    {
+      "actor": "cycle-leader-independent-replay",
+      "ordinal": 1,
+      "status": "PASS",
+      "check_count": 104,
+      "artifact_set_sha256": "f8dc91ab8fa23a2a5d861f476905c6ef3fd786d4742063ba72143fd807a5bdc8"
+    },
+    {
+      "actor": "cycle-leader-independent-replay",
+      "ordinal": 2,
+      "status": "PASS",
+      "check_count": 104,
+      "artifact_set_sha256": "f8dc91ab8fa23a2a5d861f476905c6ef3fd786d4742063ba72143fd807a5bdc8"
+    }
+  ],
+  "recommended_cycle_result": {
+    "assignment_id": "experiment-01",
+    "idempotency_key": "legendary-paper-reader-upgrade-experiment-01-baseline-v1",
+    "status": "completed",
+    "summary": "Round-1 canonical losslessness/structure baseline established; current readers fail hard preservation/semantic thresholds.",
+    "evidence": "repo://.omx/state/legendary-paper-reader-upgrade-experiments/E01/reports/verification.json",
+    "evidence_revision": "5baf6ceb81d7da72577245f99293778a924269cb",
+    "payload": {
+      "assignment_id": "experiment-01",
+      "round": 1,
+      "candidate_ids": [],
+      "input_hashes": {
+        "inventory_digest": "3e480a9fcf44da65a07aa1fcad8e981911006568d23b89ad8891f26a5d96e69e",
+        "CCH29": "2524c05d63ac96c31f31e4c8a54219be64d23e8356ec7acd27978c358509ec15",
+        "PDS45": "5894db69f3d3f9ddc0416bd5e5e6b50dc72c1d962efb56ac7fd863b1a8d1caa7",
+        "CCH28": "4519c9ac819e4c666c376bfbae11007d0e6c31765a692c99ccd2ad4188a57d0e",
+        "PDS44": "4923e1b72da37c384ebc3f7b80ba15a08c9998fde560db0095d349a27457f96d"
+      },
+      "fixture_manifest_path": ".omx/state/legendary-paper-reader-upgrade-experiments/E01/reports/hash-manifest.json",
+      "fixture_manifest_sha256": "695bb11edc4356b8c64ae26528edb883b971213be5e044775eacbc14d3d62d72",
+      "commands_or_probes": [
+        "python3 .omx/state/legendary-paper-reader-upgrade-experiments/E01/scripts/build_baseline.py",
+        "python3 .omx/state/legendary-paper-reader-upgrade-experiments/E01/scripts/verify.py"
+      ],
+      "observed_facts": [
+        "4/4 exact revision pins and 815/815 canonical blocks reproduced.",
+        "113 authored legacy header cells, 11 genuinely headerless tables, 1,374 body cells, 388 marks, and 381 exact-empty spacers accounted.",
+        "CCH29 has 11 paragraph-wrapped nested-list items totaling 406 words; current public, email, and TUI80 captures preserve 0/406.",
+        "Public and email expose 113/113 header cells but all 46 tables are role=presentation; Studio/TUI adapters consume head while live sources use header.",
+        "All four TUI80 captures are width-contained at 80 columns but span 1,305-2,357 lines."
+      ],
+      "inferences": [
+        "Reader compatibility must be proven before source migration or spacer deletion.",
+        "A dual-vocabulary resolver must quarantine conflicting header/head rather than choose silently."
+      ],
+      "recommendations": [
+        "Use E01 denominators, controls, bad targets, adversarial fixtures, and thresholds unchanged in E04-E15.",
+        "Do not treat the current baseline as a repair candidate or format selection."
+      ],
+      "unresolved_unknowns": [
+        "Authenticated hydrated Studio GUI behavior was not re-driven in E01; its header loss is source-adapter-static evidence.",
+        "Real mail clients and assistive technologies were not exercised by this structure baseline.",
+        "Eleven genuinely headerless tables require author intent."
+      ],
+      "surface_matrix": {
+        "CLI_API": "PASS exact machine source",
+        "source_endpoint": "PASS exact canonical blocks",
+        "public": "FAIL nested-list loss and table semantics",
+        "email": "FAIL nested-list loss and table semantics",
+        "TUI80": "FAIL header/nested-list semantic preservation; width contained",
+        "Studio": "PARTIAL static adapter proof; authenticated GUI not re-driven"
+      },
+      "threshold_results": {
+        "accounting": "PASS",
+        "current_reader_losslessness": "FAIL",
+        "idempotent_verification": "PASS",
+        "candidate_acceptance": "NOT_APPLICABLE_BASELINE_ONLY"
+      },
+      "evidence_paths": [
+        ".omx/state/legendary-paper-reader-upgrade-experiments/E01/reports/census.json",
+        ".omx/state/legendary-paper-reader-upgrade-experiments/E01/reports/reader-probes.json",
+        ".omx/state/legendary-paper-reader-upgrade-experiments/E01/reports/failure-taxonomy.json",
+        ".omx/state/legendary-paper-reader-upgrade-experiments/E01/reports/thresholds.json",
+        ".omx/state/legendary-paper-reader-upgrade-experiments/E01/reports/hash-manifest.json"
+      ],
+      "validation": {
+        "status": "PASS",
+        "check_count": 104,
+        "replays": 4,
+        "stable_artifact_set_sha256": "f8dc91ab8fa23a2a5d861f476905c6ef3fd786d4742063ba72143fd807a5bdc8"
+      },
+      "risks": [
+        "Live HTTP probes showed transient 500s; bounded retries were required and timing includes retries.",
+        "Public/email bytes can vary with live auxiliary data even when the pinned canonical Paper source does not."
+      ],
+      "stop_condition": "Met: denominators, controls, known-bad and adversarial fixtures, raw captures, thresholds, taxonomy, timing, and stable double verification are durable; no candidate was built.",
+      "verdict": "BASELINE_ESTABLISHED_CURRENT_READERS_FAIL_HARD_THRESHOLDS"
+    }
+  }
+}

@@ -1,0 +1,269 @@
+{
+  "papers": [
+    {
+      "cli_api": {
+        "bytes": 431200,
+        "canonical_blocks_sha256": "46ed01f7416f064f950cee3b00f1a59da00cd0cef523b2a6e4cf1e7cee4b1a50",
+        "sha256": "2524c05d63ac96c31f31e4c8a54219be64d23e8356ec7acd27978c358509ec15",
+        "status": "pass"
+      },
+      "email": {
+        "bytes": 121072,
+        "content_type": "text/html; charset=utf-8",
+        "legacy_header_th_instances": 35,
+        "nested_list_survival": {
+          "items_lost": 11,
+          "items_survived": 0,
+          "items_total": 11,
+          "words_survived": 0,
+          "words_total": 406
+        },
+        "presentation_table_instances": 11,
+        "sha256": "dc57c4d6704a97ba7003a06694f126c25f9de3f5c8e64529aa20351a3b36e331",
+        "status": "captured"
+      },
+      "fixture_id": "CCH29",
+      "public": {
+        "bytes": 280162,
+        "content_type": "text/html; charset=utf-8",
+        "data_block_id_instances": 252,
+        "legacy_header_th_instances": 35,
+        "nested_list_survival": {
+          "items_lost": 11,
+          "items_survived": 0,
+          "items_total": 11,
+          "words_survived": 0,
+          "words_total": 406
+        },
+        "presentation_table_instances": 11,
+        "sha256": "bdb622cb6f0dbfad1e97fafd7f5af249aba3ed257184c3d5aec03cc013964ca7",
+        "status": "captured"
+      },
+      "revision": "18768b0a14c2eead927181c4a0e37c18",
+      "source": {
+        "bytes": 109924,
+        "content_type": "application/json; charset=utf-8",
+        "sha256": "d3bb064cffd3977a6cb466cfa450000f180511b2aac147a1d54c2620c480cfc9",
+        "status": "pass"
+      },
+      "studio": {
+        "adapter_source": "api/assets/paper-editor/src/canvas/run-convert.js:1674",
+        "note": "The authenticated reader was not mutated or GUI-driven in E01. Current tableBlockToNode reads block.head only; all 113 live cells are under block.header.",
+        "status": "source-proven/current-adapter-static"
+      },
+      "tui80": {
+        "bytes": 126556,
+        "line_count": 1440,
+        "max_codepoint_width": 80,
+        "nested_list_survival": {
+          "items_lost": 11,
+          "items_survived": 0,
+          "items_total": 11,
+          "words_survived": 0,
+          "words_total": 406
+        },
+        "sha256": "e20c839b7be4443eed91bbe148a1f95f1bace8c24eed247fbab0d1c9236fbf83",
+        "status": "captured"
+      }
+    },
+    {
+      "cli_api": {
+        "bytes": 392184,
+        "canonical_blocks_sha256": "f01937cbc0c28fc4f381136ba1ec8174591b1d60abc7b99454aaefd8a7f829da",
+        "sha256": "5894db69f3d3f9ddc0416bd5e5e6b50dc72c1d962efb56ac7fd863b1a8d1caa7",
+        "status": "pass"
+      },
+      "email": {
+        "bytes": 119290,
+        "content_type": "text/html; charset=utf-8",
+        "legacy_header_th_instances": 9,
+        "nested_list_survival": {
+          "items_lost": 0,
+          "items_survived": 0,
+          "items_total": 0,
+          "words_survived": 0,
+          "words_total": 0
+        },
+        "presentation_table_instances": 12,
+        "sha256": "3e29bd380466e0db716ec4bc67a197a38206a757ebf7f5157f98da70fd39a900",
+        "status": "captured"
+      },
+      "fixture_id": "PDS45",
+      "public": {
+        "bytes": 278909,
+        "content_type": "text/html; charset=utf-8",
+        "data_block_id_instances": 227,
+        "legacy_header_th_instances": 9,
+        "nested_list_survival": {
+          "items_lost": 0,
+          "items_survived": 0,
+          "items_total": 0,
+          "words_survived": 0,
+          "words_total": 0
+        },
+        "presentation_table_instances": 12,
+        "sha256": "691904a8d554111274fbcab10af918d78d77ede304d61f36ba537b08c8efe1f0",
+        "status": "captured"
+      },
+      "revision": "b992fd8aaa028b0dab30a8da76f077fd",
+      "source": {
+        "bytes": 91515,
+        "content_type": "application/json; charset=utf-8",
+        "sha256": "e19503ef0f854680056c1857d2d9647dbfdafb2a172e7cabc75d67652f1514e8",
+        "status": "pass"
+      },
+      "studio": {
+        "adapter_source": "api/assets/paper-editor/src/canvas/run-convert.js:1674",
+        "note": "The authenticated reader was not mutated or GUI-driven in E01. Current tableBlockToNode reads block.head only; all 113 live cells are under block.header.",
+        "status": "source-proven/current-adapter-static"
+      },
+      "tui80": {
+        "bytes": 136500,
+        "line_count": 1537,
+        "max_codepoint_width": 80,
+        "nested_list_survival": {
+          "items_lost": 0,
+          "items_survived": 0,
+          "items_total": 0,
+          "words_survived": 0,
+          "words_total": 0
+        },
+        "sha256": "1c9c67b7f7fba9459a81c60ac12ba432ef110126323d5293c4d4c3fa99940746",
+        "status": "captured"
+      }
+    },
+    {
+      "cli_api": {
+        "bytes": 558569,
+        "canonical_blocks_sha256": "a9051f7ad1d7739ccaaca7e80f6d8079c7c78206b0cd723a8e29d0570c9e5d09",
+        "sha256": "4519c9ac819e4c666c376bfbae11007d0e6c31765a692c99ccd2ad4188a57d0e",
+        "status": "pass"
+      },
+      "email": {
+        "bytes": 170149,
+        "content_type": "text/html; charset=utf-8",
+        "legacy_header_th_instances": 57,
+        "nested_list_survival": {
+          "items_lost": 0,
+          "items_survived": 0,
+          "items_total": 0,
+          "words_survived": 0,
+          "words_total": 0
+        },
+        "presentation_table_instances": 18,
+        "sha256": "cfe862c4f7b2c69dd7e88c2c914754d88a7b1effb447ce18f3e667b82e7aa621",
+        "status": "captured"
+      },
+      "fixture_id": "CCH28",
+      "public": {
+        "bytes": 315953,
+        "content_type": "text/html; charset=utf-8",
+        "data_block_id_instances": 237,
+        "legacy_header_th_instances": 57,
+        "nested_list_survival": {
+          "items_lost": 0,
+          "items_survived": 0,
+          "items_total": 0,
+          "words_survived": 0,
+          "words_total": 0
+        },
+        "presentation_table_instances": 18,
+        "sha256": "00c410a0db46b3b4f7f1da124318f7fbfac34d5b08b130004bbbc4bd69c5836c",
+        "status": "captured"
+      },
+      "revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+      "source": {
+        "bytes": 130346,
+        "content_type": "application/json; charset=utf-8",
+        "sha256": "34332ee5666902161af9abe4f96c8243374f93f1f143ba567d2d5bc2b51fba8b",
+        "status": "pass"
+      },
+      "studio": {
+        "adapter_source": "api/assets/paper-editor/src/canvas/run-convert.js:1674",
+        "note": "The authenticated reader was not mutated or GUI-driven in E01. Current tableBlockToNode reads block.head only; all 113 live cells are under block.header.",
+        "status": "source-proven/current-adapter-static"
+      },
+      "tui80": {
+        "bytes": 191456,
+        "line_count": 2357,
+        "max_codepoint_width": 80,
+        "nested_list_survival": {
+          "items_lost": 0,
+          "items_survived": 0,
+          "items_total": 0,
+          "words_survived": 0,
+          "words_total": 0
+        },
+        "sha256": "baa96ee0db0f27fbafebf6388fe7845982fdec2291c504478791d843880c96e4",
+        "status": "captured"
+      }
+    },
+    {
+      "cli_api": {
+        "bytes": 328256,
+        "canonical_blocks_sha256": "a89dd730f1697b0ce25b86ace3f88d790ef6b13e24e5519d58b3ded2c09445cd",
+        "sha256": "4923e1b72da37c384ebc3f7b80ba15a08c9998fde560db0095d349a27457f96d",
+        "status": "pass"
+      },
+      "email": {
+        "bytes": 98335,
+        "content_type": "text/html; charset=utf-8",
+        "legacy_header_th_instances": 12,
+        "nested_list_survival": {
+          "items_lost": 0,
+          "items_survived": 0,
+          "items_total": 0,
+          "words_survived": 0,
+          "words_total": 0
+        },
+        "presentation_table_instances": 5,
+        "sha256": "c46f46e5172fa878f0a2ae8216cf75e4bfb265dc7cec350691d7e5dca2957645",
+        "status": "captured"
+      },
+      "fixture_id": "PDS44",
+      "public": {
+        "bytes": 255624,
+        "content_type": "text/html; charset=utf-8",
+        "data_block_id_instances": 99,
+        "legacy_header_th_instances": 12,
+        "nested_list_survival": {
+          "items_lost": 0,
+          "items_survived": 0,
+          "items_total": 0,
+          "words_survived": 0,
+          "words_total": 0
+        },
+        "presentation_table_instances": 5,
+        "sha256": "a397522e9fc7b8318b1519141b6beb098ac4eff9ca03d6063108da0f6499c671",
+        "status": "captured"
+      },
+      "revision": "8bbd5d874a1b697f1e4e437c473f8e52",
+      "source": {
+        "bytes": 76255,
+        "content_type": "application/json; charset=utf-8",
+        "sha256": "9d63b5e3f844718cb9eccb70507a63c9b2d169d90f558aab18d74344ea80b8d7",
+        "status": "pass"
+      },
+      "studio": {
+        "adapter_source": "api/assets/paper-editor/src/canvas/run-convert.js:1674",
+        "note": "The authenticated reader was not mutated or GUI-driven in E01. Current tableBlockToNode reads block.head only; all 113 live cells are under block.header.",
+        "status": "source-proven/current-adapter-static"
+      },
+      "tui80": {
+        "bytes": 111922,
+        "line_count": 1305,
+        "max_codepoint_width": 80,
+        "nested_list_survival": {
+          "items_lost": 0,
+          "items_survived": 0,
+          "items_total": 0,
+          "words_survived": 0,
+          "words_total": 0
+        },
+        "sha256": "cdc224a9741b010f35d20ea98bf2fdab17e80a4b8153001c1723c503d8f8b076",
+        "status": "captured"
+      }
+    }
+  ],
+  "schema_version": "legendary-paper-e01-reader-probes/v1"
+}
