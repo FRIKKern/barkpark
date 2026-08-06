@@ -1,0 +1,127 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-27",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": [
+    "pds-wave-44-2026-08-03::tui_terminal"
+  ],
+  "verdict": "partial_failure",
+  "direct_answer": "PDS44 one-shot rendering is deterministic and bounded at widths 20, 40, 80, and 120 with no residual C0/DEL controls, but width 1 overflows on the Related heading. Full-screen PDS44 remains unreachable in 0/2 latest PTY sessions. Static code shows Paper-owned scrolling, but mouse parity is absent, H is swallowed before history, Related is noninteractive, main query failures collapse to nil, and width 0 silently aliases width 80.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "aa533cef-fbf9-4dee-a27d-e0f9ca3c215f",
+    "assignment_snapshot_digest": "4c5d3ee92e3f90d8f777d0707fd074e592a8bcbb22fd0ff6c5e4b67c29c715f0",
+    "paper_id": "pds-wave-44-2026-08-03",
+    "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52"
+  },
+  "observations": {
+    "source": {
+      "blocks": 99,
+      "unique_block_ids": 99,
+      "raw_sha256": "4923e1b72da37c384ebc3f7b80ba15a08c9998fde560db0095d349a27457f96d",
+      "canonical_blocks_sha256": "1c10ec4984826b0b12a0111c64b57bfc2c79de3ae576dd40b74e83c9e183bfce"
+    },
+    "authored_carriers": {
+      "visible_nonempty_groups": 84,
+      "empty_paragraph_scaffolds": 15,
+      "headings": 32,
+      "paragraphs": 48,
+      "lists": 10,
+      "list_items": 85,
+      "tables": 5,
+      "header_cells": 12,
+      "body_cells": 203,
+      "intentionally_headerless_tables": 2,
+      "callouts": 4,
+      "marks": 0,
+      "links": 0
+    },
+    "one_shot_widths": {
+      "1": {"lines": 103906, "max_cells": 7, "overflow": 1, "offender": "Related", "residual_controls": 0},
+      "20": {"lines": 6568, "max_cells": 20, "overflow": 0, "residual_controls": 0},
+      "40": {"lines": 2653, "max_cells": 40, "overflow": 0, "residual_controls": 0},
+      "80": {"lines": 1305, "max_cells": 80, "overflow": 0, "residual_controls": 0},
+      "120": {"lines": 909, "max_cells": 120, "overflow": 0, "residual_controls": 0}
+    },
+    "projection": {
+      "visible_groups": "84/99",
+      "list_items": "85/85",
+      "table_bodies": "5/5",
+      "authored_headers": "0/12",
+      "callout_labels": "0/4",
+      "visible_slug_tokens": 0,
+      "visible_revision_tokens": 0
+    },
+    "full_screen": {
+      "exact_paper_opened": "0/2 latest PTY sessions",
+      "api_paper_present": true,
+      "history_revisions": 12,
+      "one_shot_is_not_proxy_pass": true
+    },
+    "required_cells": {
+      "terminal_widths": "partial: one-shot 4/5; width 1 fails; full-screen exact Paper unavailable",
+      "control_sanitization": "partial: exact source has zero residual C0/DEL; hostile C1/bidi/malformed UTF-8 matrix incomplete",
+      "focus_scroll": "partial static only: focused Paper owns scroll keys; dynamic exact-Paper proof blocked",
+      "click_enter": "not_found: main Update has no MouseMsg path",
+      "history": "not_found: focused Paper swallows H before history handler",
+      "related": "not_found: fail-open noninteractive appendix",
+      "typed_recovery": "partial: missing Paper rc4; main Query erases errors; width 0 silently defaults to 80"
+    }
+  },
+  "inferences": [
+    "The empty full-screen pane is likely a swallowed query error rather than an empty corpus.",
+    "Width-1 overflow comes from Related chrome outside the wrapped body renderer.",
+    "Static focus/scroll behavior cannot be promoted to a reader pass without an exact opened session."
+  ],
+  "repair_seams": [
+    "Return typed main-query states and restore exact Paper discovery.",
+    "Fix the width-1 Related heading and reject invalid widths explicitly.",
+    "Route H to structured history before focused-Paper no-op handling.",
+    "Implement or explicitly reject main-TUI mouse parity and selectable Related navigation.",
+    "Expose slug and immutable revision and preserve header/callout semantics."
+  ],
+  "tests": {
+    "command": "CGO_ENABLED=0 go test ./cmd/barkpark ./internal/cli ./internal/pdrender ./internal/taskboard -count=1",
+    "result": "PASS",
+    "claim_boundary": "Does not prove full-screen reachability, mouse parity, history, Related, or width-1 containment"
+  },
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "pds-bl-board-tui-reader-honesty", "task query: title*=TUI"],
+    "papers": ["pds-wave-44-2026-08-03@8bbd5d874a1b697f1e4e437c473f8e52", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      "tooling/grip/ledger/legendary-paper-restart-survey-44-2026-08-06.md",
+      "cmd/barkpark/tui_update.go",
+      "cmd/barkpark/history.go",
+      "cmd/barkpark/paper.go",
+      "internal/apiclient/client.go",
+      "internal/cli/paper_cmd.go",
+      "internal/pdrender"
+    ]
+  },
+  "risks": [
+    "Exact full-screen reachability remains 0/2.",
+    "Width 1 fails the hard boundary.",
+    "All 12 authored table headers and four callout labels disappear.",
+    "Mouse parity, Paper history, and interactive Related are absent.",
+    "Main query errors collapse to an empty pane and invalid width silently defaults.",
+    "C1, bidi, malformed UTF-8, CJK, combining, and ZWJ hostile cases remain incomplete."
+  ],
+  "unvisited_scope": [
+    "fresh exact full-screen sessions at five widths",
+    "dynamic focus, scroll, and resize preservation",
+    "real mouse and wheel parity",
+    "structured history replay and diff",
+    "interactive Related and forced failure",
+    "complete hostile Unicode/control matrix"
+  ],
+  "credential_scan": {"status": "clean", "credential_values_reported": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0}
+}
