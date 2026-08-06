@@ -302,9 +302,14 @@
     // un-upgraded emitter sends — still resolves to ERRORS.invalid
     // byte-identically, and every other slug never reaches this branch.
     // Neither key is deleted from ERRORS: the no-details path IS their path.
+    // An ARRAY details is excluded: Object.keys() on one yields "0", so the
+    // ladder below would render "0 has already been taken" — a worse sentence
+    // than the curated generic it unseated. Under main an array could only
+    // reach the ladder on an UNREGISTERED slug, so excluding it here keeps the
+    // fence from inventing that string on the two keys it newly routes.
     var generic = (key === "invalid" || key === "validation_failed");
     var hasDetails = !!data.details && typeof data.details === "object" &&
-      Object.keys(data.details).length > 0;
+      !Array.isArray(data.details) && Object.keys(data.details).length > 0;
     if (key && ERRORS[key] && !(generic && hasDetails)) return ERRORS[key];
     if (data.details && typeof data.details === "object") {
       var first = Object.keys(data.details)[0];

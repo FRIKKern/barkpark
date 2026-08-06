@@ -15398,6 +15398,10 @@ test("cch-w37-s1 THE FENCE CAN LOSE: no details, empty details, and non-generic 
     assert.equal(hooks.friendly({ error: "invalid", details: empty }), INVALID,
       "an empty or non-object details must not unseat the curated copy: " + JSON.stringify(empty));
   }
+  // REVIEW (cch-w37 review): an ARRAY details keys to "0", so the ladder would
+  // render "0 has already been taken". It must not unseat the curated copy.
+  assert.equal(hooks.friendly({ error: "invalid", details: ["has already been taken"] }), INVALID,
+    "an array details must not unseat the curated copy — Object.keys() yields \"0\"");
   // D412's three exclusions, rendered byte-identically WITH details attached.
   assert.equal(hooks.friendly({ error: "password_invalid", details: { password: ["is too short"] } }),
     "Password is too short (12+ characters).");
