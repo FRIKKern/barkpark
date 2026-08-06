@@ -792,24 +792,23 @@ defmodule BarkparkCloud.FailureCopyTest do
        "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5"},
       {"slack webhook token", "notify failed: xoxb-9aB3xQ7zLmNpR4tV", "xoxb-9aB3xQ7zLmNpR4tV"},
       {"aws access key id", "s3 sync refused key " <> @aws_key, @aws_key},
-      {"bare mixed-case 40-char provider token", "provider rejected " <> @bare_token, @bare_token},
+      {"bare mixed-case 40-char provider token", "provider rejected " <> @bare_token,
+       @bare_token},
 
       # OUR OWN credential, in the four shapes that leaked 93.6% before the
       # provider-prefix clause learned `bppat_`/`bpcs_`. The clause matches the
       # TOKEN, not the syntax around it, so all four close at once — which is the
       # whole argument for fixing it there rather than at each carrier.
-      {"barkpark PAT in an env fold",
-       "provisioner env: BARKPARK_TOKEN=" <> @bppat, @bppat},
-      {"barkpark PAT after export (no `\\b` before TOKEN)",
-       "+ export BARKPARK_TOKEN=" <> @bppat, @bppat},
-      {"barkpark PAT bare in prose (no key, no separator)",
-       "using token " <> @bppat <> " ok", @bppat},
-      {"barkpark PAT behind a colour code",
-       "\e[31mtoken=" <> @bppat <> "\e[0m", @bppat},
-      {"barkpark PAT as a Bearer credential",
-       "ssh: remote said Authorization: Bearer " <> @bppat, @bppat},
-      {"barkpark chat/MCP session token (bpcs_)",
-       "spawn failed: BARKPARK_API_TOKEN=" <> @bpcs, @bpcs},
+      {"barkpark PAT in an env fold", "provisioner env: BARKPARK_TOKEN=" <> @bppat, @bppat},
+      {"barkpark PAT after export (no `\\b` before TOKEN)", "+ export BARKPARK_TOKEN=" <> @bppat,
+       @bppat},
+      {"barkpark PAT bare in prose (no key, no separator)", "using token " <> @bppat <> " ok",
+       @bppat},
+      {"barkpark PAT behind a colour code", "\e[31mtoken=" <> @bppat <> "\e[0m", @bppat},
+      {"barkpark PAT as a Bearer credential", "ssh: remote said Authorization: Bearer " <> @bppat,
+       @bppat},
+      {"barkpark chat/MCP session token (bpcs_)", "spawn failed: BARKPARK_API_TOKEN=" <> @bpcs,
+       @bpcs},
       {"barkpark chat/MCP session token bare in prose",
        "child inherited " <> @bpcs <> " and exited 1", @bpcs},
 
@@ -819,10 +818,10 @@ defmodule BarkparkCloud.FailureCopyTest do
 
       # Fix B's own reach: `(?<![A-Za-z0-9])` also opens the key clause to every
       # other SCREAMING_SNAKE env var, not just ours.
-      {"generic SCREAMING_SNAKE env secret",
-       "env: MY_SECRET=Qp9vR4tZ7wN1cB6yH3sD5fG0", "Qp9vR4tZ7wN1cB6yH3sD5fG0"},
-      {"generic SCREAMING_SNAKE env token",
-       "env: DEPLOY_TOKEN=Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3", "Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3"}
+      {"generic SCREAMING_SNAKE env secret", "env: MY_SECRET=Qp9vR4tZ7wN1cB6yH3sD5fG0",
+       "Qp9vR4tZ7wN1cB6yH3sD5fG0"},
+      {"generic SCREAMING_SNAKE env token", "env: DEPLOY_TOKEN=Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3",
+       "Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3"}
     ]
 
     # NEGATIVES: shapes a person NEEDS to read. A redacted git SHA costs them the
@@ -858,7 +857,17 @@ defmodule BarkparkCloud.FailureCopyTest do
       {"the prefix NAMED in prose, with no body after it",
        "expected a token with the bppat_ prefix"},
       {"a word merely ENDING in token (Fix B's lookbehind excludes alnum)",
-       "xtoken=cax11 is not a recognised flag"}
+       "xtoken=cax11 is not a recognised flag"},
+
+      # Fix B widened the key clause's left edge to `_`, which put every
+      # `*_password`/`*_token` identifier in a stack trace or source echo inside
+      # its reach. A COMPARISON is not an assignment: `=` is not in the value
+      # clause's stop set, so without the `(?![=:])` guard the second `=` of
+      # `==` became "the value" and a captured source line rendered
+      # "hashed_password =[redacted] before" — copy loss where no secret was.
+      {"an Elixir comparison echoed from a stack trace, not an assignment",
+       "match failed: hashed_password == before"},
+      {"a guard clause echoed from the build log", "refused because deploy_token == nil"}
     ]
 
     for {label, input, secret} <- @positives do

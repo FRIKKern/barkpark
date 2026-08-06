@@ -256,7 +256,15 @@ defmodule BarkparkCloud.FailureCopy do
     # live credential. The lookbehind excludes only alphanumerics, so
     # `BARKPARK_TOKEN=`, `MY_SECRET=` and `DEPLOY_TOKEN=` all match while
     # `xtoken=` (a longer word merely ENDING in `token`) still does not.
-    {~r/(?<![A-Za-z0-9])((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?!#{@prose_value})[^\s"',;)]+/i,
+    #
+    # `(?![=:])` in the value position is the price of that widening. Reaching
+    # past `_` puts every `*_token`/`*_password` identifier in a captured stack
+    # trace or source echo inside this clause's reach, and `=` is not in the
+    # value's stop set — so `hashed_password == before` would render
+    # "hashed_password =[redacted] before", copy loss where no secret ever was.
+    # A COMPARISON is not an assignment. A real value never STARTS with `=` or
+    # `:`, so the guard costs no redaction (`token=abc==` still redacts whole).
+    {~r/(?<![A-Za-z0-9])((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?![=:])(?!#{@prose_value})[^\s"',;)]+/i,
      "\\1#{@redaction}"},
 
     # Provider-prefixed credentials: Stripe/OpenAI `sk-`/`pk-`, GitHub `ghp_`/
