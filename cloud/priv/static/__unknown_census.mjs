@@ -43,7 +43,7 @@
 //   LIMIT 1 — CALLEE INLINING IS DEPTH 1. Clause (3) inlines the bodies of
 //   named functions the fold's own function calls DIRECTLY, one hop only. A
 //   renderer whose determinate paint is TWO hops out is invisible here.
-//   `loadProviders` (app.js:2553) is a KNOWN MISS for exactly this reason —
+//   `loadProviders` (grep -n 'function loadProviders' app.js) is a KNOWN MISS —
 //   its determinate render is `renderProviderPage → providerRosterHtml`. The
 //   population this module reports is therefore a LOWER BOUND, not a total.
 //   Owned by bp task cch-w34-bl-census-depth-limit-loadproviders.

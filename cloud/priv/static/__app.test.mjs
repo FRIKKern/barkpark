@@ -14443,7 +14443,8 @@ test("cch-w34-s1: a 500 on /v1/sites SPEAKS — it never renders 'No sites yet'"
 });
 
 test("cch-w34-s1: a 403 on /v1/sites does NOT render the billing sentence", async () => {
-  // app.js:207 keys the GENERIC `forbidden` slug to "Only the team owner can
+  // The shared ERRORS map (grep -n 'forbidden:' app.js, inside the ERRORS
+  // object above friendly()) keys the GENERIC `forbidden` slug to "Only the team owner can
   // manage billing." — friendly()'s curated copy beats any caller fallback, so
   // bare friendly(r.data) would answer a sites read with billing copy.
   for (const bp of [{ id: "bp-1", host: "one.barkpark.cloud" }, { id: "bp-1", host: null }]) {

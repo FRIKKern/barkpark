@@ -277,7 +277,8 @@
 
   // cch-w34-s1 — THE COPY FOR A READ THAT FAILED, and why it is not bare
   // friendly()/faultCopy(). The shared ERRORS map keys the GENERIC `forbidden`
-  // slug to "Only the team owner can manage billing." (:207) — copy written for
+  // slug to "Only the team owner can manage billing." (grep -n 'forbidden:' in
+  // the ERRORS object above friendly()) — copy written for
   // the billing writes, which is the only place that slug used to surface. But
   // friendly()'s precedence is curated ERRORS → details → the caller's fallback,
   // so a 403 on a READ (the sites list, the token list) renders a sentence about
