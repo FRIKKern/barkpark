@@ -3233,6 +3233,10 @@
   ];
   var notifDeliveryFilter = { channel: null, status: null, event: null };
   var notifDeliveryRows = null; // the accumulated FILTERED page list
+  // True while the signed-in user is a plain member: the server fences the log to
+  // their own address, so the surface must say so and must not offer the channel
+  // axis. Set once per render from the role, never guessed from the rows.
+  var notifDeliverySelfScoped = false;
 
   // Pure: the request URL for one page of the delivery log. An unset axis sends
   // nothing; `before` is the ISO stamp of the oldest row already rendered and
@@ -3283,19 +3287,27 @@
   // surfaces in this SPA read as one idea.
   // The chip row's INNER markup — the one builder both the first render and the
   // in-place repaint use, so an active-chip rule can never drift between them.
-  function notifDeliveryChipRowHtml() {
-    var chan = NOTIF_DELIVERY_CHANNELS.map(function (c) {
-      return notifDeliveryChipHtml("channel", c.value, c.label, (notifDeliveryFilter.channel || null) === c.value);
-    }).join("");
+  //
+  // `selfScoped` DROPS the channel axis. A self-scoped read is fenced on the
+  // caller's own email address, and chat deliveries are recorded against the
+  // CHANNEL TYPE ("slack") rather than a person — so every chat chip a member
+  // could press is a guaranteed empty result. Offering a filter that can only
+  // ever return nothing is the same promise-with-no-mechanism this epic exists
+  // to kill; the section's copy says why instead.
+  function notifDeliveryChipRowHtml(selfScoped) {
     var stat = NOTIF_DELIVERY_STATUSES.map(function (s) {
       return notifDeliveryChipHtml("status", s.value, s.label, (notifDeliveryFilter.status || null) === s.value);
+    }).join("");
+    if (selfScoped) return '<span class="dim">Result</span>' + stat;
+    var chan = NOTIF_DELIVERY_CHANNELS.map(function (c) {
+      return notifDeliveryChipHtml("channel", c.value, c.label, (notifDeliveryFilter.channel || null) === c.value);
     }).join("");
     return '<span class="dim">Channel</span>' + chan + '<span class="dim">Result</span>' + stat;
   }
 
-  function notifDeliveryFiltersHtml() {
+  function notifDeliveryFiltersHtml(selfScoped) {
     return '<div class="activity-filters" id="notif-del-filters" role="group" aria-label="Filter the delivery log">' +
-        notifDeliveryChipRowHtml() +
+        notifDeliveryChipRowHtml(selfScoped) +
       "</div>" +
       '<div class="field">' +
         '<label class="label" for="notif-del-event">Event</label>' +
@@ -3318,20 +3330,43 @@
   // Delivery-log body states, filter-aware. An empty FILTERED log must never read
   // as "nothing has ever been delivered" — that sentence would be false, and it
   // is the exact lie a filter panel invites.
-  function notifDeliveriesBodyHtml(list, filtered) {
+  // `selfScoped` changes only the UNFILTERED empty sentence, and it has to: for a
+  // member the log is fenced to their own address, so "no notifications have been
+  // delivered yet" would be a claim about the whole team that this view cannot
+  // make. It says what it actually knows — nothing was sent to YOU.
+  function notifDeliveriesBodyHtml(list, filtered, selfScoped) {
     if (!list || !list.length) {
-      return filtered
-        ? '<div class="wh-del-empty dim">No sends match these filters. The log itself isn\'t empty &mdash; widen a filter to see the rest.</div>'
+      if (filtered) {
+        return '<div class="wh-del-empty dim">No sends match these filters. The log itself isn\'t empty &mdash; widen a filter to see the rest.</div>';
+      }
+      return selfScoped
+        ? '<div class="wh-del-empty dim">Nothing has been sent to your address yet.</div>'
         : '<div class="wh-del-empty dim">No notifications have been delivered yet.</div>';
     }
     return '<div class="wh-del-card">' + list.map(notifDeliveryRowHtml).join("") + "</div>";
   }
 
-  function notifDeliveriesShellHtml() {
+  // The delivery-log section. `selfScoped` is the MEMBER view of the same
+  // surface: same shell, same filters, same keyset trail — the server fences the
+  // rows to the caller's own address, so the difference is entirely in what the
+  // heading and the purpose line PROMISE.
+  //
+  // The self-scoped purpose line states the limit rather than letting a person
+  // infer a completeness this surface does not have: chat deliveries are
+  // recorded against the channel type, never against a person, so a self-scoped
+  // log can answer "was I emailed?" and can NEVER answer "did the team's Slack
+  // get it?". Saying that is the whole point — an empty member log used to be
+  // indistinguishable from "alerts are off".
+  function notifDeliveriesShellHtml(selfScoped) {
+    var head = selfScoped
+      ? '<h3 class="set-h">Your delivery log</h3>' +
+        '<p class="set-purpose">Every notification sent <strong>to your address</strong>, newest first &mdash; including alerts that were withheld. Filters run on the server, so they search your whole log, not just the page you can see.</p>' +
+        '<p class="set-purpose dim">This log covers email only. Chat deliveries (Slack, Discord&hellip;) are recorded against the channel rather than a person, so it can tell you whether <em>you</em> were emailed &mdash; never whether the team\'s chat channel got it. A team admin sees the full log.</p>'
+      : '<h3 class="set-h">Delivery log</h3>' +
+        '<p class="set-purpose">Every notification send, newest first. Filters run on the server, so they search the whole log &mdash; not just the page you can see.</p>';
     return '<section class="set-section">' +
-      '<h3 class="set-h">Delivery log</h3>' +
-      '<p class="set-purpose">Every notification send, newest first. Filters run on the server, so they search the whole log &mdash; not just the page you can see.</p>' +
-      notifDeliveryFiltersHtml() +
+      head +
+      notifDeliveryFiltersHtml(selfScoped) +
       '<div id="notif-deliveries-body"><div class="loading">Loading delivery log&hellip;</div></div>' +
       '<div class="activity-more" id="notif-del-more" hidden>' +
         '<button class="btn btn-ghost btn-sm" id="notif-del-load-more" type="button">Load more</button>' +
@@ -3339,21 +3374,30 @@
       "</section>";
   }
 
-  // The plain-member notice: channels, routing, and the delivery log are admin-only
-  // — an honest line, never a disabled ghost or a silent-403 button (GR33).
+  // The plain-member notice: channels and routing are admin-only — an honest
+  // line, never a disabled ghost or a silent-403 button (GR33).
+  //
+  // cch-w31-s8 CORRECTED this rather than deleting it: it used to say the
+  // delivery log was "managed by team admins" too, which stopped being true the
+  // moment the route learned to serve a member their own rows. The heading and
+  // the sentence now name exactly the two things a member still cannot touch,
+  // and point at the log they CAN read.
   function notifMemberAdminNoticeHtml() {
     return '<section class="set-section">' +
-      '<h3 class="set-h">Channels, routing &amp; delivery log</h3>' +
-      '<p class="set-purpose">Chat channels, the event-routing matrix, and the delivery log are managed by team admins.</p>' +
+      '<h3 class="set-h">Channels &amp; routing</h3>' +
+      '<p class="set-purpose">Chat channels and the event-routing matrix are managed by team admins &mdash; which alerts exist, and where they go. The sends addressed to you are in your delivery log below.</p>' +
       "</section>";
   }
 
-  // The whole page: admin gets every section; a member gets read-only email + the
-  // admin-only notice (no save-rows, no write affordances).
+  // The whole page: admin gets every section over the WHOLE team's log; a member
+  // gets read-only email, the corrected admin-only notice (no save-rows, no write
+  // affordances), and their OWN self-scoped delivery log.
   function notifPageHtml(s, opts) {
     opts = opts || {};
-    if (!opts.canManage) return notifEmailSectionHtml(s, false) + notifMemberAdminNoticeHtml();
-    return notifEmailSectionHtml(s, true) + notifChannelsSectionHtml(s) + notifMatrixSectionHtml(s) + notifDeliveriesShellHtml();
+    if (!opts.canManage) {
+      return notifEmailSectionHtml(s, false) + notifMemberAdminNoticeHtml() + notifDeliveriesShellHtml(true);
+    }
+    return notifEmailSectionHtml(s, true) + notifChannelsSectionHtml(s) + notifMatrixSectionHtml(s) + notifDeliveriesShellHtml(false);
   }
 
   // ── DOM mounts (browser + smoke verified) ────────────────────────────────────
@@ -3377,12 +3421,24 @@
     var box = $("#notif-body");
     if (!box) return;
     var canManage = notifCanManage();
+    // A member reads the log SELF-SCOPED, and the channel axis is not offered in
+    // that view — so drop any channel value a previous render left behind rather
+    // than sending a filter the user can no longer see or clear.
+    notifDeliverySelfScoped = !canManage;
+    if (notifDeliverySelfScoped) notifDeliveryFilter.channel = null;
     box.innerHTML = notifPageHtml(s, { canManage: canManage });
 
     // The header "Send test email" action is admin-only (email test is a mutation).
     var testBtn = $("#notif-test");
     if (testBtn) testBtn.hidden = !canManage;
-    if (!canManage) return; // member: read-only, nothing to wire.
+
+    if (!canManage) {
+      // Member: nothing writable to wire — but the delivery log is READ-ONLY and
+      // it is theirs, so it mounts exactly like the admin one.
+      wireNotifDeliveryFilters();
+      loadNotifDeliveries();
+      return;
+    }
 
     // Email section: transport seg toggles SMTP visibility + drives the save.
     var seg = $("#notif-transport-seg");
@@ -3437,7 +3493,7 @@
         return;
       }
       notifDeliveryRows = r.data.deliveries;
-      box.innerHTML = notifDeliveriesBodyHtml(notifDeliveryRows, filtered);
+      box.innerHTML = notifDeliveriesBodyHtml(notifDeliveryRows, filtered, notifDeliverySelfScoped);
       // A full page is the only honest reason to offer more: the server capped
       // us, so there may be older rows. A short page IS the end of the trail.
       toggleNotifDeliveryMore(notifDeliveryRows.length === NOTIF_DELIVERY_PAGE);
@@ -3463,7 +3519,7 @@
       if (more.length) {
         notifDeliveryRows = rows.concat(more);
         var box = $("#notif-deliveries-body");
-        if (box) box.innerHTML = notifDeliveriesBodyHtml(notifDeliveryRows, notifDeliveryFiltered());
+        if (box) box.innerHTML = notifDeliveriesBodyHtml(notifDeliveryRows, notifDeliveryFiltered(), notifDeliverySelfScoped);
       }
       toggleNotifDeliveryMore(more.length === NOTIF_DELIVERY_PAGE);
     });
@@ -3512,7 +3568,7 @@
   // Repaint ONLY the chip row (the event input keeps its own DOM value + focus).
   function repaintNotifDeliveryFilters() {
     var row = $("#notif-del-filters");
-    if (row) row.innerHTML = notifDeliveryChipRowHtml();
+    if (row) row.innerHTML = notifDeliveryChipRowHtml(notifDeliverySelfScoped);
   }
 
   function notifReadTransport() {

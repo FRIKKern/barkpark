@@ -126,7 +126,7 @@ defmodule BarkparkCloud.Web.Router do
       PUT     /v1/notifications/channels admin  update per-channel transport settings
       PUT     /v1/notifications/events admin  update per-event notification toggles
       POST    /v1/notifications/test      admin  send a rate-limited test email
-      GET     /v1/notifications/deliveries admin the team's durable notification delivery log (newest first; ?channel/?status/?event/?before narrow it)
+      GET     /v1/notifications/deliveries user  the durable notification delivery log (newest first; ?channel/?status/?event/?before narrow it). owner/admin sees the whole team's; any other member sees only sends addressed to them
       GET     /v1/tokens           user(s)   list the caller's Personal Access Tokens
       POST    /v1/tokens           user(s)   mint a PAT → {token: <plaintext ONCE>, pat}
       DELETE  /v1/tokens/:id       user(s)   revoke a PAT (own only) → {ok:true} | 404
@@ -4551,11 +4551,51 @@ defmodule BarkparkCloud.Web.Router do
   # GET /v1/notifications/deliveries → 200 {deliveries: [<delivery_json>]}, newest
   # first, strictly team-scoped via conn.assigns.current_team. Pure read-only
   # exposure of the durable notification_deliveries table — the delivery-log surface
-  # the Settings wave renders. ADMIN-gated (require_team_admin halts 401 with no
-  # session / 403 for a plain member) for parity with the other notifications admin
-  # routes. `?limit` caps the page via parse_int, hard-capped at 200 HERE (the
-  # /v1/audit precedent — list_audit_events caps in the context, but
-  # list_deliveries leaves the clamp to its caller, so the router owns it).
+  # the Settings wave renders. `?limit` caps the page via parse_int, hard-capped
+  # at 200 HERE (the /v1/audit precedent — list_audit_events caps in the context,
+  # but list_deliveries leaves the clamp to its caller, so the router owns it).
+  #
+  # TWO AUDIENCES, TWO ROW SETS — and the narrower one is the point.
+  # This route used to open `Auth.require_team_admin`, which made it the only
+  # surface that can answer "was I notified?" while 403ing the people it
+  # notifies: alert email fans out to EVERY member (`dispatch_event/3` loops
+  # `team_member_emails/1`, no role filter), so a plain member was a recipient of
+  # every alert and could never ask whether one reached them — a WITHHELD alert
+  # read byte-identically to "alerts are off". `accounts/authz.ex` already says
+  # verbatim "Reads stay at `member`"; this pure read gated at admin was a
+  # documented divergence from the codebase's own policy table.
+  #
+  # So: an owner/admin still reads the WHOLE team log, unchanged. Anyone else
+  # holding a grant on the team reads it SELF-SCOPED — `recipient:` fences the
+  # query to their own address (case-insensitively; see
+  # `Notifications.maybe_delivery_recipient/2`). The honest cost of that fence is
+  # structural and must be said out loud on the surface: chat deliveries store
+  # the CHANNEL TYPE as the recipient (`log_chat_delivery/6` writes
+  # `recipient: type`), so a self-scoped log answers "was I emailed?" and can
+  # NEVER answer "did the team's Slack get it?".
+  #
+  # `require_user/2` implies a team grant (`resolve_team/2` honours the
+  # `x-barkpark-team` header only after `get_membership/2` succeeds, else falls
+  # back to `primary_team/1`) — but it does NOT close the nil-team hole that
+  # `gate_role/2` closes explicitly. A user with no membership anywhere resolves
+  # to `current_team = nil`, so 403 BEFORE querying rather than running the fence
+  # against a nil team_id.
+  #
+  # THE SELF-SCOPED READ IS NOT FREE, AND THE NUMBER IS MEASURED, NOT ARGUED.
+  # EXPLAIN (ANALYZE, BUFFERS) against a seeded table (one team, 200k rows, 50
+  # recipients) shows the planner DECLINING `notification_deliveries_team_id_
+  # inserted_at_index` for the fenced query — `lower(recipient)` is not indexed,
+  # so it bitmap-scans `notification_deliveries_team_id_index`, filters 196k rows
+  # away and top-N heapsorts what is left: 30.8 ms / 3798 shared buffers. The
+  # ADMIN read on the same team still walks the compound index backwards and
+  # stops at the LIMIT: 0.037 ms / 6 buffers. The team fence keeps it bounded and
+  # 30 ms is a fine page today, but it scales with the TEAM'S WHOLE LOG rather
+  # than the page size, and this table has no retention policy. The fix is an
+  # index on `(team_id, lower(recipient), inserted_at)` — deliberately NOT taken
+  # in this slice (it is a migration, outside this slice's file fence). It is
+  # OPEN WORK, not a solved problem: re-run the same EXPLAIN (ANALYZE, BUFFERS)
+  # after adding it and quote both plans, because a green suite proves nothing
+  # about a query plan.
   #
   # `?channel=` / `?status=` / `?event=` narrow the log, and `?before=<oldest
   # inserted_at>&before_id=<that row's id>` walks the next page (the /v1/audit
@@ -4567,24 +4607,56 @@ defmodule BarkparkCloud.Web.Router do
   # closed vocabulary matches nothing rather than being dropped — a dropped
   # filter would silently show MORE than was asked for.
   get "/v1/notifications/deliveries" do
-    conn = Auth.require_team_admin(conn, [])
+    conn = Auth.require_user(conn, [])
 
-    if conn.halted do
-      conn
-    else
-      opts = [
-        limit: min(parse_int(conn.query_params["limit"], 50), 200),
-        channel: conn.query_params["channel"],
-        status: conn.query_params["status"],
-        event: conn.query_params["event"],
-        before: parse_dt(conn.query_params["before"]),
-        before_id: conn.query_params["before_id"]
-      ]
+    cond do
+      conn.halted ->
+        conn
 
-      deliveries = Notifications.list_deliveries(conn.assigns.current_team, opts)
-      json(conn, 200, %{deliveries: Enum.map(deliveries, &delivery_json/1)})
+      is_nil(conn.assigns.current_team) ->
+        json(conn, 403, %{error: "forbidden"})
+
+      true ->
+        user = conn.assigns.current_user
+        team = conn.assigns.current_team
+        admin? = Accounts.team_admin?(user, team)
+
+        # THE FENCE MUST FAIL CLOSED, and `list_deliveries/2` cannot make it do
+        # so on its own: `:recipient` is an OPTIONAL filter, so a nil or blank
+        # value there means "no fence" — which is exactly right for the admin
+        # read and exactly WRONG for a member. A non-admin whose account carries
+        # no usable address would therefore fall through to the UNFENCED query
+        # and be handed the whole team's log. The router owns the self-scope
+        # decision, so the router owns its failure mode: no address, no read.
+        cond do
+          not admin? and not self_scopable_address?(user) ->
+            json(conn, 403, %{error: "forbidden"})
+
+          true ->
+            opts = [
+              limit: min(parse_int(conn.query_params["limit"], 50), 200),
+              channel: conn.query_params["channel"],
+              status: conn.query_params["status"],
+              event: conn.query_params["event"],
+              before: parse_dt(conn.query_params["before"]),
+              before_id: conn.query_params["before_id"],
+              recipient: if(admin?, do: nil, else: user.email)
+            ]
+
+            deliveries = Notifications.list_deliveries(team, opts)
+            json(conn, 200, %{deliveries: Enum.map(deliveries, &delivery_json/1)})
+        end
     end
   end
+
+  # The address a self-scoped read is fenced on must be exactly what
+  # `Notifications.maybe_delivery_recipient/2` will accept as a filter — a
+  # non-empty binary. Anything else (a nil-email account, a blank string) cannot
+  # be fenced, and an unfenceable member read is a 403, never a wider one.
+  defp self_scopable_address?(%{email: email}) when is_binary(email),
+    do: String.trim(email) != ""
+
+  defp self_scopable_address?(_user), do: false
 
   # True when the caller wants a CHAT test rather than the default email test.
   defp chat_test?(params) do
