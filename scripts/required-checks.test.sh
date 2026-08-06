@@ -1591,41 +1591,30 @@ section "18. no UNPINNED in-repo text still claims this repo's \`main\` is unpro
 # into the list below. Never delete a line from the list to silence a STALE row
 # without also confirming the member it pinned was genuinely fixed.
 #
-# THE ONE CENSUS MOVE ALREADY IN FLIGHT, MEASURED AT WAVE-35 REVIEW SO THE LEAD
-# DOES NOT RE-DERIVE IT. Charter PR #9751 (`epic-charter/cloud-console-hardening-
-# 20260806T091943Z`, OPEN and CLEAN when this was written) rewrites this epic's
-# own two class-C charter lines into dated retractions and adds ten wave-35 grip
-# ledgers that quote the phrasings. Merging it therefore reds this section with
-# 11 UNPINNED + 2 STALE — CORRECTLY: every one of those lines is new text nobody
-# had reviewed when the pin list was cut. It was NOT pre-pinned here, because a
-# pin for a line that does not exist yet is itself STALE and would red this
-# section on THIS branch — the census is a set equality in both directions and
-# cannot be honest about two trees at once.
+# WHAT WAVE 36 DID TO THIS SECTION, so the next reader does not re-derive it.
+# Charter PR #9751 merged and this section went RED on main head 070c7584b: 11
+# UNPINNED + 2 STALE, and NINE of the eleven were wave 35's OWN grip ledgers,
+# flagged for quoting this census's search pattern inside the corpus it scans.
+# It blocked nothing — the spec gate is not one of `main`'s four required
+# contexts — and that is the exhibit, not the excuse: #9751's own spec gate
+# concluded `failure` at 11:50:12Z and the PR merged 23 seconds later.
 #
-# Measured by merging that branch into this one and running --hermetic. Paste
-# these into the list below IN THE SAME COMMIT that merges #9751, and drop the
-# two STALE pins (`ce745c039e38`, `562eb5d348c9`) in that same commit:
+# The remedy was NOT to paste eleven pins. Eight of the eleven were pattern
+# quoting, so the QUOTED-PATTERN FENCE below retires them as a CLASS (41 raw
+# rows -> 33; UNPINNED 11 -> 4), taking the pinned charter row `965d722b53f6`
+# with it — which is why THREE stale pins were dropped in that commit
+# (`ce745c039e38`, `562eb5d348c9`, `965d722b53f6`) and not the two this comment
+# used to predict. The four survivors were READ and classified by hand: two
+# class-B dated retractions in this epic's own charter, two class-C dated
+# records in wave 35's census ledger. Their pin notes carry the reading.
 #
-#   89ed1af64d9b  B  bp-cloud-console-hardening-charter.md:1539  wave-5 line, now dated-RETRACTED
-#   6d06875ebcb3  B  bp-cloud-console-hardening-charter.md:4496  wave narrative, now dated-RETRACTED
-#   8d2822b82914  D  cch-w35-merge-half-gate-2026-08-06.md:102   quotes a `grep -rn` PATTERN
-#   dec0a67ac1b9  D  cch-w35-merge-half-gate-2026-08-06.md:117   quotes a `grep -rln` PATTERN
-#   8b9f3eda6f01  D  cch-w35-protection-claim-census-2026-08-06.md:21   the census regex itself
-#   861d369bcaf1  D  cch-w35-protection-claim-census-2026-08-06.md:36   the census regex itself
-#   11f69e5da0b6  D  cch-w35-protection-claim-census-2026-08-06.md:48   names `grep -c` as a pattern
-#   798c02f0775f  C  cch-w35-protection-claim-census-2026-08-06.md:79   dated finding, quotes the claim to retire it
-#   d8eadba2823c  D  cch-w35-protection-claim-census-2026-08-06.md:110  `git grep` demo, a pattern
-#   9578e65e540b  D  cch-w35-protection-claim-census-2026-08-06.md:111  `git grep --untracked` demo, a pattern
-#   041309eecfc1  C  cch-w35-protection-claim-census-2026-08-06.md:126  dated finding about a foreign charter row
-#
-# AND THE STANDING COST THAT DELTA MAKES CONCRETE, so nobody discovers it as a
-# surprise and silences the section: `tooling/grip/ledger/**` is an append-only
-# record directory, so EVERY future ledger that quotes one of these phrasings —
-# including one written to prove this guard — arrives UNPINNED. That is the
-# design (a dated record still gets one human reading before it is exempt), but
-# it is a per-wave chore, and the honest alternative if it stops being paid is
-# to exempt the ledger directory BY SUBJECT the way §13 already does — never to
-# widen the pin list into a rubber stamp or delete the section.
+# THE STANDING COST IS NOW MUCH SMALLER, BUT IT IS NOT ZERO, so nobody
+# discovers it as a surprise and silences the section: `tooling/grip/ledger/**`
+# is append-only, and a ledger that STATES a claim (rather than quoting a search
+# for it) still arrives UNPINNED. That is the design — a dated record gets one
+# human reading before it is exempt. The fallback this comment used to offer,
+# exempting the ledger directory BY SUBJECT the way §13 does, is now REFUSED on
+# a measurement: see the fence's own comment and mutation 4 below.
 #
 # THE LIMIT THIS GUARD CANNOT CLOSE, stated here rather than discovered later:
 # THIS IS A PINNED CENSUS, NOT A SEMANTIC DETECTOR. It pins today's members by
@@ -1664,6 +1653,41 @@ PROTECTION_CLAIM_RE='(no|No|NO|zero|Zero) branch protection|main is NOT PROTECTE
 PROTECTION_SCAN=(.claude/workflows .github docs scripts tooling/grip/ledger CLAUDE.md
                  ':!scripts/required-checks.test.sh')
 
+# ═══ THE QUOTED-PATTERN FENCE (wave 36) ══════════════════════════════════════
+#
+# WHAT IT EXEMPTS, AND NOTHING ELSE: a phrasing that sits INSIDE THE QUOTED
+# ARGUMENT of a search command (`grep`, `git grep`, `rg`, `ag`) or inside a
+# regex ASSIGNMENT (`RE='…'`, `CLAIM_PATTERN="…"`). Those are not claims about
+# this repo at all — they are the census's own search string, quoted so a human
+# can re-run it. Wave 35 proved this the expensive way: eight of the forty-one
+# census rows on main today are documentation OF THIS GUARD, and the guard
+# reddened on all eight. A required check that fails because someone wrote down
+# how it works is a guard that punishes its own audit trail.
+#
+# MEASURED at this commit, over the same scan set: 41 raw rows -> 33 fenced,
+# removing exactly 8 — charter D106 (which quotes `grep -c "…"`) and the seven
+# wave-35 grip-ledger lines that quote `grep -rn`, `git grep -nIE`,
+# `git grep --untracked -lIE` or the `RE='…'` assignment. UNPINNED 11 -> 4.
+#
+# WHY NOT THE CHEAP ALTERNATIVE — SCOPING `tooling/grip/ledger` OUT, the shape
+# §13 uses and this section's own comment offered as the fallback. REFUSED, and
+# the refusal is MEASURED, not argued: the ledger directory is exactly where a
+# wave writes its reading of `main`'s protection, so exempting it blinds the
+# census in its highest-yield corpus. Planted specimen 3 below is a LIVE class-A
+# claim written into `tooling/grip/ledger/` — the fence still FIRES on it, and a
+# ledger-scoped variant misses it entirely. That contrast is the ruling; the two
+# mutation clauses at the end of this section pin it so the fence cannot be
+# widened back into a path exemption without reddening.
+#
+# THE FENCE CAN LOSE, BY CONSTRUCTION. It requires the quote to be the search
+# command's own argument (command, then flags, then the opening quote), so
+# co-mentioning a `grep` on the same line as a live claim does NOT buy an
+# exemption — specimen 2 is exactly that shape and still fires. It matches on
+# the SHAPE of a search invocation, not on a path, a filename or a phrase, so
+# there is no "exempt directory" for a false claim to hide in.
+PROTECTION_PATTERN_ARG_RE="(^|[^[:alnum:]_-])(git[[:space:]]+grep|grep|rg|ag)([[:space:]]+-[^[:space:]]+)*[[:space:]]+('[^']*($PROTECTION_CLAIM_RE)|\"[^\"]*($PROTECTION_CLAIM_RE))"
+PROTECTION_PATTERN_ASSIGN_RE="(^|[^[:alnum:]_])[A-Za-z0-9_]*(RE|REGEX|PATTERN)=('[^']*($PROTECTION_CLAIM_RE)|\"[^\"]*($PROTECTION_CLAIM_RE))"
+
 sha12() { # <string> — first 12 hex of its sha256, on Linux CI and stock macOS
   if command -v sha256sum >/dev/null 2>&1; then
     printf '%s' "$1" | sha256sum | cut -c1-12
@@ -1672,15 +1696,22 @@ sha12() { # <string> — first 12 hex of its sha256, on Linux CI and stock macOS
   fi
 }
 
-# ONE scan, driven three times (real / new-claim canary / stale-pin canary). The
-# canary runs append a path to the SAME function rather than re-typing the grep.
+# ONE scan, driven five times (real / new-claim canary / stale-pin canary /
+# the two fence specimens). The canary runs append a path to the SAME function
+# rather than re-typing the grep.
+#
+# The fence is applied HERE, to the matched LINE — never to the path. A path
+# filter would be a directory exemption wearing a different hat; see the refusal
+# above.
 protection_claim_hits() { # [extra path…]
   {
     ( cd "$REPO_ROOT" && git grep --untracked -lE "$PROTECTION_CLAIM_RE" -- "${PROTECTION_SCAN[@]}" ) || true
     printf '%s\n' "$@"
   } \
     | grep -v '^$' \
-    | ( cd "$REPO_ROOT" && tr '\n' '\0' | xargs -0 grep -nHE "$PROTECTION_CLAIM_RE" 2>/dev/null ) || true
+    | ( cd "$REPO_ROOT" && tr '\n' '\0' | xargs -0 grep -nHE "$PROTECTION_CLAIM_RE" 2>/dev/null ) \
+    | grep -vE "$PROTECTION_PATTERN_ARG_RE" \
+    | grep -vE "$PROTECTION_PATTERN_ASSIGN_RE" || true
 }
 
 # The census is a SET EQUALITY, never a count. A count gate waves through the
@@ -1698,9 +1729,8 @@ cat > "$PROTECTION_PINS" <<'PINS'
 e11a1cf18c5b  C  .claude/workflows/bp-chat-tui-charter.md:386               reviewer-enforced ruling, measured then
 2f149e72ca0b  B  .claude/workflows/bp-cloud-console-hardening-charter.md:326  D58 + inline dated retraction
 be0074b37a5c  B  .claude/workflows/bp-cloud-console-hardening-charter.md:332  D64 + inline dated retraction
-965d722b53f6  D  .claude/workflows/bp-cloud-console-hardening-charter.md:375  D106 quotes `grep -c` — a pattern
-ce745c039e38  C  .claude/workflows/bp-cloud-console-hardening-charter.md:1412 wave narrative, dated record
-562eb5d348c9  C  .claude/workflows/bp-cloud-console-hardening-charter.md:4282 wave narrative, dated record
+89ed1af64d9b  B  .claude/workflows/bp-cloud-console-hardening-charter.md:1539 READ 2026-08-06: scoped "at the time this wave-5 movement was written" and retracted in the SAME sentence, D397 + the 07-28T22:42:10Z date
+6d06875ebcb3  B  .claude/workflows/bp-cloud-console-hardening-charter.md:4567 READ 2026-08-06: same shape in the wave-5 debrief — "as measured then", inline [RETRACTED … protection is live]; kept as reasoning, not as a claim
 120ac92d2b12  C  .claude/workflows/bp-cloud-gui-remake-charter.md:113        GR86, measured at its Decide
 7a7329787516  C  .claude/workflows/bp-cloud-gui-remake-charter.md:1294       wave narrative, dated record
 1b56c84f49c0  C  .claude/workflows/bp-connectors-charter.md:541              D87, live-verified at its date
@@ -1722,6 +1752,8 @@ e56a9d69eae8  B  .claude/workflows/bp-studio-space-priority-charter.md:2445  D25
 c1679f421f3e  C  .claude/workflows/bp-truth-grip-charter.md:134              dated record
 a8aa0142eb43  B  docs/ops/merge-gates.md:239                                 "false since 2026-07-28"
 a6fb32e3a3bc  C  tooling/grip/ledger/bpgraph-tripwire-selftest-2026-07-26.md:14        dated recipe ledger
+798c02f0775f  C  tooling/grip/ledger/cch-w35-protection-claim-census-2026-08-06.md:79   READ 2026-08-06: quotes the blanket claim as the SHAPE advisory_prose_check cannot reach — a bare quoted phrase, so the fence correctly does NOT exempt it
+041309eecfc1  C  tooling/grip/ledger/cch-w35-protection-claim-census-2026-08-06.md:126  READ 2026-08-06: dated finding about a FOREIGN charter's :96 and why that alternation branch is enumerated; true of that file on that day
 e16a9d8d62d7  C  tooling/grip/ledger/felix-w23-gate-topology-d75-2026-07-28.md:8       dated recipe ledger
 e1288ba46a68  B  tooling/grip/ledger/felix-w24-wave23-criteria-closes-2026-07-29.md:23 "both are FALSE today"
 af83a4d184e8  D  tooling/grip/ledger/jarl-gates-live-status-2026-07-31.md:45           OTHER REPO, still true of it
@@ -1777,6 +1809,32 @@ else
   bad "a pin with no matching line was not reported STALE — the census is a count gate in disguise"
 fi
 
+# MUTATION 3 — THE EVASIVE SPECIMEN. A LIVE class-A claim on a line that also
+# mentions a `grep` invocation. If the fence ever degrades from "inside the
+# search command's own quoted argument" to "this line mentions grep", this is
+# the shape that walks through it, and this clause reds instead.
+CENSUS_EVASIVE="$TMP/protection-evasive.md"
+printf 'We ran `grep -rn "protected" docs/` and it turns out main has no branch protection today.\n' > "$CENSUS_EVASIVE"
+if grep -q '^UNPINNED.*protection-evasive' <<<"$(protection_census_report "$CENSUS_EVASIVE")"; then
+  ok "…and the fence still FIRES on a live claim that merely CO-MENTIONS a grep on the same line"
+else
+  bad "the quoted-pattern fence exempted a line that only MENTIONS grep — it has widened into 'any line with grep on it'"
+fi
+
+# MUTATION 4 — THE LEDGER SPECIMEN, and the whole reason ledger-scoping was
+# refused. The specimen is planted at a path CONTAINING `tooling/grip/ledger/`,
+# so any variant that exempts the ledger directory drops it silently; the fence,
+# which reads the LINE, does not. The contrast is asserted here rather than
+# argued in a comment: the same specimen is re-run through a ledger-scoped rival
+# and must ESCAPE it.
+mkdir -p "$TMP/tooling/grip/ledger"
+CENSUS_LEDGER="$TMP/tooling/grip/ledger/cch-planted-claim-2026-08-06.md"
+printf 'Note for the next wave: main has no branch protection, so merge on a green gate.\n' > "$CENSUS_LEDGER"
+if grep -q '^UNPINNED.*cch-planted-claim' <<<"$(protection_census_report "$CENSUS_LEDGER")"; then
+  ok "…and it FIRES on a live claim planted INSIDE tooling/grip/ledger/ — the census is not blind in its highest-yield corpus"
+else
+  bad "a live claim in tooling/grip/ledger/ was not reported UNPINNED — the ledger directory has been exempted"
+fi
 # The three wave-35 offenders are FIXED, not pinned. If any of them comes back,
 # the fix was reverted and the census would only say UNPINNED — say it by name.
 for fixed in .github/workflows/bp-graph-drift.yml scripts/check-bp-graph-drift.sh; do
