@@ -468,6 +468,24 @@ defmodule BarkparkCloud.Web.Router do
                     proxies: ["127.0.0.0/8", "::1/128"]
                   )
 
+  # dr-w4-s4: the all-unmetered host-pressure block a fleet row carries when the
+  # box has NEVER phoned home a health beat (a just-created / just-enqueued
+  # instance, and every box whose agent predates the vitals beat). Every signal
+  # is nil — "we did not measure" — never a fabricated 0, which would read as a
+  # perfectly idle machine. Shape is fixed so a consumer can always destructure.
+  @unmetered_pressure %{
+    cpu_percent: nil,
+    cpu_cores: nil,
+    mem_used_percent: nil,
+    load1: nil,
+    disk_used_percent: nil,
+    swap_used_percent: nil,
+    swap_total_bytes: nil,
+    beam_pss_bytes: nil,
+    beam_swap_bytes: nil,
+    reported_at: nil
+  }
+
   # Rewrite conn.remote_ip to the real client IP from X-Forwarded-For, but ONLY
   # when the immediate peer is a trusted front (loopback, or the docker bridge
   # gateway — see trusted_peer?/1). A request whose actual peer is NOT trusted is
@@ -1791,6 +1809,14 @@ defmodule BarkparkCloud.Web.Router do
   # query) so the dashboard can show a FAILED launch distinctly from one still
   # provisioning — a failed job leaves the barkpark health "unknown"/host nil,
   # otherwise indistinguishable from in-progress.
+  #
+  # dr-w4-s4: each row also carries `pressure` — the host's live vitals off the
+  # latest health beat, prefetched the same batched way. AUTHORIZATION NOTE
+  # (charter D63, a deliberate decision): this default branch accepts a
+  # read-scoped PAT while /metrics — the only other pressure surface — is
+  # `require_user` only, so host pressure is now visible to MACHINE principals
+  # holding a read token for their own team's boxes. Accepted: it is the team's
+  # own box, and it is what `bp cloud status` in CI wants.
   get "/v1/barkparks" do
     conn = fetch_query_params(conn)
     all_teams? = conn.query_params["scope"] == "all"
@@ -1819,11 +1845,16 @@ defmodule BarkparkCloud.Web.Router do
       ids = Enum.map(barkparks, & &1.id)
       pmap = Registry.latest_provision_status_map(ids)
       dmap = Registry.latest_deprovision_status_map(ids)
+      # dr-w4-s4: host pressure rides the SAME prefetch shape — one DISTINCT ON
+      # query for the whole page, never a per-row lookup (that is the N+1 this
+      # domain already paid for once).
+      hmap = Registry.latest_health_payload_map(ids)
 
       json(conn, 200, %{
         barkparks:
           Enum.map(scoped_barkparks, fn {barkpark, role} ->
-            row = barkpark_json(barkpark, pmap[barkpark.id], dmap[barkpark.id])
+            row =
+              barkpark_json(barkpark, pmap[barkpark.id], dmap[barkpark.id], hmap[barkpark.id])
 
             if all_teams? do
               Map.put(row, :team, %{
@@ -8608,7 +8639,14 @@ defmodule BarkparkCloud.Web.Router do
 
   defp string_param_or_nil(_), do: nil
 
-  defp barkpark_json(bp, provision \\ nil, deprovision \\ nil) do
+  # `pressure` is the PREFETCHED latest health beat for this box
+  # (`Registry.latest_health_payload_map/1`), passed IN as a parameter and
+  # defaulting to nil. Deliberately a parameter, not a lookup inside this
+  # function: four of the five call sites serialize a box that by construction
+  # has never beaten (a just-created / just-enqueued instance), and an internal
+  # lookup would put a per-row query on those four WRITE paths. nil → the
+  # `pressure` key renders all-unmetered, never zeros.
+  defp barkpark_json(bp, provision \\ nil, deprovision \\ nil, pressure \\ nil) do
     base = %{
       id: bp.id,
       name: bp.name,
@@ -8680,7 +8718,57 @@ defmodule BarkparkCloud.Web.Router do
     |> merge_job_status(:deprovision_status, :deprovision_error, deprovision)
     |> merge_provision_steps(provision)
     |> merge_provision_console(provision)
+    |> merge_pressure(pressure)
   end
+
+  # dr-w4-s4: the host's LIVE resource pressure on the fleet row. Until now
+  # `barkpark_json/3` carried ~30 fields and ZERO vitals, so a box at 100% cpu
+  # and load1 5.57 was indistinguishable from an idle one to any consumer that
+  # ranks the fleet off this payload.
+  #
+  # Read straight off the agent-shaped RAW jsonb of the latest health beat (not
+  # `Telemetry.normalize/1`, whose fixed envelope drops swap and the BEAM's own
+  # footprint — the two signals that name a box swapping itself to death).
+  #
+  # HONESTY LAW, and the whole point of the slice: an ABSENT key and the agent's
+  # `-1` "probe not wired" sentinel both render `nil` — UNMETERED — never 0. A
+  # box whose agent predates the vitals beat must read "we did not measure",
+  # never "measured, and it is fine". Same guard the usage meters already keep
+  # (`n >= 0`). `swap_used_percent` travels WITH `swap_total_bytes` because a
+  # bare percent cannot separate a swapless box (0, 0) from an idle one (0, >0).
+  # `reported_at` is the beat's own timestamp, so a consumer can age the reading
+  # rather than trust it blindly.
+  #
+  # The key is always present (all-nil when the box has never beaten), so a
+  # consumer branches on the VALUES, not on the key's existence.
+  defp merge_pressure(map, %{payload: payload, reported_at: at}) when is_map(payload) do
+    Map.put(map, :pressure, %{
+      cpu_percent: measured_or_nil(Map.get(payload, "cpu_percent")),
+      # The strained fence's DENOMINATOR (charter D52): sustained load-PER-CORE,
+      # never a raw load number and never a hardcoded core count. It rides here
+      # rather than beside `server_type` because `server_type` is a nullable
+      # LAUNCH PIN, not observed truth — wrong or empty on adopted boxes — while
+      # this is `runtime.NumCPU()` off the beat itself. An agent that predates
+      # the field simply omits it, so it renders nil and a nil vital never
+      # strains (D42's factual arm).
+      cpu_cores: measured_or_nil(Map.get(payload, "cpu_cores")),
+      mem_used_percent: measured_or_nil(Map.get(payload, "mem_used_percent")),
+      load1: measured_or_nil(Map.get(payload, "load1")),
+      disk_used_percent: measured_or_nil(Map.get(payload, "disk_used_percent")),
+      swap_used_percent: measured_or_nil(Map.get(payload, "swap_used_percent")),
+      swap_total_bytes: measured_or_nil(Map.get(payload, "swap_total_bytes")),
+      beam_pss_bytes: measured_or_nil(Map.get(payload, "beam_pss_bytes")),
+      beam_swap_bytes: measured_or_nil(Map.get(payload, "beam_swap_bytes")),
+      reported_at: at
+    })
+  end
+
+  defp merge_pressure(map, _), do: Map.put(map, :pressure, @unmetered_pressure)
+
+  # A vital counts as MEASURED only when it is a non-negative number. Anything
+  # else — absent, non-numeric, or the agent's `-1` unwired sentinel — is nil.
+  defp measured_or_nil(n) when is_number(n) and n >= 0, do: n
+  defp measured_or_nil(_), do: nil
 
   # The fleet-ops row shape (GET/POST /v1/internal/barkparks): the identity +
   # placement fields the `bp cloud hetzner instance` verbs cross-check, plus

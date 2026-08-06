@@ -2247,6 +2247,165 @@ test("gr-p5: operatorPageHtml composes the four cards, each with its own body sl
   assert.ok(!/Suspend|Decommission|Archive|Delete instance/i.test(html), "no lifecycle admin verbs");
 });
 
+// ── cch-w36-s4: the refusal has a voice, and the funnel keeps the status ─────
+// Charter D411 carves ONE additive emission out of GR49's fail-closed bounce,
+// fenced three ways: GR9 untouched (the sentence names the PLATFORM principal,
+// never a team role), fail-closed unweakened (routing byte-identical, the
+// unloaded-me arm still WAITS), and it must never say "ask your team owner" —
+// a platform allowlist is not team-grantable, and pointing at a team owner is
+// charter D386's wrong remedy on a new screen.
+
+test("cch-w36-s4: operatorReadFault tells FOUR classes apart — a 403 is an authority determination, not a transport story", () => {
+  assert.equal(hooks.operatorReadFault({ ok: true, status: 200, data: {} }), null, "an answer has no fault");
+  assert.equal(hooks.operatorReadFault(null), null, "no response, no invented fault");
+
+  const denied = hooks.operatorReadFault({ ok: false, status: 403, data: { error: "forbidden" } });
+  assert.equal(denied.kind, "denied");
+  assert.match(denied.text, /refused this read \(403\)/, "the determination is named as a determination");
+  assert.match(denied.text, /platform_operator/, "it names the principal the server itself emits");
+  assert.match(denied.text, /That says nothing about the fleet itself/, "and it claims nothing about the fleet");
+
+  const expired = hooks.operatorReadFault({ ok: false, status: 401, data: {} });
+  assert.equal(expired.kind, "expired");
+  assert.match(expired.text, /no longer accepted here \(401\)/);
+  assert.doesNotMatch(expired.text, /platform_operator/, "an expired session is not an allowlist verdict");
+
+  const dead = hooks.operatorReadFault({ ok: false, status: 0, data: { error: "network_error" }, transport: "unreachable" });
+  assert.equal(dead.kind, "unreachable");
+  assert.match(dead.text, /never reached the control plane/);
+
+  // A 5xx and an older control plane's 404 DEFER: "it didn't answer" is the true
+  // sentence for both, and it is the card's own to say.
+  // (Field-wise, not deepEqual: the sandbox's objects are cross-realm.)
+  const server = hooks.operatorReadFault({ ok: false, status: 500, data: {} });
+  assert.equal(server.kind, "server");
+  assert.equal(server.text, null, "a 5xx defers to the card's own 'it didn't answer'");
+  const older = hooks.operatorReadFault({ ok: false, status: 404, data: {} });
+  assert.equal(older.kind, "other");
+  assert.equal(older.text, null, "an older control plane's 404 defers too");
+});
+
+test("cch-w36-s4: operatorCardBody is the ONE funnel — all four cards speak the allowlist under a 403 and their own line under a 500", () => {
+  const cards = {
+    brake: (d) => hooks.operatorBrakeCardHtml(d),
+    canary: (d) => hooks.operatorCanaryCardHtml(d),
+    warm: (d) => hooks.operatorWarmPoolCardHtml(d),
+    digest: (d) => hooks.operatorDigestCardHtml(d && d.deliveries),
+  };
+  const forbidden = { ok: false, status: 403, data: { error: "forbidden" } };
+  const boom = { ok: false, status: 500, data: {} };
+  const offline = { ok: false, status: 0, data: { error: "network_error" }, transport: "unreachable" };
+
+  for (const [name, render] of Object.entries(cards)) {
+    const denied = hooks.operatorCardBody(forbidden, render);
+    assert.match(denied, /platform_operator/, name + " names the authority under a 403");
+    assert.match(denied, /refused this read \(403\)/, name + " says it was refused, not unanswered");
+    assert.ok(!/didn't answer/.test(denied), name + " must NOT call a determined 403 a failure to answer");
+    assert.ok(!/couldn't read it/.test(denied), name + " must not blame its own reading for a refusal");
+
+    const unread = hooks.operatorCardBody(boom, render);
+    assert.match(unread, /didn't answer/, name + " keeps its honest degrade under a 5xx");
+    assert.ok(!/platform_operator/.test(unread), name + " never blames the allowlist for a 5xx");
+
+    assert.match(hooks.operatorCardBody(offline, render), /never reached the control plane/,
+      name + " distinguishes a request that never landed");
+  }
+
+  // An OK read is byte-identical to the old ternary: the card's own render, its
+  // own data — the funnel adds no arm to the success path.
+  assert.equal(
+    hooks.operatorCardBody({ ok: true, status: 200, data: { ready: 2 } }, cards.warm),
+    hooks.operatorWarmPoolCardHtml({ ready: 2 }),
+  );
+
+  // AIM: operatorPaint routes through the funnel. The old collapsing ternary,
+  // which handed every card the same null whatever the control plane said, is
+  // gone from the file — reverting it reds HERE, not only in smoke.
+  assert.match(APP_SRC, /slot\.innerHTML = operatorCardBody\(r, render\);/,
+    "the one funnel is the one assignment");
+  assert.equal((APP_SRC.match(/render\(r\.ok \? r\.data : null\)/g) || []).length, 0,
+    "the status-destroying ternary is gone");
+});
+
+test("cch-w36-s4 (D411): the fail-closed bounce EMITS one refusal — routing untouched, and it never sends anyone to a team owner", () => {
+  // GR9 fence: the sentence names the PLATFORM principal and no team role.
+  const copy = hooks.OPERATOR_ALLOWLIST_COPY;
+  assert.match(copy, /platform_operator/, "the principal the server itself emits");
+  assert.match(copy, /No team role grants it/, "and the fact that no team action can");
+  for (const wrong of [/ask your team owner/i, /contact your team owner/i, /ask the team owner/i, /manage billing/i])
+    assert.doesNotMatch(copy, wrong, "a platform allowlist is not a team remedy (charter D386)");
+  assert.ok(!/\bowner or admin\b/i.test(copy) && !/\badmin\b/i.test(copy),
+    "the owner/admin family is a different axis and is never invoked here");
+
+  const deny = APP_SRC.match(/if \(!operatorRouteAllowed\(meCache\)\) \{[\s\S]*?\n    \}\n/);
+  assert.ok(deny, "the deny branch is still the branch");
+  const branch = deny[0];
+  // FAIL-CLOSED, UNWEAKENED: every routing byte still there, in order.
+  assert.match(branch, /body\.innerHTML = "";/, "the body is still blanked");
+  assert.match(branch, /if \(location\.hash !== "#overview"\) location\.hash = "#overview";/, "the hash still flips");
+  assert.match(branch, /applyRoute\(\);/, "the bounce is still synchronous");
+  // ADDITIVE: the sentence rides the toast stack, never #operator-body, and is
+  // emitted AFTER the bounce so the repaint cannot swallow it.
+  assert.match(branch, /toast\(\{/, "the refusal is emitted");
+  assert.match(branch, /OPERATOR_ALLOWLIST_COPY/, "and it is the allowlist sentence");
+  assert.ok(branch.indexOf("applyRoute()") < branch.indexOf("toast({"), "emitted after the bounce, not instead of it");
+  assert.ok(!/body\.innerHTML =[^;]*toast/.test(branch) && (branch.match(/body\.innerHTML/g) || []).length === 1,
+    "#operator-body stays empty — the sentence never becomes operator markup");
+
+  // THE UNLOADED-ROLE ARM STILL WAITS: a real operator whose /v1/me has not
+  // landed is told we are checking, and is never accused.
+  const loader = APP_SRC.match(/function loadOperator\(\) \{[\s\S]*?\n  \}\n/)[0];
+  assert.match(loader, /if \(!meCache\) \{\s*\n\s*body\.innerHTML = '<div class="loading">Checking operator access&hellip;<\/div>';\s*\n\s*return;/,
+    "the unloaded-me arm renders the checking line and returns, ahead of any refusal");
+  assert.ok(loader.indexOf("Checking operator access") < loader.indexOf("toast({"),
+    "nothing can accuse a session whose role has not loaded");
+
+  // GR9: the predicate family is untouched — the route gate still delegates.
+  assert.match(APP_SRC, /function operatorRouteAllowed\(me\) \{\s*\n\s*return operatorVisible\(me\);/,
+    "the route gate still delegates to the sidebar predicate — no new role axis");
+});
+
+test("cch-w36-s4: a failed halt/resume stops printing the billing sentence over a 403", () => {
+  const action = APP_SRC.match(/function fleetRolloutAction\(verb, onDone\) \{[\s\S]*?\n  \}\n/)[0];
+  assert.match(action, /var fault = operatorReadFault\(r\);/, "the CALL SITE classifies the fault");
+  assert.match(action, /fault && fault\.text \? fault\.text : friendly\(r\.data, "Please try again\."\)/,
+    "a nameable fault speaks; everything else keeps friendly()");
+  // The rendered toast body under a 403 — the sentence the operator now reads.
+  const body = hooks.operatorReadFault({ ok: false, status: 403, data: { error: "forbidden" } }).text;
+  assert.match(body, /platform_operator/);
+  assert.doesNotMatch(body, /billing/i, "a refused halt is not a billing problem");
+  // friendly() is NOT edited here (cch-w35-s4 owns it): the curated map still
+  // maps `forbidden` the way it does, which is exactly why the call site guards.
+  // …and the curated map is NOT edited here (cch-w35-s4 owns friendly()): it
+  // still answers `forbidden` with its team-owner sentence, which is precisely
+  // why the call site has to guard. Asserted UNCONDITIONALLY — a `hooks.friendly
+  // ? … : "team owner"` shape would pass on an absent export, which is the
+  // vacuous green this wave exists to kill.
+  assert.equal(typeof hooks.friendly, "function", "friendly() is hook-exported, so this assertion can fail");
+  assert.match(hooks.friendly({ error: "forbidden" }, "x"), /team owner/,
+    "the curated map is untouched — the fix is at the call site");
+});
+
+test("cch-w36-s4-r: the Halt confirm dialog's OWN failure arm stops printing the billing sentence too", () => {
+  // The builder enumerated ONE call site (fleetRolloutAction) and filed this
+  // sixth one as backlog. It is the path the console's own Halt button takes —
+  // operatorConfirmBrake("halt") does NOT go through fleetRolloutAction — so a
+  // 403 rendered "Only the team owner can manage billing." inside a DANGER
+  // confirm dialog about the whole fleet. Fixed in review with the classifier
+  // this same commit ships; pinned here so a revert reds.
+  const brake = APP_SRC.match(/function operatorConfirmBrake\(verb\) \{[\s\S]*?\n  \}\n/)[0];
+  assert.match(brake, /var haltFault = operatorReadFault\(r\);/,
+    "the confirm dialog's failure arm classifies the fault before it speaks");
+  assert.match(brake, /haltFault && haltFault\.text \? haltFault\.text : friendly\(r\.data, "Please try again\."\)/,
+    "a nameable fault speaks; every other class keeps friendly()");
+  assert.equal((brake.match(/ctl\.fail\(friendly\(/g) || []).length, 0,
+    "the unguarded ctl.fail(friendly(…)) shape is gone");
+  // And the sentence it now shows is the authority one, not billing.
+  const shown = hooks.operatorReadFault({ ok: false, status: 403, data: { error: "forbidden" } }).text;
+  assert.match(shown, /platform_operator/);
+  assert.doesNotMatch(shown, /billing/i);
+});
+
 // ── GR49 anti-drift source guards (the console is the SOLE brake control) ────
 
 test("gr-p5 GR49: ONE route literal, ONE action emitter, ZERO worker-gated probes", () => {
@@ -14492,9 +14651,13 @@ test("cch-w31-s4: api()'s envelope is ADDITIVE — status 0 and network_error su
   // string branches are still there — the envelope added fields, it repurposed
   // nothing. (Five code branches now: the four originals plus faultCopy's own
   // arm, which is what lets the four retire at the seam later.)
+  // cch-w36-s4 raises the pin to SIX: operatorReadFault classifies a status-0
+  // operator read as `unreachable` so a card that never got an answer stops
+  // reading like one that got a refusal. The pin is a set-size ratchet on
+  // ADDITIONS, not a ban on them — a branch that DISAPPEARS still reds it.
   const zeroBranches = [...src.matchAll(/^\s*if \(status === 0\)/gm)];
-  assert.equal(zeroBranches.length, 5,
-    "the four original status-0 branches plus faultCopy's arm (found " + zeroBranches.length + ")");
+  assert.equal(zeroBranches.length, 6,
+    "the four original status-0 branches, faultCopy's arm, and operatorReadFault's (found " + zeroBranches.length + ")");
   assert.ok([...src.matchAll(/err === "network_error"/g)].length >= 2);
   // A non-JSON body still hands consumers an EMPTY data object (all 354 .data
   // reads unchanged) — the bytes now ride alongside as `text` instead of
@@ -15071,4 +15234,181 @@ test("cch-w36-s3: loadEnvVars does the same — the twin fall-through is closed 
   assert.ok(failed.indexOf("No team yet") === -1);
   assert.match(failed, /Couldn&#39;t load environment variables|Couldn't load environment variables/);
   assert.match(failed, /data-env-retry/);
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// cch-w35-s4 — THE 403 STOPS BEING A BILLING SENTENCE.
+//
+// friendly() resolves `forbidden` out of ONE global map, and that map's entry is
+// billing copy (GR36, written for the five owner-gated billing writes). It wins
+// over every caller fallback at all 55 friendly() sites, so a plain member who
+// clicks Activity — refused by the admin-gated GET /v1/audit — reads "Only the
+// team owner can manage billing." about the audit log. The server now merges
+// evidence around that slug (Auth.forbidden/2: `required`, or `reason` for the
+// no-team arm), and ONE fence ahead of the map lets that evidence win.
+//
+// THE HARNESS COULD NOT LOSE HERE BEFORE THIS BLOCK. The only two assertions on
+// the billing sentence anywhere in this file are NEGATIVE (indexOf(…) === -1),
+// so mutation M1 — deleting the evidence guard so every bare forbidden
+// fabricates a role sentence — passed 887/887. The positive control below is
+// what notices.
+
+const FORBIDDEN_BILLING = "Only the team owner can manage billing.";
+const ADMIN_SENTENCE = "You need the admin role on this team — an admin on this team can grant it.";
+const AUDIT_403 = { error: "forbidden", required: "admin", scope: "primary_team" };
+
+test("cch-w35-s4 POSITIVE CONTROL (RED under M1): a bare forbidden STILL reads the billing sentence", () => {
+  // The billing gate (require_primary_team_owner) sends `required: "owner"` on a
+  // member/admin, but a 403 with NO evidence at all — an un-upgraded route, an
+  // edge proxy, an older deploy — must keep resolving to the curated entry.
+  // Delete the `typeof required !== "string"` guard in forbiddenEvidenceCopy and
+  // this test is the one that fails.
+  assert.equal(hooks.friendly({ error: "forbidden" }), FORBIDDEN_BILLING);
+  assert.equal(hooks.friendly({ error: "forbidden" }, "a caller fallback"), FORBIDDEN_BILLING);
+  assert.equal(hooks.faultCopy(403, { error: "forbidden" }, "a caller fallback"), FORBIDDEN_BILLING);
+  // Deliberately asserts NOTHING about evidence: this test must stay green when
+  // the fence is reverted and red ONLY when the guard is deleted, so that a
+  // future reader can tell the two mutations apart by which test speaks.
+});
+
+test("cch-w35-s4 THE OWNER GATE, MEASURED NOT ASSUMED: the billing writes read the OWNER sentence", () => {
+  // DEVIATION FROM THE BRIEF, PINNED HERE SO IT IS VISIBLE RATHER THAN SILENT.
+  // The slice brief predicted the five owner-gated billing writes would keep
+  // ERRORS.forbidden verbatim, "because the owner gate's evidence is
+  // billing-scoped or absent". It is neither: Auth.require_primary_team_owner
+  // (cloud/lib/barkpark_cloud/web/auth.ex, the `forbidden(conn, required:
+  // "owner", scope: "primary_team")` arm) ships evidence, so the fence DOES fire
+  // on POST /v1/billing/{checkout,portal,cancel} and they now read the owner
+  // ROLE sentence instead of the owner BILLING sentence. Both are true on that
+  // screen; the role sentence is additionally true on the OTHER owner gate
+  // (Auth.require_team_owner → team deletion), where "manage billing" would be a
+  // second confidently-wrong sentence. That is why the arm is not special-cased.
+  const portal403 = { error: "forbidden", required: "owner", scope: "primary_team" };
+  assert.equal(hooks.friendly(portal403, "Please try again in a moment."),
+    "You need the owner role on this team — only the team owner can grant it.");
+  // It never reads as transient — the GR36 property that entry exists to hold.
+  assert.ok(hooks.friendly(portal403, "Please try again in a moment.").indexOf("try again") === -1);
+  // And the static owner-gate copy on the billing SCREEN is untouched (app.js
+  // renders that string as literal markup; smoke.mjs pins it mounted).
+  assert.equal(hooks.friendly({ error: "forbidden" }), FORBIDDEN_BILLING);
+});
+
+test("cch-w35-s4 THE EXHIBIT, BOTH DIRECTIONS: an evidence-carrying 403 names the authority, not billing", () => {
+  const copy = hooks.friendly(AUDIT_403);
+  // PRESENT: the authority the gate actually wanted.
+  assert.equal(copy, ADMIN_SENTENCE);
+  assert.match(copy, /admin on this team/);
+  // ABSENT: the sentence that used to render here. THIS is the arm that can lose
+  // — revert the fence in friendly() and it fails.
+  assert.ok(copy.indexOf(FORBIDDEN_BILLING) === -1, "the audit log is not the billing screen");
+  assert.ok(copy.indexOf("billing") === -1);
+  // `scope` is NEVER interpolated (it says primary_team even when the team
+  // switcher made a SECOND team refuse you), and `reason` is never echoed raw.
+  assert.ok(copy.indexOf("primary_team") === -1 && copy.indexOf("primary team") === -1,
+    "scope is a misnomer under the team switcher — the sentence says 'this team'");
+  // This is verbatim what loadActivity's empty state renders: it interpolates
+  // esc(friendly(r.data)) under <h2>Couldn't load activity</h2>.
+  assert.equal(hooks.esc(copy).indexOf(FORBIDDEN_BILLING), -1);
+  assert.match(hooks.esc(copy), /admin on this team/);
+  // The owner gate's own evidence names the OWNER role — the fence never
+  // fabricates an admin for a refusal that wanted an owner.
+  assert.equal(hooks.friendly({ error: "forbidden", required: "owner", scope: "primary_team" }),
+    "You need the owner role on this team — only the team owner can grant it.");
+});
+
+test("cch-w35-s4: the no-team arm is MAPPED, never echoed as its slug", () => {
+  const copy = hooks.friendly({ error: "forbidden", reason: "no_team", scope: "team" });
+  assert.match(copy, /isn't on a team yet/);
+  assert.ok(copy.indexOf("no_team") === -1 && copy.indexOf("no team") === -1,
+    "'no_team' is a slug — a human must never read it");
+  assert.ok(copy.indexOf(FORBIDDEN_BILLING) === -1);
+  // And it does NOT leak into the 422 no_team slug, which is a different answer.
+  assert.equal(hooks.friendly({ error: "no_team" }), "Your account has no team yet.");
+});
+
+test("cch-w35-s4: an unwritten `required` renders as a bounded label, and junk falls through", () => {
+  assert.equal(hooks.friendly({ error: "forbidden", required: "deploy", scope: "token" }),
+    'You need the "deploy" permission on this team — an admin on this team can grant it.');
+  // Not a label → no interpolation, no markup, back to the curated entry.
+  for (const junk of ["<img src=x onerror=alert(1)>", "Admin", "", "  ", "a".repeat(64), 7, null, {}]) {
+    assert.equal(hooks.friendly({ error: "forbidden", required: junk }), FORBIDDEN_BILLING,
+      "a `required` that is not a label must never reach the copy: " + JSON.stringify(junk));
+  }
+});
+
+test("cch-w35-s4 THE FENCE IS INERT: every other slug resolves byte-identically to main", () => {
+  // The committed ERRORS map as it stands on origin/main, every key. If the
+  // fence widened by one slug (mutation M2), this sweep and 12 named tests red.
+  const PINNED = {
+    invalid_credentials: "Wrong email or password.",
+    email_taken: "That email is already registered.",
+    email_invalid: "Enter a valid email address.",
+    password_invalid: "Password is too short (12+ characters).",
+    validation_failed: "Please check the form and try again.",
+    name_required: "A name is required.",
+    no_active_subscription: "You need an active subscription to launch.",
+    plan_invalid: "That plan can't be checked out.",
+    invalid_code: "That code didn't match. Authenticator codes rotate every 30 seconds — enter the current one, or use a recovery code.",
+    rate_limited: "Too many attempts. Wait a moment, then try the code again.",
+    no_team: "Your account has no team yet.",
+    invalid: "That didn't work — check your input.",
+    not_live: "The instance isn't live yet — wait for provisioning to finish.",
+    no_admin_token: "No stored credentials for this instance — it may need a re-provision.",
+    instance_unreachable: "Couldn't reach the instance — try again in a moment.",
+    network_error: "Network error — is the control plane running?",
+    limit_reached: "You're at your plan's instance limit.",
+    billing_not_configured: "Billing isn't set up on this deployment yet.",
+    forbidden: FORBIDDEN_BILLING,
+    server_error: "Something broke on our side — not your input. Try again in a moment; if it keeps happening, contact support.",
+    malformed_body: "We couldn't read that request — reload the page and try again.",
+    malformed_request: "We couldn't read that request — reload the page and try again.",
+    unsupported_media_type: "We couldn't read that request — reload the page and try again.",
+    request_too_large: "That's too large for us to accept. Try a smaller value or file.",
+  };
+  for (const [slug, copy] of Object.entries(PINNED)) {
+    assert.equal(hooks.friendly({ error: slug }, "a caller fallback"), copy, slug + " moved");
+    // …and the evidence keys are INERT on every slug but `forbidden`. (`required`
+    // and `reason` are never sent together — gate_role() picks one arm — so the
+    // sweep uses the shape the server actually emits.)
+    const withEvidence = { error: slug, required: "admin", scope: "primary_team" };
+    assert.equal(hooks.friendly(withEvidence, "a caller fallback"),
+      slug === "forbidden" ? ADMIN_SENTENCE : copy,
+      slug + " must ignore evidence it was not sent for");
+  }
+  // The unregistered-slug and details ladders are untouched.
+  assert.equal(hooks.friendly({ error: "totally_unknown_slug" }, "Please try again."), "Please try again.");
+  assert.equal(hooks.friendly({ error: "totally_unknown_slug" }), "totally unknown slug");
+  assert.equal(hooks.friendly({ error: "x", details: { name: ["is required"] } }, "fb"), "name is required");
+  assert.equal(hooks.friendly(null, "fb"), "fb");
+});
+
+test("cch-w35-s4 FOUR LANES FROM ONE EDIT — two of them are free repairs", () => {
+  // 1. friendly() direct — the Activity read, and 54 other sites.
+  assert.equal(hooks.friendly(AUDIT_403), ADMIN_SENTENCE);
+  // 2. faultCopy(403, …) — every 4xx falls through to friendly().
+  assert.equal(hooks.faultCopy(403, AUDIT_403, "Check the form and try again."), ADMIN_SENTENCE);
+  // 3. removeMemberFailureCopy — a member removal refused for lack of authority
+  //    used to render the billing sentence into a destroy-modal.
+  assert.equal(hooks.removeMemberFailureCopy(403, AUDIT_403), ADMIN_SENTENCE);
+  assert.equal(hooks.removeMemberFailureCopy(403, { error: "forbidden" }), FORBIDDEN_BILLING, "bare stays put");
+  // 4. inviteFailureCopy — same, in the invite toast.
+  assert.equal(hooks.inviteFailureCopy(AUDIT_403, 403), ADMIN_SENTENCE);
+  assert.equal(hooks.inviteFailureCopy({ error: "forbidden" }, 403), FORBIDDEN_BILLING, "bare stays put");
+  // The lanes' OWN branches are untouched by the fence.
+  assert.match(hooks.removeMemberFailureCopy(409, { error: "last_owner" }), /last owner/);
+  assert.match(hooks.inviteFailureCopy({ error: "already_member" }, 409), /already on your team/);
+});
+
+test("cch-w35-s4 THE TWIN FENCE (zero reach today, and it CAN lose): evidence beats the read-scoped sentence", () => {
+  const f = hooks.readFailureCopy;
+  // Evidence wins over the caller's scoped copy — it is strictly more specific.
+  assert.equal(f({ ok: false, status: 403, data: AUDIT_403 }, "SCOPED", "FB"), ADMIN_SENTENCE);
+  // A BARE forbidden still returns the caller string — this is the guard whose
+  // removal reds the three cch-w34-s1 tests above (sites 403, tokens 403, and
+  // 'readFailureCopy overrides ONLY the generic forbidden slug').
+  assert.equal(f({ ok: false, status: 403, data: { error: "forbidden" } }, "SCOPED", "FB"), "SCOPED");
+  // Neither of this function's two routes can actually 403 a browser session
+  // today (GET /v1/tokens is require_user only; GET /v1/sites gives a session
+  // the root ability), so this arm buys no user-visible change — it is insurance.
+  assert.equal(f({ ok: false, status: 404, data: { error: "nope" } }, "SCOPED", "FB"), "FB");
 });

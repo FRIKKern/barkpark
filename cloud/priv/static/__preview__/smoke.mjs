@@ -2619,22 +2619,42 @@ const EXPECTATIONS = {
       assert.equal(reg.get("view-overview").hidden, false, "the bounce lands on Overview");
       assert.equal(reg.get("operator-body").innerHTML || "", "", "no operator markup is left behind");
       assert.equal(reg.get("nav-operator").hidden, true, "the sidebar entry stays hidden too");
+      // cch-w36-s4 / charter D411 — ADDITIVE to the four above, which are the
+      // fail-closed guarantee and are asserted here UNCHANGED. The bounce used
+      // to happen in total silence: body blanked, hash flipped, and not one
+      // sentence — right or wrong — ever shown. With PLATFORM_ADMIN_EMAILS unset
+      // this is EVERY user's experience of #operator, so the silence was the
+      // only behaviour prod has ever had.
+      const toasts = (reg.get("toast-stack") || {}).innerHTML || "";
+      assert.ok(toasts.includes("platform-gated"), "the refusal is finally SAID; got: " + toasts);
+      assert.ok(toasts.includes("platform_operator"),
+        "and it names the platform principal the server itself emits");
+      assert.ok(toasts.includes("No team role grants it"), "…and that no team action can grant it");
+      assert.ok(!/ask (your|the) team owner/i.test(toasts),
+        "a platform allowlist is never a team-owner errand (charter D386's wrong remedy)");
     },
   },
   "operator-unreadable": {
-    what: "Operator console — every route 403s; each card says IT couldn't read, and none fakes a value",
+    what: "Operator console — every route 403s; all four cards name the REFUSAL (not a transport failure), and none fakes a value",
     check(reg) {
       assert.equal(reg.get("view-operator").hidden, false, "an operator still reaches the page");
       const brake = reg.get("op-brake-body").innerHTML || "";
       const canary = reg.get("op-canary-body").innerHTML || "";
       const warm = reg.get("op-warm-body").innerHTML || "";
       const digest = reg.get("op-digest-body").innerHTML || "";
-      assert.ok(brake.includes("Rollout state unavailable"), "the brake degrades honestly");
-      assert.ok(!brake.includes("data-fleet-au"), "an unreadable brake offers no button");
-      assert.ok(canary.includes("Fleet unavailable"), "the canary degrades honestly");
-      assert.ok(warm.includes("Warm pool unavailable"), "the warm pool degrades honestly");
-      assert.ok(!warm.includes("op-metric-v"), "no fake zero is drawn when the count didn't answer");
-      assert.ok(digest.includes("Digest log unavailable"), "the digest degrades honestly");
+      // cch-w36-s4 — THIS SCENARIO IS A 403 ON ALL FOUR ROUTES, and a 403 is an
+      // ANSWER: the control plane made a determination. The cards used to call
+      // it "didn't answer / this card just couldn't read it" — a transport story
+      // over an authority verdict — because operatorPaint's single ternary
+      // destroyed the status before any renderer saw it. Four cards, ONE funnel.
+      for (const [name, html] of [["brake", brake], ["canary", canary], ["warm pool", warm], ["digest", digest]]) {
+        assert.ok(html.includes("refused this read (403)"), "the " + name + " names the refusal");
+        assert.ok(html.includes("platform_operator"), "the " + name + " names the authority that refused");
+        assert.ok(!html.includes("didn't answer"), "the " + name + " no longer calls a determination a silence");
+        assert.ok(!/ask (your|the) team owner/i.test(html), "the " + name + " sends nobody to a team owner");
+      }
+      assert.ok(!brake.includes("data-fleet-au"), "a refused brake offers no button");
+      assert.ok(!warm.includes("op-metric-v"), "no fake zero is drawn when the count was refused");
       for (const html of [brake, canary, warm, digest])
         assert.ok(!html.includes("Loading"), "no card is left spinning after its request settles");
     },
