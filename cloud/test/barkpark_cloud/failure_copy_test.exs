@@ -754,6 +754,27 @@ defmodule BarkparkCloud.FailureCopyTest do
     @aws_key "AKIA" <> "Q7ZLMNPR" <> "4TV6WY2X"
     @bare_token "Kj8Xm2QpL9vR4tZ7" <> "wN1cB6yH3sD5" <> "fG0aQ2eR7uI9"
 
+    # BARKPARK'S OWN credential shapes, assembled for the same reason as above.
+    # `bppat_` is the self-service PAT (`Barkpark.Auth.create_personal_access_token/3`)
+    # and `bpcs_` the scoped chat/MCP session token — both are
+    # `<prefix> <> Base.url_encode64(32 random bytes, padding: false)`, so the
+    # body is 43 chars of `[A-Za-z0-9\-_]`. The `-`/`_` inside is exactly why the
+    # bare-token clause (contiguous alnum only) could not see them: measured over
+    # 2,000 freshly minted tokens against the pre-fix module, four of six carrier
+    # shapes leaked 93.6% and the rest redacted only by accident of the alphabet.
+    # A `-` and a `_` are kept IN the bodies here on purpose — a body without one
+    # is the ~6% lucky case and would pass even unfixed.
+    @bppat "bppat_" <> "9aB3xQ7z-LmNpR4tV" <> "6wY2_Kj8Xm2QpL9vR4tZ7wN1cB"
+    @bpcs "bpcs_" <> "Zx7Qm2Lp-9Vr4Tz8W" <> "n1Cb6Yh3_sD5fG0aQ2eR7uI9K"
+
+    # A Bearer credential that NO other clause can reach: no vendor prefix, no
+    # `key=`/`token=` separator, and 20 chars — under the bare-token clause's 32.
+    # Every pre-existing Bearer positive used `sk-live-…`, which the
+    # provider-prefix clause redacts on its own, so deleting the ENTIRE Bearer
+    # clause left the table fully green while `Bearer <token>` went 0.0% -> 94.2%
+    # leaked. This row is the only thing that reds on that mutation.
+    @unprefixed_bearer "nJq2LmT4vB" <> "7nR1zC8kW5"
+
     # POSITIVES: every shape a remote capture can carry a live credential in.
     # Each row is {label, input, must_not_survive}.
     @positives [
@@ -771,7 +792,37 @@ defmodule BarkparkCloud.FailureCopyTest do
        "ghp_A1b2C3d4E5f6G7h8I9j0K1l2M3n4O5"},
       {"slack webhook token", "notify failed: xoxb-9aB3xQ7zLmNpR4tV", "xoxb-9aB3xQ7zLmNpR4tV"},
       {"aws access key id", "s3 sync refused key " <> @aws_key, @aws_key},
-      {"bare mixed-case 40-char provider token", "provider rejected " <> @bare_token, @bare_token}
+      {"bare mixed-case 40-char provider token", "provider rejected " <> @bare_token, @bare_token},
+
+      # OUR OWN credential, in the four shapes that leaked 93.6% before the
+      # provider-prefix clause learned `bppat_`/`bpcs_`. The clause matches the
+      # TOKEN, not the syntax around it, so all four close at once — which is the
+      # whole argument for fixing it there rather than at each carrier.
+      {"barkpark PAT in an env fold",
+       "provisioner env: BARKPARK_TOKEN=" <> @bppat, @bppat},
+      {"barkpark PAT after export (no `\\b` before TOKEN)",
+       "+ export BARKPARK_TOKEN=" <> @bppat, @bppat},
+      {"barkpark PAT bare in prose (no key, no separator)",
+       "using token " <> @bppat <> " ok", @bppat},
+      {"barkpark PAT behind a colour code",
+       "\e[31mtoken=" <> @bppat <> "\e[0m", @bppat},
+      {"barkpark PAT as a Bearer credential",
+       "ssh: remote said Authorization: Bearer " <> @bppat, @bppat},
+      {"barkpark chat/MCP session token (bpcs_)",
+       "spawn failed: BARKPARK_API_TOKEN=" <> @bpcs, @bpcs},
+      {"barkpark chat/MCP session token bare in prose",
+       "child inherited " <> @bpcs <> " and exited 1", @bpcs},
+
+      # The Bearer clause's ONLY independent pin — see @unprefixed_bearer.
+      {"Bearer with a token no other clause can reach",
+       "ssh: remote said Authorization: Bearer " <> @unprefixed_bearer, @unprefixed_bearer},
+
+      # Fix B's own reach: `(?<![A-Za-z0-9])` also opens the key clause to every
+      # other SCREAMING_SNAKE env var, not just ours.
+      {"generic SCREAMING_SNAKE env secret",
+       "env: MY_SECRET=Qp9vR4tZ7wN1cB6yH3sD5fG0", "Qp9vR4tZ7wN1cB6yH3sD5fG0"},
+      {"generic SCREAMING_SNAKE env token",
+       "env: DEPLOY_TOKEN=Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3", "Zx7Qm2Lp9Vr4Tz8Wn1Cb6Yh3"}
     ]
 
     # NEGATIVES: shapes a person NEEDS to read. A redacted git SHA costs them the
@@ -796,7 +847,18 @@ defmodule BarkparkCloud.FailureCopyTest do
       {"prose after Bearer (capitalised)", "missing Bearer credentials"},
       {"prose in a token value", "token: expired"},
       {"prose in an api_key value", "no api_key: set in the config file"},
-      {"prose in a password value", "sftp refused: password: missing"}
+      {"prose in a password value", "sftp refused: password: missing"},
+
+      # The new `bppat_`/`bpcs_` arm's false-positive surface, pinned. Each of
+      # these is copy a person needs verbatim to act on the failure.
+      {"the bpcs mint-refused sentinel (hyphen, not a token)",
+       "chat spawn refused: bpcs-mint-refused"},
+      {"a provisioned site hostname (`bp-` is NOT a credential prefix)",
+       "dial tcp: bp-acme-ac4e1f2a.barkpark.cloud:443 connection refused"},
+      {"the prefix NAMED in prose, with no body after it",
+       "expected a token with the bppat_ prefix"},
+      {"a word merely ENDING in token (Fix B's lookbehind excludes alnum)",
+       "xtoken=cax11 is not a recognised flag"}
     ]
 
     for {label, input, secret} <- @positives do
@@ -840,6 +902,40 @@ defmodule BarkparkCloud.FailureCopyTest do
 
       assert FailureCopy.scrub("Authorization: Bearer sk-live-9aB3xQ7zLmNpR4tV6wY2") ==
                "Authorization: Bearer [redacted]"
+    end
+
+    # THE ORDER, for a path that does NOT classify. `humanize/1` must stay
+    # `classify |> scrub |> strip_ansi` (the classifier reads producer-anchored
+    # prefixes and an escape run can sit inside them). A RAW capture has no
+    # classify step, and there the shipped order LEAKS: the key clause redacts
+    # up to the next delimiter, and a colour code parks a non-delimiter byte
+    # (`m`) immediately before the key, so the clause never fires. Measured over
+    # 2,000 random values: `scrub |> strip_ansi` 2000/2000 leaked,
+    # `strip_ansi |> scrub` 0/2000.
+    #
+    # `bppat_`/`bpcs_` are order-INDEPENDENT (the provider-prefix clause matches
+    # the token itself), which is precisely why this test uses a NON-prefixed
+    # `api_key=` secret — otherwise the wrong order would look safe.
+    test "raw-log order: strip_ansi BEFORE scrub — the shipped order leaks a colourised api_key" do
+      secret = "Qp9vR4tZ7wN1cB6yH3sD5fG0"
+      line = "\e[31mapi_key=#{secret}\e[0m"
+
+      # WRONG for a raw log — the colour code hides the key from the scrub.
+      assert line |> FailureCopy.scrub() |> FailureCopy.strip_ansi() =~ secret
+
+      # RIGHT for a raw log.
+      refute line |> FailureCopy.strip_ansi() |> FailureCopy.scrub() =~ secret
+
+      assert line |> FailureCopy.strip_ansi() |> FailureCopy.scrub() == "api_key=[redacted]"
+    end
+
+    # Order-INDEPENDENCE of the prefix clause, stated as a test so the claim in
+    # the moduledoc is checkable: our own token closes under BOTH orders.
+    test "a bppat_ token is redacted under either order — the prefix clause sees the token itself" do
+      line = "\e[31mtoken=#{@bppat}\e[0m"
+
+      refute line |> FailureCopy.scrub() |> FailureCopy.strip_ansi() =~ @bppat
+      refute line |> FailureCopy.strip_ansi() |> FailureCopy.scrub() =~ @bppat
     end
   end
 

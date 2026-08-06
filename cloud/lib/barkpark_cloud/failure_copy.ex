@@ -170,6 +170,26 @@ defmodule BarkparkCloud.FailureCopy do
 
   The DB stays RAW by design: only the JSON/email boundary scrubs, so ops
   recovery via `Repo.get(ProvisionJob, id).console` and the logs is unaffected.
+
+  ## Two orders, and which path owns which (deploy-reliability W2 S4)
+
+  `humanize/1` is `classify |> scrub |> strip_ansi` and MUST stay that way: its
+  first step matches producer-anchored prefixes, and an escape run can sit
+  between the prefix and the text, so stripping first changes what the
+  classifier reads.
+
+  A RAW-LOG path has no classify step, and for it that order is WRONG.
+  `scrub/1`'s key clause keeps the key and redacts up to the next delimiter, so
+  a colourised `\\e[31mclient_secret=…\\e[0m` hides its value behind bytes the
+  scrub then leaves in place — measured 2000/2000 leaked under
+  `scrub |> strip_ansi` and 0/2000 under `strip_ansi |> scrub`. Any path that
+  renders a raw capture without classifying it must be
+  `strip_ansi() |> scrub()`. Pinned by
+  "raw-log order: strip_ansi BEFORE scrub…" in `failure_copy_test.exs`.
+
+  Provider-prefixed credentials (including our own `bppat_`/`bpcs_`) are
+  order-INDEPENDENT — that clause matches the token itself — so the order only
+  decides whether the key-shaped secrets survive.
   """
 
   # An extractor refusal code: `E_` followed by SCREAMING_SNAKE. Anchored on a
@@ -228,14 +248,40 @@ defmodule BarkparkCloud.FailureCopy do
     #
     # Same `@prose_value` guard, same reason: "token: expired" and
     # "no api_key: set in the config file" are status prose, not credentials.
-    {~r/\b((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?!#{@prose_value})[^\s"',;)]+/i,
+    #
+    # The left edge is `(?<![A-Za-z0-9])`, NOT `\b`. `_` is a word character, so
+    # `\b` cannot fire between the `_` and the `TOKEN` in `BARKPARK_TOKEN=…` —
+    # which made every `[A-Z_]*TOKEN=` env fold invisible to this clause, and an
+    # env fold is the single most common way a provisioner capture carries a
+    # live credential. The lookbehind excludes only alphanumerics, so
+    # `BARKPARK_TOKEN=`, `MY_SECRET=` and `DEPLOY_TOKEN=` all match while
+    # `xtoken=` (a longer word merely ENDING in `token`) still does not.
+    {~r/(?<![A-Za-z0-9])((?:client[_-]?secret|secret[_-]?key|access[_-]?key|api[_-]?key|auth[_-]?token|private[_-]?key|secret|token|password|passwd)\s*[=:]\s*)["']?(?!#{@prose_value})[^\s"',;)]+/i,
      "\\1#{@redaction}"},
 
     # Provider-prefixed credentials: Stripe/OpenAI `sk-`/`pk-`, GitHub `ghp_`/
-    # `github_pat_`, Slack `xoxb-`, AWS `AKIA…`, Hetzner `hcloud_`. These carry
-    # hyphens and underscores, so the bare-token clause below (which is
-    # `[A-Za-z0-9]` only) cannot see them.
-    {~r/\b(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[baprs]|hcloud)[-_][A-Za-z0-9\-_]{8,}/,
+    # `github_pat_`, Slack `xoxb-`, AWS `AKIA…`, Hetzner `hcloud_`, and — since
+    # deploy-reliability W2 S4 — BARKPARK'S OWN `bppat_` (PAT, `auth.ex`) and
+    # `bpcs_` (scoped chat/MCP session token, `auth.ex`). These carry hyphens and
+    # underscores, so the bare-token clause below (which is `[A-Za-z0-9]` only)
+    # cannot see them.
+    #
+    # Our own prefixes are the load-bearing addition, not a tidy-up. A minted PAT
+    # is `bppat_` + `Base.url_encode64(32 bytes, padding: false)`, and ~94% of
+    # those 43-char bodies contain a `-` or `_` that breaks the bare-token
+    # clause's contiguous-alnum run — so before this clause knew the prefix, a
+    # real token measured 94.3% LEAKED through `scrub/1` in four of six shapes
+    # (`BARKPARK_TOKEN=…`, `export BARKPARK_TOKEN=…`, bare in prose, and a
+    # colourised `token=…`), and the ~6% that redacted did so by accident of the
+    # alphabet. Matching the TOKEN — not the syntax around it — is what makes
+    # this hole close independently of env-var spelling, prose and colour codes.
+    #
+    # Our prefixes require `_` specifically (the vendor arm keeps `[-_]`): every
+    # Barkpark credential is minted with an underscore, and `bpcs-mint-refused`
+    # — a real sentinel in `api/lib/barkpark_web/studio/claude_chat.ex` — is
+    # copy a person needs to read, not a secret. `bp-` alone is deliberately
+    # absent: every provisioned site is named `bp-<slug>-<hash>`.
+    {~r/\b(?:(?:sk|pk|rk|ghp|gho|ghu|ghs|github_pat|xox[baprs]|hcloud)[-_]|(?:bppat|bpcs)_)[A-Za-z0-9\-_]{8,}/,
      @redaction},
 
     # An AWS access key id: `AKIA` + 16 uppercase alphanumerics, no separator, so
