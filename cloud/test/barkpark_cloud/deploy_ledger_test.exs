@@ -64,6 +64,28 @@ defmodule BarkparkCloud.DeployLedgerTest do
   # 2 rows: nixpacks. Genuinely unnamed — the honest tail.
   @nixpacks "nixpacks build: exit status 1"
 
+  # ── The DEFERRED corpus (dr-w3 S3) ────────────────────────────────────────
+  # What `Sites.Deploy.defer/3` actually writes: the box's own refusal, plus the
+  # driver's promise clause appended after an em-dash separator.
+  @requeued " — deferred: a rebuild carrying this content has been re-queued and will run once the in-flight deploy finishes"
+  @d_busy @r409_coded <> @requeued
+  @d_busy_bare @r409_bare <> @requeued
+  # The concurrent-build CAP's refusal: a box that is not busy with THIS site at
+  # all, refusing a slot so it stops swapping itself to death.
+  @d_capacity "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+                @requeued
+  # A deferral shape the ledger has never seen — not a box refusal at all.
+  @d_novel "the boxcar shim deferred the handshake (code BLERG-7)" <> @requeued
+  # …and the nearer miss: a real anchored 409, refusing with a code the ledger has
+  # never named. This is the one an "absorb it into the busy bucket" tail would
+  # silently eat, so the taxonomy would keep looking complete.
+  @d_unknown_code "the instance refused the deploy (HTTP 409): slot_reservation_denied — the runner would not reserve a slot" <>
+                    @requeued
+  # The pre-dr-w3 lost publish that wore a `deferred` status while its own words
+  # said the opposite.
+  @d_requeue_broken @r409_bare <>
+                      " — and the rebuild could NOT be re-queued; publish again to retry"
+
   ## Fixtures
 
   defp user_fixture do
@@ -201,6 +223,72 @@ defmodule BarkparkCloud.DeployLedgerTest do
 
       assert DeployLedger.classify(%{status: "failed", stage: "PLAN", failure_reason: @r409_bare}) ==
                "BOX_BUSY_409"
+    end
+
+    # dr-w3 S3. This clause used to be `def classify(%{status: "deferred"}), do:
+    # "BOX_BUSY_DEFERRED"` — status alone, reason never read. A probe asserting
+    # that FOUR distinct causes all answered BOX_BUSY_DEFERRED PASSED, and the
+    # label it stamped on a CAPACITY refusal ("the box was busy") was simply
+    # false: a box at its build cap is not busy with this site at all.
+    test "a DEFERRAL is classified by its REASON, not by its status alone" do
+      deferred = fn reason ->
+        DeployLedger.classify(%{status: "deferred", stage: "PLAN", failure_reason: reason})
+      end
+
+      # The busy slug — including D7's bare 409, which carries no code word and
+      # predates the cap entirely, so it can only be `already_running`.
+      assert deferred.(@d_busy) == "BOX_BUSY_DEFERRED"
+      assert deferred.(@d_busy_bare) == "BOX_BUSY_DEFERRED"
+
+      # The concurrent-build cap: its OWN class, because it is its own cause and
+      # its own operator action.
+      assert deferred.(@d_capacity) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # …and the three shapes that are not a named deferral: a refusal that is
+      # not the box's, a 409 whose CODE the ledger has never seen, and nothing.
+      assert deferred.(@d_novel) == "DEFERRED_UNCLASSIFIED"
+      assert deferred.(@d_unknown_code) == "DEFERRED_UNCLASSIFIED"
+      assert deferred.(nil) == "DEFERRED_UNCLASSIFIED"
+
+      # A row whose re-queue BROKE is a lost publish, so it must not answer with
+      # a class whose label promises "re-queued, not lost". (dr-w3 S3 settles
+      # these `failed` at the source; this arm covers the rows already written.)
+      assert deferred.(@d_requeue_broken) == "DEFERRED_UNCLASSIFIED"
+
+      # And the labels are three DISTINCT sentences, not one lie reused.
+      labels = Enum.map(DeployLedger.deferred_classes(), &DeployLedger.label/1)
+      assert length(Enum.uniq(labels)) == 3
+      assert DeployLedger.label("BOX_AT_CAPACITY_DEFERRED") =~ "cap"
+    end
+
+    # The DEFERRED-SIDE MIRROR of "UNCLASSIFIED CAN GO UP" (D8) — which did not
+    # exist: D8 was honoured for failed rows and violated for deferred ones,
+    # because the deferred arm had exactly one answer and could not be wrong.
+    #
+    # The sentinel is DEFERRED_UNCLASSIFIED and NOT UNCLASSIFIED, deliberately:
+    # UNCLASSIFIED lives in `classes/0`, and those rows ARE the failure
+    # numerator. Routing a healthy capacity refusal there would inflate the
+    # deploy-failure rate with the fleet working as designed — vacuous RED.
+    test "DEFERRED_UNCLASSIFIED CAN GO UP: an unnamed deferral is not absorbed, and is NOT a failure" do
+      row = %{status: "deferred", stage: "PLAN", failure_reason: @d_novel}
+      assert DeployLedger.classify(row) == "DEFERRED_UNCLASSIFIED"
+
+      # The NEAR miss matters more than the far one: a genuine 409 refusing with
+      # a code nobody has named must rise in the tail, not be absorbed by the
+      # busy bucket it most resembles.
+      near = %{status: "deferred", stage: "PLAN", failure_reason: @d_unknown_code}
+      assert DeployLedger.classify(near) == "DEFERRED_UNCLASSIFIED"
+
+      # It is the sentinel name, in the deferred cohort…
+      assert "DEFERRED_UNCLASSIFIED" in DeployLedger.deferred_classes()
+      assert DeployLedger.deferred?("DEFERRED_UNCLASSIFIED")
+      assert DeployLedger.deferred?("BOX_AT_CAPACITY_DEFERRED")
+
+      # …and NOT in the failure taxonomy, under any of its names.
+      refute "DEFERRED_UNCLASSIFIED" in DeployLedger.classes()
+      refute "BOX_AT_CAPACITY_DEFERRED" in DeployLedger.classes()
+      refute "BOX_BUSY_DEFERRED" in DeployLedger.classes()
+      refute DeployLedger.not_attempted?("DEFERRED_UNCLASSIFIED")
     end
 
     test "GITHUB_PUSH_UNBUILDABLE is not in the ordinary taxonomy at all" do
@@ -387,6 +475,79 @@ defmodule BarkparkCloud.DeployLedgerTest do
       assert row.volume == 20
       assert row.failed == 6
       assert row.deferred == 14
+    end
+
+    # THE NUMERATOR JUDGMENT, as behaviour. An unnamed DEFERRAL is honest
+    # ignorance about a refusal, not a failed deploy: it must be VISIBLE (its own
+    # line, its own count) and must NOT move the failure rate. A tail routed into
+    # `UNCLASSIFIED` instead would have inflated the numerator by every capacity
+    # refusal the fleet's new build cap produces — vacuous RED, and it would
+    # corrupt the very before/after this epic exists to measure.
+    test "an UNNAMED deferral is counted and visible, and does NOT enter the failure numerator",
+         %{
+           site: site
+         } do
+      from = ~U[2026-07-26 00:00:00Z]
+      to = ~U[2026-07-27 00:00:00Z]
+
+      for i <- 1..6 do
+        deployment!(site, %{
+          stage: "HEALTH",
+          failure_reason: @doc_id,
+          inserted_at: DateTime.add(from, i, :second)
+        })
+      end
+
+      for i <- 1..2 do
+        deployment!(site, %{
+          status: "deferred",
+          stage: "PLAN",
+          failure_reason: @d_busy,
+          inserted_at: DateTime.add(from, 50 + i, :second)
+        })
+      end
+
+      before = DeployLedger.census(from, to)
+      assert before.volume == 8
+      assert before.failure_rate.numerator == 6
+
+      # Now a deferral for a cause the ledger cannot name, plus a capacity
+      # refusal — the two shapes the old status-only arm folded into BOX_BUSY.
+      deployment!(site, %{
+        status: "deferred",
+        stage: "PLAN",
+        failure_reason: @d_novel,
+        inserted_at: DateTime.add(from, 100, :second)
+      })
+
+      deployment!(site, %{
+        status: "deferred",
+        stage: "PLAN",
+        failure_reason: @d_capacity,
+        inserted_at: DateTime.add(from, 101, :second)
+      })
+
+      census = DeployLedger.census(from, to)
+
+      # UNCHANGED numerator: neither row is a failure.
+      assert census.failure_rate.numerator == before.failure_rate.numerator
+      assert census.failed == 6
+      # …and still COUNTED: both were real attempts against a real box.
+      assert census.volume == 10
+
+      deferred = Map.new(census.deferred, &{&1.class, &1.count})
+
+      assert deferred == %{
+               "BOX_BUSY_DEFERRED" => 2,
+               "DEFERRED_UNCLASSIFIED" => 1,
+               "BOX_AT_CAPACITY_DEFERRED" => 1
+             }
+
+      # Three causes, three lines — not one bucket wearing one label.
+      refute Enum.any?(census.classes, &(&1.class in DeployLedger.deferred_classes()))
+      assert [row] = census.sites
+      assert row.failed == 6
+      assert row.deferred == 4
     end
 
     test "counts per class and per site, with an unrecognised reason visibly in UNCLASSIFIED", %{

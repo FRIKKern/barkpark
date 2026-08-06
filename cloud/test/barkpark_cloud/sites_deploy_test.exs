@@ -18,7 +18,7 @@ defmodule BarkparkCloud.SitesDeployTest do
   """
   use BarkparkCloud.DataCase, async: true
 
-  alias BarkparkCloud.{Accounts, Registry}
+  alias BarkparkCloud.{Accounts, DeployLedger, Registry}
   alias BarkparkCloud.Registry.{Deployment, Site, Vault}
   alias BarkparkCloud.Sites.Deploy
   alias BarkparkCloud.Sites.FakeBoxRelay
@@ -744,6 +744,131 @@ defmodule BarkparkCloud.SitesDeployTest do
       rows = Registry.list_deployments(site, 20)
       assert Enum.count(rows, &(&1.status == "deferred")) == 5
       assert Enum.count(rows, &(&1.status == "failed")) == 1
+    end
+
+    # dr-w3 S3. `consecutive_deferrals/1` used to count by STATUS alone, so a
+    # chain of MIXED causes was one chain against one bound: five busy-slug
+    # refusals followed by a single capacity refusal terminally FAILED the
+    # capacity round — a lost publish charged to a cause that had happened once.
+    test "a chain of MIXED deferral causes is not one chain — the capacity refusal keeps its own budget" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+      )
+
+      # Five busy-slug deferrals: one short of the busy bound.
+      for _ <- 1..5 do
+        {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+        assert {:ok, :deferred} = Deploy.run(d.id)
+      end
+
+      # …and now the box refuses for a DIFFERENT reason: its concurrent-build cap.
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{"error" => %{"code" => "box_at_capacity", "message" => "4 of 4 build slots in use"}}}
+      )
+
+      {:ok, sixth} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(sixth.id)
+
+      row = Repo.get(Deployment, sixth.id)
+      assert row.status == "deferred"
+      assert row.failure_reason =~ "box_at_capacity"
+      # NOT slandered as a stuck runner, and NOT lost.
+      refute row.failure_reason =~ "stuck"
+      assert row.failure_reason =~ "re-queued"
+
+      assert DeployLedger.classify(row) == "BOX_AT_CAPACITY_DEFERRED"
+      assert [_job] = pending_auto_deploy_jobs(site.id)
+
+      # And the chain COUNT is cause-aware too, not just the bound: the busy-slug
+      # run was BROKEN by the capacity row, so a fresh busy refusal starts over
+      # instead of arriving as the seventh of a chain that never happened.
+      # Counting by status alone, this round is 6-in-a-row and dies terminally.
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+      )
+
+      {:ok, seventh} = Deploy.enqueue(site, bp, true, "content-auto")
+      assert {:ok, :deferred} = Deploy.run(seventh.id)
+      assert Repo.get(Deployment, seventh.id).status == "deferred"
+    end
+
+    # The bound still exists — a cap that refused every round of a long run has
+    # builds that are not finishing — but it is the CAPACITY bound, and the
+    # sentence it writes sends the operator to the cap, not to a deploy runner
+    # that is working exactly as designed.
+    test "a box at its build cap gets its OWN bound, and the terminal verdict names the cap" do
+      {bp, site} = setup_site()
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409,
+           %{"error" => %{"code" => "box_at_capacity", "message" => "4 of 4 build slots in use"}}}
+      )
+
+      outcomes =
+        for _ <- 1..12 do
+          {:ok, d} = Deploy.enqueue(site, bp, true, "content-auto")
+          {:ok, outcome} = Deploy.run(d.id)
+          {outcome, Repo.get(Deployment, d.id)}
+        end
+
+      # Eleven deferrals then one honest terminal round — where the busy-slug
+      # bound would have failed the SIXTH and lost six publishes to a healthy
+      # refusal.
+      assert Enum.map(outcomes, &elem(&1, 0)) == List.duplicate(:deferred, 11) ++ [:failed]
+
+      {:failed, last} = List.last(outcomes)
+      assert last.status == "failed"
+      assert last.failure_reason =~ "concurrent-build cap"
+      assert last.failure_reason =~ "raise the cap"
+      # The verdict is DERIVED from the cause, so the busy-box accusation cannot
+      # be aimed at a box that was never busy with this site.
+      refute last.failure_reason =~ "not busy but stuck"
+    end
+
+    # THE FIRST TEST THIS BRANCH HAS EVER HAD. `git grep 'could NOT be
+    # re-queued' -- cloud/test` returned zero before dr-w3 S3: the arm that
+    # decides whether a LOST publish is counted had never been exercised, and it
+    # wrote no `status` at all — so the row kept `deferred`, sat outside the
+    # failure numerator, and carried the label "the rebuild was re-queued, not
+    # lost" while its own reason said the opposite. Its comment claimed the Oban
+    # job would retry; `Deploy.run/1`'s return value is discarded by the
+    # supervised Task that drives it, so nothing retried anything.
+    test "a deferral whose re-queue FAILS is a lost publish: it settles FAILED, in the numerator" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+      )
+
+      # The re-queue seam: the promise cannot be made.
+      Process.put(:site_deploy_requeue, fn _site_id -> {:error, :oban_unavailable} end)
+
+      assert {:error, {:deferral_requeue_failed, :oban_unavailable}} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      # THE STATUS, not merely the prose: a lost publish is a failure.
+      assert row.status == "failed"
+      assert row.failure_reason =~ "could NOT be re-queued"
+      assert row.failure_reason =~ "publish again to retry"
+
+      # IN THE NUMERATOR — the ledger counts it as the failure it is…
+      class = DeployLedger.classify(row)
+      assert class in DeployLedger.classes()
+      refute DeployLedger.deferred?(class)
+      # …and it no longer wears the label that says it was not lost.
+      refute DeployLedger.label(class) =~ "re-queued, not lost"
+
+      # No promise was made, and none is pretended.
+      assert pending_auto_deploy_jobs(site.id) == []
     end
 
     test "a PREBUILT deploy is never deferred — it fails honestly, since the rebuild path would refuse it" do
