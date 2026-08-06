@@ -48,6 +48,17 @@ defmodule BarkparkCloud.DeployLedger do
   2026-08-05 corpus the tail is 8 rows (0.05%): nixpacks, `docker run` exit 125,
   an `HTTP 404`/`HTTP 400` refusal, and two em-dash `BUILD failed —` rows.
 
+  ## …and its DEFERRED-side mirror, which is a DIFFERENT sentinel (D43/D44)
+
+  A deferred row gets the same treatment — `classify/1` reads its stage and RAW
+  reason, and an unrecognised cause answers `DEFERRED_UNCLASSIFIED` rather than
+  being absorbed by the nearest bucket. The tail name is deliberately NOT
+  `UNCLASSIFIED`: that class sits in `@classes`, and `@classes` rows are the
+  failure NUMERATOR. A concurrent-build cap refusing a slot is the fleet working
+  as designed, so counting it as a failure would inflate the very rate this epic
+  exists to measure — vacuous RED. The deferred tail therefore rises inside the
+  deferred cohort: inside `volume`, outside the numerator, on its own line.
+
   ## Why GITHUB_PUSH_UNBUILDABLE is out of the denominator (D19)
 
   Exactly 7 rows, born `failed` on purpose by `Registry.record_unbuildable_push`
@@ -113,7 +124,17 @@ defmodule BarkparkCloud.DeployLedger do
   # attempt against a real box), outside the failure numerator (the box's answer
   # was "not now", and a rebuild was re-queued), and reported as its own line so
   # the 409 mass is visibly RELOCATED rather than silently deleted.
-  @deferred_classes ["BOX_BUSY_DEFERRED"]
+  # THREE deferral classes, because there are three distinct answers a box can
+  # give that are not failures, and a taxonomy that keys on `status` alone cannot
+  # tell them apart (dr-w3 S3). `BOX_BUSY_DEFERRED` is the box already deploying
+  # THIS slug; `BOX_AT_CAPACITY_DEFERRED` is the concurrent-build cap refusing a
+  # slot on a box that is not busy with this site at all; `DEFERRED_UNCLASSIFIED`
+  # is the honest tail — the deferred-side mirror of D8 (see below).
+  @deferred_classes [
+    "BOX_BUSY_DEFERRED",
+    "BOX_AT_CAPACITY_DEFERRED",
+    "DEFERRED_UNCLASSIFIED"
+  ]
 
   @labels %{
     "BOX_BUSY_409" => "the box was already deploying (HTTP 409)",
@@ -131,7 +152,10 @@ defmodule BarkparkCloud.DeployLedger do
     "PROCESS_DIED" => "the deploy process died abnormally",
     "UNCLASSIFIED" => "not yet named by the ledger",
     "GITHUB_PUSH_UNBUILDABLE" => "GitHub push builds are not available yet",
-    "BOX_BUSY_DEFERRED" => "the box was busy; the rebuild was re-queued, not lost"
+    "BOX_BUSY_DEFERRED" => "the box was busy; the rebuild was re-queued, not lost",
+    "BOX_AT_CAPACITY_DEFERRED" =>
+      "the box was at its concurrent-build cap; the rebuild was re-queued, not lost",
+    "DEFERRED_UNCLASSIFIED" => "deferred for a cause the ledger has not named"
   }
 
   # Below this many ATTEMPTED rows a percentage is noise, not a measurement: at
@@ -177,12 +201,13 @@ defmodule BarkparkCloud.DeployLedger do
   def classify(%{status: "failed"} = row),
     do: classify(Map.get(row, :stage), Map.get(row, :failure_reason))
 
-  # A DEFERRAL is not a failure and not a nil — see `@deferred_classes`. Today
-  # the busy box is the only thing that defers a row (`Sites.Deploy.defer/3`
-  # fires on a 409 and nothing else), so the class names that cause outright
-  # rather than pretending to a generality the producer does not have. A second
-  # deferral cause would have to be named here, which is the point.
-  def classify(%{status: "deferred"}), do: "BOX_BUSY_DEFERRED"
+  # A DEFERRAL is not a failure and not a nil — see `@deferred_classes`. It reads
+  # the (stage, RAW reason) pair exactly like the failed arm above, and for the
+  # same reason: this clause used to match `status` alone, so a capacity refusal,
+  # a busy-slug refusal, a broken re-queue and a nil reason ALL answered
+  # `BOX_BUSY_DEFERRED` — a taxonomy with one arm cannot be wrong, and was.
+  def classify(%{status: "deferred"} = row),
+    do: classify_deferred(Map.get(row, :stage), Map.get(row, :failure_reason))
 
   def classify(%{status: _other}), do: nil
   def classify(nil), do: nil
@@ -264,6 +289,63 @@ defmodule BarkparkCloud.DeployLedger do
   # purpose: inventing a BOX_REFUSED_OTHER bucket would make the taxonomy look
   # complete while telling nobody a new refusal shape appeared.
   defp refusal_class(_other), do: "UNCLASSIFIED"
+
+  ## ── The DEFERRED taxonomy ─────────────────────────────────────────────────
+  #
+  # Same discipline as `classify/2` — anchored prefix, the box's own code, the
+  # RAW column — and one deliberate difference: the tail is `DEFERRED_UNCLASSIFIED`
+  # and NEVER `UNCLASSIFIED`. `UNCLASSIFIED` lives in `@classes`, and `@classes`
+  # rows ARE the failure numerator, so routing a healthy capacity refusal there
+  # would inflate the deploy-failure rate with the fleet working exactly as
+  # designed — vacuous RED, the mirror image of the vacuous green this epic
+  # refuses. The honest tail rises INSIDE the deferred cohort: in `volume`, out
+  # of the numerator, on its own reported line.
+  defp classify_deferred(_stage, reason) when is_binary(reason) do
+    cond do
+      # A deferral whose re-queue BROKE is a lost publish, not a re-queue. Rows
+      # written before dr-w3 S3 settled `deferred` with this text (the driver now
+      # settles them `failed`), and calling them "re-queued, not lost" is the one
+      # thing the ledger must not do — so they surface in the tail instead.
+      String.contains?(reason, "could NOT be re-queued") ->
+        "DEFERRED_UNCLASSIFIED"
+
+      # `Sites.Deploy.defer/3` only ever fires behind the box's 409, so anything
+      # that is not an anchored 409 refusal is a deferral shape this classifier
+      # has never seen — which it says, rather than absorbing it.
+      refusal_code(reason) != "409" ->
+        "DEFERRED_UNCLASSIFIED"
+
+      deferral_code(reason) == "box_at_capacity" ->
+        "BOX_AT_CAPACITY_DEFERRED"
+
+      # `already_running` — and the BARE 409 with no code at all, which is D7's
+      # 43%: a codeless 409 predates the concurrent-build cap entirely, so the
+      # only thing it can be is the busy slug.
+      deferral_code(reason) in [nil, "already_running"] ->
+        "BOX_BUSY_DEFERRED"
+
+      true ->
+        "DEFERRED_UNCLASSIFIED"
+    end
+  end
+
+  # A nil reason on a deferred row is the tail too: the driver always writes the
+  # box's own words, so a deferral with no reason is a producer this module does
+  # not know about.
+  defp classify_deferred(_stage, _reason), do: "DEFERRED_UNCLASSIFIED"
+
+  # The box's own refusal CODE out of a deferral reason: what follows the anchored
+  # 409 prefix, up to the driver's own ` — ` suffix separator (the stored reason
+  # carries `… — deferred: a rebuild carrying this content has been re-queued …`
+  # after the box's words). `nil` when the box named no code at all.
+  @deferral_prefix ~r/^the instance refused the deploy \((?:HTTP )?409\):\s*(.+)$/s
+
+  defp deferral_code(reason) do
+    case Regex.run(@deferral_prefix, reason) do
+      [_, detail] -> detail |> String.split(" — ") |> hd() |> String.trim()
+      nil -> nil
+    end
+  end
 
   defp health_gate?(reason) do
     String.starts_with?(reason, "HEALTH gate failed") or
