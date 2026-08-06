@@ -1,0 +1,69 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-18",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-29-2026-08-03::tui_terminal"],
+  "verdict": "partial",
+  "direct_answer": "CCH29 source identity and denominators are pinned. Installed bp and repo code render byte-identical output at widths 1/20/40/80/120. Widths 20–120 have no overflow or residual controls, but width 1 overflows on the literal Related heading. Full-screen frames are bounded at all widths, yet the Papers pane returns zero rows, so CCH29 opens in 0/5 sessions. Main TUI lacks mouse mode, consumes H before history, has no Related model, and collapses Paper query errors to an empty pane. The separate bp tasks reader has mouse and typed connection states but cannot reach CCH29 because no task references it.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "232a335e-813c-4f71-a589-f1aab560b571",
+    "assignment_snapshot_digest": "6a8d68d5b383dd1fed8829f83a7b7852fb08481e884a58b63ab0e64bb49514c1",
+    "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+    "paper_revision": "18768b0a14c2eead927181c4a0e37c18"
+  },
+  "observations": {
+    "source": {"blocks": 252, "unique_block_ids": 252, "canonical_blocks_sha256": "e1cb807591caa511dadb1cc98311812aa364abc624f8da60c24562185b828b21", "history_revisions": 14, "newest_history_blocks_equal": true},
+    "authored_carriers": {"nonempty": 113, "headings": 37, "paragraphs": 187, "empty_spacers": 139, "tables": 11, "header_cells": 35, "body_cells": 316, "lists": 13, "list_items": 67, "callouts": 4, "marks": 313, "links": 0, "nested_items": 11},
+    "binary_identity": {"installed_commit": "f59aaf717", "installed_sha256": "7d501025836a0b3795a80b477069c3cc1634928dd4eaf9af56da8d3994909690", "repo_execution_head": "09eb0b77eaee966d3d8e1982b549d87fec202cfd", "reader_code_unchanged_through": "0aa555b511c2b4170ef702b13df3d3f4164a6b7f"},
+    "one_shot_widths": {
+      "1": {"lines": 81236, "max_width": 7, "overflow": 1, "offender": "Related", "installed_repo_equal": true},
+      "20": {"lines": 8490, "max_width": 20, "overflow": 0, "installed_repo_equal": true},
+      "40": {"lines": 3182, "max_width": 40, "overflow": 0, "installed_repo_equal": true},
+      "80": {"lines": 1440, "max_width": 80, "overflow": 0, "installed_repo_equal": true},
+      "120": {"lines": 986, "max_width": 120, "overflow": 0, "installed_repo_equal": true}
+    },
+    "prior_semantic_accounting": {"missing_nonempty_blocks_by_width": "37–57", "missing_authored_words_by_width": "8,838–10,274"},
+    "full_screen": {"installed_main_tui_bounded": "5/5", "paper_rows_visible": "0/5", "exact_cch29_opened": "0/5", "repo_width80_rows": 0, "taskboard_mouse": true, "taskboard_states": ["live", "offline", "polling", "server error"]},
+    "required_cells": {
+      "terminal_widths": "partial: one-shot 4/5; width 1 overflows; full-screen CCH29 0/5",
+      "control_sanitization": "partial: current source and renders clean, but C1/bidi hostile controls are outside policy",
+      "focus_scroll": "blocked: reducer exists but exact Paper never opened",
+      "click_enter": "not_found: main TUI mouse no-op while Enter changes state",
+      "history": "not_found: focused reducer consumes unmatched H before history handler",
+      "related": "not_found: one-shot plain-text appendix; no interactive model",
+      "typed_recovery": "partial: one-shot typed retry exists; main Query collapses failures to nil/empty pane"
+    }
+  },
+  "inferences": [
+    "The empty Papers pane likely represents swallowed Query failure rather than an empty corpus.",
+    "Earlier Related-width work wrapped entries but missed the width-1 heading literal.",
+    "Taskboard mouse/Enter parity cannot prove CCH29 without a task reference or direct Paper route."
+  ],
+  "repair_seams": [
+    "Wrap, truncate, or suppress Related heading below its display width and test width 1.",
+    "Return typed Query errors and distinguish empty, unauthorized, timeout, malformed, and retryable states.",
+    "Let unmatched H defer to history and prove structured revision navigation.",
+    "Add selectable Related navigation with Enter-open behavior.",
+    "Implement main-TUI mouse routing or explicitly scope parity to bp tasks.",
+    "Expose immutable slug and physical revision in full-screen chrome.",
+    "Add a release-pinned PTY fixture when live discovery is unavailable.",
+    "Extend hostile-control proof to C1, bidi, malformed UTF-8, CJK, combining marks, and ZWJ."
+  ],
+  "tests": {"command": "CGO_ENABLED=0 go test ./cmd/barkpark ./internal/cli ./internal/pdrender ./internal/taskboard -count=1", "result": "PASS", "claim_boundary": "Does not prove exact CCH29 full-screen, history, Related, or width-1 containment"},
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "task-341a3ce5a57dc306", "pds-bl-board-tui-reader-honesty", "pds-bl-taskboard-fetchpaper-unfenced", "ttw17-bl-live-tmux-drive", "content-history-goal"],
+    "papers": ["cloud-console-hardening-wave-29-2026-08-03@18768b0a14c2eead927181c4a0e37c18", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json", ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E03/reports/render-matrix.json", "cmd/barkpark/main.go", "cmd/barkpark/tui_update.go", "cmd/barkpark/history.go", "internal/apiclient/client.go", "internal/cli/paper_cmd.go", "internal/cli/paper_related_test.go", "internal/pdrender/inline.go", "internal/pdrender/sanitize_text_test.go", "internal/taskboard/program.go", "internal/taskboard/paper.go", "internal/taskboard/compose.go"]
+  },
+  "risks": ["No exact CCH29 full-screen session exists.", "Prior semantic accounting reports large authored loss.", "Width 1 violates the hard boundary.", "Mouse and Enter diverge.", "History is advertised but unreachable.", "Related is non-navigable and failure-silent.", "Main Query destroys typed errors.", "C1 and bidi remain outside sanitization."],
+  "unvisited_scope": ["exact CCH29 full-screen at five widths", "viewport scroll/resize preservation", "exact taskboard FramePaper", "real wheel/native mouse", "structured history replay", "forced Related failure", "hostile Unicode/control fixtures"],
+  "credential_scan": {"status": "clean", "credential_values_reported": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0}
+}
