@@ -793,6 +793,20 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert %{state: :idle} = DeployRunner.status("prov-fail")
     end
 
+    # The two reason shapes the provisioner's swap produces (provisioner.ex:202
+    # and :240) are the ONLY two whose operator sentence lives beside its
+    # producer. Nothing asserted these before, so a future move of either clause
+    # would have degraded the log line to Elixir tuple jargon in silence.
+    test "the swap-aside failure renders as an operator sentence, not a tuple" do
+      assert DeployRunner.describe_provision_reason({:swap_aside_failed, :eacces}) ==
+               "could not move the live site source aside before swapping in the new one: permission denied"
+    end
+
+    test "a lock the other deploy holds renders as an operator sentence, not a tuple" do
+      assert DeployRunner.describe_provision_reason({:lock_aborted, "search-capstone"}) ==
+               "another deploy of search-capstone holds the provision lock and it could not be acquired"
+    end
+
     test "a rollback does NOT provision — its source is already there", %{sites: sites} do
       put_cfg(enabled: true, rollback_command: stub("exit 0"))
 

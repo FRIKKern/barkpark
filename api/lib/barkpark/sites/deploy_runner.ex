@@ -482,12 +482,88 @@ defmodule Barkpark.Sites.DeployRunner do
 
       {:error, {:provision_failed, reason}} ->
         Logger.warning(
-          "[site-deploy] provision failed for #{inspect(req.slug)} — deploy not started: #{inspect(reason)}"
+          "[site-deploy] provision failed for #{inspect(req.slug)} — deploy not started: #{describe_provision_reason(reason)}"
         )
 
         {:reply, {:error, :start_failed}, state}
     end
   end
+
+  # The provision reason, rendered for an operator and SCRUBBED. Deliberately a
+  # local, explicit redactor rather than the display-boundary `scrub/1`: what
+  # must SURVIVE is the diagnosis — a File.Error's action and path, an errno's
+  # meaning — because "enoent" alone is what made 25 failures unreadable.
+  #
+  # PUBLIC (`@doc false`) purely so the operator sentences can be asserted
+  # directly. Neither of the two shapes below can be induced end-to-end from a
+  # test: `:global.trans/2` retries forever rather than returning `:aborted`,
+  # and making `rename(2)` fail with anything but `:enoent` needs a
+  # platform-specific trick (an immutable flag, a mount point) that would red on
+  # someone else's box. An unassertable sentence is one nobody notices breaking.
+  @doc false
+  @spec describe_provision_reason(term()) :: String.t()
+  def describe_provision_reason(%File.Error{reason: reason, path: path, action: action}),
+    do: redact("could not #{action} #{path}: #{format_posix(reason)}")
+
+  def describe_provision_reason(%File.CopyError{reason: reason, source: src, destination: dst}),
+    do: redact("could not copy #{src} to #{dst}: #{format_posix(reason)}")
+
+  def describe_provision_reason({:template_not_found, path}),
+    do: redact("site template not found: #{path}")
+
+  def describe_provision_reason({:rename_failed, reason}),
+    do: redact("could not rename the staged site source: #{format_posix(reason)}")
+
+  # The two shapes the provisioner's swap produces (provisioner.ex:202/:240).
+  # They live HERE, beside their producers: without their own clauses they fall
+  # to `inspect/1` and reach the operator as Elixir tuple jargon, which is the
+  # exact narrowing this arm exists to end.
+  def describe_provision_reason({:swap_aside_failed, reason}),
+    do:
+      redact(
+        "could not move the live site source aside before swapping in the new one: " <>
+          format_posix(reason)
+      )
+
+  def describe_provision_reason({:lock_aborted, slug}),
+    do: redact("another deploy of #{slug} holds the provision lock and it could not be acquired")
+
+  def describe_provision_reason(reason) when is_binary(reason), do: redact(reason)
+
+  def describe_provision_reason(%{__exception__: true} = error),
+    do: redact(Exception.message(error))
+
+  def describe_provision_reason(reason) when is_atom(reason), do: format_posix(reason)
+
+  def describe_provision_reason(reason), do: redact(inspect(reason))
+
+  defp format_posix(reason) when is_atom(reason) do
+    described = reason |> :file.format_error() |> to_string()
+
+    # `:file.format_error/1` answers "unknown POSIX error: <atom>" for anything
+    # that is not an errno — in that case the atom itself is the better answer.
+    if String.starts_with?(described, "unknown POSIX error"),
+      do: to_string(reason),
+      else: described
+  rescue
+    _ -> inspect(reason)
+  end
+
+  defp format_posix(reason), do: inspect(reason)
+
+  # Redact the two secret shapes that can plausibly ride a provision reason: this
+  # product's own token prefix, and any `KEY=value` whose key names a credential.
+  @token_re ~r/bppat_[A-Za-z0-9_\-]+/
+  @assigned_secret_re ~r/\b([A-Za-z0-9_]*(?:TOKEN|SECRET|PASSWORD|KEK|APIKEY|API_KEY))=\S+/i
+
+  defp redact(text) when is_binary(text) do
+    text
+    |> String.replace(@token_re, "bppat_[REDACTED]")
+    |> String.replace(@assigned_secret_re, "\\1=[REDACTED]")
+    |> String.slice(0, 500)
+  end
+
+  defp redact(other), do: redact(inspect(other))
 
   # The launch fork: a systemd box gets a SURVIVING transient unit; anywhere
   # `systemd-run` is absent falls back to the in-process Port.

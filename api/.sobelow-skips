@@ -12,8 +12,6 @@ Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/re
 XSS.Raw: XSS,lib/barkpark_web/layouts/quiz.html.heex:21,47A091E
 XSS.SendResp: XSS in `send_resp`,lib/barkpark/plugins/onixedit/web/export_controller.ex:52,64EB26D
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/codelists/editeur.ex:298,227D73E
-Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/sites/provisioner.ex:214,1E1DB9B
-Traversal.FileModule: Directory Traversal in `File.write!`,lib/barkpark/sites/provisioner.ex:158,4EA14F9
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/frt.ex:141,227F1B8
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/media.ex:96,340ACA6
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/studio_chat/runtime.ex:554,49C06AE
@@ -25,14 +23,11 @@ Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/plugins/re
 SQL.Query: SQL injection,lib/barkpark/media/delivery/search.ex:406,17455DA
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/manifest.ex:90,6A0A6D5
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark/tasks/queue_gate.ex:245,2428CAE
-Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/sites/provisioner.ex:178,229BECE
 Traversal.FileModule: Directory Traversal in `File.read`,lib/barkpark/media/probe.ex:27,2C782D6
-Traversal.FileModule: Directory Traversal in `File.mkdir_p!`,lib/barkpark/sites/provisioner.ex:151,21C1D00
 DOS.StringToAtom: Unsafe `String.to_atom`,lib/barkpark_web/router/plugins.ex:295,3CA05A1
 CI.System: Command Injection via `System` function,lib/barkpark/studio_chat/runtime/codex/readiness.ex:42,6CC3DE8
 Traversal.FileModule: Directory Traversal in `File.read!`,lib/barkpark/plugins/onixedit/schemas/text_content.ex:40,1DCA539
 Traversal.FileModule: Directory Traversal in `File.write`,lib/barkpark/epic_fleet/benchmark.ex:233,7E9FD64
-Traversal.FileModule: Directory Traversal in `File.cp_r!`,lib/barkpark/sites/provisioner.ex:152,2C3FE7D
 Traversal.FileModule: Directory Traversal in `File.rm`,lib/barkpark/plugins/indx/persistence.ex:81,ABE21C
 Traversal.FileModule: Directory Traversal in `File.mkdir_p`,lib/barkpark/plugins/indx/persistence.ex:71,14F913C
 RCE.CodeModule: Code Execution in `Code.eval_file`,lib/barkpark/release.ex:23,5B901F4
