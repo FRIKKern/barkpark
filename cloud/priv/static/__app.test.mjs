@@ -11149,7 +11149,10 @@ test("cch-w12-s1: an identity change WITHOUT a reload drops the cached actor axi
   // the subscription trio and the overview snapshot; the actor axis was the
   // one per-account cache left standing.
   const loggedOut = appRegion(src, "    var s = session();\n    if (!s || !s.token) {", "hide($(\"#app-shell\"));");
-  assert.ok(loggedOut.includes("meCache = null"), "sanity: this is the logged-out branch");
+  // cch-w36-s3: the literal `meCache = null` here is now clearMe(), which drops
+  // the cache AND the meLoaded/meError/meErrorFault trio in lockstep (a stale
+  // fault must never outlive its data).
+  assert.ok(loggedOut.includes("clearMe()"), "sanity: this is the logged-out branch, and it drops the /v1/me cache");
   assert.ok(loggedOut.includes("activityActors = null") && loggedOut.includes("activityActorsTried = false"),
     "signing out (or being bounced by a 401) must drop the previous team's roster");
   // Accepting an invite changes the roster under the same page life.
@@ -15122,6 +15125,229 @@ test("cch-w34-s1: the absence-as-answer census runs clean against the shipped ap
   // Neither fixed loader may still be in the population.
   assert.ok(r.stdout.indexOf("loadInstanceSites") === -1);
   assert.ok(r.stdout.indexOf("loadTokens") === -1);
+});
+
+// ── cch-w36-s3 · A ROLE WE DO NOT KNOW IS NOT A ROLE OF "MEMBER" ───────────
+// The measured defect (wave 36): GET /v1/me answering 500 left meCache null
+// FOREVER — a state BYTE-IDENTICAL to cold boot — and every authority predicate
+// reads that falsiness as "not privileged". An OWNER whose /v1/me blipped was
+// shown the plain-member token picker and told, as fact:
+//
+//     "Members can create read-only tokens. Ask an admin for write, deploy, or root."
+//
+// asking themselves for permission they already hold. The picker an owner
+// received after a 500 was byte-identical to a real member's (434 bytes), and
+// smoke.mjs's `tokens-member` expectation passed against it VERBATIM, all four
+// assertions — the existing test asserted the right sentence for the wrong
+// reason and stayed green through the whole defect.
+//
+// These tests DRIVE loadMe (impure — it fetches and paints), on the cch-w34-s1
+// precedent above: the collapse lives in the fetch callback, which is exactly
+// why nothing in a pure-helper harness could see it.
+
+async function driveMe(status, payload) {
+  const saved = sandbox.fetch;
+  sandbox.fetch = fetchStub(status, payload);
+  try {
+    hooks.loadMe();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally { sandbox.fetch = saved; }
+}
+
+const ME_OWNER = { role: "owner", team: { id: "t1", name: "Acme Inc" }, user: { id: "u1", email: "ada@acme.com" } };
+const ME_MEMBER = { role: "member", team: { id: "t1", name: "Acme Inc" }, user: { id: "u2", email: "lin@acme.com" } };
+const MEMBER_NOTE = "Members can create read-only tokens. Ask an admin for write, deploy, or root.";
+
+test("cch-w36-s3: the /v1/me state trio is hookable (RED on origin/main, where none of it exists)", () => {
+  assert.equal(typeof hooks.loadMe, "function", "loadMe must be drivable");
+  assert.equal(typeof hooks.clearMe, "function", "clearMe must be drivable");
+  assert.equal(typeof hooks.meState, "function", "meState must be hookable");
+  assert.equal(typeof hooks.meFlags, "function", "the three states must be readable together");
+});
+
+test("cch-w36-s3: THE UNKNOWN STATE IS DISTINGUISHABLE FROM THE COLD STATE — false on main today", async () => {
+  hooks.clearMe();
+  const cold = hooks.meFlags();
+  const coldPicker = hooks.tokenAbilitiesFieldHtml();
+  assert.deepEqual({ role: cold.role, loaded: cold.loaded, error: cold.error },
+    { role: null, loaded: false, error: false }, "cold boot: nothing known, nothing failed");
+  assert.equal(hooks.meState(), "loading");
+
+  await driveMe(500, { error: "server_error" });
+  const failed = hooks.meFlags();
+
+  // THE ASSERTION THAT COULD NOT PASS BEFORE THIS SLICE: on origin/main both
+  // states are {role:null, loaded:false, error:false} and both pickers are the
+  // same 434 bytes, so "we never asked" and "the answer failed" were the SAME
+  // VALUE and no renderer could tell them apart.
+  assert.notDeepEqual(failed, cold,
+    "the post-500 state must not equal the cold state — otherwise nothing can distinguish 'never asked' from 'the answer failed'");
+  assert.equal(hooks.meState(), "failed");
+  assert.equal(failed.error, true, "the failure is recorded");
+  assert.equal(failed.loaded, false, "a failed read never counts as loaded");
+  assert.deepEqual({ status: failed.fault.status, err: failed.fault.data.error },
+    { status: 500, err: "server_error" }, "the fault is retained as faultCopy()'s arguments");
+  assert.notEqual(hooks.tokenAbilitiesFieldHtml(), coldPicker,
+    "and the two states must RENDER differently, not merely differ in a variable");
+  hooks.clearMe();
+});
+
+test("cch-w36-s3: loadMe's ELSE arm records every failure class — a missing .catch was never the defect", async () => {
+  // api() ends in a .catch returning {ok:false,status:0,…}, so loadMe's promise
+  // NEVER rejects: the load-bearing hole was the missing else, and it swallowed
+  // every class the same way.
+  for (const [status, payload] of [[500, { error: "server_error" }], [502, {}], [0, { error: "network_error" }], [200, null]]) {
+    hooks.clearMe();
+    await driveMe(status, payload);
+    assert.equal(hooks.meState(), "failed", "status " + status + " must land in the failed state");
+    assert.equal(hooks.meFlags().fault.status, status);
+    assert.match(hooks.meFailureCopy(), /\S/, "every class gets human copy");
+  }
+  hooks.clearMe();
+});
+
+test("cch-w36-s3: loadMe's FAILURE arm carries its own repaint seams — they were stranded inside the success arm", () => {
+  // The twin of the cch-w12-s1 region test above, on the other arm. loadMe's
+  // three repaint seams (billing / operator / activity) all lived INSIDE
+  // `if (r.ok && r.data)`, so a screen painted while me was unknown sat on its
+  // provisional render forever when the answer failed. Structural, like its
+  // twin: renderBilling/paintActivityFilters are DOM-bound mounts.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+  const region = appRegion(src, "function loadMe(", "// =========================================================== SUBSCRIPTION");
+  const failureArm = region.slice(region.indexOf("} else {"));
+  assert.ok(failureArm.length > 0, "loadMe must HAVE a failure arm at all");
+  assert.ok(failureArm.includes("absorbMe(r)"), "the failure arm records the fault");
+  assert.ok(failureArm.includes("applyOperatorGate()"), "the operator entry is re-hidden, fail-closed (GR9)");
+  for (const view of ["billing", "activity"]) {
+    assert.ok(failureArm.includes('currentView() === "' + view + '"'),
+      "the failure arm must repaint " + view + " — a provisional render must not outlive the answer");
+  }
+  // loadOperator() is deliberately NOT re-entered here: the operator view's own
+  // copy belongs to the operator band (cch-w36-s4). Pinned so a later widening
+  // is a decision, not a drift.
+  assert.ok(!failureArm.includes("loadOperator()"),
+    "the operator view's failure copy is cch-w36-s4's, not this slice's");
+});
+
+test("cch-w36-s3: a good answer clears the fault, and clearMe drops the trio in lockstep", async () => {
+  hooks.clearMe();
+  await driveMe(500, { error: "server_error" });
+  assert.equal(hooks.meState(), "failed");
+  await driveMe(200, ME_OWNER);
+  assert.deepEqual(
+    { state: hooks.meState(), role: hooks.meFlags().role, error: hooks.meFlags().error, fault: hooks.meFlags().fault },
+    { state: "loaded", role: "owner", error: false, fault: null },
+    "a stale fault must never outlive its flag",
+  );
+  hooks.clearMe();
+  assert.deepEqual(
+    { state: hooks.meState(), ...hooks.meFlags() },
+    { state: "loading", role: null, loaded: false, error: false, fault: null },
+    "clearMe (sign-out / invitation accept) drops cache AND flags",
+  );
+});
+
+// ── the exhibit: the token picker stops accusing an owner ──────────────────
+
+test("cch-w36-s3: THE TOKEN PICKER STOPS ACCUSING AN OWNER — no member sentence while the role is unknown", async () => {
+  hooks.clearMe();
+  const loading = hooks.tokenAbilitiesFieldHtml();
+  assert.ok(loading.indexOf(MEMBER_NOTE) === -1,
+    "a role that has not loaded must not be reported as a member cap");
+  assert.match(loading, /Checking your account/, "the waiting state says it is waiting");
+  assert.match(loading, /data-me-state="loading"/);
+
+  await driveMe(500, { error: "server_error" });
+  const failed = hooks.tokenAbilitiesFieldHtml();
+  assert.ok(failed.indexOf(MEMBER_NOTE) === -1,
+    "an owner whose /v1/me answered 500 must NOT read the ask-an-admin sentence");
+  assert.match(failed, /We couldn&#39;t check your account/, "the failure is stated");
+  assert.match(failed, /broke on our side/, "a 5xx names US as the party at fault");
+  assert.match(failed, /a token created now would be read-only/,
+    "the consequence is stated — the Create button still works and the server caps an unproven actor at read");
+  assert.ok(failed.indexOf('class="token-ab"') === -1,
+    "an unknown role is never handed privileged checkboxes either — the unknown arm fails CLOSED");
+  assert.notEqual(failed, loading, "failed and waiting are themselves distinguishable");
+  hooks.clearMe();
+});
+
+test("cch-w36-s3: THE POSITIVE CONTROL SURVIVES — a confirmed member still gets the member picker, a confirmed owner four checkboxes", async () => {
+  hooks.clearMe();
+  await driveMe(200, ME_MEMBER);
+  const member = hooks.tokenAbilitiesFieldHtml();
+  assert.ok(member.includes("set-check--scope"), "read scope is stated, not a pickable ghost");
+  assert.ok(member.includes(MEMBER_NOTE), "a CONFIRMED member still reads the honest cap, verbatim");
+  assert.ok(member.indexOf('class="token-ab"') === -1, "no ability checkboxes for a member");
+  assert.ok(!member.includes('value="write"') && !member.includes('value="deploy"') && !member.includes('value="root"'));
+  assert.ok(member.indexOf("token-scope-unknown") === -1, "a known member is not an unknown one");
+  assert.equal(hooks.canMintAnyAbility(), false);
+
+  await driveMe(200, ME_OWNER);
+  const owner = hooks.tokenAbilitiesFieldHtml();
+  assert.equal(owner.split('class="token-ab"').length - 1, 4, "an owner still picks from four abilities");
+  assert.ok(owner.indexOf(MEMBER_NOTE) === -1);
+  assert.equal(hooks.canMintAnyAbility(), true);
+  hooks.clearMe();
+});
+
+test("cch-w36-s3: the smoke `tokens-member` assertion body can no longer pass against an owner-after-500", async () => {
+  // The primary obligation of this slice, pinned here so it cannot regress
+  // silently in the preview harness. Verbatim from smoke.mjs's tokens-member.
+  hooks.clearMe();
+  await driveMe(500, { error: "server_error" });
+  const picker = hooks.tokenAbilitiesFieldHtml();
+  assert.throws(() => {
+    assert.ok(picker.includes("set-check--scope"), "read scope is stated, not a pickable ghost");
+    assert.ok(picker.includes("Members can create read-only tokens"), "honest copy names the cap");
+    assert.ok(!picker.includes('class="token-ab"'), "no ability checkboxes are rendered for a member");
+    assert.ok(
+      !picker.includes('value="write"') && !picker.includes('value="deploy"') && !picker.includes('value="root"'),
+      "write/deploy/root are not offered to a member",
+    );
+  }, /honest copy names the cap/, "the four smoke assertions passed 4/4 against this render on origin/main; the second must now fail");
+  hooks.clearMe();
+});
+
+// ── loadMembers / loadEnvVars: a transport failure is not "No team yet" ────
+
+async function driveMeGatedLoader(run, id, status, payload) {
+  hooks.clearMe();
+  const saved = { fetch: sandbox.fetch, document: sandbox.document };
+  const dom = recordingDom([id]);
+  sandbox.fetch = fetchStub(status, payload);
+  sandbox.document = dom.document;
+  try {
+    run();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally {
+    Object.assign(sandbox, saved);
+    hooks.clearMe();
+  }
+  return dom.els[id].innerHTML;
+}
+
+test("cch-w36-s3: loadMembers reports a FAILED /v1/me as a failure, never as 'No team yet'", async () => {
+  const teamless = await driveMeGatedLoader(hooks.loadMembers, "members-body", 200, { user: { id: "u9", email: "solo@acme.com" } });
+  assert.match(teamless, /No team yet/, "a GENUINE teamless 200 keeps its determinate answer");
+
+  for (const [status, re] of [[500, /couldn&#39;t load your team&#39;s members/i], [0, /Network error/], [403, /permission/]]) {
+    const failed = await driveMeGatedLoader(hooks.loadMembers, "members-body", status, { error: "boom" });
+    assert.ok(failed.indexOf("No team yet") === -1,
+      "status " + status + " on /v1/me must not be reported as a fact about the account");
+    assert.match(failed, /Couldn&#39;t load members|Couldn't load members/);
+    assert.match(failed, re);
+    assert.match(failed, /data-members-retry/, "and the honest state offers the Retry it needs");
+  }
+});
+
+test("cch-w36-s3: loadEnvVars does the same — the twin fall-through is closed too", async () => {
+  const teamless = await driveMeGatedLoader(hooks.loadEnvVars, "env-body", 200, { user: { id: "u9", email: "solo@acme.com" } });
+  assert.match(teamless, /No team yet/, "a GENUINE teamless 200 keeps its determinate answer");
+
+  const failed = await driveMeGatedLoader(hooks.loadEnvVars, "env-body", 500, { error: "server_error" });
+  assert.ok(failed.indexOf("No team yet") === -1);
+  assert.match(failed, /Couldn&#39;t load environment variables|Couldn't load environment variables/);
+  assert.match(failed, /data-env-retry/);
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
