@@ -275,6 +275,46 @@
     return friendly(data, fallback);
   }
 
+  // cch-w31-s4 follow-up — THE READER for the bytes api() started keeping.
+  // api() retains a non-JSON body as `text` while `data` stays {}, so
+  // faultCopy() can only reach for the always-true server-fault sentence. The
+  // one fact that separates "our app crashed" from "the proxy in front of us
+  // never reached it" — and the fact a support ticket actually needs — is
+  // sitting in those bytes and was being dropped on the floor. faultDetail()
+  // makes them READABLE and BOUNDED: script/style blocks and tags stripped (an
+  // upstream error page is HTML and must never ride into innerHTML as markup;
+  // it is escaped at the seam too, belt-and-braces), whitespace collapsed, cut
+  // at 160 characters on a word boundary. Total over junk: a null/absent body,
+  // a JSON response (where `text` is null by construction) and a page with no
+  // readable characters all return "" — the seam renders NOTHING for "", so an
+  // empty detail line never promises a detail it does not have.
+  function faultDetail(text) {
+    if (typeof text !== "string") return "";
+    var plain = text
+      .replace(/<(script|style)\b[^>]*>[\s\S]*?<\/\1>/gi, " ")
+      .replace(/<[^>]*>/g, " ")
+      .replace(/\s+/g, " ")
+      .trim();
+    if (!plain) return "";
+    if (plain.length > 160) plain = plain.slice(0, 159).replace(/\s+\S*$/, "") + "…";
+    return plain;
+  }
+
+  // cch-w31-s4 follow-up — the instance-load failure card, PURE so the bytes it
+  // now carries are node-assertable rather than browser-only. The sentence is
+  // unchanged (faultCopy still decides it); what is new is the detail line: a
+  // fault whose body never parsed now shows the person what the server actually
+  // said instead of only being told, truthfully but uselessly, that something
+  // broke on our side.
+  function fleetLoadErrorHtml(fault) {
+    fault = fault || {};
+    var detail = faultDetail(fault.text);
+    return '<div class="empty-state"><h2>Couldn\'t load this instance</h2>' +
+      "<p>" + esc(faultCopy(fault.status, fault.data, "Check your connection and retry.", fault.transport)) + "</p>" +
+      (detail ? '<p class="muted">The server replied: ' + esc(detail) + "</p>" : "") +
+      '<p><button class="btn btn-primary btn-sm" id="inst-load-retry" type="button">Retry</button></p></div>';
+  }
+
   // =========================================================== TOAST primitive
   // toast({ kind, title, body, action, duration }) — kind: success|error|info.
   // action: { label, onClick }. Auto-dismisses; X closes early.
@@ -5191,7 +5231,7 @@
         return fleetCache;
       }
       // Retain WHY before the list-or-null collapse throws it away.
-      fleetFault = { status: r.status, data: r.data, transport: r.transport };
+      fleetFault = { status: r.status, data: r.data, text: r.text, transport: r.transport };
       return null;
     });
   }
@@ -5891,10 +5931,9 @@
         // connection; the connection sentence stays the honest fallback for a
         // fault we genuinely cannot name.
         setBreadcrumb(null);
-        var fleetErr = fleetFault || {};
-        box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load this instance</h2>' +
-          "<p>" + esc(faultCopy(fleetErr.status, fleetErr.data, "Check your connection and retry.", fleetErr.transport)) + "</p>" +
-          '<p><button class="btn btn-primary btn-sm" id="inst-load-retry" type="button">Retry</button></p></div>';
+        // cch-w31-s4 follow-up: the card is built by a pure helper now, so the
+        // captured non-JSON body reaches a reader (and is node-assertable).
+        box.innerHTML = fleetLoadErrorHtml(fleetFault);
         var retry = $("#inst-load-retry");
         if (retry) retry.addEventListener("click", function () { loadInstance(id, tab); });
         return;
@@ -19906,6 +19945,14 @@
       // line is legal inside an object literal). Only reference helpers
       // declared above -- this object is built once, at eval tail. Sweeps:
       // move this comment only whole, on its own lines. MARK:zone-console-hook-map
+      // cch-w31-s4 follow-up: api() ITSELF, so the response envelope is drivable
+      // from node against a stub instead of only being read as source text. The
+      // source-regex pin cannot see a body-recovery arm that is short-circuited
+      // out (every pinned line stays byte-identical); a real call through a
+      // 502 text/html stub can. Plus the two helpers that give the recovered
+      // bytes a reader: the excerpt derivation and the card that renders it.
+      api: api,
+      faultDetail: faultDetail, fleetLoadErrorHtml: fleetLoadErrorHtml,
       // cch-w30-s5: the crash-vs-validation copy switch. Node drives it with the
       // router's real crash envelope so the RENDERED sentence is pinned, not
       // just the wire bytes.

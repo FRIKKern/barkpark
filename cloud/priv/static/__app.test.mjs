@@ -14033,7 +14033,9 @@ test("cch-w31-s4: the fleet and subscription caches RETAIN the fault they used t
   // ensureFleet(): the list-or-null collapse now writes the fault beside it…
   const ensure = src.slice(src.indexOf("function ensureFleet()"));
   const ensureBody = ensure.slice(0, ensure.indexOf("\n  }"));
-  assert.match(ensureBody, /fleetFault = \{ status: r\.status, data: r\.data, transport: r\.transport \}/);
+  // (the follow-up slice added `text` — the captured non-JSON body — to the
+  // retained fault so the instance-load card can show what the server said.)
+  assert.match(ensureBody, /fleetFault = \{ status: r\.status, data: r\.data, text: r\.text, transport: r\.transport \}/);
   assert.match(ensureBody, /fleetFault = null/, "a success must clear the retained fault");
   // …and loadSubscription()'s bare boolean gained the same companion.
   const load = src.slice(src.indexOf("function loadSubscription()"));
@@ -14045,4 +14047,128 @@ test("cch-w31-s4: the fleet and subscription caches RETAIN the fault they used t
   assert.equal([...src.matchAll(/subError = false/g)].length,
     [...src.matchAll(/subErrorFault = null/g)].length,
     "every subError reset must clear subErrorFault too");
+});
+
+// ── cch-w31-s4 follow-up: THE CAPTURED 5xx BODY GETS A READER ──────────────
+// The group above pins api()'s envelope by READING app.js as text, and that pin
+// has real but narrow power: deleting the field (`text: body.text` -> `text:
+// null`) reds it. What it structurally cannot see is the arm being turned OFF —
+// `} else if (false && typeof res.text === "function") {` leaves every pinned
+// line byte-identical, kills body recovery completely, and the whole harness
+// stays green. So api() is exported now and DRIVEN: a real call against a 502
+// text/html stub that has NO json method at all (the JSON arm is unreachable by
+// construction, not by convention) must come back carrying the proxy's bytes,
+// and those bytes must reach a surface a person can read.
+
+// A stub shaped like an upstream proxy that never spoke JSON: real
+// headers.get() switch, a text() body, and DELIBERATELY no json method.
+function proxyFaultFetch(status, contentType, bodyText) {
+  const calls = [];
+  const fn = (path, opts) => {
+    calls.push({ path, opts });
+    return Promise.resolve({
+      ok: status >= 200 && status < 300,
+      status,
+      headers: { get: (n) => (String(n).toLowerCase() === "content-type" ? contentType : null) },
+      text: () => Promise.resolve(bodyText),
+    });
+  };
+  fn.calls = calls;
+  return fn;
+}
+
+// Swap the one global api() reads, drive it to completion, restore.
+async function driveApi(fetchFn, method, path) {
+  const saved = sandbox.fetch;
+  sandbox.fetch = fetchFn;
+  try {
+    return await hooks.api(method || "GET", path || "/v1/barkparks");
+  } finally {
+    sandbox.fetch = saved;
+  }
+}
+
+const NGINX_502 =
+  "<html>\r\n<head><title>502 Bad Gateway</title></head>\r\n<body>\n" +
+  "<center><h1>502 Bad Gateway</h1></center>\n<hr><center>nginx/1.24.0</center>\n" +
+  "</body>\r\n</html>\r\n";
+
+test("cch-w31-s4 follow-up: api() is exported, so the envelope is drivable at all", () => {
+  assert.equal(typeof hooks.api, "function",
+    "api must be in __bpTestHook — without it no behavioural fixture is possible");
+});
+
+test("cch-w31-s4 follow-up: a 502 text/html answer arrives with the proxy's bytes as .text", async () => {
+  const r = await driveApi(proxyFaultFetch(502, "text/html", NGINX_502));
+  assert.equal(r.ok, false);
+  assert.equal(r.status, 502);
+  // `data` is untouched by the addition — still the empty object every .data
+  // read already expects. (Cross-realm object: compare by shape, not identity.)
+  assert.equal(typeof r.data, "object");
+  assert.equal(Object.keys(r.data).length, 0);
+  assert.equal(r.transport, null, "an answered request is not a transport failure");
+  // THE POINT: the bytes survived instead of vanishing into {}.
+  assert.equal(typeof r.text, "string");
+  assert.match(r.text, /502 Bad Gateway/);
+  assert.match(r.text, /nginx/);
+});
+
+test("cch-w31-s4 follow-up: a JSON answer still yields text === null", async () => {
+  const jsonish = (path, opts) => {
+    void path; void opts;
+    return Promise.resolve({
+      ok: false, status: 500,
+      headers: { get: () => "application/json; charset=utf-8" },
+      json: () => Promise.resolve({ error: "server_error" }),
+    });
+  };
+  const r = await driveApi(jsonish);
+  assert.equal(r.text, null, "the recovery arm must not fire on a parseable body");
+  assert.equal(r.data.error, "server_error");
+});
+
+test("cch-w31-s4 follow-up: faultDetail turns an HTML error page into readable, bounded prose", () => {
+  const detail = hooks.faultDetail(NGINX_502);
+  assert.match(detail, /502 Bad Gateway/);
+  assert.match(detail, /nginx/);
+  assert.ok(detail.indexOf("<") === -1 && detail.indexOf(">") === -1,
+    "markup must be stripped, never handed onward as markup");
+  assert.ok(detail.length <= 161, "the excerpt is bounded (found " + detail.length + ")");
+  // Total over junk — and "" is the signal the seam uses to render NOTHING,
+  // so an empty detail line never promises a detail it does not have.
+  assert.equal(hooks.faultDetail(null), "");
+  assert.equal(hooks.faultDetail(undefined), "");
+  assert.equal(hooks.faultDetail(""), "");
+  assert.equal(hooks.faultDetail("<html><body>   </body></html>"), "");
+  // A long body is cut on a word boundary with an ellipsis, not mid-word.
+  const long = hooks.faultDetail("word ".repeat(200));
+  assert.ok(long.length <= 161 && long.endsWith("…"));
+});
+
+test("cch-w31-s4 follow-up: THE BYTES REACH A SURFACE — the instance-load card renders them", async () => {
+  const r = await driveApi(proxyFaultFetch(502, "text/html", NGINX_502));
+  // Exactly what ensureFleet() now retains, built from a REAL api() answer.
+  const html = hooks.fleetLoadErrorHtml({ status: r.status, data: r.data, text: r.text, transport: r.transport });
+  // The honest 5xx sentence is unchanged…
+  assert.match(html, /broke on our side/);
+  // …and the body the person could not see before is now on the card.
+  assert.match(html, /The server replied/);
+  assert.match(html, /502 Bad Gateway/);
+  assert.match(html, /nginx/);
+  // Escaped, not injected: no tag from the upstream page survives as markup.
+  assert.ok(html.indexOf("<html") === -1 && html.indexOf("<center") === -1,
+    "the upstream page must be escaped into text, never mounted as markup");
+  assert.match(html, /id="inst-load-retry"/, "the retry affordance stays");
+});
+
+test("cch-w31-s4 follow-up: with no recovered body the card gains NOTHING — no empty detail line", () => {
+  const plain = hooks.fleetLoadErrorHtml({ status: 500, data: { error: "server_error" }, text: null, transport: null });
+  assert.match(plain, /broke on our side/);
+  assert.ok(plain.indexOf("The server replied") === -1);
+  // Transport failures keep the class copy the two existing consumers rely on —
+  // `transport` was NOT touched by this slice.
+  const offline = hooks.fleetLoadErrorHtml({ status: 0, data: { error: "network_error" }, text: null, transport: "offline" });
+  assert.match(offline, /offline/i);
+  // Total over an absent fault (the seam passes fleetFault, which can be null).
+  assert.match(hooks.fleetLoadErrorHtml(null), /Couldn't load this instance/);
 });
