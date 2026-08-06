@@ -86,6 +86,32 @@ defmodule BarkparkCloud.DeployLedgerTest do
   @d_requeue_broken @r409_bare <>
                       " — and the rebuild could NOT be re-queued; publish again to retry"
 
+  # ── The STAMPED deferrals (dr-w4 S6) ──────────────────────────────────────
+  # `Sites.Deploy.box_refusal/3` appends the box's own request id AFTER the
+  # detail — `"#{base} [box request_id: #{rid}]"` — and `refusal_detail/1`
+  # returns the BARE code when the envelope carries no message. So on a
+  # code-only refusal the stamp lands INSIDE the first ` — ` segment, which is
+  # exactly the segment the classifier reads the code out of.
+  @rid " [box request_id: F9tPXq2A]"
+  @d_capacity_stamped "the instance refused the deploy (HTTP 409): box_at_capacity" <>
+                        @rid <> @requeued
+  # The SHIPPING class, live since W1 — the same break, on the busy slug.
+  @d_busy_stamped "the instance refused the deploy (HTTP 409): already_running" <>
+                    @rid <> @requeued
+  # …and the stamped shape that already worked, because the message pushed the
+  # stamp past the ` — ` boundary. Pinned so the strip does not regress it.
+  @d_capacity_msg_stamped "the instance refused the deploy (HTTP 409): box_at_capacity — 4 of 4 build slots are in use" <>
+                            @rid <> @requeued
+
+  # A CODELESS envelope — `%{"error" => %{"message" => "…"}}` with no `code` key
+  # — whose PROSE merely begins with a code word. `refusal_detail/1` returns the
+  # bare message, so nothing in the persisted string is a code at all; the box
+  # never named one.
+  @d_spoof_padded "the instance refused the deploy (HTTP 409): box_at_capacity  — the operator says the box is idle" <>
+                    @requeued
+  @d_spoof_prose "the instance refused the deploy (HTTP 409): box_at_capacity was blamed by the shim, wrongly" <>
+                   @requeued
+
   ## Fixtures
 
   defp user_fixture do
@@ -259,6 +285,72 @@ defmodule BarkparkCloud.DeployLedgerTest do
       labels = Enum.map(DeployLedger.deferred_classes(), &DeployLedger.label/1)
       assert length(Enum.uniq(labels)) == 3
       assert DeployLedger.label("BOX_AT_CAPACITY_DEFERRED") =~ "cap"
+    end
+
+    # dr-w4 S6. The request-id stamp ATE THE CODE. `box_refusal/3` appends
+    # " [box request_id: X]" after the detail and `refusal_detail/1` returns the
+    # bare code when the envelope has no message, so the first ` — ` segment of
+    # the persisted reason was `box_at_capacity [box request_id: F9tPXq2A]` and
+    # the `==` comparison could not match. This is NOT only the unbuilt capacity
+    # class: the identical break hits `already_running`, shipping since W1, and
+    # by D43's logic a DEFERRED_UNCLASSIFIED row falls back to the generic chain
+    # bound and produces the false accusation "refusing this site persistently
+    # for a cause the ledger cannot name" — against a runner working as designed.
+    test "the request-id stamp does not eat the deferral code" do
+      deferred = fn reason ->
+        DeployLedger.classify(%{status: "deferred", stage: "PLAN", failure_reason: reason})
+      end
+
+      # Code, no message, WITH the stamp — the broken shape, both classes.
+      assert deferred.(@d_capacity_stamped) == "BOX_AT_CAPACITY_DEFERRED"
+      assert deferred.(@d_busy_stamped) == "BOX_BUSY_DEFERRED"
+
+      # Code AND message and stamp: already worked, because the message pushed
+      # the stamp past the ` — ` boundary. It must keep working.
+      assert deferred.(@d_capacity_msg_stamped) == "BOX_AT_CAPACITY_DEFERRED"
+
+      # The stamp really is in the persisted string — this is not a fixture that
+      # quietly dropped the thing under test.
+      assert String.contains?(@d_capacity_stamped, "[box request_id: F9tPXq2A]")
+      assert String.contains?(@d_busy_stamped, "[box request_id: F9tPXq2A]")
+
+      # A stamp does not INVENT a code either: an unnamed code stays unnamed.
+      stamped_unknown =
+        "the instance refused the deploy (HTTP 409): slot_reservation_denied" <>
+          @rid <> @requeued
+
+      assert deferred.(stamped_unknown) == "DEFERRED_UNCLASSIFIED"
+    end
+
+    # dr-w4 S6, the opposite direction: the classifier read the first ` — `
+    # segment of whatever PROSE the box sent and treated it as a code. A codeless
+    # envelope whose message merely begins with a code word was therefore
+    # promoted to a capacity refusal with no code involved anywhere.
+    #
+    # The close stays on the RAW column (moduledoc): a code must LOOK like a code
+    # — a bare snake_case token, exactly as `refusal_detail/1` emits one — and
+    # prose that does not is prose, which is NOT the same thing as "the box named
+    # no code". D7's codeless 409 still means the busy slug; unreadable prose
+    # rises in the tail instead of collapsing into it.
+    test "prose that merely BEGINS with a code word is not read as a code" do
+      deferred = fn reason ->
+        DeployLedger.classify(%{status: "deferred", stage: "PLAN", failure_reason: reason})
+      end
+
+      # `String.trim/1` on the split segment made padded prose byte-equal to the
+      # code the producer template can never emit padded.
+      assert deferred.(@d_spoof_padded) == "DEFERRED_UNCLASSIFIED"
+      assert deferred.(@d_spoof_prose) == "DEFERRED_UNCLASSIFIED"
+
+      # …and it must NOT fall the other way either: unreadable prose is not a
+      # codeless 409, so it must not be absorbed by the busy bucket that D7's
+      # bare-409 fallback fills.
+      refute deferred.(@d_spoof_padded) == "BOX_BUSY_DEFERRED"
+      refute deferred.(@d_spoof_prose) == "BOX_BUSY_DEFERRED"
+
+      # The genuine codeless 409 — no detail at all after the status — is still
+      # the busy slug (D7's 43%).
+      assert deferred.(@d_busy_bare) == "BOX_BUSY_DEFERRED"
     end
 
     # The DEFERRED-SIDE MIRROR of "UNCLASSIFIED CAN GO UP" (D8) — which did not
