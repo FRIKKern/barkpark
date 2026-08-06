@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-11",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-29-2026-08-03::cli"],
+  "verdict": "partial",
+  "direct_answer": "The exact Paper revision and all 252 authored blocks are reproducibly pinned through structured CLI reads and the latest durable history snapshot. CLI discovery/help and raw JSON output are present. The rendered reader is not self-authenticating, history limits are ignored, a live upstream internal_error/500 is flattened to not_found/exit 4, and width 1 exceeds its boundary on the Related heading. Current source and captures contain no hostile controls, but Unicode bidi/format controls are not covered by the sanitizer.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+    "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+    "paper_blocks": 252
+  },
+  "observations": {
+    "source_identity": {
+      "status": "found",
+      "reads_equal": "4/4",
+      "blocks": "252/252",
+      "unique_block_ids": "252/252",
+      "canonical_blocks_sha256": "e1cb807591caa511dadb1cc98311812aa364abc624f8da60c24562185b828b21",
+      "latest_history_blocks_equal": true
+    },
+    "authored_carriers": {
+      "headings": 37,
+      "paragraphs": 187,
+      "empty_paragraph_spacers": 139,
+      "tables": 11,
+      "header_cells": 35,
+      "body_cells": 316,
+      "lists": 13,
+      "list_items": 67,
+      "callouts": 4,
+      "marked_runs": 313
+    },
+    "cli": {
+      "discovery_help": "found",
+      "structured_output": "found: raw JSON contains _id, exact _rev, and 252 unique blocks",
+      "typed_errors": "partial: a source internal_error/500 was converted to not_found/exit 4; usage probes correctly exited 2",
+      "render_identity": "partial: six captures contained neither Paper slug nor revision",
+      "history_limit": "refuted: --limit 1, 2, and 100 each returned all 14 revisions",
+      "sanitization": "partial: C0/DEL stripping exists; Unicode Cf/bidi policy and hostile fixtures are absent"
+    },
+    "terminal_widths": {
+      "1": {"lines": 81236, "max_width": 7, "overflow_lines": 1, "offender": "Related"},
+      "20": {"max_width": 20, "overflow_lines": 0},
+      "40": {"max_width": 40, "overflow_lines": 0},
+      "80": {"max_width": 80, "overflow_lines": 0, "repeat_equal": true},
+      "120": {"max_width": 120, "overflow_lines": 0}
+    }
+  },
+  "inferences": [
+    "History limit loss occurs in CLI query construction because the controller consumes limit while the manifest marks doc.history non-paginated and applyQuery forwards global limit only for paginated commands.",
+    "A rendered capture cannot independently prove which source revision it represents because it lacks Paper identity and appends mutable Related content.",
+    "Unicode bidi controls would survive sanitizeText because it removes only C0 and DEL runes."
+  ],
+  "recommended_repair_seams": [
+    "Emit sanitized Paper id and immutable source revision inside the render width boundary.",
+    "Preserve the underlying coded API error and canonical exit instead of converting every source-read failure to not_found/4.",
+    "Forward an explicitly declared history limit or declare doc.history paginated, with an emitted-URL assertion.",
+    "Pass the Related heading through the same width wrapper as its entries.",
+    "Define a Unicode bidi/format-control policy and add hostile Paper fixtures.",
+    "Separate or identity-stamp the mutable Related appendix."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "cloud-console-hardening-epic", "two adjacent CLI tasks"],
+    "papers": ["cloud-console-hardening-wave-29-2026-08-03@18768b0a14c2eead927181c4a0e37c18", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      "internal/cli/paper_cmd.go",
+      "internal/cli/run.go",
+      "internal/cli/errors.go",
+      "internal/pdrender/inline.go",
+      "internal/cli/paper_cmd_test.go",
+      "internal/cli/paper_related_test.go",
+      "internal/pdrender/sanitize_text_test.go",
+      "api/lib/barkpark_web/controllers/history_controller.ex",
+      "docs/cli/error-exit-table.md"
+    ]
+  },
+  "risks": [
+    "Rendered captures cannot authenticate their source revision.",
+    "History pagination appears to work in help but ignores its requested limit.",
+    "Transient server failures are reported as missing Papers.",
+    "Width 1 violates its declared boundary and bidi controls remain untested."
+  ],
+  "unvisited_scope": [
+    "interactive PTY behavior and real terminal emulator",
+    "controlled 401/403/404/422/500/timeout matrix",
+    "hostile persisted Paper through the full server-to-CLI path",
+    "release-candidate pin semantics for this exact Paper revision"
+  ],
+  "credential_scan": {"status": "clean", "values_revealed": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0}
+}
