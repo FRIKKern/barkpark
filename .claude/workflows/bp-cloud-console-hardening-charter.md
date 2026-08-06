@@ -1617,7 +1617,7 @@ six consecutive waves stranded work on local branches in a shared checkout.
 
 | Slice | Task | Final branch | PR | Reviewer fix |
 |---|---|---|---|---|
-| A failed read is not an empty one + the absence-as-answer census | `cch-w34-s1-absence-is-not-an-answer` | `…an-empt-0` | [#9738](https://github.com/FRIKKern/barkpark/pull/9738) | none — nothing to fix |
+| A failed read is not an empty one + the absence-as-answer census | `cch-w34-s1-absence-is-not-an-answer` | `…an-empt-0-r` | [#9742](https://github.com/FRIKKern/barkpark/pull/9742) | re-anchored two E11-banned `app.js:<line>` cites |
 | Health never measured; the never-reported watchdog becomes reachable | `cch-w34-s2-health-never-measured` | `…a-heal-1-r` | [#9739](https://github.com/FRIKKern/barkpark/pull/9739) | `StalenessWorker` moduledoc synced to the two-arm query |
 | The four gates' disclosure headline survives delivery | `cch-w34-s3-disclosure-survives-delivery` | `…headl-2` | [#9740](https://github.com/FRIKKern/barkpark/pull/9740) | none — nothing to fix |
 | Keyset cursors seek — ROW comparator at three sites, no migration | `cch-w34-s4-delivery-log-cursor-seeks` | `…instead-of-3-r` | [#9741](https://github.com/FRIKKern/barkpark/pull/9741) | committed the SQL-shape guard |
@@ -1654,12 +1654,27 @@ were re-derived independently by the reviewer and both HELD (the `agent_status "
 claim; s1's pre-host quiet) — but s1's pre-host silence is a PRODUCT call that this diff now asserts as
 ratified law while deleting its only citation, and it deserves a genuinely independent second look.
 
+**A GATE THE SLICE'S OWN GATE COULD NOT SEE.** s1's gate command omits `__css_check.mjs`, so its E11
+clause — the D41 / bp-honest-gates D5 ban on the `app.js:<digits>` citation SHAPE — only fired in CI
+and red the **required** Console gate on the first PR. Two offenders, both introduced by the slice.
+Re-anchored to name + grep on the `-r` branch; the first PR (#9738) is closed in favour of #9742.
+**Lesson for Decide: a slice gate that is a strict subset of a required context's gate is a slice that
+finds out in CI.** The other three slices' gates were supersets and all came back CLEAN.
+
 **Ledger.** All four tasks `in_progress`, published, honest miss-notes where a criterion needed a
 pushed head. Reviewer filed the one row the build could not (guerrilla was 500ing on `/v1/data/mutate`
 through both s2's and s4's builds): `cch-w34-bl-media-search-cursor-or-decomposition` —
 `api/lib/barkpark/media/delivery/search.ex:272`, filed **measure-before-rewrite**, because the Cloud
 38.7x is a measurement of Cloud tables. s2's blocked follow-up (the annotation comma truncation) needed
 NO row: s3 fixed it in this same wave. No task outside the wave was touched.
+
+**Two read-backs, both live, one of them settled and one structurally unsettleable here.** #9739's own
+head (`6c6c4708a`, cloud-only) delivers ONE Elixir-gate annotation, title verbatim `"Elixir gate:
+green"` with the body intact — D393 answered yes, and the truncation confirmed on our own tree. s3's
+own head can NEVER show the fixed title: a `.github/workflows/**` diff matches every aggregator path
+set, so `dispatched` is never 0 and the nothing-ran notice is never emitted (all three gates:
+`annotations_count=0`). The fixed headline is observable only on the first cloud-only or docs-only PR
+AFTER #9740 merges — that read-back is the lead's, and it is the whole lesson of the slice.
 
 **NEXT WAVE takes the deferred round-2 pair, in dependency order, and the residue this wave named.**
 Merge round 1 first; then `cch-w34-s5-detail-column-is-text` (waits on s2 — same
