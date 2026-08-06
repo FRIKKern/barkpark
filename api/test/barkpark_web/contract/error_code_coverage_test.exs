@@ -46,6 +46,13 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
                    "already_running",
                    "feature_not_configured",
                    "runner_start_failed",
+                   # Site deploy — the site's SOURCE could not be materialized,
+                   # so the build never started (POST /v1/admin/site-deploy,
+                   # same admin-ops family as the three codes above). Split out
+                   # of runner_start_failed by deploy-reliability D26 so a
+                   # provision failure names itself instead of vanishing into a
+                   # Logger line.
+                   "site_provision_failed",
                    # Self-update W6 rollback preflight — same admin-ops
                    # endpoint family as the three codes above (fail-closed
                    # 500 when preflight can't clear the rollback).
