@@ -1677,6 +1677,77 @@ removes what it creates, growing ~1 entry per few minutes under load) wanting a 
 <!-- one entry per wave: date, slices shipped, grade, what the next wave must know -->
 
 
+### 2026-08-06 — wave 35 REVIEW (round 1 shipped, five PRs open, grade A−)
+
+Five round-1 slices built, all green, **all five pushed and PR'd**. Round 2 (`cch-w35-s4`) was NOT
+built, by design — the sequenced-rounds law; it waits on s1 (the evidence keys it renders) and on
+s6 (which owns `app.js` in round 1).
+
+| Slice | Task | Final branch | PR | Reviewer fix |
+|---|---|---|---|---|
+| `deployments.detail` becomes `:text` | `cch-w34-s5-detail-column-is-text` | `…stops-lyin-0` | [#9787](https://github.com/FRIKKern/barkpark/pull/9787) | none — but the unverified blast radius was verified: **full cloud suite 2885/0** |
+| The console says "never reported" | `cch-w34-s6-console-says-never-reported` | `…instead--1-r` | [#9788](https://github.com/FRIKKern/barkpark/pull/9788) | `.instance-card--neutral` rule + the `overview-never-reported` fixture |
+| The refusal names its authority | `cch-w35-s1-refusal-names-its-authority` | `…it-requi-2` | [#9789](https://github.com/FRIKKern/barkpark/pull/9789) | none — seven-site necessity independently re-derived |
+| The merge story stops asserting a retired rule | `cch-w35-s2-merge-story-stops-asserting-a-retired-rule` | `…agents-tha-3-r` | [#9790](https://github.com/FRIKKern/barkpark/pull/9790) | the in-flight census delta, measured and recorded |
+| The delivery reason names what it observed | `cch-w35-s3-delivery-reason-names-what-it-observed` | `…a-mecha-4-r` | [#9791](https://github.com/FRIKKern/barkpark/pull/9791) | `delivery.ex`'s vocabulary note synced to `:not_configured` |
+
+**WHAT LANDED.** Five surfaces stopped asserting what they cannot support: a column that promised
+2 KB and stored 255 (and answered an undocumented 500 for the difference); a console that printed a
+cached green "Up" for a box it had never once heard from, while throwing away the `unreachable_count`
+the server had been sending it since #9739; a 403 that said only "forbidden" and let the client guess
+a billing sentence for an audit read; three files that taught agents `main` is unprotected, 9 days
+after it was protected; and four `DeliveryReason` arms that named a mechanism nothing observed —
+including `ehostunreach → "The destination refused the connection"`, which is **D321(3) run exactly
+backwards, one module over from where this epic already ruled on it.**
+
+**THE HONESTY WINS ARE STRUCTURAL, NOT COSMETIC.** `statusOf`'s dead `Unknown` tail became a loud
+`Unclassified` warn — the calmest word in the file no longer inherits the least-understood state.
+Section 18 ships as a **set equality with a STALE arm**, which is the direction a `count <= N` gate
+waves through, and it states its own two limits (pinned census, not semantic detector; self-excluded
+from its own corpus) inside the guard rather than leaving them to be discovered. And s2's PR body
+says, in those words, that the guard EXECUTES on every PR and does **not** block a merge — the
+comfortable fix (adding the scripts to `CLOUD_PATHS`) was refused **on honesty**, because it buys a
+green by running a suite that executes zero lines of the shell guard.
+
+**WHAT STALLED / WHAT THE NEXT WAVE MUST KNOW.**
+
+1. **MERGE-ORDER, MEASURED NOT GUESSED.** Merging **this charter PR (#9751)** reds §18 with **11
+   UNPINNED + 2 STALE** — it rewrites this epic's own two class-C charter lines into dated
+   retractions and adds ten wave-35 grip ledgers that quote the phrasings. That is the guard working
+   (new text, unreviewed), it blocks nothing, and the 13-row paste-ready delta with class letters is
+   recorded in §18's own comment. Clear it **in the same commit that merges #9751**.
+2. **THE STANDING TAX §18 CREATES.** `tooling/grip/ledger/**` is append-only, so every future ledger
+   quoting the phrasings arrives UNPINNED — a per-wave chore. If it stops being paid, the honest
+   remedy is to exempt that directory BY SUBJECT the way §13 already does. Never widen the pin list
+   into a rubber stamp, never delete the section.
+3. **s5 CARRIES A MIGRATION ON AN AUTO-DEPLOYING SURFACE.** `varchar(255) → text`, proved
+   metadata-only against a real DB (relfilenode 2209862 before and after, 30,000 rows, 2.081 ms).
+   The lead orders that merge. Its `down` is a REAL rewrite and will fail loudly on rows >255 — that
+   was chosen over a silently-truncating `down`, which would be this defect again.
+4. **s5 TRADED A 500 FOR AN UNBOUNDED RENDER.** 2 KB captions are now storable and the render path
+   has **no cap** — traced to `app.css`'s single `.deploy-detail` rule, no clamp, no line-clamp
+   anywhere in the file. Filed as `cch-deploy-detail-render-has-no-cap` (p1). Today's realistic worst
+   caption is ~278 chars, so the exposure is small, but it is NEW.
+5. **TWO SLICES ARE FLAGGED FOR AN INDEPENDENT SECOND REVIEWER** (E2, and Review can only *name* the
+   need): s1's authority-necessity + the new information disclosure (a 403 now names which axis
+   gated the caller), and s2's class-A/B/C/D classification of 32 pinned members, 21 of them class C.
+6. **THE LEDGER WAS LYING IN ONE PLACE AND WAS FIXED.** `cch-w35-s1` read `lifecycle: open` at 10/11
+   with gate-green code on a branch — a lapsed claim advertising built work as available. Re-claimed.
+   `cch-w35-followup-validate-options-atoms` did not exist (the builder's four `bp task create`
+   attempts failed during a ~40-minute Barkpark degradation); filed and published at review.
+   `cch-w34-bl-neutral-card-modifier` was **fixed and closed** in the same pass, 2/2 stamped.
+7. **DISPATCH ORDER FOR THE NEXT WAVE.** Merge round 1 first (#9787 #9788 #9789 #9790 #9791 in any
+   order — the file sets are disjoint), then dispatch `cch-w35-s4` the moment **#9789 and #9788** are
+   both on main. s4 is the payoff slice: it turns s1's server evidence into the 22 non-billing 403
+   screens with zero call-site edits.
+
+**GRADE: A−.** Five slices, five gates green on the reviewer's own tree, five PRs open, every
+merge-gated criterion honestly left for the lead. Held off an A by three things the wave chose not
+to close: s5 shipped `:text` without the render cap D399 asked it to name-or-file (it filed, which
+was the sanctioned branch, but the pairing is still split across two waves); §18 lands knowing it
+will red on its own sibling charter PR; and the Go twin (`cloud_status_cmd.go`) now has no word for
+`unreported`, so two surfaces the code says MUST agree are no longer state-for-state identical.
+
 ### 2026-08-06 — wave 34 REVIEW (round 1 shipped, four PRs open, grade A)
 
 Four round-1 slices built, all green, **all four pushed and PR'd** — the reviewer's own step 11, after
