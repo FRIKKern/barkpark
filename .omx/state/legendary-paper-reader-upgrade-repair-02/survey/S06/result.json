@@ -1,0 +1,132 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-06",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-28-2026-08-03::email_outlook"],
+  "verdict": "blocked",
+  "direct_answer": "The published Paper revision and authored-source denominators are proven exactly. Real delivered Outlook evidence is 0/1, so none of the six Outlook-required cells passes. The live HTTP preview and generated .eml candidates are proxy or synthetic artifacts only.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "2077c7a5-e054-4127-aa9f-ca02007af42f",
+    "assignment_snapshot_digest": "7c5253b1e3f280b68eb4431bfa5485dce74a633553737b45f97a963eaa59e2f3",
+    "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+    "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+    "authority_status": "found"
+  },
+  "observations": {
+    "source_identity": {
+      "status": "found",
+      "proof": "bp paper view, published doc get, and live source route agree on id, revision, and 237 blocks",
+      "canonical_blocks_sha256": "697b972c5ea8eddd21348bdafe0a0e408d16b13962bc575463acc6efff9d688f",
+      "preview_revision_tokens": 0,
+      "preview_etag": "not_found",
+      "preview_last_modified": "not_found",
+      "limitation": "Preview identity is inferred from controller flow and content equality, not self-attested."
+    },
+    "authored_carriers": {
+      "blocks": "237/237 unique ids",
+      "headings": 43,
+      "tables": 18,
+      "authored_header_cells": 57,
+      "table_rows": 155,
+      "table_body_cells": 466,
+      "marks": 67,
+      "callouts": 13,
+      "lists": 7,
+      "text_nodes": 750,
+      "authored_characters": 91138,
+      "authored_link_nodes": 0
+    },
+    "required_cells": {
+      "real_delivered_outlook_rendering": "BLOCKED: 0/1 delivered messages, mailbox artifacts, or Outlook captures",
+      "narrow_geometry": "BLOCKED: 0/2 Outlook width cells at 320 and 390 CSS px; HTTP preview is not Outlook",
+      "structural_semantics": "BLOCKED: 0/237 blocks, 0/18 tables, 0/57 headers, 0/466 body cells, 0/67 marks, and 0/13 callouts inspected in Outlook",
+      "reading_order": "BLOCKED: 0/1 Outlook reading-order sessions and 0/750 authored text nodes exercised",
+      "link_and_label_behavior": "partial: source authors zero links, so link rewriting is not applicable here; 0/13 callout labels inspected in Outlook",
+      "source_message_identity": "BLOCKED: 0/1 delivered Message-IDs and provider receipts; preview has no RFC or revision identity"
+    },
+    "live_proxy": {
+      "classification": "proxy_only",
+      "attempts": 3,
+      "results": "first HTTP 500, then 2/2 HTTP 200",
+      "successful_bytes": 170149,
+      "successful_sha256": "cfe862c4f7b2c69dd7e88c2c914754d88a7b1effb447ce18f3e667b82e7aa621",
+      "content_type": "text/html; charset=utf-8",
+      "semantic_defects": "18/18 presentation tables, 0/57 scoped headers, no html lang, and no main/article landmark"
+    },
+    "synthetic_artifacts": [
+      {
+        "path": ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E05/generated/adapters/CCH28/email.eml",
+        "sha256": "017f12969399f7e707cc7b037fd1d8d1ff2909bb9f9869986627fbf678945d76",
+        "classification": "generated multipart proxy; not delivered"
+      },
+      {
+        "path": ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/CCH28.eml",
+        "sha256": "7b8ba83f8d8afb0e612f7de9aff61a58039b46f9f8e6c843805202335a1c63e4",
+        "classification": "generated candidate with revision and message carriers; not delivered"
+      }
+    ]
+  },
+  "inferences": [
+    "Successful preview bytes most likely derive from the pinned Paper because source identity, content, and controller flow agree, but the preview does not self-attest this.",
+    "Static table and landmark defects are likely to affect Outlook accessibility, but only real delivered-client evidence may decide the Outlook cell.",
+    "A real delivery harness should connect the current renderer to a Paper-specific Mailer boundary, subject to targeted design and proof."
+  ],
+  "recommended_repair_seams": [
+    "At BulldocsEmailController, create a non-production Paper-specific multipart send from the exact pinned revision with explicit From, To, Subject, Message-ID, and revision identity.",
+    "Retain provider receipt and raw delivered source, then capture Outlook at 320, 390, and normal width.",
+    "Repair geometry and semantic carriers in the shared email renderer, while treating existing Outlook-oriented comments as intent rather than proof.",
+    "Use a separate hostile linked fixture to prove Outlook link rewriting because this Paper has zero authored links."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "task-e4836038babf7cc0", "cd-10-email-section-grid", "gp-w4c-email-terminal-columns-legend"],
+    "papers": ["cloud-console-hardening-wave-28-2026-08-03@49c1534d9fb76d0d9adc7b97f25ec471", "paper-cross-reader-reliability-wave-1-2026-07-17"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex",
+      "api/test/barkpark_web/controllers/bulldocs_email_controller_test.exs",
+      "api/lib/barkpark/portable_doc/render.ex",
+      "api/lib/barkpark/portable_doc/render/walk.ex",
+      "api/lib/barkpark/portable_doc/render/fleet_email.ex",
+      "api/lib/barkpark/portable_doc/render/panels_email.ex",
+      "api/lib/barkpark/portable_doc/render/cards_email.ex",
+      "api/lib/barkpark/mailer.ex",
+      "api/lib/barkpark/accounts/user_notifier.ex",
+      "api/lib/barkpark/access/grant_notifier.ex",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E05/result.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/result.json"
+    ]
+  },
+  "risks": [
+    "Outlook may rewrite, clip, or reorder the 170 KB HTML independently of browser behavior.",
+    "The target Paper cannot prove link rewriting because it authors zero links.",
+    "Preview intermittently returns 500, so message generation must capture source and revision atomically.",
+    "No proof exists for Outlook dark mode, remote-image behavior, spam placement, accessibility order, desktop/web parity, or client clipping."
+  ],
+  "unvisited_scope": [
+    "Any real Outlook mailbox or desktop, web, mobile, or Graph client",
+    "SMTP relay, provider receipt, DKIM, SPF, DMARC, and inbox placement",
+    "320/390/normal Outlook captures, dark mode, zoom, and assistive technology",
+    "production logs for the intermittent preview 500"
+  ],
+  "credential_scan": {
+    "status": "clean",
+    "values_revealed": 0,
+    "outlook_app": "absent",
+    "outlook_connector": "not available",
+    "note": "No executable mailbox boundary was found and no send was attempted."
+  },
+  "mutations": {
+    "repo_files_changed_by_surveyor": 0,
+    "barkpark_mutations": 0,
+    "mailbox_mutations": 0,
+    "mail_sent": 0
+  }
+}
