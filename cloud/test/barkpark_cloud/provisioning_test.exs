@@ -501,7 +501,10 @@ defmodule BarkparkCloud.ProvisioningTest do
   end
 
   describe "succeed_job/2" do
-    test "marks the job succeeded with the ip and flips the barkpark to up at that host" do
+    # cch-w34-s2: succeed_job lands the HOST, and leaves health "unknown" — the
+    # machine exists, but nothing has reported yet, so there is nothing to call
+    # healthy. The row goes green on the first POST /v1/agent/report.
+    test "marks the job succeeded with the ip and leaves health unknown at that host" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team, %{health_status: "unknown", agent_status: "offline"})
       {:ok, job} = Registry.enqueue_provision_job(bp)
@@ -511,7 +514,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert done.result_ip == "203.0.113.7"
 
       reloaded = Registry.get_barkpark(bp.id)
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
       assert reloaded.host == "203.0.113.7"
       assert reloaded.agent_status == "offline"
     end
@@ -537,7 +540,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert {:ok, ^token} = Registry.reveal_admin_token(reloaded)
       # The host/health flip still happened in the same write.
       assert reloaded.host == "203.0.113.7"
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
     end
 
     test "ip-only succeed (no admin_token) leaves the encrypted column nil (back-compat)" do
@@ -578,7 +581,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert reloaded.fleet_token_id == "tok_opaque_42"
       # The host/health flip happened in the SAME write.
       assert reloaded.host == "203.0.113.7"
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
     end
 
     test "ip-only support succeed (no token_id) leaves fleet_token_id nil (older workers, back-compat)" do
@@ -655,7 +658,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       # UNTOUCHED (the health/host upsert never re-runs).
       assert {:ok, _done} = Registry.succeed_job(job.id, "203.0.113.7")
       bp_after_first = Registry.get_barkpark(bp.id)
-      assert bp_after_first.health_status == "up"
+      assert bp_after_first.health_status == "unknown"
       first_updated_at = bp_after_first.updated_at
 
       # A retried/duplicate succeed (the worker re-POSTs after a dropped response).
@@ -800,7 +803,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert reloaded_job.result_ip == "198.51.100.9"
 
       reloaded_bp = Registry.get_barkpark(bp.id)
-      assert reloaded_bp.health_status == "up"
+      assert reloaded_bp.health_status == "unknown"
       assert reloaded_bp.host == "198.51.100.9"
     end
   end
@@ -1469,7 +1472,7 @@ defmodule BarkparkCloud.ProvisioningTest do
   end
 
   describe "POST /v1/internal/provision-jobs/:id/succeed" do
-    test "worker token + {ip} → 200 ok, job succeeded, barkpark up at ip" do
+    test "worker token + {ip} → 200 ok, job succeeded, barkpark hosted at ip, health unknown" do
       {_user, team} = user_with_team()
       bp = barkpark_fixture(team)
       {:ok, job} = Registry.enqueue_provision_job(bp)
@@ -1486,7 +1489,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       assert json_body(conn)["ok"] == true
 
       reloaded = Registry.get_barkpark(bp.id)
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
       assert reloaded.host == "198.51.100.9"
     end
 
@@ -1551,7 +1554,7 @@ defmodule BarkparkCloud.ProvisioningTest do
       reloaded = Registry.get_barkpark(support.id)
       assert reloaded.fleet_token_id == "tok_http_reported_1"
       assert reloaded.host == "198.51.100.9"
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
     end
 
     test "dwb (charter D9): the update-status kick is fire-and-forget — succeed 200s and flips the box live regardless of the probe's fate" do
@@ -1581,7 +1584,7 @@ defmodule BarkparkCloud.ProvisioningTest do
 
       # The synchronous succeed work is unaffected: the box is flipped live.
       reloaded = Registry.get_barkpark(bp.id)
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
       assert reloaded.host == "198.51.100.9"
     end
 
@@ -1762,7 +1765,7 @@ defmodule BarkparkCloud.ProvisioningTest do
 
       reloaded = Repo.get(ProvisionJob, job.id)
       assert reloaded.status == "succeeded"
-      assert Registry.get_barkpark(bp.id).health_status == "up"
+      assert Registry.get_barkpark(bp.id).health_status == "unknown"
     end
   end
 

@@ -186,7 +186,7 @@ defmodule BarkparkCloud.BootstrapTemplateTest do
       assert conn.status == 200
 
       reloaded = Registry.get_barkpark(bp.id)
-      assert reloaded.health_status == "up"
+      assert reloaded.health_status == "unknown"
       assert reloaded.bootstrap_workspace == "acme"
       assert reloaded.bootstrap_project == "default"
       assert reloaded.bootstrap_dataset == "production"
