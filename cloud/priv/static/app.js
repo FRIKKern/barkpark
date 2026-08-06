@@ -3948,6 +3948,14 @@
   function submitToken() {
     var name = ($("#token-name").value || "").trim();
     var privileged = canMintAnyAbility();
+    // REVIEW (cch-w36-s3-r): honour the picker that was actually RENDERED, not
+    // the role as it stands now. The modal is painted once; /v1/me can land
+    // (or land privileged) while it is open, and the abilities picker is not
+    // repainted. Without this, a person shown the unknown-state picker — which
+    // has no checkboxes and promises "a token created now would be read-only" —
+    // would click Create and be told "Pick at least one ability" with nothing
+    // on screen to pick. Send exactly what was promised.
+    if ($("#modal-body") && $("#modal-body").querySelector("#token-scope-unknown")) privileged = false;
     var abilities = [];
     if (privileged) {
       $("#modal-body").querySelectorAll(".token-ab:checked").forEach(function (cb) { abilities.push(cb.value); });
