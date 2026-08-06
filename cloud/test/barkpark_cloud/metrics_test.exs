@@ -206,7 +206,11 @@ defmodule BarkparkCloud.MetricsTest do
     test "latest reads the NEWEST beat only — an older beat never overrules it" do
       events = [
         health(10, %{"pg_size_bytes" => 999, "swap_total_bytes" => 0, "swap_used_percent" => 0}),
-        health(70, %{"pg_size_bytes" => 111, "swap_total_bytes" => 2048, "swap_used_percent" => 90})
+        health(70, %{
+          "pg_size_bytes" => 111,
+          "swap_total_bytes" => 2048,
+          "swap_used_percent" => 90
+        })
       ]
 
       env = build(events)
@@ -222,7 +226,10 @@ defmodule BarkparkCloud.MetricsTest do
     end
 
     test "the -1 sentinel becomes nil in latest — distinct from a swapless 0" do
-      env = build([health(5, %{"swap_used_percent" => -1, "swap_total_bytes" => -1, "pg_size_bytes" => -1})])
+      env =
+        build([
+          health(5, %{"swap_used_percent" => -1, "swap_total_bytes" => -1, "pg_size_bytes" => -1})
+        ])
 
       assert env.latest.swap == %{used_pct: nil, total_bytes: nil}
       assert env.latest.db_size == nil
@@ -235,7 +242,9 @@ defmodule BarkparkCloud.MetricsTest do
 
     test "a nil-payload beat still yields the fixed latest shape, never raises" do
       env =
-        build([%AgentEvent{type: "health", payload: nil, inserted_at: DateTime.add(@now, -5, :second)}])
+        build([
+          %AgentEvent{type: "health", payload: nil, inserted_at: DateTime.add(@now, -5, :second)}
+        ])
 
       assert env.latest == %{
                db_size: nil,
