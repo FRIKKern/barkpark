@@ -1666,3 +1666,71 @@ nothing. `db_unavailable` on the wire is filed, not built: `errors.ex:205-209` s
 OpenApi enum plus `error_code_coverage_test.exs`, and `openapi.json` cannot be regenerated locally.
 `/v1/graph` failing 51.6% of its requests is FILED, not absorbed — it is real, it is worse than anything
 this epic tracks, and taking it would cost the wave its last-mile shape.
+
+---
+
+### Wave 2026-08-06 (wave 5) — REVIEWED · Paper `deploy-reliability-wave-5-2026-08-06` · grade **A−**
+
+**Four of five slices built, reviewed, gate-green on the final state, pushed and PR'd. Nothing merged — the
+lead merges.** The fifth (`dr-w5-s5`, space by HOST consumer) is round 2 BY DESIGN, behind s2 and s3.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| The eleven-rung triage ladder | `dr-w5-s1-ladder-reaches-triage` | `…eleven-rungs-bp--0` (unchanged) | [#9887](https://github.com/FRIKKern/barkpark/pull/9887) | build + vet + `internal/cli` and `internal/semrole` green; gofmt clean |
+| The beat learns `load15` + its own 5xx | `dr-w5-s2-beat-carries-load15-and-5xx` | `…the-box-a-1` (unchanged) | [#9888](https://github.com/FRIKKern/barkpark/pull/9888) | Go suites green · api 19/0 · cloud 23/0 |
+| The CP lands space, and the window is fixed | `dr-w5-s3-cp-lands-space-and-fixes-the-window` | `…the-agent-s-spac-2` (unchanged) | [#9889](https://github.com/FRIKKern/barkpark/pull/9889) | 44 tests, 0 failures · `mix format` clean |
+| The agent binary reaches the fleet | `dr-w5-s4-agent-binary-reaches-the-fleet` | `…the-fleet-the-s-3-r` | [#9890](https://github.com/FRIKKern/barkpark/pull/9890) | `bash -n` × 3, exit 0 |
+
+**What landed — and this wave finally answers the question the epic opened with.** For four waves the
+owner's complaint has been that `bp cloud status` calls a box "ok" while the box is drowning. #9887 closes
+it, and the proof is a LIVE read off the real control plane with a `bp` built from the commit under test
+(sha `aa19dcca3`, D70's provenance rule honoured): **guerrilla ranks `strained` rank 5 attention** —
+"load 5.9 on 2 cores (2.9x, 1m avg) · 1.2 GB in swap" — and **jarl ranks `filling` rank 6 attention** —
+"disk 95% used (fills at 90%) · vitals unreadable — agent predates the vitals beat". Both read
+`ok / rank 8 / healthy` before that commit. Buckets went `{attention: 4, healthy: 2}` over six boxes. The
+D69 ladder landed atomically at eleven rungs with every shipped bucket assignment preserved exactly, and
+the `filling` fence is not a second number — `TestFillingThresholdMatchesUsageMeter` reads the ceiling out
+of `usage.ex` itself, so the verdict surface and the meter surface cannot drift apart again.
+
+Underneath it, #9888 makes the box report the two scalars it was already computing and discarding: the
+kernel's 15-minute load average (`fields[2]`, in memory and thrown away) and its own 5xx rate (Phoenix hands
+`RequestStats` the conn and the handler bound `_meta`). D67's 1.75x threshold was **re-derived on real
+`fields[2]`** as the decision demanded — healthy ceiling 0.340/core against a strained floor 2.635/core, a
+7.7x margin, wider than the reconstruction implied and in the predicted direction. #9889 gives the agent's
+15-minute space payload a landing site at last (`"space"` was outside `AgentEvent`'s `@types`; the pre-change
+`record_event` rejection is quoted from a run) and fixes a defect that was live and unrelated: the metrics
+fetch limited the MIXED stream, so `?points=200` rendered 188 while the envelope claimed 200 —
+mutation-proven, with the guard placed in the DB-backed test because the 14 pure tests were structurally
+incapable of seeing it. #9890 ends the structural staleness: the agent binary was built once at warm-pool
+arm time and never again, on both self-update lanes, and the hot lane is the one `freshen.go:100` runs.
+
+**What did NOT land, and must be said plainly.**
+
+1. **Nothing renders the space payload.** #9889 lands the data and stops, so the wish's "see what is taking
+   up space" is NOT satisfied end to end by this wave. Filed as `dr-w5-s3-followup-render-the-space-payload`.
+2. **The CONSOLE still calls both of those boxes "Healthy · Online."** That is D68's stated, owned cost, not
+   an oversight — but for an epic whose complaint was operator surfaces contradicting each other, shipping a
+   two-tier ladder is an uncomfortable state to sit in. Filed as `dr-w5-followup-spa-ladder-two-tier`.
+3. **`err_5xx_per_s` reaches the wire and the Go struct and NO operator's eyes.** Found by the reviewer in
+   the seam between #9888 and #9887: neither slice is at fault (D75 scoped to landing the field, D69's ladder
+   to load and disk), but after both merge a human still cannot see the sentence D75 exists to make sayable.
+   Filed as `dr-w5-followup-5xx-reaches-no-eyes` with the rung-vs-detail-line ruling left open.
+4. **The wish's third clause — capping concurrent builds — is untouched by this wave**, and correctly so: the
+   cap is #9827, whose sole unmet criterion is a human's independent review of the door-vs-unit race (D73).
+   Doctrine is discharged; the human is not.
+5. **Two live proofs are honest misses, not failures.** #9888's criterion 6 (a real beat carrying the two new
+   fields) needs a deploy, not a merge. #9890's criteria 5-6 (a box actually refreshing its binary) would have
+   meant pushing unmerged code onto a production host. Both left OPEN with recipes rather than faked — which
+   is exactly the discipline the epic is about, and which makes #9890 the merge that unblocks #9888's proof.
+6. Every slice's last criterion is merge-gated and stays OPEN for the lead to close on merge.
+
+**HIGH-FLIP-RISK, still owed:** #9887's ladder ordering and bucket boundary. The wave reviewer performed an
+independent re-derivation against `origin/main`'s `ATTENTION_RANK` and `bucketOf` and confirms it — that is
+ONE reviewer. A genuinely independent second read before merge is a MANUAL LEAD STEP.
+
+**What the next wave takes.** (a) MERGE ROUND 1 in dependency order, then dispatch `dr-w5-s5` — it edits the
+same two files as s2 and its live proof needs s3's route to exist. (b) The three render gaps above, which
+together are the whole remaining distance between "the instrument measures it" and "a human sees it":
+`dr-w5-s3-followup-render-the-space-payload`, `dr-w5-followup-5xx-reaches-no-eyes`, and
+`dr-w5-followup-spa-ladder-two-tier`. (c) The two live proofs, which cost a deploy rather than a wave.
+(d) #9827's human review — the only thing between this epic and the wish's build-cap clause.
