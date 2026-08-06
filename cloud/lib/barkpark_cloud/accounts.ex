@@ -468,12 +468,36 @@ defmodule BarkparkCloud.Accounts do
   # stamp-only cutoff it has always had. `id` is a `:binary_id`, so a non-UUID
   # from a query string would raise Ecto.Query.CastError — it is cast first, and
   # anything that is not a UUID degrades to the stamp-only arm rather than 500ing.
+  #
+  # The tiebreak arm is a ROW comparator, not the equivalent OR-decomposition: the
+  # two select the same rows, but only the ROW form can SEEK. On the EXISTING
+  # `(team_id, inserted_at)` index the OR form leaves `Index Cond:` carrying
+  # `team_id` alone and drops the stamp bound into `Filter:` — a full scan of the
+  # team's trail per page (542 buffers / 4.284 ms for a 50-row page on a 250k-row
+  # corpus); the ROW form lifts `inserted_at <= $2` into the Index Cond (14
+  # buffers / 0.104 ms), with NO migration. Prophylactic at today's row counts.
+  #
+  # THE SPELLING IS LOAD-BEARING. `type(^ts, :utc_datetime_usec)` renders
+  # `$2::timestamp` — a naive timestamp against a `timestamptz` column, coerced
+  # through the SESSION TimeZone, which slips the page boundary by the server's
+  # UTC offset. `$2` is left UNCAST so Postgres infers `timestamptz` from the
+  # ROW's left operand. The uuid half needs `type(^uuid, Ecto.UUID)` or Ecto never
+  # dumps the string and Postgrex raises "expected a binary of 16 bytes".
+  #
+  # ROW comparison differs from the OR form on NULLs, and no NULL is reachable:
+  # `audit_events.id` is the primary key and `inserted_at` comes from
+  # `timestamps(type: :utc_datetime_usec, updated_at: false)` — both NOT NULL —
+  # and both params are non-nil by the clause head and the successful cast.
   defp maybe_audit_before(query, nil, _before_id), do: query
 
   defp maybe_audit_before(query, %DateTime{} = ts, before_id) when is_binary(before_id) do
     case Ecto.UUID.cast(before_id) do
       {:ok, uuid} ->
-        where(query, [e], e.inserted_at < ^ts or (e.inserted_at == ^ts and e.id < ^uuid))
+        where(
+          query,
+          [e],
+          fragment("(?,?) < (?,?)", e.inserted_at, e.id, ^ts, type(^uuid, Ecto.UUID))
+        )
 
       :error ->
         where(query, [e], e.inserted_at < ^ts)

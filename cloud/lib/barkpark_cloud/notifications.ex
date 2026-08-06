@@ -688,10 +688,42 @@ defmodule BarkparkCloud.Notifications do
   # so an existing `?before=<stamp>` caller keeps byte-identical behaviour. `id`
   # is a `:binary_id`: a non-UUID from a query string is cast first (a raw binary
   # in that comparison raises Ecto.Query.CastError) and degrades to stamp-only.
+  #
+  # The tiebreak arm is a ROW comparator, not the equivalent OR-decomposition.
+  # The two forms select the same rows; only the ROW form can SEEK. Measured on a
+  # 250k-row corpus against the EXISTING `(team_id, inserted_at)` index, the OR
+  # form lands in `Filter:` — `Index Cond:` carries `team_id` alone — and removes
+  # ~19,380 rows to return a 50-row page (542 buffers / 4.284 ms). The ROW form
+  # lets the planner lift `inserted_at <= $2` into the Index Cond and keep the id
+  # half as a cheap residual: 14 buffers / 0.104 ms, on the same index, with NO
+  # migration. (Adding `(team_id, inserted_at, id)` makes the OR form WORSE — 641
+  # buffers — so the index is not the fix; the spelling is.) Production is only
+  # ~2k rows today, so this is PROPHYLACTIC: it buys a cursor shape that stays
+  # correct-and-cheap as the log grows.
+  #
+  # THE SPELLING IS LOAD-BEARING. `type(^ts, :utc_datetime_usec)` (and
+  # `type(^ts, d.inserted_at)`) render `$2::timestamp` — a NAIVE timestamp
+  # against a `timestamptz` column, which Postgres coerces through the SESSION
+  # TimeZone and silently slips the boundary by the server's UTC offset. Leaving
+  # `$2` UNCAST makes Postgres infer `timestamptz` from the ROW's left operand.
+  # The uuid half must be `type(^uuid, Ecto.UUID)`: untyped, Ecto never dumps the
+  # string and Postgrex raises "expected a binary of 16 bytes"; a `?::uuid` text
+  # cast does not help, because the cast does not make Ecto dump the value. The
+  # rendered SQL is `((n0."inserted_at",n0."id") < ($2,$3::uuid))`.
+  #
+  # NULL semantics are not a concern here even though ROW comparison differs from
+  # the OR form on NULLs: `notification_deliveries.id` is the primary key and
+  # `inserted_at` comes from `timestamps(type: :utc_datetime_usec)` — both NOT
+  # NULL in the DDL — and both params are non-nil by the clause head (`%DateTime{}
+  # = ts`) and the successful `Ecto.UUID.cast`. No NULL is reachable on either side.
   defp maybe_delivery_before(query, %DateTime{} = ts, before_id) when is_binary(before_id) do
     case Ecto.UUID.cast(before_id) do
       {:ok, uuid} ->
-        where(query, [d], d.inserted_at < ^ts or (d.inserted_at == ^ts and d.id < ^uuid))
+        where(
+          query,
+          [d],
+          fragment("(?,?) < (?,?)", d.inserted_at, d.id, ^ts, type(^uuid, Ecto.UUID))
+        )
 
       :error ->
         where(query, [d], d.inserted_at < ^ts)
