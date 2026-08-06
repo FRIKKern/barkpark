@@ -1,0 +1,65 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-29",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["pds-wave-45-2026-08-03::cli"],
+  "verdict": "partial_fail",
+  "direct_answer": "PDS45 CLI identity and structured output are exact, list pagination works, and redirected rendering is width-bounded. Two hard defects reproduce: a transport timeout is flattened to not_found/exit 4, and doc history ignores limits, returning all 10 revisions for limits 3 and 1. One capabilities 500 interrupted help discovery, followed by 3/3 successful retries; that transient is separate from deterministic CLI defects.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "26ac132a-ebbe-440f-a81f-b28e508f156e",
+    "assignment_snapshot_digest": "04379a1d60b2b27c4e5007ba8eaa794b3bf50ef8db3eb40b01f72ade19a9e6b2",
+    "paper_id": "pds-wave-45-2026-08-03",
+    "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd"
+  },
+  "observations": {
+    "source": {"blocks": 227, "unique_block_ids": 227, "raw_sha256": "5894db69f3d3f9ddc0416bd5e5e6b50dc72c1d962efb56ac7fd863b1a8d1caa7", "canonical_blocks_sha256": "f01937cbc0c28fc4f381136ba1ec8174591b1d60abc7b99454aaefd8a7f829da", "history_revisions": 10},
+    "authored_carriers": {"headings": 33, "paragraphs": 166, "empty_spacers": 124, "callouts": 9, "lists": 7, "list_items": 44, "tables": 12, "header_cells": 9, "body_cells": 389, "headerless_tables": 9, "text_runs": 536, "marks": 8, "links": 0, "source_controls": 0},
+    "required_cells": {
+      "discovery_help": "partial: verb help succeeds when capabilities are healthy; noun doc --help exits 2; one transient capabilities 500 then 3/3 success",
+      "structured_output": "found: JSON, YAML, minimal, and paper-view JSON carry exact identity",
+      "typed_errors": "fail: true missing and five-second transport timeout both use not_found/exit 4",
+      "identity_revision": "found across live formats and archived adapter",
+      "history_pagination": "fail: limits 3 and 1 each return all 10 revisions; doc list pagination works",
+      "terminal_sanitization": "partial: widths 40/80/120 bounded with zero ESC/NUL/replacement; hostile input unexercised"
+    },
+    "transient_availability": "one capabilities internal_error; three immediate identical retries succeeded"
+  },
+  "inferences": [
+    "History limit is likely ignored server-side because the client appends positive limit; packet capture remains needed.",
+    "The capabilities 500 is transient and separate from deterministic semantic failures.",
+    "Sanitizer source/tests are indirect evidence only because this Paper contains no hostile controls or links."
+  ],
+  "repair_seams": [
+    "Preserve transport/deadline errors as unavailable with a distinct exit.",
+    "Capture history requests and enforce limit at the responsible boundary.",
+    "Make noun-level doc help exit successfully.",
+    "Exercise a release-pinned hostile-control and link fixture.",
+    "Monitor capabilities availability separately."
+  ],
+  "checked": {
+    "papers": ["pds-wave-45-2026-08-03@b992fd8aaa028b0dab30a8da76f077fd"],
+    "tasks": ["task-a768c69e659add58", "cf5f4bec-eb4c-454e-bfff-b0996483a8db", "first 1000 task rows"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/raw/PDS45/cli.json",
+      "internal/cli/paper_cmd.go",
+      "internal/apiclient/client.go",
+      "internal/cli/errors.go",
+      "internal/pdrender/inline.go",
+      "internal/pdrender/sanitize_text_test.go",
+      "internal/pdrender/sanitize_url_test.go"
+    ]
+  },
+  "risks": ["Timeouts are indistinguishable from absent Papers.", "History limits cannot bound payload or latency.", "Hostile controls and links are unexercised.", "Capability discovery can transiently block local help.", "Live attribution drops frozen unit_ids."],
+  "unvisited_scope": ["task corpus beyond 1000", "packet-level history capture", "hostile fixture through real binary", "TTY color profiles", "long-running capability monitoring", "release-pin flags without gate/candidate IDs"],
+  "credential_scan": {"status": "clean", "credential_values_reported": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0}
+}
