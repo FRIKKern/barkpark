@@ -5117,6 +5117,10 @@ defmodule BarkparkCloud.Web.Router do
       conn.halted ->
         conn
 
+      # UNREACHABLE belt-and-braces: require_primary_team_owner above already
+      # halts a teamless caller (403 forbidden/no_team since cch-w38-s2; 422
+      # before it), so `conn.halted` catches that case one clause earlier. Kept
+      # as a fail-closed guard, NOT as a contract this route can emit.
       is_nil(conn.assigns.current_team) ->
         json(conn, 422, %{error: "no_team"})
 
@@ -5159,6 +5163,10 @@ defmodule BarkparkCloud.Web.Router do
       conn.halted ->
         conn
 
+      # UNREACHABLE belt-and-braces: require_primary_team_owner above already
+      # halts a teamless caller (403 forbidden/no_team since cch-w38-s2; 422
+      # before it), so `conn.halted` catches that case one clause earlier. Kept
+      # as a fail-closed guard, NOT as a contract this route can emit.
       is_nil(conn.assigns.current_team) ->
         json(conn, 422, %{error: "no_team"})
 

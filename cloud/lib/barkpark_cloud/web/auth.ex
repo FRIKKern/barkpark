@@ -427,12 +427,13 @@ defmodule BarkparkCloud.Web.Auth do
   @doc """
   Require that the authed user is the OWNER of their PRIMARY team — the billing
   gate (checkout / portal / cancel). The narrower twin of
-  `require_primary_team_admin/1`, preserving the same 401 / 403 `no_team` / 403
-  contract: 401 if unauthenticated; 403 `{forbidden, reason: "no_team", scope:
+  `require_primary_team_admin/1`, and it answers the same three conditions the
+  same way: 401 if unauthenticated; 403 `{forbidden, reason: "no_team", scope:
   "primary_team"}` if the user has no team; 403 `{forbidden, required: "owner",
   scope: "primary_team"}` if a member/admin but not the owner — a missing grant
-  is an authority answer, never a bad body. Reads `Authz.team_owner?/2`. On success the
-  conn passes through with `:current_team` already assigned by `require_user/2`.
+  is an authority answer, never a bad body. Reads `Authz.team_owner?/2`. On
+  success the conn passes through with `:current_team` already assigned by
+  `require_user/2`.
   """
   @spec require_primary_team_owner(Plug.Conn.t()) :: Plug.Conn.t()
   def require_primary_team_owner(conn) do
