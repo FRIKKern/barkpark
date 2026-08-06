@@ -615,6 +615,39 @@ named but did not take: `dr-w2-s7-followup-scoped-media-public-read-audit` (P1, 
 and `/v1/graph`'s second copy of the visibility predicate) and `dr-w2-s4-followup-raw-log-order` (P1, the
 raw-log read path still scrubs before stripping ANSI).
 
+### Wave 2026-08-06 (wave 3) — REVIEWED · Paper `deploy-reliability-wave-2026-08-06` · grade **A−**
+
+**Four of seven slices built, reviewed, gate-green, PUSHED and PR'd. The other three are round 2 BY
+DESIGN** — `s5` (the `box_at_capacity` door refusal) waits on s1+s2 merging, `s6` (control-plane + CLI
+render) on s4, `s7` (`strained` at rank 5) on s4+s6. Nothing merged: the lead merges.
+
+**What landed.**
+
+| Slice | Final branch | PR | Verdict |
+|---|---|---|---|
+| `dr-w3-s1` | `loop-epic/search-capstone-s-25-identical-failures--1` | **#9729** (updated in place) | Five stale `.sobelow-skips` rows replaced by five inline waivers with TAILORED reachability paragraphs; the provision describer moves in beside its producers. Gate re-run green end to end; the waivers independently mutation-proved. |
+| `dr-w3-s2` | `loop-epic/the-durable-build-log-is-keyed-on-the-de-0-r` | **#9727** (updated in place) | The two unreachable describer clauses deleted (the single cause of all four Elixir reds), then the REAL second red found on CI: one-second mtime resolution let `File.ls/1` order decide which build log was evicted. Fixed with a total `recency_key/1`. **Review added the same fix to `prune_terminal_records/2`**, which carried the identical bug on the tombstones that make an evicted deploy read `:evicted` rather than `:never_recorded`. |
+| `dr-w3-s3` | `loop-epic/the-deferral-taxonomy-stops-being-reason-2` | **#9783** | The deferral taxonomy stops matching `status` alone; `BOX_AT_CAPACITY_DEFERRED` + `DEFERRED_UNCLASSIFIED`; the chain bound is cause-aware; the requeue-failure arm settles `failed` instead of a lost publish wearing "re-queued, not lost". Reviewer re-derived the numerator judgment independently and concurs. |
+| `dr-w3-s4` | `loop-epic/the-agent-measures-what-the-box-is-actua-3` | **#9784** | Swap (with its companion total, so swapless ≠ unmeasurable), `PGSizeProbe` finally WIRED after 25 days dark, a named top-10 relation breakdown, and the BEAM's own PSS/swap. **Review closed the builder's biggest stated unknown** by running the exact psql argv against a live PostgreSQL 17 — the output shape is confirmed, not reasoned. |
+
+**What did NOT happen, stated plainly.** Nothing this wave changes anything the owner can see yet. `s4`
+measures into a drawer until `s6` renders it; the `box_at_capacity` code `s3` classifies has no producer
+until `s5` ships it. Both are sequenced-round consequences, not misses — but the wish is not served until
+round 2 lands.
+
+**The one thing the lead must not get wrong: MERGE #9727 BEFORE #9729.** Both branches carry
+`describe_provision_reason/1` + `format_posix/1` + `redact/1` in the same region of `deploy_runner.ex`, so
+whichever merges second conflicts. In THIS order the resolution is one hunk, "take #9729's side", and the
+result compiles because #9729 brings the producers. In the reverse order #9727's deletion commit removes
+two clauses `main` has just started needing.
+
+**Next wave takes:** round 2 in dependency order — `s5` the moment #9727 and #9729 are on `main`, then
+`s6` once #9784 is in, then `s7` behind both AND behind an agent release that has actually beaten swap
+home (a merged `internal/**` change is not a deployed agent). Then `dr-bl-beam-memory-readable-then-bounded`
+(P0, D39's real fix: read `:erlang.memory()` before guessing a `MemoryHigh`), and the follow-ups this wave
+filed: `dr-w3-s3-followup-capacity-code-handshake`, `dr-w3-pg-probe-url-in-argv`, and
+`dr-terminal-record-prune-tie-order` (fixed in review, rides #9727, criterion 2 closes on the first Linux CI run).
+
 ---
 
 ## Wave 3 — 2026-08-06 — "The box can say no, and the fleet can see why"
