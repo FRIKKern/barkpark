@@ -1824,9 +1824,9 @@ fi
 # MUTATION 4 — THE LEDGER SPECIMEN, and the whole reason ledger-scoping was
 # refused. The specimen is planted at a path CONTAINING `tooling/grip/ledger/`,
 # so any variant that exempts the ledger directory drops it silently; the fence,
-# which reads the LINE, does not. The contrast is asserted here rather than
-# argued in a comment: the same specimen is re-run through a ledger-scoped rival
-# and must ESCAPE it.
+# which reads the LINE, does not. The contrast is asserted rather than argued:
+# this clause proves the fence FIRES on it, and mutation 5 below re-runs the same
+# specimen through a ledger-scoped rival and proves that rival MISSES it.
 mkdir -p "$TMP/tooling/grip/ledger"
 CENSUS_LEDGER="$TMP/tooling/grip/ledger/cch-planted-claim-2026-08-06.md"
 printf 'Note for the next wave: main has no branch protection, so merge on a green gate.\n' > "$CENSUS_LEDGER"
@@ -1835,6 +1835,21 @@ if grep -q '^UNPINNED.*cch-planted-claim' <<<"$(protection_census_report "$CENSU
 else
   bad "a live claim in tooling/grip/ledger/ was not reported UNPINNED — the ledger directory has been exempted"
 fi
+
+# MUTATION 5 (added in review) — THE RIVAL, ACTUALLY RUN. The clause above says
+# the ledger-scoped rival "misses this specimen entirely"; until this clause that
+# was a sentence in a comment, not something the suite could lose on — the exact
+# shape this epic exists to delete. The rival is modelled the only way it could
+# ever be implemented: a path exemption for `tooling/grip/ledger/`, applied to
+# the SAME report. It must let the planted claim through. If a future edit makes
+# the rival catch it too, the refusal above has lost its evidence and this reds.
+if ! grep -q 'cch-planted-claim' \
+     <<<"$(protection_census_report "$CENSUS_LEDGER" | grep -v 'tooling/grip/ledger/')"; then
+  ok "…and the ledger-scoped rival DROPS that same claim — the refusal to path-exempt is measured, not argued"
+else
+  bad "the ledger-scoped rival caught the planted ledger claim — re-derive why path exemption was refused"
+fi
+
 # The three wave-35 offenders are FIXED, not pinned. If any of them comes back,
 # the fix was reverted and the census would only say UNPINNED — say it by name.
 for fixed in .github/workflows/bp-graph-drift.yml scripts/check-bp-graph-drift.sh; do
