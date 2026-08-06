@@ -1230,6 +1230,27 @@ test("gr-p5-account: the account is reachable from #acct-btn and the palette —
     "the command palette must keep the act-account action id");
 });
 
+test("team picker: the chip is ONE control — no native <select> may re-appear inside it", () => {
+  // THE DEFECT THIS PINS, reported by the owner with screenshots: the chip's
+  // CENTRE opened a bare OS <select> while its CARET opened the styled picker.
+  // Two different menus on one control, chosen by which pixel you hit. The
+  // <select> came from renderTeamSwitcher, which swapped #account-team's text
+  // for a control whenever /v1/me listed 2+ memberships — so it only appeared
+  // for exactly the users who needed the switcher to be good.
+  const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
+
+  assert.ok(!/function renderTeamSwitcher\s*\(/.test(src),
+    "renderTeamSwitcher must not come back — the picker is the only switch seam");
+  assert.ok(!/sel\.id = "team-switcher"/.test(src),
+    "no native <select> may be mounted as the team switcher");
+
+  // And nothing may replace the chip's label with a control: #account-team is
+  // plain text so the WHOLE chip is one target for the picker.
+  const chip = appRegion(src, "function setAccountChip(", "\n  }\n");
+  assert.ok(!/createElement\("select"\)/.test(chip),
+    "the account chip must not build a control into its own label");
+});
+
 test("team picker: reads the real /v1/me shape, marks the active team, and says LOADING rather than empty", () => {
   const src = fs.readFileSync(new URL("./app.js", import.meta.url), "utf8");
 
@@ -10647,8 +10668,11 @@ test("cch-w12-s1: an identity change WITHOUT a reload drops the cached actor axi
   assert.ok(invite.includes("activityActors = null") && invite.includes("activityActorsTried = false"),
     "an accepted invite changes the roster the Who axis is derived from");
   // NOT at the team switcher: it does location.reload(), which kills every
-  // module variable — a reset there would be a fix for a non-bug.
-  const switcher = appRegion(src, 'sel.id = "team-switcher"', "host.textContent = \"\";");
+  // module variable — a reset there would be a fix for a non-bug. The seam MOVED
+  // (the native <select> is gone; the styled team picker owns the switch now),
+  // so this re-anchors on the picker's own handler rather than deleting an
+  // invariant that still holds.
+  const switcher = appRegion(src, 'var id = el.getAttribute("data-team");', "    });");
   assert.ok(switcher.includes("location.reload()"), "the switcher still reloads");
   assert.ok(!switcher.includes("activityActors"), "no reset belongs at a seam that reloads the document");
 });
