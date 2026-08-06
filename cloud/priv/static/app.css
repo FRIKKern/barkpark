@@ -3727,6 +3727,13 @@ a.btn.site-open, a.btn.site-open:hover { text-decoration: none; }
 .instance-card--danger { border-left-color: var(--danger); }
 .instance-card--info { border-left-color: var(--info); }
 .instance-card--ok { border-left-color: var(--ok); }
+/* cch-w34-s6 review: `neutral` was a role statusOf declared and could never
+   produce, so this modifier had no rule and the card silently fell back to the
+   base --border edge — the ONE state with no accent, which reads as "nothing to
+   say" for the box we know least about. `unreported` makes the role reachable,
+   so it gets the dim accent its pill already uses (.status-pill--neutral's dot),
+   distinct from every measured state and from the plain border. */
+.instance-card--neutral { border-left-color: var(--dim); }
 .instance-card-head { display: flex; align-items: center; gap: 10px; }
 /* cch-w21-s3 — THE NAME IS BOUNDED, and it is a DIFFERENT failure shape from
    the address line directly below it, which is why w20-s3's fix did not cover

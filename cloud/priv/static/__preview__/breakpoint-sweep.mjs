@@ -402,12 +402,16 @@ export const RESIDUE_FAMILY_REASONS = {
 // failed` is the 102nd scenario and the 77th residue entry, and this sweep
 // exited 2 with `UNLISTED scenario "site-deploy-rail-failed" (family
 // hash:#site)` until the entry below was written.
-// `familyOf` over all 102 gives 15; the two with ZERO residue are `hash:#sites`
-// and `hash:#activity`. 77 is the RESIDUE, not the census.
+// cch-w34-s6 REVIEW moved it a fourth time: `overview-never-reported` is the
+// 103rd scenario and the 78th residue entry — residue, not a cell, the same
+// home its sibling `overview-attention` has, so it is rendered and asserted by
+// smoke.mjs without claiming a width walk it does not get.
+// `familyOf` over all 103 gives 15; the two with ZERO residue are `hash:#sites`
+// and `hash:#activity`. 78 is the RESIDUE, not the census.
 // EVERY NUMBER ON THESE FOUR LINES IS DERIVED, NOT TYPED (cch-w18-s4, D213):
 // `scenarioReport({ scenarios: SCENARIOS })` prints
-// {total:102, cells:26, distinctCovered:25, residue:77, families:13, ok:true},
-// `Object.keys(SCENARIO_RESIDUE).length` is 77 and `familyOf` over all 102
+// {total:103, cells:26, distinctCovered:25, residue:78, families:13, ok:true},
+// `Object.keys(SCENARIO_RESIDUE).length` is 78 and `familyOf` over all 103
 // gives 15. The prose said 99/74 while the literal below already held 75 —
 // #8849's `sites-on-instance` moved the census and only the TEST literals
 // (breakpoint-sweep.test.mjs:516-522) were updated. A census that two files
@@ -437,7 +441,7 @@ export const SCENARIO_RESIDUE = {
   "offload-working": "hash:#instance",
   "offload-done": "hash:#instance",
   "offload-blocked": "hash:#instance",
-  // hash:#overview — 9
+  // hash:#overview — 10
   "loggedout": "hash:#overview",
   "empty": "hash:#overview",
   "fleet-usage": "hash:#overview",
@@ -447,6 +451,7 @@ export const SCENARIO_RESIDUE = {
   "loggedout-twofactor": "hash:#overview",
   "overview-trial-runway": "hash:#overview",
   "overview-attention": "hash:#overview",
+  "overview-never-reported": "hash:#overview",
   // hash:#site — 9
   "promote-failure": "hash:#site",
   "promote-in-flight": "hash:#site",
