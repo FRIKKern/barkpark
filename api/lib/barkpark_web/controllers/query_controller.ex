@@ -637,7 +637,32 @@ defmodule BarkparkWeb.QueryController do
 
   defp preview?(conn), do: is_binary(conn.assigns[:forced_perspective])
 
-  defp authed?(conn), do: not is_nil(conn.assigns[:api_token])
+  # "May this caller read at all" — a token or a preview JWT, EXCEPT the
+  # public-read tier, which is treated exactly like an anonymous caller here.
+  #
+  # The parity partner of `DocumentsRetriever.restrict_anonymous_to_public_types/3`,
+  # moved in the SAME commit: both used to key on "is authenticated"
+  # (`not is_nil(:api_token)` / `principal_type in [:api_token, :user]`), and a
+  # public-read token satisfies both. Tightening one alone reproduces the leak
+  # one layer up, so they move together or not at all.
+  #
+  # STILL REACHABLE, which is why this is not cosmetic: the flat reads ride
+  # `:api_grant_read` and the scoped `/v1/data/*` reads ride `:shared_docs_api`,
+  # both of which mount `Plugs.PublicRead` — but the SCOPED PREVIEW block rides
+  # bare `:scoped_api` with no PublicRead, so `authed?/1` was the ONLY thing
+  # between a public-read token and `GET /w/:ws/p/:proj/v1/preview/query/:ds/:type`
+  # on a private type (plus the five preview siblings). Post-clamp those fall to
+  # the same 404 an anonymous caller gets — existence-hiding, not a 403, so the
+  # refusal never becomes a probe. `index`/`show` keep their `schema_public?`
+  # arm, so a public-read token still reads PUBLIC types normally.
+  #
+  # ONE definition of the tier: `Plugs.PublicRead.public_read_token?/1` is public
+  # on purpose (its own comment: "a second copy in the controller is exactly how
+  # a clamp and its downstream filter drift apart"). Never re-derive it here.
+  defp authed?(conn) do
+    not is_nil(conn.assigns[:api_token]) and
+      not BarkparkWeb.Plugs.PublicRead.public_read_token?(conn)
+  end
 
   # Perspective resolution + the anon/public-read pin live in ONE place —
   # `BarkparkWeb.AnonPerspective` (error-emitters-duplicated: this controller
