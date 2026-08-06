@@ -1,0 +1,135 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-19",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": [
+    "pds-wave-44-2026-08-03::api"
+  ],
+  "verdict": "fail",
+  "hard_gate_result": "blocked_no_qualifying_api_receipt",
+  "direct_answer": "The immutable PDS44 revision and document ETag behavior are exact, but the deployed API fails the platform-truth gate. Method mismatch returns 404 instead of 405, 406 uses internal_error, safe 422 and server-timeout receipts are absent, request-ID parity is incomplete, only three of six identity domains are visible, invalid perspective silently substitutes published, and CLI history limits are ignored.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "585ebebb-a312-43a0-a407-75fb357c4140",
+    "assignment_snapshot_digest": "1de723c4a975e841c42ad76fccae9dbeefadae3efc558ec8bfe7243f0f0b435f",
+    "paper_id": "pds-wave-44-2026-08-03",
+    "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52"
+  },
+  "observations": {
+    "source": {
+      "blocks": 99,
+      "unique_block_ids": 99,
+      "canonical_blocks_sha256": "1c10ec4984826b0b12a0111c64b57bfc2c79de3ae576dd40b74e83c9e183bfce",
+      "etag_equals_revision": true
+    },
+    "authored_carriers": {
+      "headings": 32,
+      "paragraphs": 48,
+      "empty_paragraphs": 15,
+      "callouts": 4,
+      "lists": 10,
+      "list_items": 85,
+      "tables": 5,
+      "header_cells": 12,
+      "body_rows": 54,
+      "body_cells": 203,
+      "marks": 0,
+      "links": 0
+    },
+    "discovery_schema": {
+      "capabilities": "200 with ETag, request ID, 4 nouns, and 16 commands",
+      "openapi": "200 OpenAPI 3.1 with 151 paths, but examined paths document only 200/404/429 and Error does not require request_id",
+      "schema_get": "found with seven fields",
+      "schema_list": "1/4 success; 3/4 typed 500 internal_error"
+    },
+    "typed_error_matrix": {
+      "401": "pass",
+      "404": "pass",
+      "405": "fail: returned 404/not_found",
+      "406": "fail: HTTP 406 with internal_error body",
+      "422": "blocked: no safe read-only trigger",
+      "500": "partial: body typed; header parity unvisited",
+      "timeout": "blocked: client-local timeout only"
+    },
+    "request_ids": "header/body parity 4/7; 500 body only; 422 and timeout unavailable",
+    "identity_domains": "3/6 distinct deployed domains: document, revision, and ETag/cache; release, projection, and cycle absent",
+    "conditional_document_get": "4/4: exact and wildcard 304/0; stale and absent 200/current",
+    "pagination_perspective": {
+      "public_query": "pass: stable total 669 and bounded limit/offset clamping",
+      "invalid_perspective": "fail: 200 with silent published substitution",
+      "history_limit": "fail: --limit 1 returned 12 revisions"
+    }
+  },
+  "inferences": [
+    "The 406 internal_error body follows the generic non-404 ErrorJSON mapping.",
+    "The history-limit defect is at the manifest/CLI seam because the controller reads limit while doc.history is not declared paginated.",
+    "Intermittent schema-list 500s resemble a prior overload incident, but their present root cause is unproven.",
+    "Any failed, blocked, proxy, or missing hard cell forbids this API unit from qualifying."
+  ],
+  "repair_seams": [
+    "Return typed 405 and negotiation-specific 406 errors with request-ID parity.",
+    "Provide deterministic read-only fixtures for 422, controlled 500, and server timeout.",
+    "Require request_id and the full failure matrix in OpenAPI.",
+    "Expose release, projection, and cycle identities separately from document revision and ETag.",
+    "Reject invalid perspectives explicitly and forward history limits end to end."
+  ],
+  "checked": {
+    "tasks": [
+      "task-a768c69e659add58",
+      "task-e05c4e4cea2282e5",
+      "task-114768618bf29ae0",
+      "cch-cloud-app-has-no-plug-errorhandler",
+      "cch-w30-bl-api-status-aware-envelope"
+    ],
+    "papers": [
+      "pds-wave-44-2026-08-03@8bbd5d874a1b697f1e4e437c473f8e52",
+      "legendary-paper-reader-upgrade-sweep-2026-08-03"
+    ],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      "api/lib/barkpark_web/controllers/query_controller.ex",
+      "api/lib/barkpark_web/controllers/history_controller.ex",
+      "api/lib/barkpark_web/anon_perspective.ex",
+      "api/lib/barkpark_web/controllers/error_json.ex",
+      "api/lib/barkpark/plugins/capabilities.ex",
+      "internal/cli/run.go",
+      "docs/cli/fixtures/full-manifest.json",
+      "docs/api-v1.md"
+    ]
+  },
+  "risks": [
+    "Method mismatch is falsely represented as document absence.",
+    "A deterministic 406 instructs clients to treat negotiation failure as an internal retryable error.",
+    "Invalid perspective silently changes caller intent.",
+    "Intermittent 500s can be erased by retries.",
+    "Release, projection, and cycle identity can be conflated with document revision or ETag.",
+    "Ignored history limits permit unexpectedly large payloads."
+  ],
+  "unvisited_scope": [
+    "authenticated direct history endpoint",
+    "safe deployed 422 induction",
+    "controlled server-side timeout",
+    "500 header/body request-ID parity",
+    "capabilities and OpenAPI conditional GETs",
+    "authenticated drafts/raw behavior",
+    "deployed six-domain projection",
+    "mutation paths"
+  ],
+  "credential_scan": {
+    "status": "clean",
+    "production_matches": 0,
+    "credential_values_reported": 0
+  },
+  "mutations": {
+    "repo_files_changed_by_surveyor": 0,
+    "barkpark_mutations": 0,
+    "tests_run": 0
+  }
+}
