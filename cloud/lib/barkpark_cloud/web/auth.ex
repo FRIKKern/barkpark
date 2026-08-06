@@ -501,6 +501,7 @@ defmodule BarkparkCloud.Web.Auth do
   # --warnings-as-errors.
   defp forbidden(conn, evidence),
     do: json_halt(conn, 403, Enum.into(evidence, %{error: "forbidden"}))
+
   defp not_found(conn), do: json_halt(conn, 404, %{error: "not_found"})
 
   defp json_halt(conn, status, body) do

@@ -433,7 +433,12 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
       {:ok, _} = Accounts.add_member(team, user, "member")
 
       conn =
-        session_call(:post, "/v1/teams/#{team.id}/invitations", %{"email" => "x@example.com"}, user)
+        session_call(
+          :post,
+          "/v1/teams/#{team.id}/invitations",
+          %{"email" => "x@example.com"},
+          user
+        )
 
       assert conn.status == 403
 
