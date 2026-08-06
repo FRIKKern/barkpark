@@ -47,7 +47,8 @@ defmodule BarkparkCloud.Notifications do
     EmailSettings,
     EventEmail,
     SafeUrl,
-    Transactional
+    Transactional,
+    Withhold
   }
 
   # Events that bypass the per-event toggle (Coolify's `$alwaysSendEvents`) — but
@@ -380,6 +381,12 @@ defmodule BarkparkCloud.Notifications do
     summary = DigestEmail.summary(barkparks)
 
     case platform_admin_emails() do
+      # cch-w32-r2 (census row `deliver_fleet_digest/1 c1 do
+      # case(platform_admin_emails())>[]`): NAMED CONSENTED — the same
+      # recipient-less-by-construction shape as the empty-team fan-out, one
+      # level up. `Delivery.changeset/2` requires a recipient (delivery.ex:78)
+      # and this arm has none; charter D362 forbids a synthetic one. This is not
+      # the system deciding against a person, it is the absence of a person.
       [] ->
         Logger.info(
           "Notifications.deliver_fleet_digest: no platform admins configured/registered — " <>
@@ -450,6 +457,13 @@ defmodule BarkparkCloud.Notifications do
     settings = get_or_create_settings(team)
 
     if should_send?(settings, event) do
+      # cch-w32-r2 (census row `dispatch_event/3 c1 do if(should_send?)>then>
+      # for(...)>empty`): a team whose member list is EMPTY sends nothing and
+      # writes nothing. NAMED CONSENTED, not funnelled: `Delivery.changeset/2`
+      # runs `validate_required([:recipient, :event])` (delivery.ex:78), so a
+      # withhold row here has no recipient by construction — and charter D362
+      # forbids inventing one (a synthetic address is a row claiming a person
+      # was involved who was not). There is nobody the alert was withheld FROM.
       for recipient <- team_member_emails(settings.team_id) do
         email = EventEmail.build(settings, event, payload, recipient)
         result = deliver_alert(settings, email)
@@ -468,10 +482,27 @@ defmodule BarkparkCloud.Notifications do
   rescue
     # The dispatcher is wired into broadcast paths that must never fail because
     # email did. Log and swallow — the SSE signal still goes out.
+    #
+    # cch-w32-r2: the SWALLOW is deliberate; the SILENCE was not. This arm eats
+    # any crash in the whole email fan-out AND the chat enqueue while returning
+    # `:ok` to the producer, so a team read a delivery log byte-identical to "no
+    # alert was ever triggered". The withhold now becomes a row per member.
     error ->
       Logger.error("Notifications.dispatch_event/3 crashed: #{Exception.message(error)}")
+
+      Withhold.record(withholdable_team_id(team), Atom.to_string(event), :dispatch_crashed)
+
       :ok
   end
+
+  # The rescue arm above runs on ANY crash — including one raised before
+  # `settings` was ever bound — so the team id must be recovered from the
+  # ARGUMENT, and recovering it must not itself raise inside a rescue. An
+  # unrecognisable `team` yields `nil`, which `Withhold.record/4` refuses out
+  # loud rather than writing a row about a team nobody can name.
+  defp withholdable_team_id(%Team{id: id}), do: id
+  defp withholdable_team_id(id) when is_binary(id), do: id
+  defp withholdable_team_id(_other), do: nil
 
   @doc """
   Dispatch an alert `event` keyed by a **Site** — the deployment-side twin of the
@@ -497,6 +528,11 @@ defmodule BarkparkCloud.Notifications do
          %Site{team_id: team_id, name: name} when is_binary(team_id) <- Repo.get(Site, id) do
       dispatch_event(team_id, event, Map.put_new(payload, :name, name))
     else
+      # cch-w32-r2 (census row `dispatch_site_event/3 c1 do with>else>_`): NAMED
+      # CONSENTED under charter D349(b). A since-deleted or non-UUID site has no
+      # team, so a row written here is returnable by NOBODY — "a Logger line in
+      # a Delivery costume". Re-filing it as a withhold is the mistake this
+      # comment exists to prevent.
       _ -> :ok
     end
   end
@@ -700,6 +736,14 @@ defmodule BarkparkCloud.Notifications do
       {:ok, delivery} ->
         delivery
 
+      # cch-w32-r2, RECEIPT LOSS — a DIFFERENT class, adjudicated here so it is
+      # not mistaken for a withhold: the send above already happened, and a
+      # `suppressed` row would assert the opposite of what occurred. What is
+      # lost is the RECEIPT, not the notification. It is NOT routed through
+      # `Withhold` and it is NOT absorbed by this row; it keeps its own filed
+      # backlog task `cch-w32-bl-receipt-loss-branches-have-no-trace`, which
+      # needs a trace of its own class (the same species as
+      # `cch-w31-bl-auto-deploy-refusal-row-failure-leaves-no-trace`).
       {:error, changeset} ->
         Logger.error("Notifications: failed to record delivery: #{inspect(changeset.errors)}")
         nil
@@ -860,6 +904,13 @@ defmodule BarkparkCloud.Notifications do
 
     case Enum.find(settings.channels || [], &(&1.type == type and &1.enabled)) do
       nil ->
+        # cch-w32-r2: the purest silent withhold in the rail — the job existed,
+        # ran, and vanished with neither a row nor a log. The channel was
+        # removed or switched off AFTER this alert was already queued for it, so
+        # the alert was decided and then dropped; that is the system's decision,
+        # not the team's toggle, and it is now readable per member.
+        Withhold.record(team_id, event, :chat_channel_gone, channel: type)
+
         {:cancel, :channel_gone}
 
       %ChannelConfig{} = cfg ->
@@ -935,10 +986,12 @@ defmodule BarkparkCloud.Notifications do
   defp enqueue_chat(%EmailSettings{} = settings, event, payload) do
     selected = channels_for_event(settings, event)
 
-    failed =
-      Enum.count(selected, fn cfg ->
-        not match?({:ok, _}, enqueue_channel(settings.team_id, cfg, event, payload))
+    withheld =
+      selected
+      |> Enum.reject(fn cfg ->
+        match?({:ok, _}, enqueue_channel(settings.team_id, cfg, event, payload))
       end)
+      |> Enum.map(& &1.type)
 
     # cch-w32-s1: a decided-but-never-enqueued notification reaches nobody, with
     # no delivery row and (until now) no log at all — the enqueue result was
@@ -946,11 +999,23 @@ defmodule BarkparkCloud.Notifications do
     # its team/channel/event; this second line states the SHAPE of the fan-out,
     # so "3 channels selected, 1 never enqueued" is readable as one fact rather
     # than reconstructed from three scattered lines.
-    if failed > 0 do
+    #
+    # cch-w32-r2: s1 stopped the result being DISCARDED, but the failure was
+    # still only a LOG — a chat alert that was decided, selected and never
+    # enqueued produced zero `Delivery` rows, so the person it was for read a
+    # delivery log byte-identical to "no alert was ever triggered". One
+    # suppressed row per member per never-enqueued channel is the fix; the log
+    # stays for the operator, the row is for the team.
+    if withheld != [] do
       Logger.error(
         "Notifications: chat fan-out for #{event} enqueued " <>
-          "#{length(selected) - failed}/#{length(selected)} channels (team #{settings.team_id})"
+          "#{length(selected) - length(withheld)}/#{length(selected)} channels " <>
+          "(team #{settings.team_id})"
       )
+
+      Enum.each(withheld, fn type ->
+        Withhold.record(settings.team_id, event, :chat_enqueue_failed, channel: type)
+      end)
     end
 
     :ok
@@ -966,7 +1031,7 @@ defmodule BarkparkCloud.Notifications do
   defp enqueue_channel(team_id, %ChannelConfig{type: type}, event, payload) do
     %{team_id: team_id, channel_type: type, event: event, payload: json_safe(payload)}
     |> ChatNotificationWorker.new()
-    |> Oban.insert()
+    |> insert_job()
     |> case do
       {:ok, %Oban.Job{}} = ok ->
         ok
@@ -984,6 +1049,23 @@ defmodule BarkparkCloud.Notifications do
         )
 
         {:error, reason}
+    end
+  end
+
+  # The JOB-QUEUE seam, the twin of `chat_http_client/0` below. `Oban.insert/1`
+  # stays literal on the real path; a test may substitute a client through
+  # `config :barkpark_cloud, :notifications_job_client`.
+  #
+  # cch-w32-r2: this exists because the enqueue-FAILED withhold cannot otherwise
+  # be driven. Every in-sandbox way to make this insert fail RAISES (a
+  # non-JSON-encodable arg, a stopped Oban) rather than returning `{:error, _}`,
+  # and a raise is `dispatch_event/3`'s rescue arm — a DIFFERENT branch with a
+  # different row. Without the seam the `{:error, _}` arm would be asserted only
+  # by reading it, which is exactly the vacuous green this epic exists to refuse.
+  defp insert_job(changeset) do
+    case Application.get_env(:barkpark_cloud, :notifications_job_client) do
+      nil -> Oban.insert(changeset)
+      client -> client.insert(changeset)
     end
   end
 
@@ -1035,6 +1117,10 @@ defmodule BarkparkCloud.Notifications do
       {:ok, delivery} ->
         delivery
 
+      # cch-w32-r2, RECEIPT LOSS — the chat twin of `record_delivery/5`'s arm
+      # above, and adjudicated identically: the POST already returned, so this
+      # is a lost receipt, not a withheld notification. Not routed through
+      # `Withhold`; still owned by `cch-w32-bl-receipt-loss-branches-have-no-trace`.
       {:error, changeset} ->
         Logger.error(
           "Notifications: failed to record chat delivery: #{inspect(changeset.errors)}"

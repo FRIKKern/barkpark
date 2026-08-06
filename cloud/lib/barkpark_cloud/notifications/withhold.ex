@@ -54,9 +54,15 @@ defmodule BarkparkCloud.Notifications.Withhold do
 
   @status "suppressed"
 
-  @reasons [:reap_alert_cap]
+  # THE CLOSED VOCABULARY. `record/4` guards on `reason in @reasons` and the
+  # catch-all clause writes NO row — so a caller that invents a reason without
+  # adding it here is a silent withhold reintroduced INSIDE the fix. Two guards
+  # stand against that: the catch-all below LOGS instead of failing quietly, and
+  # `withhold_test.exs` derives every reason atom passed to `Withhold.record/4`
+  # from `notifications.ex`'s AST and asserts it is a member of this list.
+  @reasons [:reap_alert_cap, :dispatch_crashed, :chat_enqueue_failed, :chat_channel_gone]
 
-  @type reason :: :reap_alert_cap
+  @type reason :: :reap_alert_cap | :dispatch_crashed | :chat_enqueue_failed | :chat_channel_gone
 
   @doc """
   The `Delivery.status` a withheld notification is recorded under. One word, no
@@ -82,6 +88,21 @@ defmodule BarkparkCloud.Notifications.Withhold do
     do:
       "Withheld: too many deployment alerts in one sweep, so this one was not sent. " <>
         "The deployment itself is failed in the console."
+
+  def label(:dispatch_crashed),
+    do:
+      "Withheld: the notification system failed while preparing this alert, so it " <>
+        "was not sent. The event that triggered it still happened."
+
+  def label(:chat_enqueue_failed),
+    do:
+      "Withheld: this alert could not be queued for its chat channel, so it was " <>
+        "never sent there. Email delivery for the same event is listed separately."
+
+  def label(:chat_channel_gone),
+    do:
+      "Withheld: the chat channel this alert was routed to was disconnected before " <>
+        "it could be sent, so it was not delivered there."
 
   @doc """
   Every withhold sentence, for the `last_error` clamp in `Delivery.changeset/2`.
@@ -150,5 +171,18 @@ defmodule BarkparkCloud.Notifications.Withhold do
       0
   end
 
-  def record(_team_id, _event, _reason, _opts), do: 0
+  # THE UNRECORDABLE WITHHOLD — loud, never quiet. Zero rows is the honest
+  # outcome for a caller with no team, no event name, or a reason outside
+  # `@reasons`, but a QUIET zero is this epic's own defect rebuilt inside its
+  # own fix: a withhold that writes nothing and says nothing. So this arm names
+  # what it refused and why, on the operator log, every time.
+  def record(team_id, event, reason, _opts) do
+    Logger.error(
+      "Notifications.Withhold: refused an unrecordable withhold and wrote NO row — " <>
+        "team_id=#{inspect(team_id)} event=#{inspect(event)} reason=#{inspect(reason)}. " <>
+        "A reason outside #{inspect(@reasons)} needs adding there and to label/1."
+    )
+
+    0
+  end
 end
