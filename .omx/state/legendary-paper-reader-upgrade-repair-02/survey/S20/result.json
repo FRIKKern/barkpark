@@ -1,0 +1,107 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-20",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": [
+    "pds-wave-44-2026-08-03::cli"
+  ],
+  "verdict": "partial_fail",
+  "direct_answer": "PDS44 CLI identity is exact and normal document-list pagination works, but two hard defects remain: a transport timeout is flattened to not_found/exit 4, and doc history --limit 3 returns all 12 revisions. Plain renders are width-bounded at 40, 80, and 120 with no ESC or NUL leakage, but this benign source does not exercise hostile controls.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "fe59f6e8-276a-4a27-8974-c9e1c74d02fc",
+    "assignment_snapshot_digest": "06001924f36bb3b24042186039bd8a509691739cf8a2bae34fbfadf15ea38706",
+    "paper_id": "pds-wave-44-2026-08-03",
+    "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52"
+  },
+  "observations": {
+    "source": {
+      "blocks": 99,
+      "canonical_blocks_sha256": "1c10ec4984826b0b12a0111c64b57bfc2c79de3ae576dd40b74e83c9e183bfce",
+      "history_revisions": 12,
+      "paper_list_total": 669
+    },
+    "authored_carriers": {
+      "headings": 32,
+      "paragraphs": 48,
+      "callouts": 4,
+      "lists": 10,
+      "list_items": 85,
+      "tables": 5,
+      "header_cells": 12,
+      "body_cells": 203,
+      "text_runs": 337,
+      "text_characters": 59939,
+      "links": 0,
+      "source_c0_or_del_controls": 0,
+      "source_bidi_controls": 0
+    },
+    "required_cells": {
+      "discovery_help": "partial: verb help exits 0; bp doc --help prints valid help but exits 2",
+      "structured_output": "found: JSON, YAML, minimal, and paper view JSON carry exact identity",
+      "typed_errors": "fail: timeout reported as not_found/exit 4; true missing document also uses not_found/exit 4",
+      "identity_revision": "found: all live projections agree on 8bbd5d874a1b697f1e4e437c473f8e52",
+      "history_pagination": "fail: --limit 3 returns 12/12; doc ls limit/offset returns distinct stable pages",
+      "terminal_sanitization": "partial: widths 40/80/120 bounded; redirected output has zero ESC/NUL; hostile input unexercised"
+    },
+    "duplicate_search": {
+      "tasks_checked": 1000,
+      "matching_tasks": 0,
+      "unvisited": "task corpus beyond the first 1000 rows"
+    }
+  },
+  "inferences": [
+    "The history-limit defect may be server-side because the client appends limit when positive; request capture is still needed.",
+    "Central sanitizers and existing tests suggest supported paths are robust, but this Paper cannot prove hostile-input behavior."
+  ],
+  "repair_seams": [
+    "Preserve transport/deadline failures as unavailable or infrastructure errors with a distinct exit code.",
+    "Prove and enforce history limit forwarding end to end.",
+    "Make noun-level bp doc --help exit 0.",
+    "Run hostile-control fixtures through the release-pinned real binary."
+  ],
+  "checked": {
+    "papers": [
+      "pds-wave-44-2026-08-03@8bbd5d874a1b697f1e4e437c473f8e52",
+      "legendary-paper-reader-upgrade-sweep-2026-08-03"
+    ],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      "docs/cli/fixtures/full-manifest.json",
+      "internal/apiclient/client.go",
+      "internal/cli/paper_cmd.go",
+      "internal/pdrender/inline.go",
+      "internal/pdrender/sanitize_text_test.go",
+      "internal/pdrender/sanitize_url_test.go",
+      "cmd/barkpark/paper.go"
+    ]
+  },
+  "risks": [
+    "Timeouts are operationally indistinguishable from absent content at the code and exit layer.",
+    "History limit cannot currently bound payload size or latency.",
+    "The live document has no hostile controls, so sanitizer confidence is indirect.",
+    "The live assignment attribution projection loses unit_ids even though the immutable snapshot is correct."
+  ],
+  "unvisited_scope": [
+    "packet-level history request capture",
+    "sealed hostile-control Paper through the real binary",
+    "task duplicate search beyond 1000 rows",
+    "full 669-Paper --all retrieval after server error",
+    "immutable release-pin flags without supplied gate and candidate UUIDs"
+  ],
+  "credential_scan": {
+    "status": "clean",
+    "credential_values_reported": 0
+  },
+  "mutations": {
+    "repo_files_changed_by_surveyor": 0,
+    "barkpark_mutations": 0
+  }
+}
