@@ -530,4 +530,12 @@
 # menu. MISSES 0 is what makes this an unrecorded ADD rather than a parity
 # defect — the distinction this ratchet's own failure text tells you to confirm
 # before bumping, and it was confirmed by run, not assumed.
-1304
+#
+# Re-measured 2026-08-06 after merging origin/main: 1305 authored heads,
+# MISSES 0 — the +1 is this slice's own never-reported rule. The baseline was
+# 1289 when this branch was cut and reached 1304 on main via the sidebar team
+# picker (#9775/#9777), so this is the ONE-HOLDER-PER-ROUND collision resolved
+# the prescribed way: merge main first, RE-RUN parity, and record the number the
+# run printed — never arithmetic over two deltas. MISSES 0 confirmed FIRST,
+# which is what makes it an unrecorded ADD rather than a parity defect.
+1305
