@@ -1263,3 +1263,77 @@ and `revisions` remains a DATA-LOSS decision outside the fence (D46) — sharpen
 and `mutation_events.document` is the ONLY surviving copy of 158 adjudication reasons already filed for
 recovery. The 76× HTTP 500 class may or may not fall; that stays a MEASUREMENT `dr-w2-s8` takes, never a
 promise.
+
+---
+
+### Wave 2026-08-06 (wave 4) — REVIEWED · Paper `deploy-reliability-wave-4-2026-08-06` · grade **A−**
+
+**Seven of eight slices built, reviewed, gate-green on the final state, pushed and PR'd. Nothing merged — the
+lead merges.** The eighth (`dr-w3-s7`, `strained` reaching triage) is round 2 BY DESIGN, behind s2 and s4.
+
+| Slice | Task | Final branch | PR | Gate on final state |
+|---|---|---|---|---|
+| Agent release restarts the unit | `dr-w4-s1-agent-release-restarts-the-unit` | `…starts-running--0` (unchanged) | [#9823](https://github.com/FRIKKern/barkpark/pull/9823) | `bash -n` exit 0 + pasted live guerrilla proof |
+| Agent measures space + cores | `dr-w4-s2-agent-measures-space-and-cores` | `…by-named-consum-1` (unchanged) | [#9824](https://github.com/FRIKKern/barkpark/pull/9824) | go build/vet/test green; gofmt clean |
+| The fold — CP + CLI render swap, db, BEAM | `dr-w3-s6-cp-cli-render-new-vitals` | `…and-the-cli-r-2` (unchanged) | [#9825](https://github.com/FRIKKern/barkpark/pull/9825) | 92 tests, 0 failures (baseline 70) + Go suite green |
+| Fleet list carries pressure | `dr-w4-s4-fleet-list-carries-pressure` | `…pressure-prefetch-3-r` | [#9826](https://github.com/FRIKKern/barkpark/pull/9826) | 176 tests, 0 failures |
+| The door refuses `box_at_capacity` | `dr-w3-s5-door-refuses-box-at-capacity` | `…with-a-typed-4` (unchanged) | [#9827](https://github.com/FRIKKern/barkpark/pull/9827) | 81 tests, 0 failures (+ controller suite 28/0) |
+| Deferral code survives the stamp | `dr-w4-s6-deferral-code-survives-the-stamp` | `…the-request-i-5` (unchanged) | [#9828](https://github.com/FRIKKern/barkpark/pull/9828) | 94 tests, 0 failures (baseline 92) |
+| `vm.memory` names the subsystem | `dr-w4-s7-beam-memory-breakdown-readable` | `…subsystem-grow-6` (unchanged) | [#9829](https://github.com/FRIKKern/barkpark/pull/9829) | 5 tests, 0 failures (baseline 3) |
+
+**What landed, against the wish's three clauses.**
+
+*See what is taking up space.* The fold (#9825) is the wave's most valuable single PR: `db_size` was
+pre-wired and dark only because the probe reported `-1`, and `pg_top_relations` has been arriving at the
+control plane since the 11:45:23Z cutover — so `bp cloud instance top` now names `mutation_events` 1.53 GB
++ `revisions` 1.33 GB = 81.3 % of a 3.52 GB database, **retroactively over the whole retained window**, as a
+bar chart whose bars are shares of the total. That answer is real today. The disk/journal/sites axis
+(#9824) ships the PRODUCER only — see the gap below.
+
+*See a struggling box as struggling.* Swap, the BEAM's own footprint and load-per-core all reach the
+control plane and the CLI in three honest states (`none configured` / `<pct>% of <total>` / em dash), five
+of six boxes being swapless makes state one the majority case, and the fleet row now carries the pressure
+block the ranker reads. `vm.memory` breaks down by subsystem so a leak names itself. But `attentionStatus`
+still ranks a 100 %-cpu box `healthy / rank 8` — that is s8, round 2.
+
+*Cap concurrent builds.* Done and typed: the box refuses at the DOOR with `box_at_capacity` 409 before the
+artifact is unpacked, off a serialized in-BEAM census plus a non-destructive `/proc/locks` second opinion,
+failing open everywhere, with the in-engine `flock -w 900` untouched as the last-resort barrier.
+
+**The wave's one real hole.** `dr-w4-s2` posts space to `/v1/agent/space` under event type `"space"`, and
+**neither exists on the control plane** — the type is outside `AgentEvent`'s `~w(health status backup tls
+content verify)` allowlist and the route is absent. No wave-4 slice was fenced to touch `cloud/**` for the
+agent-ingest path, so the widening could not land with it. Shipped alone the slice measures space perfectly
+and 404s it every 15 minutes. Its criterion 2 is honestly left OPEN. Follow-up `task-3b69c3e24bf3d8ca`.
+
+**Review fixes made in place (one commit).** `dr-w4-s4`'s pressure block shipped `load1` without
+`cpu_cores` — the denominator D52 rules the strained fence is a ratio against, and which D52 explicitly
+refuses to hardcode. `dr-w4-s2` puts `cpu_cores` on the beat for exactly that reason. Without it on the row,
+round 2 would have had no denominator on the fleet-list surface and would have had to reopen the file.
+Added under the same `measured_or_nil` guard on `…prefetch-3-r`, gate re-run 176/0. Every other slice was
+accepted unchanged — six of seven needed nothing, which is a real statement about the build phase.
+
+**Independence owed before merge (high-flip-risk).** `dr-w3-s5`'s door-vs-unit race judgment. The wave
+reviewer re-derived it independently and agrees (the census is inside one `handle_call`, so serialization is
+structural; every `File.read`/`File.stat` error arm returns `false`; `takes_build_slot?` is `true` only for
+`mode: :deploy`) — but the charter's dual-review rule makes the actual second reviewer a manual lead step.
+
+**What the lead must know before merging.**
+1. #9827 creates the first real producer of a 409 on a path that always answered 202. If BoxRelay treats a
+   409 as fatal rather than as a deferral to retry, deploys that used to queue dishonestly now fail fast.
+   The end-to-end retry behaviour is proved by nothing this wave ran.
+2. #9827 edits a **fifth file** outside its declared fence — `site_deploy_controller_test.exs` — because that
+   suite asserted the old 202 semantics verbatim.
+3. #9826 newly exposes host pressure to read-scoped **PAT** principals (charter D63, a decision, not a
+   discovery).
+4. Merge order is unconstrained. #9828 before #9827 is strictly safer but not required: the door always
+   sends a non-empty message, so its code classifies correctly either way.
+5. Every slice's last criterion is merge-gated and stays OPEN for the lead to close on merge.
+
+**What the next wave takes.** (a) The CP side of space — the `/v1/agent/space` route plus the `@types`
+widening — without which #9824 is a producer talking to nobody. (b) `dr-w3-s7`, unblocked the moment #9824
+and #9826 merge. (c) The `MemoryHigh` bound, now that #9829 makes attribution readable and D64 shows why an
+`erlang:memory()`-derived threshold would be ~1 GB too low — derive from PSS + swap. (d) Two named residuals:
+the deferral classifier's raw-column ambiguity (a codeless `box_at_capacity — <prose>` is byte-identical to
+`code — message`; only a structured column closes it) and the `unavailable` token painting neutral in
+`semrole.For`.
