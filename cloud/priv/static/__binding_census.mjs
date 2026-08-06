@@ -43,14 +43,19 @@
 // The 79 write call sites collapse to 67 route keys; 11 of those keys are
 // multi-site. The decisive case is POST /v1/providers:
 //
-//   app.js:2313  submitProviderCred        — reached from the launch wizard's
-//                                            `.launch-connect-provider` button,
-//                                            which renderLaunchConnect draws
-//                                            UNCONDITIONALLY. NO PREDICATE.
-//   app.js:2744  submitInlineProviderCred  — reached only through
-//                                            renderConnectCard, which
-//                                            renderProviderPage mounts only
-//                                            when providerCanWrite().
+//   submitProviderCred()        — reached from the launch wizard's
+//                                 `.launch-connect-provider` button, which
+//                                 renderLaunchConnect draws UNCONDITIONALLY.
+//                                 NO PREDICATE.
+//   submitInlineProviderCred()  — reached only through renderConnectCard,
+//                                 which renderProviderPage mounts only when
+//                                 providerCanWrite().
+//
+//   (Re-derive both: grep -n 'function submitProviderCred' app.js, and the same
+//   for submitInlineProviderCred. Line numbers are NEVER written down here —
+//   they rot on any sibling shift, charter D41 / bp-honest-gates D5 — the PIN
+//   below is keyed on the function name for exactly that reason, and every line
+//   number this census prints is DERIVED at run time from the live file.)
 //
 // Route-keyed, those two collapse into one row, the row scores "predicated",
 // and the ONE REAL DEFECT this instrument exists to see becomes structurally
@@ -65,17 +70,18 @@
 //     no-op for it". The check discriminates PATs, not people. Every console
 //     call site whose only guard above membership is `require_ability` (or
 //     `with_team_site(conn, {:ability, "write"}, …)`) is therefore PLAIN
-//     MEMBER here: app.js 10801 (PATCH /v1/sites/:*), 11437 (promote), 11649
-//     (site rollback), 12059 and 12223 (deploy). A builder who counts
-//     `require_ability` as elevated gets 46, not 40 — those five plus
-//     app.js:4044, whose whole authority also lives below the router (see (c)).
+//     MEMBER here: loadSite (PATCH /v1/sites/:*), runPromote, runSiteRollback,
+//     createAndDeploy and runDeploy. A builder who counts `require_ability` as
+//     elevated gets 46, not 40 — those five plus submitToken, whose whole
+//     authority also lives below the router (see (c)).
 //
 // (b) THE VACUITY FLOOR ASSERTS "RESOLVED TO A ROUTE", NEVER "SEEN". A literal
 //     path extractor silently drops 13 of the 79 — they build their path from a
 //     variable or a helper — and a census that counted what it saw would call
 //     that 66-of-66 and go green over a hole. Two of the dropped are the
-//     console's HIGHEST-privilege writes (app.js 7732 and 8107, the operator
-//     autoupdate brake). Worse, a 14th does not drop at all: app.js:18710 is
+//     console's HIGHEST-privilege writes (fleetRolloutAction and
+//     operatorConfirmBrake, the operator autoupdate brake). Worse, a 14th does
+//     not drop at all: submitActivateDecision builds
 //     `"/v1/auth/device/" + decision` — a literal PREFIX with a variable last
 //     segment, which a naive extractor ACCEPTS and mis-routes to
 //     "/v1/auth/device/". Silent mis-routing beats silent dropping for damage,
@@ -523,7 +529,7 @@ console.log("");
 console.log(`THE ${pinnedUnpredicated.length} UNPREDICATED ELEVATED WRITES — an affordance a plain member can see, click, and be refused for.`);
 console.log("This census does NOT fix them. Fixing them is cch-w36-bl-unpredicated-write-affordances-fix,");
 console.log("which is still open and still the owner — its text says seventeen because it was written before");
-console.log("app.js:2313 was separated from :2744 by call-site keying. The population it owns is these 18.");
+console.log("submitProviderCred was separated from submitInlineProviderCred by call-site keying. The population it owns is these 18.");
 for (const r of pinnedUnpredicated) {
   const live = liveByKey(r);
   console.log(`  ${pad(`${LABEL}:${live ? live.line : "gone"}`, 34)}${pad(r.verb, 7)}${pad(r.route, 58)}${r.auth_fn || r.context_fn}`);
