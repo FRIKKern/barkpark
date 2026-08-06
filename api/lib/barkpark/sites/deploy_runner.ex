@@ -758,6 +758,12 @@ defmodule Barkpark.Sites.DeployRunner do
     Enum.uniq(port_slugs ++ unit_slugs)
   end
 
+  # Reachability: `path` is always `proc_locks_path()` — `Keyword.get(config(),
+  # :proc_locks_path, @default_proc_locks)`, i.e. application config with a
+  # compile-time default of "/proc/locks". It is never a request value, never a
+  # slug, and no caller passes a path in: `foreign_build_in_flight?/1` takes a
+  # `%DeployRequest{}` and reads nothing path-shaped off it.
+  # sobelow_skip ["Traversal.FileModule"]
   defp foreign_build_in_flight?(%DeployRequest{} = req) do
     path = proc_locks_path()
 
