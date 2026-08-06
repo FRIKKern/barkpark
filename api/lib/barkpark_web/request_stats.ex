@@ -14,7 +14,8 @@ defmodule BarkparkWeb.RequestStats do
       instead of dividing by a full 60s it has not lived through yet.
     * `p95_ms`   — the 95th-percentile request duration (nearest-rank) in ms, or
       `nil` when the window is empty. Zero samples is **not** `0ms` — a fabricated
-      floor would be a lie (charter D48 honest-meters law). It is the honest `null`.
+      floor would be a lie. It is the honest `null`, and `BarkparkWeb.RequestStatsTest`
+      is what holds it there.
     * `err_5xx_per_s` — 5xx responses over the same window, over the same elapsed
       seconds, or `nil` when the window is empty. **Same law, and it bites harder
       here:** an empty window rendered as `0.0` reads "this box is serving no
@@ -43,9 +44,12 @@ defmodule BarkparkWeb.RequestStats do
   `cloud-console-w5-agent-reqstats-beat`). A timer prunes expired rows so memory
   stays bounded to roughly one window's worth of samples.
 
-  The read shape is pinned by charter OC24 so the agent slice builds against it
-  in parallel: `%{req_per_s: float, p95_ms: integer | nil,
-  err_5xx_per_s: float | nil, window_s: integer}`.
+  The read shape — `%{req_per_s: float, p95_ms: integer | nil,
+  err_5xx_per_s: float | nil, window_s: integer}` — is pinned on the wire by
+  `BarkparkWeb.RequestStatsControllerTest` and in the pure math by
+  `BarkparkWeb.RequestStatsTest`. Those two tests are the contract; a charter
+  letter is not, because charters are rewritten per wave and the code does not
+  follow.
   """
 
   use GenServer

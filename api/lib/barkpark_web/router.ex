@@ -1603,8 +1603,8 @@ defmodule BarkparkWeb.Router do
   # ── Instance machine meter: rolling req/s + p95 + 5xx window (cloud-console
   # W5; 5xx added dr-w5-s2) ──
   # Authed with the SAME Bearer-token seam the agent health gate probes
-  # (`RequireToken`); never unauthenticated. Contract pinned by charter OC24 and
-  # widened by D75:
+  # (`RequireToken`); never unauthenticated. Contract owned by
+  # `BarkparkWeb.RequestStats` and pinned by `RequestStatsControllerTest`:
   # {"req_per_s": float, "p95_ms": int|null, "err_5xx_per_s": float|null,
   #  "window_s": int}.
   # Both nullable keys are `null` — never 0 — on an empty window: the agent maps
