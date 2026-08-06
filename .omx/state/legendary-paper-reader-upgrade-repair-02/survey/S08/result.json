@@ -1,0 +1,105 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-08",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-28-2026-08-03::studio_authenticated"],
+  "verdict": "partial",
+  "direct_answer": "Source identity and authored denominators are proven. A same-day real authenticated connected Studio capture exists for the unchanged Paper revision and proves 320/390 geometry, focus order, canvas completeness, and WebSocket connection. Both narrow cells fail responsive chrome: Open and Share begin offscreen, overlap the title, and clipped topbar/header rails overflow. Actual scroll input, click/Enter parity, session expiry/reconnect, and immutable physical revision display were not exercised.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "1d3d7a83-c19c-49c1-b809-480dbfc5ede1",
+    "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+    "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471"
+  },
+  "observations": {
+    "source_identity": {
+      "status": "found",
+      "blocks": "237/237",
+      "history_block_equality": true,
+      "canonical_blocks_sha256": "697b972c5ea8eddd21348bdafe0a0e408d16b13962bc575463acc6efff9d688f"
+    },
+    "authored_carriers": {
+      "blocks": 237,
+      "unique_block_ids": 237,
+      "headings": 43,
+      "tables": 18,
+      "header_cells": 57,
+      "body_cells": 466,
+      "lists": 7,
+      "list_items": 35,
+      "callouts": 13,
+      "marks": 67,
+      "spacer_candidates": 103
+    },
+    "authenticated_mount": {
+      "status": "found",
+      "connected_cells": "16/16 aggregate; CCH28 connected at 320 and 390",
+      "canvas_blocks": "237/237 at both widths",
+      "canvas_tables": "18/18 at both widths",
+      "canvas_headings": 43,
+      "mutating_events": 0
+    },
+    "required_cells": {
+      "width_390": "fail: shell and topbar scrollWidth 617; header scrollWidth 831; 10/15 initial controls contained; Open/Share initially hidden and overlap title",
+      "width_320": "fail: shell and topbar scrollWidth 617; header scrollWidth 831; 8/15 initial controls contained; Open/Share initially hidden and overlap title",
+      "focus_and_scroll_ownership": "partial: Tab order reached Open, Share, editor; editor-body is the only vertical scroller, but no wheel, touch, PageDown, or scrollTop delta was captured",
+      "click_and_enter_parity": "not_found: controls were deliberately not activated; native element semantics are implementation evidence only",
+      "session_expiry_and_reconnect": "not_found: WebSockets stayed open and no expiry, revoke, disconnect, or reconnect occurred",
+      "immutable_paper_identity": "not_found: live payload had zero physical revision carriers; Studio data-rev derives from mutable content-local editor rev, not Document.rev"
+    },
+    "captures": {
+      "metrics_sha256": "b9a37b002c0fdb6a6fdf89c0896ad1e145fdd23890b43112136129f309dc98a0",
+      "width_320_screenshot_sha256": "8983d9032a689fa99fd276561cbd636739f64f841902ca597eab2220d55db55c",
+      "width_390_screenshot_sha256": "6defccd0d5cc3b20ecb52c7693cf08fdc9f41093fa281ebc3de7594016d4c229"
+    }
+  },
+  "inferences": [
+    "The responsive failure is a Studio chrome/layout seam rather than a Paper-source defect because the canvas preserves every block and table.",
+    "The smallest geometry repair is the fixed three-column Studio bar plus the non-wrapping document header/action row.",
+    "Physical Document.rev and editor CAS content.rev are distinct identity domains and require separate names and carriers."
+  ],
+  "recommended_repair_seams": [
+    "Add a narrow contract for studio-bar, tabs, and right rail so every control remains reachable without clipped horizontal overflow.",
+    "Add phone wrap, stack, or truncation behavior for pane-header/editor-header while preserving title and initial Open/Share visibility.",
+    "Carry physical Document.rev separately from content-local editor revision and expose it as immutable source identity.",
+    "After repair, behaviorally prove wheel/touch/keyboard scrolling, click/Enter or Space parity, expiry/reconnect, and focus state at 320/390."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "six adjacent Paper-reader or chrome tasks"],
+    "papers": ["cloud-console-hardening-wave-28-2026-08-03@49c1534d9fb76d0d9adc7b97f25ec471", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      "tooling/grip/ledger/legendary-paper-restart-verify-13-2026-08-06.md",
+      "api/lib/barkpark/content/document.ex",
+      "api/lib/barkpark/content/envelope.ex",
+      "api/lib/barkpark_web/live/studio/studio_live/components.ex",
+      "api/lib/barkpark_web/live/studio/studio_live/shared/paper.ex",
+      "api/lib/barkpark_web/components/studio_components/editor.ex",
+      "api/lib/barkpark_web/layouts/root.html.heex",
+      "api/lib/barkpark_web/studio/caps.ex",
+      "api/test/barkpark_web/live/studio/studio_live_read_liveness_test.exs"
+    ]
+  },
+  "risks": [
+    "Global Studio chrome changes affect all Studio surfaces and require width-bucket regression coverage.",
+    "Current raw screenshots and metrics live under private temporary storage; durable proof depends on recorded hashes and ledger receipts.",
+    "No alternate role, MFA posture, grant scope, browser matrix, or draft/published divergence was exercised."
+  ],
+  "unvisited_scope": [
+    "actual wheel, touch, keyboard, and focused-control scrolling",
+    "safe click and Enter or Space activation parity",
+    "real expiry, revoke, disconnect, and reconnect",
+    "physical revision carrier across reconnect",
+    "Safari and Firefox narrow Studio sessions",
+    "screen-reader behavior"
+  ],
+  "credential_scan": {"status": "clean", "values_revealed": 0, "false_positive_authored_bearer_phrases": 4},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0}
+}
