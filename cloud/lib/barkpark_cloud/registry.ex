@@ -163,6 +163,12 @@ defmodule BarkparkCloud.Registry do
   # 300 lines is generous for a single provision's narration while staying small.
   @max_console_lines 300
 
+  # dwb-16: hard cap on a SINGLE console line. A longer line is TRUNCATED to this
+  # many characters (never rejected — see `validate_console_line/1`), and the
+  # entry then carries `"truncated_from" => <original length>` so the reader can
+  # see that the line it is being shown is a prefix, not the whole line.
+  @max_console_line_chars 2_000
+
   # Same append-only bound for a job's step-transition array (mirrors
   # @max_console_lines, oldest dropped). ~5 steps × 3 statuses + retries fits easily.
   @max_step_entries 100
@@ -1741,16 +1747,29 @@ defmodule BarkparkCloud.Registry do
   dropped) so a chatty/looping worker can't grow the row unbounded. Each element
   is `%{"line" => line, "at" => iso8601}`.
 
+  BOTH BOUNDS DISCLOSE THEMSELVES rather than discarding silently, because a
+  console that hides what it dropped reads as a complete log when it is a tail:
+
+    * an oversized line is TRUNCATED to `@max_console_line_chars` (never
+      rejected) and its entry carries `"truncated_from" => <original length>`;
+    * past the line cap, the oldest SURVIVING entry carries
+      `"dropped_before" => <cumulative count>`.
+
   Returns `{:ok, job}` with the appended array, `{:error, :not_found}` for an
-  unknown id, or `{:error, :invalid}` for a missing/blank/oversized line (the
-  router 422s it rather than persisting garbage).
+  unknown id, or `{:error, :invalid}` for a missing/blank line (the router 422s
+  it rather than persisting garbage). Length is NOT a rejection reason: the
+  builder latches its console channel off after three non-2xx replies, so 422ing
+  a long line would silence the rest of the build's narration too.
   """
   @spec append_provision_console(binary(), term()) ::
           {:ok, ProvisionJob.t()} | {:error, :not_found | :invalid}
-  def append_provision_console(id, line) when is_binary(id) do
-    with {:ok, line} <- validate_console_line(line),
+  def append_provision_console(id, raw_line) when is_binary(id) do
+    with {:ok, line} <- validate_console_line(raw_line),
          %ProvisionJob{} = job <- uuid_or_nil(id) && Repo.get(ProvisionJob, id) do
-      entry = %{"line" => line, "at" => DateTime.to_iso8601(DateTime.utc_now())}
+      entry =
+        %{"line" => line, "at" => DateTime.to_iso8601(DateTime.utc_now())}
+        |> Map.merge(console_line_meta(raw_line))
+
       console = cap_console((job.console || []) ++ [entry])
 
       job
@@ -1765,28 +1784,75 @@ defmodule BarkparkCloud.Registry do
   end
 
   # A console line must be a non-blank binary; it is trimmed of a trailing newline
-  # and hard-capped at 2 KB so one pathological line can't bloat the row. Anything
-  # else (nil, a number, a map) is rejected → 422.
+  # and hard-capped at @max_console_line_chars so one pathological line can't
+  # bloat the row. Anything else (nil, a number, a map) is rejected → 422.
+  #
+  # ARITY IS LOAD-BEARING: `set_deployment_detail/2` is a THIRD consumer whose
+  # `detail` is a bare string column with nowhere to carry a marker, so the
+  # {:ok, binary} return shape stays exactly as it was. The chop DISCLOSURE
+  # rides alongside, in `console_line_meta/1` below, and only the two callers
+  # that write a console *entry map* merge it in.
   defp validate_console_line(line) when is_binary(line) do
     trimmed = String.trim_trailing(line)
 
     cond do
-      trimmed == "" -> :error
-      String.length(trimmed) > 2_000 -> {:ok, String.slice(trimmed, 0, 2_000)}
-      true -> {:ok, trimmed}
+      trimmed == "" ->
+        :error
+
+      String.length(trimmed) > @max_console_line_chars ->
+        {:ok, String.slice(trimmed, 0, @max_console_line_chars)}
+
+      true ->
+        {:ok, trimmed}
     end
   end
 
   defp validate_console_line(_), do: :error
 
+  # The chop, disclosed. Returns the EXTRA console-entry keys that describe what
+  # `validate_console_line/1` just discarded — `%{"truncated_from" => original}`
+  # when the line was actually chopped, and an EMPTY map otherwise, so an
+  # untouched line (including one of exactly @max_console_line_chars) carries no
+  # marker at all. Both console columns are schemaless {:array, :map} jsonb and
+  # both serializer folds (`scrub_entry/2`, `caption_entry/3`) Map.put back only
+  # the keys they fetched, so an extra key reaches the browser with no migration
+  # and no serializer change.
+  defp console_line_meta(line) when is_binary(line) do
+    length = line |> String.trim_trailing() |> String.length()
+
+    if length > @max_console_line_chars, do: %{"truncated_from" => length}, else: %{}
+  end
+
+  defp console_line_meta(_), do: %{}
+
   # Keep only the last @max_console_lines entries (oldest dropped) — the append-only
-  # cap that bounds the row size.
+  # cap that bounds the row size — and DISCLOSE the drop: the oldest SURVIVING
+  # entry carries `"dropped_before" => <cumulative count>`, so a reader can tell a
+  # complete narration from the tail of one. The count is cumulative because the
+  # entry being dropped is itself the previous oldest survivor and carries the
+  # running total; below the cap nothing is dropped and no key is written (an
+  # absent key reads as 0).
   defp cap_console(entries) when is_list(entries) do
     case length(entries) - @max_console_lines do
-      drop when drop > 0 -> Enum.drop(entries, drop)
-      _ -> entries
+      drop when drop > 0 ->
+        entries
+        |> Enum.drop(drop)
+        |> disclose_drop(dropped_before(entries) + drop)
+
+      _ ->
+        entries
     end
   end
+
+  defp disclose_drop([%{} = oldest | rest], count),
+    do: [Map.put(oldest, "dropped_before", count) | rest]
+
+  defp disclose_drop(entries, _count), do: entries
+
+  # The cumulative drop count already recorded on the oldest entry (0 on a
+  # console that has never been capped, and on a non-map/absent head).
+  defp dropped_before([%{"dropped_before" => count} | _]) when is_integer(count), do: count
+  defp dropped_before(_), do: 0
 
   # Keep only the last @max_step_entries entries (oldest dropped) — the append-only
   # cap that bounds the step-transition array.
@@ -5584,6 +5650,10 @@ defmodule BarkparkCloud.Registry do
     |> length()
   end
 
+  # The third `cap_console/1` call site. The line here is control-plane-authored
+  # (a fixed cancellation notice), never builder input, so it is never truncated
+  # and carries no `truncated_from`; the ring drop still discloses itself through
+  # `cap_console/1` exactly as on the two append paths.
   defp cancel_preview(%Deployment{} = dep, line) do
     entry = %{"line" => line, "at" => DateTime.to_iso8601(DateTime.utc_now())}
     console = cap_console((dep.console || []) ++ [entry])
@@ -5955,16 +6025,29 @@ defmodule BarkparkCloud.Registry do
   iso8601}`; the timestamp is stamped HERE (server clock), never trusted from
   the builder. Reuses `validate_console_line/1` + `cap_console/1`.
 
+  BOTH BOUNDS DISCLOSE THEMSELVES (identically to the provision twin): an
+  oversized line is TRUNCATED to `@max_console_line_chars` and its entry carries
+  `"truncated_from" => <original length>`; past the line cap the oldest
+  SURVIVING entry carries `"dropped_before" => <cumulative count>`. A build
+  console that silently drops is indistinguishable from a complete one, and the
+  panel that renders it prints a bare line count as if it were the whole log.
+
   Returns `{:ok, deployment}` with the appended array, `{:error, :not_found}`
-  for an unknown id, or `{:error, :invalid}` for a missing/blank/oversized line
-  (the router 422s it rather than persisting garbage).
+  for an unknown id, or `{:error, :invalid}` for a missing/blank line (the
+  router 422s it rather than persisting garbage). Length is NOT a rejection
+  reason — `internal/builder`'s console channel latches off after three non-2xx
+  replies (and that latch is SHARED with the `detail` caption), so 422ing a long
+  line would take the rest of the build's narration down with it.
   """
   @spec append_deployment_console(binary(), term()) ::
           {:ok, Deployment.t()} | {:error, :not_found | :invalid}
-  def append_deployment_console(id, line) when is_binary(id) do
-    with {:ok, line} <- validate_console_line(line),
+  def append_deployment_console(id, raw_line) when is_binary(id) do
+    with {:ok, line} <- validate_console_line(raw_line),
          %Deployment{} = deployment <- uuid_or_nil(id) && Repo.get(Deployment, id) do
-      entry = %{"line" => line, "at" => DateTime.to_iso8601(DateTime.utc_now())}
+      entry =
+        %{"line" => line, "at" => DateTime.to_iso8601(DateTime.utc_now())}
+        |> Map.merge(console_line_meta(raw_line))
+
       console = cap_console((deployment.console || []) ++ [entry])
 
       deployment
@@ -5984,8 +6067,23 @@ defmodule BarkparkCloud.Registry do
   overwritten by the builder at each real sub-boundary (fetch source → build →
   save image → hand off). The site-detail deploy row renders it under the status
   pill while the deploy is active. Best-effort telemetry: it NEVER affects the
-  build's outcome, and a blank/oversized caption is rejected rather than
-  persisting garbage.
+  build's outcome, and a blank caption is rejected rather than persisting
+  garbage.
+
+  Shares `validate_console_line/1` with the two console appenders, so an
+  oversized caption is TRUNCATED to `@max_console_line_chars`, not rejected.
+  Unlike a console entry it carries NO `truncated_from` marker: `detail` is a
+  bare string column with nowhere to put one. That is precisely why
+  `validate_console_line/1` keeps its `{:ok, binary}` return shape and the
+  disclosure rides in the separate `console_line_meta/1` — changing the /1
+  return shape would break this with-chain silently.
+
+  KNOWN DEFECT, filed as `cch-deployment-detail-column-overflow` and pinned by a
+  test in `registry_test.exs`: the shared cap is 2 KB but this column is
+  varchar(255), so a caption of 256..2_000 characters is neither rejected nor
+  trimmed to fit — it reaches `Repo.update/1` and RAISES a
+  `Postgrex.Error 22001`, contradicting the "never affects the build's outcome"
+  promise above. Do not read that promise as covering a long caption yet.
 
   Returns `{:ok, deployment}`, `{:error, :not_found}` for an unknown id, or
   `{:error, :invalid}` for a missing/blank line (the router 422s it).

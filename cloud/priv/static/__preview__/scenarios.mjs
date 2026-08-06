@@ -17,7 +17,14 @@
 //                     at,detail?} with status ∈ started|done|failed|progress and
 //                     step ∈ create|secure|configure|content|verify|ready
 //                     (SERVER_STEP_ORDER in app.js).
-//   • provision_console[] entries ⇐ append_provision_console: {line,at}.
+//   • provision_console[] entries ⇐ append_provision_console: {line,at}, plus
+//                     the OPTIONAL cch-w33-s3 disclosure keys the server writes
+//                     when it discarded something: truncated_from (this line is
+//                     a 2 KB prefix of an original of that many chars) and
+//                     dropped_before (the oldest SURVIVING entry, cumulative
+//                     count dropped by the 300-line ring). A deployment
+//                     console[] entry carries the same keys, and additionally
+//                     stage + status when the builder stamped them.
 //   • subscription  ⇐ subscription_json (plan,status,past_due,
 //                     cancel_at_period_end,current_period_end,canceled_at,
 //                     started_at,is_trial,trial_days_remaining).
@@ -1470,8 +1477,45 @@ const stPrior = deployment({
 // cch-w28-bl adds stRefused directly ABOVE the bare stCancelled: the two
 // cancelled rows now sit adjacent, one with something to say and one without,
 // so a screenshot shows the rule (copy → panel, silence → pill only) rather
-// than one specimen of it. Row count for this scenario: 6 → 7.
-const siteStatesDeployments = [stLive, stCrash, stCrashCruel, stBlocked, stRefused, stCancelled, stPrior];
+// than one specimen of it. Row count for this scenario: 6 → 7, and cch-w33-s3's
+// cut-narration row (below) takes it to 8.
+// ── cch-w33-s3: THE CUT NARRATION — the row the console count used to lie about
+//
+// The population: 2,881 failed production deployments across NINE distinct
+// sites whose LAST console entry's own status is still "running" on a row the
+// control plane calls failed. The panel printed a bare "3 lines" for those, as
+// though the builder had finished talking. Every other committed deploy fixture
+// in this file carries a status-less {line, at} console, so no instrument here
+// could paint the disclosure — the fixture IS the precondition of the leg.
+//
+// It carries all three disclosures at once, so one screen shows the whole
+// vocabulary:
+//   • the ring drop     — `dropped_before` on the OLDEST surviving entry, as
+//                         registry.ex's cap_console/1 writes it;
+//   • the line chop     — `truncated_from` on a line stored as a 2 KB prefix,
+//                         as console_line_meta/1 writes it (the `line` here is
+//                         itself a stand-in, not 2,000 literal chars — the
+//                         MARKER is what the renderer reads);
+//   • the cut narration — a trailing BUILD/running entry under status "failed".
+// Neither marker may inflate the count: this console has FOUR entries and the
+// panel must read "4 lines · …".
+const stCutNarration = deployment({
+  id: "5b2c1e00-0000-4000-8000-0000000000f9",
+  status: "failed",
+  git_ref: "7d41f0e39a2b5c6d8e0f1a2b3c4d5e6f70819a2b",
+  branch: "main",
+  trigger: "manual",
+  failure_reason: "BUILD failed — the builder stopped reporting",
+  inserted_at: tMinus(46800),
+  updated_at: tMinus(46702),
+  console: [
+    { line: "…5 earlier lines dropped by the 300-line cap", at: tMinus(46800), dropped_before: 5, stage: "PLAN", status: "done" },
+    { line: "PLAN: resolved acme/web @ 7d41f0e", at: tMinus(46790), stage: "PLAN", status: "done" },
+    { line: "npm ERR! " + "…", at: tMinus(46740), stage: "BUILD", status: "running", truncated_from: 5000 },
+    { line: "BUILD: nixpacks still working", at: tMinus(46702), stage: "BUILD", status: "running" },
+  ],
+});
+const siteStatesDeployments = [stLive, stCrash, stCrashCruel, stBlocked, stRefused, stCutNarration, stCancelled, stPrior];
 const siteStatesSite = Object.assign({}, webSite, {
   current_deployment_id: stLive.id,
 });

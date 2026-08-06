@@ -11634,6 +11634,40 @@
   // collapsed by default once terminal, but the lines STAY so a failed build's
   // console remains inspectable. Rendered only when there are lines or the deploy
   // is still active (no empty panel on old terminal rows).
+  // cch-w33-s3: what this console is NOT showing, in words — "" when it is a
+  // complete record, because a bare count is the honest render then. Three
+  // disclosures, all read off data that already reaches the client:
+  //   • the row is TERMINAL but its LAST narrated entry is still mid-stage —
+  //     the builder stopped talking before it finished. Only an entry that
+  //     actually CARRIES a status can say this: the great majority of console
+  //     entries are a plain {line, at}, and a missing status is silence, not a
+  //     claim that the log is complete.
+  //   • `dropped_before` on the oldest surviving entry — the server's 300-line
+  //     ring dropped the head of the console (registry.ex cap_console/1).
+  //   • `truncated_from` on any entry — that line is a 2 KB prefix, not the
+  //     whole line (registry.ex console_line_meta/1).
+  function deployConsoleCutHtml(d, lines) {
+    var notes = [];
+    var last = lines[lines.length - 1];
+    if (last && !deployIsActive(d.status || "") && typeof last.status === "string" &&
+        last.status !== "done" && last.status !== "failed") {
+      var stage = (typeof last.stage === "string" && last.stage) ? last.stage : "";
+      notes.push(stage ? "narration ended mid-" + stage : "narration ended mid-build");
+    }
+    var dropped = (lines[0] && typeof lines[0].dropped_before === "number")
+      ? lines[0].dropped_before : 0;
+    if (dropped > 0) {
+      notes.push(dropped + (dropped === 1 ? " earlier line dropped" : " earlier lines dropped"));
+    }
+    var truncated = lines.filter(function (e) {
+      return e && typeof e.truncated_from === "number";
+    }).length;
+    if (truncated) {
+      notes.push(truncated + (truncated === 1 ? " line truncated" : " lines truncated"));
+    }
+    return notes.length ? esc(notes.join(" · ")) : "";
+  }
+
   function deployConsoleHtml(d, active) {
     var lines = d.console || [];
     // dwb-18: a queued-but-unclaimed deploy shows no dark console at all — the
@@ -11651,6 +11685,18 @@
         }).join("")
       : '<div class="deploy-console-line dim">Waiting for the first log line&hellip;</div>';
     var count = lines.length ? esc(String(lines.length)) + (lines.length === 1 ? " line" : " lines") : "";
+    // cch-w33-s3: the count used to read as though it were the whole log. On
+    // 2,881 failed production deployments (nine sites) the LAST console entry's
+    // own status is still `running` on a row the control plane calls terminal —
+    // the narration stopped mid-stage and nothing said so, and on some rows the
+    // server dropped the head of the console outright. Both are DISCLOSED here,
+    // appended to the count as words. THE COUNT ITSELF IS NEVER INFLATED: a
+    // 2-entry console still reads "2 lines" — inflating the very number this
+    // exists to make honest would make it more wrong, not less.
+    if (count) {
+      var cut = deployConsoleCutHtml(d, lines);
+      if (cut) count += " · " + cut;
+    }
     return '<div class="deploy-console' + (open ? "" : " is-collapsed") + '" data-deploy-id="' + esc(d.id) + '">' +
         '<button type="button" class="deploy-console-toggle" aria-expanded="' + (open ? "true" : "false") + '">' +
           '<span class="deploy-console-caret" aria-hidden="true"></span>Build console' +
