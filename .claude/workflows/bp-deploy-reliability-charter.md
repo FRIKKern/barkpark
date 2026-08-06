@@ -614,3 +614,244 @@ are merged AND deployed, then the live proof on the box (`dr-w2-s2-verify-capsto
 named but did not take: `dr-w2-s7-followup-scoped-media-public-read-audit` (P1, the scoped media surface
 and `/v1/graph`'s second copy of the visibility predicate) and `dr-w2-s4-followup-raw-log-order` (P1, the
 raw-log read path still scrubs before stripping ANSI).
+
+---
+
+## Wave 3 — 2026-08-06 — "The box can say no, and the fleet can see why"
+
+Wave 3's own headline move was **refuted by measurement before a builder flew**. The wish asked for a cap
+on concurrent site builds and for Cloud-side diagnosis. Half of that is already law; the other half is
+aimed at the wrong consumer. Both corrections are recorded here as decisions, because the next wave will
+otherwise re-derive the same wrong premise from the same wish.
+
+- **D37 — THE FLEET BUILD CAP IS ALREADY BUILT, ALREADY LAW, AND PROVEN HOLDING LIVE. Do not build it.**
+  *Why:* `deploy/lib/site-deploy-common.sh` on `origin/main` carries a fleet-wide build admission gate —
+  `BUILD_GATE_SLOTS=1` (:282), `BUILD_GATE_WAIT_DEFAULT=900` (:289), `flock -n 7` fast path (:326) then
+  `flock -w "$BUILD_GATE_WAIT" 7` (:334), fd-7 form so the kernel releases on SIGKILL, explicit fail-OPEN
+  warnings, and a self-test whose mutation deletes `build_gate_release` and proves the slot leaks. It
+  merged 2026-07-30 as `3e27a4915` ("one box, one build", #7868) and BOTH engines call it
+  (`site-deploy-node.sh:1628`, `site-deploy.sh:1991`). Proven holding by run on guerrilla 2026-08-06
+  08:55-09:00Z: **three sites deploying concurrently, exactly ONE `npm ci`, three processes parked with
+  `fd7 -> /run/lock/barkpark-site-build.lock` in state S**, and the per-unit journal reading
+  `BUILD started → the box's only build slot is busy — queueing up to 900s → fleet build slot acquired
+  after queueing → npm ci`. The strategic direction's premise ("nothing bounds how many DIFFERENT sites
+  build together") is FALSE, and has been for a week. A cap slice would ship a duplicate of existing law.
+
+- **D38 — THE REAL HOLE IS QUEUE-NOT-REFUSE: the box's capacity answer never becomes a D9 counted
+  deferral, and when the 900s budget lapses it becomes an UNCLASSIFIED TERMINAL failure — a lost publish.**
+  *Why:* the box answers the deploy trigger `202` and the engine only meets the gate LATER, inside the
+  unit. So `Sites.Deploy.start_on_box/6`'s `{:ok, 409, body} -> defer(...)` arm — the whole D9 seam —
+  **can never fire for capacity**. `SiteDeployController` has exactly one 409 code, `already_running`
+  (:91), emitted by the PER-SLUG `running_slug?/2`. Measured consequences, all live: 2-5 units sit
+  `active running` while parked in `flock`, each burning its 30-minute `@default_run_deadline_ms`
+  (armed at LAUNCH, before the engine ever reaches the gate) and holding that slug's single-flight slot,
+  so a newer content rev for the same site 409s `already_running` against the reason-blind
+  `@max_consecutive_deferrals 6`. On lapse the engine does `emit BUILD failed; exit 15`;
+  `exit_label(15)` = `"gave up waiting for the deploy lock (exit 15)"` — which is also the label for the
+  PER-SLUG lock, so the sentence names the wrong lock — and no `DeployLedger.classify/2` arm matches that
+  prefix, so it falls to `UNCLASSIFIED` and `Deploy.poll`'s `:failed ->` arm makes it terminal.
+  **HONEST BOUND: the lapse has NOT been observed in production** — no `exit 15` gate timeout is findable
+  on the box. The slice is justified by the blindness and the burned units, which are happening
+  continuously, not by the lost publish, which is a thin-margin future (5 units × 2-4 min builds ≈ 720s
+  against a 900s budget).
+
+- **D39 — THE BOX IS NOT SWAPPING BECAUSE OF BUILDS. THE KERNEL IS OOM-KILLING THE API, 34 TIMES IN
+  14 DAYS. This reframes the whole wish, and no slice in this wave fixes it.** *Why:* measured on
+  guerrilla 2026-08-06 08:50-08:58Z: `journalctl -k --since -14d` OOM victim census is **35 beam.smp,
+  1 python3**; the running BEAM is 5h38m old on a box with 38 days uptime because it was shot at
+  03:13:58 that morning; historical anon-rss at kill 2.62-3.30 GB. PSS budget (RSS triple-counts
+  postgres shared_buffers): **beam.smp 1,528 MB PSS + 1,176 MB swap = 2,704 MB of a 3,819 MB box — 58%
+  of all anonymous demand**, against a build in flight at 364 MB, postgres ~370 MB, eight serving slots
+  ~586 MB. Total anonymous demand 4,620 MB; swap 95.5% full with 94 MB left. **Removing the build
+  entirely still overshoots RAM by ~446 MB.** `barkpark.service` carries ZERO resource directives
+  (`MemoryMax=infinity`) and runs `mix phx.server`, not an OTP release. Two candidate levers are
+  REFUTED by measurement: retiring the three Caddy-unbound standby slots recovers **190 MB of swap and
+  2.2 MB of RAM** (file it as swap hygiene, never as a memory lever); and the build is not the swapper
+  (build processes held ~9 MB of swap while the box held 2,160 MB). **`MemoryHigh` on `barkpark.service`
+  is the real fix and this wave DOES NOT SET IT** — `:erlang.memory()` could not be read (epmd empty,
+  `bin/barkpark` has no `rpc` verb), so WHICH subsystem grows is UNPROVEN, and a guessed threshold trades
+  periodic OOM kills for permanent reclaim stalls (PSI memory `full avg10` is already 4.46). This wave
+  ships the MEASUREMENT (`beam_pss_bytes`, `beam_swap_bytes` from `/proc`); the bound is filed.
+
+- **D40 — `attentionStatus()` IS BLIND TO PRESSURE, RE-PROVED BY RUN, AND THAT IS THE OWNER'S ACTUAL
+  COMPLAINT.** *Why:* while guerrilla pegged CPU 100, load 8.08 and p95 16,345 ms against an `over_at`
+  of 1000, `bp cloud status` returned `status "ok", rank 8, bucket "healthy"` — in the same minute the
+  usage envelope was screaming. `internal/cli/cloud_status_cmd.go:50` switches only on
+  `DeprovisionStatus / ProvisionStatus / Suspended / HealthStatus / AgentStatus / UpdateState`. Zero
+  vitals inputs across all eight cases. The data, the vocabulary and the render all already exist in
+  this repo and have never been connected.
+
+- **D41 — THE NINTH STATE IS `strained`, IT SHIPS GO-ONLY, AND THAT IS MANDATORY UNDER OUR OWN D31 —
+  NOT MERELY CONVENIENT.** *Why:* D31 reads *"this wave does NOT touch the console render path … the
+  console half of the reader is deferred, the CLI half ships."* `internal/cli/cloud_status_cmd.go` IS
+  the CLI half; `cloud/priv/static/app.js` is the ceded half. The cession is now BILATERAL: open PR
+  #9705 (cloud-console-hardening wave 34) carries **D392**, which quotes our D31 back and claims the
+  console render path, naming `cloud/priv/static/__app.test.mjs` as the only shared file. The four
+  briefed "claimants" resolve: **cch-w34-s6 does NOT collide** (its file fence is exactly the three SPA
+  files, zero overlap with `internal/cli`); **onb-w1-fleet-health-decompose does NOT collide** (its
+  unpushed `7eb18297` adds ONE map key to `rankedBarkparkRow:196`, ~120 lines from `attentionStatus`);
+  **dr-w2-s5 does NOT collide** (it fences `cloud_site_cmd.go`). **`jpf-w1-queue-age-alarm` IS the one
+  real collision** — open, unclaimed, dark since 2026-07-31, and its criterion 2 inserts `deploy_stalled`
+  at the identical rank-5 slot with the identical tail renumbering. **RULING: `strained` takes rank 5;
+  `jpf-w1-queue-age-alarm` is DEFERRED behind it and must rebase to rank 6.** Ours is measured live on
+  the box the owner is complaining about; jpf's has sat unclaimed for six days. The consequence is a
+  DELIBERATE Go/SPA divergence — 9 states in Go, 8 in the SPA — which **no gate reds on** (proved by
+  mutation: a nine-state fixture leaves `__app.test.mjs` byte-identical at 873/858/15). That divergence
+  is correct under D31 and is recorded HERE so the next surveyor reads it as cession, not drift.
+
+- **D42 — NO NEW `unmetered` ATTENTION STATE. The existing `degraded` arm already covers every box that
+  cannot be read.** *Why:* the direction's sharpest self-attack was that promoting pressure into the
+  triage vocabulary might promote a NULL. Measured: guerrilla beats REAL non-negative vitals home
+  (cpu 0-100 hitting 100 in six of thirty minutes, load 0.47-6.73, mem 51-88, disk 74-76, beat age
+  10-31s), and five of six barkparks are live-beating. The ONE unmetered box, muscle-1, has
+  `beat.status "absent"`, `last_seen_at null`, all four series empty AND `agent_status "offline"` — so
+  `live && b.AgentStatus != "online"` already ranks it `degraded`, in the attention bucket. A tenth
+  state would add vocabulary for a population of zero. **`strained` therefore fires only on a POSITIVE
+  reading crossing threshold; a nil or `-1` vital NEVER produces `strained`** — the honest "we cannot
+  read it" is already spoken by `degraded`.
+
+- **D43 — A CAPACITY DEFERRAL LANDED ON TODAY'S SEAM IS WORSE THAN NOTHING, AND THE FIX IS
+  `DEFERRED_UNCLASSIFIED`, NOT `UNCLASSIFIED`.** *Why:* proved by mutation on an `origin/main` tree.
+  `deploy_ledger.ex:185` is `def classify(%{status: "deferred"}), do: "BOX_BUSY_DEFERRED"` — status
+  alone, never `stage`, never `failure_reason`. A probe asserting that FOUR distinct causes (a
+  `box_at_capacity` refusal, the requeue-broken text, pure nonsense, and `nil`) all answer
+  `BOX_BUSY_DEFERRED` **PASSED**. `UNCLASSIFIED` is structurally unreachable for a deferred row, so D8's
+  "UNCLASSIFIED must be able to go up" is honoured for FAILED rows and violated for DEFERRED ones — the
+  mirror of the 8,830-invisible-rows bug, one status over. Driven end to end through the real
+  `Deploy.run`, six rounds of a literal `box_at_capacity` 409 produce
+  `[:deferred ×5, :failed]` and the sentence *"…it has now refused 6 rebuilds in a row for this site, so
+  the instance is not busy but stuck; check its deploy runner"* — a TERMINALLY LOST publish plus a false
+  accusation against a runner working exactly as designed. `consecutive_deferrals/1` is reason-blind
+  (`take_while(&(&1.status == "deferred"))`), so mixed causes accumulate on one counter. **Routing the
+  unknown tail into `UNCLASSIFIED` is refused**: `UNCLASSIFIED` lives in `@classes`, and `@classes` rows
+  ARE the failure numerator, so a healthy capacity refusal would inflate the deploy-failure rate — the
+  mirror image of vacuous green, i.e. vacuous RED, corrupting the very measurement `dr-w2-s8` exists to
+  take. The tail rises INSIDE the deferred cohort.
+
+- **D44 — A THIRD DEFECT, PREVIOUSLY UNNAMED AND WORSE THAN THE OTHER TWO: the requeue-failure path is a
+  SILENT LOST PUBLISH that nothing retries, and its "so the Oban job retries" justification is FALSE on
+  the production path.** *Why:* `deploy.ex:1226-1230` rewrites `failure_reason` and `detail` and passes
+  NO `status` key, so the row keeps the `deferred` status the previous transition set. It therefore
+  classifies `BOX_BUSY_DEFERRED`, sits OUTSIDE the failure numerator, and carries the label *"the
+  rebuild was re-queued, not lost"* while its own reason text says the opposite. Census probe: 6 genuine
+  failures + 3 requeue-broken rows → `volume 9, failed 6, numerator 6`, deferred
+  `[%{class: "BOX_BUSY_DEFERRED", count: 3}]` — three lost publishes, zero in the numerator. And
+  `Deploy.run/1` is invoked ONLY from inside `Task.Supervisor.start_child` at `deploy.ex:1900`
+  (`git grep "Deploy.run("` over `cloud/lib` returns that plus the `def start` delegate), so the return
+  value is DISCARDED — there is no Oban job to retry. `git grep "could NOT be re-queued|
+  deferral_requeue_failed"` over `cloud/test` returns ZERO: this path has never been tested. **This row
+  must write `status: "failed"`** — it IS a lost publish and belongs in the numerator, the opposite
+  direction from D43's tail.
+
+- **D45 — SWAP IS THE ONE GENUINELY MISSING VITAL, AND THE EXISTING `mem` VITAL ACTIVELY UNDERSTATES
+  THIS CRISIS.** *Why:* all 149 `swap` hits across `*.go`/`*.ex` are compare-and-swap or
+  swappable-adapter prose; `MemorySwapMax` has zero occurrences repo-wide. Measured on guerrilla at the
+  same instant: `SwapTotal 2097148 kB / SwapFree 2328 kB` = **99.89%, clamping to 100** — while
+  `MemAvailable 1641988 of MemTotal 3911580` makes the SHIPPED mem vital report a comfortable **58%**.
+  `MemAvailable` clears the floor precisely BECAUSE the BEAM has been paged out (independently corroborated
+  at `tooling/pds/fixtures/live-corpus-2026-07-31.json:522`). That is the sharpest argument in the wave
+  for shipping swap: the vital already in production is the one telling the reassuring lie. The probe is
+  BUILT and mutation-proved; **the swapless branch returns `(0, 0, nil)`, NOT the `-1` sentinel**, and
+  carries a companion `swap_total_bytes` so a consumer can tell "none configured" (total 0) from "0% of
+  2 GiB" (total > 0) from "could not measure" (both -1) — a bare percent cannot carry three states.
+  Copying `memProcProbe`'s `total <= 0 -> error` guard literally would turn every swapless box into a
+  `-1`; that one line must diverge, with a named test whose failure message states the consequence.
+
+- **D46 — `PGSizeProbe` IS DECLARED, CONSUMED END-TO-END, AND NEVER WIRED — so `db_size` has ALWAYS read
+  "unmetered", and the database it is failing to measure is 3.24 GiB. The seam is SHELL-OUT, not HTTP.**
+  *Why:* `report.go:187` declares it, `:261` folds it, `telemetry.ex` normalises it, `usage.ex:219`
+  meters it, `cloud_usage.go:710` renders it — and `cmd/barkpark-agent/main.go` wires
+  Disk/CPU/Mem/Load/ReqStats and NOT PGSize (`git show origin/main:cmd/barkpark-agent/main.go | grep
+  PGSize` exits 1). Live proof: `bp cloud usage guerrilla` returns
+  `db_size: {"value":"unmetered", "source":"telemetry.pg_size_bytes"}` while `pg_database_size` returns
+  **3,477,617,687 bytes in 0.143s**. There is NO Postgres driver in `go.mod` (no `lib/pq`, no `pgx`), so
+  the probe must shell out or ride HTTP. **SHELL-OUT is chosen**: the HTTP seam needs a new `api/` route,
+  which drags `openapi.json` regeneration that cannot be run locally and reds the api gate. The
+  shell-out's cost is that it is proven on guerrilla ONLY (ssh host-key verification failed on gyl and
+  jarl, and `known_hosts` was correctly not touched), so five boxes may keep reporting `-1` — which is
+  EXACTLY what they report today, so there is no regression, only an un-uniform improvement. **And the
+  per-relation breakdown is free**: top-10 `pg_total_relation_size` costs 0.145s, the same order as the
+  bare total, and NAMES the consumers — `mutation_events 1.51 GB + revisions 1.31 GB = 81% of the whole
+  database`. A named breakdown obtained in 145 ms with no tree walk is strictly better than the total
+  the pipeline was built for. **Retention on those two tables is a DATA-LOSS decision outside this
+  wave's fence** — wire the meter, do not let the same slice touch retention.
+
+- **D47 — THE THREE-HOUR CPU RUNAWAY WAS A JOURNALCTL UNIT GLOB, NOT A `du`, AND A `du` OVER THE SITES
+  TREE IS AFFORDABLE. The bound is a LIFETIME bound, not a cadence.** *Why:* `task-e05c4e4cea2282e5`
+  records `journalctl -u bp-site-build-* --since -14d --no-pager`, PPID 1, orphaned into a dead pipe —
+  a journal CONTENT scan whose glob matched no unit. Re-measured this wave: exact unit **0.276s**, glob
+  **hangs past 120s**, `--disk-usage` **0.086s cold / 0.01-0.04s warm** (a header read). And measured on
+  guerrilla WHILE load was 7.4-8.6, swap 99% consumed and a build running: `du -x --max-depth=2` over
+  `/opt/barkpark/sites` = **4.34s cold, 1.11s warm**; `find` over 153,129 inodes = 4.45s; per-slug
+  `du -sh` over 30 paths = 1.20s. Only a full-rootfs walk is expensive (22.16s). So the "slow cadence"
+  premise is over-conservative at this tree size — but the LIFETIME bound (timeout + kill, `nice -n 19
+  ionice -c3` per the existing `BP_NICE` precedent) is mandatory, because the incident was an unbounded
+  lifetime, not an expensive command. **The sites tree is also not the space story**: root is 27.4G used
+  of 38G, of which `/var` is 10.2G (journal 3.9G + postgres 3.5G), `/opt` 5.9G (sites 4.0G), `/root`
+  4.4G, `/tmp` 2.2G. Sites is 15%. And its gigabytes are `src/node_modules` (~2.9G) and `src/.next` —
+  load-bearing build caches whose deletion forces a cold `npm ci` on the box that is swapping.
+  Reclamation and the cap pull in OPPOSITE directions.
+
+- **D48 — THE JOURNAL IS NOT A LEVER AND ITS CAP STAYS ORDERED BEHIND THE BACKFILL — but D21's stated
+  backfill GATE is refuted.** *Why:* `/etc/systemd/journald.conf` on guerrilla is a bare `[Journal]`
+  stanza with every directive commented and no `journald.conf.d/`, so the 3.7G is systemd's
+  compile-time default `min(10% of 38G, 4G)` doing its job — a policy nobody chose. It is 14% of used
+  disk on a box with 9.0G free, so capping it buys at most ~2G on the wrong axis. Retention measured
+  8.84 days (oldest entry 2026-07-28T12:37:58Z), and the oldest edge advanced only ~6h51m in 24h — the
+  window is WIDENING, not collapsing, so D21's "every day of delay drops the oldest failures" is
+  directionally true at ~7h/day, not 1 day/day. **D21 says backfill is "gated on the row persisting
+  `unit_name` at launch"; `git grep unit_name origin/main -- cloud` returns ZERO hits, so the gate is
+  genuinely unmet — but it is also unnecessary**: unit names are already build_id-keyed
+  (`bp-site-build-<slug>-<build_id>-<epoch_ms>.service`), `journalctl -F _SYSTEMD_UNIT` enumerates
+  **9,634 retained build units** cheaply, and a backfill can resolve any Deployment row by prefix-matching
+  slug+build_id. The backfill is therefore a standalone extraction needing no schema change and no
+  recorder — filed, not built.
+
+### Slice-zero correction, and the merge order it implies
+
+The direction mislabelled BOTH owed PRs, in both directions. **#9727 is `dr-w2-s1`** (the recorder), whose
+FOUR Elixir reds have ONE cause — two dead `describe_provision_reason/1` clauses at
+`deploy_runner.ex:675/:682` under `--warnings-as-errors`. The briefed "CI Postgres container re-init" is
+**REFUTED**: the log reads `postgres service is healthy.` at 02:56:01Z, `initdb` ran in full, and the six
+`FATAL: role "root" does not exist` lines are the bare `pg_isready` health probe firing on its 10s
+interval — the repo-wide pattern, green in four other workflows. Zero tests ran because compile precedes
+`mix test`. **#9729 is `dr-w2-s2`** (the provisioner swap-then-unlink wedge), whose red is five STALE
+`Traversal.FileModule` baseline anchors line-shifted by its own edits. And **#9729, not #9727, gates the
+after-measurement** (`dr-w2-s8` names s2, s3 and s6 by slug; s1 is not in the chain).
+
+The two PRs are COUPLED and neither can go green alone: #9727 pre-landed #9729's *describer* while #9729
+holds the *producers* (`provisioner.ex:202` `{:lock_aborted, slug}`, `:240` `{:swap_aside_failed, reason}`).
+Mutation-proved: adding one producer drops the warning count 2 → 1, leaving exactly the un-produced shape.
+**Ruling: the two describer clauses move to #9729, beside their producers.** #9727 then compiles with a
+9-line deletion and chains on nothing; #9729 compiles because it has both halves.
+
+**Also corrected: #9729 is NOT mechanically merge-blocked.** Live branch protection requires exactly four
+contexts — `Elixir gate`, `PR references an active task`, `Cloud gate`, `Console gate` — and **all four
+PASS on #9729** with `mergeable: MERGEABLE`. `Security gate` is held out by decision S7 and the Sobelow
+static-analysis job carries `continue-on-error: true`. The red that reached `Security gate` came from the
+genuinely blocking `sobelow-inline-overlap` job's staleness step. The fix is still worth landing, because
+normalising that ratchet's red is how ratchets die. **And the briefed MUST-RUN script paths are wrong**:
+both scripts live at `api/scripts/`, not `scripts/`.
+
+### Wave 3 plan — 7 slices, 4 in round 1
+
+| # | Slice | Round | Model | Surface |
+|---|---|---|---|---|
+| s1 | #9729 goes green: inline sobelow waivers + the describer moves in beside its producers | 1 | opus | `api/lib/barkpark/sites/`, `api/.sobelow-skips` |
+| s2 | #9727 goes green: the dead describer clauses come out, and its tests run for the first time | 1 | opus | `api/lib/barkpark/sites/deploy_runner.ex` |
+| s3 | The deferral taxonomy stops being reason-blind, and a lost re-queue stops calling itself a deferral | 1 | fable | `cloud/lib/barkpark_cloud/` |
+| s4 | The agent measures what the box is actually short of: swap, db size + top relations, BEAM footprint | 1 | fable | `internal/agent/`, `cmd/barkpark-agent/` |
+| s5 | The box refuses at the DOOR with a typed `box_at_capacity`, and its build scope stops swapping | 2 (after s1, s2) | fable | `api/lib/barkpark/sites/`, `api/lib/barkpark_web/controllers/` |
+| s6 | The control plane and the CLI render the three new numbers | 2 (after s4) | opus | `cloud/lib/barkpark_cloud/`, `internal/cli/` |
+| s7 | `strained` reaches the triage vocabulary — Go-only, rank 5, under the D31 cession | 2 (after s4, s6) | fable | `internal/cli/`, `cloud/priv/static/__fixtures__/` |
+
+**HIGH-FLIP-RISK slices, owed a genuinely independent second reviewer before merge (a MANUAL LEAD STEP —
+this workflow spawns exactly ONE reviewer):** s3 (whether the unknown deferral tail belongs inside or
+outside the failure numerator — the wrong call corrupts `dr-w2-s8`'s measurement), s5 (the race between
+the door's `flock -n` check and the unit's own acquire — the in-engine flock MUST survive as the
+last-resort correctness barrier), s7 (the deliberate Go/SPA divergence, which no gate reds on).
+
+**What this wave does NOT promise.** D28 keeps the pool repair outside this epic and D39 puts the real
+memory fix behind a measurement this wave only makes possible. The 76× HTTP 500 class may or may not fall.
+That is a MEASUREMENT `dr-w2-s8` takes once s1/s2 and wave 2's s2/s3/s6 are merged AND deployed — never a
+promise this wave makes.
