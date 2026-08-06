@@ -351,7 +351,8 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       request = req("pb-unit", artifact_b64: b64, artifact_sha256: sha)
       assert DeployRunner.trigger(request) == {:ok, :started}
 
-      env_contents = File.read!(Path.join(dir, "pb-unit.env"))
+      # Keyed on the BUILD, not the slug (deploy-reliability D21).
+      env_contents = File.read!(Path.join(dir, "pb-unit-b1.env"))
       assert env_contents =~ "PREBUILT_DIR=#{Path.join(dir, "pb-unit.prebuilt")}"
       assert env_contents =~ "PREBUILT_SHA256=#{sha}"
 
@@ -786,11 +787,67 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
       put_cfg(enabled: true, command: stub("exit 0"))
 
-      assert DeployRunner.trigger(req("prov-fail")) == {:error, :start_failed}
+      # A NAMED typed refusal, not a bare :start_failed (deploy-reliability
+      # D26). The two have different operators and different fixes, and folding
+      # them together is what sent 25 consecutive %File.Error{}s to journald and
+      # nowhere else.
+      assert {:error, {:provision_failed, reason}} = DeployRunner.trigger(req("prov-fail"))
+      assert is_binary(reason)
+      # The PATH survives into the reason — the missing template's identity IS
+      # the diagnosis. A bare :start_failed named nothing at all.
+      assert reason =~ "site template not found"
+      assert reason =~ "bp-no-template-"
       # The Runner survived the fail-closed provision…
       assert Process.whereis(DeployRunner) == pid
       # …and no run was recorded — the slug is still idle.
       assert %{state: :idle} = DeployRunner.status("prov-fail")
+    end
+
+    test "a %File.Error{} provision failure keeps its ACTION and PATH in the typed refusal",
+         %{template: template} do
+      # An UNWRITABLE sites dir is the shape that hid 63% of this fleet's
+      # failures: File.mkdir_p!/cp_r! RAISE a %File.Error{}, the Provisioner
+      # degrades it to {:provision_failed, error}, and the old arm inspected it
+      # into a Logger line nobody read. The action + path must survive to the
+      # caller.
+      Application.put_env(:barkpark, Provisioner,
+        sites_dir: "/dev/null/bp-unwritable-sites",
+        template_dir: template
+      )
+
+      put_cfg(enabled: true, command: stub("exit 0"))
+
+      assert {:error, {:provision_failed, reason}} = DeployRunner.trigger(req("prov-eacces"))
+      assert reason =~ "could not make directory"
+      assert reason =~ "/dev/null/bp-unwritable-sites"
+      # The errno is RENDERED, not left as a bare atom nobody can act on.
+      refute reason =~ "enotdir"
+      assert %{state: :idle} = DeployRunner.status("prov-eacces")
+    end
+
+    test "the typed provision refusal SCRUBS a secret out of its reason" do
+      # A reason string crosses an HTTP boundary as a 500 body, and the shared
+      # display scrubber leaks this box's own `bppat_` token shape 95.1% of the
+      # time — so the refusal redacts locally and explicitly. A token can reach a
+      # reason through any path component the box was configured with.
+      leaky_dir =
+        Path.join(
+          System.tmp_dir!(),
+          "bp-missing-BARKPARK_TOKEN=bppat_livetokenvalue123-#{System.unique_integer([:positive])}"
+        )
+
+      Application.put_env(:barkpark, Provisioner,
+        sites_dir: Path.join(System.tmp_dir!(), "bp-scrub-#{System.unique_integer([:positive])}"),
+        template_dir: leaky_dir
+      )
+
+      put_cfg(enabled: true, command: stub("exit 0"))
+
+      assert {:error, {:provision_failed, reason}} = DeployRunner.trigger(req("prov-secret"))
+      refute reason =~ "bppat_livetokenvalue123"
+      assert reason =~ "[REDACTED]"
+      # …and the diagnosis still survives the redaction.
+      assert reason =~ "site template not found"
     end
 
     # The two reason shapes the provisioner's swap produces (provisioner.ex:202
@@ -1101,7 +1158,7 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       assert DeployRunner.trigger(request) == {:ok, :started}
 
       # The EnvironmentFile is 0600 and CARRIES the secret; argv does NOT.
-      env_file = Path.join(dir, "unitspawn.env")
+      env_file = Path.join(dir, "unitspawn-b9.env")
       assert File.exists?(env_file)
       %{mode: mode} = File.stat!(env_file)
       assert Bitwise.band(mode, 0o777) == 0o600
@@ -1459,6 +1516,343 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
       assert us < 1_500_000,
              "unit_deadline finalize took #{div(us, 1000)}ms — the systemctl stop deadline did not fire (unbounded?)"
+    end
+  end
+
+  # ── the durable per-BUILD record (deploy-reliability D21/D22/D23) ─────────
+  #
+  # The run-state files used to be keyed on the SLUG alone and truncated at
+  # every launch, so deploy #2 of a slug destroyed deploy #1's build log —
+  # observed live: 33,227 bytes at 23:36, 0 bytes at 23:39, across 25
+  # consecutive failures of one site. These tests pin the three things that make
+  # it honest: build-keyed paths, bounded retention, and an EVICTED deployment
+  # reading back differently from one that never happened.
+
+  # An engine that writes its own build_id into the durable log + a terminal
+  # stage, so a log's BYTES identify which build wrote them.
+  defp recording_engine do
+    stub("""
+    echo "build output for $BUILD_ID" >> "$BARKPARK_SITE_LOG_FILE"
+    echo "BPSTAGE name=SWITCH status=ok build_id=$BUILD_ID" >> "$BARKPARK_SITE_STATUS_FILE"
+    exit 0
+    """)
+  end
+
+  defp recorder_cfg(dir, overrides \\ []) do
+    put_cfg(
+      Keyword.merge(
+        [
+          enabled: true,
+          runner_mode: :systemd,
+          run_state_dir: dir,
+          systemd_run_command: {fake_systemd_run(Path.join(dir, "argv.dump")), []},
+          is_active_cmd: {echo_script("inactive"), []},
+          command: recording_engine()
+        ],
+        overrides
+      )
+    )
+  end
+
+  # Launch a build and drive it to its terminal record (is-active reports the
+  # unit gone, so the first status/1 finalizes it).
+  defp deploy_and_finalize(slug, build_id) do
+    assert DeployRunner.trigger(req(slug, build_id: build_id)) == {:ok, :started}
+    assert %{state: :done} = DeployRunner.status(slug)
+  end
+
+  describe "the durable build log is keyed on the BUILD" do
+    test "a second build of the same slug does NOT destroy the first one's log" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      deploy_and_finalize("twicebuilt", "aaa")
+      first_log = Path.join(dir, "twicebuilt-aaa.log")
+      assert File.read!(first_log) =~ "build output for aaa"
+      first_bytes = File.stat!(first_log).size
+      assert first_bytes > 0
+
+      deploy_and_finalize("twicebuilt", "bbb")
+
+      # THE BUG: with a `<slug>.log` path this file was 0 bytes here.
+      assert File.stat!(first_log).size == first_bytes
+      assert File.read!(first_log) =~ "build output for aaa"
+      assert File.read!(Path.join(dir, "twicebuilt-bbb.log")) =~ "build output for bbb"
+
+      # …and each deployment is addressable BY ID, not merely present on disk.
+      assert %{record: :terminal, log_state: :available, exit_code: 0} =
+               first = DeployRunner.build_record("twicebuilt", "aaa")
+
+      assert first.build_id == "aaa"
+      assert first.log_path == first_log
+
+      assert %{record: :terminal, build_id: "bbb", log_state: :available} =
+               DeployRunner.build_record("twicebuilt", "bbb")
+    end
+
+    test "a rollback names no build and still cannot clobber a sibling's log" do
+      dir = run_dir()
+
+      recorder_cfg(dir,
+        rollback_command:
+          stub("""
+          echo 'ROLLED BACK' >> "$BARKPARK_SITE_LOG_FILE"
+          exit 0
+          """)
+      )
+
+      deploy_and_finalize("rbkeyed", "d1")
+      deploy_log = Path.join(dir, "rbkeyed-d1.log")
+      assert File.read!(deploy_log) =~ "build output for d1"
+
+      assert DeployRunner.trigger(req("rbkeyed", mode: "rollback")) == {:ok, :started}
+      assert %{state: :done, exit_code: 0} = DeployRunner.status("rbkeyed")
+
+      # The deploy's log survived the rollback that followed it.
+      assert File.read!(deploy_log) =~ "build output for d1"
+      rollback_logs = dir |> File.ls!() |> Enum.filter(&(&1 =~ ~r/\Arbkeyed-rollback-\d+\.log\z/))
+      assert length(rollback_logs) == 1
+    end
+
+    test "the terminal record carries the EXACT unit name, so journald is addressable by name" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      deploy_and_finalize("unitrec", "u1")
+      record = DeployRunner.build_record("unitrec", "u1")
+
+      assert record.unit_name =~ ~r/\Abp-site-build-unitrec-u1-\d+\.service\z/
+      # An EXACT -u query (measured 0.16s), never a glob (measured 121s).
+      assert record.journal_command == "journalctl --no-pager -u #{record.unit_name}"
+      refute record.journal_command =~ "*"
+    end
+  end
+
+  describe "build-log retention (bytes AND count AND age)" do
+    test "the COUNT cap bites, and the effective bound is reported" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      for id <- ~w(c1 c2 c3), do: deploy_and_finalize("capcount", id)
+
+      # Tighten the cap AFTER the builds — a sweep also runs at every launch, so
+      # a cap set up front would have evicted as it went and left this sweep
+      # nothing to do (which is correct behaviour, and a vacuous assertion).
+      put_cfg(max_build_logs: 1, max_build_log_bytes: 1_000_000_000)
+      report = DeployRunner.retention_sweep()
+
+      assert report.bound == :count
+      assert report.evicted_by.count >= 2
+      assert report.evicted_by.age == 0
+      assert report.evicted_by.bytes == 0
+      assert report.kept == 1
+      assert report.caps.max_logs == 1
+      assert length(Enum.filter(File.ls!(dir), &String.ends_with?(&1, ".log"))) == 1
+    end
+
+    test "the AGE cap bites independently of count and bytes" do
+      dir = run_dir()
+      recorder_cfg(dir, max_build_log_age_ms: 60_000, max_build_logs: 500)
+
+      deploy_and_finalize("capage", "old1")
+      deploy_and_finalize("capage", "new1")
+
+      # Backdate ONE log an hour — count and bytes are nowhere near their caps,
+      # so only age can condemn it.
+      old_log = Path.join(dir, "capage-old1.log")
+      File.touch!(old_log, System.os_time(:second) - 3_600)
+
+      report = DeployRunner.retention_sweep()
+
+      assert report.bound == :age
+      assert report.evicted_by.age == 1
+      assert report.evicted_by.count == 0
+      assert report.evicted_by.bytes == 0
+      refute File.exists?(old_log)
+      assert File.exists?(Path.join(dir, "capage-new1.log"))
+    end
+
+    test "the BYTES cap bites independently, and the newest log is never the one evicted" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      for id <- ~w(b1 b2 b3), do: deploy_and_finalize("capbytes", id)
+
+      # Age the two older logs apart EXPLICITLY. mtime has one-second resolution,
+      # and three builds this cheap all finish inside the same second on a fast
+      # box — which left "the newest" undefined and made this assertion depend on
+      # directory order (it passed on a slow laptop and failed on CI). Spreading
+      # the mtimes is what makes b3 provably the newest, so the survivor below
+      # tests the recency rule rather than a tie-break. Still far inside the age
+      # cap (7 days), so age condemns nothing.
+      now = System.os_time(:second)
+      File.touch!(Path.join(dir, "capbytes-b1.log"), now - 120)
+      File.touch!(Path.join(dir, "capbytes-b2.log"), now - 60)
+      File.touch!(Path.join(dir, "capbytes-b3.log"), now)
+
+      # 1 byte: every log is over budget, so only the always-keep-the-newest rule
+      # decides what survives. Applied after the builds (see the count test).
+      put_cfg(max_build_log_bytes: 1, max_build_logs: 500)
+      report = DeployRunner.retention_sweep()
+
+      assert report.bound == :bytes
+      assert report.evicted_by.bytes == 2
+      assert report.evicted_by.count == 0
+      assert report.evicted_by.age == 0
+      # A bound that deletes the build you are reading is not a bound.
+      assert report.kept == 1
+      assert File.exists?(Path.join(dir, "capbytes-b3.log"))
+    end
+
+    test "logs that tie on mtime are evicted deterministically, not in directory order" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      for id <- ~w(t1 t2 t3), do: deploy_and_finalize("captie", id)
+
+      # The case the filesystem cannot resolve: three logs stamped the SAME
+      # second. Nothing on disk says which build finished last, so the sweep may
+      # not consult `File.ls/1`'s arbitrary order to decide — that would let the
+      # OS choose which build silently loses its log, and make two sweeps of an
+      # identical directory disagree. The tie-break is the path, descending.
+      same_second = System.os_time(:second)
+      for id <- ~w(t1 t2 t3), do: File.touch!(Path.join(dir, "captie-#{id}.log"), same_second)
+
+      put_cfg(max_build_log_bytes: 1, max_build_logs: 500)
+      report = DeployRunner.retention_sweep()
+
+      assert report.bound == :bytes
+      assert report.evicted_by.bytes == 2
+      assert report.kept == 1
+      assert File.exists?(Path.join(dir, "captie-t3.log"))
+      refute File.exists?(Path.join(dir, "captie-t1.log"))
+      refute File.exists?(Path.join(dir, "captie-t2.log"))
+    end
+
+    test "terminal RECORDS that tie on mtime are pruned deterministically too" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      for id <- ~w(r1 r2 r3), do: deploy_and_finalize("recordtie", id)
+
+      # The tombstones carry the SAME one-second mtime hazard as the logs, and
+      # losing one is worse: a deployment whose terminal record is gone reads as
+      # `:never_recorded` rather than `:evicted` — the exact dishonesty this PR
+      # exists to end. Keep exactly one and pin WHICH one, so the assertion is
+      # structurally able to catch directory order deciding it.
+      same_second = System.os_time(:second)
+
+      for id <- ~w(r1 r2 r3),
+          do: File.touch!(Path.join(dir, "recordtie-#{id}.terminal.json"), same_second)
+
+      put_cfg(max_terminal_records: 1)
+      DeployRunner.retention_sweep()
+
+      assert File.exists?(Path.join(dir, "recordtie-r3.terminal.json"))
+      refute File.exists?(Path.join(dir, "recordtie-r1.terminal.json"))
+      refute File.exists?(Path.join(dir, "recordtie-r2.terminal.json"))
+    end
+
+    test "a log whose unit is STILL RUNNING is never evicted" do
+      dir = run_dir()
+      recorder_cfg(dir, is_active_cmd: {echo_script("active"), []}, max_build_logs: 0)
+
+      assert DeployRunner.trigger(req("liverun", build_id: "l1")) == {:ok, :started}
+      assert %{state: :running} = DeployRunner.status("liverun")
+
+      report = DeployRunner.retention_sweep()
+
+      assert report.protected == 1
+      assert report.evicted == 0
+      assert File.exists?(Path.join(dir, "liverun-l1.log"))
+    end
+  end
+
+  describe "eviction is a DIFFERENT answer from 'never recorded'" do
+    test "an evicted deployment keeps its outcome; a never-deployed one has none" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      deploy_and_finalize("evictme", "e1")
+      log = Path.join(dir, "evictme-e1.log")
+      assert File.exists?(log)
+
+      # BEFORE: the log is there and the read says so.
+      before_evict = DeployRunner.build_record("evictme", "e1")
+      assert before_evict.log_state == :available
+
+      # Drive PAST the count cap — the eviction branch has never run in prod
+      # (@max_tracked_runs counts SLUGS, and this box has 16), so it is proven
+      # here by forcing it, not by reading it.
+      put_cfg(max_build_logs: 0)
+      assert %{evicted: 1} = DeployRunner.retention_sweep()
+      refute File.exists?(log)
+
+      evicted = DeployRunner.build_record("evictme", "e1")
+      never = DeployRunner.build_record("never-deployed-at-all", "zzz")
+
+      # AFTER: different answers where there used to be one.
+      assert evicted.log_state == :evicted
+      assert never.log_state == :never_recorded
+      refute evicted == never
+
+      # The evicted one still knows WHAT HAPPENED — that is the whole point of a
+      # tombstone written at finalize rather than at prune time.
+      assert evicted.record == :terminal
+      assert evicted.exit_code == 0
+      assert evicted.unit_name =~ "bp-site-build-evictme-e1-"
+      assert evicted.journal_command =~ "journalctl"
+      assert evicted.evicted_at != nil
+
+      # …and the never-deployed one honestly knows nothing.
+      assert never.record == :none
+      assert never.exit_code == nil
+      assert never.unit_name == nil
+    end
+
+    test "status/1 stops reporting an evicted deployment as :idle" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      deploy_and_finalize("statusevict", "s1")
+
+      # Lose the slug-keyed manifest (the manifest cap, or a newer run
+      # overwriting it) AND the log.
+      File.rm!(Path.join(dir, "statusevict.manifest.json"))
+      put_cfg(max_build_logs: 0)
+      assert %{evicted: 1} = DeployRunner.retention_sweep()
+
+      evicted = DeployRunner.status("statusevict")
+      never = DeployRunner.status("never-deployed-at-all")
+
+      # This pair used to be identical apart from the slug.
+      assert evicted.state == :done
+      assert evicted.exit_code == 0
+      assert evicted.log_state == :evicted
+      assert evicted.unit_name =~ "bp-site-build-statusevict-s1-"
+
+      assert never.state == :idle
+      assert never.log_state == :never_recorded
+      assert never.unit_name == nil
+    end
+
+    test "a log evicted before its run finalized is still not 'never recorded'" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      # A log from a run that never reached finalize (the BEAM died, the unit
+      # vanished): bytes on disk, no terminal record.
+      File.write!(Path.join(dir, "orphanlog-o1.log"), "partial output\n")
+      refute File.exists?(Path.join(dir, "orphanlog-o1.terminal.json"))
+
+      put_cfg(max_build_logs: 0)
+
+      assert %{evicted: 1} = DeployRunner.retention_sweep()
+
+      record = DeployRunner.build_record("orphanlog", "o1")
+      assert record.log_state == :evicted
+      assert record.exit_code == nil
+      assert record.failure_reason =~ "evicted by retention before this run was finalized"
     end
   end
 end
