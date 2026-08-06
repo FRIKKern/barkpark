@@ -243,6 +243,27 @@ jobs:
       - name: Every repo-root read is dispatched on
         run: bash scripts/elixir-path-escape-check.sh
 
+      # ── the wave-33 skip-disclosure ratchet, riding this job ─────────────
+      # Same wiring intent as security.yml's `Security gate shape ratchet`
+      # (unfiltered, blocking, a few seconds of python + bash) but as a STEP of
+      # this already-unfiltered job rather than a job of its own, for two
+      # measured reasons:
+      #   * A NEW job in any of the four workflows breaks a sibling ratchet this
+      #     slice may not touch: each of security-gate-shape.test.sh,
+      #     elixir/cloud/console-path-escape-check.test.sh derives
+      #     `blocking_not_in_needs` FROM the YAML and demands the new job be
+      #     added to the aggregator's `needs` — and adding it there leaves their
+      #     `env -i` gate exercises without the new `R_*` var, which dies on
+      #     `set -u`. Correct ratchets, both directions; the answer is not to
+      #     add a job.
+      #   * A step adds no rendered check name, so required-checks-verify.sh's
+      #     roster is unchanged.
+      # This job is in the aggregator's needs with gate value NEVER, so the
+      # ratchet blocks the merge — strictly stronger placement than its sibling,
+      # which hangs off a context branch protection does not require.
+      - name: The four gates announce their skips (the ratchet must be able to fail)
+        run: bash scripts/gate-announces-skips.test.sh
+
   format:
     # ADVISORY format signal — NOT a merge gate. The project pins formatting
     # to the PROD Elixir version (server runs 1.18.x; local dev runs 1.19.x,
@@ -663,6 +684,16 @@ jobs:
 
           bad=0
 
+          # ── D377 tally: did anything SUBSTANTIVE actually run? ────────────
+          # `bad` answers "is anything wrong"; it cannot answer "was anything
+          # tested", and until wave 33 nothing did. These two answer it.
+          # Only PATH-GATED jobs count: the dispatcher and the ratchet carry the
+          # gate value NEVER and run on every head, so they are present in a
+          # "nothing ran" run exactly as in a full one and can distinguish
+          # nothing.
+          dispatched=0
+          not_dispatched=""
+
           # decide <job-name> <result> <gate-value>
           #   gate-value is the dispatcher output that gated the job, or the
           #   literal string NEVER for jobs that must always run. A skip is
@@ -698,6 +729,14 @@ jobs:
                 bad=1
                 ;;
             esac
+            # Tally, for the D377 notice at the bottom of this step. NEVER-gated
+            # jobs are excluded on purpose (see the declaration above).
+            if [ "$gate" != "NEVER" ]; then
+              case "$result" in
+                success) dispatched=$((dispatched + 1)) ;;
+                skipped) not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
           }
 
           # The dispatcher itself may never skip: without it there are no gate
@@ -712,5 +751,31 @@ jobs:
           if [ "$bad" -ne 0 ]; then
             echo "::error::Elixir gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose."
             exit 1
+          fi
+
+          # ── D377/D378 — SAY IT WHERE A PERSON AND AN API CAN READ IT ──────
+          # A green here means one of two very different things and, until wave
+          # 33, published byte-identical evidence for both: conclusion=success,
+          # annotations=0, output.title=null, output.summary=null. Measured on
+          # real heads — cloud-only PR #9656 and docs-only #9637 both greened
+          # this context with every substantive job skipped, and the honest
+          # sentence printed just below goes only to stdout, six clicks deep.
+          #
+          # Two mechanisms are RULED OUT BY MEASUREMENT, do not substitute one:
+          #   * $GITHUB_STEP_SUMMARY does NOT populate the check-run API — eight
+          #     workflows write it and 0 of 32 check-runs on that sha returned a
+          #     non-null summary, pr-task-gate (which writes one) included.
+          #   * Renaming this check is forbidden: `Elixir gate` is a frozen
+          #     required context under enforce_admins=true, and a rename
+          #     deadlocks main.
+          # A bare ::notice:: DOES reach the annotations endpoint from a
+          # succeeding, checkout-less, unmatrixed job — measured on probe branch
+          # probe/elixir-gate-annotation, commit e9be79a8d, run 31055317124.
+          #
+          # ONE notice, never one per skipped job: GitHub caps annotations at 10
+          # per level per step, so an N-per-job emitter truncates silently — the
+          # same class of quiet lie this line exists to remove.
+          if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=Elixir gate: green, nothing ran::NOTHING ELIXIR RAN on this head.%0AElixir gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Elixir job executed', never as 'the Elixir suite passed'."
           fi
           echo "Elixir gate: every upstream job either succeeded or was legitimately not dispatched."
