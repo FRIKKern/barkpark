@@ -1,0 +1,121 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-03",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "unit_ids": [
+    "cloud-console-hardening-wave-28-2026-08-03::email_apple_mail"
+  ],
+  "lens": "revision_source_identity_pin",
+  "verdict": "partial_source_pin_proven_delivered_apple_mail_blocked",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+    "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471"
+  },
+  "direct_answer": "The pinned Paper source and authored denominators are proven, but real delivered Apple Mail evidence is 0/1 and every client-specific geometry, semantics, reading-order, label, and source-message identity cell is BLOCKED. Production currently exposes an HTML preview, not a Paper delivery boundary.",
+  "evidence": {
+    "source_identity": {
+      "status": "found",
+      "reads": "9/9 across flat/dataset/scoped source routes",
+      "response_sha256": "34332ee5666902161af9abe4f96c8243374f93f1f143ba567d2d5bc2b51fba8b",
+      "blocks": "237/237",
+      "unique_block_ids": "237/237"
+    },
+    "authored_carriers": {
+      "blocks": 237,
+      "unique_block_ids": 237,
+      "headings": 43,
+      "paragraphs": 156,
+      "tables": 18,
+      "authored_header_cells": 57,
+      "body_cells": 466,
+      "lists": 7,
+      "list_items": 35,
+      "callouts": 13,
+      "marked_runs": 67,
+      "empty_paragraph_spacers": 103
+    },
+    "html_preview": {
+      "classification": "proxy_control_only_not_delivered_mail",
+      "successful_reads": "7/9",
+      "dataset_failures": "2/3 HTTP 500",
+      "sha256": "cfe862c4f7b2c69dd7e88c2c914754d88a7b1effb447ce18f3e667b82e7aa621",
+      "bytes": 170149,
+      "etag": false,
+      "last_modified": false,
+      "revision_tokens": 0,
+      "block_id_carriers": "0/237",
+      "tables": "18/18 presentation",
+      "scoped_headers": "0/57",
+      "semantic_marks": "0/67",
+      "aria_attributes": 0,
+      "tabbables": 0,
+      "viewport_meta": 0
+    },
+    "real_apple_mail": {
+      "status": "BLOCKED",
+      "qualifying_delivered_messages": "0/1",
+      "width_cells": "0/2",
+      "required_categories": "0/6",
+      "provider_receipts": 0,
+      "mailbox_artifacts": 0,
+      "apple_mail_captures": 0
+    },
+    "production_delivery_path": {
+      "status": "not_found",
+      "paper_specific_mailer": false,
+      "multipart_alternative": false,
+      "message_id": false,
+      "revision_header": false,
+      "provider_receipt": false
+    },
+    "synthetic_control": {
+      "status": "partial_nonproduction_only",
+      "artifact": ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/CCH28.eml",
+      "delivered_to_apple_mail": false,
+      "proxy_pass_allowed": false
+    }
+  },
+  "observations": [
+    "Preview HTML is not self-identifying and resolves mutable task widgets and workspace theme.",
+    "No production Paper MIME/sender/provider/mailbox seam or qualifying Apple Mail artifact was found.",
+    "Static HTML and synthetic EML cannot pass the real delivered-client gate."
+  ],
+  "inferences": [
+    "Successful preview bytes likely derive from the pinned source, but revision-only determinism is unproven; current evidence cannot establish Apple Mail fidelity."
+  ],
+  "recommended_repair_seams": [
+    "Add a Paper-specific MIME/delivery boundary with multipart alternative, exact revision provenance, stable Message-ID, provider receipt, and captured delivered source.",
+    "Repair email viewport/reflow, landmarks, table associations, mark semantics, and callout labels at the shared renderer seam.",
+    "Deliver the exact pinned message to a controlled mailbox and capture Apple Mail at both declared narrow widths."
+  ],
+  "risks": [
+    "Preview can drift through live theme/task dependencies",
+    "dataset-route preview succeeded only 1/3",
+    "client rewriting/dark mode/accessibility remain unknown"
+  ],
+  "unvisited_scope": [
+    "real Apple Mail inbox",
+    "Apple Mail width/reflow and VoiceOver",
+    "provider logs and DKIM/SPF/DMARC",
+    "spam placement",
+    "Gmail and Outlook"
+  ],
+  "checked": [
+    "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex",
+    "api/lib/barkpark_web/controllers/bulldocs_email_html.ex",
+    "api/lib/barkpark/portable_doc/render.ex",
+    "api/lib/barkpark/mailer.ex"
+  ],
+  "credential_scan": "Clean: saved Barkpark token used only via read-only bp calls; no raw token or mail credential displayed; no mailbox accessed.",
+  "mutations": {
+    "repo_files_changed": 0,
+    "barkpark_mutations": 0,
+    "mail_sent": 0
+  }
+}

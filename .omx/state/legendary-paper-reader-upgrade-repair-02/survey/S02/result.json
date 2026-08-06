@@ -1,0 +1,94 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-02",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "unit_ids": [
+    "cloud-console-hardening-wave-28-2026-08-03::cli"
+  ],
+  "lens": "revision_source_identity_pin",
+  "verdict": "partial",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+    "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471"
+  },
+  "direct_answer": "Structured CLI reads pin the exact Paper and 237 authored blocks, but rendered terminal output carries neither Paper id nor immutable revision, history limits are not honored, upstream 500 is reclassified as not_found, and width 1 overflows on the Related heading.",
+  "evidence": {
+    "source_identity": {
+      "status": "found",
+      "reads": "3/3",
+      "blocks": "237/237",
+      "unique_block_ids": "237/237",
+      "canonical_blocks_sha256": "697b972c5ea8eddd21348bdafe0a0e408d16b13962bc575463acc6efff9d688f",
+      "ordered_ids_sha256": "cdccebe0ecef199bf57fbf01fe0883db0388a37c014b1a46b1361a9f4a595bf6",
+      "history_blocks_equal": true
+    },
+    "authored_carriers": {
+      "blocks": 237,
+      "unique_block_ids": 237,
+      "headings": 43,
+      "paragraphs": 156,
+      "tables": 18,
+      "authored_header_cells": 57,
+      "body_cells": 466,
+      "lists": 7,
+      "list_items": 35,
+      "callouts": 13,
+      "marked_runs": 67,
+      "empty_paragraph_spacers": 103
+    },
+    "cli_cells": {
+      "discovery_help": "found: bp/paper/cycle/task help and capabilities readable",
+      "structured_output": "found: machine-readable id, _rev, and 237 blocks",
+      "typed_errors": "partial: missing Paper exits 4/not_found even when upstream is internal_error/500; usage cells exit 2",
+      "identity_revision": "partial: structured output carries both; six sampled renders carry neither",
+      "history_pagination": "partial/refuted: successful limit 1 and 2 calls returned all 12 revisions",
+      "terminal_sanitization": "partial: 5 plain widths and ANSI16 had no raw hostile controls; width 1 overflowed on literal Related; current Paper contains no bidi controls"
+    }
+  },
+  "observations": [
+    "Five plain-width renders and one ANSI16 render contained zero slug and revision tokens.",
+    "Rendered output appends mutable Related content outside the immutable Paper source.",
+    "Width-80 render was deterministic at SHA-256 386de871838459e09144db4d96afeea339c69617fdceb6fa40048dcc435b48b3."
+  ],
+  "inferences": [
+    "The rendered body derives from the source path but is not self-authenticating; the history-limit gap likely lies in CLI flag forwarding but request tracing is still required."
+  ],
+  "recommended_repair_seams": [
+    "Add sanitized Paper id and immutable _rev metadata inside the width boundary.",
+    "Preserve upstream typed failures instead of converting every read error to not_found.",
+    "Wrap the Related heading through the same width engine.",
+    "Trace and restore --limit propagation.",
+    "Define and test an explicit Unicode bidi/control policy."
+  ],
+  "risks": [
+    "Captured terminal output cannot prove its revision",
+    "mutable Related changes whole-output hashes",
+    "history reads are unbounded",
+    "current-input sanitization does not prove hostile-input handling"
+  ],
+  "unvisited_scope": [
+    "interactive PTY/TUI",
+    "emitted history URL trace",
+    "release-pinned read",
+    "hostile synthetic Paper"
+  ],
+  "checked": [
+    "internal/cli/paper_cmd.go",
+    "internal/cli/errors.go",
+    "internal/apiclient/client.go",
+    "internal/pdrender/pdrender.go",
+    "internal/pdrender/inline.go",
+    "api/lib/barkpark_web/controllers/history_controller.ex"
+  ],
+  "credential_scan": "Clean: environment names were observed without values; no secret/config dump or mutation used.",
+  "mutations": {
+    "repo_files_changed": 0,
+    "barkpark_mutations": 0
+  }
+}

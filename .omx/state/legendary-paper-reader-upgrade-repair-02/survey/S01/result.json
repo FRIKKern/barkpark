@@ -1,0 +1,95 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-01",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "unit_ids": [
+    "cloud-console-hardening-wave-28-2026-08-03::api"
+  ],
+  "lens": "revision_source_identity_pin",
+  "verdict": "partial",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+    "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471"
+  },
+  "direct_answer": "The pinned Paper source and 237 authored blocks are stable across document, source, query, history, and Cycle reads, but API reader identity is only partial because method/error taxonomy, invalid-perspective handling, OpenAPI discovery, conditional validators, and availability disagree.",
+  "evidence": {
+    "source_identity": {
+      "status": "found",
+      "document_reads": "3/3",
+      "source_reads": "3/3",
+      "query_reads": "3/3",
+      "history_reads": "3/3",
+      "blocks": "237/237",
+      "unique_block_ids": "237/237",
+      "history_revision_id": "7c1135de-733c-4325-aea6-31b9dbbda4d1"
+    },
+    "authored_carriers": {
+      "blocks": 237,
+      "unique_block_ids": 237,
+      "headings": 43,
+      "paragraphs": 156,
+      "tables": 18,
+      "authored_header_cells": 57,
+      "body_cells": 466,
+      "lists": 7,
+      "list_items": 35,
+      "callouts": 13,
+      "marked_runs": 67,
+      "empty_paragraph_spacers": 103
+    },
+    "api_cells": {
+      "discovery_schema": "partial: capabilities and runtime schema 3/3; documented /openapi.json 0/3 (404)",
+      "typed_errors": "partial/refuted: 401 and 404 typed; PUT falls through to 404 not 405; 406 uses internal_error; live 422 unvisited; three transient 500s recovered; client timeout has no server envelope",
+      "request_ids": "canonical live error bodies 4/4 and transient 500s 3/3 carried request IDs; timeout 0/1",
+      "identities": "partial: document/source/query/history/Cycle joined, page identity not freshly retained",
+      "etags": "partial: predecessor matrix found source ETag 0/4, page exact 304 0/4, query exact 304 4/4",
+      "pagination_perspective": "partial/refuted: history limit and query limit passed; bogus perspective returned 200 published content",
+      "availability": "partial: three transient 500s followed by success"
+    }
+  },
+  "observations": [
+    "Source/editor denominators are evidence of authored input, not downstream preservation.",
+    "Unsupported methods are mislabeled as missing resources.",
+    "Invalid perspectives silently substitute published content.",
+    "Advertised validator behavior differs by endpoint."
+  ],
+  "inferences": [
+    "Successful payload equality strongly supports one authored source identity; transient 500 recovery does not prove availability or root cause."
+  ],
+  "recommended_repair_seams": [
+    "Use a JSON-native Paper source negotiation pipeline with canonical 404/406/422 envelopes.",
+    "Add router-level 405 plus Allow handling.",
+    "Reject invalid perspectives rather than coercing them.",
+    "Align deployed OpenAPI discovery and document the six-domain identity graph.",
+    "Retain append-only request/deployment/timing evidence for availability failures."
+  ],
+  "risks": [
+    "Retry can erase failure evidence",
+    "page/source validators diverge from query",
+    "weaker principals and cross-tenant scope remain unvisited"
+  ],
+  "unvisited_scope": [
+    "safe live 422",
+    "server/proxy log correlation",
+    "fresh exact If-None-Match replay",
+    "weaker principals",
+    "full OpenAPI reconciliation"
+  ],
+  "checked": [
+    "api/lib/barkpark_web/router.ex",
+    "api/lib/barkpark_web/controllers/bulldocs_source_controller.ex",
+    "api/lib/barkpark_web/plugs/paper_revision_headers.ex",
+    "docs/api-v1.md"
+  ],
+  "credential_scan": "Clean: saved credential used only through read-only bp calls; no value printed or persisted.",
+  "mutations": {
+    "repo_files_changed": 0,
+    "barkpark_mutations": 0
+  }
+}
