@@ -398,9 +398,12 @@ defmodule BarkparkCloud.Web.Auth do
   Require that the authed user is owner|admin of their PRIMARY team — the gate
   for privileged actions on routes that still resolve the team implicitly
   (billing/checkout, go-live, DELETE barkpark) rather than from a path `:id`.
-  401 if unauthenticated; 422 `no_team` if the user has no team; 403 if a member
-  but not admin. On success the conn passes through with `:current_team` already
-  assigned by `require_user/2`.
+  401 if unauthenticated; 403 `{forbidden, reason: "no_team", scope:
+  "primary_team"}` if the user has no team; 403 `{forbidden, required: "admin",
+  scope: "primary_team"}` if a member but not admin. Holding no grant is an
+  AUTHORITY answer, not a malformed body — one condition, one status. On success
+  the conn passes through with `:current_team` already assigned by
+  `require_user/2`.
   """
   @spec require_primary_team_admin(Plug.Conn.t()) :: Plug.Conn.t()
   def require_primary_team_admin(conn) do
@@ -411,7 +414,7 @@ defmodule BarkparkCloud.Web.Auth do
         conn
 
       is_nil(conn.assigns[:current_team]) ->
-        json_halt(conn, 422, %{error: "no_team"})
+        forbidden(conn, reason: "no_team", scope: "primary_team")
 
       Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
         conn
@@ -424,9 +427,11 @@ defmodule BarkparkCloud.Web.Auth do
   @doc """
   Require that the authed user is the OWNER of their PRIMARY team — the billing
   gate (checkout / portal / cancel). The narrower twin of
-  `require_primary_team_admin/1`, preserving the same 401 / 422 `no_team` / 403
-  contract: 401 if unauthenticated; 422 `no_team` if the user has no team; 403 if
-  a member/admin but not the owner. Reads `Authz.team_owner?/2`. On success the
+  `require_primary_team_admin/1`, preserving the same 401 / 403 `no_team` / 403
+  contract: 401 if unauthenticated; 403 `{forbidden, reason: "no_team", scope:
+  "primary_team"}` if the user has no team; 403 `{forbidden, required: "owner",
+  scope: "primary_team"}` if a member/admin but not the owner — a missing grant
+  is an authority answer, never a bad body. Reads `Authz.team_owner?/2`. On success the
   conn passes through with `:current_team` already assigned by `require_user/2`.
   """
   @spec require_primary_team_owner(Plug.Conn.t()) :: Plug.Conn.t()
@@ -438,7 +443,7 @@ defmodule BarkparkCloud.Web.Auth do
         conn
 
       is_nil(conn.assigns[:current_team]) ->
-        json_halt(conn, 422, %{error: "no_team"})
+        forbidden(conn, reason: "no_team", scope: "primary_team")
 
       Authz.team_owner?(conn.assigns.current_user, conn.assigns.current_team) ->
         conn

@@ -409,6 +409,49 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
              }
     end
 
+    # cch-w38-s2: ONE CONDITION, ONE ANSWER. Both primary-team gates used to
+    # answer a TEAMLESS caller `422 {error: "no_team"}` — the status that means
+    # "your body was unprocessable" handed to a caller whose body was fine and
+    # who simply holds no grant. `gate_role/4` already answered the same
+    # condition 403. These two pins are the fail-before proof: against
+    # origin/main's bytes they red on `assert conn.status == 403` (got 422), and
+    # they are the ONLY pins that exist on these two arms — the rest of the
+    # suite is green in BOTH directions, which is exactly why the flip needed a
+    # test that can lose.
+    #
+    # `scope` stays "primary_team", matching the two required-role refusals
+    # above, so each gate emits ONE scope label. The 15 INLINE
+    # `json(conn, 422, %{error: "no_team"})` emitters in router.ex are a
+    # different contract and deliberately unchanged (`bp cloud support add` and
+    # app.js's envVarsFailureCopy both read that status).
+    test "require_primary_team_admin answers a TEAMLESS caller 403 no_team, not 422" do
+      user = user_fixture()
+
+      conn = session_call(:get, "/v1/audit", nil, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "reason" => "no_team",
+               "scope" => "primary_team"
+             }
+    end
+
+    test "require_primary_team_owner answers a TEAMLESS caller 403 no_team, not 422" do
+      user = user_fixture()
+
+      conn = session_call(:post, "/v1/billing/checkout", %{}, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "reason" => "no_team",
+               "scope" => "primary_team"
+             }
+    end
+
     test "require_platform_operator names the platform allowlist, not a team role" do
       user = user_fixture()
       team = team_fixture()
