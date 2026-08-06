@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-23",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": [
+    "pds-wave-44-2026-08-03::email_mime"
+  ],
+  "verdict": "blocked",
+  "direct_answer": "The production Paper email endpoint is a stable HTML preview, not an RFC message. It has no multipart body, plain-text alternative, envelope headers, Message-ID, or immutable revision token. E05 and E06 are non-qualifying synthetic fixtures: E05 has a substantial but incomplete plain part without envelope identity; E06 has revision identity but only a 50-character fallback plain part.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "569dafd1-9db0-4cfa-bca2-a44aa03f9889",
+    "assignment_snapshot_digest": "59c78bfb8bcd6d9e384b4734783d3b45a7a7e4cd162bdaf06205a1b20de45a11",
+    "paper_id": "pds-wave-44-2026-08-03",
+    "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52"
+  },
+  "observations": {
+    "source": {
+      "blocks": 99,
+      "unique_block_ids": 99,
+      "raw_sha256": "4923e1b72da37c384ebc3f7b80ba15a08c9998fde560db0095d349a27457f96d",
+      "canonical_blocks_sha256": "1c10ec4984826b0b12a0111c64b57bfc2c79de3ae576dd40b74e83c9e183bfce"
+    },
+    "authored_carriers": {
+      "headings": 32,
+      "paragraphs": 48,
+      "empty_paragraph_scaffolds": 15,
+      "lists": 10,
+      "list_items": 85,
+      "tables": 5,
+      "body_rows": 54,
+      "header_cells": 12,
+      "body_cells": 203,
+      "intentionally_headerless_tables": 2,
+      "callouts": 4,
+      "marks": 0,
+      "links": 0,
+      "authored_text_runs": 369,
+      "longest_token_characters": 57
+    },
+    "production": {
+      "fresh_requests": "3/3 HTTP 200",
+      "bytes_each": 98335,
+      "sha256": "c46f46e5172fa878f0a2ae8216cf75e4bfb265dc7cec350691d7e5dca2957645",
+      "content_type": "text/html; charset=utf-8",
+      "mime_version": false,
+      "message_id": false,
+      "envelope_headers": false,
+      "multipart_boundary": false,
+      "plain_part": false,
+      "revision_occurrences": 0,
+      "classification": "standalone HTML preview, not RFC message"
+    },
+    "required_cells": {
+      "rfc_mime_generation": "not_found",
+      "multipart_structure": "not_found",
+      "plain_text_parity": "not_found in production; E05 366/369 anywhere and 332/369 ordered; E06 0/369",
+      "html_semantics": "partial_fail: content counts exact; no lang/landmarks; 5/5 presentational tables; 0/12 scoped headers; 0/4 labeled callouts",
+      "header_safety": "partial synthetic only; production has no RFC headers and no hostile-injection proof",
+      "long_token_containment": "not_found: production lacks overflow-wrap, word-break, hyphens, and table containment"
+    },
+    "synthetic_fixtures": {
+      "E05": "multipart/alternative; 132197 bytes; substantial plain part; missing envelope and revision identity; not delivered",
+      "E06": "multipart/alternative; 75747 bytes; revision-bound invalid.example identity; 50-byte fallback plain part; not delivered"
+    }
+  },
+  "inferences": [
+    "Production likely overflows in some narrow clients because it lacks long-token containment, but no real client geometry proves that outcome.",
+    "E06's envelope and revision scheme is a design seed, not production evidence.",
+    "The live assignment attribution loses unit_ids even though its immutable snapshot is correct."
+  ],
+  "repair_seams": [
+    "Generate production multipart/alternative with From, To, Date, stable Message-ID, and immutable revision provenance.",
+    "Preserve all 369 authored text runs in ordered plain-text output, including tables and callouts.",
+    "Use semantic data tables, associated headers, labeled callouts, language, and landmarks.",
+    "Inline email-client-compatible long-token containment and prove CR/LF header safety.",
+    "Retain generated, submitted, and delivered raw messages for hash comparison."
+  ],
+  "checked": {
+    "papers": [
+      "pds-wave-44-2026-08-03@8bbd5d874a1b697f1e4e437c473f8e52",
+      "legendary-paper-reader-upgrade-sweep-2026-08-03"
+    ],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E05/generated/adapters/PDS44/email.eml",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/PDS44.eml",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/reports/blocked-cells.json",
+      "api/lib/barkpark_web/router.ex",
+      "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex",
+      "api/lib/barkpark_web/controllers/bulldocs_email_html.ex",
+      "api/lib/barkpark/portable_doc/render/walk.ex"
+    ]
+  },
+  "risks": [
+    "No production RFC message, submission receipt, provider receipt, or delivered source exists.",
+    "Production omits plain-text fallback and immutable message identity.",
+    "Production table and callout semantics fail their authored denominators.",
+    "No hostile header or real-client containment proof exists.",
+    "Synthetic fixture strengths are split across incompatible candidates and cannot be combined as a pass."
+  ],
+  "unvisited_scope": [
+    "production-generated RFC message",
+    "provider transit and delivered source",
+    "real client rendering",
+    "narrow long-token and table containment",
+    "hostile header-injection fixture",
+    "task duplicates beyond 1000 rows"
+  ],
+  "credential_scan": {
+    "status": "clean",
+    "credential_values_reported": 0
+  },
+  "mutations": {
+    "repo_files_changed_by_surveyor": 0,
+    "barkpark_mutations": 0,
+    "mail_sent": 0
+  }
+}
