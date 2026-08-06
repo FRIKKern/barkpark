@@ -18,6 +18,10 @@
 #   * meta_value() — the content-truth marker reader HEALTH rests on: it reads the
 #     VALUE of a <meta name=…> tag, so a gate can assert bp-build-id == the build
 #     it ships, never merely that the marker is present (D26).
+#   * build_failure_reason() — the ONE extractor that picks the most useful line
+#     out of a failed build log for the `BUILD failed` detail. It was duplicated
+#     byte-for-byte in both engines, so every repair to it had to be made twice
+#     and the DEFAULT (static) target silently kept the older, narrower one.
 #   * BUILD_ALLOW — the env allow-list a build may see (the Vite process.env-
 #     precedence scrub, D7): only these BARKPARK_* vars cross into npm.
 #
@@ -76,6 +80,54 @@ emit() { # <PLAN|BUILD|STAGE|HEALTH|SWITCH|RETIRE> <started|ok|skipped|noop|fail
 # ---------------------------------------------------------------------------
 disk_free() { # <path>
   df -Ph "$1" 2>/dev/null | awk 'NR==2 {print $4" free ("$5" used)"}'
+}
+
+# ---------------------------------------------------------------------------
+# build_failure_reason — the most useful ONE LINE of a failed build log, for the
+# `BUILD failed` stage detail. The real reason (`FATAL: 401 Unauthorized … the
+# site read token is invalid`) used to go to STDERR while the generic "BUILD
+# failed" went to stdout — a stdout-only orchestrator could never tell the user
+# WHY.
+#
+# ONE COPY, BOTH ENGINES (charter D33). This body used to exist TWICE, byte-
+# identical (md5 181029d3bc98b876d99d67ae704841a4), in site-deploy.sh and
+# site-deploy-node.sh. runtime_target DEFAULTS to :static
+# (api/lib/barkpark/sites/deploy_request.ex), so repairing the node copy alone
+# left the DEFAULT engine compressing every failed build to a line nobody had
+# looked at. It lives here because THIS file is the one both engines already
+# source — and because it is the file the Console harness already reads, so the
+# lift buys a blocking assertion over BOTH engines for free.
+#
+# IT IS A SUMMARY, NOT THE RECORD, AND IT CANNOT BECOME ONE. emit() above
+# collapses newlines and cuts every detail to 240 chars, and the control plane's
+# @stage_re is single-line — a multi-line reason structurally cannot cross that
+# wire (D24). The whole-truth channel is the build_id-keyed durable build log;
+# this function's only job is to pick the line most likely to start a diagnosis.
+#
+# THE TIERS ARE MEASURED, NOT GUESSED, against a RECORDED REAL producer:
+# deploy/testdata/capstone-turbopack-build-fail.txt (30,993 bytes, captured live
+# off guerrilla from a real search-capstone Turbopack failure). On those exact
+# bytes:
+#   tier 1 (FATAL)                 0 matches — no FATAL in a Turbopack failure
+#   tier 2 (npm ERR! | [Ee]rror:)  EXACTLY 1 match, and it is the RIGHT one:
+#                                  "Error: Turbopack build failed with 29 errors:"
+#                                  (not a `tail -1` accident — the 29 error
+#                                  bodies carry no `Error:` token, and npm 11
+#                                  prints "npm error", so that arm is dead)
+#   tier 3 (last non-blank)        strictly WORSE — it yields
+#                                  "at <unknown> (…/module-not-found)"
+# No reordering of the predicates improves that, so there is NO fifth tier: a
+# fifth grep would be a guess at a producer nobody has recorded. When a NEW
+# producer shape shows up, record its log as a fixture first, then measure.
+# Pinned by both engines' --self-test against that fixture.
+# ---------------------------------------------------------------------------
+build_failure_reason() { # <build-log>
+  local f="$1" r
+  r="$(grep -a 'FATAL' "$f" 2>/dev/null | tail -1)"
+  [ -n "$r" ] || r="$(grep -aE 'npm ERR!|[Ee]rror:' "$f" 2>/dev/null | grep -av 'complete log of this run' | tail -1)"
+  [ -n "$r" ] || r="$(grep -av '^[[:space:]]*$' "$f" 2>/dev/null | tail -1)"
+  [ -n "$r" ] || r="npm ci / npm run build failed with no output"
+  printf '%s' "$r"
 }
 
 # ---------------------------------------------------------------------------
