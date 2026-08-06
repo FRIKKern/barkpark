@@ -14,6 +14,11 @@ var cloudTokens = []string{
 	"live", "up", "online", "ok",
 	"queued", "building", "pushing", "provisioning", "pending", "removing", "behind",
 	"degraded", "unknown", "suspended", "near_limit",
+	// The charter-D69 triage rungs (deploy-reliability w5): a box under
+	// sustained load, a box whose disk is at the meter's own ceiling, and a live
+	// box the control plane has never heard a byte from. Before this slice all
+	// three fell to the neutral default and would have shipped UNCOLOURED.
+	"strained", "filling", "unreported",
 	"failed", "error", "offline", "removal_failed", "over_limit",
 }
 
@@ -28,6 +33,12 @@ func TestForCloudVocabulary(t *testing.T) {
 		// "behind" is info, not warn — "update available" is news, not an alarm.
 		"behind":   "info",
 		"degraded": "warn", "unknown": "warn", "suspended": "warn",
+		// The D69 triage rungs share degraded's grammar — a box to LOOK AT, not
+		// one that has already failed — and sit between it and "behind" on the
+		// ladder, so painting any of them danger would make the tone ladder
+		// non-monotone (rank 5 shouting louder than rank 4).
+		"strained": "warn", "STRAINED": "warn", " filling ": "warn",
+		"filling": "warn", "unreported": "warn",
 		"failed": "danger", "error": "danger", "offline": "danger", "removal_failed": "danger",
 		// Usage-meter quota states: near_limit warns, over_limit is danger.
 		"near_limit": "warn", "NEAR_LIMIT": "warn", " over_limit ": "danger", "over_limit": "danger",
