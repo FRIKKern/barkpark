@@ -789,11 +789,52 @@ type ServiceHealth struct {
 	Failing []string `json:"failing"`
 }
 
+// RelationSize is one named consumer of the database total: a relation and the
+// bytes it occupies including indexes and TOAST. The named breakdown is what
+// turns "3.5 GB" into a diagnosis of WHAT is taking up space.
+type RelationSize struct {
+	Name  string  `json:"name"`
+	Bytes float64 `json:"bytes"`
+}
+
+// MetricsSwap is the newest beat's swap reading as a PAIR. A bare percent cannot
+// carry three states, so the total rides with it: TotalBytes 0 is a swapless box
+// (measured — the answer is "none configured"), TotalBytes > 0 is configured (the
+// percent is of THAT), and nil for either is "we could not measure". Both are
+// POINTERS so an absent/sentinel reading is a gap, never a fabricated zero.
+type MetricsSwap struct {
+	UsedPct    *float64 `json:"used_pct"`
+	TotalBytes *float64 `json:"total_bytes"`
+}
+
+// MetricsBeam is the BEAM's OWN footprint from the newest beat: resident (Pss)
+// and paged-out (Swap) bytes for the one process the kernel OOM-kills.
+type MetricsBeam struct {
+	PSSBytes  *float64 `json:"pss_bytes"`
+	SwapBytes *float64 `json:"swap_bytes"`
+}
+
+// MetricsLatest is the newest beat's SCALAR facts — the ones a trend line cannot
+// answer. TopRelations is nil when the probe never ran (a pre-upgrade agent, or
+// a failed read) and an EMPTY slice when it ran and found nothing: "unmeasured"
+// and "measured, and it's empty" are different facts and stay different here.
+type MetricsLatest struct {
+	DBSize       *float64       `json:"db_size"`
+	TopRelations []RelationSize `json:"top_relations"`
+	Swap         MetricsSwap    `json:"swap"`
+	Beam         MetricsBeam    `json:"beam"`
+}
+
 // MetricsResult is a COMPLETED metrics roll-up: the control plane rolled the
 // agent's beat window and reported per-series points. This client NEVER computes
 // — it renders the CP's truth. Raw is the envelope BYTES verbatim so `-o json`
 // re-emits the contract without reshaping (the verify/domain-status idiom). The
-// series map is keyed by metric (cpu|mem|disk|load), each oldest-to-newest.
+// series map is keyed by metric (cpu|mem|disk|load|swap|beam_pss|beam_swap), each
+// oldest-to-newest; Latest carries the newest beat's scalars (db size + its named
+// top relations, the swap pair, the BEAM footprint). NOTE the series map is
+// DYNAMICALLY keyed, so a key the renderer does not list is dropped silently —
+// cloud_instance_top_cmd.go's metricTopSpecs is the render list that must move
+// with the control plane's @vitals.
 type MetricsResult struct {
 	Raw         []byte `json:"-"`
 	OK          bool   `json:"ok"`
@@ -806,6 +847,7 @@ type MetricsResult struct {
 	Beat          MetricsBeat              `json:"beat"`
 	Points        int                      `json:"points"`
 	Series        map[string][]MetricPoint `json:"series"`
+	Latest        MetricsLatest            `json:"latest"`
 	ServiceHealth ServiceHealth            `json:"service_health"`
 }
 
@@ -2005,6 +2047,14 @@ type UsageMeter struct {
 	Source             string   `json:"source"`
 	MeasuredAt         *string  `json:"measured_at"`
 	PendingInvitations *int     `json:"pending_invitations,omitempty"`
+	// UnavailableReason is the control plane's typed reason a meter read was
+	// ATTEMPTED and FAILED (exception|deadline_exceeded|unreachable|bad_shape|
+	// too_many_datasets|unknown) — a CONDITIONAL key, exactly like
+	// PendingInvitations above: a meter that measured fine, or one that is
+	// deliberately not metered, does not carry it at all. Without this field the
+	// reason died at unmarshal one layer BELOW the renderer, so a CRASHED meter
+	// was indistinguishable from a deliberate "not yet metered".
+	UnavailableReason string `json:"unavailable_reason,omitempty"`
 }
 
 // UsageResult is the parsed + raw usage envelope. Raw is the bytes VERBATIM so

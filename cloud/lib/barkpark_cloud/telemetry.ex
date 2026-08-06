@@ -18,6 +18,20 @@ defmodule BarkparkCloud.Telemetry do
       %{
         disk: %{used_pct: number | nil},   # verbatim from the agent (int in practice)
         db_size: number | nil,
+        # The biggest named consumers INSIDE db_size (agent `pg_top_relations`).
+        # nil — never [] — when the probe was not wired or failed: "we did not
+        # measure" is a different fact from "the database has no relations".
+        top_relations: [%{name: String.t(), bytes: number}] | nil,
+        # Swap travels as a PAIR because a bare percent cannot carry three states:
+        # (0, 0) is a swapless box (measured — the answer is "none configured"),
+        # (0, >0) is configured-but-idle, (-1, -1) is "could not measure". Both
+        # sentinels pass through VERBATIM; disambiguating them is a view concern.
+        swap: %{used_pct: number | nil, total_bytes: number | nil},
+        # The BEAM's OWN footprint (Pss + Swap from smaps_rollup) — the single
+        # largest consumer on a box and the process the kernel OOM-kills. This is
+        # the vital `mem_used_percent` HIDES: MemAvailable clears the floor
+        # precisely BECAUSE the BEAM was paged out.
+        beam: %{pss_bytes: number | nil, swap_bytes: number | nil},
         cpu: number | nil,        # host CPU busy % (agent `cpu_percent`, -1 verbatim)
         mem: number | nil,        # used-memory % (agent `mem_used_percent`, -1 verbatim)
         load1: number | nil,      # 1-minute load average (agent `load1`, -1 verbatim)
@@ -32,10 +46,17 @@ defmodule BarkparkCloud.Telemetry do
   The agent-side field contract (verified in `internal/agent/report.go` +
   `internal/cli/setup/healthgate.go`): `disk_used_percent` (int, `-1` when the
   probe was not wired — passed through verbatim; sentinel interpretation is a
-  view concern, not the normalizer's), `pg_size_bytes` (int64), `backup_ok`
-  (bool) + `backup_detail` (string), `dirty_tree` (bool), and `health_checks`
-  (a list of `%{"name","pass","detail"}` `CheckResult`s — note the boolean key
-  is `"pass"`, with `"ok"` accepted as a defensive alias).
+  view concern, not the normalizer's), `pg_size_bytes` (int64),
+  `pg_top_relations` (a list of `%{"name","bytes"}` `RelationSize`s, or JSON
+  null when unmeasured), `swap_used_percent` (int) + `swap_total_bytes` (int64),
+  `beam_pss_bytes` + `beam_swap_bytes` (int64), `backup_ok` (bool) +
+  `backup_detail` (string), `dirty_tree` (bool), and `health_checks` (a list of
+  `%{"name","pass","detail"}` `CheckResult`s — note the boolean key is `"pass"`,
+  with `"ok"` accepted as a defensive alias).
+
+  An OLDER agent build simply does not send the newer keys (a real guerrilla
+  beat carries all 20; a pre-upgrade box carries 15) — every absent one becomes
+  `nil`, so a mixed-version fleet normalizes without a special case.
 
   Payloads arrive from jsonb with STRING keys (Jason-decoded), which is what
   this module reads. `reported_at` is not in the payload — it is the event's
@@ -65,6 +86,21 @@ defmodule BarkparkCloud.Telemetry do
     %{
       disk: %{used_pct: num_or_nil(Map.get(payload, "disk_used_percent"))},
       db_size: num_or_nil(Map.get(payload, "pg_size_bytes")),
+      # The named breakdown inside db_size — what turns "3.5 GB" into a
+      # diagnosis. A non-list (absent / JSON null / malformed) stays nil so
+      # "unmeasured" never collapses into "measured, and it's empty".
+      top_relations: relation_sizes(Map.get(payload, "pg_top_relations")),
+      # Swap + the BEAM's own footprint, each verbatim (the -1 sentinel included
+      # — a swapless box's honest `0` and an unwired probe's `-1` are opposite
+      # facts, and only the view is allowed to word them).
+      swap: %{
+        used_pct: num_or_nil(Map.get(payload, "swap_used_percent")),
+        total_bytes: num_or_nil(Map.get(payload, "swap_total_bytes"))
+      },
+      beam: %{
+        pss_bytes: num_or_nil(Map.get(payload, "beam_pss_bytes")),
+        swap_bytes: num_or_nil(Map.get(payload, "beam_swap_bytes"))
+      },
       # Machine vitals — the host's live resource pressure the agent beats every
       # cycle (report.go: `cpu_percent` / `mem_used_percent` / `load1`, each `-1`
       # when its probe was unwired) plus the request-load signals the instance
@@ -107,6 +143,27 @@ defmodule BarkparkCloud.Telemetry do
   end
 
   defp summarize_checks(_), do: @empty_checks
+
+  # The agent's `pg_top_relations` rows, kept in the agent's own order (biggest
+  # first) and reduced to the two fields the surfaces render. Only a row with a
+  # real name AND a real byte count survives — a malformed row is dropped rather
+  # than rendered as a nameless or sizeless consumer. A non-list input (absent,
+  # JSON null, garbage) is nil: NOT measured, which is not the same as measured
+  # and empty (an honestly empty list stays []).
+  defp relation_sizes(rows) when is_list(rows) do
+    Enum.flat_map(rows, &relation_size/1)
+  end
+
+  defp relation_sizes(_), do: nil
+
+  defp relation_size(row) when is_map(row) do
+    case {str_or_nil(Map.get(row, "name")), num_or_nil(Map.get(row, "bytes"))} do
+      {name, bytes} when is_binary(name) and is_number(bytes) -> [%{name: name, bytes: bytes}]
+      _ -> []
+    end
+  end
+
+  defp relation_size(_), do: []
 
   # A check counts as passing ONLY when its boolean is literally true. The
   # struct's JSON key is "pass" and it is AUTHORITATIVE when present as a

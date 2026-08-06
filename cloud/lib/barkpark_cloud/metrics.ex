@@ -36,10 +36,27 @@ defmodule BarkparkCloud.Metrics do
           cpu:  [%{at: String.t(), value: number | nil}],
           mem:  [...],
           disk: [...],
-          load: [...]
+          load: [...],
+          swap: [...],       # swap consumption %
+          beam_pss: [...],   # the BEAM's resident footprint, bytes
+          beam_swap: [...]   # the BEAM's paged-out bytes
+        },
+        latest: %{                                 # NEWEST beat only — not a series
+          db_size: number | nil,
+          top_relations: [%{name: String.t(), bytes: number}] | nil,
+          swap: %{used_pct: number | nil, total_bytes: number | nil},
+          beam: %{pss_bytes: number | nil, swap_bytes: number | nil}
         },
         service_health: %{pass: non_neg_integer, total: non_neg_integer, failing: [String.t()]}
       }
+
+  `latest` carries the newest beat's SCALAR facts — the ones a trend line cannot
+  answer. `db_size` + `top_relations` are "what is taking up space" (a named
+  breakdown is what turns 3.5 GB into a diagnosis); `swap.total_bytes` is the
+  companion that makes a swap PERCENT interpretable at all (`total 0` is a
+  swapless box — measured, and the answer is none; a nil total is "we could not
+  measure"). Every scalar takes the SAME nil-not-zero pass as a series point, so
+  a `-1` sentinel is nil here too and the renderer never words a sentinel.
 
   `status` uses `Registry.health_stale_after_seconds/0` — the SAME CP-wide
   degraded threshold (180s) the staleness worker uses, never a new constant.
@@ -52,14 +69,37 @@ defmodule BarkparkCloud.Metrics do
   alias BarkparkCloud.Telemetry
 
   # series key => the agent Report's jsonb field name (string keys, Jason-decoded).
+  # This list DEFINES the rendered series key set (`series/1` is a Map.new over
+  # it), and the consumers are keyed maps that DROP an unknown key silently — so
+  # adding an entry here is only half a fold: `metricTopSpecs` in
+  # internal/cli/cloud_instance_top_cmd.go must gain the same key or the number
+  # ships invisibly behind a fully green build.
   @vitals [
     {:cpu, "cpu_percent"},
     {:mem, "mem_used_percent"},
     {:disk, "disk_used_percent"},
-    {:load, "load1"}
+    {:load, "load1"},
+    # Swap consumption is the vital `mem_used_percent` HIDES: MemAvailable clears
+    # the floor precisely BECAUSE the BEAM was paged out, so a box at 99% swap can
+    # report a comfortable 58% memory. Trending it is how a swapping box reads as
+    # struggling instead of calm.
+    {:swap, "swap_used_percent"},
+    # The BEAM's own footprint over the window: resident (Pss) and paged-out
+    # (Swap) bytes for the one process the kernel OOM-kills.
+    {:beam_pss, "beam_pss_bytes"},
+    {:beam_swap, "beam_swap_bytes"}
   ]
 
   @empty_service_health %{pass: 0, total: 0, failing: []}
+
+  # The all-absent `latest` block — the fixed shape a never-phoned-home box (and
+  # a pre-upgrade agent that sends none of these keys) still destructures.
+  @empty_latest %{
+    db_size: nil,
+    top_relations: nil,
+    swap: %{used_pct: nil, total_bytes: nil},
+    beam: %{pss_bytes: nil, swap_bytes: nil}
+  }
 
   @doc """
   Fold a window of `barkpark`'s agent events into the metrics envelope.
@@ -90,6 +130,7 @@ defmodule BarkparkCloud.Metrics do
       beat: beat(newest, now),
       points: points,
       series: series(oldest_first),
+      latest: latest(newest),
       service_health: service_health(newest)
     }
   end
@@ -142,6 +183,35 @@ defmodule BarkparkCloud.Metrics do
   end
 
   defp vital(_, _), do: nil
+
+  # The newest beat's SCALAR facts, taken through `Telemetry.normalize/1` (public
+  # reuse — Telemetry stays untouched) and then put through the SAME nil-not-zero
+  # pass the series points get: the agent's `-1` becomes nil, a real `0` survives.
+  # That is what lets the renderer tell a swapless box (total 0) apart from an
+  # unmeasured one (total nil) without the normalizer minting a word for it.
+  defp latest(nil), do: @empty_latest
+
+  defp latest(%AgentEvent{} = event) do
+    t = Telemetry.normalize(event)
+
+    %{
+      db_size: measured(t.db_size),
+      top_relations: t.top_relations,
+      swap: %{
+        used_pct: measured(t.swap.used_pct),
+        total_bytes: measured(t.swap.total_bytes)
+      },
+      beam: %{
+        pss_bytes: measured(t.beam.pss_bytes),
+        swap_bytes: measured(t.beam.swap_bytes)
+      }
+    }
+  end
+
+  # A scalar is real only when it is a non-negative number — the `vital/2`
+  # doctrine, applied off the series path.
+  defp measured(n) when is_number(n) and n >= 0, do: n
+  defp measured(_), do: nil
 
   # The newest beat's health-check roll-up, reusing Telemetry's summarization
   # (public — Telemetry stays untouched). No beat → the empty roll-up.

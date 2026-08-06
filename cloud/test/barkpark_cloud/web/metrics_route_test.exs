@@ -137,7 +137,21 @@ defmodule BarkparkCloud.Web.MetricsRouteTest do
 
       assert m["beat"]["status"] == "absent"
       assert m["beat"]["last_seen_at"] == nil
-      assert m["series"] == %{"cpu" => [], "mem" => [], "disk" => [], "load" => []}
+      # The series envelope WIDENED with this slice: swap, beam_pss and beam_swap
+      # join the original four. Kept as an EXACT equality rather than a subset
+      # check — the envelope is a contract three runtimes read, so the next
+      # widening SHOULD red here and be reviewed, which is the whole point of
+      # asserting the shape instead of asserting "the values are empty".
+      assert m["series"] == %{
+               "cpu" => [],
+               "mem" => [],
+               "disk" => [],
+               "load" => [],
+               "swap" => [],
+               "beam_pss" => [],
+               "beam_swap" => []
+             }
+
       assert m["service_health"] == %{"pass" => 0, "total" => 0, "failing" => []}
     end
 
