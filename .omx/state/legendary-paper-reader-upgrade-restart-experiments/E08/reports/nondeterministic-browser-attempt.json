@@ -1,0 +1,13 @@
+{
+  "disposition": "preserved negative reproducibility evidence; official replay rerun with a longer renderer timeout",
+  "round": "attack",
+  "run_1": {
+    "counts": {"BLOCKED": 54, "FAIL": 23, "PASS": 31},
+    "semantic_sha256": "07d0415016d5fad746187983bf6fe9c79eb8fc3cb89a41b377228b564534b474"
+  },
+  "run_2": {
+    "counts": {"BLOCKED": 55, "FAIL": 22, "PASS": 31},
+    "semantic_sha256": "1cb241e99a8081bc49b7bad2c3afffaaac540382fa1787969e46961aabf025a2"
+  },
+  "status": "FAIL_TRANSIENT_LOCAL_CHROME_TIMEOUT"
+}

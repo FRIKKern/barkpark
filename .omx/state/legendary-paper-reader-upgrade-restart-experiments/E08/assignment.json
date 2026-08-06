@@ -1,0 +1,11 @@
+{
+  "agent_type": "legendary-experimenter",
+  "assignment_id": "restart-experiment-08",
+  "assignment_uuid": "ef4bc3aa-adbe-487a-813a-87ba2b27e142",
+  "epic_task_id": "task-a768c69e659add58",
+  "round": "attack",
+  "schema_version": "legendary-paper-restart-experiment-assignment/v1",
+  "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-restart",
+  "wave_revision": "8a94f6db-1be6-4bbf-ba49-7f3aeed0e737",
+  "write_boundary": ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E08"
+}

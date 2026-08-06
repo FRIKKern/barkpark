@@ -1,0 +1,34 @@
+{
+  "candidates": [
+    {
+      "candidate": "E04",
+      "counts": {
+        "BLOCKED": 20,
+        "FAIL": 2,
+        "PASS": 14
+      },
+      "reason": "zero-threshold gate has FAIL/BLOCKED cells",
+      "verdict": "REJECT"
+    },
+    {
+      "candidate": "E05",
+      "counts": {
+        "BLOCKED": 16,
+        "FAIL": 20
+      },
+      "reason": "zero-threshold gate has FAIL/BLOCKED cells",
+      "verdict": "REJECT"
+    },
+    {
+      "candidate": "E06",
+      "counts": {
+        "BLOCKED": 16,
+        "FAIL": 2,
+        "PASS": 18
+      },
+      "reason": "zero-threshold gate has FAIL/BLOCKED cells",
+      "verdict": "REJECT"
+    }
+  ],
+  "round": "attack"
+}

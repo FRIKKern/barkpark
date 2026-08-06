@@ -1,0 +1,9 @@
+{
+  "counts": {
+    "BLOCKED": 52,
+    "FAIL": 24,
+    "PASS": 32
+  },
+  "run": 2,
+  "semantic_sha256": "e1d24ad354e23a1c1819e36d7d584bb80bc7ee9f7b6818f596412b6a77ddaac0"
+}
