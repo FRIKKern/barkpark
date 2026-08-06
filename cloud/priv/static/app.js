@@ -218,12 +218,72 @@
     unsupported_media_type: "We couldn't read that request — reload the page and try again.",
     request_too_large: "That's too large for us to accept. Try a smaller value or file."
   };
+  // cch-w35-s4 — THE ROLE SENTENCES, keyed by the server's own `required` label.
+  // Auth.forbidden/2 (cloud/lib/barkpark_cloud/web/auth.ex) merges evidence AROUND
+  // the `forbidden` slug: `required` (the authority the gate wanted) or, for the
+  // no-authority arm, `reason: "no_team"`. These are the only two facts a refusal
+  // carries that a person can act on, so they are the only two this map renders.
+  var FORBIDDEN_ROLE_COPY = {
+    admin: "You need the admin role on this team — an admin on this team can grant it.",
+    owner: "You need the owner role on this team — only the team owner can grant it.",
+    platform_operator: "That's limited to platform operators — no team role grants it."
+  };
+  // The one non-role arm: gate_role() answers a user who holds NO team with
+  // reason "no_team" and no `required`, because no role grant could repair it.
+  var FORBIDDEN_REASON_COPY = {
+    no_team: "Your account isn't on a team yet, so no role can allow this — ask a team owner to invite you."
+  };
+  // A slug the server invented that we have no sentence for is still renderable
+  // as evidence, but ONLY if it looks like a label (an unbounded echo of a
+  // server string into copy is how a message becomes markup).
+  var FORBIDDEN_LABEL_RE = /^[a-z][a-z0-9_]{0,39}$/;
+
+  // cch-w35-s4 — WHAT THE SERVER PROVED, or nothing at all.
+  //
+  // Returns a sentence ONLY when the 403 carried evidence; otherwise null, so
+  // every caller falls through to exactly what it renders today. Deliberately
+  // NOT composed from two other keys the payload also carries:
+  //   • `scope` is NEVER interpolated. require_primary_team_admin reads
+  //     conn.assigns[:current_team], which resolve_team fills from the
+  //     x-barkpark-team header — so an owner of their primary team who is
+  //     refused on a SECOND team is still answered scope: "primary_team",
+  //     naming a team where they ARE the owner as the team that refused them.
+  //     "this team" is true under the team switcher; "your primary team" is not.
+  //   • `reason` is a SLUG ("no_team"). It is MAPPED through a written arm,
+  //     never echoed — echoing it renders the literal string "no team" at a
+  //     human.
+  function forbiddenEvidenceCopy(data) {
+    if (!data) return null;
+    var reason = data.reason;
+    if (typeof reason === "string" && FORBIDDEN_REASON_COPY[reason]) return FORBIDDEN_REASON_COPY[reason];
+    var required = data.required;
+    if (typeof required !== "string" || !required) return null;
+    if (FORBIDDEN_ROLE_COPY[required]) return FORBIDDEN_ROLE_COPY[required];
+    if (!FORBIDDEN_LABEL_RE.test(required)) return null;
+    return 'You need the "' + required.replace(/_/g, " ") +
+      '" permission on this team — an admin on this team can grant it.';
+  }
+
   // Precedence (GR19 fix): curated ERRORS copy → field-level details → the
   // caller's DESIGNED fallback → the humanized slug. (Previously any truthy
   // slug beat the fallback, so a per-call fallback never rendered.)
+  //
+  // cch-w35-s4 — ONE fenced exception, ahead of the curated map: a `forbidden`
+  // that CARRIES SERVER EVIDENCE renders that evidence. ERRORS.forbidden is copy
+  // for the five owner-gated billing writes (GR36), and it used to win at all 55
+  // friendly() sites — so a member refused by the admin-gated /v1/audit read
+  // "Only the team owner can manage billing." on the Activity screen: wrong
+  // subject, wrong remedy, and confident. The fence is narrow on purpose. A bare
+  // `{error: "forbidden"}` (which is all the billing gate's own refusal renders
+  // through, and all any un-upgraded route sends) still resolves to ERRORS.forbidden
+  // byte-identically, and every other slug never reaches this branch at all.
   function friendly(data, fallback) {
     if (!data) return fallback || "Something went wrong.";
     var key = data.error;
+    if (key === "forbidden") {
+      var proved = forbiddenEvidenceCopy(data);
+      if (proved) return proved;
+    }
     if (key && ERRORS[key]) return ERRORS[key];
     if (data.details && typeof data.details === "object") {
       var first = Object.keys(data.details)[0];
@@ -286,9 +346,17 @@
   // An authority answer on a read gets a READ-SCOPED sentence; every other
   // status keeps faultCopy's honest classification (5xx = our fault, status 0 =
   // the named transport class, 4xx = the caller's designed fallback).
+  // cch-w35-s4 — the twin fence, and its honest reach: ZERO, today. Server
+  // evidence is more specific than the caller's read-scoped sentence (which can
+  // only say WHICH list was refused, never WHY), so it wins — but a BARE
+  // forbidden still returns the caller string unchanged, which is the only case
+  // either of this function's two routes can currently produce: GET /v1/tokens
+  // is require_user only, and GET /v1/sites hands a browser session the "root"
+  // ability and answers a teamless user 200 {sites: []}. It ships as insurance
+  // for the day one of those routes grows a role gate, not as a fix.
   function readFailureCopy(r, forbiddenCopy, fallback) {
     var data = r && r.data;
-    if (data && data.error === "forbidden") return forbiddenCopy;
+    if (data && data.error === "forbidden") return forbiddenEvidenceCopy(data) || forbiddenCopy;
     return faultCopy(r ? r.status : 0, data, fallback, r && r.transport);
   }
 
