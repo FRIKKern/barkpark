@@ -8021,18 +8021,65 @@
 
   // ---- DOM mounts -----------------------------------------------------------
 
-  // Fail-CLOSED entry point (GR49). Three outcomes:
+  // cch-w37-s6 — the FAILED-me copy, PURE so its bytes are node-assertable.
+  // It is deliberately NOT an accusation and NOT a refusal: we do not know
+  // whether this account is an operator, and the sentence says exactly that.
+  // meFailureCopy() classifies the retained fault the same way the token
+  // picker's unknown arm does — a 500 reads "something broke on our side", an
+  // offline read reads "you're offline", never "you are not an operator".
+  function operatorMeFailedHtml() {
+    return '<div class="empty-state"><h2>We couldn\'t check your account</h2>' +
+      "<p>" + esc(meFailureCopy()) + "</p>" +
+      '<p class="muted">Until it answers we can\'t tell whether this account may open the ' +
+      "Operator console, so nothing was read and nothing was refused.</p>" +
+      '<p><button class="btn btn-primary btn-sm" id="operator-me-retry" type="button">Retry</button></p></div>';
+  }
+
+  // Fail-CLOSED entry point (GR49). FOUR outcomes — the unloaded arm is
+  // three-valued as of cch-w37-s6, over the meState() seam next door:
   //   • /v1/me hasn't answered yet  → an honest "checking" line; loadMe re-enters
   //     here the moment it lands, so a real operator's deep link is never bounced
   //     by a boot race.
+  //   • /v1/me FAILED               → say so, and offer the retry. This arm used
+  //     to be folded into the one above (`if (!meCache)`), and loadMe's failure
+  //     arm deliberately does not re-enter this loader, so a real operator whose
+  //     /v1/me answered 500 sat on "Checking operator access…" for the rest of
+  //     the session — terminal, because navigating away and back repaints the
+  //     same spinner. A spinner that outlives its request is a claim we are
+  //     still checking, and we are not.
   //   • answered, not an operator   → BOUNCE to #overview. Registering "operator"
   //     in VIEWS made init()'s validator accept the deep link for anybody, so the
   //     sidebar gate alone is no longer enough.
   //   • answered, operator          → paint the shell and read the four routes.
+  //
+  // D411'S FENCE, CARVED OUT DELIBERATELY. __app.test.mjs pinned the SOURCE TEXT
+  // of the `if (!meCache)` arm — the checking line immediately followed by
+  // `return;` — so that an unloaded role could never be accused. That INTENT is
+  // untouched and still pinned (the LOADING arm below is byte-identical, and
+  // still precedes every refusal); only the fence's LETTER moved, because
+  // "we couldn't check your account" is not an accusation. Fail-closed is
+  // unweakened: the failed arm reads zero operator routes and applyOperatorGate
+  // keeps the sidebar entry hidden.
   function loadOperator() {
     var body = $("#operator-body");
     if (!body) return;
-    if (!meCache) {
+    var state = meState(); // "loaded" iff meCache is set — the same fact, told three-valued
+    if (state === "failed") {
+      body.innerHTML = operatorMeFailedHtml();
+      var retryBtn = $("#operator-me-retry");
+      if (retryBtn) {
+        retryBtn.addEventListener("click", function () {
+          body.innerHTML = '<div class="loading">Checking operator access&hellip;</div>';
+          // loadMe's SUCCESS arm re-enters this loader itself; its failure arm
+          // deliberately does not (app.js loadMe's else), so re-enter here ONLY
+          // when the read did not land — otherwise the page would paint twice
+          // and issue the four operator reads twice.
+          loadMe().then(function () { if (meState() !== "loaded") loadOperator(); });
+        });
+      }
+      return;
+    }
+    if (state === "loading") {
       body.innerHTML = '<div class="loading">Checking operator access&hellip;</div>';
       return;
     }
@@ -13938,13 +13985,24 @@
         // painted while me was unknown sat on its provisional render forever.
         // Billing and Activity re-render here so they re-derive from the failed
         // state. applyOperatorGate() re-runs to keep the sidebar entry hidden
-        // (fail-closed, GR9) — the operator VIEW's own copy belongs to the
-        // operator band (cch-w36-s4), so the operator loader is deliberately
-        // NOT re-entered here.
+        // (fail-closed, GR9) — the operator VIEW's own copy was left to the
+        // operator band, and cch-w37-s6 is that band: the loader is re-entered
+        // below, now that it HAS a failed arm to re-enter into.
         absorbMe(r); // records {status, data, transport} — the fault faultCopy() needs
         applyOperatorGate();
         if (currentView() === "billing") renderBilling();
         if (currentView() === "activity") paintActivityFilters();
+        // cch-w37-s6 — THE MIRROR OF THE SUCCESS ARM'S OPERATOR SEAM, and
+        // without it the failed arm is unreachable on the path that matters. A
+        // deep-linked #operator paints its "Checking operator access…" line
+        // from applyRoute BEFORE /v1/me answers; when the answer FAILED nothing
+        // ever repainted, so the console claimed to be checking for the rest of
+        // the session (navigating away and back only repaints the same line).
+        // Re-entering here is fail-CLOSED by construction: meState() is
+        // "failed", so loadOperator takes its report-and-retry arm — it reads
+        // zero /v1/operator/* routes, grants nothing, and the sidebar entry
+        // above stays hidden.
+        if (currentView() === "operator") loadOperator();
       }
     });
   }
@@ -20772,6 +20830,12 @@
       // state is DISTINGUISHABLE from the cold one — on origin/main both are
       // {role:null, loaded:false, error:false}.
       loadMe: loadMe, clearMe: clearMe, meState: meState, meFailureCopy: meFailureCopy,
+      // cch-w37-s6 — the Operator console's FAILED-me body. Pure, so the node
+      // harness can pin its bytes; the reachability proof (that a real 500 on
+      // /v1/me actually lands here) belongs to smoke's operator-me-unreadable
+      // scenario, because loadOperator itself is not exported and this sandbox's
+      // getElementById returns null.
+      operatorMeFailedHtml: operatorMeFailedHtml,
       meFlags: function () {
         return {
           role: (meCache && meCache.role) || null,
