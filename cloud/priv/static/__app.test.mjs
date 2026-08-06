@@ -10141,9 +10141,17 @@ test("cch-w25-s3: the rail fixture's cut is DERIVED from emit(), and reds when t
 
 test("cch-w25-s3: both producers still exist and still emit an unhumanised stage detail", () => {
   const node = fs.readFileSync(DEPLOY_NODE_SH, "utf8");
+  const common = fs.readFileSync(DEPLOY_COMMON_SH, "utf8");
   // The cruel string's stem is a `build_failure_reason` line: the LAST
-  // npm/Error line out of the build log, forwarded verbatim.
-  assert.ok(/build_failure_reason\(\) \{/.test(node), "build_failure_reason is the fixture's stem producer");
+  // npm/Error line out of the build log, forwarded verbatim. It lives in the
+  // SHARED lib now (one copy, both engines — it used to be duplicated byte for
+  // byte in site-deploy.sh and site-deploy-node.sh), so this assertion reads the
+  // lib and thereby covers BOTH runtime targets, including the DEFAULT (static)
+  // one, which is not itself a path this harness reads.
+  assert.ok(/build_failure_reason\(\) \{/.test(common),
+    "build_failure_reason is the fixture's stem producer, and it lives in deploy/lib/site-deploy-common.sh");
+  assert.ok(!/build_failure_reason\(\) \{/.test(node),
+    "build_failure_reason must exist ONCE — a re-forked copy in an engine is how the two targets drifted before");
   assert.ok(/emit BUILD failed "\$reason"/.test(node),
     "BUILD failed must still forward build_failure_reason's raw line — the moment it is humanised, this box stops " +
     "being a place a machine string can land and the fixture should be re-derived");
