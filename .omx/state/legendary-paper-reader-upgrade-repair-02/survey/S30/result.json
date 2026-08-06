@@ -1,0 +1,76 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-30",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["pds-wave-45-2026-08-03::email_apple_mail"],
+  "verdict": "blocked",
+  "direct_answer": "Exact PDS45 identity and authored denominators are proven. Native Apple Mail inspection found an empty read-only Inbox, no selected message, disabled controls, and an account-provider setup sheet; the local index and message store contain zero PDS45 matches. No delivered rendering, geometry, semantics, reading order, labels, or message identity can pass. Synthetic MIME and preview evidence remain non-qualifying.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "4b3a6ab7-984b-4851-afb7-621804f6c7db",
+    "assignment_snapshot_digest": "bb7e9eaf6ec296ad26a292f84b26ec1f621e65407d06037226f40343d2813843",
+    "paper_id": "pds-wave-45-2026-08-03",
+    "paper_revision": "b992fd8aaa028b0dab30a8da76f077fd"
+  },
+  "observations": {
+    "source": {"blocks": 227, "unique_block_ids": 227, "canonical_blocks_sha256": "5c9e77f2af56751516862425db7abfbfadc924cb9c5e8aab770cda67e9acc673"},
+    "authored_carriers": {"headings": 33, "paragraphs": 166, "empty_paragraphs": 124, "lists": 7, "list_items": 44, "tables": 12, "header_cells": 9, "body_cells": 389, "intentional_headerless_tables": 9, "callouts": 9, "marks": 8, "marked_characters": 161, "links": 0},
+    "apple_mail": {
+      "application": "found and running",
+      "native_state": "empty Inbox; no selected message; disabled controls; Choose a Mail account provider sheet",
+      "message_rows": 0,
+      "mail_index_matches": 0,
+      "emlx_matches": 0,
+      "provider_receipts": 0,
+      "raw_delivered_sources": 0,
+      "captures": 0,
+      "qualifying_width_cells": "0/2",
+      "required_categories": "0/6"
+    },
+    "synthetic_mime": {"E05": "proxy only; multipart without envelope/revision identity", "E06": "proxy only; invalid.example revision identity; never delivered"},
+    "preview_semantics": "proxy only: 12/12 tables nonsemantic, 0/9 callouts and 0/8 marks semantic",
+    "repository_contract": "Paper email route returns HTTP HTML only; no production MIME submission or delivery receipts"
+  },
+  "inferences": [
+    "The empty message table and setup sheet indicate Apple Mail is not provisioned with a usable account.",
+    "Zero index and message-body matches prove no local PDS45 receipt, not absence from every external mailbox.",
+    "Synthetic revision identity does not prove submission, transit, delivery, rewriting, or rendering.",
+    "A real message likely inherits preview semantic defects, but Apple Mail behavior is unobserved."
+  ],
+  "repair_seams": [
+    "Provision a controlled Mail account and deliver exact-revision multipart/alternative.",
+    "Retain submission, provider, delivery, and raw-source receipts.",
+    "Capture both widths with Apple Mail/macOS version and VoiceOver evidence.",
+    "Preserve all source denominators, labels, semantic marks, and revision/Message-ID continuity."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "task query: title*=Apple Mail"],
+    "papers": ["pds-wave-45-2026-08-03@b992fd8aaa028b0dab30a8da76f077fd", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E05/generated/adapters/PDS45/email.eml",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/PDS45.eml",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/semantics.json",
+      "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex",
+      "tooling/grip/ledger/legendary-paper-restart-experiment-02-2026-08-06.md"
+    ],
+    "local_store": "Envelope Index and .emlx bodies: target not found",
+    "native_app": "Mail client found; account and target not found"
+  },
+  "risks": [
+    "All six Apple Mail categories and both widths remain zero.",
+    "No provider account, raw source, receipt, dark mode, remote content, clipping, spam, authentication, or VoiceOver proof exists.",
+    "Zero authored links prevents link activation evidence.",
+    "Proxy tables, callouts, and marks already fail semantics."
+  ],
+  "unvisited_scope": ["real target at two widths", "provider receipts and raw source", "Apple Mail version/dark mode/remote content", "VoiceOver", "Gmail and Outlook"],
+  "credential_scan": {"status": "clean", "credential_values_reported": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0, "mail_sent": 0, "foreground_changed": false, "space_changed": false}
+}
