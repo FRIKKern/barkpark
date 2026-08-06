@@ -206,6 +206,14 @@ defmodule Barkpark.Sites.Provisioner do
 
   # ── materialize ───────────────────────────────────────────────────────────
 
+  # Reachability: every path written here is `src` — `src_dir/1`, the configured
+  # sites dir joined with a slug `DeployRequest` already validated against
+  # `~r/\A[a-z0-9][a-z0-9-]{0,62}\z/` (deploy_request.ex:104), a pattern that
+  # cannot express a dot or a slash — plus the module constants
+  # `@partial_suffix`, `@stale_suffix` and `@marker`. The copy SOURCE is
+  # `template_dir/1` over the closed `@templates` map. No caller-supplied path
+  # component reaches any of these calls.
+  # sobelow_skip ["Traversal.FileModule"]
   defp materialize(src, template, template_key, digest) do
     if File.dir?(template) do
       partial = src <> @partial_suffix
@@ -241,6 +249,12 @@ defmodule Barkpark.Sites.Provisioner do
     end
   end
 
+  # Reachability: `src`, `partial` and `stale` are not derived here at all —
+  # they arrive from `materialize/4`, which built all three from `src_dir/1`
+  # (regex-validated slug, deploy_request.ex:104) and the `@partial_suffix` /
+  # `@stale_suffix` constants. The `rm_rf` only ever unlinks the tree this
+  # module itself parked at `<src>.stale` two lines earlier.
+  # sobelow_skip ["Traversal.FileModule"]
   defp commit(src, partial, stale, moved_aside?) do
     case File.rename(partial, src) do
       :ok ->
@@ -257,6 +271,12 @@ defmodule Barkpark.Sites.Provisioner do
     end
   end
 
+  # Reachability: `partial` is the staging tree this module created one call
+  # earlier — `src_dir(slug) <> @partial_suffix`, with `slug` regex-validated at
+  # deploy_request.ex:104 to a pattern with no dot and no slash in it. The only
+  # caller-influenced value reaching `abort/2` is `reason`, which is returned,
+  # never joined into a path.
+  # sobelow_skip ["Traversal.FileModule"]
   defp abort(partial, reason) do
     File.rm_rf(partial)
     {:error, {:provision_failed, reason}}
@@ -288,6 +308,12 @@ defmodule Barkpark.Sites.Provisioner do
   # `node_modules` tree on every provision. Presence of the manifest is one
   # `stat` per template file and catches the class that actually bit us: files
   # that VANISHED.
+  # Reachability: the single read is `Path.join(src, @marker)` — `src_dir/1`
+  # (regex-validated slug, deploy_request.ex:104: no dot, no slash) joined with
+  # the `@marker` module constant. It is read-only, it never writes, and the
+  # bytes it returns are parsed into a `template=`/`digest=` comparison, never
+  # into a path.
+  # sobelow_skip ["Traversal.FileModule"]
   defp provisioned_fresh?(src, template_key, digest, template_files) do
     case File.read(Path.join(src, @marker)) do
       {:ok, body} ->
@@ -323,6 +349,13 @@ defmodule Barkpark.Sites.Provisioner do
   # in well under a second; the cost buys the no-op/rematerialize decision being
   # CONTENT-true, and the manifest it already walks is what `src_intact?/2`
   # compares `src` against.
+  # Reachability: nothing from the request is on this path at all. `template` is
+  # `template_dir/1` over the closed `@templates` map (a `Map.fetch!` on an atom
+  # key, with a config override), and each `rel` is a filename this function's
+  # own `tree_files/2` read back out of that same tree with `File.ls!` — a
+  # directory listing, not user input. The reads are of the shipped starter we
+  # are about to copy.
+  # sobelow_skip ["Traversal.FileModule"]
   defp template_manifest(template) do
     case File.dir?(template) do
       false ->
