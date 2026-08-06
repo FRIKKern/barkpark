@@ -385,10 +385,22 @@ func performUpgrade(base, latest, exePath string) error {
 	return nil
 }
 
+// upgradeDevBuildRefusal is the dev-build refusal for the MUTATING path. The
+// instruction is the right one and stays verbatim.
+const upgradeDevBuildRefusal = "bp upgrade: this is a dev build (go build); upgrade via git pull + make cli-build"
+
 // runUpgrade is the `bp upgrade` builtin: self-update from the cli-v*
 // GitHub Releases. --check reports current vs latest without touching the
 // binary (exit 1 when behind). Refuses on dev builds (no release to compare
 // against). Honors BARKPARK_CLI_RELEASE_BASE (release-tree root).
+//
+// The two dev-build paths answer two DIFFERENT questions and must not be
+// conflated. Bare `bp upgrade` asks "replace this binary" — impossible for a dev
+// build, so it refuses at exitUsage. `bp upgrade --check` asks "how fresh am I?"
+// — the honest answer is that no reading can be taken, which is exactly what
+// `bp doctor --onboarding` now reports (Status onbCLIUnreported, ok unchanged,
+// exit 0). An unknown is not a failure, so --check reports it and exits 0 too:
+// the same fact must not produce contradicting verdicts on two surfaces.
 func runUpgrade(out *writer, g globals, args []string) int {
 	check := false
 	for _, a := range args {
@@ -407,11 +419,26 @@ func runUpgrade(out *writer, g globals, args []string) int {
 		out.outf("usage: bp upgrade [--check] [-o json|yaml]")
 		out.outf("  self-update bp from the latest cli-v* GitHub release")
 		out.outf("  --check   print current vs latest only; exit 1 when behind")
+		out.outf("            a dev build reports status=unreported and exits 0 —")
+		out.outf("            it cannot be compared, so no verdict is claimed")
 		return exitOK
 	}
 
 	if cliVersion == "dev" {
-		out.errf("bp upgrade: this is a dev build (go build); upgrade via git pull + make cli-build")
+		if check {
+			// Freshness is UNREPORTED, not "up to date" and not "behind" — the
+			// same tri-state the onboarding receipt renders for this binary.
+			if !out.emitStructured(map[string]any{
+				"current": cliVersion,
+				"latest":  "",
+				"behind":  nil,
+				"status":  onbCLIUnreported,
+			}) {
+				out.outf("bp %s — freshness UNREPORTED: a dev build (go build) has no release to compare against; refresh it with `%s`", cliVersion, onbCLIDevRemedy)
+			}
+			return exitOK
+		}
+		out.errf("%s", upgradeDevBuildRefusal)
 		return exitUsage
 	}
 
@@ -424,7 +451,13 @@ func runUpgrade(out *writer, g globals, args []string) int {
 	behind := compareVersions(cliVersion, latest) < 0
 
 	if check {
-		if !out.emitStructured(map[string]any{"current": cliVersion, "latest": latest, "behind": behind}) {
+		// `status` carries the same vocabulary the onboarding receipt uses, so a
+		// reader gets one word meaning one thing on both surfaces.
+		status := onbCLIUpToDate
+		if behind {
+			status = onbCLIBehind
+		}
+		if !out.emitStructured(map[string]any{"current": cliVersion, "latest": latest, "behind": behind, "status": status}) {
 			if behind {
 				out.outf("bp %s — latest is %s (run 'bp upgrade')", cliVersion, latest)
 			} else {

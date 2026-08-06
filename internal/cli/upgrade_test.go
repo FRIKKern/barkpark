@@ -391,6 +391,65 @@ func TestRunUpgradeDevRefusal(t *testing.T) {
 	}
 }
 
+// TestRunUpgradeCheckDevIsUnreportedNotAnError: `--check` ASKS a question
+// ("how fresh am I?"), it does not request a mutation. On a dev build the honest
+// answer is "no reading can be taken" — which `bp doctor --onboarding` treats as
+// a non-failure — so --check reports UNREPORTED and exits 0 instead of exiting 2
+// while the doctor next door says everything is fine. Fail-before on
+// origin/main, which returns exitUsage here.
+func TestRunUpgradeCheckDevIsUnreportedNotAnError(t *testing.T) {
+	withCLIVersion(t, "dev")
+	out, stdout, stderr := newTestWriter()
+	out.output = "table" // the human render
+
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitOK {
+		t.Fatalf("upgrade --check on a dev build = %d, want exitOK (an unknown is not a failure)\nstdout: %s\nstderr: %s", code, stdout, stderr)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("UNREPORTED")) {
+		t.Errorf("--check on a dev build must say its freshness is UNREPORTED; stdout: %s", stdout)
+	}
+	if !bytes.Contains(stdout.Bytes(), []byte("make cli-install")) {
+		t.Errorf("--check on a dev build must name the literal remedy; stdout: %s", stdout)
+	}
+	// No network was touched: a dev build has nothing to resolve against.
+	if bytes.Contains(stdout.Bytes(), []byte("up to date")) {
+		t.Errorf("--check on a dev build must never claim \"up to date\"; stdout: %s", stdout)
+	}
+}
+
+// TestRunUpgradeCheckDevJSONCarriesNullBehind pins the machine shape: status
+// "unreported" and a NULL behind — never a fabricated boolean.
+func TestRunUpgradeCheckDevJSONCarriesNullBehind(t *testing.T) {
+	withCLIVersion(t, "dev")
+	out, stdout, _ := newTestWriter()
+	out.output = "json"
+
+	if code := runUpgrade(out, globals{}, []string{"--check"}); code != exitOK {
+		t.Fatalf("upgrade --check -o json on a dev build = %d, want exitOK; stdout: %s", code, stdout)
+	}
+	got := stdout.String()
+	if !strings.Contains(got, `"status": "unreported"`) && !strings.Contains(got, `"status":"unreported"`) {
+		t.Errorf("--check json must carry status \"unreported\"; stdout: %s", got)
+	}
+	if !strings.Contains(got, `"behind": null`) && !strings.Contains(got, `"behind":null`) {
+		t.Errorf("--check json must carry a null behind (no reading taken); stdout: %s", got)
+	}
+}
+
+// TestRunUpgradeDevMutationStillRefuses: the MUTATING path is a different
+// question ("replace this binary"), it genuinely cannot be honoured on a dev
+// build, and its refusal text is the right instruction — both stay put.
+func TestRunUpgradeDevMutationStillRefuses(t *testing.T) {
+	withCLIVersion(t, "dev")
+	out, _, stderr := newTestWriter()
+	if code := runUpgrade(out, globals{}, nil); code != exitUsage {
+		t.Errorf("bare upgrade on a dev build = %d, want exitUsage", code)
+	}
+	if !bytes.Contains(stderr.Bytes(), []byte(upgradeDevBuildRefusal)) {
+		t.Errorf("the dev refusal text must be preserved verbatim; stderr: %s", stderr)
+	}
+}
+
 func TestRunUpgradeUnknownFlag(t *testing.T) {
 	withCLIVersion(t, "0.0.1")
 	out, _, _ := newTestWriter()
