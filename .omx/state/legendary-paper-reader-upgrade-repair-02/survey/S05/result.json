@@ -1,0 +1,140 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-05",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": [
+    "cloud-console-hardening-wave-28-2026-08-03::email_mime"
+  ],
+  "verdict": "blocked",
+  "direct_answer": "The immutable Paper source, revision, and authored-carrier denominators are proven. The current production surface is not RFC email: 3/3 reads returned byte-identical text/html without multipart, plain-text, or mail headers. None of the MIME-dependent cells can pass. The historical CCH28 .eml is a synthetic candidate proxy, not production evidence, and its 50-byte generic plain part is not authored-content parity.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+    "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471",
+    "authority_status": "found"
+  },
+  "observations": {
+    "source_identity": {
+      "status": "found",
+      "live_reads": "3/3",
+      "byte_identical_reads": "3/3",
+      "paper_id_matches": "3/3",
+      "paper_revision_matches": "3/3",
+      "blocks": "237/237",
+      "unique_block_ids": "237/237",
+      "canonical_blocks_sha256": "697b972c5ea8eddd21348bdafe0a0e408d16b13962bc575463acc6efff9d688f",
+      "html_paper_id_tokens": 0,
+      "html_revision_tokens": 0
+    },
+    "authored_carriers": {
+      "blocks": 237,
+      "headings": 43,
+      "paragraphs": 156,
+      "nonempty_paragraphs": 53,
+      "empty_paragraph_spacers": 103,
+      "tables": 18,
+      "authored_header_cells": 57,
+      "body_cells": 466,
+      "lists": 7,
+      "list_items": 35,
+      "callouts": 13,
+      "marked_runs": 67
+    },
+    "production_capture": {
+      "route": "/papers/cloud-console-hardening-wave-28-2026-08-03/email",
+      "reads": "3/3 HTTP 200",
+      "content_type": "text/html; charset=utf-8",
+      "bytes_each": 170149,
+      "sha256_each": "cfe862c4f7b2c69dd7e88c2c914754d88a7b1effb447ce18f3e667b82e7aa621",
+      "etag": "not_found",
+      "last_modified": "not_found",
+      "classification": "production HTML preview; not RFC MIME"
+    },
+    "required_cells": {
+      "rfc_mime_generation": "BLOCKED: 0/1 qualifying RFC messages; live output is text/html with no MIME-Version or Message-ID",
+      "multipart_structure": "BLOCKED: 0/1 multipart messages and no text/plain part",
+      "plain_text_parity": "BLOCKED: no production plain part; synthetic proxy plain part is 50 generic bytes versus 117828 HTML bytes",
+      "html_semantics": "partial: 43/43 headings, 53/53 nonempty paragraphs, 18/18 tables, 57/57 headers, 466/466 body cells, 7/7 lists, 35/35 items, and 13/13 visual callouts; but 18/18 tables are presentation, 0/57 headers have scope, and 0/67 marks retain semantic strong/code elements",
+      "header_safety": "BLOCKED: 0/1 RFC header sets; no Paper-specific From, To, Subject, Message-ID, MIME-Version, or revision header",
+      "long_token_containment": "BLOCKED: 0/1 adversarial delivered-message checks; no operative overflow-wrap or word-break declaration and no narrow delivered-client capture"
+    },
+    "synthetic_proxy": {
+      "artifact": ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/CCH28.eml",
+      "sha256": "7b8ba83f8d8afb0e612f7de9aff61a58039b46f9f8e6c843805202335a1c63e4",
+      "content_type": "multipart/alternative",
+      "parts": ["text/plain", "text/html"],
+      "plain_bytes": 50,
+      "html_bytes": 117828,
+      "parser_defects": 0,
+      "delivered_or_deployed": false,
+      "proxy_pass_allowed": false
+    }
+  },
+  "inferences": [
+    "The stable live HTML probably derives from the pinned source, but it is not self-authenticating because it carries neither Paper id nor revision.",
+    "The smallest repair is a real Paper-message construction and evidence boundary around the existing HTML renderer.",
+    "Header and containment behavior can change after SMTP, provider, and client rewriting; static preview inspection cannot resolve those risks."
+  ],
+  "recommended_repair_seams": [
+    "Build multipart/alternative from the exact revision-pinned source at a Paper-specific RFC message boundary adjacent to BulldocsEmailController and Barkpark.Mailer.",
+    "Generate authored-content-equivalent plain text, validated headers, stable Message-ID, and immutable Paper revision headers.",
+    "Archive raw submitted and delivered message source plus provider receipt and source digest.",
+    "Remove presentation role from authored data tables, add header associations, preserve strong/code semantics, and apply email-safe long-token containment.",
+    "Exercise the exact delivered message in real narrow clients; static and synthetic artifacts remain proxies."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58"],
+    "papers": ["cloud-console-hardening-wave-28-2026-08-03@49c1534d9fb76d0d9adc7b97f25ec471"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      "api/lib/barkpark_web/controllers/bulldocs_source_controller.ex",
+      "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex",
+      "api/lib/barkpark_web/controllers/bulldocs_email_html.ex",
+      "api/lib/barkpark/portable_doc/render.ex",
+      "api/lib/barkpark/portable_doc/render/walk.ex",
+      "api/lib/barkpark/portable_doc/render/inline.ex",
+      "api/lib/barkpark/mailer.ex",
+      "api/lib/barkpark/plugins/bulldocs.ex",
+      "api/test/barkpark_web/controllers/bulldocs_email_controller_test.exs",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/CCH28.eml",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/result.json"
+    ]
+  },
+  "risks": [
+    "No production Paper RFC source, SMTP submission, provider receipt, or delivered-source capture exists.",
+    "No authored-content plain-text serializer, CRLF/header-injection test, or real-client long-token proof exists.",
+    "Presentation tables, absent header scopes, and style-only marks lose authored semantics."
+  ],
+  "unvisited_scope": [
+    "SMTP relay and provider logs",
+    "DKIM, SPF, and DMARC results",
+    "raw delivered Gmail, Outlook, and Apple Mail messages",
+    "mailbox rewriting, spam placement, real narrow-client geometry, and screen-reader behavior",
+    "hostile header input and weaker-principal or cross-tenant routes"
+  ],
+  "evidence": {
+    "commands": [
+      "bp cycle show, task get, and paper view read-only authority calls",
+      "three source reads plus canonical identity and SHA-256 census",
+      "three live email-route reads plus safe-header and byte comparisons",
+      "HTML structural census and Python stdlib parsing of the synthetic proxy"
+    ]
+  },
+  "credential_scan": {
+    "status": "clean",
+    "values_revealed": 0,
+    "note": "Saved authentication was used only through read-only calls; environment variable values were not inspected."
+  },
+  "mutations": {
+    "repo_files_changed_by_surveyor": 0,
+    "barkpark_mutations": 0,
+    "mail_sent": 0
+  }
+}
