@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-14",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-29-2026-08-03::email_mime"],
+  "verdict": "blocked",
+  "hard_gate_result": "fail",
+  "direct_answer": "The exact Paper revision and authored denominators are pinned, but the production Paper email endpoint is HTML preview rather than an RFC message. No production Paper-specific MIME construction, multipart alternative, plain-text parity, message-header safety, delivery receipt, or delivered-client artifact exists. Synthetic EMLs exercise candidate MIME shapes but are proxy evidence and cannot satisfy production or real-reader gates.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "d849989e-4dc4-4800-8cbb-66c8c03ecdd1",
+    "assignment_snapshot_digest": "b9e70e01b20369fb6a0073f2fc8e43628c3b05ecd84eef89b481d361706350f1",
+    "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+    "paper_revision": "18768b0a14c2eead927181c4a0e37c18"
+  },
+  "observations": {
+    "source": {"blocks": 252, "unique_block_ids": 252, "nonempty_carriers": 113, "empty_spacers": 139, "canonical_blocks_sha256": "e1cb807591caa511dadb1cc98311812aa364abc624f8da60c24562185b828b21", "authored_characters": 64638},
+    "authored_carriers": {"headings": 37, "paragraphs": 187, "tables": 11, "header_cells": 35, "body_cells": 316, "lists": 13, "list_items": 67, "nested_items": 11, "nested_characters": 2268, "callouts": 4, "marked_runs": 313, "code_runs": 200, "strong_runs": 113, "links": 0, "max_unbroken_token": 65},
+    "production_preview": {"classification": "standalone_html_proxy", "http_200": "3/3", "bytes": 121072, "sha256": "dc57c4d6704a97ba7003a06694f126c25f9de3f5c8e64529aa20351a3b36e331", "content_type": "text/html; charset=utf-8", "etag": false, "message_id": false, "mime_version": false, "boundary": false, "multipart": false, "plain_part": false, "revision_token": false},
+    "html_census": {"headings": 37, "tables": 11, "presentation_tables": 11, "header_cells": 35, "headers_with_scope": 0, "body_cells": 316, "lists": 13, "list_items": 67, "semantic_strong": 0, "semantic_code": 0, "overflow_wrap_rules": 0, "word_break_rules": 0, "viewport_meta": 0},
+    "required_cells": {
+      "rfc_mime_generation": "not_found",
+      "multipart_structure": "not_found",
+      "plain_text_parity": "not_found",
+      "html_semantics": "partial: all tables are presentation, no header scope, marks flattened, and 2,268 nested characters absent",
+      "header_safety": "not_found: no production headers or delivered raw source",
+      "long_token_containment": "partial: 65-character token is visible, but no wrap rules or delivered-client proof exist"
+    },
+    "delivery_boundary": {"paper_specific_swoosh_email": false, "provider_receipt": false, "raw_delivered_source": false, "delivered_clients": 0},
+    "synthetic_proxies": ["E05 parses as multipart/alternative but lacks From, To, and Message-ID and was not delivered", "E06 parses as multipart/alternative with synthetic invalid.example identity, only a 50-byte plain part, and was not delivered"]
+  },
+  "inferences": [
+    "Controller comments and older task language conflate HTML preview with bytes a mail backend would transmit.",
+    "String-shaped strong/code marks are flattened because the renderer recognizes map-shaped mark descriptors.",
+    "Paragraph-wrapped nested list content is lost through the current normalization path.",
+    "No existing task owns the full production MIME and delivered-client seam."
+  ],
+  "repair_seams": [
+    "Construct and capture the exact production RFC message for the pinned Paper revision, separate from HTML preview.",
+    "Compare all authored carriers across text/plain and text/html parts.",
+    "Record normalized Subject, From, To, Message-ID, MIME-Version, Content-Type, transfer encoding, revision identity, and provider acceptance without exposing private data.",
+    "Preserve table semantics, all 313 marks, and all 2,268 nested characters in HTML.",
+    "Prove the 65-character token at narrow width in a real delivered client."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "task-e4836038babf7cc0", "gp-w3-email-view", "gp-w3b-email-popup", "paper-cross-reader-reliability-epic", "5,298-task MIME receipt census"],
+    "papers": ["cloud-console-hardening-wave-29-2026-08-03@18768b0a14c2eead927181c4a0e37c18", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json", ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E05/generated/adapters/CCH29/email.eml", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/CCH29.eml", "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex", "api/lib/barkpark/plugins/bulldocs.ex", "api/lib/barkpark/mailer.ex", "api/config/runtime.exs", "api/lib/barkpark/accounts/user_notifier.ex", "api/lib/barkpark/access/grant_notifier.ex", "api/lib/barkpark/portable_doc/render.ex", "api/lib/barkpark/portable_doc/render/walk.ex", "api/lib/barkpark/portable_doc/render/inline.ex", "api/lib/barkpark/portable_doc/render/compose.ex"]
+  },
+  "risks": ["HTML preview may be mistaken for real email.", "No provider receipt proves accepted bytes.", "All 313 marks and 2,268 nested characters are lost in preview semantics.", "All 11 tables lack data-table semantics.", "No production plain part or header-safety evidence exists.", "Long-token containment and intermittent preview availability remain unproven."],
+  "unvisited_scope": ["real SMTP provider and logs", "delivered Gmail, Outlook, and Apple Mail", "exhaustive Paper listing after internal_error", "runtime tests", "environment variable values"],
+  "credential_scan": {"status": "clean", "credentials_revealed": 0, "environment_values_inspected": false},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0, "mail_sent": 0}
+}
