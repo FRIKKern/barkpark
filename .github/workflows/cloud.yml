@@ -325,6 +325,16 @@ jobs:
 
           bad=0
 
+          # ── D377 tally: did anything SUBSTANTIVE actually run? ────────────
+          # `bad` answers "is anything wrong"; it cannot answer "was anything
+          # tested", and until wave 33 nothing did. These two answer it.
+          # Only PATH-GATED jobs count: the dispatcher and the ratchet carry the
+          # gate value NEVER and run on every head, so they are present in a
+          # "nothing ran" run exactly as in a full one and can distinguish
+          # nothing.
+          dispatched=0
+          not_dispatched=""
+
           # decide <job-name> <result> <gate-value>
           #   gate-value is the dispatcher output that gated the job, or the
           #   literal string NEVER for jobs that must always run. A skip is
@@ -360,6 +370,14 @@ jobs:
                 bad=1
                 ;;
             esac
+            # Tally, for the D377 notice at the bottom of this step. NEVER-gated
+            # jobs are excluded on purpose (see the declaration above).
+            if [ "$gate" != "NEVER" ]; then
+              case "$result" in
+                success) dispatched=$((dispatched + 1)) ;;
+                skipped) not_dispatched="${not_dispatched} ${job}" ;;
+              esac
+            fi
           }
 
           # The dispatcher itself may never skip: without it there are no gate
@@ -373,5 +391,19 @@ jobs:
           if [ "$bad" -ne 0 ]; then
             echo "::error::Cloud gate: at least one upstream job is not in the allow-set (see above). This is the required context; it is RED on purpose."
             exit 1
+          fi
+
+          # ── D377/D378 — SAY IT WHERE A PERSON AND AN API CAN READ IT ──────
+          # Measured on api-only PR #9529 (head 48d960092): this context read
+          # `Cloud gate | success | ann=0 | summary=null` with BOTH substantive
+          # jobs skipped — byte-identical to a run where `mix test` passed.
+          # $GITHUB_STEP_SUMMARY does not reach the check-run API (0 of 32
+          # check-runs returned a non-null summary), and renaming this frozen
+          # required context would deadlock main; a bare ::notice:: does reach
+          # it (probe/elixir-gate-annotation, run 31055317124).
+          # ONE notice, never one per job — GitHub caps annotations at 10 per
+          # level per step and truncates the rest silently.
+          if [ "$dispatched" -eq 0 ]; then
+            echo "::notice title=Cloud gate: green, nothing ran::NOTHING CLOUD RAN on this head.%0ACloud gate is green because this diff touched none of its declared path sets, NOT because anything was tested.%0ANot dispatched:${not_dispatched}%0AGreen here means NOT APPLICABLE to this diff. Read it as 'no Cloud job executed', never as 'the Cloud suite passed'."
           fi
           echo "Cloud gate: every upstream job either succeeded or was legitimately not dispatched."

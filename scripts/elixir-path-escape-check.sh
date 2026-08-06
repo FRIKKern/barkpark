@@ -65,12 +65,15 @@ set -euo pipefail
 #   an @external_resource of api/lib/barkpark/portable_doc/render/status_vocab.ex:20,
 #   so editing it recompiles that module. design/tokens.json rides the same tree.
 #   This file and elixir.yml are here so a change to the shim itself always runs
-#   the full suite it is gating.
+#   the full suite it is gating. gate-announces-skips.test.sh joins them for the
+#   same reason: it is executed by elixir.yml's unfiltered `path-escape` job, so
+#   a change to it is a change to what this required context asserts.
 ELIXIR_COMPILE_PATHS='api/**
 design/**
 .github/workflows/elixir.yml
 scripts/elixir-path-escape-check.sh
-scripts/elixir-path-escape-check.test.sh'
+scripts/elixir-path-escape-check.test.sh
+scripts/gate-announces-skips.test.sh'
 
 # TEST-ONLY set — fixture/mirror trees read by tests but never compiled against.
 # Each entry is a MEASURED read, not a guess; see --list-escapes for the census.
