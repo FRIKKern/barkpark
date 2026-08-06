@@ -395,12 +395,20 @@ defmodule BarkparkCloud.Web.Auth do
   end
 
   @doc """
-  Require that the authed user is owner|admin of their PRIMARY team — the gate
-  for privileged actions on routes that still resolve the team implicitly
+  Require that the authed user is owner|admin of the CURRENTLY SELECTED team —
+  the gate for privileged actions on routes that resolve the team implicitly
   (billing/checkout, go-live, DELETE barkpark) rather than from a path `:id`.
-  401 if unauthenticated; 422 `no_team` if the user has no team; 403 if a member
-  but not admin. On success the conn passes through with `:current_team` already
-  assigned by `require_user/2`.
+
+  The team read is `conn.assigns[:current_team]`, which `require_user/2` fills
+  via `resolve_team/2`: the `x-barkpark-team` header wins whenever the caller is
+  a member of that team (the SPA's team switcher), and only an absent/unusable
+  header falls back to the primary membership. So this gate is NOT primary-team
+  scoped — it judges whichever team the caller currently has selected, and its
+  403 says `scope: "team"` for that reason.
+
+  401 if unauthenticated; 422 `no_team` if the user has no team at all; 403 if a
+  member but not admin. On success the conn passes through with `:current_team`
+  already assigned by `require_user/2`.
   """
   @spec require_primary_team_admin(Plug.Conn.t()) :: Plug.Conn.t()
   def require_primary_team_admin(conn) do
@@ -417,17 +425,21 @@ defmodule BarkparkCloud.Web.Auth do
         conn
 
       true ->
-        forbidden(conn, required: "admin", scope: "primary_team")
+        forbidden(conn, required: "admin", scope: "team")
     end
   end
 
   @doc """
-  Require that the authed user is the OWNER of their PRIMARY team — the billing
-  gate (checkout / portal / cancel). The narrower twin of
+  Require that the authed user is the OWNER of the CURRENTLY SELECTED team — the
+  billing gate (checkout / portal / cancel). The narrower twin of
   `require_primary_team_admin/1`, preserving the same 401 / 422 `no_team` / 403
-  contract: 401 if unauthenticated; 422 `no_team` if the user has no team; 403 if
-  a member/admin but not the owner. Reads `Authz.team_owner?/2`. On success the
-  conn passes through with `:current_team` already assigned by `require_user/2`.
+  contract: 401 if unauthenticated; 422 `no_team` if the user has no team at all;
+  403 if a member/admin but not the owner. Reads `Authz.team_owner?/2` against
+  `conn.assigns[:current_team]` — filled by `resolve_team/2` from the
+  `x-barkpark-team` header when the caller is a member of that team, primary
+  membership only as the fallback. Not primary-team scoped, hence
+  `scope: "team"` on the 403. On success the conn passes through with
+  `:current_team` already assigned by `require_user/2`.
   """
   @spec require_primary_team_owner(Plug.Conn.t()) :: Plug.Conn.t()
   def require_primary_team_owner(conn) do
@@ -444,7 +456,7 @@ defmodule BarkparkCloud.Web.Auth do
         conn
 
       true ->
-        forbidden(conn, required: "owner", scope: "primary_team")
+        forbidden(conn, required: "owner", scope: "team")
     end
   end
 

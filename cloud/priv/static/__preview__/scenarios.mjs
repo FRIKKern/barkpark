@@ -4345,12 +4345,14 @@ export function route(name, method, path, state) {
   if (p === "/v1/audit") {
     // cch-w35-s4: the refusal carries the server's EVIDENCE, because the real one
     // does. Auth.require_primary_team_admin answers this route with
-    // `forbidden(conn, required: "admin", scope: "primary_team")` — note
-    // "primary_team", NOT "team": a fixture that modelled a refusal shape the
-    // server never sends would be its own kind of lie. The console renders the
-    // `required` label and deliberately ignores `scope`.
+    // `forbidden(conn, required: "admin", scope: "team")` — "team", NOT
+    // "primary_team": cch-w37-s3 renamed the label because the gate reads
+    // conn.assigns[:current_team] (resolve_team/2 honours the x-barkpark-team
+    // header), so it never consulted the primary team. A fixture that modelled a
+    // refusal shape the server never sends would be its own kind of lie. The
+    // console renders the `required` label and deliberately ignores `scope`.
     if (d.auditDenied) {
-      return { status: 403, body: { error: "forbidden", required: "admin", scope: "primary_team" } };
+      return { status: 403, body: { error: "forbidden", required: "admin", scope: "team" } };
     }
     const q = new URLSearchParams(String(path || "").split("?")[1] || "");
     const ttype = q.get("target_type");
