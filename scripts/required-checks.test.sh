@@ -1591,6 +1591,42 @@ section "18. no UNPINNED in-repo text still claims this repo's \`main\` is unpro
 # into the list below. Never delete a line from the list to silence a STALE row
 # without also confirming the member it pinned was genuinely fixed.
 #
+# THE ONE CENSUS MOVE ALREADY IN FLIGHT, MEASURED AT WAVE-35 REVIEW SO THE LEAD
+# DOES NOT RE-DERIVE IT. Charter PR #9751 (`epic-charter/cloud-console-hardening-
+# 20260806T091943Z`, OPEN and CLEAN when this was written) rewrites this epic's
+# own two class-C charter lines into dated retractions and adds ten wave-35 grip
+# ledgers that quote the phrasings. Merging it therefore reds this section with
+# 11 UNPINNED + 2 STALE — CORRECTLY: every one of those lines is new text nobody
+# had reviewed when the pin list was cut. It was NOT pre-pinned here, because a
+# pin for a line that does not exist yet is itself STALE and would red this
+# section on THIS branch — the census is a set equality in both directions and
+# cannot be honest about two trees at once.
+#
+# Measured by merging that branch into this one and running --hermetic. Paste
+# these into the list below IN THE SAME COMMIT that merges #9751, and drop the
+# two STALE pins (`ce745c039e38`, `562eb5d348c9`) in that same commit:
+#
+#   89ed1af64d9b  B  bp-cloud-console-hardening-charter.md:1539  wave-5 line, now dated-RETRACTED
+#   6d06875ebcb3  B  bp-cloud-console-hardening-charter.md:4496  wave narrative, now dated-RETRACTED
+#   8d2822b82914  D  cch-w35-merge-half-gate-2026-08-06.md:102   quotes a `grep -rn` PATTERN
+#   dec0a67ac1b9  D  cch-w35-merge-half-gate-2026-08-06.md:117   quotes a `grep -rln` PATTERN
+#   8b9f3eda6f01  D  cch-w35-protection-claim-census-2026-08-06.md:21   the census regex itself
+#   861d369bcaf1  D  cch-w35-protection-claim-census-2026-08-06.md:36   the census regex itself
+#   11f69e5da0b6  D  cch-w35-protection-claim-census-2026-08-06.md:48   names `grep -c` as a pattern
+#   798c02f0775f  C  cch-w35-protection-claim-census-2026-08-06.md:79   dated finding, quotes the claim to retire it
+#   d8eadba2823c  D  cch-w35-protection-claim-census-2026-08-06.md:110  `git grep` demo, a pattern
+#   9578e65e540b  D  cch-w35-protection-claim-census-2026-08-06.md:111  `git grep --untracked` demo, a pattern
+#   041309eecfc1  C  cch-w35-protection-claim-census-2026-08-06.md:126  dated finding about a foreign charter row
+#
+# AND THE STANDING COST THAT DELTA MAKES CONCRETE, so nobody discovers it as a
+# surprise and silences the section: `tooling/grip/ledger/**` is an append-only
+# record directory, so EVERY future ledger that quotes one of these phrasings —
+# including one written to prove this guard — arrives UNPINNED. That is the
+# design (a dated record still gets one human reading before it is exempt), but
+# it is a per-wave chore, and the honest alternative if it stops being paid is
+# to exempt the ledger directory BY SUBJECT the way §13 already does — never to
+# widen the pin list into a rubber stamp or delete the section.
+#
 # THE LIMIT THIS GUARD CANNOT CLOSE, stated here rather than discovered later:
 # THIS IS A PINNED CENSUS, NOT A SEMANTIC DETECTOR. It pins today's members by
 # CONTENT HASH and reds on any NEW instance of the enumerated phrasings — a
