@@ -3106,6 +3106,53 @@ export const SCENARIOS = {
       audit: [],
     },
   },
+  // ── cch-w34-s6 (REVIEW ADDITION): the NEVER-REPORTED box, on screen ────────
+  // The slice made `unreported` reachable and proved it through the pure hooks
+  // and 26 harness assertions — but shipped no fixture, so the one state a
+  // person most wants to LOOK at was the only console state with no fixture at
+  // all. It is also the state that first reaches the `neutral` role, whose
+  // `.instance-card--neutral` rule did not exist until this review — a gap no
+  // amount of hook-level assertion could have surfaced, and that this fixture
+  // surfaced immediately. HONEST SCOPE: it is registered as breakpoint-sweep
+  // RESIDUE, not as a cell — exactly where its sibling `overview-attention`
+  // sits — so it is RENDERED and asserted by smoke.mjs but not width-walked.
+  //
+  // The row is production's own 3-of-8 shape, not an invented one: host set and
+  // provisioning SUCCEEDED, `health_status: "up"` and `agent_status: "offline"`
+  // still carrying the values written at adoption time (cch-w34-s2 fixed the
+  // WRITERS and shipped no backfill, so legacy rows look exactly like this),
+  // `last_seen_at: null`, `unreachable_count: 3`, created 38 days ago. The
+  // point of the fixture is that the cached green "up" is on the row and the
+  // console must NOT print it. `liveInstance` is the kind control beside it.
+  "overview-never-reported": {
+    label: "Overview never-reported — a box the control plane has never heard from names the absence, not a cached health",
+    authed: true,
+    deepLink: "#overview",
+    data: {
+      me: me("Acme Inc", { instance: true, published_doc: true, completed: true }),
+      barkparks: [
+        bpBase({
+          id: "bp-ov-unreported",
+          name: "Archive",
+          slug: "archive",
+          url: "https://archive-5b2c1e.barkpark.cloud",
+          host: "archive-5b2c1e.barkpark.cloud",
+          // The stale cached columns — deliberately the OPTIMISTIC pair.
+          health_status: "up",
+          agent_status: "offline",
+          version: null,
+          last_seen_at: null,
+          unreachable_count: 3,
+          inserted_at: tMinus(38 * 86400),
+          provision_status: "succeeded",
+        }),
+        liveInstance,
+      ],
+      subscription: activeSub,
+      sites: [],
+      audit: [],
+    },
+  },
   "overview-past-due": {
     label: "Overview past-due — GR17 overview dunning banner + the suspended instance-card banner (no runway)",
     authed: true,
