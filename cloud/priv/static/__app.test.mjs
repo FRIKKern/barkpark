@@ -88,6 +88,120 @@ vm.runInContext(
 // (above the older groups) sees the same populated `hooks` as a tail append.
 // Sweeps: move this comment only whole, on its own lines. MARK:zone-console-tests
 
+// ── cch-w36-s1 · THE LAUNCH PAYWALL'S AUTHORITY SEAM ───────────────────────
+// The server refuses two DIFFERENT things on this one screen: launching needs
+// team-ADMIN (go_live's inline gate), paying needs OWNER
+// (Auth.require_primary_team_owner). So the 402 paywall used to hand a team
+// admin a "Choose Supporter" button the server had already decided to refuse,
+// and a plain member's ROLE refusal rendered as "Plan limit reached".
+//
+// These tests drive the REAL renders (a recording container / a #new-body stub)
+// rather than re-implementing their markup — an assertion over a copy of the
+// template would stay green while the shipped template kept the button.
+
+const LAUNCH_CONTAINER = () => ({
+  innerHTML: "",
+  _launchHosting: null,
+  querySelector: () => null,
+  querySelectorAll: () => [],
+});
+
+test("cch-w36-s1: launchCheckoutAuthority is THREE-valued — unknown is not blocked", () => {
+  assert.equal(hooks.launchCheckoutAuthority({ role: "owner" }), "owner");
+  assert.equal(hooks.launchCheckoutAuthority({ role: "admin" }), "blocked");
+  assert.equal(hooks.launchCheckoutAuthority({ role: "member" }), "blocked");
+  // An unloaded /v1/me (the /new flow never loads it) must NOT read as a
+  // refusal — that would strand a real owner on the read-only screen.
+  assert.equal(hooks.launchCheckoutAuthority(null), "unknown");
+  assert.equal(hooks.launchCheckoutAuthority({}), "unknown");
+  assert.equal(hooks.launchCheckoutAuthority({ role: "" }), "unknown");
+});
+
+test("cch-w36-s1: renderLaunchPlan — the owner render carries the CTAs, the admin render carries none", () => {
+  const owner = LAUNCH_CONTAINER();
+  hooks.renderLaunchPlan(owner, { authority: "owner" }, "Prod");
+  assert.match(owner.innerHTML, /class="[^"]*new-plan"[^>]*data-plan="supporter"/);
+  assert.match(owner.innerHTML, /Choose Supporter/);
+  assert.match(owner.innerHTML, /Choose Support\+\+/);
+
+  const admin = LAUNCH_CONTAINER();
+  hooks.renderLaunchPlan(admin, { authority: "blocked" }, "Prod");
+  assert.doesNotMatch(admin.innerHTML, /new-plan/, "no checkout CTA for a principal the server refuses");
+  assert.doesNotMatch(admin.innerHTML, /Choose /, "and no 'Choose <tier>' label anywhere");
+  // Never a disabled ghost — the GR36 plain-member law.
+  assert.doesNotMatch(admin.innerHTML, /disabled/);
+  // The prices stay (it is a read-only state, not a hidden one) and one
+  // sentence names who CAN pay.
+  assert.match(admin.innerHTML, /Supporter/);
+  assert.match(admin.innerHTML, /Only the team owner can start a paid plan/);
+  assert.doesNotMatch(admin.innerHTML, /pick a plan to launch/i, "no instruction the person cannot follow");
+
+  // An unknown role renders exactly like the owner — we withdraw the door only
+  // when the server has actually told us the role.
+  const unknown = LAUNCH_CONTAINER();
+  hooks.renderLaunchPlan(unknown, { authority: "unknown" }, "Prod");
+  assert.match(unknown.innerHTML, /Choose Supporter/);
+});
+
+test("cch-w36-s1: renderNewPricing — the /new 402 screen takes the SAME predicate", () => {
+  const orig = sandbox.document;
+  const slot = { innerHTML: "" };
+  sandbox.document = {
+    ...orig,
+    querySelector: (sel) => (sel === "#new-body" ? slot : null),
+    querySelectorAll: () => [],
+  };
+  const tpl = { slug: "blog", title: "Blog", description: "A blog", what_you_get: [] };
+  try {
+    hooks.renderNewPricing(tpl, "owner");
+    assert.match(slot.innerHTML, /Choose Supporter/);
+
+    hooks.renderNewPricing(tpl, "blocked");
+    assert.doesNotMatch(slot.innerHTML, /new-plan/);
+    assert.doesNotMatch(slot.innerHTML, /Choose /);
+    assert.match(slot.innerHTML, /Only the team owner can start a paid plan/);
+    assert.match(slot.innerHTML, /A paid plan is needed to launch/);
+  } finally {
+    sandbox.document = orig;
+  }
+});
+
+test("cch-w36-s1: the /new launch 403 toast BRANCHES ON THE SLUG, never on the status", () => {
+  // The quota refusal is unchanged — it was the only 403 the old code was
+  // right about, and the server's own copy still leads.
+  const quota = hooks.newLaunchRefusalToast({
+    error: "limit_reached",
+    limit: 1,
+    upgrade_path: "/v1/billing/checkout",
+  });
+  assert.equal(quota.title, "Plan limit reached");
+  assert.match(quota.body, /instance limit/);
+  assert.equal(quota.billingAction, true);
+
+  // The AUTHORITY refusal: no quota was reached, and the role it names is the
+  // one the server actually wants (admin — NOT the owner friendly() would name).
+  const authority = hooks.newLaunchRefusalToast({
+    error: "forbidden",
+    required: "admin",
+    scope: "team",
+  });
+  assert.notEqual(authority.title, "Plan limit reached");
+  assert.doesNotMatch(authority.title + " " + authority.body, /limit/i);
+  assert.match(authority.body, /admin role on this team/);
+  assert.doesNotMatch(authority.body, /owner/i, "launching does not need the owner — saying so is the second lie");
+  assert.equal(authority.billingAction, false, "no 'Open dashboard' CTA — billing is not the fix");
+
+  // A pre-deploy control plane that ships the bare slug still gets an honest
+  // authority sentence, defaulted to the role go_live actually requires.
+  const bare = hooks.newLaunchRefusalToast({ error: "forbidden" });
+  assert.match(bare.body, /admin role on this team/);
+
+  // Anything else stays the neutral fallback — never a fabricated cause.
+  const odd = hooks.newLaunchRefusalToast({ error: "team_suspended" });
+  assert.equal(odd.title, "Couldn't launch");
+  assert.equal(odd.billingAction, false);
+});
+
 // ── cch-w10-oauth-exchange-code · THE OAUTH LANDING GATE ───────────────────
 // This path had ZERO coverage before this group: `handleOAuthReturn` was not in
 // __bpTestHook, and "oauth" appeared in this file exactly twice, both inside one

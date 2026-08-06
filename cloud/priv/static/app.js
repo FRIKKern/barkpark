@@ -13114,25 +13114,67 @@
     });
   }
 
+  // cch-w36-s1 — THE LAUNCH/CHECKOUT AUTHORITY SEAM. Two authorities disagree by
+  // design: launching is TEAM-ADMIN (go_live's inline gate) while paying is
+  // OWNER-only (Auth.require_primary_team_owner). So the 402 paywall hands a
+  // team ADMIN a checkout door the server has already decided to refuse — the
+  // console must not advertise it. The billing page already knows this shape
+  // (renderTiers folds to renderBillingReadOnly for a non-owner); these two plan
+  // grids are the SAME affordance and now take the same predicate.
+  //
+  // THREE-VALUED ON PURPOSE. "unknown" is not "blocked": the /new deploy flow
+  // never loads /v1/me, so a null cache there means we have not been told the
+  // role — hiding checkout on that would refuse a real owner. We only withdraw
+  // the affordance when the server has actually told us the role, and it is not
+  // owner. Pure, node-pinned; the two renders below just paste the string.
+  var LAUNCH_OWNER_ONLY_COPY =
+    "Only the team owner can start a paid plan. Ask them to pick one — you can launch as soon as it's active.";
+
+  function launchCheckoutAuthority(me) {
+    if (!me || typeof me.role !== "string" || !me.role) return "unknown";
+    return billingCanManage(me.role) ? "owner" : "blocked";
+  }
+
+  function launchPlanTierHtml(t, withCta) {
+    return '<div class="new-tier">' +
+      '<div class="new-tier-head"><span class="new-tier-name">' + esc(t.name) + "</span>" +
+        '<span class="new-tier-price">' + esc(t.price) + '<span class="dim">' + esc(t.per) + "</span></span></div>" +
+      '<p class="dim">' + esc(t.note) + "</p>" +
+      (withCta
+        ? '<button class="btn btn-primary btn-block new-plan" data-plan="' + esc(t.plan) + '" type="button">Choose ' + esc(t.name) + "</button>"
+        : "") +
+    "</div>";
+  }
+
+  // The plan grid, authority-honest. An owner (or an unknown role) gets the
+  // CTAs; a principal the server WILL refuse gets the same prices with no dead
+  // button and one sentence naming who can pay — never a disabled ghost (the
+  // GR36 plain-member law).
+  function launchPlanGridHtml(authority) {
+    var withCta = authority !== "blocked";
+    var tiers = PLAN_CATALOG.filter(function (t) { return !t.free; })
+      .map(function (t) { return launchPlanTierHtml(t, withCta); }).join("");
+    return (withCta ? "" : '<p class="dim">' + esc(LAUNCH_OWNER_ONLY_COPY) + "</p>") +
+      '<div class="new-tiers">' + tiers + "</div>";
+  }
+
   // Step 2 (402): the inline plan fold — reuses PLAN_CATALOG + the checkout
   // hand-off. Stashes the typed name so a success return re-enters prefilled.
+  // `opts.authority` is an override seam for the node harness (the live callers
+  // never pass it — the authority is derived from the /v1/me cache).
   function renderLaunchPlan(container, opts, name) {
     try { localStorage.setItem(LAUNCH_RETURN_KEY, name); } catch (x) {}
-    var tiers = PLAN_CATALOG.filter(function (t) { return !t.free; }).map(function (t) {
-      return '<div class="new-tier">' +
-        '<div class="new-tier-head"><span class="new-tier-name">' + esc(t.name) + "</span>" +
-          '<span class="new-tier-price">' + esc(t.price) + '<span class="dim">' + esc(t.per) + "</span></span></div>" +
-        '<p class="dim">' + esc(t.note) + "</p>" +
-        '<button class="btn btn-primary btn-block new-plan" data-plan="' + esc(t.plan) + '" type="button">Choose ' + esc(t.name) + "</button>" +
-      "</div>";
-    }).join("");
+    var authority = opts.authority || launchCheckoutAuthority(meCache);
+    var title = authority === "blocked" ? "A paid plan is needed to launch" : "Choose a plan to launch";
     var hero = opts.runway
-      ? '<span class="new-eyebrow">One more step</span><h2 class="runway-title">Choose a plan to launch</h2>'
-      : '<h2 class="modal-title" id="modal-title">Choose a plan to launch</h2>';
+      ? '<span class="new-eyebrow">One more step</span><h2 class="runway-title">' + esc(title) + "</h2>"
+      : '<h2 class="modal-title" id="modal-title">' + esc(title) + "</h2>";
+    var lead = authority === "blocked"
+      ? "Your free trial isn't available, so launching " + esc(name) + " needs a paid plan."
+      : "Your free trial isn't available — pick a plan to launch " + esc(name) + ". Cancel anytime.";
     var inner = hero +
-      '<p class="dim launch-plan-lead">Your free trial isn\'t available — pick a plan to launch ' +
-        esc(name) + ". Cancel anytime.</p>" +
-      '<div class="new-tiers">' + tiers + "</div>" +
+      '<p class="dim launch-plan-lead">' + lead + "</p>" +
+      launchPlanGridHtml(authority) +
       '<button class="btn btn-ghost btn-block launch-plan-back" type="button">Back</button>';
     container.innerHTML = launchFlowShell(inner, opts);
     container.querySelectorAll(".new-plan").forEach(function (b) {
@@ -13152,8 +13194,10 @@
     // In the modal the submit button just vanished under the fold — move focus
     // into the new content so keyboard users aren't dropped on <body>.
     if (opts.modal) {
-      var firstPlan = container.querySelector(".new-plan");
-      if (firstPlan) firstPlan.focus();
+      // With no plan CTA (a refused principal) the Back button is the only
+      // focusable thing left — never drop the keyboard user on <body>.
+      var firstFocus = container.querySelector(".new-plan") || container.querySelector(".launch-plan-back");
+      if (firstFocus) firstFocus.focus();
     }
     var back = container.querySelector(".launch-plan-back");
     if (back) back.addEventListener("click", function () {
@@ -16141,6 +16185,34 @@
     $("#new-launch-form").addEventListener("submit", newLaunch);
   }
 
+  // cch-w36-s1: POST /v1/launch answers 403 for TWO different reasons and the
+  // slug — never the status — decides which sentence is true. `limit_reached` is
+  // the quota refusal (an actionable upgrade, dashboard link). A bare
+  // `forbidden` is go_live's ROLE refusal, which a quota title would misreport
+  // twice over: no quota was reached, and friendly()'s stock forbidden copy
+  // names the OWNER when launching only needs an admin. The server now ships the
+  // authority it wants (`required`/`scope`), so the copy can name it.
+  function newLaunchRefusalToast(data) {
+    var slug = data && data.error;
+    if (slug === "limit_reached") {
+      return {
+        title: "Plan limit reached",
+        body: friendly(data, "You're at your plan's instance limit."),
+        billingAction: true
+      };
+    }
+    if (slug === "forbidden") {
+      var role = (data && typeof data.required === "string" && data.required) || "admin";
+      return {
+        title: "You can't launch for this team",
+        body: "Launching needs the " + role + " role on this team. Ask a team " + role +
+          " to launch it, or to give you that role.",
+        billingAction: false
+      };
+    }
+    return { title: "Couldn't launch", body: friendly(data, "Please try again."), billingAction: false };
+  }
+
   function newLaunch(e) {
     e.preventDefault();
     var btn = $("#new-launch-btn");
@@ -16160,8 +16232,11 @@
         newStartProgress(r.data.barkpark.id); // already provisioning → jump to its progress
       } else if (r.status === 403) {
         btn.disabled = false; btn.textContent = "Launch";
-        toast({ kind: "error", title: "Plan limit reached", body: friendly(r.data, "You're at your plan's instance limit."),
-          action: { label: "Open dashboard", onClick: function () { location.href = "/#billing"; } } });
+        var refusal = newLaunchRefusalToast(r.data);
+        toast({ kind: "error", title: refusal.title, body: refusal.body,
+          action: refusal.billingAction
+            ? { label: "Open dashboard", onClick: function () { location.href = "/#billing"; } }
+            : null });
       } else {
         btn.disabled = false; btn.textContent = "Launch";
         toast({ kind: "error", title: "Couldn't launch", body: friendly(r.data, "Please try again.") });
@@ -16170,27 +16245,56 @@
   }
 
   // ---- Step: pricing (402 — price visible before any charge) ----------------
-  function renderNewPricing(tpl) {
-    var tiers = PLAN_CATALOG.filter(function (t) { return !t.free; }).map(function (t) {
-      return '<div class="new-tier">' +
-        '<div class="new-tier-head"><span class="new-tier-name">' + esc(t.name) + "</span>" +
-          '<span class="new-tier-price">' + esc(t.price) + '<span class="dim">' + esc(t.per) + "</span></span></div>" +
-        '<p class="dim">' + esc(t.note) + "</p>" +
-        '<button class="btn btn-primary btn-block new-plan" data-plan="' + esc(t.plan) + '" type="button">Choose ' + esc(t.name) + "</button>" +
-      "</div>";
-    }).join("");
+  // cch-w36-s1: the same authority seam as the dashboard's inline plan fold —
+  // checkout is owner-only, launching is admin, so this screen must not offer a
+  // door the server will refuse. The /new flow never loads /v1/me (it returns
+  // before the dashboard shell boots), so this screen asks for the role ITSELF,
+  // once, and re-renders if the answer is "not the owner". Until that answer
+  // lands the authority is "unknown" and the CTAs stand — an unknown role must
+  // never be rendered as a refusal.
+  function renderNewPricing(tpl, authority) {
+    var known = authority || "unknown";
+    var blocked = known === "blocked";
+    var tiers = launchPlanGridHtml(known);
     newSetBody(newPanel(newTemplateHead(tpl) +
-      '<div class="new-pricing"><h2>Choose a plan to launch</h2>' +
-      '<p class="dim">Your free trial has been used. Pick a plan to launch — cancel anytime.</p>' +
-      '<div class="new-tiers">' + tiers + "</div></div>"));
+      '<div class="new-pricing"><h2>' +
+        esc(blocked ? "A paid plan is needed to launch" : "Choose a plan to launch") + "</h2>" +
+      '<p class="dim">' +
+        esc(blocked
+          ? "Your free trial has been used."
+          : "Your free trial has been used. Pick a plan to launch — cancel anytime.") + "</p>" +
+      tiers + "</div>"));
+    if (!authority) {
+      // One read, only on this screen, and only when the authority is still
+      // unknown — a failed read leaves the CTAs standing (unknown, not refused).
+      api("GET", "/v1/me").then(function (r) {
+        var resolved = r.ok && r.data ? launchCheckoutAuthority(r.data) : "unknown";
+        if (resolved !== "blocked") return;
+        // REVIEW (cch-w36-s1-r): the answer can land after the person has moved
+        // on — a plan click already opened checkout, or a resume jumped the flow
+        // to progress. newSetBody writes into #new-body whatever step is on
+        // screen, so repaint ONLY while this screen is still the one mounted and
+        // no checkout is in flight; otherwise the honest read would clobber a
+        // different step (or destroy an "Opening checkout…" button mid-request).
+        var body = $("#new-body");
+        if (!body || typeof body.querySelector !== "function") return;
+        if (!body.querySelector(".new-pricing")) return;
+        if (body.querySelector(".new-plan[disabled]")) return;
+        renderNewPricing(tpl, resolved);
+      });
+    }
     document.querySelectorAll(".new-plan").forEach(function (b) {
+      var label = b.textContent; // "Choose <Tier>" — restored after an error
       b.addEventListener("click", function () {
         b.disabled = true; b.textContent = "Opening checkout…";
         try { localStorage.setItem(NEW_RETURN_KEY, tpl.slug); } catch (x) {}
         api("POST", "/v1/billing/checkout", { plan: b.getAttribute("data-plan") }).then(function (r) {
           if (r.status === 200 && r.data && r.data.checkout_url) { window.location = r.data.checkout_url; }
           else {
-            b.disabled = false; b.textContent = "Choose";
+            // REVIEW (cch-w36-s1-r): was a bare "Choose", which silently renamed
+            // every tier button after one failed checkout. The dashboard fold
+            // (renderLaunchPlan) already restores the real label; match it.
+            b.disabled = false; b.textContent = label;
             try { localStorage.removeItem(NEW_RETURN_KEY); } catch (x) {}
             toast({ kind: "error", title: "Couldn't open checkout", body: friendly(r.data, "Please try again.") });
           }
@@ -20439,6 +20543,16 @@
       // line is legal inside an object literal). Only reference helpers
       // declared above -- this object is built once, at eval tail. Sweeps:
       // move this comment only whole, on its own lines. MARK:zone-console-hook-map
+      // cch-w36-s1 — the launch/checkout authority seam: the three-valued
+      // predicate, the shared plan grid, the slug-branched /new 403 copy, and
+      // BOTH plan renders themselves (driven with a recording container /
+      // #new-body stub, so the assertion is over the real render's markup and
+      // not a re-implementation of it).
+      launchCheckoutAuthority: launchCheckoutAuthority,
+      launchPlanGridHtml: launchPlanGridHtml,
+      newLaunchRefusalToast: newLaunchRefusalToast,
+      renderLaunchPlan: renderLaunchPlan, renderNewPricing: renderNewPricing,
+      launchOwnerOnlyCopy: LAUNCH_OWNER_ONLY_COPY,
       // cch-w31-s4 follow-up: api() ITSELF, so the response envelope is drivable
       // from node against a stub instead of only being read as source text. The
       // source-regex pin cannot see a body-recovery arm that is short-circuited
