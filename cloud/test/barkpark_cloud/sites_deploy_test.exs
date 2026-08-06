@@ -78,6 +78,23 @@ defmodule BarkparkCloud.SitesDeployTest do
 
   defp all_stages, do: Deploy.stages()
 
+  # THE POOL BLIP, byte-for-byte. A `DBConnection.ConnectionError` on the deploy
+  # door's auth plug never reaches `action_fallback` — Phoenix's RenderErrors
+  # layer renders it through `BarkparkWeb.ErrorJSON`, which collapses ANY
+  # unhandled fault to the UNTYPED `internal_error / "unknown error"` envelope
+  # (`Barkpark.Content.Errors`), request_id stamped from Logger metadata. It is
+  # the shape a transient answer has, and the only 5xx shape that earns grace.
+  defp crash_500(request_id \\ "F9-pool-blip") do
+    {:ok, 500,
+     %{
+       "error" => %{
+         "code" => "internal_error",
+         "message" => "unknown error",
+         "request_id" => request_id
+       }
+     }}
+  end
+
   # Move a row out of the ACTIVE set. deploy-truth W1 re-keyed the active-
   # deployment index onto (site_id, environment), so at most ONE queued/building/
   # pushing production build per site can exist — a test that wants a second one
@@ -874,6 +891,182 @@ defmodule BarkparkCloud.SitesDeployTest do
       final = Repo.get(Deployment, d.id)
       assert final.status == "live"
       assert Repo.get(Site, site.id).current_deployment_id == d.id
+    end
+
+    # deploy-truth W2 — THE POOL BLIP. The box's 500s on this door are not box
+    # faults at all: they are `DBConnection.ConnectionError` (Postgres pool
+    # starvation, dominated by SEARCH) crashing the deploy door's OWN auth plug
+    # and rendered by the CRASH path into the UNTYPED `internal_error / unknown
+    # error` envelope. 91% of them land on the POLL arm — where the loop used to
+    # be terminal on the first one, so a blip on beat 37 of a nearly-finished
+    # build killed it, exactly as the first-blip `{:error, _}` fail used to.
+    # A transient answer now buys the same bounded grace a transient silence does.
+    test "one untyped 5xx poll beat no longer kills a build that then finishes" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          crash_500(),
+          FakeBoxRelay.walk(all_stages(), url: "#{@instance_url}/sites/#{site.slug}/")
+        ]
+      )
+
+      assert {:ok, :live} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "live"
+      assert final.stage == "RETIRE"
+      assert Repo.get(Site, site.id).current_deployment_id == d.id
+    end
+
+    # THE DISCRIMINATION, and the reason this is not the minimal arm: grace is
+    # scoped to the UNTYPED crash envelope. A box that answers a TYPED 500 —
+    # `runner_start_failed` is one `SiteDeployController` documents — is stating a
+    # real fault about itself, and waiting 45 beats to repeat it would only make
+    # the user wait for a verdict the box already gave. It stays terminal on the
+    # FIRST beat: one poll, then failed.
+    test "a TYPED box 500 is still terminal on the first beat — grace is only for the untyped crash envelope" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        polls: [
+          {:ok, 500,
+           %{
+             "error" => %{
+               "code" => "runner_start_failed",
+               "message" => "could not spawn site-deploy.sh"
+             }
+           }}
+        ]
+      )
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "failed"
+      assert final.failure_reason =~ "runner_start_failed"
+      assert final.failure_reason =~ "could not spawn"
+      # No grace was burned: exactly ONE poll happened before the verdict.
+      assert Enum.count(FakeBoxRelay.calls(), &match?({:poll_deploy, _}, &1)) == 1
+    end
+
+    # The other half of the bargain: an untyped 5xx that NEVER clears is a real
+    # box fault wearing a transient shape, so the grace must still be able to
+    # fail — and the refusal it swallowed on the way must SURFACE, counted, in
+    # the caption. Grace (3) + the terminal beat = 4 polls, then failed.
+    test "an untyped 5xx that never clears exhausts the grace and names the refusals it swallowed" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(polls: [crash_500()])
+
+      assert {:ok, :failed} = Deploy.run(d.id)
+
+      final = Repo.get(Deployment, d.id)
+      assert final.status == "failed"
+      # The box's own words, the phase, and the swallowed count all travel.
+      assert final.failure_reason =~ "internal_error"
+      assert final.failure_reason =~ "HTTP 500"
+      assert final.failure_reason =~ "build poll"
+      assert final.failure_reason =~ "3 transient box 5xx"
+      # Bounded: grace (3) + the beat that spends the last of it.
+      assert Enum.count(FakeBoxRelay.calls(), &match?({:poll_deploy, _}, &1)) == 4
+      assert is_nil(Repo.get(Site, site.id).current_deployment_id)
+    end
+
+    # 2,544 refusal rows say "the instance refused the deploy (HTTP 500)" and
+    # nothing else — they cannot be told apart from each other, cannot be told
+    # apart from a START refusal, and cannot be joined to the box journal that
+    # holds the stack trace. The caption now carries the PHASE and the box's own
+    # `request_id` (the envelope has always had it; `refusal_detail/1` dropped it).
+    test "a refusal caption names its phase and carries the box's request_id" do
+      {bp, site} = setup_site()
+
+      # START: the box refuses the trigger itself.
+      {:ok, d1} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start:
+          {:ok, 400,
+           %{
+             "error" => %{
+               "code" => "E_NO_INDEX",
+               "message" => "the archive has no index.html",
+               "request_id" => "F9-start-abc"
+             }
+           }}
+      )
+
+      assert {:ok, :failed} = Deploy.run(d1.id)
+      start_reason = Repo.get(Deployment, d1.id).failure_reason
+      assert start_reason =~ "refused the deploy"
+      assert start_reason =~ "E_NO_INDEX"
+      assert start_reason =~ "request_id: F9-start-abc"
+
+      # POLL: the box accepted the build, then refused a beat of it. Same helper,
+      # a caption a reader (and a journal join) can tell apart.
+      {:ok, d2} = Deploy.enqueue(site, bp, true, "content-auto")
+
+      FakeBoxRelay.program(
+        polls: [
+          {:ok, 503,
+           %{
+             "error" => %{
+               "code" => "feature_not_configured",
+               "message" => "site deploys are disabled on this instance",
+               "request_id" => "F9-poll-xyz"
+             }
+           }}
+        ]
+      )
+
+      assert {:ok, :failed} = Deploy.run(d2.id)
+      poll_reason = Repo.get(Deployment, d2.id).failure_reason
+      assert poll_reason =~ "refused the build poll"
+      assert poll_reason =~ "feature_not_configured"
+      assert poll_reason =~ "request_id: F9-poll-xyz"
+      # The two phases are genuinely distinguishable, which is the whole point.
+      refute poll_reason =~ "refused the deploy"
+    end
+
+    # The START arm gets the same grace — and it is safe BY CONSTRUCTION, which
+    # is what this test pins. If the pool blip ate the RESPONSE but the box did
+    # start the run, the retry hits a slug that is already in flight and the box
+    # answers 409 `already_running` — which charter D9 already converts into a
+    # counted `deferred` row plus a re-fired debounce. So the worst case of a
+    # start retry is a DEFERRAL, never a second build.
+    test "a start retry that races an in-flight slug degrades to a counted deferral, never a second build" do
+      {bp, site} = setup_site()
+      {:ok, d} = Deploy.enqueue(site, bp)
+
+      FakeBoxRelay.program(
+        start: [
+          # The blip: the response died on the pool, but the box took the job.
+          crash_500(),
+          # The retry meets the run it already started.
+          {:ok, 409, %{"error" => %{"code" => "already_running", "message" => "already running"}}}
+        ]
+      )
+
+      assert {:ok, :deferred} = Deploy.run(d.id)
+
+      row = Repo.get(Deployment, d.id)
+      assert row.status == "deferred"
+      assert row.failure_reason =~ "already_running"
+      assert row.failure_reason =~ "re-queued"
+
+      # Exactly two trigger calls, both naming the SAME build — the retry is a
+      # retry, not a second build.
+      starts = for {:start_deploy, payload} <- FakeBoxRelay.calls(), do: payload
+      assert length(starts) == 2
+      build_ids = starts |> Enum.map(fn p -> p[:build_id] || p["build_id"] end) |> Enum.uniq()
+      assert build_ids == [d.build_id]
+      # And ONE deployment row for this site, not two.
+      assert length(Registry.list_deployments(site, 10)) == 1
+      # …with the debounced rebuild the deferral promises.
+      assert [_job] = pending_auto_deploy_jobs(site.id)
     end
   end
 

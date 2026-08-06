@@ -637,7 +637,23 @@ defmodule BarkparkCloud.Sites.Deploy do
     end
   end
 
-  defp start_on_box(ctx, %Deployment{} = deployment, %Site{} = site, %Barkpark{} = bp, read_token) do
+  defp start_on_box(
+         ctx,
+         %Deployment{} = deployment,
+         %Site{} = site,
+         %Barkpark{} = bp,
+         read_token
+       ),
+       do: start_on_box(ctx, deployment, site, bp, read_token, start_retries())
+
+  defp start_on_box(
+         ctx,
+         %Deployment{} = deployment,
+         %Site{} = site,
+         %Barkpark{} = bp,
+         read_token,
+         retries_left
+       ) do
     case BoxRelay.start_deploy(bp, deploy_payload(deployment, site, bp, read_token)) do
       {:ok, status, body} when status in 200..299 ->
         case prebuilt_echo(deployment, body) do
@@ -652,10 +668,28 @@ defmodule BarkparkCloud.Sites.Deploy do
       # every recovery pass and nothing re-enqueued. It becomes a COUNTED
       # `deferred` row plus a re-fired debounce instead.
       {:ok, 409, body} ->
-        defer(ctx, deployment, box_refusal(409, body))
+        defer(ctx, deployment, box_refusal(409, body, :start))
+
+      # THE POOL BLIP ON THE TRIGGER (deploy-truth W2). An UNTYPED 5xx is not the
+      # box saying no — it is the door's own auth plug dying on a starved
+      # Postgres pool and being rendered by the crash path (see
+      # `transient_refusal?/1`). Retrying is safe BY CONSTRUCTION: if the blip
+      # ate only the RESPONSE and the box did take the job, the retry meets a
+      # slug already in flight and the box answers 409 `already_running` — which
+      # the clause above already turns into a counted deferral plus a re-fired
+      # debounce. So the worst case of a start retry is a DEFERRAL, never a
+      # second build. A TYPED 5xx is the box stating a real fault about itself
+      # and stays terminal on the first answer.
+      {:ok, status, body} when status >= 500 ->
+        if retries_left > 0 and transient_refusal?(body) do
+          Process.sleep(poll_ms())
+          start_on_box(ctx, deployment, site, bp, read_token, retries_left - 1)
+        else
+          fail(ctx, box_refusal(status, body, :start))
+        end
 
       {:ok, status, body} ->
-        fail(ctx, box_refusal(status, body))
+        fail(ctx, box_refusal(status, body, :start))
 
       {:error, reason} ->
         fail(ctx, unreachable(bp, reason))
@@ -844,14 +878,17 @@ defmodule BarkparkCloud.Sites.Deploy do
     do:
       fail(
         ctx,
-        "the build did not finish in time — the box is still working, or it stalled; deploy again to retry"
+        with_graced_note(
+          ctx,
+          "the build did not finish in time — the box is still working, or it stalled; deploy again to retry"
+        )
       )
 
   defp poll(ctx, build_id, left, grace_left) do
     case BoxRelay.poll_deploy(ctx.bp, ctx.site.slug, build_id) do
       {:ok, status, body} when status in 200..299 ->
         report = normalize_report(body)
-        ctx = apply_stages(ctx, report.stages)
+        ctx = ctx |> forget_graced_refusals() |> apply_stages(report.stages)
 
         case report.state do
           :succeeded -> settle_live(ctx, report)
@@ -864,10 +901,37 @@ defmodule BarkparkCloud.Sites.Deploy do
       # picked up) — keep waiting rather than inventing a failure. Reachable, so
       # the grace budget resets here too.
       {:ok, 404, _body} ->
-        sleep_then_poll(ctx, build_id, left - 1, poll_grace())
+        sleep_then_poll(ctx |> forget_graced_refusals(), build_id, left - 1, poll_grace())
+
+      # THE POOL BLIP (deploy-truth W2). 91% of this door's 500s land HERE, and
+      # none of them are the box refusing anything: they are
+      # `DBConnection.ConnectionError` — a starved Postgres pool (SEARCH is the
+      # dominant consumer) crashing the deploy door's OWN auth plug, rendered by
+      # Phoenix's RenderErrors path (`ErrorJSON`, which never reaches
+      # `action_fallback`) into the UNTYPED `internal_error / unknown error`
+      # envelope. Terminating on the first one killed builds on beat 37 of 45 for
+      # a defect the deploy path does not own — the exact grenade the `{:error, _}`
+      # grace below already defuses for a transient SILENCE. A transient ANSWER
+      # now buys the same bounded budget.
+      #
+      # It is DISCRIMINATING, not blanket: only the untyped crash envelope is
+      # graced (`transient_refusal?/1`), so a TYPED 5xx (`runner_start_failed`,
+      # the box stating a real fault about itself) is still terminal on the first
+      # beat. And the swallowed refusals are RECORDED, so if the untyped 5xx
+      # never clears, the failure that lands names the box's own last words and
+      # how many were tolerated first — grace hides nothing, it only waits.
+      {:ok, status, body} when status >= 500 and grace_left > 0 ->
+        refusal = box_refusal(status, body, :poll)
+
+        if transient_refusal?(body) do
+          Process.sleep(poll_ms())
+          poll(record_graced_refusal(ctx, refusal), build_id, left, grace_left - 1)
+        else
+          fail(ctx, refusal)
+        end
 
       {:ok, status, body} ->
-        fail(ctx, box_refusal(status, body))
+        fail(ctx, with_graced_note(ctx, box_refusal(status, body, :poll)))
 
       # A restart-shaped blip: the box was unreachable this beat. Spend GRACE (not
       # build budget) and re-poll — `left` is untouched, so a long restart never
@@ -880,7 +944,44 @@ defmodule BarkparkCloud.Sites.Deploy do
       # with the box's own unreachable reason — exactly the pre-grace behaviour,
       # now only after the restart window has closed.
       {:error, reason} ->
-        fail(ctx, unreachable(ctx.bp, reason))
+        fail(ctx, with_graced_note(ctx, unreachable(ctx.bp, reason)))
+    end
+  end
+
+  # `failure_reason` is `:text` and holds the WHOLE story; `detail` is the
+  # varchar(255) latest-wins caption the site page renders under the status pill.
+  # A reason that carries the box's own words plus a request_id plus a graced
+  # count can outgrow 255 — and an over-long `detail` does not truncate, it
+  # RAISES (22001) inside the terminal transition, which would lose the very
+  # failure it was trying to record. Clamped here, once, for both terminal
+  # writers.
+  defp short_detail(reason) when is_binary(reason) do
+    if String.length(reason) > 255, do: String.slice(reason, 0, 254) <> "…", else: reason
+  end
+
+  defp short_detail(reason), do: reason
+
+  # The graced-refusal ledger, carried on `ctx` (a plain map) so the loop's two
+  # budgets keep their arities. It is CLEARED by any poll that reached the box —
+  # the same reset rule `grace_left` follows, so an old blip never colours a
+  # later, unrelated verdict.
+  defp record_graced_refusal(ctx, caption) do
+    ctx
+    |> Map.update(:graced_refusals, 1, &(&1 + 1))
+    |> Map.put(:last_graced_refusal, caption)
+  end
+
+  defp forget_graced_refusals(ctx), do: Map.drop(ctx, [:graced_refusals, :last_graced_refusal])
+
+  # Grace waits; it never hides. Whatever finally fails the row says how many
+  # transient 5xx were tolerated on the way and what the last one said.
+  defp with_graced_note(ctx, reason) do
+    case {Map.get(ctx, :graced_refusals), Map.get(ctx, :last_graced_refusal)} do
+      {n, last} when is_integer(n) and is_binary(last) ->
+        "#{reason} (after tolerating #{n} transient box 5xx; the last was: #{last})"
+
+      _ ->
+        reason
     end
   end
 
@@ -1090,7 +1191,7 @@ defmodule BarkparkCloud.Sites.Deploy do
           Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
             status: "deferred",
             failure_reason: detail,
-            detail: detail
+            detail: short_detail(detail)
           })
 
         outcome =
@@ -1149,7 +1250,7 @@ defmodule BarkparkCloud.Sites.Deploy do
       Registry.transition_deployment_fenced(ctx.id, ctx.worker, ctx.epoch, %{
         status: "failed",
         failure_reason: reason,
-        detail: reason
+        detail: short_detail(reason)
       })
 
     # `failed` is terminal too — the row is never re-driven (the reaper only
@@ -1164,12 +1265,71 @@ defmodule BarkparkCloud.Sites.Deploy do
 
   # A box that answered, but said no. Its own words travel — never a generic
   # "deploy failed".
-  defp box_refusal(status, body) when is_map(body) do
-    case refusal_detail(body) do
-      d when is_binary(d) and d != "" -> "the instance refused the deploy (HTTP #{status}): #{d}"
-      _ -> "the instance refused the deploy (HTTP #{status})"
+  #
+  # deploy-truth W2: the caption also names WHICH PHASE refused and carries the
+  # box's `request_id`. Both were missing, and 2,544 rows paid for it: this
+  # helper is called identically from the START arm and from every poll beat, so
+  # "the instance refused the deploy (HTTP 500)" could not be told apart from
+  # "…refused beat 37 of 45", and with no request_id no row could be joined to
+  # the box journal that holds the actual stack trace. `failure_reason` is
+  # `:text`, so both fold in with NO migration and no new column.
+  defp box_refusal(status, body, phase) when is_map(body) do
+    base =
+      case phase do
+        :start -> "the instance refused the deploy (HTTP #{status})"
+        :poll -> "the instance refused the build poll (HTTP #{status})"
+      end
+
+    base =
+      case refusal_detail(body) do
+        d when is_binary(d) and d != "" -> "#{base}: #{d}"
+        _ -> base
+      end
+
+    case request_id(body) do
+      nil -> base
+      rid -> "#{base} [box request_id: #{rid}]"
     end
   end
+
+  # The box's own request id, as `Barkpark.Content.Errors.put_request_id/2`
+  # stamps it from Logger metadata — nested inside the typed envelope, or flat on
+  # the bodies `relay_with/5`'s fallback produces.
+  defp request_id(body) when is_map(body) do
+    nested =
+      case body["error"] do
+        %{} = err -> err["request_id"] || err["requestId"]
+        _ -> nil
+      end
+
+    string_or_nil(nested || body["request_id"])
+  end
+
+  defp request_id(_), do: nil
+
+  # Is this 5xx the box refusing, or the DOOR dying?
+  #
+  # A refusal the box AUTHORED carries a code it chose (`runner_start_failed`,
+  # `feature_not_configured`, …): it is a verdict about this build and repeating
+  # the question cannot change it. The pool-starvation 500 has no author — the
+  # crash path collapses every unhandled fault to the generic `internal_error`
+  # constant with the message "unknown error". That, and only that, is what the
+  # grace budget is for. An untyped body with no code at all counts too: the
+  # bodies `relay_with/5` synthesises for an undecodable 5xx are equally
+  # authorless.
+  defp transient_refusal?(body) when is_map(body) do
+    case refusal_code(body) do
+      nil -> true
+      "internal_error" -> true
+      _ -> false
+    end
+  end
+
+  defp transient_refusal?(_), do: false
+
+  defp refusal_code(%{"error" => %{} = err}), do: string_or_nil(err["code"])
+  defp refusal_code(body) when is_map(body), do: string_or_nil(body["code"])
+  defp refusal_code(_), do: nil
 
   # site-spawner W10: the box renders its typed refusals NESTED —
   # `BarkparkWeb.SiteDeployController.bad_request/3` (and its
@@ -1687,6 +1847,14 @@ defmodule BarkparkCloud.Sites.Deploy do
   # a genuinely dead box still fails inside a couple of minutes. Config-defaulted
   # so tests can shrink it to a handful.
   defp poll_grace, do: Application.get_env(:barkpark_cloud, :site_deploy_poll_grace, 45)
+
+  # How many times an UNTYPED 5xx on the START trigger is retried before the row
+  # fails. Deliberately small: unlike a poll beat (where a finished build is on
+  # the line), nothing has been built yet, and the retry's worst case is a 409
+  # that becomes a counted deferral — so a handful of attempts across a pool blip
+  # is enough, and a box that keeps crash-500ing still gets a verdict in seconds.
+  defp start_retries,
+    do: Application.get_env(:barkpark_cloud, :site_deploy_start_retries, 3)
 
   defp worker_id, do: "site-deploy-#{System.unique_integer([:positive])}@#{node()}"
 end
