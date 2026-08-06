@@ -2247,6 +2247,165 @@ test("gr-p5: operatorPageHtml composes the four cards, each with its own body sl
   assert.ok(!/Suspend|Decommission|Archive|Delete instance/i.test(html), "no lifecycle admin verbs");
 });
 
+// ── cch-w36-s4: the refusal has a voice, and the funnel keeps the status ─────
+// Charter D411 carves ONE additive emission out of GR49's fail-closed bounce,
+// fenced three ways: GR9 untouched (the sentence names the PLATFORM principal,
+// never a team role), fail-closed unweakened (routing byte-identical, the
+// unloaded-me arm still WAITS), and it must never say "ask your team owner" —
+// a platform allowlist is not team-grantable, and pointing at a team owner is
+// charter D386's wrong remedy on a new screen.
+
+test("cch-w36-s4: operatorReadFault tells FOUR classes apart — a 403 is an authority determination, not a transport story", () => {
+  assert.equal(hooks.operatorReadFault({ ok: true, status: 200, data: {} }), null, "an answer has no fault");
+  assert.equal(hooks.operatorReadFault(null), null, "no response, no invented fault");
+
+  const denied = hooks.operatorReadFault({ ok: false, status: 403, data: { error: "forbidden" } });
+  assert.equal(denied.kind, "denied");
+  assert.match(denied.text, /refused this read \(403\)/, "the determination is named as a determination");
+  assert.match(denied.text, /platform_operator/, "it names the principal the server itself emits");
+  assert.match(denied.text, /That says nothing about the fleet itself/, "and it claims nothing about the fleet");
+
+  const expired = hooks.operatorReadFault({ ok: false, status: 401, data: {} });
+  assert.equal(expired.kind, "expired");
+  assert.match(expired.text, /no longer accepted here \(401\)/);
+  assert.doesNotMatch(expired.text, /platform_operator/, "an expired session is not an allowlist verdict");
+
+  const dead = hooks.operatorReadFault({ ok: false, status: 0, data: { error: "network_error" }, transport: "unreachable" });
+  assert.equal(dead.kind, "unreachable");
+  assert.match(dead.text, /never reached the control plane/);
+
+  // A 5xx and an older control plane's 404 DEFER: "it didn't answer" is the true
+  // sentence for both, and it is the card's own to say.
+  // (Field-wise, not deepEqual: the sandbox's objects are cross-realm.)
+  const server = hooks.operatorReadFault({ ok: false, status: 500, data: {} });
+  assert.equal(server.kind, "server");
+  assert.equal(server.text, null, "a 5xx defers to the card's own 'it didn't answer'");
+  const older = hooks.operatorReadFault({ ok: false, status: 404, data: {} });
+  assert.equal(older.kind, "other");
+  assert.equal(older.text, null, "an older control plane's 404 defers too");
+});
+
+test("cch-w36-s4: operatorCardBody is the ONE funnel — all four cards speak the allowlist under a 403 and their own line under a 500", () => {
+  const cards = {
+    brake: (d) => hooks.operatorBrakeCardHtml(d),
+    canary: (d) => hooks.operatorCanaryCardHtml(d),
+    warm: (d) => hooks.operatorWarmPoolCardHtml(d),
+    digest: (d) => hooks.operatorDigestCardHtml(d && d.deliveries),
+  };
+  const forbidden = { ok: false, status: 403, data: { error: "forbidden" } };
+  const boom = { ok: false, status: 500, data: {} };
+  const offline = { ok: false, status: 0, data: { error: "network_error" }, transport: "unreachable" };
+
+  for (const [name, render] of Object.entries(cards)) {
+    const denied = hooks.operatorCardBody(forbidden, render);
+    assert.match(denied, /platform_operator/, name + " names the authority under a 403");
+    assert.match(denied, /refused this read \(403\)/, name + " says it was refused, not unanswered");
+    assert.ok(!/didn't answer/.test(denied), name + " must NOT call a determined 403 a failure to answer");
+    assert.ok(!/couldn't read it/.test(denied), name + " must not blame its own reading for a refusal");
+
+    const unread = hooks.operatorCardBody(boom, render);
+    assert.match(unread, /didn't answer/, name + " keeps its honest degrade under a 5xx");
+    assert.ok(!/platform_operator/.test(unread), name + " never blames the allowlist for a 5xx");
+
+    assert.match(hooks.operatorCardBody(offline, render), /never reached the control plane/,
+      name + " distinguishes a request that never landed");
+  }
+
+  // An OK read is byte-identical to the old ternary: the card's own render, its
+  // own data — the funnel adds no arm to the success path.
+  assert.equal(
+    hooks.operatorCardBody({ ok: true, status: 200, data: { ready: 2 } }, cards.warm),
+    hooks.operatorWarmPoolCardHtml({ ready: 2 }),
+  );
+
+  // AIM: operatorPaint routes through the funnel. The old collapsing ternary,
+  // which handed every card the same null whatever the control plane said, is
+  // gone from the file — reverting it reds HERE, not only in smoke.
+  assert.match(APP_SRC, /slot\.innerHTML = operatorCardBody\(r, render\);/,
+    "the one funnel is the one assignment");
+  assert.equal((APP_SRC.match(/render\(r\.ok \? r\.data : null\)/g) || []).length, 0,
+    "the status-destroying ternary is gone");
+});
+
+test("cch-w36-s4 (D411): the fail-closed bounce EMITS one refusal — routing untouched, and it never sends anyone to a team owner", () => {
+  // GR9 fence: the sentence names the PLATFORM principal and no team role.
+  const copy = hooks.OPERATOR_ALLOWLIST_COPY;
+  assert.match(copy, /platform_operator/, "the principal the server itself emits");
+  assert.match(copy, /No team role grants it/, "and the fact that no team action can");
+  for (const wrong of [/ask your team owner/i, /contact your team owner/i, /ask the team owner/i, /manage billing/i])
+    assert.doesNotMatch(copy, wrong, "a platform allowlist is not a team remedy (charter D386)");
+  assert.ok(!/\bowner or admin\b/i.test(copy) && !/\badmin\b/i.test(copy),
+    "the owner/admin family is a different axis and is never invoked here");
+
+  const deny = APP_SRC.match(/if \(!operatorRouteAllowed\(meCache\)\) \{[\s\S]*?\n    \}\n/);
+  assert.ok(deny, "the deny branch is still the branch");
+  const branch = deny[0];
+  // FAIL-CLOSED, UNWEAKENED: every routing byte still there, in order.
+  assert.match(branch, /body\.innerHTML = "";/, "the body is still blanked");
+  assert.match(branch, /if \(location\.hash !== "#overview"\) location\.hash = "#overview";/, "the hash still flips");
+  assert.match(branch, /applyRoute\(\);/, "the bounce is still synchronous");
+  // ADDITIVE: the sentence rides the toast stack, never #operator-body, and is
+  // emitted AFTER the bounce so the repaint cannot swallow it.
+  assert.match(branch, /toast\(\{/, "the refusal is emitted");
+  assert.match(branch, /OPERATOR_ALLOWLIST_COPY/, "and it is the allowlist sentence");
+  assert.ok(branch.indexOf("applyRoute()") < branch.indexOf("toast({"), "emitted after the bounce, not instead of it");
+  assert.ok(!/body\.innerHTML =[^;]*toast/.test(branch) && (branch.match(/body\.innerHTML/g) || []).length === 1,
+    "#operator-body stays empty — the sentence never becomes operator markup");
+
+  // THE UNLOADED-ROLE ARM STILL WAITS: a real operator whose /v1/me has not
+  // landed is told we are checking, and is never accused.
+  const loader = APP_SRC.match(/function loadOperator\(\) \{[\s\S]*?\n  \}\n/)[0];
+  assert.match(loader, /if \(!meCache\) \{\s*\n\s*body\.innerHTML = '<div class="loading">Checking operator access&hellip;<\/div>';\s*\n\s*return;/,
+    "the unloaded-me arm renders the checking line and returns, ahead of any refusal");
+  assert.ok(loader.indexOf("Checking operator access") < loader.indexOf("toast({"),
+    "nothing can accuse a session whose role has not loaded");
+
+  // GR9: the predicate family is untouched — the route gate still delegates.
+  assert.match(APP_SRC, /function operatorRouteAllowed\(me\) \{\s*\n\s*return operatorVisible\(me\);/,
+    "the route gate still delegates to the sidebar predicate — no new role axis");
+});
+
+test("cch-w36-s4: a failed halt/resume stops printing the billing sentence over a 403", () => {
+  const action = APP_SRC.match(/function fleetRolloutAction\(verb, onDone\) \{[\s\S]*?\n  \}\n/)[0];
+  assert.match(action, /var fault = operatorReadFault\(r\);/, "the CALL SITE classifies the fault");
+  assert.match(action, /fault && fault\.text \? fault\.text : friendly\(r\.data, "Please try again\."\)/,
+    "a nameable fault speaks; everything else keeps friendly()");
+  // The rendered toast body under a 403 — the sentence the operator now reads.
+  const body = hooks.operatorReadFault({ ok: false, status: 403, data: { error: "forbidden" } }).text;
+  assert.match(body, /platform_operator/);
+  assert.doesNotMatch(body, /billing/i, "a refused halt is not a billing problem");
+  // friendly() is NOT edited here (cch-w35-s4 owns it): the curated map still
+  // maps `forbidden` the way it does, which is exactly why the call site guards.
+  // …and the curated map is NOT edited here (cch-w35-s4 owns friendly()): it
+  // still answers `forbidden` with its team-owner sentence, which is precisely
+  // why the call site has to guard. Asserted UNCONDITIONALLY — a `hooks.friendly
+  // ? … : "team owner"` shape would pass on an absent export, which is the
+  // vacuous green this wave exists to kill.
+  assert.equal(typeof hooks.friendly, "function", "friendly() is hook-exported, so this assertion can fail");
+  assert.match(hooks.friendly({ error: "forbidden" }, "x"), /team owner/,
+    "the curated map is untouched — the fix is at the call site");
+});
+
+test("cch-w36-s4-r: the Halt confirm dialog's OWN failure arm stops printing the billing sentence too", () => {
+  // The builder enumerated ONE call site (fleetRolloutAction) and filed this
+  // sixth one as backlog. It is the path the console's own Halt button takes —
+  // operatorConfirmBrake("halt") does NOT go through fleetRolloutAction — so a
+  // 403 rendered "Only the team owner can manage billing." inside a DANGER
+  // confirm dialog about the whole fleet. Fixed in review with the classifier
+  // this same commit ships; pinned here so a revert reds.
+  const brake = APP_SRC.match(/function operatorConfirmBrake\(verb\) \{[\s\S]*?\n  \}\n/)[0];
+  assert.match(brake, /var haltFault = operatorReadFault\(r\);/,
+    "the confirm dialog's failure arm classifies the fault before it speaks");
+  assert.match(brake, /haltFault && haltFault\.text \? haltFault\.text : friendly\(r\.data, "Please try again\."\)/,
+    "a nameable fault speaks; every other class keeps friendly()");
+  assert.equal((brake.match(/ctl\.fail\(friendly\(/g) || []).length, 0,
+    "the unguarded ctl.fail(friendly(…)) shape is gone");
+  // And the sentence it now shows is the authority one, not billing.
+  const shown = hooks.operatorReadFault({ ok: false, status: 403, data: { error: "forbidden" } }).text;
+  assert.match(shown, /platform_operator/);
+  assert.doesNotMatch(shown, /billing/i);
+});
+
 // ── GR49 anti-drift source guards (the console is the SOLE brake control) ────
 
 test("gr-p5 GR49: ONE route literal, ONE action emitter, ZERO worker-gated probes", () => {
@@ -14489,9 +14648,13 @@ test("cch-w31-s4: api()'s envelope is ADDITIVE — status 0 and network_error su
   // string branches are still there — the envelope added fields, it repurposed
   // nothing. (Five code branches now: the four originals plus faultCopy's own
   // arm, which is what lets the four retire at the seam later.)
+  // cch-w36-s4 raises the pin to SIX: operatorReadFault classifies a status-0
+  // operator read as `unreachable` so a card that never got an answer stops
+  // reading like one that got a refusal. The pin is a set-size ratchet on
+  // ADDITIONS, not a ban on them — a branch that DISAPPEARS still reds it.
   const zeroBranches = [...src.matchAll(/^\s*if \(status === 0\)/gm)];
-  assert.equal(zeroBranches.length, 5,
-    "the four original status-0 branches plus faultCopy's arm (found " + zeroBranches.length + ")");
+  assert.equal(zeroBranches.length, 6,
+    "the four original status-0 branches, faultCopy's arm, and operatorReadFault's (found " + zeroBranches.length + ")");
   assert.ok([...src.matchAll(/err === "network_error"/g)].length >= 2);
   // A non-JSON body still hands consumers an EMPTY data object (all 354 .data
   // reads unchanged) — the bytes now ride alongside as `text` instead of
