@@ -1,0 +1,67 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-16",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-29-2026-08-03::public_browser"],
+  "verdict": "blocked",
+  "hard_gate_result": "fail",
+  "direct_answer": "The public-browser unit fails. Fresh real Chrome 150 proves 390 CSS px fits but 320 CSS px overflows to 379 px. Long tokens escape containment, authored table/callout/mark semantics are not preserved, and the public response exposes neither immutable revision identity nor conditional validators. Safari is installed without a qualifying session, Firefox is absent, and no true 200% browser-zoom receipt exists.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "bfc14abb-44bc-40a2-bb9a-5b27422b21e8",
+    "assignment_snapshot_digest": "bb94f827f38367e6d5db4bc4ac7514f5bd9b4d2a5815a7c9a72284f6dc259565",
+    "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+    "paper_revision": "18768b0a14c2eead927181c4a0e37c18"
+  },
+  "observations": {
+    "source": {"blocks": 252, "unique_block_ids": 252, "nonempty": 113, "empty_spacers": 139, "canonical_blocks_sha256": "e1cb807591caa511dadb1cc98311812aa364abc624f8da60c24562185b828b21"},
+    "authored_carriers": {"headings": 37, "paragraphs": 187, "lists": 13, "list_items": 67, "tables": 11, "header_cells": 35, "body_cells": 316, "callouts": 4, "marks": 313, "code_marks": 200, "strong_marks": 113, "links": 0},
+    "chrome": {
+      "version": "150.0.7871.189",
+      "width_390": {"client_width": 390, "scroll_width": 390, "overflow": false},
+      "width_320": {"client_width": 320, "inner_width": 379, "scroll_width": 379, "overflow": true},
+      "long_tokens_320": {"measured": 151, "extending_right": 31, "bounded_scroll_ancestor": 0, "wider_than_viewport": 2},
+      "dom": {"block_ids": 252, "presentation_tables": "11/11", "headers_with_scope": "0/35", "labeled_callouts": "0/4", "semantic_strong": 3, "semantic_code": 0, "data_rev": "0", "exact_revision_tokens": 0},
+      "ax": {"tables": 11, "column_headers": 35, "cells": 316, "lists": 13, "list_items": 67, "strong_roles": 0, "code_roles": 0}
+    },
+    "browser_availability": {"chrome": "freshly observed", "safari": "installed, no qualifying session", "firefox": "not installed", "three_engine_receipts": 0},
+    "http": {"status": 200, "cache_control": "max-age=0, private, must-revalidate", "etag": false, "last_modified": false, "stale_if_none_match_status": 200, "exact_conditional": "not exercisable", "repeated_equal_lengths": true, "repeated_equal_hashes": false},
+    "required_cells": {
+      "real_chrome_safari_firefox": "fail: Chrome only",
+      "actual_320_390": "fail: 390 passes, 320 overflows",
+      "true_200_percent_reflow": "blocked: deviceScaleFactor proxy is not browser zoom",
+      "long_token_containment": "fail: 31 measured tokens extend right",
+      "dom_accessibility_semantics": "fail: presentational tables, unlabeled callouts, flattened marks, no real AT",
+      "cache_conditionals": "fail: no validators or exact 304 path"
+    }
+  },
+  "inferences": [
+    "The 320 failure is broader than table width because long-token elements lack bounded scrolling ancestors.",
+    "Chrome AX reconstruction may not reproduce across Safari, Firefox, or real assistive technology.",
+    "Changing response hashes prove variation but do not identify the dynamic field.",
+    "data-rev zero prevents the surface from self-attesting to the assigned immutable revision."
+  ],
+  "repair_seams": [
+    "Bind public output to immutable document revision and expose it machine-readably.",
+    "Add revision validators and exact If-None-Match 304 behavior to the flat Paper route.",
+    "Remove role=presentation from data tables and preserve header relationships.",
+    "Add general long-token breaking or bounded overflow containment.",
+    "Give callouts semantic labels and normalize string-form marks.",
+    "Create revision-bound Chrome/Safari/Firefox receipts at 320, 390, desktop, and actual 200% zoom with real AT evidence."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "broad exact-revision/browser/cache searches"],
+    "papers": ["cloud-console-hardening-wave-29-2026-08-03@18768b0a14c2eead927181c4a0e37c18", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json", ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/geometry.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/fixtures/browser-frame-cases.json", ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/fixtures/cache-freshness.json", "api/lib/barkpark_web/live/bulldocs_live.ex", "api/lib/barkpark_web/plugs/paper_revision_headers.ex", "api/lib/barkpark/portable_doc/render/walk.ex", "api/lib/barkpark/portable_doc/render/inline.ex", "api/assets/paper-surface/paper-surface.css", "api/lib/barkpark_web/layouts/bulldocs.html.heex"]
+  },
+  "risks": ["Required 320px width overflows.", "Long tokens escape without bounded containment.", "Table/callout/mark semantics are unreliable.", "No immutable revision or conditional validator binds captures.", "Chrome-only evidence may be generalized incorrectly.", "Device-scale emulation may be mislabeled as true zoom."],
+  "unvisited_scope": ["qualifying Safari session", "Firefox", "real assistive technology", "true 200% zoom", "desktop fresh capture", "post-repair stability", "deployed exact-validator 304", "server logs for response variation"],
+  "credential_scan": {"status": "clean", "secret_values_found": 0, "values_revealed": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0, "browser_profiles_retained": 0}
+}
