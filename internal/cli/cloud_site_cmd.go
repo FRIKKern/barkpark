@@ -778,6 +778,13 @@ func siteDeployCancelled(status string) bool {
 	return s == "cancelled" || s == "canceled"
 }
 
+// siteDeployFailed is the one status that means the build DIED (as opposed to a
+// human stopping it, which siteDeployCancelled owns). Named so the status verb's
+// staleness arm reads on the same word the control plane writes.
+func siteDeployFailed(status string) bool {
+	return strings.EqualFold(strings.TrimSpace(status), "failed")
+}
+
 // siteFailureFallback is the last-resort explanation when neither the deployment
 // nor its failed stage says anything — the ONLY honest thing left to say.
 const siteFailureFallback = "the build did not pass its health gate — nothing was switched, visitors still see the previous build"
@@ -1089,19 +1096,51 @@ func runCloudSiteStatus(out *writer, g globals, args []string) int {
 		}
 	}
 
+	// THE SECOND READ, and the reason this verb stopped lying. The current pointer
+	// can never read `failed` — it has three writers, all gated on status "live",
+	// and `live` is terminal in the control plane's transition table — so a status
+	// that resolves ONLY the pointer prints a serene "live" while the newest deploy
+	// is a wall of red. The newest row is one bounded call away (limit=1, the same
+	// route the console reads), and it carries the ledger's named failure_class.
+	//
+	// A control plane that cannot answer this list is NOT a reason to fail the
+	// whole verb — the live pointer is still true — but it IS a reason to say the
+	// staleness check did not run, rather than to imply it passed.
+	var newest *cloudclient.SiteDeployment
+	page, lerr := cfg.CloudClient().ListSpawnSiteDeployments(cloudCtx(), id, 1, "")
+	switch {
+	case lerr != nil:
+		out.errf("could not read this site's newest deployment (%v) — the header below describes the LIVE build only, and a newer failed deploy would not show here", lerr)
+	case len(page.Deployments) > 0:
+		n := page.Deployments[0]
+		newest = &n
+	}
+
 	if out.machineOut() {
 		payload := map[string]any{"site": spawnSiteMap(site)}
+		// `deployment` stays the LIVE-pointer contract — every existing reader of
+		// this envelope means "what is serving". The newest row rides beside it
+		// under its own key, with the comparison spelled out rather than left for
+		// the reader to redo.
 		if dep != nil {
 			payload["deployment"] = siteDeploymentMap(*dep)
+		}
+		if newest != nil {
+			payload["latest_deployment"] = siteDeploymentMap(*newest)
+			payload["staleness"] = siteStalenessMap(dep, newest)
 		}
 		out.emitStructured(payload)
 		return exitOK
 	}
 
-	renderKV(out, spawnSiteStatusMap(site, dep))
+	renderKV(out, spawnSiteStatusMap(site, dep, newest))
 	if dep == nil {
 		out.outf("")
-		out.outf("no deployment yet — kick the first build with `bp cloud site deploy %s`", ref)
+		if newest != nil && siteDeployFailed(newest.Status) {
+			out.outf("this site has never gone live — its last deploy failed. See why above, fix it, then re-run `bp cloud site deploy %s`", ref)
+		} else {
+			out.outf("no deployment yet — kick the first build with `bp cloud site deploy %s`", ref)
+		}
 		return exitOK
 	}
 	out.outf("")
@@ -1315,7 +1354,15 @@ func spawnSiteMap(s cloudclient.SpawnSite) map[string]any {
 
 // spawnSiteStatusMap is the KV view of a site's status header (the human table
 // above the stage list).
-func spawnSiteStatusMap(s cloudclient.SpawnSite, dep *cloudclient.SiteDeployment) map[string]any {
+//
+// It takes BOTH deployments the status verb reads: `dep` is the live pointer (what
+// is serving) and `newest` is the newest row in the ledger (what happened last).
+// They are usually the same row. When they are not — and the newest one failed —
+// the header must not print a bare "live", because "live" then describes an OLD
+// build while the site's actual last word was a failure. `newest` is nil when the
+// list read failed or the site has no deployments at all; in neither case does
+// this function claim the two agree.
+func spawnSiteStatusMap(s cloudclient.SpawnSite, dep, newest *cloudclient.SiteDeployment) map[string]any {
 	m := map[string]any{
 		"site":      spawnSiteRef(s),
 		"kind":      hzCell(s.Kind),
@@ -1362,6 +1409,66 @@ func spawnSiteStatusMap(s cloudclient.SpawnSite, dep *cloudclient.SiteDeployment
 	} else {
 		m["status"] = "never deployed"
 	}
+	// THE STALENESS ARM. The live pointer and the newest ledger row disagree, and
+	// the newest one failed — so "live" alone is a half-truth: it names a build the
+	// box is still serving BECAUSE the next one never got switched in. Say both.
+	if newest != nil && siteDeployFailed(newest.Status) && (dep == nil || !strings.EqualFold(newest.ID, dep.ID)) {
+		if dep != nil {
+			m["status"] = "live — but the NEWEST deploy FAILED (visitors still see this older build)"
+		} else {
+			m["status"] = "never went live — the newest deploy FAILED"
+		}
+		m["newest deployment"] = hzCell(newest.ID)
+		m["newest status"] = hzCell(newest.Status)
+		// FEED the failure renderer, do not rewrite it: siteFailure prefers the
+		// deployment's own failure_reason and falls back to the failed stage's
+		// streamed detail. Its input was simply unreachable until this second read.
+		_, reason := siteFailure(*newest)
+		m["reason"] = sanitizeCell(reason)
+	}
+	// The ledger's NAMED cause, from whichever failed row this header describes —
+	// the server has computed it from the raw column all along and no Go type
+	// declared it, so it decoded to nothing and printed as nothing.
+	if fc := siteFailureClass(dep, newest); fc != "" {
+		m["failure class"] = hzCell(fc)
+	}
+	return m
+}
+
+// siteFailureClass is the named failure class to show in a status header: the
+// newest row's when the newest one failed, else the live row's (which is empty on
+// every live row — the control plane classifies failures only).
+func siteFailureClass(dep, newest *cloudclient.SiteDeployment) string {
+	if newest != nil && siteDeployFailed(newest.Status) {
+		if fc := strings.TrimSpace(newest.FailureClass); fc != "" {
+			return fc
+		}
+	}
+	if dep != nil {
+		return strings.TrimSpace(dep.FailureClass)
+	}
+	return ""
+}
+
+// siteStalenessMap is the `-o json` twin of the staleness arm above: the explicit
+// comparison, so a script does not have to re-derive "is what is serving also the
+// last thing that happened?" by diffing two ids. Emitted only when the newest read
+// actually succeeded — an absent node means unknown, never "in sync".
+func siteStalenessMap(dep, newest *cloudclient.SiteDeployment) map[string]any {
+	m := map[string]any{
+		"latest_deployment_id": newest.ID,
+		"latest_status":        newest.Status,
+	}
+	live := ""
+	if dep != nil {
+		live = dep.ID
+		m["live_deployment_id"] = dep.ID
+	}
+	m["live_is_latest"] = live != "" && strings.EqualFold(live, newest.ID)
+	m["latest_failed"] = siteDeployFailed(newest.Status)
+	if fc := strings.TrimSpace(newest.FailureClass); fc != "" {
+		m["failure_class"] = fc
+	}
 	return m
 }
 
@@ -1406,6 +1513,21 @@ func siteDeploymentMap(d cloudclient.SiteDeployment) map[string]any {
 	}
 	if d.FailureReason != "" {
 		m["failure_reason"] = d.FailureReason
+	}
+	// deploy-reliability W2: the ledger's named class and the un-humanized capture.
+	// A new field costs THREE edits to reach this envelope — the struct, the list
+	// decoder, and this map — and skipping any one of them drops it silently.
+	if d.FailureClass != "" {
+		m["failure_class"] = d.FailureClass
+	}
+	if d.FailureReasonRaw != "" {
+		m["failure_reason_raw"] = d.FailureReasonRaw
+	}
+	if d.Environment != "" {
+		m["environment"] = d.Environment
+	}
+	if d.Branch != "" {
+		m["branch"] = d.Branch
 	}
 	return m
 }
