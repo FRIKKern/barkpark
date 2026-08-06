@@ -14356,3 +14356,204 @@ test("cch-w31-s4 follow-up: with no recovered body the card gains NOTHING — no
   // Total over an absent fault (the seam passes fleetFault, which can be null).
   assert.match(hooks.fleetLoadErrorHtml(null), /Couldn't load this instance/);
 });
+
+// ── cch-w34-s1 · A FAILED READ IS NOT AN EMPTY ONE ─────────────────────────
+// The wave-34 law (charter D382), driven rather than read. Both loaders folded
+// `r.ok` into a value-coalescing default — `(r.ok && r.data && r.data.X) || []`
+// — so a 500 and a 403 produced the SAME value as a genuine 200-with-nothing,
+// and the person read a determinate assertion the console never received:
+// "No sites yet" on the instance workspace, "No API tokens yet" beside a
+// Create-token button on the tokens page.
+//
+// Why these are DRIVEN and not asserted from markup: the collapse lives inside
+// the fetch callback, which is exactly why nothing in this harness could see it
+// (loadInstanceSites was mentioned five times, every one of them an assertion
+// that its slot exists in the static HTML). fakeDom() is unusable here — its
+// innerHTML setter regex-extracts class names and THROWS THE MARKUP AWAY, so it
+// cannot assert copy. These use a recording-innerHTML stub, on the
+// driveBootOAuth precedent above (swap the sandbox globals, drive, restore).
+
+// A DOM whose innerHTML assignments are KEPT verbatim, keyed by element id. The
+// whole point is the bytes: a census can prove the fold is gone, only rendered
+// copy can prove what the person actually reads.
+function recordingDom(ids) {
+  const els = {};
+  for (const id of ids) {
+    els[id] = {
+      id,
+      _html: "",
+      writes: [],
+      get innerHTML() { return this._html; },
+      set innerHTML(v) { this._html = String(v); this.writes.push(String(v)); },
+      onclick: null,
+      addEventListener() {},
+      querySelectorAll() { return []; },
+      querySelector() { return null; },
+      getAttribute() { return null; },
+    };
+  }
+  return {
+    els,
+    document: {
+      querySelector(sel) { return els[String(sel).replace(/^#/, "")] || null; },
+      getElementById(id) { return els[id] || null; },
+      querySelectorAll() { return []; },
+      createElement: () => ({ ...inertEl }),
+    },
+  };
+}
+
+// Swap fetch + document, run one loader to completion, restore. api() resolves
+// on a microtask chain, so draining the queue settles the paint.
+async function driveLoader(run, { status, payload, ids }) {
+  const saved = { fetch: sandbox.fetch, document: sandbox.document };
+  const dom = recordingDom(ids);
+  const fetch = fetchStub(status, payload);
+  sandbox.fetch = fetch;
+  sandbox.document = dom.document;
+  try {
+    run();
+    for (let i = 0; i < 12; i++) await Promise.resolve();
+  } finally {
+    Object.assign(sandbox, saved);
+  }
+  return { dom, fetch, html: () => dom.els[ids[0]].innerHTML };
+}
+
+const SITES_IDS = ["instance-sites", "site-new-btn"];
+const driveSites = (status, payload, bp) =>
+  driveLoader(() => hooks.loadInstanceSites(bp), { status, payload, ids: SITES_IDS });
+
+test("cch-w34-s1: both collapsing loaders are hookable (RED on origin/main, where neither is exported)", () => {
+  assert.equal(typeof hooks.loadInstanceSites, "function", "loadInstanceSites must be drivable");
+  assert.equal(typeof hooks.loadTokens, "function", "loadTokens must be drivable");
+  assert.equal(typeof hooks.readFailureCopy, "function", "readFailureCopy must be drivable");
+});
+
+// ── the 3x2 matrix the fix was measured on: {200-empty, 500, 403} x {host, no host}
+
+test("cch-w34-s1: a 500 on /v1/sites SPEAKS — it never renders 'No sites yet'", async () => {
+  for (const bp of [{ id: "bp-1", host: "one.barkpark.cloud" }, { id: "bp-1", host: null }]) {
+    const { html } = await driveSites(500, { error: "server_error" }, bp);
+    assert.match(html(), /Couldn't load sites/, "the failure must be stated, host or no host");
+    assert.ok(html().indexOf("No sites yet") === -1,
+      "a failed read must never be painted as an empty one");
+    assert.match(html(), /broke on our side/, "a 5xx names US as the party at fault");
+  }
+});
+
+test("cch-w34-s1: a 403 on /v1/sites does NOT render the billing sentence", async () => {
+  // app.js:207 keys the GENERIC `forbidden` slug to "Only the team owner can
+  // manage billing." — friendly()'s curated copy beats any caller fallback, so
+  // bare friendly(r.data) would answer a sites read with billing copy.
+  for (const bp of [{ id: "bp-1", host: "one.barkpark.cloud" }, { id: "bp-1", host: null }]) {
+    const { html } = await driveSites(403, { error: "forbidden" }, bp);
+    assert.match(html(), /Couldn't load sites/);
+    assert.ok(html().indexOf("Only the team owner can manage billing.") === -1,
+      "a sites 403 must not render copy about the billing screen");
+    assert.match(html(), /access to the sites on this instance/);
+    assert.ok(html().indexOf("No sites yet") === -1);
+  }
+});
+
+test("cch-w34-s1: THE PRE-HOST QUIET SURVIVES — a 200 with zero sites and no host paints nothing", async () => {
+  // The high-flip-risk judgment of this slice. The tempting one-liner (turn the
+  // `bp.host` ternary into an `r.ok` ternary) renders correct error copy AND
+  // silently starts asserting "No sites yet" on a pre-host instance — measured,
+  // with every other test in this file still green. This is the assertion that
+  // notices.
+  const quiet = await driveSites(200, { sites: [] }, { id: "bp-1", host: null });
+  assert.equal(quiet.html(), "", "pre-host, a genuine empty stays SILENT — the timeline is the surface");
+
+  const loud = await driveSites(200, { sites: [] }, { id: "bp-1", host: "one.barkpark.cloud" });
+  assert.match(loud.html(), /No sites yet/, "once the box is up, a genuine empty says so");
+  assert.ok(loud.html().indexOf("Couldn't load sites") === -1);
+});
+
+test("cch-w34-s1: a 200 carrying sites still renders rows, and only this instance's", async () => {
+  const { html } = await driveSites(200, {
+    sites: [
+      { id: "s-1", name: "alpha", slug: "alpha", barkpark_id: "bp-1" },
+      { id: "s-2", name: "beta", slug: "beta", barkpark_id: "bp-OTHER" },
+    ],
+  }, { id: "bp-1", host: "one.barkpark.cloud" });
+  assert.match(html(), /alpha/);
+  assert.ok(html().indexOf("beta") === -1, "the barkpark_id filter is untouched by this fix");
+  assert.ok(html().indexOf("empty-state") === -1);
+});
+
+// ── loadTokens: the security-relevant twin
+
+const driveTokens = (status, payload) =>
+  driveLoader(() => hooks.loadTokens(), { status, payload, ids: ["token-list"] });
+
+test("cch-w34-s1: a failed /v1/tokens no longer paints 'No API tokens yet' beside a Create-token CTA", async () => {
+  const { dom } = await driveTokens(500, { error: "server_error" });
+  const html = dom.els["token-list"].innerHTML;
+  assert.match(html, /Couldn't load your tokens/);
+  assert.ok(html.indexOf("No API tokens yet") === -1,
+    "a person must never read 'no tokens' about a list we failed to fetch");
+  assert.ok(html.indexOf("token-add-empty") === -1, "and must not be offered the empty-state CTA");
+  assert.match(html, /broke on our side/, "a 5xx names US as the party at fault");
+  assert.match(html, /Nothing was changed/,
+    "the reassurance is UNCONDITIONAL — a failed read cannot have revoked a token");
+  // The loading state was painted first and replaced — the error is the LAST word.
+  assert.match(dom.els["token-list"].writes[0], /Loading tokens/);
+});
+
+test("cch-w34-s1: a tokens 403 is an authority answer, not billing copy", async () => {
+  const { dom } = await driveTokens(403, { error: "forbidden" });
+  const html = dom.els["token-list"].innerHTML;
+  assert.ok(html.indexOf("Only the team owner can manage billing.") === -1);
+  // esc()'d at the seam, so the apostrophe arrives as an entity.
+  assert.match(html, /access to this team&#39;s API tokens/);
+  assert.ok(html.indexOf("No API tokens yet") === -1);
+  assert.match(html, /Nothing was changed/);
+});
+
+test("cch-w34-s1: a genuine 200 with zero tokens still says 'No API tokens yet'", async () => {
+  const { dom } = await driveTokens(200, { tokens: [] });
+  const html = dom.els["token-list"].innerHTML;
+  assert.match(html, /No API tokens yet/, "an honest empty must keep speaking");
+  assert.match(html, /token-add-empty/, "and keep its Create-token affordance");
+});
+
+test("cch-w34-s1: a 200 carrying tokens renders the rows", async () => {
+  const { dom } = await driveTokens(200, {
+    tokens: [{ id: "t-1", name: "ci-deploy", abilities: ["deploy"] }],
+  });
+  const html = dom.els["token-list"].innerHTML;
+  assert.match(html, /ci-deploy/);
+  assert.ok(html.indexOf("No API tokens yet") === -1);
+});
+
+// ── the copy seam itself
+
+test("cch-w34-s1: readFailureCopy overrides ONLY the generic forbidden slug", () => {
+  const f = hooks.readFailureCopy;
+  assert.equal(f({ ok: false, status: 403, data: { error: "forbidden" } }, "SCOPED", "FB"), "SCOPED");
+  // Everything else keeps faultCopy's honest classification.
+  assert.match(f({ ok: false, status: 500, data: { error: "server_error" } }, "SCOPED", "FB"), /broke on our side/);
+  assert.equal(f({ ok: false, status: 404, data: { error: "not_a_registered_slug" } }, "SCOPED", "FB"), "FB");
+  assert.match(f({ ok: false, status: 0, data: { error: "network_error" }, transport: "offline" }, "SCOPED", "FB"), /offline/i);
+  // A 403 that is genuinely ABOUT billing keeps its own slug's copy — the
+  // override is keyed on the generic slug, not on the status.
+  assert.match(f({ ok: false, status: 403, data: { error: "billing_not_configured" } }, "SCOPED", "FB"), /Billing isn't set up/);
+});
+
+// ── the census is part of the gate, and it must be able to lose ────────────
+
+test("cch-w34-s1: the absence-as-answer census runs clean against the shipped app.js", () => {
+  const censusPath = fileURLToPath(new URL("./__unknown_census.mjs", import.meta.url));
+  const r = spawnSync(process.execPath, [censusPath], { encoding: "utf8" });
+  assert.equal(r.status, 0, "the census must equal its pin:\n" + r.stdout + r.stderr);
+  assert.match(r.stdout, /OK: the absence-as-answer set equals its 5-site pin\./);
+  // The five positive controls are PRESENT and unflagged — that is the proof it
+  // discriminates rather than counting `|| []` idioms.
+  assert.match(r.stdout, /controls present : presenceChip lifecyclePill catalogViewState metricsAgeText freshnessModel/);
+  assert.match(r.stdout, /controls flagged : \(none\)/);
+  assert.match(r.stdout, /controls missing : \(none\)/);
+  // Neither fixed loader may still be in the population.
+  assert.ok(r.stdout.indexOf("loadInstanceSites") === -1);
+  assert.ok(r.stdout.indexOf("loadTokens") === -1);
+});
