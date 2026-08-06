@@ -1,0 +1,102 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-07",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-28-2026-08-03::public_browser"],
+  "verdict": "partial",
+  "direct_answer": "Source identity and authored denominators are proven. Native Chrome and Safari render the Paper at desktop width, but Firefox is absent and no native 320/390 or true 200% zoom captures exist. Earlier exact-width Chrome/CDP evidence is proxy-only and shows overflow plus semantic defects. Public page and source routes emit no ETag, so conditional 304 behavior is absent from the exposed contract.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "paper_id": "cloud-console-hardening-wave-28-2026-08-03",
+    "paper_revision": "49c1534d9fb76d0d9adc7b97f25ec471"
+  },
+  "observations": {
+    "source_identity": {
+      "status": "found",
+      "blocks": "237/237",
+      "unique_block_ids": "237/237",
+      "canonical_blocks_sha256": "a9051f7ad1d7739ccaaca7e80f6d8079c7c78206b0cd723a8e29d0570c9e5d09",
+      "prior_hash_match": true
+    },
+    "authored_carriers": {
+      "blocks": 237,
+      "headings": 43,
+      "paragraphs": 156,
+      "tables": 18,
+      "authored_header_cells": 57,
+      "body_cells": 466,
+      "lists": 7,
+      "list_items": 35,
+      "callouts": 13,
+      "marked_runs": 67,
+      "empty_paragraph_spacers": 103,
+      "nonempty_carriers": 134
+    },
+    "required_cells": {
+      "real_chrome_safari_firefox": "partial: native Chrome and Safari loaded the exact Paper and exposed title headings at a 1152-point window; Firefox is not installed",
+      "width_320": "partial proxy: Chrome/CDP clientWidth 320, scrollWidth 553, overflow 233 CSS px",
+      "width_390": "partial proxy: Chrome/CDP clientWidth 390, scrollWidth 448, overflow 58 CSS px",
+      "reflow_200_percent": "not_found: predecessor set width 640 and deviceScaleFactor 2, which changes DPR rather than browser zoom",
+      "long_token_containment": "partial/fail in proxy: authored tokens reach 70 characters and the 320/390 pages overflow; native cross-browser offender attribution is unvisited",
+      "dom_accessibility_semantics": "partial: main/article/h1/lang and heading AX carriers exist, but 18/18 authored tables use role=presentation, ordinary callouts lack semantic labels, only 3 semantic mark elements represent 67 marks, and no real AT session ran",
+      "cache_conditional_requests": "not_found: public page and source return private must-revalidate with no ETag or Last-Modified, leaving no exact validator for 304"
+    },
+    "captures": [
+      {"browser": "Google Chrome", "kind": "native AX", "width_points": 1152, "result": "found"},
+      {"browser": "Safari", "kind": "native AX", "width_points": 1152, "result": "partial"},
+      {"browser": "Google Chrome", "kind": "headless CDP proxy", "profiles": ["320", "390", "reflow200"], "result": "partial"}
+    ]
+  },
+  "inferences": [
+    "Narrow overflow likely comes from long authored path or task tokens, but the exact native DOM offender was not isolated.",
+    "Unchanged source hash preserves content-denominator relevance, not old CSS or geometry proof.",
+    "Removing presentation semantics from authored tables and labelling callouts targets the clearest accessibility seam, subject to role verification."
+  ],
+  "recommended_repair_seams": [
+    "In portable_doc/render/walk.ex, preserve authored data-table semantics and explicit header association for all 57 headers and 466 body cells.",
+    "Give all 13 ordinary callouts an appropriate tested role and accessible label.",
+    "Identify actual overflow nodes and prove native Chrome, Safari, and Firefox at 320/390 plus true 200% zoom without authored loss.",
+    "Extend revision-derived validators to flat and dataset-scoped Paper routes and prove exact 304 versus stale 200 behavior."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58"],
+    "papers": ["cloud-console-hardening-wave-28-2026-08-03@49c1534d9fb76d0d9adc7b97f25ec471", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/scripts/capture.py",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/redacted-capture-manifest.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/source-denominators.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/geometry.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/semantics.json",
+      "api/lib/barkpark_web/live/bulldocs_live.ex",
+      "api/lib/barkpark_web/controllers/bulldocs_source_controller.ex",
+      "api/lib/barkpark_web/plugs/paper_revision_headers.ex",
+      "api/lib/barkpark/plugins/bulldocs.ex",
+      "api/lib/barkpark/portable_doc/render/walk.ex",
+      "api/assets/paper-surface/paper-surface.css",
+      "api/lib/barkpark_web/layouts/bulldocs.html.heex"
+    ]
+  },
+  "risks": [
+    "Firefox, native 320/390 cells, true 200% zoom, real AT, and element-level overflow attribution remain unproven.",
+    "Conditional behavior is unproven across flat, dataset, and scoped routes and after revision change.",
+    "Proxy DPR emulation must never be promoted to true browser-zoom evidence."
+  ],
+  "unvisited_scope": [
+    "native Firefox",
+    "native 320 and 390 CSS px in all three browsers",
+    "true 200% browser zoom in all three browsers",
+    "VoiceOver plus NVDA or equivalent",
+    "element-level overflow attribution",
+    "scoped and stale-validator conditional requests"
+  ],
+  "credential_scan": {"status": "clean", "credential_shaped_matches": 0, "values_revealed": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0}
+}
