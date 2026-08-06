@@ -275,6 +275,23 @@
     return friendly(data, fallback);
   }
 
+  // cch-w34-s1 — THE COPY FOR A READ THAT FAILED, and why it is not bare
+  // friendly()/faultCopy(). The shared ERRORS map keys the GENERIC `forbidden`
+  // slug to "Only the team owner can manage billing." (grep -n 'forbidden:' in
+  // the ERRORS object above friendly()) — copy written for
+  // the billing writes, which is the only place that slug used to surface. But
+  // friendly()'s precedence is curated ERRORS → details → the caller's fallback,
+  // so a 403 on a READ (the sites list, the token list) renders a sentence about
+  // a screen the person is not even on, and no caller-supplied fallback can win.
+  // An authority answer on a read gets a READ-SCOPED sentence; every other
+  // status keeps faultCopy's honest classification (5xx = our fault, status 0 =
+  // the named transport class, 4xx = the caller's designed fallback).
+  function readFailureCopy(r, forbiddenCopy, fallback) {
+    var data = r && r.data;
+    if (data && data.error === "forbidden") return forbiddenCopy;
+    return faultCopy(r ? r.status : 0, data, fallback, r && r.transport);
+  }
+
   // cch-w31-s4 follow-up — THE READER for the bytes api() started keeping.
   // api() retains a non-JSON body as `text` while `data` stays {}, so
   // faultCopy() can only reach for the always-true server-fault sentence. The
@@ -3750,8 +3767,28 @@
     if (!box) return;
     box.innerHTML = '<div class="loading">Loading tokens&hellip;</div>';
     api("GET", "/v1/tokens").then(function (r) {
-      var list = (r.ok && r.data && r.data.tokens) || [];
-      renderTokenList(list);
+      // cch-w34-s1 (charter D382) — A FAILED READ IS NOT AN EMPTY ONE, and this
+      // is the security-relevant instance of it: folding `r.ok` into the list
+      // default painted "No API tokens yet" plus a Create-token button on a
+      // failed /v1/tokens, which a person reads as "my PATs were revoked". The
+      // arm is hoisted above renderTokenList so the empty state can only ever
+      // describe a list the server actually sent, and the copy says out loud
+      // that nothing has changed.
+      if (!r.ok) {
+        box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load your tokens</h2><p>' +
+          esc(readFailureCopy(
+            r,
+            "You don't have access to this team's API tokens.",
+            "We couldn't read your tokens just now — try again in a moment."
+          )) +
+          // The reassurance is UNCONDITIONAL, not part of the classified
+          // sentence: whatever went wrong, a failed READ cannot have changed a
+          // token, and "did my PATs just get revoked?" is the exact question
+          // this screen used to answer wrongly.
+          '</p><p class="dim">Nothing was changed — your existing tokens haven\'t moved.</p></div>';
+        return;
+      }
+      renderTokenList((r.data && r.data.tokens) || []);
     });
   }
 
@@ -7799,12 +7836,31 @@
       if (staleGuard(reqId, instanceSitesReq)) return;
       var box = $("#instance-sites");
       if (!box) return;
-      var all = (r.ok && r.data && r.data.sites) || [];
+      // cch-w34-s1 (charter D382) — A FAILED READ IS NOT AN EMPTY ONE. This arm
+      // is HOISTED ABOVE the emptiness check on purpose: the "No sites yet"
+      // copy below is an ASSERTION about this instance, and it may only ever
+      // describe an answer we actually received. Folding `r.ok` into the `all`
+      // default (as this did) made a 500 and a 403 render byte-identically to a
+      // genuine 200-with-zero-sites, and nothing in the harness could see it.
+      if (!r.ok) {
+        box.innerHTML = '<div class="empty-state"><h2>Couldn\'t load sites</h2><p>' +
+          esc(readFailureCopy(
+            r,
+            "You don't have access to the sites on this instance.",
+            "We couldn't read this instance's sites — try again in a moment."
+          )) + "</p></div>";
+        return;
+      }
+      var all = (r.data && r.data.sites) || [];
       var sites = all.filter(function (s) { return String(s.barkpark_id) === String(bp.id); });
       if (!sites.length) {
-        // A4/D60: pre-host (provisioning / provision-failed) the timeline is the
-        // primary surface — a "No sites yet" box beside it is just noise, so stay
-        // quiet until the box is up.
+        // THE RULE cch-w34-s1 RATIFIES: errors always speak, a genuinely-empty
+        // result stays quiet pre-host. Pre-host (provisioning / provision-failed)
+        // the timeline is the primary surface and a "No sites yet" box beside it
+        // is just noise — so a TRUE empty stays silent there, and only there.
+        // This MUST stay a `bp.host` ternary: folding `r.ok` into it instead
+        // renders correct error copy while silently starting to assert "No sites
+        // yet" pre-host on a 200 — measured, with all 862 harness tests green.
         box.innerHTML = bp.host
           ? '<div class="empty-state"><h2>No sites yet</h2>' +
             "<p>Sites hosted on this instance will appear here.</p></div>"
@@ -19729,6 +19785,13 @@
       handleLiveEvent: handleLiveEvent, currentView: currentView,
       loadOverview: loadOverview, invalidateFleet: invalidateFleet,
       applyRoute: applyRoute,
+      // cch-w34-s1 — the two loaders whose failed read used to render as an
+      // empty one. Impure (they fetch and paint), like the three above: the
+      // collapse was invisible to a pure-helper-only harness precisely because
+      // it lives in the fetch callback, so these are DRIVEN with a stubbed
+      // fetch and a recording-innerHTML DOM rather than asserted from markup.
+      loadInstanceSites: loadInstanceSites, loadTokens: loadTokens,
+      readFailureCopy: readFailureCopy,
       overviewScopes: { full: OVERVIEW_FULL, fleet: OVERVIEW_FLEET, onboarding: OVERVIEW_ONBOARDING },
       overviewData: overviewData, // stable object identity — the harness resets its fields
       // C2/D45: the /new timeline's step vocabulary — pinned against the Go
