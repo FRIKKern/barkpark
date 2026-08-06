@@ -6099,12 +6099,13 @@ defmodule BarkparkCloud.Registry do
   disclosure rides in the separate `console_line_meta/1` — changing the /1
   return shape would break this with-chain silently.
 
-  KNOWN DEFECT, filed as `cch-deployment-detail-column-overflow` and pinned by a
-  test in `registry_test.exs`: the shared cap is 2 KB but this column is
-  varchar(255), so a caption of 256..2_000 characters is neither rejected nor
-  trimmed to fit — it reaches `Repo.update/1` and RAISES a
-  `Postgrex.Error 22001`, contradicting the "never affects the build's outcome"
-  promise above. Do not read that promise as covering a long caption yet.
+  cch-w34-s5: the column is now `:text`
+  (`priv/repo/migrations/20260806110000_deployment_detail_to_text.exs`), so the
+  2 KB validator is the ONLY bound and the "never affects the build's outcome"
+  promise above holds for a caption of any length. It did not before: the column
+  was varchar(255) while the shared cap was 2 KB, so a caption of 256..2_000
+  characters raised `Postgrex.Error 22001` inside `Repo.update/1` — reachable
+  from a long `git_ref`, whose builder caption runs +23 characters over the ref.
 
   Returns `{:ok, deployment}`, `{:error, :not_found}` for an unknown id, or
   `{:error, :invalid}` for a missing/blank line (the router 422s it).
