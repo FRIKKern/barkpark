@@ -16124,17 +16124,32 @@
       // unknown — a failed read leaves the CTAs standing (unknown, not refused).
       api("GET", "/v1/me").then(function (r) {
         var resolved = r.ok && r.data ? launchCheckoutAuthority(r.data) : "unknown";
-        if (resolved === "blocked") renderNewPricing(tpl, resolved);
+        if (resolved !== "blocked") return;
+        // REVIEW (cch-w36-s1-r): the answer can land after the person has moved
+        // on — a plan click already opened checkout, or a resume jumped the flow
+        // to progress. newSetBody writes into #new-body whatever step is on
+        // screen, so repaint ONLY while this screen is still the one mounted and
+        // no checkout is in flight; otherwise the honest read would clobber a
+        // different step (or destroy an "Opening checkout…" button mid-request).
+        var body = $("#new-body");
+        if (!body || typeof body.querySelector !== "function") return;
+        if (!body.querySelector(".new-pricing")) return;
+        if (body.querySelector(".new-plan[disabled]")) return;
+        renderNewPricing(tpl, resolved);
       });
     }
     document.querySelectorAll(".new-plan").forEach(function (b) {
+      var label = b.textContent; // "Choose <Tier>" — restored after an error
       b.addEventListener("click", function () {
         b.disabled = true; b.textContent = "Opening checkout…";
         try { localStorage.setItem(NEW_RETURN_KEY, tpl.slug); } catch (x) {}
         api("POST", "/v1/billing/checkout", { plan: b.getAttribute("data-plan") }).then(function (r) {
           if (r.status === 200 && r.data && r.data.checkout_url) { window.location = r.data.checkout_url; }
           else {
-            b.disabled = false; b.textContent = "Choose";
+            // REVIEW (cch-w36-s1-r): was a bare "Choose", which silently renamed
+            // every tier button after one failed checkout. The dashboard fold
+            // (renderLaunchPlan) already restores the real label; match it.
+            b.disabled = false; b.textContent = label;
             try { localStorage.removeItem(NEW_RETURN_KEY); } catch (x) {}
             toast({ kind: "error", title: "Couldn't open checkout", body: friendly(r.data, "Please try again.") });
           }
