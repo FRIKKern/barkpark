@@ -1,0 +1,118 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-24",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": [
+    "pds-wave-44-2026-08-03::email_outlook"
+  ],
+  "verdict": "blocked",
+  "direct_answer": "The exact PDS44 revision, source, and authored denominators are proven. Outlook is not installed, running, or provisioned on this host; no profile, delivered target message, provider receipt, raw source, client capture, or version receipt exists. Every real Outlook cell is blocked, and synthetic EML or HTTP-preview evidence receives no pass.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "320bb4d1-b1ca-4001-a7ec-38a64605aad1",
+    "assignment_snapshot_digest": "b3aebc18a5a7d5f2e4f1c35fb32b9d33632cc22690a39775d7889f3228fa57d3",
+    "paper_id": "pds-wave-44-2026-08-03",
+    "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52"
+  },
+  "observations": {
+    "source": {
+      "blocks": 99,
+      "unique_block_ids": 99,
+      "raw_sha256": "4923e1b72da37c384ebc3f7b80ba15a08c9998fde560db0095d349a27457f96d",
+      "canonical_blocks_sha256": "1c10ec4984826b0b12a0111c64b57bfc2c79de3ae576dd40b74e83c9e183bfce"
+    },
+    "authored_carriers": {
+      "headings": 32,
+      "paragraphs": 48,
+      "empty_paragraph_scaffolds": 15,
+      "lists": 10,
+      "list_items": 85,
+      "tables": 5,
+      "body_rows": 54,
+      "header_cells": 12,
+      "body_cells": 203,
+      "intentionally_headerless_tables": 2,
+      "callouts": 4,
+      "marks": 0,
+      "links": 0
+    },
+    "real_outlook": {
+      "application": "not_found",
+      "running_processes": 0,
+      "profile_store": "not_found",
+      "target_messages": 0,
+      "provider_receipts": 0,
+      "raw_delivered_sources": 0,
+      "captures": 0,
+      "client_versions": 0,
+      "qualifying_width_cells": "0/2",
+      "required_categories": "0/6"
+    },
+    "synthetic_mime": {
+      "E05": "proxy only: multipart bytes exist without envelope or revision identity",
+      "E06": "proxy only: invalid.example revision identity exists but was never delivered"
+    },
+    "repository_contract": "Paper email route emits text/html HTTP preview only; no Outlook or MIME delivery integration, provider receipt, or delivered-client artifact",
+    "prior_proxy_semantics": "5/5 tables presentational, 0/12 headers associated, 0/4 callouts labeled"
+  },
+  "inferences": [
+    "This host cannot produce a real Outlook observation; that does not prove an external Microsoft 365 mailbox lacks the target.",
+    "E06 proves a synthetic projection only, not submission, delivery, Outlook rewriting, or rendering.",
+    "A delivered Outlook message likely inherits known proxy semantic defects, but Outlook-specific behavior is unobserved."
+  ],
+  "repair_seams": [
+    "Provision a controlled Outlook or Microsoft 365 mailbox and real client.",
+    "Deliver exact-revision multipart mail and retain provider, Graph/internetMessageId, and raw-message receipts.",
+    "Capture both narrow widths and verify keyboard, screen reader, Safe Links, dark mode, and identity continuity."
+  ],
+  "checked": {
+    "tasks": [
+      "task-a768c69e659add58",
+      "task query: title*=Outlook"
+    ],
+    "papers": [
+      "pds-wave-44-2026-08-03@8bbd5d874a1b697f1e4e437c473f8e52",
+      "legendary-paper-reader-upgrade-sweep-2026-08-03"
+    ],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E05/generated/adapters/PDS44/email.eml",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/PDS44.eml",
+      "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex",
+      "tooling/grip/ledger/legendary-paper-restart-experiment-02-2026-08-06.md",
+      "tooling/grip/ledger/legendary-paper-survey-57-2026-08-06.md",
+      "tooling/grip/ledger/legendary-paper-survey-60-2026-08-06.md"
+    ],
+    "local_client_store": "Applications and Library Outlook paths: not found"
+  },
+  "risks": [
+    "All six required Outlook categories and both width cells remain zero.",
+    "No client version, raw source, provider receipt, Graph record, dark mode, Safe Links, keyboard, or assistive-technology evidence exists.",
+    "The fixture has no links, so link activation and rewriting remain structurally unexercised.",
+    "Proxy semantics already fail table associations and callout labels."
+  ],
+  "unvisited_scope": [
+    "real Outlook mailbox or Microsoft Graph record",
+    "provider logs and raw delivered source",
+    "320 and 390 pixel Outlook captures",
+    "dark mode, zoom, keyboard, screen reader, and Safe Links",
+    "Gmail and Apple Mail"
+  ],
+  "credential_scan": {
+    "status": "clean",
+    "credential_values_reported": 0
+  },
+  "mutations": {
+    "repo_files_changed_by_surveyor": 0,
+    "barkpark_mutations": 0,
+    "mail_sent": 0,
+    "outlook_launched": 0
+  }
+}
