@@ -1,0 +1,125 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-22",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": [
+    "pds-wave-44-2026-08-03::email_gmail"
+  ],
+  "verdict": "blocked",
+  "hard_gate_result": "blocked_no_real_delivered_gmail_receipt",
+  "direct_answer": "The exact PDS44 revision, source, and authored denominators are proven, but no delivered Gmail message or authenticated Gmail reader is available. Chrome has no Gmail tab, Safari exposes Google sign-in rather than a mailbox, and no Gmail connector exists. All six required categories and both width cells remain zero; preview, faux mail chrome, and synthetic MIME cannot pass.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "cycle_assignment_id": "bf14c819-525f-4671-91df-25ca1fc7276d",
+    "assignment_snapshot_digest": "12bbf3a80a0dbc7f426502a6043bad351e8b38ec89ac40dbab51736f05a8dcd9",
+    "paper_id": "pds-wave-44-2026-08-03",
+    "paper_revision": "8bbd5d874a1b697f1e4e437c473f8e52"
+  },
+  "observations": {
+    "source": {
+      "blocks": 99,
+      "unique_block_ids": 99,
+      "raw_sha256": "4923e1b72da37c384ebc3f7b80ba15a08c9998fde560db0095d349a27457f96d",
+      "canonical_blocks_sha256": "1c10ec4984826b0b12a0111c64b57bfc2c79de3ae576dd40b74e83c9e183bfce"
+    },
+    "authored_carriers": {
+      "nonempty_carriers": 84,
+      "headings": 32,
+      "paragraphs": 48,
+      "empty_paragraph_scaffolds": 15,
+      "lists": 10,
+      "list_items": 85,
+      "tables": 5,
+      "header_cells": 12,
+      "body_cells": 203,
+      "intentionally_headerless_tables": 2,
+      "callouts": 4,
+      "marks": 0,
+      "links": 0
+    },
+    "real_gmail": {
+      "connector_installed": false,
+      "chrome_tabs_checked": 22,
+      "chrome_gmail_tabs": 0,
+      "safari_session": "Google sign-in, not authenticated mailbox",
+      "delivered_messages": 0,
+      "raw_delivered_sources": 0,
+      "provider_receipts": 0,
+      "captures": 0,
+      "qualifying_width_cells": "0/2",
+      "required_categories": "0/6"
+    },
+    "nonqualifying_controls": {
+      "http_preview": "text/html response only; no submission or delivery",
+      "faux_reader": "in-page Barkpark Mail iframe, not Gmail",
+      "synthetic_mime": "E05 lacks delivery identity; E06 uses invalid.example and was never delivered",
+      "preview_geometry": "nominal 390 and 320 profiles both measured client width 980",
+      "preview_semantics": "5/5 tables rendered nonsemantic; 0/4 callouts observed; source order 84/84"
+    }
+  },
+  "inferences": [
+    "This host lacks an already-open authenticated Gmail reader for the target message.",
+    "Synthetic MIME constrains implementation but cannot prove Gmail transit, rewriting, clipping, semantics, interaction, or identity.",
+    "A real message may inherit preview semantic defects, but Gmail itself was not observed.",
+    "Blocked and proxy evidence cannot qualify under the wave contract."
+  ],
+  "repair_seams": [
+    "Deliver exact-revision multipart mail to an authorized Gmail mailbox and retain provider and raw-source receipts.",
+    "Capture real Gmail at actual 390 and 320 pixel client widths with client version and hashes.",
+    "Verify all 84 nonempty carriers, lists, tables, callouts, and assistive-technology order.",
+    "Use a separate immutable link-bearing fixture for Gmail rewriting and click/Enter equivalence."
+  ],
+  "checked": {
+    "tasks": [
+      "task-a768c69e659add58",
+      "gp-w3b-email-popup",
+      "task query: title*=Gmail",
+      "task query: description*=Gmail"
+    ],
+    "papers": [
+      "pds-wave-44-2026-08-03@8bbd5d874a1b697f1e4e437c473f8e52",
+      "legendary-paper-reader-upgrade-sweep-2026-08-03"
+    ],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/fixtures/delivered-mail-clients.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E05/generated/adapters/PDS44/email.eml",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/PDS44.eml",
+      "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex",
+      "api/lib/barkpark_web/layouts/bulldocs.html.heex",
+      "tooling/grip/ledger/legendary-paper-restart-experiment-02-2026-08-06.md"
+    ]
+  },
+  "risks": [
+    "All six Gmail categories and both width cells are unvisited.",
+    "No proof exists for clipping, dark mode, remote content, spam placement, link rewriting, or keyboard behavior.",
+    "No raw delivered source binds a Gmail render to the immutable Paper revision.",
+    "The zero-link source cannot prove Gmail link activation.",
+    "Nominally narrow preview captures actually measured 980 pixels and can mislead reviewers."
+  ],
+  "unvisited_scope": [
+    "authenticated Gmail inbox",
+    "delivered target and provider receipts",
+    "real 390 and 320 pixel geometry",
+    "dark mode and remote-content behavior",
+    "assistive-technology reading order",
+    "link rewriting, spam placement, and clipping"
+  ],
+  "credential_scan": {
+    "status": "clean",
+    "credential_values_reported": 0
+  },
+  "mutations": {
+    "repo_files_changed_by_surveyor": 0,
+    "barkpark_mutations": 0,
+    "mail_sent": 0,
+    "browser_navigation_or_tab_switches": 0
+  }
+}
