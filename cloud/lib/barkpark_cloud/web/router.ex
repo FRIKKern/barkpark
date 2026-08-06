@@ -268,7 +268,7 @@ defmodule BarkparkCloud.Web.Router do
     Webhooks
   }
 
-  alias BarkparkCloud.Accounts.{Team, TwoFactorRateLimiter, UserToken}
+  alias BarkparkCloud.Accounts.{Authz, Team, TwoFactorRateLimiter, UserToken}
   alias BarkparkCloud.DeviceAuth.RateLimiter, as: DeviceAuthRateLimiter
   alias BarkparkCloud.Registry.AzureCatalog
   alias BarkparkCloud.Registry.Barkpark
@@ -2056,7 +2056,12 @@ defmodule BarkparkCloud.Web.Router do
         conn.assigns[:current_token] -> Auth.require_ability(conn, "deploy")
         is_nil(conn.assigns[:current_team]) -> conn
         Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
-        true -> conn |> json(403, %{error: "forbidden"}) |> halt()
+        # cch-w37-s2: NAME THE AUTHORITY. This refusal shipped as a bare
+        # %{error: "forbidden"}, which the console's friendly() resolves to the
+        # owner-only BILLING sentence — so a plain member who clicks the rendered
+        # "Add support server" CTA was told, confidently, about billing. Adding a
+        # support machine needs ADMIN on the resolved team; paying needs OWNER.
+        true -> Auth.forbidden(conn, required: "admin", scope: "team")
       end
 
     cond do
@@ -2220,7 +2225,11 @@ defmodule BarkparkCloud.Web.Router do
         conn.assigns[:current_token] -> Auth.require_ability(conn, "deploy")
         is_nil(conn.assigns[:current_team]) -> conn
         Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) -> conn
-        true -> conn |> json(403, %{error: "forbidden"}) |> halt()
+        # cch-w37-s2: SHAPE PARITY with POST /v1/fleet/supports above — a
+        # credential that can BIND can UNBIND, so its refusal must read the same.
+        # This one is CLI-only today (zero console call sites), so no user reads
+        # it yet; it is labelled anyway so the pair cannot drift apart.
+        true -> Auth.forbidden(conn, required: "admin", scope: "team")
       end
 
     cond do
@@ -4299,8 +4308,11 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 422, %{error: "no_team"})
 
+      # cch-w37-s2: NAME THE AUTHORITY — writing an env var is admin-gated on the
+      # resolved team. Bare, this refusal read to the console as the owner-only
+      # billing one.
       not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-        json(conn, 403, %{error: "forbidden"})
+        Auth.forbidden(conn, required: "admin", scope: "team")
 
       not is_binary(conn.body_params["key"]) or conn.body_params["key"] == "" ->
         json(conn, 422, %{error: "key_required"})
@@ -4335,6 +4347,9 @@ defmodule BarkparkCloud.Web.Router do
           {:error, :write_once} ->
             json(conn, 409, %{error: "write_once"})
 
+          # LEFT BARE ON PURPOSE — charter D396(5). This is the CROSS-TENANT arm:
+          # an ADMIN of team A is refused here on team B's barkpark_id, so it is
+          # not a role refusal at all and `required: "admin"` would be a NEW lie.
           {:error, :barkpark_not_in_team} ->
             json(conn, 403, %{error: "forbidden"})
 
@@ -4357,8 +4372,9 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns.current_team) ->
         json(conn, 422, %{error: "no_team"})
 
+      # cch-w37-s2: NAME THE AUTHORITY — the delete twin of POST /v1/env-vars.
       not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-        json(conn, 403, %{error: "forbidden"})
+        Auth.forbidden(conn, required: "admin", scope: "team")
 
       true ->
         # activity-audit-log: the env-var delete + an `env_var.deleted` audit
@@ -4660,6 +4676,11 @@ defmodule BarkparkCloud.Web.Router do
         # and be handed the whole team's log. The router owns the self-scope
         # decision, so the router owns its failure mode: no address, no read.
         cond do
+          # LEFT BARE ON PURPOSE — charter D396(5). Admin is sufficient but NOT
+          # necessary here (a member WITH a usable address reads their own rows),
+          # so `required: "admin"` would misdescribe the gate. It is additionally
+          # unreachable in practice: `self_scopable_address?/1` is true for any
+          # non-blank email and `users.email` is `null: false`.
           not admin? and not self_scopable_address?(user) ->
             json(conn, 403, %{error: "forbidden"})
 
@@ -4871,11 +4892,33 @@ defmodule BarkparkCloud.Web.Router do
             member_json(%{user: target, role: membership.role, joined_at: membership.inserted_at})
         })
       else
-        nil -> json(conn, 404, %{error: "not_found"})
-        {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
-        {:error, :invalid_role} -> json(conn, 422, %{error: "invalid_role"})
-        {:error, :forbidden} -> json(conn, 403, %{error: "forbidden"})
-        {:error, :last_owner} -> json(conn, 409, %{error: "last_owner"})
+        nil ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :not_found} ->
+          json(conn, 404, %{error: "not_found"})
+
+        {:error, :invalid_role} ->
+          json(conn, 422, %{error: "invalid_role"})
+
+        # cch-w37-s2: A CAUSE, NEVER AN AUTHORITY. The caller is ALREADY inside
+        # with_team_role(conn, "admin", …), so `required: "admin"` would be a new
+        # lie — and no static authority label is sound here anyway: the SAME
+        # admin refused on a peer admin succeeds on a plain member. The refusal
+        # is RANK-RELATIVE, so it names the relation instead. Re-deriving
+        # can_grant?/3 (total, no side effects) separates the two arms
+        # `update_member_role_as/4` collapses into one `{:error, :forbidden}`:
+        # granting ABOVE your own rank vs. targeting someone you do not outrank.
+        {:error, :forbidden} ->
+          reason =
+            if Authz.can_grant?(conn.assigns.current_user, team, to_string(role)) == :ok,
+              do: "outranked",
+              else: "cannot_grant_higher_role"
+
+          Auth.forbidden(conn, reason: reason)
+
+        {:error, :last_owner} ->
+          json(conn, 409, %{error: "last_owner"})
       end
     end)
   end
@@ -4907,7 +4950,11 @@ defmodule BarkparkCloud.Web.Router do
       else
         nil -> json(conn, 404, %{error: "not_found"})
         {:error, :not_found} -> json(conn, 404, %{error: "not_found"})
-        {:error, :forbidden} -> json(conn, 403, %{error: "forbidden"})
+        # cch-w37-s2: A CAUSE, NEVER AN AUTHORITY — same reasoning as the PATCH
+        # above. `remove_member_as/3` refuses on ONE relation only (the actor
+        # does not out-rank the target), so the cause is always `outranked`; the
+        # caller is already an admin, and the same admin succeeds on a member.
+        {:error, :forbidden} -> Auth.forbidden(conn, reason: "outranked")
         {:error, :last_owner} -> json(conn, 409, %{error: "last_owner"})
       end
     end)
@@ -5052,8 +5099,10 @@ defmodule BarkparkCloud.Web.Router do
 
           # A plain member may mint only a `read` PAT — minting deploy/root/write
           # is owner/admin-only (anti-escalation, see create_personal_access_token).
+          # cch-w37-s2: NAME THE AUTHORITY, so the console can say "minting this
+          # ability needs admin" instead of the owner-only billing sentence.
           {:error, :forbidden} ->
-            json(conn, 403, %{error: "forbidden"})
+            Auth.forbidden(conn, required: "admin", scope: "team")
 
           {:error, cs} ->
             json(conn, 422, %{error: "invalid", details: errors(cs)})
@@ -8287,8 +8336,13 @@ defmodule BarkparkCloud.Web.Router do
       is_nil(conn.assigns[:current_team]) ->
         json(conn, 422, %{error: "no_team"})
 
+      # cch-w37-s2: NAME THE AUTHORITY. The rendered "Resurrect" CTA sends a
+      # member's refusal through resurrectOutcome → friendly(), where a bare body
+      # resolves to the owner-only BILLING sentence — and the very next branch
+      # here is a REAL billing refusal (402), so the two were indistinguishable
+      # to the user. Resurrecting needs ADMIN; paying needs OWNER.
       not Accounts.team_admin?(conn.assigns.current_user, conn.assigns.current_team) ->
-        json(conn, 403, %{error: "forbidden"})
+        Auth.forbidden(conn, required: "admin", scope: "team")
 
       # A resurrect stands up — and bills — a real box, so it honors the SAME
       # entitlement gate as launch (an active subscription, or the one auto-started
