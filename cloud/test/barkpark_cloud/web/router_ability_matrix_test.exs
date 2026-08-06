@@ -82,6 +82,17 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     {token, stored}
   end
 
+  defp session_token(user) do
+    {:ok, token} = Accounts.create_user_session_token(user)
+    token
+  end
+
+  # The session twin of `call/4` — the team-role and platform-operator gates are
+  # reachable only by a browser credential (a PAT carries no team role axis).
+  defp session_call(method, path, body, user) do
+    call(method, path, body, session_token(user))
+  end
+
   defp call(method, path, body, token) do
     conn =
       case body do
@@ -335,6 +346,151 @@ defmodule BarkparkCloud.Web.RouterAbilityMatrixTest do
     test "an unauthenticated request to a read-gated GET is 401, not 403" do
       conn = Router.call(conn(:get, "/v1/sites"), @opts)
       assert conn.status == 401
+    end
+  end
+
+  ## 2b. THE REFUSAL NAMES THE AUTHORITY IT REQUIRED (cch w35 s1)
+
+  # A 403 whose whole body is `{"error":"forbidden"}` tells the caller nothing
+  # about WHAT would have admitted them, which is why the console had to guess a
+  # cause from one global slug map and printed "Only the team owner can manage
+  # billing" for an audit-trail read. Every refusal that flows through
+  # `Auth.forbidden/2` now carries the authority it actually required, plus the
+  # scope that authority lives in. These are the guards that can LOSE: delete an
+  # evidence pair from auth.ex and the matching assertion below reds by name.
+  #
+  # The pairs are asserted by FULL-MAP equality on purpose — an assertion that
+  # only keys into ["error"] cannot notice a field going missing.
+  describe "a refusal names the authority it required" do
+    test "require_ability names the ability and the token scope" do
+      s = scope()
+      {token, _} = pat(s, ["deploy"])
+
+      conn = call(:patch, "/v1/sites/#{s.site.id}", %{name: "Renamed"}, token)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "write",
+               "scope" => "token"
+             }
+    end
+
+    test "require_primary_team_admin names admin on the primary team (the audit-trail exhibit)" do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "member")
+
+      conn = session_call(:get, "/v1/audit", nil, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "primary_team"
+             }
+    end
+
+    test "require_primary_team_owner names owner, so an ADMIN is told what they still lack" do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "admin")
+
+      conn = session_call(:post, "/v1/billing/checkout", %{}, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "owner",
+               "scope" => "primary_team"
+             }
+    end
+
+    test "require_platform_operator names the platform allowlist, not a team role" do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "owner")
+
+      conn = session_call(:get, "/v1/operator/autoupdate", nil, user)
+
+      assert conn.status == 403
+
+      # A team OWNER is still refused here, and the body says why: this axis is
+      # the platform allowlist, which no team grant can reach.
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "platform_operator",
+               "scope" => "platform"
+             }
+    end
+
+    test "require_team_role names the min_role the route asked for, on the team scope" do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "member")
+
+      conn =
+        session_call(
+          :post,
+          "/v1/teams/#{team.id}/invitations",
+          %{"email" => "x@example.com"},
+          user
+        )
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+    end
+
+    test "gate_role names the label its opaque check cannot introspect" do
+      user = user_fixture()
+      team = team_fixture()
+      {:ok, _} = Accounts.add_member(team, user, "member")
+
+      conn = session_call(:get, "/v1/barkparks/#{Ecto.UUID.generate()}/credentials", nil, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "required" => "admin",
+               "scope" => "team"
+             }
+    end
+
+    test "the no-team arm states a CAUSE and never an authority" do
+      # NOT `required: "admin"`. This user holds no team grant at all, so no role
+      # would have admitted them; naming one would be a second confidently-wrong
+      # sentence, which is the exact failure this slice exists to remove.
+      user = user_fixture()
+
+      conn = session_call(:get, "/v1/barkparks/#{Ecto.UUID.generate()}/credentials", nil, user)
+
+      assert conn.status == 403
+
+      assert Jason.decode!(conn.resp_body) == %{
+               "error" => "forbidden",
+               "reason" => "no_team",
+               "scope" => "team"
+             }
+
+      refute Map.has_key?(Jason.decode!(conn.resp_body), "required")
+    end
+
+    test "evidence is ADDITIVE — the `forbidden` slug 21 assertions pin is untouched" do
+      s = scope()
+      {token, _} = pat(s, ["deploy"])
+
+      conn = call(:patch, "/v1/sites/#{s.site.id}", %{name: "Renamed"}, token)
+
+      assert Jason.decode!(conn.resp_body)["error"] == "forbidden"
     end
   end
 
