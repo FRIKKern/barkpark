@@ -2032,7 +2032,7 @@ defmodule Barkpark.Sites.DeployRunner do
       dir
       |> build_log_entries()
       |> Enum.reject(&MapSet.member?(protected, &1.path))
-      |> Enum.sort_by(& &1.mtime, {:desc, DateTime})
+      |> Enum.sort_by(&recency_key/1, :desc)
       |> Enum.split_with(&older_than?(&1, caps.max_age_ms))
 
     {within_count, over_count} = Enum.split(fresh, caps.max_logs)
@@ -2117,6 +2117,21 @@ defmodule Barkpark.Sites.DeployRunner do
 
   defp older_than?(entry, max_age_ms),
     do: DateTime.diff(DateTime.utc_now(), entry.mtime, :millisecond) > max_age_ms
+
+  # Newest-first ordering, and it must be TOTAL. `File.stat/2` reports mtime at
+  # one-second resolution, so builds of the same slug that finish inside the same
+  # second tie — and a tie left to `Enum.sort_by/3`'s stable sort falls through to
+  # `File.ls/1`'s arbitrary directory order, which would let the OS pick which
+  # build log the byte and count caps delete. Tie-breaking on the path makes that
+  # choice deterministic: the same directory always evicts the same files, so a
+  # sweep is reproducible and "which build lost its log" is answerable.
+  #
+  # The path is a TIE-BREAK, not a recency claim — within one second the
+  # filesystem does not know which build finished last, and neither do we. The
+  # sort key is the mtime as a unix integer rather than the %DateTime{}: a tuple
+  # sorts by Erlang term order, under which structs compare as maps (by size,
+  # then keys, then values) and NOT chronologically.
+  defp recency_key(entry), do: {DateTime.to_unix(entry.mtime), entry.path}
 
   # Newest-first: keep taking until the running total would exceed the cap; the
   # remainder is condemned. The newest log is ALWAYS kept even if it alone is

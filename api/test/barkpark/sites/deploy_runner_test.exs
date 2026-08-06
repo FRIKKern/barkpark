@@ -1664,6 +1664,18 @@ defmodule Barkpark.Sites.DeployRunnerTest do
 
       for id <- ~w(b1 b2 b3), do: deploy_and_finalize("capbytes", id)
 
+      # Age the two older logs apart EXPLICITLY. mtime has one-second resolution,
+      # and three builds this cheap all finish inside the same second on a fast
+      # box — which left "the newest" undefined and made this assertion depend on
+      # directory order (it passed on a slow laptop and failed on CI). Spreading
+      # the mtimes is what makes b3 provably the newest, so the survivor below
+      # tests the recency rule rather than a tie-break. Still far inside the age
+      # cap (7 days), so age condemns nothing.
+      now = System.os_time(:second)
+      File.touch!(Path.join(dir, "capbytes-b1.log"), now - 120)
+      File.touch!(Path.join(dir, "capbytes-b2.log"), now - 60)
+      File.touch!(Path.join(dir, "capbytes-b3.log"), now)
+
       # 1 byte: every log is over budget, so only the always-keep-the-newest rule
       # decides what survives. Applied after the builds (see the count test).
       put_cfg(max_build_log_bytes: 1, max_build_logs: 500)
@@ -1676,6 +1688,31 @@ defmodule Barkpark.Sites.DeployRunnerTest do
       # A bound that deletes the build you are reading is not a bound.
       assert report.kept == 1
       assert File.exists?(Path.join(dir, "capbytes-b3.log"))
+    end
+
+    test "logs that tie on mtime are evicted deterministically, not in directory order" do
+      dir = run_dir()
+      recorder_cfg(dir)
+
+      for id <- ~w(t1 t2 t3), do: deploy_and_finalize("captie", id)
+
+      # The case the filesystem cannot resolve: three logs stamped the SAME
+      # second. Nothing on disk says which build finished last, so the sweep may
+      # not consult `File.ls/1`'s arbitrary order to decide — that would let the
+      # OS choose which build silently loses its log, and make two sweeps of an
+      # identical directory disagree. The tie-break is the path, descending.
+      same_second = System.os_time(:second)
+      for id <- ~w(t1 t2 t3), do: File.touch!(Path.join(dir, "captie-#{id}.log"), same_second)
+
+      put_cfg(max_build_log_bytes: 1, max_build_logs: 500)
+      report = DeployRunner.retention_sweep()
+
+      assert report.bound == :bytes
+      assert report.evicted_by.bytes == 2
+      assert report.kept == 1
+      assert File.exists?(Path.join(dir, "captie-t3.log"))
+      refute File.exists?(Path.join(dir, "captie-t1.log"))
+      refute File.exists?(Path.join(dir, "captie-t2.log"))
     end
 
     test "a log whose unit is STILL RUNNING is never evicted" do
