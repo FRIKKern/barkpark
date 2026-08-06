@@ -55,6 +55,7 @@ defmodule BarkparkCloud.Web.Router do
       GET     /v1/subscription     user      {subscription | nil} — current plan
       GET     /v1/events           user*     Server-Sent-Events live stream (*ticket= or Bearer)
       POST    /v1/agent/report     agent     land a health report (health + events)
+      POST    /v1/agent/space      agent     land the disk-consumption payload (event only)
       GET     /v1/agent/commands   agent     approved-command queue (empty for now)
       POST    /v1/agent/results    agent     ack command results
       GET     /v1/barkparks        user      the team's registered Barkparks (+provision_status)
@@ -1310,6 +1311,43 @@ defmodule BarkparkCloud.Web.Router do
       # notifications-email: alert on a health FLIP only (down→up reachable,
       # up→down unreachable). Additive to the SSE push above.
       maybe_dispatch_health_flip(barkpark, prior_health, new_health)
+
+      json(conn, 200, %{ok: true})
+    end
+  end
+
+  # POST /v1/agent/space — body is the agent's SpaceReport (see
+  # internal/agent/report.go): root used/total bytes, journal bytes, PG size +
+  # its biggest named relations, and the sites tree + its biggest slugs. Lands
+  # ONE append-only `space` AgentEvent and answers 200 {ok: true}. This is the
+  # ingest half of "what is taking up space"; `Telemetry.normalize_space/1` is
+  # the read half.
+  #
+  # STRICTLY SMALLER THAN /v1/agent/report — the same agent auth, and then five
+  # deliberate NON-actions, each a decision rather than an omission:
+  #
+  #   * NO record_agent_report. A space post must never move health_status /
+  #     last_seen_at / version / agent_status: a box whose disk probe still
+  #     succeeds while its BEAT is dead must keep reading as stale. This is the
+  #     most important negative in the design.
+  #   * NO maybe_dispatch_health_flip — a disk reading is not a health signal
+  #     and must not email anyone that a box came back.
+  #   * NO push_event(team_id, "fleet") — a 15-minute disk row does not justify
+  #     waking every open dashboard.
+  #   * NO dispatch on the body's `type` field. The agent carries `type:
+  #     "space"` inline so a landing site records it verbatim rather than
+  #     guessing, but the TYPE THIS ROUTE WRITES IS HARDCODED; the schema's
+  #     validate_inclusion is the second fence, never the first.
+  #   * NO retention change. AgentRetentionWorker prunes agent_events on
+  #     inserted_at with no type predicate, so space rows inherit the 14-day
+  #     window for free (+96 rows/day/box against ~1440 health beats, +6.7%).
+  post "/v1/agent/space" do
+    conn = Auth.require_agent(conn, [])
+
+    if conn.halted do
+      conn
+    else
+      _ = Registry.record_event(conn.assigns.current_barkpark, "space", conn.body_params)
 
       json(conn, 200, %{ok: true})
     end
@@ -7735,7 +7773,15 @@ defmodule BarkparkCloud.Web.Router do
             json(conn, 404, %{error: "not_found"})
 
           %Barkpark{} = bp ->
-            events = Registry.recent_events(bp, points)
+            # TYPE-FILTERED at the FETCH, not just at the fold: `points` is the
+            # number of HEALTH beats the caller asked to chart, so the LIMIT has
+            # to be applied to health rows. A type-blind read hands the window
+            # `points` rows of the MIXED stream and Metrics then drops the
+            # non-health ones — at the shipped cadence (60s health beside a
+            # 15-minute `space` row) that renders 188 of a requested 200 while
+            # the envelope still says 200 (D58's separation was enforced at
+            # WRITE and at FOLD, never at FETCH).
+            events = Registry.recent_events_of_type(bp, "health", points)
             json(conn, 200, Metrics.build(bp, events, points: points))
         end
     end

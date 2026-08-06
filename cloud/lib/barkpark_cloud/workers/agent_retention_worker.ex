@@ -7,11 +7,17 @@ defmodule BarkparkCloud.Workers.AgentRetentionWorker do
 
   Three append-only tables grow forever without this:
 
-    * `agent_events` — one `health` row per 60s beat per box (~1440 rows/box/day),
-      written by `Registry.record_event/3` and never mutated. We keep 14 days:
-      enough for the metrics window (`BarkparkCloud.Metrics` reads the durable
-      table) and the instance event timeline, and `recent_events/2`'s
-      limit-50 tail is unaffected by pruning anything older.
+    * `agent_events` — one `health` row per 60s beat per box (~1440 rows/box/day)
+      PLUS one `space` row per 15-minute disk report (~96 rows/box/day, +6.7% —
+      D58), written by `Registry.record_event/3` and never mutated. We keep 14
+      days: enough for the metrics window (`BarkparkCloud.Metrics` reads the
+      durable table) and the instance event timeline. The prune is deliberately
+      TYPE-AGNOSTIC — it keys on `inserted_at` alone, so every event type a box
+      learns to post inherits the same 14-day window with no code change here.
+      Pruning anything older leaves the timeline's recent tail untouched, and
+      the metrics window is now a TYPE-FILTERED read
+      (`recent_events_of_type/3`), so a non-health row can neither shorten a
+      chart nor be kept alive by one.
     * `agent_tokens` — `mint_agent_token/3` now revokes a box's superseded
       same-scope token at re-mint, so dead rows accumulate as `revoked_at` is
       stamped on every re-claim. We keep a dead token 30 days past whichever

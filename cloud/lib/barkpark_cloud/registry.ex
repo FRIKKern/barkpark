@@ -2732,6 +2732,34 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  Most-recent `limit` events of ONE `type` for `barkpark`, newest first.
+
+  The type-blind sibling above is the timeline read ("show me what happened");
+  this one is the SERIES read ("give me N health beats"). They are different
+  questions and the difference is the LIMIT: `recent_events/2` applies `limit`
+  to the mixed stream, so once a box writes more than one type — `space` lands
+  one row per 15 minutes beside the 60s health beat — asking for 200 rows to
+  chart returns ~188 health beats and a chart silently loses its tail (D58 is
+  enforced at WRITE and at FOLD; this is the FETCH). Filtering IN the query is
+  what makes `limit` mean what the caller asked for.
+
+  No migration: the existing `(barkpark_id, inserted_at)` index still backs the
+  scan; `type` is an extra predicate on the same ordered rows.
+  """
+  @spec recent_events_of_type(Barkpark.t() | binary(), String.t(), pos_integer()) :: [
+          AgentEvent.t()
+        ]
+  def recent_events_of_type(barkpark, type, limit \\ 50) when is_binary(type) do
+    bp_id = barkpark_id(barkpark)
+
+    AgentEvent
+    |> where([e], e.barkpark_id == ^bp_id and e.type == ^type)
+    |> order_by([e], desc: e.inserted_at, desc: e.id)
+    |> limit(^limit)
+    |> Repo.all()
+  end
+
+  @doc """
   Most-recent `limit` events for `barkpark_id`, TEAM-SCOPED and 404-safe — the
   read behind `GET /v1/barkparks/:id/events`. Returns the events newest-first
   when the barkpark exists AND belongs to `team`; returns `nil` when the id is
