@@ -53,6 +53,11 @@ defmodule BarkparkWeb.Contract.ErrorCodeCoverageTest do
                    # provision failure names itself instead of vanishing into a
                    # Logger line.
                    "site_provision_failed",
+                   # Site deploy — the box's ONE fleet build slot is already
+                   # taken by another site's build, so the deploy is refused at
+                   # the door instead of queueing inside its unit for 900s
+                   # (same admin-ops endpoint, deploy-reliability wave 4).
+                   "box_at_capacity",
                    # Self-update W6 rollback preflight — same admin-ops
                    # endpoint family as the three codes above (fail-closed
                    # 500 when preflight can't clear the rollback).

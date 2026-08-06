@@ -250,6 +250,34 @@ defmodule Barkpark.Sites.DeployRunner do
   # else (inactive / failed / deactivating / unknown / "") is terminal or gone.
   @active_states ~w(active activating reloading)
 
+  # ── the box's build-slot door ────────────────────────────────────────────
+  #
+  # The engine serializes BUILDS across the whole box on ONE fleet build slot
+  # (`BUILD_GATE_SLOTS=1` in deploy/lib/site-deploy-common.sh, forced by the
+  # unit's CPUQuota=150% / MemoryMax=1500M). Until this door existed the box
+  # answered every trigger 202 and the engine only met that gate LATER, inside
+  # the unit — so a second site's unit sat `active running` parked in
+  # `flock -w 900`, burning its 30-minute deadline while it waited, and an
+  # operator read a queue as a hang.
+  #
+  # This is an EARLY HONEST REFUSAL, never the barrier. `build_gate_acquire`
+  # FAILS OPEN in three named cases (no flock(1), an undeletable lock dir, an
+  # unopenable lock file) and in every one of them nothing is written to
+  # /proc/locks, so a door that trusted the lock alone would read "free"
+  # forever. The in-engine flock — including its 900s wait — stays exactly as
+  # it is, as the last-resort correctness barrier.
+  @build_slot_capacity 1
+
+  # The lock the engine actually takes. NOT /run/lock. `build_gate_acquire`
+  # resolves it as $BARKPARK_BUILD_GATE_LOCK, else this path, else
+  # ${TMPDIR:-/tmp}/barkpark-site-build.lock when the lock dir cannot be made —
+  # so the door reads EVERY path the engine could have picked. Keying on one
+  # hardcoded path would miss a box whose /var/lock is unwritable, which is
+  # precisely the box that needs the door most.
+  @default_build_gate_lock "/var/lock/barkpark-site-build.lock"
+  @build_gate_lock_basename "barkpark-site-build.lock"
+  @default_proc_locks "/proc/locks"
+
   # The box's master encryption keys — REMOVED from the Port child (see moduledoc).
   @scrub_env ~w(BARKPARK_KEK BARKPARK_CLOAK_KEY)
   # Set-from-request-or-remove. Superset of DeployRequest.allowed_env_keys/0: the
@@ -280,11 +308,18 @@ defmodule Barkpark.Sites.DeployRunner do
   @doc """
   Start a site deploy (or rollback) for a VALIDATED request. Single-flight PER
   SLUG — a second run for the same slug while one is in flight returns
-  `{:error, :already_running}`; a different slug proceeds. Never raises.
+  `{:error, :already_running}`. Never raises.
+
+  A DIFFERENT slug proceeds only while the box still has a free fleet build
+  slot: `mode: :deploy` is refused with `{:error, :box_at_capacity}` when a
+  build is already in flight (see `build_slot_capacity/0`), because the engine
+  would otherwise queue that build inside its unit for up to 900s and read as a
+  hang. `:rollback` and `:teardown` never touch the build gate and are never
+  refused by it.
   """
   @spec trigger(DeployRequest.t()) ::
           {:ok, :started}
-          | {:error, :already_running | :disabled | :start_failed}
+          | {:error, :already_running | :box_at_capacity | :disabled | :start_failed}
           | {:error, {:artifact_rejected, String.t(), String.t()}}
           | {:error, {:provision_failed, String.t()}}
   def trigger(%DeployRequest{} = req), do: safe_call({:trigger, req}, {:error, :disabled})
@@ -410,10 +445,26 @@ defmodule Barkpark.Sites.DeployRunner do
       true ->
         state = drop_stale(state, req.slug)
 
-        if running_slug?(state, req.slug) do
-          {:reply, {:error, :already_running}, state}
-        else
-          start_run(state, req)
+        cond do
+          running_slug?(state, req.slug) ->
+            {:reply, {:error, :already_running}, state}
+
+          # THE DOOR. This is one serialized GenServer critical section:
+          # drop_stale → running_slug? → box_at_capacity? → start_run all run
+          # without interleaving, so two concurrent triggers can NEVER both
+          # observe a free slot. The census touches no lock, so — unlike a
+          # `flock -n` probe — it cannot steal one from a unit already blocked
+          # in `flock -w 900`, and it cannot leak an inherited fd that would
+          # hold the box's only build slot with no reaper.
+          #
+          # It sits BEFORE start_run/2 deliberately (charter D86/D87): a
+          # refused deploy must cost nothing, and start_run's first act is
+          # ingest_prebuilt/1, which extracts the caller's artifact to disk.
+          box_at_capacity?(state, req) ->
+            {:reply, {:error, :box_at_capacity}, state}
+
+          true ->
+            start_run(state, req)
         end
     end
   end
@@ -566,6 +617,198 @@ defmodule Barkpark.Sites.DeployRunner do
         state
     end
   end
+
+  # ── the box's build-slot door (see the @build_slot_capacity note) ────────
+
+  @doc """
+  How many builds this box will run at once — the DOOR's mirror of the engine's
+  `BUILD_GATE_SLOTS`, which is forced to 1 by the build unit's CPUQuota=150% /
+  MemoryMax=1500M. Deliberately not operator-tunable from a control-plane
+  deploy: raising it here without raising the unit's resource caps is how a box
+  swaps itself to death.
+  """
+  @spec build_slot_capacity() :: pos_integer()
+  def build_slot_capacity, do: @build_slot_capacity
+
+  @doc """
+  Every path the engine's `build_gate_acquire` could have resolved the fleet
+  build lock to, in its own order: `$BARKPARK_BUILD_GATE_LOCK`, else
+  `/var/lock/barkpark-site-build.lock`, else the `${TMPDIR:-/tmp}` fallback it
+  falls back to when the lock dir cannot be created. The door reads ALL of them
+  — on the box whose /var/lock is unwritable, the tmp path IS the real lock.
+  """
+  @spec build_gate_lock_candidates() :: [String.t()]
+  def build_gate_lock_candidates do
+    primary =
+      env_or_nil("BARKPARK_BUILD_GATE_LOCK") ||
+        Keyword.get(config(), :build_gate_lock) ||
+        @default_build_gate_lock
+
+    tmp_dir = env_or_nil("TMPDIR") || "/tmp"
+
+    Enum.uniq([primary, Path.join(tmp_dir, @build_gate_lock_basename)])
+  end
+
+  @doc """
+  The `MAJ:MIN:INO` triple `/proc/locks` prints for a file — hex major, hex
+  minor (both `%02x`, the kernel's own format), decimal inode — derived from
+  `File.stat/2`'s `st_dev` + inode. `:error` when the file cannot be stat'd,
+  which INCLUDES the ordinary "no build has ever run on this box" case.
+
+  Pure enough to unit-test: the door's whole foreign-holder read is this plus
+  `flock_held?/2`.
+  """
+  @spec lock_triple(String.t()) :: {:ok, String.t()} | :error
+  def lock_triple(path) do
+    case File.stat(path) do
+      {:ok, %File.Stat{major_device: dev, inode: inode}} ->
+        # Userspace st_dev encoding (glibc gnu_dev_major/minor); the kernel
+        # prints MAJOR()/MINOR() of the same device, so the numbers agree.
+        major = Bitwise.bsr(Bitwise.band(dev, 0x000F_FF00), 8)
+
+        minor =
+          Bitwise.bor(Bitwise.band(dev, 0xFF), Bitwise.band(Bitwise.bsr(dev, 12), 0xFFFF_FF00))
+
+        {:ok, "#{hex2(major)}:#{hex2(minor)}:#{inode}"}
+
+      {:error, :enoent} ->
+        # The lock file does not exist — nothing has ever taken this gate.
+        :error
+
+      {:error, reason} ->
+        Logger.warning(
+          "[site-deploy] the build-slot door could not stat #{path} (#{inspect(reason)}) — " <>
+            "no second opinion on foreign builds; ADMITTING, the engine's own flock still serializes"
+        )
+
+        :error
+    end
+  end
+
+  @doc """
+  Does a `/proc/locks` body carry an FLOCK entry for this `MAJ:MIN:INO` triple?
+
+  Keyed on the ENTRY'S PRESENCE and NEVER on its PID: a live build showed
+  /proc/locks naming a pid that `ps` could not find, because the lock's fd had
+  been inherited and lived on in a child. The read itself is non-destructive —
+  five world-readable lines, one `File.read` — which is the whole reason
+  `flock -n` is not used here: on a FREE lock `flock -n` ACQUIRES, and flock
+  wakeups are unordered, so a probe can take the slot from a unit that was
+  already queued for it.
+  """
+  @spec flock_held?(String.t(), String.t()) :: boolean()
+  def flock_held?(locks_body, triple) do
+    locks_body
+    |> String.split("\n")
+    |> Enum.any?(fn line ->
+      fields = String.split(line)
+      "FLOCK" in fields and triple in fields
+    end)
+  end
+
+  # Is the box's ONE build slot already spoken for? Two signals, in order:
+  #
+  #   1. PRIMARY — the in-BEAM census, above, race-free by construction.
+  #   2. SECOND OPINION — /proc/locks, covering the census's blind spot: a
+  #      build this BEAM did not launch (a human running site-deploy.sh by
+  #      hand, or a unit that outlived a previous BEAM).
+  #
+  # Neither is complete, and the door does not pretend otherwise: the node and
+  # static engines share ONE lock but are two command families here; a
+  # hand-run engine answers to neither; and the node engine RELEASES the slot
+  # before HEALTH boots the site's own process, so one slot does not bound
+  # concurrent memory on node sites. Every uncertain case ADMITS.
+  defp box_at_capacity?(state, %DeployRequest{} = req) do
+    if takes_build_slot?(req) do
+      case building_slugs(state) do
+        [_ | _] = in_flight ->
+          Logger.info(
+            "[site-deploy] REFUSED #{inspect(req.slug)} at the door: the box's build slot is " <>
+              "in use (#{length(in_flight)} of #{build_slot_capacity()}, in flight: " <>
+              "#{Enum.join(in_flight, ", ")})"
+          )
+
+          true
+
+        [] ->
+          foreign_build_in_flight?(req)
+      end
+    else
+      # A rollback is a symlink repoint and a teardown removes a site — neither
+      # ever acquires the build gate, so neither may be refused by it.
+      false
+    end
+  end
+
+  defp takes_build_slot?(%DeployRequest{mode: :deploy}), do: true
+  defp takes_build_slot?(%DeployRequest{}), do: false
+
+  # Slugs this BEAM knows are BUILDING right now — a live Port-mode run, or a
+  # tracked unit systemd still reports active. Rollbacks/teardowns are excluded:
+  # they hold no build slot. A run whose shape is unexpected is simply not
+  # counted (the door fails OPEN, never closed).
+  defp building_slugs(state) do
+    port_slugs = for {slug, %{state: :running, mode: :deploy}} <- state.runs, do: slug
+
+    unit_slugs =
+      for {slug, %{mode: :deploy} = manifest} <- state.units,
+          is_active(manifest.unit_name) in @active_states,
+          do: slug
+
+    Enum.uniq(port_slugs ++ unit_slugs)
+  end
+
+  defp foreign_build_in_flight?(%DeployRequest{} = req) do
+    path = proc_locks_path()
+
+    case File.read(path) do
+      {:ok, body} ->
+        held =
+          Enum.find(build_gate_lock_candidates(), fn lock ->
+            case lock_triple(lock) do
+              {:ok, triple} -> flock_held?(body, triple)
+              :error -> false
+            end
+          end)
+
+        if held do
+          Logger.info(
+            "[site-deploy] REFUSED #{inspect(req.slug)} at the door: the box's build lock #{held} " <>
+              "is held by a build this instance did not launch (#{build_slot_capacity()} of " <>
+              "#{build_slot_capacity()} slots in use)"
+          )
+
+          true
+        else
+          false
+        end
+
+      {:error, :enoent} ->
+        # No /proc/locks — this box is not Linux (dev, macOS, CI). There is no
+        # second opinion to be had; ADMIT and let the engine's flock decide.
+        false
+
+      {:error, reason} ->
+        Logger.warning(
+          "[site-deploy] the build-slot door could not read #{path} (#{inspect(reason)}) — " <>
+            "ADMITTING #{inspect(req.slug)} unrefused; the engine's own flock still serializes it"
+        )
+
+        false
+    end
+  end
+
+  defp proc_locks_path, do: Keyword.get(config(), :proc_locks_path, @default_proc_locks)
+
+  defp env_or_nil(name) do
+    case System.get_env(name) do
+      nil -> nil
+      "" -> nil
+      value -> value
+    end
+  end
+
+  defp hex2(n), do: n |> Integer.to_string(16) |> String.downcase() |> String.pad_leading(2, "0")
 
   defp start_run(state, %DeployRequest{} = req) do
     # INGEST FIRST when the request carries prebuilt bytes (charter D86/D87): a
@@ -1552,7 +1795,16 @@ defmodule Barkpark.Sites.DeployRunner do
   defp exit_label(12), do: "BUILD failed (exit 12)"
   defp exit_label(13), do: "STAGE failed — no dist/ (exit 13)"
   defp exit_label(14), do: "HEALTH gate failed — not switched (exit 14)"
-  defp exit_label(15), do: "gave up waiting for the deploy lock (exit 15)"
+  # Exit 15 has TWO producers in the engine and the label may not pick one: the
+  # per-slug deploy lock (`flock -w 1200`) AND the box's fleet build gate
+  # (`flock -w 900`, site-deploy-common.sh). Naming only the first sent an
+  # operator to the wrong lock — the box-wide queue is the far likelier cause,
+  # and it is the one the door above now refuses up front.
+  defp exit_label(15),
+    do:
+      "gave up waiting for a deploy lock — the box's fleet build slot (900s) " <>
+        "or this site's own deploy lock (1200s) (exit 15)"
+
   defp exit_label(16), do: "SWITCH failed (exit 16)"
   defp exit_label(21), do: "rollback: no previous release (exit 21)"
   defp exit_label(22), do: "rollback: not supported on this site (exit 22)"

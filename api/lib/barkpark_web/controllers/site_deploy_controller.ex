@@ -33,6 +33,13 @@ defmodule BarkparkWeb.SiteDeployController do
       arrived WHOLE and still has nothing to serve.
     * **409** `already_running` — a run for THAT SLUG is in flight. A different
       slug (or an unrelated self-update) never collides.
+    * **409** `box_at_capacity` — a DIFFERENT slug is building and the box's
+      fleet build slot is taken (`BUILD_GATE_SLOTS=1`). The refusal happens at
+      the door, before the artifact is even unpacked, because the alternative
+      is what the box used to do: answer 202 and let the engine queue inside
+      its own unit for up to 900s, where an operator reads a queue as a hang.
+      Only `mode: "deploy"` can draw it — a rollback or teardown never touches
+      the build gate. Retry when the in-flight build finishes.
     * **202** `started` — with the fresh run status.
     * **500** `runner_start_failed` — the feature IS enabled but the command
       could not spawn (missing script, bad cd). Distinct from 503: telling an
@@ -95,6 +102,26 @@ defmodule BarkparkWeb.SiteDeployController do
           error: %{
             code: "already_running",
             message: "a deploy for site '#{req.slug}' is already running"
+          }
+        })
+
+      {:error, :box_at_capacity} ->
+        # The box is BUILDING something else. `code` is exactly
+        # "box_at_capacity" (lowercase snake, no prefix) and `message` is
+        # NON-EMPTY on purpose: the control plane renders a refusal as
+        # "<code> — <message>" and classifies on the head of that split, so a
+        # code with an empty message collides with the request-id stamp the
+        # relay appends and the deferral lands unclassified.
+        slots = DeployRunner.build_slot_capacity()
+
+        conn
+        |> put_status(:conflict)
+        |> json(%{
+          error: %{
+            code: "box_at_capacity",
+            message:
+              "the box is at its build capacity (#{slots} of #{slots} build slots in use) — " <>
+                "another site is building; retry when it finishes"
           }
         })
 
