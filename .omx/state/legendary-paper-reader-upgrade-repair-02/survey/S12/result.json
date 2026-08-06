@@ -1,0 +1,143 @@
+{
+  "schema_version": 1,
+  "assignment_id": "repair02-survey-12",
+  "phase": "survey",
+  "agent_type": "epic-surveyor",
+  "effort": "medium",
+  "lens": "revision_source_identity_pin",
+  "unit_ids": ["cloud-console-hardening-wave-29-2026-08-03::email_apple_mail"],
+  "verdict": "blocked",
+  "direct_answer": "The exact Paper revision and authored denominators are proven. No delivered Apple Mail message, mailbox source, provider receipt, render capture, or client-version receipt exists. Real Apple Mail geometry, semantics, reading order, labels, and source identity are therefore 0/2 width cells and 0/6 categories. Preview and synthetic EML remain proxies. The preview additionally loses 2,268 authored characters from 11 nested list items and flattens all 313 code or strong marks.",
+  "authority": {
+    "epic_id": "task-a768c69e659add58",
+    "wave_id": "legendary-paper-reader-upgrade-wave-2026-08-06-repair-02",
+    "wave_revision": "4087a637-4a40-4175-ba0e-08fae4187f95",
+    "inventory_digest": "aec488c5330adadd31a9f75193288694580a6cb013612e98f330b2940a1cf3f4",
+    "paper_id": "cloud-console-hardening-wave-29-2026-08-03",
+    "paper_revision": "18768b0a14c2eead927181c4a0e37c18",
+    "paper_blocks": 252
+  },
+  "observations": {
+    "source_identity": {
+      "status": "found",
+      "profile_reads": 2,
+      "profile_bytes_identical": true,
+      "blocks": "252/252",
+      "unique_block_ids": "252/252",
+      "canonical_blocks_sha256": "e1cb807591caa511dadb1cc98311812aa364abc624f8da60c24562185b828b21"
+    },
+    "authored_carriers": {
+      "blocks": 252,
+      "nonempty_carriers": 113,
+      "headings": 37,
+      "paragraphs": 187,
+      "empty_paragraph_spacers": 139,
+      "tables": 11,
+      "header_cells": 35,
+      "body_cells": 316,
+      "lists": 13,
+      "list_items": 67,
+      "paragraph_wrapped_nested_items": 11,
+      "nested_item_authored_characters": 2268,
+      "callouts": 4,
+      "marked_runs": 313,
+      "code_marks": 200,
+      "strong_marks": 113,
+      "link_nodes": 0
+    },
+    "live_preview": {
+      "classification": "proxy_only",
+      "attempts": 3,
+      "http_200": 2,
+      "http_500": 1,
+      "successful_bytes": 121072,
+      "successful_sha256": "dc57c4d6704a97ba7003a06694f126c25f9de3f5c8e64529aa20351a3b36e331",
+      "content_type": "text/html; charset=utf-8",
+      "etag": false,
+      "last_modified": false,
+      "paper_id_tokens": 0,
+      "paper_revision_tokens": 0,
+      "message_id": false,
+      "mime_version": false,
+      "viewport_meta": false,
+      "html_lang": false,
+      "landmarks": 0,
+      "aria_attributes": 0
+    },
+    "preview_projection": {
+      "headings": "37/37",
+      "tables": "11/11",
+      "presentation_tables": "11/11",
+      "headers_visible": "35/35",
+      "headers_associated": "0/35",
+      "body_cells": "316/316",
+      "lists": "13/13",
+      "list_items": "67/67 elements",
+      "empty_nested_items": "11/67",
+      "nested_characters_lost": 2268,
+      "semantic_code_marks": "0/200",
+      "semantic_strong_marks": "0/113",
+      "semantic_callout_labels": "0/4"
+    },
+    "narrow_geometry_proxy": "failed proxy: requested 390/320 but observed browser clientWidth 980 because the HTML lacks viewport metadata",
+    "real_apple_mail": {
+      "status": "BLOCKED",
+      "qualifying_width_cells": "0/2",
+      "proven_categories": "0/6",
+      "delivery_message_ids": 0,
+      "provider_receipts": 0,
+      "raw_delivered_sources": 0,
+      "captures": 0,
+      "client_versions": 0,
+      "voiceover_sessions": 0
+    }
+  },
+  "inferences": [
+    "Stable preview bytes likely derive from the pinned source, but the response carries no Paper, revision, validator, or message identity.",
+    "A delivered message using current HTML would likely inherit source-level content and semantic defects, though client rewriting was not observed.",
+    "The repository currently conflates preview bytes with delivery semantics despite no Paper-specific message construction or delivery call."
+  ],
+  "recommended_repair_seams": [
+    "Construct multipart/alternative from the exact pinned revision, stamp Message-ID and Paper provenance, retain provider receipt and delivered raw source, then capture Apple Mail at both widths.",
+    "Normalize string-valued marks so all 313 code/strong marks retain semantic carriers.",
+    "Normalize paragraph-wrapped nested list items so all 67 items and 2,268 nested characters survive in order.",
+    "Preserve 11 data tables with 35 associated headers and 316 body cells without clipping.",
+    "Add document landmarks and accessible labels for all four callouts.",
+    "Make UI/docs distinguish HTML preview, constructed MIME, submitted message, provider receipt, and delivered-client capture."
+  ],
+  "checked": {
+    "tasks": ["task-a768c69e659add58", "two adjacent Cloud notification tasks", "5,296-task text census"],
+    "papers": ["cloud-console-hardening-wave-29-2026-08-03@18768b0a14c2eead927181c4a0e37c18", "legendary-paper-reader-upgrade-sweep-2026-08-03"],
+    "files": [
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/wave-open.json",
+      ".omx/state/legendary-paper-reader-upgrade-repair-02/survey-plan.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/source-denominators.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E02/outputs/semantics.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E11/fixtures/delivered-mail-clients.json",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E05/generated/adapters/CCH29/email.eml",
+      ".omx/state/legendary-paper-reader-upgrade-restart-experiments/E06/generated/adapters/email/CCH29.eml",
+      "api/lib/barkpark_web/controllers/bulldocs_email_controller.ex",
+      "api/lib/barkpark/mailer.ex",
+      "api/lib/barkpark/portable_doc/render.ex",
+      "api/lib/barkpark/portable_doc/render/inline.ex",
+      "api/lib/barkpark/portable_doc/render/compose.ex",
+      "api/lib/barkpark/portable_doc/render/walk.ex",
+      "api/lib/barkpark_web/layouts/bulldocs.html.heex"
+    ]
+  },
+  "risks": [
+    "No real Apple Mail evidence exists and the preview succeeded only 2/3 times.",
+    "Eleven nested items lose 2,268 characters; all 313 marks lose semantic distinction.",
+    "All 11 tables discard data-table semantics and all four callouts lack accessible labels.",
+    "This link-free fixture cannot prove link rewriting or activation.",
+    "Dark mode, remote content, clipping, spam placement, DKIM/SPF/DMARC, and VoiceOver remain unknown."
+  ],
+  "unvisited_scope": [
+    "real Apple Mail inbox, source, version, widths, dark mode, and VoiceOver",
+    "provider delivery logs, DKIM, SPF, DMARC, and spam placement",
+    "live link activation and adversarial long-token delivery",
+    "Gmail and Outlook"
+  ],
+  "credential_scan": {"status": "clean", "values_revealed": 0, "mail_addresses_revealed": 0},
+  "mutations": {"repo_files_changed_by_surveyor": 0, "barkpark_mutations": 0, "mail_sent": 0}
+}
