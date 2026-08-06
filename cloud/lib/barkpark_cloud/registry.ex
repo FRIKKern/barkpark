@@ -2202,6 +2202,44 @@ defmodule BarkparkCloud.Registry do
   end
 
   @doc """
+  The RAW payload of the latest `"health"` agent event per barkpark id, as
+  `%{barkpark_id => %{payload: map(), reported_at: DateTime.t()}}` — the fleet
+  list's host-pressure prefetch (dr-w4-s4).
+
+  ONE query, modelled structurally on `latest_provision_status_map/1`: Postgres
+  `DISTINCT ON (barkpark_id) ... ORDER BY barkpark_id, inserted_at DESC, id DESC`
+  over `agent_events`, backed by the existing `(barkpark_id, inserted_at)` index
+  (migration 20260626193200 — no migration needed). Mapping
+  `recent_events/2` over the rows instead would be an N+1 — the same N+1 already
+  found and fixed once in this domain (`Usage.latest_samples_by_barkpark/1`).
+
+  RAW, NOT NORMALIZED, on purpose: `Telemetry.normalize/1` folds the beat into a
+  fixed literal envelope that drops swap/beam, so the fleet row would inherit
+  that fold's blind spots. The caller reads the agent-shaped jsonb keys itself
+  and renders anything absent as UNMETERED — never a fabricated 0.
+
+  Boxes with no health event are simply ABSENT from the map (nil-honest at the
+  caller). Empty `ids` → empty map (no query).
+  """
+  @spec latest_health_payload_map([binary()]) :: %{
+          binary() => %{payload: map(), reported_at: DateTime.t()}
+        }
+  def latest_health_payload_map([]), do: %{}
+
+  def latest_health_payload_map(ids) when is_list(ids) do
+    from(e in AgentEvent,
+      where: e.barkpark_id in ^ids and e.type == "health",
+      order_by: [asc: e.barkpark_id, desc: e.inserted_at, desc: e.id],
+      distinct: e.barkpark_id,
+      select: {e.barkpark_id, e.payload, e.inserted_at}
+    )
+    |> Repo.all()
+    |> Map.new(fn {bp_id, payload, at} ->
+      {bp_id, %{payload: (is_map(payload) && payload) || %{}, reported_at: at}}
+    end)
+  end
+
+  @doc """
   The latest deployment per site id in `ids`, as a SLIM freshness map
   `%{site_id => %{status:, trigger:, inserted_at:, updated_at:}}`. One query via
   Postgres `DISTINCT ON (site_id) ... ORDER BY site_id, inserted_at DESC` (the

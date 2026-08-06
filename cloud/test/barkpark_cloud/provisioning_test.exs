@@ -2470,4 +2470,270 @@ defmodule BarkparkCloud.ProvisioningTest do
       refute Map.has_key?(List.last(console), "dropped_before")
     end
   end
+
+  # ── dr-w4-s4: the fleet list carries HOST PRESSURE ─────────────────────────
+  #
+  # Until this slice `barkpark_json/3` carried ~30 fields and ZERO vitals, so a
+  # box at 100% cpu and load1 5.57 was indistinguishable, on the wire, from an
+  # idle one. These drive the REAL agent route (POST /v1/agent/report) so the
+  # payload under test is the bytes the agent actually stores — never a
+  # hand-built map with keys deleted, which would prove nothing about the shapes
+  # in the field.
+  describe "GET /v1/barkparks — host pressure rides the fleet row" do
+    # The report body an agent that PREDATES the vitals beat sends: disk + pg +
+    # backup + checks, and no cpu / mem / load1 / swap / beam key at all. This is
+    # five of six boxes in the field today.
+    defp pre_vitals_report do
+      %{
+        "agent_status" => "online",
+        "version" => "0.1.0",
+        "git_commit" => "abc123def",
+        "dirty_tree" => false,
+        "health_status" => "up",
+        "disk_used_percent" => 41,
+        "pg_size_bytes" => 123_456_789,
+        "backup_ok" => true,
+        "backup_detail" => "fresh",
+        "health_checks" => []
+      }
+    end
+
+    defp beat(bp, payload) do
+      {:ok, agent_token, _} = Registry.mint_agent_token(bp, "report")
+      conn = call(:post, "/v1/agent/report", payload, agent_token)
+      assert conn.status == 200
+      :ok
+    end
+
+    defp pressure_for(user, bp) do
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+      conn = call(:get, "/v1/barkparks", nil, user_token)
+      assert conn.status == 200
+      row = Enum.find(json_body(conn)["barkparks"], &(&1["id"] == bp.id))
+      assert row, "the barkpark must be on its own team's fleet page"
+      row["pressure"]
+    end
+
+    test "a struggling box carries its vitals — cpu, load, swap and the BEAM's own footprint" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          Map.merge(pre_vitals_report(), %{
+            "cpu_percent" => 100,
+            "mem_used_percent" => 58,
+            "load1" => 5.57,
+            "swap_used_percent" => 99,
+            "swap_total_bytes" => 2_147_483_648,
+            "beam_pss_bytes" => 900_000_000,
+            "beam_swap_bytes" => 1_900_000_000
+          })
+        )
+
+      pressure = pressure_for(user, bp)
+
+      assert pressure["cpu_percent"] == 100
+      assert pressure["mem_used_percent"] == 58
+      assert pressure["load1"] == 5.57
+      assert pressure["disk_used_percent"] == 41
+      # The vital `mem_used_percent` HIDES: MemAvailable clears the floor
+      # precisely because the BEAM has been paged out, so a box reporting a
+      # comfortable 58% memory is at 99% swap. The row has to carry both.
+      assert pressure["swap_used_percent"] == 99
+      assert pressure["swap_total_bytes"] == 2_147_483_648
+      assert pressure["beam_pss_bytes"] == 900_000_000
+      assert pressure["beam_swap_bytes"] == 1_900_000_000
+      assert is_binary(pressure["reported_at"])
+    end
+
+    test "the LATEST beat wins — a newer report replaces an older one on the row" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok = beat(bp, Map.put(pre_vitals_report(), "cpu_percent", 3))
+      :ok = beat(bp, Map.put(pre_vitals_report(), "cpu_percent", 97))
+
+      assert pressure_for(user, bp)["cpu_percent"] == 97
+    end
+
+    test "a pre-vitals agent renders UNMETERED — every absent signal is nil, never 0" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      # A REAL stored beat, exactly as a pre-#9784 agent sends it.
+      :ok = beat(bp, pre_vitals_report())
+
+      # The payload really is missing the keys — if the agent shape ever starts
+      # carrying them this test must be re-cut, not silently pass.
+      assert [%{type: "health", payload: payload} | _] = Registry.recent_events(bp, 5)
+      refute Map.has_key?(payload, "cpu_percent")
+      refute Map.has_key?(payload, "swap_used_percent")
+
+      pressure = pressure_for(user, bp)
+
+      # What it DID measure still arrives.
+      assert pressure["disk_used_percent"] == 41
+
+      # What it did not measure reads "we did not measure" — a 0 here would be a
+      # perfectly idle machine, which is a lie about a box nobody has metered.
+      for key <- ~w(cpu_percent mem_used_percent load1 swap_used_percent
+                    swap_total_bytes beam_pss_bytes beam_swap_bytes) do
+        assert Map.has_key?(pressure, key), "the pressure block must always carry #{key}"
+        assert pressure[key] == nil, "#{key} must be unmetered (nil), got #{inspect(pressure[key])}"
+      end
+    end
+
+    test "the agent's -1 'probe not wired' sentinel is unmetered too, never a fake reading" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      :ok =
+        beat(
+          bp,
+          Map.merge(pre_vitals_report(), %{
+            "cpu_percent" => -1,
+            "mem_used_percent" => -1,
+            "load1" => -1,
+            "swap_used_percent" => -1,
+            "swap_total_bytes" => -1,
+            "beam_pss_bytes" => -1,
+            "beam_swap_bytes" => -1
+          })
+        )
+
+      pressure = pressure_for(user, bp)
+
+      for key <- ~w(cpu_percent mem_used_percent load1 swap_used_percent
+                    swap_total_bytes beam_pss_bytes beam_swap_bytes) do
+        assert pressure[key] == nil, "the -1 sentinel must render unmetered, got #{key}"
+      end
+
+      # A swapless box is a MEASURED zero and must survive as one — the sentinel
+      # guard is `< 0`, not `falsy`.
+      :ok =
+        beat(
+          bp,
+          Map.merge(pre_vitals_report(), %{"swap_used_percent" => 0, "swap_total_bytes" => 0})
+        )
+
+      swapless = pressure_for(user, bp)
+      assert swapless["swap_used_percent"] == 0
+      assert swapless["swap_total_bytes"] == 0
+    end
+
+    test "a box that has NEVER beaten renders the all-unmetered block (no key, no zeros)" do
+      {user, team} = user_with_team()
+      bp = barkpark_fixture(team)
+
+      pressure = pressure_for(user, bp)
+
+      assert pressure["reported_at"] == nil
+
+      for key <- ~w(cpu_percent mem_used_percent load1 disk_used_percent
+                    swap_used_percent swap_total_bytes beam_pss_bytes beam_swap_bytes) do
+        assert Map.has_key?(pressure, key)
+        assert pressure[key] == nil
+      end
+    end
+
+    # ARITY-1 CALL SITE. POST /v1/fleet/supports serializes a row that BY
+    # CONSTRUCTION has never beaten (it was created microseconds ago), which is
+    # exactly why pressure is a PARAMETER: a lookup inside the serializer would
+    # put a per-row query on this WRITE path for a guaranteed miss.
+    test "POST /v1/fleet/supports (arity-1 serializer) renders unmetered, not zeros" do
+      {user, team} = user_with_team()
+      main = barkpark_fixture(team)
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+
+      conn =
+        call(
+          :post,
+          "/v1/fleet/supports",
+          %{name: "Support box", parent_id: main.id, host: "10.0.0.9"},
+          user_token,
+          team.id
+        )
+
+      assert conn.status == 201
+      pressure = json_body(conn)["barkpark"]["pressure"]
+
+      assert pressure["reported_at"] == nil
+
+      for key <- ~w(cpu_percent mem_used_percent load1 disk_used_percent
+                    swap_used_percent swap_total_bytes beam_pss_bytes beam_swap_bytes) do
+        assert pressure[key] == nil
+      end
+    end
+
+    # THE N+1 GUARD. `Registry.recent_events/2` is single-barkpark, so mapping it
+    # over the page is a query per row — the same N+1 this domain already found
+    # and fixed once (Usage.latest_samples_by_barkpark/1). One DISTINCT ON query
+    # serves the whole page; this asserts the count, so a future "just look it up
+    # per row" refactor fails here instead of on a production page.
+    test "N boxes cost exactly ONE agent_events query for the whole page" do
+      {user, team} = user_with_team()
+
+      for i <- 1..4 do
+        bp = barkpark_fixture(team, %{slug: "pressure-n1-#{i}"})
+        :ok = beat(bp, Map.put(pre_vitals_report(), "cpu_percent", 10 * i))
+      end
+
+      {:ok, user_token} = Accounts.create_user_session_token(user)
+
+      queries =
+        capture_repo_sql(fn ->
+          conn = call(:get, "/v1/barkparks", nil, user_token)
+          assert conn.status == 200
+          assert length(json_body(conn)["barkparks"]) == 4
+        end)
+
+      agent_event_queries = Enum.filter(queries, &String.contains?(&1, ~s(FROM "agent_events")))
+
+      assert length(agent_event_queries) == 1,
+             """
+             The fleet page must read agent_events ONCE for the whole page.
+             Ran #{length(agent_event_queries)} for 4 boxes:
+
+             #{Enum.join(agent_event_queries, "\n\n")}
+             """
+
+      assert hd(agent_event_queries) =~ "DISTINCT ON",
+             "the one query must be the DISTINCT ON latest-per-box read: #{hd(agent_event_queries)}"
+    end
+
+    # Capture the SQL this TEST PROCESS runs inside `fun`. The `self() == test`
+    # guard is load-bearing: telemetry handlers are global and the suite is
+    # async, so without it a concurrent test's queries would be counted here.
+    defp capture_repo_sql(fun) do
+      test = self()
+      id = {:dr_w4_s4_pressure_sql, make_ref()}
+
+      :telemetry.attach(
+        id,
+        [:barkpark_cloud, :repo, :query],
+        fn _event, _measure, meta, _cfg ->
+          if self() == test, do: send(test, {:dr_w4_s4_sql, meta.query})
+        end,
+        nil
+      )
+
+      try do
+        fun.()
+      after
+        :telemetry.detach(id)
+      end
+
+      drain_repo_sql([])
+    end
+
+    defp drain_repo_sql(acc) do
+      receive do
+        {:dr_w4_s4_sql, sql} -> drain_repo_sql([sql | acc])
+      after
+        0 -> Enum.reverse(acc)
+      end
+    end
+  end
 end
